@@ -17,3 +17,7 @@ Thumbs.db
 # 本地缓存/临时
 .cache/
 tmp/
+
+# 构建生成
+web/auto-imports.d.ts
+web/components.d.ts

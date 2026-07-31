@@ -1,0 +1,30 @@
+﻿// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，暗色主题后续只切这里
+:root {
+  --x-primary: #6366f1;
+  --x-primary-hover: #4f46e5;
+  --x-primary-soft: #eef2ff;
+  --x-bg: #f4f5fb;
+  --x-card: #ffffff;
+  --x-border: #e6e8f0;
+  --x-text: #1e2333;
+  --x-text-2: #6b7280;
+  --x-text-3: #9ca3af;
+  --x-success: #10b981;
+  --x-warning: #f59e0b;
+  --x-danger: #ef4444;
+  --x-info: #3b82f6;
+  --x-sidebar-bg: #171b2e;
+  --x-radius: 10px;
+  --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
+  --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
+
+  --el-color-primary: #6366f1;
+  --el-color-primary-light-3: #8b8cf5;
+  --el-color-primary-light-5: #adaef8;
+  --el-color-primary-light-7: #d0d0fb;
+  --el-color-primary-light-8: #e1e1fc;
+  --el-color-primary-light-9: #f2f2fe;
+  --el-color-primary-dark-2: #4f52c9;
+  --el-border-radius-base: 8px;
+  --el-font-family: 'Inter', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
