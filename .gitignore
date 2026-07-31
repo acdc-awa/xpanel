@@ -1,0 +1,19 @@
+﻿# Node
+node_modules/
+dist/
+*.local
+
+# Go
+backend/yamlrss.exe*
+*.exe~
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 本地缓存/临时
+.cache/
+tmp/
