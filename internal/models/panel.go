@@ -135,3 +135,36 @@ type Setting struct {
 	Value     string    `gorm:"type:text" json:"value"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// ServerOutbound 服务器独立出站规则（§多节点 3x-ui 架构）。
+type ServerOutbound struct {
+	ID                 uint64    `gorm:"primaryKey" json:"id"`
+	ServerID           uint64    `gorm:"index;not null" json:"server_id"`
+	Tag                string    `gorm:"size:64;not null" json:"tag"`
+	Protocol           string    `gorm:"size:32;not null" json:"protocol"` // freedom / blackhole / socks / vmess / etc.
+	SettingsJSON       string    `gorm:"type:text" json:"settings_json"`
+	StreamSettingsJSON string    `gorm:"type:text" json:"stream_settings_json,omitempty"`
+	SendThrough        string    `gorm:"size:64" json:"send_through,omitempty"`
+	Enabled            bool      `gorm:"default:true" json:"enabled"`
+	Priority           int       `gorm:"default:0" json:"priority"`
+	Remark             string    `gorm:"size:255" json:"remark"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// ServerRoutingRule 服务器独立路由规则（§多节点 3x-ui 架构）。
+type ServerRoutingRule struct {
+	ID          uint64    `gorm:"primaryKey" json:"id"`
+	ServerID    uint64    `gorm:"index;not null" json:"server_id"`
+	OutboundTag string    `gorm:"size:64;not null" json:"outbound_tag"`
+	RuleJSON    string    `gorm:"type:text" json:"rule_json,omitempty"` // 自定义完整 Rule JSON
+	Domain      string    `gorm:"type:text" json:"domain,omitempty"`    // 逗号/换行分隔或 JSON 数组
+	IP          string    `gorm:"type:text" json:"ip,omitempty"`        // 逗号/换行分隔或 JSON 数组
+	Port        string    `gorm:"size:64" json:"port,omitempty"`
+	Network     string    `gorm:"size:32" json:"network,omitempty"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Priority    int       `gorm:"default:0" json:"priority"`
+	Remark      string    `gorm:"size:255" json:"remark"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}

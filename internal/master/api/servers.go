@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/nodegate"
-	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -67,7 +66,6 @@ func (d *Deps) AdminServers(c *gin.Context) {
 	util.OK(c, gin.H{"items": items})
 }
 
-// AdminCreateServer POST /api/v1/admin/servers —— 新增服务器，返回一次性 secret 与一键安装命令。
 func (d *Deps) AdminCreateServer(c *gin.Context) {
 	var req struct {
 		Name     string `json:"name" binding:"required,max=64"`
@@ -94,7 +92,9 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Remark:   req.Remark,
 		Status:   0,
 	}
-	if err := d.DB.Create(&server).Error; err != nil {
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&server).Error
+	}); err != nil {
 		util.ServerError(c, "创建失败")
 		return
 	}
@@ -227,6 +227,12 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 				return err
 			}
 		}
+		if err := tx.Where("server_id = ?", id).Delete(&models.ServerOutbound{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("server_id = ?", id).Delete(&models.ServerRoutingRule{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("server_id = ?", id).Delete(&models.PendingConfig{}).Error; err != nil {
 			return err
 		}
@@ -287,7 +293,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 }
 
 // AdminGenerateConfig POST /api/v1/admin/servers/:id/generate-config
-// 由主控根据「服务器启用入站 + 全部启用用户」生成 Xray 配置：
+// 由主控根据「服务器启用入站 + 节点出站 + 节点路由 + 全部启用用户」生成 Xray 配置：
 // 保存为待推送 → 节点在线则立即下发；离线则保留，节点上线自动补推（非阻塞）。
 func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -300,22 +306,15 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		util.Fail(c, 404, "服务器不存在")
 		return
 	}
-	var inbounds []models.Inbound
-	if err := d.DB.Where("server_id = ? AND enabled = ?", id, true).Find(&inbounds).Error; err != nil {
-		util.ServerError(c, "查询入站失败")
+	if d.Config == nil {
+		util.ServerError(c, "配置服务未初始化")
 		return
 	}
-	var users []models.User
-	if err := d.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
-		util.ServerError(c, "查询用户失败")
-		return
-	}
-	cfg, err := xray.Generate(&srv, inbounds, users)
+	cfgStr, err := d.Config.Generate(id)
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return
 	}
-	cfgStr := string(cfg)
 
 	// 保存待推送（无论节点是否在线）
 	if d.Config != nil {

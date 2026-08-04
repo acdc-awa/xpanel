@@ -346,7 +346,17 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	cfg, err := xray.Generate(&srv, inbounds, users)
+	var outbounds []models.ServerOutbound
+	if err := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
+		util.ServerError(c, "查询出站失败")
+		return
+	}
+	var routingRules []models.ServerRoutingRule
+	if err := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true).Order("priority asc, id asc").Find(&routingRules).Error; err != nil {
+		util.ServerError(c, "查询路由失败")
+		return
+	}
+	cfg, err := xray.Generate(&srv, inbounds, outbounds, routingRules, users)
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return

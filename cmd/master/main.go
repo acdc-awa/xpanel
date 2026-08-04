@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -106,7 +107,10 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		log.Printf("%s 启动，监听 :%d（env=%s, db=%s）", cfg.App.Name, cfg.App.Port, cfg.App.Env, cfg.DB.Driver)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("服务启动失败: %v", err)
@@ -123,6 +127,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("关闭异常: %v", err)
 	}
+	hub.Shutdown()
+	wg.Wait()
 	log.Println("已退出")
 }
 

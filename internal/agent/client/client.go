@@ -50,7 +50,7 @@ func (c *Client) Run(ctx context.Context) {
 
 	backoff := time.Second
 	for {
-		err := c.connectAndServe(ctx)
+		err := c.connectAndServe(ctx, &backoff)
 		if err != nil {
 			log.Printf("agent: 连接断开: %v（%s 后重连）", err, backoff)
 		}
@@ -59,8 +59,12 @@ func (c *Client) Run(ctx context.Context) {
 			return
 		case <-time.After(backoff):
 		}
-		if backoff < c.ReconnectMax {
-			backoff *= 2
+		// 指数退避 (带抖动)
+		backoff = time.Duration(float64(backoff) * 1.5)
+		jitter := time.Duration((float64(backoff) * 0.2) * (float64(time.Now().UnixNano()%100) / 100.0))
+		backoff += jitter
+		if backoff > c.ReconnectMax {
+			backoff = c.ReconnectMax
 		}
 	}
 }
@@ -182,7 +186,7 @@ func (c *Client) wsURL() string {
 }
 
 // connectAndServe 建立连接并进入消息循环（返回时连接已关闭）。
-func (c *Client) connectAndServe(ctx context.Context) error {
+func (c *Client) connectAndServe(ctx context.Context, backoff *time.Duration) error {
 	ws, _, err := websocket.DefaultDialer.Dial(c.wsURL(), nil)
 	if err != nil {
 		return err
@@ -196,6 +200,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 		c.writeMu.Unlock()
 		_ = ws.Close()
 	}()
+	ws.SetReadLimit(1024 * 1024)
 
 	// 认证
 	if err := c.send(protocol.MsgAuth, "", protocol.AuthPayload{NodeID: c.NodeID, Secret: c.Secret}); err != nil {
@@ -212,6 +217,9 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	}
 	_ = ws.SetReadDeadline(time.Time{})
 	log.Printf("agent: 已连上主控（node=%s）", c.NodeID)
+	
+	// 连接成功，重置退避时间
+	*backoff = time.Second
 
 	// ctx 取消时关闭连接，中断阻塞中的 ReadMessage（否则 SIGTERM 无法退出）
 	done := make(chan struct{})

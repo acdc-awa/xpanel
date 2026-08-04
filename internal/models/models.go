@@ -29,6 +29,7 @@ func All() []any {
 	return []any{
 		&User{}, &InvitationCode{},
 		&Server{}, &Inbound{}, &UserInbound{}, &PendingConfig{},
+		&ServerOutbound{}, &ServerRoutingRule{},
 		&Plan{}, &Order{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
 		&AuditLog{}, &Setting{},

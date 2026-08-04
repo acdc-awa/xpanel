@@ -15,27 +15,33 @@ type OrderService struct {
 	DB *gorm.DB
 }
 
-// Create 用户下单：校验套餐 → 创建 pending 订单。
 func (s *OrderService) Create(userID, planID uint64) (*models.Order, error) {
-	var plan models.Plan
-	if err := s.DB.First(&plan, planID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("套餐不存在")
+	var order *models.Order
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var plan models.Plan
+		if err := tx.First(&plan, planID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("套餐不存在")
+			}
+			return err
 		}
-		return nil, err
-	}
-	if !plan.Enabled {
-		return nil, errors.New("套餐未上架")
-	}
-	orderNo := time.Now().Format("20060102150405") + util.RandomID(4)
-	order := &models.Order{
-		OrderNo:     orderNo,
-		UserID:      userID,
-		PlanID:      planID,
-		AmountCents: plan.PriceCents,
-		Status:      models.OrderPending,
-	}
-	if err := s.DB.Create(order).Error; err != nil {
+		if !plan.Enabled {
+			return errors.New("套餐未上架")
+		}
+		orderNo := time.Now().Format("20060102150405") + util.RandomID(4)
+		order = &models.Order{
+			OrderNo:     orderNo,
+			UserID:      userID,
+			PlanID:      planID,
+			AmountCents: plan.PriceCents,
+			Status:      models.OrderPending,
+		}
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return order, nil

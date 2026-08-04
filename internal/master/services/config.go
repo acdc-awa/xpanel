@@ -15,7 +15,7 @@ type ConfigService struct {
 	DB *gorm.DB
 }
 
-// Generate 为服务器生成完整 Xray 配置（启用入站 + 全部启用用户）。
+// Generate 为服务器生成完整 Xray 配置（启用入站 + 节点出站 + 节点路由 + 全部启用用户）。
 // 无启用入站时返回仅含 api 入站的配置（用于全停用后清理节点入站）；
 // 有启用入站但无可用用户时返回错误（此时不需要推送）。
 func (s *ConfigService) Generate(serverID uint64) (string, error) {
@@ -27,11 +27,19 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Find(&inbounds).Error; err != nil {
 		return "", err
 	}
+	var outbounds []models.ServerOutbound
+	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
+		return "", err
+	}
+	var routingRules []models.ServerRoutingRule
+	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&routingRules).Error; err != nil {
+		return "", err
+	}
 	var users []models.User
 	if err := s.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
 		return "", err
 	}
-	cfg, err := xray.Generate(&srv, inbounds, users)
+	cfg, err := xray.Generate(&srv, inbounds, outbounds, routingRules, users)
 	if err != nil {
 		return "", err
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zhx/xray-panel/internal/models"
 )
@@ -94,21 +95,162 @@ func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 	return nil
 }
 
-// Generate 生成完整 Xray 配置（含 api/policy/stats 三段 + 全部启用入站 + 全部启用用户）。
-func Generate(server *models.Server, inbounds []models.Inbound, users []models.User) ([]byte, error) {
+// parseStringList 解析 JSON 数组字符串或逗号/换行/分号分隔字符串。
+func parseStringList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		var arr []string
+		if err := json.Unmarshal([]byte(s), &arr); err == nil {
+			return arr
+		}
+	}
+	lines := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ';'
+	})
+	var res []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			res = append(res, l)
+		}
+	}
+	return res
+}
+
+// Generate 生成完整 Xray 配置（含 api/policy/stats 三段 + 全部启用入站 + 节点自定义出站/路由规则 + 全部启用用户）。
+func Generate(server *models.Server, inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User) ([]byte, error) {
+	outboundList := make([]any, 0)
+	hasFreedom := false
+	hasBlackhole := false
+
+	for _, ob := range outbounds {
+		if !ob.Enabled {
+			continue
+		}
+		item := make(map[string]any)
+
+		if ob.SettingsJSON != "" {
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(ob.SettingsJSON), &parsed); err == nil {
+				for k, v := range parsed {
+					item[k] = v
+				}
+				_, hasProto := parsed["protocol"]
+				_, hasSettings := parsed["settings"]
+				if !hasProto && !hasSettings {
+					item["settings"] = parsed
+				}
+			}
+		}
+
+		if ob.Tag != "" {
+			item["tag"] = ob.Tag
+		}
+		if ob.Protocol != "" {
+			item["protocol"] = ob.Protocol
+		}
+		if ob.StreamSettingsJSON != "" {
+			var stream map[string]any
+			if err := json.Unmarshal([]byte(ob.StreamSettingsJSON), &stream); err == nil {
+				item["streamSettings"] = stream
+			}
+		}
+		if ob.SendThrough != "" {
+			item["sendThrough"] = ob.SendThrough
+		}
+
+		tagVal, _ := item["tag"].(string)
+		protoVal, _ := item["protocol"].(string)
+		if tagVal == "direct" || tagVal == "freedom" || protoVal == "freedom" {
+			hasFreedom = true
+		}
+		if tagVal == "blocked" || tagVal == "blackhole" || protoVal == "blackhole" {
+			hasBlackhole = true
+		}
+
+		outboundList = append(outboundList, item)
+	}
+
+	// 兜底 freedom (direct) 出站
+	if !hasFreedom {
+		outboundList = append(outboundList, map[string]any{
+			"protocol": "freedom",
+			"tag":      "direct",
+			"settings": map[string]any{
+				"finalRules": []any{
+					map[string]any{"action": "allow", "ip": []string{"198.18.0.0/15"}},
+				},
+			},
+		})
+	}
+
+	// 兜底 blackhole (blocked) 出站
+	if !hasBlackhole {
+		outboundList = append(outboundList, map[string]any{
+			"protocol": "blackhole",
+			"tag":      "blocked",
+		})
+	}
+
+	// 构建 routing rules 列表
+	rulesList := []any{
+		map[string]any{
+			"type":        "field",
+			"inboundTag":  []string{"api"},
+			"outboundTag": "api",
+		},
+	}
+
+	for _, rule := range routingRules {
+		if !rule.Enabled {
+			continue
+		}
+
+		if rule.RuleJSON != "" {
+			var rmap map[string]any
+			if err := json.Unmarshal([]byte(rule.RuleJSON), &rmap); err == nil {
+				if rmap["type"] == nil {
+					rmap["type"] = "field"
+				}
+				if rule.OutboundTag != "" && rmap["outboundTag"] == nil {
+					rmap["outboundTag"] = rule.OutboundTag
+				}
+				rulesList = append(rulesList, rmap)
+				continue
+			}
+		}
+
+		rmap := map[string]any{
+			"type":        "field",
+			"outboundTag": rule.OutboundTag,
+		}
+
+		if domains := parseStringList(rule.Domain); len(domains) > 0 {
+			rmap["domain"] = domains
+		}
+		if ips := parseStringList(rule.IP); len(ips) > 0 {
+			rmap["ip"] = ips
+		}
+		if rule.Port != "" {
+			rmap["port"] = rule.Port
+		}
+		if rule.Network != "" {
+			rmap["network"] = rule.Network
+		}
+
+		rulesList = append(rulesList, rmap)
+	}
+
 	cfg := map[string]any{
 		"log": map[string]any{"loglevel": "warning"},
 		"api": map[string]any{
 			"tag":      "api",
 			"services": []string{"HandlerService", "StatsService", "RoutingService"},
 		},
-		"outbounds": []any{
-			map[string]any{"protocol": "freedom", "tag": "direct",
-				"settings": map[string]any{"finalRules": []any{
-					map[string]any{"action": "allow", "ip": []string{"198.18.0.0/15"}},
-				}}},
-			map[string]any{"protocol": "blackhole", "tag": "blocked"},
-		},
+		"outbounds": outboundList,
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{
 				"statsUserUplink":   true,
@@ -121,9 +263,7 @@ func Generate(server *models.Server, inbounds []models.Inbound, users []models.U
 			},
 		},
 		"routing": map[string]any{
-			"rules": []any{map[string]any{
-				"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api",
-			}},
+			"rules": rulesList,
 		},
 		"stats": map[string]any{},
 	}

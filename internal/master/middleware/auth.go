@@ -2,8 +2,6 @@
 package middleware
 
 import (
-	"strings"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/zhx/xray-panel/internal/master/services"

@@ -3,6 +3,7 @@ package db
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -30,5 +31,15 @@ func Open(cfg *config.DB) (*gorm.DB, error) {
 		return nil, fmt.Errorf("不支持的数据库驱动: %q（可选 sqlite / mysql）", cfg.Driver)
 	}
 
-	return gorm.Open(dialector, gcfg)
+	db, err := gorm.Open(dialector, gcfg)
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err == nil {
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+	}
+	return db, nil
 }

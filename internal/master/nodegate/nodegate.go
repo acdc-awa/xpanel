@@ -60,6 +60,8 @@ type Hub struct {
 	mu      sync.RWMutex
 	conns   map[uint64]*Conn                      // by server_id
 	pending map[string]chan *protocol.ResultPayload // 请求 id → 回执通道
+	wg      sync.WaitGroup
+	quit    chan struct{}
 }
 
 // NewHub 构造网关。
@@ -76,9 +78,22 @@ func NewHub(db *gorm.DB, traffic *services.TrafficService, config *services.Conf
 		},
 		conns:   make(map[uint64]*Conn),
 		pending: make(map[string]chan *protocol.ResultPayload),
+		quit:    make(chan struct{}),
 	}
+	h.wg.Add(1)
 	go h.watchdog()
 	return h
+}
+
+// Shutdown 优雅关闭：停止 watchdog，断开所有节点连接。
+func (h *Hub) Shutdown() {
+	close(h.quit)
+	h.wg.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, c := range h.conns {
+		c.closeSafe()
+	}
 }
 
 // ServeWS 处理节点 WebSocket 连接。
@@ -87,6 +102,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	if err != nil {
 		return
 	}
+	ws.SetReadLimit(1024 * 1024)
 
 	// 第一步必须是 auth
 	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -346,22 +362,27 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 }
 
-// watchdog 扫描心跳超时连接并关闭（触发 unregister → 离线）。
 func (h *Hub) watchdog() {
+	defer h.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		h.mu.RLock()
-		var stale []*Conn
-		for _, c := range h.conns {
-			if time.Since(time.Unix(c.LastSeen, 0)) > HeartbeatTimeout {
-				stale = append(stale, c)
+	for {
+		select {
+		case <-h.quit:
+			return
+		case <-ticker.C:
+			h.mu.RLock()
+			var stale []*Conn
+			for _, c := range h.conns {
+				if time.Since(time.Unix(c.LastSeen, 0)) > HeartbeatTimeout {
+					stale = append(stale, c)
+				}
 			}
-		}
-		h.mu.RUnlock()
-		for _, c := range stale {
-			log.Printf("nodegate: 节点 %s 心跳超时，断开", c.NodeID)
-			c.closeSafe()
+			h.mu.RUnlock()
+			for _, c := range stale {
+				log.Printf("nodegate: 节点 %s 心跳超时，断开", c.NodeID)
+				c.closeSafe()
+			}
 		}
 	}
 }

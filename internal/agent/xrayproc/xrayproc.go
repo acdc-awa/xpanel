@@ -106,6 +106,7 @@ func (p *Proc) Start() error {
 	cmd := exec.Command(p.Bin, "run", "-c", p.ConfigPath)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	setSysProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return fmt.Errorf("启动 xray 失败: %w", err)
