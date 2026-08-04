@@ -30,6 +30,7 @@ type inboundView struct {
 
 // inboundForm 入站创建/更新表单（结构化连接参数，替代手填 JSON）。
 type inboundForm struct {
+	ID       uint64                  `json:"id"`
 	ServerID uint64                  `json:"server_id" binding:"required"`
 	Tag      string                  `json:"tag" binding:"required,max=64"`
 	Protocol string                  `json:"protocol" binding:"required"` // vless
@@ -123,6 +124,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	d.enqueueConfig(req.ServerID)
 	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name)})
 }
 
@@ -216,6 +218,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			return
 		}
 	}
+	d.enqueueConfig(inb.ServerID)
 	var srv models.Server
 	serverName := ""
 	if err := d.DB.First(&srv, inb.ServerID).Error; err == nil {
@@ -232,9 +235,14 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		util.BadRequest(c, "非法 ID")
 		return
 	}
+	var inb models.Inbound
+	d.DB.First(&inb, id)
 	if err := d.DB.Delete(&models.Inbound{}, id).Error; err != nil {
 		util.ServerError(c, "删除失败")
 		return
+	}
+	if inb.ID > 0 {
+		d.enqueueConfig(inb.ServerID)
 	}
 	util.OK(c, gin.H{"deleted": id})
 }
@@ -256,6 +264,7 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		util.ServerError(c, "更新失败")
 		return
 	}
+	d.enqueueConfig(inb.ServerID)
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
 }
 
@@ -267,4 +276,80 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"private_key": priv, "public_key": pub})
+}
+
+
+// enqueueConfig 入站变更后自动生成配置并待推送（非阻塞；节点离线保留，上线补推）。
+func (d *Deps) enqueueConfig(serverID uint64) {
+	if d.Config == nil || d.Hub == nil {
+		return
+	}
+	cfg, err := d.Config.Generate(serverID)
+	if err != nil {
+		return // 无启用入站/无可用用户等，无需推送
+	}
+	if err := d.Config.SavePending(serverID, cfg); err != nil {
+		return
+	}
+	go d.Hub.PushPending(serverID)
+}
+
+// formToInbound 把入站表单转为 models.Inbound（用于配置预览）。
+func formToInbound(f *inboundForm) (models.Inbound, error) {
+	settingsJSON, err := marshalSettings(f.Settings)
+	if err != nil {
+		return models.Inbound{}, err
+	}
+	return models.Inbound{
+		ID: f.ID, ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
+		Port: f.Port, Network: f.Network, TLSType: f.TLSType,
+		SettingsJSON: settingsJSON, Ratio: f.Ratio, Enabled: true,
+	}, nil
+}
+
+// AdminPreviewConfig POST /api/v1/admin/xray/preview-config
+// body: {"server_id": x, "form": {入站表单字段}} —— 用当前表单（临时替换同名 ID）预览生成的完整 xray 配置。
+func (d *Deps) AdminPreviewConfig(c *gin.Context) {
+	var req struct {
+		ServerID uint64       `json:"server_id" binding:"required"`
+		Form     *inboundForm `json:"form"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, req.ServerID).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+	q := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true)
+	if req.Form != nil && req.Form.ID > 0 {
+		q = q.Where("id != ?", req.Form.ID)
+	}
+	var inbounds []models.Inbound
+	if err := q.Find(&inbounds).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	// 追加当前表单入站
+	if req.Form != nil {
+		inb, err := formToInbound(req.Form)
+		if err != nil {
+			util.BadRequest(c, "参数序列化失败")
+			return
+		}
+		inbounds = append(inbounds, inb)
+	}
+	var users []models.User
+	if err := d.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	cfg, err := xray.Generate(&srv, inbounds, users)
+	if err != nil {
+		util.BadRequest(c, "配置生成失败: "+err.Error())
+		return
+	}
+	util.OK(c, gin.H{"config": string(cfg)})
 }

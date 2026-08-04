@@ -67,13 +67,14 @@ func main() {
 	trafficSvc.StartDailyAgg(context.Background())
 	orderSvc := &services.OrderService{DB: database}
 	auditSvc := &services.AuditService{DB: database}
-	hub := nodegate.NewHub(database, trafficSvc)
+	configSvc := &services.ConfigService{DB: database}
+	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc}
 	router := deps.NewRouter()
 
 	srv := &http.Server{

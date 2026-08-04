@@ -80,6 +80,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/servers/:id/command", d.AdminServerCommand)
 			admin.POST("/servers/:id/generate-config", d.AdminGenerateConfig)
 			admin.GET("/xray/keys", d.AdminXrayKeys)
+			admin.POST("/xray/preview-config", d.AdminPreviewConfig)
 			admin.GET("/inbounds", d.AdminInbounds)
 			admin.POST("/inbounds", d.AdminCreateInbound)
 			admin.PUT("/inbounds/:id", d.AdminUpdateInbound)

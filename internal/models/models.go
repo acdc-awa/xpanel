@@ -28,7 +28,7 @@ const (
 func All() []any {
 	return []any{
 		&User{}, &InvitationCode{},
-		&Server{}, &Inbound{}, &UserInbound{},
+		&Server{}, &Inbound{}, &UserInbound{}, &PendingConfig{},
 		&Plan{}, &Order{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
 		&AuditLog{}, &Setting{},

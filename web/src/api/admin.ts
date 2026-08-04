@@ -133,6 +133,13 @@ export function toggleInbound(id: number) {
   return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
 }
 
+export function previewConfig(serverId: number, form?: Partial<InboundPayload>) {
+  return http.post<ApiResp<{ config: string }>>('/admin/xray/preview-config', {
+    server_id: serverId,
+    form,
+  })
+}
+
 export function getXrayKeys() {
   return http.get<ApiResp<{ private_key: string; public_key: string }>>('/admin/xray/keys')
 }

@@ -54,6 +54,7 @@ func (c *Conn) closeSafe() {
 type Hub struct {
 	DB       *gorm.DB
 	Traffic  *services.TrafficService
+	Config   *services.ConfigService
 	Upgrader websocket.Upgrader
 
 	mu      sync.RWMutex
@@ -62,10 +63,11 @@ type Hub struct {
 }
 
 // NewHub 构造网关。
-func NewHub(db *gorm.DB, traffic *services.TrafficService) *Hub {
+func NewHub(db *gorm.DB, traffic *services.TrafficService, config *services.ConfigService) *Hub {
 	h := &Hub{
 		DB:      db,
 		Traffic: traffic,
+		Config:  config,
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -126,6 +128,9 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	// 标记在线
 	h.DB.Model(&models.Server{}).Where("id = ?", server.ID).
 		Updates(map[string]any{"status": 1, "last_seen_at": time.Now()})
+
+	// 节点上线：自动补推待推送配置（非阻塞）
+	go h.PushPending(server.ID)
 
 	go h.writePump(conn)
 	h.readPump(conn)
@@ -318,6 +323,26 @@ func (h *Hub) Ask(serverID uint64, typ string, payload any, timeout time.Duratio
 		return res, nil
 	case <-time.After(timeout):
 		return nil, errors.New("等待节点回执超时")
+	}
+}
+
+// PushPending 若存在待推送配置且节点在线，则下发并标记已推送（非阻塞，调用方用 goroutine）。
+func (h *Hub) PushPending(serverID uint64) {
+	if h.Config == nil {
+		return
+	}
+	p, err := h.Config.GetPending(serverID)
+	if err != nil || p == nil || p.Status == "pushed" {
+		return
+	}
+	if !h.IsOnline(serverID) {
+		return // 节点离线，保留待推送（上线时由 ServeWS 再次触发）
+	}
+	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
+	if err == nil && res != nil && res.OK {
+		if merr := h.Config.MarkPushed(p.ID); merr == nil {
+			log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
+		}
 	}
 }
 

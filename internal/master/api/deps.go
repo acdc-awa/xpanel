@@ -19,4 +19,5 @@ type Deps struct {
 	Traffic *services.TrafficService
 	Order   *services.OrderService
 	Audit   *services.AuditService
+	Config  *services.ConfigService
 }

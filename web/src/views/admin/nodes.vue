@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Plus, Search, Edit, Delete, Refresh, VideoPlay, MagicStick } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -9,6 +9,7 @@ import {
   getInbounds,
   getServers,
   getXrayKeys,
+  previewConfig,
   toggleInbound,
   updateInbound,
   type InboundItem,
@@ -161,6 +162,51 @@ function buildSettings(): InboundSettings {
   return s
 }
 
+// ---- 原始 Xray Config 预览（防抖） ----
+const previewOpen = ref(false)
+const previewLoading = ref(false)
+const previewConfigText = ref('')
+
+function buildPreviewPayload() {
+  return {
+    id: form.id,
+    server_id: form.server_id,
+    tag: form.tag,
+    protocol: form.protocol,
+    port: form.port,
+    network: form.network,
+    tls_type: form.tls_type,
+    settings: buildSettings(),
+    ratio: form.ratio,
+  }
+}
+
+let previewTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => ({ ...form }),
+  () => {
+    if (!previewOpen.value) return
+    if (previewTimer) clearTimeout(previewTimer)
+    previewTimer = setTimeout(async () => {
+      if (!form.server_id || !form.port || !form.tag) {
+        previewConfigText.value = '请先填写服务器、标签与端口'
+        return
+      }
+      previewLoading.value = true
+      try {
+        const { data } = await previewConfig(form.server_id, buildPreviewPayload())
+        if (data.code === 0) previewConfigText.value = data.data.config
+        else previewConfigText.value = data.message
+      } catch (e) {
+        previewConfigText.value = `预览失败：${errMsg(e)}`
+      } finally {
+        previewLoading.value = false
+      }
+    }, 500)
+  },
+  { deep: true },
+)
+
 async function save() {
   if (!form.tag || !form.port || !form.server_id) {
     ElMessage.warning('请填写服务器、标签与端口')
@@ -180,7 +226,7 @@ async function save() {
     }
     const { data } = editing.value ? await updateInbound(form.id, payload) : await createInbound(payload)
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '已保存' : '已创建')
+      ElMessage.success(editing.value ? '已保存（将自动推送到节点）' : '已创建（将自动推送到节点）')
       formOpen.value = false
       load()
     } else {
@@ -339,8 +385,12 @@ async function deployFiltered() {
     </BaseCard>
 
     <!-- 新增/编辑 -->
-    <el-dialog v-model="formOpen" :title="editing ? '编辑入站' : '新增入站'" width="640px">
-      <el-form label-position="top">
+    <el-dialog v-model="formOpen" :title="editing ? '编辑入站' : '新增入站'" width="680px">
+      <div class="dialog-head">
+        <el-button size="small" :type="!previewOpen ? 'primary' : 'default'" @click="previewOpen = false">参数配置</el-button>
+        <el-button size="small" :type="previewOpen ? 'primary' : 'default'" @click="previewOpen = true">原始 Xray Config</el-button>
+      </div>
+      <el-form v-if="!previewOpen" label-position="top">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
           <el-form-item label="所属服务器">
             <el-select v-model="form.server_id" style="width: 100%">
@@ -444,6 +494,10 @@ async function deployFiltered() {
 
         <p class="muted tip">{{ settingsTip }}</p>
       </el-form>
+      <div v-else class="preview-pane">
+        <p class="muted tip" style="margin: 0 0 8px">按当前表单 + 该服务器已保存入站 + 全部启用用户生成的完整 Xray 配置（实时预览）：</p>
+        <pre v-loading="previewLoading" class="cfg-view">{{ previewConfigText || '正在生成预览…' }}</pre>
+      </div>
       <template #footer>
         <el-button @click="formOpen = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
@@ -478,4 +532,7 @@ async function deployFiltered() {
   white-space: pre-wrap;
   word-break: break-all;
 }
+.dialog-head { display: flex; gap: 8px; margin-bottom: 14px; }
+.preview-pane { min-height: 360px; }
+
 </style>

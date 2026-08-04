@@ -117,6 +117,17 @@ type AuditLog struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// PendingConfig 服务器待推送的 Xray 配置（每服务器一条最新；节点离线时保留，上线后自动补推）。
+type PendingConfig struct {
+	ID         uint64     `gorm:"primaryKey" json:"id"`
+	ServerID   uint64     `gorm:"uniqueIndex;not null" json:"server_id"`
+	ConfigJSON string     `gorm:"type:text" json:"-"`
+	Status     string     `gorm:"size:16;default:pending" json:"status"` // pending / pushed
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	PushedAt   *time.Time `json:"pushed_at"`
+}
+
 // Setting 站点配置（公告等键值对）。
 type Setting struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
