@@ -1,0 +1,104 @@
+# B 组验证：XHTTP mode 矩阵 + TCP 对照（服务端 8444 mode auto 全收）
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+
+proxies:
+  - name: "XHTTP-packet-up"
+    type: vless
+    server: 127.0.0.1
+    port: 8444
+    uuid: 34903645-2a21-4d15-b8e4-57784431114d
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ
+      short-id: abcdef0123456789
+    xhttp-opts:
+      mode: packet-up
+      path: /
+
+  - name: "XHTTP-stream-up"
+    type: vless
+    server: 127.0.0.1
+    port: 8444
+    uuid: 34903645-2a21-4d15-b8e4-57784431114d
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ
+      short-id: abcdef0123456789
+    xhttp-opts:
+      mode: stream-up
+      path: /
+
+  - name: "XHTTP-stream-one"
+    type: vless
+    server: 127.0.0.1
+    port: 8444
+    uuid: 34903645-2a21-4d15-b8e4-57784431114d
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ
+      short-id: abcdef0123456789
+    xhttp-opts:
+      mode: stream-one
+      path: /
+
+  - name: "XHTTP-auto"
+    type: vless
+    server: 127.0.0.1
+    port: 8444
+    uuid: 34903645-2a21-4d15-b8e4-57784431114d
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ
+      short-id: abcdef0123456789
+    xhttp-opts:
+      mode: auto
+      path: /
+
+  - name: "TCP-REALITY-vision"
+    type: vless
+    server: 127.0.0.1
+    port: 8443
+    uuid: 34903645-2a21-4d15-b8e4-57784431114d
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ
+      short-id: abcdef0123456789
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - XHTTP-packet-up
+      - XHTTP-stream-up
+      - XHTTP-stream-one
+      - XHTTP-auto
+      - TCP-REALITY-vision
+      - DIRECT
+
+rules:
+  - MATCH,PROXY

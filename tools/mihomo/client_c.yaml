@@ -1,0 +1,23 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+
+proxy-providers:
+  c-sub:
+    type: http
+    url: http://127.0.0.1:8090/sub
+    interval: 60
+    health-check:
+      enable: false
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    use:
+      - c-sub
+
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - MATCH,PROXY

@@ -1,4 +1,4 @@
-﻿# Node
+# Node
 node_modules/
 dist/
 *.local
@@ -21,3 +21,14 @@ tmp/
 # 构建生成
 web/auto-imports.d.ts
 web/components.d.ts
+
+# 节点/代理实验二进制与运行产物（tools/）
+tools/xray/Xray-linux-64.zip
+tools/xray/xray-bin/xray
+tools/xray/xray-bin/geoip.dat
+tools/xray/xray-bin/geosite.dat
+tools/mihomo/mihomo
+tools/mihomo/mihomo-linux-amd64-*.gz
+tools/**/cache.db
+tools/**/*.pid
+tools/**/*.out

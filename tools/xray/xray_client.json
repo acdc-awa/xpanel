@@ -1,0 +1,28 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    { "tag": "socks-in", "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": { "udp": true } }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless-out",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          { "address": "127.0.0.1", "port": 8443, "users": [ { "id": "34903645-2a21-4d15-b8e4-57784431114d", "encryption": "none", "flow": "xtls-rprx-vision" } ] }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.apple.com",
+          "fingerprint": "chrome",
+          "publicKey": "SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ",
+          "shortId": "abcdef0123456789"
+        }
+      }
+    }
+  ],
+  "routing": { "rules": [ { "type": "field", "network": "tcp,udp", "outboundTag": "vless-out" } ] }
+}
