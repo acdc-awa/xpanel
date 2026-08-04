@@ -129,6 +129,34 @@ export interface InboundItem {
   created_at: string
 }
 
+
+export interface RealitySettings {
+  server_name: string
+  public_key: string
+  short_id: string
+  private_key: string
+  dest: string
+}
+export interface WSSettings {
+  path: string
+  host?: string
+}
+export interface XHTTPSettings {
+  mode: string
+  path: string
+}
+export interface TLSSettings {
+  server_name?: string
+  cert_file: string
+  key_file: string
+}
+export interface InboundSettings {
+  reality?: RealitySettings
+  ws?: WSSettings
+  xhttp?: XHTTPSettings
+  tls?: TLSSettings
+}
+
 export interface UserInboundGrant {
   inbounds: InboundItem[]
   granted_ids: number[]

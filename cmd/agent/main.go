@@ -26,6 +26,7 @@ func main() {
 	}
 
 	proc := xrayproc.New(cfg.Xray.Bin, cfg.Xray.ConfigPath, cfg.Xray.LogPath, cfg.Xray.PidFile)
+	proc.CleanupStale()
 
 	// 启动时若已有配置则拉起 xray（崩溃由 watchdog 保持）
 	if _, err := os.Stat(cfg.Xray.ConfigPath); err == nil {
@@ -57,14 +58,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	go func() {
-		<-ctx.Done()
-		close(wdStop)
-		statsCollector.Close()
-		_ = proc.Stop()
-	}()
-
 	log.Printf("xray-agent 启动（node=%s, master=%s, heartbeat=%s）", cfg.Master.NodeID, cfg.Master.URL, cfg.Heartbeat)
 	cli.Run(ctx)
+
+	// 退出清理（同步执行，确保 xray 被优雅停止，不遗留孤儿进程）
+	close(wdStop)
+	statsCollector.Close()
+	_ = proc.Stop()
 	log.Println("xray-agent 已退出")
 }

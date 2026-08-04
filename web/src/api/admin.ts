@@ -6,6 +6,7 @@ import type {
   AuditLog,
   CreateInvitationResult,
   InboundItem,
+  InboundSettings,
   Invitation,
   Order,
   Plan,
@@ -17,6 +18,7 @@ export type {
   AdminUserPage,
   AuditLog,
   InboundItem,
+  InboundSettings,
   Invitation,
   Order,
   Plan,
@@ -105,7 +107,7 @@ export interface InboundPayload {
   port: number
   network: string
   tls_type?: string
-  settings_json?: string
+  settings?: InboundSettings
   ratio?: number
 }
 
@@ -129,6 +131,10 @@ export function deleteInbound(id: number) {
 
 export function toggleInbound(id: number) {
   return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
+}
+
+export function getXrayKeys() {
+  return http.get<ApiResp<{ private_key: string; public_key: string }>>('/admin/xray/keys')
 }
 
 export function generateAndPushConfig(serverId: number) {

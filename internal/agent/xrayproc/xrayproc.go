@@ -50,6 +50,39 @@ func (p *Proc) TestConfig(path string) error {
 	return nil
 }
 
+// CleanupStale 停止同配置路径的残留 xray 实例（agent 异常退出遗留的孤儿进程）。
+// 用 pgrep -f 匹配完整 config_path（唯一），避免误杀；pgrep 自动排除自身。
+func (p *Proc) CleanupStale() {
+	cmd := exec.Command("pgrep", "-f", p.ConfigPath)
+	out, err := cmd.Output()
+	if err != nil {
+		return // 无匹配（pgrep 无结果时 exit 1）
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, perr := strconv.Atoi(strings.TrimSpace(line))
+		if perr != nil || pid <= 0 || pid == os.Getpid() {
+			continue
+		}
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+	// 等待残留进程退出（最多 3s）
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		left := false
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			pid, perr := strconv.Atoi(strings.TrimSpace(line))
+			if perr == nil && pid > 0 && pid != os.Getpid() && syscall.Kill(pid, 0) == nil {
+				left = true
+				break
+			}
+		}
+		if !left {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // Start 启动 xray 子进程（配置已存在时使用）。
 func (p *Proc) Start() error {
 	p.mu.Lock()

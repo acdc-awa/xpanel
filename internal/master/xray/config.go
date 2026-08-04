@@ -4,6 +4,7 @@ package xray
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/zhx/xray-panel/internal/models"
@@ -56,6 +57,41 @@ func ParseSettings(inb *models.Inbound) (*InboundSettings, error) {
 		return nil, fmt.Errorf("入站 %s settings_json 解析失败: %w", inb.Tag, err)
 	}
 	return s, nil
+}
+
+// ValidateSettings 校验入站连接参数与传输层/TLS 的匹配关系。
+func ValidateSettings(s *InboundSettings, network, tlsType string) error {
+	if s == nil {
+		s = &InboundSettings{}
+	}
+	switch network {
+	case "tcp":
+	case "ws":
+		if s.WS == nil || s.WS.Path == "" {
+			return errors.New("ws 传输需要配置 path")
+		}
+	case "xhttp":
+		if s.XHTTP == nil || s.XHTTP.Mode == "" || s.XHTTP.Path == "" {
+			return errors.New("xhttp 传输需要配置 mode 和 path")
+		}
+	default:
+		return fmt.Errorf("暂不支持传输层 %q", network)
+	}
+	switch tlsType {
+	case "none", "":
+	case "reality":
+		if s.Reality == nil || s.Reality.ServerName == "" || s.Reality.PublicKey == "" ||
+			s.Reality.PrivateKey == "" || s.Reality.Dest == "" {
+			return errors.New("reality 需要配置 server_name / public_key / private_key / dest")
+		}
+	case "tls":
+		if s.TLS == nil || s.TLS.CertFile == "" || s.TLS.KeyFile == "" {
+			return errors.New("tls 需要配置 cert_file 和 key_file")
+		}
+	default:
+		return fmt.Errorf("暂不支持 TLS 类型 %q", tlsType)
+	}
+	return nil
 }
 
 // Generate 生成完整 Xray 配置（含 api/policy/stats 三段 + 全部启用入站 + 全部启用用户）。
