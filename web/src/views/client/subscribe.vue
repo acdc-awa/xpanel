@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { CopyDocument, Download, Monitor, Check } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
+import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 
 const auth = useAuthStore()
@@ -11,7 +12,7 @@ const loading = ref(false)
 
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
-  return token ? `${location.origin}/api/v1/sub/${token}` : ''
+  return token ? buildSubscribeUrl(token) : ''
 })
 
 onMounted(async () => {

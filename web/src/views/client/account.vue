@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { CopyDocument, Key, Wallet, DataLine } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { buildSubscribeUrl } from '@/config/site'
 import { changePassword, updateProfile } from '@/api/user'
 import { errMsg } from '@/api/http'
 import { formatBytes } from '@/utils/format'
@@ -26,7 +27,7 @@ const expireText = computed(() => {
 const planLabel = computed(() => (auth.user?.plan_id ? `套餐 #${auth.user.plan_id}` : '暂无套餐'))
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
-  return token ? `${location.origin}/api/v1/sub/${token}` : ''
+  return token ? buildSubscribeUrl(token) : ''
 })
 
 async function refresh() {

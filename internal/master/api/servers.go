@@ -98,16 +98,20 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	webBase := ""
+	if d.Site != nil {
+		webBase = d.Site.WebBase()
+	}
 	util.OK(c, gin.H{
 		"server":      toServerView(&server),
 		"node_id":     nodeID,
 		"secret":      secret, // 仅此一次返回明文
-		"install_cmd": installCmd(d.Cfg.App.PublicURL, c.Request.Host, nodeID, secret),
+		"install_cmd": installCmd(webBase, d.Cfg.App.PublicURL, c.Request.Host, nodeID, secret),
 	})
 }
 
 // installCmd 生成节点一键安装命令（主控作为安装脚本与 agent 二进制的下载源）。
-func installCmd(publicURL, reqHost, nodeID, secret string) string {
+func installCmd(webBase, publicURL, reqHost, nodeID, secret string) string {
 	httpScheme := "http"
 	wsScheme := "ws"
 	host := publicURL
@@ -122,8 +126,8 @@ func installCmd(publicURL, reqHost, nodeID, secret string) string {
 		host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
 	}
 	return fmt.Sprintf(
-		"bash <(curl -fsSL %s://%s/api/v1/download/install-agent.sh) --master %s://%s/api/v1/node/ws --node-id %s --secret %s",
-		httpScheme, host, wsScheme, host, nodeID, secret)
+		"bash <(curl -fsSL %s://%s%s/api/v1/download/install-agent.sh) --master %s://%s%s/api/v1/node/ws --node-id %s --secret %s",
+		httpScheme, host, webBase, wsScheme, host, webBase, nodeID, secret)
 }
 
 // AdminUpdateServer PUT /api/v1/admin/servers/:id —— 编辑服务器信息。

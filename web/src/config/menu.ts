@@ -11,6 +11,7 @@ import {
   Tickets,
   Key,
   DataAnalysis,
+  Setting,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
@@ -33,6 +34,7 @@ export const adminMenus: MenuItem[] = [
   { title: '订单确认', path: '/admin/orders', icon: Tickets },
   { title: '邀请码', path: '/admin/invitations', icon: Key },
   { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
+  { title: '设置', path: '/admin/settings', icon: Setting },
 ]
 
 export const clientMenus: MenuItem[] = [

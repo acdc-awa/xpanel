@@ -23,6 +23,7 @@ type App struct {
 	Env       string `yaml:"env"`
 	Port      int    `yaml:"port"`
 	PublicURL string `yaml:"public_url"` // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
+	WebBase   string `yaml:"web_base"`   // 自定义 Web 访问路径前缀（如 /panel；空=根路径）；默认值可被管理端「设置」页覆盖
 }
 
 type DB struct {
@@ -78,6 +79,9 @@ func Load(path string) (*Config, error) {
 func (c *Config) applyEnv() {
 	if v := os.Getenv("APP_PUBLIC_URL"); v != "" {
 		c.App.PublicURL = v
+	}
+	if v := os.Getenv("APP_WEB_BASE"); v != "" {
+		c.App.WebBase = v
 	}
 	if v := os.Getenv("APP_PORT"); v != "" {
 		var p int

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,6 +75,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 		)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
+			admin.GET("/settings", d.AdminSettings)
+			admin.PUT("/settings", d.AdminUpdateSettings)
 			admin.GET("/users", d.AdminUsers)
 			admin.GET("/invitations", d.AdminInvitations)
 			admin.POST("/invitations", d.AdminCreateInvitations)
@@ -105,10 +108,11 @@ func (d *Deps) NewRouter() *gin.Engine {
 	}
 
 	// 前端静态托管：web/dist 存在时托管（生产部署；开发用 vite dev 不需要）。
-	// SPA fallback：非 API 路径返回 index.html。
+	// SPA fallback：非 API 路径返回 index.html，并注入 web base 供前端读取。
 	dist := "web/dist"
 	if _, err := os.Stat(dist); err == nil {
 		r.Static("/assets", filepath.Join(dist, "assets"))
+		indexHTML, _ := os.ReadFile(filepath.Join(dist, "index.html"))
 		r.NoRoute(func(c *gin.Context) {
 			p := c.Request.URL.Path
 			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/sub/") ||
@@ -116,8 +120,19 @@ func (d *Deps) NewRouter() *gin.Engine {
 				util.Fail(c, http.StatusNotFound, "接口不存在")
 				return
 			}
-			c.File(filepath.Join(dist, "index.html"))
+			if len(indexHTML) == 0 {
+				util.Fail(c, http.StatusNotFound, "前端未构建")
+				return
+			}
+			base := ""
+			if d.Site != nil {
+				base = d.Site.WebBase()
+			}
+			html := strings.Replace(string(indexHTML), "</head>",
+				fmt.Sprintf("<script>window.__PANEL_BASE__=%q</script></head>", base), 1)
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 		})
 	}
 	return r
 }
+

@@ -1,10 +1,11 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { apiBase, withBase } from '@/config/site'
 
 /** Axios 实例：统一 baseURL /api/v1（dev 由 vite proxy 转发到主控 18080）。 */
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE ?? '/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE ?? apiBase,
   timeout: 10000,
 })
 
@@ -31,7 +32,7 @@ http.interceptors.response.use(
       if (refreshToken) {
         try {
           const { data } = await axios.post<{ code: number; data: { access_token: string } }>(
-            `${import.meta.env.VITE_API_BASE ?? '/api/v1'}/auth/refresh`,
+            `${import.meta.env.VITE_API_BASE ?? apiBase}/auth/refresh`,
             { refresh_token: refreshToken },
           )
           if (data.code === 0 && data.data?.access_token) {
@@ -45,9 +46,9 @@ http.interceptors.response.use(
       }
       const auth = useAuthStore()
       auth.logout()
-      if (window.location.pathname !== '/login') {
+      if (window.location.pathname !== withBase('/login')) {
         ElMessage.error('登录已过期，请重新登录')
-        window.location.href = '/login'
+        window.location.href = withBase('/login')
       }
     }
     return Promise.reject(error)

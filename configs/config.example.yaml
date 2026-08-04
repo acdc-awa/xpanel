@@ -4,6 +4,7 @@ app:
   env: dev            # dev | prod（prod 关闭 gin debug 日志）
   port: 18080         # 注意：若宿主机 Windows 侧有服务占用同端口，WSL 内绑定会失败
   # public_url: https://panel.example.com   # 面板公网地址；设置后节点「一键安装命令」用 wss://，留空则按请求 Host + ws://
+  # web_base: /panel                        # 自定义 Web 访问路径前缀（空=根路径）；可被管理端「设置」页覆盖并即时生效
 
 db:
   driver: sqlite      # sqlite | mysql（开发默认 sqlite，生产用 mysql）

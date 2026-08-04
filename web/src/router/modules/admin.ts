@@ -60,6 +60,12 @@ export const adminRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/audit.vue'),
         meta: { title: '审计日志' },
       },
+      {
+        path: 'settings',
+        name: 'admin.settings',
+        component: () => import('@/views/admin/settings.vue'),
+        meta: { title: '设置' },
+      },
     ],
   },
 ]

@@ -29,6 +29,20 @@ export function getDashboard() {
   return http.get<ApiResp<AdminDashboard>>('/admin/dashboard')
 }
 
+// ===== 站点设置（设置页） =====
+
+export interface SiteSettings {
+  web_base: string
+}
+
+export function getSettings() {
+  return http.get<ApiResp<SiteSettings>>('/admin/settings')
+}
+
+export function updateSettings(payload: Partial<SiteSettings>) {
+  return http.put<ApiResp<SiteSettings>>('/admin/settings', payload)
+}
+
 export function getUsers(page = 1, size = 20) {
   return http.get<ApiResp<AdminUserPage>>('/admin/users', { params: { page, size } })
 }

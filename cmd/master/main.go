@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,18 +69,40 @@ func main() {
 	orderSvc := &services.OrderService{DB: database}
 	auditSvc := &services.AuditService{DB: database}
 	configSvc := &services.ConfigService{DB: database}
+	siteSvc := services.NewSiteService(database, cfg)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc}
 	router := deps.NewRouter()
+
+	// Web Base：在 gin 路由前剥离自定义前缀（如 /panel/api/v1/... → /api/v1/...）。
+	// 放在 Handler 层而不是 gin 中间件，因为 gin 的路由树在中间件执行前已按原始路径匹配。
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base := siteSvc.WebBase()
+		if base != "" {
+			p := r.URL.Path
+			if p == "/" {
+				http.Redirect(w, r, base+"/", http.StatusFound)
+				return
+			}
+			if p == base || strings.HasPrefix(p, base+"/") {
+				rest := strings.TrimPrefix(p, base)
+				if rest == "" {
+					rest = "/"
+				}
+				r.URL.Path = rest
+			}
+		}
+		router.ServeHTTP(w, r)
+	})
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.App.Port),
-		Handler:           router,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

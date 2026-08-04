@@ -20,4 +20,5 @@ type Deps struct {
 	Order   *services.OrderService
 	Audit   *services.AuditService
 	Config  *services.ConfigService
+	Site    *services.SiteService
 }
