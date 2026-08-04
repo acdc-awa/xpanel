@@ -2,11 +2,15 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/zhx/xray-panel/internal/master/middleware"
+	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
 // NewRouter 组装全部路由。
@@ -47,6 +51,19 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 公开：上架套餐
 		v1.GET("/plans", d.PublicPlans)
 
+		// 节点 Agent 二进制下载（部署用；Docker 镜像内置 /app/agent）
+		v1.GET("/download/agent", func(c *gin.Context) {
+			p := os.Getenv("AGENT_BIN_PATH")
+			if p == "" {
+				p = "/app/agent"
+			}
+			if _, err := os.Stat(p); err != nil {
+				util.Fail(c, http.StatusNotFound, "agent 二进制未内置（开发环境请用 --agent-file 或本地编译）")
+				return
+			}
+			c.FileAttachment(p, "xray-agent")
+		})
+
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",
 			middleware.AuthRequired(d.JWT),
@@ -78,6 +95,22 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
 			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
 		}
+	}
+
+	// 前端静态托管：web/dist 存在时托管（生产部署；开发用 vite dev 不需要）。
+	// SPA fallback：非 API 路径返回 index.html。
+	dist := "web/dist"
+	if _, err := os.Stat(dist); err == nil {
+		r.Static("/assets", filepath.Join(dist, "assets"))
+		r.NoRoute(func(c *gin.Context) {
+			p := c.Request.URL.Path
+			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/sub/") ||
+				strings.HasPrefix(p, "/node/") || p == "/healthz" {
+				util.Fail(c, http.StatusNotFound, "接口不存在")
+				return
+			}
+			c.File(filepath.Join(dist, "index.html"))
+		})
 	}
 	return r
 }

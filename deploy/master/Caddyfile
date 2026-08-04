@@ -1,0 +1,7 @@
+# 主控反向代理：TLS 终止 + WebSocket 升级（Caddy 自动处理）
+# SITE_ADDRESS 由 .env 提供（如 panel.example.com 或 :80）。
+# 有域名 → 自动 Let's Encrypt；无域名用 IP/端口时建议 tls internal（自签）。
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy master:18080
+}

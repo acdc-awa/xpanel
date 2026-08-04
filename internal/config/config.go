@@ -90,4 +90,10 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("JWT_SECRET"); v != "" {
 		c.JWT.Secret = v
 	}
+	if v := os.Getenv("ADMIN_USERNAME"); v != "" {
+		c.Admin.Username = v
+	}
+	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
+		c.Admin.Password = v
+	}
 }
