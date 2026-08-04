@@ -1,8 +1,12 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import { adminMenus } from '@/config/menu'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
+const router = useRouter()
 const route = useRoute()
 const pageTitle = computed(() => (route.meta.title as string) ?? '')
 const activeMenu = computed(() => route.path)
@@ -21,6 +25,12 @@ onMounted(() => {
   mq.addEventListener('change', onMq)
 })
 onUnmounted(() => mq?.removeEventListener('change', onMq))
+
+async function handleLogout() {
+  await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
+  auth.logout()
+  router.replace('/login')
+}
 </script>
 
 <template>
@@ -34,7 +44,7 @@ onUnmounted(() => mq?.removeEventListener('change', onMq))
           <span>{{ item.title }}</span>
         </el-menu-item>
       </el-menu>
-      <div class="admin-aside-foot">v0.1 初版</div>
+      <div class="admin-aside-foot">{{ auth.username }} · v0.1 初版</div>
     </aside>
 
     <!-- 移动端抽屉 -->
@@ -59,7 +69,15 @@ onUnmounted(() => mq?.removeEventListener('change', onMq))
         <div class="admin-topbar-right">
           <el-button text circle><el-icon :size="17"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></el-icon></el-button>
           <el-button text circle><el-icon :size="17"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></el-icon></el-button>
-          <div class="admin-avatar">管</div>
+          <el-dropdown trigger="click" class="admin-user">
+  <div class="admin-avatar">{{ auth.avatarText }}</div>
+  <template #dropdown>
+    <el-dropdown-menu>
+      <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
+      <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+    </el-dropdown-menu>
+  </template>
+</el-dropdown>
         </div>
       </header>
       <main class="admin-content">

@@ -1,9 +1,30 @@
-﻿<script setup lang="ts">
-import { computed } from 'vue'
-import { mockClient, mockNotices, mockServers } from '@/mock/data'
-import { formatGb } from '@/utils/format'
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { errMsg } from '@/api/http'
+import { mockNotices, mockServers } from '@/mock/data'
 
-const usagePercent = computed(() => Math.min(100, Math.round((mockClient.usedGb / mockClient.totalGb) * 100)))
+const auth = useAuthStore()
+const loading = ref(false)
+
+// 套餐/到期来自 /user/me；流量统计待 P2 接入
+const planLabel = computed(() => (auth.user?.plan_id ? `套餐 #${auth.user.plan_id}` : '暂无套餐'))
+const expireText = computed(() => {
+  const t = auth.user?.expire_at
+  return t ? String(t).replace('T', ' ').slice(0, 16) : '—'
+})
+
+onMounted(async () => {
+  if (auth.user) return
+  loading.value = true
+  try {
+    await auth.fetchMe()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载用户信息失败'))
+  } finally {
+    loading.value = false
+  }
+})
 
 const statusText: Record<string, { dot: string; text: string }> = {
   online: { dot: 'online', text: '在线' },
@@ -13,16 +34,16 @@ const statusText: Record<string, { dot: string; text: string }> = {
 </script>
 
 <template>
-  <div class="x-client-body">
+  <div class="x-client-body" v-loading="loading">
     <div class="x-dash-grid">
       <div>
         <!-- 用量卡片 -->
         <div class="x-usage-hero">
-          <div class="x-plan-name">🚀 {{ mockClient.planName }} · 剩余 {{ formatGb(mockClient.totalGb - mockClient.usedGb) }}</div>
-          <el-progress :percentage="usagePercent" :show-text="false" :stroke-width="8" color="#fff" class="hero-progress" />
+          <div class="x-plan-name">🚀 {{ planLabel }} · 流量统计 P2 接入</div>
+          <el-progress :percentage="0" :show-text="false" :stroke-width="8" color="#fff" class="hero-progress" />
           <div class="x-plan-meta">
-            <span>已用 {{ formatGb(mockClient.usedGb) }} / {{ formatGb(mockClient.totalGb) }}</span>
-            <span>到期 {{ mockClient.expireAt }}</span>
+            <span>已用 — / —</span>
+            <span>到期 {{ expireText }}</span>
           </div>
         </div>
 
@@ -30,7 +51,7 @@ const statusText: Record<string, { dot: string; text: string }> = {
         <div class="x-card">
           <div class="x-card-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
             <el-button type="primary" size="large">订阅中心</el-button>
-            <el-button size="large">购买套餐</el-button>
+            <router-link to="/shop"><el-button size="large" style="width: 100%">购买套餐</el-button></router-link>
           </div>
         </div>
       </div>
@@ -40,7 +61,7 @@ const statusText: Record<string, { dot: string; text: string }> = {
         <div class="x-card">
           <div class="x-card-head">
             <span>节点状态</span>
-            <span class="muted" style="font-size: 12px; font-weight: 400">{{ mockClient.onlineNodes }} / {{ mockClient.totalNodes }} 在线</span>
+            <span class="demo-tag">演示数据</span>
           </div>
           <div style="padding: 6px 16px">
             <div v-for="s in mockServers" :key="s.id" class="x-row-line">
@@ -75,4 +96,13 @@ const statusText: Record<string, { dot: string; text: string }> = {
 <style scoped lang="scss">
 .hero-progress { margin-top: 10px; --el-progress-bg-color: #fff; }
 .muted { color: var(--x-text-3); }
+.demo-tag {
+  font-size: 11px;
+  color: var(--x-warning);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-weight: 400;
+}
 </style>

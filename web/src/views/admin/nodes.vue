@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref } from 'vue'
 import { Plus, Search, Edit, Delete, Lightning } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -23,6 +23,7 @@ const form = ref({
 
 <template>
   <div class="x-page">
+    <el-alert type="info" :closable="false" show-icon title="演示数据：P5 接入真实入站（接入点）管理" style="margin-bottom: 16px" />
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-input placeholder="搜索入站标签 / 端口" :prefix-icon="Search" clearable style="width: 240px" />

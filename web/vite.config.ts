@@ -1,4 +1,4 @@
-﻿import { fileURLToPath, URL } from 'node:url'
+import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -19,5 +19,15 @@ export default defineConfig({
       scss: { api: 'modern' },
     },
   },
-  server: { port: 5173, host: '0.0.0.0' },
+  server: {
+    port: 5173,
+    host: '0.0.0.0',
+    proxy: {
+      // 开发期把 /api 转发到主控后端（避免 CORS）；生产由 Nginx 同域反代
+      '/api': {
+        target: 'http://127.0.0.1:18080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { Check, CreditCard, Box } from '@element-plus/icons-vue'
 import { mockPlans, mockOrders } from '@/mock/data'
 import { formatMoney } from '@/utils/format'
@@ -12,6 +12,7 @@ const orderStatusMap = {
 
 <template>
   <div class="x-client-body">
+    <el-alert type="info" :closable="false" show-icon title="演示数据：P4 接入真实套餐与订单" style="margin-bottom: 16px" />
     <!-- 套餐（移动单列 / 桌面三列） -->
     <div class="x-plan-grid">
       <div v-for="(p, idx) in mockPlans.filter((x) => x.enabled)" :key="p.id" class="x-plan-card" :class="{ featured: idx === 0 }">

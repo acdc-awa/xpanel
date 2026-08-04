@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Plus, Search, Edit, Delete, Share } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -27,6 +27,7 @@ const statusMap: Record<string, { type: 'success' | 'warning' | 'info'; text: st
 
 <template>
   <div class="x-page">
+    <el-alert type="info" :closable="false" show-icon title="演示数据：P1 节点通道上线后接入真实服务器" style="margin-bottom: 16px" />
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-input v-model="keyword" placeholder="搜索服务器名称 / IP / 地区" :prefix-icon="Search" clearable style="width: 260px" />

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref } from 'vue'
 import { Plus, Search, Edit, Delete, Lightning } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -12,6 +12,7 @@ const cacheSeconds = ref(60)
 
 <template>
   <div class="x-page">
+    <el-alert type="info" :closable="false" show-icon title="演示数据：P4/P5 接入真实套餐与订阅管理" style="margin-bottom: 16px" />
     <el-tabs v-model="activeTab">
       <el-tab-pane label="套餐列表" name="plans">
         <div class="x-toolbar">

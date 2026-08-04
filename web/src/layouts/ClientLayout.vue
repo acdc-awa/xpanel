@@ -1,8 +1,18 @@
-﻿<script setup lang="ts">
-import { useRoute } from 'vue-router'
+<script setup lang="ts">
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import { clientMenus } from '@/config/menu'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
+const router = useRouter()
 const route = useRoute()
+
+async function handleLogout() {
+  await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
+  auth.logout()
+  router.replace('/login')
+}
 const activeMenu = () => route.path
 </script>
 
@@ -30,7 +40,15 @@ const activeMenu = () => route.path
           <el-button text circle>
             <el-icon :size="17"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></el-icon>
           </el-button>
-          <div class="client-avatar">A</div>
+          <el-dropdown trigger="click">
+  <div class="client-avatar">{{ auth.avatarText }}</div>
+  <template #dropdown>
+    <el-dropdown-menu>
+      <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
+      <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+    </el-dropdown-menu>
+  </template>
+</el-dropdown>
         </div>
       </header>
 
