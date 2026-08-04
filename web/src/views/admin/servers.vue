@@ -1,101 +1,366 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Plus, Search, Edit, Delete, Share } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { mockServers, type Server } from '@/mock/data'
+import {
+  createServer,
+  deleteServer,
+  getServers,
+  serverCommand,
+  type CommandResult,
+  type ServerItem,
+} from '@/api/admin'
+import { errMsg } from '@/api/http'
 
+const list = ref<ServerItem[]>([])
+const loading = ref(false)
 const keyword = ref('')
-const statusFilter = ref('')
-const page = ref(1)
-const pageSize = 5
 
-const filtered = computed(() =>
-  mockServers.filter((s: Server) => {
-    const kw = keyword.value.trim().toLowerCase()
-    const hitKw = !kw || s.name.toLowerCase().includes(kw) || s.ip.includes(kw) || s.location.includes(kw)
-    const hitStatus = !statusFilter.value || s.status === statusFilter.value
-    return hitKw && hitStatus
-  }),
-)
+const filtered = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return list.value
+  return list.value.filter(
+    (s) =>
+      s.name.toLowerCase().includes(kw) ||
+      s.host.toLowerCase().includes(kw) ||
+      (s.location ?? '').toLowerCase().includes(kw),
+  )
+})
 
-const statusMap: Record<string, { type: 'success' | 'warning' | 'info'; text: string }> = {
-  online: { type: 'success', text: '在线' },
-  connecting: { type: 'warning', text: '重连中' },
-  offline: { type: 'info', text: '离线' },
+async function load() {
+  loading.value = true
+  try {
+    const { data } = await getServers()
+    if (data.code === 0) list.value = data.data.items
+    else ElMessage.error(data.message)
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载服务器失败'))
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(load)
+
+function fmtTime(t: string | null) {
+  if (!t) return '—'
+  const d = new Date(t)
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+// ---- 新增服务器 ----
+const createOpen = ref(false)
+const createForm = reactive({ name: '', host: '', location: '', remark: '' })
+const creating = ref(false)
+const createdResult = ref<{ node_id: string; secret: string } | null>(null)
+
+async function submitCreate() {
+  if (!createForm.name || !createForm.host) {
+    ElMessage.warning('请填写名称与地址')
+    return
+  }
+  creating.value = true
+  try {
+    const { data } = await createServer({ ...createForm })
+    if (data.code === 0) {
+      createdResult.value = { node_id: data.data.node_id, secret: data.data.secret }
+      createForm.name = ''
+      createForm.host = ''
+      createForm.location = ''
+      createForm.remark = ''
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '创建失败'))
+  } finally {
+    creating.value = false
+  }
+}
+
+async function copyText(text: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制`)
+  } catch {
+    ElMessage.warning('复制失败，请手动复制')
+  }
+}
+
+function closeCreate() {
+  createOpen.value = false
+  createdResult.value = null
+}
+
+// ---- 下发配置 ----
+const pushOpen = ref(false)
+const pushTarget = ref<ServerItem | null>(null)
+const pushConfig = ref('')
+const pushing = ref(false)
+const pushResult = ref('')
+
+function openPush(row: any) {
+  pushTarget.value = row
+  pushConfig.value = ''
+  pushResult.value = ''
+  pushOpen.value = true
+}
+
+async function submitPush() {
+  if (!pushTarget.value) return
+  try {
+    JSON.parse(pushConfig.value)
+  } catch {
+    ElMessage.warning('配置不是合法 JSON')
+    return
+  }
+  pushing.value = true
+  try {
+    const { data } = await serverCommand(pushTarget.value.id, 'push_config', {
+      config_json: pushConfig.value,
+    })
+    if (data.code === 0) {
+      const r = data.data
+      pushResult.value = r.ok ? `✅ ${r.data}` : `❌ ${r.error}`
+      if (r.ok) ElMessage.success('配置下发成功')
+      else ElMessage.error('配置下发失败')
+    } else {
+      pushResult.value = `❌ ${data.message}`
+    }
+  } catch (e) {
+    pushResult.value = `❌ ${errMsg(e, '指令失败')}`
+  } finally {
+    pushing.value = false
+  }
+}
+
+// ---- 状态详情 ----
+const statusOpen = ref(false)
+const statusData = ref<CommandResult<any> | null>(null)
+const statusLoading = ref(false)
+
+async function openStatus(row: any) {
+  statusOpen.value = true
+  statusData.value = null
+  statusLoading.value = true
+  try {
+    const { data } = await serverCommand(row.id, 'get_status')
+    statusData.value = data.data
+  } catch (e) {
+    ElMessage.error(errMsg(e, '查询状态失败'))
+  } finally {
+    statusLoading.value = false
+  }
+}
+
+// ---- 重启 ----
+async function restartXray(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认重启节点「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await serverCommand(row.id, 'restart_xray')
+    if (data.code === 0 && data.data.ok) ElMessage.success('已重启')
+    else ElMessage.error(data.data.error || '重启失败')
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重启失败'))
+  }
+}
+
+// ---- 日志 ----
+const logOpen = ref(false)
+const logContent = ref('')
+const logLoading = ref(false)
+
+async function openLogs(row: any) {
+  logOpen.value = true
+  logContent.value = ''
+  logLoading.value = true
+  try {
+    const { data } = await serverCommand(row.id, 'get_logs', { lines: 200 })
+    logContent.value = (data.data.data as string) || '（空）'
+  } catch (e) {
+    logContent.value = `读取失败：${errMsg(e)}`
+  } finally {
+    logLoading.value = false
+  }
+}
+
+// ---- 删除 ----
+async function removeServer(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除节点「${row.name}」？该节点的 Agent 将无法再连接。`, '删除服务器', {
+      type: 'error',
+    })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await deleteServer(row.id)
+    if (data.code === 0) {
+      ElMessage.success('已删除')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
+  }
 }
 </script>
 
 <template>
   <div class="x-page">
-    <el-alert type="info" :closable="false" show-icon title="演示数据：P1 节点通道上线后接入真实服务器" style="margin-bottom: 16px" />
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input v-model="keyword" placeholder="搜索服务器名称 / IP / 地区" :prefix-icon="Search" clearable style="width: 260px" />
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 130px">
-          <el-option label="在线" value="online" />
-          <el-option label="重连中" value="connecting" />
-          <el-option label="离线" value="offline" />
-        </el-select>
+        <el-input v-model="keyword" placeholder="搜索名称 / 地址 / 地区" :prefix-icon="Search" clearable style="width: 240px" />
+        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
-      <el-button type="primary"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
+      <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
     </div>
 
     <BaseCard>
-      <el-table :data="filtered">
+      <el-table v-loading="loading" :data="filtered">
         <el-table-column prop="name" label="名称" min-width="120">
           <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
         </el-table-column>
-        <el-table-column prop="host" label="主机地址" min-width="170">
+        <el-table-column prop="host" label="地址" min-width="160">
           <template #default="{ row }"><code class="cell-mono">{{ row.host }}</code></template>
         </el-table-column>
-        <el-table-column prop="ip" label="IP" min-width="130">
-          <template #default="{ row }"><code class="cell-mono">{{ row.ip }}</code></template>
+        <el-table-column prop="location" label="地区" width="110">
+          <template #default="{ row }">{{ row.location || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="location" label="地区" width="100" />
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusMap[row.status].type" size="small">
-              <span class="x-status-dot" :class="row.status" />{{ statusMap[row.status].text }}
+            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+              <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />{{ row.status === 1 ? '在线' : '离线' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastSeenAt" label="最后心跳" width="110" />
-        <el-table-column prop="remark" label="备注" min-width="100">
-          <template #default="{ row }"><span class="muted">{{ row.remark ?? '—' }}</span></template>
+        <el-table-column label="最后心跳" width="170">
+          <template #default="{ row }"><span class="muted">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default>
-            <el-button size="small" text><el-icon><Share /></el-icon></el-button>
-            <el-button size="small" text><el-icon><Edit /></el-icon></el-button>
-            <el-button size="small" text type="danger"><el-icon><Delete /></el-icon></el-button>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
+            <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发配置</el-button>
+            <el-button size="small" text @click="restartXray(row)"><el-icon><VideoPlay /></el-icon>&nbsp;重启</el-button>
+            <el-button size="small" text @click="openLogs(row)"><el-icon><Key /></el-icon>&nbsp;日志</el-button>
+            <el-button size="small" text type="danger" @click="removeServer(row)"><el-icon><Delete /></el-icon></el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <div style="padding: 30px 0; color: var(--x-text-3)">
+            尚未添加服务器。点击右上角「新增服务器」，按提示配置节点 Agent。
+          </div>
+        </template>
       </el-table>
-      <div class="table-foot">
-        <el-pagination
-          v-model:current-page="page"
-          :page-size="pageSize"
-          :total="filtered.length"
-          layout="prev, pager, next"
-          small
-        />
-        <span class="muted">共 {{ filtered.length }} 台</span>
-      </div>
     </BaseCard>
 
-    <BaseCard title="服务器 = 一台部署了 Xray-Agent 的机器">
-      <p class="muted" style="font-size: 13px">
-        每个服务器对应一台物理机 / VPS（systemd 托管 Agent）。节点（接入点）挂在服务器之下，一台服务器可配置多个入站（vmess / vless / trojan / ss 等）。新增服务器时生成 node_id + secret，供一键安装脚本使用。
+    <!-- 新增服务器 -->
+    <el-dialog v-model="createOpen" title="新增服务器" width="460px" @close="closeCreate">
+      <template v-if="!createdResult">
+        <el-form label-position="top">
+          <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01" /></el-form-item>
+          <el-form-item label="地址"><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
+          <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本（选填）" /></el-form-item>
+          <el-form-item label="备注"><el-input v-model="createForm.remark" placeholder="选填" /></el-form-item>
+        </el-form>
+      </template>
+      <template v-else>
+        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="请把以下 node_id 与 secret 配置到节点 Agent（secret 仅显示这一次，请立即复制保存）" style="margin-bottom: 12px" />
+        <div class="secret-box">
+          <div class="secret-row">
+            <span class="k">node_id</span>
+            <code>{{ createdResult.node_id }}</code>
+            <el-button size="small" text @click="copyText(createdResult.node_id, 'node_id')"><el-icon><CopyDocument /></el-icon></el-button>
+          </div>
+          <div class="secret-row">
+            <span class="k">secret</span>
+            <code>{{ createdResult.secret }}</code>
+            <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="!createdResult">
+          <el-button @click="createOpen = false">取消</el-button>
+          <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+        </template>
+        <template v-else>
+          <el-button type="primary" @click="closeCreate">完成</el-button>
+        </template>
+      </template>
+    </el-dialog>
+
+    <!-- 下发配置 -->
+    <el-dialog v-model="pushOpen" :title="`下发配置 · ${pushTarget?.name ?? ''}`" width="560px">
+      <p class="muted" style="margin: 0 0 8px; font-size: 12.5px">
+        粘贴完整 Xray 配置 JSON，Agent 将执行 <code>xray -test</code> 校验，通过后写盘并重启。
       </p>
-    </BaseCard>
+      <el-input v-model="pushConfig" type="textarea" :rows="12" placeholder='{"log": {...}, "inbounds": [...], "outbounds": [...]}' />
+      <p v-if="pushResult" style="margin: 10px 0 0" :class="pushResult.startsWith('✅') ? 'ok-text' : 'err-text'">{{ pushResult }}</p>
+      <template #footer>
+        <el-button @click="pushOpen = false">关闭</el-button>
+        <el-button type="primary" :loading="pushing" :disabled="!pushConfig" @click="submitPush">校验并下发</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 状态详情 -->
+    <el-dialog v-model="statusOpen" title="节点状态" width="420px">
+      <div v-loading="statusLoading" class="status-rows">
+        <template v-if="statusData">
+          <div class="row"><span class="k">Xray 运行</span><span class="v">{{ statusData.data?.xray_running ? '✅ 运行中' : '⛔ 已停止' }}</span></div>
+          <div class="row"><span class="k">进程 PID</span><span class="v">{{ statusData.data?.pid ?? '—' }}</span></div>
+          <div class="row"><span class="k">启动时间</span><span class="v">{{ statusData.data?.started_at ? fmtTime(statusData.data.started_at) : '—' }}</span></div>
+          <div class="row"><span class="k">运行时长</span><span class="v">{{ statusData.data?.uptime_sec ?? 0 }} 秒</span></div>
+          <div class="row"><span class="k">配置路径</span><span class="v"><code class="cell-mono">{{ statusData.data?.config_path ?? '—' }}</code></span></div>
+        </template>
+        <el-empty v-else-if="!statusLoading" description="无数据" />
+      </div>
+    </el-dialog>
+
+    <!-- 日志 -->
+    <el-dialog v-model="logOpen" :title="`最近日志 · ${pushTarget?.name ?? ''}`" width="620px">
+      <pre v-loading="logLoading" class="log-view">{{ logContent }}</pre>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped lang="scss">
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
-.table-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; }
-@media (max-width: 900px) {
-  .cell-mono { font-size: 11.5px; }
+.secret-box { display: grid; gap: 10px; }
+.secret-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--x-primary-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  .k { color: var(--x-text-2); font-size: 12.5px; flex: none; width: 56px; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-primary); word-break: break-all; flex: 1; }
+}
+.ok-text { color: var(--x-success); font-size: 13px; }
+.err-text { color: var(--x-danger); font-size: 13px; }
+.status-rows .row { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--x-border); font-size: 13.5px; }
+.status-rows .k { color: var(--x-text-2); }
+.status-rows .v { font-weight: 500; }
+.log-view {
+  background: #171b2e;
+  color: #c7d2fe;
+  border-radius: 8px;
+  padding: 14px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

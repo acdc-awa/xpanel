@@ -20,6 +20,7 @@ import (
 
 	"github.com/zhx/xray-panel/internal/config"
 	"github.com/zhx/xray-panel/internal/master/api"
+	"github.com/zhx/xray-panel/internal/master/nodegate"
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/db"
@@ -61,11 +62,13 @@ func main() {
 
 	ensureAdmin(database, cfg)
 
+	hub := nodegate.NewHub(database)
+
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub}
 	router := deps.NewRouter()
 
 	srv := &http.Server{

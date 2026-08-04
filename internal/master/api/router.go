@@ -28,6 +28,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 			auth.POST("/refresh", d.Refresh)
 		}
 
+		// 节点 WebSocket 网关（节点 Agent 连接）
+		v1.GET("/node/ws", d.Hub.ServeWS)
+
 		// 用户端
 		user := v1.Group("/user", middleware.AuthRequired(d.JWT))
 		{
@@ -44,6 +47,10 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/users", d.AdminUsers)
 			admin.GET("/invitations", d.AdminInvitations)
 			admin.POST("/invitations", d.AdminCreateInvitations)
+			admin.GET("/servers", d.AdminServers)
+			admin.POST("/servers", d.AdminCreateServer)
+			admin.DELETE("/servers/:id", d.AdminDeleteServer)
+			admin.POST("/servers/:id/command", d.AdminServerCommand)
 		}
 	}
 	return r
