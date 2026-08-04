@@ -24,11 +24,26 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 
-	// 收集用户可用节点（P3：全部启用入站；P5 接入 user_inbounds 精细授权）
+	// 收集用户可用节点（有授权记录则过滤；无记录回退全部启用入站）
 	var inbounds []models.Inbound
 	if err := d.DB.Where("enabled = ?", true).Order("id ASC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
+	}
+	var grants []models.UserInbound
+	d.DB.Where("user_id = ? AND enabled = ?", user.ID, true).Find(&grants)
+	if len(grants) > 0 {
+		granted := make(map[uint64]bool, len(grants))
+		for _, g := range grants {
+			granted[g.InboundID] = true
+		}
+		filtered := inbounds[:0]
+		for _, inb := range inbounds {
+			if granted[inb.ID] {
+				filtered = append(filtered, inb)
+			}
+		}
+		inbounds = filtered
 	}
 	items := make([]subscribe.ProxyItem, 0, len(inbounds))
 	for i := range inbounds {

@@ -1,4 +1,4 @@
-﻿import type { Component } from 'vue'
+import type { Component } from 'vue'
 import {
   Odometer,
   Monitor,
@@ -8,6 +8,9 @@ import {
   HomeFilled,
   ShoppingCart,
   UserFilled,
+  Tickets,
+  Key,
+  DataAnalysis,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
@@ -27,6 +30,9 @@ export const adminMenus: MenuItem[] = [
   { title: '节点（接入点）', path: '/admin/nodes', icon: Share },
   { title: '套餐 / 订阅', path: '/admin/plans', icon: Box },
   { title: '用户管理', path: '/admin/users', icon: User },
+  { title: '订单确认', path: '/admin/orders', icon: Tickets },
+  { title: '邀请码', path: '/admin/invitations', icon: Key },
+  { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
 ]
 
 export const clientMenus: MenuItem[] = [

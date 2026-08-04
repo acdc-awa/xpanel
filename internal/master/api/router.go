@@ -38,7 +38,12 @@ func (d *Deps) NewRouter() *gin.Engine {
 		user := v1.Group("/user", middleware.AuthRequired(d.JWT))
 		{
 			user.GET("/me", d.Me)
+			user.POST("/orders", d.UserCreateOrder)
+			user.GET("/orders", d.UserOrders)
 		}
+
+		// 公开：上架套餐
+		v1.GET("/plans", d.PublicPlans)
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",
@@ -60,6 +65,16 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.PUT("/inbounds/:id", d.AdminUpdateInbound)
 			admin.DELETE("/inbounds/:id", d.AdminDeleteInbound)
 			admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
+			admin.GET("/plans", d.AdminPlans)
+			admin.POST("/plans", d.AdminCreatePlan)
+			admin.PUT("/plans/:id", d.AdminUpdatePlan)
+			admin.DELETE("/plans/:id", d.AdminDeletePlan)
+			admin.GET("/orders", d.AdminOrders)
+			admin.POST("/orders/:id/confirm", d.AdminConfirmOrder)
+			admin.POST("/orders/:id/cancel", d.AdminCancelOrder)
+			admin.GET("/audit-logs", d.AdminAuditLogs)
+			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
+			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
 		}
 	}
 	return r

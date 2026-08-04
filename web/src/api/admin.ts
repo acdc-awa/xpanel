@@ -3,8 +3,24 @@ import type {
   AdminDashboard,
   AdminUserPage,
   ApiResp,
+  AuditLog,
   CreateInvitationResult,
+  InboundItem,
   Invitation,
+  Order,
+  Plan,
+  UserInboundGrant,
+} from './types'
+
+export type {
+  AdminDashboard,
+  AdminUserPage,
+  AuditLog,
+  InboundItem,
+  Invitation,
+  Order,
+  Plan,
+  UserInboundGrant,
 } from './types'
 
 export function getDashboard() {
@@ -82,21 +98,6 @@ export function serverCommand(
 
 // ===== P3 入站管理 + 配置生成 =====
 
-export interface InboundItem {
-  id: number
-  server_id: number
-  server_name: string
-  tag: string
-  protocol: string
-  port: number
-  network: string
-  tls_type: string
-  settings_json: string
-  ratio: number
-  enabled: boolean
-  created_at: string
-}
-
 export interface InboundPayload {
   server_id: number
   tag: string
@@ -134,4 +135,54 @@ export function generateAndPushConfig(serverId: number) {
   return http.post<ApiResp<{ ok: boolean; error: string; config: string }>>(
     `/admin/servers/${serverId}/generate-config`,
   )
+}
+
+// ===== P5 套餐 / 订单 / 审计 / 入站授权 =====
+
+export function getPlans() {
+  return http.get<ApiResp<{ items: Plan[] }>>('/admin/plans')
+}
+
+export function createPlan(payload: Partial<Plan>) {
+  return http.post<ApiResp<{ plan: Plan }>>('/admin/plans', payload)
+}
+
+export function updatePlan(id: number, payload: Partial<Plan>) {
+  return http.put<ApiResp<{ plan: Plan }>>(`/admin/plans/${id}`, payload)
+}
+
+export function deletePlan(id: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/plans/${id}`)
+}
+
+export function getOrders(page = 1, size = 20, status?: string) {
+  return http.get<ApiResp<{ total: number; page: number; size: number; items: Order[] }>>(
+    '/admin/orders',
+    { params: { page, size, status } },
+  )
+}
+
+export function confirmOrder(id: number) {
+  return http.post<ApiResp<{ confirmed: number }>>(`/admin/orders/${id}/confirm`)
+}
+
+export function cancelOrder(id: number) {
+  return http.post<ApiResp<{ cancelled: number }>>(`/admin/orders/${id}/cancel`)
+}
+
+export function getAuditLogs(page = 1, size = 20, action?: string) {
+  return http.get<ApiResp<{ total: number; page: number; size: number; items: AuditLog[] }>>(
+    '/admin/audit-logs',
+    { params: { page, size, action } },
+  )
+}
+
+export function getUserInbounds(userId: number) {
+  return http.get<ApiResp<UserInboundGrant>>(`/admin/users/${userId}/inbounds`)
+}
+
+export function setUserInbounds(userId: number, inboundIds: number[]) {
+  return http.post<ApiResp<{ user_id: number; granted: number }>>(`/admin/users/${userId}/inbounds`, {
+    inbound_ids: inboundIds,
+  })
 }

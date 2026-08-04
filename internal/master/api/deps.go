@@ -17,4 +17,6 @@ type Deps struct {
 	Auth    *services.AuthService
 	Hub     *nodegate.Hub
 	Traffic *services.TrafficService
+	Order   *services.OrderService
+	Audit   *services.AuditService
 }

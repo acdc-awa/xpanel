@@ -2,9 +2,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Plus, Search, View, Key, Ticket } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { getUsers, createInvitations } from '@/api/admin'
+import { getUsers, createInvitations, getUserInbounds, setUserInbounds } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { AdminUser } from '@/api/types'
+import type { AdminUser, InboundItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 
 const list = ref<AdminUser[]>([])
@@ -47,6 +47,45 @@ const current = ref<AdminUser | null>(null)
 function openDetail(row: any) {
   current.value = row
   detailOpen.value = true
+  loadGrants(row.id)
+}
+
+// ---- 入站授权 ----
+const grantInbounds = ref<InboundItem[]>([])
+const grantedIds = ref<number[]>([])
+const grantLoading = ref(false)
+const grantSaving = ref(false)
+
+async function loadGrants(userId: number) {
+  grantLoading.value = true
+  try {
+    const { data } = await getUserInbounds(userId)
+    if (data.code === 0) {
+      grantInbounds.value = data.data.inbounds
+      grantedIds.value = [...data.data.granted_ids]
+    }
+  } catch {
+    /* 忽略 */
+  } finally {
+    grantLoading.value = false
+  }
+}
+
+async function saveGrants() {
+  if (!current.value) return
+  grantSaving.value = true
+  try {
+    const { data } = await setUserInbounds(current.value.id, grantedIds.value)
+    if (data.code === 0) {
+      ElMessage.success('授权已保存（订阅将按授权入站过滤）')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存失败'))
+  } finally {
+    grantSaving.value = false
+  }
 }
 
 // ---- 生成邀请码 ----
@@ -166,6 +205,22 @@ async function copyCodes() {
           <el-button size="small" type="danger" plain disabled>封禁</el-button>
           <p class="muted" style="width: 100%">以上操作随 P4/P5 管理端完善后开放</p>
         </div>
+
+        <!-- 入站授权（订阅按此过滤） -->
+        <div v-loading="grantLoading" class="grant-box">
+          <div class="grant-title">节点授权（控制该用户订阅包含的入站）</div>
+          <div v-if="grantInbounds.length" class="grant-list">
+            <el-checkbox-group v-model="grantedIds">
+              <el-checkbox v-for="inb in grantInbounds" :key="inb.id" :value="inb.id" class="grant-item">
+                {{ inb.server_name }} · {{ inb.tag }}（{{ inb.protocol }}:{{ inb.port }}）
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+          <p v-else class="muted" style="font-size: 12px">暂无启用入站</p>
+          <el-button size="small" type="primary" :loading="grantSaving" style="margin-top: 12px" @click="saveGrants">
+            保存授权
+          </el-button>
+        </div>
       </template>
     </el-drawer>
 
@@ -219,4 +274,9 @@ async function copyCodes() {
   padding: 10px 12px;
   word-break: break-all;
 }
+.grant-box { margin-top: 20px; border-top: 1px dashed var(--x-border); padding-top: 14px; }
+.grant-title { font-weight: 600; font-size: 13.5px; margin-bottom: 10px; }
+.grant-list { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
+.grant-item { margin-right: 0; width: 100%; }
+
 </style>

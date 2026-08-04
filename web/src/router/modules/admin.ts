@@ -1,4 +1,4 @@
-﻿import type { RouteRecordRaw } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import AdminLayout from '@/layouts/AdminLayout.vue'
 
 /**
@@ -41,6 +41,24 @@ export const adminRoutes: RouteRecordRaw[] = [
         name: 'admin.users',
         component: () => import('@/views/admin/users.vue'),
         meta: { title: '用户管理' },
+      },
+      {
+        path: 'orders',
+        name: 'admin.orders',
+        component: () => import('@/views/admin/orders.vue'),
+        meta: { title: '订单确认' },
+      },
+      {
+        path: 'invitations',
+        name: 'admin.invitations',
+        component: () => import('@/views/admin/invitations.vue'),
+        meta: { title: '邀请码' },
+      },
+      {
+        path: 'audit',
+        name: 'admin.audit',
+        component: () => import('@/views/admin/audit.vue'),
+        meta: { title: '审计日志' },
       },
     ],
   },

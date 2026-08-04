@@ -56,6 +56,7 @@ func (d *Deps) Login(c *gin.Context) {
 		util.ServerError(c, "签发令牌失败")
 		return
 	}
+	d.Audit.Log("user", user.ID, "auth.login", "登录成功", c.ClientIP())
 	util.OK(c, gin.H{
 		"user":          userSummary(user),
 		"access_token":  access,
