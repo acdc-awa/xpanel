@@ -37,3 +37,12 @@ tools/**/*.out
 data/
 /bin/
 /tmp/
+
+# 本地配置（含 JWT secret / 管理员口令，不入库；参考 configs/config.example.yaml）
+configs/config.yaml
+
+# 多代理工作流 scratch 状态
+.agents/
+
+# Windows xray 二进制（约 90MB，不入库）
+docs/Xray-windows-64/
