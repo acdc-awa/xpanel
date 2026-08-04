@@ -9,6 +9,7 @@ import (
 type User struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
 	Username       string     `gorm:"size:32;uniqueIndex;not null" json:"username"`
+	UUID           string     `gorm:"size:36;uniqueIndex" json:"-"` // VLESS 用户账号（UUID v4）
 	Email          string     `gorm:"size:128;uniqueIndex" json:"email"`
 	PasswordHash   string     `gorm:"size:255;not null" json:"-"`
 	Role           string     `gorm:"size:16;default:user;index" json:"role"`

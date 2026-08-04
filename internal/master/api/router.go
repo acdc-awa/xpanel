@@ -31,6 +31,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 节点 WebSocket 网关（节点 Agent 连接）
 		v1.GET("/node/ws", d.Hub.ServeWS)
 
+		// 订阅（公开，token 鉴权）
+		v1.GET("/sub/:token", d.Subscribe)
+
 		// 用户端
 		user := v1.Group("/user", middleware.AuthRequired(d.JWT))
 		{
@@ -51,6 +54,12 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/servers", d.AdminCreateServer)
 			admin.DELETE("/servers/:id", d.AdminDeleteServer)
 			admin.POST("/servers/:id/command", d.AdminServerCommand)
+			admin.POST("/servers/:id/generate-config", d.AdminGenerateConfig)
+			admin.GET("/inbounds", d.AdminInbounds)
+			admin.POST("/inbounds", d.AdminCreateInbound)
+			admin.PUT("/inbounds/:id", d.AdminUpdateInbound)
+			admin.DELETE("/inbounds/:id", d.AdminDeleteInbound)
+			admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
 		}
 	}
 	return r

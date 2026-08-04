@@ -5,6 +5,7 @@ import BaseCard from '@/components/base/BaseCard.vue'
 import {
   createServer,
   deleteServer,
+  generateAndPushConfig,
   getServers,
   serverCommand,
   type CommandResult,
@@ -190,6 +191,40 @@ async function openLogs(row: any) {
   }
 }
 
+// ---- 生成并下发配置 ----
+const genOpen = ref(false)
+const genLoading = ref(false)
+const genResult = ref('')
+
+async function genPush(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `将按「${row.name}」的启用入站 + 全部启用用户生成 Xray 配置并下发（自动重启），确认？`,
+      '生成并下发配置',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  genOpen.value = true
+  genLoading.value = true
+  genResult.value = ''
+  try {
+    const { data } = await generateAndPushConfig(row.id)
+    if (data.code === 0 && data.data.ok) {
+      ElMessage.success('配置生成并下发成功')
+      genResult.value = data.data.config
+    } else {
+      ElMessage.error(data.data?.error || data.message)
+      genResult.value = data.data?.config ?? ''
+    }
+  } catch (e) {
+    genResult.value = `失败：${errMsg(e)}`
+    ElMessage.error(errMsg(e, '生成失败'))
+  } finally {
+    genLoading.value = false
+  }
+}
 // ---- 删除 ----
 async function removeServer(row: any) {
   try {
@@ -244,9 +279,10 @@ async function removeServer(row: any) {
         <el-table-column label="最后心跳" width="170">
           <template #default="{ row }"><span class="muted">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
+            <el-button size="small" text type="success" @click="genPush(row)"><el-icon><VideoPlay /></el-icon>&nbsp;生成</el-button>
             <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发配置</el-button>
             <el-button size="small" text @click="restartXray(row)"><el-icon><VideoPlay /></el-icon>&nbsp;重启</el-button>
             <el-button size="small" text @click="openLogs(row)"><el-icon><Key /></el-icon>&nbsp;日志</el-button>

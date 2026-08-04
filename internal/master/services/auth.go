@@ -63,10 +63,15 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterReq) (*models.U
 	if err != nil {
 		return nil, err
 	}
+	uuid, err := util.NewUUID()
+	if err != nil {
+		return nil, err
+	}
 
 	user := &models.User{
 		Username:       req.Username,
 		Email:          req.Email,
+		UUID:           uuid,
 		PasswordHash:   hash,
 		Role:           models.RoleUser,
 		Status:         models.StatusActive,

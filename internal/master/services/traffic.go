@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -35,14 +37,19 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload) error {
 			if e.Email == "" {
 				continue
 			}
-			var user models.User
-			if err := s.DB.Where("email = ?", e.Email).First(&user).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					continue // 未知用户（未注册/email 不匹配），跳过
+			// 优先解析固定格式 user-<id>@panel.local（主控生成配置时使用）
+			if id, ok := parsePanelEmail(e.Email); ok {
+				userID = id
+			} else {
+				var user models.User
+				if err := s.DB.Where("email = ?", e.Email).First(&user).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue // 未知用户（未注册/email 不匹配），跳过
+					}
+					return err
 				}
-				return err
+				userID = user.ID
 			}
-			userID = user.ID
 		}
 
 		var log models.TrafficLog
@@ -141,4 +148,18 @@ func (s *TrafficService) AggDaily() {
 			})
 		}
 	}
+}
+// parsePanelEmail 解析 user-<id>@panel.local → user id。
+func parsePanelEmail(email string) (uint64, bool) {
+	const prefix = "user-"
+	const suffix = "@panel.local"
+	if !strings.HasPrefix(email, prefix) || !strings.HasSuffix(email, suffix) {
+		return 0, false
+	}
+	idStr := strings.TrimSuffix(strings.TrimPrefix(email, prefix), suffix)
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }

@@ -25,6 +25,17 @@ func NewInviteCode() (string, error) { return RandomHex(12) }
 // NewNodeSecret 生成节点密钥（32 字节 = 64 hex）。
 func NewNodeSecret() (string, error) { return RandomHex(32) }
 
+// NewUUID 生成 UUID v4（用于 VLESS 用户账号）。
+func NewUUID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
 // RandomID 生成短随机 ID（请求配对用，n 字节 hex）。
 func RandomID(n int) string {
 	s, err := RandomHex(n)

@@ -61,6 +61,7 @@ func main() {
 	}
 
 	ensureAdmin(database, cfg)
+	ensureUserUUIDs(database)
 
 	trafficSvc := &services.TrafficService{DB: database}
 	trafficSvc.StartDailyAgg(context.Background())
@@ -116,15 +117,40 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 	if err != nil {
 		log.Fatalf("生成订阅 token 失败: %v", err)
 	}
+	uuid, err := util.NewUUID()
+	if err != nil {
+		log.Fatalf("生成管理员 UUID 失败: %v", err)
+	}
 	admin := &models.User{
 		Username:       cfg.Admin.Username,
 		PasswordHash:   hash,
 		Role:           models.RoleAdmin,
 		Status:         models.StatusActive,
 		SubscribeToken: token,
+		UUID:           uuid,
 	}
 	if err := database.Create(admin).Error; err != nil {
 		log.Fatalf("创建初始管理员失败: %v", err)
 	}
 	log.Printf("已创建初始管理员 %q（密码来自配置，请尽快登录后修改）", cfg.Admin.Username)
+}
+// ensureUserUUIDs 为历史用户补全 UUID（升级迁移）。
+func ensureUserUUIDs(database *gorm.DB) {
+	var users []models.User
+	if err := database.Where("uuid = ? OR uuid IS NULL", "").Find(&users).Error; err != nil {
+		log.Printf("查询缺 UUID 用户失败: %v", err)
+		return
+	}
+	for _, u := range users {
+		uuid, err := util.NewUUID()
+		if err != nil {
+			continue
+		}
+		if err := database.Model(&u).Update("uuid", uuid).Error; err != nil {
+			log.Printf("补全用户 %s UUID 失败: %v", u.Username, err)
+		}
+	}
+	if len(users) > 0 {
+		log.Printf("已为 %d 个用户补全 UUID", len(users))
+	}
 }

@@ -79,3 +79,59 @@ export function serverCommand(
     ...extra,
   })
 }
+
+// ===== P3 入站管理 + 配置生成 =====
+
+export interface InboundItem {
+  id: number
+  server_id: number
+  server_name: string
+  tag: string
+  protocol: string
+  port: number
+  network: string
+  tls_type: string
+  settings_json: string
+  ratio: number
+  enabled: boolean
+  created_at: string
+}
+
+export interface InboundPayload {
+  server_id: number
+  tag: string
+  protocol: string
+  port: number
+  network: string
+  tls_type?: string
+  settings_json?: string
+  ratio?: number
+}
+
+export function getInbounds(serverId?: number) {
+  return http.get<ApiResp<{ items: InboundItem[] }>>('/admin/inbounds', {
+    params: serverId ? { server_id: serverId } : {},
+  })
+}
+
+export function createInbound(payload: InboundPayload) {
+  return http.post<ApiResp<{ inbound: InboundItem }>>('/admin/inbounds', payload)
+}
+
+export function updateInbound(id: number, payload: Partial<InboundPayload>) {
+  return http.put<ApiResp<{ inbound: InboundItem }>>(`/admin/inbounds/${id}`, payload)
+}
+
+export function deleteInbound(id: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/inbounds/${id}`)
+}
+
+export function toggleInbound(id: number) {
+  return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
+}
+
+export function generateAndPushConfig(serverId: number) {
+  return http.post<ApiResp<{ ok: boolean; error: string; config: string }>>(
+    `/admin/servers/${serverId}/generate-config`,
+  )
+}

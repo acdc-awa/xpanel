@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/zhx/xray-panel/internal/master/nodegate"
+	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -146,4 +147,44 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
+}
+// AdminGenerateConfig POST /api/v1/admin/servers/:id/generate-config
+// 由主控根据「服务器启用入站 + 全部启用用户」生成 Xray 配置并下发（返回回执）。
+func (d *Deps) AdminGenerateConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+	var inbounds []models.Inbound
+	if err := d.DB.Where("server_id = ? AND enabled = ?", id, true).Find(&inbounds).Error; err != nil {
+		util.ServerError(c, "查询入站失败")
+		return
+	}
+	var users []models.User
+	if err := d.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
+		util.ServerError(c, "查询用户失败")
+		return
+	}
+	cfg, err := xray.Generate(&srv, inbounds, users)
+	if err != nil {
+		util.BadRequest(c, "配置生成失败: "+err.Error())
+		return
+	}
+
+	res, err := d.Hub.Ask(id, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: string(cfg)}, nodegate.AskTimeout)
+	if err != nil {
+		util.Fail(c, 502, "下发失败: "+err.Error())
+		return
+	}
+	util.OK(c, gin.H{
+		"ok":     res.OK,
+		"error":  res.Error,
+		"config": string(cfg), // 返回生成结果供查看
+	})
 }

@@ -1,0 +1,102 @@
+package api
+
+import (
+	"strings"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/zhx/xray-panel/internal/master/subscribe"
+	"github.com/zhx/xray-panel/internal/master/xray"
+	"github.com/zhx/xray-panel/internal/models"
+	"github.com/zhx/xray-panel/internal/pkg/util"
+)
+
+// Subscribe GET /api/v1/sub/:token —— 订阅生成（按 UA 区分 Clash YAML / Base64）。
+func (d *Deps) Subscribe(c *gin.Context) {
+	token := c.Param("token")
+	var user models.User
+	if err := d.DB.Where("subscribe_token = ?", token).First(&user).Error; err != nil {
+		util.Fail(c, 404, "订阅链接无效")
+		return
+	}
+	if user.Status != models.StatusActive {
+		util.Fail(c, 403, "账号已被禁用")
+		return
+	}
+
+	// 收集用户可用节点（P3：全部启用入站；P5 接入 user_inbounds 精细授权）
+	var inbounds []models.Inbound
+	if err := d.DB.Where("enabled = ?", true).Order("id ASC").Find(&inbounds).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	items := make([]subscribe.ProxyItem, 0, len(inbounds))
+	for i := range inbounds {
+		inb := &inbounds[i]
+		if inb.Protocol != "vless" {
+			continue
+		}
+		var srv models.Server
+		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
+			continue
+		}
+		settings, err := xray.ParseSettings(inb)
+		if err != nil {
+			continue
+		}
+		item := subscribe.ProxyItem{
+			Name:    subscribe.NodeName(&srv, inb),
+			Host:    srv.Host,
+			Port:    inb.Port,
+			UUID:    user.UUID,
+			Network: inb.Network,
+			TLSType: inb.TLSType,
+			Reality: settings.Reality,
+			WS:      settings.WS,
+			XHTTP:   settings.XHTTP,
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		util.Fail(c, 404, "暂无可用的节点")
+		return
+	}
+
+	// 按 UA 区分输出
+	ua := strings.ToLower(c.GetHeader("User-Agent"))
+	isClash := strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo") ||
+		strings.Contains(ua, "stash") || strings.Contains(ua, "verge")
+
+	var content string
+	if isClash {
+		content = subscribe.BuildClash(&user, items)
+		c.Header("Content-Type", "application/yaml; charset=utf-8")
+	} else {
+		content = subscribe.BuildBase64(&user, items)
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+	}
+
+	// subscription-userinfo
+	up, down, _ := d.Traffic.UserUsed(user.ID)
+	totalBytes := int64(0)
+	expire := int64(0)
+	if user.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled {
+			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+		}
+	}
+	if user.ExpireAt != nil {
+		expire = user.ExpireAt.Unix()
+	}
+	c.Header("Subscription-Userinfo", subscribe.UserInfoHeader(up, down, totalBytes, expire))
+
+	// ETag / 304 增量
+	etag := subscribe.Hash(content)
+	if inm := c.GetHeader("If-None-Match"); inm != "" && inm == etag {
+		c.Status(304)
+		return
+	}
+	c.Header("ETag", etag)
+	c.String(200, content)
+}
