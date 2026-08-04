@@ -42,3 +42,51 @@ func (d *Deps) Me(c *gin.Context) {
 		"total_bytes":     totalBytes,
 	})
 }
+
+// UserChangePassword POST /api/v1/user/password —— 修改密码。
+func (d *Deps) UserChangePassword(c *gin.Context) {
+	uid := middleware.CurrentUser(c)
+	var req struct {
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if err := d.Auth.ChangePassword(c.Request.Context(), uid, req.OldPassword, req.NewPassword); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
+	d.Audit.Log("user", uid, "auth.change_password", "修改密码", c.ClientIP())
+	util.OK(c, gin.H{"ok": true})
+}
+
+// UserUpdateProfile PUT /api/v1/user/profile —— 保存资料（邮箱）。
+func (d *Deps) UserUpdateProfile(c *gin.Context) {
+	uid := middleware.CurrentUser(c)
+	var req struct {
+		Email string `json:"email" binding:"omitempty,email,max=128"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var user models.User
+	if err := d.DB.First(&user, uid).Error; err != nil {
+		util.Fail(c, 404, "用户不存在")
+		return
+	}
+	// 邮箱唯一性检查（排除自己）
+	var cnt int64
+	d.DB.Model(&models.User{}).Where("email = ? AND id != ?", req.Email, uid).Count(&cnt)
+	if cnt > 0 {
+		util.BadRequest(c, "邮箱已被使用")
+		return
+	}
+	if err := d.DB.Model(&user).Update("email", req.Email).Error; err != nil {
+		util.ServerError(c, "保存失败")
+		return
+	}
+	util.OK(c, gin.H{"email": req.Email})
+}

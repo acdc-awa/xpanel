@@ -131,6 +131,23 @@ func (s *AuthService) IssueTokens(user *models.User) (access, refresh string, er
 	return s.JWT.GeneratePair(user.ID, user.Role)
 }
 
+// ChangePassword 修改密码（校验旧密码）。
+func (s *AuthService) ChangePassword(ctx context.Context, userID uint64, oldPwd, newPwd string) error {
+	var user models.User
+	if err := s.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+		return errors.New("用户不存在")
+	}
+	match, err := argon2id.ComparePasswordAndHash(oldPwd, user.PasswordHash)
+	if err != nil || !match {
+		return errors.New("当前密码错误")
+	}
+	hash, err := argon2id.CreateHash(newPwd, argon2id.DefaultParams)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Model(&user).Update("password_hash", hash).Error
+}
+
 // Refresh 用 refresh token 换取新 access token。
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string, error) {
 	claims, err := s.JWT.Parse(refreshToken)

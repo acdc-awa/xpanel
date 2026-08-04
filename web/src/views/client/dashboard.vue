@@ -60,7 +60,7 @@ const statusText: Record<string, { dot: string; text: string }> = {
         <!-- 快捷操作 -->
         <div class="x-card">
           <div class="x-card-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
-            <el-button type="primary" size="large">订阅中心</el-button>
+            <router-link to="/subscribe"><el-button type="primary" size="large" style="width: 100%">订阅中心</el-button></router-link>
             <router-link to="/shop"><el-button size="large" style="width: 100%">购买套餐</el-button></router-link>
           </div>
         </div>

@@ -1,4 +1,4 @@
-﻿import type { RouteRecordRaw } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import ClientLayout from '@/layouts/ClientLayout.vue'
 
 /** 客户端路由：新增页面 → 在此数组追加一条记录（页面放 views/client/ 下）。 */
@@ -26,6 +26,12 @@ export const clientRoutes: RouteRecordRaw[] = [
         name: 'client.account',
         component: () => import('@/views/client/account.vue'),
         meta: { title: '我的' },
+      },
+      {
+        path: 'subscribe',
+        name: 'client.subscribe',
+        component: () => import('@/views/client/subscribe.vue'),
+        meta: { title: '订阅中心' },
       },
     ],
   },

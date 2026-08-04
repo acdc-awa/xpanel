@@ -40,6 +40,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 			user.GET("/me", d.Me)
 			user.POST("/orders", d.UserCreateOrder)
 			user.GET("/orders", d.UserOrders)
+			user.POST("/password", d.UserChangePassword)
+			user.PUT("/profile", d.UserUpdateProfile)
 		}
 
 		// 公开：上架套餐
