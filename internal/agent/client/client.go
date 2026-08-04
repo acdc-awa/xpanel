@@ -215,7 +215,24 @@ func (c *Client) connectAndServe(ctx context.Context, backoff *time.Duration) er
 	if err != nil || msg.Type != "auth_ok" {
 		return errAuthRejected
 	}
-	_ = ws.SetReadDeadline(time.Time{})
+	const (
+		pongWait = 60 * time.Second
+	)
+	_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPingHandler(func(appData string) error {
+		_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+		if c.ws != nil {
+			_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			return c.ws.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+		}
+		return nil
+	})
+	ws.SetPongHandler(func(string) error {
+		_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 	log.Printf("agent: 已连上主控（node=%s）", c.NodeID)
 	
 	// 连接成功，重置退避时间
@@ -315,7 +332,21 @@ func (c *Client) handle(m *protocol.Message) {
 		} else if err := c.Xray.RestartWithConfig(p.ConfigJSON); err != nil {
 			res = protocol.ResultPayload{OK: false, Error: err.Error()}
 		} else {
+			if c.Stats != nil {
+				c.Stats.ResetUsers()
+			}
 			res = protocol.ResultPayload{OK: true, Data: "xray 已按新配置重启"}
+		}
+	case protocol.MsgSyncUsers:
+		var p protocol.SyncUsersPayload
+		if err := m.PayloadTo(&p); err != nil {
+			res = protocol.ResultPayload{OK: false, Error: "解析 sync_users 失败: " + err.Error()}
+		} else if c.Stats == nil {
+			res = protocol.ResultPayload{OK: false, Error: "stats collector 未初始化"}
+		} else if err := c.Stats.SyncUsers(context.Background(), p.Users); err != nil {
+			res = protocol.ResultPayload{OK: false, Error: err.Error()}
+		} else {
+			res = protocol.ResultPayload{OK: true, Data: "用户列表同步成功（gRPC 动态调整）"}
 		}
 	case protocol.MsgRestartXray:
 		if err := c.Xray.Stop(); err != nil {
@@ -323,6 +354,9 @@ func (c *Client) handle(m *protocol.Message) {
 		} else if err := c.Xray.Start(); err != nil {
 			res = protocol.ResultPayload{OK: false, Error: err.Error()}
 		} else {
+			if c.Stats != nil {
+				c.Stats.ResetUsers()
+			}
 			res = protocol.ResultPayload{OK: true, Data: "xray 已重启"}
 		}
 	case protocol.MsgGetStatus:

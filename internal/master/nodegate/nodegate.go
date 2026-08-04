@@ -24,6 +24,8 @@ const (
 	HeartbeatTimeout = 90 * time.Second // 超过此时长无心跳视为失联
 	WriteTimeout     = 10 * time.Second
 	AskTimeout       = 15 * time.Second // 指令等待回执超时
+	PongWait         = 60 * time.Second // 等待 pong 回复超时
+	PingPeriod       = (PongWait * 9) / 10
 )
 
 // Conn 一条节点连接。
@@ -194,6 +196,12 @@ func (h *Hub) readPump(conn *Conn) {
 		h.unregister(conn)
 		conn.closeSafe()
 	}()
+	_ = conn.WS.SetReadDeadline(time.Now().Add(PongWait))
+	conn.WS.SetPongHandler(func(string) error {
+		_ = conn.WS.SetReadDeadline(time.Now().Add(PongWait))
+		conn.touch()
+		return nil
+	})
 	for {
 		_, data, err := conn.WS.ReadMessage()
 		if err != nil {
@@ -270,10 +278,24 @@ func (h *Hub) handleResult(msg *protocol.Message) {
 
 // writePump 从 Send 通道写消息。
 func (h *Hub) writePump(conn *Conn) {
-	for data := range conn.Send {
-		_ = conn.WS.SetWriteDeadline(time.Now().Add(WriteTimeout))
-		if err := conn.WS.WriteMessage(websocket.TextMessage, data); err != nil {
-			return
+	ticker := time.NewTicker(PingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case data, ok := <-conn.Send:
+			if !ok {
+				_ = conn.WS.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			_ = conn.WS.SetWriteDeadline(time.Now().Add(WriteTimeout))
+			if err := conn.WS.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = conn.WS.SetWriteDeadline(time.Now().Add(WriteTimeout))
+			if err := conn.WS.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -362,10 +384,52 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 }
 
+// SyncUsers 计算指定节点最新有效用户并发送 MsgSyncUsers。
+func (h *Hub) SyncUsers(serverID uint64) error {
+	if h.Config == nil {
+		return errors.New("config service not initialized")
+	}
+	usersMap, err := h.Config.GetValidUsers(serverID)
+	if err != nil {
+		return err
+	}
+	payload := protocol.SyncUsersPayload{
+		Users: usersMap,
+	}
+	res, err := h.Ask(serverID, protocol.MsgSyncUsers, payload, AskTimeout)
+	if err != nil {
+		return err
+	}
+	if res != nil && !res.OK {
+		return errors.New(res.Error)
+	}
+	return nil
+}
+
+// SyncUsersToAll 广播给所有在线节点增量/全量同步最新用户列表（非阻塞）。
+func (h *Hub) SyncUsersToAll() {
+	h.mu.RLock()
+	var serverIDs []uint64
+	for id := range h.conns {
+		serverIDs = append(serverIDs, id)
+	}
+	h.mu.RUnlock()
+
+	for _, id := range serverIDs {
+		go func(sid uint64) {
+			if err := h.SyncUsers(sid); err != nil {
+				log.Printf("nodegate: 向节点 %d 动态同步用户失败: %v", sid, err)
+			}
+		}(id)
+	}
+}
+
 func (h *Hub) watchdog() {
 	defer h.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
+	alignTicker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
+	defer alignTicker.Stop()
 	for {
 		select {
 		case <-h.quit:
@@ -382,6 +446,26 @@ func (h *Hub) watchdog() {
 			for _, c := range stale {
 				log.Printf("nodegate: 节点 %s 心跳超时，断开", c.NodeID)
 				c.closeSafe()
+			}
+		case <-alignTicker.C:
+			// 定期 1 小时 100% 状态校准全量推送
+			h.mu.RLock()
+			var serverIDs []uint64
+			for id := range h.conns {
+				serverIDs = append(serverIDs, id)
+			}
+			h.mu.RUnlock()
+			for _, id := range serverIDs {
+				go func(sid uint64) {
+					log.Printf("nodegate: 执行定期全量状态校准 (server=%d)", sid)
+					if h.Config != nil {
+						cfgStr, err := h.Config.Generate(sid)
+						if err == nil {
+							_ = h.Config.SavePending(sid, cfgStr)
+							h.PushPending(sid)
+						}
+					}
+				}(id)
 			}
 		}
 	}

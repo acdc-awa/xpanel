@@ -68,5 +68,8 @@ func (d *Deps) AdminSetUserInbounds(c *gin.Context) {
 		util.ServerError(c, "保存授权失败")
 		return
 	}
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
 	util.OK(c, gin.H{"user_id": uid, "granted": len(req.InboundIDs)})
 }

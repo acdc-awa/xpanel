@@ -38,6 +38,19 @@ type TrafficReportPayload struct {
 	Period  string         `json:"period"` // 上报周期起始，RFC3339
 }
 
+// User 节点同步的用户信息。
+type User struct {
+	UUID  string `json:"uuid"`
+	Email string `json:"email"`
+	Flow  string `json:"flow,omitempty"`
+	Level uint32 `json:"level,omitempty"`
+}
+
+// SyncUsersPayload 全量用户同步负载（InboundTag -> []User）。
+type SyncUsersPayload struct {
+	Users map[string][]User `json:"users"`
+}
+
 // PushConfigPayload 下发 Xray 配置（P1 为完整 config JSON 透传，
 // 模板生成器放 P3/P5）。
 type PushConfigPayload struct {

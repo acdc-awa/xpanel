@@ -69,7 +69,7 @@ func main() {
 	trafficSvc.StartDailyAgg(context.Background())
 	orderSvc := &services.OrderService{DB: database}
 	auditSvc := &services.AuditService{DB: database}
-	configSvc := &services.ConfigService{DB: database}
+	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
 	siteSvc := services.NewSiteService(database, cfg)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 

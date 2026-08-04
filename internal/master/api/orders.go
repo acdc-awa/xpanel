@@ -117,6 +117,9 @@ func (d *Deps) AdminConfirmOrder(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
 	d.Audit.Log("admin", adminID, "order.confirm", "确认订单 #"+strconv.FormatUint(id, 10), c.ClientIP())
 	util.OK(c, gin.H{"confirmed": id})
 }

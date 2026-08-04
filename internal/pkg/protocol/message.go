@@ -19,6 +19,7 @@ const (
 
 	// 主控 → 节点
 	MsgPushConfig  = "push_config"
+	MsgSyncUsers   = "sync_users"
 	MsgRestartXray = "restart_xray"
 	MsgGetStatus   = "get_status"
 	MsgGetLogs     = "get_logs"
