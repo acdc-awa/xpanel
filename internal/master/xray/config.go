@@ -1,5 +1,5 @@
 // Package xray 负责从「服务器 + 入站 + 用户」生成 Xray 配置。
-// 支持协议：VLESS（tcp+reality+vision / ws+tls / xhttp+reality）；其他协议后续扩展。
+// 支持协议：VLESS（tcp+reality+vision / tcp+tls+fallbacks / ws+tls / xhttp+reality / grpc+tls / grpc+reality）；其他协议后续扩展。
 package xray
 
 import (
@@ -16,7 +16,19 @@ type InboundSettings struct {
 	Reality *RealitySettings `json:"reality,omitempty"`
 	WS      *WSSettings      `json:"ws,omitempty"`
 	XHTTP   *XHTTPSettings   `json:"xhttp,omitempty"`
+	GRPC    *GRPCSettings    `json:"grpc,omitempty"`
 	TLS     *TLSSettings     `json:"tls,omitempty"`
+	// Fallbacks 仅应用于 tcp 传输（VLESS settings.fallbacks 线格式）。
+	Fallbacks []FallbackSettings `json:"fallbacks,omitempty"`
+	// Sniffing 入站流量嗅探（存储层 snake_case；前端表单以 camelCase 发送，UnmarshalJSON 双写兼容）。
+	Sniffing *SniffingSettings `json:"sniffing,omitempty"`
+}
+
+// FallbackSettings 对应 xray-core VLESS settings.fallbacks 条目（infra/conf/vless.go 的 VLessInboundFallback）。
+type FallbackSettings struct {
+	Dest string `json:"dest"`
+	Path string `json:"path,omitempty"`
+	Xver int    `json:"xver,omitempty"`
 }
 
 type RealitySettings struct {
@@ -35,6 +47,99 @@ type WSSettings struct {
 type XHTTPSettings struct {
 	Mode string `json:"mode"`
 	Path string `json:"path"`
+}
+
+type GRPCSettings struct {
+	ServiceName string `json:"serviceName,omitempty"`
+	Authority   string `json:"authority,omitempty"`
+	MultiMode   bool   `json:"multiMode,omitempty"`
+}
+
+// MarshalJSON 以 snake_case 输出（service_name/multi_mode/authority），与 InboundSettings 其余字段
+// 及 TEST_INFRA §4.1 载荷一致，保证 marshalSettings 落库后前端表单（只认 snake_case）编辑不丢字段。
+// xray 线格式不受影响：buildInbound 直接构造 grpcSettings map（camelCase，xray 要求）。
+func (g GRPCSettings) MarshalJSON() ([]byte, error) {
+	wire := struct {
+		ServiceName string `json:"service_name,omitempty"`
+		Authority   string `json:"authority,omitempty"`
+		MultiMode   bool   `json:"multi_mode,omitempty"`
+	}{
+		ServiceName: g.ServiceName,
+		Authority:   g.Authority,
+		MultiMode:   g.MultiMode,
+	}
+	return json.Marshal(wire)
+}
+
+// UnmarshalJSON 支持 camelCase (serviceName/multiMode) 与 snake_case (service_name/multi_mode) 双写；
+// authority 两种写法相同。两套键同时出现时显式 camelCase 优先。
+func (g *GRPCSettings) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ServiceName    string `json:"serviceName"`
+		Authority      string `json:"authority"`
+		MultiMode      *bool  `json:"multiMode"`
+		ServiceNameAlt string `json:"service_name"`
+		MultiModeAlt   *bool  `json:"multi_mode"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	g.ServiceName = raw.ServiceName
+	if g.ServiceName == "" {
+		g.ServiceName = raw.ServiceNameAlt
+	}
+	g.Authority = raw.Authority
+	g.MultiMode = false
+	if raw.MultiMode != nil {
+		g.MultiMode = *raw.MultiMode
+	} else if raw.MultiModeAlt != nil {
+		g.MultiMode = *raw.MultiModeAlt
+	}
+	return nil
+}
+
+// SniffingSettings 入站流量嗅探（存储层 snake_case；前端表单以 camelCase 发送，UnmarshalJSON 双写兼容）。
+type SniffingSettings struct {
+	Enabled      bool     `json:"enabled"`
+	DestOverride []string `json:"dest_override,omitempty"`
+	MetadataOnly bool     `json:"metadata_only,omitempty"`
+	RouteOnly    bool     `json:"route_only,omitempty"`
+}
+
+// UnmarshalJSON 支持 camelCase (destOverride/metadataOnly/routeOnly) 与 snake_case (dest_override/
+// metadata_only/route_only) 双写；enabled 两写法相同。前端表单按 camelCase 发送，存储按 snake_case。
+// 两套键同时出现时显式 camelCase 优先（与 GRPCSettings 一致）。
+func (s *SniffingSettings) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Enabled         bool     `json:"enabled"`
+		DestOverride    []string `json:"destOverride"`
+		DestOverrideAlt []string `json:"dest_override"`
+		MetadataOnly    *bool    `json:"metadataOnly"`
+		MetadataOnlyAlt *bool    `json:"metadata_only"`
+		RouteOnly       *bool    `json:"routeOnly"`
+		RouteOnlyAlt    *bool    `json:"route_only"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Enabled = raw.Enabled
+	s.DestOverride = raw.DestOverride
+	if len(s.DestOverride) == 0 {
+		s.DestOverride = raw.DestOverrideAlt
+	}
+	s.MetadataOnly = false
+	if raw.MetadataOnly != nil {
+		s.MetadataOnly = *raw.MetadataOnly
+	} else if raw.MetadataOnlyAlt != nil {
+		s.MetadataOnly = *raw.MetadataOnlyAlt
+	}
+	s.RouteOnly = false
+	if raw.RouteOnly != nil {
+		s.RouteOnly = *raw.RouteOnly
+	} else if raw.RouteOnlyAlt != nil {
+		s.RouteOnly = *raw.RouteOnlyAlt
+	}
+	return nil
 }
 
 type TLSSettings struct {
@@ -75,6 +180,10 @@ func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 		if s.XHTTP == nil || s.XHTTP.Mode == "" || s.XHTTP.Path == "" {
 			return errors.New("xhttp 传输需要配置 mode 和 path")
 		}
+	case "grpc":
+		if err := checkGRPCServiceName(s.GRPC); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("暂不支持传输层 %q", network)
 	}
@@ -93,6 +202,21 @@ func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 		return fmt.Errorf("暂不支持 TLS 类型 %q", tlsType)
 	}
 	return nil
+}
+
+// checkGRPCServiceName 校验 grpc 传输必填字段 serviceName：去空白后非空，且不含控制字符。
+func checkGRPCServiceName(g *GRPCSettings) error {
+	if g == nil || strings.TrimSpace(g.ServiceName) == "" {
+		return errors.New("grpc 传输需要配置 serviceName")
+	}
+	if strings.ContainsFunc(g.ServiceName, isControlChar) {
+		return errors.New("grpc serviceName 不能包含控制字符")
+	}
+	return nil
+}
+
+func isControlChar(r rune) bool {
+	return r < 0x20 || r == 0x7f
 }
 
 // parseStringList 解析 JSON 数组字符串或逗号/换行/分号分隔字符串。
@@ -240,6 +364,9 @@ func Generate(server *models.Server, inbounds []models.Inbound, outbounds []mode
 		if rule.Network != "" {
 			rmap["network"] = rule.Network
 		}
+		if rule.InboundTag != "" {
+			rmap["inboundTag"] = parseStringList(rule.InboundTag)
+		}
 
 		rulesList = append(rulesList, rmap)
 	}
@@ -320,7 +447,7 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 	}
 
 	stream := map[string]any{
-		"network": inb.Network,
+		"network":  inb.Network,
 		"security": inb.TLSType,
 	}
 	switch inb.Network {
@@ -341,15 +468,43 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 				"path": settings.XHTTP.Path,
 			}
 		}
+	case "grpc":
+		if err := checkGRPCServiceName(settings.GRPC); err != nil {
+			return nil, err
+		}
+		grpcMap := map[string]any{
+			"serviceName": settings.GRPC.ServiceName,
+		}
+		if settings.GRPC.Authority != "" {
+			grpcMap["authority"] = settings.GRPC.Authority
+		}
+		if settings.GRPC.MultiMode {
+			grpcMap["multiMode"] = settings.GRPC.MultiMode
+		}
+		stream["grpcSettings"] = grpcMap
 	default:
 		return nil, fmt.Errorf("暂不支持传输层 %q", inb.Network)
 	}
 
 	switch inb.TLSType {
 	case "reality":
-		if settings.Reality == nil || settings.Reality.PrivateKey == "" {
-			return nil, fmt.Errorf("reality 配置缺失 private_key/dest/server_name")
+		if settings.Reality == nil {
+			return nil, errors.New("reality 需要配置 server_name / public_key / private_key / dest")
 		}
+		if strings.TrimSpace(settings.Reality.ServerName) == "" {
+			return nil, errors.New("reality 需要配置 server_name")
+		}
+		if strings.TrimSpace(settings.Reality.PublicKey) == "" {
+			return nil, errors.New("reality 需要配置 public_key")
+		}
+		if strings.TrimSpace(settings.Reality.PrivateKey) == "" {
+			return nil, errors.New("reality 需要配置 private_key")
+		}
+		if strings.TrimSpace(settings.Reality.Dest) == "" {
+			return nil, errors.New("reality 需要配置 dest")
+		}
+		// shortIds 必须始终输出（xray 26.x 实测：缺失 shortIds 直接报 "empty shortIds" 拒绝配置；
+		// 空字符串条目 ["", ...] 被接受，等价于默认空 shortId）。
 		stream["realitySettings"] = map[string]any{
 			"show":        false,
 			"dest":        settings.Reality.Dest,
@@ -358,8 +513,14 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 			"shortIds":    []string{settings.Reality.ShortID},
 		}
 	case "tls":
-		if settings.TLS == nil || settings.TLS.CertFile == "" {
-			return nil, fmt.Errorf("tls 配置缺失 cert_file/key_file")
+		if settings.TLS == nil {
+			return nil, errors.New("tls 需要配置 cert_file 和 key_file")
+		}
+		if strings.TrimSpace(settings.TLS.CertFile) == "" {
+			return nil, errors.New("tls 需要配置 cert_file")
+		}
+		if strings.TrimSpace(settings.TLS.KeyFile) == "" {
+			return nil, errors.New("tls 需要配置 key_file")
 		}
 		stream["tlsSettings"] = map[string]any{
 			"serverName": settings.TLS.ServerName,
@@ -374,12 +535,46 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 		return nil, fmt.Errorf("暂不支持 TLS 类型 %q", inb.TLSType)
 	}
 
-	return map[string]any{
+	// VLESS fallbacks 线格式位于 settings.fallbacks（xray-core infra/conf/vless.go），仅 tcp 传输生效。
+	inSettings := map[string]any{"clients": clients, "decryption": "none"}
+	if inb.Network == "tcp" && len(settings.Fallbacks) > 0 {
+		fallbacks := make([]any, 0, len(settings.Fallbacks))
+		for _, fb := range settings.Fallbacks {
+			fbMap := map[string]any{"dest": fb.Dest}
+			if fb.Path != "" {
+				fbMap["path"] = fb.Path
+			}
+			if fb.Xver != 0 {
+				fbMap["xver"] = fb.Xver
+			}
+			fallbacks = append(fallbacks, fbMap)
+		}
+		inSettings["fallbacks"] = fallbacks
+	}
+
+	item := map[string]any{
 		"tag":            inb.Tag,
 		"listen":         "0.0.0.0",
 		"port":           inb.Port,
 		"protocol":       "vless",
-		"settings":       map[string]any{"clients": clients, "decryption": "none"},
+		"settings":       inSettings,
 		"streamSettings": stream,
-	}, nil
+	}
+
+	// 嗅探位于入站顶层（xray wire: "sniffing": {"enabled":..., "destOverride":[...], ...}）。
+	if settings.Sniffing != nil {
+		sniff := map[string]any{"enabled": settings.Sniffing.Enabled}
+		if len(settings.Sniffing.DestOverride) > 0 {
+			sniff["destOverride"] = settings.Sniffing.DestOverride
+		}
+		if settings.Sniffing.MetadataOnly {
+			sniff["metadataOnly"] = true
+		}
+		if settings.Sniffing.RouteOnly {
+			sniff["routeOnly"] = true
+		}
+		item["sniffing"] = sniff
+	}
+
+	return item, nil
 }

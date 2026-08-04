@@ -162,6 +162,7 @@ type ServerRoutingRule struct {
 	IP          string    `gorm:"type:text" json:"ip,omitempty"`        // 逗号/换行分隔或 JSON 数组
 	Port        string    `gorm:"size:64" json:"port,omitempty"`
 	Network     string    `gorm:"size:32" json:"network,omitempty"`
+	InboundTag  string    `gorm:"type:text" json:"inbound_tag,omitempty"` // 逗号/换行分隔或 JSON 数组
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
 	Priority    int       `gorm:"default:0" json:"priority"`
 	Remark      string    `gorm:"size:255" json:"remark"`
