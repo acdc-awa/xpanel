@@ -22,6 +22,7 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=go /out/master /app/master
 COPY --from=go /out/agent /app/agent
+COPY deploy/agent/install-agent.sh /app/install-agent.sh
 COPY --from=web /web/dist /app/web/dist
 COPY configs/config.example.yaml /app/configs/config.yaml
 EXPOSE 18080

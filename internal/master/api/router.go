@@ -51,6 +51,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 公开：上架套餐
 		v1.GET("/plans", d.PublicPlans)
 
+		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh）
+		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
+
 		// 节点 Agent 二进制下载（部署用；Docker 镜像内置 /app/agent）
 		v1.GET("/download/agent", func(c *gin.Context) {
 			p := os.Getenv("AGENT_BIN_PATH")
@@ -76,7 +79,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/invitations", d.AdminCreateInvitations)
 			admin.GET("/servers", d.AdminServers)
 			admin.POST("/servers", d.AdminCreateServer)
+			admin.PUT("/servers/:id", d.AdminUpdateServer)
 			admin.DELETE("/servers/:id", d.AdminDeleteServer)
+			admin.POST("/servers/:id/reset-secret", d.AdminResetSecret)
 			admin.POST("/servers/:id/command", d.AdminServerCommand)
 			admin.POST("/servers/:id/generate-config", d.AdminGenerateConfig)
 			admin.GET("/xray/keys", d.AdminXrayKeys)

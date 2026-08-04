@@ -54,6 +54,7 @@ export interface ServerItem {
   location: string
   remark: string
   status: number // 0 离线 1 在线
+  config_status: string // pushed / pending / ''（无待推送配置）
   last_seen_at: string | null
   created_at: string
 }
@@ -62,6 +63,7 @@ export interface CreateServerResult {
   server: ServerItem
   node_id: string
   secret: string // 仅创建时返回一次
+  install_cmd: string // 节点一键安装命令（含 secret，仅创建时有效）
 }
 
 export interface CommandResult<T = unknown> {
@@ -85,6 +87,17 @@ export function createServer(payload: {
 
 export function deleteServer(id: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/servers/${id}`)
+}
+
+export function updateServer(
+  id: number,
+  payload: { name?: string; host?: string; location?: string; remark?: string },
+) {
+  return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
+}
+
+export function resetServerSecret(id: number) {
+  return http.post<ApiResp<{ node_id: string; secret: string }>>(`/admin/servers/${id}/reset-secret`)
 }
 
 export function serverCommand(
@@ -145,7 +158,7 @@ export function getXrayKeys() {
 }
 
 export function generateAndPushConfig(serverId: number) {
-  return http.post<ApiResp<{ ok: boolean; error: string; config: string }>>(
+  return http.post<ApiResp<{ ok: boolean; pushed: boolean; message: string; config: string }>>(
     `/admin/servers/${serverId}/generate-config`,
   )
 }

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
   createServer,
   deleteServer,
   generateAndPushConfig,
   getServers,
+  resetServerSecret,
   serverCommand,
   type CommandResult,
   type ServerItem,
+  updateServer,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -52,7 +54,7 @@ function fmtTime(t: string | null) {
 const createOpen = ref(false)
 const createForm = reactive({ name: '', host: '', location: '', remark: '' })
 const creating = ref(false)
-const createdResult = ref<{ node_id: string; secret: string } | null>(null)
+const createdResult = ref<{ node_id: string; secret: string; install_cmd: string } | null>(null)
 
 async function submitCreate() {
   if (!createForm.name || !createForm.host) {
@@ -63,7 +65,7 @@ async function submitCreate() {
   try {
     const { data } = await createServer({ ...createForm })
     if (data.code === 0) {
-      createdResult.value = { node_id: data.data.node_id, secret: data.data.secret }
+      createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
@@ -199,7 +201,7 @@ const genResult = ref('')
 async function genPush(row: any) {
   try {
     await ElMessageBox.confirm(
-      `将按「${row.name}」的启用入站 + 全部启用用户生成 Xray 配置并下发（自动重启），确认？`,
+      `将按「${row.name}」的启用入站 + 全部启用用户生成 Xray 配置并自动推送（节点离线时保存，上线自动补推），确认？`,
       '生成并下发配置',
       { type: 'warning' },
     )
@@ -212,10 +214,10 @@ async function genPush(row: any) {
   try {
     const { data } = await generateAndPushConfig(row.id)
     if (data.code === 0 && data.data.ok) {
-      ElMessage.success('配置生成并下发成功')
+      ElMessage.success(data.data.message || '配置已生成')
       genResult.value = data.data.config
     } else {
-      ElMessage.error(data.data?.error || data.message)
+      ElMessage.error(data.data?.message || data.message)
       genResult.value = data.data?.config ?? ''
     }
   } catch (e) {
@@ -225,10 +227,87 @@ async function genPush(row: any) {
     genLoading.value = false
   }
 }
+// ---- 编辑服务器 ----
+const editOpen = ref(false)
+const editForm = reactive({ id: 0, name: '', host: '', location: '', remark: '' })
+const editSaving = ref(false)
+
+function openEdit(row: any) {
+  Object.assign(editForm, {
+    id: row.id,
+    name: row.name,
+    host: row.host,
+    location: row.location ?? '',
+    remark: row.remark ?? '',
+  })
+  editOpen.value = true
+}
+
+async function submitEdit() {
+  if (!editForm.name || !editForm.host) {
+    ElMessage.warning('请填写名称与地址')
+    return
+  }
+  editSaving.value = true
+  try {
+    const { data } = await updateServer(editForm.id, {
+      name: editForm.name,
+      host: editForm.host,
+      location: editForm.location,
+      remark: editForm.remark,
+    })
+    if (data.code === 0) {
+      ElMessage.success('已保存')
+      editOpen.value = false
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存失败'))
+  } finally {
+    editSaving.value = false
+  }
+}
+
+// ---- 重置密钥 ----
+const secretOpen = ref(false)
+const secretInfo = ref<{ node_id: string; secret: string } | null>(null)
+
+async function resetSecret(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认重置节点「${row.name}」的密钥？旧密钥立即失效，需在节点 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
+      '重置密钥',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data } = await resetServerSecret(row.id)
+    if (data.code === 0) {
+      secretInfo.value = { node_id: data.data.node_id, secret: data.data.secret }
+      secretOpen.value = true
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重置失败'))
+  }
+}
+
+// ---- 更多操作（编辑/重置密钥/删除） ----
+function onMore(cmd: string, row: any) {
+  if (cmd === 'edit') openEdit(row)
+  else if (cmd === 'reset') resetSecret(row)
+  else if (cmd === 'delete') removeServer(row)
+}
+
 // ---- 删除 ----
 async function removeServer(row: any) {
   try {
-    await ElMessageBox.confirm(`确认删除节点「${row.name}」？该节点的 Agent 将无法再连接。`, '删除服务器', {
+    await ElMessageBox.confirm(`确认删除节点「${row.name}」？关联的入站、待推送配置与节点上报将一并删除，该节点 Agent 将无法再连接。`, '删除服务器', {
       type: 'error',
     })
   } catch {
@@ -276,17 +355,33 @@ async function removeServer(row: any) {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="配置同步" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
+            <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="最后心跳" width="170">
           <template #default="{ row }"><span class="muted">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
             <el-button size="small" text type="success" @click="genPush(row)"><el-icon><VideoPlay /></el-icon>&nbsp;生成</el-button>
-            <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发配置</el-button>
+            <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发</el-button>
             <el-button size="small" text @click="restartXray(row)"><el-icon><VideoPlay /></el-icon>&nbsp;重启</el-button>
             <el-button size="small" text @click="openLogs(row)"><el-icon><Key /></el-icon>&nbsp;日志</el-button>
-            <el-button size="small" text type="danger" @click="removeServer(row)"><el-icon><Delete /></el-icon></el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+              <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
+                  <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
         <template #empty>
@@ -298,7 +393,7 @@ async function removeServer(row: any) {
     </BaseCard>
 
     <!-- 新增服务器 -->
-    <el-dialog v-model="createOpen" title="新增服务器" width="460px" @close="closeCreate">
+    <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
       <template v-if="!createdResult">
         <el-form label-position="top">
           <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01" /></el-form-item>
@@ -308,8 +403,13 @@ async function removeServer(row: any) {
         </el-form>
       </template>
       <template v-else>
-        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="请把以下 node_id 与 secret 配置到节点 Agent（secret 仅显示这一次，请立即复制保存）" style="margin-bottom: 12px" />
+        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
         <div class="secret-box">
+          <div class="secret-row install-row">
+            <span class="k">安装</span>
+            <code class="install-cmd">{{ createdResult.install_cmd }}</code>
+            <el-button size="small" text @click="copyText(createdResult.install_cmd, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
+          </div>
           <div class="secret-row">
             <span class="k">node_id</span>
             <code>{{ createdResult.node_id }}</code>
@@ -320,6 +420,7 @@ async function removeServer(row: any) {
             <code>{{ createdResult.secret }}</code>
             <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
           </div>
+          <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装后回到「服务器」页可查看节点在线状态并「生成」下发配置。</p>
         </div>
       </template>
       <template #footer>
@@ -364,6 +465,39 @@ async function removeServer(row: any) {
     <el-dialog v-model="logOpen" :title="`最近日志 · ${pushTarget?.name ?? ''}`" width="620px">
       <pre v-loading="logLoading" class="log-view">{{ logContent }}</pre>
     </el-dialog>
+
+    <!-- 编辑服务器 -->
+    <el-dialog v-model="editOpen" title="编辑服务器" width="460px">
+      <el-form label-position="top">
+        <el-form-item label="名称"><el-input v-model="editForm.name" /></el-form-item>
+        <el-form-item label="地址"><el-input v-model="editForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
+        <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="editForm.remark" placeholder="选填" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editOpen = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="submitEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 重置密钥 -->
+    <el-dialog v-model="secretOpen" title="重置密钥" width="560px">
+      <el-alert type="warning" :closable="false" show-icon title="新密钥已生成（仅显示这一次）" description="请更新节点 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务" style="margin-bottom: 12px" />
+      <div v-if="secretInfo" class="secret-box">
+        <div class="secret-row">
+          <span class="k">node_id</span>
+          <code>{{ secretInfo.node_id }}</code>
+        </div>
+        <div class="secret-row">
+          <span class="k">secret</span>
+          <code>{{ secretInfo.secret }}</code>
+          <el-button size="small" text @click="copyText(secretInfo.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="secretOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -371,6 +505,8 @@ async function removeServer(row: any) {
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
 .secret-box { display: grid; gap: 10px; }
+.tip { font-size: 12px; color: var(--x-text-3); }
+.install-cmd { font-size: 11.5px; }
 .secret-row {
   display: flex;
   align-items: center;

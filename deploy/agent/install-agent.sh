@@ -46,7 +46,6 @@ done
 [[ -z "$MASTER" || -z "$NODE_ID" || -z "$SECRET" ]] && { echo "缺少 --master / --node-id / --secret"; usage; }
 # agent 下载地址默认取主控 origin 的 /api/v1/download/agent
 if [[ -z "$AGENT_URL" ]]; then
-  AGENT_BASE=$(echo "$MASTER" | sed 's#\(ws\|wss\)://##; s#\([^/]*\).*#\1#' | sed 's#^#\#' 2>/dev/null || echo "$MASTER")
   AGENT_URL="${MASTER%%/api/*}/api/v1/download/agent"
 fi
 

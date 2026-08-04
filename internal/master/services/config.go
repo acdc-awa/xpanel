@@ -16,7 +16,8 @@ type ConfigService struct {
 }
 
 // Generate 为服务器生成完整 Xray 配置（启用入站 + 全部启用用户）。
-// 无启用入站或无可用用户时返回错误（此时不需要推送）。
+// 无启用入站时返回仅含 api 入站的配置（用于全停用后清理节点入站）；
+// 有启用入站但无可用用户时返回错误（此时不需要推送）。
 func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	var srv models.Server
 	if err := s.DB.First(&srv, serverID).Error; err != nil {
@@ -25,9 +26,6 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	var inbounds []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Find(&inbounds).Error; err != nil {
 		return "", err
-	}
-	if len(inbounds) == 0 {
-		return "", errors.New("服务器无启用入站")
 	}
 	var users []models.User
 	if err := s.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
@@ -76,6 +74,16 @@ func (s *ConfigService) GetPending(serverID uint64) (*models.PendingConfig, erro
 		return nil, err
 	}
 	return &p, nil
+}
+
+// MarkPushedByServer 按服务器标记配置已推送。
+func (s *ConfigService) MarkPushedByServer(serverID uint64) error {
+	now := time.Now()
+	return s.DB.Model(&models.PendingConfig{}).Where("server_id = ?", serverID).Updates(map[string]any{
+		"status":     "pushed",
+		"pushed_at":  now,
+		"updated_at": now,
+	}).Error
 }
 
 // MarkPushed 标记配置已推送。

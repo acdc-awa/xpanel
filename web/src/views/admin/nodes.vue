@@ -276,7 +276,7 @@ const deployResult = ref('')
 async function deploy(row: any) {
   try {
     await ElMessageBox.confirm(
-      `将按「${serverName(row.server_id)}」的全部启用入站 + 用户生成配置并下发（自动重启 xray），确认？`,
+      `将按「${serverName(row.server_id)}」的全部启用入站 + 用户生成配置并自动推送（节点离线时保存，上线自动补推），确认？`,
       '一键部署',
       { type: 'warning' },
     )
@@ -289,10 +289,10 @@ async function deploy(row: any) {
   try {
     const { data } = await generateAndPushConfig(row.server_id)
     if (data.code === 0 && data.data.ok) {
-      ElMessage.success('部署成功')
+      ElMessage.success(data.data.message || '部署成功')
       deployResult.value = data.data.config
     } else {
-      ElMessage.error(data.data?.error || data.message)
+      ElMessage.error(data.data?.message || data.message)
       deployResult.value = data.data?.config ?? ''
     }
   } catch (e) {
@@ -342,7 +342,7 @@ async function deployFiltered() {
       </div>
     </div>
 
-    <el-alert type="info" :closable="false" show-icon title="新增/编辑入站后，点操作列「部署」即可一键生成配置并下发到节点；入站列表按服务器筛选后可用顶部按钮批量下发" style="margin-bottom: 14px" />
+    <el-alert type="info" :closable="false" show-icon title="新增/编辑/停用入站后将自动生成配置并推送到节点（离线时保存，上线自动补推）；也可点操作列「部署」立即生成并下发" style="margin-bottom: 14px" />
 
     <BaseCard>
       <el-table v-loading="loading" :data="list">

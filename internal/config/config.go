@@ -19,9 +19,10 @@ type Config struct {
 }
 
 type App struct {
-	Name string `yaml:"name"`
-	Env  string `yaml:"env"`
-	Port int    `yaml:"port"`
+	Name      string `yaml:"name"`
+	Env       string `yaml:"env"`
+	Port      int    `yaml:"port"`
+	PublicURL string `yaml:"public_url"` // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
 }
 
 type DB struct {
@@ -75,6 +76,9 @@ func Load(path string) (*Config, error) {
 
 // applyEnv 用环境变量覆盖关键项（便于容器/部署场景）。
 func (c *Config) applyEnv() {
+	if v := os.Getenv("APP_PUBLIC_URL"); v != "" {
+		c.App.PublicURL = v
+	}
 	if v := os.Getenv("APP_PORT"); v != "" {
 		var p int
 		if _, err := fmt.Sscanf(v, "%d", &p); err == nil {
