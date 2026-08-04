@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
+import InboundConfigEditor from './servers/InboundConfigEditor.vue'
 import {
   createServer,
   deleteServer,
@@ -434,12 +435,12 @@ async function removeServer(row: any) {
       </template>
     </el-dialog>
 
-    <!-- 下发配置 -->
-    <el-dialog v-model="pushOpen" :title="`下发配置 · ${pushTarget?.name ?? ''}`" width="560px">
-      <p class="muted" style="margin: 0 0 8px; font-size: 12.5px">
-        粘贴完整 Xray 配置 JSON，Agent 将执行 <code>xray -test</code> 校验，通过后写盘并重启。
+    <!-- 下发配置 (使用 InboundConfigEditor 双向可视化/JSON 编辑) -->
+    <el-dialog v-model="pushOpen" :title="`配置编辑与下发 · ${pushTarget?.name ?? ''}`" width="780px">
+      <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
+        可视化配置 VLESS 入站参数或输入完整 Xray 配置 JSON，Agent 将执行 <code>xray -test</code> 校验，通过后写入节点并重启服务。
       </p>
-      <el-input v-model="pushConfig" type="textarea" :rows="12" placeholder='{"log": {...}, "inbounds": [...], "outbounds": [...]}' />
+      <InboundConfigEditor v-model="pushConfig" />
       <p v-if="pushResult" style="margin: 10px 0 0" :class="pushResult.startsWith('✅') ? 'ok-text' : 'err-text'">{{ pushResult }}</p>
       <template #footer>
         <el-button @click="pushOpen = false">关闭</el-button>

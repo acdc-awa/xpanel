@@ -131,29 +131,62 @@ export interface InboundItem {
 
 
 export interface RealitySettings {
-  server_name: string
-  public_key: string
-  short_id: string
-  private_key: string
-  dest: string
+  server_name?: string
+  server_names?: string[]
+  public_key?: string
+  short_id?: string
+  short_ids?: string[]
+  private_key?: string
+  dest?: string
+  spider_x?: string
 }
+
 export interface WSSettings {
-  path: string
+  path?: string
   host?: string
 }
+
 export interface XHTTPSettings {
-  mode: string
-  path: string
+  mode?: string
+  path?: string
+  host?: string
 }
+
+export interface GRPCSettings {
+  service_name?: string
+  multi_mode?: boolean
+}
+
 export interface TLSSettings {
   server_name?: string
-  cert_file: string
-  key_file: string
+  cert_file?: string
+  key_file?: string
+  alpn?: string[]
 }
+
+export interface FallbackItem {
+  name?: string
+  alpn?: string
+  path?: string
+  dest: string
+  xver?: number
+}
+
+export interface VlessClientItem {
+  id: string
+  flow?: string
+  email?: string
+}
+
 export interface InboundSettings {
+  flow?: string
+  uuid?: string
+  clients?: VlessClientItem[]
+  fallbacks?: FallbackItem[]
   reality?: RealitySettings
   ws?: WSSettings
   xhttp?: XHTTPSettings
+  grpc?: GRPCSettings
   tls?: TLSSettings
 }
 
