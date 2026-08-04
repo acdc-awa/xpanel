@@ -17,6 +17,10 @@ export interface UserInfo {
   expire_at: string | null
   subscribe_token?: string
   created_at: string
+  up_bytes: number
+  down_bytes: number
+  used_bytes: number
+  total_bytes: number
 }
 
 export interface LoginResult {
@@ -42,6 +46,10 @@ export interface AdminUser {
   plan_id: number
   expire_at: string | null
   created_at: string
+  up_bytes: number
+  down_bytes: number
+  used_bytes: number
+  total_bytes: number
 }
 
 export interface AdminUserPage {

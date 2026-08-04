@@ -62,13 +62,15 @@ func main() {
 
 	ensureAdmin(database, cfg)
 
-	hub := nodegate.NewHub(database)
+	trafficSvc := &services.TrafficService{DB: database}
+	trafficSvc.StartDailyAgg(context.Background())
+	hub := nodegate.NewHub(database, trafficSvc)
 
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc}
 	router := deps.NewRouter()
 
 	srv := &http.Server{

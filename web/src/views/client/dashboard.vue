@@ -2,13 +2,23 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
+import { formatBytes } from '@/utils/format'
 import { mockNotices, mockServers } from '@/mock/data'
 
 const auth = useAuthStore()
 const loading = ref(false)
 
-// 套餐/到期来自 /user/me；流量统计待 P2 接入
+// 套餐/到期/流量来自 /user/me（P2 已接入真实流量统计）
 const planLabel = computed(() => (auth.user?.plan_id ? `套餐 #${auth.user.plan_id}` : '暂无套餐'))
+const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
+const totalBytes = computed(() => auth.user?.total_bytes ?? 0)
+const remainBytes = computed(() => Math.max(0, totalBytes.value - usedBytes.value))
+const usagePercent = computed(() => {
+  if (!totalBytes.value) return 0
+  return Math.min(100, Math.round((usedBytes.value / totalBytes.value) * 100))
+})
+const totalText = computed(() => (totalBytes.value ? formatBytes(totalBytes.value) : '—'))
+const remainText = computed(() => (totalBytes.value ? `剩余 ${formatBytes(remainBytes.value)}` : '未购买套餐'))
 const expireText = computed(() => {
   const t = auth.user?.expire_at
   return t ? String(t).replace('T', ' ').slice(0, 16) : '—'
@@ -39,10 +49,10 @@ const statusText: Record<string, { dot: string; text: string }> = {
       <div>
         <!-- 用量卡片 -->
         <div class="x-usage-hero">
-          <div class="x-plan-name">🚀 {{ planLabel }} · 流量统计 P2 接入</div>
-          <el-progress :percentage="0" :show-text="false" :stroke-width="8" color="#fff" class="hero-progress" />
+          <div class="x-plan-name">🚀 {{ planLabel }} · {{ remainText }}</div>
+          <el-progress :percentage="usagePercent" :show-text="false" :stroke-width="8" color="#fff" class="hero-progress" />
           <div class="x-plan-meta">
-            <span>已用 — / —</span>
+            <span>已用 {{ formatBytes(usedBytes) }} / {{ totalText }}</span>
             <span>到期 {{ expireText }}</span>
           </div>
         </div>

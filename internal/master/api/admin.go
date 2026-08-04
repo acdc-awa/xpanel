@@ -54,10 +54,21 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 	}
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
+		up, down, _ := d.Traffic.UserUsed(u.ID)
+		used := up + down
+		totalBytes := int64(0)
+		if u.PlanID > 0 {
+			var plan models.Plan
+			if err := d.DB.First(&plan, u.PlanID).Error; err == nil && plan.Enabled {
+				totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+			}
+		}
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
 			"expire_at": u.ExpireAt, "created_at": u.CreatedAt,
+			"up_bytes": up, "down_bytes": down,
+			"used_bytes": used, "total_bytes": totalBytes,
 		})
 	}
 	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": list})

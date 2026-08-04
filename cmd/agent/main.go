@@ -12,6 +12,7 @@ import (
 	"github.com/zhx/xray-panel/internal/agent/client"
 	"github.com/zhx/xray-panel/internal/agent/collector"
 	"github.com/zhx/xray-panel/internal/agent/config"
+	"github.com/zhx/xray-panel/internal/agent/stats"
 	"github.com/zhx/xray-panel/internal/agent/xrayproc"
 )
 
@@ -38,14 +39,19 @@ func main() {
 	wdStop := make(chan struct{})
 	go proc.Watchdog(wdStop)
 
+	statsCollector := stats.New(cfg.Stats.APIAddr)
+
 	cli := &client.Client{
-		BaseURL:      cfg.Master.URL,
-		NodeID:       cfg.Master.NodeID,
-		Secret:       cfg.Master.Secret,
-		Heartbeat:    cfg.Heartbeat,
-		ReconnectMax: cfg.ReconnectMax,
-		Xray:         proc,
-		Collector:    collector.New(),
+		BaseURL:         cfg.Master.URL,
+		NodeID:          cfg.Master.NodeID,
+		Secret:          cfg.Master.Secret,
+		Heartbeat:       cfg.Heartbeat,
+		ReconnectMax:    cfg.ReconnectMax,
+		Xray:            proc,
+		Collector:       collector.New(),
+		Stats:           statsCollector,
+		CollectInterval: cfg.Stats.CollectInterval,
+		ReportInterval:  cfg.Stats.ReportInterval,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -54,6 +60,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		close(wdStop)
+		statsCollector.Close()
 		_ = proc.Stop()
 	}()
 

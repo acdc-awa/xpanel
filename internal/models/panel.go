@@ -72,13 +72,14 @@ type Order struct {
 }
 
 // TrafficLog 节点上报的流量明细（按 用户×入站×周期）。
+// (user_id, inbound_id, period_start) 唯一：同一上报周期重复投递时覆盖合并（补报幂等）。
 type TrafficLog struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`
 	UserID      uint64    `gorm:"index;not null" json:"user_id"`
 	InboundID   uint64    `gorm:"index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`
-	PeriodStart time.Time `gorm:"index" json:"period_start"`
+	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_period" json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	CreatedAt   time.Time `json:"created_at"`
 }

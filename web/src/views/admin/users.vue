@@ -5,6 +5,7 @@ import BaseCard from '@/components/base/BaseCard.vue'
 import { getUsers, createInvitations } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { AdminUser } from '@/api/types'
+import { formatBytes } from '@/utils/format'
 
 const list = ref<AdminUser[]>([])
 const total = ref(0)
@@ -30,6 +31,11 @@ async function load() {
   }
 }
 onMounted(load)
+
+function usagePercent(u: any) {
+  if (!u.total_bytes) return 0
+  return Math.min(100, Math.round((u.used_bytes / u.total_bytes) * 100))
+}
 
 function fmtTime(t: string | null) {
   return t ? t.replace('T', ' ').slice(0, 16) : '—'
@@ -106,8 +112,14 @@ async function copyCodes() {
             <span class="muted">{{ row.plan_id ? `#${row.plan_id}` : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="剩余流量" min-width="120">
-          <template #default="{ row }"><span class="muted">P2 接入</span></template>
+        <el-table-column label="剩余流量" min-width="160">
+          <template #default="{ row }">
+            <div v-if="row.total_bytes > 0" class="usage-cell">
+              <el-progress :percentage="usagePercent(row)" :stroke-width="8" :show-text="false" style="width: 80px" />
+              <span class="muted">{{ formatBytes(Math.max(0, row.total_bytes - row.used_bytes)) }}</span>
+            </div>
+            <span v-else class="muted">—</span>
+          </template>
         </el-table-column>
         <el-table-column label="到期时间" width="150">
           <template #default="{ row }">{{ fmtTime(row.expire_at) }}</template>

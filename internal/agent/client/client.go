@@ -1,35 +1,53 @@
 // Package client 实现 Agent 到主控的 WebSocket 客户端：
-// 认证、心跳、断线指数退避重连、指令处理与回执。
+// 认证、心跳、断线指数退避重连、指令处理与回执、流量采集上报。
 package client
 
 import (
 	"context"
 	"log"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/zhx/xray-panel/internal/agent/collector"
+	"github.com/zhx/xray-panel/internal/agent/stats"
 	"github.com/zhx/xray-panel/internal/agent/xrayproc"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 )
 
-// Client 节点端客户端。
-type Client struct {
-	BaseURL   string // ws://host/api/v1/node/ws
-	NodeID    string
-	Secret    string
-	Heartbeat time.Duration
-	ReconnectMax time.Duration
-	Xray      *xrayproc.Proc
-	Collector *collector.Collector
-
-	ws *websocket.Conn
+// pendingEntry 待上报的累积流量。
+type pendingEntry struct {
+	Up   int64
+	Down int64
 }
 
-// Run 常驻运行：连接 → 服务 → 断线重连。
+// Client 节点端客户端。
+type Client struct {
+	BaseURL        string // ws://host/api/v1/node/ws
+	NodeID         string
+	Secret         string
+	Heartbeat      time.Duration
+	ReconnectMax   time.Duration
+	Xray           *xrayproc.Proc
+	Collector      *collector.Collector
+	Stats          *stats.Collector
+	CollectInterval time.Duration
+	ReportInterval  time.Duration
+
+	ws      *websocket.Conn
+	writeMu sync.Mutex // 保护 ws 写（心跳/上报/回执并发）
+	pendingMu sync.Mutex
+	pending   map[string]*pendingEntry // by email
+}
+
+// Run 常驻运行：流量采集上报 + 连接/服务/重连。
 func (c *Client) Run(ctx context.Context) {
+	c.pending = make(map[string]*pendingEntry)
+	go c.collectLoop(ctx)
+	go c.reportLoop(ctx)
+
 	backoff := time.Second
 	for {
 		err := c.connectAndServe(ctx)
@@ -47,6 +65,114 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
+// collectLoop 周期性采集 xray stats 并累积到 pending。
+func (c *Client) collectLoop(ctx context.Context) {
+	ticker := time.NewTicker(c.CollectInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			entries, err := c.Stats.Collect(ctx)
+			if err != nil {
+				log.Printf("agent: stats 采集失败: %v", err)
+				c.Stats.Close()
+				continue
+			}
+			if len(entries) == 0 {
+				continue
+			}
+			total := int64(0)
+			for _, e := range entries {
+				total += e.Up + e.Down
+			}
+			if total > 0 {
+				log.Printf("agent: 采集到流量 delta=%d 字节（%d 用户）", total, len(entries))
+			}
+			c.pendingMu.Lock()
+			for _, e := range entries {
+				p, ok := c.pending[e.Email]
+				if !ok {
+					p = &pendingEntry{}
+					c.pending[e.Email] = p
+				}
+				p.Up += e.Up
+				p.Down += e.Down
+			}
+			c.pendingMu.Unlock()
+		}
+	}
+}
+
+// reportLoop 周期上报 pending；失败保留（重连后补报，不丢数据）。
+func (c *Client) reportLoop(ctx context.Context) {
+	ticker := time.NewTicker(c.ReportInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.reportPending()
+		}
+	}
+}
+
+func (c *Client) reportPending() {
+	c.pendingMu.Lock()
+	if len(c.pending) == 0 {
+		c.pendingMu.Unlock()
+		return
+	}
+	entries := make([]protocol.TrafficEntry, 0, len(c.pending))
+	for email, p := range c.pending {
+		entries = append(entries, protocol.TrafficEntry{
+			UserID: 0, // 主控按 email 匹配 user_id
+			Email:  email,
+			UpBytes: p.Up,
+			DownBytes: p.Down,
+		})
+	}
+	period := time.Now().UTC().Format(time.RFC3339)
+	// 清空 pending（发送失败再放回）
+	c.pending = make(map[string]*pendingEntry)
+	c.pendingMu.Unlock()
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if c.ws == nil {
+		c.restorePending(entries)
+		return
+	}
+	err := c.sendLocked(protocol.MsgTrafficReport, "", protocol.TrafficReportPayload{
+		Entries: entries,
+		Period:  period,
+	})
+	if err != nil {
+		log.Printf("agent: traffic_report 发送失败，保留待补报: %v", err)
+		c.restorePending(entries)
+	} else {
+		log.Printf("agent: 已上报流量 %d 条（period=%s）", len(entries), period)
+	}
+}
+
+// restorePending 上报失败后把数据放回 pending。
+func (c *Client) restorePending(entries []protocol.TrafficEntry) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	for _, e := range entries {
+		key := e.Email
+		p, ok := c.pending[key]
+		if !ok {
+			p = &pendingEntry{}
+			c.pending[key] = p
+		}
+		p.Up += e.UpBytes
+		p.Down += e.DownBytes
+	}
+}
+
 func (c *Client) wsURL() string {
 	u, _ := url.Parse(c.BaseURL)
 	q := u.Query()
@@ -61,8 +187,15 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	c.writeMu.Lock()
 	c.ws = ws
-	defer ws.Close()
+	c.writeMu.Unlock()
+	defer func() {
+		c.writeMu.Lock()
+		c.ws = nil
+		c.writeMu.Unlock()
+		_ = ws.Close()
+	}()
 
 	// 认证
 	if err := c.send(protocol.MsgAuth, "", protocol.AuthPayload{NodeID: c.NodeID, Secret: c.Secret}); err != nil {
@@ -116,7 +249,20 @@ type wsError struct{ msg string }
 
 func (e *wsError) Error() string { return e.msg }
 
+// send 写消息（并发安全）。
 func (c *Client) send(typ, id string, payload any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if c.ws == nil {
+		return errNoConn
+	}
+	return c.sendLocked(typ, id, payload)
+}
+
+var errNoConn = &wsError{msg: "未连接"}
+
+// sendLocked 写消息（调用方需持有 writeMu）。
+func (c *Client) sendLocked(typ, id string, payload any) error {
 	data, err := protocol.Encode(typ, id, payload)
 	if err != nil {
 		return err
@@ -133,10 +279,6 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			snap := c.Collector.Snapshot()
-			running, pid, _, uptime := c.Xray.Status()
-			_ = running
-			_ = pid
-			_ = uptime
 			hb := protocol.HeartbeatPayload{
 				CPU:         snap.CPU,
 				Mem:         snap.Mem,

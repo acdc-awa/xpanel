@@ -11,5 +11,11 @@ xray:
   log_path: /tmp/xray-agent/xray.log
   pid_file: /tmp/xray-agent/xray.pid
 
+# 流量采集：对应 xray 配置的 api 段（agent 通过 gRPC 查询 stats）
+stats:
+  api_addr: 127.0.0.1:10085
+  collect_interval: 30s
+  report_interval: 60s
+
 heartbeat_interval: 30s
 reconnect_max: 60s

@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
+	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -52,6 +53,7 @@ func (c *Conn) closeSafe() {
 // Hub 节点连接注册表。
 type Hub struct {
 	DB       *gorm.DB
+	Traffic  *services.TrafficService
 	Upgrader websocket.Upgrader
 
 	mu      sync.RWMutex
@@ -60,9 +62,10 @@ type Hub struct {
 }
 
 // NewHub 构造网关。
-func NewHub(db *gorm.DB) *Hub {
+func NewHub(db *gorm.DB, traffic *services.TrafficService) *Hub {
 	h := &Hub{
-		DB: db,
+		DB:      db,
+		Traffic: traffic,
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -186,8 +189,22 @@ func (h *Hub) readPump(conn *Conn) {
 		case protocol.MsgResult:
 			h.handleResult(msg)
 		case protocol.MsgTrafficReport:
-			// P1 仅接收占位；P2 落库
+			h.handleTrafficReport(conn, msg)
 		}
+	}
+}
+
+// handleTrafficReport 处理节点流量上报（幂等落库）。
+func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
+	if h.Traffic == nil {
+		return
+	}
+	var tr protocol.TrafficReportPayload
+	if err := msg.PayloadTo(&tr); err != nil {
+		return
+	}
+	if err := h.Traffic.Save(tr); err != nil {
+		log.Printf("nodegate: 流量落库失败 (server=%d): %v", conn.ServerID, err)
 	}
 }
 

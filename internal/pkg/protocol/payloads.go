@@ -22,11 +22,13 @@ type HeartbeatPayload struct {
 	TS          int64   `json:"ts"` // unix 秒
 }
 
-// TrafficEntry 单条流量记录（P1 仅定义通道，P2 实现采集与上报）。
+// TrafficEntry 单条流量记录。
+// P2：UserID=0 时主控按 Email 匹配用户；P5 接入入站维度后可填 Inbound。
 type TrafficEntry struct {
-	UserID   uint64 `json:"user_id"`
-	Inbound  string `json:"inbound"`
-	UpBytes  int64  `json:"up_bytes"`
+	UserID    uint64 `json:"user_id"`
+	Email     string `json:"email,omitempty"`
+	Inbound   string `json:"inbound,omitempty"`
+	UpBytes   int64  `json:"up_bytes"`
 	DownBytes int64  `json:"down_bytes"`
 }
 
