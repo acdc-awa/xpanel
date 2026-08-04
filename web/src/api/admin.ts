@@ -10,6 +10,8 @@ import type {
   Invitation,
   Order,
   Plan,
+  ServerOutbound,
+  ServerRoutingRule,
   UserInboundGrant,
 } from './types'
 
@@ -22,6 +24,8 @@ export type {
   Invitation,
   Order,
   Plan,
+  ServerOutbound,
+  ServerRoutingRule,
   UserInboundGrant,
 } from './types'
 
@@ -175,6 +179,71 @@ export function generateAndPushConfig(serverId: number) {
   return http.post<ApiResp<{ ok: boolean; pushed: boolean; message: string; config: string }>>(
     `/admin/servers/${serverId}/generate-config`,
   )
+}
+
+// ===== M2 节点出站（3x-ui outbound） =====
+
+export interface OutboundPayload {
+  tag: string
+  protocol: string
+  settings_json?: string
+  stream_settings_json?: string
+  send_through?: string
+  enabled?: boolean
+  priority?: number
+  remark?: string
+}
+
+export function getServerOutbounds(serverId: number) {
+  return http.get<ApiResp<{ items: ServerOutbound[] }>>(`/admin/servers/${serverId}/outbounds`)
+}
+
+export function createServerOutbound(serverId: number, payload: OutboundPayload) {
+  return http.post<ApiResp<{ outbound: ServerOutbound }>>(`/admin/servers/${serverId}/outbounds`, payload)
+}
+
+export function updateServerOutbound(serverId: number, outboundId: number, payload: Partial<OutboundPayload>) {
+  return http.put<ApiResp<{ outbound: ServerOutbound }>>(
+    `/admin/servers/${serverId}/outbounds/${outboundId}`,
+    payload,
+  )
+}
+
+export function deleteServerOutbound(serverId: number, outboundId: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/servers/${serverId}/outbounds/${outboundId}`)
+}
+
+// ===== M2 节点路由规则（3x-ui routing） =====
+
+export interface RoutingRulePayload {
+  outbound_tag: string
+  rule_json?: string
+  domain?: string
+  ip?: string
+  port?: string
+  network?: string
+  enabled?: boolean
+  priority?: number
+  remark?: string
+}
+
+export function getServerRoutingRules(serverId: number) {
+  return http.get<ApiResp<{ items: ServerRoutingRule[] }>>(`/admin/servers/${serverId}/routing`)
+}
+
+export function createServerRoutingRule(serverId: number, payload: RoutingRulePayload) {
+  return http.post<ApiResp<{ rule: ServerRoutingRule }>>(`/admin/servers/${serverId}/routing`, payload)
+}
+
+export function updateServerRoutingRule(serverId: number, ruleId: number, payload: Partial<RoutingRulePayload>) {
+  return http.put<ApiResp<{ rule: ServerRoutingRule }>>(
+    `/admin/servers/${serverId}/routing/${ruleId}`,
+    payload,
+  )
+}
+
+export function deleteServerRoutingRule(serverId: number, ruleId: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/servers/${serverId}/routing/${ruleId}`)
 }
 
 // ===== P5 套餐 / 订单 / 审计 / 入站授权 =====

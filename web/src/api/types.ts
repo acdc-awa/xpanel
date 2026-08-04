@@ -154,7 +154,18 @@ export interface XHTTPSettings {
 
 export interface GRPCSettings {
   service_name?: string
+  authority?: string
   multi_mode?: boolean
+}
+
+export interface SniffingSettings {
+  enabled: boolean
+  destOverride?: string[]
+  metadataOnly?: boolean
+  routeOnly?: boolean
+  dest_override?: string[]
+  metadata_only?: boolean
+  route_only?: boolean
 }
 
 export interface TLSSettings {
@@ -188,6 +199,39 @@ export interface InboundSettings {
   xhttp?: XHTTPSettings
   grpc?: GRPCSettings
   tls?: TLSSettings
+  sniffing?: SniffingSettings
+}
+
+export interface ServerOutbound {
+  id: number
+  server_id: number
+  tag: string
+  protocol: string
+  settings_json: string
+  stream_settings_json?: string
+  send_through?: string
+  enabled: boolean
+  priority: number
+  remark: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ServerRoutingRule {
+  id: number
+  server_id: number
+  outbound_tag: string
+  rule_json?: string
+  domain?: string
+  ip?: string
+  port?: string
+  network?: string
+  inbound_tag?: string
+  enabled: boolean
+  priority: number
+  remark: string
+  created_at: string
+  updated_at: string
 }
 
 export interface UserInboundGrant {

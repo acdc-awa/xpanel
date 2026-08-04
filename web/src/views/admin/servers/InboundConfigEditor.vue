@@ -67,12 +67,6 @@ const localTlsType = ref(props.tlsType || 'reality')
 const localPort = ref(props.port || 443)
 const localTag = ref(props.tag || '')
 
-// VLESS 基础设置
-const vlessForm = reactive({
-  flow: 'xtls-rprx-vision',
-  uuid: '',
-})
-
 // Fallbacks 列表
 const fallbacks = ref<FallbackItem[]>([])
 
@@ -90,7 +84,16 @@ const xhttpForm = reactive<XHTTPSettings>({
 
 const grpcForm = reactive({
   service_name: 'grpc',
+  authority: '',
   multi_mode: false,
+})
+
+// 流量嗅探（Sniffing）
+const sniffingForm = reactive({
+  enabled: false,
+  destOverride: ['http', 'tls', 'quic', 'fakedns'] as string[],
+  metadataOnly: false,
+  routeOnly: false,
 })
 
 const tcpForm = reactive({
@@ -123,19 +126,6 @@ const rawJsonText = ref('{}')
 const jsonError = ref('')
 const isInternalUpdating = ref(false)
 const genKeyLoading = ref(false)
-
-// 生成 UUID
-function genUUID() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    vlessForm.uuid = crypto.randomUUID()
-  } else {
-    vlessForm.uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0
-      const v = c === 'x' ? r : (r & 0x3) | 0x8
-      return v.toString(16)
-    })
-  }
-}
 
 // 生成 Random Short ID
 function genShortId() {
@@ -193,9 +183,6 @@ function moveFallback(index: number, direction: -1 | 1) {
 function buildSettingsObj(): InboundSettings {
   const s: InboundSettings = {}
 
-  if (vlessForm.flow) s.flow = vlessForm.flow
-  if (vlessForm.uuid) s.uuid = vlessForm.uuid
-
   if (fallbacks.value.length > 0) {
     s.fallbacks = fallbacks.value.map((f) => ({
       dest: f.dest,
@@ -212,7 +199,21 @@ function buildSettingsObj(): InboundSettings {
   } else if (localNetwork.value === 'xhttp') {
     s.xhttp = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/', host: xhttpForm.host || undefined }
   } else if (localNetwork.value === 'grpc') {
-    s.grpc = { service_name: grpcForm.service_name || 'grpc', multi_mode: grpcForm.multi_mode }
+    s.grpc = {
+      service_name: grpcForm.service_name || 'grpc',
+      authority: grpcForm.authority || undefined,
+      multi_mode: grpcForm.multi_mode,
+    }
+  }
+
+  // Sniffing（仅在启用时输出，键名与 xray-core streamSettings.sniffing 一致）
+  if (sniffingForm.enabled) {
+    s.sniffing = {
+      enabled: true,
+      destOverride: sniffingForm.destOverride,
+      metadataOnly: sniffingForm.metadataOnly,
+      routeOnly: sniffingForm.routeOnly,
+    }
   }
 
   // Security
@@ -305,10 +306,6 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
 
-    // VLESS 基础
-    if (s.flow !== undefined) vlessForm.flow = s.flow
-    if (s.uuid !== undefined) vlessForm.uuid = s.uuid
-
     // Fallbacks
     if (Array.isArray(s.fallbacks)) {
       fallbacks.value = s.fallbacks.map((f) => ({
@@ -332,7 +329,19 @@ function parseJsonToForm(str: string) {
     }
     if (s.grpc) {
       grpcForm.service_name = s.grpc.service_name || 'grpc'
+      grpcForm.authority = s.grpc.authority || ''
       grpcForm.multi_mode = !!s.grpc.multi_mode
+    }
+
+    if (s.sniffing) {
+      sniffingForm.enabled = !!s.sniffing.enabled
+      sniffingForm.destOverride = Array.isArray(s.sniffing.destOverride)
+        ? s.sniffing.destOverride
+        : Array.isArray(s.sniffing.dest_override)
+          ? s.sniffing.dest_override
+          : ['http', 'tls', 'quic', 'fakedns']
+      sniffingForm.metadataOnly = !!s.sniffing.metadataOnly || !!s.sniffing.metadata_only
+      sniffingForm.routeOnly = !!s.sniffing.routeOnly || !!s.sniffing.route_only
     }
 
     // Security
@@ -400,7 +409,6 @@ watch(
     localTlsType,
     localPort,
     localTag,
-    vlessForm,
     fallbacks,
     wsForm,
     xhttpForm,
@@ -409,6 +417,7 @@ watch(
     realityForm,
     tlsForm,
     tlsAlpnText,
+    sniffingForm,
   ],
   () => {
     syncFormToJson()
@@ -489,23 +498,6 @@ async function copyText(text: string, label: string) {
       <!-- VLESS 协议设置 -->
       <div class="form-section">
         <div class="section-title">VLESS 基础设置</div>
-        <div class="grid-2">
-          <el-form-item label="Flow 流控">
-            <el-select v-model="vlessForm.flow" style="width: 100%">
-              <el-option label="xtls-rprx-vision (REALITY/TLS 推荐)" value="xtls-rprx-vision" />
-              <el-option label="无 (默认/WS/xhttp)" value="" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="测试/默认 UUID">
-            <div style="display: flex; gap: 8px; width: 100%">
-              <el-input v-model="vlessForm.uuid" placeholder="可留空使用用户各自 UUID" />
-              <el-button @click="genUUID">
-                <el-icon><MagicStick /></el-icon>&nbsp;生成
-              </el-button>
-            </div>
-          </el-form-item>
-        </div>
-
         <!-- Fallbacks 回落 -->
         <div class="fallbacks-card">
           <div class="card-head">
@@ -608,6 +600,9 @@ async function copyText(text: string, label: string) {
             <el-form-item label="Service Name">
               <el-input v-model="grpcForm.service_name" placeholder="grpc" />
             </el-form-item>
+            <el-form-item label="Authority（自定义 Host，可选）">
+              <el-input v-model="grpcForm.authority" placeholder="留空使用默认" />
+            </el-form-item>
             <el-form-item label="Multi Mode">
               <el-switch v-model="grpcForm.multi_mode" />
             </el-form-item>
@@ -690,6 +685,30 @@ async function copyText(text: string, label: string) {
             description="明文传输容易被 DPI 审查封锁，生产环境强烈建议选择 REALITY 或 TLS。"
           />
         </template>
+      </div>
+
+      <!-- 流量嗅探 Sniffing -->
+      <div class="form-section">
+        <div class="section-title">流量嗅探 (Sniffing)</div>
+        <div class="grid-2">
+          <el-form-item label="启用嗅探">
+            <el-switch v-model="sniffingForm.enabled" />
+          </el-form-item>
+          <el-form-item label="DestOverride（覆盖目标类型）">
+            <el-checkbox-group v-model="sniffingForm.destOverride" :disabled="!sniffingForm.enabled">
+              <el-checkbox label="http" />
+              <el-checkbox label="tls" />
+              <el-checkbox label="quic" />
+              <el-checkbox label="fakedns" />
+            </el-checkbox-group>
+          </el-form-item>
+          <el-form-item label="MetadataOnly（仅元数据嗅探）">
+            <el-switch v-model="sniffingForm.metadataOnly" :disabled="!sniffingForm.enabled" />
+          </el-form-item>
+          <el-form-item label="RouteOnly（仅用于路由，不改写目标）">
+            <el-switch v-model="sniffingForm.routeOnly" :disabled="!sniffingForm.enabled" />
+          </el-form-item>
+        </div>
       </div>
     </div>
 

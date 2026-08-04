@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit, Setting } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import InboundConfigEditor from './servers/InboundConfigEditor.vue'
+import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import {
   createServer,
   deleteServer,
@@ -96,45 +96,50 @@ function closeCreate() {
   createdResult.value = null
 }
 
-// ---- 下发配置 ----
+// ---- 节点管理抽屉 ----
+const drawerOpen = ref(false)
+const drawerServer = ref<ServerItem | null>(null)
+
+function openDrawer(row: any) {
+  drawerServer.value = row
+  drawerOpen.value = true
+}
+
+// ---- 下发配置（走 generate-config：主控生成完整配置并保存待推送，在线自动下发） ----
 const pushOpen = ref(false)
 const pushTarget = ref<ServerItem | null>(null)
-const pushConfig = ref('')
-const pushing = ref(false)
+const pushLoading = ref(false)
 const pushResult = ref('')
+const pushConfigText = ref('')
 
 function openPush(row: any) {
   pushTarget.value = row
-  pushConfig.value = ''
   pushResult.value = ''
+  pushConfigText.value = ''
   pushOpen.value = true
+  runPush()
 }
 
-async function submitPush() {
+async function runPush() {
   if (!pushTarget.value) return
+  pushLoading.value = true
+  pushResult.value = ''
   try {
-    JSON.parse(pushConfig.value)
-  } catch {
-    ElMessage.warning('配置不是合法 JSON')
-    return
-  }
-  pushing.value = true
-  try {
-    const { data } = await serverCommand(pushTarget.value.id, 'push_config', {
-      config_json: pushConfig.value,
-    })
+    const { data } = await generateAndPushConfig(pushTarget.value.id)
     if (data.code === 0) {
-      const r = data.data
-      pushResult.value = r.ok ? `✅ ${r.data}` : `❌ ${r.error}`
-      if (r.ok) ElMessage.success('配置下发成功')
-      else ElMessage.error('配置下发失败')
+      pushConfigText.value = data.data.config || ''
+      pushResult.value = data.data.message
+      if (data.data.ok) ElMessage.success(data.data.message || '配置已下发')
+      else ElMessage.warning(data.data.message || '配置已保存，节点上线后自动补推')
+      load()
     } else {
-      pushResult.value = `❌ ${data.message}`
+      pushResult.value = `失败：${data.message}`
     }
   } catch (e) {
-    pushResult.value = `❌ ${errMsg(e, '指令失败')}`
+    pushResult.value = `失败：${errMsg(e)}`
+    ElMessage.error(errMsg(e, '生成失败'))
   } finally {
-    pushing.value = false
+    pushLoading.value = false
   }
 }
 
@@ -179,8 +184,10 @@ async function restartXray(row: any) {
 const logOpen = ref(false)
 const logContent = ref('')
 const logLoading = ref(false)
+const logTarget = ref<ServerItem | null>(null)
 
 async function openLogs(row: any) {
+  logTarget.value = row
   logOpen.value = true
   logContent.value = ''
   logLoading.value = true
@@ -366,8 +373,9 @@ async function removeServer(row: any) {
         <el-table-column label="最后心跳" width="170">
           <template #default="{ row }"><span class="muted">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;管理</el-button>
             <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
             <el-button size="small" text type="success" @click="genPush(row)"><el-icon><VideoPlay /></el-icon>&nbsp;生成</el-button>
             <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发</el-button>
@@ -435,16 +443,31 @@ async function removeServer(row: any) {
       </template>
     </el-dialog>
 
-    <!-- 下发配置 (使用 InboundConfigEditor 双向可视化/JSON 编辑) -->
-    <el-dialog v-model="pushOpen" :title="`配置编辑与下发 · ${pushTarget?.name ?? ''}`" width="780px">
+    <!-- 下发配置（主控生成完整配置并推送） -->
+    <el-dialog v-model="pushOpen" :title="`生成并下发配置 · ${pushTarget?.name ?? ''}`" width="680px">
       <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
-        可视化配置 VLESS 入站参数或输入完整 Xray 配置 JSON，Agent 将执行 <code>xray -test</code> 校验，通过后写入节点并重启服务。
+        按该节点启用入站 + 出站 + 路由规则 + 全部启用用户生成完整 Xray 配置：保存待推送，节点在线立即下发（离线保留，上线自动补推）。
       </p>
-      <InboundConfigEditor v-model="pushConfig" />
-      <p v-if="pushResult" style="margin: 10px 0 0" :class="pushResult.startsWith('✅') ? 'ok-text' : 'err-text'">{{ pushResult }}</p>
+      <pre v-loading="pushLoading" class="log-view">{{ pushResult ? `结果：${pushResult}\n\n` : '' }}{{ pushConfigText || (pushLoading ? '正在生成配置…' : '') }}</pre>
+      <div v-if="pushConfigText" style="display: flex; gap: 8px; margin-top: 10px">
+        <el-button size="small" @click="copyText(pushConfigText, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
+      </div>
       <template #footer>
-        <el-button @click="pushOpen = false">关闭</el-button>
-        <el-button type="primary" :loading="pushing" :disabled="!pushConfig" @click="submitPush">校验并下发</el-button>
+        <el-button type="primary" @click="pushOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 生成结果 -->
+    <el-dialog v-model="genOpen" title="生成并下发配置" width="680px">
+      <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
+        生成的完整 Xray 配置如下（已保存待推送；节点在线则立即下发，离线则上线自动补推）：
+      </p>
+      <pre v-loading="genLoading" class="log-view">{{ genResult || '正在生成…' }}</pre>
+      <div v-if="genResult && !genLoading" style="display: flex; gap: 8px; margin-top: 10px">
+        <el-button size="small" @click="copyText(genResult, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="genOpen = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -463,7 +486,7 @@ async function removeServer(row: any) {
     </el-dialog>
 
     <!-- 日志 -->
-    <el-dialog v-model="logOpen" :title="`最近日志 · ${pushTarget?.name ?? ''}`" width="620px">
+    <el-dialog v-model="logOpen" :title="`最近日志 · ${logTarget?.name ?? ''}`" width="620px">
       <pre v-loading="logLoading" class="log-view">{{ logContent }}</pre>
     </el-dialog>
 
@@ -499,6 +522,14 @@ async function removeServer(row: any) {
         <el-button type="primary" @click="secretOpen = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 节点管理抽屉 -->
+    <ServerNodeDrawer
+      v-model="drawerOpen"
+      :server="drawerServer"
+      @removed="load"
+      @changed="load"
+    />
   </div>
 </template>
 

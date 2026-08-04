@@ -16,6 +16,7 @@ import {
   type InboundSettings,
   type ServerItem,
 } from '@/api/admin'
+import type { FallbackItem } from '@/api/types'
 import { errMsg } from '@/api/http'
 
 const list = ref<InboundItem[]>([])
@@ -65,12 +66,17 @@ const form = reactive({
   network: 'tcp',
   tls_type: 'reality',
   ratio: 1,
+  // Fallbacks
+  fallbacks: [] as FallbackItem[],
   // 动态参数
   reality: { server_name: '', dest: '', public_key: '', private_key: '', short_id: 'abcdef0123456789' },
   ws: { path: '/', host: '' },
   xhttp: { mode: 'auto', path: '/' },
+  grpc: { service_name: 'grpc', authority: '', multi_mode: false },
   tls: { server_name: '', cert_file: '', key_file: '' },
+  sniffing: { enabled: false, destOverride: ['http', 'tls', 'quic', 'fakedns'] as string[], metadataOnly: false, routeOnly: false },
 })
+const tlsAlpnText = ref('h2,http/1.1')
 const saving = ref(false)
 const genKeyLoading = ref(false)
 
@@ -99,11 +105,15 @@ function openCreate() {
     network: 'tcp',
     tls_type: 'reality',
     ratio: 1,
+    fallbacks: [],
     reality: { server_name: '', dest: '', public_key: '', private_key: '', short_id: 'abcdef0123456789' },
     ws: { path: '/', host: '' },
     xhttp: { mode: 'auto', path: '/' },
+    grpc: { service_name: 'grpc', authority: '', multi_mode: false },
     tls: { server_name: '', cert_file: '', key_file: '' },
+    sniffing: { enabled: false, destOverride: ['http', 'tls', 'quic', 'fakedns'], metadataOnly: false, routeOnly: false },
   })
+  tlsAlpnText.value = 'h2,http/1.1'
   formOpen.value = true
 }
 
@@ -119,6 +129,9 @@ function openEdit(row: any) {
     network: row.network,
     tls_type: row.tls_type,
     ratio: row.ratio,
+    fallbacks: Array.isArray(s?.fallbacks)
+      ? s!.fallbacks!.map((f) => ({ name: f.name || '', alpn: f.alpn || '', path: f.path || '', dest: f.dest || '', xver: f.xver || 0 }))
+      : [],
     reality: {
       server_name: s?.reality?.server_name ?? '',
       dest: s?.reality?.dest ?? '',
@@ -128,9 +141,34 @@ function openEdit(row: any) {
     },
     ws: { path: s?.ws?.path ?? '/', host: s?.ws?.host ?? '' },
     xhttp: { mode: s?.xhttp?.mode ?? 'auto', path: s?.xhttp?.path ?? '/' },
+    grpc: {
+      service_name: s?.grpc?.service_name ?? 'grpc',
+      authority: s?.grpc?.authority ?? '',
+      multi_mode: !!s?.grpc?.multi_mode,
+    },
     tls: { server_name: s?.tls?.server_name ?? '', cert_file: s?.tls?.cert_file ?? '', key_file: s?.tls?.key_file ?? '' },
+    sniffing: {
+      enabled: !!s?.sniffing?.enabled,
+      destOverride: Array.isArray(s?.sniffing?.destOverride)
+        ? s!.sniffing!.destOverride!
+        : Array.isArray(s?.sniffing?.dest_override)
+          ? s!.sniffing!.dest_override!
+          : ['http', 'tls', 'quic', 'fakedns'],
+      metadataOnly: !!s?.sniffing?.metadataOnly || !!s?.sniffing?.metadata_only,
+      routeOnly: !!s?.sniffing?.routeOnly || !!s?.sniffing?.route_only,
+    },
   })
+  tlsAlpnText.value = Array.isArray(s?.tls?.alpn) && s!.tls!.alpn!.length > 0 ? s!.tls!.alpn!.join(',') : 'h2,http/1.1'
   formOpen.value = true
+}
+
+// ---- Fallbacks 操作 ----
+function addFallback() {
+  form.fallbacks.push({ dest: '80', path: '', xver: 0 })
+}
+
+function removeFallback(index: number) {
+  form.fallbacks.splice(index, 1)
 }
 
 // 生成 REALITY 密钥对
@@ -155,10 +193,31 @@ async function genRealityKeys() {
 // 组装 settings 对象（仅包含当前生效的参数）
 function buildSettings(): InboundSettings {
   const s: InboundSettings = {}
+  if (form.fallbacks.length > 0) {
+    s.fallbacks = form.fallbacks.map((f) => ({
+      dest: f.dest,
+      path: f.path || undefined,
+      xver: f.xver || 0,
+    }))
+  }
   if (form.tls_type === 'reality') s.reality = { ...form.reality }
-  if (form.tls_type === 'tls') s.tls = { ...form.tls }
+  if (form.tls_type === 'tls') {
+    const alpnArr = tlsAlpnText.value
+      ? tlsAlpnText.value.split(',').map((x) => x.trim()).filter(Boolean)
+      : []
+    s.tls = { ...form.tls, alpn: alpnArr.length > 0 ? alpnArr : undefined }
+  }
   if (form.network === 'ws') s.ws = { ...form.ws }
   if (form.network === 'xhttp') s.xhttp = { ...form.xhttp }
+  if (form.network === 'grpc') s.grpc = { ...form.grpc }
+  if (form.sniffing.enabled) {
+    s.sniffing = {
+      enabled: true,
+      destOverride: form.sniffing.destOverride,
+      metadataOnly: form.sniffing.metadataOnly,
+      routeOnly: form.sniffing.routeOnly,
+    }
+  }
   return s
 }
 
@@ -413,6 +472,7 @@ async function deployFiltered() {
               <el-option label="tcp（REALITY 推荐）" value="tcp" />
               <el-option label="ws（WebSocket）" value="ws" />
               <el-option label="xhttp" value="xhttp" />
+              <el-option label="grpc" value="grpc" />
             </el-select>
           </el-form-item>
           <el-form-item label="TLS">
@@ -422,6 +482,33 @@ async function deployFiltered() {
               <el-option label="none" value="none" />
             </el-select>
           </el-form-item>
+        </div>
+
+        <!-- Fallbacks 回落 -->
+        <div class="fallbacks-card">
+          <div class="card-head">
+            <span class="head-title">回落设置（Fallbacks，tcp 传输生效）</span>
+            <el-button size="small" type="primary" plain @click="addFallback"><el-icon><Plus /></el-icon>&nbsp;添加</el-button>
+          </div>
+          <div v-if="form.fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
+          <div v-else class="fallback-list">
+            <div v-for="(item, idx) in form.fallbacks" :key="idx" class="fallback-item">
+              <div class="fb-grid">
+                <el-form-item label="Dest 目标地址">
+                  <el-input v-model="item.dest" placeholder="80 或 127.0.0.1:8080" />
+                </el-form-item>
+                <el-form-item label="Path 匹配">
+                  <el-input v-model="item.path" placeholder="如 /" />
+                </el-form-item>
+                <el-form-item label="PROXY protocol (xver)">
+                  <el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" />
+                </el-form-item>
+              </div>
+              <div class="fb-actions">
+                <el-button size="small" text type="danger" @click="removeFallback(idx)"><el-icon><Delete /></el-icon></el-button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- REALITY 参数 -->
@@ -476,6 +563,22 @@ async function deployFiltered() {
           </div>
         </template>
 
+        <!-- gRPC 参数 -->
+        <template v-if="form.network === 'grpc'">
+          <div class="sec-title">gRPC 参数</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+            <el-form-item label="Service Name">
+              <el-input v-model="form.grpc.service_name" placeholder="grpc" />
+            </el-form-item>
+            <el-form-item label="Authority（自定义 Host，可选）">
+              <el-input v-model="form.grpc.authority" placeholder="留空使用默认" />
+            </el-form-item>
+            <el-form-item label="Multi Mode">
+              <el-switch v-model="form.grpc.multi_mode" />
+            </el-form-item>
+          </div>
+        </template>
+
         <!-- TLS 参数 -->
         <template v-if="form.tls_type === 'tls'">
           <div class="sec-title">TLS 参数（节点服务器上的证书路径）</div>
@@ -489,8 +592,33 @@ async function deployFiltered() {
             <el-form-item label="SNI（可选）">
               <el-input v-model="form.tls.server_name" placeholder="example.com" />
             </el-form-item>
+            <el-form-item label="ALPN（逗号分隔）">
+              <el-input v-model="tlsAlpnText" placeholder="h2,http/1.1" />
+            </el-form-item>
           </div>
         </template>
+
+        <!-- 流量嗅探 -->
+        <div class="sec-title">流量嗅探（Sniffing）</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+          <el-form-item label="启用嗅探">
+            <el-switch v-model="form.sniffing.enabled" />
+          </el-form-item>
+          <el-form-item label="DestOverride（覆盖目标类型）">
+            <el-checkbox-group v-model="form.sniffing.destOverride" :disabled="!form.sniffing.enabled">
+              <el-checkbox label="http" />
+              <el-checkbox label="tls" />
+              <el-checkbox label="quic" />
+              <el-checkbox label="fakedns" />
+            </el-checkbox-group>
+          </el-form-item>
+          <el-form-item label="MetadataOnly（仅元数据嗅探）">
+            <el-switch v-model="form.sniffing.metadataOnly" :disabled="!form.sniffing.enabled" />
+          </el-form-item>
+          <el-form-item label="RouteOnly（仅用于路由，不改写目标）">
+            <el-switch v-model="form.sniffing.routeOnly" :disabled="!form.sniffing.enabled" />
+          </el-form-item>
+        </div>
 
         <p class="muted tip">{{ settingsTip }}</p>
       </el-form>
@@ -534,5 +662,50 @@ async function deployFiltered() {
 }
 .dialog-head { display: flex; gap: 8px; margin-bottom: 14px; }
 .preview-pane { min-height: 360px; }
+
+.fallbacks-card {
+  background: var(--x-primary-soft);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    .head-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--x-text-2);
+    }
+  }
+  .empty-tip {
+    font-size: 12px;
+    color: var(--x-text-3);
+    text-align: center;
+    padding: 10px 0;
+  }
+  .fallback-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .fallback-item {
+    background: var(--x-card);
+    border: 1px solid var(--x-border);
+    border-radius: 6px;
+    padding: 10px;
+    .fb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0 10px;
+    }
+    .fb-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+  }
+}
 
 </style>
