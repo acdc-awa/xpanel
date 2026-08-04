@@ -15,3 +15,7 @@ export function login(username: string, password: string) {
 export function register(payload: RegisterPayload) {
   return http.post<ApiResp<LoginResult>>('/auth/register', payload)
 }
+
+export function logout() {
+  return http.post<ApiResp<null>>('/auth/logout')
+}

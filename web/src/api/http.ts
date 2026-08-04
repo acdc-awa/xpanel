@@ -10,8 +10,7 @@ export const http = axios.create({
 })
 
 http.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  // 凭证现在通过 Cookie 发送，不需要手动附加 Authorization
   return config
 })
 
@@ -26,26 +25,22 @@ http.interceptors.response.use(
     const cfg = error.config as RetriableRequest | undefined
     const status = error.response?.status
 
-    if (status === 401 && cfg && !cfg._retried) {
+    if (status === 401 && cfg && !cfg._retried && window.location.pathname !== withBase('/login')) {
       cfg._retried = true
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (refreshToken) {
-        try {
-          const { data } = await axios.post<{ code: number; data: { access_token: string } }>(
-            `${import.meta.env.VITE_API_BASE ?? apiBase}/auth/refresh`,
-            { refresh_token: refreshToken },
-          )
-          if (data.code === 0 && data.data?.access_token) {
-            localStorage.setItem('access_token', data.data.access_token)
-            cfg.headers.Authorization = `Bearer ${data.data.access_token}`
-            return http(cfg)
-          }
-        } catch {
-          /* 刷新失败走登出 */
+      try {
+        const { data } = await axios.post<{ code: number }>(
+          `${import.meta.env.VITE_API_BASE ?? apiBase}/auth/refresh`,
+          {},
+          { withCredentials: true }
+        )
+        if (data.code === 0) {
+          return http(cfg)
         }
+      } catch {
+        /* 刷新失败走登出 */
       }
       const auth = useAuthStore()
-      auth.logout()
+      await auth.logout()
       if (window.location.pathname !== withBase('/login')) {
         ElMessage.error('登录已过期，请重新登录')
         window.location.href = withBase('/login')

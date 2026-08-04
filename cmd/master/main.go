@@ -154,6 +154,7 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		Status:         models.StatusActive,
 		SubscribeToken: token,
 		UUID:           uuid,
+		MustChangePwd:  cfg.Admin.Password == "admin123",
 	}
 	if err := database.Create(admin).Error; err != nil {
 		log.Fatalf("创建初始管理员失败: %v", err)

@@ -12,12 +12,8 @@ export function setupRouterGuards(router: Router) {
   router.beforeEach(async (to) => {
     const auth = useAuthStore()
 
-    if (auth.isLoggedIn && !auth.user) {
-      try {
-        await auth.fetchMe()
-      } catch {
-        auth.logout()
-      }
+    if (!auth.isInitialized) {
+      await auth.fetchMe()
     }
 
     if (to.meta.guestOnly && auth.isLoggedIn) {

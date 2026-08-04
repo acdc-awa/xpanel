@@ -51,7 +51,7 @@ func Default() *Config {
 	return &Config{
 		App: App{Name: "xray-panel", Env: "dev", Port: 8080},
 		DB:  DB{Driver: "sqlite", DSN: "./data/panel.db"},
-		JWT: JWT{Secret: "dev-secret-change-me", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
+		JWT: JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
 		Auth: Auth{InviteRequired: true},
 	}
 }
@@ -72,6 +72,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.applyEnv()
+
+	if cfg.JWT.Secret == "" {
+		return nil, fmt.Errorf("JWT secret 未配置，请在配置文件(JWT.Secret)或环境变量(JWT_SECRET)中设置")
+	}
+
 	return cfg, nil
 }
 

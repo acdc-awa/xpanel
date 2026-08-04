@@ -31,6 +31,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			auth.POST("/register", d.Register)
 			auth.POST("/login", d.Login)
 			auth.POST("/refresh", d.Refresh)
+			auth.POST("/logout", d.Logout)
 		}
 
 		// 节点 WebSocket 网关（节点 Agent 连接）

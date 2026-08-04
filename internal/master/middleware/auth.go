@@ -15,13 +15,12 @@ const CtxClaimsKey = "claims"
 // AuthRequired 解析 Bearer access token 并注入 claims。
 func AuthRequired(jwtMgr *services.JWTManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
+		tokenStr, err := c.Cookie("access_token")
+		if err != nil || tokenStr == "" {
 			util.Unauthorized(c, "缺少访问令牌")
 			c.Abort()
 			return
 		}
-		tokenStr := strings.TrimPrefix(auth, "Bearer ")
 		claims, err := jwtMgr.Parse(tokenStr)
 		if err != nil || claims.Type != services.TokenAccess {
 			util.Unauthorized(c, "访问令牌无效或已过期")

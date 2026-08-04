@@ -145,7 +145,10 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uint64, oldPwd,
 	if err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).Model(&user).Update("password_hash", hash).Error
+	return s.DB.WithContext(ctx).Model(&user).Updates(map[string]any{
+		"password_hash":   hash,
+		"must_change_pwd": false,
+	}).Error
 }
 
 // Refresh 用 refresh token 换取新 access token。

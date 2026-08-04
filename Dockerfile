@@ -18,13 +18,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/master ./cmd/master && \
 
 # ---- 运行镜像 ----
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && \
+    adduser -D app
 WORKDIR /app
 COPY --from=go /out/master /app/master
 COPY --from=go /out/agent /app/agent
 COPY deploy/agent/install-agent.sh /app/install-agent.sh
 COPY --from=web /web/dist /app/web/dist
 COPY configs/config.example.yaml /app/configs/config.yaml
+RUN mkdir -p /app/data && chown -R app:app /app
+USER app
 EXPOSE 18080
 ENV APP_PORT=18080
 CMD ["/app/master", "-config", "/app/configs/config.yaml"]

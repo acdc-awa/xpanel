@@ -40,6 +40,7 @@ func (d *Deps) Me(c *gin.Context) {
 		"down_bytes":      down,
 		"used_bytes":      up + down,
 		"total_bytes":     totalBytes,
+		"must_change_pwd": user.MustChangePwd,
 	})
 }
 
