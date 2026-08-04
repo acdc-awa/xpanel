@@ -32,3 +32,8 @@ tools/mihomo/mihomo-linux-amd64-*.gz
 tools/**/cache.db
 tools/**/*.pid
 tools/**/*.out
+
+# 运行时数据与构建产物
+data/
+/bin/
+/tmp/

@@ -1,0 +1,26 @@
+# Xray 面板主控配置示例（复制为 config.yaml 并按环境修改）
+app:
+  name: xray-panel
+  env: dev            # dev | prod（prod 关闭 gin debug 日志）
+  port: 18080         # 注意：若宿主机 Windows 侧有服务占用同端口，WSL 内绑定会失败
+
+db:
+  driver: sqlite      # sqlite | mysql（开发默认 sqlite，生产用 mysql）
+  dsn: ./data/panel.db
+  # mysql 示例：
+  # driver: mysql
+  # dsn: "user:pass@tcp(127.0.0.1:3306)/xray_panel?charset=utf8mb4&parseTime=True&loc=Local"
+
+jwt:
+  # 生产务必替换为 >=32 字节随机串（可用 `openssl rand -hex 32` 生成）
+  secret: change-me-in-production-at-least-32-chars
+  access_ttl: 2h      # 短期 access token 有效期
+  refresh_ttl: 168h   # 长期 refresh token 有效期（7 天）
+
+admin:
+  # 首次启动自动创建初始管理员；生产首次登录后立即修改密码
+  username: admin
+  password: admin123
+
+auth:
+  invite_required: true   # 是否强制邀请码注册
