@@ -26,3 +26,9 @@ admin:
 
 auth:
   invite_required: true   # 是否强制邀请码注册
+
+backup:
+  enabled: true            # 定时备份开关（BACKUP_ENABLED）
+  schedule: "0 3 * * *"    # cron 表达式：每天 03:00（BACKUP_SCHEDULE）
+  keep: 14                 # 保留最近 N 份备份（BACKUP_KEEP）
+  dir: ./data/backups      # 备份目录（compose 下位于数据卷）（BACKUP_DIR）
