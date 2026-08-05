@@ -5,3 +5,6 @@ package embed
 
 // AgentBinary 为空表示未内嵌。
 var AgentBinary []byte
+
+// AgentVersion 为空表示非内嵌构建（与 embed.go 符号一致，构建期 -ldflags -X 注入）。
+var AgentVersion string

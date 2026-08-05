@@ -9,3 +9,6 @@ import _ "embed"
 
 //go:embed agent-linux
 var AgentBinary []byte
+
+// AgentVersion 内嵌 agent 的版本（构建期 -ldflags -X 注入；与 scripts/build.* 同步）。
+var AgentVersion string
