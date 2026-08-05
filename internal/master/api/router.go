@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/zhx/xray-panel/internal/master/embed"
 	"github.com/zhx/xray-panel/internal/master/middleware"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
@@ -56,14 +57,29 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh）
 		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
 
-		// 节点 Agent 二进制下载（部署用；Docker 镜像内置 /app/agent）
+		// 节点 Agent 二进制下载（部署用；优先内嵌二进制，其次 AGENT_BIN_PATH / Docker 内置 /app/agent / 本地文件兜底）
 		v1.GET("/download/agent", func(c *gin.Context) {
+			if len(embed.AgentBinary) > 0 {
+				c.Header("Content-Disposition", `attachment; filename="xray-agent"`)
+				c.Data(http.StatusOK, "application/octet-stream", embed.AgentBinary)
+				return
+			}
 			p := os.Getenv("AGENT_BIN_PATH")
 			if p == "" {
 				p = "/app/agent"
 			}
 			if _, err := os.Stat(p); err != nil {
-				util.Fail(c, http.StatusNotFound, "agent 二进制未内置（开发环境请用 --agent-file 或本地编译）")
+				// 开发环境兜底：scripts/build.* 的产物（agent-linux / bin/agent-linux）
+				p = ""
+				for _, cand := range []string{"agent-linux", "bin/agent-linux"} {
+					if _, err := os.Stat(cand); err == nil {
+						p = cand
+						break
+					}
+				}
+			}
+			if p == "" {
+				util.Fail(c, http.StatusNotFound, "agent 二进制未内置（请用 scripts/build.sh 或 build.ps1 构建，或设置 AGENT_BIN_PATH）")
 				return
 			}
 			c.FileAttachment(p, "xray-agent")

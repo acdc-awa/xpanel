@@ -38,6 +38,7 @@ data/
 /bin/
 /tmp/
 agent-linux
+internal/master/embed/agent-linux
 
 # 本地配置（含 JWT secret / 管理员口令，不入库；参考 configs/config.example.yaml）
 configs/config.yaml
@@ -45,5 +46,8 @@ configs/config.yaml
 # 多代理工作流 scratch 状态
 .agents/
 
-# Windows xray 二进制（约 90MB，不入库）
-docs/Xray-windows-64/
+# Windows xray 发行包二进制（约 90MB，不入库；保留 LICENSE/README 追踪）
+tools/xray-windows-64/xray.exe
+tools/xray-windows-64/geoip.dat
+tools/xray-windows-64/geosite.dat
+tools/xray-windows-64/wintun.dll
