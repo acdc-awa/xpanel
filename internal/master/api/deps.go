@@ -5,6 +5,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/config"
+	"github.com/zhx/xray-panel/internal/master/backup"
 	"github.com/zhx/xray-panel/internal/master/nodegate"
 	"github.com/zhx/xray-panel/internal/master/services"
 )
@@ -21,4 +22,5 @@ type Deps struct {
 	Audit   *services.AuditService
 	Config  *services.ConfigService
 	Site    *services.SiteService
+	Backup  *backup.Service
 }
