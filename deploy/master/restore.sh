@@ -29,11 +29,13 @@ if [[ ! "$TARGET" =~ ^panel-[0-9]{8}-[0-9]{6}\.db$ ]]; then
   echo "错误: 备份文件名格式不符: $TARGET" >&2; exit 1
 fi
 
-echo "==> 快照当前数据库（panel.db.pre-restore）"
-docker compose exec -T master sh -c 'cp /app/data/panel.db /app/data/panel.db.pre-restore'
-
-echo "==> 停止服务"
+echo "==> 停止服务（快照需在停止后进行：WAL 模式下运行中只拷主文件会不一致）"
 docker compose stop master
+
+echo "==> 快照当前数据库三件套到本脚本目录（原库另存 panel.db.pre-restore*）"
+docker compose cp master:/app/data/panel.db ./panel.db.pre-restore
+docker compose cp master:/app/data/panel.db-wal ./panel.db.pre-restore-wal 2>/dev/null || true
+docker compose cp master:/app/data/panel.db-shm ./panel.db.pre-restore-shm 2>/dev/null || true
 
 echo "==> 替换数据库（备份在容器卷内，经宿主临时文件中转：docker cp 不支持容器↔容器）"
 TMPDB="restore.tmp.db"
@@ -45,7 +47,16 @@ rm -f "$TMPDB"
 echo "==> 启动服务"
 docker compose start master
 
-echo "==> 验证"
+echo "==> 修正数据库属主（容器 USER app；docker cp 写回的文件属主为宿主用户）"
+docker compose exec -T -u root master chown app:app /app/data/panel.db
+
+echo "==> 验证可写性（exec 以容器 USER=app 运行，test -w 真实反映 app 可写）"
+if ! docker compose exec -T master sh -c 'test -w /app/data/panel.db'; then
+  echo "错误: /app/data/panel.db 对 app 不可写（属主可能仍为宿主用户）" >&2
+  exit 1
+fi
+
+echo "==> 验证服务健康（healthz 为第二层）"
 OK=""
 for i in 1 2 3 4 5; do
   if docker compose exec -T master sh -c 'wget -qO- http://127.0.0.1:18080/healthz' 2>/dev/null | grep -q '"ok"'; then
@@ -58,4 +69,4 @@ if [[ -z "$OK" ]]; then
   exit 1
 fi
 
-echo "完成。原库已保留为 /app/data/panel.db.pre-restore"
+echo "完成。原库三件套已保留在脚本目录: ./panel.db.pre-restore*"

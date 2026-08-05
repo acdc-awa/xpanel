@@ -20,9 +20,13 @@ var Version = "dev"
 // CurrentVersion 返回当前 agent 版本。
 func CurrentVersion() string { return Version }
 
-// normVersion 归一化版本串：去掉 v 前缀，非法段视为 0。
+// normVersion 归一化版本串：去掉 v 前缀，截断第一个 - 之前的部分（git describe 输出
+// 如 v1.2.3-5-gabc1234 的 pre-release 后缀忽略），非法段视为 0。
 func normVersion(s string) string {
 	s = strings.TrimSpace(strings.TrimPrefix(s, "v"))
+	if i := strings.Index(s, "-"); i >= 0 {
+		s = s[:i]
+	}
 	if s == "" {
 		return "0"
 	}
@@ -122,15 +126,20 @@ func Sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// EnsureURL 把 ws(s) 地址转成 http(s)（与 install-agent.sh 的转换一致）。
+// EnsureURL 把 ws(s) 地址转成 http(s)，并剥离 /api/ 之后的路径（与 install-agent.sh 的
+// ORIGIN 提取一致）：master.url 形如 ws://host/api/v1/node/ws，下载端点在其 origin 下。
 func EnsureURL(masterURL string) string {
-	switch {
-	case strings.HasPrefix(masterURL, "wss://"):
-		return "https://" + strings.TrimPrefix(masterURL, "wss://")
-	case strings.HasPrefix(masterURL, "ws://"):
-		return "http://" + strings.TrimPrefix(masterURL, "ws://")
+	u := masterURL
+	if i := strings.Index(u, "/api/"); i >= 0 {
+		u = u[:i]
 	}
-	return strings.TrimSuffix(masterURL, "/")
+	switch {
+	case strings.HasPrefix(u, "wss://"):
+		return "https://" + strings.TrimPrefix(u, "wss://")
+	case strings.HasPrefix(u, "ws://"):
+		return "http://" + strings.TrimPrefix(u, "ws://")
+	}
+	return strings.TrimSuffix(u, "/")
 }
 
 // ErrUpToDate 已是最新版本。

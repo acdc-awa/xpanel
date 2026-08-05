@@ -2,6 +2,7 @@ package backup
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +68,37 @@ func TestSnapshotCreatesValidBackup(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("备份中行数 = %d, want 2", n)
+	}
+}
+
+// TestSnapshotQuotedPath 备份目录路径含单引号时快照仍应成功（SQL 字面量转义）。
+func TestSnapshotQuotedPath(t *testing.T) {
+	dir := t.TempDir()
+	dsn, _ := setupDB(t, dir)
+	cfg := configForTest(filepath.Join(dir, "back'ups"))
+	svc, err := New(dsn, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := svc.Snapshot()
+	if err != nil {
+		t.Fatalf("含单引号路径快照失败: %v", err)
+	}
+	backPath := filepath.Join(cfg.Dir, info.File)
+	if _, err := os.Stat(backPath); err != nil {
+		t.Fatalf("备份文件未生成: %v", err)
+	}
+	db, err := sql.Open("sqlite", backPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var integrity string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&integrity); err != nil {
+		t.Fatal(err)
+	}
+	if integrity != "ok" {
+		t.Fatalf("integrity_check = %q", integrity)
 	}
 }
 

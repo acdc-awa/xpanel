@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 
 // tsRe 备份文件名格式：panel-20060102-150405.db。
 var tsRe = regexp.MustCompile(`^panel-\d{8}-\d{6}\.db$`)
+
+// quoteSQL 用单引号 SQL 字面量包裹路径（SQLite 不支持反斜杠转义；%q 的双引号标识符
+// 会把 \ 转成 \\ 且 \x22 无法还原，Windows 下依赖文件系统归一化属侥幸）。
+func quoteSQL(p string) string { return "'" + strings.ReplaceAll(p, "'", "''") + "'" }
 
 // BackupInfo 备份文件元信息。
 type BackupInfo struct {
@@ -74,7 +79,8 @@ func (s *Service) snapshotLocked() (BackupInfo, error) {
 		return BackupInfo{}, err
 	}
 	defer src.Close()
-	if _, err := src.Exec(fmt.Sprintf(`VACUUM INTO %q`, dst)); err != nil {
+	if _, err := src.Exec(fmt.Sprintf(`VACUUM INTO %s`, quoteSQL(dst))); err != nil {
+		_ = os.Remove(dst) // 清理半成品，防其被 List/下载
 		s.log("backup.create", "failed", fmt.Sprintf("VACUUM INTO 失败: %v", err))
 		return BackupInfo{}, err
 	}

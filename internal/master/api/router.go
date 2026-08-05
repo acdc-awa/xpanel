@@ -17,6 +17,17 @@ import (
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
+// agentDownloadHeaders 计算 /download/agent 下载响应头（version 为空则不发送版本头）。
+// embed 与非 embed 路径共用；agent 升级（internal/agent/upgrade）以此为契约。
+func agentDownloadHeaders(data []byte, version string) (versionHdr, shaHdr string) {
+	if version != "" {
+		versionHdr = version
+	}
+	sum := sha256.Sum256(data)
+	shaHdr = hex.EncodeToString(sum[:])
+	return
+}
+
 // NewRouter 组装全部路由。
 func (d *Deps) NewRouter() *gin.Engine {
 	r := gin.New()
@@ -88,11 +99,11 @@ func (d *Deps) NewRouter() *gin.Engine {
 					return
 				}
 			}
-			if embed.AgentVersion != "" {
-				c.Header("X-Agent-Version", embed.AgentVersion)
+			verHdr, shaHdr := agentDownloadHeaders(data, embed.AgentVersion)
+			if verHdr != "" {
+				c.Header("X-Agent-Version", verHdr)
 			}
-			sum := sha256.Sum256(data)
-			c.Header("X-Agent-Sha256", hex.EncodeToString(sum[:]))
+			c.Header("X-Agent-Sha256", shaHdr)
 			c.Header("Content-Disposition", `attachment; filename="xray-agent"`)
 			c.Data(http.StatusOK, "application/octet-stream", data)
 		})
