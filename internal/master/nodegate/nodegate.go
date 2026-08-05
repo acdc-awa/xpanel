@@ -34,7 +34,8 @@ type Conn struct {
 	NodeID   string
 	WS       *websocket.Conn
 	Send     chan []byte
-	LastSeen int64 // unix 秒
+	done     chan struct{} // 关闭信号：通知 writePump 退出（代替关闭 Send，避免与并发 Send 竞态）
+	LastSeen int64         // unix 秒
 	mu       sync.Mutex
 	closed   bool
 }
@@ -42,13 +43,18 @@ type Conn struct {
 // touch 更新最近活跃时间。
 func (c *Conn) touch() { c.LastSeen = time.Now().Unix() }
 
-// closeSafe 幂等关闭。
+// closeSafe 幂等关闭：置 closed、关闭 done 通知 writePump 退出、关闭 WS。
+// 注意：这里刻意不 close(c.Send)——Send 通道可能正被并发 Send/Ask 选中发送，
+// 关闭它会触发 "send on closed channel" panic（详见 reliability_test.go 的竞态说明）。
 func (c *Conn) closeSafe() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.closed {
 		c.closed = true
-		_ = c.WS.Close()
+		close(c.done)
+		if c.WS != nil {
+			_ = c.WS.Close()
+		}
 	}
 }
 
@@ -137,6 +143,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		NodeID:   server.NodeID,
 		WS:       ws,
 		Send:     make(chan []byte, 64),
+		done:     make(chan struct{}),
 		LastSeen: time.Now().Unix(),
 	}
 	h.register(conn)
@@ -181,11 +188,11 @@ func (h *Hub) register(conn *Conn) {
 
 func (h *Hub) unregister(conn *Conn) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if cur, ok := h.conns[conn.ServerID]; ok && cur == conn {
 		delete(h.conns, conn.ServerID)
 	}
-	close(conn.Send)
+	h.mu.Unlock()
+	conn.closeSafe() // 幂等；只关闭 done/WS，不关闭 Send 通道（避免与并发 Send 竞态 panic）
 	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
 		Update("status", 0)
 }
@@ -291,6 +298,8 @@ func (h *Hub) writePump(conn *Conn) {
 			if err := conn.WS.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
+		case <-conn.done:
+			return
 		case <-ticker.C:
 			_ = conn.WS.SetWriteDeadline(time.Now().Add(WriteTimeout))
 			if err := conn.WS.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -378,8 +387,14 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
 	if err == nil && res != nil && res.OK {
-		if merr := h.Config.MarkPushed(p.ID); merr == nil {
-			log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
+		marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
+		if merr == nil {
+			if marked {
+				log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
+			} else {
+				// 推送期间 pending 已被更新（如用户编辑/每小时校准），保持 pending 待下一轮推送
+				log.Printf("nodegate: 节点 %d 推送成功但 pending 内容已被更新，保留待推送", serverID)
+			}
 		}
 	}
 }

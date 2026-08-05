@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -347,7 +348,10 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		return
 	}
 	if d.Config != nil {
-		_ = d.Config.MarkPushedByServer(id)
+		// 条件标记：若 Ask 期间 pending 被并发覆盖（内容不一致），保持 pending 待后续推送
+		if _, serr := d.Config.MarkPushedByServerIfSame(id, cfgStr); serr != nil {
+			log.Printf("api: 标记配置已推送失败 (server=%d): %v", id, serr)
+		}
 	}
 	util.OK(c, gin.H{
 		"ok":      true,

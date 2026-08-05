@@ -202,22 +202,39 @@ func (s *ConfigService) GetPending(serverID uint64) (*models.PendingConfig, erro
 	return &p, nil
 }
 
-// MarkPushedByServer 按服务器标记配置已推送。
-func (s *ConfigService) MarkPushedByServer(serverID uint64) error {
+// MarkPushedIfSame 仅当待推送配置内容仍为本次已下发内容（未被并发 SavePending 覆盖）
+// 且状态为 pending 时标记已推送，返回是否实际标记。
+// 背景：SavePending 覆盖的是同一行（ID 不变），若旧内容的推送回执到达时行内容已被
+// 更新，盲目按 ID 标记会把"从未下发的新内容"误标为 pushed，导致节点长期运行旧配置。
+// 内容不匹配时保持 pending，等待下一轮推送（用户编辑/重连补推/每小时校准）。
+func (s *ConfigService) MarkPushedIfSame(id uint64, configJSON string) (bool, error) {
 	now := time.Now()
-	return s.DB.Model(&models.PendingConfig{}).Where("server_id = ?", serverID).Updates(map[string]any{
-		"status":     "pushed",
-		"pushed_at":  now,
-		"updated_at": now,
-	}).Error
+	res := s.DB.Model(&models.PendingConfig{}).
+		Where("id = ? AND config_json = ? AND status = ?", id, configJSON, "pending").
+		Updates(map[string]any{
+			"status":     "pushed",
+			"pushed_at":  now,
+			"updated_at": now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
-// MarkPushed 标记配置已推送。
-func (s *ConfigService) MarkPushed(id uint64) error {
+// MarkPushedByServerIfSame 同 MarkPushedIfSame，按服务器 + 内容匹配标记
+// （供 API 生成下发后的确认路径使用）。
+func (s *ConfigService) MarkPushedByServerIfSame(serverID uint64, configJSON string) (bool, error) {
 	now := time.Now()
-	return s.DB.Model(&models.PendingConfig{}).Where("id = ?", id).Updates(map[string]any{
-		"status":    "pushed",
-		"pushed_at": now,
-		"updated_at": now,
-	}).Error
+	res := s.DB.Model(&models.PendingConfig{}).
+		Where("server_id = ? AND config_json = ? AND status = ?", serverID, configJSON, "pending").
+		Updates(map[string]any{
+			"status":     "pushed",
+			"pushed_at":  now,
+			"updated_at": now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
