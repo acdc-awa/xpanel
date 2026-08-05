@@ -4,9 +4,11 @@ package upgrade
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -129,4 +131,49 @@ func EnsureURL(masterURL string) string {
 		return "http://" + strings.TrimPrefix(masterURL, "ws://")
 	}
 	return strings.TrimSuffix(masterURL, "/")
+}
+
+// ErrUpToDate 已是最新版本。
+var ErrUpToDate = errors.New("已是最新版本")
+
+// Apply 完整升级流程：查版本 → 比较 → 下载 → sha256 校验 → 原子替换 → 重启。
+// exePath 为目标二进制路径（通常 os.Executable()）；restart 由调用方注入（systemd 重启或手动提示）。
+func Apply(f *Fetcher, exePath string, restart func() error, out io.Writer) error {
+	latest, err := f.Latest()
+	if err != nil {
+		return err
+	}
+	if Compare(CurrentVersion(), latest) >= 0 {
+		fmt.Fprintf(out, "当前版本 %s，已是最新（主控: %s）\n", CurrentVersion(), latest)
+		return ErrUpToDate
+	}
+	fmt.Fprintf(out, "发现新版本 %s（当前 %s），开始升级...\n", latest, CurrentVersion())
+
+	data, wantSum, err := f.Download()
+	if err != nil {
+		return err
+	}
+	if wantSum != "" && !strings.EqualFold(wantSum, Sha256Hex(data)) {
+		return fmt.Errorf("sha256 校验失败: 声明 %s 实际 %s", wantSum, Sha256Hex(data))
+	}
+
+	tmp := exePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, exePath); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	fmt.Fprintf(out, "二进制已替换（%s）\n", exePath)
+
+	if err := restart(); err != nil {
+		return fmt.Errorf("重启失败（新二进制已就位，可手动重启）: %w", err)
+	}
+	fmt.Fprintln(out, "重启完成，升级成功")
+	return nil
 }

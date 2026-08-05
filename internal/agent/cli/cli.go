@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zhx/xray-panel/internal/agent/config"
+	"github.com/zhx/xray-panel/internal/agent/upgrade"
 	"github.com/zhx/xray-panel/internal/agent/xrayproc"
 )
 
@@ -26,6 +27,7 @@ var commands = map[string]string{
 	"restart":   "重启 agent 服务（systemd）或 xray 进程（手动）",
 	"logs":      "查看日志（systemd: journalctl；手动: xray 日志文件）",
 	"uninstall": "卸载 agent（含 xray-core 与 geo 数据）",
+	"upgrade":   "升级 agent 到主控最新版本（--check 仅检查）",
 	"help":      "显示帮助或命令详情",
 }
 
@@ -76,6 +78,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runLogs(rest, stdout, stderr)
 	case "uninstall":
 		return runUninstall(rest, stdin, stdout, stderr)
+	case "upgrade":
+		return runUpgrade(rest, stdout, stderr)
 	case "run":
 		fmt.Fprintln(stderr, "run 子命令请直接使用 xray-agent 启动（或省略 run）")
 		return 2
@@ -115,7 +119,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  xray-agent <命令> [选项]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "命令:")
-	for _, c := range []string{"status", "restart", "logs", "uninstall", "help"} {
+	for _, c := range []string{"status", "restart", "logs", "uninstall", "upgrade", "help"} {
 		fmt.Fprintf(w, "  %-10s %s\n", c, commands[c])
 	}
 	fmt.Fprintln(w)
@@ -139,6 +143,9 @@ func printCmdHelp(cmd string, w io.Writer) {
 	case "uninstall":
 		fmt.Fprintln(w, "xray-agent uninstall - 卸载 agent（含 xray-core 与 geo 数据，自动适配 systemd/手动模式）")
 		fmt.Fprintln(w, "用法: xray-agent uninstall [--force] [-config <path>]")
+	case "upgrade":
+		fmt.Fprintln(w, "xray-agent upgrade - 升级 agent 到主控最新版本（下载 → sha256 校验 → 原子替换 → 重启）")
+		fmt.Fprintln(w, "用法: xray-agent upgrade [--check] [-config <path>]")
 	case "help":
 		fmt.Fprintln(w, "xray-agent help - 显示帮助或命令详情")
 		fmt.Fprintln(w, "用法: xray-agent help [命令]")
@@ -410,6 +417,60 @@ func runUninstall(rest []string, stdin io.Reader, stdout, stderr io.Writer) int 
 
 	fmt.Fprintln(stdout, "==> 卸载完成")
 	fmt.Fprintln(stdout, "提示: 可在主控管理端删除对应服务器节点以清理主控侧数据")
+	return 0
+}
+
+// ---------- upgrade ----------
+
+func runUpgrade(rest []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("upgrade")
+	cfgPath := fs.String("config", "", "配置文件路径")
+	checkOnly := fs.Bool("check", false, "仅检查版本")
+	if err := fs.Parse(rest); err != nil {
+		fmt.Fprintf(stderr, "参数错误: %v\n", err)
+		return 2
+	}
+	path := resolveConfigPath(*cfgPath)
+	cfg, err := loadTolerant(path)
+	if err != nil {
+		fmt.Fprintln(stderr, "upgrade 失败:", err)
+		return 1
+	}
+
+	f := &upgrade.Fetcher{BaseURL: upgrade.EnsureURL(cfg.Master.URL)}
+	if *checkOnly {
+		latest, err := f.Latest()
+		if err != nil {
+			fmt.Fprintln(stderr, "检查失败:", err)
+			return 1
+		}
+		if upgrade.Compare(upgrade.CurrentVersion(), latest) >= 0 {
+			fmt.Fprintf(stdout, "已是最新（当前 %s，主控 %s）\n", upgrade.CurrentVersion(), latest)
+		} else {
+			fmt.Fprintf(stdout, "有新版本 %s（当前 %s），执行 xray-agent upgrade 升级\n", latest, upgrade.CurrentVersion())
+		}
+		return 0
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, "获取自身路径失败:", err)
+		return 1
+	}
+	restart := func() error {
+		if isSystemdManaged() {
+			return runCmdErr("systemctl", "restart", "xray-agent")
+		}
+		fmt.Fprintln(stdout, "手动模式：请手动重启 agent（systemctl restart xray-agent 或重新运行）")
+		return nil
+	}
+	if err := upgrade.Apply(f, exe, restart, stdout); err != nil {
+		if errors.Is(err, upgrade.ErrUpToDate) {
+			return 0
+		}
+		fmt.Fprintln(stderr, "升级失败:", err)
+		return 1
+	}
 	return 0
 }
 
