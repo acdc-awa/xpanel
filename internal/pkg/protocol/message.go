@@ -23,6 +23,8 @@ const (
 	MsgRestartXray = "restart_xray"
 	MsgGetStatus   = "get_status"
 	MsgGetLogs     = "get_logs"
+
+	// upgrade_agent（预留）：主控→节点 推送升级指令（未实现；agent 升级逻辑见 internal/agent/upgrade）
 )
 
 // Message 为统一消息帧。
