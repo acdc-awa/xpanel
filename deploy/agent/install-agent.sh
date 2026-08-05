@@ -44,9 +44,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$MASTER" || -z "$NODE_ID" || -z "$SECRET" ]] && { echo "缺少 --master / --node-id / --secret"; usage; }
-# agent 下载地址默认取主控 origin 的 /api/v1/download/agent
+# agent 下载地址默认取主控 origin 的 /api/v1/download/agent；
+# 注意：下载走普通 HTTP(S)，不能沿用 master 的 ws(s) scheme（curl 会把 ws:// 当 WebSocket 升级）
 if [[ -z "$AGENT_URL" ]]; then
-  AGENT_URL="${MASTER%%/api/*}/api/v1/download/agent"
+  ORIGIN="${MASTER%%/api/*}"
+  case "$ORIGIN" in
+    wss://*) AGENT_URL="https://${ORIGIN#wss://}/api/v1/download/agent" ;;
+    ws://*)  AGENT_URL="http://${ORIGIN#ws://}/api/v1/download/agent" ;;
+    *)       AGENT_URL="${ORIGIN}/api/v1/download/agent" ;;
+  esac
 fi
 
 echo "==> 参数"
