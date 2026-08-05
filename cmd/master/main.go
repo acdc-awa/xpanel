@@ -22,6 +22,7 @@ import (
 
 	"github.com/zhx/xray-panel/internal/config"
 	"github.com/zhx/xray-panel/internal/master/api"
+	"github.com/zhx/xray-panel/internal/master/backup"
 	"github.com/zhx/xray-panel/internal/master/nodegate"
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/models"
@@ -73,11 +74,24 @@ func main() {
 	siteSvc := services.NewSiteService(database, cfg)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
+	backupSvc, err := backup.New(cfg.DB.DSN, cfg.Backup, auditSvc)
+	if err != nil {
+		log.Fatalf("初始化备份服务失败: %v", err)
+	}
+	backupCtx, backupCancel := context.WithCancel(context.Background())
+	defer backupCancel()
+	backupSvc.Start(backupCtx)
+	if cfg.Backup.Enabled {
+		log.Printf("备份服务已启用（schedule=%s, keep=%d, dir=%s）", cfg.Backup.Schedule, cfg.Backup.Keep, cfg.Backup.Dir)
+	} else {
+		log.Printf("备份服务已禁用（仅手动触发可用）")
+	}
+
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, Backup: backupSvc}
 	router := deps.NewRouter()
 
 	// Web Base：在 gin 路由前剥离自定义前缀（如 /panel/api/v1/... → /api/v1/...）。
