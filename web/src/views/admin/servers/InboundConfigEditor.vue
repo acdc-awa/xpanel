@@ -16,22 +16,19 @@ import { getXrayKeys } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, WSSettings, XHTTPSettings } from '@/api/types'
 
+export interface InboundEditorChangePayload {
+  settingsJson: string
+  streamSettings: string
+  sniffing: string
+  protocol: string
+  port: number
+  tag: string
+  listen: string
+}
+
 export interface InboundEditorEmits {
   (e: 'update:modelValue', value: string): void
-  (e: 'update:protocol', value: string): void
-  (e: 'update:network', value: string): void
-  (e: 'update:tlsType', value: string): void
-  (e: 'update:port', value: number): void
-  (e: 'update:tag', value: string): void
-  (e: 'change', payload: {
-    settingsJson: string
-    settings: InboundSettings
-    protocol: string
-    network: string
-    tlsType: string
-    port: number
-    tag: string
-  }): void
+  (e: 'change', payload: InboundEditorChangePayload): void
 }
 
 const props = withDefaults(
@@ -101,6 +98,9 @@ const tcpForm = reactive({
   request_host: '',
   request_path: '/',
 })
+
+// uTLS fingerprint
+const fingerprint = ref('chrome')
 
 // TLS & REALITY 设置
 const realityForm = reactive<RealitySettings>({
@@ -180,74 +180,78 @@ function moveFallback(index: number, direction: -1 | 1) {
 }
 
 // 从当前表单对象构建 InboundSettings JSON
-function buildSettingsObj(): InboundSettings {
-  const s: InboundSettings = {}
-
+function buildSettingsJSON(): string {
+  const s: Record<string, any> = { decryption: 'none' }
   if (fallbacks.value.length > 0) {
     s.fallbacks = fallbacks.value.map((f) => ({
       dest: f.dest,
-      name: f.name || undefined,
-      alpn: f.alpn || undefined,
       path: f.path || undefined,
       xver: f.xver || 0,
     }))
   }
+  return JSON.stringify(s)
+}
 
-  // Transport
+function buildStreamSettingsJSON(): string {
+  const s: Record<string, any> = {
+    network: localNetwork.value,
+    security: localTlsType.value,
+    fingerprint: fingerprint.value,
+  }
+
   if (localNetwork.value === 'ws') {
-    s.ws = { path: wsForm.path || '/', host: wsForm.host || undefined }
+    const ws: Record<string, any> = { path: wsForm.path || '/' }
+    if (wsForm.host) ws.headers = { Host: wsForm.host }
+    s.wsSettings = ws
   } else if (localNetwork.value === 'xhttp') {
-    s.xhttp = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/', host: xhttpForm.host || undefined }
+    s.xhttpSettings = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/' }
+    if (xhttpForm.host) s.xhttpSettings.host = xhttpForm.host
   } else if (localNetwork.value === 'grpc') {
-    s.grpc = {
-      service_name: grpcForm.service_name || 'grpc',
-      authority: grpcForm.authority || undefined,
-      multi_mode: grpcForm.multi_mode,
+    const g: Record<string, any> = { serviceName: grpcForm.service_name || 'grpc' }
+    if (grpcForm.authority) g.authority = grpcForm.authority
+    if (grpcForm.multi_mode) g.multiMode = true
+    s.grpcSettings = g
+  } else if (localNetwork.value === 'tcp' && tcpForm.header_type !== 'none') {
+    const hdr: Record<string, any> = { type: tcpForm.header_type }
+    if (tcpForm.header_type === 'http') {
+      hdr.request = {}
+      if (tcpForm.request_host) hdr.request.headers = { Host: tcpForm.request_host.split(',') }
+      if (tcpForm.request_path) hdr.request.path = tcpForm.request_path.split(',')
     }
+    s.tcpSettings = { header: hdr }
   }
 
-  // Sniffing（仅在启用时输出，键名与 xray-core streamSettings.sniffing 一致）
-  if (sniffingForm.enabled) {
-    s.sniffing = {
-      enabled: true,
-      destOverride: sniffingForm.destOverride,
-      metadataOnly: sniffingForm.metadataOnly,
-      routeOnly: sniffingForm.routeOnly,
-    }
-  }
-
-  // Security
   if (localTlsType.value === 'reality') {
-    const sNames = realityForm.server_name
-      ? realityForm.server_name.split(',').map((x) => x.trim()).filter(Boolean)
-      : []
-    const sIds = realityForm.short_id
-      ? realityForm.short_id.split(',').map((x) => x.trim()).filter(Boolean)
-      : []
-
-    s.reality = {
+    s.realitySettings = {
+      show: false,
       dest: realityForm.dest,
-      server_name: realityForm.server_name,
-      server_names: sNames.length > 0 ? sNames : (realityForm.server_name ? [realityForm.server_name] : []),
-      private_key: realityForm.private_key,
-      public_key: realityForm.public_key,
-      short_id: realityForm.short_id,
-      short_ids: sIds.length > 0 ? sIds : (realityForm.short_id ? [realityForm.short_id] : []),
-      spider_x: realityForm.spider_x || undefined,
+      serverNames: realityForm.server_name ? realityForm.server_name.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
+      privateKey: realityForm.private_key,
+      shortIds: realityForm.short_id ? realityForm.short_id.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
     }
+    if (realityForm.public_key) s.realitySettings.publicKey = realityForm.public_key
+    if (realityForm.spider_x && realityForm.spider_x !== '/') s.realitySettings.spiderX = realityForm.spider_x
   } else if (localTlsType.value === 'tls') {
-    const alpnArr = tlsAlpnText.value
-      ? tlsAlpnText.value.split(',').map((x) => x.trim()).filter(Boolean)
-      : []
-    s.tls = {
-      server_name: tlsForm.server_name || undefined,
-      cert_file: tlsForm.cert_file,
-      key_file: tlsForm.key_file,
-      alpn: alpnArr.length > 0 ? alpnArr : undefined,
+    const alpnArr = tlsAlpnText.value ? tlsAlpnText.value.split(',').map((x: string) => x.trim()).filter(Boolean) : []
+    const t: Record<string, any> = {
+      serverName: tlsForm.server_name || undefined,
+      certificates: [{ certificateFile: tlsForm.cert_file, keyFile: tlsForm.key_file }],
     }
+    if (alpnArr.length > 0) t.alpn = alpnArr
+    s.tlsSettings = t
   }
 
-  return s
+  return JSON.stringify(s)
+}
+
+function buildSniffingJSON(): string {
+  if (!sniffingForm.enabled) return ''
+  return JSON.stringify({
+    enabled: true,
+    destOverride: sniffingForm.destOverride,
+    metadataOnly: sniffingForm.metadataOnly,
+    routeOnly: sniffingForm.routeOnly,
+  })
 }
 
 // 同步表单数据 -> JSON & emits
@@ -255,28 +259,27 @@ function syncFormToJson() {
   if (isInternalUpdating.value) return
   isInternalUpdating.value = true
 
-  const settingsObj = buildSettingsObj()
-  const jsonStr = JSON.stringify(settingsObj, null, 2)
-  rawJsonText.value = jsonStr
+  const settingsJson = buildSettingsJSON()
+  const streamJson = buildStreamSettingsJSON()
+  const sniffJson = buildSniffingJSON()
+
+  rawJsonText.value = JSON.stringify({
+    settings_json: JSON.parse(settingsJson),
+    stream_settings: JSON.parse(streamJson),
+    sniffing: sniffJson ? JSON.parse(sniffJson) : null,
+  }, null, 2)
   jsonError.value = ''
 
-  emit('update:modelValue', jsonStr)
-  emit('update:protocol', localProtocol.value)
-  emit('update:network', localNetwork.value)
-  emit('update:tlsType', localTlsType.value)
-  emit('update:port', localPort.value)
-  emit('update:tag', localTag.value)
-
+  emit('update:modelValue', rawJsonText.value)
   emit('change', {
-    settingsJson: jsonStr,
-    settings: settingsObj,
+    settingsJson,
+    streamSettings: streamJson,
+    sniffing: sniffJson,
     protocol: localProtocol.value,
-    network: localNetwork.value,
-    tlsType: localTlsType.value,
     port: localPort.value,
     tag: localTag.value,
+    listen: '0.0.0.0',
   })
-
   isInternalUpdating.value = false
 }
 
@@ -417,6 +420,7 @@ watch(
     realityForm,
     tlsForm,
     tlsAlpnText,
+    fingerprint,
     sniffingForm,
   ],
   () => {
@@ -613,6 +617,21 @@ async function copyText(text: string, label: string) {
       <!-- 安全/加密配置 -->
       <div class="form-section">
         <div class="section-title">安全加密 ({{ localTlsType.toUpperCase() }})</div>
+
+        <div style="margin-bottom: 8px">
+          <el-form-item label="uTLS 指纹 (fingerprint)">
+            <el-select v-model="fingerprint" style="width: 240px">
+              <el-option label="chrome (推荐)" value="chrome" />
+              <el-option label="firefox" value="firefox" />
+              <el-option label="safari" value="safari" />
+              <el-option label="edge" value="edge" />
+              <el-option label="360" value="360" />
+              <el-option label="qq" value="qq" />
+              <el-option label="random" value="random" />
+              <el-option label="randomized" value="randomized" />
+            </el-select>
+          </el-form-item>
+        </div>
 
         <!-- REALITY -->
         <template v-if="localTlsType === 'reality'">

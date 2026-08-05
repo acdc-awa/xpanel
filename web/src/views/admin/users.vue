@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Search, View, Key, Ticket } from '@element-plus/icons-vue'
+import { Plus, Search, View, Key, Ticket, Delete, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { getUsers, createInvitations, getUserInbounds, setUserInbounds } from '@/api/admin'
+import { getUsers, createInvitations, getUserInbounds, setUserInbounds, createUser, toggleUser, deleteUser } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { AdminUser, InboundItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
@@ -88,6 +88,81 @@ async function saveGrants() {
   }
 }
 
+// ---- 手动创建用户 ----
+const newUserOpen = ref(false)
+const newUserForm = reactive({ email: '', password: '' })
+const newUserCreating = ref(false)
+const newUserResult = ref<{ uuid: string; email: string } | null>(null)
+
+async function submitNewUser() {
+  if (!newUserForm.email || !newUserForm.password) {
+    ElMessage.warning('请填写邮箱与密码')
+    return
+  }
+  newUserCreating.value = true
+  try {
+    const { data } = await createUser({ email: newUserForm.email, password: newUserForm.password })
+    if (data.code === 0) {
+      newUserResult.value = { uuid: data.data.uuid, email: data.data.email }
+      newUserForm.email = ''
+      newUserForm.password = ''
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '创建失败'))
+  } finally {
+    newUserCreating.value = false
+  }
+}
+
+function closeNewUser() {
+  newUserOpen.value = false
+  newUserResult.value = null
+}
+
+// ---- 封禁/解封 ----
+async function doToggle(row: any) {
+  const label = row.status === 1 ? '封禁' : '解封'
+  try {
+    await ElMessageBox.confirm(`确认${label}用户「${row.username}」？`, label, { type: 'warning' })
+  } catch { return }
+  try {
+    const { data } = await toggleUser(row.id)
+    if (data.code === 0) {
+      ElMessage.success(`已${label}`)
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, `${label}失败`))
+  }
+}
+
+// ---- 删除用户 ----
+async function doDelete(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除用户「${row.username}」？该操作将禁用账号并撤销所有入站授权。`,
+      '删除用户',
+      { type: 'error' },
+    )
+  } catch { return }
+  try {
+    const { data } = await deleteUser(row.id)
+    if (data.code === 0) {
+      ElMessage.success('已删除')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
+  }
+}
+
 // ---- 生成邀请码 ----
 const invOpen = ref(false)
 const invForm = reactive({ count: 5, expires: '' })
@@ -110,6 +185,16 @@ async function createInv() {
   }
 }
 
+async function copyText(text: string, label: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制`)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择')
+  }
+}
+
 async function copyCodes() {
   try {
     await navigator.clipboard.writeText(generated.value.join('\n'))
@@ -127,7 +212,10 @@ async function copyCodes() {
         <el-input v-model="keyword" placeholder="搜索用户名 / 邮箱" :prefix-icon="Search" clearable style="width: 240px" @keyup.enter="load" />
         <el-button @click="load">搜索</el-button>
       </div>
-      <el-button type="primary" @click="invOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
+      <div style="display: flex; gap: 8px">
+        <el-button type="primary" @click="newUserOpen = true"><el-icon><Plus /></el-icon>&nbsp;添加用户</el-button>
+        <el-button @click="invOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
+      </div>
     </div>
 
     <BaseCard>
@@ -138,8 +226,13 @@ async function copyCodes() {
         <el-table-column prop="username" label="用户名" min-width="110">
           <template #default="{ row }"><span style="font-weight: 600">{{ row.username }}</span></template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="180">
+        <el-table-column prop="email" label="邮箱" min-width="160">
           <template #default="{ row }"><code class="cell-mono">{{ row.email || '—' }}</code></template>
+        </el-table-column>
+        <el-table-column prop="uuid" label="UUID" min-width="200">
+          <template #default="{ row }">
+            <code class="cell-mono" style="font-size: 11px; cursor: pointer" :title="'点击复制: ' + (row.uuid || '')" @click="copyText(row.uuid || '', 'UUID')">{{ row.uuid || '—' }}</code>
+          </template>
         </el-table-column>
         <el-table-column label="角色" width="90">
           <template #default="{ row }">
@@ -170,7 +263,11 @@ async function copyCodes() {
         </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text @click="openDetail(row)"><el-icon><View /></el-icon></el-button>
+            <el-button size="small" text type="primary" @click="openDetail(row)"><el-icon><View /></el-icon></el-button>
+            <el-button size="small" text :type="row.status === 1 ? 'warning' : 'success'" @click="doToggle(row)">
+              <el-icon><Key /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click="doDelete(row)"><el-icon><Delete /></el-icon></el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -194,16 +291,22 @@ async function copyCodes() {
         <div class="detail-rows">
           <div class="row"><span class="k">用户名</span><span class="v">{{ current.username }}</span></div>
           <div class="row"><span class="k">邮箱</span><span class="v">{{ current.email || '—' }}</span></div>
+          <div class="row">
+            <span class="k">UUID</span>
+            <code class="cell-mono" style="font-size: 11px; cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis" @click="copyText(current.uuid || '', 'UUID')">{{ current.uuid || '—' }}</code>
+          </div>
           <div class="row"><span class="k">角色</span><span class="v">{{ current.role === 'admin' ? '管理员' : '用户' }}</span></div>
           <div class="row"><span class="k">套餐</span><span class="v">{{ current.plan_id ? `#${current.plan_id}` : '—' }}</span></div>
           <div class="row"><span class="k">到期时间</span><span class="v">{{ fmtTime(current.expire_at) }}</span></div>
           <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>
         </div>
         <div class="detail-actions">
-          <el-button size="small" disabled><el-icon><Key /></el-icon>&nbsp;重置订阅 Token</el-button>
-          <el-button size="small" disabled>调整套餐</el-button>
-          <el-button size="small" type="danger" plain disabled>封禁</el-button>
-          <p class="muted" style="width: 100%">以上操作随 P4/P5 管理端完善后开放</p>
+          <el-button size="small" :type="current.status === 1 ? 'warning' : 'success'" @click="doToggle(current); detailOpen = false">
+            {{ current.status === 1 ? '封禁' : '解封' }}
+          </el-button>
+          <el-button v-if="current.role !== 'admin'" size="small" type="danger" plain @click="doDelete(current); detailOpen = false">
+            删除
+          </el-button>
         </div>
 
         <!-- 入站授权（订阅按此过滤） -->
@@ -223,6 +326,44 @@ async function copyCodes() {
         </div>
       </template>
     </el-drawer>
+
+    <!-- 手动创建用户弹窗 -->
+    <el-dialog v-model="newUserOpen" title="添加用户" width="520px" @close="closeNewUser">
+      <template v-if="!newUserResult">
+        <el-form label-position="top">
+          <el-form-item label="邮箱">
+            <el-input v-model="newUserForm.email" placeholder="user@example.com" />
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="newUserForm.password" type="password" show-password placeholder="至少 8 位" />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template v-else>
+        <el-alert type="success" :closable="false" show-icon title="用户已创建" style="margin-bottom: 12px" />
+        <div class="secret-box">
+          <div class="secret-row">
+            <span class="k">邮箱</span>
+            <code>{{ newUserResult.email }}</code>
+          </div>
+          <div class="secret-row">
+            <span class="k">UUID</span>
+            <code>{{ newUserResult.uuid }}</code>
+            <el-button size="small" text @click="copyText(newUserResult.uuid, 'UUID')"><el-icon><CopyDocument /></el-icon></el-button>
+          </div>
+          <p class="muted" style="margin: 0; font-size: 12px">UUID 已生成，用户可通过此 UUID 导入订阅（待订阅模块开放）。</p>
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="!newUserResult">
+          <el-button @click="newUserOpen = false">取消</el-button>
+          <el-button type="primary" :loading="newUserCreating" @click="submitNewUser">创建</el-button>
+        </template>
+        <template v-else>
+          <el-button type="primary" @click="closeNewUser">完成</el-button>
+        </template>
+      </template>
+    </el-dialog>
 
     <!-- 生成邀请码弹窗 -->
     <el-dialog v-model="invOpen" title="生成邀请码" width="440px">

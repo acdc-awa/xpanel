@@ -41,6 +41,7 @@ export interface AdminUser {
   id: number
   username: string
   email: string
+  uuid: string
   role: Role
   status: number
   plan_id: number
@@ -121,9 +122,10 @@ export interface InboundItem {
   tag: string
   protocol: string
   port: number
-  network: string
-  tls_type: string
+  listen: string
   settings_json: string
+  stream_settings: string
+  sniffing: string
   ratio: number
   enabled: boolean
   created_at: string

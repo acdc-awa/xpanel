@@ -18,21 +18,23 @@ type Server struct {
 }
 
 // Inbound 入站（接入点），每节点可配多个。
+// settings_json 存协议层 JSON（clients 动态注入 / fallbacks / decryption）；
+// stream_settings 存传输层 JSON（network / security / realitySettings / wsSettings / tlsSettings 等）；
+// sniffing 存流量嗅探 JSON。
 type Inbound struct {
-	ID           uint64    `gorm:"primaryKey" json:"id"`
-	ServerID     uint64    `gorm:"index;not null" json:"server_id"`
-	Tag          string    `gorm:"size:64;not null" json:"tag"`
-	Protocol     string    `gorm:"size:16;not null" json:"protocol"` // vless / vmess / trojan / shadowsocks
-	Port         int       `gorm:"not null" json:"port"`
-	UUID         string    `gorm:"size:64" json:"uuid"`
-	Password     string    `gorm:"size:255" json:"-"`
-	Network      string    `gorm:"size:16" json:"network"`  // tcp / ws / grpc / xhttp
-	TLSType      string    `gorm:"size:16" json:"tls_type"` // none / tls / reality
-	SettingsJSON string    `gorm:"type:text" json:"settings_json"`
-	Ratio        float64   `gorm:"default:1" json:"ratio"`
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID             uint64    `gorm:"primaryKey" json:"id"`
+	ServerID       uint64    `gorm:"index;not null" json:"server_id"`
+	Tag            string    `gorm:"size:64;not null" json:"tag"`
+	Protocol       string    `gorm:"size:16;not null" json:"protocol"` // vless / vmess / trojan / shadowsocks
+	Port           int       `gorm:"not null" json:"port"`
+	Listen         string    `gorm:"size:64" json:"listen"`            // 监听地址，空 = 0.0.0.0
+	SettingsJSON   string    `gorm:"type:text" json:"settings_json"`   // 协议 settings（透传，clients 由后端注入）
+	StreamSettings string    `gorm:"type:text" json:"stream_settings"` // 传输 streamSettings（透传）
+	Sniffing       string    `gorm:"type:text" json:"sniffing"`        // 嗅探配置（透传）
+	Ratio          float64   `gorm:"default:1" json:"ratio"`
+	Enabled        bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // UserInbound 用户-入站授权关系。

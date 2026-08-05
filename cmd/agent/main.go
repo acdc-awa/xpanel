@@ -30,10 +30,23 @@ func main() {
 		}
 	}
 
-	cfgPath := flag.String("config", "agent.yaml", "配置文件路径")
+	cfgPath := flag.String("config", "", "配置文件路径（默认探测 /etc/xray-agent/config.yml 或 ./agent.yaml）")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
+	path := *cfgPath
+	if path == "" {
+		for _, cand := range []string{"/etc/xray-agent/config.yml", "agent.yaml"} {
+			if _, err := os.Stat(cand); err == nil {
+				path = cand
+				break
+			}
+		}
+	}
+	if path == "" {
+		log.Fatal("未找到配置文件（可加 -config 指定路径，默认探测 /etc/xray-agent/config.yml 或 ./agent.yaml）")
+	}
+
+	cfg, err := config.Load(path)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}

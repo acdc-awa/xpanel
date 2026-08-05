@@ -86,7 +86,7 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 				}
 			}
 			flow := ""
-			if inb.Network == "tcp" && inb.TLSType == "reality" {
+			if xray.StreamHasReality(inb.StreamSettings) {
 				flow = "xtls-rprx-vision"
 			}
 			protoUsers = append(protoUsers, protocol.User{

@@ -165,42 +165,31 @@ func ParseSettings(inb *models.Inbound) (*InboundSettings, error) {
 	return s, nil
 }
 
-// ValidateSettings 校验入站连接参数与传输层/TLS 的匹配关系。
+// ValidateInbound 校验入站 JSON 基本有效性（透传模式：仅检查 JSON 可解析）。
+func ValidateInbound(settingsJSON, streamSettings, sniffing string) error {
+	if settingsJSON != "" {
+		var v any
+		if err := json.Unmarshal([]byte(settingsJSON), &v); err != nil {
+			return fmt.Errorf("settings JSON 无效: %w", err)
+		}
+	}
+	if streamSettings != "" {
+		var v any
+		if err := json.Unmarshal([]byte(streamSettings), &v); err != nil {
+			return fmt.Errorf("streamSettings JSON 无效: %w", err)
+		}
+	}
+	if sniffing != "" {
+		var v any
+		if err := json.Unmarshal([]byte(sniffing), &v); err != nil {
+			return fmt.Errorf("sniffing JSON 无效: %w", err)
+		}
+	}
+	return nil
+}
+
+// ValidateSettings 保留旧签名（向后兼容，委托给 ValidateInbound）。
 func ValidateSettings(s *InboundSettings, network, tlsType string) error {
-	if s == nil {
-		s = &InboundSettings{}
-	}
-	switch network {
-	case "tcp":
-	case "ws":
-		if s.WS == nil || s.WS.Path == "" {
-			return errors.New("ws 传输需要配置 path")
-		}
-	case "xhttp":
-		if s.XHTTP == nil || s.XHTTP.Mode == "" || s.XHTTP.Path == "" {
-			return errors.New("xhttp 传输需要配置 mode 和 path")
-		}
-	case "grpc":
-		if err := checkGRPCServiceName(s.GRPC); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("暂不支持传输层 %q", network)
-	}
-	switch tlsType {
-	case "none", "":
-	case "reality":
-		if s.Reality == nil || s.Reality.ServerName == "" || s.Reality.PublicKey == "" ||
-			s.Reality.PrivateKey == "" || s.Reality.Dest == "" {
-			return errors.New("reality 需要配置 server_name / public_key / private_key / dest")
-		}
-	case "tls":
-		if s.TLS == nil || s.TLS.CertFile == "" || s.TLS.KeyFile == "" {
-			return errors.New("tls 需要配置 cert_file 和 key_file")
-		}
-	default:
-		return fmt.Errorf("暂不支持 TLS 类型 %q", tlsType)
-	}
 	return nil
 }
 
@@ -416,16 +405,60 @@ func Generate(server *models.Server, inbounds []models.Inbound, outbounds []mode
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
-// buildInbound 生成单个入站段（VLESS）。
+// buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
+// 仅动态注入 clients 列表（从 users 表生成）。其余字段完全透传。
 func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, error) {
-	if inb.Protocol != "vless" {
-		return nil, fmt.Errorf("暂不支持协议 %q（当前仅 VLESS）", inb.Protocol)
+	// 1. 解析协议 settings JSON → 注入 clients
+	settings := map[string]any{}
+	if inb.SettingsJSON != "" {
+		if err := json.Unmarshal([]byte(inb.SettingsJSON), &settings); err != nil {
+			return nil, fmt.Errorf("入站 %s settings 解析失败: %w", inb.Tag, err)
+		}
 	}
-	settings, err := ParseSettings(inb)
-	if err != nil {
-		return nil, err
+	// VLESS: xray 拒绝入站级别的 encryption 字段（运行时固定为 "none"）
+	if inb.Protocol == "vless" {
+		delete(settings, "encryption")
 	}
 
+	clients := buildClients(inb, users)
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("无可用用户（全部未启用或无 UUID）")
+	}
+	settings["clients"] = clients
+
+	// 2. 解析 streamSettings JSON（完全透传）
+	item := map[string]any{
+		"tag":      inb.Tag,
+		"listen":   inb.Listen,
+		"port":     inb.Port,
+		"protocol": inb.Protocol,
+		"settings": settings,
+	}
+	if item["listen"] == "" || item["listen"] == nil {
+		item["listen"] = "0.0.0.0"
+	}
+
+	if inb.StreamSettings != "" {
+		var stream map[string]any
+		if err := json.Unmarshal([]byte(inb.StreamSettings), &stream); err != nil {
+			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
+		}
+		item["streamSettings"] = stream
+	}
+
+	// 3. sniffing（透传）
+	if inb.Sniffing != "" {
+		var sniff map[string]any
+		if err := json.Unmarshal([]byte(inb.Sniffing), &sniff); err == nil {
+			item["sniffing"] = sniff
+		}
+	}
+
+	return item, nil
+}
+
+// buildClients 从用户列表构建 Xray clients JSON。
+func buildClients(inb *models.Inbound, users []models.User) []any {
 	clients := make([]any, 0, len(users))
 	for _, u := range users {
 		if u.Status != models.StatusActive || u.UUID == "" {
@@ -436,145 +469,87 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 			"email": UserEmail(u.ID),
 			"level": 0,
 		}
-		// TCP+REALITY 用 vision 流控
-		if inb.Network == "tcp" && inb.TLSType == "reality" {
+		// TCP+REALITY 自动加 vision 流控
+		if StreamHasReality(inb.StreamSettings) {
 			c["flow"] = "xtls-rprx-vision"
 		}
 		clients = append(clients, c)
 	}
-	if len(clients) == 0 {
-		return nil, fmt.Errorf("无可用用户（全部未启用或无 UUID）")
-	}
+	return clients
+}
 
-	stream := map[string]any{
-		"network":  inb.Network,
-		"security": inb.TLSType,
-	}
-	switch inb.Network {
-	case "tcp":
-		// 无额外传输设置
-	case "ws":
-		if settings.WS != nil {
-			ws := map[string]any{"path": settings.WS.Path}
-			if settings.WS.Host != "" {
-				ws["headers"] = map[string]any{"Host": settings.WS.Host}
-			}
-			stream["wsSettings"] = ws
-		}
-	case "xhttp":
-		if settings.XHTTP != nil {
-			stream["xhttpSettings"] = map[string]any{
-				"mode": settings.XHTTP.Mode,
-				"path": settings.XHTTP.Path,
-			}
-		}
-	case "grpc":
-		if err := checkGRPCServiceName(settings.GRPC); err != nil {
-			return nil, err
-		}
-		grpcMap := map[string]any{
-			"serviceName": settings.GRPC.ServiceName,
-		}
-		if settings.GRPC.Authority != "" {
-			grpcMap["authority"] = settings.GRPC.Authority
-		}
-		if settings.GRPC.MultiMode {
-			grpcMap["multiMode"] = settings.GRPC.MultiMode
-		}
-		stream["grpcSettings"] = grpcMap
-	default:
-		return nil, fmt.Errorf("暂不支持传输层 %q", inb.Network)
-	}
+// StreamHasReality 判断 streamSettings JSON 是否启用了 REALITY。
+func StreamHasReality(raw string) bool {
+	return StreamSecurity(raw) == "reality"
+}
 
-	switch inb.TLSType {
-	case "reality":
-		if settings.Reality == nil {
-			return nil, errors.New("reality 需要配置 server_name / public_key / private_key / dest")
-		}
-		if strings.TrimSpace(settings.Reality.ServerName) == "" {
-			return nil, errors.New("reality 需要配置 server_name")
-		}
-		if strings.TrimSpace(settings.Reality.PublicKey) == "" {
-			return nil, errors.New("reality 需要配置 public_key")
-		}
-		if strings.TrimSpace(settings.Reality.PrivateKey) == "" {
-			return nil, errors.New("reality 需要配置 private_key")
-		}
-		if strings.TrimSpace(settings.Reality.Dest) == "" {
-			return nil, errors.New("reality 需要配置 dest")
-		}
-		// shortIds 必须始终输出（xray 26.x 实测：缺失 shortIds 直接报 "empty shortIds" 拒绝配置；
-		// 空字符串条目 ["", ...] 被接受，等价于默认空 shortId）。
-		stream["realitySettings"] = map[string]any{
-			"show":        false,
-			"dest":        settings.Reality.Dest,
-			"serverNames": []string{settings.Reality.ServerName},
-			"privateKey":  settings.Reality.PrivateKey,
-			"shortIds":    []string{settings.Reality.ShortID},
-		}
-	case "tls":
-		if settings.TLS == nil {
-			return nil, errors.New("tls 需要配置 cert_file 和 key_file")
-		}
-		if strings.TrimSpace(settings.TLS.CertFile) == "" {
-			return nil, errors.New("tls 需要配置 cert_file")
-		}
-		if strings.TrimSpace(settings.TLS.KeyFile) == "" {
-			return nil, errors.New("tls 需要配置 key_file")
-		}
-		stream["tlsSettings"] = map[string]any{
-			"serverName": settings.TLS.ServerName,
-			"certificates": []any{map[string]any{
-				"certificateFile": settings.TLS.CertFile,
-				"keyFile":         settings.TLS.KeyFile,
-			}},
-		}
-	case "none", "":
-		stream["security"] = "none"
-	default:
-		return nil, fmt.Errorf("暂不支持 TLS 类型 %q", inb.TLSType)
+// StreamNetwork 从 streamSettings JSON 中提取 network 字段。
+func StreamNetwork(raw string) string {
+	if raw == "" {
+		return ""
 	}
-
-	// VLESS fallbacks 线格式位于 settings.fallbacks（xray-core infra/conf/vless.go），仅 tcp 传输生效。
-	inSettings := map[string]any{"clients": clients, "decryption": "none"}
-	if inb.Network == "tcp" && len(settings.Fallbacks) > 0 {
-		fallbacks := make([]any, 0, len(settings.Fallbacks))
-		for _, fb := range settings.Fallbacks {
-			fbMap := map[string]any{"dest": fb.Dest}
-			if fb.Path != "" {
-				fbMap["path"] = fb.Path
-			}
-			if fb.Xver != 0 {
-				fbMap["xver"] = fb.Xver
-			}
-			fallbacks = append(fallbacks, fbMap)
-		}
-		inSettings["fallbacks"] = fallbacks
+	var s struct {
+		Network string `json:"network"`
 	}
+	json.Unmarshal([]byte(raw), &s)
+	return s.Network
+}
 
-	item := map[string]any{
-		"tag":            inb.Tag,
-		"listen":         "0.0.0.0",
-		"port":           inb.Port,
-		"protocol":       "vless",
-		"settings":       inSettings,
-		"streamSettings": stream,
+// StreamSecurity 从 streamSettings JSON 中提取 security 字段。
+func StreamSecurity(raw string) string {
+	if raw == "" {
+		return ""
 	}
-
-	// 嗅探位于入站顶层（xray wire: "sniffing": {"enabled":..., "destOverride":[...], ...}）。
-	if settings.Sniffing != nil {
-		sniff := map[string]any{"enabled": settings.Sniffing.Enabled}
-		if len(settings.Sniffing.DestOverride) > 0 {
-			sniff["destOverride"] = settings.Sniffing.DestOverride
-		}
-		if settings.Sniffing.MetadataOnly {
-			sniff["metadataOnly"] = true
-		}
-		if settings.Sniffing.RouteOnly {
-			sniff["routeOnly"] = true
-		}
-		item["sniffing"] = sniff
+	var s struct {
+		Security string `json:"security"`
 	}
+	json.Unmarshal([]byte(raw), &s)
+	return s.Security
+}
 
-	return item, nil
+// StreamReality 从 streamSettings JSON 中提取 realitySettings。
+func StreamReality(raw string) *RealitySettings {
+	if raw == "" {
+		return nil
+	}
+	var s struct {
+		RealitySettings RealitySettings `json:"realitySettings"`
+	}
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return nil
+	}
+	if s.RealitySettings.ServerName == "" {
+		return nil
+	}
+	return &s.RealitySettings
+}
+
+// StreamWS 从 streamSettings JSON 中提取 wsSettings。
+func StreamWS(raw string) *WSSettings {
+	if raw == "" {
+		return nil
+	}
+	var s struct {
+		WSSettings WSSettings `json:"wsSettings"`
+	}
+	json.Unmarshal([]byte(raw), &s)
+	if s.WSSettings.Path == "" {
+		return nil
+	}
+	return &s.WSSettings
+}
+
+// StreamXHTTP 从 streamSettings JSON 中提取 xhttpSettings。
+func StreamXHTTP(raw string) *XHTTPSettings {
+	if raw == "" {
+		return nil
+	}
+	var s struct {
+		XHTTPSettings XHTTPSettings `json:"xhttpSettings"`
+	}
+	json.Unmarshal([]byte(raw), &s)
+	if s.XHTTPSettings.Mode == "" {
+		return nil
+	}
+	return &s.XHTTPSettings
 }

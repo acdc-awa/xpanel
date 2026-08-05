@@ -35,7 +35,7 @@ import {
   type ServerRoutingRule,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { InboundSettings } from '@/api/types'
+import type { InboundEditorChangePayload } from './InboundConfigEditor.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -151,19 +151,9 @@ const inboundEditorOpen = ref(false)
 const inboundEditing = ref<InboundItem | null>(null)
 const inboundSaving = ref(false)
 
-interface InboundChangePayload {
-  settingsJson: string
-  settings: InboundSettings
-  protocol: string
-  network: string
-  tlsType: string
-  port: number
-  tag: string
-}
+const inboundChange = ref<InboundEditorChangePayload | null>(null)
 
-const inboundChange = ref<InboundChangePayload | null>(null)
-
-function onInboundChange(payload: InboundChangePayload) {
+function onInboundChange(payload: InboundEditorChangePayload) {
   inboundChange.value = payload
 }
 
@@ -171,12 +161,12 @@ function openInboundCreate() {
   inboundEditing.value = null
   inboundChange.value = {
     settingsJson: '{}',
-    settings: {},
+    streamSettings: '{"network":"tcp","security":"reality"}',
+    sniffing: '',
     protocol: 'vless',
-    network: 'tcp',
-    tlsType: 'reality',
     port: 443,
     tag: '',
+    listen: '0.0.0.0',
   }
   inboundEditorOpen.value = true
 }
@@ -200,19 +190,20 @@ async function saveInbound() {
   }
   inboundSaving.value = true
   try {
-    const payload: InboundPayload = {
+    const payload: Partial<InboundPayload> = {
       server_id: props.server.id,
       tag: c.tag,
       protocol: c.protocol,
       port: c.port,
-      network: c.network,
-      tls_type: c.tlsType,
-      settings: c.settings,
+      listen: c.listen,
+      settings_json: c.settingsJson,
+      stream_settings: c.streamSettings,
+      sniffing: c.sniffing || undefined,
       ratio: inboundEditing.value?.ratio ?? 1,
     }
     const { data } = inboundEditing.value
       ? await updateInbound(inboundEditing.value.id, payload)
-      : await createInbound(payload)
+      : await createInbound(payload as InboundPayload)
     if (data.code === 0) {
       ElMessage.success(inboundEditing.value ? '入站已更新' : '入站已创建')
       inboundEditorOpen.value = false
@@ -513,8 +504,11 @@ watch(
           <el-table-column label="端口" width="80">
             <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
           </el-table-column>
-          <el-table-column prop="network" label="传输" width="80" />
-          <el-table-column prop="tls_type" label="TLS" width="90" />
+          <el-table-column label="传输/TLS" width="120">
+            <template #default="{ row }">
+              <code class="cell-mono" style="font-size: 11px">{{ row.stream_settings ? JSON.parse(row.stream_settings).network + '/' + JSON.parse(row.stream_settings).security : '—' }}</code>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="80">
             <template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggleInboundRow(row)" /></template>
           </el-table-column>
@@ -630,11 +624,6 @@ watch(
       <InboundConfigEditor
         :key="inboundEditing ? `edit-${inboundEditing.id}` : 'create'"
         :model-value="inboundEditing?.settings_json ?? '{}'"
-        :protocol="inboundEditing?.protocol ?? 'vless'"
-        :network="inboundEditing?.network ?? 'tcp'"
-        :tls-type="inboundEditing?.tls_type ?? 'reality'"
-        :port="inboundEditing?.port ?? 443"
-        :tag="inboundEditing?.tag ?? ''"
         @change="onInboundChange"
       />
       <template #footer>

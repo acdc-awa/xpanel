@@ -23,7 +23,7 @@ import (
 const (
 	HeartbeatTimeout = 90 * time.Second // 超过此时长无心跳视为失联
 	WriteTimeout     = 10 * time.Second
-	AskTimeout       = 15 * time.Second // 指令等待回执超时
+	AskTimeout       = 30 * time.Second // 指令等待回执超时（需 > testTimeout + stopGracePeriod + RTT）
 	PongWait         = 60 * time.Second // 等待 pong 回复超时
 	PingPeriod       = (PongWait * 9) / 10
 )

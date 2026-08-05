@@ -55,20 +55,16 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		settings, err := xray.ParseSettings(inb)
-		if err != nil {
-			continue
-		}
 		item := subscribe.ProxyItem{
 			Name:    subscribe.NodeName(&srv, inb),
 			Host:    srv.Host,
 			Port:    inb.Port,
 			UUID:    user.UUID,
-			Network: inb.Network,
-			TLSType: inb.TLSType,
-			Reality: settings.Reality,
-			WS:      settings.WS,
-			XHTTP:   settings.XHTTP,
+			Network: xray.StreamNetwork(inb.StreamSettings),
+			TLSType: xray.StreamSecurity(inb.StreamSettings),
+			Reality: xray.StreamReality(inb.StreamSettings),
+			WS:      xray.StreamWS(inb.StreamSettings),
+			XHTTP:   xray.StreamXHTTP(inb.StreamSettings),
 		}
 		items = append(items, item)
 	}

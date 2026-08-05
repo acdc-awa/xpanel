@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"strconv"
 	"time"
 
@@ -14,52 +13,42 @@ import (
 
 // inboundView 入站对外结构。
 type inboundView struct {
-	ID           uint64    `json:"id"`
-	ServerID     uint64    `json:"server_id"`
-	ServerName   string    `json:"server_name"`
-	Tag          string    `json:"tag"`
-	Protocol     string    `json:"protocol"`
-	Port         int       `json:"port"`
-	Network      string    `json:"network"`
-	TLSType      string    `json:"tls_type"`
-	SettingsJSON string    `json:"settings_json"`
-	Ratio        float64   `json:"ratio"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             uint64    `json:"id"`
+	ServerID       uint64    `json:"server_id"`
+	ServerName     string    `json:"server_name"`
+	Tag            string    `json:"tag"`
+	Protocol       string    `json:"protocol"`
+	Port           int       `json:"port"`
+	Listen         string    `json:"listen"`
+	SettingsJSON   string    `json:"settings_json"`
+	StreamSettings string    `json:"stream_settings"`
+	Sniffing       string    `json:"sniffing"`
+	Ratio          float64   `json:"ratio"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
-// inboundForm 入站创建/更新表单（结构化连接参数，替代手填 JSON）。
+// inboundForm 入站创建/更新表单（透传 JSON）。
 type inboundForm struct {
-	ID       uint64                `json:"id"`
-	ServerID uint64                `json:"server_id" binding:"required"`
-	Tag      string                `json:"tag" binding:"required,max=64"`
-	Protocol string                `json:"protocol" binding:"required"` // vless
-	Port     int                   `json:"port" binding:"required,min=1,max=65535"`
-	Network  string                `json:"network" binding:"required"` // tcp / ws / xhttp
-	TLSType  string                `json:"tls_type"`                   // none / tls / reality
-	Settings *xray.InboundSettings `json:"settings"`                   // reality/ws/xhttp/tls 结构化参数
-	Ratio    float64               `json:"ratio"`
+	ServerID       uint64  `json:"server_id" binding:"required"`
+	Tag            string  `json:"tag" binding:"required,max=64"`
+	Protocol       string  `json:"protocol" binding:"required"`
+	Port           int     `json:"port" binding:"required,min=1,max=65535"`
+	Listen         string  `json:"listen"`
+	SettingsJSON   string  `json:"settings_json"`   // 协议 settings（透传）
+	StreamSettings string  `json:"stream_settings"` // 传输 streamSettings（透传）
+	Sniffing       string  `json:"sniffing"`        // 嗅探（透传）
+	Ratio          float64 `json:"ratio"`
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
 	return inboundView{
 		ID: i.ID, ServerID: i.ServerID, ServerName: serverName,
 		Tag: i.Tag, Protocol: i.Protocol, Port: i.Port,
-		Network: i.Network, TLSType: i.TLSType, SettingsJSON: i.SettingsJSON,
+		Listen: i.Listen, SettingsJSON: i.SettingsJSON,
+		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
 		Ratio: i.Ratio, Enabled: i.Enabled, CreatedAt: i.CreatedAt,
 	}
-}
-
-// marshalSettings 序列化入站连接参数为 settings_json。
-func marshalSettings(s *xray.InboundSettings) (string, error) {
-	if s == nil {
-		return "", nil
-	}
-	b, err := json.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 // AdminInbounds GET /api/v1/admin/inbounds?server_id=
@@ -99,7 +88,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "服务器不存在")
 		return
 	}
-	if err := xray.ValidateSettings(req.Settings, req.Network, req.TLSType); err != nil {
+	if err := xray.ValidateInbound(req.SettingsJSON, req.StreamSettings, req.Sniffing); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
@@ -110,15 +99,11 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "该服务器上端口已被占用")
 		return
 	}
-	settingsJSON, err := marshalSettings(req.Settings)
-	if err != nil {
-		util.ServerError(c, "参数序列化失败")
-		return
-	}
 	inb := models.Inbound{
 		ServerID: req.ServerID, Tag: req.Tag, Protocol: req.Protocol,
-		Port: req.Port, Network: req.Network, TLSType: req.TLSType,
-		SettingsJSON: settingsJSON, Ratio: req.Ratio, Enabled: true,
+		Port: req.Port, Listen: req.Listen,
+		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
+		Sniffing: req.Sniffing, Ratio: req.Ratio, Enabled: true,
 	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -141,43 +126,42 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Tag      *string               `json:"tag"`
-		Protocol *string               `json:"protocol"`
-		Port     *int                  `json:"port"`
-		Network  *string               `json:"network"`
-		TLSType  *string               `json:"tls_type"`
-		Settings *xray.InboundSettings `json:"settings"`
-		Ratio    *float64              `json:"ratio"`
-		Enabled  *bool                 `json:"enabled"`
+		Tag            *string  `json:"tag"`
+		Protocol       *string  `json:"protocol"`
+		Port           *int     `json:"port"`
+		Listen         *string  `json:"listen"`
+		SettingsJSON   *string  `json:"settings_json"`
+		StreamSettings *string  `json:"stream_settings"`
+		Sniffing       *string  `json:"sniffing"`
+		Ratio          *float64 `json:"ratio"`
+		Enabled        *bool    `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	// 组装最终值用于校验
-	network := inb.Network
-	if req.Network != nil {
-		network = *req.Network
+	// 校验 JSON 有效性
+	sj := inb.SettingsJSON
+	if req.SettingsJSON != nil {
+		sj = *req.SettingsJSON
 	}
-	tlsType := inb.TLSType
-	if req.TLSType != nil {
-		tlsType = *req.TLSType
+	ss := inb.StreamSettings
+	if req.StreamSettings != nil {
+		ss = *req.StreamSettings
 	}
-	port := inb.Port
-	if req.Port != nil {
-		port = *req.Port
+	sn := inb.Sniffing
+	if req.Sniffing != nil {
+		sn = *req.Sniffing
 	}
-	settings := req.Settings
-	if settings == nil {
-		if parsed, perr := xray.ParseSettings(&inb); perr == nil {
-			settings = parsed
-		}
-	}
-	if err := xray.ValidateSettings(settings, network, tlsType); err != nil {
+	if err := xray.ValidateInbound(sj, ss, sn); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
 	// 端口冲突（排除自己）
+	port := inb.Port
+	if req.Port != nil {
+		port = *req.Port
+	}
 	var cnt int64
 	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ? AND id != ?", inb.ServerID, port, id).Count(&cnt)
 	if cnt > 0 {
@@ -195,16 +179,17 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.Port != nil {
 		updates["port"] = *req.Port
 	}
-	if req.Network != nil {
-		updates["network"] = *req.Network
+	if req.Listen != nil {
+		updates["listen"] = *req.Listen
 	}
-	if req.TLSType != nil {
-		updates["tls_type"] = *req.TLSType
+	if req.SettingsJSON != nil {
+		updates["settings_json"] = *req.SettingsJSON
 	}
-	if req.Settings != nil {
-		if sj, merr := marshalSettings(req.Settings); merr == nil {
-			updates["settings_json"] = sj
-		}
+	if req.StreamSettings != nil {
+		updates["stream_settings"] = *req.StreamSettings
+	}
+	if req.Sniffing != nil {
+		updates["sniffing"] = *req.Sniffing
 	}
 	if req.Ratio != nil {
 		updates["ratio"] = *req.Ratio
@@ -268,24 +253,28 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
 }
 
-// AdminXrayKeys GET /api/v1/admin/xray/keys —— 生成 REALITY X25519 密钥对。
+// AdminXrayKeys GET /api/v1/admin/xray/keys —— REALITY x25519 + shortId 一键生成。
 func (d *Deps) AdminXrayKeys(c *gin.Context) {
 	priv, pub, err := xray.GenerateKeys()
 	if err != nil {
 		util.ServerError(c, err.Error())
 		return
 	}
-	util.OK(c, gin.H{"private_key": priv, "public_key": pub})
+	util.OK(c, gin.H{
+		"private_key": priv,
+		"public_key":  pub,
+		"short_id":    xray.GenerateShortID(),
+	})
 }
 
-// enqueueConfig 入站变更后自动生成配置并待推送（非阻塞；节点离线保留，上线补推）。
+// enqueueConfig 入站变更后自动生成配置并待推送。
 func (d *Deps) enqueueConfig(serverID uint64) {
 	if d.Config == nil || d.Hub == nil {
 		return
 	}
 	cfg, err := d.Config.Generate(serverID)
 	if err != nil {
-		return // 无启用入站/无可用用户等，无需推送
+		return
 	}
 	if err := d.Config.SavePending(serverID, cfg); err != nil {
 		return
@@ -293,21 +282,17 @@ func (d *Deps) enqueueConfig(serverID uint64) {
 	go d.Hub.PushPending(serverID)
 }
 
-// formToInbound 把入站表单转为 models.Inbound（用于配置预览）。
-func formToInbound(f *inboundForm) (models.Inbound, error) {
-	settingsJSON, err := marshalSettings(f.Settings)
-	if err != nil {
-		return models.Inbound{}, err
-	}
+// formToInbound 把入站表单转为 models.Inbound（配置预览用）。
+func formToInbound(f *inboundForm) models.Inbound {
 	return models.Inbound{
-		ID: f.ID, ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
-		Port: f.Port, Network: f.Network, TLSType: f.TLSType,
-		SettingsJSON: settingsJSON, Ratio: f.Ratio, Enabled: true,
-	}, nil
+		ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
+		Port: f.Port, Listen: f.Listen,
+		SettingsJSON: f.SettingsJSON, StreamSettings: f.StreamSettings,
+		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
+	}
 }
 
 // AdminPreviewConfig POST /api/v1/admin/xray/preview-config
-// body: {"server_id": x, "form": {入站表单字段}} —— 用当前表单（临时替换同名 ID）预览生成的完整 xray 配置。
 func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 	var req struct {
 		ServerID uint64       `json:"server_id" binding:"required"`
@@ -323,22 +308,16 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		return
 	}
 	q := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true)
-	if req.Form != nil && req.Form.ID > 0 {
-		q = q.Where("id != ?", req.Form.ID)
+	if req.Form != nil && req.Form.Tag != "" {
+		q = q.Where("tag != ?", req.Form.Tag)
 	}
 	var inbounds []models.Inbound
 	if err := q.Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	// 追加当前表单入站
 	if req.Form != nil {
-		inb, err := formToInbound(req.Form)
-		if err != nil {
-			util.BadRequest(c, "参数序列化失败")
-			return
-		}
-		inbounds = append(inbounds, inb)
+		inbounds = append(inbounds, formToInbound(req.Form))
 	}
 	var users []models.User
 	if err := d.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {

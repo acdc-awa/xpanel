@@ -153,6 +153,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/backup", d.AdminCreateBackup)
 			admin.GET("/backup", d.AdminListBackups)
 			admin.GET("/backup/:file", d.AdminDownloadBackup)
+			admin.POST("/users", d.AdminCreateUser)
+			admin.DELETE("/users/:id", d.AdminDeleteUser)
+			admin.POST("/users/:id/toggle", d.AdminToggleUser)
 			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
 			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
 		}

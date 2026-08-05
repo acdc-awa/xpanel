@@ -136,9 +136,10 @@ export interface InboundPayload {
   tag: string
   protocol: string
   port: number
-  network: string
-  tls_type?: string
-  settings?: InboundSettings
+  listen?: string
+  settings_json?: string
+  stream_settings?: string
+  sniffing?: string
   ratio?: number
 }
 
@@ -294,4 +295,27 @@ export function setUserInbounds(userId: number, inboundIds: number[]) {
   return http.post<ApiResp<{ user_id: number; granted: number }>>(`/admin/users/${userId}/inbounds`, {
     inbound_ids: inboundIds,
   })
+}
+
+// ===== 手动用户管理 =====
+
+export interface CreateUserResult {
+  id: number
+  username: string
+  email: string
+  uuid: string
+  role: string
+  status: number
+}
+
+export function createUser(payload: { email: string; password: string }) {
+  return http.post<ApiResp<CreateUserResult>>('/admin/users', payload)
+}
+
+export function toggleUser(id: number) {
+  return http.post<ApiResp<{ id: number; status: number }>>(`/admin/users/${id}/toggle`)
+}
+
+export function deleteUser(id: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/users/${id}`)
 }

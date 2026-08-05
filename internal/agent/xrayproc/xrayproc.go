@@ -4,6 +4,7 @@
 package xrayproc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -39,11 +40,20 @@ func New(bin, configPath, logPath, pidFile string) *Proc {
 	return &Proc{Bin: bin, ConfigPath: configPath, LogPath: logPath, PidFile: pidFile}
 }
 
+// testTimeout 是 xray -test 的最长等待时间；超时视为配置校验失败，
+// 避免因 xray 进程卡死导致 agent 消息循环永久阻塞。
+const testTimeout = 10 * time.Second
+
 // TestConfig 用 `xray -test` 校验配置（exit 0 = 通过）。
 func (p *Proc) TestConfig(path string) error {
-	cmd := exec.Command(p.Bin, "-test", "-config", path)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, p.Bin, "-test", "-config", path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("xray -test 超时（%v）", testTimeout)
+		}
 		// 退出码 23 = 配置错误（实测）；其他为启动异常
 		return fmt.Errorf("xray -test 未通过: %v / %s", err, strings.TrimSpace(string(out)))
 	}
