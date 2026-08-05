@@ -8,12 +8,12 @@ import (
 )
 
 // Start 启动定时备份（cfg.Enabled=false 或 schedule 非法时静默降级为仅手动）。
-// 返回的 func 可调用 Stop() 停止 cron。
+// 停止调度：调用方 cancel ctx，Start 内部通过 ctx.Done() 停止 cron。
 func (s *Service) Start(ctx context.Context) {
 	if !s.enabled {
 		return
 	}
-	c := cron.New(cron.WithSeconds())
+	c := cron.New(cron.WithParser(cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)))
 	spec := s.schedule
 	if spec == "" {
 		spec = "0 3 * * *"

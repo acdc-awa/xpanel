@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/zhx/xray-panel/internal/config"
 )
 
@@ -72,5 +73,17 @@ func TestStartInvalidScheduleLogsAndContinues(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatal("非法 schedule 不应触发备份")
+	}
+}
+
+func TestFiveAndSixFieldSchedulesParse(t *testing.T) {
+	p := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	for _, spec := range []string{"0 3 * * *", "* * * * *", "0 0 3 * * *", "* * * * * *"} {
+		if _, err := p.Parse(spec); err != nil {
+			t.Errorf("parser 应接受 %q: %v", spec, err)
+		}
+	}
+	if _, err := p.Parse("not-a-cron"); err == nil {
+		t.Error("非法表达式应报错")
 	}
 }
