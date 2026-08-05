@@ -5,6 +5,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+trap 'rc=$?; if [ $rc -ne 0 ]; then echo "恢复失败：master 可能处于停止状态，可执行 docker compose start master 恢复服务" >&2; fi; exit $rc' ERR
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "错误: 未找到 docker" >&2; exit 1
@@ -19,25 +20,42 @@ docker compose exec -T master sh -c 'ls -lh /app/data/backups/panel-*.db 2>/dev/
 
 TARGET="${1:-}"
 if [[ -z "$TARGET" ]]; then
-  read -rp "输入要恢复的备份文件名: " TARGET
+  if ! read -rp "输入要恢复的备份文件名: " TARGET; then
+    echo "错误: 未提供备份文件名（用法: bash restore.sh <panel-YYYYMMDD-HHMMSS.db>）" >&2
+    exit 1
+  fi
 fi
 if [[ ! "$TARGET" =~ ^panel-[0-9]{8}-[0-9]{6}\.db$ ]]; then
   echo "错误: 备份文件名格式不符: $TARGET" >&2; exit 1
 fi
 
+echo "==> 快照当前数据库（panel.db.pre-restore）"
+docker compose exec -T master sh -c 'cp /app/data/panel.db /app/data/panel.db.pre-restore'
+
 echo "==> 停止服务"
 docker compose stop master
 
-echo "==> 替换数据库（备份先另存为 panel.db.pre-restore）"
-docker compose exec -T master sh -c \
-  "cp /app/data/panel.db /app/data/panel.db.pre-restore && cp /app/data/backups/$TARGET /app/data/panel.db && chown app:app /app/data/panel.db"
+echo "==> 替换数据库（备份在容器卷内，经宿主临时文件中转：docker cp 不支持容器↔容器）"
+TMPDB="restore.tmp.db"
+trap 'rm -f "$TMPDB"' EXIT
+docker compose cp master:/app/data/backups/$TARGET "$TMPDB"
+docker compose cp "$TMPDB" master:/app/data/panel.db
+rm -f "$TMPDB"
 
 echo "==> 启动服务"
 docker compose start master
 
-sleep 3
 echo "==> 验证"
-docker compose exec -T master sh -c 'wget -qO- http://127.0.0.1:18080/healthz' || \
-  curl -fsS http://127.0.0.1:18080/healthz || echo "healthz 未通过，请检查日志: docker compose logs master"
+OK=""
+for i in 1 2 3 4 5; do
+  if docker compose exec -T master sh -c 'wget -qO- http://127.0.0.1:18080/healthz' 2>/dev/null | grep -q '"ok"'; then
+    OK="1"; break
+  fi
+  sleep 2
+done
+if [[ -z "$OK" ]]; then
+  echo "healthz 未通过，请检查日志: docker compose logs master" >&2
+  exit 1
+fi
 
 echo "完成。原库已保留为 /app/data/panel.db.pre-restore"
