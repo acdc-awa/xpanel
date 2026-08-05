@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zhx/xray-panel/internal/agent/cli"
 	"github.com/zhx/xray-panel/internal/agent/client"
 	"github.com/zhx/xray-panel/internal/agent/collector"
 	"github.com/zhx/xray-panel/internal/agent/config"
@@ -17,6 +18,16 @@ import (
 )
 
 func main() {
+	// 管理子命令分派：xray-agent status|restart|logs|uninstall|help
+	args := os.Args[1:]
+	if len(args) > 0 && cli.IsSubcommand(args[0]) {
+		if args[0] == "run" {
+			os.Args = append([]string{os.Args[0]}, args[1:]...)
+		} else {
+			os.Exit(cli.Run(args, os.Stdin, os.Stdout, os.Stderr))
+		}
+	}
+
 	cfgPath := flag.String("config", "agent.yaml", "配置文件路径")
 	flag.Parse()
 
