@@ -8,6 +8,7 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/xtls/xray-core v1.260327.1-0.20260627131803-45cf2898ab12
 	google.golang.org/grpc v1.81.1
 	gopkg.in/yaml.v3 v3.0.1

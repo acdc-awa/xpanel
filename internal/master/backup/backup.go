@@ -28,10 +28,12 @@ type BackupInfo struct {
 
 // Service 备份服务：快照 / 列表 / 轮转（调度器见 scheduler.go）。
 type Service struct {
-	dsn   string
-	dir   string
-	keep  int
-	audit *services.AuditService
+	dsn      string
+	dir      string
+	keep     int
+	enabled  bool
+	schedule string
+	audit    *services.AuditService
 
 	mu  sync.Mutex       // 串行化快照与轮转
 	now func() time.Time // 可注入（测试）
@@ -43,11 +45,13 @@ func New(dsn string, cfg config.Backup, audit *services.AuditService) (*Service,
 		return nil, fmt.Errorf("创建备份目录失败: %w", err)
 	}
 	return &Service{
-		dsn:   dsn,
-		dir:   cfg.Dir,
-		keep:  cfg.Keep,
-		audit: audit,
-		now:   time.Now,
+		dsn:      dsn,
+		dir:      cfg.Dir,
+		keep:     cfg.Keep,
+		enabled:  cfg.Enabled,
+		schedule: cfg.Schedule,
+		audit:    audit,
+		now:      time.Now,
 	}, nil
 }
 
