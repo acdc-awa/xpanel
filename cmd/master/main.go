@@ -181,6 +181,7 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 	}
 	log.Printf("已创建初始管理员 %q（密码来自配置，请尽快登录后修改）", cfg.Admin.Username)
 }
+
 // ensureUserUUIDs 为历史用户补全 UUID（升级迁移）。
 func ensureUserUUIDs(database *gorm.DB) {
 	var users []models.User

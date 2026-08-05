@@ -25,19 +25,19 @@ type pendingEntry struct {
 
 // Client 节点端客户端。
 type Client struct {
-	BaseURL        string // ws://host/api/v1/node/ws
-	NodeID         string
-	Secret         string
-	Heartbeat      time.Duration
-	ReconnectMax   time.Duration
-	Xray           *xrayproc.Proc
-	Collector      *collector.Collector
-	Stats          *stats.Collector
+	BaseURL         string // ws://host/api/v1/node/ws
+	NodeID          string
+	Secret          string
+	Heartbeat       time.Duration
+	ReconnectMax    time.Duration
+	Xray            *xrayproc.Proc
+	Collector       *collector.Collector
+	Stats           *stats.Collector
 	CollectInterval time.Duration
 	ReportInterval  time.Duration
 
-	ws      *websocket.Conn
-	writeMu sync.Mutex // 保护 ws 写（心跳/上报/回执并发）
+	ws        *websocket.Conn
+	writeMu   sync.Mutex // 保护 ws 写（心跳/上报/回执并发）
 	pendingMu sync.Mutex
 	pending   map[string]*pendingEntry // by email
 }
@@ -132,9 +132,9 @@ func (c *Client) reportPending() {
 	entries := make([]protocol.TrafficEntry, 0, len(c.pending))
 	for email, p := range c.pending {
 		entries = append(entries, protocol.TrafficEntry{
-			UserID: 0, // 主控按 email 匹配 user_id
-			Email:  email,
-			UpBytes: p.Up,
+			UserID:    0, // 主控按 email 匹配 user_id
+			Email:     email,
+			UpBytes:   p.Up,
 			DownBytes: p.Down,
 		})
 	}
@@ -234,7 +234,7 @@ func (c *Client) connectAndServe(ctx context.Context, backoff *time.Duration) er
 		return nil
 	})
 	log.Printf("agent: 已连上主控（node=%s）", c.NodeID)
-	
+
 	// 连接成功，重置退避时间
 	*backoff = time.Second
 

@@ -15,8 +15,8 @@ type User struct {
 	Role           string     `gorm:"size:16;default:user;index" json:"role"`
 	Status         int        `gorm:"default:1;index" json:"status"`
 	SubscribeToken string     `gorm:"size:64;uniqueIndex" json:"-"`
-	PlanID         uint64     `gorm:"index" json:"plan_id"`          // 当前套餐（冗余，P4 前可为 0）
-	ExpireAt       *time.Time `json:"expire_at"`                     // 当前套餐到期时间
+	PlanID         uint64     `gorm:"index" json:"plan_id"`                 // 当前套餐（冗余，P4 前可为 0）
+	ExpireAt       *time.Time `json:"expire_at"`                            // 当前套餐到期时间
 	MustChangePwd  bool       `gorm:"default:false" json:"must_change_pwd"` // 必须修改密码
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`

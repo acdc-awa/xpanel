@@ -66,7 +66,7 @@ type Hub struct {
 	Upgrader websocket.Upgrader
 
 	mu      sync.RWMutex
-	conns   map[uint64]*Conn                      // by server_id
+	conns   map[uint64]*Conn                        // by server_id
 	pending map[string]chan *protocol.ResultPayload // 请求 id → 回执通道
 	wg      sync.WaitGroup
 	quit    chan struct{}

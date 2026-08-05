@@ -17,15 +17,15 @@ import (
 
 // ProxyItem 订阅中的单个节点。
 type ProxyItem struct {
-	Name     string
-	Host     string
-	Port     int
-	UUID     string
-	Network  string
-	TLSType  string
-	Reality  *xray.RealitySettings
-	WS       *xray.WSSettings
-	XHTTP    *xray.XHTTPSettings
+	Name    string
+	Host    string
+	Port    int
+	UUID    string
+	Network string
+	TLSType string
+	Reality *xray.RealitySettings
+	WS      *xray.WSSettings
+	XHTTP   *xray.XHTTPSettings
 }
 
 // BuildClash 生成 Clash YAML（proxy-providers 兼容格式）。

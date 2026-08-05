@@ -58,10 +58,10 @@ type Auth struct {
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
 func Default() *Config {
 	return &Config{
-		App: App{Name: "xray-panel", Env: "dev", Port: 8080},
-		DB:  DB{Driver: "sqlite", DSN: "./data/panel.db"},
-		JWT: JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
-		Auth: Auth{InviteRequired: true},
+		App:    App{Name: "xray-panel", Env: "dev", Port: 8080},
+		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
+		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
+		Auth:   Auth{InviteRequired: true},
 		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},
 	}
 }

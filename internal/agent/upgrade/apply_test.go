@@ -88,8 +88,7 @@ func TestApplyShaMismatchRejects(t *testing.T) {
 		t.Error("校验失败不应触碰现有二进制")
 	}
 	// 临时文件应被清理
-	matches, _ := filepath.Glob(filepath.Join(dir, "xray-agent.*.tmp"))
-	if len(matches) != 0 {
-		t.Errorf("临时文件未清理: %v", matches)
+	if _, err := os.Stat(filepath.Join(dir, "xray-agent.tmp")); err == nil {
+		t.Error("临时文件未清理: xray-agent.tmp 仍存在")
 	}
 }

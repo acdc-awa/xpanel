@@ -106,8 +106,8 @@ func (s *AuthService) consumeInviteTx(ctx context.Context, tx *gorm.DB, code str
 		return ErrInviteInvalid
 	}
 	return tx.WithContext(ctx).Model(&inv).Updates(map[string]any{
-		"status":   models.InviteUsed,
-		"used_at":  time.Now(),
+		"status":  models.InviteUsed,
+		"used_at": time.Now(),
 	}).Error
 }
 

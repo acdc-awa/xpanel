@@ -175,4 +175,3 @@ func (d *Deps) NewRouter() *gin.Engine {
 	}
 	return r
 }
-

@@ -159,6 +159,7 @@ func Apply(f *Fetcher, exePath string, restart func() error, out io.Writer) erro
 
 	tmp := exePath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	if err := os.Chmod(tmp, 0o755); err != nil {

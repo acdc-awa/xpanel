@@ -26,7 +26,7 @@ type serverView struct {
 	NodeID       string     `json:"node_id"`
 	Location     string     `json:"location"`
 	Remark       string     `json:"remark"`
-	Status       int        `json:"status"` // 0 离线 1 在线
+	Status       int        `json:"status"`        // 0 离线 1 在线
 	ConfigStatus string     `json:"config_status"` // pushed / pending / ""（无待推送配置）
 	LastSeenAt   *time.Time `json:"last_seen_at"`
 	CreatedAt    time.Time  `json:"created_at"`
