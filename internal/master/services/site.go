@@ -20,10 +20,10 @@ var webBaseRe = regexp.MustCompile(`^/[a-zA-Z0-9/_-]*$`)
 // SiteService 站点设置（管理端「设置」页）。当前支持 web_base：
 // 空 = 根路径；/panel 等 = 面板挂在 /panel/... 下。DB 值优先，config.yaml 为兜底默认。
 type SiteService struct {
-	DB        *gorm.DB
+	DB         *gorm.DB
 	cfgDefault string // config.yaml app.web_base（兜底）
-	mu        sync.RWMutex
-	webBase   string // 规范化后的当前值（如 /panel；空=根路径）
+	mu         sync.RWMutex
+	webBase    string // 规范化后的当前值（如 /panel；空=根路径）
 }
 
 // NewSiteService 构造并加载当前 web base（DB 优先，config 兜底）。

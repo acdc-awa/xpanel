@@ -17,6 +17,8 @@ import (
 	"github.com/zhx/xray-panel/internal/agent/xrayproc"
 )
 
+var version = "dev" // 构建期 -ldflags -X main.version=<git describe>（未注入时保持 dev）
+
 func main() {
 	// 管理子命令分派：xray-agent status|restart|logs|uninstall|help
 	args := os.Args[1:]

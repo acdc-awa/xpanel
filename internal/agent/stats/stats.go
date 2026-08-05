@@ -41,8 +41,8 @@ type Collector struct {
 	handler handlerService.HandlerServiceClient
 
 	mu           sync.Mutex
-	last         map[string]int64 // 计数器名 → 上次累计值
-	baseline     bool             // 是否已建立基线
+	last         map[string]int64                    // 计数器名 → 上次累计值
+	baseline     bool                                // 是否已建立基线
 	currentUsers map[string]map[string]protocol.User // inboundTag -> email -> protocol.User
 }
 

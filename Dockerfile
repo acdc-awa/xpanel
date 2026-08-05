@@ -13,9 +13,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/agent ./cmd/agent && \
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-X github.com/zhx/xray-panel/internal/agent/upgrade.Version=docker" \
+      -o /out/agent ./cmd/agent && \
     cp /out/agent internal/master/embed/agent-linux && \
-    CGO_ENABLED=0 GOOS=linux go build -tags embedagent -o /out/master ./cmd/master
+    CGO_ENABLED=0 GOOS=linux go build -tags embedagent \
+      -ldflags "-X github.com/zhx/xray-panel/internal/master/embed.AgentVersion=docker" \
+      -o /out/master ./cmd/master
 
 # ---- 运行镜像 ----
 FROM alpine:3.20

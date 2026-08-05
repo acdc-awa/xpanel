@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -25,7 +26,7 @@ type serverView struct {
 	NodeID       string     `json:"node_id"`
 	Location     string     `json:"location"`
 	Remark       string     `json:"remark"`
-	Status       int        `json:"status"` // 0 离线 1 在线
+	Status       int        `json:"status"`        // 0 离线 1 在线
 	ConfigStatus string     `json:"config_status"` // pushed / pending / ""（无待推送配置）
 	LastSeenAt   *time.Time `json:"last_seen_at"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -347,7 +348,10 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		return
 	}
 	if d.Config != nil {
-		_ = d.Config.MarkPushedByServer(id)
+		// 条件标记：若 Ask 期间 pending 被并发覆盖（内容不一致），保持 pending 待后续推送
+		if _, serr := d.Config.MarkPushedByServerIfSame(id, cfgStr); serr != nil {
+			log.Printf("api: 标记配置已推送失败 (server=%d): %v", id, serr)
+		}
 	}
 	util.OK(c, gin.H{
 		"ok":      true,

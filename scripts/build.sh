@@ -4,10 +4,15 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EMBED="$ROOT/internal/master/embed"
+VERSION="$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)"
 
-echo "==> 构建 Linux agent"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$EMBED/agent-linux" ./cmd/agent
+echo "==> 构建 Linux agent（version=$VERSION）"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -ldflags "-X github.com/zhx/xray-panel/internal/agent/upgrade.Version=$VERSION" \
+  -o "$EMBED/agent-linux" ./cmd/agent
 
 echo "==> 构建 master（embedagent）"
-go build -tags embedagent -o "$ROOT/master" ./cmd/master
-echo "完成: $ROOT/master（已内嵌 agent-linux，$(du -h "$EMBED/agent-linux" | cut -f1)）"
+go build -tags embedagent \
+  -ldflags "-X github.com/zhx/xray-panel/internal/master/embed.AgentVersion=$VERSION" \
+  -o "$ROOT/master" ./cmd/master
+echo "完成: $ROOT/master（内嵌 agent $VERSION，$(du -h "$EMBED/agent-linux" | cut -f1)）"

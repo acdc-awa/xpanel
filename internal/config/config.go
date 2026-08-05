@@ -11,11 +11,20 @@ import (
 
 // Config 为全量配置，对应 configs/config.yaml。
 type Config struct {
-	App   App   `yaml:"app"`
-	DB    DB    `yaml:"db"`
-	JWT   JWT   `yaml:"jwt"`
-	Admin Admin `yaml:"admin"`
-	Auth  Auth  `yaml:"auth"`
+	App    App    `yaml:"app"`
+	DB     DB     `yaml:"db"`
+	JWT    JWT    `yaml:"jwt"`
+	Admin  Admin  `yaml:"admin"`
+	Auth   Auth   `yaml:"auth"`
+	Backup Backup `yaml:"backup"`
+}
+
+// Backup 备份配置。
+type Backup struct {
+	Enabled  bool   `yaml:"enabled"`
+	Schedule string `yaml:"schedule"` // cron 表达式，如 "0 3 * * *"（每天 03:00）
+	Keep     int    `yaml:"keep"`     // 保留备份份数
+	Dir      string `yaml:"dir"`      // 备份目录
 }
 
 type App struct {
@@ -49,10 +58,11 @@ type Auth struct {
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
 func Default() *Config {
 	return &Config{
-		App: App{Name: "xray-panel", Env: "dev", Port: 8080},
-		DB:  DB{Driver: "sqlite", DSN: "./data/panel.db"},
-		JWT: JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
-		Auth: Auth{InviteRequired: true},
+		App:    App{Name: "xray-panel", Env: "dev", Port: 8080},
+		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
+		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
+		Auth:   Auth{InviteRequired: true},
+		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},
 	}
 }
 
@@ -108,5 +118,20 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
 		c.Admin.Password = v
+	}
+	if v := os.Getenv("BACKUP_ENABLED"); v != "" {
+		c.Backup.Enabled = v == "1" || v == "true"
+	}
+	if v := os.Getenv("BACKUP_SCHEDULE"); v != "" {
+		c.Backup.Schedule = v
+	}
+	if v := os.Getenv("BACKUP_KEEP"); v != "" {
+		var k int
+		if _, err := fmt.Sscanf(v, "%d", &k); err == nil {
+			c.Backup.Keep = k
+		}
+	}
+	if v := os.Getenv("BACKUP_DIR"); v != "" {
+		c.Backup.Dir = v
 	}
 }

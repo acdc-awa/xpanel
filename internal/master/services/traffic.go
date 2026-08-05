@@ -149,6 +149,7 @@ func (s *TrafficService) AggDaily() {
 		}
 	}
 }
+
 // parsePanelEmail 解析 user-<id>@panel.local → user id。
 func parsePanelEmail(email string) (uint64, bool) {
 	const prefix = "user-"

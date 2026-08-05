@@ -30,15 +30,15 @@ type inboundView struct {
 
 // inboundForm 入站创建/更新表单（结构化连接参数，替代手填 JSON）。
 type inboundForm struct {
-	ID       uint64                  `json:"id"`
-	ServerID uint64                  `json:"server_id" binding:"required"`
-	Tag      string                  `json:"tag" binding:"required,max=64"`
-	Protocol string                  `json:"protocol" binding:"required"` // vless
-	Port     int                     `json:"port" binding:"required,min=1,max=65535"`
-	Network  string                  `json:"network" binding:"required"` // tcp / ws / xhttp
-	TLSType  string                  `json:"tls_type"`                    // none / tls / reality
-	Settings *xray.InboundSettings   `json:"settings"`                    // reality/ws/xhttp/tls 结构化参数
-	Ratio    float64                 `json:"ratio"`
+	ID       uint64                `json:"id"`
+	ServerID uint64                `json:"server_id" binding:"required"`
+	Tag      string                `json:"tag" binding:"required,max=64"`
+	Protocol string                `json:"protocol" binding:"required"` // vless
+	Port     int                   `json:"port" binding:"required,min=1,max=65535"`
+	Network  string                `json:"network" binding:"required"` // tcp / ws / xhttp
+	TLSType  string                `json:"tls_type"`                   // none / tls / reality
+	Settings *xray.InboundSettings `json:"settings"`                   // reality/ws/xhttp/tls 结构化参数
+	Ratio    float64               `json:"ratio"`
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
@@ -141,14 +141,14 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Tag      *string                `json:"tag"`
-		Protocol *string                `json:"protocol"`
-		Port     *int                   `json:"port"`
-		Network  *string                `json:"network"`
-		TLSType  *string                `json:"tls_type"`
-		Settings *xray.InboundSettings  `json:"settings"`
-		Ratio    *float64               `json:"ratio"`
-		Enabled  *bool                  `json:"enabled"`
+		Tag      *string               `json:"tag"`
+		Protocol *string               `json:"protocol"`
+		Port     *int                  `json:"port"`
+		Network  *string               `json:"network"`
+		TLSType  *string               `json:"tls_type"`
+		Settings *xray.InboundSettings `json:"settings"`
+		Ratio    *float64              `json:"ratio"`
+		Enabled  *bool                 `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -277,7 +277,6 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 	}
 	util.OK(c, gin.H{"private_key": priv, "public_key": pub})
 }
-
 
 // enqueueConfig 入站变更后自动生成配置并待推送（非阻塞；节点离线保留，上线补推）。
 func (d *Deps) enqueueConfig(serverID uint64) {

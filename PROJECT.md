@@ -27,6 +27,7 @@
 | M1 | Backend Data Pipeline & Generator | Extend `config.go` with gRPC transport, verify rich JSON merging, unit tests | None | **DONE** (gRPC/fallbacks/sniffing/inbound_tag 支持；门禁审查通过) |
 | M2 | Node-Centric UI & 3x-ui Forms | Refactor `servers.vue`, add `ServerNodeDrawer.vue`, API types, rich forms | M1 (contracts) | **DONE** (抽屉 5 Tab + 出站/路由表单 + 入站表单增强；npm build/typecheck 通过) |
 | M3 | Final E2E Validation & Hardening | Pass 100% E2E test suite (Phase 1) & Tier 5 Adversarial Coverage Hardening (Phase 2) | M1, M2, E2E Track | **DONE** (E2E 套件 235 PASS FAIL=0；对抗性单元测试与完整性审计全通过) |
+| M4 | 数据可靠与升级（模块 B） | SQLite 备份/恢复、agent upgrade（推送预留）、compose 去 mysql、推送链路复查 | 无 | **DONE** (backup 调度/轮转/API + agent upgrade 校验替换 + compose 去 mysql；go vet/race 与 WSL 全量测试通过，E2E 235 PASS FAIL=0) |
 
 ## E2E Gate
 - Spec: `TEST_INFRA.md`；Runner: `tests/teamwork_ui_validation.sh`（WSL 运行，235 断言 / 4 层）

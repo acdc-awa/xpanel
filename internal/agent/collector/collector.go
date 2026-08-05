@@ -21,7 +21,7 @@ type Snapshot struct {
 
 // Collector 通过 /proc 采集。
 type Collector struct {
-	mu      sync.Mutex
+	mu        sync.Mutex
 	prevIdle  float64
 	prevTotal float64
 	havePrev  bool

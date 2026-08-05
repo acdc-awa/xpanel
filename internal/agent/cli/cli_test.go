@@ -212,6 +212,26 @@ func TestRemoveTargetsMissingIsNotWarning(t *testing.T) {
 	}
 }
 
+func TestHelpListsUpgrade(t *testing.T) {
+	code, out, _ := run(t, "help")
+	if code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(out, "upgrade") {
+		t.Error("help 输出应包含 upgrade")
+	}
+}
+
+func TestUpgradeUnknownFlag(t *testing.T) {
+	code, _, errOut := run(t, "upgrade", "--bogus")
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(errOut, "参数错误") {
+		t.Errorf("stderr = %q", errOut)
+	}
+}
+
 func TestFormatDur(t *testing.T) {
 	cases := []struct {
 		sec  int64
