@@ -73,3 +73,28 @@ func (d *Deps) AdminSetUserInbounds(c *gin.Context) {
 	}
 	util.OK(c, gin.H{"user_id": uid, "granted": len(req.InboundIDs)})
 }
+
+// AdminToggleUserInbound POST /api/v1/admin/user-inbounds/:id/toggle
+// 启用/禁用单个 UserInbound → 触发 gRPC AddUser/RemoveUser（不重启 xray）。
+func (d *Deps) AdminToggleUserInbound(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var ui models.UserInbound
+	if err := d.DB.First(&ui, id).Error; err != nil {
+		util.Fail(c, 404, "授权记录不存在")
+		return
+	}
+	ui.Enabled = !ui.Enabled
+	if err := d.DB.Model(&ui).Update("enabled", ui.Enabled).Error; err != nil {
+		util.ServerError(c, "更新失败")
+		return
+	}
+	// 热更新：增量同步用户列表到所有在线节点（不重启 xray）
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
+	util.OK(c, gin.H{"id": id, "enabled": ui.Enabled})
+}

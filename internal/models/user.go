@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // User 用户。plan_id / expire_at 是对《系统设计方案》§5 简表的补充，
@@ -18,9 +20,18 @@ type User struct {
 	PlanID              uint64     `gorm:"index" json:"plan_id"`
 	ExpireAt            *time.Time `json:"expire_at"`
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
+	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
 	MustChangePwd       bool       `gorm:"default:false" json:"must_change_pwd"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// BeforeCreate 自动设置流量周期起点（首次创建时）。
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.TrafficCycleStart.IsZero() {
+		u.TrafficCycleStart = time.Now()
+	}
+	return nil
 }
 
 // InvitationCode 邀请码（一次性，可设过期）。

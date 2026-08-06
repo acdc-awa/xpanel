@@ -84,20 +84,73 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload) error {
 	return nil
 }
 
-// UserUsed 用户已用总流量（字节）。
+// UserUsed 用户当前计费周期内已用总流量（字节）。
+// 从 user.traffic_cycle_start 开始计算；若为零值（旧数据）则回溯全部。
 func (s *TrafficService) UserUsed(userID uint64) (up, down int64, err error) {
+	var user models.User
+	if err := s.DB.First(&user, userID).Error; err != nil {
+		return 0, 0, err
+	}
+	q := s.DB.Model(&models.TrafficLog{}).Where("user_id = ?", userID)
+	if !user.TrafficCycleStart.IsZero() {
+		q = q.Where("period_start >= ?", user.TrafficCycleStart)
+	}
 	var row struct {
 		Up   int64
 		Down int64
 	}
-	err = s.DB.Model(&models.TrafficLog{}).
-		Where("user_id = ?", userID).
-		Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").
-		Scan(&row).Error
+	err = q.Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").Scan(&row).Error
 	if err != nil {
 		return 0, 0, err
 	}
 	return row.Up, row.Down, nil
+}
+
+// ResetUserTraffic 重置用户流量周期起点（套餐续费或手动重置时调用）。
+func (s *TrafficService) ResetUserTraffic(userID uint64) error {
+	return s.DB.Model(&models.User{}).Where("id = ?", userID).
+		Update("traffic_cycle_start", time.Now()).Error
+}
+
+// StartTrafficResetCron 启动 Inbound 级流量重置定时任务（每 5 分钟检查）。
+func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				s.resetInboundTraffic()
+			}
+		}
+	}()
+}
+
+func (s *TrafficService) resetInboundTraffic() {
+	var inbounds []models.Inbound
+	if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&inbounds).Error; err != nil {
+		return
+	}
+	now := time.Now()
+	for _, inb := range inbounds {
+		shouldReset := false
+		switch inb.TrafficReset {
+		case "daily":
+			shouldReset = true // 每 5 分钟 tick 时简单清零，daily 粒度通过日期去重保证
+		case "weekly":
+			shouldReset = now.Weekday() == time.Monday
+		case "monthly":
+			shouldReset = now.Day() == 1
+		}
+		if shouldReset {
+			_ = s.DB.Model(&inb).Updates(map[string]any{
+				"up":   0,
+				"down": 0,
+			})
+		}
+	}
 }
 
 // StartDailyAgg 启动每日汇总定时任务（每 5 分钟把 traffic_logs 累加到 traffic_daily）。

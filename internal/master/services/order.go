@@ -83,8 +83,9 @@ func (s *OrderService) Confirm(orderID, adminID uint64) error {
 			return err
 		}
 		if err := tx.Model(&user).Updates(map[string]any{
-			"plan_id":   plan.ID,
-			"expire_at": newExpire,
+			"plan_id":             plan.ID,
+			"expire_at":           newExpire,
+			"traffic_cycle_start": now,
 		}).Error; err != nil {
 			return err
 		}

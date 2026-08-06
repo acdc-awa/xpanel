@@ -158,6 +158,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/users/:id/toggle", d.AdminToggleUser)
 			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
 			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
+			admin.POST("/user-inbounds/:id/toggle", d.AdminToggleUserInbound)
 		}
 	}
 

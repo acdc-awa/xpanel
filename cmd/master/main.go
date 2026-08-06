@@ -68,6 +68,7 @@ func main() {
 
 	trafficSvc := &services.TrafficService{DB: database}
 	trafficSvc.StartDailyAgg(context.Background())
+	trafficSvc.StartTrafficResetCron(context.Background())
 	orderSvc := &services.OrderService{DB: database}
 	auditSvc := &services.AuditService{DB: database}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
@@ -168,13 +169,14 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		log.Fatalf("生成管理员 UUID 失败: %v", err)
 	}
 	admin := &models.User{
-		Username:       cfg.Admin.Username,
-		PasswordHash:   hash,
-		Role:           models.RoleAdmin,
-		Status:         models.StatusActive,
-		SubscribeToken: token,
-		UUID:           uuid,
-		MustChangePwd:  cfg.Admin.Password == "admin123",
+		Username:          cfg.Admin.Username,
+		PasswordHash:      hash,
+		Role:              models.RoleAdmin,
+		Status:            models.StatusActive,
+		SubscribeToken:    token,
+		UUID:              uuid,
+		TrafficCycleStart: time.Now(),
+		MustChangePwd:     cfg.Admin.Password == "admin123",
 	}
 	if err := database.Create(admin).Error; err != nil {
 		log.Fatalf("创建初始管理员失败: %v", err)
