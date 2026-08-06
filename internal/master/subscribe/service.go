@@ -40,7 +40,9 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 		b.WriteString(fmt.Sprintf("    uuid: %s\n", it.UUID))
 		b.WriteString(fmt.Sprintf("    network: %s\n", it.Network))
 		b.WriteString("    udp: true\n")
-		if it.TLSType == "reality" {
+		// TLS 层
+		switch it.TLSType {
+		case "reality":
 			b.WriteString("    tls: true\n")
 			if it.Network == "tcp" {
 				b.WriteString("    flow: xtls-rprx-vision\n")
@@ -50,21 +52,26 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 			b.WriteString("    reality-opts:\n")
 			b.WriteString(fmt.Sprintf("      public-key: %s\n", it.Reality.PublicKey))
 			b.WriteString(fmt.Sprintf("      short-id: %s\n", it.Reality.ShortID))
-			if it.Network == "xhttp" && it.XHTTP != nil {
-				b.WriteString("    xhttp-opts:\n")
-				b.WriteString(fmt.Sprintf("      mode: %s\n", it.XHTTP.Mode))
-				b.WriteString(fmt.Sprintf("      path: %s\n", it.XHTTP.Path))
-			}
-		} else if it.TLSType == "tls" {
+		case "tls":
 			b.WriteString("    tls: true\n")
+		default:
+			b.WriteString("    tls: false\n")
+		}
+		// 传输层参数（与 TLS 类型无关）
+		switch it.Network {
+		case "ws":
 			if it.WS != nil {
 				b.WriteString(fmt.Sprintf("    ws-opts:\n      path: %s\n", it.WS.Path))
 				if it.WS.Host != "" {
 					b.WriteString(fmt.Sprintf("      headers:\n        Host: %s\n", it.WS.Host))
 				}
 			}
-		} else {
-			b.WriteString("    tls: false\n")
+		case "xhttp":
+			if it.XHTTP != nil {
+				b.WriteString("    xhttp-opts:\n")
+				b.WriteString(fmt.Sprintf("      mode: %s\n", it.XHTTP.Mode))
+				b.WriteString(fmt.Sprintf("      path: %s\n", it.XHTTP.Path))
+			}
 		}
 	}
 
@@ -113,14 +120,25 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 		default:
 			q.Set("security", "none")
 		}
-		if it.Network == "tcp" && it.TLSType != "reality" {
-			q.Set("type", "tcp")
-		}
-		if it.Network == "xhttp" && it.TLSType == "reality" {
+		// 传输层参数（与 TLS 类型无关，独立输出）
+		switch it.Network {
+		case "ws":
+			q.Set("type", "ws")
+			if it.WS != nil {
+				q.Set("path", url.QueryEscape(it.WS.Path))
+				if it.WS.Host != "" {
+					q.Set("host", it.WS.Host)
+				}
+			}
+		case "xhttp":
 			q.Set("type", "xhttp")
 			if it.XHTTP != nil {
 				q.Set("mode", it.XHTTP.Mode)
 				q.Set("path", it.XHTTP.Path)
+			}
+		default:
+			if it.Network == "tcp" && it.TLSType != "reality" {
+				q.Set("type", "tcp")
 			}
 		}
 		frag := url.QueryEscape(it.Name)
@@ -149,4 +167,4 @@ func NodeName(server *models.Server, inb *models.Inbound) string {
 	return fmt.Sprintf("%s | %s", server.Name, inb.Tag)
 }
 
-var _ = time.Now // 保留
+var _ = time.Now

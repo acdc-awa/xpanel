@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -109,7 +111,9 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
-	d.enqueueConfig(req.ServerID)
+	if err := d.enqueueConfig(req.ServerID); err != nil {
+		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", req.ServerID, err)
+	}
 	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name)})
 }
 
@@ -203,7 +207,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			return
 		}
 	}
-	d.enqueueConfig(inb.ServerID)
+	if err := d.enqueueConfig(inb.ServerID); err != nil {
+		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+	}
 	var srv models.Server
 	serverName := ""
 	if err := d.DB.First(&srv, inb.ServerID).Error; err == nil {
@@ -227,7 +233,9 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		return
 	}
 	if inb.ID > 0 {
-		d.enqueueConfig(inb.ServerID)
+		if err := d.enqueueConfig(inb.ServerID); err != nil {
+			log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+		}
 	}
 	util.OK(c, gin.H{"deleted": id})
 }
@@ -249,7 +257,9 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		util.ServerError(c, "更新失败")
 		return
 	}
-	d.enqueueConfig(inb.ServerID)
+	if err := d.enqueueConfig(inb.ServerID); err != nil {
+		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+	}
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
 }
 
@@ -268,18 +278,19 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 }
 
 // enqueueConfig 入站变更后自动生成配置并待推送。
-func (d *Deps) enqueueConfig(serverID uint64) {
+func (d *Deps) enqueueConfig(serverID uint64) error {
 	if d.Config == nil || d.Hub == nil {
-		return
+		return nil
 	}
 	cfg, err := d.Config.Generate(serverID)
 	if err != nil {
-		return
+		return fmt.Errorf("生成配置失败: %w", err)
 	}
 	if err := d.Config.SavePending(serverID, cfg); err != nil {
-		return
+		return fmt.Errorf("保存待推送配置失败: %w", err)
 	}
 	go d.Hub.PushPending(serverID)
+	return nil
 }
 
 // formToInbound 把入站表单转为 models.Inbound（配置预览用）。

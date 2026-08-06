@@ -469,8 +469,8 @@ func buildClients(inb *models.Inbound, users []models.User) []any {
 			"email": UserEmail(u.ID),
 			"level": 0,
 		}
-		// TCP+REALITY 自动加 vision 流控
-		if StreamHasReality(inb.StreamSettings) {
+		// TCP+REALITY 才需要 vision 流控（gRPC/xHTTP 有自己的流控，叠加 vision 会导致异常）
+		if StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
 			c["flow"] = "xtls-rprx-vision"
 		}
 		clients = append(clients, c)

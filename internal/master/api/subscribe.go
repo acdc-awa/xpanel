@@ -48,7 +48,14 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	items := make([]subscribe.ProxyItem, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
-		if inb.Protocol != "vless" {
+		switch inb.Protocol {
+		case "vless":
+			// 支持
+		case "vmess":
+			fallthrough
+		case "trojan":
+			fallthrough
+		default:
 			continue
 		}
 		var srv models.Server
