@@ -413,8 +413,9 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 	}
 
 	if inb.StreamSettings != "" {
+		cleaned := sanitizeStreamSettings(inb.StreamSettings)
 		var stream map[string]any
-		if err := json.Unmarshal([]byte(inb.StreamSettings), &stream); err != nil {
+		if err := json.Unmarshal([]byte(cleaned), &stream); err != nil {
 			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
 		}
 		item["streamSettings"] = stream
