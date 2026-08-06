@@ -33,6 +33,7 @@ func All() []any {
 		&Plan{}, &Order{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
 		&AuditLog{}, &Setting{},
+		&PermissionGroup{}, &PermissionGroupInbound{},
 	}
 }
 

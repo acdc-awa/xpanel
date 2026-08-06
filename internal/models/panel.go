@@ -54,8 +54,9 @@ type Plan struct {
 	PriceCents     int64     `gorm:"not null" json:"price_cents"` // 价格（分）
 	TrafficGB      int64     `gorm:"not null" json:"traffic_gb"`
 	DurationDays   int       `gorm:"not null" json:"duration_days"`
-	SpeedLimitKbps int64     `json:"speed_limit_kbps"` // 0 = 不限速
-	Enabled        bool      `gorm:"default:true" json:"enabled"`
+	SpeedLimitKbps     int64  `json:"speed_limit_kbps"` // 0 = 不限速
+	PermissionGroupID  uint64 `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
+	Enabled            bool   `gorm:"default:true" json:"enabled"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
