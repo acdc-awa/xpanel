@@ -32,19 +32,37 @@ type Inbound struct {
 	StreamSettings string    `gorm:"type:text" json:"stream_settings"` // 传输 streamSettings（透传）
 	Sniffing       string    `gorm:"type:text" json:"sniffing"`        // 嗅探配置（透传）
 	Ratio          float64   `gorm:"default:1" json:"ratio"`
-	Enabled        bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	// 流量统计（冗余计数器，避免每次 SUM traffic_logs）
+	Up            int64      `gorm:"default:0" json:"up"`
+	Down          int64      `gorm:"default:0" json:"down"`
+	Total         int64      `gorm:"default:0" json:"total"`                         // 入站总流量上限（0=不限）
+	TrafficReset  string     `gorm:"size:16;default:never" json:"traffic_reset"`     // never / daily / weekly / monthly
+	ExpiryTime    *time.Time `json:"expiry_time,omitempty"`                          // 入站自身到期时间
+	// 分享地址（订阅链接中的对外地址，默认使用节点 Host）
+	ShareAddrStrategy string `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
+	ShareAddr         string `gorm:"size:255" json:"share_addr"`
+	Enabled           bool   `gorm:"default:true" json:"enabled"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-// UserInbound 用户-入站授权关系。
+// UserInbound 用户-入站授权关系（Client 模型）。
+// 控制粒度为 per-user per-inbound：UUID/Flow/LimitedDevice/TotalGB/ExpiryTime。
+// 零值字段表示"从 User/Plan 继承"，非零值表示覆盖。
 type UserInbound struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	UserID    uint64    `gorm:"index;not null" json:"user_id"`
-	InboundID uint64    `gorm:"index;not null" json:"inbound_id"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
-	Remark    string    `gorm:"size:255" json:"remark"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                uint64     `gorm:"primaryKey" json:"id"`
+	UserID            uint64     `gorm:"index;not null" json:"user_id"`
+	InboundID         uint64     `gorm:"index;not null" json:"inbound_id"`
+	UUID              string     `gorm:"size:36" json:"uuid,omitempty"`            // 从 User 继承，可覆盖
+	Flow              string     `gorm:"size:32" json:"flow,omitempty"`            // xtls-rprx-vision / ""
+	LimitedDevice     int        `gorm:"default:0" json:"limited_device"`          // xray maxClientDevices（0=不限）
+	TotalGB           int64      `gorm:"default:0" json:"total_gb"`                // 覆盖套餐流量（0=继承）
+	ExpiryTime        *time.Time `json:"expiry_time,omitempty"`                    // 覆盖到期时间（nil=继承）
+	Enabled           bool       `gorm:"default:true" json:"enabled"`              // 启用→gRPC AddUser，禁用→RemoveUser
+	PermissionGroupID uint64     `gorm:"index;default:0" json:"permission_group_id"` // 来源追溯
+	Remark            string     `gorm:"size:255" json:"remark"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Plan 套餐。
