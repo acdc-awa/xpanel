@@ -41,7 +41,6 @@ func inbStream(network, security, extra string) string {
 }
 
 func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Test Server", NodeID: "node-test"}
 
 	inbounds := []models.Inbound{
 		{
@@ -62,7 +61,7 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 		{ID: 2, ServerID: 1, OutboundTag: "blocked", RuleJSON: `{"type":"field","domain":["geosite:category-ads-all"],"outboundTag":"blocked"}`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, outbounds, routingRules, users)
+	rawCfg, err := xray.Generate(inbounds, outbounds, routingRules, users)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -96,7 +95,6 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 }
 
 func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-gRPC-REALITY", NodeID: "node-grpc-reality"}
 
 	inbounds := []models.Inbound{
 		{
@@ -106,7 +104,7 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, nil, nil, vlessTestUser())
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser())
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -137,7 +135,6 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 }
 
 func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-gRPC-TLS", NodeID: "node-grpc-tls"}
 
 	inbounds := []models.Inbound{
 		{
@@ -147,7 +144,7 @@ func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, nil, nil, vlessTestUser())
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser())
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -170,7 +167,6 @@ func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
 }
 
 func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Outbounds", NodeID: "node-outbounds"}
 
 	inbounds := []models.Inbound{
 		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
@@ -183,7 +179,7 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 		{ID: 3, ServerID: 1, Tag: "outbound-vless-grpc", Protocol: "vless", SettingsJSON: `{"vnext":[{"address":"remote.proxy.com","port":443,"users":[{"id":"uuid","encryption":"none"}]}]}`, StreamSettingsJSON: `{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"out-grpc-svc"}}`, SendThrough: "192.168.1.100", Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, outbounds, nil, users)
+	rawCfg, err := xray.Generate(inbounds, outbounds, nil, users)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -208,7 +204,6 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 }
 
 func TestGenerateConfig_RichRoutingRules(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Routing", NodeID: "node-routing"}
 
 	inbounds := []models.Inbound{
 		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
@@ -221,7 +216,7 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 		{ID: 3, ServerID: 1, OutboundTag: "proxy", RuleJSON: `{"type":"field","inboundTag":["vless-in"],"protocol":["http","tls"],"outboundTag":"proxy"}`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, nil, routingRules, users)
+	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -239,7 +234,6 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 }
 
 func TestGenerateConfig_TCPWithFallbacks(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Fallbacks", NodeID: "node-fallbacks"}
 
 	inb := models.Inbound{
 		ID: 1, ServerID: 1, Tag: "vless-fallback-tcp", Protocol: "vless", Port: 50443,
@@ -248,7 +242,7 @@ func TestGenerateConfig_TCPWithFallbacks(t *testing.T) {
 		Enabled:        true,
 	}
 
-	raw, err := xray.Generate(srv, []models.Inbound{inb}, nil, nil, vlessTestUser())
+	raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser())
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -271,7 +265,6 @@ func TestGenerateConfig_TCPWithFallbacks(t *testing.T) {
 }
 
 func TestGenerateConfig_Sniffing(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Sniffing", NodeID: "node-sniffing"}
 
 	t.Run("sniffing emitted", func(t *testing.T) {
 		inb := models.Inbound{
@@ -280,7 +273,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			Sniffing:       `{"enabled":true,"destOverride":["http","tls"],"routeOnly":true}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate(srv, []models.Inbound{inb}, nil, nil, vlessTestUser())
+		raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser())
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -306,7 +299,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			StreamSettings: `{"network":"ws","security":"none","wsSettings":{"path":"/ws"}}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate(srv, []models.Inbound{inb}, nil, nil, vlessTestUser())
+		raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser())
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -321,13 +314,12 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 }
 
 func TestGenerateConfig_ErrorHandling(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Err"}
 
 	t.Run("invalid settings_json", func(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, SettingsJSON: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(srv, inbounds, nil, nil, vlessTestUser())
+		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser())
 		if err == nil {
 			t.Error("expected error for malformed settings_json")
 		}
@@ -338,7 +330,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 			{ID: 3, Tag: "in3", Protocol: "vless", Port: 443, Enabled: true},
 		}
 		users := []models.User{{ID: 1, UUID: "", Status: models.StatusActive}, {ID: 2, UUID: "uuid2", Status: models.StatusDisabled}}
-		_, err := xray.Generate(srv, inbounds, nil, nil, users)
+		_, err := xray.Generate(inbounds, nil, nil, users)
 		if err == nil {
 			t.Error("expected error for no active users")
 		}
@@ -348,7 +340,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, StreamSettings: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(srv, inbounds, nil, nil, vlessTestUser())
+		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser())
 		if err == nil {
 			t.Error("expected error for malformed streamSettings")
 		}
@@ -356,7 +348,6 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 }
 
 func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-Reality", NodeID: "node-reality"}
 
 	cases := []struct {
 		name     string
@@ -373,7 +364,7 @@ func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
 				StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"serverNames":["example.com"],"publicKey":"pk","privateKey":"sk","shortIds":[` + tc.shortIDs + `],"dest":"1.1.1.1:443"}}`,
 				Enabled:        true,
 			}
-			raw, err := xray.Generate(srv, []models.Inbound{inb}, nil, nil, vlessTestUser())
+			raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser())
 			if err != nil {
 				t.Fatalf("Generate failed: %v", err)
 			}
@@ -392,7 +383,6 @@ func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
 }
 
 func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
-	srv := &models.Server{ID: 1, Name: "Node-InboundTag", NodeID: "node-intag"}
 	inbounds := []models.Inbound{{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true}}
 	users := vlessTestUser()
 
@@ -401,7 +391,7 @@ func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
 		{ID: 2, ServerID: 1, OutboundTag: "blocked", InboundTag: `["vless-in"]`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(srv, inbounds, nil, routingRules, users)
+	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}

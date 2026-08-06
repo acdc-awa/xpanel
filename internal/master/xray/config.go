@@ -233,32 +233,73 @@ func parseStringList(s string) []string {
 	return res
 }
 
-// Generate 生成完整 Xray 配置（含 api/policy/stats 三段 + 全部启用入站 + 节点自定义出站/路由规则 + 全部启用用户）。
-func Generate(server *models.Server, inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User) ([]byte, error) {
-	outboundList := make([]any, 0)
-	hasFreedom := false
-	hasBlackhole := false
+// Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User) ([]byte, error) {
+	cfg := LoadTemplate()
 
-	for _, ob := range outbounds {
+	// 1. 出站：模板基础出站 + 节点自定义出站叠加
+	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds)
+
+	// 2. 路由规则：api 保护规则 + 模板规则 + 节点规则叠加
+	cfg["routing"] = map[string]any{
+		"rules": mergeRoutingRules(routingRules),
+	}
+
+	// 3. 入站：全部启用的入站 + api 内建入站
+	inboundList := []any{}
+	for _, inb := range inbounds {
+		if !inb.Enabled {
+			continue
+		}
+		item, err := buildInbound(&inb, users)
+		if err != nil {
+			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
+		}
+		inboundList = append(inboundList, item)
+	}
+	// api 入站：内部 gRPC 通信
+	inboundList = append(inboundList, map[string]any{
+		"tag": "api", "listen": "127.0.0.1", "port": 10085,
+		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
+	})
+	cfg["inbounds"] = inboundList
+
+	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// mergeOutbounds 合并模板出站与节点自定义出站。模板提供基础（freedom/blackhole），
+// 节点 ServerOutbound 叠加在模板之上。同 tag 时节点覆盖模板（允许管理员自定义基础策略）。
+func mergeOutbounds(tmpl any, outs []models.ServerOutbound) []any {
+	seen := make(map[string]int) // tag → index in list
+	list := make([]any, 0)
+	if arr, ok := tmpl.([]any); ok {
+		for _, item := range arr {
+			if m, ok := item.(map[string]any); ok {
+				if tag, _ := m["tag"].(string); tag != "" {
+					seen[tag] = len(list)
+				}
+			}
+			list = append(list, item)
+		}
+	}
+	for _, ob := range outs {
 		if !ob.Enabled {
 			continue
 		}
 		item := make(map[string]any)
-
 		if ob.SettingsJSON != "" {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(ob.SettingsJSON), &parsed); err == nil {
 				for k, v := range parsed {
 					item[k] = v
 				}
-				_, hasProto := parsed["protocol"]
-				_, hasSettings := parsed["settings"]
-				if !hasProto && !hasSettings {
-					item["settings"] = parsed
+				if _, hasProto := parsed["protocol"]; !hasProto {
+					if _, hasSettings := parsed["settings"]; !hasSettings {
+						item["settings"] = parsed
+					}
 				}
 			}
 		}
-
 		if ob.Tag != "" {
 			item["tag"] = ob.Tag
 		}
@@ -274,54 +315,33 @@ func Generate(server *models.Server, inbounds []models.Inbound, outbounds []mode
 		if ob.SendThrough != "" {
 			item["sendThrough"] = ob.SendThrough
 		}
-
-		tagVal, _ := item["tag"].(string)
-		protoVal, _ := item["protocol"].(string)
-		if tagVal == "direct" || tagVal == "freedom" || protoVal == "freedom" {
-			hasFreedom = true
+		tag, _ := item["tag"].(string)
+		if tag != "" {
+			if idx, exists := seen[tag]; exists {
+				list[idx] = item // 覆盖模板中的同 tag 出站
+				continue
+			}
+			seen[tag] = len(list)
 		}
-		if tagVal == "blocked" || tagVal == "blackhole" || protoVal == "blackhole" {
-			hasBlackhole = true
-		}
-
-		outboundList = append(outboundList, item)
+		list = append(list, item)
 	}
+	return list
+}
 
-	// 兜底 freedom (direct) 出站
-	if !hasFreedom {
-		outboundList = append(outboundList, map[string]any{
-			"protocol": "freedom",
-			"tag":      "direct",
-			"settings": map[string]any{
-				"finalRules": []any{
-					map[string]any{"action": "allow", "ip": []string{"198.18.0.0/15"}},
-				},
-			},
-		})
-	}
-
-	// 兜底 blackhole (blocked) 出站
-	if !hasBlackhole {
-		outboundList = append(outboundList, map[string]any{
-			"protocol": "blackhole",
-			"tag":      "blocked",
-		})
-	}
-
-	// 构建 routing rules 列表
-	rulesList := []any{
+// mergeRoutingRules 合并模板路由规则与节点路由规则。
+// 顺序：api 保护规则（最前）+ 模板规则 + 节点规则（按 Priority ASC, id ASC 排序）。
+func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
+	list := []any{
 		map[string]any{
 			"type":        "field",
 			"inboundTag":  []string{"api"},
 			"outboundTag": "api",
 		},
 	}
-
-	for _, rule := range routingRules {
+	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
-
 		if rule.RuleJSON != "" {
 			var rmap map[string]any
 			if err := json.Unmarshal([]byte(rule.RuleJSON), &rmap); err == nil {
@@ -331,16 +351,14 @@ func Generate(server *models.Server, inbounds []models.Inbound, outbounds []mode
 				if rule.OutboundTag != "" && rmap["outboundTag"] == nil {
 					rmap["outboundTag"] = rule.OutboundTag
 				}
-				rulesList = append(rulesList, rmap)
+				list = append(list, rmap)
 				continue
 			}
 		}
-
 		rmap := map[string]any{
 			"type":        "field",
 			"outboundTag": rule.OutboundTag,
 		}
-
 		if domains := parseStringList(rule.Domain); len(domains) > 0 {
 			rmap["domain"] = domains
 		}
@@ -356,53 +374,9 @@ func Generate(server *models.Server, inbounds []models.Inbound, outbounds []mode
 		if rule.InboundTag != "" {
 			rmap["inboundTag"] = parseStringList(rule.InboundTag)
 		}
-
-		rulesList = append(rulesList, rmap)
+		list = append(list, rmap)
 	}
-
-	cfg := map[string]any{
-		"log": map[string]any{"loglevel": "warning"},
-		"api": map[string]any{
-			"tag":      "api",
-			"services": []string{"HandlerService", "StatsService", "RoutingService"},
-		},
-		"outbounds": outboundList,
-		"policy": map[string]any{
-			"levels": map[string]any{"0": map[string]any{
-				"statsUserUplink":   true,
-				"statsUserDownlink": true,
-				"statsUserOnline":   true,
-			}},
-			"system": map[string]any{
-				"statsInboundUplink":   true,
-				"statsInboundDownlink": true,
-			},
-		},
-		"routing": map[string]any{
-			"rules": rulesList,
-		},
-		"stats": map[string]any{},
-	}
-
-	inboundList := []any{}
-	for _, inb := range inbounds {
-		if !inb.Enabled {
-			continue
-		}
-		item, err := buildInbound(&inb, users)
-		if err != nil {
-			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
-		}
-		inboundList = append(inboundList, item)
-	}
-	// api 入站（gRPC）
-	inboundList = append(inboundList, map[string]any{
-		"tag": "api", "listen": "127.0.0.1", "port": 10085,
-		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
-	})
-	cfg["inbounds"] = inboundList
-
-	return json.MarshalIndent(cfg, "", "  ")
+	return list
 }
 
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
