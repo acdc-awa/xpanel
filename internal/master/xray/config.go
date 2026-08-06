@@ -234,8 +234,14 @@ func parseStringList(s string) []string {
 }
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User) ([]byte, error) {
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound) ([]byte, error) {
 	cfg := LoadTemplate()
+
+	// 索引：userID → UserInbound（per-inbound 覆盖配置）
+	uiByUser := make(map[uint64]*models.UserInbound, len(userInbounds))
+	for i := range userInbounds {
+		uiByUser[userInbounds[i].UserID] = &userInbounds[i]
+	}
 
 	// 1. 出站：模板基础出站 + 节点自定义出站叠加
 	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds)
@@ -251,7 +257,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !inb.Enabled {
 			continue
 		}
-		item, err := buildInbound(&inb, users)
+		item, err := buildInbound(&inb, users, uiByUser)
 		if err != nil {
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
 		}
@@ -380,8 +386,8 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 }
 
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
-// 仅动态注入 clients 列表（从 users 表生成）。其余字段完全透传。
-func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, error) {
+// 仅动态注入 clients 列表（从 users + userInbounds 生成）。其余字段完全透传。
+func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound) (map[string]any, error) {
 	// 1. 解析协议 settings JSON → 注入 clients
 	settings := map[string]any{}
 	if inb.SettingsJSON != "" {
@@ -394,7 +400,7 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 		delete(settings, "encryption")
 	}
 
-	clients := buildClients(inb, users)
+	clients := buildClients(inb, users, uiByUser)
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("无可用用户（全部未启用或无 UUID）")
 	}
@@ -432,21 +438,53 @@ func buildInbound(inb *models.Inbound, users []models.User) (map[string]any, err
 	return item, nil
 }
 
-// buildClients 从用户列表构建 Xray clients JSON。
-func buildClients(inb *models.Inbound, users []models.User) []any {
+// buildClients 从用户列表 + UserInbound 覆盖配置构建 Xray clients JSON。
+// 按协议分派：vless → {id,email,flow,level,limit}，vmess/trojan 预留。
+func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound) []any {
 	clients := make([]any, 0, len(users))
 	for _, u := range users {
 		if u.Status != models.StatusActive || u.UUID == "" {
 			continue
 		}
+		// 合并 User 基础 + UserInbound 覆盖
+		uuid := u.UUID
+		flow := ""
+		limit := 0
+		if ui, ok := uiByUser[u.ID]; ok {
+			if ui.UUID != "" {
+				uuid = ui.UUID
+			}
+			if ui.Flow != "" {
+				flow = ui.Flow
+			}
+			limit = ui.LimitedDevice
+		}
+		// 自动 flow：TCP+REALITY 时注入 xtls-rprx-vision
+		if flow == "" && StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
+			flow = "xtls-rprx-vision"
+		}
+
 		c := map[string]any{
-			"id":    u.UUID,
 			"email": UserEmail(u.ID),
 			"level": 0,
 		}
-		// TCP+REALITY 才需要 vision 流控（gRPC/xHTTP 有自己的流控，叠加 vision 会导致异常）
-		if StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
-			c["flow"] = "xtls-rprx-vision"
+		switch inb.Protocol {
+		case "vless":
+			c["id"] = uuid
+			if flow != "" {
+				c["flow"] = flow
+			}
+			if limit > 0 {
+				c["limit"] = limit
+			}
+		case "vmess":
+			// 预留
+			continue
+		case "trojan":
+			// 预留
+			continue
+		default:
+			continue
 		}
 		clients = append(clients, c)
 	}
