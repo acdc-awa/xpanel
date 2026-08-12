@@ -53,8 +53,12 @@ configs/config.yaml
 .claude/
 .zcode/
 
+# 外部参考仓库素材（XTLS/REALITY、Xray-examples、chika0801、lxhao61 等；提炼文档入库，素材不入库）
+.references/
+
 # Windows xray 发行包二进制（约 90MB，不入库；保留 LICENSE/README 追踪）
 tools/xray-windows-64/xray.exe
 tools/xray-windows-64/geoip.dat
 tools/xray-windows-64/geosite.dat
 tools/xray-windows-64/wintun.dll
+tools/xray-windows-64/xray_no_window.*
