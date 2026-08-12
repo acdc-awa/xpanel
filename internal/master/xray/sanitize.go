@@ -22,6 +22,10 @@ func sanitizeStreamSettings(raw string) string {
 	deleteNestedKey(stream, "tlsSettings", "settings")
 	deleteNestedKey(stream, "realitySettings", "settings")
 
+	// xray v26.6.27 已移除 tlsSettings.allowInsecure（迁移到 pinnedPeerCertSha256 /
+	// verifyPeerCertByName），携带会直接拒绝加载；面板保留 DB 标志仅供订阅 skip-cert-verify 透传
+	deleteNestedKey(stream, "tlsSettings", "allowInsecure")
+
 	// REALITY + finalmask 组合会导致 xray panic（XTLS/Xray-core#6453）
 	if security, _ := stream["security"].(string); security == "reality" {
 		delete(stream, "finalmask")

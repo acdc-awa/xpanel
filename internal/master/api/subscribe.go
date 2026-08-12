@@ -32,6 +32,10 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 	var grants []models.UserInbound
 	d.DB.Where("user_id = ? AND enabled = ?", user.ID, true).Find(&grants)
+	flowByInbound := make(map[uint64]string, len(grants))
+	for _, g := range grants {
+		flowByInbound[g.InboundID] = g.Flow
+	}
 	if len(grants) > 0 {
 		granted := make(map[uint64]bool, len(grants))
 		for _, g := range grants {
@@ -69,7 +73,9 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			UUID:    user.UUID,
 			Network: xray.StreamNetwork(inb.StreamSettings),
 			TLSType: xray.StreamSecurity(inb.StreamSettings),
+			Flow:    flowByInbound[inb.ID], // TCP+TLS+Vision 场景订阅必须带 flow（生成侧同源）
 			Reality: xray.StreamReality(inb.StreamSettings),
+			TLS:     xray.StreamTLS(inb.StreamSettings),
 			WS:      xray.StreamWS(inb.StreamSettings),
 			XHTTP:   xray.StreamXHTTP(inb.StreamSettings),
 		}

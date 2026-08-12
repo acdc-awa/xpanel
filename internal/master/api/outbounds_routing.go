@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
@@ -68,6 +69,11 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	var req outboundForm
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
+	if err := xray.ValidateOutbound(req.SettingsJSON, req.StreamSettingsJSON); err != nil {
+		util.BadRequest(c, err.Error())
 		return
 	}
 
@@ -134,6 +140,20 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
+	sj := ob.SettingsJSON
+	if req.SettingsJSON != nil {
+		sj = *req.SettingsJSON
+	}
+	ssj := ob.StreamSettingsJSON
+	if req.StreamSettingsJSON != nil {
+		ssj = *req.StreamSettingsJSON
+	}
+	if err := xray.ValidateOutbound(sj, ssj); err != nil {
+		util.BadRequest(c, err.Error())
 		return
 	}
 

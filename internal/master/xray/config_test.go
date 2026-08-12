@@ -203,6 +203,98 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 	}
 }
 
+func TestGenerateConfig_VLESSOutbound_Normalize(t *testing.T) {
+	// 01 号文档 §4 第 4 项 + 附注：
+	// - 裸 {vnext:[...]} settings 只进 settings，不得顶层 + settings 双写
+	// - vless 出站 users 缺 encryption 时兜底注入 "none"；已有值不覆盖
+	inbounds := []models.Inbound{
+		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
+	}
+	users := vlessTestUser()
+
+	outbounds := []models.ServerOutbound{
+		{
+			ID: 1, ServerID: 1, Tag: "proxy-out", Protocol: "vless", Enabled: true,
+			SettingsJSON: `{"vnext":[{"address":"remote.proxy.com","port":443,"users":[{"id":"uuid-1"},{"id":"uuid-2","encryption":"none"}]}]}`,
+		},
+	}
+
+	rawCfg, err := xray.Generate(inbounds, outbounds, nil, users, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(rawCfg, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	obs := asArray(t, parsed["outbounds"], "outbounds")
+	var ob map[string]any
+	for _, o := range obs {
+		if om, _ := o.(map[string]any); om["tag"] == "proxy-out" {
+			ob = om
+		}
+	}
+	if ob == nil {
+		t.Fatal("proxy-out outbound not found")
+	}
+	if _, has := ob["vnext"]; has {
+		t.Error("bare vnext leaked to outbound top level (double-write, 附注)")
+	}
+	settings := asObject(t, ob["settings"], "settings")
+	vnext := asArray(t, settings["vnext"], "settings.vnext")
+	users0 := asObject(t, asArray(t, asObject(t, vnext[0], "vnext[0]")["users"], "vnext[0].users")[0], "users[0]")
+	if users0["encryption"] != "none" {
+		t.Errorf("users[0].encryption = %v, want none (兜底注入)", users0["encryption"])
+	}
+	users1 := asObject(t, asArray(t, asObject(t, vnext[0], "vnext[0]")["users"], "vnext[0].users")[1], "users[1]")
+	if users1["encryption"] != "none" {
+		t.Errorf("users[1].encryption = %v, want none (原值保留)", users1["encryption"])
+	}
+}
+
+func TestValidateRealityStream(t *testing.T) {
+	// 01 号文档 §2.2/§4 第 6 项：x25519 密钥须 base64 RawURL 解码 32 字节，非法直接报错
+	valid := "uOF-_qWw55cTMdM8CbaDieJg6HiKUV2g7BOj1GIvf04" // xray x25519 输出格式
+	cases := []struct {
+		name      string
+		stream    string
+		expectErr bool
+	}{
+		{name: "empty", stream: "", expectErr: false},
+		{name: "no reality", stream: `{"network":"tcp","security":"tls"}`, expectErr: false},
+		{name: "valid inbound privateKey", stream: `{"network":"tcp","security":"reality","realitySettings":{"serverNames":["e.com"],"privateKey":"` + valid + `","shortIds":["abcd"]}}`, expectErr: false},
+		{name: "valid outbound password", stream: `{"network":"tcp","security":"reality","realitySettings":{"serverName":"e.com","password":"` + valid + `","shortId":"abcd"}}`, expectErr: false},
+		{name: "valid legacy publicKey", stream: `{"network":"tcp","security":"reality","realitySettings":{"serverName":"e.com","publicKey":"` + valid + `"}}`, expectErr: false},
+		{name: "short privateKey", stream: `{"security":"reality","realitySettings":{"privateKey":"pk123"}}`, expectErr: true},
+		{name: "bad base64 publicKey", stream: `{"security":"reality","realitySettings":{"publicKey":"not-a-base64!!!"}}`, expectErr: true},
+		{name: "bad json", stream: `{bad`, expectErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := xray.ValidateRealityStream(tc.stream)
+			if tc.expectErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.expectErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateOutbound(t *testing.T) {
+	if err := xray.ValidateOutbound(`{"vnext":[]}`, `{"network":"tcp"}`); err != nil {
+		t.Errorf("valid outbound rejected: %v", err)
+	}
+	if err := xray.ValidateOutbound(`{bad`, ``); err == nil {
+		t.Error("expected error for bad settings json")
+	}
+	if err := xray.ValidateOutbound(`{}`, `{"security":"reality","realitySettings":{"password":"short"}}`); err == nil {
+		t.Error("expected error for invalid reality password")
+	}
+}
+
 func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 
 	inbounds := []models.Inbound{

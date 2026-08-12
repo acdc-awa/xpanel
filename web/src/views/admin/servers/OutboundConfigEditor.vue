@@ -175,7 +175,7 @@ function buildStreamJSON(): string {
   }
   if (form.vless_network === 'ws') {
     const ws: Record<string, any> = { path: form.ws_path || '/' }
-    if (form.ws_host) ws.headers = { Host: form.ws_host }
+    if (form.ws_host) ws.host = form.ws_host
     s.wsSettings = ws
   } else if (form.vless_network === 'xhttp') {
     s.xhttpSettings = { mode: form.xhttp_mode || 'auto', path: form.xhttp_path || '/' }
@@ -193,9 +193,10 @@ function buildStreamJSON(): string {
     s.tlsSettings = t
     if (form.vless_fingerprint) s.fingerprint = form.vless_fingerprint
   } else if (form.vless_security === 'reality') {
+    // 出站 REALITY 公钥标准字段为 password（publicKey 是兼容旧名，见 01 号文档 §2.2）
     s.realitySettings = {
       serverName: form.reality_server_name || undefined,
-      publicKey: form.reality_public_key || undefined,
+      password: form.reality_public_key || undefined,
       shortId: form.reality_short_id || undefined,
       fingerprint: form.reality_fingerprint || 'chrome',
       spiderX: form.reality_spider_x || '/',
@@ -244,14 +245,14 @@ function parseExisting() {
     form.vless_security = stream.security || 'none'
     form.vless_fingerprint = stream.fingerprint || 'chrome'
 
-    if (stream.wsSettings) { form.ws_path = stream.wsSettings.path || '/'; form.ws_host = stream.wsSettings.headers?.Host || '' }
+    if (stream.wsSettings) { form.ws_path = stream.wsSettings.path || '/'; form.ws_host = stream.wsSettings.host || stream.wsSettings.headers?.Host || '' }
     if (stream.xhttpSettings) { form.xhttp_mode = stream.xhttpSettings.mode || 'auto'; form.xhttp_path = stream.xhttpSettings.path || '/'; form.xhttp_host = stream.xhttpSettings.host || '' }
     if (stream.grpcSettings) { form.grpc_service_name = stream.grpcSettings.serviceName || 'grpc'; form.grpc_authority = stream.grpcSettings.authority || ''; form.grpc_multi_mode = !!stream.grpcSettings.multiMode }
 
     if (stream.tlsSettings) { form.tls_server_name = stream.tlsSettings.serverName || ''; form.tls_allow_insecure = !!stream.tlsSettings.allowInsecure }
     if (stream.realitySettings) {
       form.reality_server_name = stream.realitySettings.serverName || ''
-      form.reality_public_key = stream.realitySettings.publicKey || ''
+      form.reality_public_key = stream.realitySettings.password || stream.realitySettings.publicKey || ''
       form.reality_short_id = stream.realitySettings.shortId || ''
       form.reality_fingerprint = stream.realitySettings.fingerprint || 'chrome'
       form.reality_spider_x = stream.realitySettings.spiderX || '/'

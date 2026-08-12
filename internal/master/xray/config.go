@@ -3,6 +3,7 @@
 package xray
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +48,7 @@ type WSSettings struct {
 type XHTTPSettings struct {
 	Mode string `json:"mode"`
 	Path string `json:"path"`
+	Host string `json:"host"`
 }
 
 type GRPCSettings struct {
@@ -143,9 +145,10 @@ func (s *SniffingSettings) UnmarshalJSON(data []byte) error {
 }
 
 type TLSSettings struct {
-	ServerName string `json:"server_name"`
-	CertFile   string `json:"cert_file"`
-	KeyFile    string `json:"key_file"`
+	ServerName    string `json:"server_name"`
+	CertFile      string `json:"cert_file"`
+	KeyFile       string `json:"key_file"`
+	AllowInsecure bool   `json:"allowInsecure"` // stream_settings 线格式 camelCase；订阅 skip-cert-verify 透传
 }
 
 // UserEmail 用户在 Xray 中的 email（固定格式，stats 上报按此回查 user_id）。
@@ -184,6 +187,72 @@ func ValidateInbound(settingsJSON, streamSettings, sniffing string) error {
 		if err := json.Unmarshal([]byte(sniffing), &v); err != nil {
 			return fmt.Errorf("sniffing JSON 无效: %w", err)
 		}
+	}
+	// REALITY 密钥格式预检（非法 base64/长度推送到 agent 端 -test 才暴露）
+	return ValidateRealityStream(streamSettings)
+}
+
+// ValidateOutbound 校验出站 settings/streamSettings JSON 有效性，
+// 并对 REALITY 密钥做格式预检（01 号文档 §4 第 6 项）。
+func ValidateOutbound(settingsJSON, streamSettings string) error {
+	for _, s := range []string{settingsJSON, streamSettings} {
+		if s == "" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			return fmt.Errorf("出站 JSON 无效: %w", err)
+		}
+	}
+	return ValidateRealityStream(streamSettings)
+}
+
+// ValidateRealityStream 校验 streamSettings 中 REALITY 密钥格式：x25519 密钥须为
+// base64 RawURL 解码 32 字节（xray x25519 输出格式）。非法直接报错，避免配置
+// 推送到 agent 端 -test 才暴露（01 号文档 §4 第 6 项）。
+func ValidateRealityStream(streamSettings string) error {
+	if streamSettings == "" {
+		return nil
+	}
+	var s struct {
+		Security string `json:"security"`
+		Reality  *struct {
+			PrivateKey string `json:"privateKey"`
+			PublicKey  string `json:"publicKey"` // 兼容旧名
+			Password   string `json:"password"`  // 标准名（出站）
+		} `json:"realitySettings"`
+	}
+	if err := json.Unmarshal([]byte(streamSettings), &s); err != nil {
+		return fmt.Errorf("streamSettings JSON 无效: %w", err)
+	}
+	if s.Security != "reality" || s.Reality == nil {
+		return nil
+	}
+	if s.Reality.PrivateKey != "" {
+		if err := checkX25519Key(s.Reality.PrivateKey); err != nil {
+			return fmt.Errorf("REALITY privateKey 非法: %w", err)
+		}
+	}
+	pk := s.Reality.Password
+	if pk == "" {
+		pk = s.Reality.PublicKey
+	}
+	if pk != "" {
+		if err := checkX25519Key(pk); err != nil {
+			return fmt.Errorf("REALITY 公钥(password/publicKey) 非法: %w", err)
+		}
+	}
+	return nil
+}
+
+// checkX25519Key x25519 密钥格式：base64 RawURL 解码后须为 32 字节（xray x25519 输出格式）。
+func checkX25519Key(k string) error {
+	dec, err := base64.RawURLEncoding.DecodeString(k)
+	if err != nil {
+		return fmt.Errorf("base64 解码失败: %w", err)
+	}
+	if len(dec) != 32 {
+		return fmt.Errorf("解码后 %d 字节，须为 32 字节", len(dec))
 	}
 	return nil
 }
@@ -306,13 +375,18 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) [
 		if ob.SettingsJSON != "" {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(ob.SettingsJSON), &parsed); err == nil {
-				for k, v := range parsed {
-					item[k] = v
-				}
-				if _, hasProto := parsed["protocol"]; !hasProto {
-					if _, hasSettings := parsed["settings"]; !hasSettings {
-						item["settings"] = parsed
+				_, hasProto := parsed["protocol"]
+				_, hasSettings := parsed["settings"]
+				switch {
+				case hasProto || hasSettings:
+					// 完整出站配置（含 protocol / settings 键）：透传到顶层
+					for k, v := range parsed {
+						item[k] = v
 					}
+				default:
+					// 裸 settings（如 {"vnext": [...]}）：只进 settings，
+					// 避免顶层 + settings 双写脏数据（01 号文档 §4 附注）
+					item["settings"] = parsed
 				}
 			}
 		}
@@ -331,6 +405,8 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) [
 		if ob.SendThrough != "" {
 			item["sendThrough"] = ob.SendThrough
 		}
+		// vless 出站 users 兜底注入 encryption:"none"（xray 校验强制，见 01 号文档 §2.2）
+		normalizeVlessOutbound(item)
 		tag, _ := item["tag"].(string)
 		if tag != "" {
 			if idx, exists := seen[tag]; exists {
@@ -357,6 +433,36 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) [
 	}
 
 	return list
+}
+
+// normalizeVlessOutbound 对 vless 出站的 settings.vnext[].users[] 兜底注入
+// encryption:"none"（缺该字段 xray -test 直接报错；入站相反，禁止 encryption）。
+func normalizeVlessOutbound(item map[string]any) {
+	proto, _ := item["protocol"].(string)
+	if proto != "vless" {
+		return
+	}
+	settings, _ := item["settings"].(map[string]any)
+	if settings == nil {
+		return
+	}
+	vnext, _ := settings["vnext"].([]any)
+	for _, vn := range vnext {
+		vm, ok := vn.(map[string]any)
+		if !ok {
+			continue
+		}
+		users, _ := vm["users"].([]any)
+		for _, u := range users {
+			um, ok := u.(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, has := um["encryption"]; !has {
+				um["encryption"] = "none"
+			}
+		}
+	}
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
@@ -579,20 +685,46 @@ func StreamSecurity(raw string) string {
 }
 
 // StreamReality 从 streamSettings JSON 中提取 realitySettings。
+// stream_settings 存 xray 入站线格式（camelCase：serverNames[]/shortIds[]/publicKey/privateKey），
+// serverName 取 serverNames[0]、shortId 取 shortIds[0]（客户端订阅用单数）。
 func StreamReality(raw string) *RealitySettings {
 	if raw == "" {
 		return nil
 	}
 	var s struct {
-		RealitySettings RealitySettings `json:"realitySettings"`
+		RealitySettings *struct {
+			ServerName  string   `json:"serverName"`
+			ServerNames []string `json:"serverNames"`
+			PublicKey   string   `json:"publicKey"`
+			ShortID     string   `json:"shortId"`
+			ShortIDs    []string `json:"shortIds"`
+			PrivateKey  string   `json:"privateKey"`
+			Dest        string   `json:"dest"`
+		} `json:"realitySettings"`
 	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.RealitySettings == nil {
 		return nil
 	}
-	if s.RealitySettings.ServerName == "" {
+	r := s.RealitySettings
+	out := &RealitySettings{
+		PublicKey:  r.PublicKey,
+		PrivateKey: r.PrivateKey,
+		Dest:       r.Dest,
+	}
+	if r.ServerName != "" {
+		out.ServerName = r.ServerName
+	} else if len(r.ServerNames) > 0 {
+		out.ServerName = r.ServerNames[0]
+	}
+	if r.ShortID != "" {
+		out.ShortID = r.ShortID
+	} else if len(r.ShortIDs) > 0 {
+		out.ShortID = r.ShortIDs[0]
+	}
+	if out.ServerName == "" {
 		return nil
 	}
-	return &s.RealitySettings
+	return out
 }
 
 // StreamWS 从 streamSettings JSON 中提取 wsSettings。
@@ -608,6 +740,26 @@ func StreamWS(raw string) *WSSettings {
 		return nil
 	}
 	return &s.WSSettings
+}
+
+// StreamTLS 从 streamSettings JSON 中提取 tlsSettings（订阅 servername / skip-cert-verify 透传）。
+func StreamTLS(raw string) *TLSSettings {
+	if raw == "" {
+		return nil
+	}
+	var s struct {
+		TLSSettings *struct {
+			ServerName    string `json:"serverName"`
+			AllowInsecure bool   `json:"allowInsecure"`
+		} `json:"tlsSettings"`
+	}
+	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.TLSSettings == nil {
+		return nil
+	}
+	return &TLSSettings{
+		ServerName:    s.TLSSettings.ServerName,
+		AllowInsecure: s.TLSSettings.AllowInsecure,
+	}
 }
 
 // StreamXHTTP 从 streamSettings JSON 中提取 xhttpSettings。

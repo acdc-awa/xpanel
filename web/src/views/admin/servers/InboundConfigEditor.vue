@@ -215,7 +215,7 @@ function buildStreamSettingsJSON(): string {
 
   if (localNetwork.value === 'ws') {
     const ws: Record<string, any> = { path: wsForm.path || '/' }
-    if (wsForm.host) ws.headers = { Host: wsForm.host }
+    if (wsForm.host) ws.host = wsForm.host
     s.wsSettings = ws
   } else if (localNetwork.value === 'xhttp') {
     s.xhttpSettings = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/' }
@@ -344,7 +344,7 @@ function parseJsonToForm(str: string) {
     // Transport
     if (s.ws) {
       wsForm.path = s.ws.path || '/'
-      wsForm.host = s.ws.host || ''
+      wsForm.host = s.ws.host || s.ws.headers?.Host || ''
     }
     if (s.xhttp) {
       xhttpForm.mode = s.xhttp.mode || 'auto'
@@ -590,6 +590,8 @@ async function copyText(text: string, label: string) {
 
         <!-- WebSocket -->
         <template v-if="localNetwork === 'ws'">
+          <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
+            title="WS 为兼容保留项，新配置推荐使用 xhttp（性能更好、防封更稳），WS 旧配置不受影响" />
           <div class="grid-2">
             <el-form-item label="Path 路径">
               <el-input v-model="wsForm.path" placeholder="/" />
@@ -657,12 +659,14 @@ async function copyText(text: string, label: string) {
 
         <!-- REALITY -->
         <template v-if="localTlsType === 'reality'">
+          <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
+            title="官方警告：选 apple / icloud 等大站做借壳目标（Dest）有被 GFW 封 IP 的风险，建议用自建/小众站，且 target 应与 serverName 一致" />
           <div class="grid-2">
             <el-form-item label="借壳目标 Dest">
-              <el-input v-model="realityForm.dest" placeholder="www.apple.com:443" />
+              <el-input v-model="realityForm.dest" placeholder="www.example.com:443" />
             </el-form-item>
             <el-form-item label="SNI (server_name)">
-              <el-input v-model="realityForm.server_name" placeholder="www.apple.com" />
+              <el-input v-model="realityForm.server_name" placeholder="www.example.com" />
             </el-form-item>
             <el-form-item label="Short ID">
               <div style="display: flex; gap: 8px; width: 100%">

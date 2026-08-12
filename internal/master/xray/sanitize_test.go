@@ -57,6 +57,32 @@ func TestSanitizeStreamSettings(t *testing.T) {
 			},
 		},
 		{
+			name: "delete tlsSettings.allowInsecure (v26.6.27 removed)",
+			in:   `{"security":"tls","tlsSettings":{"serverName":"x.com","allowInsecure":true,"certificates":[{"certificateFile":"/c.pem","keyFile":"/k.pem"}]}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				tls := m["tlsSettings"].(map[string]any)
+				if _, ok := tls["allowInsecure"]; ok {
+					t.Error("tlsSettings.allowInsecure should be deleted (xray 拒绝加载)")
+				}
+				if tls["serverName"] != "x.com" {
+					t.Error("tlsSettings.serverName should be preserved")
+				}
+			},
+		},
+		{
+			name: "keep top-level allowInsecure",
+			in:   `{"security":"tls","allowInsecure":true,"tlsSettings":{"serverName":"x.com"}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				if _, ok := m["allowInsecure"]; !ok {
+					t.Error("顶层 allowInsecure xray 静默忽略，不应删（仅删 tlsSettings 内）")
+				}
+			},
+		},
+		{
 			name: "delete realitySettings.settings",
 			in:   `{"security":"reality","realitySettings":{"serverName":"apple.com","settings":{"publicKey":"pk"}}}`,
 			want: func(t *testing.T, out string) {

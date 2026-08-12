@@ -147,6 +147,8 @@ export interface RealitySettings {
 export interface WSSettings {
   path?: string
   host?: string
+  // 旧格式兼容（弃用的 headers.Host，仅解析回填用）
+  headers?: { Host?: string }
 }
 
 export interface XHTTPSettings {

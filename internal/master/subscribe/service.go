@@ -23,7 +23,9 @@ type ProxyItem struct {
 	UUID    string
 	Network string
 	TLSType string
+	Flow    string // 用户在该入站上的 flow（UserInbound 覆盖，与生成侧 clients 注入同源）
 	Reality *xray.RealitySettings
+	TLS     *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
 	WS      *xray.WSSettings
 	XHTTP   *xray.XHTTPSettings
 }
@@ -31,8 +33,14 @@ type ProxyItem struct {
 // BuildClash 生成 Clash YAML（proxy-providers 兼容格式）。
 func BuildClash(user *models.User, items []ProxyItem) string {
 	var b strings.Builder
+	names := make([]string, 0, len(items))
 	b.WriteString("proxies:\n")
 	for _, it := range items {
+		// reality 提取失败（缺 SNI/公钥）的节点跳过，避免 nil 崩溃与 proxy-groups 悬空引用
+		if it.TLSType == "reality" && it.Reality == nil {
+			continue
+		}
+		names = append(names, it.Name)
 		b.WriteString(fmt.Sprintf("  - name: %q\n", it.Name))
 		b.WriteString("    type: vless\n")
 		b.WriteString(fmt.Sprintf("    server: %s\n", it.Host))
@@ -45,7 +53,12 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 		case "reality":
 			b.WriteString("    tls: true\n")
 			if it.Network == "tcp" {
-				b.WriteString("    flow: xtls-rprx-vision\n")
+				// 与生成侧 buildClients 一致：TCP+REALITY 自动 vision，UserInbound 覆盖优先
+				flow := it.Flow
+				if flow == "" {
+					flow = "xtls-rprx-vision"
+				}
+				b.WriteString(fmt.Sprintf("    flow: %s\n", flow))
 			}
 			b.WriteString(fmt.Sprintf("    servername: %s\n", it.Reality.ServerName))
 			b.WriteString("    client-fingerprint: chrome\n")
@@ -54,6 +67,16 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 			b.WriteString(fmt.Sprintf("      short-id: %s\n", it.Reality.ShortID))
 		case "tls":
 			b.WriteString("    tls: true\n")
+			// TCP+TLS+Vision 场景（UserInbound.Flow 已配置时订阅必须带 flow，否则握手不匹配）
+			if it.Network == "tcp" && it.Flow != "" {
+				b.WriteString(fmt.Sprintf("    flow: %s\n", it.Flow))
+			}
+			if it.TLS != nil && it.TLS.ServerName != "" {
+				b.WriteString(fmt.Sprintf("    servername: %s\n", it.TLS.ServerName))
+			}
+			if it.TLS != nil && it.TLS.AllowInsecure {
+				b.WriteString("    skip-cert-verify: true\n")
+			}
 		default:
 			b.WriteString("    tls: false\n")
 		}
@@ -67,24 +90,25 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 				}
 			}
 		case "xhttp":
+			// mihomo 默认仅 h2，显式声明 alpn（服务端可能 h3/http1.1）
+			b.WriteString("    alpn: [h2]\n")
 			if it.XHTTP != nil {
 				b.WriteString("    xhttp-opts:\n")
 				b.WriteString(fmt.Sprintf("      mode: %s\n", it.XHTTP.Mode))
 				b.WriteString(fmt.Sprintf("      path: %s\n", it.XHTTP.Path))
+				if it.XHTTP.Host != "" {
+					b.WriteString(fmt.Sprintf("      host: %s\n", it.XHTTP.Host))
+				}
 			}
 		}
 	}
 
-	names := make([]string, 0, len(items))
-	for _, it := range items {
-		names = append(names, it.Name)
-	}
 	b.WriteString("proxy-groups:\n")
 	b.WriteString("  - name: \"🚀 节点选择\"\n    type: select\n    proxies:\n")
 	for _, n := range names {
 		b.WriteString(fmt.Sprintf("      - %q\n", n))
 	}
-	b.WriteString("  - name: \"♻️ 自动选择\"\n    type: url-test\n    url: http://www.gstatic.com/generate_204\n    interval: 300\n    proxies:\n")
+	b.WriteString("  - name: \"♻️ 自动选择\"\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    proxies:\n")
 	for _, n := range names {
 		b.WriteString(fmt.Sprintf("      - %q\n", n))
 	}
@@ -100,22 +124,34 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 		q.Set("encryption", "none")
 		switch it.TLSType {
 		case "reality":
+			if it.Reality == nil {
+				continue
+			}
 			q.Set("security", "reality")
 			q.Set("sni", it.Reality.ServerName)
 			q.Set("fp", "chrome")
 			q.Set("pbk", it.Reality.PublicKey)
 			q.Set("sid", it.Reality.ShortID)
 			if it.Network == "tcp" {
-				q.Set("flow", "xtls-rprx-vision")
+				flow := it.Flow
+				if flow == "" {
+					flow = "xtls-rprx-vision"
+				}
+				q.Set("flow", flow)
 			}
 		case "tls":
 			q.Set("security", "tls")
-			if it.WS != nil {
-				q.Set("type", "ws")
-				q.Set("path", url.QueryEscape(it.WS.Path))
-				if it.WS.Host != "" {
-					q.Set("host", it.WS.Host)
+			if it.TLS != nil {
+				if it.TLS.ServerName != "" {
+					q.Set("sni", it.TLS.ServerName)
 				}
+				if it.TLS.AllowInsecure {
+					q.Set("allowInsecure", "1")
+				}
+			}
+			// TCP+TLS+Vision：仅当用户已配置 flow（vision 不适用 ws/xhttp）
+			if it.Network == "tcp" && it.Flow != "" {
+				q.Set("flow", it.Flow)
 			}
 		default:
 			q.Set("security", "none")
@@ -135,6 +171,9 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 			if it.XHTTP != nil {
 				q.Set("mode", it.XHTTP.Mode)
 				q.Set("path", it.XHTTP.Path)
+				if it.XHTTP.Host != "" {
+					q.Set("host", it.XHTTP.Host)
+				}
 			}
 		default:
 			if it.Network == "tcp" && it.TLSType != "reality" {
