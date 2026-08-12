@@ -27,6 +27,7 @@ tools/xray/xray-bin/xray
 tools/xray/xray-bin/geoip.dat
 tools/xray/xray-bin/geosite.dat
 tools/mihomo/mihomo
+tools/mihomo/mihomo.exe
 tools/mihomo/mihomo-linux-amd64-*.gz
 tools/**/cache.db
 tools/**/*.pid
