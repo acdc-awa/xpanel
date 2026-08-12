@@ -11,6 +11,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/zhx/xray-panel/internal/agent/accounts"
+	"github.com/zhx/xray-panel/internal/agent/certs"
 	"github.com/zhx/xray-panel/internal/agent/collector"
 	"github.com/zhx/xray-panel/internal/agent/stats"
 	"github.com/zhx/xray-panel/internal/agent/xrayproc"
@@ -35,6 +37,9 @@ type Client struct {
 	Stats           *stats.Collector
 	CollectInterval time.Duration
 	ReportInterval  time.Duration
+	// Phase T：内部账户存储 + 证书落盘目录
+	Accounts *accounts.Store
+	CertsDir string
 
 	ws        *websocket.Conn
 	writeMu   sync.Mutex // 保护 ws 写（心跳/上报/回执并发）
@@ -323,45 +328,54 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 
 // handle 处理主控指令并回执。
 func (c *Client) handle(m *protocol.Message) {
-	var res protocol.ResultPayload
+	res := c.dispatch(m)
+	if res == nil {
+		return // 不认识的类型不回应
+	}
+	_ = c.send(protocol.MsgResult, m.ID, *res)
+}
+
+// dispatch 按消息类型处理指令，返回回执负载；未知类型返回 nil。
+func (c *Client) dispatch(m *protocol.Message) *protocol.ResultPayload {
 	switch m.Type {
 	case protocol.MsgPushConfig:
 		var p protocol.PushConfigPayload
 		if err := m.PayloadTo(&p); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: "解析 push_config 失败"}
-		} else if err := c.Xray.RestartWithConfig(p.ConfigJSON); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: err.Error()}
-		} else {
-			if c.Stats != nil {
-				c.Stats.ResetUsers()
-			}
-			res = protocol.ResultPayload{OK: true, Data: "xray 已按新配置重启"}
+			return &protocol.ResultPayload{OK: false, Error: "解析 push_config 失败"}
 		}
+		if err := c.Xray.RestartWithConfig(p.ConfigJSON); err != nil {
+			return &protocol.ResultPayload{OK: false, Error: err.Error()}
+		}
+		if c.Stats != nil {
+			c.Stats.ResetUsers()
+		}
+		return &protocol.ResultPayload{OK: true, Data: "xray 已按新配置重启"}
 	case protocol.MsgSyncUsers:
 		var p protocol.SyncUsersPayload
 		if err := m.PayloadTo(&p); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: "解析 sync_users 失败: " + err.Error()}
-		} else if c.Stats == nil {
-			res = protocol.ResultPayload{OK: false, Error: "stats collector 未初始化"}
-		} else if err := c.Stats.SyncUsers(context.Background(), p.Users); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: err.Error()}
-		} else {
-			res = protocol.ResultPayload{OK: true, Data: "用户列表同步成功（gRPC 动态调整）"}
+			return &protocol.ResultPayload{OK: false, Error: "解析 sync_users 失败: " + err.Error()}
 		}
+		if c.Stats == nil {
+			return &protocol.ResultPayload{OK: false, Error: "stats collector 未初始化"}
+		}
+		if err := c.Stats.SyncUsers(context.Background(), p.Users); err != nil {
+			return &protocol.ResultPayload{OK: false, Error: err.Error()}
+		}
+		return &protocol.ResultPayload{OK: true, Data: "用户列表同步成功（gRPC 动态调整）"}
 	case protocol.MsgRestartXray:
 		if err := c.Xray.Stop(); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: err.Error()}
-		} else if err := c.Xray.Start(); err != nil {
-			res = protocol.ResultPayload{OK: false, Error: err.Error()}
-		} else {
-			if c.Stats != nil {
-				c.Stats.ResetUsers()
-			}
-			res = protocol.ResultPayload{OK: true, Data: "xray 已重启"}
+			return &protocol.ResultPayload{OK: false, Error: err.Error()}
 		}
+		if err := c.Xray.Start(); err != nil {
+			return &protocol.ResultPayload{OK: false, Error: err.Error()}
+		}
+		if c.Stats != nil {
+			c.Stats.ResetUsers()
+		}
+		return &protocol.ResultPayload{OK: true, Data: "xray 已重启"}
 	case protocol.MsgGetStatus:
 		running, pid, startedAt, uptime := c.Xray.Status()
-		res = protocol.ResultPayload{OK: true, Data: protocol.StatusData{
+		return &protocol.ResultPayload{OK: true, Data: protocol.StatusData{
 			XrayRunning: running,
 			Pid:         pid,
 			UptimeSec:   uptime,
@@ -373,12 +387,62 @@ func (c *Client) handle(m *protocol.Message) {
 		_ = m.PayloadTo(&p)
 		logs, err := c.Xray.Logs(p.Lines)
 		if err != nil {
-			res = protocol.ResultPayload{OK: false, Error: err.Error()}
-		} else {
-			res = protocol.ResultPayload{OK: true, Data: logs}
+			return &protocol.ResultPayload{OK: false, Error: err.Error()}
 		}
+		return &protocol.ResultPayload{OK: true, Data: logs}
+	case protocol.MsgSetupInternalAccount, protocol.MsgRotateInternalAccount:
+		return c.handleInternalAccount(m, m.Type == protocol.MsgRotateInternalAccount)
+	case protocol.MsgPushCert:
+		return c.handlePushCert(m)
 	default:
-		return // 不认识的类型不回应
+		return nil
 	}
-	_ = c.send(protocol.MsgResult, m.ID, res)
+}
+
+// handleInternalAccount setup/rotate：节点生成 UUID → 原子持久化 → 回执。
+// setup 幂等（已有则复用）；rotate 强制重新生成。
+func (c *Client) handleInternalAccount(m *protocol.Message, force bool) *protocol.ResultPayload {
+	if c.Accounts == nil {
+		return &protocol.ResultPayload{OK: false, Error: "内部账户存储未初始化"}
+	}
+	var p protocol.SetupInternalAccountPayload
+	if err := m.PayloadTo(&p); err != nil {
+		return &protocol.ResultPayload{OK: false, Error: "解析失败: " + err.Error()}
+	}
+	if p.Tag == "" {
+		return &protocol.ResultPayload{OK: false, Error: "缺少 tag"}
+	}
+	if !force {
+		if m, err := c.Accounts.Load(); err == nil {
+			if uuid, ok := m[p.Tag]; ok && uuid != "" {
+				return &protocol.ResultPayload{OK: true, Data: protocol.SetupInternalResult{Tag: p.Tag, UUID: uuid}}
+			}
+		}
+	}
+	uuid, err := accounts.NewUUID()
+	if err != nil {
+		return &protocol.ResultPayload{OK: false, Error: "生成 UUID 失败: " + err.Error()}
+	}
+	if err := c.Accounts.Set(p.Tag, uuid); err != nil {
+		return &protocol.ResultPayload{OK: false, Error: "持久化失败: " + err.Error()}
+	}
+	return &protocol.ResultPayload{OK: true, Data: protocol.SetupInternalResult{Tag: p.Tag, UUID: uuid}}
+}
+
+// handlePushCert 证书下发：校验 PEM 匹配 → 原子落盘 → 回执。
+func (c *Client) handlePushCert(m *protocol.Message) *protocol.ResultPayload {
+	if c.CertsDir == "" {
+		return &protocol.ResultPayload{OK: false, Error: "证书目录未配置"}
+	}
+	var p protocol.PushCertPayload
+	if err := m.PayloadTo(&p); err != nil {
+		return &protocol.ResultPayload{OK: false, Error: "解析失败: " + err.Error()}
+	}
+	if p.Domain == "" {
+		return &protocol.ResultPayload{OK: false, Error: "缺少 domain"}
+	}
+	if err := certs.Write(c.CertsDir, p.Domain, p.CertPEM, p.KeyPEM); err != nil {
+		return &protocol.ResultPayload{OK: false, Error: err.Error()}
+	}
+	return &protocol.ResultPayload{OK: true, Data: "证书已落盘 " + certs.SanitizeDomain(p.Domain)}
 }

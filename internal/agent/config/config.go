@@ -16,6 +16,9 @@ type Config struct {
 	Stats        Stats         `yaml:"stats"`
 	Heartbeat    time.Duration `yaml:"heartbeat_interval"` // 心跳间隔
 	ReconnectMax time.Duration `yaml:"reconnect_max"`      // 重连退避上限
+	// Phase T：内部账户与证书
+	AccountsPath string `yaml:"accounts_path"` // relay 内部账户持久化文件
+	CertsDir     string `yaml:"certs_dir"`     // push_cert 落盘根目录
 }
 
 type Master struct {
@@ -54,6 +57,8 @@ func Default() *Config {
 			CollectInterval: 30 * time.Second,
 			ReportInterval:  60 * time.Second,
 		},
+		AccountsPath: "/etc/xray-agent/internal_accounts.json",
+		CertsDir:     "/etc/xray/certs",
 	}
 }
 

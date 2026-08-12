@@ -24,6 +24,12 @@ const (
 	MsgGetStatus   = "get_status"
 	MsgGetLogs     = "get_logs"
 
+	// Phase T：内部账户与证书
+	MsgSetupInternalAccount   = "setup_internal_account"   // 主控→节点：为 relay 入站生成内部 UUID
+	MsgRotateInternalAccount  = "rotate_internal_account"  // 主控→节点：重新生成内部 UUID
+	MsgPushCert               = "push_cert"                // 主控→节点：TLS 证书下发落盘
+	MsgInternalUUIDReport     = "internal_uuid_report"     // 节点→主控：内部 UUID 变更主动上报
+
 	// upgrade_agent（预留）：主控→节点 推送升级指令（未实现；agent 升级逻辑见 internal/agent/upgrade）
 )
 

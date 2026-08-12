@@ -62,6 +62,30 @@ type GetLogsPayload struct {
 	Lines int `json:"lines"`
 }
 
+// SetupInternalAccountPayload 主控→节点：为 relay 入站生成（或轮换）内部 UUID。
+type SetupInternalAccountPayload struct {
+	Tag string `json:"tag"`
+}
+
+// SetupInternalResult setup/rotate 回执 data（uuid 由节点生成，主控以此覆盖 DB）。
+type SetupInternalResult struct {
+	Tag  string `json:"tag"`
+	UUID string `json:"uuid"`
+}
+
+// PushCertPayload 主控→节点：TLS 证书下发（agent 校验 PEM 匹配后落盘）。
+type PushCertPayload struct {
+	Domain  string `json:"domain"`
+	CertPEM string `json:"cert_pem"`
+	KeyPEM  string `json:"key_pem"`
+}
+
+// InternalUUIDReportPayload 节点→主控：内部 UUID 变更主动上报（如 CLI 轮换）。
+type InternalUUIDReportPayload struct {
+	Tag  string `json:"tag"`
+	UUID string `json:"uuid"`
+}
+
 // ResultPayload 指令回执（id 回填请求 ID）。
 type ResultPayload struct {
 	OK    bool   `json:"ok"`

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/zhx/xray-panel/internal/agent/accounts"
 	"github.com/zhx/xray-panel/internal/agent/cli"
 	"github.com/zhx/xray-panel/internal/agent/client"
 	"github.com/zhx/xray-panel/internal/agent/collector"
@@ -86,6 +87,8 @@ func main() {
 		Stats:           statsCollector,
 		CollectInterval: cfg.Stats.CollectInterval,
 		ReportInterval:  cfg.Stats.ReportInterval,
+		Accounts:        accounts.New(cfg.AccountsPath),
+		CertsDir:        cfg.CertsDir,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

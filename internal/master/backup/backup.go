@@ -17,8 +17,8 @@ import (
 	"github.com/zhx/xray-panel/internal/master/services"
 )
 
-// tsRe 备份文件名格式：panel-20060102-150405.db。
-var tsRe = regexp.MustCompile(`^panel-\d{8}-\d{6}\.db$`)
+// tsRe 备份文件名格式：panel-20060102-150405.db（捕获时间戳段）。
+var tsRe = regexp.MustCompile(`^panel-(\d{8}-\d{6})\.db$`)
 
 // quoteSQL 用单引号 SQL 字面量包裹路径（SQLite 不支持反斜杠转义；%q 的双引号标识符
 // 会把 \ 转成 \\ 且 \x22 无法还原，Windows 下依赖文件系统归一化属侥幸）。
@@ -120,6 +120,20 @@ func verify(path string) error {
 	return nil
 }
 
+// tsFromName 从备份文件名解析时间戳（文件名是权威时间；mtime 在同秒创建或
+// 拷贝/恢复后会失真，不能作为排序依据）。
+func tsFromName(name string) (time.Time, bool) {
+	m := tsRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, false
+	}
+	t, err := time.ParseInLocation("20060102-150405", m[1], time.UTC)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
 // List 按时间倒序返回全部备份。
 func (s *Service) List() ([]BackupInfo, error) {
 	s.mu.Lock()
@@ -145,7 +159,14 @@ func (s *Service) listLocked() ([]BackupInfo, error) {
 		}
 		items = append(items, info)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	sort.Slice(items, func(i, j int) bool {
+		ti, okI := tsFromName(items[i].File)
+		tj, okJ := tsFromName(items[j].File)
+		if okI && okJ {
+			return ti.After(tj)
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
 	return items, nil
 }
 
