@@ -4,17 +4,19 @@ import "time"
 
 // Server 节点服务器（对应 §5 servers）。
 type Server struct {
-	ID         uint64     `gorm:"primaryKey" json:"id"`
-	Name       string     `gorm:"size:64;not null" json:"name"`
-	Host       string     `gorm:"size:255;not null" json:"host"`
-	NodeID     string     `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
-	Secret     string     `gorm:"size:64;not null" json:"-"`
-	Location   string     `gorm:"size:64" json:"location"`
-	Remark     string     `gorm:"size:255" json:"remark"`
-	Status     int        `gorm:"default:0;index" json:"status"` // 0 离线 1 在线
-	LastSeenAt *time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID                    uint64     `gorm:"primaryKey" json:"id"`
+	Name                  string     `gorm:"size:64;not null" json:"name"`
+	Host                  string     `gorm:"size:255;not null" json:"host"`
+	NodeID                string     `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
+	Secret                string     `gorm:"size:64;not null" json:"-"`
+	Location              string     `gorm:"size:64" json:"location"`
+	Remark                string     `gorm:"size:255" json:"remark"`
+	Status                int        `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
+	DefaultOutboundTag    string     `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
+	RoutingDomainStrategy string     `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
+	LastSeenAt            *time.Time `json:"last_seen_at"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 // Inbound 入站（接入点），每节点可配多个。
@@ -22,26 +24,26 @@ type Server struct {
 // stream_settings 存传输层 JSON（network / security / realitySettings / wsSettings / tlsSettings 等）；
 // sniffing 存流量嗅探 JSON。
 type Inbound struct {
-	ID             uint64    `gorm:"primaryKey" json:"id"`
-	ServerID       uint64    `gorm:"index;not null" json:"server_id"`
-	Tag            string    `gorm:"size:64;not null" json:"tag"`
-	Protocol       string    `gorm:"size:16;not null" json:"protocol"` // vless / vmess / trojan / shadowsocks
-	Port           int       `gorm:"not null" json:"port"`
-	Listen         string    `gorm:"size:64" json:"listen"`            // 监听地址，空 = 0.0.0.0
-	SettingsJSON   string    `gorm:"type:text" json:"settings_json"`   // 协议 settings（透传，clients 由后端注入）
-	StreamSettings string    `gorm:"type:text" json:"stream_settings"` // 传输 streamSettings（透传）
-	Sniffing       string    `gorm:"type:text" json:"sniffing"`        // 嗅探配置（透传）
-	Ratio          float64   `gorm:"default:1" json:"ratio"`
+	ID             uint64  `gorm:"primaryKey" json:"id"`
+	ServerID       uint64  `gorm:"index;not null" json:"server_id"`
+	Tag            string  `gorm:"size:64;not null" json:"tag"`
+	Protocol       string  `gorm:"size:16;not null" json:"protocol"` // vless / vmess / trojan / shadowsocks
+	Port           int     `gorm:"not null" json:"port"`
+	Listen         string  `gorm:"size:64" json:"listen"`            // 监听地址，空 = 0.0.0.0
+	SettingsJSON   string  `gorm:"type:text" json:"settings_json"`   // 协议 settings（透传，clients 由后端注入）
+	StreamSettings string  `gorm:"type:text" json:"stream_settings"` // 传输 streamSettings（透传）
+	Sniffing       string  `gorm:"type:text" json:"sniffing"`        // 嗅探配置（透传）
+	Ratio          float64 `gorm:"default:1" json:"ratio"`
 	// 流量统计（冗余计数器，避免每次 SUM traffic_logs）
-	Up            int64      `gorm:"default:0" json:"up"`
-	Down          int64      `gorm:"default:0" json:"down"`
-	Total         int64      `gorm:"default:0" json:"total"`                         // 入站总流量上限（0=不限）
-	TrafficReset  string     `gorm:"size:16;default:never" json:"traffic_reset"`     // never / daily / weekly / monthly
-	ExpiryTime    *time.Time `json:"expiry_time,omitempty"`                          // 入站自身到期时间
+	Up           int64      `gorm:"default:0" json:"up"`
+	Down         int64      `gorm:"default:0" json:"down"`
+	Total        int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
+	TrafficReset string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
+	ExpiryTime   *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
 	// 分享地址（订阅链接中的对外地址，默认使用节点 Host）
-	ShareAddrStrategy string `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
-	ShareAddr         string `gorm:"size:255" json:"share_addr"`
-	Enabled           bool   `gorm:"default:true" json:"enabled"`
+	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
+	ShareAddr         string    `gorm:"size:255" json:"share_addr"`
+	Enabled           bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -53,12 +55,12 @@ type UserInbound struct {
 	ID                uint64     `gorm:"primaryKey" json:"id"`
 	UserID            uint64     `gorm:"index;not null" json:"user_id"`
 	InboundID         uint64     `gorm:"index;not null" json:"inbound_id"`
-	UUID              string     `gorm:"size:36" json:"uuid,omitempty"`            // 从 User 继承，可覆盖
-	Flow              string     `gorm:"size:32" json:"flow,omitempty"`            // xtls-rprx-vision / ""
-	LimitedDevice     int        `gorm:"default:0" json:"limited_device"`          // xray maxClientDevices（0=不限）
-	TotalGB           int64      `gorm:"default:0" json:"total_gb"`                // 覆盖套餐流量（0=继承）
-	ExpiryTime        *time.Time `json:"expiry_time,omitempty"`                    // 覆盖到期时间（nil=继承）
-	Enabled           bool       `gorm:"default:true" json:"enabled"`              // 启用→gRPC AddUser，禁用→RemoveUser
+	UUID              string     `gorm:"size:36" json:"uuid,omitempty"`              // 从 User 继承，可覆盖
+	Flow              string     `gorm:"size:32" json:"flow,omitempty"`              // xtls-rprx-vision / ""
+	LimitedDevice     int        `gorm:"default:0" json:"limited_device"`            // xray maxClientDevices（0=不限）
+	TotalGB           int64      `gorm:"default:0" json:"total_gb"`                  // 覆盖套餐流量（0=继承）
+	ExpiryTime        *time.Time `json:"expiry_time,omitempty"`                      // 覆盖到期时间（nil=继承）
+	Enabled           bool       `gorm:"default:true" json:"enabled"`                // 启用→gRPC AddUser，禁用→RemoveUser
 	PermissionGroupID uint64     `gorm:"index;default:0" json:"permission_group_id"` // 来源追溯
 	Remark            string     `gorm:"size:255" json:"remark"`
 	CreatedAt         time.Time  `json:"created_at"`
@@ -67,16 +69,16 @@ type UserInbound struct {
 
 // Plan 套餐。
 type Plan struct {
-	ID             uint64    `gorm:"primaryKey" json:"id"`
-	Name           string    `gorm:"size:64;not null" json:"name"`
-	PriceCents     int64     `gorm:"not null" json:"price_cents"` // 价格（分）
-	TrafficGB      int64     `gorm:"not null" json:"traffic_gb"`
-	DurationDays   int       `gorm:"not null" json:"duration_days"`
-	SpeedLimitKbps     int64  `json:"speed_limit_kbps"` // 0 = 不限速
-	PermissionGroupID  uint64 `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
-	Enabled            bool   `gorm:"default:true" json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                uint64    `gorm:"primaryKey" json:"id"`
+	Name              string    `gorm:"size:64;not null" json:"name"`
+	PriceCents        int64     `gorm:"not null" json:"price_cents"` // 价格（分）
+	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
+	DurationDays      int       `gorm:"not null" json:"duration_days"`
+	SpeedLimitKbps    int64     `json:"speed_limit_kbps"`                           // 0 = 不限速
+	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
+	Enabled           bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Order 订单（人工确认制：pending → paid / cancelled）。
@@ -183,6 +185,7 @@ type ServerRoutingRule struct {
 	IP          string    `gorm:"type:text" json:"ip,omitempty"`        // 逗号/换行分隔或 JSON 数组
 	Port        string    `gorm:"size:64" json:"port,omitempty"`
 	Network     string    `gorm:"size:32" json:"network,omitempty"`
+	Protocol    string    `gorm:"size:64" json:"protocol,omitempty"`      // bittorrent / http / tls / quic，逗号分隔多选
 	InboundTag  string    `gorm:"type:text" json:"inbound_tag,omitempty"` // 逗号/换行分隔或 JSON 数组
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
 	Priority    int       `gorm:"default:0" json:"priority"`

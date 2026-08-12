@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/zhx/xray-panel/internal/agent/cli"
@@ -30,12 +31,18 @@ func main() {
 		}
 	}
 
-	cfgPath := flag.String("config", "", "配置文件路径（默认探测 /etc/xray-agent/config.yml 或 ./agent.yaml）")
+	cfgPath := flag.String("config", "", "配置文件路径（默认探测 /etc/xray-agent/config.yml、二进制同目录下的 agent.yaml、或 ./agent.yaml）")
 	flag.Parse()
 
 	path := *cfgPath
 	if path == "" {
-		for _, cand := range []string{"/etc/xray-agent/config.yml", "agent.yaml"} {
+		// 按优先级探测：系统安装路径 → 二进制同目录 → 当前工作目录
+		candidates := []string{"/etc/xray-agent/config.yml"}
+		if exe, err := os.Executable(); err == nil {
+			candidates = append(candidates, filepath.Join(filepath.Dir(exe), "agent.yaml"))
+		}
+		candidates = append(candidates, "agent.yaml")
+		for _, cand := range candidates {
 			if _, err := os.Stat(cand); err == nil {
 				path = cand
 				break
@@ -43,7 +50,7 @@ func main() {
 		}
 	}
 	if path == "" {
-		log.Fatal("未找到配置文件（可加 -config 指定路径，默认探测 /etc/xray-agent/config.yml 或 ./agent.yaml）")
+		log.Fatal("未找到配置文件（可加 -config 指定路径，默认探测 /etc/xray-agent/config.yml、二进制同目录 agent.yaml、或当前目录 agent.yaml）")
 	}
 
 	cfg, err := config.Load(path)

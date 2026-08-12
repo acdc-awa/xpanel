@@ -61,7 +61,7 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 		{ID: 2, ServerID: 1, OutboundTag: "blocked", RuleJSON: `{"type":"field","domain":["geosite:category-ads-all"],"outboundTag":"blocked"}`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil)
+	rawCfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil)
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil)
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 		{ID: 3, ServerID: 1, Tag: "outbound-vless-grpc", Protocol: "vless", SettingsJSON: `{"vnext":[{"address":"remote.proxy.com","port":443,"users":[{"id":"uuid","encryption":"none"}]}]}`, StreamSettingsJSON: `{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"out-grpc-svc"}}`, SendThrough: "192.168.1.100", Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, outbounds, nil, users, nil)
+	rawCfg, err := xray.Generate(inbounds, outbounds, nil, users, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -190,14 +190,14 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 	}
 
 	obs := asArray(t, parsed["outbounds"], "outbounds")
-	if len(obs) != 3 {
-		t.Fatalf("expected 3 outbounds, got %d", len(obs))
+	if len(obs) != 4 {
+		t.Fatalf("expected 4 outbounds (direct+blocked+api from template + vless-grpc from DB), got %d", len(obs))
 	}
 	obDirect := asObject(t, obs[0], "obs[0]")
 	if obDirect["tag"] != "direct" {
 		t.Errorf("outbound 0 mismatch: %v", obDirect)
 	}
-	obProxy := asObject(t, obs[2], "obs[2]")
+	obProxy := asObject(t, obs[3], "obs[3]")
 	if obProxy["sendThrough"] != "192.168.1.100" {
 		t.Errorf("sendThrough mismatch: %v", obProxy)
 	}
@@ -216,7 +216,7 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 		{ID: 3, ServerID: 1, OutboundTag: "proxy", RuleJSON: `{"type":"field","inboundTag":["vless-in"],"protocol":["http","tls"],"outboundTag":"proxy"}`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users, nil)
+	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -228,8 +228,8 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 
 	rt := asObject(t, parsed["routing"], "routing")
 	rules := asArray(t, rt["rules"], "routing.rules")
-	if len(rules) != 4 {
-		t.Fatalf("expected 4 rules, got %d", len(rules))
+	if len(rules) != 6 {
+		t.Fatalf("expected 6 rules (1 API + 2 defaults + 3 DB), got %d", len(rules))
 	}
 }
 
@@ -242,7 +242,7 @@ func TestGenerateConfig_TCPWithFallbacks(t *testing.T) {
 		Enabled:        true,
 	}
 
-	raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser(), nil)
+	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			Sniffing:       `{"enabled":true,"destOverride":["http","tls"],"routeOnly":true}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser(), nil)
+		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -299,7 +299,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			StreamSettings: `{"network":"ws","security":"none","wsSettings":{"path":"/ws"}}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser(), nil)
+		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -319,7 +319,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, SettingsJSON: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil)
+		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
 		if err == nil {
 			t.Error("expected error for malformed settings_json")
 		}
@@ -330,7 +330,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 			{ID: 3, Tag: "in3", Protocol: "vless", Port: 443, Enabled: true},
 		}
 		users := []models.User{{ID: 1, UUID: "", Status: models.StatusActive}, {ID: 2, UUID: "uuid2", Status: models.StatusDisabled}}
-		_, err := xray.Generate(inbounds, nil, nil, users, nil)
+		_, err := xray.Generate(inbounds, nil, nil, users, nil, "", "")
 		if err == nil {
 			t.Error("expected error for no active users")
 		}
@@ -340,7 +340,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, StreamSettings: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil)
+		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
 		if err == nil {
 			t.Error("expected error for malformed streamSettings")
 		}
@@ -364,7 +364,7 @@ func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
 				StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"serverNames":["example.com"],"publicKey":"pk","privateKey":"sk","shortIds":[` + tc.shortIDs + `],"dest":"1.1.1.1:443"}}`,
 				Enabled:        true,
 			}
-			raw, err := xray.Generate( []models.Inbound{inb}, nil, nil, vlessTestUser(), nil)
+			raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
 			if err != nil {
 				t.Fatalf("Generate failed: %v", err)
 			}
@@ -391,7 +391,7 @@ func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
 		{ID: 2, ServerID: 1, OutboundTag: "blocked", InboundTag: `["vless-in"]`, Enabled: true},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users, nil)
+	rawCfg, err := xray.Generate(inbounds, nil, routingRules, users, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -400,8 +400,8 @@ func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
 	rt := asObject(t, parsed["routing"], "routing")
 	rules := asArray(t, rt["rules"], "routing.rules")
 
-	r1 := asObject(t, rules[1], "rules[1]")
-	inbTags1 := asArray(t, r1["inboundTag"], "rules[1].inboundTag")
+	r1 := asObject(t, rules[3], "rules[3]")
+	inbTags1 := asArray(t, r1["inboundTag"], "rules[3].inboundTag")
 	if len(inbTags1) != 2 || inbTags1[0] != "vless-in" || inbTags1[1] != "api" {
 		t.Errorf("inboundTag = %v", inbTags1)
 	}

@@ -345,7 +345,7 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.ServerError(c, "查询路由失败")
 		return
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil)
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil, "", "")
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return

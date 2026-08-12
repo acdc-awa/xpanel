@@ -129,7 +129,7 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 
 	validUsers := s.filterValidUsers()
 
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil)
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, srv.DefaultOutboundTag, srv.RoutingDomainStrategy)
 	if err != nil {
 		return "", err
 	}

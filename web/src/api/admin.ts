@@ -73,6 +73,8 @@ export interface ServerItem {
   remark: string
   status: number // 0 离线 1 在线
   config_status: string // pushed / pending / ''（无待推送配置）
+  default_outbound_tag: string // 路由默认出口
+  routing_domain_strategy: string // 路由域名策略
   last_seen_at: string | null
   created_at: string
 }
@@ -109,7 +111,7 @@ export function deleteServer(id: number) {
 
 export function updateServer(
   id: number,
-  payload: { name?: string; host?: string; location?: string; remark?: string },
+  payload: { name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
 }
@@ -223,6 +225,8 @@ export interface RoutingRulePayload {
   ip?: string
   port?: string
   network?: string
+  protocol?: string
+  inbound_tag?: string
   enabled?: boolean
   priority?: number
   remark?: string

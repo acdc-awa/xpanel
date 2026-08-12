@@ -234,7 +234,8 @@ func parseStringList(s string) []string {
 }
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound) ([]byte, error) {
+// defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, defaultOutboundTag string, routingDomainStrategy string) ([]byte, error) {
 	cfg := LoadTemplate()
 
 	// 索引：userID → UserInbound（per-inbound 覆盖配置）
@@ -243,13 +244,21 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		uiByUser[userInbounds[i].UserID] = &userInbounds[i]
 	}
 
-	// 1. 出站：模板基础出站 + 节点自定义出站叠加
-	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds)
+	// 1. 出站：模板基础出站 + 节点自定义出站叠加，然后按默认出口排序
+	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds, defaultOutboundTag)
 
-	// 2. 路由规则：api 保护规则 + 模板规则 + 节点规则叠加
-	cfg["routing"] = map[string]any{
-		"rules": mergeRoutingRules(routingRules),
+	// 2. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加
+	routing := map[string]any{}
+	if tmplRouting, ok := cfg["routing"].(map[string]any); ok {
+		for k, v := range tmplRouting {
+			routing[k] = v
+		}
 	}
+	routing["rules"] = mergeRoutingRules(routingRules)
+	if routingDomainStrategy != "" {
+		routing["domainStrategy"] = routingDomainStrategy
+	}
+	cfg["routing"] = routing
 
 	// 3. 入站：全部启用的入站 + api 内建入站
 	inboundList := []any{}
@@ -275,7 +284,8 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 
 // mergeOutbounds 合并模板出站与节点自定义出站。模板提供基础（freedom/blackhole），
 // 节点 ServerOutbound 叠加在模板之上。同 tag 时节点覆盖模板（允许管理员自定义基础策略）。
-func mergeOutbounds(tmpl any, outs []models.ServerOutbound) []any {
+// defaultTag 非空时将该标签的出站移至数组首位（xray 将数组首个出站作为路由默认出口）。
+func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) []any {
 	seen := make(map[string]int) // tag → index in list
 	list := make([]any, 0)
 	if arr, ok := tmpl.([]any); ok {
@@ -314,7 +324,7 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound) []any {
 		}
 		if ob.StreamSettingsJSON != "" {
 			var stream map[string]any
-			if err := json.Unmarshal([]byte(ob.StreamSettingsJSON), &stream); err == nil {
+			if err := json.Unmarshal([]byte(sanitizeStreamSettings(ob.StreamSettingsJSON)), &stream); err == nil {
 				item["streamSettings"] = stream
 			}
 		}
@@ -331,11 +341,26 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound) []any {
 		}
 		list = append(list, item)
 	}
+
+	// 默认出口置顶：xray 路由未命中时使用 outbounds[0] 作为默认出口
+	if defaultTag != "" {
+		for i, item := range list {
+			if m, ok := item.(map[string]any); ok {
+				if t, _ := m["tag"].(string); t == defaultTag {
+					// 移到首位
+					copy(list[1:i+1], list[0:i])
+					list[0] = item
+					break
+				}
+			}
+		}
+	}
+
 	return list
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）+ 模板规则 + 节点规则（按 Priority ASC, id ASC 排序）。
+// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网直连）→ 节点规则（按 Priority ASC, id ASC 排序）。
 func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 	list := []any{
 		map[string]any{
@@ -344,6 +369,36 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 			"outboundTag": "api",
 		},
 	}
+
+	// 默认内置规则（3x-ui 风格）：BT 流量屏蔽、内网 IP 直连
+	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）
+	hasBT := false
+	hasPrivate := false
+	for _, rule := range rules {
+		if rule.Enabled {
+			if rule.Protocol == "bittorrent" {
+				hasBT = true
+			}
+			if rule.IP == "geoip:private" {
+				hasPrivate = true
+			}
+		}
+	}
+	if !hasBT {
+		list = append(list, map[string]any{
+			"type":        "field",
+			"protocol":    []string{"bittorrent"},
+			"outboundTag": "blocked",
+		})
+	}
+	if !hasPrivate {
+		list = append(list, map[string]any{
+			"type":        "field",
+			"ip":          []string{"geoip:private"},
+			"outboundTag": "direct",
+		})
+	}
+
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
@@ -376,6 +431,9 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 		}
 		if rule.Network != "" {
 			rmap["network"] = rule.Network
+		}
+		if protocols := parseStringList(rule.Protocol); len(protocols) > 0 {
+			rmap["protocol"] = protocols
 		}
 		if rule.InboundTag != "" {
 			rmap["inboundTag"] = parseStringList(rule.InboundTag)

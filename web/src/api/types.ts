@@ -31,6 +31,7 @@ export interface LoginResult {
 
 export interface AdminDashboard {
   total_users: number
+  total_servers: number
   online_servers: number
   total_plans: number
   total_orders: number
@@ -228,6 +229,7 @@ export interface ServerRoutingRule {
   ip?: string
   port?: string
   network?: string
+  protocol?: string
   inbound_tag?: string
   enabled: boolean
   priority: number

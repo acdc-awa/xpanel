@@ -26,6 +26,7 @@ import {
   resetServerSecret,
   toggleInbound,
   updateInbound,
+  updateServer,
   updateServerOutbound,
   updateServerRoutingRule,
   type InboundItem,
@@ -343,6 +344,40 @@ async function loadRouting() {
 }
 
 const outboundTags = computed(() => outbounds.value.map((o) => o.tag))
+const inboundTags = computed(() => inbounds.value.map((ib) => ib.tag))
+
+// ---- 默认出口 ----
+const defaultOutboundTag = ref(props.server?.default_outbound_tag || 'direct')
+const routingDomainStrategy = ref(props.server?.routing_domain_strategy || 'AsIs')
+const defaultOutboundSaving = ref(false)
+
+async function saveDefaultOutbound() {
+  if (!props.server) return
+  defaultOutboundSaving.value = true
+  try {
+    const { data } = await updateServer(props.server.id, {
+      default_outbound_tag: defaultOutboundTag.value,
+      routing_domain_strategy: routingDomainStrategy.value,
+    })
+    if (data.code === 0) {
+      ElMessage.success('默认出口已更新，下次生成配置生效')
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存默认出口失败'))
+  } finally {
+    defaultOutboundSaving.value = false
+  }
+}
+
+watch(() => props.server?.default_outbound_tag, (v) => {
+  if (v) defaultOutboundTag.value = v
+})
+watch(() => props.server?.routing_domain_strategy, (v) => {
+  if (v) routingDomainStrategy.value = v
+})
 
 function openRuleCreate() {
   ruleEditing.value = null
@@ -555,6 +590,21 @@ watch(
 
       <!-- 路由 -->
       <el-tab-pane label="路由" name="routing">
+        <!-- 默认出口 & 域名策略 -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 10px 12px; background: var(--x-bg-soft, #f1f5f9); border-radius: 6px; flex-wrap: wrap">
+          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap">默认出口：</span>
+          <el-select v-model="defaultOutboundTag" style="width: 160px" size="small" :disabled="outboundTags.length === 0">
+            <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
+          </el-select>
+          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">域名策略：</span>
+          <el-select v-model="routingDomainStrategy" style="width: 160px" size="small">
+            <el-option label="AsIs（保持原样）" value="AsIs" />
+            <el-option label="IPIfNonMatch" value="IPIfNonMatch" />
+            <el-option label="IPOnDemand" value="IPOnDemand" />
+          </el-select>
+          <el-button size="small" type="primary" :loading="defaultOutboundSaving" @click="saveDefaultOutbound">保存</el-button>
+          <span v-if="outboundTags.length === 0" class="muted" style="font-size: 12px">（暂无出站，请先在"出站"Tab 中添加）</span>
+        </div>
         <div class="tab-toolbar">
           <el-button size="small" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
           <el-button size="small" type="primary" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
@@ -569,11 +619,17 @@ watch(
           <el-table-column label="IP 匹配" min-width="140">
             <template #default="{ row }"><span class="ellipsis-text">{{ row.ip || '—' }}</span></template>
           </el-table-column>
-          <el-table-column prop="port" label="端口" width="80">
-            <template #default="{ row }">{{ row.port || '—' }}</template>
+          <el-table-column prop="protocol" label="协议" width="100">
+            <template #default="{ row }"><span class="ellipsis-text">{{ row.protocol || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="入站标签" min-width="120">
+            <template #default="{ row }"><span class="ellipsis-text">{{ row.inbound_tag || '—' }}</span></template>
           </el-table-column>
           <el-table-column prop="network" label="网络" width="70">
             <template #default="{ row }">{{ row.network || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="port" label="端口" width="80">
+            <template #default="{ row }">{{ row.port || '—' }}</template>
           </el-table-column>
           <el-table-column prop="priority" label="优先级" width="80" />
           <el-table-column label="状态" width="80">
@@ -647,6 +703,7 @@ watch(
       :server-id="server?.id ?? 0"
       :rule="ruleEditing"
       :outbound-tags="outboundTags"
+      :inbound-tags="inboundTags"
       @saved="loadRouting"
       @close="ruleEditorOpen = false"
     />

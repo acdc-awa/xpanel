@@ -17,17 +17,29 @@ import (
 // AdminDashboard GET /api/v1/admin/dashboard —— 仪表盘统计（P0 先提供真实计数，
 // 卡片数据后续由 stats 模块补全）。
 func (d *Deps) AdminDashboard(c *gin.Context) {
-	var users, servers, plans, orders, pendingOrders int64
+	var users, plans, orders, pendingOrders int64
 	db := d.DB
 	db.Model(&models.User{}).Count(&users)
-	db.Model(&models.Server{}).Count(&servers)
 	db.Model(&models.Plan{}).Count(&plans)
 	db.Model(&models.Order{}).Count(&orders)
 	db.Model(&models.Order{}).Where("status = ?", models.OrderPending).Count(&pendingOrders)
 
+	// 实时在线数：遍历全部节点，用 Hub.IsOnline 判断
+	var allServers []models.Server
+	onlineCount := int64(0)
+	if err := db.Find(&allServers).Error; err == nil && d.Hub != nil {
+		for _, s := range allServers {
+			if d.Hub.IsOnline(s.ID) {
+				onlineCount++
+			}
+		}
+	}
+	totalServers := int64(len(allServers))
+
 	util.OK(c, gin.H{
 		"total_users":    users,
-		"online_servers": servers, // P1 接入心跳后改为在线数
+		"total_servers":  totalServers,
+		"online_servers": onlineCount,
 		"total_plans":    plans,
 		"total_orders":   orders,
 		"pending_orders": pendingOrders,

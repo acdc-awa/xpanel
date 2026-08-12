@@ -88,7 +88,7 @@ const grpcForm = reactive({
 // 流量嗅探（Sniffing）
 const sniffingForm = reactive({
   enabled: false,
-  destOverride: ['http', 'tls', 'quic', 'fakedns'] as string[],
+  destOverride: ['http', 'tls', 'quic'] as string[],
   metadataOnly: false,
   routeOnly: false,
 })
@@ -98,6 +98,9 @@ const tcpForm = reactive({
   request_host: '',
   request_path: '/',
 })
+
+// acceptProxyProtocol
+const acceptProxyProtocol = ref(false)
 
 // uTLS fingerprint
 const fingerprint = ref('chrome')
@@ -112,6 +115,10 @@ const realityForm = reactive<RealitySettings>({
   spider_x: '/',
 })
 
+const realityMinClientVer = ref('')
+const realityMaxClientVer = ref('')
+const realityMaxTimeDiff = ref(0)
+
 const tlsForm = reactive<TLSSettings>({
   server_name: '',
   cert_file: '/etc/xray/cert.pem',
@@ -120,6 +127,10 @@ const tlsForm = reactive<TLSSettings>({
 })
 
 const tlsAlpnText = ref('h2,http/1.1')
+const tlsMinVersion = ref('')
+const tlsMaxVersion = ref('')
+const tlsCipherSuites = ref('')
+const tlsAllowInsecure = ref(false)
 
 // Raw JSON 编辑与校验状态
 const rawJsonText = ref('{}')
@@ -184,6 +195,8 @@ function buildSettingsJSON(): string {
   const s: Record<string, any> = { decryption: 'none' }
   if (fallbacks.value.length > 0) {
     s.fallbacks = fallbacks.value.map((f) => ({
+      name: f.name || undefined,
+      alpn: f.alpn || undefined,
       dest: f.dest,
       path: f.path || undefined,
       xver: f.xver || 0,
@@ -198,6 +211,7 @@ function buildStreamSettingsJSON(): string {
     security: localTlsType.value,
     fingerprint: fingerprint.value,
   }
+  if (acceptProxyProtocol.value) s.acceptProxyProtocol = true
 
   if (localNetwork.value === 'ws') {
     const ws: Record<string, any> = { path: wsForm.path || '/' }
@@ -231,6 +245,9 @@ function buildStreamSettingsJSON(): string {
     }
     if (realityForm.public_key) s.realitySettings.publicKey = realityForm.public_key
     if (realityForm.spider_x && realityForm.spider_x !== '/') s.realitySettings.spiderX = realityForm.spider_x
+    if (realityMinClientVer.value) s.realitySettings.minClientVer = realityMinClientVer.value
+    if (realityMaxClientVer.value) s.realitySettings.maxClientVer = realityMaxClientVer.value
+    if (realityMaxTimeDiff.value > 0) s.realitySettings.maxTimeDiff = realityMaxTimeDiff.value
   } else if (localTlsType.value === 'tls') {
     const alpnArr = tlsAlpnText.value ? tlsAlpnText.value.split(',').map((x: string) => x.trim()).filter(Boolean) : []
     const t: Record<string, any> = {
@@ -238,6 +255,10 @@ function buildStreamSettingsJSON(): string {
       certificates: [{ certificateFile: tlsForm.cert_file, keyFile: tlsForm.key_file }],
     }
     if (alpnArr.length > 0) t.alpn = alpnArr
+    if (tlsMinVersion.value) t.minVersion = tlsMinVersion.value
+    if (tlsMaxVersion.value) t.maxVersion = tlsMaxVersion.value
+    if (tlsCipherSuites.value) t.cipherSuites = tlsCipherSuites.value
+    if (tlsAllowInsecure.value) t.allowInsecure = true
     s.tlsSettings = t
   }
 
@@ -342,7 +363,7 @@ function parseJsonToForm(str: string) {
         ? s.sniffing.destOverride
         : Array.isArray(s.sniffing.dest_override)
           ? s.sniffing.dest_override
-          : ['http', 'tls', 'quic', 'fakedns']
+          : ['http', 'tls', 'quic']
       sniffingForm.metadataOnly = !!s.sniffing.metadataOnly || !!s.sniffing.metadata_only
       sniffingForm.routeOnly = !!s.sniffing.routeOnly || !!s.sniffing.route_only
     }
@@ -565,6 +586,7 @@ async function copyText(text: string, label: string) {
             </template>
           </div>
         </template>
+        <div style="margin-top: 8px"><el-form-item label="acceptProxyProtocol（HAProxy 代理协议）"><el-switch v-model="acceptProxyProtocol" /></el-form-item></div>
 
         <!-- WebSocket -->
         <template v-if="localNetwork === 'ws'">
@@ -654,6 +676,17 @@ async function copyText(text: string, label: string) {
               <el-input v-model="realityForm.spider_x" placeholder="/" />
             </el-form-item>
           </div>
+          <div class="grid-2" style="margin-top: 8px">
+            <el-form-item label="minClientVer（最低客户端版本）">
+              <el-input v-model="realityMinClientVer" placeholder="如 1.8.0" />
+            </el-form-item>
+            <el-form-item label="maxClientVer（最高客户端版本）">
+              <el-input v-model="realityMaxClientVer" placeholder="不限制" />
+            </el-form-item>
+            <el-form-item label="maxTimeDiff（最大时间差 ms）">
+              <el-input-number v-model="realityMaxTimeDiff" :min="0" style="width: 100%" placeholder="0=不限制" />
+            </el-form-item>
+          </div>
 
           <div class="grid-2" style="margin-top: 8px">
             <el-form-item label="Private Key (服务端私钥)">
@@ -692,6 +725,26 @@ async function copyText(text: string, label: string) {
               <el-input v-model="tlsForm.key_file" placeholder="/etc/xray/key.pem" />
             </el-form-item>
           </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; margin-top: 8px">
+            <el-form-item label="TLS 最低版本">
+              <el-select v-model="tlsMinVersion" style="width: 100%" clearable placeholder="不限制">
+                <el-option label="1.2" value="1.2" />
+                <el-option label="1.3" value="1.3" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="TLS 最高版本">
+              <el-select v-model="tlsMaxVersion" style="width: 100%" clearable placeholder="不限制">
+                <el-option label="1.2" value="1.2" />
+                <el-option label="1.3" value="1.3" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="Cipher Suites（逗号分隔）">
+              <el-input v-model="tlsCipherSuites" placeholder="如 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" />
+            </el-form-item>
+            <el-form-item label="allowInsecure（跳过证书校验）">
+              <el-switch v-model="tlsAllowInsecure" />
+            </el-form-item>
+          </div>
         </template>
 
         <!-- none -->
@@ -718,7 +771,9 @@ async function copyText(text: string, label: string) {
               <el-checkbox label="http" />
               <el-checkbox label="tls" />
               <el-checkbox label="quic" />
-              <el-checkbox label="fakedns" />
+              <el-tooltip content="需要配置 DNS 顶层块才能生效，当前暂不支持" placement="top">
+                <el-checkbox label="fakedns" disabled />
+              </el-tooltip>
             </el-checkbox-group>
           </el-form-item>
           <el-form-item label="MetadataOnly（仅元数据嗅探）">

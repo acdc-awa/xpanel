@@ -30,6 +30,7 @@ type routingRuleForm struct {
 	IP          string `json:"ip"`
 	Port        string `json:"port"`
 	Network     string `json:"network"`
+	Protocol    string `json:"protocol"`
 	InboundTag  string `json:"inbound_tag"`
 	Enabled     *bool  `json:"enabled"`
 	Priority    *int   `json:"priority"`
@@ -259,6 +260,7 @@ func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 		IP:          req.IP,
 		Port:        req.Port,
 		Network:     req.Network,
+		Protocol:    req.Protocol,
 		InboundTag:  req.InboundTag,
 		Enabled:     enabled,
 		Priority:    priority,
@@ -302,6 +304,7 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 		IP          *string `json:"ip"`
 		Port        *string `json:"port"`
 		Network     *string `json:"network"`
+		Protocol    *string `json:"protocol"`
 		InboundTag  *string `json:"inbound_tag"`
 		Enabled     *bool   `json:"enabled"`
 		Priority    *int    `json:"priority"`
@@ -334,6 +337,9 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 	}
 	if req.Network != nil {
 		updates["network"] = *req.Network
+	}
+	if req.Protocol != nil {
+		updates["protocol"] = *req.Protocol
 	}
 	if req.InboundTag != nil {
 		updates["inbound_tag"] = *req.InboundTag

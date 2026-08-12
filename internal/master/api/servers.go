@@ -20,23 +20,27 @@ import (
 
 // serverView 服务器对外结构。
 type serverView struct {
-	ID           uint64     `json:"id"`
-	Name         string     `json:"name"`
-	Host         string     `json:"host"`
-	NodeID       string     `json:"node_id"`
-	Location     string     `json:"location"`
-	Remark       string     `json:"remark"`
-	Status       int        `json:"status"`        // 0 离线 1 在线
-	ConfigStatus string     `json:"config_status"` // pushed / pending / ""（无待推送配置）
-	LastSeenAt   *time.Time `json:"last_seen_at"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID                    uint64     `json:"id"`
+	Name                  string     `json:"name"`
+	Host                  string     `json:"host"`
+	NodeID                string     `json:"node_id"`
+	Location              string     `json:"location"`
+	Remark                string     `json:"remark"`
+	Status                int        `json:"status"`                  // 0 离线 1 在线
+	ConfigStatus          string     `json:"config_status"`           // pushed / pending / ""（无待推送配置）
+	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
+	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略
+	LastSeenAt            *time.Time `json:"last_seen_at"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 func toServerView(s *models.Server) serverView {
 	return serverView{
 		ID: s.ID, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
 		Location: s.Location, Remark: s.Remark, Status: s.Status,
-		LastSeenAt: s.LastSeenAt, CreatedAt: s.CreatedAt,
+		DefaultOutboundTag:    s.DefaultOutboundTag,
+		RoutingDomainStrategy: s.RoutingDomainStrategy,
+		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
 	}
 }
 
@@ -69,14 +73,19 @@ func (d *Deps) AdminServers(c *gin.Context) {
 
 func (d *Deps) AdminCreateServer(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name" binding:"required,max=64"`
-		Host     string `json:"host" binding:"required,max=255"`
-		Location string `json:"location" binding:"max=64"`
-		Remark   string `json:"remark" binding:"max=255"`
+		Name                  string `json:"name" binding:"required,max=64"`
+		Host                  string `json:"host" binding:"required,max=255"`
+		Location              string `json:"location" binding:"max=64"`
+		Remark                string `json:"remark" binding:"max=255"`
+		DefaultOutboundTag    string `json:"default_outbound_tag"`
+		RoutingDomainStrategy string `json:"routing_domain_strategy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
+	}
+	if req.DefaultOutboundTag == "" {
+		req.DefaultOutboundTag = "direct"
 	}
 	nodeID := "node-" + util.RandomID(6)
 	secret, err := util.NewNodeSecret()
@@ -85,13 +94,15 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		return
 	}
 	server := models.Server{
-		Name:     req.Name,
-		Host:     req.Host,
-		NodeID:   nodeID,
-		Secret:   util.HashSecret(secret),
-		Location: req.Location,
-		Remark:   req.Remark,
-		Status:   0,
+		Name:                  req.Name,
+		Host:                  req.Host,
+		NodeID:                nodeID,
+		Secret:                util.HashSecret(secret),
+		Location:              req.Location,
+		Remark:                req.Remark,
+		Status:                0,
+		DefaultOutboundTag:    req.DefaultOutboundTag,
+		RoutingDomainStrategy: req.RoutingDomainStrategy,
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		return tx.Create(&server).Error
@@ -144,10 +155,12 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name     *string `json:"name"`
-		Host     *string `json:"host"`
-		Location *string `json:"location"`
-		Remark   *string `json:"remark"`
+		Name                  *string `json:"name"`
+		Host                  *string `json:"host"`
+		Location              *string `json:"location"`
+		Remark                *string `json:"remark"`
+		DefaultOutboundTag    *string `json:"default_outbound_tag"`
+		RoutingDomainStrategy *string `json:"routing_domain_strategy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -173,6 +186,9 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
+	}
+	if req.DefaultOutboundTag != nil {
+		updates["default_outbound_tag"] = *req.DefaultOutboundTag
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&srv).Updates(updates).Error; err != nil {
