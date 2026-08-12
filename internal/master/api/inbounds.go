@@ -28,6 +28,9 @@ type inboundView struct {
 	Sniffing       string    `json:"sniffing"`
 	Ratio          float64   `json:"ratio"`
 	Enabled        bool      `json:"enabled"`
+	Type           string    `json:"type"`                       // user / relay / idle（Phase T）
+	InternalUUID   string    `json:"internal_uuid,omitempty"`    // relay 只读（节点上报）
+	CertID         *uint64   `json:"cert_id,omitempty"`          // 绑定的证书
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -42,6 +45,8 @@ type inboundForm struct {
 	StreamSettings string  `json:"stream_settings"` // 传输 streamSettings（透传）
 	Sniffing       string  `json:"sniffing"`        // 嗅探（透传）
 	Ratio          float64 `json:"ratio"`
+	Type           string  `json:"type"`      // user / relay / idle（空 = user，T4）
+	CertID         *uint64 `json:"cert_id"`   // 绑定证书（T5 校验存在性）
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
@@ -51,6 +56,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		Listen: i.Listen, SettingsJSON: i.SettingsJSON,
 		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
 		Ratio: i.Ratio, Enabled: i.Enabled, CreatedAt: i.CreatedAt,
+		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
 	}
 }
 
@@ -107,6 +113,12 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		Port: req.Port, Listen: req.Listen,
 		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
 		Sniffing: req.Sniffing, Ratio: req.Ratio, Enabled: true,
+		Type:   req.Type,
+		CertID: req.CertID,
+	}
+	// Type 空 = user（与模型默认一致）
+	if inb.Type == "" {
+		inb.Type = models.InboundTypeUser
 	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -140,6 +152,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		Sniffing       *string  `json:"sniffing"`
 		Ratio          *float64 `json:"ratio"`
 		Enabled        *bool    `json:"enabled"`
+		Type           *string  `json:"type"`
+		InternalUUID   *string  `json:"internal_uuid"` // 仅节点回执写入（管理员只读展示）
+		CertID         *uint64  `json:"cert_id"`       // nil 不更新；显式传 0 解绑
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -201,6 +216,19 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	if req.Type != nil {
+		updates["type"] = *req.Type
+	}
+	if req.InternalUUID != nil {
+		updates["internal_uuid"] = *req.InternalUUID
+	}
+	if req.CertID != nil {
+		if *req.CertID == 0 {
+			updates["cert_id"] = nil
+		} else {
+			updates["cert_id"] = *req.CertID
+		}
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {

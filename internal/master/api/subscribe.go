@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/subscribe"
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
@@ -24,9 +25,9 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 
-	// 收集用户可用节点（有授权记录则过滤；无记录回退全部启用入站）
+	// 收集用户可用节点（有授权记录则过滤；无记录回退全部 type=user 入站）
 	var inbounds []models.Inbound
-	if err := d.DB.Where("enabled = ?", true).Order("id ASC").Find(&inbounds).Error; err != nil {
+	if err := d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Order("id ASC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -36,11 +37,9 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	for _, g := range grants {
 		flowByInbound[g.InboundID] = g.Flow
 	}
-	if len(grants) > 0 {
-		granted := make(map[uint64]bool, len(grants))
-		for _, g := range grants {
-			granted[g.InboundID] = true
-		}
+	// 动态授权：UserInbound 授权 ∪ Plan→权限组→入站集合（T4，不写授权表避免膨胀）
+	granted := services.AuthorizedInboundSet(d.DB, &user)
+	if len(granted) > 0 {
 		filtered := inbounds[:0]
 		for _, inb := range inbounds {
 			if granted[inb.ID] {

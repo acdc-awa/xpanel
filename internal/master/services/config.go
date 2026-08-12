@@ -64,9 +64,10 @@ func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 }
 
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
+// 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
-	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Find(&inbounds).Error; err != nil {
+	if err := s.DB.Where("server_id = ? AND enabled = ? AND type = ?", serverID, true, models.InboundTypeUser).Find(&inbounds).Error; err != nil {
 		return nil, err
 	}
 	res := make(map[string][]protocol.User)
