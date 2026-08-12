@@ -22,6 +22,11 @@ const (
 	OrderPending   = "pending"
 	OrderPaid      = "paid"
 	OrderCancelled = "cancelled"
+
+	// Phase T：入站三态
+	InboundTypeUser  = "user"  // 进订阅、参与用户授权与 SyncUsers（默认）
+	InboundTypeRelay = "relay" // 内部转发入站，被出站 InboundRef 引用，clients 固定为 InternalUUID
+	InboundTypeIdle  = "idle"  // 闲置：未接线也未启用用户
 )
 
 // All 返回全部模型，供 AutoMigrate 使用。
@@ -30,7 +35,7 @@ func All() []any {
 		&User{}, &InvitationCode{},
 		&Server{}, &Inbound{}, &UserInbound{}, &PendingConfig{},
 		&ServerOutbound{}, &ServerRoutingRule{},
-		&Plan{}, &Order{},
+		&Plan{}, &Order{}, &Cert{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{}, &PermissionGroupInbound{},

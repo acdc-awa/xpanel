@@ -43,9 +43,13 @@ type Inbound struct {
 	// 分享地址（订阅链接中的对外地址，默认使用节点 Host）
 	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
 	ShareAddr         string    `gorm:"size:255" json:"share_addr"`
-	Enabled           bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// Phase T 拓扑化：入站三态
+	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（进订阅）/ relay（内部转发）/ idle（闲置）
+	InternalUUID  string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
+	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
+	Enabled       bool    `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // UserInbound 用户-入站授权关系（Client 模型）。
@@ -168,11 +172,13 @@ type ServerOutbound struct {
 	SettingsJSON       string    `gorm:"type:text" json:"settings_json"`
 	StreamSettingsJSON string    `gorm:"type:text" json:"stream_settings_json,omitempty"`
 	SendThrough        string    `gorm:"size:64" json:"send_through,omitempty"`
-	Enabled            bool      `gorm:"default:true" json:"enabled"`
-	Priority           int       `gorm:"default:0" json:"priority"`
-	Remark             string    `gorm:"size:255" json:"remark"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
+	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
+	Enabled    bool    `gorm:"default:true" json:"enabled"`
+	Priority   int     `gorm:"default:0" json:"priority"`
+	Remark     string  `gorm:"size:255" json:"remark"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // ServerRoutingRule 服务器独立路由规则（§多节点 3x-ui 架构）。
