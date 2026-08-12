@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -345,7 +346,12 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.ServerError(c, "查询路由失败")
 		return
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil, "", "")
+	ctx, err := services.BuildGenerateContext(d.DB, inbounds, outbounds)
+	if err != nil {
+		util.ServerError(c, "查询生成上下文失败")
+		return
+	}
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil, ctx, "", "")
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return

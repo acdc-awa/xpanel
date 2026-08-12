@@ -17,6 +17,52 @@ type ConfigService struct {
 	Traffic *TrafficService
 }
 
+// BuildGenerateContext 组装生成器拓扑化上下文（Phase T T3）：
+// InboundRef → 目标入站（可跨服务器，含 Server Host）与 CertID → 域名映射。
+func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*xray.GenerateContext, error) {
+	ctx := &xray.GenerateContext{
+		RefTargets:  map[uint64]xray.RefTarget{},
+		CertDomains: map[uint64]string{},
+	}
+	// 证书映射（CertID → 域名）
+	certIDs := make([]uint64, 0, len(inbounds))
+	for i := range inbounds {
+		if inbounds[i].CertID != nil {
+			certIDs = append(certIDs, *inbounds[i].CertID)
+		}
+	}
+	if len(certIDs) > 0 {
+		var certs []models.Cert
+		if err := db.Where("id IN ?", certIDs).Find(&certs).Error; err != nil {
+			return nil, err
+		}
+		for _, c := range certs {
+			ctx.CertDomains[c.ID] = c.Domain
+		}
+	}
+	// 引用映射（出站 InboundRef → 目标入站 + 服务器 Host）
+	refIDs := make([]uint64, 0, len(outbounds))
+	for i := range outbounds {
+		if outbounds[i].InboundRef != nil {
+			refIDs = append(refIDs, *outbounds[i].InboundRef)
+		}
+	}
+	if len(refIDs) > 0 {
+		var targets []models.Inbound
+		if err := db.Where("id IN ?", refIDs).Find(&targets).Error; err != nil {
+			return nil, err
+		}
+		for _, t := range targets {
+			var srv models.Server
+			if err := db.First(&srv, t.ServerID).Error; err != nil {
+				continue // 目标服务器缺失：Generate 预检会报引用不存在
+			}
+			ctx.RefTargets[t.ID] = xray.RefTarget{Inbound: t, ServerHost: srv.Host}
+		}
+	}
+	return ctx, nil
+}
+
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
@@ -129,7 +175,11 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 
 	validUsers := s.filterValidUsers()
 
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, srv.DefaultOutboundTag, srv.RoutingDomainStrategy)
+	ctx, err := BuildGenerateContext(s.DB, inbounds, outbounds)
+	if err != nil {
+		return "", err
+	}
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy)
 	if err != nil {
 		return "", err
 	}

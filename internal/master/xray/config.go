@@ -156,6 +156,28 @@ func UserEmail(userID uint64) string {
 	return fmt.Sprintf("user-%d@panel.local", userID)
 }
 
+// RelayEmail relay 入站在 Xray 中的 email（不入用户体系，仅 stats 标识）。
+func RelayEmail(tag string) string {
+	return fmt.Sprintf("relay-%s@panel.local", tag)
+}
+
+// certDomainFor 返回入站绑定证书的域名（ctx 为 nil / 未绑定 / 域名非法时返回 false）。
+func certDomainFor(inb *models.Inbound, ctx *GenerateContext) (string, bool) {
+	if inb.CertID == nil || ctx == nil || ctx.CertDomains == nil {
+		return "", false
+	}
+	domain, ok := ctx.CertDomains[*inb.CertID]
+	if !ok || domain == "" || strings.ContainsAny(domain, "/\\") || domain == "." || domain == ".." {
+		return "", false
+	}
+	return domain, true
+}
+
+// certFilePath 托管证书固定路径（与 agent push_cert 落盘一致，见 05 号文档 §4）。
+func certFilePath(domain, file string) string {
+	return "/etc/xray/certs/" + domain + "/" + file
+}
+
 // ParseSettings 解析入站 settings_json。
 func ParseSettings(inb *models.Inbound) (*InboundSettings, error) {
 	s := &InboundSettings{}
@@ -302,10 +324,30 @@ func parseStringList(s string) []string {
 	return res
 }
 
+// RefTarget 出站 InboundRef 引用的目标入站（可跨服务器）。
+type RefTarget struct {
+	Inbound    models.Inbound
+	ServerHost string // 目标服务器对外 Host（vnext address 来源）
+}
+
+// GenerateContext 拓扑化上下文（Phase T）：跨服务器引用与证书映射，由调用方从 DB 组装。
+// 传 nil 时行为与旧版完全一致（无 InboundRef / CertID 注入）。
+type GenerateContext struct {
+	RefTargets  map[uint64]RefTarget // 出站 InboundRef → 目标入站
+	CertDomains map[uint64]string    // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
+}
+
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
 // defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, defaultOutboundTag string, routingDomainStrategy string) ([]byte, error) {
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string) ([]byte, error) {
 	cfg := LoadTemplate()
+
+	// 旧数据/测试夹具可能无 Type（DB 默认 user）——归一化避免"未知类型"
+	for i := range inbounds {
+		if inbounds[i].Type == "" {
+			inbounds[i].Type = models.InboundTypeUser
+		}
+	}
 
 	// 索引：userID → UserInbound（per-inbound 覆盖配置）
 	uiByUser := make(map[uint64]*models.UserInbound, len(userInbounds))
@@ -313,8 +355,22 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		uiByUser[userInbounds[i].UserID] = &userInbounds[i]
 	}
 
+	// Phase T 预检：InboundRef 出站的落地入站必须已完成 setup（InternalUUID 非空）
+	for _, ob := range outbounds {
+		if !ob.Enabled || ob.InboundRef == nil {
+			continue
+		}
+		target, ok := ctxTarget(ctx, *ob.InboundRef)
+		if !ok {
+			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
+		}
+		if target.Inbound.InternalUUID == "" {
+			return nil, fmt.Errorf("出站 %s 引用的落地入站 %s 未完成内部账户 setup（InternalUUID 为空）", ob.Tag, target.Inbound.Tag)
+		}
+	}
+
 	// 1. 出站：模板基础出站 + 节点自定义出站叠加，然后按默认出口排序
-	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds, defaultOutboundTag)
+	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
 
 	// 2. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加
 	routing := map[string]any{}
@@ -329,13 +385,13 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 	}
 	cfg["routing"] = routing
 
-	// 3. 入站：全部启用的入站 + api 内建入站
+	// 3. 入站：全部启用的入站（idle 跳过）+ api 内建入站
 	inboundList := []any{}
 	for _, inb := range inbounds {
-		if !inb.Enabled {
+		if !inb.Enabled || inb.Type == models.InboundTypeIdle {
 			continue
 		}
-		item, err := buildInbound(&inb, users, uiByUser)
+		item, err := buildInbound(&inb, users, uiByUser, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
 		}
@@ -353,8 +409,9 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 
 // mergeOutbounds 合并模板出站与节点自定义出站。模板提供基础（freedom/blackhole），
 // 节点 ServerOutbound 叠加在模板之上。同 tag 时节点覆盖模板（允许管理员自定义基础策略）。
+// InboundRef 出站忽略手填 settings/streamSettings，vnext 由生成器按目标入站自动构造。
 // defaultTag 非空时将该标签的出站移至数组首位（xray 将数组首个出站作为路由默认出口）。
-func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) []any {
+func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext, defaultTag string) []any {
 	seen := make(map[string]int) // tag → index in list
 	list := make([]any, 0)
 	if arr, ok := tmpl.([]any); ok {
@@ -372,7 +429,12 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) [
 			continue
 		}
 		item := make(map[string]any)
-		if ob.SettingsJSON != "" {
+		if ob.InboundRef != nil && ctx != nil {
+			// InboundRef 出站：vnext / streamSettings 全自动构造（不手填）
+			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
+				buildRefOutbound(item, target)
+			}
+		} else if ob.SettingsJSON != "" {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(ob.SettingsJSON), &parsed); err == nil {
 				_, hasProto := parsed["protocol"]
@@ -433,6 +495,85 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, defaultTag string) [
 	}
 
 	return list
+}
+
+// ctxTarget 从 GenerateContext 取引用目标（nil ctx 安全）。
+func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
+	if ctx == nil || ctx.RefTargets == nil {
+		return RefTarget{}, false
+	}
+	t, ok := ctx.RefTargets[id]
+	return t, ok
+}
+
+// buildRefOutbound 按目标入站自动构造中转出站（vless）：vnext address/port/uuid/flow
+// 与 streamSettings（reality 公钥/SNI/shortId 派生、tls serverName）全部由生成器填充。
+func buildRefOutbound(item map[string]any, target RefTarget) {
+	inb := target.Inbound
+	net := StreamNetwork(inb.StreamSettings)
+	sec := StreamSecurity(inb.StreamSettings)
+
+	flow := ""
+	if net == "tcp" && (sec == "reality" || sec == "tls") {
+		flow = "xtls-rprx-vision"
+	}
+	user := map[string]any{
+		"id":         inb.InternalUUID,
+		"encryption": "none",
+	}
+	if flow != "" {
+		user["flow"] = flow
+	}
+	item["protocol"] = "vless"
+	item["settings"] = map[string]any{
+		"vnext": []any{map[string]any{
+			"address": target.ServerHost,
+			"port":    inb.Port,
+			"users":   []any{user},
+		}},
+	}
+
+	// streamSettings：传输参数透传目标 + 安全参数自动填充
+	ss := map[string]any{"network": net, "security": sec}
+	switch net {
+	case "xhttp":
+		if x := StreamXHTTP(inb.StreamSettings); x != nil {
+			xh := map[string]any{"mode": x.Mode, "path": x.Path}
+			if x.Host != "" {
+				xh["host"] = x.Host
+			}
+			ss["xhttpSettings"] = xh
+		}
+	case "ws":
+		if w := StreamWS(inb.StreamSettings); w != nil {
+			ws := map[string]any{"path": w.Path}
+			if w.Host != "" {
+				ws["host"] = w.Host
+			}
+			ss["wsSettings"] = ws
+		}
+	}
+	switch sec {
+	case "reality":
+		// 出站 REALITY：公钥标准名 password、SNI/shortId 单数（01 号文档 §2.2）
+		if r := StreamReality(inb.StreamSettings); r != nil {
+			ss["realitySettings"] = map[string]any{
+				"serverName":  r.ServerName,
+				"password":    r.PublicKey,
+				"shortId":     r.ShortID,
+				"fingerprint": "chrome",
+				"spiderX":     "/",
+			}
+		}
+	case "tls":
+		serverName := target.ServerHost
+		if t := StreamTLS(inb.StreamSettings); t != nil && t.ServerName != "" {
+			serverName = t.ServerName
+		}
+		// 注意：v26.6.27 已移除 allowInsecure（迁移 pinnedPeerCertSha256/verifyPeerCertByName），不输出
+		ss["tlsSettings"] = map[string]any{"serverName": serverName}
+	}
+	item["streamSettings"] = ss
 }
 
 // normalizeVlessOutbound 对 vless 出站的 settings.vnext[].users[] 兜底注入
@@ -550,8 +691,9 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 }
 
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
-// 仅动态注入 clients 列表（从 users + userInbounds 生成）。其余字段完全透传。
-func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound) (map[string]any, error) {
+// 动态注入 clients 列表（Phase T：按入站三态分流——user 动态用户 / relay 内部 UUID /
+// idle 由 Generate 过滤不达此处）。其余字段完全透传。
+func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound, ctx *GenerateContext) (map[string]any, error) {
 	// 1. 解析协议 settings JSON → 注入 clients
 	settings := map[string]any{}
 	if inb.SettingsJSON != "" {
@@ -564,7 +706,31 @@ func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 		delete(settings, "encryption")
 	}
 
-	clients := buildClients(inb, users, uiByUser)
+	// Phase T：入站三态分流
+	var clients []any
+	switch inb.Type {
+	case models.InboundTypeRelay:
+		if inb.InternalUUID == "" {
+			return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
+		}
+		flow := ""
+		if StreamNetwork(inb.StreamSettings) == "tcp" &&
+			(StreamHasReality(inb.StreamSettings) || StreamSecurity(inb.StreamSettings) == "tls") {
+			flow = "xtls-rprx-vision"
+		}
+		client := map[string]any{
+			"id":    inb.InternalUUID,
+			"email": RelayEmail(inb.Tag),
+		}
+		if flow != "" {
+			client["flow"] = flow
+		}
+		clients = []any{client}
+	case models.InboundTypeUser:
+		clients = buildClients(inb, users, uiByUser)
+	default:
+		return nil, fmt.Errorf("未知入站类型 %q", inb.Type)
+	}
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("无可用用户（全部未启用或无 UUID）")
 	}
@@ -587,6 +753,15 @@ func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 		var stream map[string]any
 		if err := json.Unmarshal([]byte(cleaned), &stream); err != nil {
 			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
+		}
+		// Phase T：证书路径注入（绑定 CertID 的 TLS 入站 → 固定托管路径）
+		if domain, ok := certDomainFor(inb, ctx); ok {
+			if tls, ok := stream["tlsSettings"].(map[string]any); ok {
+				tls["certificates"] = []any{map[string]any{
+					"certificateFile": certFilePath(domain, "fullchain.pem"),
+					"keyFile":         certFilePath(domain, "key.pem"),
+				}}
+			}
 		}
 		item["streamSettings"] = stream
 	}
