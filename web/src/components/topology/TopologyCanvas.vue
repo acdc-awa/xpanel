@@ -62,14 +62,14 @@ const edges = ref<Edge[]>([])
 // 不回到默认布局（仅新服务器用默认位置）
 const boxPositions = new Map<string, { x: number; y: number }>()
 
-const ROW_H = 30
-const HEADER_H = 44
-const TITLE_H = 26
+const ROW_H = 40 // 增加行高以适配药丸样式
+const HEADER_H = 48
+const TITLE_H = 30
 const BOX_W = 440 // 与 .server-box 宽度一致（CSS），端点坐标计算用
 
-// 盒子渲染高度（与模板布局一致）：头部 + 标题 + 行数
+// 盒子渲染高度（与模板布局一致）：头部 + 标题 + 行数 + 底部边距
 function boxHeight(inbCount: number, outCount: number) {
-  return HEADER_H + TITLE_H + Math.max(Math.max(inbCount, outCount), 1) * ROW_H
+  return HEADER_H + TITLE_H + Math.max(Math.max(inbCount, outCount), 1) * ROW_H + 16
 }
 
 // 节点当前位置（记住的拖动位置或默认布局）
@@ -83,10 +83,7 @@ function typeInfo(t?: string) {
   return { cls: 'user', text: '用户' }
 }
 
-// 端点垂直居中于行（双栏并列行高一致；Handle 自带 translate(-50%,-50%) 居中）
-function rowHandleTop(i: number) {
-  return { top: `${HEADER_H + TITLE_H + i * ROW_H + ROW_H / 2}px` }
-}
+
 
 // 盒内路由线：S 形贝塞尔——入站内点（盒中线左）→ 出站内点（盒中线右），横穿两列之间的
 // 走线走廊（标签都靠边，走廊空旷），无论行差多少都不经过任何标签
@@ -228,6 +225,7 @@ function buildGraph(data: TopologyData) {
       target: `server-${rule.server_id}`,
       targetHandle,
       type: 'boxrule',
+      markerEnd: { type: MarkerType.ArrowClosed },
     })
   }
   edges.value = es
@@ -584,7 +582,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       <template #edge-boxrule="e">
         <path class="edge-hit" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
         <path class="boxrule-glow" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
-        <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
+        <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" :marker-end="e.markerEnd" />
       </template>
       <!-- 跨盒引用线：方案④ 直-弧-直（被盒子阻挡时下方 U 形绕行），流动虚线+箭头 -->
       <template #edge-refedge="e">
@@ -619,7 +617,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :position="Position.Left"
                     :connectable="editable"
                     class="ep ext-tgt"
-                    :style="rowHandleTop(i)"
                   />
                   <Handle
                     type="source"
@@ -627,18 +624,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :position="Position.Left"
                     :connectable="editable"
                     class="ep ext-src"
-                    :style="rowHandleTop(i)"
                   />
                   <span class="type-tag" :class="typeInfo(inb.type).cls">{{ typeInfo(inb.type).text }}</span>
                   <span class="tag">{{ inb.tag }}</span>
-                  <span class="spacer" />
                   <Handle
                     type="source"
                     :id="`inb-src-${inb.id}`"
-                    :position="Position.Left"
+                    :position="Position.Right"
                     :connectable="editable"
                     class="ep in-ep"
-                    :style="{ ...rowHandleTop(i), left: 'calc(50% - 6px)' }"
                   />
                 </div>
               </template>
@@ -657,9 +651,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :position="Position.Left"
                     :connectable="editable"
                     class="ep in-ep"
-                    :style="{ ...rowHandleTop(i), left: 'calc(50% + 6px)' }"
                   />
-                  <span class="spacer" />
                   <span class="tag out-tag" :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : ''">{{ out.tag }}</span>
                   <Handle
                     v-if="!out.virtual"
@@ -668,7 +660,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :position="Position.Right"
                     :connectable="editable"
                     class="ep ext-src"
-                    :style="rowHandleTop(i)"
                   />
                   <Handle
                     v-else
@@ -677,7 +668,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :position="Position.Right"
                     :connectable="editable"
                     class="ep direct-ep"
-                    :style="rowHandleTop(i)"
                   />
                 </div>
               </template>
@@ -750,26 +740,29 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 /* ---- ServerBox 自定义节点 ---- */
 .server-box {
   width: 440px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
   font-size: 12px;
   color: #e2e8f0;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   overflow: visible;
+  transition: all 0.3s ease;
   &.offline {
-    opacity: 0.75;
-    border-color: #475569;
+    opacity: 0.6;
+    border-color: rgba(255, 255, 255, 0.05);
   }
   .sb-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 12px;
-    height: 44px;
-    border-bottom: 1px solid #334155;
-    background: linear-gradient(180deg, #273449 0%, #1e293b 100%);
-    border-radius: 10px 10px 0 0;
+    padding: 0 16px;
+    height: 48px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+    border-radius: 16px 16px 0 0;
     .status-dot {
       width: 8px;
       height: 8px;
@@ -777,7 +770,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       flex: none;
       &.online {
         background: #34d399;
-        box-shadow: 0 0 6px #34d399;
+        box-shadow: 0 0 8px #34d399;
       }
       &.offline {
         background: #64748b;
@@ -785,8 +778,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     }
     .name {
       font-weight: 600;
-      font-size: 13px;
+      font-size: 14px;
       white-space: nowrap;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
     .host {
       margin-left: auto;
@@ -800,37 +794,61 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
   .sb-cols {
     display: flex;
-    gap: 0;
-    padding: 0 12px;
+    gap: 80px; /* 拉大中央间距，留出连线空间 */
+    justify-content: space-between;
+    padding: 0 16px 16px;
+    width: 440px;
+    box-sizing: border-box;
     .sb-col {
       flex: 1;
       min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start; /* 自动收缩适应标签宽度 */
+    }
+    .sb-col:last-child {
+      align-items: flex-end;
+      .sb-title {
+        text-align: right;
+      }
     }
     .sb-title {
-      padding: 6px 2px 2px;
+      height: 30px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 4px 0;
       color: #94a3b8;
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.5px;
       font-weight: 600;
+      text-transform: uppercase;
     }
   }
   .sb-row {
+    position: relative; /* 关键：让绝对定位的 Handle 吸附在药丸边缘 */
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 2px;
-    height: 30px;
-    line-height: 30px;
-    border-bottom: 1px dashed #2b3a52;
-    .spacer {
-      flex: 1;
+    gap: 8px;
+    padding: 0 10px;
+    height: 34px;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 17px; /* Pill shape */
+    transition: all 0.2s;
+    &:hover {
+      background: rgba(15, 23, 42, 0.8);
+      border-color: rgba(255, 255, 255, 0.15);
     }
+
     .tag {
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 110px;
+      max-width: 100px;
     }
     .out-tag {
       font-weight: 600;
@@ -843,13 +861,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       }
     }
     &.direct-row {
-      background: rgba(52, 211, 153, 0.06);
+      background: rgba(52, 211, 153, 0.1);
+      border-color: rgba(52, 211, 153, 0.2);
     }
     .type-tag {
       flex: none;
-      font-size: 10.5px;
-      padding: 1px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 600;
       &.user {
         background: rgba(52, 211, 153, 0.15);
         color: #34d399;
@@ -865,11 +885,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     }
   }
   .sb-empty {
-    padding: 4px 2px;
+    padding: 4px 10px;
     color: #64748b;
     font-size: 11px;
-    height: 30px;
-    line-height: 30px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.3);
+    border-radius: 17px;
+    border: 1px dashed rgba(255, 255, 255, 0.05);
   }
 }
 
@@ -878,25 +902,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
    @vue-flow 落点按几何最近命中任意一个），引用线/跨盒中转线收在此处
    内点（盒中线两侧）= 盒内路由连接点，边框稍弱区分；direct 绿点（右缘）= 收本盒规则线 */
 :deep(.server-box .ep) {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #0f172a;
-  border: 2px solid #64748b;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  transition: all 0.2s ease;
   &:hover {
     border-color: #38bdf8;
-    box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+    background: rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
   }
   &.valid,
   &.connecting {
     border-color: #38bdf8;
-    box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+    background: rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
   }
   &.ext-src {
     z-index: 3;
+    border-color: rgba(255, 255, 255, 0.4);
   }
   &.ext-tgt {
     z-index: 2;
@@ -904,7 +929,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
   /* 内点（盒内路由连接点）：边框稍弱，视觉上区分于外点 */
   &.in-ep {
-    border-color: #475569;
+    border-color: rgba(255, 255, 255, 0.15);
   }
   /* direct 虚拟行绿点（右缘，收本盒规则线） */
   &.direct-ep {
@@ -936,27 +961,29 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         svg/g，无 data-v 祖先，:deep 选择器匹配不到 -->
 <style>
 .vue-flow__edges {
-  z-index: 1000 !important;
+  z-index: 9999 !important;
 }
 /* 盒内路由线（自定义 boxrule 边）：亮蓝虚线 + 同色光晕底，深色背景上清晰显眼 */
 .boxrule-glow {
-  stroke: #7dd3fc;
-  stroke-width: 5;
-  opacity: 0.16;
+  stroke: #38bdf8;
+  stroke-width: 6;
+  opacity: 0.2;
   fill: none;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
 }
 .boxrule-path {
-  stroke: #7dd3fc;
+  stroke: #bae6fd;
   stroke-width: 2;
-  stroke-dasharray: 5 3;
+  stroke-dasharray: 6 4;
   fill: none;
 }
 /* 跨盒引用线（自定义 refedge 边；animated 类驱动流动虚线） */
 .refedge-path {
-  stroke: #f59e0b;
-  stroke-width: 2;
+  stroke: #fbbf24;
+  stroke-width: 3;
   stroke-linejoin: round;
   fill: none;
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.5));
 }
 /* 宽透明命中路径：细线也易于点选删除 */
 .edge-hit {
