@@ -1,42 +1,18 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import {
-  Plus,
-  Delete,
-  Edit,
-  Refresh,
-  Key,
-  CopyDocument,
-  VideoPlay,
-} from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { Delete, Key, CopyDocument, VideoPlay, Connection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import InboundConfigEditor from './InboundConfigEditor.vue'
-import OutboundConfigEditor from './OutboundConfigEditor.vue'
-import RoutingRuleEditor from './RoutingRuleEditor.vue'
 import {
-  createInbound,
-  deleteInbound,
   deleteServer,
-  deleteServerOutbound,
-  deleteServerRoutingRule,
   generateAndPushConfig,
   getInbounds,
-  getServerOutbounds,
-  getServerRoutingRules,
   resetServerSecret,
-  toggleInbound,
-  updateInbound,
-  updateServer,
-  updateServerOutbound,
-  updateServerRoutingRule,
   type InboundItem,
-  type InboundPayload,
   type ServerItem,
-  type ServerOutbound,
-  type ServerRoutingRule,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { InboundEditorChangePayload } from './InboundConfigEditor.vue'
+import { maskUUIDs } from '@/utils/mask'
 
 const props = defineProps<{
   modelValue: boolean
@@ -48,6 +24,8 @@ const emit = defineEmits<{
   (e: 'removed'): void
   (e: 'changed'): void
 }>()
+
+const router = useRouter()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -61,8 +39,31 @@ function fmtTime(t: string | null) {
   return new Date(t).toLocaleString('zh-CN', { hour12: false })
 }
 
+// ---- 概览：接入点摘要（增删改统一在「节点（接入点）」页） ----
+const inbounds = ref<InboundItem[]>([])
+const inboundsLoading = ref(false)
+
+async function loadInbounds() {
+  if (!props.server) return
+  inboundsLoading.value = true
+  try {
+    const { data } = await getInbounds(props.server.id)
+    if (data.code === 0) inbounds.value = data.data.items
+  } catch {
+    /* 摘要加载失败不打扰 */
+  } finally {
+    inboundsLoading.value = false
+  }
+}
+
+function goInbounds() {
+  if (!props.server) return
+  visible.value = false
+  router.push({ path: '/admin/nodes', query: { server_id: props.server.id } })
+}
+
 // ---- 概览：重置密钥 / 删除 ----
-const secretInfo = ref<{ node_id: string; secret: string } | null>(null)
+const secretInfo = ref<{ node_id: string; secret: string; install_cmd?: string } | null>(null)
 const resetting = ref(false)
 
 async function resetSecret() {
@@ -80,7 +81,7 @@ async function resetSecret() {
   try {
     const { data } = await resetServerSecret(props.server.id)
     if (data.code === 0) {
-      secretInfo.value = { node_id: data.data.node_id, secret: data.data.secret }
+      secretInfo.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
       ElMessage.success('密钥已重置')
     } else {
       ElMessage.error(data.message)
@@ -130,305 +131,7 @@ async function copyText(text: string, label: string) {
   }
 }
 
-// ---- 入站 Tab ----
-const inbounds = ref<InboundItem[]>([])
-const inboundsLoading = ref(false)
-
-async function loadInbounds() {
-  if (!props.server) return
-  inboundsLoading.value = true
-  try {
-    const { data } = await getInbounds(props.server.id)
-    if (data.code === 0) inbounds.value = data.data.items
-    else ElMessage.error(data.message)
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载入站失败'))
-  } finally {
-    inboundsLoading.value = false
-  }
-}
-
-const inboundEditorOpen = ref(false)
-const inboundEditing = ref<InboundItem | null>(null)
-const inboundSaving = ref(false)
-
-const inboundChange = ref<InboundEditorChangePayload | null>(null)
-
-function onInboundChange(payload: InboundEditorChangePayload) {
-  inboundChange.value = payload
-}
-
-function openInboundCreate() {
-  inboundEditing.value = null
-  inboundChange.value = {
-    settingsJson: '{}',
-    streamSettings: '{"network":"tcp","security":"reality"}',
-    sniffing: '',
-    protocol: 'vless',
-    port: 443,
-    tag: '',
-    listen: '0.0.0.0',
-  }
-  inboundEditorOpen.value = true
-}
-
-function openInboundEdit(row: any) {
-  inboundEditing.value = row
-  inboundChange.value = null
-  inboundEditorOpen.value = true
-}
-
-async function saveInbound() {
-  if (!props.server) return
-  const c = inboundChange.value
-  if (!c) {
-    ElMessage.warning('请先在表单中编辑参数')
-    return
-  }
-  if (!c.tag.trim() || !c.port) {
-    ElMessage.warning('请填写标签与端口')
-    return
-  }
-  inboundSaving.value = true
-  try {
-    const payload: Partial<InboundPayload> = {
-      server_id: props.server.id,
-      tag: c.tag,
-      protocol: c.protocol,
-      port: c.port,
-      listen: c.listen,
-      settings_json: c.settingsJson,
-      stream_settings: c.streamSettings,
-      sniffing: c.sniffing || undefined,
-      ratio: inboundEditing.value?.ratio ?? 1,
-      type: inboundEditing.value?.type || 'user',
-      cert_id: inboundEditing.value?.cert_id || undefined,
-    }
-    const { data } = inboundEditing.value
-      ? await updateInbound(inboundEditing.value.id, payload)
-      : await createInbound(payload as InboundPayload)
-    if (data.code === 0) {
-      ElMessage.success(inboundEditing.value ? '入站已更新' : '入站已创建')
-      inboundEditorOpen.value = false
-      inboundEditing.value = null
-      loadInbounds()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
-  } finally {
-    inboundSaving.value = false
-  }
-}
-
-async function toggleInboundRow(row: any) {
-  try {
-    const { data } = await toggleInbound(row.id)
-    if (data.code === 0) {
-      ElMessage.success(data.data.enabled ? '已启用' : '已停用')
-      loadInbounds()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
-  }
-}
-
-async function removeInbound(row: any) {
-  try {
-    await ElMessageBox.confirm(`确认删除入站「${row.tag}」？`, '删除入站', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteInbound(row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      loadInbounds()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-// ---- 出站 Tab ----
-const outbounds = ref<ServerOutbound[]>([])
-const outboundsLoading = ref(false)
-const outboundEditorOpen = ref(false)
-const outboundEditing = ref<ServerOutbound | null>(null)
-
-async function loadOutbounds() {
-  if (!props.server) return
-  outboundsLoading.value = true
-  try {
-    const { data } = await getServerOutbounds(props.server.id)
-    if (data.code === 0) outbounds.value = data.data.items
-    else ElMessage.error(data.message)
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载出站失败'))
-  } finally {
-    outboundsLoading.value = false
-  }
-}
-
-function openOutboundCreate() {
-  outboundEditing.value = null
-  outboundEditorOpen.value = true
-}
-
-function openOutboundEdit(row: any) {
-  outboundEditing.value = row
-  outboundEditorOpen.value = true
-}
-
-async function toggleOutbound(row: any) {
-  if (!props.server) return
-  try {
-    const { data } = await updateServerOutbound(props.server.id, row.id, { enabled: !row.enabled })
-    if (data.code === 0) {
-      ElMessage.success(data.data.outbound.enabled ? '已启用' : '已停用')
-      loadOutbounds()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
-  }
-}
-
-async function removeOutbound(row: any) {
-  if (!props.server) return
-  try {
-    await ElMessageBox.confirm(`确认删除出站「${row.tag}」？`, '删除出站', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteServerOutbound(props.server.id, row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      loadOutbounds()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-// ---- 路由 Tab ----
-const routingRules = ref<ServerRoutingRule[]>([])
-const routingLoading = ref(false)
-const ruleEditorOpen = ref(false)
-const ruleEditing = ref<ServerRoutingRule | null>(null)
-
-async function loadRouting() {
-  if (!props.server) return
-  routingLoading.value = true
-  try {
-    const { data } = await getServerRoutingRules(props.server.id)
-    if (data.code === 0) routingRules.value = data.data.items
-    else ElMessage.error(data.message)
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载路由规则失败'))
-  } finally {
-    routingLoading.value = false
-  }
-}
-
-const outboundTags = computed(() => outbounds.value.map((o) => o.tag))
-const inboundTags = computed(() => inbounds.value.map((ib) => ib.tag))
-
-// ---- 默认出口 ----
-const defaultOutboundTag = ref(props.server?.default_outbound_tag || 'direct')
-const routingDomainStrategy = ref(props.server?.routing_domain_strategy || 'AsIs')
-const defaultOutboundSaving = ref(false)
-
-async function saveDefaultOutbound() {
-  if (!props.server) return
-  defaultOutboundSaving.value = true
-  try {
-    const { data } = await updateServer(props.server.id, {
-      default_outbound_tag: defaultOutboundTag.value,
-      routing_domain_strategy: routingDomainStrategy.value,
-    })
-    if (data.code === 0) {
-      ElMessage.success('默认出口已更新，下次生成配置生效')
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存默认出口失败'))
-  } finally {
-    defaultOutboundSaving.value = false
-  }
-}
-
-watch(() => props.server?.default_outbound_tag, (v) => {
-  if (v) defaultOutboundTag.value = v
-})
-watch(() => props.server?.routing_domain_strategy, (v) => {
-  if (v) routingDomainStrategy.value = v
-})
-
-function openRuleCreate() {
-  ruleEditing.value = null
-  ruleEditorOpen.value = true
-}
-
-function openRuleEdit(row: any) {
-  ruleEditing.value = row
-  ruleEditorOpen.value = true
-}
-
-async function toggleRule(row: any) {
-  if (!props.server) return
-  try {
-    const { data } = await updateServerRoutingRule(props.server.id, row.id, { enabled: !row.enabled })
-    if (data.code === 0) {
-      ElMessage.success(data.data.rule.enabled ? '已启用' : '已停用')
-      loadRouting()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
-  }
-}
-
-async function removeRule(row: any) {
-  if (!props.server) return
-  try {
-    await ElMessageBox.confirm(`确认删除路由规则「${row.outbound_tag}」？`, '删除路由规则', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteServerRoutingRule(props.server.id, row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      loadRouting()
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-// ---- 配置预览 Tab ----
+// ---- 配置预览 Tab（uuid 脱敏展示，复制时保留原文） ----
 const cfgLoading = ref(false)
 const cfgText = ref('')
 const cfgMessage = ref('')
@@ -466,8 +169,6 @@ watch(
       cfgText.value = ''
       cfgMessage.value = ''
       loadInbounds()
-      loadOutbounds()
-      loadRouting()
     }
   },
   { immediate: true },
@@ -505,18 +206,33 @@ watch(
               <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
             </span></div>
             <div class="desc-row"><span class="k">最后心跳</span><span class="v">{{ fmtTime(server.last_seen_at) }}</span></div>
+            <div class="desc-row">
+              <span class="k">接入点</span>
+              <span class="v">
+                <template v-if="inboundsLoading">…</template>
+                <template v-else>{{ inbounds.length }} 个</template>
+                <el-button size="small" text type="primary" @click="goInbounds">
+                  <el-icon><Connection /></el-icon>&nbsp;管理
+                </el-button>
+              </span>
+            </div>
           </div>
 
           <el-divider />
           <div class="sec-title">节点密钥</div>
           <p class="muted tip">
-            密钥仅在创建/重置时显示一次；重置后需更新节点 /etc/xray-agent/config.yml 中的 secret。
+            密钥仅在创建/重置时显示一次；重置后需更新节点 /etc/xray-agent/config.yml 中的 secret（或重新执行安装命令）。
           </p>
           <div v-if="secretInfo" class="secret-box">
             <div class="secret-row"><span class="k">node_id</span><code>{{ secretInfo.node_id }}</code></div>
             <div class="secret-row">
               <span class="k">secret</span><code>{{ secretInfo.secret }}</code>
               <el-button size="small" text @click="copyText(secretInfo.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+            </div>
+            <div v-if="secretInfo.install_cmd" class="secret-row">
+              <span class="k">安装</span>
+              <code class="install-cmd">{{ secretInfo.install_cmd }}</code>
+              <el-button size="small" text @click="copyText(secretInfo.install_cmd!, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
             </div>
           </div>
           <div class="action-row">
@@ -525,133 +241,6 @@ watch(
           </div>
         </template>
         <el-empty v-else description="未选择节点" />
-      </el-tab-pane>
-
-      <!-- 入站 -->
-      <el-tab-pane label="入站" name="inbounds">
-        <div class="tab-toolbar">
-          <el-button size="small" @click="loadInbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-          <el-button size="small" type="primary" @click="openInboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增入站</el-button>
-        </div>
-        <el-table v-loading="inboundsLoading" :data="inbounds" size="small">
-          <el-table-column prop="tag" label="标签" min-width="130">
-            <template #default="{ row }">
-              <span style="font-weight: 600">{{ row.tag }}</span>
-              <el-tag v-if="row.type === 'relay'" size="small" type="warning" style="margin-left: 6px">转发</el-tag>
-              <el-tag v-else-if="row.type === 'idle'" size="small" type="info" style="margin-left: 6px">闲置</el-tag>
-              <el-tag v-else size="small" type="success" style="margin-left: 6px">用户</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="80" />
-          <el-table-column label="端口" width="80">
-            <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
-          </el-table-column>
-          <el-table-column label="传输/TLS" width="120">
-            <template #default="{ row }">
-              <code class="cell-mono" style="font-size: 11px">{{ row.stream_settings ? JSON.parse(row.stream_settings).network + '/' + JSON.parse(row.stream_settings).security : '—' }}</code>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggleInboundRow(row)" /></template>
-          </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text @click="openInboundEdit(row)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" text type="danger" @click="removeInbound(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-          <template #empty><div class="table-empty">尚未配置入站，点击右上角「新增入站」</div></template>
-        </el-table>
-      </el-tab-pane>
-
-      <!-- 出站 -->
-      <el-tab-pane label="出站" name="outbounds">
-        <div class="tab-toolbar">
-          <el-button size="small" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-          <el-button size="small" type="primary" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
-        </div>
-        <el-table v-loading="outboundsLoading" :data="outbounds" size="small">
-          <el-table-column prop="tag" label="标签" min-width="120">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
-          </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="100" />
-          <el-table-column prop="send_through" label="发送 IP" width="120">
-            <template #default="{ row }">{{ row.send_through || '—' }}</template>
-          </el-table-column>
-          <el-table-column prop="priority" label="优先级" width="80" />
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggleOutbound(row)" /></template>
-          </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="120">
-            <template #default="{ row }">{{ row.remark || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text @click="openOutboundEdit(row)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" text type="danger" @click="removeOutbound(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-          <template #empty><div class="table-empty">尚未配置出站，点击右上角「新增出站」</div></template>
-        </el-table>
-      </el-tab-pane>
-
-      <!-- 路由 -->
-      <el-tab-pane label="路由" name="routing">
-        <!-- 默认出口 & 域名策略 -->
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 10px 12px; background: var(--x-bg-soft, #f1f5f9); border-radius: 6px; flex-wrap: wrap">
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap">默认出口：</span>
-          <el-select v-model="defaultOutboundTag" style="width: 160px" size="small" :disabled="outboundTags.length === 0">
-            <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
-          </el-select>
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">域名策略：</span>
-          <el-select v-model="routingDomainStrategy" style="width: 160px" size="small">
-            <el-option label="AsIs（保持原样）" value="AsIs" />
-            <el-option label="IPIfNonMatch" value="IPIfNonMatch" />
-            <el-option label="IPOnDemand" value="IPOnDemand" />
-          </el-select>
-          <el-button size="small" type="primary" :loading="defaultOutboundSaving" @click="saveDefaultOutbound">保存</el-button>
-          <span v-if="outboundTags.length === 0" class="muted" style="font-size: 12px">（暂无出站，请先在"出站"Tab 中添加）</span>
-        </div>
-        <div class="tab-toolbar">
-          <el-button size="small" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-          <el-button size="small" type="primary" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
-        </div>
-        <el-table v-loading="routingLoading" :data="routingRules" size="small">
-          <el-table-column prop="outbound_tag" label="出站标签" min-width="120">
-            <template #default="{ row }"><el-tag size="small">{{ row.outbound_tag }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="域名匹配" min-width="140">
-            <template #default="{ row }"><span class="ellipsis-text">{{ row.domain || '—' }}</span></template>
-          </el-table-column>
-          <el-table-column label="IP 匹配" min-width="140">
-            <template #default="{ row }"><span class="ellipsis-text">{{ row.ip || '—' }}</span></template>
-          </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="100">
-            <template #default="{ row }"><span class="ellipsis-text">{{ row.protocol || '—' }}</span></template>
-          </el-table-column>
-          <el-table-column label="入站标签" min-width="120">
-            <template #default="{ row }"><span class="ellipsis-text">{{ row.inbound_tag || '—' }}</span></template>
-          </el-table-column>
-          <el-table-column prop="network" label="网络" width="70">
-            <template #default="{ row }">{{ row.network || '—' }}</template>
-          </el-table-column>
-          <el-table-column prop="port" label="端口" width="80">
-            <template #default="{ row }">{{ row.port || '—' }}</template>
-          </el-table-column>
-          <el-table-column prop="priority" label="优先级" width="80" />
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }">
-              <el-switch :model-value="row.enabled" @change="toggleRule(row)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text @click="openRuleEdit(row)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" text type="danger" @click="removeRule(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-          <template #empty><div class="table-empty">尚未配置路由规则，点击右上角「新增规则」</div></template>
-        </el-table>
       </el-tab-pane>
 
       <!-- 配置预览 -->
@@ -671,56 +260,11 @@ watch(
         <p v-if="cfgMessage" class="cfg-message">{{ cfgMessage }}</p>
         <p class="muted tip" style="margin: 0 0 8px">
           按该节点启用入站 + 出站 + 路由规则 + 全部启用用户生成完整 Xray 配置；生成即保存待推送（节点在线自动下发）。
+          展示内容已对用户 UUID 打码，复制配置得到原始 JSON。
         </p>
-        <pre v-loading="cfgLoading" class="cfg-view">{{ cfgText || '点击「生成并预览」生成配置…' }}</pre>
+        <pre v-loading="cfgLoading" class="cfg-view">{{ maskUUIDs(cfgText) || '点击「生成并预览」生成配置…' }}</pre>
       </el-tab-pane>
     </el-tabs>
-
-    <!-- 入站编辑器（复用 3x-ui InboundConfigEditor） -->
-    <el-dialog
-      v-model="inboundEditorOpen"
-      :title="inboundEditing ? '编辑入站' : '新增入站'"
-      width="780px"
-      :append-to-body="true"
-      @closed="inboundEditing = null"
-    >
-      <InboundConfigEditor
-        :key="inboundEditing ? `edit-${inboundEditing.id}` : 'create'"
-        :model-value="inboundEditing?.settings_json ?? '{}'"
-        :inbound-type="inboundEditing?.type || 'user'"
-        :internal-uuid="inboundEditing?.internal_uuid || ''"
-        :inbound-id="inboundEditing?.id || 0"
-        :cert-id="inboundEditing?.cert_id || 0"
-        @change="onInboundChange"
-        @update:inbound-type="(v: string) => { if (inboundEditing) inboundEditing.type = v }"
-        @update:cert-id="(v: number) => { if (inboundEditing) inboundEditing.cert_id = v || 0 }"
-        @internal-uuid-changed="loadInbounds"
-      />
-      <template #footer>
-        <el-button @click="inboundEditorOpen = false">取消</el-button>
-        <el-button type="primary" :loading="inboundSaving" @click="saveInbound">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 出站编辑器 -->
-    <OutboundConfigEditor
-      v-if="outboundEditorOpen"
-      :server-id="server?.id ?? 0"
-      :outbound="outboundEditing"
-      @saved="loadOutbounds"
-      @close="outboundEditorOpen = false"
-    />
-
-    <!-- 路由编辑器 -->
-    <RoutingRuleEditor
-      v-if="ruleEditorOpen"
-      :server-id="server?.id ?? 0"
-      :rule="ruleEditing"
-      :outbound-tags="outboundTags"
-      :inbound-tags="inboundTags"
-      @saved="loadRouting"
-      @close="ruleEditorOpen = false"
-    />
   </el-drawer>
 </template>
 
@@ -798,21 +342,13 @@ watch(
     word-break: break-all;
     flex: 1;
   }
+  .install-cmd {
+    font-size: 11.5px;
+  }
 }
 .action-row {
   display: flex;
   gap: 10px;
-}
-.table-empty {
-  padding: 30px 0;
-  color: var(--x-text-3);
-}
-.ellipsis-text {
-  display: inline-block;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cfg-message {
   color: var(--x-text-2);

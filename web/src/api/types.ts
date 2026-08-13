@@ -233,11 +233,19 @@ export interface ServerOutbound {
 }
 
 // Phase T：证书（PEM 不回传）
+export interface CertRef {
+  server_id: number
+  server_name: string
+  inbound_id: number
+  inbound_tag: string
+}
+
 export interface CertItem {
   id: number
   domain: string
   not_after: string
   remark: string
+  refs: CertRef[] // 引用该证书的入站位置（服务器/入站标签）
   created_at: string
 }
 

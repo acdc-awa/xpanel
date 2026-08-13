@@ -13,6 +13,7 @@ import {
   Lock,
   DataAnalysis,
   Setting,
+  Connection,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
@@ -30,12 +31,13 @@ export const adminMenus: MenuItem[] = [
   { title: '仪表盘', path: '/admin/dashboard', icon: Odometer },
   { title: '服务器', path: '/admin/servers', icon: Monitor },
   { title: '节点（接入点）', path: '/admin/nodes', icon: Share },
-  { title: '套餐 / 订阅', path: '/admin/plans', icon: Box },
+  { title: '路由管理', path: '/admin/routing', icon: Connection },
+  { title: '权限组', path: '/admin/permission-groups', icon: UserFilled },
+  { title: '套餐', path: '/admin/plans', icon: Box },
+  { title: '证书管理', path: '/admin/certs', icon: Lock },
   { title: '用户管理', path: '/admin/users', icon: User },
   { title: '订单确认', path: '/admin/orders', icon: Tickets },
   { title: '邀请码', path: '/admin/invitations', icon: Key },
-  { title: '证书管理', path: '/admin/certs', icon: Lock },
-  { title: '权限组', path: '/admin/permission-groups', icon: UserFilled },
   { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
   { title: '设置', path: '/admin/settings', icon: Setting },
 ]

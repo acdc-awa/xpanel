@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit, Setting } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
@@ -7,6 +8,7 @@ import {
   createServer,
   deleteServer,
   generateAndPushConfig,
+  getInbounds,
   getServers,
   resetServerSecret,
   serverCommand,
@@ -15,10 +17,37 @@ import {
   updateServer,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { maskUUIDs } from '@/utils/mask'
+
+const router = useRouter()
 
 const list = ref<ServerItem[]>([])
 const loading = ref(false)
 const keyword = ref('')
+
+// 接入点计数：server_id → 入站数（服务器页摘要，跳转节点页按服务器过滤）
+const inboundCountMap = ref<Record<number, number>>({})
+
+async function loadInboundCounts() {
+  try {
+    const { data } = await getInbounds()
+    if (data.code === 0) {
+      const m: Record<number, number> = {}
+      for (const ib of data.data.items) m[ib.server_id] = (m[ib.server_id] ?? 0) + 1
+      inboundCountMap.value = m
+    }
+  } catch {
+    /* 计数失败不阻塞列表 */
+  }
+}
+
+function inboundCount(id: number) {
+  return inboundCountMap.value[id] ?? 0
+}
+
+function goInbounds(row: any) {
+  router.push({ path: '/admin/nodes', query: { server_id: row.id } })
+}
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -42,6 +71,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  loadInboundCounts()
 }
 onMounted(load)
 
@@ -280,7 +310,7 @@ async function submitEdit() {
 
 // ---- 重置密钥 ----
 const secretOpen = ref(false)
-const secretInfo = ref<{ node_id: string; secret: string } | null>(null)
+const secretInfo = ref<{ node_id: string; secret: string; install_cmd?: string } | null>(null)
 
 async function resetSecret(row: any) {
   try {
@@ -295,7 +325,7 @@ async function resetSecret(row: any) {
   try {
     const { data } = await resetServerSecret(row.id)
     if (data.code === 0) {
-      secretInfo.value = { node_id: data.data.node_id, secret: data.data.secret }
+      secretInfo.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
       secretOpen.value = true
     } else {
       ElMessage.error(data.message)
@@ -361,6 +391,13 @@ async function removeServer(row: any) {
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
               <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />{{ row.status === 1 ? '在线' : '离线' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="接入点" width="90">
+          <template #default="{ row }">
+            <el-link type="primary" :underline="false" @click="goInbounds(row)">
+              {{ inboundCount(row.id) }} 个
+            </el-link>
           </template>
         </el-table-column>
         <el-table-column label="配置同步" width="100">
@@ -448,7 +485,7 @@ async function removeServer(row: any) {
       <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
         按该节点启用入站 + 出站 + 路由规则 + 全部启用用户生成完整 Xray 配置：保存待推送，节点在线立即下发（离线保留，上线自动补推）。
       </p>
-      <pre v-loading="pushLoading" class="log-view">{{ pushResult ? `结果：${pushResult}\n\n` : '' }}{{ pushConfigText || (pushLoading ? '正在生成配置…' : '') }}</pre>
+      <pre v-loading="pushLoading" class="log-view">{{ pushResult ? `结果：${pushResult}\n\n` : '' }}{{ maskUUIDs(pushConfigText) || (pushLoading ? '正在生成配置…' : '') }}</pre>
       <div v-if="pushConfigText" style="display: flex; gap: 8px; margin-top: 10px">
         <el-button size="small" @click="copyText(pushConfigText, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
       </div>
@@ -462,7 +499,7 @@ async function removeServer(row: any) {
       <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
         生成的完整 Xray 配置如下（已保存待推送；节点在线则立即下发，离线则上线自动补推）：
       </p>
-      <pre v-loading="genLoading" class="log-view">{{ genResult || '正在生成…' }}</pre>
+      <pre v-loading="genLoading" class="log-view">{{ maskUUIDs(genResult) || '正在生成…' }}</pre>
       <div v-if="genResult && !genLoading" style="display: flex; gap: 8px; margin-top: 10px">
         <el-button size="small" @click="copyText(genResult, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
       </div>
@@ -505,8 +542,8 @@ async function removeServer(row: any) {
     </el-dialog>
 
     <!-- 重置密钥 -->
-    <el-dialog v-model="secretOpen" title="重置密钥" width="560px">
-      <el-alert type="warning" :closable="false" show-icon title="新密钥已生成（仅显示这一次）" description="请更新节点 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务" style="margin-bottom: 12px" />
+    <el-dialog v-model="secretOpen" title="重置密钥" width="600px">
+      <el-alert type="warning" :closable="false" show-icon title="新密钥已生成（仅显示这一次）" description="请更新节点 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务；或重新执行下方安装命令" style="margin-bottom: 12px" />
       <div v-if="secretInfo" class="secret-box">
         <div class="secret-row">
           <span class="k">node_id</span>
@@ -516,6 +553,11 @@ async function removeServer(row: any) {
           <span class="k">secret</span>
           <code>{{ secretInfo.secret }}</code>
           <el-button size="small" text @click="copyText(secretInfo.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+        </div>
+        <div v-if="secretInfo.install_cmd" class="secret-row">
+          <span class="k">安装</span>
+          <code class="install-cmd">{{ secretInfo.install_cmd }}</code>
+          <el-button size="small" text @click="copyText(secretInfo.install_cmd!, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
         </div>
       </div>
       <template #footer>

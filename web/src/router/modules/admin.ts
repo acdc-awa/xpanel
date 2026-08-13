@@ -31,10 +31,28 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '节点（接入点）' },
       },
       {
+        path: 'routing',
+        name: 'admin.routing',
+        component: () => import('@/views/admin/routing.vue'),
+        meta: { title: '路由管理' },
+      },
+      {
         path: 'plans',
         name: 'admin.plans',
         component: () => import('@/views/admin/plans.vue'),
-        meta: { title: '套餐 / 订阅' },
+        meta: { title: '套餐' },
+      },
+      {
+        path: 'certs',
+        name: 'admin.certs',
+        component: () => import('@/views/admin/certs.vue'),
+        meta: { title: '证书管理' },
+      },
+      {
+        path: 'permission-groups',
+        name: 'admin.permission-groups',
+        component: () => import('@/views/admin/permission-groups.vue'),
+        meta: { title: '权限组' },
       },
       {
         path: 'users',
@@ -59,18 +77,6 @@ export const adminRoutes: RouteRecordRaw[] = [
         name: 'admin.audit',
         component: () => import('@/views/admin/audit.vue'),
         meta: { title: '审计日志' },
-      },
-      {
-        path: 'certs',
-        name: 'admin.certs',
-        component: () => import('@/views/admin/certs.vue'),
-        meta: { title: '证书管理' },
-      },
-      {
-        path: 'permission-groups',
-        name: 'admin.permission-groups',
-        component: () => import('@/views/admin/permission-groups.vue'),
-        meta: { title: '权限组' },
       },
       {
         path: 'settings',

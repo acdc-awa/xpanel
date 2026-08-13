@@ -121,7 +121,7 @@ export function updateServer(
 }
 
 export function resetServerSecret(id: number) {
-  return http.post<ApiResp<{ node_id: string; secret: string }>>(`/admin/servers/${id}/reset-secret`)
+  return http.post<ApiResp<{ node_id: string; secret: string; install_cmd?: string }>>(`/admin/servers/${id}/reset-secret`)
 }
 
 export function serverCommand(

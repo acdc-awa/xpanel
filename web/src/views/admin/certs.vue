@@ -123,6 +123,16 @@ function expireTag(row: any) {
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" />
+        <el-table-column label="引用节点（服务器 / 入站）" min-width="200">
+          <template #default="{ row }">
+            <template v-if="row.refs && row.refs.length > 0">
+              <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
+                {{ r.server_name }} / {{ r.inbound_tag }}
+              </el-tag>
+            </template>
+            <span v-else class="muted">未引用</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="上传时间" width="130" />
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
