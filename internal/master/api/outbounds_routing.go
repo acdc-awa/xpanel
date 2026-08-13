@@ -214,6 +214,8 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 	}
 
+	// 在 Updates 前捕获旧引用（GORM Updates 会回写 struct 字段，否则解绑后 oldRef 已被置 nil）
+	oldRef := ob.InboundRef
 	if len(updates) > 0 {
 		if err := d.DB.Model(&ob).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新出站规则失败")
@@ -222,7 +224,6 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 	// 引用目标维护：新目标标 relay；旧目标（被改走/解除）无其他引用则回 idle
 	if req.InboundRef != nil {
-		oldRef := ob.InboundRef
 		if *req.InboundRef > 0 {
 			d.ensureRelayMark(*req.InboundRef)
 		}

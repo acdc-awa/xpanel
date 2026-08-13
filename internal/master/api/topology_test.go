@@ -1,10 +1,13 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
@@ -130,4 +133,37 @@ func TestCheckInboundRefTargets(t *testing.T) {
 		t.Error("引用停用入站应报错")
 	}
 	_ = time.Now
+}
+
+// TestAdminUpdateOutboundUnbindDemotes 回归：PUT outbound {inbound_ref:0} 解绑后，
+// 目标落地入站在无其他引用时应回 idle。
+// 曾因 GORM Updates 回写 struct 字段（解绑后 ob.InboundRef 被置 nil），
+// 导致 demote 分支的 oldRef 判断失败、relay 永不降级。
+func TestAdminUpdateOutboundUnbindDemotes(t *testing.T) {
+	db := apiTestDB(t)
+	s1, _, aIn, bIn := seedRefGraph(t, db)
+	_ = aIn
+	// outbound X (S1) 引用 B（合法设置后 B 为 relay）
+	refB := bIn
+	ob := models.ServerOutbound{ServerID: s1, Tag: "x", Protocol: "freedom", SettingsJSON: "{}", InboundRef: &refB, Enabled: true}
+	db.Create(&ob)
+	db.Model(&models.Inbound{}).Where("id = ?", bIn).Update("type", models.InboundTypeRelay)
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "1"}, {Key: "outbound_id", Value: "1"}}
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/servers/1/outbounds/1", strings.NewReader(`{"inbound_ref":0}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	d.AdminUpdateServerOutbound(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("解绑请求应 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var b models.Inbound
+	db.First(&b, bIn)
+	if b.Type != models.InboundTypeIdle {
+		t.Errorf("解绑后目标应回 idle, got %s", b.Type)
+	}
 }
