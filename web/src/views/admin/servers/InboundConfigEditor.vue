@@ -643,21 +643,6 @@ async function copyText(text: string, label: string) {
                   <el-option label="VLESS (推荐)" value="vless" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="传输协议 Network">
-                <el-select v-model="localNetwork" style="width: 100%">
-                  <el-option label="TCP (REALITY 最佳)" value="tcp" />
-                  <el-option label="WebSocket (WS)" value="ws" />
-                  <el-option label="xhttp (Xray 1.8.21+)" value="xhttp" />
-                  <el-option label="gRPC" value="grpc" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="安全类型 TLS / Security">
-                <el-select v-model="localTlsType" style="width: 100%">
-                  <el-option label="REALITY (伪装/防封)" value="reality" />
-                  <el-option label="TLS (自定义证书)" value="tls" />
-                  <el-option label="none (无加密)" value="none" />
-                </el-select>
-              </el-form-item>
               <el-form-item label="流量倍率 Ratio">
                 <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
                 <p class="muted tip">计费倍率（后续流量计费用）：1 倍 = 1GB 记 1GB，1.5 表示 1GB 记 1.5GB。</p>
@@ -694,9 +679,15 @@ async function copyText(text: string, label: string) {
         <el-tab-pane label="传输设置" name="transport">
           <!-- 传输层参数（随 network 联动） -->
           <div class="form-section">
-            <div class="section-title">传输层参数 ({{ localNetwork.toUpperCase() }})</div>
-
-            <!-- TCP -->
+            <div class="section-title">传输设置 ({{ localNetwork.toUpperCase() }})</div>
+            <el-form-item label="传输协议 Network">
+              <el-select v-model="localNetwork" style="width: 280px">
+                <el-option label="TCP (REALITY 最佳)" value="tcp" />
+                <el-option label="WebSocket (WS)" value="ws" />
+                <el-option label="xhttp (Xray 1.8.21+)" value="xhttp" />
+                <el-option label="gRPC" value="grpc" />
+              </el-select>
+            </el-form-item>
             <template v-if="localNetwork === 'tcp'">
               <div class="grid-2">
                 <el-form-item label="伪装类型 (Header)">
@@ -826,7 +817,15 @@ async function copyText(text: string, label: string) {
         <el-tab-pane label="安全设置" name="security">
       <!-- 安全/加密配置 -->
       <div class="form-section">
-        <div class="section-title">安全加密 ({{ localTlsType.toUpperCase() }})</div>
+        <div class="section-title">安全设置 ({{ localTlsType.toUpperCase() }})</div>
+
+        <el-form-item label="安全类型 Security">
+          <el-select v-model="localTlsType" style="width: 280px">
+            <el-option label="REALITY (伪装/防封)" value="reality" />
+            <el-option label="TLS (自定义证书)" value="tls" />
+            <el-option label="none (无加密)" value="none" />
+          </el-select>
+        </el-form-item>
 
         <div style="margin-bottom: 8px">
           <el-form-item label="uTLS 指纹 (fingerprint)">
