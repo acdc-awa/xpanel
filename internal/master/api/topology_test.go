@@ -192,3 +192,67 @@ func TestAdminUpdateOutboundUnbindDemotes(t *testing.T) {
 		t.Errorf("解绑后目标应回退到 user, got %s", b.Type)
 	}
 }
+
+// TestTopologyLayoutAPI：画布布局云端同步 GET/PUT 往返（settings 表 upsert）
+func TestTopologyLayoutAPI(t *testing.T) {
+	db := apiTestDB(t)
+	db.AutoMigrate(&models.Setting{})
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+
+	// 初始为空
+	{
+		r := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(r)
+		c.Request = httptest.NewRequest(http.MethodGet, "/admin/topology-layout", nil)
+		d.AdminGetTopologyLayout(c)
+		if r.Code != 200 || !strings.Contains(r.Body.String(), `"positions":{}`) {
+			t.Fatalf("empty layout unexpected: %d %s", r.Code, r.Body.String())
+		}
+	}
+
+	// PUT 保存
+	{
+		r := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(r)
+		c.Request = httptest.NewRequest(http.MethodPut, "/admin/topology-layout", strings.NewReader(
+			`{"positions":{"server-4":{"x":123,"y":456}},"widths":{"server-4":600}}`))
+		c.Request.Header.Set("Content-Type", "application/json")
+		d.AdminSaveTopologyLayout(c)
+		if r.Code != 200 {
+			t.Fatalf("save failed: %d %s", r.Code, r.Body.String())
+		}
+	}
+
+	// GET 回读
+	{
+		r := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(r)
+		c.Request = httptest.NewRequest(http.MethodGet, "/admin/topology-layout", nil)
+		d.AdminGetTopologyLayout(c)
+		body := r.Body.String()
+		if !strings.Contains(body, `"x":123`) || !strings.Contains(body, `"y":456`) || !strings.Contains(body, `"widths":{"server-4":600}`) {
+			t.Fatalf("roundtrip mismatch: %s", body)
+		}
+	}
+
+	// PUT 覆盖（第二次保存走 update 分支）
+	{
+		r := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(r)
+		c.Request = httptest.NewRequest(http.MethodPut, "/admin/topology-layout", strings.NewReader(
+			`{"positions":{"server-4":{"x":9,"y":9}},"widths":{}}`))
+		c.Request.Header.Set("Content-Type", "application/json")
+		d.AdminSaveTopologyLayout(c)
+		if r.Code != 200 {
+			t.Fatalf("resave failed: %d %s", r.Code, r.Body.String())
+		}
+		r2 := httptest.NewRecorder()
+		c2, _ := gin.CreateTestContext(r2)
+		c2.Request = httptest.NewRequest(http.MethodGet, "/admin/topology-layout", nil)
+		d.AdminGetTopologyLayout(c2)
+		if !strings.Contains(r2.Body.String(), `"x":9`) || strings.Contains(r2.Body.String(), `"y":456`) {
+			t.Fatalf("overwrite mismatch: %s", r2.Body.String())
+		}
+	}
+}

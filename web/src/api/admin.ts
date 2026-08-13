@@ -354,6 +354,20 @@ export function getTopology() {
   return http.get<ApiResp<TopologyData>>('/admin/topology')
 }
 
+// 画布布局云端同步（盒子位置/宽度，跨浏览器/设备统一；settings 表存 JSON）
+export interface TopologyLayout {
+  positions: Record<string, { x: number; y: number }>
+  widths: Record<string, number>
+}
+
+export function getTopologyLayout() {
+  return http.get<ApiResp<TopologyLayout>>('/admin/topology-layout')
+}
+
+export function saveTopologyLayout(payload: TopologyLayout) {
+  return http.put<ApiResp<null>>('/admin/topology-layout', payload)
+}
+
 // ===== P5 套餐 / 订单 / 审计 / 入站授权 =====
 
 export function getPlans() {

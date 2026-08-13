@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log"
 	"strconv"
 
@@ -328,4 +329,74 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		"outbounds":     outViews,
 		"routing_rules": ruleViews,
 	})
+}
+
+// ---- 画布布局云端同步（盒子位置/宽度，settings 表存 JSON） ----
+
+const settingTopologyLayout = "topology_layout"
+
+// AdminGetTopologyLayout GET /api/v1/admin/topology-layout —— 拉取画布布局（跨浏览器/设备统一）
+func (d *Deps) AdminGetTopologyLayout(c *gin.Context) {
+	positions := gin.H{}
+	widths := gin.H{}
+	var set models.Setting
+	if err := d.DB.Where("key = ?", settingTopologyLayout).First(&set).Error; err == nil && set.Value != "" {
+		var raw struct {
+			Positions map[string]struct {
+				X float64 `json:"x"`
+				Y float64 `json:"y"`
+			} `json:"positions"`
+			Widths map[string]float64 `json:"widths"`
+		}
+		if err := json.Unmarshal([]byte(set.Value), &raw); err == nil {
+			if raw.Positions != nil {
+				pos := gin.H{}
+				for k, v := range raw.Positions {
+					pos[k] = gin.H{"x": v.X, "y": v.Y}
+				}
+				positions = pos
+			}
+			if raw.Widths != nil {
+				w := gin.H{}
+				for k, v := range raw.Widths {
+					w[k] = v
+				}
+				widths = w
+			}
+		}
+	}
+	util.OK(c, gin.H{"positions": positions, "widths": widths})
+}
+
+// AdminSaveTopologyLayout PUT /api/v1/admin/topology-layout —— 保存画布布局（upsert settings）
+func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
+	var req struct {
+		Positions map[string]struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		} `json:"positions"`
+		Widths map[string]float64 `json:"widths"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	val, err := json.Marshal(req)
+	if err != nil {
+		util.BadRequest(c, "序列化失败")
+		return
+	}
+	var set models.Setting
+	if err := d.DB.Where("key = ?", settingTopologyLayout).First(&set).Error; err != nil {
+		if err := d.DB.Create(&models.Setting{Key: settingTopologyLayout, Value: string(val)}).Error; err != nil {
+			util.ServerError(c, "保存失败")
+			return
+		}
+	} else {
+		if err := d.DB.Model(&set).Update("value", string(val)).Error; err != nil {
+			util.ServerError(c, "保存失败")
+			return
+		}
+	}
+	util.OK(c, nil)
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   VueFlow,
   Handle,
@@ -25,6 +25,8 @@ import {
   createServerRoutingRule,
   deleteServerOutbound,
   deleteServerRoutingRule,
+  getTopologyLayout,
+  saveTopologyLayout,
   updateInbound,
   updateServerOutbound,
   type TopologyData,
@@ -60,11 +62,61 @@ interface BoxData {
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
 
-// 模块级：会话内记住盒子拖动位置——连线/删线/视图切换后 buildGraph 重建节点时保持，
-// 不回到默认布局（仅新服务器用默认位置）
-const boxPositions = new Map<string, { x: number; y: number }>()
-// 模块级：盒子拉伸宽度记忆（同 boxPositions，buildGraph 重建后保持）
-const boxWidths = new Map<string, number>()
+// ---- 布局持久化（localStorage）----
+// 盒子位置/宽度记忆：模块级 Map 保证 SPA 内（连线/删线/切视图）重建节点后保持；
+// localStorage 保证整页刷新/退出后回到上次布局（按服务器 id 存取，删除的服务器残留 key 无害）
+const POS_KEY = 'topology-box-positions'
+const WIDTH_KEY = 'topology-box-widths'
+
+function loadMap<T>(key: string): Map<string, T> {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) return new Map(JSON.parse(raw) as [string, T][])
+  } catch {
+    /* localStorage 不可用/解析失败 → 空布局 */
+  }
+  return new Map()
+}
+
+function saveMap(key: string, m: Map<string, unknown>) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...m]))
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+const boxPositions = loadMap<{ x: number; y: number }>(POS_KEY)
+const boxWidths = loadMap<number>(WIDTH_KEY)
+
+// 云端同步：挂载时拉取服务端布局（跨浏览器/设备统一，服务端为权威覆盖本地），
+// 拖动/拉伸结束后 PUT 保存
+function persistServerLayout() {
+  saveTopologyLayout({
+    positions: Object.fromEntries(boxPositions),
+    widths: Object.fromEntries(boxWidths),
+  }).catch(() => {
+    /* 网络失败忽略，下次拖动再存 */
+  })
+}
+
+onMounted(async () => {
+  try {
+    const { data } = await getTopologyLayout()
+    if (data.code !== 0) return
+    const pos = data.data?.positions ?? {}
+    const widths = data.data?.widths ?? {}
+    for (const [k, v] of Object.entries(pos)) {
+      if (v && typeof v.x === 'number' && typeof v.y === 'number') boxPositions.set(k, { x: v.x, y: v.y })
+    }
+    for (const [k, v] of Object.entries(widths)) {
+      if (typeof v === 'number') boxWidths.set(k, v)
+    }
+    if (props.topology) buildGraph(props.topology)
+  } catch {
+    /* 拉取失败用本地布局 */
+  }
+})
 
 const ROW_H = 40 // 增加行高以适配药丸样式
 const HEADER_H = 48
@@ -572,7 +624,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
   }
 }
 
-// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆在模块级 boxWidths，连线/删线重建后保持）
+// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆在模块级 boxWidths + localStorage + 云端）
 function startBoxResize(e: MouseEvent, data: BoxData) {
   const nodeId = `server-${data.server.id}`
   const startX = e.clientX
@@ -582,10 +634,12 @@ function startBoxResize(e: MouseEvent, data: BoxData) {
     const w = Math.max(320, Math.min(800, startWidth + deltaX))
     data.boxWidth = w
     boxWidths.set(nodeId, w)
+    saveMap(WIDTH_KEY, boxWidths)
   }
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
+    persistServerLayout()
   }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
@@ -597,10 +651,14 @@ function handleNodeDblClick(evt: NodeMouseEvent) {
   if (box?.server?.id) emit('open-server', box.server.id)
 }
 
-// 盒子拖动结束：记住位置（连线/删线重建节点后保持）
+// 盒子拖动结束：记住位置（连线/删线重建节点后保持）+ localStorage + 云端（跨浏览器统一）
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
-  if (node.position) boxPositions.set(node.id, { x: node.position.x, y: node.position.y })
+  if (node.position) {
+    boxPositions.set(node.id, { x: node.position.x, y: node.position.y })
+    saveMap(POS_KEY, boxPositions)
+    persistServerLayout()
+  }
 }
 
 const hasData = computed(() => !!props.topology && props.topology.servers.length > 0)
