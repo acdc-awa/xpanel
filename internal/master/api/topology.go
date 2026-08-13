@@ -238,3 +238,94 @@ func (d *Deps) AdminSetGroupInbounds(c *gin.Context) {
 	}
 	util.OK(c, gin.H{"group_id": id, "count": len(req.InboundIDs)})
 }
+
+// ---- 拓扑画布（T8）：一次拉全量 ----
+
+// topoOutbound 画布出站轻量视图。
+type topoOutbound struct {
+	ID         uint64  `json:"id"`
+	ServerID   uint64  `json:"server_id"`
+	Tag        string  `json:"tag"`
+	Protocol   string  `json:"protocol"`
+	InboundRef *uint64 `json:"inbound_ref"` // Phase T：引用落地入站
+	Enabled    bool    `json:"enabled"`
+	Priority   int     `json:"priority"`
+}
+
+// topoRule 画布路由规则轻量视图。
+type topoRule struct {
+	ID         uint64 `json:"id"`
+	ServerID   uint64 `json:"server_id"`
+	InboundTag string `json:"inbound_tag"`
+	OutboundTag string `json:"outbound_tag"`
+	Enabled    bool   `json:"enabled"`
+}
+
+// AdminTopology GET /api/v1/admin/topology —— 可视化画布数据源（服务器盒子 + 入站/出站项 + 引用/规则线）。
+func (d *Deps) AdminTopology(c *gin.Context) {
+	// 服务器（实时在线状态）
+	var servers []models.Server
+	if err := d.DB.Order("id ASC").Find(&servers).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	srvViews := make([]serverView, 0, len(servers))
+	srvName := map[uint64]string{}
+	for i := range servers {
+		v := toServerView(&servers[i])
+		if d.Hub != nil && d.Hub.IsOnline(v.ID) {
+			v.Status = 1
+		}
+		srvViews = append(srvViews, v)
+		srvName[servers[i].ID] = servers[i].Name
+	}
+
+	// 入站（含服务器名）
+	var inbounds []models.Inbound
+	if err := d.DB.Order("server_id ASC, id ASC").Find(&inbounds).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	inbViews := make([]inboundView, 0, len(inbounds))
+	for i := range inbounds {
+		inbViews = append(inbViews, toInboundView(&inbounds[i], srvName[inbounds[i].ServerID]))
+	}
+
+	// 出站（轻量）
+	var outbounds []models.ServerOutbound
+	if err := d.DB.Order("server_id ASC, id ASC").Find(&outbounds).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	outViews := make([]topoOutbound, 0, len(outbounds))
+	for i := range outbounds {
+		outViews = append(outViews, topoOutbound{
+			ID: outbounds[i].ID, ServerID: outbounds[i].ServerID,
+			Tag: outbounds[i].Tag, Protocol: outbounds[i].Protocol,
+			InboundRef: outbounds[i].InboundRef, Enabled: outbounds[i].Enabled,
+			Priority: outbounds[i].Priority,
+		})
+	}
+
+	// 路由规则（轻量）
+	var rules []models.ServerRoutingRule
+	if err := d.DB.Order("server_id ASC, id ASC").Find(&rules).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	ruleViews := make([]topoRule, 0, len(rules))
+	for i := range rules {
+		ruleViews = append(ruleViews, topoRule{
+			ID: rules[i].ID, ServerID: rules[i].ServerID,
+			InboundTag: rules[i].InboundTag, OutboundTag: rules[i].OutboundTag,
+			Enabled: rules[i].Enabled,
+		})
+	}
+
+	util.OK(c, gin.H{
+		"servers":       srvViews,
+		"inbounds":      inbViews,
+		"outbounds":     outViews,
+		"routing_rules": ruleViews,
+	})
+}

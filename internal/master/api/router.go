@@ -172,6 +172,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
 			admin.GET("/permission-groups/:id/inbounds", d.AdminGroupInbounds)
 			admin.POST("/permission-groups/:id/inbounds", d.AdminSetGroupInbounds)
+			admin.GET("/topology", d.AdminTopology)
 		}
 	}
 

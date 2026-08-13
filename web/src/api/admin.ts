@@ -323,6 +323,37 @@ export function deleteServerRoutingRule(serverId: number, ruleId: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/servers/${serverId}/routing/${ruleId}`)
 }
 
+// ===== T8 拓扑画布：一次拉全量 =====
+
+export interface TopologyOutbound {
+  id: number
+  server_id: number
+  tag: string
+  protocol: string
+  inbound_ref?: number | null // Phase T：引用落地入站
+  enabled: boolean
+  priority: number
+}
+
+export interface TopologyRule {
+  id: number
+  server_id: number
+  inbound_tag: string
+  outbound_tag: string
+  enabled: boolean
+}
+
+export interface TopologyData {
+  servers: ServerItem[]
+  inbounds: InboundItem[]
+  outbounds: TopologyOutbound[]
+  routing_rules: TopologyRule[]
+}
+
+export function getTopology() {
+  return http.get<ApiResp<TopologyData>>('/admin/topology')
+}
+
 // ===== P5 套餐 / 订单 / 审计 / 入站授权 =====
 
 export function getPlans() {
