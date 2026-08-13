@@ -5,6 +5,7 @@ import {
   Handle,
   Position,
   MarkerType,
+  useVueFlow,
   type Connection,
   type Edge,
   type EdgeMouseEvent,
@@ -470,6 +471,20 @@ async function saveRule() {
 }
 
 // ---- 交互：删线 ----
+// 取消弹窗/操作失败后取消该边选中（selected 提亮样式不残留，无需点空白区才能消除）
+// 用 vue-flow store 的 updateEdge（避免手改 edges 数组触发 TS 泛型深度推断）
+// 取消弹窗/操作失败后取消该边选中（selected 提亮样式不残留，无需点空白区才能消除）：
+// 直接改 v-model:edges 数组元素 + 替换引用触发 vue-flow 同步（edges.value 联合类型复杂，
+// 经宽松类型桥接避免 TS 泛型深度推断爆炸）
+function deselectEdge(id: string) {
+  const raw = edges.value as unknown as { id: string; selected?: boolean }[]
+  const edge = raw.find((e) => e.id === id)
+  if (edge) {
+    edge.selected = false
+    edges.value = raw.slice() as unknown as Edge[]
+  }
+}
+
 async function handleEdgeClick(evt: EdgeMouseEvent) {
   const edge = evt.edge
   if (!props.editable || !props.topology) return
@@ -486,6 +501,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
           { type: 'warning' },
         )
       } catch {
+        deselectEdge(edge.id)
         return
       }
       try {
@@ -495,9 +511,11 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
           emit('changed')
         } else {
           ElMessage.error(data.message)
+          deselectEdge(edge.id)
         }
       } catch (e) {
         ElMessage.error(errMsg(e, '删除失败'))
+        deselectEdge(edge.id)
       }
       return
     }
@@ -508,6 +526,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
         { type: 'warning' },
       )
     } catch {
+      deselectEdge(edge.id)
       return
     }
     try {
@@ -517,9 +536,11 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
         emit('changed')
       } else {
         ElMessage.error(data.message)
+        deselectEdge(edge.id)
       }
     } catch (e) {
       ElMessage.error(errMsg(e, '解除引用失败'))
+      deselectEdge(edge.id)
     }
   } else if (edge.id.startsWith('rule-')) {
     const ruleId = Number(edge.id.slice(5))
@@ -532,6 +553,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
         { type: 'error' },
       )
     } catch {
+      deselectEdge(edge.id)
       return
     }
     try {
@@ -541,9 +563,11 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
         emit('changed')
       } else {
         ElMessage.error(data.message)
+        deselectEdge(edge.id)
       }
     } catch (e) {
       ElMessage.error(errMsg(e, '删除规则失败'))
+      deselectEdge(edge.id)
     }
   }
 }
@@ -603,18 +627,25 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       <Controls position="bottom-left" />
       <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线（宽透明 hit path 保证可点删；同色光晕底增强显眼度） -->
       <template #edge-boxrule="e">
-        <path class="edge-hit" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
+        <path
+          class="vue-flow__edge-path vue-flow__edge-interaction edge-hit rule-hit"
+          :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
+        />
         <path class="boxrule-glow" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
-        <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" :marker-end="e.markerEnd" />
+        <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
       </template>
       <!-- 跨盒引用线：方案④ 直-弧-直（被盒子阻挡时下方 U 形绕行），流动虚线+箭头 -->
       <template #edge-refedge="e">
         <path
-          class="edge-hit"
+          class="vue-flow__edge-path vue-flow__edge-interaction edge-hit ref-hit"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
         />
         <path
-          class="refedge-path vue-flow__edge-path"
+          class="refedge-glow"
+          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
+        />
+        <path
+          class="refedge-path"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
           :marker-end="e.markerEnd"
         />
@@ -993,33 +1024,119 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 .vue-flow__edges {
   z-index: 9999 !important;
 }
-/* 盒内路由线（自定义 boxrule 边）：亮蓝虚线 + 同色光晕底，深色背景上清晰显眼 */
+/* 盒内路由线（自定义 boxrule 边）：含蓄天蓝淡光晕底 + 慢速流动虚线 */
+/* 注意：四条线的 transition 不能含 d——Chrome 把 SVG d 映射为 CSS 几何属性，transition: all 会让
+   拖动盒子时 d 每帧走 0.3s 过渡（线永远在追赶），表现为盒子走了线还留在原地 */
 .boxrule-glow {
-  stroke: #38bdf8;
+  stroke: #0284c7;
   stroke-width: 6;
-  opacity: 0.2;
+  opacity: 0.18;
   fill: none;
-  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.3));
+  transition:
+    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none !important;
 }
 .boxrule-path {
-  stroke: #bae6fd;
+  stroke: #38bdf8;
   stroke-width: 2;
-  stroke-dasharray: 6 4;
+  stroke-dasharray: 6 5;
   fill: none;
+  stroke-linecap: round;
+  transition:
+    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none !important;
+  animation: dash-flow-slow 30s linear infinite;
 }
-/* 跨盒引用线（自定义 refedge 边；animated 类驱动流动虚线） */
+
+/* 跨盒引用线（自定义 refedge 边）：含蓄琥珀金发光底膜 + 精致金光主线条 */
+.refedge-glow {
+  stroke: #d97706;
+  stroke-width: 8;
+  opacity: 0.2;
+  fill: none;
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.4));
+  transition:
+    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none !important;
+}
 .refedge-path {
   stroke: #fbbf24;
-  stroke-width: 3;
+  stroke-width: 2.5;
   stroke-linejoin: round;
+  stroke-linecap: round;
   fill: none;
-  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.5));
+  filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
+  transition:
+    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none !important;
 }
-/* 宽透明命中路径：细线也易于点选删除 */
+
+/* 宽透明命中路径：热区扩大至 24-28px，作为唯一响应鼠标与点击事件的 path。
+   stroke 必须 !important：① 官方 style.css 的 .vue-flow__edge.selected .vue-flow__edge-path 会在
+   选中时强制 stroke:#555，把整条热区染成深灰管道（挂 vue-flow__edge-path 类所致，特异性 0-2-0
+   高于本规则）② rgba(0,0,0,0.01) 非 transparent（visibleStroke 下透明不命中） */
 .edge-hit {
-  stroke: transparent;
-  stroke-width: 14;
+  stroke: rgba(0, 0, 0, 0.01) !important;
+  stroke-width: 24;
   fill: none;
+  pointer-events: stroke !important;
+  cursor: pointer !important;
+}
+.edge-hit.ref-hit {
+  stroke-width: 28;
+}
+.edge-hit.rule-hit {
+  stroke-width: 24;
+}
+
+/* 装饰线条禁止响应 pointer-events，防止事件拦截与跳动 */
+.boxrule-glow,
+.boxrule-path,
+.refedge-glow,
+.refedge-path {
+  pointer-events: none !important;
+}
+
+/* 可点性优化：手型光标提示与高级选中特效 */
+.vue-flow__edge,
+.vue-flow__edge-path,
+.vue-flow__edge-interaction {
+  cursor: pointer !important;
+}
+
+/* 鼠标靠近发光（克制版）：仅「未选中」的线响应 hover——命中带（24/28px）内触发，主线上移色阶
+   微加粗 + 衬线变浓，无额外光晕；0.3s 过渡平滑出现。点击后（selected）禁用 hover 发光：
+   弹窗打开时鼠标仍停在线上，若不排除 selected 会持续亮着宽光影 */
+.vue-flow__edge:not(.selected):hover .boxrule-glow {
+  opacity: 0.38;
+  stroke-width: 7;
+}
+.vue-flow__edge:not(.selected):hover .boxrule-path {
+  stroke: #e0f2fe;
+  stroke-width: 3;
+}
+.vue-flow__edge:not(.selected):hover .refedge-glow {
+  opacity: 0.42;
+  stroke-width: 9;
+}
+.vue-flow__edge:not(.selected):hover .refedge-path {
+  stroke: #fef3c7;
+  stroke-width: 3.5;
+}
+
+@keyframes dash-flow-slow {
+  to {
+    stroke-dashoffset: -100;
+  }
 }
 
 /* 自定义右侧拉伸把手 */
