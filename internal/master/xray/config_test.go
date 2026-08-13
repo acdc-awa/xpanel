@@ -865,3 +865,64 @@ func TestGenerate_DefaultOutboundDS(t *testing.T) {
 		t.Fatalf("explicit UseIPv4 should not be overwritten: %s", got)
 	}
 }
+
+// clientFlowOf 生成配置并提取 inbounds[0].settings.clients[0].flow。
+func clientFlowOf(t *testing.T, streamJSON, inbFlow, uiFlow string) (string, bool) {
+	t.Helper()
+	users := vlessTestUser()
+	var userInbounds []models.UserInbound
+	if uiFlow != "" {
+		userInbounds = []models.UserInbound{{UserID: 1, InboundID: 1, Flow: uiFlow}}
+	}
+	inb := models.Inbound{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443,
+		StreamSettings: streamJSON, Flow: inbFlow, Enabled: true}
+	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, users, userInbounds, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	inList := asArray(t, parsed["inbounds"], "inbounds")
+	im := asObject(t, inList[0], "inbounds[0]")
+	settings := asObject(t, im["settings"], "settings")
+	clients := asArray(t, settings["clients"], "clients")
+	c0 := asObject(t, clients[0], "clients[0]")
+	flow, has := c0["flow"].(string)
+	return flow, has
+}
+
+// TestGenerate_ClientFlowThreeStates 入站级流控三态：
+// 空 = 自动（TCP+REALITY 注入 vision）；xtls-rprx-vision = 为该入站用户全部开启；
+// none = 禁用自动注入（UserInbound.Flow 仍最高优先）。
+func TestGenerate_ClientFlowThreeStates(t *testing.T) {
+	realityTCP := inbStream("tcp", "reality", `"realitySettings":{"dest":"1.2.3.4:443","serverNames":["r.example.com"],"privateKey":"sk","shortIds":["abcd"]}`)
+	tlsTCP := inbStream("tcp", "tls", `"tlsSettings":{"serverName":"t.example.com","certificates":[{"certificateFile":"/c.pem","keyFile":"/k.pem"}]}`)
+
+	// 1. 自动：TCP+REALITY，inb.Flow 空 → vision
+	flow, has := clientFlowOf(t, realityTCP, "", "")
+	if !has || flow != "xtls-rprx-vision" {
+		t.Errorf("自动模式 tcp+reality 应注入 vision: flow=%q has=%v", flow, has)
+	}
+	// 2. 关闭：TCP+REALITY，inb.Flow=none → 不注入
+	flow, has = clientFlowOf(t, realityTCP, "none", "")
+	if has {
+		t.Errorf("none 应禁用自动注入: flow=%q", flow)
+	}
+	// 3. 开启：tcp+tls，inb.Flow=xtls-rprx-vision → 非 reality 也注入
+	flow, has = clientFlowOf(t, tlsTCP, "xtls-rprx-vision", "")
+	if !has || flow != "xtls-rprx-vision" {
+		t.Errorf("显式 vision 应注入: flow=%q has=%v", flow, has)
+	}
+	// 4. UserInbound 覆盖：inb.Flow=none + ui.Flow=vision → vision（用户级最高）
+	flow, has = clientFlowOf(t, realityTCP, "none", "xtls-rprx-vision")
+	if !has || flow != "xtls-rprx-vision" {
+		t.Errorf("UserInbound.Flow 应覆盖 none: flow=%q has=%v", flow, has)
+	}
+	// 5. 显式 flow 与 network 无关：ws + inb.Flow=vision → 注入
+	flow, has = clientFlowOf(t, inbStream("ws", "none", ""), "xtls-rprx-vision", "")
+	if !has || flow != "xtls-rprx-vision" {
+		t.Errorf("显式 flow 应不受 network 限制: flow=%q has=%v", flow, has)
+	}
+}

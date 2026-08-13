@@ -43,15 +43,21 @@ type Inbound struct {
 	Total        int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
 	TrafficReset string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
 	ExpiryTime   *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
-	// 分享地址（订阅链接中的对外地址，默认使用节点 Host）
+	// 分享地址（订阅专用，与节点监听解耦：四层转发场景监听为内网，订阅给用户的是转发端点）
 	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
-	ShareAddr         string    `gorm:"size:255" json:"share_addr"`
+	ShareAddr         string    `gorm:"size:255" json:"share_addr"`                      // 自定义分享地址（域名/IP，不带端口）
+	SharePort         int       `gorm:"default:0" json:"share_port"`                     // 自定义分享端口（0 = 使用入站端口）
 	// Phase T 拓扑化：入站三态
 	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（进订阅）/ relay（内部转发）/ idle（闲置）
 	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 原本即 relay/idle，保持不动）
 	InternalUUID  string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
 	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
 	Enabled       bool    `gorm:"default:true" json:"enabled"`
+	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
+	// 空 = 自动（UserInbound.Flow 覆盖 → TCP+REALITY 自动注入 xtls-rprx-vision）；
+	// xtls-rprx-vision = 为该入站用户全部开启（UserInbound 仍可覆盖）；
+	// none = 禁用自动注入（UserInbound.Flow 仍生效）。
+	Flow          string    `gorm:"size:32" json:"flow"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

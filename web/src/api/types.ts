@@ -133,6 +133,10 @@ export interface InboundItem {
   type?: string // user / relay / idle（Phase T）
   internal_uuid?: string // relay 只读（节点生成上报）
   cert_id?: number // 绑定的证书
+  flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
+  share_addr_strategy?: string // node / listen / custom（订阅专用）
+  share_addr?: string // 自定义分享地址
+  share_port?: number // 自定义分享端口（0 = 用入站端口）
   created_at: string
 }
 

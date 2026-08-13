@@ -93,6 +93,11 @@ function editorModelValue(): string {
     protocol: editing.value.protocol,
     port: editing.value.port,
     tag: editing.value.tag,
+    flow: editing.value.flow || '',
+    ratio: editing.value.ratio ?? 1,
+    share_addr_strategy: editing.value.share_addr_strategy || 'node',
+    share_addr: editing.value.share_addr || '',
+    share_port: editing.value.share_port || 0,
   })
 }
 
@@ -143,9 +148,13 @@ async function save() {
       settings_json: c.settingsJson,
       stream_settings: c.streamSettings,
       sniffing: c.sniffing || undefined,
-      ratio: editing.value?.ratio ?? 1,
+      ratio: c.ratio,
       type: formType.value,
       cert_id: formCertId.value || undefined,
+      flow: c.flow || undefined,
+      share_addr_strategy: c.shareAddrStrategy || undefined,
+      share_addr: c.shareAddr || undefined,
+      share_port: c.sharePort || undefined,
     }
     const { data } = editing.value
       ? await updateInbound(editing.value.id, payload)

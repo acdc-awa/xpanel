@@ -12,6 +12,44 @@ import (
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
+// shareAddrOf 计算订阅对外地址与端口（订阅专用，与 xray 监听解耦——四层转发场景
+// 监听为内网，订阅给用户的是转发端点）。
+// custom 且 ShareAddr 非空 → ShareAddr +（SharePort>0 ? SharePort : 入站端口）；
+// listen 且 Listen 非空非 0.0.0.0 → Listen + 入站端口；默认 node → 服务器 Host + 入站端口。
+func shareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
+	switch inb.ShareAddrStrategy {
+	case "custom":
+		if inb.ShareAddr != "" {
+			port := inb.Port
+			if inb.SharePort > 0 {
+				port = inb.SharePort
+			}
+			return inb.ShareAddr, port
+		}
+	case "listen":
+		if inb.Listen != "" && inb.Listen != "0.0.0.0" {
+			return inb.Listen, inb.Port
+		}
+	}
+	return srv.Host, inb.Port
+}
+
+// subscribeFlow 计算订阅中的 flow（与生成侧 buildClients 同源）：
+// UserInbound.Flow（最高）→ 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
+func subscribeFlow(userInboundFlow, inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
+	flow = userInboundFlow
+	if flow == "" {
+		flow = inboundFlow
+	}
+	if flow == "none" {
+		return "", true
+	}
+	if flow == "" && tcpReality {
+		flow = "xtls-rprx-vision"
+	}
+	return flow, false
+}
+
 // Subscribe GET /api/v1/sub/:token —— 订阅生成（按 UA 区分 Clash YAML / Base64）。
 func (d *Deps) Subscribe(c *gin.Context) {
 	token := c.Param("token")
@@ -65,14 +103,18 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
+		host, port := shareAddrOf(&srv, inb)
+		flow, noAutoFlow := subscribeFlow(flowByInbound[inb.ID], inb.Flow,
+			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
 		item := subscribe.ProxyItem{
 			Name:    subscribe.NodeName(&srv, inb),
-			Host:    srv.Host,
-			Port:    inb.Port,
+			Host:    host,
+			Port:    port,
 			UUID:    user.UUID,
 			Network: xray.StreamNetwork(inb.StreamSettings),
 			TLSType: xray.StreamSecurity(inb.StreamSettings),
-			Flow:    flowByInbound[inb.ID], // TCP+TLS+Vision 场景订阅必须带 flow（生成侧同源）
+			Flow:    flow,
+			NoAutoFlow: noAutoFlow,
 			Reality: xray.StreamReality(inb.StreamSettings),
 			TLS:     xray.StreamTLS(inb.StreamSettings),
 			WS:      xray.StreamWS(inb.StreamSettings),

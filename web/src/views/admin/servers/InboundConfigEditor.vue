@@ -24,6 +24,11 @@ export interface InboundEditorChangePayload {
   port: number
   tag: string
   listen: string
+  flow: string // 入站级流控（空=自动 / xtls-rprx-vision / none）
+  ratio: number // 流量倍率（后续计费用）
+  shareAddrStrategy: string // node / listen / custom（订阅专用）
+  shareAddr: string // 自定义分享地址
+  sharePort: number // 自定义分享端口（0 = 用入站端口）
 }
 
 export interface InboundEditorEmits {
@@ -76,6 +81,16 @@ const localNetwork = ref(props.network || 'tcp')
 const localTlsType = ref(props.tlsType || 'reality')
 const localPort = ref(props.port || 443)
 const localTag = ref(props.tag || '')
+
+// 入站级字段（Inbound 模型字段，经 modelValue 顶层透传，不入 settings_json）
+const localFlow = ref('') // 流控：空=自动 / xtls-rprx-vision / none
+const localRatio = ref(1) // 流量倍率（后续计费用）
+const localShareStrategy = ref('node') // 订阅分享地址策略 node / listen / custom
+const localShareAddr = ref('') // 自定义分享地址（订阅专用，与监听解耦）
+const localSharePort = ref(0) // 自定义分享端口（0 = 用入站端口）
+
+// 表单视图内 tab（基础/传输/安全/嗅探）
+const formTab = ref('basic')
 
 // Fallbacks 列表
 const fallbacks = ref<FallbackItem[]>([])
@@ -314,6 +329,11 @@ function syncFormToJson() {
     port: localPort.value,
     tag: localTag.value,
     listen: '0.0.0.0',
+    flow: localFlow.value,
+    ratio: localRatio.value,
+    shareAddrStrategy: localShareStrategy.value,
+    shareAddr: localShareAddr.value,
+    sharePort: localSharePort.value,
   })
   isInternalUpdating.value = false
 }
@@ -343,6 +363,13 @@ function parseJsonToForm(str: string) {
     else if (parsed.streamSettings?.security) localTlsType.value = parsed.streamSettings.security
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
+
+    // 入站级字段（nodes.vue 回填顶层透传）
+    if (typeof parsed.flow === 'string') localFlow.value = parsed.flow
+    if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
+    if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
+    if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
+    if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
 
     // Fallbacks
     if (Array.isArray(s.fallbacks)) {
@@ -447,6 +474,11 @@ watch(
     localTlsType,
     localPort,
     localTag,
+    localFlow,
+    localRatio,
+    localShareStrategy,
+    localShareAddr,
+    localSharePort,
     fallbacks,
     wsForm,
     xhttpForm,
@@ -594,157 +626,204 @@ async function copyText(text: string, label: string) {
         </div>
       </div>
 
-      <!-- 基础参数 (可选显示) -->
-      <div v-if="showBaseFields" class="form-section">
-        <div class="section-title">入站基础网络</div>
-        <div class="grid-2">
-          <el-form-item label="标签 Tag">
-            <el-input v-model="localTag" placeholder="如 Tokyo-VLESS-REALITY" />
-          </el-form-item>
-          <el-form-item label="监听端口">
-            <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="协议 Protocol">
-            <el-select v-model="localProtocol" style="width: 100%" disabled>
-              <el-option label="VLESS (推荐)" value="vless" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="传输协议 Network">
-            <el-select v-model="localNetwork" style="width: 100%">
-              <el-option label="TCP (REALITY 最佳)" value="tcp" />
-              <el-option label="WebSocket (WS)" value="ws" />
-              <el-option label="xhttp (Xray 1.8.21+)" value="xhttp" />
-              <el-option label="gRPC" value="grpc" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="安全类型 TLS / Security">
-            <el-select v-model="localTlsType" style="width: 100%">
-              <el-option label="REALITY (伪装/防封)" value="reality" />
-              <el-option label="TLS (自定义证书)" value="tls" />
-              <el-option label="none (无加密)" value="none" />
-            </el-select>
-          </el-form-item>
-        </div>
-      </div>
-
-      <!-- VLESS 协议设置 -->
-      <div v-if="localInboundType !== 'relay'" class="form-section">
-        <div class="section-title">VLESS 基础设置</div>
-        <!-- Fallbacks 回落 -->
-        <div class="fallbacks-card">
-          <div class="card-head">
-            <span class="head-title">回落设置 (Fallbacks)</span>
-            <el-button size="small" type="primary" plain @click="addFallback">
-              <el-icon><Plus /></el-icon>&nbsp;添加 Fallback
-            </el-button>
+      <el-tabs v-model="formTab" class="editor-tabs">
+        <el-tab-pane label="基础设置" name="basic">
+          <!-- 基础参数 (可选显示) -->
+          <div v-if="showBaseFields" class="form-section">
+            <div class="section-title">入站基础网络</div>
+            <div class="grid-2">
+              <el-form-item label="标签 Tag">
+                <el-input v-model="localTag" placeholder="如 Tokyo-VLESS-REALITY" />
+              </el-form-item>
+              <el-form-item label="监听端口">
+                <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="协议 Protocol">
+                <el-select v-model="localProtocol" style="width: 100%" disabled>
+                  <el-option label="VLESS (推荐)" value="vless" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="传输协议 Network">
+                <el-select v-model="localNetwork" style="width: 100%">
+                  <el-option label="TCP (REALITY 最佳)" value="tcp" />
+                  <el-option label="WebSocket (WS)" value="ws" />
+                  <el-option label="xhttp (Xray 1.8.21+)" value="xhttp" />
+                  <el-option label="gRPC" value="grpc" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="安全类型 TLS / Security">
+                <el-select v-model="localTlsType" style="width: 100%">
+                  <el-option label="REALITY (伪装/防封)" value="reality" />
+                  <el-option label="TLS (自定义证书)" value="tls" />
+                  <el-option label="none (无加密)" value="none" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="流量倍率 Ratio">
+                <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
+                <p class="muted tip">计费倍率（后续流量计费用）：1 倍 = 1GB 记 1GB，1.5 表示 1GB 记 1.5GB。</p>
+              </el-form-item>
+            </div>
           </div>
-          <div v-if="fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
-          <div v-else class="fallback-list">
-            <div v-for="(item, idx) in fallbacks" :key="idx" class="fallback-item">
-              <div class="fb-grid">
-                <el-form-item label="SNI 匹配">
-                  <el-input v-model="item.name" placeholder="任意" />
+
+          <!-- 分享地址与端口（订阅专用，与节点监听解耦） -->
+          <div v-if="localInboundType === 'user'" class="form-section">
+            <div class="section-title">分享地址与端口（订阅专用）</div>
+            <div class="grid-2">
+              <el-form-item label="分享地址策略">
+                <el-select v-model="localShareStrategy" style="width: 100%">
+                  <el-option label="节点 Host（跟随服务器地址）" value="node" />
+                  <el-option label="监听地址（Listen）" value="listen" />
+                  <el-option label="自定义（转发端点）" value="custom" />
+                </el-select>
+              </el-form-item>
+            </div>
+            <template v-if="localShareStrategy === 'custom'">
+              <div class="grid-2" style="margin-top: 8px">
+                <el-form-item label="自定义地址">
+                  <el-input v-model="localShareAddr" placeholder="cdn.example.com" />
                 </el-form-item>
-                <el-form-item label="ALPN 匹配">
-                  <el-input v-model="item.alpn" placeholder="如 h2" />
-                </el-form-item>
-                <el-form-item label="Path 匹配">
-                  <el-input v-model="item.path" placeholder="如 /" />
-                </el-form-item>
-                <el-form-item label="Dest 目标地址">
-                  <el-input v-model="item.dest" placeholder="80 或 127.0.0.1:8080" />
-                </el-form-item>
-                <el-form-item label="PROXY protocol (xver)">
-                  <el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" />
+                <el-form-item label="自定义端口">
+                  <el-input-number v-model="localSharePort" :min="0" :max="65535" style="width: 100%" />
                 </el-form-item>
               </div>
-              <div class="fb-actions">
-                <el-button size="small" text :disabled="idx === 0" @click="moveFallback(idx, -1)">上移</el-button>
-                <el-button size="small" text :disabled="idx === fallbacks.length - 1" @click="moveFallback(idx, 1)">下移</el-button>
-                <el-button size="small" text type="danger" @click="removeFallback(idx)">
-                  <el-icon><Delete /></el-icon>
+            </template>
+            <p class="muted tip">订阅链接中的对外地址/端口，与 xray 实际监听无关：四层转发场景 xray 监听内网端口，这里填转发端点（如 cdn.example.com:443）给用户。留空端口时使用上方监听端口。</p>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="传输设置" name="transport">
+          <!-- 传输层参数（随 network 联动） -->
+          <div class="form-section">
+            <div class="section-title">传输层参数 ({{ localNetwork.toUpperCase() }})</div>
+
+            <!-- TCP -->
+            <template v-if="localNetwork === 'tcp'">
+              <div class="grid-2">
+                <el-form-item label="伪装类型 (Header)">
+                  <el-select v-model="tcpForm.header_type" style="width: 100%">
+                    <el-option label="none (无)" value="none" />
+                    <el-option label="http (HTTP 报文伪装)" value="http" />
+                  </el-select>
+                </el-form-item>
+                <template v-if="tcpForm.header_type === 'http'">
+                  <el-form-item label="Request Host">
+                    <el-input v-model="tcpForm.request_host" placeholder="example.com" />
+                  </el-form-item>
+                  <el-form-item label="Request Path">
+                    <el-input v-model="tcpForm.request_path" placeholder="/" />
+                  </el-form-item>
+                </template>
+              </div>
+            </template>
+            <div style="margin-top: 8px"><el-form-item label="acceptProxyProtocol（HAProxy 代理协议）"><el-switch v-model="acceptProxyProtocol" /></el-form-item></div>
+
+            <!-- WebSocket -->
+            <template v-if="localNetwork === 'ws'">
+              <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
+                title="WS 为兼容保留项，新配置推荐使用 xhttp（性能更好、防封更稳），WS 旧配置不受影响" />
+              <div class="grid-2">
+                <el-form-item label="Path 路径">
+                  <el-input v-model="wsForm.path" placeholder="/" />
+                </el-form-item>
+                <el-form-item label="Host 域名标头 (可选)">
+                  <el-input v-model="wsForm.host" placeholder="留空默认" />
+                </el-form-item>
+              </div>
+            </template>
+
+            <!-- xhttp -->
+            <template v-if="localNetwork === 'xhttp'">
+              <div class="grid-2">
+                <el-form-item label="Mode 传输模式">
+                  <el-select v-model="xhttpForm.mode" style="width: 100%">
+                    <el-option label="auto (自动)" value="auto" />
+                    <el-option label="packet-up" value="packet-up" />
+                    <el-option label="stream-up" value="stream-up" />
+                    <el-option label="stream-one" value="stream-one" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="Path 路径">
+                  <el-input v-model="xhttpForm.path" placeholder="/" />
+                </el-form-item>
+                <el-form-item label="Host 域名标头 (可选)">
+                  <el-input v-model="xhttpForm.host" placeholder="留空默认" />
+                </el-form-item>
+              </div>
+            </template>
+
+            <!-- gRPC -->
+            <template v-if="localNetwork === 'grpc'">
+              <div class="grid-2">
+                <el-form-item label="Service Name">
+                  <el-input v-model="grpcForm.service_name" placeholder="grpc" />
+                </el-form-item>
+                <el-form-item label="Authority（自定义 Host，可选）">
+                  <el-input v-model="grpcForm.authority" placeholder="留空使用默认" />
+                </el-form-item>
+                <el-form-item label="Multi Mode">
+                  <el-switch v-model="grpcForm.multi_mode" />
+                </el-form-item>
+              </div>
+            </template>
+          </div>
+
+          <!-- 用户流控（入站级，写进该入站全部用户的 clients） -->
+          <div v-if="localInboundType !== 'relay'" class="form-section">
+            <div class="section-title">用户流控 (Flow)</div>
+            <el-form-item label="流控设置">
+              <el-select v-model="localFlow" style="width: 280px">
+                <el-option label="自动（TCP+REALITY 时注入 xtls-rprx-vision）" value="" />
+                <el-option label="开启（为该入站用户全部开启 xtls-rprx-vision）" value="xtls-rprx-vision" />
+                <el-option label="关闭（禁用自动注入）" value="none" />
+              </el-select>
+              <p class="muted tip">流控与客户端绑定：设置写入该入站生成的 clients。用户级授权（UserInbound）可单独覆盖。</p>
+            </el-form-item>
+          </div>
+
+          <!-- 回落设置 (Fallbacks) -->
+          <div v-if="localInboundType !== 'relay'" class="form-section">
+            <div class="section-title">回落设置 (Fallbacks)</div>
+            <div class="fallbacks-card">
+              <div class="card-head">
+                <span class="head-title">回落规则列表</span>
+                <el-button size="small" type="primary" plain @click="addFallback">
+                  <el-icon><Plus /></el-icon>&nbsp;添加 Fallback
                 </el-button>
+              </div>
+              <div v-if="fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
+              <div v-else class="fallback-list">
+                <div v-for="(item, idx) in fallbacks" :key="idx" class="fallback-item">
+                  <div class="fb-grid">
+                    <el-form-item label="SNI 匹配">
+                      <el-input v-model="item.name" placeholder="任意" />
+                    </el-form-item>
+                    <el-form-item label="ALPN 匹配">
+                      <el-input v-model="item.alpn" placeholder="如 h2" />
+                    </el-form-item>
+                    <el-form-item label="Path 匹配">
+                      <el-input v-model="item.path" placeholder="如 /" />
+                    </el-form-item>
+                    <el-form-item label="Dest 目标地址">
+                      <el-input v-model="item.dest" placeholder="80 或 127.0.0.1:8080" />
+                    </el-form-item>
+                    <el-form-item label="PROXY protocol (xver)">
+                      <el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" />
+                    </el-form-item>
+                  </div>
+                  <div class="fb-actions">
+                    <el-button size="small" text :disabled="idx === 0" @click="moveFallback(idx, -1)">上移</el-button>
+                    <el-button size="small" text :disabled="idx === fallbacks.length - 1" @click="moveFallback(idx, 1)">下移</el-button>
+                    <el-button size="small" text type="danger" @click="removeFallback(idx)">
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </el-tab-pane>
 
-      <!-- 传输层配置 -->
-      <div class="form-section">
-        <div class="section-title">传输层参数 ({{ localNetwork.toUpperCase() }})</div>
-
-        <!-- TCP -->
-        <template v-if="localNetwork === 'tcp'">
-          <div class="grid-2">
-            <el-form-item label="伪装类型 (Header)">
-              <el-select v-model="tcpForm.header_type" style="width: 100%">
-                <el-option label="none (无)" value="none" />
-                <el-option label="http (HTTP 报文伪装)" value="http" />
-              </el-select>
-            </el-form-item>
-            <template v-if="tcpForm.header_type === 'http'">
-              <el-form-item label="Request Host">
-                <el-input v-model="tcpForm.request_host" placeholder="example.com" />
-              </el-form-item>
-              <el-form-item label="Request Path">
-                <el-input v-model="tcpForm.request_path" placeholder="/" />
-              </el-form-item>
-            </template>
-          </div>
-        </template>
-        <div style="margin-top: 8px"><el-form-item label="acceptProxyProtocol（HAProxy 代理协议）"><el-switch v-model="acceptProxyProtocol" /></el-form-item></div>
-
-        <!-- WebSocket -->
-        <template v-if="localNetwork === 'ws'">
-          <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
-            title="WS 为兼容保留项，新配置推荐使用 xhttp（性能更好、防封更稳），WS 旧配置不受影响" />
-          <div class="grid-2">
-            <el-form-item label="Path 路径">
-              <el-input v-model="wsForm.path" placeholder="/" />
-            </el-form-item>
-            <el-form-item label="Host 域名标头 (可选)">
-              <el-input v-model="wsForm.host" placeholder="留空默认" />
-            </el-form-item>
-          </div>
-        </template>
-
-        <!-- xhttp -->
-        <template v-if="localNetwork === 'xhttp'">
-          <div class="grid-2">
-            <el-form-item label="Mode 传输模式">
-              <el-select v-model="xhttpForm.mode" style="width: 100%">
-                <el-option label="auto (自动)" value="auto" />
-                <el-option label="packet-up" value="packet-up" />
-                <el-option label="stream-up" value="stream-up" />
-                <el-option label="stream-one" value="stream-one" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="Path 路径">
-              <el-input v-model="xhttpForm.path" placeholder="/" />
-            </el-form-item>
-            <el-form-item label="Host 域名标头 (可选)">
-              <el-input v-model="xhttpForm.host" placeholder="留空默认" />
-            </el-form-item>
-          </div>
-        </template>
-
-        <!-- gRPC -->
-        <template v-if="localNetwork === 'grpc'">
-          <div class="grid-2">
-            <el-form-item label="Service Name">
-              <el-input v-model="grpcForm.service_name" placeholder="grpc" />
-            </el-form-item>
-            <el-form-item label="Authority（自定义 Host，可选）">
-              <el-input v-model="grpcForm.authority" placeholder="留空使用默认" />
-            </el-form-item>
-            <el-form-item label="Multi Mode">
-              <el-switch v-model="grpcForm.multi_mode" />
-            </el-form-item>
-          </div>
-        </template>
-      </div>
-
+        <el-tab-pane label="安全设置" name="security">
       <!-- 安全/加密配置 -->
       <div class="form-section">
         <div class="section-title">安全加密 ({{ localTlsType.toUpperCase() }})</div>
@@ -877,7 +956,9 @@ async function copyText(text: string, label: string) {
           />
         </template>
       </div>
+        </el-tab-pane>
 
+        <el-tab-pane label="嗅探" name="sniffing">
       <!-- 流量嗅探 Sniffing -->
       <div class="form-section">
         <div class="section-title">流量嗅探 (Sniffing)</div>
@@ -903,6 +984,8 @@ async function copyText(text: string, label: string) {
           </el-form-item>
         </div>
       </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <!-- 视图 2: 原始 JSON 编辑器 -->
@@ -961,6 +1044,16 @@ async function copyText(text: string, label: string) {
 .form-container,
 .json-container {
   padding: 14px;
+}
+
+.editor-tabs {
+  :deep(.el-tabs__header) {
+    margin-bottom: 14px;
+  }
+
+  :deep(.el-tabs__content) {
+    overflow: visible;
+  }
 }
 
 .form-section {

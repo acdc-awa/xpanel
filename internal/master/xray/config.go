@@ -796,8 +796,11 @@ func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 
 // buildClients 从用户列表 + UserInbound 覆盖配置构建 Xray clients JSON。
 // 按协议分派：vless → {id,email,flow,level,limit}，vmess/trojan 预留。
+// flow 优先级：UserInbound.Flow（最高）→ 入站级 inb.Flow（none 视为空）→ TCP+REALITY 自动注入
+// （inb.Flow == "none" 时禁用自动注入）。
 func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound) []any {
 	clients := make([]any, 0, len(users))
+	disableAutoFlow := inb.Flow == "none"
 	for _, u := range users {
 		if u.Status != models.StatusActive || u.UUID == "" {
 			continue
@@ -806,6 +809,9 @@ func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 		uuid := u.UUID
 		flow := ""
 		limit := 0
+		if inb.Flow != "" && inb.Flow != "none" {
+			flow = inb.Flow
+		}
 		if ui, ok := uiByUser[u.ID]; ok {
 			if ui.UUID != "" {
 				uuid = ui.UUID
@@ -815,8 +821,8 @@ func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 			}
 			limit = ui.LimitedDevice
 		}
-		// 自动 flow：TCP+REALITY 时注入 xtls-rprx-vision
-		if flow == "" && StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
+		// 自动 flow：TCP+REALITY 且未显式关闭时注入 xtls-rprx-vision
+		if flow == "" && !disableAutoFlow && StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
 			flow = "xtls-rprx-vision"
 		}
 

@@ -150,6 +150,10 @@ export interface InboundPayload {
   ratio?: number
   type?: string // user / relay / idle（Phase T）
   cert_id?: number
+  flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
+  share_addr_strategy?: string // node / listen / custom（订阅专用）
+  share_addr?: string // 自定义分享地址
+  share_port?: number // 自定义分享端口（0 = 用入站端口）
 }
 
 export function getInbounds(serverId?: number) {

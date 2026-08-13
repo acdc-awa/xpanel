@@ -31,7 +31,11 @@ type inboundView struct {
 	Type           string    `json:"type"`                       // user / relay / idle（Phase T）
 	InternalUUID   string    `json:"internal_uuid,omitempty"`    // relay 只读（节点上报）
 	CertID         *uint64   `json:"cert_id,omitempty"`          // 绑定的证书
-	CreatedAt      time.Time `json:"created_at"`
+	Flow              string    `json:"flow"`                       // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	ShareAddrStrategy string    `json:"share_addr_strategy"`        // node / listen / custom
+	ShareAddr         string    `json:"share_addr"`                 // 自定义分享地址（订阅专用，域名/IP）
+	SharePort         int       `json:"share_port"`                 // 自定义分享端口（0 = 使用入站端口）
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // inboundForm 入站创建/更新表单（透传 JSON）。
@@ -47,6 +51,10 @@ type inboundForm struct {
 	Ratio          float64 `json:"ratio"`
 	Type           string  `json:"type"`      // user / relay / idle（空 = user，T4）
 	CertID         *uint64 `json:"cert_id"`   // 绑定证书（T5 校验存在性）
+	Flow              string  `json:"flow"`      // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	ShareAddrStrategy string  `json:"share_addr_strategy"` // node / listen / custom
+	ShareAddr         string  `json:"share_addr"` // 自定义分享地址（订阅专用，域名/IP）
+	SharePort         int     `json:"share_port"` // 自定义分享端口（0 = 使用入站端口）
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
@@ -57,6 +65,8 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
 		Ratio: i.Ratio, Enabled: i.Enabled, CreatedAt: i.CreatedAt,
 		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
+		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
+		SharePort: i.SharePort,
 	}
 }
 
@@ -115,10 +125,16 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		Sniffing: req.Sniffing, Ratio: req.Ratio, Enabled: true,
 		Type:   req.Type,
 		CertID: req.CertID,
+		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
+		SharePort: req.SharePort,
 	}
 	// Type 空 = user（与模型默认一致）
 	if inb.Type == "" {
 		inb.Type = models.InboundTypeUser
+	}
+	// ShareAddrStrategy 空 = node（与模型默认一致）
+	if inb.ShareAddrStrategy == "" {
+		inb.ShareAddrStrategy = "node"
 	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -155,6 +171,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		Type           *string  `json:"type"`
 		InternalUUID   *string  `json:"internal_uuid"` // 仅节点回执写入（管理员只读展示）
 		CertID         *uint64  `json:"cert_id"`       // nil 不更新；显式传 0 解绑
+		Flow              *string `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
+		ShareAddrStrategy *string `json:"share_addr_strategy"` //
+		ShareAddr         *string `json:"share_addr"`          //
+		SharePort         *int    `json:"share_port"`          // 0 = 使用入站端口
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -231,6 +251,18 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		} else {
 			updates["cert_id"] = *req.CertID
 		}
+	}
+	if req.Flow != nil {
+		updates["flow"] = *req.Flow
+	}
+	if req.ShareAddrStrategy != nil {
+		updates["share_addr_strategy"] = *req.ShareAddrStrategy
+	}
+	if req.ShareAddr != nil {
+		updates["share_addr"] = *req.ShareAddr
+	}
+	if req.SharePort != nil {
+		updates["share_port"] = *req.SharePort
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {

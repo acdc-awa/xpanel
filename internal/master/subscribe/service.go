@@ -23,7 +23,10 @@ type ProxyItem struct {
 	UUID    string
 	Network string
 	TLSType string
-	Flow    string // 用户在该入站上的 flow（UserInbound 覆盖，与生成侧 clients 注入同源）
+	Flow    string // 用户在该入站上的 flow（UserInbound 覆盖 → 入站级 Flow，与生成侧 clients 注入同源）
+	// NoAutoFlow 禁用 reality+tcp 的自动 vision 兜底（对应入站 Flow = "none"，
+	// 服务端 clients 不注入 flow，订阅必须保持一致否则握手不匹配）。
+	NoAutoFlow bool
 	Reality *xray.RealitySettings
 	TLS     *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
 	WS      *xray.WSSettings
@@ -53,12 +56,14 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 		case "reality":
 			b.WriteString("    tls: true\n")
 			if it.Network == "tcp" {
-				// 与生成侧 buildClients 一致：TCP+REALITY 自动 vision，UserInbound 覆盖优先
+				// 与生成侧 buildClients 一致：TCP+REALITY 自动 vision（NoAutoFlow 时禁用）
 				flow := it.Flow
-				if flow == "" {
+				if flow == "" && !it.NoAutoFlow {
 					flow = "xtls-rprx-vision"
 				}
-				b.WriteString(fmt.Sprintf("    flow: %s\n", flow))
+				if flow != "" {
+					b.WriteString(fmt.Sprintf("    flow: %s\n", flow))
+				}
 			}
 			b.WriteString(fmt.Sprintf("    servername: %s\n", it.Reality.ServerName))
 			b.WriteString("    client-fingerprint: chrome\n")
@@ -134,10 +139,12 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 			q.Set("sid", it.Reality.ShortID)
 			if it.Network == "tcp" {
 				flow := it.Flow
-				if flow == "" {
+				if flow == "" && !it.NoAutoFlow {
 					flow = "xtls-rprx-vision"
 				}
-				q.Set("flow", flow)
+				if flow != "" {
+					q.Set("flow", flow)
+				}
 			}
 		case "tls":
 			q.Set("security", "tls")
