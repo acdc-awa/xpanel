@@ -77,12 +77,13 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	// Phase T：InboundRef 校验（引用存在 + 无环 + 目标自动标 relay）
+	// Phase T：InboundRef 校验（引用存在 + 无环）+ 目标自动标 relay（记录 PreviousType）
 	if req.InboundRef != nil {
 		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
 			util.BadRequest(c, msg)
 			return
 		}
+		d.ensureRelayMark(*req.InboundRef)
 	}
 
 	enabled := true
@@ -252,12 +253,18 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 		return
 	}
 
-	// Phase T：删除前记录引用目标，删除后无其他引用则回 idle
+	// Phase T：删除前记录引用目标，删除后无其他引用则回退原类型
 	var ob models.ServerOutbound
 	d.DB.Where("id = ? AND server_id = ?", outboundID, id).First(&ob)
 	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).Delete(&models.ServerOutbound{}).Error; err != nil {
 		util.ServerError(c, "删除出站规则失败")
 		return
+	}
+	// 级联删除引用该出站 tag 的路由规则（避免生成配置引用不存在的出站）
+	if ob.Tag != "" {
+		if err := d.DB.Where("server_id = ? AND outbound_tag = ?", id, ob.Tag).Delete(&models.ServerRoutingRule{}).Error; err != nil {
+			log.Printf("outbounds_routing: 级联删除路由规则失败 (server=%d tag=%s): %v", id, ob.Tag, err)
+		}
 	}
 	if ob.InboundRef != nil {
 		d.demoteIfUnreferenced(*ob.InboundRef)
@@ -324,16 +331,31 @@ func (d *Deps) wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOut
 }
 
 // ensureRelayMark 引用目标入站自动标记 relay。
+// ensureRelayMark 目标入站设为 relay，并记录引用前的类型（PreviousType），解绑后回退。
 func (d *Deps) ensureRelayMark(targetInboundID uint64) {
-	d.DB.Model(&models.Inbound{}).Where("id = ?", targetInboundID).Update("type", models.InboundTypeRelay)
+	var inb models.Inbound
+	if err := d.DB.First(&inb, targetInboundID).Error; err != nil {
+		return
+	}
+	if inb.Type != models.InboundTypeRelay {
+		d.DB.Model(&inb).Updates(map[string]any{"previous_type": inb.Type, "type": models.InboundTypeRelay})
+	}
 }
 
-// demoteIfUnreferenced 目标入站不再被任何出站引用时回 idle（管理员可再改回）。
+// demoteIfUnreferenced 目标入站不再被任何出站引用时回退到引用前类型（PreviousType）；
+// 无 PreviousType（原本即 relay/idle 或手动管理）则保持现状不动。
 func (d *Deps) demoteIfUnreferenced(targetInboundID uint64) {
 	var cnt int64
 	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", targetInboundID).Count(&cnt)
-	if cnt == 0 {
-		d.DB.Model(&models.Inbound{}).Where("id = ?", targetInboundID).Update("type", models.InboundTypeIdle)
+	if cnt > 0 {
+		return
+	}
+	var inb models.Inbound
+	if err := d.DB.First(&inb, targetInboundID).Error; err != nil {
+		return
+	}
+	if inb.PreviousType != "" && inb.PreviousType != models.InboundTypeRelay {
+		d.DB.Model(&inb).Updates(map[string]any{"type": inb.PreviousType, "previous_type": ""})
 	}
 }
 

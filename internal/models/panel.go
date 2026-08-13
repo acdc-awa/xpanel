@@ -45,6 +45,7 @@ type Inbound struct {
 	ShareAddr         string    `gorm:"size:255" json:"share_addr"`
 	// Phase T 拓扑化：入站三态
 	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（进订阅）/ relay（内部转发）/ idle（闲置）
+	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 原本即 relay/idle，保持不动）
 	InternalUUID  string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
 	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
 	Enabled       bool    `gorm:"default:true" json:"enabled"`

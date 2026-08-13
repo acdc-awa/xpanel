@@ -77,12 +77,16 @@ func TestRelayMarkLifecycle(t *testing.T) {
 	_, _, aIn, bIn := seedRefGraph(t, db)
 	d := &Deps{DB: db}
 
-	// 设置引用 → 目标自动标 relay
+	// 目标原本是 user：设置引用 → 自动标 relay 并记录 PreviousType=user
+	db.Model(&models.Inbound{}).Where("id = ?", bIn).Update("type", models.InboundTypeUser)
 	d.ensureRelayMark(bIn)
 	var b models.Inbound
 	db.First(&b, bIn)
 	if b.Type != models.InboundTypeRelay {
 		t.Errorf("目标应为 relay, got %s", b.Type)
+	}
+	if b.PreviousType != models.InboundTypeUser {
+		t.Errorf("PreviousType 应记录 user, got %q", b.PreviousType)
 	}
 
 	// 仍被引用 → demote 不生效
@@ -94,14 +98,35 @@ func TestRelayMarkLifecycle(t *testing.T) {
 		t.Error("仍被引用时不应降级")
 	}
 
-	// 删除引用后 → 回 idle
+	// 删除引用后 → 回退到引用前类型（user），并清除 PreviousType
 	db.Where("tag = ?", "x").Delete(&models.ServerOutbound{})
 	d.demoteIfUnreferenced(bIn)
 	db.First(&b, bIn)
-	if b.Type != models.InboundTypeIdle {
-		t.Errorf("无引用应回 idle, got %s", b.Type)
+	if b.Type != models.InboundTypeUser {
+		t.Errorf("无引用应回退到 user, got %s", b.Type)
+	}
+	if b.PreviousType != "" {
+		t.Errorf("回退后 PreviousType 应清空, got %q", b.PreviousType)
 	}
 	_ = aIn
+}
+
+// TestDemoteKeepsManualRelay：原本就是手动 relay（无 PreviousType）的落地入站，解绑后保持 relay 不动。
+func TestDemoteKeepsManualRelay(t *testing.T) {
+	db := apiTestDB(t)
+	_, _, _, bIn := seedRefGraph(t, db)
+	d := &Deps{DB: db}
+	// 种子 bIn 本就是 relay（无 PreviousType）
+	refB := bIn
+	db.Create(&models.ServerOutbound{ServerID: 1, Tag: "x", Protocol: "vless", InboundRef: &refB, Enabled: true})
+	d.ensureRelayMark(bIn)
+	db.Where("tag = ?", "x").Delete(&models.ServerOutbound{})
+	d.demoteIfUnreferenced(bIn)
+	var b models.Inbound
+	db.First(&b, bIn)
+	if b.Type != models.InboundTypeRelay {
+		t.Errorf("手动 relay 解绑后应保持 relay, got %s", b.Type)
+	}
 }
 
 func TestCertNotAfter(t *testing.T) {
@@ -136,18 +161,18 @@ func TestCheckInboundRefTargets(t *testing.T) {
 }
 
 // TestAdminUpdateOutboundUnbindDemotes 回归：PUT outbound {inbound_ref:0} 解绑后，
-// 目标落地入站在无其他引用时应回 idle。
+// 目标落地入站在无其他引用时应回退到引用前类型（user）。
 // 曾因 GORM Updates 回写 struct 字段（解绑后 ob.InboundRef 被置 nil），
 // 导致 demote 分支的 oldRef 判断失败、relay 永不降级。
 func TestAdminUpdateOutboundUnbindDemotes(t *testing.T) {
 	db := apiTestDB(t)
 	s1, _, aIn, bIn := seedRefGraph(t, db)
 	_ = aIn
-	// outbound X (S1) 引用 B（合法设置后 B 为 relay）
+	// 目标 B 原为 user（被引用后自动标 relay 并记录 PreviousType=user）
+	db.Model(&models.Inbound{}).Where("id = ?", bIn).Update("type", models.InboundTypeUser)
 	refB := bIn
 	ob := models.ServerOutbound{ServerID: s1, Tag: "x", Protocol: "freedom", SettingsJSON: "{}", InboundRef: &refB, Enabled: true}
 	db.Create(&ob)
-	db.Model(&models.Inbound{}).Where("id = ?", bIn).Update("type", models.InboundTypeRelay)
 
 	d := &Deps{DB: db}
 	gin.SetMode(gin.TestMode)
@@ -163,7 +188,7 @@ func TestAdminUpdateOutboundUnbindDemotes(t *testing.T) {
 	}
 	var b models.Inbound
 	db.First(&b, bIn)
-	if b.Type != models.InboundTypeIdle {
-		t.Errorf("解绑后目标应回 idle, got %s", b.Type)
+	if b.Type != models.InboundTypeUser {
+		t.Errorf("解绑后目标应回退到 user, got %s", b.Type)
 	}
 }

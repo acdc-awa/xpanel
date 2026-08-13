@@ -219,6 +219,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.Type != nil {
 		updates["type"] = *req.Type
+		// 手动修改 type：清除自动标 relay 的历史（PreviousType），避免后续解绑引用错误回退
+		updates["previous_type"] = ""
 	}
 	if req.InternalUUID != nil {
 		updates["internal_uuid"] = *req.InternalUUID
