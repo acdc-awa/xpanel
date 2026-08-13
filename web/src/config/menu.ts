@@ -10,6 +10,7 @@ import {
   UserFilled,
   Tickets,
   Key,
+  Lock,
   DataAnalysis,
   Setting,
 } from '@element-plus/icons-vue'
@@ -33,6 +34,8 @@ export const adminMenus: MenuItem[] = [
   { title: '用户管理', path: '/admin/users', icon: User },
   { title: '订单确认', path: '/admin/orders', icon: Tickets },
   { title: '邀请码', path: '/admin/invitations', icon: Key },
+  { title: '证书管理', path: '/admin/certs', icon: Lock },
+  { title: '权限组', path: '/admin/permission-groups', icon: UserFilled },
   { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
   { title: '设置', path: '/admin/settings', icon: Setting },
 ]

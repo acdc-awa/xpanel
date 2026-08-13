@@ -201,6 +201,8 @@ async function saveInbound() {
       stream_settings: c.streamSettings,
       sniffing: c.sniffing || undefined,
       ratio: inboundEditing.value?.ratio ?? 1,
+      type: inboundEditing.value?.type || 'user',
+      cert_id: inboundEditing.value?.cert_id || undefined,
     }
     const { data } = inboundEditing.value
       ? await updateInbound(inboundEditing.value.id, payload)
@@ -532,8 +534,13 @@ watch(
           <el-button size="small" type="primary" @click="openInboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增入站</el-button>
         </div>
         <el-table v-loading="inboundsLoading" :data="inbounds" size="small">
-          <el-table-column prop="tag" label="标签" min-width="120">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
+          <el-table-column prop="tag" label="标签" min-width="130">
+            <template #default="{ row }">
+              <span style="font-weight: 600">{{ row.tag }}</span>
+              <el-tag v-if="row.type === 'relay'" size="small" type="warning" style="margin-left: 6px">转发</el-tag>
+              <el-tag v-else-if="row.type === 'idle'" size="small" type="info" style="margin-left: 6px">闲置</el-tag>
+              <el-tag v-else size="small" type="success" style="margin-left: 6px">用户</el-tag>
+            </template>
           </el-table-column>
           <el-table-column prop="protocol" label="协议" width="80" />
           <el-table-column label="端口" width="80">
@@ -680,7 +687,14 @@ watch(
       <InboundConfigEditor
         :key="inboundEditing ? `edit-${inboundEditing.id}` : 'create'"
         :model-value="inboundEditing?.settings_json ?? '{}'"
+        :inbound-type="inboundEditing?.type || 'user'"
+        :internal-uuid="inboundEditing?.internal_uuid || ''"
+        :inbound-id="inboundEditing?.id || 0"
+        :cert-id="inboundEditing?.cert_id || 0"
         @change="onInboundChange"
+        @update:inbound-type="(v: string) => { if (inboundEditing) inboundEditing.type = v }"
+        @update:cert-id="(v: number) => { if (inboundEditing) inboundEditing.cert_id = v || 0 }"
+        @internal-uuid-changed="loadInbounds"
       />
       <template #footer>
         <el-button @click="inboundEditorOpen = false">取消</el-button>

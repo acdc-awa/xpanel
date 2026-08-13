@@ -61,6 +61,18 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '审计日志' },
       },
       {
+        path: 'certs',
+        name: 'admin.certs',
+        component: () => import('@/views/admin/certs.vue'),
+        meta: { title: '证书管理' },
+      },
+      {
+        path: 'permission-groups',
+        name: 'admin.permission-groups',
+        component: () => import('@/views/admin/permission-groups.vue'),
+        meta: { title: '权限组' },
+      },
+      {
         path: 'settings',
         name: 'admin.settings',
         component: () => import('@/views/admin/settings.vue'),

@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { createPlan, deletePlan, getPlans, updatePlan, type Plan } from '@/api/admin'
+import { createPlan, deletePlan, getPermissionGroups, getPlans, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
 const list = ref<Plan[]>([])
@@ -22,14 +22,24 @@ async function load() {
 }
 onMounted(load)
 
+// Phase T：权限组下拉（套餐自动授权）
+const groups = ref<PermissionGroup[]>([])
+async function loadGroups() {
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) groups.value = data.data.items
+  } catch { /* 权限组加载失败不阻塞 */ }
+}
+onMounted(loadGroups)
+
 const formOpen = ref(false)
 const editing = ref(false)
-const form = reactive({ id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0 })
+const form = reactive({ id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
 const saving = ref(false)
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0 })
+  Object.assign(form, { id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
   formOpen.value = true
 }
 
@@ -38,6 +48,7 @@ function openEdit(row: any) {
   Object.assign(form, {
     id: row.id, name: row.name, price_cents: row.price_cents, traffic_gb: row.traffic_gb,
     duration_days: row.duration_days, speed_limit_kbps: row.speed_limit_kbps,
+    permission_group_id: row.permission_group_id || 0,
   })
   formOpen.value = true
 }
@@ -52,6 +63,7 @@ async function save() {
     const payload = {
       name: form.name, price_cents: form.price_cents, traffic_gb: form.traffic_gb,
       duration_days: form.duration_days, speed_limit_kbps: form.speed_limit_kbps,
+      permission_group_id: form.permission_group_id || undefined,
     }
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
     if (data.code === 0) {
@@ -155,6 +167,11 @@ async function remove(row: any) {
             <el-input-number v-model="form.speed_limit_kbps" :min="0" :step="1000" style="width: 100%" />
           </el-form-item>
         </div>
+        <el-form-item label="权限组（选填，购买后自动授权组内入站）">
+          <el-select v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
+            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="formOpen = false">取消</el-button>

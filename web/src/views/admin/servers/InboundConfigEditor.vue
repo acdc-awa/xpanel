@@ -11,8 +11,8 @@ import {
   Warning,
   CopyDocument,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { getXrayKeys } from '@/api/admin'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getCerts, getXrayKeys, rotateInternalInbound, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, WSSettings, XHTTPSettings } from '@/api/types'
 
@@ -40,6 +40,11 @@ const props = withDefaults(
     port?: number
     tag?: string
     showBaseFields?: boolean
+    // Phase T：入站三态与证书
+    inboundType?: string
+    internalUUID?: string
+    inboundId?: number
+    certId?: number
   }>(),
   {
     modelValue: '{}',
@@ -49,10 +54,18 @@ const props = withDefaults(
     port: 443,
     tag: '',
     showBaseFields: true,
+    inboundType: 'user',
+    internalUUID: '',
+    inboundId: 0,
+    certId: 0,
   },
 )
 
-const emit = defineEmits<InboundEditorEmits>()
+const emit = defineEmits<InboundEditorEmits & {
+  (e: 'update:inboundType', value: string): void
+  (e: 'update:certId', value: number): void
+  (e: 'internal-uuid-changed', value: string): void
+}>()
 
 // 视图模式：form 可视化表单 | json 源码
 const activeTab = ref<'form' | 'json'>('form')
@@ -259,6 +272,7 @@ function buildStreamSettingsJSON(): string {
     if (tlsMaxVersion.value) t.maxVersion = tlsMaxVersion.value
     if (tlsCipherSuites.value) t.cipherSuites = tlsCipherSuites.value
     if (tlsAllowInsecure.value) t.allowInsecure = true
+    // 绑定托管证书时 certificates 由生成器强制替换为固定路径（此处保留表单默认值即可）
     s.tlsSettings = t
   }
 
@@ -455,7 +469,69 @@ onMounted(() => {
     // 自动为未填充私钥的 REALITY 生成一组默认 ID
     genShortId()
   }
+  loadCerts()
 })
+
+// ===== Phase T：入站三态 + 证书 =====
+const localInboundType = ref(props.inboundType || 'user')
+const localInternalUUID = ref(props.internalUUID || '')
+const localCertId = ref<number>(props.certId || 0)
+const certs = ref<CertItem[]>([])
+
+watch(
+  () => props.inboundType,
+  (v) => {
+    if (v) localInboundType.value = v
+  },
+)
+watch(
+  () => props.internalUUID,
+  (v) => {
+    if (v) localInternalUUID.value = v
+  },
+)
+watch(
+  () => props.certId,
+  (v) => {
+    if (v) localCertId.value = v
+  },
+)
+
+function onTypeChange(v: string | number | boolean | undefined) {
+  localInboundType.value = String(v || 'user')
+  emit('update:inboundType', localInboundType.value)
+}
+
+async function loadCerts() {
+  try {
+    const { data } = await getCerts()
+    if (data.code === 0) certs.value = data.data.items
+  } catch { /* 证书列表加载失败不阻塞表单 */ }
+}
+
+async function rotateInternal() {
+  if (!props.inboundId) {
+    ElMessage.warning('请先保存入站')
+    return
+  }
+  try {
+    await ElMessageBox.confirm('将重新生成内部 UUID，引用该落地入站的中转配置会自动更新，确认轮换？', '轮换内部账户', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await rotateInternalInbound(props.inboundId)
+    if (data.code === 0) {
+      localInternalUUID.value = data.data.internal_uuid
+      emit('internal-uuid-changed', data.data.internal_uuid)
+      ElMessage.success('内部 UUID 已轮换，配置已重新生成推送')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '轮换失败'))
+  }
+}
 
 async function copyText(text: string, label: string) {
   try {
@@ -487,6 +563,37 @@ async function copyText(text: string, label: string) {
 
     <!-- 视图 1: 可视化表单 -->
     <div v-if="activeTab === 'form'" class="form-container">
+      <!-- Phase T：入站类型（三态） -->
+      <div class="form-section">
+        <div class="section-title">入站类型</div>
+        <el-radio-group v-model="localInboundType" @change="onTypeChange">
+          <el-radio value="user">用户入站（进订阅）</el-radio>
+          <el-radio value="relay">转发入站（内部落地）</el-radio>
+          <el-radio value="idle">闲置（不生成）</el-radio>
+        </el-radio-group>
+        <p v-if="localInboundType === 'relay'" class="muted tip">relay 入站不参与用户体系与订阅；clients 固定为下方内部 UUID（节点生成，主控只读）。</p>
+        <p v-if="localInboundType === 'idle'" class="muted tip">idle 入站不生成到节点配置，用于预留端口/接线。</p>
+
+        <!-- relay：内部 UUID 只读 + 轮换 -->
+        <div v-if="localInboundType === 'relay'" class="grid-2" style="margin-top: 10px">
+          <el-form-item label="内部 UUID（节点生成，只读）">
+            <el-input :model-value="localInternalUUID" placeholder="执行「生成」后由节点回填" disabled>
+              <template #append>
+                <el-button v-if="localInternalUUID" text @click="copyText(localInternalUUID, '内部 UUID')"><el-icon><CopyDocument /></el-icon></el-button>
+              </template>
+            </el-input>
+          </el-form-item>
+          <el-form-item label="操作">
+            <div style="display: flex; gap: 8px">
+              <el-button size="small" type="primary" plain :disabled="!props.inboundId" @click="rotateInternal">
+                <el-icon><Refresh /></el-icon>&nbsp;轮换 UUID
+              </el-button>
+              <span v-if="!props.inboundId" class="muted tip">保存入站后可轮换</span>
+            </div>
+          </el-form-item>
+        </div>
+      </div>
+
       <!-- 基础参数 (可选显示) -->
       <div v-if="showBaseFields" class="form-section">
         <div class="section-title">入站基础网络</div>
@@ -521,7 +628,7 @@ async function copyText(text: string, label: string) {
       </div>
 
       <!-- VLESS 协议设置 -->
-      <div class="form-section">
+      <div v-if="localInboundType !== 'relay'" class="form-section">
         <div class="section-title">VLESS 基础设置</div>
         <!-- Fallbacks 回落 -->
         <div class="fallbacks-card">
@@ -715,6 +822,14 @@ async function copyText(text: string, label: string) {
 
         <!-- TLS -->
         <template v-if="localTlsType === 'tls'">
+          <!-- Phase T：托管证书下拉（选择后生成器注入固定路径并自动推送节点） -->
+          <el-form-item label="托管证书（certs 表，选填）">
+            <el-select v-model="localCertId" style="width: 320px" clearable placeholder="不绑定（手动填路径）"
+              @change="(v: number | undefined) => emit('update:certId', v || 0)">
+              <el-option v-for="ct in certs" :key="ct.id" :label="`${ct.domain}（到期 ${ct.not_after}）`" :value="ct.id" />
+            </el-select>
+            <p class="muted tip">绑定后节点配置的 certificates 自动使用 /etc/xray/certs/&lt;domain&gt;/ 固定路径（证书由主控下发）。</p>
+          </el-form-item>
           <div class="grid-2">
             <el-form-item label="SNI (server_name)">
               <el-input v-model="tlsForm.server_name" placeholder="example.com" />

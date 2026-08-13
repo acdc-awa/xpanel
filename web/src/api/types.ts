@@ -87,6 +87,7 @@ export interface Plan {
   duration_days: number
   speed_limit_kbps: number
   enabled: boolean
+  permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
   created_at: string
 }
 
@@ -129,8 +130,16 @@ export interface InboundItem {
   sniffing: string
   ratio: number
   enabled: boolean
+  type?: string // user / relay / idle（Phase T）
+  internal_uuid?: string // relay 只读（节点生成上报）
+  cert_id?: number // 绑定的证书
   created_at: string
 }
+
+// Phase T：入站三态
+export const INBOUND_TYPE_USER = 'user'
+export const INBOUND_TYPE_RELAY = 'relay'
+export const INBOUND_TYPE_IDLE = 'idle'
 
 
 export interface RealitySettings {
@@ -217,6 +226,25 @@ export interface ServerOutbound {
   send_through?: string
   enabled: boolean
   priority: number
+  remark: string
+  inbound_ref?: number // Phase T：引用落地入站
+  created_at: string
+  updated_at: string
+}
+
+// Phase T：证书（PEM 不回传）
+export interface CertItem {
+  id: number
+  domain: string
+  not_after: string
+  remark: string
+  created_at: string
+}
+
+// Phase T：权限组
+export interface PermissionGroup {
+  id: number
+  name: string
   remark: string
   created_at: string
   updated_at: string

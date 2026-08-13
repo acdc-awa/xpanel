@@ -6,8 +6,12 @@ import {
   createServerOutbound,
   updateServerOutbound,
   getXrayKeys,
+  getServers,
+  getInbounds,
   type ServerOutbound,
+  type ServerItem,
 } from '@/api/admin'
+import type { InboundItem } from '@/api/types'
 import { errMsg } from '@/api/http'
 
 const props = defineProps<{
@@ -22,6 +26,41 @@ const emit = defineEmits<{
 
 const visible = ref(false)
 const saving = ref(false)
+
+// ===== Phase T：连接方式（仅 vless）——手动配置 / 引用落地入站 =====
+const refMode = ref(false)
+const refServerId = ref<number>(0)
+const refInboundId = ref<number>(0)
+const servers = ref<ServerItem[]>([])
+const allInbounds = ref<InboundItem[]>([])
+
+// 选中服务器的可引用入站（relay 优先展示）
+const refInboundOptions = computed(() => {
+  const list = allInbounds.value.filter((i) => i.server_id === refServerId.value && i.enabled)
+  const sorted = [...list].sort((a, b) => {
+    const rank = (t?: string) => (t === 'relay' ? 0 : t === 'user' ? 1 : 2)
+    return rank(a.type) - rank(b.type)
+  })
+  return sorted
+})
+
+function inboundLabel(i: InboundItem) {
+  const typeLabel = i.type === 'relay' ? '转发' : i.type === 'idle' ? '闲置' : '用户'
+  let net = '—'
+  try {
+    const s = JSON.parse(i.stream_settings || '{}')
+    net = `${s.network || 'tcp'}/${s.security || 'none'}`
+  } catch { /* ignore */ }
+  return `${i.tag}（${typeLabel} · vless+${net}）`
+}
+
+async function loadRefTargets() {
+  try {
+    const [s, i] = await Promise.all([getServers(), getInbounds()])
+    if (s.data.code === 0) servers.value = s.data.data.items
+    if (i.data.code === 0) allInbounds.value = i.data.data.items
+  } catch { /* 引用选择器加载失败不阻塞 */ }
+}
 
 // ===== 协议选项（去掉 socks/vmess） =====
 const PROTOCOL_OPTIONS = [
@@ -216,6 +255,15 @@ function parseExisting() {
   form.remark = props.outbound.remark
   form.send_through = props.outbound.send_through || ''
 
+  // Phase T：引用模式回填
+  const ob = props.outbound
+  if (ob?.inbound_ref) {
+    refMode.value = true
+    refInboundId.value = ob.inbound_ref
+    const target = allInbounds.value.find((i) => i.id === ob.inbound_ref)
+    if (target) refServerId.value = target.server_id
+  }
+
   try {
     const settings = props.outbound.settings_json ? JSON.parse(props.outbound.settings_json) : {}
     if (form.protocol === 'freedom') {
@@ -261,14 +309,20 @@ function parseExisting() {
 }
 
 onMounted(() => {
-  parseExisting()
-  visible.value = true
+  loadRefTargets().then(() => {
+    parseExisting()
+    visible.value = true
+  })
 })
 
 async function save() {
   if (!form.tag?.trim()) { ElMessage.warning('请填写出站标签'); return }
-  if (form.protocol === 'vless' && (!form.vless_address || !form.vless_uuid)) {
-    ElMessage.warning('VLESS 出站需填写远端地址和 UUID')
+  if (form.protocol === 'vless' && !refMode.value && (!form.vless_address || !form.vless_uuid)) {
+    ElMessage.warning('VLESS 出站需填写远端地址和 UUID，或改用「引用落地入站」')
+    return
+  }
+  if (refMode.value && !refInboundId.value) {
+    ElMessage.warning('请选择引用的落地入站')
     return
   }
   saving.value = true
@@ -276,12 +330,14 @@ async function save() {
     const payload = {
       tag: form.tag.trim(),
       protocol: form.protocol,
-      settings_json: buildSettingsJSON(),
-      stream_settings_json: buildStreamJSON(),
+      settings_json: refMode.value ? '' : buildSettingsJSON(),
+      stream_settings_json: refMode.value ? '' : buildStreamJSON(),
       send_through: form.send_through?.trim() || '',
       enabled: form.enabled,
       priority: form.priority,
       remark: form.remark || '',
+      // Phase T：引用模式只发 inbound_ref（vnext/streamSettings 由生成器自动构造）
+      inbound_ref: refMode.value ? refInboundId.value : undefined,
     }
     const { data } = props.outbound
       ? await updateServerOutbound(props.serverId, props.outbound.id, payload)
@@ -367,6 +423,34 @@ async function copyText(text: string, label: string) {
 
       <!-- ===== VLESS 参数 ===== -->
       <template v-if="form.protocol === 'vless'">
+        <!-- Phase T：连接方式 -->
+        <div class="sec-title">连接方式</div>
+        <el-radio-group v-model="refMode" style="margin-bottom: 10px">
+          <el-radio :value="false">手动配置（vnext 手填）</el-radio>
+          <el-radio :value="true">引用落地入站（自动构造）</el-radio>
+        </el-radio-group>
+
+        <!-- 引用落地入站模式 -->
+        <template v-if="refMode">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+            <el-form-item label="落地服务器">
+              <el-select v-model="refServerId" style="width: 100%" @change="refInboundId = 0">
+                <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="落地入站（relay 优先）">
+              <el-select v-model="refInboundId" style="width: 100%" placeholder="先选服务器">
+                <el-option v-for="i in refInboundOptions" :key="i.id" :label="inboundLabel(i)" :value="i.id" />
+              </el-select>
+            </el-form-item>
+          </div>
+          <el-alert type="info" :closable="false" show-icon style="margin-top: 4px"
+            title="保存后 vnext（address/port/uuid/flow）与 REALITY/TLS 参数由生成器按目标入站自动填充；目标入站自动标记为转发（relay）。"
+            description="落地 UUID 由节点生成（内部账户），轮换后中转配置自动跟随；本机同服务器引用会被拒绝（转发环）。" />
+        </template>
+
+        <!-- 手动配置模式 -->
+        <template v-if="!refMode">
         <!-- 远端连接 -->
         <div class="sec-title">远端连接</div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
@@ -485,6 +569,7 @@ async function copyText(text: string, label: string) {
             </el-button>
           </div>
         </template>
+        </template><!-- /手动配置模式 -->
       </template>
 
       <!-- ===== 通用 ===== -->

@@ -4,11 +4,13 @@ import type {
   AdminUserPage,
   ApiResp,
   AuditLog,
+  CertItem,
   CreateInvitationResult,
   InboundItem,
   InboundSettings,
   Invitation,
   Order,
+  PermissionGroup,
   Plan,
   ServerOutbound,
   ServerRoutingRule,
@@ -19,10 +21,12 @@ export type {
   AdminDashboard,
   AdminUserPage,
   AuditLog,
+  CertItem,
   InboundItem,
   InboundSettings,
   Invitation,
   Order,
+  PermissionGroup,
   Plan,
   ServerOutbound,
   ServerRoutingRule,
@@ -143,6 +147,8 @@ export interface InboundPayload {
   stream_settings?: string
   sniffing?: string
   ratio?: number
+  type?: string // user / relay / idle（Phase T）
+  cert_id?: number
 }
 
 export function getInbounds(serverId?: number) {
@@ -165,6 +171,71 @@ export function deleteInbound(id: number) {
 
 export function toggleInbound(id: number) {
   return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
+}
+
+// Phase T：relay 内部账户指令（UUID 由节点生成上报）
+export function setupInternalInbound(id: number) {
+  return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/setup-internal`)
+}
+
+export function rotateInternalInbound(id: number) {
+  return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/rotate-internal`)
+}
+
+// Phase T：证书管理
+export function getCerts() {
+  return http.get<ApiResp<{ items: CertItem[] }>>('/admin/certs')
+}
+
+export interface CertPayload {
+  domain: string
+  cert_pem: string
+  key_pem: string
+  remark?: string
+}
+
+export function createCert(payload: CertPayload) {
+  return http.post<ApiResp<{ cert: CertItem }>>('/admin/certs', payload)
+}
+
+export function updateCert(id: number, payload: Partial<CertPayload>) {
+  return http.put<ApiResp<{ cert: CertItem }>>(`/admin/certs/${id}`, payload)
+}
+
+export function deleteCert(id: number) {
+  return http.delete<ApiResp<{ ok: boolean }>>(`/admin/certs/${id}`)
+}
+
+// Phase T：权限组
+export function getPermissionGroups() {
+  return http.get<ApiResp<{ items: PermissionGroup[] }>>('/admin/permission-groups')
+}
+
+export interface PermissionGroupPayload {
+  name: string
+  remark?: string
+}
+
+export function createPermissionGroup(payload: PermissionGroupPayload) {
+  return http.post<ApiResp<{ group: PermissionGroup }>>('/admin/permission-groups', payload)
+}
+
+export function updatePermissionGroup(id: number, payload: Partial<PermissionGroupPayload>) {
+  return http.put<ApiResp<{ group: PermissionGroup }>>(`/admin/permission-groups/${id}`, payload)
+}
+
+export function deletePermissionGroup(id: number) {
+  return http.delete<ApiResp<{ ok: boolean }>>(`/admin/permission-groups/${id}`)
+}
+
+export function getGroupInbounds(id: number) {
+  return http.get<ApiResp<{ inbound_ids: number[] }>>(`/admin/permission-groups/${id}/inbounds`)
+}
+
+export function setGroupInbounds(id: number, inboundIds: number[]) {
+  return http.post<ApiResp<{ group_id: number; count: number }>>(`/admin/permission-groups/${id}/inbounds`, {
+    inbound_ids: inboundIds,
+  })
 }
 
 export function previewConfig(serverId: number, form?: Partial<InboundPayload>) {
@@ -195,6 +266,7 @@ export interface OutboundPayload {
   enabled?: boolean
   priority?: number
   remark?: string
+  inbound_ref?: number // Phase T：引用落地入站（0/null = 手动）
 }
 
 export function getServerOutbounds(serverId: number) {
