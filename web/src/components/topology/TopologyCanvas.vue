@@ -62,61 +62,127 @@ interface BoxData {
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
 
-// ---- 布局持久化（localStorage）----
-// 盒子位置/宽度记忆：模块级 Map 保证 SPA 内（连线/删线/切视图）重建节点后保持；
-// localStorage 保证整页刷新/退出后回到上次布局（按服务器 id 存取，删除的服务器残留 key 无害）
-const POS_KEY = 'topology-box-positions'
-const WIDTH_KEY = 'topology-box-widths'
+// ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
+// 本地 localStorage 存 { hash, positions, widths }——hash = 上次与云端同步/点保存时的内容哈希。
+// 修改布局只更新内容不更新 hash（= 未保存标记，刷新仍复用本地，修改不丢）；
+// 打开时对比云端 hash：一致 → 直接复用本地（秒显）；不一致 → 云端被别的浏览器保存过 → 下载覆盖。
+// 点「保存布局」按钮才算新 hash 上传云端。
+const LAYOUT_KEY = 'topology-layout'
 
-function loadMap<T>(key: string): Map<string, T> {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) return new Map(JSON.parse(raw) as [string, T][])
-  } catch {
-    /* localStorage 不可用/解析失败 → 空布局 */
-  }
-  return new Map()
+interface LayoutData {
+  hash: string
+  positions: Record<string, { x: number; y: number }>
+  widths: Record<string, number>
 }
 
-function saveMap(key: string, m: Map<string, unknown>) {
+function loadLayoutLocal(): LayoutData {
   try {
-    localStorage.setItem(key, JSON.stringify([...m]))
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (raw) {
+      const d = JSON.parse(raw) as LayoutData
+      if (d && typeof d === 'object' && d.positions) return d
+    }
+  } catch {
+    /* 解析失败 → 空布局 */
+  }
+  // 兼容旧版双 key（topology-box-positions / topology-box-widths）→ 迁移为单 key 后复用
+  try {
+    const oldPos = localStorage.getItem('topology-box-positions')
+    const oldWidths = localStorage.getItem('topology-box-widths')
+    if (oldPos || oldWidths) {
+      const d: LayoutData = { hash: '', positions: {}, widths: {} }
+      if (oldPos) d.positions = Object.fromEntries(JSON.parse(oldPos) as [string, { x: number; y: number }][])
+      if (oldWidths) d.widths = Object.fromEntries(JSON.parse(oldWidths) as [string, number][])
+      localStorage.removeItem('topology-box-positions')
+      localStorage.removeItem('topology-box-widths')
+      saveLayoutLocal(d)
+      return d
+    }
+  } catch {
+    /* 迁移失败忽略 */
+  }
+  return { hash: '', positions: {}, widths: {} }
+}
+
+function saveLayoutLocal(d: LayoutData) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(d))
   } catch {
     /* 忽略写入失败 */
   }
 }
 
-const boxPositions = loadMap<{ x: number; y: number }>(POS_KEY)
-const boxWidths = loadMap<number>(WIDTH_KEY)
-
-// 云端同步：挂载时拉取服务端布局（跨浏览器/设备统一，服务端为权威覆盖本地），
-// 拖动/拉伸结束后 PUT 保存
-function persistServerLayout() {
-  saveTopologyLayout({
-    positions: Object.fromEntries(boxPositions),
-    widths: Object.fromEntries(boxWidths),
-  }).catch(() => {
-    /* 网络失败忽略，下次拖动再存 */
-  })
+// 内容哈希（djb2，key 排序保证 JSON 稳定）：用于「本地版本 vs 云端版本」去重判断
+function sortKeys(o: unknown): unknown {
+  if (Array.isArray(o)) return o.map(sortKeys)
+  if (o && typeof o === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(o as Record<string, unknown>).sort()) out[k] = sortKeys((o as Record<string, unknown>)[k])
+    return out
+  }
+  return o
 }
 
+function contentHash(positions: Record<string, unknown>, widths: Record<string, unknown>): string {
+  const s = JSON.stringify({ positions: sortKeys(positions), widths: sortKeys(widths) })
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+  return h.toString(36)
+}
+
+const localLayout = loadLayoutLocal()
+const boxPositions = new Map<string, { x: number; y: number }>(Object.entries(localLayout.positions))
+const boxWidths = new Map<string, number>(Object.entries(localLayout.widths))
+// 未保存修改标记：拖动/拉伸后置 true → 显示「保存布局」按钮；保存成功后清 false
+const layoutDirty = ref(false)
+
+// 云端同步：打开时拉取，hash 不一致（云端被别的浏览器保存过）→ 下载覆盖本地；一致 → 复用本地
 onMounted(async () => {
   try {
     const { data } = await getTopologyLayout()
     if (data.code !== 0) return
-    const pos = data.data?.positions ?? {}
-    const widths = data.data?.widths ?? {}
-    for (const [k, v] of Object.entries(pos)) {
+    const srv = data.data ?? { hash: '', positions: {}, widths: {} }
+    if (srv.hash === localLayout.hash) return // 版本一致 → 复用本地布局
+    boxPositions.clear()
+    boxWidths.clear()
+    for (const [k, v] of Object.entries(srv.positions ?? {})) {
       if (v && typeof v.x === 'number' && typeof v.y === 'number') boxPositions.set(k, { x: v.x, y: v.y })
     }
-    for (const [k, v] of Object.entries(widths)) {
+    for (const [k, v] of Object.entries(srv.widths ?? {})) {
       if (typeof v === 'number') boxWidths.set(k, v)
     }
+    localLayout.hash = srv.hash ?? ''
+    localLayout.positions = Object.fromEntries(boxPositions)
+    localLayout.widths = Object.fromEntries(boxWidths)
+    saveLayoutLocal(localLayout)
+    layoutDirty.value = false
     if (props.topology) buildGraph(props.topology)
   } catch {
     /* 拉取失败用本地布局 */
   }
 })
+
+// 「保存布局」按钮：算内容哈希上传云端，成功后更新本地 hash（= 已同步）
+async function saveLayoutToCloud() {
+  const positions = Object.fromEntries(boxPositions)
+  const widths = Object.fromEntries(boxWidths)
+  const hash = contentHash(positions, widths)
+  try {
+    const { data } = await saveTopologyLayout({ hash, positions, widths })
+    if (data.code === 0) {
+      localLayout.hash = hash
+      localLayout.positions = positions
+      localLayout.widths = widths
+      saveLayoutLocal(localLayout)
+      layoutDirty.value = false
+      ElMessage.success('布局已保存到云端')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存失败'))
+  }
+}
 
 const ROW_H = 40 // 增加行高以适配药丸样式
 const HEADER_H = 48
@@ -624,7 +690,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
   }
 }
 
-// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆在模块级 boxWidths + localStorage + 云端）
+// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆本地 + 未保存标记）
 function startBoxResize(e: MouseEvent, data: BoxData) {
   const nodeId = `server-${data.server.id}`
   const startX = e.clientX
@@ -634,12 +700,13 @@ function startBoxResize(e: MouseEvent, data: BoxData) {
     const w = Math.max(320, Math.min(800, startWidth + deltaX))
     data.boxWidth = w
     boxWidths.set(nodeId, w)
-    saveMap(WIDTH_KEY, boxWidths)
+    localLayout.widths = Object.fromEntries(boxWidths)
+    saveLayoutLocal(localLayout)
   }
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
-    persistServerLayout()
+    layoutDirty.value = true
   }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
@@ -651,13 +718,14 @@ function handleNodeDblClick(evt: NodeMouseEvent) {
   if (box?.server?.id) emit('open-server', box.server.id)
 }
 
-// 盒子拖动结束：记住位置（连线/删线重建节点后保持）+ localStorage + 云端（跨浏览器统一）
+// 盒子拖动结束：更新本地布局（hash 不变 = 未保存）→ 显示「保存布局」按钮
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
   if (node.position) {
     boxPositions.set(node.id, { x: node.position.x, y: node.position.y })
-    saveMap(POS_KEY, boxPositions)
-    persistServerLayout()
+    localLayout.positions = Object.fromEntries(boxPositions)
+    saveLayoutLocal(localLayout)
+    layoutDirty.value = true
   }
 }
 
@@ -666,6 +734,11 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
 <template>
   <div class="topology-wrap">
+    <!-- 布局未保存提示条：拖动/拉伸后出现，点「保存布局」算内容哈希上传云端（跨浏览器统一） -->
+    <div v-if="layoutDirty" class="layout-save-bar">
+      <span class="layout-save-tip">布局已修改</span>
+      <el-button size="small" type="primary" @click="saveLayoutToCloud">保存布局</el-button>
+    </div>
     <VueFlow
       v-if="hasData"
       v-model:nodes="nodes"
@@ -839,6 +912,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 .topology-canvas {
   width: 100%;
   height: 100%;
+}
+/* 布局未保存提示条（右上角浮动） */
+.layout-save-bar {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  .layout-save-tip {
+    font-size: 12px;
+    color: #fbbf24;
+  }
 }
 .topology-empty {
   height: 100%;

@@ -331,52 +331,50 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 	})
 }
 
-// ---- 画布布局云端同步（盒子位置/宽度，settings 表存 JSON） ----
+// ---- 画布布局云端同步（盒子位置/宽度 + 内容哈希去重，settings 表存 JSON） ----
 
 const settingTopologyLayout = "topology_layout"
 
+// topoLayout 云端布局载荷（hash = 客户端对内容算的内容哈希，用于跨浏览器版本去重）
+type topoLayout struct {
+	Hash      string `json:"hash"`
+	Positions map[string]struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	} `json:"positions"`
+	Widths map[string]float64 `json:"widths"`
+}
+
 // AdminGetTopologyLayout GET /api/v1/admin/topology-layout —— 拉取画布布局（跨浏览器/设备统一）
 func (d *Deps) AdminGetTopologyLayout(c *gin.Context) {
-	positions := gin.H{}
-	widths := gin.H{}
+	resp := gin.H{"hash": "", "positions": gin.H{}, "widths": gin.H{}}
 	var set models.Setting
 	if err := d.DB.Where("key = ?", settingTopologyLayout).First(&set).Error; err == nil && set.Value != "" {
-		var raw struct {
-			Positions map[string]struct {
-				X float64 `json:"x"`
-				Y float64 `json:"y"`
-			} `json:"positions"`
-			Widths map[string]float64 `json:"widths"`
-		}
+		var raw topoLayout
 		if err := json.Unmarshal([]byte(set.Value), &raw); err == nil {
+			resp["hash"] = raw.Hash
 			if raw.Positions != nil {
 				pos := gin.H{}
 				for k, v := range raw.Positions {
 					pos[k] = gin.H{"x": v.X, "y": v.Y}
 				}
-				positions = pos
+				resp["positions"] = pos
 			}
 			if raw.Widths != nil {
 				w := gin.H{}
 				for k, v := range raw.Widths {
 					w[k] = v
 				}
-				widths = w
+				resp["widths"] = w
 			}
 		}
 	}
-	util.OK(c, gin.H{"positions": positions, "widths": widths})
+	util.OK(c, resp)
 }
 
-// AdminSaveTopologyLayout PUT /api/v1/admin/topology-layout —— 保存画布布局（upsert settings）
+// AdminSaveTopologyLayout PUT /api/v1/admin/topology-layout —— 保存画布布局（upsert settings，原样透传 hash）
 func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
-	var req struct {
-		Positions map[string]struct {
-			X float64 `json:"x"`
-			Y float64 `json:"y"`
-		} `json:"positions"`
-		Widths map[string]float64 `json:"widths"`
-	}
+	var req topoLayout
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return

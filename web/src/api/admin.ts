@@ -354,8 +354,9 @@ export function getTopology() {
   return http.get<ApiResp<TopologyData>>('/admin/topology')
 }
 
-// 画布布局云端同步（盒子位置/宽度，跨浏览器/设备统一；settings 表存 JSON）
+// 画布布局云端同步（盒子位置/宽度 + 内容哈希去重，跨浏览器/设备统一；settings 表存 JSON）
 export interface TopologyLayout {
+  hash?: string
   positions: Record<string, { x: number; y: number }>
   widths: Record<string, number>
 }

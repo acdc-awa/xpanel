@@ -216,7 +216,7 @@ func TestTopologyLayoutAPI(t *testing.T) {
 		r := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(r)
 		c.Request = httptest.NewRequest(http.MethodPut, "/admin/topology-layout", strings.NewReader(
-			`{"positions":{"server-4":{"x":123,"y":456}},"widths":{"server-4":600}}`))
+			`{"hash":"h1","positions":{"server-4":{"x":123,"y":456}},"widths":{"server-4":600}}`))
 		c.Request.Header.Set("Content-Type", "application/json")
 		d.AdminSaveTopologyLayout(c)
 		if r.Code != 200 {
@@ -231,7 +231,7 @@ func TestTopologyLayoutAPI(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodGet, "/admin/topology-layout", nil)
 		d.AdminGetTopologyLayout(c)
 		body := r.Body.String()
-		if !strings.Contains(body, `"x":123`) || !strings.Contains(body, `"y":456`) || !strings.Contains(body, `"widths":{"server-4":600}`) {
+		if !strings.Contains(body, `"hash":"h1"`) || !strings.Contains(body, `"x":123`) || !strings.Contains(body, `"y":456`) || !strings.Contains(body, `"widths":{"server-4":600}`) {
 			t.Fatalf("roundtrip mismatch: %s", body)
 		}
 	}
@@ -241,7 +241,7 @@ func TestTopologyLayoutAPI(t *testing.T) {
 		r := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(r)
 		c.Request = httptest.NewRequest(http.MethodPut, "/admin/topology-layout", strings.NewReader(
-			`{"positions":{"server-4":{"x":9,"y":9}},"widths":{}}`))
+			`{"hash":"h2","positions":{"server-4":{"x":9,"y":9}},"widths":{}}`))
 		c.Request.Header.Set("Content-Type", "application/json")
 		d.AdminSaveTopologyLayout(c)
 		if r.Code != 200 {
@@ -251,7 +251,7 @@ func TestTopologyLayoutAPI(t *testing.T) {
 		c2, _ := gin.CreateTestContext(r2)
 		c2.Request = httptest.NewRequest(http.MethodGet, "/admin/topology-layout", nil)
 		d.AdminGetTopologyLayout(c2)
-		if !strings.Contains(r2.Body.String(), `"x":9`) || strings.Contains(r2.Body.String(), `"y":456`) {
+		if !strings.Contains(r2.Body.String(), `"hash":"h2"`) || !strings.Contains(r2.Body.String(), `"x":9`) || strings.Contains(r2.Body.String(), `"y":456`) {
 			t.Fatalf("overwrite mismatch: %s", r2.Body.String())
 		}
 	}
