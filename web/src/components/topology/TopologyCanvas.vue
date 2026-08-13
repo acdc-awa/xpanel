@@ -53,6 +53,7 @@ interface BoxData {
   server: TopologyData['servers'][number]
   inbounds: TopologyData['inbounds']
   outbounds: BoxOutbound[]
+  boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
 }
 
 const nodes = ref<GraphNode[]>([])
@@ -61,6 +62,8 @@ const edges = ref<Edge[]>([])
 // 模块级：会话内记住盒子拖动位置——连线/删线/视图切换后 buildGraph 重建节点时保持，
 // 不回到默认布局（仅新服务器用默认位置）
 const boxPositions = new Map<string, { x: number; y: number }>()
+// 模块级：盒子拉伸宽度记忆（同 boxPositions，buildGraph 重建后保持）
+const boxWidths = new Map<string, number>()
 
 const ROW_H = 40 // 增加行高以适配药丸样式
 const HEADER_H = 48
@@ -139,8 +142,9 @@ function buildGraph(data: TopologyData) {
     position: boxPositions.get(`server-${s.id}`) ?? { x: 40 + idx * 520, y: 24 },
     data: {
       server: s,
-      inbounds: inbByServer.get(s.id) ?? [],
-      outbounds: outByServer.get(s.id) ?? [],
+      inbounds: inbByServer.get(s.id) || [],
+      outbounds: outByServer.get(s.id) || [],
+      boxWidth: boxWidths.get(`server-${s.id}`) ?? 440,
     } as BoxData,
   })) as unknown as GraphNode[]
 
@@ -544,6 +548,25 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
   }
 }
 
+// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆在模块级 boxWidths，连线/删线重建后保持）
+function startBoxResize(e: MouseEvent, data: BoxData) {
+  const nodeId = `server-${data.server.id}`
+  const startX = e.clientX
+  const startWidth = data.boxWidth || 440
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    const deltaX = moveEvent.clientX - startX
+    const w = Math.max(320, Math.min(800, startWidth + deltaX))
+    data.boxWidth = w
+    boxWidths.set(nodeId, w)
+  }
+  const onMouseUp = () => {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
 // ---- 交互：双击盒子 → 服务器抽屉 ----
 function handleNodeDblClick(evt: NodeMouseEvent) {
   const box = evt.node.data as BoxData
@@ -596,12 +619,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           :marker-end="e.markerEnd"
         />
       </template>
-      <template #node-serverbox="{ data }: NodeProps<BoxData>">
-        <div class="server-box" :class="{ offline: !data.server.status }">
+      <template #node-serverbox="nodeProps">
+        <div class="server-box" :class="{ offline: !nodeProps.data.server.status }" :style="{ width: (nodeProps.data.boxWidth || 440) + 'px' }">
+          <div
+            v-show="nodeProps.selected"
+            class="custom-resizer-right"
+            @mousedown.stop.prevent="startBoxResize($event, nodeProps.data)"
+          />
           <div class="sb-head">
-            <span class="status-dot" :class="data.server.status === 1 ? 'online' : 'offline'" />
-            <span class="name">{{ data.server.name }}</span>
-            <span class="host">{{ data.server.host }}</span>
+            <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
+            <span class="name">{{ nodeProps.data.server.name }}</span>
+            <span class="host">{{ nodeProps.data.server.host }}</span>
           </div>
 
           <div class="sb-cols">
@@ -609,8 +637,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                  盒内点（中线左）= 发盒内路由线 -->
             <div class="sb-col">
               <div class="sb-title">入站</div>
-              <template v-if="data.inbounds.length > 0">
-                <div v-for="(inb, i) in data.inbounds" :key="inb.id" class="sb-row">
+              <template v-if="nodeProps.data.inbounds.length > 0">
+                <div v-for="(inb, i) in nodeProps.data.inbounds" :key="inb.id" class="sb-row">
                   <Handle
                     type="target"
                     :id="`inb-tgt-${inb.id}`"
@@ -643,8 +671,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                  direct 虚拟行：绿点（右缘）收本盒规则线，不参与引用拖线；标签贴右 -->
             <div class="sb-col">
               <div class="sb-title">出站</div>
-              <template v-if="data.outbounds.length > 0">
-                <div v-for="(out, i) in data.outbounds" :key="out.id" class="sb-row" :class="{ 'direct-row': out.virtual }">
+              <template v-if="nodeProps.data.outbounds.length > 0">
+                <div v-for="(out, i) in nodeProps.data.outbounds" :key="out.id" class="sb-row" :class="{ 'direct-row': out.virtual }">
                   <Handle
                     type="target"
                     :id="`out-tgt-${out.id}`"
@@ -739,7 +767,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
 /* ---- ServerBox 自定义节点 ---- */
 .server-box {
-  width: 440px;
+  width: 440px; /* Default overridden by inline style */
+  min-width: 320px;
+  position: relative;
   background: rgba(30, 41, 59, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -794,10 +824,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
   .sb-cols {
     display: flex;
-    gap: 80px; /* 拉大中央间距，留出连线空间 */
+    gap: 40px; /* 拉大中央间距，留出连线空间 */
     justify-content: space-between;
     padding: 0 16px 16px;
-    width: 440px;
+    width: 100%;
     box-sizing: border-box;
     .sb-col {
       flex: 1;
@@ -990,5 +1020,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   stroke: transparent;
   stroke-width: 14;
   fill: none;
+}
+
+/* 自定义右侧拉伸把手 */
+.custom-resizer-right {
+  position: absolute;
+  right: -3px;
+  top: 38px;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 36px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  z-index: 10;
+  cursor: ew-resize;
+  transition: all 0.2s;
+  &:hover {
+    background: rgba(56, 189, 248, 0.8);
+    border-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+  }
 }
 </style>
