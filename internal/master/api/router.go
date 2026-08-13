@@ -159,6 +159,19 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
 			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
 			admin.POST("/user-inbounds/:id/toggle", d.AdminToggleUserInbound)
+			// Phase T：内部账户指令 / 证书 / 权限组
+			admin.POST("/inbounds/:id/setup-internal", d.AdminSetupInternal)
+			admin.POST("/inbounds/:id/rotate-internal", d.AdminRotateInternal)
+			admin.GET("/certs", d.AdminCerts)
+			admin.POST("/certs", d.AdminCreateCert)
+			admin.PUT("/certs/:id", d.AdminUpdateCert)
+			admin.DELETE("/certs/:id", d.AdminDeleteCert)
+			admin.GET("/permission-groups", d.AdminPermissionGroups)
+			admin.POST("/permission-groups", d.AdminCreatePermissionGroup)
+			admin.PUT("/permission-groups/:id", d.AdminUpdatePermissionGroup)
+			admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
+			admin.GET("/permission-groups/:id/inbounds", d.AdminGroupInbounds)
+			admin.POST("/permission-groups/:id/inbounds", d.AdminSetGroupInbounds)
 		}
 	}
 

@@ -226,6 +226,31 @@ func (h *Hub) readPump(conn *Conn) {
 			h.handleResult(msg)
 		case protocol.MsgTrafficReport:
 			h.handleTrafficReport(conn, msg)
+		case protocol.MsgInternalUUIDReport:
+			h.handleInternalUUIDReport(conn, msg)
+		}
+	}
+}
+
+// handleInternalUUIDReport 节点侧内部 UUID 变更主动上报（如 CLI 轮换）：
+// 更新入站 internal_uuid，并按 tag 匹配本服务器 relay 入站。
+func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
+	var p protocol.InternalUUIDReportPayload
+	if err := msg.PayloadTo(&p); err != nil {
+		return
+	}
+	if p.Tag == "" || p.UUID == "" {
+		return
+	}
+	var inb models.Inbound
+	err := h.DB.Where("server_id = ? AND tag = ? AND type = ?", conn.ServerID, p.Tag, models.InboundTypeRelay).First(&inb).Error
+	if err != nil || inb.InternalUUID == p.UUID {
+		return
+	}
+	if err := h.DB.Model(&inb).Update("internal_uuid", p.UUID).Error; err == nil && h.Config != nil {
+		// UUID 变更 → 重新生成配置（引用该落地出站的服务器配置会随之更新）
+		if _, err := h.Config.Generate(conn.ServerID); err == nil {
+			h.PushPending(conn.ServerID)
 		}
 	}
 }

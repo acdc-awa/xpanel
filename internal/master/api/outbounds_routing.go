@@ -21,6 +21,7 @@ type outboundForm struct {
 	Enabled            *bool  `json:"enabled"`
 	Priority           *int   `json:"priority"`
 	Remark             string `json:"remark"`
+	InboundRef         *uint64 `json:"inbound_ref"` // Phase T：引用落地入站（vnext 自动构造）
 }
 
 // routingRuleForm 路由规则创建/修改表单
@@ -76,6 +77,13 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	// Phase T：InboundRef 校验（引用存在 + 无环 + 目标自动标 relay）
+	if req.InboundRef != nil {
+		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
+			util.BadRequest(c, msg)
+			return
+		}
+	}
 
 	enabled := true
 	if req.Enabled != nil {
@@ -96,6 +104,7 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		Enabled:            enabled,
 		Priority:           priority,
 		Remark:             req.Remark,
+		InboundRef:         req.InboundRef,
 	}
 
 	if err := d.DB.Create(&ob).Error; err != nil {
@@ -137,6 +146,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		Enabled            *bool   `json:"enabled"`
 		Priority           *int    `json:"priority"`
 		Remark             *string `json:"remark"`
+		InboundRef         *uint64 `json:"inbound_ref"` // nil=不变；0=解除引用；>0=设置引用
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -191,10 +201,33 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		updates["remark"] = *req.Remark
 	}
 
+	// Phase T：InboundRef 变更（>0 设置 / 0 解除），校验无环 + 维护目标入站标记
+	if req.InboundRef != nil {
+		if *req.InboundRef > 0 {
+			if msg := d.checkInboundRef(ob.ServerID, *req.InboundRef, outboundID); msg != "" {
+				util.BadRequest(c, msg)
+				return
+			}
+			updates["inbound_ref"] = *req.InboundRef
+		} else {
+			updates["inbound_ref"] = nil
+		}
+	}
+
 	if len(updates) > 0 {
 		if err := d.DB.Model(&ob).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新出站规则失败")
 			return
+		}
+	}
+	// 引用目标维护：新目标标 relay；旧目标（被改走/解除）无其他引用则回 idle
+	if req.InboundRef != nil {
+		oldRef := ob.InboundRef
+		if *req.InboundRef > 0 {
+			d.ensureRelayMark(*req.InboundRef)
+		}
+		if oldRef != nil && (*req.InboundRef == 0 || *oldRef != *req.InboundRef) {
+			d.demoteIfUnreferenced(*oldRef)
 		}
 	}
 
@@ -218,15 +251,89 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 		return
 	}
 
+	// Phase T：删除前记录引用目标，删除后无其他引用则回 idle
+	var ob models.ServerOutbound
+	d.DB.Where("id = ? AND server_id = ?", outboundID, id).First(&ob)
 	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).Delete(&models.ServerOutbound{}).Error; err != nil {
 		util.ServerError(c, "删除出站规则失败")
 		return
+	}
+	if ob.InboundRef != nil {
+		d.demoteIfUnreferenced(*ob.InboundRef)
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
 		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
 	}
 	util.OK(c, gin.H{"deleted": outboundID})
+}
+
+// checkInboundRef 校验 InboundRef 设置：目标存在 + 引用不成环。
+// excludeOutboundID 用于更新时排除自身（创建传 0）。返回错误消息，空串 = 通过。
+func (d *Deps) checkInboundRef(outboundServerID, targetInboundID, excludeOutboundID uint64) string {
+	var target models.Inbound
+	if err := d.DB.First(&target, targetInboundID).Error; err != nil {
+		return "引用的入站不存在"
+	}
+	if !target.Enabled {
+		return "引用的入站已停用"
+	}
+	if target.Type == models.InboundTypeIdle {
+		return "引用的入站为 idle，请先启用为 user/relay"
+	}
+	if d.wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOutboundID) {
+		return "引用将形成转发环路（A→B→A），已拒绝"
+	}
+	return ""
+}
+
+// wouldCreateRefCycle 环判定：出站 X（在 outboundServerID 服务器上）引用 targetInboundID。
+// 从 target 出发沿「目标所在服务器的出站引用」扩展，若可达 outboundServerID 的任一入站
+// （或回到 target 自身），则 X 会闭合转发环（A→B→A）。
+func (d *Deps) wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOutboundID uint64) bool {
+	reach := map[uint64]bool{targetInboundID: true}
+	queue := []uint64{targetInboundID}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		var inb models.Inbound
+		if err := d.DB.First(&inb, cur).Error; err != nil {
+			continue
+		}
+		if inb.ServerID == outboundServerID {
+			return true // 可达出站所在服务器的入站 → 闭合
+		}
+		var outs []models.ServerOutbound
+		d.DB.Where("server_id = ? AND inbound_ref IS NOT NULL AND id != ?", inb.ServerID, excludeOutboundID).Find(&outs)
+		for _, ob := range outs {
+			if !ob.Enabled || ob.InboundRef == nil {
+				continue
+			}
+			ref := *ob.InboundRef
+			if ref == targetInboundID {
+				return true
+			}
+			if !reach[ref] {
+				reach[ref] = true
+				queue = append(queue, ref)
+			}
+		}
+	}
+	return false
+}
+
+// ensureRelayMark 引用目标入站自动标记 relay。
+func (d *Deps) ensureRelayMark(targetInboundID uint64) {
+	d.DB.Model(&models.Inbound{}).Where("id = ?", targetInboundID).Update("type", models.InboundTypeRelay)
+}
+
+// demoteIfUnreferenced 目标入站不再被任何出站引用时回 idle（管理员可再改回）。
+func (d *Deps) demoteIfUnreferenced(targetInboundID uint64) {
+	var cnt int64
+	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", targetInboundID).Count(&cnt)
+	if cnt == 0 {
+		d.DB.Model(&models.Inbound{}).Where("id = ?", targetInboundID).Update("type", models.InboundTypeIdle)
+	}
 }
 
 // AdminGetServerRoutingRules GET /api/v1/admin/servers/:id/routing
