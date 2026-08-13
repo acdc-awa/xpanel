@@ -14,6 +14,9 @@ type Server struct {
 	Status                int        `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
 	DefaultOutboundTag    string     `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string     `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
+	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
+	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）
+	DefaultOutboundDS string `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
 	LastSeenAt            *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`

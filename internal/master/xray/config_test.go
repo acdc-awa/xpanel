@@ -803,3 +803,65 @@ func TestStreamSecurity(t *testing.T) {
 		t.Errorf("got %q", s)
 	}
 }
+
+// TestGenerate_DefaultOutboundDS：默认出口（freedom）出站解析策略注入——
+// Server 配 UseIP → direct 出站 settings.domainStrategy=UseIP；AsIs → 模板默认不动；
+// DB 出站显式 UseIPv4 → 不被覆盖；routing.domainStrategy 独立不受影响。
+func TestGenerate_DefaultOutboundDS(t *testing.T) {
+	gen := func(ds string) map[string]any {
+		inbounds := []models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}
+		raw, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, nil, "direct", "IPIfNonMatch", ds)
+		if err != nil {
+			t.Fatalf("Generate failed: %v", err)
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+		return parsed
+	}
+
+	findDirectDS := func(parsed map[string]any) string {
+		for _, o := range asArray(t, parsed["outbounds"], "outbounds") {
+			m := asObject(t, o, "outbound")
+			if m["tag"] == "direct" {
+				settings := asObject(t, m["settings"], "direct settings")
+				ds, _ := settings["domainStrategy"].(string)
+				return ds
+			}
+		}
+		t.Fatal("direct outbound not found")
+		return ""
+	}
+
+	// UseIP 注入
+	if got := findDirectDS(gen("UseIP")); got != "UseIP" {
+		t.Fatalf("UseIP injection failed: %s", got)
+	}
+	// AsIs 不动模板默认
+	if got := findDirectDS(gen("AsIs")); got != "AsIs" {
+		t.Fatalf("AsIs should keep template default: %s", got)
+	}
+	// routing.domainStrategy 独立（IPIfNonMatch 生效）
+	parsed := gen("UseIP")
+	routing := asObject(t, parsed["routing"], "routing")
+	if got, _ := routing["domainStrategy"].(string); got != "IPIfNonMatch" {
+		t.Fatalf("routing domainStrategy should be IPIfNonMatch: %s", got)
+	}
+
+	// DB 出站显式 UseIPv4（tag=direct 被 DB 出站覆盖场景）→ 不覆盖
+	outbounds := []models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
+	}
+	raw, err := xray.Generate([]models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}, outbounds, nil, vlessTestUser(), nil, nil, "direct", "", "UseIP")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed2 map[string]any
+	if err := json.Unmarshal(raw, &parsed2); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if got := findDirectDS(parsed2); got != "UseIPv4" {
+		t.Fatalf("explicit UseIPv4 should not be overwritten: %s", got)
+	}
+}

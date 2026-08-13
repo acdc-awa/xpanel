@@ -51,14 +51,18 @@ async function loadServers() {
   }
 }
 
-// ---- 默认出口 & 域名策略（随服务器切换） ----
+// ---- 默认出口 & 出站/路由策略（随服务器切换） ----
+// 出站策略 = 默认出口（freedom）的域名解析策略 AsIs/UseIP/UseIPv4/UseIPv6（出站连接阶段）；
+// 路由策略 = routing 段 domainStrategy AsIs/IPIfNonMatch/IPOnDemand（路由匹配阶段，语义不同）
 const defaultOutboundTag = ref('direct')
+const defaultOutboundDS = ref('AsIs')
 const routingDomainStrategy = ref('AsIs')
 const defaultSaving = ref(false)
 
 watch(currentServer, (s) => {
   if (s) {
     defaultOutboundTag.value = s.default_outbound_tag || 'direct'
+    defaultOutboundDS.value = s.default_outbound_domain_strategy || 'AsIs'
     routingDomainStrategy.value = s.routing_domain_strategy || 'AsIs'
   }
 })
@@ -71,6 +75,7 @@ async function saveDefaultOutbound() {
   try {
     const { data } = await updateServer(currentServer.value.id, {
       default_outbound_tag: defaultOutboundTag.value,
+      default_outbound_domain_strategy: defaultOutboundDS.value,
       routing_domain_strategy: routingDomainStrategy.value,
     })
     if (data.code === 0) {
@@ -78,6 +83,7 @@ async function saveDefaultOutbound() {
       const s = currentServer.value
       if (s) {
         s.default_outbound_tag = defaultOutboundTag.value
+        s.default_outbound_domain_strategy = defaultOutboundDS.value
         s.routing_domain_strategy = routingDomainStrategy.value
       }
     } else {
@@ -314,13 +320,20 @@ onMounted(async () => {
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <BaseCard v-if="currentServer" title="默认出口与域名策略" style="margin-bottom: 14px">
+      <BaseCard v-if="currentServer" title="默认出口与出站策略" style="margin-bottom: 14px">
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
           <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap">默认出口：</span>
-          <el-select v-model="defaultOutboundTag" style="width: 160px" size="small" :disabled="outboundTags.length === 0">
+          <el-select v-model="defaultOutboundTag" style="width: 150px" size="small" :disabled="outboundTags.length === 0">
             <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
           </el-select>
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">域名策略：</span>
+          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">出站策略：</span>
+          <el-select v-model="defaultOutboundDS" style="width: 170px" size="small">
+            <el-option label="AsIs（域名直连）" value="AsIs" />
+            <el-option label="UseIP（解析为 IP 连接）" value="UseIP" />
+            <el-option label="UseIPv4（仅 IPv4）" value="UseIPv4" />
+            <el-option label="UseIPv6（仅 IPv6）" value="UseIPv6" />
+          </el-select>
+          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">路由策略：</span>
           <el-select v-model="routingDomainStrategy" style="width: 180px" size="small">
             <el-option label="AsIs（保持原样）" value="AsIs" />
             <el-option label="IPIfNonMatch（先域名后 IP）" value="IPIfNonMatch" />
@@ -329,6 +342,9 @@ onMounted(async () => {
           <el-button size="small" type="primary" :loading="defaultSaving" @click="saveDefaultOutbound">保存</el-button>
           <span v-if="outboundTags.length === 0" class="muted" style="font-size: 12px">（暂无出站，请先在「出站」中添加）</span>
         </div>
+        <p class="muted" style="font-size: 12px; margin: 6px 0 0">
+          出站策略：默认出口（freedom）对目标域名的解析方式（UseIP 系列）；路由策略：路由规则匹配阶段的域名解析策略（IPIfNonMatch 系列）——两者语义不同，独立生效。
+        </p>
       </BaseCard>
 
       <BaseCard>

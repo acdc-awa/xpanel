@@ -180,7 +180,7 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy)
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
 	if err != nil {
 		return "", err
 	}

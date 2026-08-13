@@ -339,7 +339,7 @@ type GenerateContext struct {
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
 // defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string) ([]byte, error) {
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
 	cfg := LoadTemplate()
 
 	// 旧数据/测试夹具可能无 Type（DB 默认 user）——归一化避免"未知类型"
@@ -371,6 +371,23 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 
 	// 1. 出站：模板基础出站 + 节点自定义出站叠加，然后按默认出口排序
 	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
+	// 默认出口（freedom）出站解析策略注入：AsIs/UseIP/UseIPv4/UseIPv6（作用于出站连接阶段，
+	// 与 routing.domainStrategy 语义不同；模板/DB 已显式配置非 AsIs 时不覆盖）
+	if len(defaultOutboundDS) > 0 && defaultOutboundDS[0] != "" && defaultOutboundDS[0] != "AsIs" {
+		if list, ok := cfg["outbounds"].([]any); ok {
+			for _, item := range list {
+				m, ok := item.(map[string]any)
+				if !ok || m["tag"] != defaultOutboundTag {
+					continue
+				}
+				if settings, ok := m["settings"].(map[string]any); ok {
+					if cur, _ := settings["domainStrategy"].(string); cur == "" || cur == "AsIs" {
+						settings["domainStrategy"] = defaultOutboundDS[0]
+					}
+				}
+			}
+		}
+	}
 
 	// 2. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加
 	routing := map[string]any{}
