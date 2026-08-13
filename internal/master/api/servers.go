@@ -190,6 +190,9 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	if req.DefaultOutboundTag != nil {
 		updates["default_outbound_tag"] = *req.DefaultOutboundTag
 	}
+	if req.RoutingDomainStrategy != nil {
+		updates["routing_domain_strategy"] = *req.RoutingDomainStrategy
+	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&srv).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新失败")
@@ -221,7 +224,15 @@ func (d *Deps) AdminResetSecret(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	util.OK(c, gin.H{"node_id": srv.NodeID, "secret": secret})
+	webBase := ""
+	if d.Site != nil {
+		webBase = d.Site.WebBase()
+	}
+	util.OK(c, gin.H{
+		"node_id":     srv.NodeID,
+		"secret":      secret, // 仅此一次返回明文
+		"install_cmd": installCmd(webBase, d.Cfg.App.PublicURL, c.Request.Host, srv.NodeID, secret),
+	})
 }
 
 // AdminDeleteServer DELETE /api/v1/admin/servers/:id —— 删除服务器并级联清理入站/授权/待推送配置/节点上报。

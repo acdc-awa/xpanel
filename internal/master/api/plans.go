@@ -11,20 +11,22 @@ import (
 )
 
 type planView struct {
-	ID             uint64    `json:"id"`
-	Name           string    `json:"name"`
-	PriceCents     int64     `json:"price_cents"`
-	TrafficGB      int64     `json:"traffic_gb"`
-	DurationDays   int       `json:"duration_days"`
-	SpeedLimitKbps int64     `json:"speed_limit_kbps"`
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID               uint64    `json:"id"`
+	Name             string    `json:"name"`
+	PriceCents       int64     `json:"price_cents"`
+	TrafficGB        int64     `json:"traffic_gb"`
+	DurationDays     int       `json:"duration_days"`
+	SpeedLimitKbps   int64     `json:"speed_limit_kbps"`
+	PermissionGroupID uint64   `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 func toPlanView(p *models.Plan) planView {
 	return planView{
 		ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays: p.DurationDays, SpeedLimitKbps: p.SpeedLimitKbps,
+		PermissionGroupID: p.PermissionGroupID,
 		Enabled: p.Enabled, CreatedAt: p.CreatedAt,
 	}
 }
@@ -46,19 +48,29 @@ func (d *Deps) AdminPlans(c *gin.Context) {
 // AdminCreatePlan POST /api/v1/admin/plans
 func (d *Deps) AdminCreatePlan(c *gin.Context) {
 	var req struct {
-		Name           string `json:"name" binding:"required,max=64"`
-		PriceCents     int64  `json:"price_cents" binding:"required,min=0"`
-		TrafficGB      int64  `json:"traffic_gb" binding:"required,min=1"`
-		DurationDays   int    `json:"duration_days" binding:"required,min=1"`
-		SpeedLimitKbps int64  `json:"speed_limit_kbps"`
+		Name              string `json:"name" binding:"required,max=64"`
+		PriceCents        int64  `json:"price_cents" binding:"required,min=0"`
+		TrafficGB         int64  `json:"traffic_gb" binding:"required,min=1"`
+		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
+		SpeedLimitKbps    int64  `json:"speed_limit_kbps"`
+		PermissionGroupID uint64 `json:"permission_group_id"` // 0=不绑定
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
+	if req.PermissionGroupID != 0 {
+		var cnt int64
+		d.DB.Model(&models.PermissionGroup{}).Where("id = ?", req.PermissionGroupID).Count(&cnt)
+		if cnt == 0 {
+			util.BadRequest(c, "权限组不存在")
+			return
+		}
+	}
 	plan := models.Plan{
 		Name: req.Name, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
-		DurationDays: req.DurationDays, SpeedLimitKbps: req.SpeedLimitKbps, Enabled: true,
+		DurationDays: req.DurationDays, SpeedLimitKbps: req.SpeedLimitKbps,
+		PermissionGroupID: req.PermissionGroupID, Enabled: true,
 	}
 	if err := d.DB.Create(&plan).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -80,16 +92,25 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name           *string `json:"name"`
-		PriceCents     *int64  `json:"price_cents"`
-		TrafficGB      *int64  `json:"traffic_gb"`
-		DurationDays   *int    `json:"duration_days"`
-		SpeedLimitKbps *int64  `json:"speed_limit_kbps"`
-		Enabled        *bool   `json:"enabled"`
+		Name              *string `json:"name"`
+		PriceCents        *int64  `json:"price_cents"`
+		TrafficGB         *int64  `json:"traffic_gb"`
+		DurationDays      *int    `json:"duration_days"`
+		SpeedLimitKbps    *int64  `json:"speed_limit_kbps"`
+		PermissionGroupID *uint64 `json:"permission_group_id"` // 显式 0 解绑
+		Enabled           *bool   `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
+	}
+	if req.PermissionGroupID != nil && *req.PermissionGroupID != 0 {
+		var cnt int64
+		d.DB.Model(&models.PermissionGroup{}).Where("id = ?", *req.PermissionGroupID).Count(&cnt)
+		if cnt == 0 {
+			util.BadRequest(c, "权限组不存在")
+			return
+		}
 	}
 	updates := map[string]any{}
 	if req.Name != nil {
@@ -106,6 +127,9 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	}
 	if req.SpeedLimitKbps != nil {
 		updates["speed_limit_kbps"] = *req.SpeedLimitKbps
+	}
+	if req.PermissionGroupID != nil {
+		updates["permission_group_id"] = *req.PermissionGroupID
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled

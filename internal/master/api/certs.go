@@ -13,13 +13,22 @@ import (
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
+// certRefView 证书被引用位置（入站所在服务器 + 入站标签）。
+type certRefView struct {
+	ServerID   uint64 `json:"server_id"`
+	ServerName string `json:"server_name"`
+	InboundID  uint64 `json:"inbound_id"`
+	InboundTag string `json:"inbound_tag"`
+}
+
 // certView 证书对外结构（PEM 不回传，防私钥泄露）。
 type certView struct {
-	ID        uint64 `json:"id"`
-	Domain    string `json:"domain"`
-	NotAfter  string `json:"not_after"`
-	Remark    string `json:"remark"`
-	CreatedAt string `json:"created_at"`
+	ID        uint64        `json:"id"`
+	Domain    string        `json:"domain"`
+	NotAfter  string        `json:"not_after"`
+	Remark    string        `json:"remark"`
+	Refs      []certRefView `json:"refs"` // 引用该证书的入站（服务器/标签）
+	CreatedAt string        `json:"created_at"`
 }
 
 func toCertView(c *models.Cert) certView {
@@ -39,16 +48,49 @@ type certForm struct {
 	Remark  string `json:"remark"`
 }
 
-// AdminCerts GET /api/v1/admin/certs —— 证书列表（不含 PEM）。
+// AdminCerts GET /api/v1/admin/certs —— 证书列表（不含 PEM，附带引用位置）。
 func (d *Deps) AdminCerts(c *gin.Context) {
 	var list []models.Cert
 	if err := d.DB.Order("id DESC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
+	// 引用聚合：cert_id → 引用入站（服务器名）
+	refMap := map[uint64][]certRefView{}
+	var inbounds []models.Inbound
+	if err := d.DB.Where("cert_id IS NOT NULL").Find(&inbounds).Error; err == nil && len(inbounds) > 0 {
+		serverIDs := make([]uint64, 0, len(inbounds))
+		seenSrv := map[uint64]bool{}
+		for _, inb := range inbounds {
+			if inb.CertID != nil && !seenSrv[inb.ServerID] {
+				seenSrv[inb.ServerID] = true
+				serverIDs = append(serverIDs, inb.ServerID)
+			}
+		}
+		srvName := map[uint64]string{}
+		if len(serverIDs) > 0 {
+			var servers []models.Server
+			if err := d.DB.Select("id", "name").Where("id IN ?", serverIDs).Find(&servers).Error; err == nil {
+				for _, s := range servers {
+					srvName[s.ID] = s.Name
+				}
+			}
+		}
+		for _, inb := range inbounds {
+			if inb.CertID == nil {
+				continue
+			}
+			refMap[*inb.CertID] = append(refMap[*inb.CertID], certRefView{
+				ServerID: inb.ServerID, ServerName: srvName[inb.ServerID],
+				InboundID: inb.ID, InboundTag: inb.Tag,
+			})
+		}
+	}
 	items := make([]certView, 0, len(list))
 	for i := range list {
-		items = append(items, toCertView(&list[i]))
+		v := toCertView(&list[i])
+		v.Refs = refMap[list[i].ID]
+		items = append(items, v)
 	}
 	util.OK(c, gin.H{"items": items})
 }
