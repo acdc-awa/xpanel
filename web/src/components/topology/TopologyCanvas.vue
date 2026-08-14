@@ -5,21 +5,19 @@ import {
   Handle,
   Position,
   MarkerType,
-  useVueFlow,
   type Connection,
   type Edge,
   type EdgeMouseEvent,
   type GraphNode,
   type NodeDragEvent,
   type NodeMouseEvent,
-  type NodeProps,
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { FullScreen, MagicStick, RefreshRight } from '@element-plus/icons-vue'
 import {
   createServerOutbound,
   createServerRoutingRule,
@@ -61,12 +59,9 @@ interface BoxData {
 
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
+const isFullscreen = ref(false)
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
-// 本地 localStorage 存 { hash, positions, widths }——hash = 上次与云端同步/点保存时的内容哈希。
-// 修改布局只更新内容不更新 hash（= 未保存标记，刷新仍复用本地，修改不丢）；
-// 打开时对比云端 hash：一致 → 直接复用本地（秒显）；不一致 → 云端被别的浏览器保存过 → 下载覆盖。
-// 点「保存布局」按钮才算新 hash 上传云端。
 const LAYOUT_KEY = 'topology-layout'
 
 interface LayoutData {
@@ -85,7 +80,7 @@ function loadLayoutLocal(): LayoutData {
   } catch {
     /* 解析失败 → 空布局 */
   }
-  // 兼容旧版双 key（topology-box-positions / topology-box-widths）→ 迁移为单 key 后复用
+  // 兼容旧版双 key 迁移
   try {
     const oldPos = localStorage.getItem('topology-box-positions')
     const oldWidths = localStorage.getItem('topology-box-widths')
@@ -133,10 +128,9 @@ function contentHash(positions: Record<string, unknown>, widths: Record<string, 
 const localLayout = loadLayoutLocal()
 const boxPositions = new Map<string, { x: number; y: number }>(Object.entries(localLayout.positions))
 const boxWidths = new Map<string, number>(Object.entries(localLayout.widths))
-// 未保存修改标记：拖动/拉伸后置 true → 显示「保存布局」按钮；保存成功后清 false
 const layoutDirty = ref(false)
 
-// 云端同步：打开时拉取，hash 不一致（云端被别的浏览器保存过）→ 下载覆盖本地；一致 → 复用本地
+// 云端同步：打开时拉取，hash 不一致 → 下载覆盖本地；一致 → 复用本地
 onMounted(async () => {
   try {
     const { data } = await getTopologyLayout()
@@ -162,7 +156,7 @@ onMounted(async () => {
   }
 })
 
-// 「保存布局」按钮：算内容哈希上传云端，成功后更新本地 hash（= 已同步）
+// 「保存布局」按钮：算内容哈希上传云端，成功后更新本地 hash
 async function saveLayoutToCloud() {
   const positions = Object.fromEntries(boxPositions)
   const widths = Object.fromEntries(boxWidths)
@@ -184,17 +178,20 @@ async function saveLayoutToCloud() {
   }
 }
 
-const ROW_H = 40 // 增加行高以适配药丸样式
+const ROW_H = 40
 const HEADER_H = 48
 const TITLE_H = 30
-const BOX_W = 440 // 与 .server-box 宽度一致（CSS），端点坐标计算用
+const DEFAULT_BOX_W = 440
 
-// 盒子渲染高度（与模板布局一致）：头部 + 标题 + 行数 + 底部边距
+function getBoxWidth(serverId: number | string): number {
+  const id = typeof serverId === 'string' && serverId.startsWith('server-') ? serverId : `server-${serverId}`
+  return boxWidths.get(id) ?? DEFAULT_BOX_W
+}
+
 function boxHeight(inbCount: number, outCount: number) {
   return HEADER_H + TITLE_H + Math.max(Math.max(inbCount, outCount), 1) * ROW_H + 16
 }
 
-// 节点当前位置（记住的拖动位置或默认布局）
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
   return boxPositions.get(`server-${s.id}`) ?? { x: 40 + idx * 520, y: 24 }
 }
@@ -205,28 +202,131 @@ function typeInfo(t?: string) {
   return { cls: 'user', text: '用户' }
 }
 
+// 提取入站传输层与安全层摘要标签
+function inboundSummary(inb: TopologyData['inbounds'][number]) {
+  let net = 'TCP'
+  let sec = ''
+  try {
+    if (inb.stream_settings) {
+      const s = JSON.parse(inb.stream_settings)
+      if (s.network) net = String(s.network).toUpperCase()
+      if (s.security) {
+        const secUpper = String(s.security).toUpperCase()
+        if (secUpper === 'REALITY') sec = 'REALITY'
+        else if (secUpper === 'TLS') sec = 'TLS'
+      }
+    }
+  } catch {
+    /* ignore json parse error */
+  }
+  return {
+    port: inb.port,
+    net,
+    sec,
+  }
+}
 
-
-// 盒内路由线：S 形贝塞尔——入站内点（盒中线左）→ 出站内点（盒中线右），横穿两列之间的
-// 走线走廊（标签都靠边，走廊空旷），无论行差多少都不经过任何标签
+// 盒内路由线：S 形贝塞尔
 function boxRulePath(sx: number, sy: number, tx: number, ty: number) {
   const mx = (sx + tx) / 2
   return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`
 }
 
-// 跨盒引用线（方案④ 直-弧-直）：水平直出/直入 30px（垂直盒缘）→ 贝塞尔弧过渡 → 水平直入，
-// 电路板走线式；被其他盒子阻挡时改下方 U 形贝塞尔绕行（drop 到被挡盒之下）
+// 跨盒引用线：全向平滑 S 形贝塞尔走线（右出左入，遇中间盒子阻挡自动下垂 U 形绕行）
 function refEdgePath(sx: number, sy: number, tx: number, ty: number, detour: boolean, drop: number) {
-  const dir = tx >= sx ? 1 : -1
-  if (detour) {
-    return `M ${sx} ${sy} C ${sx} ${drop}, ${tx} ${drop}, ${tx} ${ty}`
+  if (detour && drop > 0) {
+    const c1x = sx + 60
+    const c2x = tx - 60
+    const midX = (sx + tx) / 2
+    return `M ${sx} ${sy} C ${c1x} ${sy}, ${c1x} ${drop}, ${midX} ${drop} C ${c2x} ${drop}, ${c2x} ${ty}, ${tx} ${ty}`
   }
-  const span = Math.abs(tx - sx)
-  const seg = Math.min(30, span * 0.15)
-  const ax = sx + seg * dir
-  const bx = tx - seg * dir
-  const arc = Math.abs(bx - ax) * 0.25
-  return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc * dir} ${sy}, ${bx - arc * dir} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
+
+  const dx = tx - sx
+  const dy = ty - sy
+
+  if (dx >= 40) {
+    // 1. 标准正向走线（源在左，目标在右）：丝滑水平 S 形贝塞尔曲线
+    const curvature = Math.max(40, dx * 0.45)
+    return `M ${sx} ${sy} C ${sx + curvature} ${sy}, ${tx - curvature} ${ty}, ${tx} ${ty}`
+  }
+
+  // 2. 反向/垂直堆叠走线（目标在源的左方、同列或垂直堆叠）：
+  // 严格保持「右侧水平向右引出 -> 大 S 弧度平滑过渡 -> 左侧水平从左接入」的接线感，彻底杜绝斜切穿模
+  const offset = Math.max(60, Math.abs(dy) * 0.4, Math.abs(dx) * 0.3)
+  let c1y = sy
+  let c2y = ty
+  if (Math.abs(dy) < 30) {
+    // 水平高度接近时略向上弯曲
+    c1y = sy - 40
+    c2y = ty - 40
+  }
+  return `M ${sx} ${sy} C ${sx + offset} ${c1y}, ${tx - offset} ${c2y}, ${tx} ${ty}`
+}
+
+// 动态重算所有跨盒引用边的阻挡与绕行高度（支持动态 boxWidth）
+function recalcDetours() {
+  if (!props.topology) return
+  const data = props.topology
+  const idxByServer = new Map(data.servers.map((s, i) => [s.id, i]))
+  const inbByServer = new Map<number, TopologyData['inbounds']>()
+  for (const inb of data.inbounds) {
+    if (!inbByServer.has(inb.server_id)) inbByServer.set(inb.server_id, [])
+    inbByServer.get(inb.server_id)!.push(inb)
+  }
+  const outByServer = new Map<number, BoxOutbound[]>()
+  for (const out of data.outbounds) {
+    if (out.protocol === 'blackhole') continue
+    if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
+    outByServer.get(out.server_id)!.push({ ...out, id: String(out.id) })
+  }
+
+  const rawEdges = edges.value as unknown as Edge[]
+  for (const edge of rawEdges) {
+    if (!edge.id.startsWith('ref-')) continue
+    const outboundId = Number(edge.id.slice(4))
+    const out = data.outbounds.find((o) => o.id === outboundId)
+    if (!out || !out.inbound_ref) continue
+    const inb = data.inbounds.find((i) => i.id === out.inbound_ref)
+    if (!inb) continue
+
+    const srcSrv = data.servers.find((s) => s.id === out.server_id)
+    const tgtSrv = data.servers.find((s) => s.id === inb.server_id)
+    if (!srcSrv || !tgtSrv) continue
+
+    const srcPos = nodePosOf(srcSrv, idxByServer.get(out.server_id) ?? 0)
+    const tgtPos = nodePosOf(tgtSrv, idxByServer.get(inb.server_id) ?? 0)
+    const srcW = getBoxWidth(srcSrv.id)
+
+    const outList = outByServer.get(out.server_id) ?? []
+    const srcRow = outList.findIndex((o) => o.id === String(out.id))
+    const sx = srcPos.x + srcW
+    const sy = srcPos.y + HEADER_H + TITLE_H + srcRow * ROW_H + ROW_H / 2
+
+    const inbList = inbByServer.get(inb.server_id) ?? []
+    const tgtRow = inbList.findIndex((i) => i.id === inb.id)
+    const tx = tgtPos.x
+    const ty = tgtPos.y + HEADER_H + TITLE_H + tgtRow * ROW_H + ROW_H / 2
+
+    let detour = false
+    let blockBottom = 0
+    for (const s2 of data.servers) {
+      if (s2.id === out.server_id || s2.id === inb.server_id) continue
+      const p2 = nodePosOf(s2, idxByServer.get(s2.id) ?? 0)
+      const w2 = getBoxWidth(s2.id)
+      const h2 = boxHeight(inbByServer.get(s2.id)?.length ?? 0, (outByServer.get(s2.id)?.length ?? 0) + 1)
+      if (
+        p2.x < Math.max(sx, tx) &&
+        p2.x + w2 > Math.min(sx, tx) &&
+        p2.y < Math.max(sy, ty) &&
+        p2.y + h2 > Math.min(sy, ty)
+      ) {
+        detour = true
+        blockBottom = Math.max(blockBottom, p2.y + h2)
+      }
+    }
+    const drop = detour ? Math.max(blockBottom + 50, Math.max(sy, ty) + 140) : 0
+    edge.data = { detour, drop }
+  }
 }
 
 function buildGraph(data: TopologyData) {
@@ -235,8 +335,7 @@ function buildGraph(data: TopologyData) {
     if (!inbByServer.has(inb.server_id)) inbByServer.set(inb.server_id, [])
     inbByServer.get(inb.server_id)!.push(inb)
   }
-  // 出站按服务器分组；blackhole/blocked 不参与拓扑（服务器表单单独管理），
-  // 每盒固定追加一行虚拟「direct」直连出站（模板 freedom，tag=direct）
+
   const outByServer = new Map<number, BoxOutbound[]>()
   for (const out of data.outbounds) {
     if (out.protocol === 'blackhole') continue
@@ -258,16 +357,15 @@ function buildGraph(data: TopologyData) {
   nodes.value = data.servers.map((s, idx) => ({
     id: `server-${s.id}`,
     type: 'serverbox',
-    position: boxPositions.get(`server-${s.id}`) ?? { x: 40 + idx * 520, y: 24 },
+    position: nodePosOf(s, idx),
     data: {
       server: s,
       inbounds: inbByServer.get(s.id) || [],
       outbounds: outByServer.get(s.id) || [],
-      boxWidth: boxWidths.get(`server-${s.id}`) ?? 440,
+      boxWidth: getBoxWidth(s.id),
     } as BoxData,
   })) as unknown as GraphNode[]
 
-  // 入站/出站 id → 节点 id 映射（边定位；虚拟 direct 无 DB id，不参与引用边）
   const inbNode = new Map<number, string>()
   const outNode = new Map<number, string>()
   for (const s of data.servers) {
@@ -277,43 +375,13 @@ function buildGraph(data: TopologyData) {
     }
   }
 
-  const idxByServer = new Map(data.servers.map((s, i) => [s.id, i]))
-
   const es: Edge[] = []
-  // InboundRef 实线（出站 → 落地入站；方案④ 直-弧-直；线路径被其他盒子阻挡 → 下方 U 形绕行）
+  // InboundRef 跨盒实线
   for (const out of data.outbounds) {
     if (out.protocol === 'blackhole' || !out.inbound_ref || !inbNode.has(out.inbound_ref)) continue
     const inb = data.inbounds.find((i) => i.id === out.inbound_ref)
     if (!inb) continue
-    // 端点绝对坐标：出站右缘 / 入站左缘，行中心
-    const srcPos = nodePosOf(data.servers.find((s) => s.id === out.server_id)!, idxByServer.get(out.server_id) ?? 0)
-    const outList = outByServer.get(out.server_id) ?? []
-    const srcRow = outList.findIndex((o) => o.id === String(out.id))
-    const sx = srcPos.x + BOX_W
-    const sy = srcPos.y + HEADER_H + TITLE_H + srcRow * ROW_H + ROW_H / 2
-    const tgtPos = nodePosOf(data.servers.find((s) => s.id === inb.server_id)!, idxByServer.get(inb.server_id) ?? 0)
-    const inbList = inbByServer.get(inb.server_id) ?? []
-    const tgtRow = inbList.findIndex((i) => i.id === inb.id)
-    const tx = tgtPos.x
-    const ty = tgtPos.y + HEADER_H + TITLE_H + tgtRow * ROW_H + ROW_H / 2
-    // 阻挡检测：线的 x 全程、y 在两端点之间，与任一其他盒子矩形相交 → 下方绕行
-    let detour = false
-    let blockBottom = 0
-    for (const s2 of data.servers) {
-      if (s2.id === out.server_id || s2.id === inb.server_id) continue
-      const p2 = nodePosOf(s2, idxByServer.get(s2.id) ?? 0)
-      const h2 = boxHeight(inbByServer.get(s2.id)?.length ?? 0, outByServer.get(s2.id)?.length ?? 0)
-      if (
-        p2.x < Math.max(sx, tx) &&
-        p2.x + BOX_W > Math.min(sx, tx) &&
-        p2.y < Math.max(sy, ty) &&
-        p2.y + h2 > Math.min(sy, ty)
-      ) {
-        detour = true
-        blockBottom = Math.max(blockBottom, p2.y + h2)
-      }
-    }
-    const drop = detour ? Math.max(blockBottom + 50, Math.max(sy, ty) + 140) : 0
+
     es.push({
       id: `ref-${out.id}`,
       source: outNode.get(out.id)!,
@@ -323,10 +391,11 @@ function buildGraph(data: TopologyData) {
       type: 'refedge',
       animated: true,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { detour, drop },
+      data: { detour: false, drop: 0 },
     })
   }
-  // 路由规则盒内虚线（入站 → 出站；目标出站匹配 DB 出站或虚拟 direct；inbound_tag 为空的全匹配规则不画）
+
+  // 路由规则盒内虚线
   for (const rule of data.routing_rules) {
     if (!rule.inbound_tag || !rule.enabled) continue
     const inb = data.inbounds.find((i) => i.tag === rule.inbound_tag && i.server_id === rule.server_id)
@@ -352,6 +421,7 @@ function buildGraph(data: TopologyData) {
     })
   }
   edges.value = es
+  recalcDetours()
 }
 
 watch(
@@ -362,27 +432,55 @@ watch(
   { immediate: true },
 )
 
-// ---- 交互：拖线 ----
-// 双点语义：盒内点（中线两侧）= 仅服务器内连接（入站内点 → 出站内点 = 路由规则）；
-//           边缘点（盒缘）= 对外接口（入站外点收引用线/发跨盒中转，出站外点发引用线，
-//           direct 绿点收本盒规则线）。入站外点为重叠双 handle（source+target 同位置，
-//           @vue-flow 落点按几何最近命中任意一个 → 等价匹配）。
+// ---- 交互：拖线实时合法性预检 ----
+function isValidConnection(conn: Connection): boolean {
+  if (!props.editable || !props.topology) return false
+  const src = conn.sourceHandle ?? ''
+  const tgt = conn.targetHandle ?? ''
+  const outSrc = src.match(/^out-src-(\d+)$/)
+  const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const inbSrc = src.match(/^inb-src-(\d+)$/)
+  const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
+  const outAny = tgt.match(/^(?:out-src|out-tgt)-(?:(\d+)|direct-(\d+))$/)
+
+  if (outSrc && inbAny) {
+    const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
+    const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
+    return !!(out && inb && out.server_id !== inb.server_id)
+  }
+  if (inbSrcExt && inbAny) {
+    const inb1 = props.topology.inbounds.find((i) => i.id === Number(inbSrcExt[1]))
+    const inb2 = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
+    return !!(inb1 && inb2 && inb1.server_id !== inb2.server_id)
+  }
+  if (inbSrc && outAny) {
+    const inb = props.topology.inbounds.find((i) => i.id === Number(inbSrc[1]))
+    if (!inb) return false
+    if (outAny[2]) {
+      return inb.server_id === Number(outAny[2])
+    }
+    const out = props.topology.outbounds.find((o) => o.id === Number(outAny[1]))
+    return !!(out && inb.server_id === out.server_id)
+  }
+  return false
+}
+
+// ---- 交互：拖线建连接 ----
 async function handleConnect(conn: Connection) {
   if (!props.editable || !props.topology) return
   const src = conn.sourceHandle ?? ''
   const tgt = conn.targetHandle ?? ''
-  const outSrc = src.match(/^out-src-(\d+)$/) // 出站外点：发引用
-  const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/) // 入站外点：发跨盒中转
-  const inbSrc = src.match(/^inb-src-(\d+)$/) // 入站内点：发盒内规则
-  const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/) // 入站外点落点（引用/中转）
-  const outAny = tgt.match(/^(?:out-src|out-tgt)-(?:(\d+)|direct-(\d+))$/) // 出站落点（含 direct 绿点）
+  const outSrc = src.match(/^out-src-(\d+)$/)
+  const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const inbSrc = src.match(/^inb-src-(\d+)$/)
+  const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
+  const outAny = tgt.match(/^(?:out-src|out-tgt)-(?:(\d+)|direct-(\d+))$/)
 
   if (outSrc && inbAny) {
     await createRef(Number(outSrc[1]), Number(inbAny[1]))
   } else if (inbSrcExt && inbAny) {
     await createViaOutbound(Number(inbSrcExt[1]), Number(inbAny[1]))
   } else if (inbSrc && outAny) {
-    // outAny[1] = DB 出站 id；outAny[2] = 虚拟 direct（direct-<serverId>）
     if (outAny[2]) {
       openDirectRuleDialog(Number(inbSrc[1]), Number(outAny[2]))
     } else {
@@ -395,7 +493,7 @@ async function handleConnect(conn: Connection) {
   }
 }
 
-// 入站 → 他服务器入站：自动创建「via 出站」（vless 引用目标落地）+ 自动创建路由规则（源入站 → 新出站）
+// 入站 → 他服务器入站：自动创建「via 出站」+ 路由规则
 async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
   const data = props.topology!
   const srcInb = data.inbounds.find((i) => i.id === srcInboundId)
@@ -408,12 +506,11 @@ async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
   const srcSrv = data.servers.find((s) => s.id === srcInb.server_id)
   const tgtSrv = data.servers.find((s) => s.id === tgtInb.server_id)
   if (!srcSrv || !tgtSrv) return
-  // 出站 tag 自动命名：via-<目标入站 tag>，重名加序号
+
   let tag = `via-${tgtInb.tag}`
   const sameServerOuts = data.outbounds.filter((o) => o.server_id === srcInb.server_id)
   let n = 2
   while (sameServerOuts.some((o) => o.tag === tag)) tag = `via-${tgtInb.tag}-${n++}`
-  // 目标闲置：自动升级为 relay（落地转发），弹窗提示
   const promoteIdle = tgtInb.type === 'idle'
   try {
     await ElMessageBox.confirm(
@@ -470,7 +567,6 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   const inbServer = data.servers.find((s) => s.id === inb.server_id)?.name ?? `#${inb.server_id}`
-  // 目标闲置：自动升级为 relay（落地转发），弹窗提示
   const promoteIdle = inb.type === 'idle'
   try {
     await ElMessageBox.confirm(
@@ -539,7 +635,6 @@ function openRuleDialog(inboundId: number, outboundId: number) {
   ruleOpen.value = true
 }
 
-// 入站 → 虚拟 direct 出站（目标 tag = 服务器默认出口）
 function openDirectRuleDialog(inboundId: number, serverId: number) {
   const data = props.topology!
   const inb = data.inbounds.find((i) => i.id === inboundId)
@@ -589,11 +684,6 @@ async function saveRule() {
 }
 
 // ---- 交互：删线 ----
-// 取消弹窗/操作失败后取消该边选中（selected 提亮样式不残留，无需点空白区才能消除）
-// 用 vue-flow store 的 updateEdge（避免手改 edges 数组触发 TS 泛型深度推断）
-// 取消弹窗/操作失败后取消该边选中（selected 提亮样式不残留，无需点空白区才能消除）：
-// 直接改 v-model:edges 数组元素 + 替换引用触发 vue-flow 同步（edges.value 联合类型复杂，
-// 经宽松类型桥接避免 TS 泛型深度推断爆炸）
 function deselectEdge(id: string) {
   const raw = edges.value as unknown as { id: string; selected?: boolean }[]
   const edge = raw.find((e) => e.id === id)
@@ -610,7 +700,6 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     const outboundId = Number(edge.id.slice(4))
     const out = props.topology.outbounds.find((o) => o.id === outboundId)
     if (!out) return
-    // 拖线自动创建的 via 出站：删引用 = 连同出站与路由规则一起清理（后端级联删规则 + 目标回退原类型）
     if (out.tag.startsWith('via-')) {
       try {
         await ElMessageBox.confirm(
@@ -690,14 +779,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
   }
 }
 
-// 自定义横向拖拉伸逻辑（盒子右缘把手；宽度记忆本地 + 未保存标记）
+// 自定义横向拖拉伸逻辑
 function startBoxResize(e: MouseEvent, data: BoxData) {
   const nodeId = `server-${data.server.id}`
   const startX = e.clientX
-  const startWidth = data.boxWidth || 440
+  const startWidth = data.boxWidth || DEFAULT_BOX_W
   const onMouseMove = (moveEvent: MouseEvent) => {
     const deltaX = moveEvent.clientX - startX
-    const w = Math.max(320, Math.min(800, startWidth + deltaX))
+    const w = Math.max(340, Math.min(800, startWidth + deltaX))
     data.boxWidth = w
     boxWidths.set(nodeId, w)
     localLayout.widths = Object.fromEntries(boxWidths)
@@ -707,18 +796,19 @@ function startBoxResize(e: MouseEvent, data: BoxData) {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
     layoutDirty.value = true
+    recalcDetours()
   }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
 
-// ---- 交互：双击盒子 → 服务器抽屉 ----
+// 双击盒子 → 打开服务器抽屉
 function handleNodeDblClick(evt: NodeMouseEvent) {
   const box = evt.node.data as BoxData
   if (box?.server?.id) emit('open-server', box.server.id)
 }
 
-// 盒子拖动结束：更新本地布局（hash 不变 = 未保存）→ 显示「保存布局」按钮
+// 盒子拖动结束：更新本地布局 + 动态重算绕行
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
   if (node.position) {
@@ -726,19 +816,140 @@ function onNodeDragStop(evt: NodeDragEvent) {
     localLayout.positions = Object.fromEntries(boxPositions)
     saveLayoutLocal(localLayout)
     layoutDirty.value = true
+    recalcDetours()
   }
+}
+
+// ---- 交互：一键分层自动排版（DAG 拓扑分层）----
+function autoLayout() {
+  if (!props.topology || props.topology.servers.length === 0) return
+  const data = props.topology
+  const srvIds = data.servers.map((s) => s.id)
+  const upstream = new Map<number, Set<number>>()
+  for (const id of srvIds) upstream.set(id, new Set())
+
+  const inbServerMap = new Map<number, number>()
+  for (const inb of data.inbounds) inbServerMap.set(inb.id, inb.server_id)
+
+  for (const out of data.outbounds) {
+    if (out.inbound_ref && inbServerMap.has(out.inbound_ref)) {
+      const targetServerId = inbServerMap.get(out.inbound_ref)!
+      if (targetServerId !== out.server_id) {
+        upstream.get(targetServerId)?.add(out.server_id)
+      }
+    }
+  }
+
+  const layers = new Map<number, number>()
+  function getLayer(id: number, visited = new Set<number>()): number {
+    if (layers.has(id)) return layers.get(id)!
+    if (visited.has(id)) return 0
+    visited.add(id)
+    const ups = Array.from(upstream.get(id) ?? [])
+    if (ups.length === 0) {
+      layers.set(id, 0)
+      return 0
+    }
+    const maxUpLayer = Math.max(...ups.map((u) => getLayer(u, new Set(visited))))
+    const layer = maxUpLayer + 1
+    layers.set(id, layer)
+    return layer
+  }
+
+  for (const id of srvIds) getLayer(id)
+
+  const layerBuckets = new Map<number, number[]>()
+  for (const id of srvIds) {
+    const l = layers.get(id) ?? 0
+    if (!layerBuckets.has(l)) layerBuckets.set(l, [])
+    layerBuckets.get(l)!.push(id)
+  }
+
+  const sortedLayers = Array.from(layerBuckets.keys()).sort((a, b) => a - b)
+  let curX = 40
+  const GAP_X = 100
+  const GAP_Y = 32
+
+  for (const l of sortedLayers) {
+    const srvsInLayer = layerBuckets.get(l)!
+    let curY = 30
+    let maxColW = DEFAULT_BOX_W
+    for (const sid of srvsInLayer) {
+      const w = getBoxWidth(sid)
+      maxColW = Math.max(maxColW, w)
+      boxPositions.set(`server-${sid}`, { x: curX, y: curY })
+      const inbCount = data.inbounds.filter((i) => i.server_id === sid).length
+      const outCount = data.outbounds.filter((o) => o.server_id === sid && o.protocol !== 'blackhole').length + 1
+      curY += boxHeight(inbCount, outCount) + GAP_Y
+    }
+    curX += maxColW + GAP_X
+  }
+
+  localLayout.positions = Object.fromEntries(boxPositions)
+  saveLayoutLocal(localLayout)
+  layoutDirty.value = true
+
+  for (const node of nodes.value) {
+    const p = boxPositions.get(node.id)
+    if (p) node.position = { ...p }
+  }
+  recalcDetours()
+  ElMessage.success('已完成拓扑分层排版（入口 → 中转 → 落地）')
+}
+
+// 重置为默认一字排列
+function resetLayout() {
+  if (!props.topology) return
+  props.topology.servers.forEach((s, idx) => {
+    boxPositions.set(`server-${s.id}`, { x: 40 + idx * 520, y: 24 })
+    boxWidths.set(`server-${s.id}`, DEFAULT_BOX_W)
+  })
+  localLayout.positions = Object.fromEntries(boxPositions)
+  localLayout.widths = Object.fromEntries(boxWidths)
+  saveLayoutLocal(localLayout)
+  layoutDirty.value = true
+
+  for (const node of nodes.value) {
+    const p = boxPositions.get(node.id)
+    if (p) node.position = { ...p }
+    if (node.data) (node.data as BoxData).boxWidth = DEFAULT_BOX_W
+  }
+  recalcDetours()
+  ElMessage.success('已重置为默认排列')
+}
+
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value
 }
 
 const hasData = computed(() => !!props.topology && props.topology.servers.length > 0)
 </script>
 
 <template>
-  <div class="topology-wrap">
-    <!-- 布局未保存提示条：拖动/拉伸后出现，点「保存布局」算内容哈希上传云端（跨浏览器统一） -->
-    <div v-if="layoutDirty" class="layout-save-bar">
-      <span class="layout-save-tip">布局已修改</span>
-      <el-button size="small" type="primary" @click="saveLayoutToCloud">保存布局</el-button>
+  <div class="topology-wrap" :class="{ 'is-fullscreen': isFullscreen }">
+    <!-- 顶部微型操作栏 -->
+    <div class="canvas-top-bar">
+      <div class="top-bar-left">
+        <el-button-group size="small">
+          <el-button @click="autoLayout" title="根据拓扑链路（入口→中转→落地）自动分层排版">
+            <el-icon><MagicStick /></el-icon>&nbsp;自动排版
+          </el-button>
+          <el-button @click="resetLayout" title="重置为默认一字排列">
+            <el-icon><RefreshRight /></el-icon>&nbsp;重置网格
+          </el-button>
+        </el-button-group>
+        <el-button size="small" class="fs-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏查看'">
+          <el-icon><FullScreen /></el-icon>&nbsp;{{ isFullscreen ? '退出全屏' : '全屏' }}
+        </el-button>
+      </div>
+
+      <!-- 布局未保存提示条 -->
+      <div v-if="layoutDirty" class="layout-save-bar">
+        <span class="layout-save-tip">布局已修改</span>
+        <el-button size="small" type="primary" @click="saveLayoutToCloud">保存布局</el-button>
+      </div>
     </div>
+
     <VueFlow
       v-if="hasData"
       v-model:nodes="nodes"
@@ -746,6 +957,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       class="topology-canvas"
       :nodes-draggable="editable"
       :nodes-connectable="editable"
+      :is-valid-connection="isValidConnection"
       :min-zoom="0.15"
       :max-zoom="2"
       :fit-view-on-init="true"
@@ -756,7 +968,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     >
       <Background pattern-color="#334155" :gap="18" />
       <Controls position="bottom-left" />
-      <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线（宽透明 hit path 保证可点删；同色光晕底增强显眼度） -->
+
+      <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线 -->
       <template #edge-boxrule="e">
         <path
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit rule-hit"
@@ -765,7 +978,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <path class="boxrule-glow" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
         <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
       </template>
-      <!-- 跨盒引用线：方案④ 直-弧-直（被盒子阻挡时下方 U 形绕行），流动虚线+箭头 -->
+
+      <!-- 跨盒引用线：直-弧-直（阻挡 U 形绕行）-->
       <template #edge-refedge="e">
         <path
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit ref-hit"
@@ -781,8 +995,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           :marker-end="e.markerEnd"
         />
       </template>
+
       <template #node-serverbox="nodeProps">
-        <div class="server-box" :class="{ offline: !nodeProps.data.server.status }" :style="{ width: (nodeProps.data.boxWidth || 440) + 'px' }">
+        <div
+          class="server-box"
+          :class="{ offline: nodeProps.data.server.status !== 1 }"
+          :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
+        >
           <div
             v-show="nodeProps.selected"
             class="custom-resizer-right"
@@ -790,17 +1009,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           />
           <div class="sb-head">
             <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
-            <span class="name">{{ nodeProps.data.server.name }}</span>
-            <span class="host">{{ nodeProps.data.server.host }}</span>
+            <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
+            <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
+            <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
           </div>
 
           <div class="sb-cols">
-            <!-- 入站列：边缘外点（重叠双 handle）= 对外接口（收引用线 + 发跨盒中转）；标签贴左；
-                 盒内点（中线左）= 发盒内路由线 -->
+            <!-- 入站列：边缘外点（双 handle 叠加）= 对外接口；标签贴左；盒内点（中线左）= 发盒内规则 -->
             <div class="sb-col">
               <div class="sb-title">入站</div>
               <template v-if="nodeProps.data.inbounds.length > 0">
-                <div v-for="(inb, i) in nodeProps.data.inbounds" :key="inb.id" class="sb-row">
+                <div v-for="inb in nodeProps.data.inbounds" :key="inb.id" class="sb-row">
                   <Handle
                     type="target"
                     :id="`inb-tgt-${inb.id}`"
@@ -816,7 +1035,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     class="ep ext-src"
                   />
                   <span class="type-tag" :class="typeInfo(inb.type).cls">{{ typeInfo(inb.type).text }}</span>
-                  <span class="tag">{{ inb.tag }}</span>
+                  <span class="port-badge">:{{ inb.port }}</span>
+                  <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
+                  <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
+                  <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
                   <Handle
                     type="source"
                     :id="`inb-src-${inb.id}`"
@@ -829,12 +1051,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
               <div v-else class="sb-empty">暂无入站</div>
             </div>
 
-            <!-- 出站列：盒内点（中线右）= 收盒内路由线；边缘外点（右缘）= 发引用线；
-                 direct 虚拟行：绿点（右缘）收本盒规则线，不参与引用拖线；标签贴右 -->
+            <!-- 出站列：盒内点（中线右）= 收盒内规则；边缘外点（右缘）= 发引用线；direct 仅右缘绿点收线 -->
             <div class="sb-col">
               <div class="sb-title">出站</div>
               <template v-if="nodeProps.data.outbounds.length > 0">
-                <div v-for="(out, i) in nodeProps.data.outbounds" :key="out.id" class="sb-row" :class="{ 'direct-row': out.virtual }">
+                <div
+                  v-for="out in nodeProps.data.outbounds"
+                  :key="out.id"
+                  class="sb-row"
+                  :class="{ 'direct-row': out.virtual }"
+                >
+                  <!-- 左侧内端接口（所有出站包括 direct 均有，接收盒内路由规则） -->
                   <Handle
                     type="target"
                     :id="`out-tgt-${out.id}`"
@@ -842,7 +1069,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :connectable="editable"
                     class="ep in-ep"
                   />
-                  <span class="tag out-tag" :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : ''">{{ out.tag }}</span>
+                  <span
+                    class="tag out-tag"
+                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : ''"
+                    :title="out.tag"
+                  >
+                    {{ out.tag }}
+                  </span>
+                  <span v-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
+                  <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
+                  <span v-else class="out-proto-badge">{{ out.protocol }}</span>
+                  <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
                   <Handle
                     v-if="!out.virtual"
                     type="source"
@@ -851,13 +1088,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :connectable="editable"
                     class="ep ext-src"
                   />
-                  <Handle
+                  <span
                     v-else
-                    type="target"
-                    :id="`out-tgt-${out.id}`"
-                    :position="Position.Right"
-                    :connectable="editable"
-                    class="ep direct-ep"
+                    class="ep direct-ep-dot"
+                    title="直连出口（freedom）"
                   />
                 </div>
               </template>
@@ -872,7 +1106,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     </div>
 
     <!-- 路由规则弹窗 -->
-    <el-dialog v-model="ruleOpen" title="新建路由规则（拖线）" width="520px" append-to-body>
+    <el-dialog v-model="ruleOpen" title="新建路由规则（拖线）" width="540px" append-to-body>
       <el-form label-position="top">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
           <el-form-item label="入站（源）">
@@ -882,6 +1116,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             <el-input :model-value="ruleForm.outboundTag" disabled />
           </el-form-item>
         </div>
+
+        <div class="rule-presets">
+          <span class="preset-label">快捷填充:</span>
+          <el-tag size="small" class="preset-btn" @click="ruleForm.domain = 'geosite:cn'">国内域名 (geosite:cn)</el-tag>
+          <el-tag size="small" class="preset-btn" @click="ruleForm.ip = 'geoip:cn,geoip:private'">国内/内网 IP</el-tag>
+          <el-tag size="small" class="preset-btn" @click="ruleForm.protocol = 'http,tls'">HTTP/TLS 嗅探</el-tag>
+          <el-tag size="small" class="preset-btn" @click="ruleForm.port = '80,443'">Web 端口 (80,443)</el-tag>
+        </div>
+
         <p class="muted tip">匹配字段选填；留空 = 该入站全部流量走目标出站</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
           <el-form-item label="域名匹配"><el-input v-model="ruleForm.domain" placeholder="如 google.com（逗号分隔）" /></el-form-item>
@@ -908,31 +1151,72 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   overflow: hidden;
   background: #0f172a;
   position: relative;
+  transition: all 0.25s ease-in-out;
+
+  &.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1500;
+    border-radius: 0;
+    border: none;
+  }
 }
 .topology-canvas {
   width: 100%;
   height: 100%;
 }
-/* 布局未保存提示条（右上角浮动） */
-.layout-save-bar {
+
+/* 顶部微型操作栏 */
+.canvas-top-bar {
   position: absolute;
   top: 12px;
+  left: 14px;
   right: 14px;
   z-index: 20;
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+
+  .top-bar-left {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    pointer-events: auto;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+
+    .fs-btn {
+      margin-left: 2px;
+    }
+  }
+}
+
+/* 布局未保存提示条（右上角浮动） */
+.layout-save-bar {
+  pointer-events: auto;
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border: 1px solid rgba(251, 191, 36, 0.4);
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   .layout-save-tip {
     font-size: 12px;
     color: #fbbf24;
+    font-weight: 500;
   }
 }
+
 .topology-empty {
   height: 100%;
   display: flex;
@@ -944,28 +1228,54 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 }
 .tip {
   font-size: 12px;
-  margin: 0 0 10px;
+  margin: 8px 0 12px;
+}
+
+.rule-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  .preset-label {
+    font-size: 12px;
+    color: var(--x-text-3);
+  }
+  .preset-btn {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s;
+    &:hover {
+      opacity: 0.85;
+      transform: translateY(-1px);
+    }
+  }
 }
 
 /* ---- ServerBox 自定义节点 ---- */
 .server-box {
-  width: 440px; /* Default overridden by inline style */
-  min-width: 320px;
+  width: 440px;
+  min-width: 340px;
   position: relative;
-  background: rgba(30, 41, 59, 0.7);
+  background: rgba(30, 41, 59, 0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
   font-size: 12px;
   color: #e2e8f0;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   overflow: visible;
-  transition: all 0.3s ease;
+  transition: border-color 0.2s, box-shadow 0.2s;
+
   &.offline {
-    opacity: 0.6;
-    border-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(239, 68, 68, 0.2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    .sb-head {
+      background: linear-gradient(180deg, rgba(239, 68, 68, 0.08) 0%, transparent 100%);
+    }
   }
+
   .sb-head {
     display: flex;
     align-items: center;
@@ -973,8 +1283,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     padding: 0 16px;
     height: 48px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
     border-radius: 16px 16px 0 0;
+
     .status-dot {
       width: 8px;
       height: 8px;
@@ -985,14 +1296,27 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         box-shadow: 0 0 8px #34d399;
       }
       &.offline {
-        background: #64748b;
+        background: #ef4444;
+        box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
       }
     }
     .name {
       font-weight: 600;
       font-size: 14px;
       white-space: nowrap;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 140px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    .offline-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      font-weight: 500;
     }
     .host {
       margin-left: auto;
@@ -1001,23 +1325,25 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 130px;
+      max-width: 160px;
     }
   }
+
   .sb-cols {
     display: flex;
-    gap: 40px; /* 拉大中央间距，留出连线空间 */
+    gap: 36px;
     justify-content: space-between;
     padding: 0 16px 16px;
     width: 100%;
     box-sizing: border-box;
+
     .sb-col {
       flex: 1;
       min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      align-items: flex-start; /* 自动收缩适应标签宽度 */
+      align-items: flex-start;
     }
     .sb-col:last-child {
       align-items: flex-end;
@@ -1037,21 +1363,23 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       text-transform: uppercase;
     }
   }
+
   .sb-row {
-    position: relative; /* 关键：让绝对定位的 Handle 吸附在药丸边缘 */
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 10px;
+    gap: 6px;
+    padding: 0 8px;
     height: 34px;
     max-width: 100%;
     box-sizing: border-box;
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(15, 23, 42, 0.55);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 17px; /* Pill shape */
+    border-radius: 17px;
     transition: all 0.2s;
+
     &:hover {
-      background: rgba(15, 23, 42, 0.8);
+      background: rgba(15, 23, 42, 0.85);
       border-color: rgba(255, 255, 255, 0.15);
     }
 
@@ -1060,7 +1388,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 100px;
+      max-width: 110px;
     }
     .out-tag {
       font-weight: 600;
@@ -1076,10 +1404,56 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       background: rgba(52, 211, 153, 0.1);
       border-color: rgba(52, 211, 153, 0.2);
     }
+
+    .port-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: #38bdf8;
+      font-family: monospace;
+      flex: none;
+    }
+
+    .proto-badge {
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-weight: 600;
+      flex: none;
+      &.sec {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+      }
+      &.net {
+        background: rgba(56, 189, 248, 0.12);
+        color: #7dd3fc;
+      }
+    }
+
+    .out-proto-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+      flex: none;
+      background: rgba(148, 163, 184, 0.15);
+      color: #cbd5e1;
+      &.ref {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px solid rgba(251, 191, 36, 0.3);
+      }
+      &.direct {
+        background: rgba(52, 211, 153, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(52, 211, 153, 0.3);
+      }
+    }
+
     .type-tag {
       flex: none;
       font-size: 10px;
-      padding: 2px 6px;
+      padding: 1px 5px;
       border-radius: 10px;
       font-weight: 600;
       &.user {
@@ -1096,6 +1470,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       }
     }
   }
+
   .sb-empty {
     padding: 4px 10px;
     color: #64748b;
@@ -1109,10 +1484,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
 }
 
-/* 端点（双点结构）：
-   边缘点（盒缘）= 对外接口——ext-src 常显（发线，hover 蓝环）；ext-tgt 透明纯落点（与 ext-src 重叠，
-   @vue-flow 落点按几何最近命中任意一个），引用线/跨盒中转线收在此处
-   内点（盒中线两侧）= 盒内路由连接点，边框稍弱区分；direct 绿点（右缘）= 收本盒规则线 */
+/* 端点双点结构 */
 :deep(.server-box .ep) {
   width: 12px;
   height: 12px;
@@ -1139,13 +1511,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     z-index: 2;
     opacity: 0;
   }
-  /* 内点（盒内路由连接点）：边框稍弱，视觉上区分于外点 */
   &.in-ep {
     border-color: rgba(255, 255, 255, 0.15);
   }
-  /* direct 虚拟行绿点（右缘，收本盒规则线） */
-  &.direct-ep {
+  &.direct-ep-dot {
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
     border-color: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+    pointer-events: none;
   }
 }
 
@@ -1165,19 +1541,22 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 }
 </style>
 
-<!-- 全局样式：
-     1) edges 层提升到 nodes 之上（z-index 1000，压过一切）：盒内路由线/引用线始终可点可删，
-        拖动盒子后也不会被节点层盖住（每条边是独立 <svg class="vue-flow__edges"> 带内联 z-index: 0，
-        需 !important 压过；节点内联 z-index 恒为 0）
-     2) 自定义边 path 的样式不能放 scoped :deep——slot 内容的祖先链全是 vue-flow 内部
-        svg/g，无 data-v 祖先，:deep 选择器匹配不到 -->
+<!-- 连线专属样式（限定在 .topology-wrap 作用域内，确保连线始终在节点上方，且防穿透 Dialog） -->
 <style>
-.vue-flow__edges {
-  z-index: 9999 !important;
+.topology-wrap .vue-flow__edges {
+  z-index: 100 !important;
+  pointer-events: none !important;
 }
-/* 盒内路由线（自定义 boxrule 边）：含蓄天蓝淡光晕底 + 慢速流动虚线 */
-/* 注意：四条线的 transition 不能含 d——Chrome 把 SVG d 映射为 CSS 几何属性，transition: all 会让
-   拖动盒子时 d 每帧走 0.3s 过渡（线永远在追赶），表现为盒子走了线还留在原地 */
+
+.topology-wrap .vue-flow__nodes {
+  z-index: 10 !important;
+}
+
+.topology-wrap .vue-flow__node,
+.topology-wrap .vue-flow__node.selected {
+  z-index: 10 !important;
+}
+
 .boxrule-glow {
   stroke: #0284c7;
   stroke-width: 6;
@@ -1204,7 +1583,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   animation: dash-flow-slow 30s linear infinite;
 }
 
-/* 跨盒引用线（自定义 refedge 边）：含蓄琥珀金发光底膜 + 精致金光主线条 */
 .refedge-glow {
   stroke: #d97706;
   stroke-width: 8;
@@ -1231,10 +1609,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   pointer-events: none !important;
 }
 
-/* 宽透明命中路径：热区扩大至 24-28px，作为唯一响应鼠标与点击事件的 path。
-   stroke 必须 !important：① 官方 style.css 的 .vue-flow__edge.selected .vue-flow__edge-path 会在
-   选中时强制 stroke:#555，把整条热区染成深灰管道（挂 vue-flow__edge-path 类所致，特异性 0-2-0
-   高于本规则）② rgba(0,0,0,0.01) 非 transparent（visibleStroke 下透明不命中） */
 .edge-hit {
   stroke: rgba(0, 0, 0, 0.01) !important;
   stroke-width: 24;
@@ -1249,7 +1623,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   stroke-width: 24;
 }
 
-/* 装饰线条禁止响应 pointer-events，防止事件拦截与跳动 */
 .boxrule-glow,
 .boxrule-path,
 .refedge-glow,
@@ -1257,16 +1630,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   pointer-events: none !important;
 }
 
-/* 可点性优化：手型光标提示与高级选中特效 */
 .vue-flow__edge,
 .vue-flow__edge-path,
 .vue-flow__edge-interaction {
   cursor: pointer !important;
 }
 
-/* 鼠标靠近发光（克制版）：仅「未选中」的线响应 hover——命中带（24/28px）内触发，主线上移色阶
-   微加粗 + 衬线变浓，无额外光晕；0.3s 过渡平滑出现。点击后（selected）禁用 hover 发光：
-   弹窗打开时鼠标仍停在线上，若不排除 selected 会持续亮着宽光影 */
 .vue-flow__edge:not(.selected):hover .boxrule-glow {
   opacity: 0.38;
   stroke-width: 7;
@@ -1290,7 +1659,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
 }
 
-/* 自定义右侧拉伸把手 */
 .custom-resizer-right {
   position: absolute;
   right: -3px;

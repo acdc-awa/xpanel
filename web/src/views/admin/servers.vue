@@ -381,7 +381,11 @@ async function removeServer(row: any) {
           <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
         </el-table-column>
         <el-table-column prop="host" label="地址" min-width="160">
-          <template #default="{ row }"><code class="cell-mono">{{ row.host }}</code></template>
+          <template #default="{ row }">
+            <code class="cell-mono" style="cursor: pointer" :title="'点击复制: ' + row.host" @click="copyText(row.host, '节点地址')">
+              {{ row.host }}
+            </code>
+          </template>
         </el-table-column>
         <el-table-column prop="location" label="地区" width="110">
           <template #default="{ row }">{{ row.location || '—' }}</template>
@@ -408,7 +412,7 @@ async function removeServer(row: any) {
           </template>
         </el-table-column>
         <el-table-column label="最后心跳" width="170">
-          <template #default="{ row }"><span class="muted">{{ fmtTime(row.last_seen_at) }}</span></template>
+          <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
         <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">

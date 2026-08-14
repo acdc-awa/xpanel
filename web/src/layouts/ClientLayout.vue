@@ -21,7 +21,10 @@ const activeMenu = () => route.path
     <div class="client-app">
       <!-- 顶栏：移动端品牌栏，桌面端含顶部导航 -->
       <header class="client-header">
-        <div class="client-logo"><span class="client-logo-mark">X</span><span>我的机场</span></div>
+        <div class="client-logo">
+          <span class="client-logo-mark">X</span>
+          <span class="client-title">XrayPanel</span>
+        </div>
 
         <nav class="client-nav">
           <router-link
@@ -37,18 +40,15 @@ const activeMenu = () => route.path
         </nav>
 
         <div class="client-header-right">
-          <el-button text circle>
-            <el-icon :size="17"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></el-icon>
-          </el-button>
           <el-dropdown trigger="click">
-  <div class="client-avatar">{{ auth.avatarText }}</div>
-  <template #dropdown>
-    <el-dropdown-menu>
-      <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
-      <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
-    </el-dropdown-menu>
-  </template>
-</el-dropdown>
+            <div class="client-avatar" title="用户菜单">{{ auth.avatarText }}</div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
+                <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -56,7 +56,7 @@ const activeMenu = () => route.path
         <router-view />
       </main>
 
-      <!-- 底部 Tab（仅移动端） -->
+      <!-- 底部 Tab（移动端固定在屏幕底部） -->
       <nav class="client-tabbar">
         <router-link
           v-for="item in clientMenus"
@@ -74,18 +74,20 @@ const activeMenu = () => route.path
 </template>
 
 <style scoped lang="scss">
-.client-stage { background: #e9ebf5; min-height: 100vh; padding: 24px 0; }
+.client-stage {
+  background: var(--x-bg);
+  min-height: 100vh;
+  padding: 0;
+}
 
 .client-app {
-  max-width: 520px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
   background: var(--x-bg);
-  min-height: calc(100vh - 48px);
-  border-radius: 16px;
-  box-shadow: var(--x-shadow-lg);
+  min-height: 100vh;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   position: relative;
-  padding-bottom: 78px;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -93,87 +95,149 @@ const activeMenu = () => route.path
 .client-header {
   position: sticky;
   top: 0;
-  z-index: 10;
-  background: var(--x-card);
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--x-border);
-  padding: 14px 18px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.client-logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+
+.client-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--x-text);
+}
+
 .client-logo-mark {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 800;
   flex: none;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
 }
-.client-nav { display: none; align-items: center; gap: 4px; }
+
+.client-nav {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
 .client-nav-item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: var(--x-radius-sm);
   font-size: 13.5px;
   color: var(--x-text-2);
   font-weight: 500;
-  &:hover, &.active { color: var(--x-primary); background: var(--x-primary-soft); }
+  transition: all 0.15s ease;
+  &:hover,
+  &.active {
+    color: var(--x-primary);
+    background: var(--x-primary-soft);
+    font-weight: 600;
+  }
 }
-.client-header-right { display: flex; align-items: center; gap: 12px; }
+
+.client-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .client-avatar {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
+  transition: transform 0.15s ease;
+  &:hover {
+    transform: scale(1.05);
+  }
 }
-.client-body { flex: 1; }
 
+.client-body {
+  flex: 1;
+}
+
+/* 移动端固定底部 Tabbar */
 .client-tabbar {
-  position: absolute;
+  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--x-card);
+  width: 100%;
+  height: 56px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid var(--x-border);
   display: flex;
-  z-index: 10;
+  z-index: 1000;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
 .client-tabbar-item {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 9px 0 10px;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 0;
   font-size: 11px;
   color: var(--x-text-3);
-  &.active { color: var(--x-primary); }
+  font-weight: 500;
+  transition: color 0.15s ease;
+  &.active {
+    color: var(--x-primary);
+    font-weight: 700;
+  }
 }
 
+/* 桌面端大屏适配 */
 @media (min-width: 768px) {
-  .client-stage { padding: 0; }
+  .client-stage {
+    padding: 0;
+    background: var(--x-bg);
+  }
   .client-app {
     max-width: 1200px;
     min-height: 100vh;
     border-radius: 0;
     box-shadow: none;
-    padding-bottom: 0;
+    padding-bottom: 36px;
   }
-  .client-nav { display: flex; }
-  .client-tabbar { display: none; }
+  .client-nav {
+    display: flex;
+  }
+  .client-tabbar {
+    display: none;
+  }
 }
 </style>

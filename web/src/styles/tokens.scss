@@ -1,4 +1,4 @@
-﻿// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，暗色主题后续只切这里
+// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，暗色主题后续只切这里
 :root {
   --x-primary: #6366f1;
   --x-primary-hover: #4f46e5;
@@ -10,13 +10,20 @@
   --x-text-2: #6b7280;
   --x-text-3: #9ca3af;
   --x-success: #10b981;
+  --x-success-soft: #ecfdf5;
   --x-warning: #f59e0b;
+  --x-warning-soft: #fffbeb;
   --x-danger: #ef4444;
+  --x-danger-soft: #fef2f2;
   --x-info: #3b82f6;
+  --x-info-soft: #eff6ff;
   --x-sidebar-bg: #171b2e;
-  --x-radius: 10px;
+  --x-radius: 12px;
+  --x-radius-sm: 8px;
   --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
+  --x-shadow-md: 0 4px 12px rgba(23, 27, 46, 0.08);
   --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
+  --x-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   --el-color-primary: #6366f1;
   --el-color-primary-light-3: #8b8cf5;

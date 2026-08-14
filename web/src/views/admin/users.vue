@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Search, View, Key, Ticket, Delete, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Ticket, Delete, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getUsers, createInvitations, getUserInbounds, setUserInbounds, createUser, toggleUser, deleteUser } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -261,13 +261,23 @@ async function copyCodes() {
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openDetail(row)"><el-icon><View /></el-icon></el-button>
-            <el-button size="small" text :type="row.status === 1 ? 'warning' : 'success'" @click="doToggle(row)">
-              <el-icon><Key /></el-icon>
+            <el-button size="small" text type="primary" title="查看用户详情并管理入站授权" @click="openDetail(row)">
+              <el-icon><Setting /></el-icon>&nbsp;详情/授权
             </el-button>
-            <el-button size="small" text type="danger" @click="doDelete(row)"><el-icon><Delete /></el-icon></el-button>
+            <el-button
+              size="small"
+              text
+              :type="row.status === 1 ? 'warning' : 'success'"
+              :title="row.status === 1 ? '封禁该用户（禁止连接）' : '解除封禁'"
+              @click="doToggle(row)"
+            >
+              <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>&nbsp;{{ row.status === 1 ? '封禁' : '解封' }}
+            </el-button>
+            <el-button size="small" text type="danger" title="删除该用户账号" @click="doDelete(row)">
+              <el-icon><Delete /></el-icon>&nbsp;删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>

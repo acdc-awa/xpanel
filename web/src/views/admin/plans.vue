@@ -34,35 +34,42 @@ onMounted(loadGroups)
 
 const formOpen = ref(false)
 const editing = ref(false)
-const form = reactive({ id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
+const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
 const saving = ref(false)
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, name: '', price_cents: 2500, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
+  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
   formOpen.value = true
 }
 
 function openEdit(row: any) {
   editing.value = true
   Object.assign(form, {
-    id: row.id, name: row.name, price_cents: row.price_cents, traffic_gb: row.traffic_gb,
-    duration_days: row.duration_days, speed_limit_kbps: row.speed_limit_kbps,
+    id: row.id,
+    name: row.name,
+    price_yuan: Number((row.price_cents / 100).toFixed(2)),
+    traffic_gb: row.traffic_gb,
+    duration_days: row.duration_days,
+    speed_limit_kbps: row.speed_limit_kbps,
     permission_group_id: row.permission_group_id || 0,
   })
   formOpen.value = true
 }
 
 async function save() {
-  if (!form.name || form.price_cents < 0 || form.traffic_gb < 1 || form.duration_days < 1) {
+  if (!form.name || form.price_yuan < 0 || form.traffic_gb < 1 || form.duration_days < 1) {
     ElMessage.warning('请填写完整套餐信息')
     return
   }
   saving.value = true
   try {
     const payload = {
-      name: form.name, price_cents: form.price_cents, traffic_gb: form.traffic_gb,
-      duration_days: form.duration_days, speed_limit_kbps: form.speed_limit_kbps,
+      name: form.name,
+      price_cents: Math.round(form.price_yuan * 100),
+      traffic_gb: form.traffic_gb,
+      duration_days: form.duration_days,
+      speed_limit_kbps: form.speed_limit_kbps,
       permission_group_id: form.permission_group_id || undefined,
     }
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
@@ -155,7 +162,7 @@ async function remove(row: any) {
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 月付 200G" /></el-form-item>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
           <el-form-item label="价格（元）">
-            <el-input-number v-model="form.price_cents" :min="0" :step="100" :precision="0" style="width: 100%" />
+            <el-input-number v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
           </el-form-item>
           <el-form-item label="时长（天）">
             <el-input-number v-model="form.duration_days" :min="1" style="width: 100%" />
