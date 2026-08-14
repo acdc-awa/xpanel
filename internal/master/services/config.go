@@ -66,6 +66,7 @@ func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
 // 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
 // 权限控制按权限组匹配（节点入站定义开放权限组，用户继承/指定权限组）。
+// 单一数据源：热更新 SyncUsers 与全量配置生成（Generate）共用本函数（批7 修正访问控制缺口）。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ? AND type = ?", serverID, true, models.InboundTypeUser).Find(&inbounds).Error; err != nil {
@@ -84,49 +85,56 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 	}
 	inboundGroupMap := BatchInboundPermissionGroupIDs(s.DB, inboundIDs)
 
-	userEffectiveGroups := make(map[uint64]uint64, len(validUsers))
-	for _, u := range validUsers {
-		userEffectiveGroups[u.ID] = UserEffectiveGroupID(s.DB, &u)
-	}
-
 	for _, inb := range inbounds {
-		allowedGroups := inboundGroupMap[inb.ID]
-		hasGroupLimit := len(allowedGroups) > 0
-		allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
-		for _, g := range allowedGroups {
-			allowedGroupSet[g] = true
-		}
-
-		var protoUsers []protocol.User
-		for _, u := range validUsers {
-			uGroup := userEffectiveGroups[u.ID]
-			// Xboard 规范：用户必须拥有生效权限组（uGroup > 0，通过套餐绑定或管理员单独指定）；
-			// 未分配权限组的用户（uGroup == 0）不具备任何节点的访问权限，不注入 UUID。
-			if uGroup == 0 {
-				continue
-			}
-			if hasGroupLimit && !allowedGroupSet[uGroup] {
-				continue
-			}
-			flow := inb.Flow
-			if flow == "" && xray.StreamHasReality(inb.StreamSettings) && xray.StreamNetwork(inb.StreamSettings) == "tcp" {
-				flow = "xtls-rprx-vision"
-			} else if flow == "none" {
-				flow = ""
-			}
-			limit, _ := UserEffectiveDeviceLimit(s.DB, &u)
-			protoUsers = append(protoUsers, protocol.User{
-				UUID:  u.UUID,
-				Email: xray.UserEmail(&u),
-				Flow:  flow,
-				Level: 0,
-				Limit: limit,
-			})
-		}
-		res[inb.Tag] = protoUsers
+		res[inb.Tag] = s.protoUsersFor(validUsers, &inb, inboundGroupMap[inb.ID])
 	}
 
 	return res, nil
+}
+
+// protoUsersFor 按权限组规则从 validUsers 计算单个入站的用户列表（GetValidUsers 与预览共用）。
+// Xboard 规范：用户必须拥有生效权限组（uGroup > 0）；入站声明开放组时，用户组须在开放组内。
+func (s *ConfigService) protoUsersFor(validUsers []models.User, inb *models.Inbound, allowedGroups []uint64) []protocol.User {
+	hasGroupLimit := len(allowedGroups) > 0
+	allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
+	for _, g := range allowedGroups {
+		allowedGroupSet[g] = true
+	}
+
+	var protoUsers []protocol.User
+	for _, u := range validUsers {
+		uGroup := UserEffectiveGroupID(s.DB, &u)
+		// 未分配权限组的用户（uGroup == 0）不具备任何节点的访问权限，不注入 UUID
+		if uGroup == 0 {
+			continue
+		}
+		if hasGroupLimit && !allowedGroupSet[uGroup] {
+			continue
+		}
+		flow := inb.Flow
+		if flow == "" && xray.StreamHasReality(inb.StreamSettings) && xray.StreamNetwork(inb.StreamSettings) == "tcp" {
+			flow = "xtls-rprx-vision"
+		} else if flow == "none" {
+			flow = ""
+		}
+		limit, _ := UserEffectiveDeviceLimit(s.DB, &u)
+		protoUsers = append(protoUsers, protocol.User{
+			UUID:  u.UUID,
+			Email: xray.UserEmail(&u),
+			Flow:  flow,
+			Level: 0,
+			Limit: limit,
+		})
+	}
+	return protoUsers
+}
+
+// PreviewUsers 预览用：按表单（可能未入库）入站的开放权限组计算其用户列表（与 GetValidUsers 同规则）。
+func (s *ConfigService) PreviewUsers(inb *models.Inbound, groupIDs []uint64) []protocol.User {
+	if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeIdle {
+		return nil
+	}
+	return s.protoUsersFor(s.filterValidUsers(), inb, groupIDs)
 }
 
 // filterValidUsers 返回全部有效的用户（状态正常、有 UUID、未过期、未超流量）。
@@ -168,9 +176,11 @@ func (s *ConfigService) filterValidUsers() []models.User {
 	return valid
 }
 
-// Generate 为服务器生成完整 Xray 配置（启用入站 + 节点出站 + 节点路由 + 全部有效启用用户）。
+// Generate 为服务器生成完整 Xray 配置（启用入站 + 节点出站 + 节点路由 + 按权限组过滤的用户）。
+// 用户列表与热更新 SyncUsers 同源（GetValidUsers：有效期/流量/权限组过滤统一在此处完成），
+// 保证全量推送与增量同步的访问控制一致（12 号文档：订阅/热更新/配置生成消费同一组计算结果）。
 // 无启用入站时返回仅含 api 入站的配置（用于全停用后清理节点入站）；
-// 有启用入站但无可用用户时返回错误（此时不需要推送）。
+// 入站无可用用户时输出空 clients（U25：清空配置推得动，节点立即移除失效用户）。
 func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	var srv models.Server
 	if err := s.DB.First(&srv, serverID).Error; err != nil {
@@ -190,13 +200,17 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 		return "", err
 	}
 
-	validUsers := s.filterValidUsers()
+	// 用户按入站 tag 分组（与热更新 SyncUsers 同一函数、同一过滤规则）
+	usersByTag, err := s.GetValidUsers(serverID)
+	if err != nil {
+		return "", err
+	}
 
 	ctx, err := BuildGenerateContext(s.DB, inbounds, outbounds)
 	if err != nil {
 		return "", err
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, usersByTag, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
 	if err != nil {
 		return "", err
 	}

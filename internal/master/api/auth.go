@@ -222,7 +222,7 @@ func authError(err error) (int, string) {
 		return 400, err.Error()
 	case errors.Is(err, services.ErrInvalidCreds), errors.Is(err, services.ErrInvalidRefresh):
 		return 401, err.Error()
-	case errors.Is(err, services.ErrUserDisabled):
+	case errors.Is(err, services.ErrUserDisabled), errors.Is(err, services.ErrRegisterClosed):
 		return 403, err.Error()
 	default:
 		return 500, "服务器内部错误"

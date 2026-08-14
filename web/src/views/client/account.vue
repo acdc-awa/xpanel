@@ -16,6 +16,8 @@ import {
   RefreshRight,
   Ticket,
   List,
+  WarningFilled,
+  InfoFilled,
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
@@ -53,7 +55,14 @@ const usagePercent = computed(() => {
 })
 const expireText = computed(() => {
   const t = auth.user?.expire_at
-  return t ? String(t).replace('T', ' ').slice(0, 16) : '永久有效'
+  if (!t) return auth.user?.plan_id ? '永久有效' : '未开通套餐'
+  return String(t).replace('T', ' ').slice(0, 16)
+})
+
+// U23：到期/未开通判定（横幅 CTA，避免无套餐用户看到误导性的「永久有效」）
+const isExpired = computed(() => {
+  const t = auth.user?.expire_at
+  return !!t && new Date(t).getTime() < Date.now()
 })
 const daysLeft = computed(() => {
   if (!auth.user?.expire_at) return null
@@ -300,6 +309,22 @@ function onLogout() {
     <div class="x-acct-grid">
       <!-- 左侧：用量、钱包与礼品卡充值 -->
       <div>
+        <!-- U23：到期/未开通 CTA 横幅 -->
+        <div v-if="isExpired" class="acct-alert danger">
+          <el-icon><WarningFilled /></el-icon>&nbsp;
+          <span>套餐已到期，节点将无法使用，请及时续费</span>
+          <router-link to="/shop">
+            <el-button size="small" type="primary" round>立即续费</el-button>
+          </router-link>
+        </div>
+        <div v-else-if="!auth.user?.plan_id" class="acct-alert">
+          <el-icon><InfoFilled /></el-icon>&nbsp;
+          <span>尚未开通套餐，开通后即可获取节点订阅</span>
+          <router-link to="/shop">
+            <el-button size="small" type="primary" round>去开通</el-button>
+          </router-link>
+        </div>
+
         <!-- 账户余额与用量 Hero 卡片 -->
         <div class="acct-hero">
           <div class="acct-hero-top">
@@ -595,6 +620,24 @@ function onLogout() {
 </template>
 
 <style scoped lang="scss">
+.acct-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--x-radius);
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--x-text);
+  > span { flex: 1; }
+  &.danger {
+    background: rgba(244, 63, 94, 0.1);
+    border-color: rgba(244, 63, 94, 0.35);
+    color: #fb7185;
+  }
+}
 .acct-hero {
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
   border-radius: var(--x-radius);

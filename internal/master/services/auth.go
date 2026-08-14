@@ -21,6 +21,7 @@ var (
 	ErrInvalidCreds   = errors.New("用户名或密码错误")
 	ErrUserDisabled   = errors.New("账号已被禁用")
 	ErrInvalidRefresh = errors.New("无效的刷新令牌")
+	ErrRegisterClosed = errors.New("注册已关闭")
 )
 
 // AuthService 注册/登录/令牌签发。
@@ -39,6 +40,10 @@ type RegisterReq struct {
 
 func (s *AuthService) Register(ctx context.Context, req *RegisterReq) (*models.User, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+	// 站点开关：stop_register=1 关闭注册（设置页「站点」tab，单一入口）
+	if StopRegister(s.DB) {
+		return nil, ErrRegisterClosed
+	}
 	var user *models.User
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 邀请码必填（2026-08-14 起硬编码，无开关）

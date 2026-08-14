@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/zhx/xray-panel/internal/models"
+	"github.com/zhx/xray-panel/internal/pkg/protocol"
 )
 
 // InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。
@@ -342,9 +343,11 @@ type GenerateContext struct {
 }
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
+// usersByTag 为「入站 tag → 已按权限组过滤的用户列表」（服务层 GetValidUsers 计算结果，
+// 与热更新 SyncUsers 同一数据源；12 号文档：订阅/热更新/配置生成消费同一组计算结果）。
 // defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
 // 2026-08-14 方向①/批2：UserInbound 冻结删除，per-user 覆盖不再存在（仅入站级 Flow 三态）。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, usersByTag map[string][]protocol.User, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
 	cfg := LoadTemplate()
 
 	// 旧数据/测试夹具可能无 Type（DB 默认 user）——归一化避免"未知类型"
@@ -407,7 +410,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !inb.Enabled || inb.Type == models.InboundTypeIdle {
 			continue
 		}
-		item, err := buildInbound(&inb, users, ctx)
+		item, err := buildInbound(&inb, usersByTag, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
 		}
@@ -709,7 +712,7 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
 // 动态注入 clients 列表（Phase T：按入站三态分流——user 动态用户 / relay 内部 UUID /
 // idle 由 Generate 过滤不达此处）。其余字段完全透传。
-func buildInbound(inb *models.Inbound, users []models.User, ctx *GenerateContext) (map[string]any, error) {
+func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ctx *GenerateContext) (map[string]any, error) {
 	// 1. 解析协议 settings JSON → 注入 clients
 	settings := map[string]any{}
 	if inb.SettingsJSON != "" {
@@ -743,12 +746,15 @@ func buildInbound(inb *models.Inbound, users []models.User, ctx *GenerateContext
 		}
 		clients = []any{client}
 	case models.InboundTypeUser:
-		clients = buildClients(inb, users)
+		clients = buildProtocolClients(usersByTag[inb.Tag])
 	default:
 		return nil, fmt.Errorf("未知入站类型 %q", inb.Type)
 	}
-	if len(clients) == 0 {
-		return nil, fmt.Errorf("无可用用户（全部未启用或无 UUID）")
+	// U25：允许空 clients（全部用户未启用/过期/超量时输出空数组，xray -test 通过）——
+	// 让"清空配置"推得动，节点立即移除失效用户，而不是卡在旧配置上继续放行。
+	// 注意：非 user 类型（relay）若缺内部 UUID 已在上面报错，此处仅 user 型可能为空。
+	if clients == nil {
+		clients = []any{}
 	}
 	settings["clients"] = clients
 
@@ -793,51 +799,26 @@ func buildInbound(inb *models.Inbound, users []models.User, ctx *GenerateContext
 	return item, nil
 }
 
-// buildClients 从用户列表构建 Xray clients JSON。
-// 按协议分派：vless → {id,email,flow,level,limit}，vmess/trojan 预留。
-// flow 优先级：入站级 inb.Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动注入。
-// （UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
-func buildClients(inb *models.Inbound, users []models.User) []any {
+// buildProtocolClients 从 GetValidUsers 计算结果（入站 tag → 已按权限组过滤的用户）构建
+// Xray clients JSON。单一数据源：热更新 SyncUsers 与全量配置生成共用同一组用户，
+// flow（入站三态）与设备限制（三级继承）均由服务层计算完毕，此处仅做线格式转换。
+// 协议：仅 VLESS 全功能（vmess/trojan 为预留 switch，不注入）。
+func buildProtocolClients(users []protocol.User) []any {
 	clients := make([]any, 0, len(users))
-	disableAutoFlow := inb.Flow == "none"
 	for _, u := range users {
-		if u.Status != models.StatusActive || u.UUID == "" {
+		if u.UUID == "" {
 			continue
 		}
-		flow := ""
-		limit := 0
-		if inb.Flow != "" && inb.Flow != "none" {
-			flow = inb.Flow
-		}
-		if limit == 0 && u.DeviceLimit > 0 {
-			limit = u.DeviceLimit
-		}
-		// 自动 flow：TCP+REALITY 且未显式关闭时注入 xtls-rprx-vision
-		if flow == "" && !disableAutoFlow && StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
-			flow = "xtls-rprx-vision"
-		}
-
 		c := map[string]any{
-			"email": UserEmail(&u),
+			"id":    u.UUID,
+			"email": u.Email,
 			"level": 0,
 		}
-		switch inb.Protocol {
-		case "vless":
-			c["id"] = u.UUID
-			if flow != "" {
-				c["flow"] = flow
-			}
-			if limit > 0 {
-				c["limit"] = limit
-			}
-		case "vmess":
-			// 预留
-			continue
-		case "trojan":
-			// 预留
-			continue
-		default:
-			continue
+		if u.Flow != "" {
+			c["flow"] = u.Flow
+		}
+		if u.Limit > 0 {
+			c["limit"] = u.Limit
 		}
 		clients = append(clients, c)
 	}

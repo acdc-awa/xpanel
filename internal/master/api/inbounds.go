@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,7 @@ import (
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
+	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
@@ -128,6 +130,28 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
+	if !validInboundProtocol(req.Protocol) {
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless/vmess/trojan/ss）")
+		return
+	}
+	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
+		util.BadRequest(c, "入站标签需为 1-64 字符")
+		return
+	}
+	var tagCnt int64
+	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND tag = ?", req.ServerID, req.Tag).Count(&tagCnt)
+	if tagCnt > 0 {
+		util.BadRequest(c, "该服务器上已存在同名入站标签")
+		return
+	}
+	if req.CertID != nil && *req.CertID != 0 {
+		var cert models.Cert
+		if err := d.DB.First(&cert, *req.CertID).Error; err != nil {
+			util.BadRequest(c, "绑定证书不存在")
+			return
+		}
+	}
 	// 同服务器端口冲突
 	var cnt int64
 	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ?", req.ServerID, req.Port).Count(&cnt)
@@ -162,7 +186,8 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		_ = services.SyncInboundPermissionGroups(d.DB, inb.ID, req.PermissionGroupIDs)
 	}
 	if err := d.enqueueConfig(req.ServerID); err != nil {
-		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", req.ServerID, err)
+		pushFail(c, req.ServerID, err)
+		return
 	}
 	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name, req.PermissionGroupIDs)})
 }
@@ -220,6 +245,31 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if err := xray.ValidateInbound(sj, ss, sn); err != nil {
 		util.BadRequest(c, err.Error())
 		return
+	}
+	// U15：更新校验闭环——tag 非空/同服务器唯一 / 协议白名单 / CertID 存在性
+	if req.Tag != nil {
+		t := strings.TrimSpace(*req.Tag)
+		if t == "" || len(t) > 64 {
+			util.BadRequest(c, "入站标签需为 1-64 字符")
+			return
+		}
+		var tagCnt int64
+		d.DB.Model(&models.Inbound{}).Where("server_id = ? AND tag = ? AND id != ?", inb.ServerID, t, id).Count(&tagCnt)
+		if tagCnt > 0 {
+			util.BadRequest(c, "该服务器上已存在同名入站标签")
+			return
+		}
+	}
+	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless/vmess/trojan/ss）")
+		return
+	}
+	if req.CertID != nil && *req.CertID != 0 {
+		var cert models.Cert
+		if err := d.DB.First(&cert, *req.CertID).Error; err != nil {
+			util.BadRequest(c, "绑定证书不存在")
+			return
+		}
 	}
 	// 端口冲突（排除自己）
 	port := inb.Port
@@ -304,7 +354,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		_ = services.SyncInboundPermissionGroups(d.DB, id, *req.PermissionGroupIDs)
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
-		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+		pushFail(c, inb.ServerID, err)
+		return
 	}
 	var srv models.Server
 	serverName := ""
@@ -336,7 +387,8 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	}
 	if inb.ID > 0 {
 		if err := d.enqueueConfig(inb.ServerID); err != nil {
-			log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+			pushFail(c, inb.ServerID, err)
+			return
 		}
 	}
 	util.OK(c, gin.H{"deleted": id})
@@ -364,7 +416,8 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		return
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
-		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
+		pushFail(c, inb.ServerID, err)
+		return
 	}
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
 }
@@ -394,6 +447,23 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 	})
 }
 
+// validInboundProtocol 入站协议白名单（仅 VLESS 全功能可用；vmess/trojan/ss 为预留 switch，
+// 防"卡出不可能存在的配置"——拼写错误/未知协议直接拒绝）。
+func validInboundProtocol(p string) bool {
+	switch p {
+	case "vless", "vmess", "trojan", "ss":
+		return true
+	}
+	return false
+}
+
+// pushFail 配置生成/待推送失败时向客户端上抛（U19：不再静默打日志返回成功——
+// 变更已入库但节点侧未生效，必须让管理员知道并处理）。
+func pushFail(c *gin.Context, serverID uint64, err error) {
+	log.Printf("config push failed (server=%d): %v", serverID, err)
+	util.ServerError(c, "变更已保存，但配置生成失败: "+err.Error())
+}
+
 // enqueueConfig 入站变更后自动生成配置并待推送。
 func (d *Deps) enqueueConfig(serverID uint64) error {
 	if d.Config == nil || d.Hub == nil {
@@ -412,12 +482,18 @@ func (d *Deps) enqueueConfig(serverID uint64) error {
 
 // formToInbound 把入站表单转为 models.Inbound（配置预览用）。
 func formToInbound(f *inboundForm) models.Inbound {
-	return models.Inbound{
+	inb := models.Inbound{
 		ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
 		Port: f.Port, Listen: f.Listen,
 		SettingsJSON: f.SettingsJSON, StreamSettings: f.StreamSettings,
 		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
 	}
+	if f.Type != "" {
+		inb.Type = f.Type
+	}
+	inb.Flow = f.Flow
+	inb.CertID = f.CertID
+	return inb
 }
 
 // AdminPreviewConfig POST /api/v1/admin/xray/preview-config
@@ -447,10 +523,20 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 	if req.Form != nil {
 		inbounds = append(inbounds, formToInbound(req.Form))
 	}
-	var users []models.User
-	if err := d.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
+	// 用户按入站 tag 分组（与全量生成同源：GetValidUsers 权限组过滤 + 有效期/流量过滤）
+	var usersByTag map[string][]protocol.User
+	if d.Config != nil {
+		var uerr error
+		usersByTag, uerr = d.Config.GetValidUsers(req.ServerID)
+		if uerr != nil {
+			util.ServerError(c, "查询用户失败")
+			return
+		}
+	}
+	if req.Form != nil && d.Config != nil {
+		// 表单入站尚未入库：按表单开放权限组即时计算（覆盖同 tag 的库内旧值）
+		formInb := formToInbound(req.Form)
+		usersByTag[req.Form.Tag] = d.Config.PreviewUsers(&formInb, req.Form.PermissionGroupIDs)
 	}
 	var outbounds []models.ServerOutbound
 	if err := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
@@ -467,7 +553,7 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.ServerError(c, "查询生成上下文失败")
 		return
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, ctx, "", "")
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, usersByTag, ctx, "", "")
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return

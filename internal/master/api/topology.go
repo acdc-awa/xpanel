@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net"
 	"strconv"
 
@@ -67,7 +66,8 @@ func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 		return
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
-		log.Printf("topology: 内部账户变更后推送配置失败 (server=%d): %v", inb.ServerID, err)
+		pushFail(c, inb.ServerID, err)
+		return
 	}
 	util.OK(c, gin.H{"inbound_id": inb.ID, "internal_uuid": out.UUID})
 }
@@ -275,7 +275,7 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 }
 
 // AdminDeletePermissionGroup DELETE /api/v1/admin/permission-groups/:id
-// （级联删除入站集合；绑定套餐的组拒绝删除）
+// （级联删除入站集合；绑定套餐/显式绑定用户的组拒绝删除）
 func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -286,6 +286,13 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 	d.DB.Model(&models.Plan{}).Where("permission_group_id = ?", id).Count(&cnt)
 	if cnt > 0 {
 		util.BadRequest(c, "该权限组正被套餐绑定，请先解绑")
+		return
+	}
+	// U18：用户显式绑定检查——删除会让用户静默失去全部节点授权
+	var userCnt int64
+	d.DB.Model(&models.User{}).Where("permission_group_id = ?", id).Count(&userCnt)
+	if userCnt > 0 {
+		util.BadRequest(c, "该权限组正被用户绑定，请先在用户管理中解除")
 		return
 	}
 	err = d.DB.Transaction(func(tx *gorm.DB) error {

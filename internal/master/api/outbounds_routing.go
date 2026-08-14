@@ -160,7 +160,8 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"outbound": ob})
 }
@@ -281,7 +282,8 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 
 	d.DB.First(&ob, outboundID)
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"outbound": ob})
 }
@@ -317,7 +319,8 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"deleted": outboundID})
 }
@@ -469,7 +472,8 @@ func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"rule": rule})
 }
@@ -559,7 +563,8 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 
 	d.DB.First(&rule, ruleID)
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"rule": rule})
 }
@@ -583,7 +588,8 @@ func (d *Deps) AdminDeleteServerRoutingRule(c *gin.Context) {
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
-		log.Printf("outbounds_routing: 自动推送配置失败 (server=%d): %v", id, err)
+		pushFail(c, id, err)
+		return
 	}
 	util.OK(c, gin.H{"deleted": ruleID})
 }

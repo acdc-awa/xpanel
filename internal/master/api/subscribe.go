@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -60,6 +61,22 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	if user.Status != models.StatusActive {
 		util.Fail(c, 403, "账号已被禁用")
 		return
+	}
+	// U13：订阅端到期/超流量过滤（与生成端 filterValidUsers 同源——
+	// 过期/超量用户不注入任何节点配置，订阅也应拒绝拉取，避免客户端持有失效配置）
+	if user.ExpireAt != nil && time.Now().After(*user.ExpireAt) {
+		util.Fail(c, 403, "订阅已过期，请续费后使用")
+		return
+	}
+	if user.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled && plan.TrafficGB > 0 {
+			up, down, _ := d.Traffic.UserUsed(user.ID)
+			if up+down >= plan.TrafficGB*1024*1024*1024 {
+				util.Fail(c, 403, "流量已用尽，请购买新套餐")
+				return
+			}
+		}
 	}
 
 	// 收集用户可用节点（无授权记录则全部 type=user 入站；再按用户生效权限组过滤）
@@ -120,10 +137,11 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 
-	// 按 UA 区分输出
+	// 按 UA 区分输出；`?format=base64` 强制 Base64（U13：实现原忽略参数）
 	ua := strings.ToLower(c.GetHeader("User-Agent"))
-	isClash := strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo") ||
-		strings.Contains(ua, "stash") || strings.Contains(ua, "verge")
+	forceBase64 := c.Query("format") == "base64"
+	isClash := !forceBase64 && (strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo") ||
+		strings.Contains(ua, "stash") || strings.Contains(ua, "verge"))
 
 	var content string
 	if isClash {

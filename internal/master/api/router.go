@@ -3,7 +3,9 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/zhx/xray-panel/internal/master/embed"
 	"github.com/zhx/xray-panel/internal/master/middleware"
+	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
@@ -216,11 +219,24 @@ func (d *Deps) NewRouter() *gin.Engine {
 				return
 			}
 			base := ""
+			site := map[string]string{}
 			if d.Site != nil {
 				base = d.Site.WebBase()
+				site = d.Site.SiteGroup()
 			}
-			html := strings.Replace(string(indexHTML), "</head>",
-				fmt.Sprintf("<script>window.__PANEL_BASE__=%q</script></head>", base), 1)
+			// 站点设置注入（17 号 P0 ②）：app_name → <title>；favicon → <link rel="icon">；
+			// 全量 site 分组 → window.__PANEL_SETTINGS__（前端读取标题/LOGO/注册开关等）。
+			head := ""
+			if title := site[services.SettingAppName]; title != "" {
+				head += "<title>" + html.EscapeString(title) + "</title>"
+			}
+			if icon := site[services.SettingFavicon]; icon != "" {
+				head += `<link rel="icon" href="` + html.EscapeString(icon) + `">`
+			}
+			settingsJSON, _ := json.Marshal(site)
+			head += fmt.Sprintf("<script>window.__PANEL_BASE__=%q;window.__PANEL_SETTINGS__=%s</script>",
+				base, settingsJSON)
+			html := strings.Replace(string(indexHTML), "</head>", head+"</head>", 1)
 			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 		})
 	}

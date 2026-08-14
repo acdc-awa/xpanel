@@ -43,9 +43,30 @@ export function getServerMetrics(id: number, range = '1h') {
   return http.get<ApiResp<ServerMetricsData>>(`/admin/servers/${id}/metrics`, { params: { range } })
 }
 
-// ===== 站点设置（设置页） =====
+// ===== 站点设置（设置页，批7 分组式：site/captcha/web_base） =====
+
+export interface SiteGroup {
+  app_name: string
+  app_description: string
+  logo: string
+  favicon: string
+  subscribe_domain: string
+  tos_url: string
+  stop_register: string
+  currency: string
+  currency_symbol: string
+}
+
+export interface CaptchaGroup {
+  captcha_enable: string
+  captcha_type: string
+  turnstile_site_key: string
+  turnstile_secret_key: string
+}
 
 export interface SiteSettings {
+  site: SiteGroup
+  captcha: CaptchaGroup
   web_base: string
 }
 

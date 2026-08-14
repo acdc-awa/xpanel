@@ -5,6 +5,7 @@ import { User, Lock, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import { getPublicConfig } from '@/api/config'
+import { appName, siteLogo, stopRegister } from '@/config/site'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 
 const auth = useAuthStore()
@@ -91,9 +92,10 @@ function gotoHome() {
   <div class="auth-stage">
     <div class="auth-card">
       <div class="auth-brand">
-        <span class="auth-logo">X</span>
+        <span v-if="siteLogo" class="auth-logo-img"><img :src="siteLogo" alt="logo" /></span>
+        <span v-else class="auth-logo">X</span>
         <div>
-          <div class="auth-title">Xray 面板</div>
+          <div class="auth-title">{{ appName }}</div>
           <div class="auth-sub">主控 · 节点 · 用户 一体化代理分发系统</div>
         </div>
       </div>
@@ -130,9 +132,11 @@ function gotoHome() {
 
       <div class="auth-foot">
         <router-link class="auth-link" to="/forgot">忘记密码？</router-link>
-        <span style="margin: 0 8px">·</span>
-        还没有账号？
-        <router-link class="auth-link" to="/register">使用邀请码注册</router-link>
+        <template v-if="!stopRegister">
+          <span style="margin: 0 8px">·</span>
+          还没有账号？
+          <router-link class="auth-link" to="/register">使用邀请码注册</router-link>
+        </template>
       </div>
     </div>
 

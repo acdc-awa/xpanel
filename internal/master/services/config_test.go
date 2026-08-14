@@ -3,6 +3,7 @@ package services
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -143,5 +144,120 @@ func TestSavePendingOverwriteKeepsRowID(t *testing.T) {
 	}
 	if p2.PushedAt != nil {
 		t.Fatal("覆盖后 pushed_at 应清空")
+	}
+}
+
+// TestGetValidUsers_GroupFilterAndFlow 批7 核心修复验证：GetValidUsers（热更新/全量生成共用）
+// 必须按权限组过滤用户、按入站流控三态计算 flow、按三级继承计算设备限制。
+func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
+	db := newTestDB(t)
+	migrateModels := []any{
+		&models.User{}, &models.Plan{}, &models.Inbound{},
+		&models.PermissionGroup{}, &models.PermissionGroupInbound{},
+	}
+	for _, m := range migrateModels {
+		if err := db.AutoMigrate(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 权限组与套餐
+	g1 := models.PermissionGroup{Name: "g1"}
+	g2 := models.PermissionGroup{Name: "g2"}
+	if err := db.Create(&g1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&g2).Error; err != nil {
+		t.Fatal(err)
+	}
+	planA := models.Plan{Name: "planA", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: g2.ID, Enabled: true}
+	if err := db.Create(&planA).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 三个入站：inb1→组1（tcp+reality，Flow 空=自动）；inb2→组2（tcp+tls，Flow=none）；
+	// inb3→无开放组（Flow=xtls-rprx-vision 显式）
+	reality := `{"network":"tcp","security":"reality","realitySettings":{"dest":"1.2.3.4:443","serverNames":["r.example.com"],"privateKey":"sk","shortIds":["abcd"]}}`
+	tls := `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"t.example.com"}}`
+	inb1 := models.Inbound{ServerID: 1, Tag: "in1", Protocol: "vless", Port: 443, StreamSettings: reality, Flow: "", Type: models.InboundTypeUser, Enabled: true}
+	inb2 := models.Inbound{ServerID: 1, Tag: "in2", Protocol: "vless", Port: 8443, StreamSettings: tls, Flow: "none", Type: models.InboundTypeUser, Enabled: true}
+	inb3 := models.Inbound{ServerID: 1, Tag: "in3", Protocol: "vless", Port: 9443, Flow: "xtls-rprx-vision", Type: models.InboundTypeUser, Enabled: true}
+	if err := db.Create(&inb1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&inb2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&inb3).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 入站-权限组绑定
+	_ = db.Create(&models.PermissionGroupInbound{PermissionGroupID: g1.ID, InboundID: inb1.ID})
+	_ = db.Create(&models.PermissionGroupInbound{PermissionGroupID: g2.ID, InboundID: inb2.ID})
+
+	// 用户：u1 显式组1（设备限制 2）；u2 套餐→组2（继承限制 3）；u3 无组；u4 已过期
+	expired := time.Now().Add(-24 * time.Hour)
+	users := []models.User{
+		{Username: "u1", Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: g1.ID, DeviceLimit: 2},
+		{Username: "u2", Email: "u2@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanID: planA.ID},
+		{Username: "u3", Email: "u3@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive},
+		{Username: "u4", Email: "u4@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive, PermissionGroupID: g1.ID, ExpireAt: &expired},
+	}
+	for i := range users {
+		if err := db.Create(&users[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := &ConfigService{DB: db}
+	m, err := s.GetValidUsers(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// in1：仅 u1，自动 vision，限制 2
+	got := m["in1"]
+	if len(got) != 1 || got[0].UUID != users[0].UUID {
+		t.Fatalf("in1 users = %+v, want only u1", got)
+	}
+	if got[0].Flow != "xtls-rprx-vision" {
+		t.Errorf("in1 flow = %q, want 自动 vision", got[0].Flow)
+	}
+	if got[0].Limit != 2 {
+		t.Errorf("in1 limit = %d, want 2（用户级）", got[0].Limit)
+	}
+
+	// in2：仅 u2，none 禁自动 → flow 空，限制继承套餐 3
+	got = m["in2"]
+	if len(got) != 1 || got[0].UUID != users[1].UUID {
+		t.Fatalf("in2 users = %+v, want only u2", got)
+	}
+	if got[0].Flow != "" {
+		t.Errorf("in2 flow = %q, want 空（none 禁自动）", got[0].Flow)
+	}
+	if got[0].Limit != 3 {
+		t.Errorf("in2 limit = %d, want 3（套餐继承）", got[0].Limit)
+	}
+
+	// in3：无开放组 → 全部有组用户（u1/u2），显式 vision
+	got = m["in3"]
+	if len(got) != 2 {
+		t.Fatalf("in3 users = %d, want 2（无组限制时所有有组用户）", len(got))
+	}
+	for _, u := range got {
+		if u.Flow != "xtls-rprx-vision" {
+			t.Errorf("in3 flow = %q, want 显式 vision", u.Flow)
+		}
+	}
+
+	// u3（无组）与 u4（过期）不得出现在任何入站
+	total := len(m["in1"]) + len(m["in2"]) + len(m["in3"])
+	if total != 4 {
+		t.Errorf("用户总数 = %d, want 4（u1×2 + u2×2）", total)
+	}
+	for _, u := range append(append(m["in1"], m["in2"]...), m["in3"]...) {
+		if u.UUID == users[2].UUID || u.UUID == users[3].UUID {
+			t.Errorf("无组/过期用户不应注入: %s", u.UUID)
+		}
 	}
 }

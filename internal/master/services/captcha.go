@@ -59,6 +59,36 @@ func LoadCaptchaConfig(db *gorm.DB) CaptchaConfig {
 	return cfg
 }
 
+// CaptchaSettings 读取验证分组全部键（设置页「安全」tab 展示；secret 仅管理端可见）。
+func CaptchaSettings(db *gorm.DB) map[string]string {
+	keys := []string{SettingCaptchaEnable, SettingCaptchaType, SettingTurnstileSiteKey, SettingTurnstileSecret}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = GetSetting(db, k)
+	}
+	return out
+}
+
+// SaveCaptchaSettings 保存验证分组（captcha_enable 规范化为 1/0；空串=默认关）。
+func SaveCaptchaSettings(db *gorm.DB, vals map[string]string) error {
+	for k, v := range vals {
+		switch k {
+		case SettingCaptchaEnable:
+			if v != "" && v != "0" && v != "1" {
+				return errors.New("验证开关仅接受 1（开）/ 0（关）")
+			}
+		case SettingTurnstileSecret, SettingTurnstileSiteKey:
+			if len(v) > 500 {
+				return errors.New("密钥过长")
+			}
+		}
+		if err := SetSetting(db, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // captchaUsed 已消费的 turnstile token（一次性防重放；单实例内存，多实例需换 Redis）。
 var captchaUsed = struct {
 	sync.Mutex

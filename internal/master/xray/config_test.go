@@ -7,6 +7,7 @@ import (
 
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
+	"github.com/zhx/xray-panel/internal/pkg/protocol"
 )
 
 func asObject(t *testing.T, v any, what string) map[string]any {
@@ -27,8 +28,15 @@ func asArray(t *testing.T, v any, what string) []any {
 	return a
 }
 
-func vlessTestUser() []models.User {
-	return []models.User{{ID: 1, UUID: "11111111-1111-1111-1111-111111111111", Status: models.StatusActive}}
+// vlessUsers 构造按入站 tag 分组的用户 fixture（批7：Generate 改为消费
+// map[string][]protocol.User——与 GetValidUsers 同构；有效性/权限过滤在服务层完成）。
+func vlessUsers(tags ...string) map[string][]protocol.User {
+	m := make(map[string][]protocol.User, len(tags))
+	u := []protocol.User{{UUID: "11111111-1111-1111-1111-111111111111", Email: "user-1@panel.local"}}
+	for _, t := range tags {
+		m[t] = u
+	}
+	return m
 }
 
 // inbStream 快捷构造一个 StreamSettings JSON。
@@ -50,7 +58,7 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 		},
 	}
 
-	users := []models.User{{ID: 1, UUID: "11111111-1111-1111-1111-111111111111", Status: models.StatusActive}}
+	users := vlessUsers("vless-in")
 
 	outbounds := []models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "warp", Protocol: "socks", SettingsJSON: `{"servers":[{"address":"127.0.0.1","port":40000}]}`, Enabled: true},
@@ -104,7 +112,7 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-grpc-tls-in"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -144,7 +152,7 @@ func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-grpc-tls-in"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -171,7 +179,7 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 	inbounds := []models.Inbound{
 		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
 	}
-	users := vlessTestUser()
+	users := vlessUsers("vless-in")
 
 	outbounds := []models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIP"}`, StreamSettingsJSON: `{"sockopt":{"mark":255}}`, Enabled: true},
@@ -210,7 +218,7 @@ func TestGenerateConfig_VLESSOutbound_Normalize(t *testing.T) {
 	inbounds := []models.Inbound{
 		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
 	}
-	users := vlessTestUser()
+	users := vlessUsers("vless-in")
 
 	outbounds := []models.ServerOutbound{
 		{
@@ -345,7 +353,7 @@ func TestGenerateConfig_IdleInboundSkipped(t *testing.T) {
 		{ID: 1, Tag: "in-idle", Protocol: "vless", Port: 8443, Type: models.InboundTypeIdle, Enabled: true},
 		{ID: 2, Tag: "in-user", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true},
 	}
-	raw, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
+	raw, err := xray.Generate(inbounds, nil, nil, vlessUsers("in"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -382,7 +390,7 @@ func TestGenerateConfig_InboundRefOutbound(t *testing.T) {
 			SettingsJSON: `{"vnext":[{"address":"手填应被忽略","port":1,"users":[{"id":"x"}]}]}`},
 	}
 	raw, err := xray.Generate([]models.Inbound{{ID: 1, Tag: "in", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true}},
-		outbounds, nil, vlessTestUser(), ctx, "", "")
+		outbounds, nil, vlessUsers("in"), ctx, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -433,7 +441,7 @@ func TestGenerateConfig_InboundRefUnsetupFails(t *testing.T) {
 		{ID: 1, ServerID: 1, Tag: "to-landing", Protocol: "vless", InboundRef: &ref, Enabled: true},
 	}
 	_, err := xray.Generate([]models.Inbound{{ID: 1, Tag: "in", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true}},
-		outbounds, nil, vlessTestUser(), ctx, "", "")
+		outbounds, nil, vlessUsers("in-tls"), ctx, "", "")
 	if err == nil {
 		t.Error("引用未 setup 的落地入站应报错")
 	}
@@ -448,7 +456,7 @@ func TestGenerateConfig_CertPathInjection(t *testing.T) {
 		Enabled:        true,
 	}
 	ctx := &xray.GenerateContext{CertDomains: map[uint64]string{certID: "t.example.com"}}
-	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), ctx, "", "")
+	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessUsers("in-tls"), ctx, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -471,7 +479,7 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 	inbounds := []models.Inbound{
 		{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
 	}
-	users := vlessTestUser()
+	users := vlessUsers("vless-fallback-tcp")
 
 	routingRules := []models.ServerRoutingRule{
 		{ID: 1, ServerID: 1, OutboundTag: "direct", Domain: "geosite:cn, geosite:apple\ndomain:internal.local", IP: "geoip:private\n10.0.0.0/8", Port: "80,443,8080-8090", Network: "tcp,udp", Enabled: true},
@@ -505,7 +513,7 @@ func TestGenerateConfig_TCPWithFallbacks(t *testing.T) {
 		Enabled:        true,
 	}
 
-	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
+	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessUsers("vless-fallback-tcp"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -536,7 +544,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			Sniffing:       `{"enabled":true,"destOverride":["http","tls"],"routeOnly":true}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
+		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessUsers("in1"), nil, "", "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -562,7 +570,7 @@ func TestGenerateConfig_Sniffing(t *testing.T) {
 			StreamSettings: `{"network":"ws","security":"none","wsSettings":{"path":"/ws"}}`,
 			Enabled:        true,
 		}
-		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
+		raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessUsers("in1"), nil, "", "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -582,20 +590,24 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, SettingsJSON: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
+		_, err := xray.Generate(inbounds, nil, nil, vlessUsers("in-reality"), nil, "", "")
 		if err == nil {
 			t.Error("expected error for malformed settings_json")
 		}
 	})
 
 	t.Run("no active users", func(t *testing.T) {
+		// U25：无可用用户时输出空 clients（清空配置推得动，节点立即移除失效用户），不再报错
 		inbounds := []models.Inbound{
 			{ID: 3, Tag: "in3", Protocol: "vless", Port: 443, Enabled: true},
 		}
-		users := []models.User{{ID: 1, UUID: "", Status: models.StatusActive}, {ID: 2, UUID: "uuid2", Status: models.StatusDisabled}}
-		_, err := xray.Generate(inbounds, nil, nil, users, nil, "", "")
-		if err == nil {
-			t.Error("expected error for no active users")
+		usersByTag := map[string][]protocol.User{"in3": {{UUID: ""}}}
+		cfg, err := xray.Generate(inbounds, nil, nil, usersByTag, nil, "", "")
+		if err != nil {
+			t.Fatalf("expected success with empty clients, got: %v", err)
+		}
+		if !strings.Contains(string(cfg), `"clients": []`) {
+			t.Errorf("expected empty clients array in config, got: %s", cfg)
 		}
 	})
 
@@ -603,7 +615,7 @@ func TestGenerateConfig_ErrorHandling(t *testing.T) {
 		inbounds := []models.Inbound{
 			{ID: 1, Tag: "in1", Protocol: "vless", Port: 443, StreamSettings: "{bad-json", Enabled: true},
 		}
-		_, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "", "")
+		_, err := xray.Generate(inbounds, nil, nil, vlessUsers("in-reality"), nil, "", "")
 		if err == nil {
 			t.Error("expected error for malformed streamSettings")
 		}
@@ -627,7 +639,7 @@ func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
 				StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"serverNames":["example.com"],"publicKey":"pk","privateKey":"sk","shortIds":[` + tc.shortIDs + `],"dest":"1.1.1.1:443"}}`,
 				Enabled:        true,
 			}
-			raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessTestUser(), nil, "", "")
+			raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, vlessUsers("in-reality"), nil, "", "")
 			if err != nil {
 				t.Fatalf("Generate failed: %v", err)
 			}
@@ -647,7 +659,7 @@ func TestGenerateConfig_RealityShortIdsAlwaysEmitted(t *testing.T) {
 
 func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
 	inbounds := []models.Inbound{{ID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true}}
-	users := vlessTestUser()
+	users := vlessUsers("vless-in")
 
 	routingRules := []models.ServerRoutingRule{
 		{ID: 1, ServerID: 1, OutboundTag: "direct", InboundTag: "vless-in, api", Enabled: true},
@@ -810,7 +822,7 @@ func TestStreamSecurity(t *testing.T) {
 func TestGenerate_DefaultOutboundDS(t *testing.T) {
 	gen := func(ds string) map[string]any {
 		inbounds := []models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}
-		raw, err := xray.Generate(inbounds, nil, nil, vlessTestUser(), nil, "direct", "IPIfNonMatch", ds)
+		raw, err := xray.Generate(inbounds, nil, nil, vlessUsers("in"), nil, "direct", "IPIfNonMatch", ds)
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -853,7 +865,7 @@ func TestGenerate_DefaultOutboundDS(t *testing.T) {
 	outbounds := []models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
 	}
-	raw, err := xray.Generate([]models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}, outbounds, nil, vlessTestUser(), nil, "direct", "", "UseIP")
+	raw, err := xray.Generate([]models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}, outbounds, nil, vlessUsers("in"), nil, "direct", "", "UseIP")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -866,12 +878,16 @@ func TestGenerate_DefaultOutboundDS(t *testing.T) {
 	}
 }
 
-// clientFlowOf 生成配置并提取 inbounds[0].settings.clients[0].flow。
-func clientFlowOf(t *testing.T, streamJSON, inbFlow string) (string, bool) {
+// clientFlowOf 生成配置并提取 inbounds[0].settings.clients[0].flow（线格式透传测试）。
+// 流控三态计算在服务层（GetValidUsers/protoUsersFor，services/config.go）；
+// xray 层只负责把协议层的 Flow 字段写入 clients JSON。
+func clientFlowOf(t *testing.T, streamJSON, userFlow string) (string, bool) {
 	t.Helper()
-	users := vlessTestUser()
+	users := map[string][]protocol.User{"in": {{
+		UUID: "11111111-1111-1111-1111-111111111111", Email: "user-1@panel.local", Flow: userFlow,
+	}}}
 	inb := models.Inbound{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443,
-		StreamSettings: streamJSON, Flow: inbFlow, Enabled: true}
+		StreamSettings: streamJSON, Enabled: true}
 	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, users, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
@@ -889,31 +905,20 @@ func clientFlowOf(t *testing.T, streamJSON, inbFlow string) (string, bool) {
 	return flow, has
 }
 
-// TestGenerate_ClientFlowThreeStates 入站级流控三态：
-// 空 = 自动（TCP+REALITY 注入 vision）；xtls-rprx-vision = 为该入站用户全部开启；
-// none = 禁用自动注入（UserInbound.Flow 仍最高优先）。
-func TestGenerate_ClientFlowThreeStates(t *testing.T) {
+// TestGenerate_ClientFlowPassthrough 用户 Flow 线格式透传：
+// 有值 → clients[0].flow 输出；空 → 不输出 flow 字段。
+// （入站级流控三态：空=自动 / xtls-rprx-vision=全开 / none=禁自动——的计算与测试在服务层）
+func TestGenerate_ClientFlowPassthrough(t *testing.T) {
 	realityTCP := inbStream("tcp", "reality", `"realitySettings":{"dest":"1.2.3.4:443","serverNames":["r.example.com"],"privateKey":"sk","shortIds":["abcd"]}`)
-	tlsTCP := inbStream("tcp", "tls", `"tlsSettings":{"serverName":"t.example.com","certificates":[{"certificateFile":"/c.pem","keyFile":"/k.pem"}]}`)
 
-	// 1. 自动：TCP+REALITY，inb.Flow 空 → vision
-	flow, has := clientFlowOf(t, realityTCP, "")
+	// 1. 有值 → 透传
+	flow, has := clientFlowOf(t, realityTCP, "xtls-rprx-vision")
 	if !has || flow != "xtls-rprx-vision" {
-		t.Errorf("自动模式 tcp+reality 应注入 vision: flow=%q has=%v", flow, has)
+		t.Errorf("Flow 有值应透传: flow=%q has=%v", flow, has)
 	}
-	// 2. 关闭：TCP+REALITY，inb.Flow=none → 不注入
-	flow, has = clientFlowOf(t, realityTCP, "none")
+	// 2. 空 → 不输出
+	flow, has = clientFlowOf(t, realityTCP, "")
 	if has {
-		t.Errorf("none 应禁用自动注入: flow=%q", flow)
-	}
-	// 3. 开启：tcp+tls，inb.Flow=xtls-rprx-vision → 非 reality 也注入
-	flow, has = clientFlowOf(t, tlsTCP, "xtls-rprx-vision")
-	if !has || flow != "xtls-rprx-vision" {
-		t.Errorf("显式 vision 应注入: flow=%q has=%v", flow, has)
-	}
-	// 4. 显式 flow 与 network 无关：ws + inb.Flow=vision → 注入
-	flow, has = clientFlowOf(t, inbStream("ws", "none", ""), "xtls-rprx-vision")
-	if !has || flow != "xtls-rprx-vision" {
-		t.Errorf("显式 flow 应不受 network 限制: flow=%q has=%v", flow, has)
+		t.Errorf("Flow 为空不应输出 flow 字段: flow=%q", flow)
 	}
 }

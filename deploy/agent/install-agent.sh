@@ -11,6 +11,7 @@
 #   --secret <secret>   同上，节点密钥（仅显示一次）
 #   --agent-url <url>   agent 二进制下载地址（默认取 --master 的 /api/v1/download/agent）
 #   --agent-file <path> 本地 agent 二进制（离线/scp 场景，优先于 --agent-url）
+#   --agent-digest <sha> 期望的 agent 二进制 sha256（提供则强制校验，不匹配拒绝安装）
 #   --xray-version <v>  xray 版本（默认 v26.6.27，与验证环境一致）
 #   --dry-run           只打印将执行的步骤，不实际执行
 #
@@ -21,11 +22,12 @@ NODE_ID=""
 SECRET=""
 AGENT_URL=""
 AGENT_FILE=""
+AGENT_DIGEST=""
 XRAY_VERSION="v26.6.27"
 DRY_RUN=0
 
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --secret) SECRET="$2"; shift 2;;
     --agent-url) AGENT_URL="$2"; shift 2;;
     --agent-file) AGENT_FILE="$2"; shift 2;;
+    --agent-digest) AGENT_DIGEST="$2"; shift 2;;
     --xray-version) XRAY_VERSION="$2"; shift 2;;
     --dry-run) DRY_RUN=1; shift;;
     -h|--help) usage;;
@@ -60,6 +63,7 @@ echo "    master   : $MASTER"
 echo "    node_id  : $NODE_ID"
 echo "    agent    : ${AGENT_FILE:-$AGENT_URL}"
 echo "    xray     : $XRAY_VERSION"
+[[ -n "$AGENT_DIGEST" ]] && echo "    agent 校验: sha256 强制校验"
 [[ $DRY_RUN -eq 1 ]] && echo "    [DRY-RUN] 仅打印步骤"
 
 if [[ $DRY_RUN -eq 0 && $EUID -ne 0 ]]; then
@@ -78,9 +82,27 @@ mkdir_p() { run mkdir -p "$@"; }
 # ---------- 1. 安装 agent 二进制 ----------
 mkdir_p /usr/local/bin
 if [[ -n "$AGENT_FILE" ]]; then
+  # U22：提供 --agent-digest 时强制校验（含本地文件），不匹配拒绝安装
+  if [[ -n "$AGENT_DIGEST" ]]; then
+    ACTUAL=$(sha256sum "$AGENT_FILE" | awk '{print $1}')
+    if [[ "$ACTUAL" != "$AGENT_DIGEST" ]]; then
+      echo "agent 校验失败: 期望 $AGENT_DIGEST 实际 $ACTUAL"; exit 1
+    fi
+    echo "    agent sha256 校验通过"
+  fi
   run install -m 0755 "$AGENT_FILE" /usr/local/bin/xray-agent
 else
   run curl -fsSL -o /tmp/xray-agent "$AGENT_URL"
+  if [[ -n "$AGENT_DIGEST" ]]; then
+    ACTUAL=$(sha256sum /tmp/xray-agent | awk '{print $1}')
+    if [[ "$ACTUAL" != "$AGENT_DIGEST" ]]; then
+      echo "agent 校验失败: 期望 $AGENT_DIGEST 实际 $ACTUAL（请检查下载源或更新 --agent-digest）"
+      rm -f /tmp/xray-agent; exit 1
+    fi
+    echo "    agent sha256 校验通过"
+  else
+    echo "    [警告] 未提供 --agent-digest，agent 二进制未校验（供应链加固建议提供）"
+  fi
   run chmod 0755 /tmp/xray-agent
   run install -m 0755 /tmp/xray-agent /usr/local/bin/xray-agent
   run rm -f /tmp/xray-agent
@@ -95,14 +117,19 @@ if [[ ! -x /usr/local/bin/xray ]] || ! /usr/local/bin/xray version >/dev/null 2>
   run curl -fL -o "$ZIP" "$URL"
   echo "==> 下载校验和"
   run curl -fL -o "${ZIP}.dgst" "${URL}.dgst"
-  if command -v sha256sum >/dev/null 2>&1 && [[ -f "${ZIP}.dgst" ]]; then
-    EXPECT=$(awk '/Xray-linux-64.zip/ {print $1}' "${ZIP}.dgst" | head -1)
-    ACTUAL=$(sha256sum "$ZIP" | awk '{print $1}')
-    if [[ -n "$EXPECT" && "$EXPECT" != "$ACTUAL" ]]; then
-      echo "校验失败: 期望 $EXPECT 实际 $ACTUAL"; exit 1
-    fi
-    echo "    sha256 校验通过"
+  # U22：sha256 校验必检——缺工具/缺条目/不匹配一律拒绝安装（不再静默跳过）
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "缺少 sha256sum 工具，无法校验 xray 完整性（拒绝安装）"; exit 1
   fi
+  EXPECT=$(awk '/Xray-linux-64.zip/ {print $1}' "${ZIP}.dgst" | head -1)
+  if [[ -z "$EXPECT" ]]; then
+    echo "校验和文件缺少 Xray-linux-64.zip 条目（拒绝安装）"; exit 1
+  fi
+  ACTUAL=$(sha256sum "$ZIP" | awk '{print $1}')
+  if [[ "$EXPECT" != "$ACTUAL" ]]; then
+    echo "校验失败: 期望 $EXPECT 实际 $ACTUAL"; exit 1
+  fi
+  echo "    sha256 校验通过"
   run unzip -o "$ZIP" -d /tmp/xray-extract >/dev/null 2>&1 || run python3 -m zipfile -e "$ZIP" /tmp/xray-extract
   run install -m 0755 /tmp/xray-extract/xray /usr/local/bin/xray
   run install -m 0644 /tmp/xray-extract/geoip.dat /usr/local/share/xray/geoip.dat
@@ -133,6 +160,8 @@ stats:
 heartbeat_interval: 30s
 reconnect_max: 60s
 EOF
+  # U22：配置文件含节点密钥，权限收紧为仅 root 可读写（默认 umask 会生成 0644）
+  chmod 0600 /etc/xray-agent/config.yml
 fi
 
 # ---------- 4. systemd 单元 ----------
