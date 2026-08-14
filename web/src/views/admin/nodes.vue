@@ -7,13 +7,14 @@ import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/
 import {
   createInbound,
   deleteInbound,
-  generateAndPushConfig,
   getInbounds,
+  getPermissionGroups,
   getServers,
   toggleInbound,
   updateInbound,
   type InboundItem,
   type InboundPayload,
+  type PermissionGroup,
   type ServerItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -23,6 +24,7 @@ const router = useRouter()
 
 const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
+const groups = ref<PermissionGroup[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
 
@@ -30,10 +32,23 @@ function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
 }
 
+function groupName(id: number) {
+  return groups.value.find((g) => g.id === id)?.name ?? `组#${id}`
+}
+
 async function loadServers() {
   try {
     const { data } = await getServers()
     if (data.code === 0) servers.value = data.data.items
+  } catch {
+    /* 忽略 */
+  }
+}
+
+async function loadGroups() {
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) groups.value = data.data.items
   } catch {
     /* 忽略 */
   }
@@ -53,7 +68,7 @@ async function load() {
 }
 
 onMounted(async () => {
-  await loadServers()
+  await Promise.all([loadServers(), loadGroups()])
   // 从服务器页跳转进入：?server_id=X 预选过滤
   const q = Number(route.query.server_id)
   if (q > 0) serverFilter.value = q
@@ -98,6 +113,7 @@ function editorModelValue(): string {
     share_addr_strategy: editing.value.share_addr_strategy || 'node',
     share_addr: editing.value.share_addr || '',
     share_port: editing.value.share_port || 0,
+    permission_group_ids: editing.value.permission_group_ids || [],
   })
 }
 
@@ -155,6 +171,7 @@ async function save() {
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
       share_port: c.sharePort || undefined,
+      permission_group_ids: c.permissionGroupIds,
     }
     const { data } = editing.value
       ? await updateInbound(editing.value.id, payload)
@@ -206,41 +223,6 @@ async function remove(row: any) {
   }
 }
 
-// ---- 生成并下发配置（按当前筛选服务器） ----
-const deployOpen = ref(false)
-const deployLoading = ref(false)
-const deployResult = ref('')
-
-async function deployFor(serverId: number, serverLabel: string) {
-  try {
-    await ElMessageBox.confirm(
-      `将按「${serverLabel}」的全部启用入站 + 出站 + 路由 + 用户生成配置并自动推送（节点离线时保存，上线自动补推），确认？`,
-      '生成并下发配置',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  deployOpen.value = true
-  deployLoading.value = true
-  deployResult.value = ''
-  try {
-    const { data } = await generateAndPushConfig(serverId)
-    if (data.code === 0 && data.data.ok) {
-      ElMessage.success(data.data.message || '部署成功')
-      deployResult.value = data.data.config
-    } else {
-      ElMessage.error(data.data?.message || data.message)
-      deployResult.value = data.data?.config ?? ''
-    }
-  } catch (e) {
-    deployResult.value = `失败：${errMsg(e)}`
-    ElMessage.error(errMsg(e, '部署失败'))
-  } finally {
-    deployLoading.value = false
-  }
-}
-
 function transportOf(row: any): string {
   try {
     const ss = JSON.parse(row.stream_settings || '{}')
@@ -261,12 +243,6 @@ function transportOf(row: any): string {
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
       <div style="display: flex; gap: 10px">
-        <el-button
-          :disabled="!serverFilter"
-          @click="deployFor(serverFilter!, serverName(serverFilter!))"
-        >
-          <el-icon><VideoPlay /></el-icon>&nbsp;生成并下发配置
-        </el-button>
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增入站</el-button>
       </div>
     </div>
@@ -298,6 +274,22 @@ function transportOf(row: any): string {
         <el-table-column label="传输/TLS" width="130">
           <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
         </el-table-column>
+        <el-table-column label="开放权限组" min-width="140">
+          <template #default="{ row }">
+            <template v-if="row.permission_group_ids && row.permission_group_ids.length">
+              <el-tag
+                v-for="gid in row.permission_group_ids"
+                :key="gid"
+                size="small"
+                effect="plain"
+                style="margin-right: 4px; margin-bottom: 2px"
+              >
+                {{ groupName(gid) }}
+              </el-tag>
+            </template>
+            <span v-else class="muted" style="font-size: 12px">全员开放</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" @change="toggle(row)" />
@@ -320,17 +312,18 @@ function transportOf(row: any): string {
     <!-- 新增/编辑入站 -->
     <el-dialog
       v-model="editorOpen"
-      :title="editing ? `编辑入站 · ${editing.tag}` : '新增入站'"
-      width="780px"
+      :title="editing ? `编辑入站 · ${editing.tag}` : '新增节点入站'"
+      width="720px"
       :append-to-body="true"
       @closed="editing = null"
     >
-      <el-form-item label="所属服务器" style="margin-bottom: 14px">
-        <el-select v-model="formServerId" style="width: 280px" :disabled="!!editing">
-          <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
-        </el-select>
-        <span v-if="editing" class="muted" style="font-size: 12px; margin-left: 8px">（编辑时不可更换服务器）</span>
-      </el-form-item>
+      <div v-if="!editing" style="margin-bottom: 14px">
+        <el-form-item label="所属目标服务器" style="margin-bottom: 0">
+          <el-select v-model="formServerId" style="width: 100%" placeholder="请选择要绑定入站的服务器">
+            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+          </el-select>
+        </el-form-item>
+      </div>
 
       <InboundConfigEditor
         :key="editing ? `edit-${editing.id}` : 'create'"
@@ -339,6 +332,7 @@ function transportOf(row: any): string {
         :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"
+        :permission-group-ids="editing?.permission_group_ids || []"
         @change="onInboundChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"
@@ -346,15 +340,7 @@ function transportOf(row: any): string {
       />
       <template #footer>
         <el-button @click="editorOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 部署结果 -->
-    <el-dialog v-model="deployOpen" title="生成并下发配置" width="640px">
-      <pre v-loading="deployLoading" class="cfg-view">{{ deployResult || '正在生成并下发…' }}</pre>
-      <template #footer>
-        <el-button type="primary" @click="deployOpen = false">关闭</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存入站</el-button>
       </template>
     </el-dialog>
   </div>

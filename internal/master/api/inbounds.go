@@ -35,6 +35,7 @@ type inboundView struct {
 	ShareAddrStrategy string    `json:"share_addr_strategy"`        // node / listen / custom
 	ShareAddr         string    `json:"share_addr"`                 // 自定义分享地址（订阅专用，域名/IP）
 	SharePort         int       `json:"share_port"`                 // 自定义分享端口（0 = 使用入站端口）
+	PermissionGroupIDs []uint64  `json:"permission_group_ids"`       // 开放权限组 ID 列表（权威来源：节点入站定义权限组）
 	CreatedAt         time.Time `json:"created_at"`
 }
 
@@ -55,9 +56,13 @@ type inboundForm struct {
 	ShareAddrStrategy string  `json:"share_addr_strategy"` // node / listen / custom
 	ShareAddr         string  `json:"share_addr"` // 自定义分享地址（订阅专用，域名/IP）
 	SharePort         int     `json:"share_port"` // 自定义分享端口（0 = 使用入站端口）
+	PermissionGroupIDs []uint64 `json:"permission_group_ids"` // 开放权限组 ID 列表
 }
 
-func toInboundView(i *models.Inbound, serverName string) inboundView {
+func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inboundView {
+	if groupIDs == nil {
+		groupIDs = []uint64{}
+	}
 	return inboundView{
 		ID: i.ID, ServerID: i.ServerID, ServerName: serverName,
 		Tag: i.Tag, Protocol: i.Protocol, Port: i.Port,
@@ -67,6 +72,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
 		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
 		SharePort: i.SharePort,
+		PermissionGroupIDs: groupIDs,
 	}
 }
 
@@ -83,6 +89,12 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
+	inboundIDs := make([]uint64, 0, len(list))
+	for i := range list {
+		inboundIDs = append(inboundIDs, list[i].ID)
+	}
+	groupMap := services.BatchInboundPermissionGroupIDs(d.DB, inboundIDs)
+
 	items := make([]inboundView, 0, len(list))
 	for i := range list {
 		serverName := ""
@@ -90,7 +102,7 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 		if err := d.DB.First(&srv, list[i].ServerID).Error; err == nil {
 			serverName = srv.Name
 		}
-		items = append(items, toInboundView(&list[i], serverName))
+		items = append(items, toInboundView(&list[i], serverName, groupMap[list[i].ID]))
 	}
 	util.OK(c, gin.H{"items": items})
 }
@@ -140,10 +152,13 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	if len(req.PermissionGroupIDs) > 0 {
+		_ = services.SyncInboundPermissionGroups(d.DB, inb.ID, req.PermissionGroupIDs)
+	}
 	if err := d.enqueueConfig(req.ServerID); err != nil {
 		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", req.ServerID, err)
 	}
-	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name)})
+	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name, req.PermissionGroupIDs)})
 }
 
 // AdminUpdateInbound PUT /api/v1/admin/inbounds/:id
@@ -175,6 +190,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ShareAddrStrategy *string `json:"share_addr_strategy"` //
 		ShareAddr         *string `json:"share_addr"`          //
 		SharePort         *int    `json:"share_port"`          // 0 = 使用入站端口
+		PermissionGroupIDs *[]uint64 `json:"permission_group_ids"` // 开放权限组（nil 不更新）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -270,6 +286,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			return
 		}
 	}
+	if req.PermissionGroupIDs != nil {
+		_ = services.SyncInboundPermissionGroups(d.DB, id, *req.PermissionGroupIDs)
+	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
 		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
 	}
@@ -279,7 +298,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		serverName = srv.Name
 	}
 	d.DB.First(&inb, id)
-	util.OK(c, gin.H{"inbound": toInboundView(&inb, serverName)})
+	groupIDs := services.InboundPermissionGroupIDs(d.DB, id)
+	util.OK(c, gin.H{"inbound": toInboundView(&inb, serverName, groupIDs)})
 }
 
 // AdminDeleteInbound DELETE /api/v1/admin/inbounds/:id
@@ -291,6 +311,7 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	}
 	var inb models.Inbound
 	d.DB.First(&inb, id)
+	_ = d.DB.Where("inbound_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error
 	if err := d.DB.Delete(&models.Inbound{}, id).Error; err != nil {
 		util.ServerError(c, "删除失败")
 		return

@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/alexedwards/argon2id"
@@ -10,41 +11,10 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/middleware"
+	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
-
-// AdminDashboard GET /api/v1/admin/dashboard —— 仪表盘统计（P0 先提供真实计数，
-// 卡片数据后续由 stats 模块补全）。
-func (d *Deps) AdminDashboard(c *gin.Context) {
-	var users, plans, orders, pendingOrders int64
-	db := d.DB
-	db.Model(&models.User{}).Count(&users)
-	db.Model(&models.Plan{}).Count(&plans)
-	db.Model(&models.Order{}).Count(&orders)
-	db.Model(&models.Order{}).Where("status = ?", models.OrderPending).Count(&pendingOrders)
-
-	// 实时在线数：遍历全部节点，用 Hub.IsOnline 判断
-	var allServers []models.Server
-	onlineCount := int64(0)
-	if err := db.Find(&allServers).Error; err == nil && d.Hub != nil {
-		for _, s := range allServers {
-			if d.Hub.IsOnline(s.ID) {
-				onlineCount++
-			}
-		}
-	}
-	totalServers := int64(len(allServers))
-
-	util.OK(c, gin.H{
-		"total_users":    users,
-		"total_servers":  totalServers,
-		"online_servers": onlineCount,
-		"total_plans":    plans,
-		"total_orders":   orders,
-		"pending_orders": pendingOrders,
-	})
-}
 
 // AdminUsers GET /api/v1/admin/users —— 用户列表（分页）。
 func (d *Deps) AdminUsers(c *gin.Context) {
@@ -78,10 +48,17 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 				totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
 			}
 		}
+		effectiveGroupID := services.UserEffectiveGroupID(d.DB, &u)
+		effectiveLimit, isCustomLimit := services.UserEffectiveDeviceLimit(d.DB, &u)
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"uuid": u.UUID,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
+			"permission_group_id":    u.PermissionGroupID,
+			"effective_group_id":     effectiveGroupID,
+			"device_limit":           u.DeviceLimit,
+			"effective_device_limit": effectiveLimit,
+			"is_custom_device_limit": isCustomLimit,
 			"expire_at": u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
 			"up_bytes": up, "down_bytes": down,
 			"used_bytes": used, "total_bytes": totalBytes,
@@ -142,27 +119,25 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 		util.ServerError(c, "保存邀请码失败")
 		return
 	}
-	util.OK(c, gin.H{"count": len(codes), "codes": codeStrs})
+	d.Audit.Log("admin", adminID, "invitation.batch_create", "批量生成邀请码 "+strconv.Itoa(req.Count)+" 个", c.ClientIP())
+	util.OK(c, gin.H{"codes": codeStrs})
 }
 
-// AdminCreateUser POST /api/v1/admin/users —— 管理员手动创建用户（自动生成 UUID 用于 Xray）。
+// AdminCreateUser POST /api/v1/admin/users —— 管理员手动创建用户。
 func (d *Deps) AdminCreateUser(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email" binding:"required,max=128"`
-		Password string `json:"password" binding:"required,min=8,max=72"`
+		Email             string     `json:"email" binding:"required,email"`
+		Password          string     `json:"password" binding:"required,min=8"`
+		PlanID            uint64     `json:"plan_id"`
+		PermissionGroupID uint64     `json:"permission_group_id"`
+		DeviceLimit       int        `json:"device_limit"`
+		BalanceCents      int64      `json:"balance_cents"`
+		ExpireAt          *time.Time `json:"expire_at"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	// 邮箱去重
-	var cnt int64
-	d.DB.Model(&models.User{}).Where("email = ?", req.Email).Count(&cnt)
-	if cnt > 0 {
-		util.BadRequest(c, "邮箱已被使用")
-		return
-	}
-
 	hash, err := argon2id.CreateHash(req.Password, argon2id.DefaultParams)
 	if err != nil {
 		util.ServerError(c, "密码加密失败")
@@ -180,13 +155,18 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 
 	user := models.User{
-		Username:       req.Email, // 用邮箱直接做用户名
-		Email:          req.Email,
-		UUID:           uuid,
-		PasswordHash:   hash,
-		Role:           models.RoleUser,
-		Status:         models.StatusActive,
-		SubscribeToken: token,
+		Username:          req.Email, // 用邮箱直接做用户名
+		Email:             req.Email,
+		UUID:              uuid,
+		PasswordHash:      hash,
+		Role:              models.RoleUser,
+		Status:            models.StatusActive,
+		SubscribeToken:    token,
+		PlanID:            req.PlanID,
+		PermissionGroupID: req.PermissionGroupID,
+		DeviceLimit:       req.DeviceLimit,
+		BalanceCents:      req.BalanceCents,
+		ExpireAt:          req.ExpireAt,
 	}
 	if err := d.DB.Create(&user).Error; err != nil {
 		if err.Error() == "UNIQUE constraint failed: users.username" {
@@ -209,6 +189,73 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		"role":     user.Role,
 		"status":   user.Status,
 	})
+}
+
+// AdminUpdateUser PUT /api/v1/admin/users/:id —— 更新用户信息（权限组/套餐/过期时间/密码/余额/设备限制）。
+func (d *Deps) AdminUpdateUser(c *gin.Context) {
+	id, err := parseUint(c.Param("id"))
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var user models.User
+	if err := d.DB.First(&user, id).Error; err != nil {
+		util.Fail(c, 404, "用户不存在")
+		return
+	}
+	var req struct {
+		PlanID            *uint64    `json:"plan_id"`
+		PermissionGroupID *uint64    `json:"permission_group_id"` // 0=跟随套餐
+		DeviceLimit       *int       `json:"device_limit"`        // 0=跟随套餐
+		BalanceCents      *int64     `json:"balance_cents"`       // 直接设置余额（分）
+		ExpireAt          *time.Time `json:"expire_at"`
+		Status            *int       `json:"status"`
+		Password          *string    `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	updates := map[string]any{}
+	if req.PlanID != nil {
+		updates["plan_id"] = *req.PlanID
+	}
+	if req.PermissionGroupID != nil {
+		updates["permission_group_id"] = *req.PermissionGroupID
+	}
+	if req.DeviceLimit != nil {
+		updates["device_limit"] = *req.DeviceLimit
+	}
+	if req.BalanceCents != nil {
+		updates["balance_cents"] = *req.BalanceCents
+	}
+	if req.ExpireAt != nil {
+		updates["expire_at"] = req.ExpireAt
+	}
+	if req.Status != nil {
+		updates["status"] = *req.Status
+	}
+	if req.Password != nil && *req.Password != "" {
+		hash, err := argon2id.CreateHash(*req.Password, argon2id.DefaultParams)
+		if err != nil {
+			util.ServerError(c, "密码哈希失败")
+			return
+		}
+		updates["password_hash"] = hash
+	}
+	if len(updates) > 0 {
+		if err := d.DB.Model(&user).Updates(updates).Error; err != nil {
+			util.ServerError(c, "更新失败")
+			return
+		}
+	}
+	d.Audit.Log("admin", middleware.CurrentUser(c), "user.update", "更新用户 "+user.Email, c.ClientIP())
+	d.enqueueForAllWithInbounds()
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
+	d.DB.First(&user, id)
+	util.OK(c, gin.H{"user": user})
 }
 
 // AdminToggleUser POST /api/v1/admin/users/:id/toggle —— 封禁/解封用户。

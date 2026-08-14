@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, VideoPlay, Delete, Key, CopyDocument, ArrowDown, Edit, Setting } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, ArrowDown, Edit, Setting, RefreshRight, TrendCharts } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
+import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 import {
   createServer,
   deleteServer,
-  generateAndPushConfig,
   getInbounds,
   getServers,
   resetServerSecret,
@@ -17,13 +17,20 @@ import {
   updateServer,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import { maskUUIDs } from '@/utils/mask'
 
 const router = useRouter()
 
 const list = ref<ServerItem[]>([])
 const loading = ref(false)
 const keyword = ref('')
+
+const metricsOpen = ref(false)
+const metricsServer = ref<ServerItem | null>(null)
+
+function openMetrics(row: any) {
+  metricsServer.value = row
+  metricsOpen.value = true
+}
 
 // 接入点计数：server_id → 入站数（服务器页摘要，跳转节点页按服务器过滤）
 const inboundCountMap = ref<Record<number, number>>({})
@@ -137,42 +144,6 @@ function openDrawer(row: any) {
 
 // ---- 下发配置（走 generate-config：主控生成完整配置并保存待推送，在线自动下发） ----
 const pushOpen = ref(false)
-const pushTarget = ref<ServerItem | null>(null)
-const pushLoading = ref(false)
-const pushResult = ref('')
-const pushConfigText = ref('')
-
-function openPush(row: any) {
-  pushTarget.value = row
-  pushResult.value = ''
-  pushConfigText.value = ''
-  pushOpen.value = true
-  runPush()
-}
-
-async function runPush() {
-  if (!pushTarget.value) return
-  pushLoading.value = true
-  pushResult.value = ''
-  try {
-    const { data } = await generateAndPushConfig(pushTarget.value.id)
-    if (data.code === 0) {
-      pushConfigText.value = data.data.config || ''
-      pushResult.value = data.data.message
-      if (data.data.ok) ElMessage.success(data.data.message || '配置已下发')
-      else ElMessage.warning(data.data.message || '配置已保存，节点上线后自动补推')
-      load()
-    } else {
-      pushResult.value = `失败：${data.message}`
-    }
-  } catch (e) {
-    pushResult.value = `失败：${errMsg(e)}`
-    ElMessage.error(errMsg(e, '生成失败'))
-  } finally {
-    pushLoading.value = false
-  }
-}
-
 // ---- 状态详情 ----
 const statusOpen = ref(false)
 const statusData = ref<CommandResult<any> | null>(null)
@@ -231,40 +202,6 @@ async function openLogs(row: any) {
   }
 }
 
-// ---- 生成并下发配置 ----
-const genOpen = ref(false)
-const genLoading = ref(false)
-const genResult = ref('')
-
-async function genPush(row: any) {
-  try {
-    await ElMessageBox.confirm(
-      `将按「${row.name}」的启用入站 + 全部启用用户生成 Xray 配置并自动推送（节点离线时保存，上线自动补推），确认？`,
-      '生成并下发配置',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  genOpen.value = true
-  genLoading.value = true
-  genResult.value = ''
-  try {
-    const { data } = await generateAndPushConfig(row.id)
-    if (data.code === 0 && data.data.ok) {
-      ElMessage.success(data.data.message || '配置已生成')
-      genResult.value = data.data.config
-    } else {
-      ElMessage.error(data.data?.message || data.message)
-      genResult.value = data.data?.config ?? ''
-    }
-  } catch (e) {
-    genResult.value = `失败：${errMsg(e)}`
-    ElMessage.error(errMsg(e, '生成失败'))
-  } finally {
-    genLoading.value = false
-  }
-}
 // ---- 编辑服务器 ----
 const editOpen = ref(false)
 const editForm = reactive({ id: 0, name: '', host: '', location: '', remark: '' })
@@ -414,14 +351,13 @@ async function removeServer(row: any) {
         <el-table-column label="最后心跳" width="170">
           <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;管理</el-button>
+            <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
+            <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
             <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
-            <el-button size="small" text type="success" @click="genPush(row)"><el-icon><VideoPlay /></el-icon>&nbsp;生成</el-button>
-            <el-button size="small" text @click="openPush(row)"><el-icon><Document /></el-icon>&nbsp;下发</el-button>
-            <el-button size="small" text @click="restartXray(row)"><el-icon><VideoPlay /></el-icon>&nbsp;重启</el-button>
-            <el-button size="small" text @click="openLogs(row)"><el-icon><Key /></el-icon>&nbsp;日志</el-button>
+            <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
+            <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
             <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
               <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
               <template #dropdown>
@@ -481,34 +417,6 @@ async function removeServer(row: any) {
         <template v-else>
           <el-button type="primary" @click="closeCreate">完成</el-button>
         </template>
-      </template>
-    </el-dialog>
-
-    <!-- 下发配置（主控生成完整配置并推送） -->
-    <el-dialog v-model="pushOpen" :title="`生成并下发配置 · ${pushTarget?.name ?? ''}`" width="680px">
-      <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
-        按该节点启用入站 + 出站 + 路由规则 + 全部启用用户生成完整 Xray 配置：保存待推送，节点在线立即下发（离线保留，上线自动补推）。
-      </p>
-      <pre v-loading="pushLoading" class="log-view">{{ pushResult ? `结果：${pushResult}\n\n` : '' }}{{ maskUUIDs(pushConfigText) || (pushLoading ? '正在生成配置…' : '') }}</pre>
-      <div v-if="pushConfigText" style="display: flex; gap: 8px; margin-top: 10px">
-        <el-button size="small" @click="copyText(pushConfigText, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
-      </div>
-      <template #footer>
-        <el-button type="primary" @click="pushOpen = false">关闭</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 生成结果 -->
-    <el-dialog v-model="genOpen" title="生成并下发配置" width="680px">
-      <p class="muted" style="margin: 0 0 10px; font-size: 12.5px">
-        生成的完整 Xray 配置如下（已保存待推送；节点在线则立即下发，离线则上线自动补推）：
-      </p>
-      <pre v-loading="genLoading" class="log-view">{{ maskUUIDs(genResult) || '正在生成…' }}</pre>
-      <div v-if="genResult && !genLoading" style="display: flex; gap: 8px; margin-top: 10px">
-        <el-button size="small" @click="copyText(genResult, '配置 JSON')"><el-icon><CopyDocument /></el-icon>&nbsp;复制配置</el-button>
-      </div>
-      <template #footer>
-        <el-button type="primary" @click="genOpen = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -575,6 +483,13 @@ async function removeServer(row: any) {
       :server="drawerServer"
       @removed="load"
       @changed="load"
+    />
+
+    <!-- 时序性能监控抽屉 -->
+    <ServerMetricsDrawer
+      v-model="metricsOpen"
+      :server-id="metricsServer?.id || 0"
+      :server-name="metricsServer?.name || ''"
     />
   </div>
 </template>

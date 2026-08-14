@@ -70,10 +70,13 @@ func TestBuildClash_Gaps(t *testing.T) {
 		t.Error("flow 不应出现在 ws 节点")
 	}
 	// ws-tls 节点（无 flow 覆盖）不应输出 flow
-	wsIdx := strings.Index(yaml, `"ws-tls"`)
+	wsIdx := strings.Index(yaml, "'ws-tls'")
+	if wsIdx < 0 {
+		wsIdx = strings.Index(yaml, `"ws-tls"`)
+	}
 	if wsIdx >= 0 {
 		rest := yaml[wsIdx:]
-		if idx := strings.Index(rest, "\n  - name"); idx > 0 {
+		if idx := strings.Index(rest, "\n"); idx > 0 {
 			rest = rest[:idx]
 		}
 		if strings.Contains(rest, "flow:") {

@@ -317,6 +317,10 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 				DiskTotal:   snap.DiskTotal,
 				XrayRunning: c.Xray.IsRunning(),
 				OnlineUsers: 0,
+				RxRate:      snap.RxRate,
+				TxRate:      snap.TxRate,
+				RxBytes:     snap.RxBytes,
+				TxBytes:     snap.TxBytes,
 				TS:          time.Now().Unix(),
 			}
 			if err := c.send(protocol.MsgHeartbeat, "", hb); err != nil {

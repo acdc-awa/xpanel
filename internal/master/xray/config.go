@@ -821,6 +821,9 @@ func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 			}
 			limit = ui.LimitedDevice
 		}
+		if limit == 0 && u.DeviceLimit > 0 {
+			limit = u.DeviceLimit
+		}
 		// 自动 flow：TCP+REALITY 且未显式关闭时注入 xtls-rprx-vision
 		if flow == "" && !disableAutoFlow && StreamHasReality(inb.StreamSettings) && StreamNetwork(inb.StreamSettings) == "tcp" {
 			flow = "xtls-rprx-vision"

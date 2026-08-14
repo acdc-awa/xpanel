@@ -19,7 +19,9 @@ type HeartbeatPayload struct {
 	OnlineUsers int     `json:"online_users"` // 在线用户数（P2 流量接入后填）
 	RxRate      float64 `json:"rx_rate"`      // 实时速率（字节/秒）
 	TxRate      float64 `json:"tx_rate"`
-	TS          int64   `json:"ts"` // unix 秒
+	RxBytes     uint64  `json:"rx_bytes"`     // 累计物理网卡接收字节
+	TxBytes     uint64  `json:"tx_bytes"`     // 累计物理网卡发送字节
+	TS          int64   `json:"ts"`           // unix 秒
 }
 
 // TrafficEntry 单条流量记录。
@@ -44,6 +46,7 @@ type User struct {
 	Email string `json:"email"`
 	Flow  string `json:"flow,omitempty"`
 	Level uint32 `json:"level,omitempty"`
+	Limit int    `json:"limit,omitempty"` // 最大在线设备数限制
 }
 
 // SyncUsersPayload 全量用户同步负载（InboundTag -> []User）。

@@ -20,6 +20,7 @@ type User struct {
 	PlanID              uint64     `gorm:"index" json:"plan_id"`
 	ExpireAt            *time.Time `json:"expire_at"`
 	BalanceCents        int64      `gorm:"default:0;not null" json:"balance_cents"`     // 账户余额（分）
+	DeviceLimit         int        `gorm:"default:0" json:"device_limit"`              // 自定义设备数限制（0=继承套餐）
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
 	MustChangePwd       bool       `gorm:"default:false" json:"must_change_pwd"`

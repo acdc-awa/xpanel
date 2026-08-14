@@ -65,6 +65,7 @@ func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
 // 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
+// 权限控制按权限组匹配（节点入站定义开放权限组，用户继承/指定权限组）。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ? AND type = ?", serverID, true, models.InboundTypeUser).Find(&inbounds).Error; err != nil {
@@ -77,35 +78,49 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 
 	validUsers := s.filterValidUsers()
 
-	var allGrants []models.UserInbound
-	_ = s.DB.Where("enabled = ?", true).Find(&allGrants)
-	userHasGrants := make(map[uint64]bool)
-	userGrantedInbounds := make(map[uint64]map[uint64]bool)
-	for _, g := range allGrants {
-		userHasGrants[g.UserID] = true
-		if userGrantedInbounds[g.UserID] == nil {
-			userGrantedInbounds[g.UserID] = make(map[uint64]bool)
-		}
-		userGrantedInbounds[g.UserID][g.InboundID] = true
+	inboundIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		inboundIDs = append(inboundIDs, inb.ID)
+	}
+	inboundGroupMap := BatchInboundPermissionGroupIDs(s.DB, inboundIDs)
+
+	userEffectiveGroups := make(map[uint64]uint64, len(validUsers))
+	for _, u := range validUsers {
+		userEffectiveGroups[u.ID] = UserEffectiveGroupID(s.DB, &u)
 	}
 
 	for _, inb := range inbounds {
+		allowedGroups := inboundGroupMap[inb.ID]
+		hasGroupLimit := len(allowedGroups) > 0
+		allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
+		for _, g := range allowedGroups {
+			allowedGroupSet[g] = true
+		}
+
 		var protoUsers []protocol.User
 		for _, u := range validUsers {
-			if userHasGrants[u.ID] {
-				if !userGrantedInbounds[u.ID][inb.ID] {
-					continue
-				}
+			uGroup := userEffectiveGroups[u.ID]
+			// Xboard 规范：用户必须拥有生效权限组（uGroup > 0，通过套餐绑定或管理员单独指定）；
+			// 未分配权限组的用户（uGroup == 0）不具备任何节点的访问权限，不注入 UUID。
+			if uGroup == 0 {
+				continue
 			}
-			flow := ""
-			if xray.StreamHasReality(inb.StreamSettings) && xray.StreamNetwork(inb.StreamSettings) == "tcp" {
+			if hasGroupLimit && !allowedGroupSet[uGroup] {
+				continue
+			}
+			flow := inb.Flow
+			if flow == "" && xray.StreamHasReality(inb.StreamSettings) && xray.StreamNetwork(inb.StreamSettings) == "tcp" {
 				flow = "xtls-rprx-vision"
+			} else if flow == "none" {
+				flow = ""
 			}
+			limit, _ := UserEffectiveDeviceLimit(s.DB, &u)
 			protoUsers = append(protoUsers, protocol.User{
 				UUID:  u.UUID,
 				Email: xray.UserEmail(u.ID),
 				Flow:  flow,
 				Level: 0,
+				Limit: limit,
 			})
 		}
 		res[inb.Tag] = protoUsers

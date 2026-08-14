@@ -10,6 +10,7 @@ import {
   Calendar,
   CircleCheckFilled,
   Wallet,
+  Cellphone,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { buildSubscribeUrl } from '@/config/site'
@@ -23,6 +24,11 @@ const loading = ref(false)
 const balanceYuan = computed(() => {
   const cents = auth.user?.balance_cents ?? 0
   return (cents / 100).toFixed(2)
+})
+
+const deviceLimitText = computed(() => {
+  const lim = auth.user?.device_limit || auth.user?.effective_device_limit || 0
+  return lim > 0 ? `${lim} 台设备` : '不限设备'
 })
 
 const planLabel = computed(() => (auth.user?.plan_id ? `已购套餐 #${auth.user.plan_id}` : '暂无生效套餐'))
@@ -109,6 +115,9 @@ const statusText: Record<string, { dot: string; text: string }> = {
             <div class="hero-top-right">
               <div class="hero-wallet-tag">
                 <el-icon><Wallet /></el-icon>&nbsp;余额 ¥ {{ balanceYuan }}
+              </div>
+              <div class="hero-wallet-tag" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.25)">
+                <el-icon><Cellphone /></el-icon>&nbsp;{{ deviceLimitText }}
               </div>
               <div v-if="daysLeft !== null" class="hero-days-tag">
                 <el-icon><Calendar /></el-icon>&nbsp;剩余 {{ daysLeft }} 天到期

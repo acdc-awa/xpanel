@@ -89,6 +89,7 @@ type Plan struct {
 	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
 	DurationDays      int       `gorm:"not null" json:"duration_days"`
 	SpeedLimitKbps    int64     `json:"speed_limit_kbps"`                           // 0 = 不限速
+	DeviceLimit       int       `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
 	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
 	Enabled           bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt         time.Time `json:"created_at"`
@@ -135,13 +136,18 @@ type TrafficDaily struct {
 // NodeReport 节点心跳/状态上报。
 type NodeReport struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`
-	ServerID    uint64    `gorm:"index;not null" json:"server_id"`
+	ServerID    uint64    `gorm:"index:idx_server_reported,priority:1;not null" json:"server_id"`
 	CPU         float64   `json:"cpu"`
 	Mem         float64   `json:"mem"`
+	MemTotal    uint64    `json:"mem_total"`
+	Disk        float64   `json:"disk"`
+	DiskTotal   uint64    `json:"disk_total"`
 	OnlineUsers int       `json:"online_users"`
 	RxRate      float64   `json:"rx_rate"`
 	TxRate      float64   `json:"tx_rate"`
-	ReportedAt  time.Time `gorm:"index" json:"reported_at"`
+	RxBytes     uint64    `json:"rx_bytes"`
+	TxBytes     uint64    `json:"tx_bytes"`
+	ReportedAt  time.Time `gorm:"index:idx_server_reported,priority:2;index" json:"reported_at"`
 }
 
 // AuditLog 审计日志（管理员操作、登录、订单确认等）。

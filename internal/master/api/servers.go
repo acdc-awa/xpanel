@@ -114,6 +114,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	EnsureDefaultServerOutbounds(d.DB, server.ID)
 	webBase := ""
 	if d.Site != nil {
 		webBase = d.Site.WebBase()
@@ -259,6 +260,9 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 			if err := tx.Where("inbound_id IN ?", inboundIDs).Delete(&models.UserInbound{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Where("inbound_id IN ?", inboundIDs).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("server_id = ?", id).Delete(&models.Inbound{}).Error; err != nil {
 				return err
 			}
@@ -326,6 +330,33 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
+}
+
+// AdminGetServerConfigPreview GET /api/v1/admin/servers/:id/config-preview
+// 实时渲染该服务器按当前数据库预期应该推送到节点的完整 Xray 配置（只读预览，无网络副作用）。
+func (d *Deps) AdminGetServerConfigPreview(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+	if d.Config == nil {
+		util.ServerError(c, "配置服务未初始化")
+		return
+	}
+	cfgStr, err := d.Config.Generate(id)
+	if err != nil {
+		util.BadRequest(c, "配置生成失败: "+err.Error())
+		return
+	}
+	util.OK(c, gin.H{
+		"config": cfgStr,
+	})
 }
 
 // AdminGenerateConfig POST /api/v1/admin/servers/:id/generate-config
@@ -416,4 +447,164 @@ func (d *Deps) DownloadInstallScript(c *gin.Context) {
 		return
 	}
 	c.File(p)
+}
+
+// AdminServerMetrics GET /api/v1/admin/servers/:id/metrics —— 查询节点时序监控数据 (1h/6h/24h/7d)。
+func (d *Deps) AdminServerMetrics(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+
+	timeRange := c.DefaultQuery("range", "1h")
+	now := time.Now()
+	var startTime time.Time
+	var bucketDuration time.Duration
+	var timeFmt string
+
+	switch timeRange {
+	case "6h":
+		startTime = now.Add(-6 * time.Hour)
+		bucketDuration = 3 * time.Minute
+		timeFmt = "15:04"
+	case "24h":
+		startTime = now.Add(-24 * time.Hour)
+		bucketDuration = 10 * time.Minute
+		timeFmt = "15:04"
+	case "7d":
+		startTime = now.AddDate(0, 0, -7)
+		bucketDuration = 1 * time.Hour
+		timeFmt = "01-02 15:00"
+	case "1h":
+		fallthrough
+	default:
+		timeRange = "1h"
+		startTime = now.Add(-1 * time.Hour)
+		bucketDuration = 1 * time.Minute
+		timeFmt = "15:04"
+	}
+
+	var reports []models.NodeReport
+	d.DB.Where("server_id = ? AND reported_at >= ?", id, startTime).
+		Order("reported_at ASC").
+		Find(&reports)
+
+	numBuckets := int(now.Sub(startTime) / bucketDuration)
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	type bucketAgg struct {
+		timeStr    string
+		cpuSum     float64
+		memSum     float64
+		memTotal   uint64
+		diskSum    float64
+		diskTotal  uint64
+		rxRateSum  float64
+		txRateSum  float64
+		usersSum   int
+		count      int
+	}
+
+	buckets := make([]bucketAgg, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		bTime := startTime.Add(time.Duration(i) * bucketDuration)
+		buckets[i].timeStr = bTime.Format(timeFmt)
+	}
+
+	for _, r := range reports {
+		idx := int(r.ReportedAt.Sub(startTime) / bucketDuration)
+		if idx >= 0 && idx < numBuckets {
+			b := &buckets[idx]
+			b.cpuSum += r.CPU
+			b.memSum += r.Mem
+			if r.MemTotal > 0 {
+				b.memTotal = r.MemTotal
+			}
+			b.diskSum += r.Disk
+			if r.DiskTotal > 0 {
+				b.diskTotal = r.DiskTotal
+			}
+			b.rxRateSum += r.RxRate
+			b.txRateSum += r.TxRate
+			b.usersSum += r.OnlineUsers
+			b.count++
+		}
+	}
+
+	timestamps := make([]string, numBuckets)
+	cpuList := make([]float64, numBuckets)
+	memPercentList := make([]float64, numBuckets)
+	memUsedList := make([]float64, numBuckets)
+	diskPercentList := make([]float64, numBuckets)
+	rxMbpsList := make([]float64, numBuckets)
+	txMbpsList := make([]float64, numBuckets)
+	usersList := make([]int, numBuckets)
+
+	var lastMemTotal uint64
+	var lastDiskTotal uint64
+
+	for i := 0; i < numBuckets; i++ {
+		b := buckets[i]
+		timestamps[i] = b.timeStr
+		if b.memTotal > 0 {
+			lastMemTotal = b.memTotal
+		}
+		if b.diskTotal > 0 {
+			lastDiskTotal = b.diskTotal
+		}
+
+		if b.count > 0 {
+			cVal := b.cpuSum / float64(b.count)
+			mVal := b.memSum / float64(b.count)
+			dVal := b.diskSum / float64(b.count)
+			cpuList[i] = float64(int(cVal*10)) / 10
+			memUsedList[i] = mVal
+			if lastMemTotal > 0 {
+				memPercentList[i] = float64(int((mVal/float64(lastMemTotal)*100)*10)) / 10
+			}
+			diskPercentList[i] = float64(int(dVal*10)) / 10
+			// 字节/秒 -> Mbps (8 / 1,000,000)
+			rxMbps := (b.rxRateSum / float64(b.count)) * 8 / 1_000_000
+			txMbps := (b.txRateSum / float64(b.count)) * 8 / 1_000_000
+			rxMbpsList[i] = float64(int(rxMbps*100)) / 100
+			txMbpsList[i] = float64(int(txMbps*100)) / 100
+			usersList[i] = b.usersSum / b.count
+		} else {
+			if i > 0 {
+				cpuList[i] = cpuList[i-1]
+				memUsedList[i] = memUsedList[i-1]
+				memPercentList[i] = memPercentList[i-1]
+				diskPercentList[i] = diskPercentList[i-1]
+				rxMbpsList[i] = rxMbpsList[i-1]
+				txMbpsList[i] = txMbpsList[i-1]
+				usersList[i] = usersList[i-1]
+			}
+		}
+	}
+
+	util.OK(c, gin.H{
+		"server_id":    id,
+		"server_name":  srv.Name,
+		"host":         srv.Host,
+		"location":     srv.Location,
+		"range":        timeRange,
+		"timestamps":   timestamps,
+		"cpu":          cpuList,
+		"mem_percent":  memPercentList,
+		"mem_used":     memUsedList,
+		"mem_total":    lastMemTotal,
+		"disk_percent": diskPercentList,
+		"disk_total":   lastDiskTotal,
+		"rx_mbps":      rxMbpsList,
+		"tx_mbps":      txMbpsList,
+		"online_users": usersList,
+	})
 }

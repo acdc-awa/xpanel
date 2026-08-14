@@ -3,12 +3,16 @@ package api
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/nodegate"
+	"github.com/zhx/xray-panel/internal/master/services"
+	"github.com/zhx/xray-panel/internal/master/subscribe"
+	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -78,7 +82,11 @@ func (d *Deps) AdminRotateInternal(c *gin.Context) {
 	d.adminInternalAccount(c, protocol.MsgRotateInternalAccount)
 }
 
-// ---- 权限组 CRUD + 入站集合 ----
+type permissionGroupView struct {
+	models.PermissionGroup
+	InboundCount int      `json:"inbound_count"`
+	InboundTags  []string `json:"inbound_tags"`
+}
 
 // AdminPermissionGroups GET /api/v1/admin/permission-groups
 func (d *Deps) AdminPermissionGroups(c *gin.Context) {
@@ -87,7 +95,39 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	util.OK(c, gin.H{"items": list})
+	var links []models.PermissionGroupInbound
+	_ = d.DB.Find(&links)
+	groupInboundMap := make(map[uint64][]uint64)
+	allInboundIDs := make([]uint64, 0, len(links))
+	for _, l := range links {
+		groupInboundMap[l.PermissionGroupID] = append(groupInboundMap[l.PermissionGroupID], l.InboundID)
+		allInboundIDs = append(allInboundIDs, l.InboundID)
+	}
+
+	var inbounds []models.Inbound
+	if len(allInboundIDs) > 0 {
+		_ = d.DB.Select("id, tag").Where("id IN ?", allInboundIDs).Find(&inbounds)
+	}
+	inboundTagMap := make(map[uint64]string, len(inbounds))
+	for _, inb := range inbounds {
+		inboundTagMap[inb.ID] = inb.Tag
+	}
+
+	items := make([]permissionGroupView, 0, len(list))
+	for _, g := range list {
+		tags := make([]string, 0)
+		for _, iid := range groupInboundMap[g.ID] {
+			if tag, ok := inboundTagMap[iid]; ok && tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+		items = append(items, permissionGroupView{
+			PermissionGroup: g,
+			InboundCount:    len(groupInboundMap[g.ID]),
+			InboundTags:     tags,
+		})
+	}
+	util.OK(c, gin.H{"items": items})
 }
 
 // AdminCreatePermissionGroup POST /api/v1/admin/permission-groups
@@ -121,8 +161,9 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name   *string `json:"name"`
-		Remark *string `json:"remark"`
+		Name          *string `json:"name"`
+		Remark        *string `json:"remark"`
+		ClashTemplate *string `json:"clash_template"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -135,6 +176,9 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
 	}
+	if req.ClashTemplate != nil {
+		updates["clash_template"] = *req.ClashTemplate
+	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&g).Updates(updates).Error; err != nil {
 			util.BadRequest(c, "更新失败（名称可能重复）")
@@ -142,6 +186,91 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 		}
 	}
 	util.OK(c, gin.H{"group": g})
+}
+
+// AdminPreviewPermissionGroupTemplate POST /api/v1/admin/permission-groups/:id/preview-template
+// 实时编译预览某个权限组的订阅模板渲染效果。
+func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var g models.PermissionGroup
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.Fail(c, 404, "权限组不存在")
+		return
+	}
+	var req struct {
+		Template string `json:"template"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Template = g.ClashTemplate
+	}
+
+	// 查询该权限组关联的所有有效入站
+	var links []models.PermissionGroupInbound
+	d.DB.Where("permission_group_id = ?", id).Find(&links)
+	var inbounds []models.Inbound
+	if len(links) > 0 {
+		inbIDs := make([]uint64, 0, len(links))
+		for _, l := range links {
+			inbIDs = append(inbIDs, l.InboundID)
+		}
+		d.DB.Where("id IN ? AND enabled = ? AND type = ?", inbIDs, true, models.InboundTypeUser).Find(&inbounds)
+	}
+
+	// 若该组暂无节点，尝试获取任意可用节点作为样例展示
+	isSampleNodes := false
+	if len(inbounds) == 0 {
+		d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Limit(5).Find(&inbounds)
+		isSampleNodes = true
+	}
+
+	mockUser := &models.User{
+		UUID: "00000000-0000-0000-0000-000000000001",
+	}
+
+	items := make([]subscribe.ProxyItem, 0, len(inbounds))
+	for i := range inbounds {
+		inb := &inbounds[i]
+		var srv models.Server
+		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
+			continue
+		}
+		host, port := shareAddrOf(&srv, inb)
+		flow, noAutoFlow := subscribeFlow("", inb.Flow,
+			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
+		item := subscribe.ProxyItem{
+			Name:       subscribe.NodeName(&srv, inb),
+			Host:       host,
+			Port:       port,
+			UUID:       mockUser.UUID,
+			Network:    xray.StreamNetwork(inb.StreamSettings),
+			TLSType:    xray.StreamSecurity(inb.StreamSettings),
+			Flow:       flow,
+			NoAutoFlow: noAutoFlow,
+			Reality:    xray.StreamReality(inb.StreamSettings),
+			TLS:        xray.StreamTLS(inb.StreamSettings),
+			WS:         xray.StreamWS(inb.StreamSettings),
+			XHTTP:      xray.StreamXHTTP(inb.StreamSettings),
+		}
+		items = append(items, item)
+	}
+
+	panelHost := c.Request.Host
+	if h, _, err := net.SplitHostPort(panelHost); err == nil {
+		panelHost = h
+	}
+	rendered := subscribe.BuildClashWithTemplate(mockUser, items, req.Template, panelHost)
+	_, names := subscribe.FormatProxiesYAML(items)
+
+	util.OK(c, gin.H{
+		"rendered":        rendered,
+		"proxy_count":     len(names),
+		"proxy_names":     names,
+		"is_sample_nodes": isSampleNodes,
+	})
 }
 
 // AdminDeletePermissionGroup DELETE /api/v1/admin/permission-groups/:id
@@ -287,9 +416,14 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
+	inboundIDs := make([]uint64, 0, len(inbounds))
+	for i := range inbounds {
+		inboundIDs = append(inboundIDs, inbounds[i].ID)
+	}
+	groupMap := services.BatchInboundPermissionGroupIDs(d.DB, inboundIDs)
 	inbViews := make([]inboundView, 0, len(inbounds))
 	for i := range inbounds {
-		inbViews = append(inbViews, toInboundView(&inbounds[i], srvName[inbounds[i].ServerID]))
+		inbViews = append(inbViews, toInboundView(&inbounds[i], srvName[inbounds[i].ServerID], groupMap[inbounds[i].ID]))
 	}
 
 	// 出站（轻量）

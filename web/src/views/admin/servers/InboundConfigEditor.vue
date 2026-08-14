@@ -10,9 +10,10 @@ import {
   Check,
   Warning,
   CopyDocument,
+  QuestionFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCerts, getXrayKeys, rotateInternalInbound, type CertItem } from '@/api/admin'
+import { getCerts, getPermissionGroups, getXrayKeys, rotateInternalInbound, type CertItem, type PermissionGroup } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, WSSettings, XHTTPSettings } from '@/api/types'
 
@@ -24,11 +25,12 @@ export interface InboundEditorChangePayload {
   port: number
   tag: string
   listen: string
-  flow: string // 入站级流控（空=自动 / xtls-rprx-vision / none）
-  ratio: number // 流量倍率（后续计费用）
-  shareAddrStrategy: string // node / listen / custom（订阅专用）
-  shareAddr: string // 自定义分享地址
-  sharePort: number // 自定义分享端口（0 = 用入站端口）
+  flow: string
+  ratio: number
+  shareAddrStrategy: string
+  shareAddr: string
+  sharePort: number
+  permissionGroupIds: number[]
 }
 
 export interface InboundEditorEmits {
@@ -45,11 +47,11 @@ const props = withDefaults(
     port?: number
     tag?: string
     showBaseFields?: boolean
-    // Phase T：入站三态与证书
     inboundType?: string
     internalUUID?: string
     inboundId?: number
     certId?: number
+    permissionGroupIds?: number[]
   }>(),
   {
     modelValue: '{}',
@@ -63,6 +65,7 @@ const props = withDefaults(
     internalUUID: '',
     inboundId: 0,
     certId: 0,
+    permissionGroupIds: () => [],
   },
 )
 
@@ -72,8 +75,11 @@ const emit = defineEmits<InboundEditorEmits & {
   (e: 'internal-uuid-changed', value: string): void
 }>()
 
-// 视图模式：form 可视化表单 | json 源码
-const activeTab = ref<'form' | 'json'>('form')
+// 视图模式：form 表单 | json 源码
+const activeView = ref<'form' | 'json'>('form')
+
+// 表单 Tab：basic 基础信息 | network_security 协议与安全 | advanced 高级扩展
+const activeTab = ref('basic')
 
 // 基础字段
 const localProtocol = ref(props.protocol || 'vless')
@@ -82,38 +88,59 @@ const localTlsType = ref(props.tlsType || 'reality')
 const localPort = ref(props.port || 443)
 const localTag = ref(props.tag || '')
 
-// 入站级字段（Inbound 模型字段，经 modelValue 顶层透传，不入 settings_json）
-const localFlow = ref('') // 流控：空=自动 / xtls-rprx-vision / none
-const localRatio = ref(1) // 流量倍率（后续计费用）
-const localShareStrategy = ref('node') // 订阅分享地址策略 node / listen / custom
-const localShareAddr = ref('') // 自定义分享地址（订阅专用，与监听解耦）
-const localSharePort = ref(0) // 自定义分享端口（0 = 用入站端口）
+// 入站级扩展字段
+const localFlow = ref('')
+const localRatio = ref(1)
+const localShareStrategy = ref('node')
+const localShareAddr = ref('')
+const localSharePort = ref(0)
+const localPermissionGroupIds = ref<number[]>(props.permissionGroupIds ? [...props.permissionGroupIds] : [])
+const permissionGroups = ref<PermissionGroup[]>([])
 
-// 表单视图内 tab（基础/传输/安全/嗅探）
-const formTab = ref('basic')
+// Phase T 入站三态与证书
+const localInboundType = ref(props.inboundType || 'user')
+const localInternalUUID = ref(props.internalUUID || '')
+const localCertId = ref<number>(props.certId || 0)
+const certs = ref<CertItem[]>([])
 
 // Fallbacks 列表
 const fallbacks = ref<FallbackItem[]>([])
 
-// 传输层设置
-const wsForm = reactive<WSSettings>({
-  path: '/',
-  host: '',
-})
+// 传输层参数
+const wsForm = reactive<WSSettings>({ path: '/', host: '' })
+const xhttpForm = reactive<XHTTPSettings>({ mode: 'auto', path: '/', host: '' })
+const grpcForm = reactive({ service_name: 'grpc', authority: '', multi_mode: false })
+const tcpForm = reactive({ header_type: 'none', request_host: '', request_path: '/' })
+const acceptProxyProtocol = ref(false)
+const fingerprint = ref('chrome')
 
-const xhttpForm = reactive<XHTTPSettings>({
-  mode: 'auto',
-  path: '/',
-  host: '',
+// REALITY 参数
+const realityForm = reactive<RealitySettings>({
+  dest: 'gateway.icloud.com:443',
+  server_name: 'gateway.icloud.com',
+  public_key: '',
+  private_key: '',
+  short_id: 'abcdef0123456789',
+  spider_x: '/',
 })
+const realityMinClientVer = ref('')
+const realityMaxClientVer = ref('')
+const realityMaxTimeDiff = ref(0)
 
-const grpcForm = reactive({
-  service_name: 'grpc',
-  authority: '',
-  multi_mode: false,
+// TLS 参数
+const tlsForm = reactive<TLSSettings>({
+  server_name: '',
+  cert_file: '/etc/xray/cert.pem',
+  key_file: '/etc/xray/key.pem',
+  alpn: [],
 })
+const tlsAlpnText = ref('h2,http/1.1')
+const tlsMinVersion = ref('')
+const tlsMaxVersion = ref('')
+const tlsCipherSuites = ref('')
+const tlsAllowInsecure = ref(false)
 
-// 流量嗅探（Sniffing）
+// Sniffing 参数
 const sniffingForm = reactive({
   enabled: false,
   destOverride: ['http', 'tls', 'quic'] as string[],
@@ -121,52 +148,27 @@ const sniffingForm = reactive({
   routeOnly: false,
 })
 
-const tcpForm = reactive({
-  header_type: 'none',
-  request_host: '',
-  request_path: '/',
-})
+// REALITY 优质预设
+const REALITY_PRESETS = [
+  { label: 'Apple iCloud (gateway.icloud.com:443)', dest: 'gateway.icloud.com:443', sni: 'gateway.icloud.com' },
+  { label: 'Apple iTunes (itunes.apple.com:443)', dest: 'itunes.apple.com:443', sni: 'itunes.apple.com' },
+  { label: 'Apple (www.apple.com:443)', dest: 'www.apple.com:443', sni: 'www.apple.com' },
+  { label: 'Cloudflare (www.cloudflare.com:443)', dest: 'www.cloudflare.com:443', sni: 'www.cloudflare.com' },
+  { label: 'Amazon AWS (aws.amazon.com:443)', dest: 'aws.amazon.com:443', sni: 'aws.amazon.com' },
+]
 
-// acceptProxyProtocol
-const acceptProxyProtocol = ref(false)
+function applyRealityPreset(preset: { dest: string; sni: string }) {
+  realityForm.dest = preset.dest
+  realityForm.server_name = preset.sni
+  ElMessage.success(`已应用借壳预设: ${preset.sni}`)
+}
 
-// uTLS fingerprint
-const fingerprint = ref('chrome')
-
-// TLS & REALITY 设置
-const realityForm = reactive<RealitySettings>({
-  dest: 'www.apple.com:443',
-  server_name: 'www.apple.com',
-  public_key: '',
-  private_key: '',
-  short_id: 'abcdef0123456789',
-  spider_x: '/',
-})
-
-const realityMinClientVer = ref('')
-const realityMaxClientVer = ref('')
-const realityMaxTimeDiff = ref(0)
-
-const tlsForm = reactive<TLSSettings>({
-  server_name: '',
-  cert_file: '/etc/xray/cert.pem',
-  key_file: '/etc/xray/key.pem',
-  alpn: [],
-})
-
-const tlsAlpnText = ref('h2,http/1.1')
-const tlsMinVersion = ref('')
-const tlsMaxVersion = ref('')
-const tlsCipherSuites = ref('')
-const tlsAllowInsecure = ref(false)
-
-// Raw JSON 编辑与校验状态
+// JSON 编辑状态
 const rawJsonText = ref('{}')
 const jsonError = ref('')
 const isInternalUpdating = ref(false)
 const genKeyLoading = ref(false)
 
-// 生成 Random Short ID
 function genShortId() {
   const chars = '0123456789abcdef'
   let result = ''
@@ -176,7 +178,6 @@ function genShortId() {
   realityForm.short_id = result
 }
 
-// 请求后端生成 REALITY x25519 密钥对
 async function fetchRealityKeys() {
   genKeyLoading.value = true
   try {
@@ -195,15 +196,32 @@ async function fetchRealityKeys() {
   }
 }
 
-// Fallback 操作
+async function rotateInternal() {
+  if (!props.inboundId) {
+    ElMessage.warning('请先保存入站')
+    return
+  }
+  try {
+    await ElMessageBox.confirm('将重新生成内部 UUID，引用该落地入站的中转配置会自动更新，确认轮换？', '轮换内部账户', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await rotateInternalInbound(props.inboundId)
+    if (data.code === 0) {
+      localInternalUUID.value = data.data.internal_uuid
+      emit('internal-uuid-changed', data.data.internal_uuid)
+      ElMessage.success('内部 UUID 已轮换，配置已重新生成推送')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '轮换失败'))
+  }
+}
+
 function addFallback() {
-  fallbacks.value.push({
-    name: '',
-    alpn: '',
-    path: '',
-    dest: '80',
-    xver: 0,
-  })
+  fallbacks.value.push({ name: '', alpn: '', path: '', dest: '80', xver: 0 })
 }
 
 function removeFallback(index: number) {
@@ -218,7 +236,6 @@ function moveFallback(index: number, direction: -1 | 1) {
   fallbacks.value[target] = temp
 }
 
-// 从当前表单对象构建 InboundSettings JSON
 function buildSettingsJSON(): string {
   const s: Record<string, any> = { decryption: 'none' }
   if (fallbacks.value.length > 0) {
@@ -287,7 +304,6 @@ function buildStreamSettingsJSON(): string {
     if (tlsMaxVersion.value) t.maxVersion = tlsMaxVersion.value
     if (tlsCipherSuites.value) t.cipherSuites = tlsCipherSuites.value
     if (tlsAllowInsecure.value) t.allowInsecure = true
-    // 绑定托管证书时 certificates 由生成器强制替换为固定路径（此处保留表单默认值即可）
     s.tlsSettings = t
   }
 
@@ -304,7 +320,6 @@ function buildSniffingJSON(): string {
   })
 }
 
-// 同步表单数据 -> JSON & emits
 function syncFormToJson() {
   if (isInternalUpdating.value) return
   isInternalUpdating.value = true
@@ -334,25 +349,22 @@ function syncFormToJson() {
     shareAddrStrategy: localShareStrategy.value,
     shareAddr: localShareAddr.value,
     sharePort: localSharePort.value,
+    permissionGroupIds: localPermissionGroupIds.value,
   })
   isInternalUpdating.value = false
 }
 
-// 解析外部传入/输入的 JSON -> 表单数据
 function parseJsonToForm(str: string) {
   if (!str || !str.trim()) return
   try {
     const parsed = JSON.parse(str)
     jsonError.value = ''
 
-    // 支持解析纯 InboundSettings 或 完整 Inbound 节点对象
     let s: InboundSettings = parsed
     if (parsed.settings_json && typeof parsed.settings_json === 'string') {
       try {
         s = JSON.parse(parsed.settings_json)
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     } else if (parsed.settings && typeof parsed.settings === 'object') {
       s = parsed.settings
     }
@@ -364,14 +376,13 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
 
-    // 入站级字段（nodes.vue 回填顶层透传）
     if (typeof parsed.flow === 'string') localFlow.value = parsed.flow
     if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
     if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
     if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
     if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
+    if (Array.isArray(parsed.permission_group_ids)) localPermissionGroupIds.value = parsed.permission_group_ids
 
-    // Fallbacks
     if (Array.isArray(s.fallbacks)) {
       fallbacks.value = s.fallbacks.map((f) => ({
         name: f.name || '',
@@ -382,7 +393,6 @@ function parseJsonToForm(str: string) {
       }))
     }
 
-    // Transport
     if (s.ws) {
       wsForm.path = s.ws.path || '/'
       wsForm.host = s.ws.host || s.ws.headers?.Host || ''
@@ -409,7 +419,6 @@ function parseJsonToForm(str: string) {
       sniffingForm.routeOnly = !!s.sniffing.routeOnly || !!s.sniffing.route_only
     }
 
-    // Security
     if (s.reality) {
       realityForm.dest = s.reality.dest || ''
       realityForm.server_name = s.reality.server_name || (s.reality.server_names?.[0] ?? '')
@@ -432,7 +441,6 @@ function parseJsonToForm(str: string) {
   }
 }
 
-// 监听源码 Tab 中手动修改 rawJsonText
 function onRawJsonInput(val: string) {
   if (isInternalUpdating.value) return
   rawJsonText.value = val
@@ -442,7 +450,6 @@ function onRawJsonInput(val: string) {
   }
 }
 
-// 监听 Props 变化
 watch(
   () => props.modelValue,
   (newVal) => {
@@ -456,18 +463,6 @@ watch(
 )
 
 watch(
-  () => [props.protocol, props.network, props.tlsType, props.port, props.tag],
-  () => {
-    if (props.protocol && props.protocol !== localProtocol.value) localProtocol.value = props.protocol
-    if (props.network && props.network !== localNetwork.value) localNetwork.value = props.network
-    if (props.tlsType && props.tlsType !== localTlsType.value) localTlsType.value = props.tlsType
-    if (props.port && props.port !== localPort.value) localPort.value = props.port
-    if (props.tag && props.tag !== localTag.value) localTag.value = props.tag
-  },
-)
-
-// 监听内部表单值变动 -> 同步导出
-watch(
   [
     localProtocol,
     localNetwork,
@@ -479,14 +474,23 @@ watch(
     localShareStrategy,
     localShareAddr,
     localSharePort,
+    localPermissionGroupIds,
     fallbacks,
     wsForm,
     xhttpForm,
     grpcForm,
     tcpForm,
+    acceptProxyProtocol,
     realityForm,
+    realityMinClientVer,
+    realityMaxClientVer,
+    realityMaxTimeDiff,
     tlsForm,
     tlsAlpnText,
+    tlsMinVersion,
+    tlsMaxVersion,
+    tlsCipherSuites,
+    tlsAllowInsecure,
     fingerprint,
     sniffingForm,
   ],
@@ -496,79 +500,54 @@ watch(
   { deep: true },
 )
 
-onMounted(() => {
-  if (!realityForm.private_key && localTlsType.value === 'reality') {
-    // 自动为未填充私钥的 REALITY 生成一组默认 ID
-    genShortId()
-  }
-  loadCerts()
-})
-
-// ===== Phase T：入站三态 + 证书 =====
-const localInboundType = ref(props.inboundType || 'user')
-const localInternalUUID = ref(props.internalUUID || '')
-const localCertId = ref<number>(props.certId || 0)
-const certs = ref<CertItem[]>([])
-
-watch(
-  () => props.inboundType,
-  (v) => {
-    if (v) localInboundType.value = v
-  },
-)
-watch(
-  () => props.internalUUID,
-  (v) => {
-    if (v) localInternalUUID.value = v
-  },
-)
-watch(
-  () => props.certId,
-  (v) => {
-    if (v) localCertId.value = v
-  },
-)
-
-function onTypeChange(v: string | number | boolean | undefined) {
-  localInboundType.value = String(v || 'user')
-  emit('update:inboundType', localInboundType.value)
-}
-
 async function loadCerts() {
   try {
     const { data } = await getCerts()
     if (data.code === 0) certs.value = data.data.items
-  } catch { /* 证书列表加载失败不阻塞表单 */ }
+  } catch { /* ignore */ }
 }
 
-async function rotateInternal() {
-  if (!props.inboundId) {
-    ElMessage.warning('请先保存入站')
-    return
-  }
+async function loadPermissionGroups() {
   try {
-    await ElMessageBox.confirm('将重新生成内部 UUID，引用该落地入站的中转配置会自动更新，确认轮换？', '轮换内部账户', { type: 'warning' })
-  } catch {
-    return
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch { /* ignore */ }
+}
+
+onMounted(() => {
+  if (!realityForm.private_key && localTlsType.value === 'reality') {
+    genShortId()
   }
-  try {
-    const { data } = await rotateInternalInbound(props.inboundId)
-    if (data.code === 0) {
-      localInternalUUID.value = data.data.internal_uuid
-      emit('internal-uuid-changed', data.data.internal_uuid)
-      ElMessage.success('内部 UUID 已轮换，配置已重新生成推送')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '轮换失败'))
-  }
+  loadCerts()
+  loadPermissionGroups()
+})
+
+watch(
+  () => props.inboundType,
+  (v) => { if (v) localInboundType.value = v },
+)
+watch(
+  () => props.internalUUID,
+  (v) => { if (v) localInternalUUID.value = v },
+)
+watch(
+  () => props.certId,
+  (v) => { if (v) localCertId.value = v },
+)
+watch(
+  () => props.permissionGroupIds,
+  (v) => { if (v) localPermissionGroupIds.value = [...v] },
+)
+
+function onTypeChange(v: any) {
+  localInboundType.value = String(v || 'user')
+  emit('update:inboundType', localInboundType.value)
 }
 
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制到剪贴板`)
+    ElMessage.success(`${label}已复制`)
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
@@ -576,435 +555,502 @@ async function copyText(text: string, label: string) {
 </script>
 
 <template>
-  <div class="inbound-config-editor">
-    <!-- 顶部 Mode 切换 -->
-    <div class="editor-header">
-      <div class="header-title">
-        <el-icon class="title-icon"><Setting /></el-icon>
-        <span>VLESS 入站配置编辑器</span>
-      </div>
-      <el-radio-group v-model="activeTab" size="small">
-        <el-radio-button label="form">
-          <el-icon><Setting /></el-icon>&nbsp;可视化表单
-        </el-radio-button>
-        <el-radio-button label="json">
-          <el-icon><Document /></el-icon>&nbsp;原始 JSON
-        </el-radio-button>
+  <div class="inbound-editor">
+    <!-- 顶部功能区：左侧 Tabs，右侧 源码切换 -->
+    <div class="editor-top-nav">
+      <el-radio-group v-if="activeView === 'form'" v-model="activeTab" size="small" class="category-tabs">
+        <el-radio-button value="basic">基础配置</el-radio-button>
+        <el-radio-button value="network_security">协议与安全</el-radio-button>
+        <el-radio-button value="advanced">高级设置</el-radio-button>
       </el-radio-group>
+      <div v-else class="json-title">
+        <span>原始 JSON 模式</span>
+      </div>
+
+      <div class="view-toggle">
+        <el-radio-group v-model="activeView" size="small">
+          <el-radio-button value="form">
+            <el-icon><Setting /></el-icon>&nbsp;表单
+          </el-radio-button>
+          <el-radio-button value="json">
+            <el-icon><Document /></el-icon>&nbsp;JSON
+          </el-radio-button>
+        </el-radio-group>
+      </div>
     </div>
 
-    <!-- 视图 1: 可视化表单 -->
-    <div v-if="activeTab === 'form'" class="form-container">
-      <!-- Phase T：入站类型（三态） -->
-      <div class="form-section">
-        <div class="section-title">入站类型</div>
-        <el-radio-group v-model="localInboundType" @change="onTypeChange">
-          <el-radio value="user">用户入站（进订阅）</el-radio>
-          <el-radio value="relay">转发入站（内部落地）</el-radio>
-          <el-radio value="idle">闲置（不生成）</el-radio>
-        </el-radio-group>
-        <p v-if="localInboundType === 'relay'" class="muted tip">relay 入站不参与用户体系与订阅；clients 固定为下方内部 UUID（节点生成，主控只读）。</p>
-        <p v-if="localInboundType === 'idle'" class="muted tip">idle 入站不生成到节点配置，用于预留端口/接线。</p>
+    <!-- 表单视图 -->
+    <div v-if="activeView === 'form'" class="form-body">
+      <el-form label-position="top">
+        <!-- ==================== 1. 基础配置 Tab ==================== -->
+        <div v-show="activeTab === 'basic'" class="tab-pane">
+          <div class="form-card">
+            <div class="card-title">接入点模式</div>
+            <el-radio-group v-model="localInboundType" class="type-radios" @change="onTypeChange">
+              <el-radio value="user">
+                <span>用户入站</span>
+                <span class="type-sub">进入客户端订阅</span>
+              </el-radio>
+              <el-radio value="relay">
+                <span>转发落地</span>
+                <span class="type-sub">中转内部节点</span>
+              </el-radio>
+              <el-radio value="idle">
+                <span>闲置预留</span>
+                <span class="type-sub">暂不生成配置</span>
+              </el-radio>
+            </el-radio-group>
 
-        <!-- relay：内部 UUID 只读 + 轮换 -->
-        <div v-if="localInboundType === 'relay'" class="grid-2" style="margin-top: 10px">
-          <el-form-item label="内部 UUID（节点生成，只读）">
-            <el-input :model-value="localInternalUUID" placeholder="执行「生成」后由节点回填" disabled>
-              <template #append>
-                <el-button v-if="localInternalUUID" text @click="copyText(localInternalUUID, '内部 UUID')"><el-icon><CopyDocument /></el-icon></el-button>
-              </template>
-            </el-input>
-          </el-form-item>
-          <el-form-item label="操作">
-            <div style="display: flex; gap: 8px">
-              <el-button size="small" type="primary" plain :disabled="!props.inboundId" @click="rotateInternal">
-                <el-icon><Refresh /></el-icon>&nbsp;轮换 UUID
-              </el-button>
-              <span v-if="!props.inboundId" class="muted tip">保存入站后可轮换</span>
-            </div>
-          </el-form-item>
-        </div>
-      </div>
-
-      <el-tabs v-model="formTab" class="editor-tabs">
-        <el-tab-pane label="基础设置" name="basic">
-          <!-- 基础参数 (可选显示) -->
-          <div v-if="showBaseFields" class="form-section">
-            <div class="section-title">入站基础网络</div>
-            <div class="grid-2">
-              <el-form-item label="标签 Tag">
-                <el-input v-model="localTag" placeholder="如 Tokyo-VLESS-REALITY" />
+            <div v-if="localInboundType === 'relay'" class="relay-box">
+              <el-form-item label="内部 UUID（由节点自治生成）">
+                <div style="display: flex; gap: 8px; width: 100%">
+                  <el-input :model-value="localInternalUUID" placeholder="保存并下发后由节点回填" disabled />
+                  <el-button v-if="localInternalUUID" @click="copyText(localInternalUUID, '内部 UUID')">
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                  <el-button type="primary" plain :disabled="!props.inboundId" @click="rotateInternal">
+                    <el-icon><Refresh /></el-icon>&nbsp;轮换
+                  </el-button>
+                </div>
               </el-form-item>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <div class="card-title">网络与计费</div>
+            <div class="form-grid">
+              <el-form-item label="节点标签 (Tag)">
+                <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
+              </el-form-item>
+
               <el-form-item label="监听端口">
                 <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
               </el-form-item>
-              <el-form-item label="协议 Protocol">
-                <el-select v-model="localProtocol" style="width: 100%" disabled>
-                  <el-option label="VLESS (推荐)" value="vless" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="流量倍率 Ratio">
-                <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
-                <p class="muted tip">计费倍率（后续流量计费用）：1 倍 = 1GB 记 1GB，1.5 表示 1GB 记 1.5GB。</p>
-              </el-form-item>
-            </div>
-          </div>
 
-          <!-- 分享地址与端口（订阅专用，与节点监听解耦） -->
-          <div v-if="localInboundType === 'user'" class="form-section">
-            <div class="section-title">分享地址与端口（订阅专用）</div>
-            <div class="grid-2">
-              <el-form-item label="分享地址策略">
-                <el-select v-model="localShareStrategy" style="width: 100%">
-                  <el-option label="节点 Host（跟随服务器地址）" value="node" />
-                  <el-option label="监听地址（Listen）" value="listen" />
-                  <el-option label="自定义（转发端点）" value="custom" />
-                </el-select>
-              </el-form-item>
-            </div>
-            <template v-if="localShareStrategy === 'custom'">
-              <div class="grid-2" style="margin-top: 8px">
-                <el-form-item label="自定义地址">
-                  <el-input v-model="localShareAddr" placeholder="cdn.example.com" />
-                </el-form-item>
-                <el-form-item label="自定义端口">
-                  <el-input-number v-model="localSharePort" :min="0" :max="65535" style="width: 100%" />
-                </el-form-item>
-              </div>
-            </template>
-            <p class="muted tip">订阅链接中的对外地址/端口，与 xray 实际监听无关：四层转发场景 xray 监听内网端口，这里填转发端点（如 cdn.example.com:443）给用户。留空端口时使用上方监听端口。</p>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="传输设置" name="transport">
-          <!-- 传输层参数（随 network 联动） -->
-          <div class="form-section">
-            <div class="section-title">传输设置 ({{ localNetwork.toUpperCase() }})</div>
-            <el-form-item label="传输协议 Network">
-              <el-select v-model="localNetwork" style="width: 280px">
-                <el-option label="TCP (REALITY 最佳)" value="tcp" />
-                <el-option label="WebSocket (WS)" value="ws" />
-                <el-option label="xhttp (Xray 1.8.21+)" value="xhttp" />
-                <el-option label="gRPC" value="grpc" />
-              </el-select>
-            </el-form-item>
-            <template v-if="localNetwork === 'tcp'">
-              <div class="grid-2">
-                <el-form-item label="伪装类型 (Header)">
-                  <el-select v-model="tcpForm.header_type" style="width: 100%">
-                    <el-option label="none (无)" value="none" />
-                    <el-option label="http (HTTP 报文伪装)" value="http" />
-                  </el-select>
-                </el-form-item>
-                <template v-if="tcpForm.header_type === 'http'">
-                  <el-form-item label="Request Host">
-                    <el-input v-model="tcpForm.request_host" placeholder="example.com" />
-                  </el-form-item>
-                  <el-form-item label="Request Path">
-                    <el-input v-model="tcpForm.request_path" placeholder="/" />
-                  </el-form-item>
+              <el-form-item v-if="localInboundType === 'user'">
+                <template #label>
+                  <span>开放权限组</span>
+                  <el-tooltip content="多选指定允许订阅该入站的权限组。留空则对所有正常用户开放。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
                 </template>
-              </div>
-            </template>
-            <div style="margin-top: 8px"><el-form-item label="acceptProxyProtocol（HAProxy 代理协议）"><el-switch v-model="acceptProxyProtocol" /></el-form-item></div>
+                <el-select
+                  v-model="localPermissionGroupIds"
+                  multiple
+                  placeholder="留空 = 全员开放"
+                  style="width: 100%"
+                  collapse-tags
+                  collapse-tags-tooltip
+                >
+                  <el-option
+                    v-for="g in permissionGroups"
+                    :key="g.id"
+                    :label="g.name"
+                    :value="g.id"
+                  >
+                    <span>{{ g.name }}</span>
+                    <span v-if="g.remark" class="opt-remark">({{ g.remark }})</span>
+                  </el-option>
+                </el-select>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span>流量计费倍率</span>
+                  <el-tooltip content="扣费倍率：1.00 为正常计费，1.50 表示消耗 1GB 扣减 1.5GB 配额。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
+              </el-form-item>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 2. 协议与安全 Tab ==================== -->
+        <div v-show="activeTab === 'network_security'" class="tab-pane">
+          <!-- 核心协议选择器 -->
+          <div class="form-card">
+            <div class="card-title">核心协议选择</div>
+            <div class="form-grid">
+              <el-form-item label="传输协议 (Network)">
+                <el-select v-model="localNetwork" style="width: 100%">
+                  <el-option label="TCP (REALITY 最佳)" value="tcp" />
+                  <el-option label="WebSocket (WS 兼容)" value="ws" />
+                  <el-option label="xhttp (新一代高性能)" value="xhttp" />
+                  <el-option label="gRPC" value="grpc" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="安全层 (Security)">
+                <el-select v-model="localTlsType" style="width: 100%">
+                  <el-option label="REALITY (免证书伪装 · 推荐)" value="reality" />
+                  <el-option label="TLS (SSL 证书托管)" value="tls" />
+                  <el-option label="none (无加密明文)" value="none" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item v-if="localInboundType !== 'relay'">
+                <template #label>
+                  <span>用户流控 (Flow)</span>
+                  <el-tooltip content="TCP + REALITY 推荐开启 xtls-rprx-vision 提升传输效率与抗封锁能力。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-select v-model="localFlow" style="width: 100%">
+                  <el-option label="自动 (TCP+REALITY 自动注入 Vision)" value="" />
+                  <el-option label="开启 (xtls-rprx-vision)" value="xtls-rprx-vision" />
+                  <el-option label="关闭 (禁用流控)" value="none" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item v-if="localTlsType === 'reality'">
+                <template #label>
+                  <span>客户端指纹 (uTLS)</span>
+                  <el-tooltip content="模拟主流浏览器 TLS 握手指纹特征。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-select v-model="fingerprint" style="width: 100%">
+                  <el-option label="chrome (推荐)" value="chrome" />
+                  <el-option label="firefox" value="firefox" />
+                  <el-option label="safari" value="safari" />
+                  <el-option label="edge" value="edge" />
+                  <el-option label="360" value="360" />
+                  <el-option label="qq" value="qq" />
+                  <el-option label="random" value="random" />
+                  <el-option label="randomized (随机)" value="randomized" />
+                </el-select>
+              </el-form-item>
+            </div>
+          </div>
+
+          <!-- 传输层专属参数 (随 Network 动态切换) -->
+          <div class="form-card">
+            <div class="card-title">传输层参数 ({{ localNetwork.toUpperCase() }})</div>
+
+            <!-- TCP -->
+            <div v-if="localNetwork === 'tcp'" class="form-grid">
+              <el-form-item label="伪装类型 (Header)">
+                <el-select v-model="tcpForm.header_type" style="width: 100%">
+                  <el-option label="none (无伪装)" value="none" />
+                  <el-option label="http (HTTP 报文伪装)" value="http" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
+                </div>
+              </el-form-item>
+
+              <template v-if="tcpForm.header_type === 'http'">
+                <el-form-item label="Request Host">
+                  <el-input v-model="tcpForm.request_host" placeholder="如 example.com" />
+                </el-form-item>
+                <el-form-item label="Request Path">
+                  <el-input v-model="tcpForm.request_path" placeholder="/" />
+                </el-form-item>
+              </template>
+            </div>
 
             <!-- WebSocket -->
-            <template v-if="localNetwork === 'ws'">
-              <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
-                title="WS 为兼容保留项，新配置推荐使用 xhttp（性能更好、防封更稳），WS 旧配置不受影响" />
-              <div class="grid-2">
-                <el-form-item label="Path 路径">
-                  <el-input v-model="wsForm.path" placeholder="/" />
-                </el-form-item>
-                <el-form-item label="Host 域名标头 (可选)">
-                  <el-input v-model="wsForm.host" placeholder="留空默认" />
-                </el-form-item>
-              </div>
-            </template>
+            <div v-if="localNetwork === 'ws'" class="form-grid">
+              <el-form-item label="Path 路径">
+                <el-input v-model="wsForm.path" placeholder="/ws" />
+              </el-form-item>
+              <el-form-item label="Host 域名标头 (可选)">
+                <el-input v-model="wsForm.host" placeholder="留空默认" />
+              </el-form-item>
+              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
+                </div>
+              </el-form-item>
+            </div>
 
             <!-- xhttp -->
-            <template v-if="localNetwork === 'xhttp'">
-              <div class="grid-2">
-                <el-form-item label="Mode 传输模式">
-                  <el-select v-model="xhttpForm.mode" style="width: 100%">
-                    <el-option label="auto (自动)" value="auto" />
-                    <el-option label="packet-up" value="packet-up" />
-                    <el-option label="stream-up" value="stream-up" />
-                    <el-option label="stream-one" value="stream-one" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="Path 路径">
-                  <el-input v-model="xhttpForm.path" placeholder="/" />
-                </el-form-item>
-                <el-form-item label="Host 域名标头 (可选)">
-                  <el-input v-model="xhttpForm.host" placeholder="留空默认" />
-                </el-form-item>
-              </div>
-            </template>
+            <div v-if="localNetwork === 'xhttp'" class="form-grid">
+              <el-form-item label="Mode 传输模式">
+                <el-select v-model="xhttpForm.mode" style="width: 100%">
+                  <el-option label="auto (自动)" value="auto" />
+                  <el-option label="packet-up" value="packet-up" />
+                  <el-option label="stream-up" value="stream-up" />
+                  <el-option label="stream-one" value="stream-one" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="Path 路径">
+                <el-input v-model="xhttpForm.path" placeholder="/" />
+              </el-form-item>
+              <el-form-item label="Host 域名标头 (可选)">
+                <el-input v-model="xhttpForm.host" placeholder="留空默认" />
+              </el-form-item>
+              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
+                </div>
+              </el-form-item>
+            </div>
 
             <!-- gRPC -->
-            <template v-if="localNetwork === 'grpc'">
-              <div class="grid-2">
-                <el-form-item label="Service Name">
-                  <el-input v-model="grpcForm.service_name" placeholder="grpc" />
+            <div v-if="localNetwork === 'grpc'" class="form-grid">
+              <el-form-item label="Service Name">
+                <el-input v-model="grpcForm.service_name" placeholder="grpc" />
+              </el-form-item>
+              <el-form-item label="Authority 标头 (可选)">
+                <el-input v-model="grpcForm.authority" placeholder="留空默认" />
+              </el-form-item>
+              <el-form-item label="Multi Mode (多路复用)">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="grpcForm.multi_mode" active-text="开启 Multi Mode" />
+                </div>
+              </el-form-item>
+            </div>
+          </div>
+
+          <!-- REALITY 详细配置 -->
+          <div v-if="localTlsType === 'reality'" class="form-card">
+            <div class="card-head-flex">
+              <div class="card-title">REALITY 伪装参数</div>
+              <el-dropdown trigger="click" @command="applyRealityPreset">
+                <el-button size="small" text type="primary">
+                  <span>优质目标预设</span>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="p in REALITY_PRESETS" :key="p.dest" :command="p">
+                      {{ p.label }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+
+            <div class="form-grid">
+              <el-form-item label="借壳目标 (Dest)">
+                <el-input v-model="realityForm.dest" placeholder="如 gateway.icloud.com:443" />
+              </el-form-item>
+
+              <el-form-item label="伪装域名 (SNI / server_name)">
+                <el-input v-model="realityForm.server_name" placeholder="如 gateway.icloud.com" />
+              </el-form-item>
+
+              <el-form-item label="Short ID">
+                <div style="display: flex; gap: 8px">
+                  <el-input v-model="realityForm.short_id" placeholder="16 位十六进制" />
+                  <el-button @click="genShortId"><el-icon><Refresh /></el-icon></el-button>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="SpiderX 爬虫路径">
+                <el-input v-model="realityForm.spider_x" placeholder="/" />
+              </el-form-item>
+            </div>
+
+            <div class="key-box">
+              <div class="key-row">
+                <el-form-item label="服务端私钥 (Private Key)" style="margin-bottom: 0">
+                  <el-input v-model="realityForm.private_key" placeholder="x25519 私钥" />
                 </el-form-item>
-                <el-form-item label="Authority（自定义 Host，可选）">
-                  <el-input v-model="grpcForm.authority" placeholder="留空使用默认" />
-                </el-form-item>
-                <el-form-item label="Multi Mode">
-                  <el-switch v-model="grpcForm.multi_mode" />
+                <el-form-item label="客户端公钥 (Public Key)" style="margin-bottom: 0">
+                  <el-input v-model="realityForm.public_key" placeholder="x25519 公钥" />
                 </el-form-item>
               </div>
-            </template>
-          </div>
-
-          <!-- 用户流控（入站级，写进该入站全部用户的 clients） -->
-          <div v-if="localInboundType !== 'relay'" class="form-section">
-            <div class="section-title">用户流控 (Flow)</div>
-            <el-form-item label="流控设置">
-              <el-select v-model="localFlow" style="width: 280px">
-                <el-option label="自动（TCP+REALITY 时注入 xtls-rprx-vision）" value="" />
-                <el-option label="开启（为该入站用户全部开启 xtls-rprx-vision）" value="xtls-rprx-vision" />
-                <el-option label="关闭（禁用自动注入）" value="none" />
-              </el-select>
-              <p class="muted tip">流控与客户端绑定：设置写入该入站生成的 clients。用户级授权（UserInbound）可单独覆盖。</p>
-            </el-form-item>
-          </div>
-
-          <!-- 回落设置 (Fallbacks) -->
-          <div v-if="localInboundType !== 'relay'" class="form-section">
-            <div class="section-title">回落设置 (Fallbacks)</div>
-            <div class="fallbacks-card">
-              <div class="card-head">
-                <span class="head-title">回落规则列表</span>
-                <el-button size="small" type="primary" plain @click="addFallback">
-                  <el-icon><Plus /></el-icon>&nbsp;添加 Fallback
+              <div class="key-actions">
+                <el-button type="primary" plain size="small" :loading="genKeyLoading" @click="fetchRealityKeys">
+                  <el-icon><MagicStick /></el-icon>&nbsp;一键生成 x25519 密钥对
+                </el-button>
+                <el-button v-if="realityForm.public_key" size="small" text @click="copyText(realityForm.public_key, '公钥')">
+                  <el-icon><CopyDocument /></el-icon>&nbsp;复制公钥
+                </el-button>
+                <el-button v-if="realityForm.private_key" size="small" text @click="copyText(realityForm.private_key, '私钥')">
+                  <el-icon><CopyDocument /></el-icon>&nbsp;复制私钥
                 </el-button>
               </div>
-              <div v-if="fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
-              <div v-else class="fallback-list">
-                <div v-for="(item, idx) in fallbacks" :key="idx" class="fallback-item">
-                  <div class="fb-grid">
-                    <el-form-item label="SNI 匹配">
-                      <el-input v-model="item.name" placeholder="任意" />
-                    </el-form-item>
-                    <el-form-item label="ALPN 匹配">
-                      <el-input v-model="item.alpn" placeholder="如 h2" />
-                    </el-form-item>
-                    <el-form-item label="Path 匹配">
-                      <el-input v-model="item.path" placeholder="如 /" />
-                    </el-form-item>
-                    <el-form-item label="Dest 目标地址">
-                      <el-input v-model="item.dest" placeholder="80 或 127.0.0.1:8080" />
-                    </el-form-item>
-                    <el-form-item label="PROXY protocol (xver)">
-                      <el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" />
-                    </el-form-item>
-                  </div>
-                  <div class="fb-actions">
-                    <el-button size="small" text :disabled="idx === 0" @click="moveFallback(idx, -1)">上移</el-button>
-                    <el-button size="small" text :disabled="idx === fallbacks.length - 1" @click="moveFallback(idx, 1)">下移</el-button>
-                    <el-button size="small" text type="danger" @click="removeFallback(idx)">
-                      <el-icon><Delete /></el-icon>
-                    </el-button>
-                  </div>
+            </div>
+
+            <div class="form-grid" style="margin-top: 14px">
+              <el-form-item label="minClientVer (最低客户端版本)">
+                <el-input v-model="realityMinClientVer" placeholder="留空不限，如 1.8.0" />
+              </el-form-item>
+              <el-form-item label="maxClientVer (最高客户端版本)">
+                <el-input v-model="realityMaxClientVer" placeholder="留空不限" />
+              </el-form-item>
+              <el-form-item label="maxTimeDiff (最大时间差 ms)">
+                <el-input-number v-model="realityMaxTimeDiff" :min="0" style="width: 100%" placeholder="0=不限制" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <!-- TLS 详细配置 -->
+          <div v-if="localTlsType === 'tls'" class="form-card">
+            <div class="card-title">TLS 证书设置</div>
+            <div class="form-grid">
+              <el-form-item label="托管证书">
+                <el-select
+                  v-model="localCertId"
+                  style="width: 100%"
+                  clearable
+                  placeholder="不绑定（使用下方本地路径）"
+                  @change="(v: any) => emit('update:certId', Number(v || 0))"
+                >
+                  <el-option v-for="ct in certs" :key="ct.id" :label="`${ct.domain}（到期 ${ct.not_after}）`" :value="ct.id" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="SNI (server_name)">
+                <el-input v-model="tlsForm.server_name" placeholder="example.com" />
+              </el-form-item>
+
+              <el-form-item label="ALPN (逗号分隔)">
+                <el-input v-model="tlsAlpnText" placeholder="h2,http/1.1" />
+              </el-form-item>
+
+              <el-form-item label="证书路径 (Cert File)">
+                <el-input v-model="tlsForm.cert_file" placeholder="/etc/xray/cert.pem" />
+              </el-form-item>
+
+              <el-form-item label="私钥路径 (Key File)">
+                <el-input v-model="tlsForm.key_file" placeholder="/etc/xray/key.pem" />
+              </el-form-item>
+
+              <el-form-item label="Cipher Suites (加密套件)">
+                <el-input v-model="tlsCipherSuites" placeholder="留空默认" />
+              </el-form-item>
+
+              <el-form-item label="TLS 版本限制">
+                <div style="display: flex; gap: 8px; width: 100%">
+                  <el-select v-model="tlsMinVersion" placeholder="最低版本" clearable style="width: 50%">
+                    <el-option label="TLS 1.2" value="1.2" />
+                    <el-option label="TLS 1.3" value="1.3" />
+                  </el-select>
+                  <el-select v-model="tlsMaxVersion" placeholder="最高版本" clearable style="width: 50%">
+                    <el-option label="TLS 1.2" value="1.2" />
+                    <el-option label="TLS 1.3" value="1.3" />
+                  </el-select>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="allowInsecure (跳过证书校验)">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="tlsAllowInsecure" active-text="允许不安全证书" />
+                </div>
+              </el-form-item>
+            </div>
+          </div>
+
+          <!-- none 明文提示 -->
+          <div v-if="localTlsType === 'none'" class="form-card">
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+              title="当前为明文传输 (none)"
+              description="无 TLS / REALITY 加密的流量极易被 DPI 识别与封锁，建议在生产环境选用 REALITY 或 TLS。"
+            />
+          </div>
+        </div>
+
+        <!-- ==================== 3. 高级设置 Tab ==================== -->
+        <div v-show="activeTab === 'advanced'" class="tab-pane">
+          <!-- 订阅分享地址与端口 -->
+          <div v-if="localInboundType === 'user'" class="form-card">
+            <div class="card-title">
+              <span>订阅分享端点 (与节点监听解耦)</span>
+              <el-tooltip content="订阅链接中生成的节点连接地址/端口，常用于端口转发或 CDN 转发场景。" placement="top">
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="分享地址策略">
+                <el-select v-model="localShareStrategy" style="width: 100%">
+                  <el-option label="跟随服务器地址 (默认)" value="node" />
+                  <el-option label="监听地址 (Listen)" value="listen" />
+                  <el-option label="自定义端点 (CDN/转发)" value="custom" />
+                </el-select>
+              </el-form-item>
+              <template v-if="localShareStrategy === 'custom'">
+                <el-form-item label="自定义分享地址">
+                  <el-input v-model="localShareAddr" placeholder="如 cdn.example.com" />
+                </el-form-item>
+                <el-form-item label="自定义分享端口">
+                  <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 使用入站端口" style="width: 100%" />
+                </el-form-item>
+              </template>
+            </div>
+          </div>
+
+          <!-- 流量嗅探 -->
+          <div class="form-card">
+            <div class="card-title">流量嗅探 (Sniffing)</div>
+            <div class="form-grid">
+              <el-form-item label="启用嗅探">
+                <el-switch v-model="sniffingForm.enabled" active-text="开启流量嗅探" />
+              </el-form-item>
+
+              <el-form-item label="嗅探目标协议 (destOverride)">
+                <el-checkbox-group v-model="sniffingForm.destOverride" :disabled="!sniffingForm.enabled">
+                  <el-checkbox value="http" label="HTTP" />
+                  <el-checkbox value="tls" label="TLS" />
+                  <el-checkbox value="quic" label="QUIC" />
+                </el-checkbox-group>
+              </el-form-item>
+
+              <el-form-item label="MetadataOnly (仅元数据嗅探)">
+                <el-switch v-model="sniffingForm.metadataOnly" :disabled="!sniffingForm.enabled" active-text="仅元数据" />
+              </el-form-item>
+
+              <el-form-item label="RouteOnly (仅用于路由，不改写目标)">
+                <el-switch v-model="sniffingForm.routeOnly" :disabled="!sniffingForm.enabled" active-text="仅用于路由" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <!-- 回落 Fallbacks -->
+          <div v-if="localInboundType !== 'relay'" class="form-card">
+            <div class="card-head-flex">
+              <div class="card-title">回落设置 (Fallbacks)</div>
+              <el-button size="small" type="primary" plain @click="addFallback">
+                <el-icon><Plus /></el-icon>&nbsp;添加回落
+              </el-button>
+            </div>
+            <div v-if="fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
+            <div v-else class="fallback-list">
+              <div v-for="(item, idx) in fallbacks" :key="idx" class="fallback-item">
+                <div class="fb-grid">
+                  <el-form-item label="SNI 匹配"><el-input v-model="item.name" placeholder="任意" /></el-form-item>
+                  <el-form-item label="ALPN"><el-input v-model="item.alpn" placeholder="如 h2" /></el-form-item>
+                  <el-form-item label="Path 路径"><el-input v-model="item.path" placeholder="如 /" /></el-form-item>
+                  <el-form-item label="目标地址 (Dest)"><el-input v-model="item.dest" placeholder="80 或 127.0.0.1:80" /></el-form-item>
+                  <el-form-item label="PROXY Protocol (xver)"><el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" /></el-form-item>
+                </div>
+                <div class="fb-actions">
+                  <el-button size="small" text :disabled="idx === 0" @click="moveFallback(idx, -1)">上移</el-button>
+                  <el-button size="small" text :disabled="idx === fallbacks.length - 1" @click="moveFallback(idx, 1)">下移</el-button>
+                  <el-button size="small" text type="danger" @click="removeFallback(idx)"><el-icon><Delete /></el-icon></el-button>
                 </div>
               </div>
             </div>
           </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="安全设置" name="security">
-      <!-- 安全/加密配置 -->
-      <div class="form-section">
-        <div class="section-title">安全设置 ({{ localTlsType.toUpperCase() }})</div>
-
-        <el-form-item label="安全类型 Security">
-          <el-select v-model="localTlsType" style="width: 280px">
-            <el-option label="REALITY (伪装/防封)" value="reality" />
-            <el-option label="TLS (自定义证书)" value="tls" />
-            <el-option label="none (无加密)" value="none" />
-          </el-select>
-        </el-form-item>
-
-        <div style="margin-bottom: 8px">
-          <el-form-item label="uTLS 指纹 (fingerprint)">
-            <el-select v-model="fingerprint" style="width: 240px">
-              <el-option label="chrome (推荐)" value="chrome" />
-              <el-option label="firefox" value="firefox" />
-              <el-option label="safari" value="safari" />
-              <el-option label="edge" value="edge" />
-              <el-option label="360" value="360" />
-              <el-option label="qq" value="qq" />
-              <el-option label="random" value="random" />
-              <el-option label="randomized" value="randomized" />
-            </el-select>
-          </el-form-item>
         </div>
-
-        <!-- REALITY -->
-        <template v-if="localTlsType === 'reality'">
-          <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px"
-            title="官方警告：选 apple / icloud 等大站做借壳目标（Dest）有被 GFW 封 IP 的风险，建议用自建/小众站，且 target 应与 serverName 一致" />
-          <div class="grid-2">
-            <el-form-item label="借壳目标 Dest">
-              <el-input v-model="realityForm.dest" placeholder="www.example.com:443" />
-            </el-form-item>
-            <el-form-item label="SNI (server_name)">
-              <el-input v-model="realityForm.server_name" placeholder="www.example.com" />
-            </el-form-item>
-            <el-form-item label="Short ID">
-              <div style="display: flex; gap: 8px; width: 100%">
-                <el-input v-model="realityForm.short_id" placeholder="abcdef0123456789" />
-                <el-button @click="genShortId">
-                  <el-icon><Refresh /></el-icon>&nbsp;随机
-                </el-button>
-              </div>
-            </el-form-item>
-            <el-form-item label="SpiderX 爬虫路径 (可选)">
-              <el-input v-model="realityForm.spider_x" placeholder="/" />
-            </el-form-item>
-          </div>
-          <div class="grid-2" style="margin-top: 8px">
-            <el-form-item label="minClientVer（最低客户端版本）">
-              <el-input v-model="realityMinClientVer" placeholder="如 1.8.0" />
-            </el-form-item>
-            <el-form-item label="maxClientVer（最高客户端版本）">
-              <el-input v-model="realityMaxClientVer" placeholder="不限制" />
-            </el-form-item>
-            <el-form-item label="maxTimeDiff（最大时间差 ms）">
-              <el-input-number v-model="realityMaxTimeDiff" :min="0" style="width: 100%" placeholder="0=不限制" />
-            </el-form-item>
-          </div>
-
-          <div class="grid-2" style="margin-top: 8px">
-            <el-form-item label="Private Key (服务端私钥)">
-              <el-input v-model="realityForm.private_key" placeholder="x25519 私钥" />
-            </el-form-item>
-            <el-form-item label="Public Key (客户端公钥)">
-              <el-input v-model="realityForm.public_key" placeholder="x25519 公钥" />
-            </el-form-item>
-          </div>
-          <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center">
-            <el-button type="primary" plain size="small" :loading="genKeyLoading" @click="fetchRealityKeys">
-              <el-icon><MagicStick /></el-icon>&nbsp;一键生成 x25519 密钥对
-            </el-button>
-            <el-button v-if="realityForm.private_key" size="small" text @click="copyText(realityForm.private_key, '私钥')">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制私钥
-            </el-button>
-            <el-button v-if="realityForm.public_key" size="small" text @click="copyText(realityForm.public_key, '公钥')">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制公钥
-            </el-button>
-          </div>
-        </template>
-
-        <!-- TLS -->
-        <template v-if="localTlsType === 'tls'">
-          <!-- Phase T：托管证书下拉（选择后生成器注入固定路径并自动推送节点） -->
-          <el-form-item label="托管证书（certs 表，选填）">
-            <el-select v-model="localCertId" style="width: 320px" clearable placeholder="不绑定（手动填路径）"
-              @change="(v: number | undefined) => emit('update:certId', v || 0)">
-              <el-option v-for="ct in certs" :key="ct.id" :label="`${ct.domain}（到期 ${ct.not_after}）`" :value="ct.id" />
-            </el-select>
-            <p class="muted tip">绑定后节点配置的 certificates 自动使用 /etc/xray/certs/&lt;domain&gt;/ 固定路径（证书由主控下发）。</p>
-          </el-form-item>
-          <div class="grid-2">
-            <el-form-item label="SNI (server_name)">
-              <el-input v-model="tlsForm.server_name" placeholder="example.com" />
-            </el-form-item>
-            <el-form-item label="ALPN (逗号分割)">
-              <el-input v-model="tlsAlpnText" placeholder="h2,http/1.1" />
-            </el-form-item>
-            <el-form-item label="Cert File (证书文件路径)">
-              <el-input v-model="tlsForm.cert_file" placeholder="/etc/xray/cert.pem" />
-            </el-form-item>
-            <el-form-item label="Key File (私钥文件路径)">
-              <el-input v-model="tlsForm.key_file" placeholder="/etc/xray/key.pem" />
-            </el-form-item>
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; margin-top: 8px">
-            <el-form-item label="TLS 最低版本">
-              <el-select v-model="tlsMinVersion" style="width: 100%" clearable placeholder="不限制">
-                <el-option label="1.2" value="1.2" />
-                <el-option label="1.3" value="1.3" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="TLS 最高版本">
-              <el-select v-model="tlsMaxVersion" style="width: 100%" clearable placeholder="不限制">
-                <el-option label="1.2" value="1.2" />
-                <el-option label="1.3" value="1.3" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="Cipher Suites（逗号分隔）">
-              <el-input v-model="tlsCipherSuites" placeholder="如 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" />
-            </el-form-item>
-            <el-form-item label="allowInsecure（跳过证书校验）">
-              <el-switch v-model="tlsAllowInsecure" />
-            </el-form-item>
-          </div>
-        </template>
-
-        <!-- none -->
-        <template v-if="localTlsType === 'none'">
-          <el-alert
-            type="warning"
-            :closable="false"
-            show-icon
-            title="未启用 TLS 加密"
-            description="明文传输容易被 DPI 审查封锁，生产环境强烈建议选择 REALITY 或 TLS。"
-          />
-        </template>
-      </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="嗅探" name="sniffing">
-      <!-- 流量嗅探 Sniffing -->
-      <div class="form-section">
-        <div class="section-title">流量嗅探 (Sniffing)</div>
-        <div class="grid-2">
-          <el-form-item label="启用嗅探">
-            <el-switch v-model="sniffingForm.enabled" />
-          </el-form-item>
-          <el-form-item label="DestOverride（覆盖目标类型）">
-            <el-checkbox-group v-model="sniffingForm.destOverride" :disabled="!sniffingForm.enabled">
-              <el-checkbox label="http" />
-              <el-checkbox label="tls" />
-              <el-checkbox label="quic" />
-              <el-tooltip content="需要配置 DNS 顶层块才能生效，当前暂不支持" placement="top">
-                <el-checkbox label="fakedns" disabled />
-              </el-tooltip>
-            </el-checkbox-group>
-          </el-form-item>
-          <el-form-item label="MetadataOnly（仅元数据嗅探）">
-            <el-switch v-model="sniffingForm.metadataOnly" :disabled="!sniffingForm.enabled" />
-          </el-form-item>
-          <el-form-item label="RouteOnly（仅用于路由，不改写目标）">
-            <el-switch v-model="sniffingForm.routeOnly" :disabled="!sniffingForm.enabled" />
-          </el-form-item>
-        </div>
-      </div>
-        </el-tab-pane>
-      </el-tabs>
+      </el-form>
     </div>
 
-    <!-- 视图 2: 原始 JSON 编辑器 -->
-    <div v-else class="json-container">
-      <div class="json-head">
-        <span>实时双向同步 JSON 源代码：</span>
+    <!-- 原始 JSON 视图 -->
+    <div v-else class="json-body">
+      <div class="json-status">
         <el-tag v-if="!jsonError" type="success" size="small">
-          <el-icon><Check /></el-icon>&nbsp;JSON 语法正确
+          <el-icon><Check /></el-icon>&nbsp;语法正确
         </el-tag>
         <el-tag v-else type="danger" size="small">
-          <el-icon><Warning /></el-icon>&nbsp;语法错误
+          <el-icon><Warning /></el-icon>&nbsp;{{ jsonError }}
         </el-tag>
       </div>
-      <el-alert v-if="jsonError" type="error" :closable="false" :title="jsonError" style="margin-bottom: 10px" />
       <el-input
         :model-value="rawJsonText"
         type="textarea"
-        :rows="18"
+        :rows="16"
         class="code-textarea"
-        placeholder='{"reality": {"dest": "www.apple.com:443", ...}}'
         @input="onRawJsonInput"
       />
     </div>
@@ -1012,139 +1058,210 @@ async function copyText(text: string, label: string) {
 </template>
 
 <style scoped lang="scss">
-.inbound-config-editor {
-  background: var(--x-bg-card, #ffffff);
-  border-radius: 8px;
+.inbound-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.editor-header {
+.editor-top-nav {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
-  background: var(--x-bg-muted, #f8fafc);
-  border-bottom: 1px solid var(--x-border, #e2e8f0);
-  border-radius: 8px 8px 0 0;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--x-border);
+}
 
-  .header-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    font-size: 13.5px;
-    color: var(--x-text-1, #1e293b);
+.category-tabs {
+  :deep(.el-radio-button__inner) {
+    font-weight: 500;
+  }
+}
 
-    .title-icon {
-      color: var(--x-primary, #4f46e5);
+.json-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--x-text);
+}
+
+.form-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-card {
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  padding: 16px 18px;
+}
+
+.card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--x-text);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-head-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  .card-title { margin-bottom: 0; }
+}
+
+.help-icon {
+  color: var(--x-text-3);
+  font-size: 13px;
+  margin-left: 4px;
+  cursor: help;
+  &:hover { color: var(--x-primary); }
+}
+
+.type-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  :deep(.el-radio) {
+    margin-right: 0;
+    padding: 10px 16px;
+    border: 1px solid var(--x-border);
+    border-radius: var(--x-radius);
+    background: var(--x-card);
+    transition: all 0.15s ease;
+    &.is-checked {
+      border-color: var(--x-primary);
+      background: var(--x-primary-soft);
     }
   }
 }
 
-.form-container,
-.json-container {
-  padding: 14px;
+.type-sub {
+  font-size: 11.5px;
+  color: var(--x-text-3);
+  margin-left: 6px;
 }
 
-.editor-tabs {
-  :deep(.el-tabs__header) {
+.relay-box {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--x-border);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+
+  :deep(.el-form-item) {
     margin-bottom: 14px;
   }
-
-  :deep(.el-tabs__content) {
-    overflow: visible;
-  }
 }
 
-.form-section {
-  margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px dashed var(--x-border, #e2e8f0);
-
-  &:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-  }
-
-  .section-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--x-primary, #4f46e5);
-    margin-bottom: 12px;
-  }
+.opt-remark {
+  color: var(--x-text-3);
+  font-size: 12px;
+  margin-left: 6px;
 }
 
-.grid-2 {
+.key-box {
+  margin-top: 8px;
+  background: var(--x-card);
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.key-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
 }
 
-.fallbacks-card {
-  background: var(--x-bg-soft, #f1f5f9);
-  border-radius: 6px;
-  padding: 12px;
+.key-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-top: 10px;
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-
-    .head-title {
-      font-size: 12.5px;
-      font-weight: 600;
-      color: var(--x-text-2, #475569);
-    }
-  }
-
-  .empty-tip {
-    font-size: 12px;
-    color: var(--x-text-3, #94a3b8);
-    text-align: center;
-    padding: 10px 0;
-  }
-
-  .fallback-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .fallback-item {
-    background: #ffffff;
-    border: 1px solid var(--x-border, #cbd5e1);
-    border-radius: 6px;
-    padding: 10px;
-    position: relative;
-
-    .fb-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 0 10px;
-    }
-
-    .fb-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 6px;
-      margin-top: 4px;
-    }
-  }
 }
 
-.json-head {
+.empty-tip {
+  color: var(--x-text-3);
+  font-size: 13px;
+  padding: 10px 0;
+  text-align: center;
+}
+
+.fallback-list {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fallback-item {
+  display: flex;
   align-items: center;
-  margin-bottom: 10px;
-  font-size: 12.5px;
-  color: var(--x-text-2, #475569);
+  gap: 10px;
+  background: var(--x-card);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--x-border);
+}
+
+.fb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  gap: 0 10px;
+  flex: 1;
+  :deep(.el-form-item) { margin-bottom: 0; }
+}
+
+.fb-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.json-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.json-status {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .code-textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.5;
+  :deep(textarea) {
+    font-family: var(--font-mono, monospace);
+    font-size: 12.5px;
+    background: var(--x-bg);
+    color: var(--x-text);
+  }
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .key-row {
+    grid-template-columns: 1fr;
+  }
+  .fb-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

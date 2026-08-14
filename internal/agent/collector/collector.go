@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
+	"time"
 )
 
 // Snapshot 一次采集结果。
@@ -17,6 +17,10 @@ type Snapshot struct {
 	MemTotal  float64 // 总内存（字节）
 	Disk      float64 // 已用磁盘（字节）
 	DiskTotal float64 // 总磁盘（字节）
+	RxBytes   uint64  // 物理网卡接收总字节
+	TxBytes   uint64  // 物理网卡发送总字节
+	RxRate    float64 // 入口带宽速率（字节/秒）
+	TxRate    float64 // 出口带宽速率（字节/秒）
 }
 
 // Collector 通过 /proc 采集。
@@ -25,6 +29,10 @@ type Collector struct {
 	prevIdle  float64
 	prevTotal float64
 	havePrev  bool
+	prevTime  time.Time
+	prevRx    uint64
+	prevTx    uint64
+	haveNet   bool
 }
 
 // New 构造采集器。
@@ -35,6 +43,7 @@ func (c *Collector) Snapshot() Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	now := time.Now()
 	snap := Snapshot{}
 	snap.Mem, snap.MemTotal = memInfo()
 	snap.Disk, snap.DiskTotal = diskInfo("/")
@@ -51,6 +60,28 @@ func (c *Collector) Snapshot() Snapshot {
 		}
 		c.prevIdle, c.prevTotal, c.havePrev = idle, total, true
 	}
+
+	rx, tx, ok := netDevInfo()
+	if ok {
+		snap.RxBytes = rx
+		snap.TxBytes = tx
+		if c.haveNet && !c.prevTime.IsZero() {
+			dt := now.Sub(c.prevTime).Seconds()
+			if dt > 0 {
+				if rx >= c.prevRx {
+					snap.RxRate = float64(rx-c.prevRx) / dt
+				}
+				if tx >= c.prevTx {
+					snap.TxRate = float64(tx-c.prevTx) / dt
+				}
+			}
+		}
+		c.prevRx = rx
+		c.prevTx = tx
+		c.prevTime = now
+		c.haveNet = true
+	}
+
 	return snap
 }
 
@@ -113,13 +144,39 @@ func memInfo() (used, total float64) {
 	return memTotal - memAvail, memTotal
 }
 
-// diskInfo 读取挂载点统计（syscall.Statfs）。
-func diskInfo(path string) (used, total float64) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, 0
+// netDevInfo 读取 /proc/net/dev 汇总物理网卡流量。
+func netDevInfo() (rxBytes, txBytes uint64, ok bool) {
+	data, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0, false
 	}
-	total = float64(st.Blocks) * float64(st.Bsize)
-	avail := float64(st.Bavail) * float64(st.Bsize)
-	return total - avail, total
+	rx, tx := parseNetDevData(string(data))
+	return rx, tx, true
+}
+
+// parseNetDevData 解析 /proc/net/dev 文本，过滤虚拟网卡。
+func parseNetDevData(content string) (rxBytes, txBytes uint64) {
+	for _, line := range strings.Split(content, "\n") {
+		idx := strings.Index(line, ":")
+		if idx == -1 {
+			continue
+		}
+		iface := strings.TrimSpace(line[:idx])
+		// 过滤回环与虚拟容器网卡
+		if iface == "lo" || strings.HasPrefix(iface, "docker") || strings.HasPrefix(iface, "br-") ||
+			strings.HasPrefix(iface, "veth") || strings.HasPrefix(iface, "tun") || strings.HasPrefix(iface, "tap") {
+			continue
+		}
+		fields := strings.Fields(line[idx+1:])
+		if len(fields) < 9 {
+			continue
+		}
+		rx, err1 := strconv.ParseUint(fields[0], 10, 64)
+		tx, err2 := strconv.ParseUint(fields[8], 10, 64)
+		if err1 == nil && err2 == nil {
+			rxBytes += rx
+			txBytes += tx
+		}
+	}
+	return rxBytes, txBytes
 }

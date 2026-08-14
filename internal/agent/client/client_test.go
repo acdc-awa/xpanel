@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -132,9 +133,11 @@ func TestDispatchPushCert(t *testing.T) {
 			t.Fatalf("缺少 %s: %v", f, err)
 		}
 	}
-	info, _ := os.Stat(filepath.Join(c.CertsDir, "test.local", "key.pem"))
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("key.pem 权限 = %o, want 600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, _ := os.Stat(filepath.Join(c.CertsDir, "test.local", "key.pem"))
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("key.pem 权限 = %o, want 600", info.Mode().Perm())
+		}
 	}
 }
 

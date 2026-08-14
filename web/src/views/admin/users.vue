@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Ticket, Delete, CopyDocument, Wallet } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { getUsers, createInvitations, getUserInbounds, setUserInbounds, createUser, toggleUser, deleteUser } from '@/api/admin'
+import {
+  getUsers,
+  createUser,
+  toggleUser,
+  deleteUser,
+  updateUser,
+  getPlans,
+  getPermissionGroups,
+  type PermissionGroup,
+  type Plan,
+} from '@/api/admin'
 import { adjustUserBalance } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
-import type { AdminUser, InboundItem } from '@/api/types'
+import type { AdminUser } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 
 const list = ref<AdminUser[]>([])
@@ -15,7 +26,42 @@ const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
 
-// ---- 调整余额 ----
+const plans = ref<Plan[]>([])
+const permissionGroups = ref<PermissionGroup[]>([])
+
+async function loadAuxData() {
+  try {
+    const [pRes, gRes] = await Promise.all([getPlans(), getPermissionGroups()])
+    if (pRes.data.code === 0) plans.value = pRes.data.data.items
+    if (gRes.data.code === 0) permissionGroups.value = gRes.data.data.items
+  } catch {
+    /* 忽略 */
+  }
+}
+
+function planName(id: number) {
+  return plans.value.find((p) => p.id === id)?.name ?? (id ? `#${id}` : '无套餐')
+}
+
+function groupName(id?: number) {
+  if (!id) return '无'
+  return permissionGroups.value.find((g) => g.id === id)?.name ?? `组#${id}`
+}
+
+function userGroupDisplay(u: any) {
+  if (u.permission_group_id && u.permission_group_id > 0) {
+    return { name: `${groupName(u.permission_group_id)} (自定义)`, type: 'primary', custom: true }
+  }
+  if (u.plan_id && u.plan_id > 0) {
+    const p = plans.value.find((x) => x.id === u.plan_id)
+    if (p && p.permission_group_id) {
+      return { name: `${groupName(p.permission_group_id)} (套餐继承)`, type: 'success', custom: false }
+    }
+  }
+  return { name: '未分配权限组', type: 'info', custom: false }
+}
+
+// ---- 调整余额（仅保留表格右键或独立调账备用） ----
 const adjustOpen = ref(false)
 const adjustUser = ref<AdminUser | null>(null)
 const adjustForm = reactive({
@@ -49,6 +95,7 @@ async function submitAdjust() {
       adjustOpen.value = false
       if (current.value && current.value.id === adjustUser.value.id) {
         current.value.balance_cents = data.data.new_balance
+        userEditForm.balance_yuan = Number((data.data.new_balance / 100).toFixed(2))
       }
       load()
     } else {
@@ -77,7 +124,10 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+
+onMounted(async () => {
+  await Promise.all([load(), loadAuxData()])
+})
 
 function usagePercent(u: any) {
   if (!u.total_bytes) return 0
@@ -88,56 +138,138 @@ function fmtTime(t: string | null) {
   return t ? t.replace('T', ' ').slice(0, 16) : '—'
 }
 
-// ---- 详情抽屉 ----
+// ---- 时间快捷设定 ----
+const dateShortcuts = [
+  {
+    text: '+1 个月 (30天)',
+    value: () => {
+      const d = new Date()
+      d.setDate(d.getDate() + 30)
+      return d
+    },
+  },
+  {
+    text: '+1 季度 (90天)',
+    value: () => {
+      const d = new Date()
+      d.setDate(d.getDate() + 90)
+      return d
+    },
+  },
+  {
+    text: '+半年 (180天)',
+    value: () => {
+      const d = new Date()
+      d.setDate(d.getDate() + 180)
+      return d
+    },
+  },
+  {
+    text: '+1 年 (365天)',
+    value: () => {
+      const d = new Date()
+      d.setDate(d.getDate() + 365)
+      return d
+    },
+  },
+]
+
+function addQuickExpire(days: number) {
+  const base = userEditForm.expire_at ? new Date(userEditForm.expire_at) : new Date()
+  const start = base.getTime() < Date.now() ? new Date() : base
+  start.setDate(start.getDate() + days)
+  userEditForm.expire_at = start.toISOString()
+}
+
+function clearExpire() {
+  userEditForm.expire_at = ''
+}
+
+function addNewUserQuickExpire(days: number) {
+  const base = newUserForm.expire_at ? new Date(newUserForm.expire_at) : new Date()
+  const start = base.getTime() < Date.now() ? new Date() : base
+  start.setDate(start.getDate() + days)
+  newUserForm.expire_at = start.toISOString()
+}
+
+function clearNewUserExpire() {
+  newUserForm.expire_at = ''
+}
+
+// ---- 详情与编辑抽屉 ----
 const detailOpen = ref(false)
 const current = ref<AdminUser | null>(null)
+const userEditForm = reactive({
+  plan_id: 0,
+  permission_group_id: 0,
+  device_limit: 0,
+  balance_yuan: 0,
+  expire_at: '',
+  password: '',
+})
+const userSaving = ref(false)
+
+const currentPlan = computed(() => {
+  if (!userEditForm.plan_id) return null
+  return plans.value.find((p) => p.id === userEditForm.plan_id) || null
+})
+
+const inheritedGroupName = computed(() => {
+  if (!currentPlan.value || !currentPlan.value.permission_group_id) {
+    return '未分配权限组'
+  }
+  return groupName(currentPlan.value.permission_group_id)
+})
+
 function openDetail(row: any) {
   current.value = row
+  userEditForm.plan_id = row.plan_id || 0
+  userEditForm.permission_group_id = row.permission_group_id || 0
+  userEditForm.device_limit = row.device_limit || 0
+  userEditForm.balance_yuan = Number(((row.balance_cents || 0) / 100).toFixed(2))
+  userEditForm.expire_at = row.expire_at || ''
+  userEditForm.password = ''
   detailOpen.value = true
-  loadGrants(row.id)
 }
 
-// ---- 入站授权 ----
-const grantInbounds = ref<InboundItem[]>([])
-const grantedIds = ref<number[]>([])
-const grantLoading = ref(false)
-const grantSaving = ref(false)
-
-async function loadGrants(userId: number) {
-  grantLoading.value = true
-  try {
-    const { data } = await getUserInbounds(userId)
-    if (data.code === 0) {
-      grantInbounds.value = data.data.inbounds
-      grantedIds.value = [...data.data.granted_ids]
-    }
-  } catch {
-    /* 忽略 */
-  } finally {
-    grantLoading.value = false
-  }
-}
-
-async function saveGrants() {
+async function saveUserConfig() {
   if (!current.value) return
-  grantSaving.value = true
+  userSaving.value = true
   try {
-    const { data } = await setUserInbounds(current.value.id, grantedIds.value)
+    const payload = {
+      plan_id: userEditForm.plan_id,
+      permission_group_id: userEditForm.permission_group_id,
+      device_limit: userEditForm.device_limit,
+      balance_cents: Math.round(userEditForm.balance_yuan * 100),
+      expire_at: userEditForm.expire_at || null,
+      password: userEditForm.password.trim() || undefined,
+    }
+    const { data } = await updateUser(current.value.id, payload)
     if (data.code === 0) {
-      ElMessage.success('授权已保存（订阅将按授权入站过滤）')
+      ElMessage.success('用户配置已更新')
+      detailOpen.value = false
+      load()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '保存失败'))
   } finally {
-    grantSaving.value = false
+    userSaving.value = false
   }
 }
 
 // ---- 手动创建用户 ----
 const newUserOpen = ref(false)
-const newUserForm = reactive({ email: '', password: '' })
+const newUserForm = reactive({
+  email: '',
+  password: '',
+  plan_id: 0,
+  permission_group_id: 0,
+  device_limit: 0,
+  balance_yuan: 0,
+  expire_at: '',
+})
 const newUserCreating = ref(false)
 const newUserResult = ref<{ uuid: string; email: string } | null>(null)
 
@@ -148,11 +280,25 @@ async function submitNewUser() {
   }
   newUserCreating.value = true
   try {
-    const { data } = await createUser({ email: newUserForm.email, password: newUserForm.password })
+    const payload = {
+      email: newUserForm.email,
+      password: newUserForm.password,
+      plan_id: newUserForm.plan_id || undefined,
+      permission_group_id: newUserForm.permission_group_id || undefined,
+      device_limit: newUserForm.device_limit || undefined,
+      balance_cents: newUserForm.balance_yuan ? Math.round(newUserForm.balance_yuan * 100) : undefined,
+      expire_at: newUserForm.expire_at || undefined,
+    }
+    const { data } = await createUser(payload)
     if (data.code === 0) {
       newUserResult.value = { uuid: data.data.uuid, email: data.data.email }
       newUserForm.email = ''
       newUserForm.password = ''
+      newUserForm.plan_id = 0
+      newUserForm.permission_group_id = 0
+      newUserForm.device_limit = 0
+      newUserForm.balance_yuan = 0
+      newUserForm.expire_at = ''
       load()
     } else {
       ElMessage.error(data.message)
@@ -169,156 +315,146 @@ function closeNewUser() {
   newUserResult.value = null
 }
 
-// ---- 封禁/解封 ----
 async function doToggle(row: any) {
-  const label = row.status === 1 ? '封禁' : '解封'
-  try {
-    await ElMessageBox.confirm(`确认${label}用户「${row.username}」？`, label, { type: 'warning' })
-  } catch { return }
   try {
     const { data } = await toggleUser(row.id)
     if (data.code === 0) {
-      ElMessage.success(`已${label}`)
+      ElMessage.success(data.message)
       load()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, `${label}失败`))
+    ElMessage.error(errMsg(e, '操作失败'))
   }
 }
 
-// ---- 删除用户 ----
 async function doDelete(row: any) {
   try {
-    await ElMessageBox.confirm(
-      `确认删除用户「${row.username}」？该操作将禁用账号并撤销所有入站授权。`,
-      '删除用户',
-      { type: 'error' },
-    )
-  } catch { return }
-  try {
+    await ElMessageBox.confirm(`确定删除用户 ${row.username}？该操作不可逆。`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      confirmButtonClass: 'el-button--danger',
+      cancelButtonText: '取消',
+    })
     const { data } = await deleteUser(row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      ElMessage.success('用户已删除')
       load()
     } else {
       ElMessage.error(data.message)
     }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-// ---- 生成邀请码 ----
-const invOpen = ref(false)
-const invForm = reactive({ count: 5, expires: '' })
-const invCreating = ref(false)
-const generated = ref<string[]>([])
-
-async function createInv() {
-  invCreating.value = true
-  try {
-    const { data } = await createInvitations(invForm.count, invForm.expires)
-    if (data.code === 0) {
-      generated.value = data.data.codes
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '生成失败'))
-  } finally {
-    invCreating.value = false
-  }
-}
-
-async function copyText(text: string, label: string) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
   } catch {
-    ElMessage.warning('复制失败，请手动选择')
+    /* 取消 */
   }
 }
 
-async function copyCodes() {
-  try {
-    await navigator.clipboard.writeText(generated.value.join('\n'))
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择')
-  }
+function copyText(text: string, label: string) {
+  navigator.clipboard.writeText(text)
+  ElMessage.success(`${label}已复制到剪贴板`)
 }
+
+const filteredList = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return list.value
+  return list.value.filter(
+    (u) =>
+      u.username.toLowerCase().includes(kw) ||
+      (u.email && u.email.toLowerCase().includes(kw)) ||
+      (u.uuid && u.uuid.toLowerCase().includes(kw)),
+  )
+})
 </script>
 
 <template>
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input v-model="keyword" placeholder="搜索用户名 / 邮箱" :prefix-icon="Search" clearable style="width: 240px" @keyup.enter="load" />
-        <el-button @click="load">搜索</el-button>
+        <el-input v-model="keyword" placeholder="搜索用户名 / 邮箱 / UUID" clearable style="width: 280px">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
       </div>
       <div style="display: flex; gap: 8px">
-        <el-button type="primary" @click="newUserOpen = true"><el-icon><Plus /></el-icon>&nbsp;添加用户</el-button>
-        <el-button @click="invOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
+        <el-button type="primary" :icon="Plus" @click="newUserOpen = true">添加用户</el-button>
       </div>
     </div>
 
-    <BaseCard>
-      <el-table v-loading="loading" :data="list">
-        <el-table-column prop="id" label="ID" width="80">
-          <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-        </el-table-column>
-        <el-table-column prop="username" label="用户名" min-width="110">
-          <template #default="{ row }"><span style="font-weight: 600">{{ row.username }}</span></template>
-        </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="160">
-          <template #default="{ row }"><code class="cell-mono">{{ row.email || '—' }}</code></template>
-        </el-table-column>
-        <el-table-column prop="uuid" label="UUID" min-width="200">
+    <BaseCard title="用户列表">
+      <template #extra>
+        <span class="muted" style="font-size: 13px">共 {{ total }} 位用户</span>
+      </template>
+
+      <el-table v-loading="loading" :data="filteredList" style="width: 100%">
+        <el-table-column prop="id" label="#" width="65" />
+        <el-table-column label="用户" min-width="170">
           <template #default="{ row }">
-            <code class="cell-mono" style="font-size: 11px; cursor: pointer" :title="'点击复制: ' + (row.uuid || '')" @click="copyText(row.uuid || '', 'UUID')">{{ row.uuid || '—' }}</code>
+            <div style="font-weight: 600">{{ row.username }}</div>
+            <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="角色" width="90">
+        <el-table-column label="套餐" width="130">
           <template #default="{ row }">
-            <el-tag :type="row.role === 'admin' ? 'warning' : 'info'" size="small">{{ row.role === 'admin' ? '管理员' : '用户' }}</el-tag>
+            <el-tag size="small" :type="row.plan_id ? 'primary' : 'info'" effect="plain">
+              {{ planName(row.plan_id) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="套餐" width="100">
+        <el-table-column label="所属权限组" width="160">
           <template #default="{ row }">
-            <span class="muted">{{ row.plan_id ? `#${row.plan_id}` : '—' }}</span>
+            <el-tag :type="(userGroupDisplay(row).type as any)" size="small" effect="plain">
+              {{ userGroupDisplay(row).name }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="余额" width="110">
+        <el-table-column label="设备限制" width="110">
           <template #default="{ row }">
-            <span class="cell-mono" style="font-weight: 700; color: var(--x-text)">
-              ¥ {{ ((row.balance_cents || 0) / 100).toFixed(2) }}
+            <span v-if="row.is_custom_device_limit" class="cell-mono" style="font-weight: 600; color: var(--x-primary)">
+              {{ row.effective_device_limit }} 台 (自定义)
+            </span>
+            <span v-else-if="row.effective_device_limit > 0" class="cell-mono muted">
+              {{ row.effective_device_limit }} 台 (继承)
+            </span>
+            <span v-else class="muted">不限</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="账户余额" width="110">
+          <template #default="{ row }">
+            <span class="cell-mono" style="font-weight: 600; color: #059669">
+              ¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="剩余流量" min-width="160">
+        <el-table-column label="已用流量 / 总量" min-width="190">
           <template #default="{ row }">
-            <div v-if="row.total_bytes > 0" class="usage-cell">
-              <el-progress :percentage="usagePercent(row)" :stroke-width="8" :show-text="false" style="width: 80px" />
-              <span class="muted">{{ formatBytes(Math.max(0, row.total_bytes - row.used_bytes)) }}</span>
+            <div class="traffic-cell">
+              <div class="traffic-text">
+                <span class="cell-mono" style="font-weight: 600">{{ formatBytes(row.used_bytes) }}</span>
+                <span class="muted cell-mono"> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}</span>
+              </div>
+              <el-progress
+                v-if="row.total_bytes"
+                :percentage="usagePercent(row)"
+                :stroke-width="5"
+                :show-text="false"
+                :status="usagePercent(row) > 90 ? 'exception' : undefined"
+              />
             </div>
-            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="到期时间" width="150">
-          <template #default="{ row }">{{ fmtTime(row.expire_at) }}</template>
+          <template #default="{ row }">
+            <span class="cell-mono" style="font-size: 12px">{{ fmtTime(row.expire_at) }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" title="查看用户详情并管理入站授权" @click="openDetail(row)">
-              <el-icon><Setting /></el-icon>&nbsp;详情/授权
+            <el-button size="small" text type="primary" title="编辑用户套餐、权限组与配置" @click="openDetail(row)">
+              <el-icon><Setting /></el-icon>&nbsp;编辑/权限
             </el-button>
             <el-button size="small" text type="success" title="调整用户账户余额" @click="openAdjust(row)">
               <el-icon><Wallet /></el-icon>&nbsp;调账
@@ -352,8 +488,8 @@ async function copyCodes() {
       </div>
     </BaseCard>
 
-    <!-- 用户详情抽屉 -->
-    <el-drawer v-model="detailOpen" :title="`用户详情 · ${current?.username ?? ''}`" size="420px">
+    <!-- 用户详情与权限配置抽屉 -->
+    <el-drawer v-model="detailOpen" :title="`用户管理 · ${current?.username ?? ''}`" size="460px">
       <template v-if="current">
         <div class="detail-rows">
           <div class="row"><span class="k">用户名</span><span class="v">{{ current.username }}</span></div>
@@ -363,39 +499,108 @@ async function copyCodes() {
             <code class="cell-mono" style="font-size: 11px; cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis" @click="copyText(current.uuid || '', 'UUID')">{{ current.uuid || '—' }}</code>
           </div>
           <div class="row"><span class="k">角色</span><span class="v">{{ current.role === 'admin' ? '管理员' : '用户' }}</span></div>
-          <div class="row"><span class="k">套餐</span><span class="v">{{ current.plan_id ? `#${current.plan_id}` : '—' }}</span></div>
           <div class="row">
             <span class="k">账户余额</span>
             <span class="v cell-mono" style="font-weight: 700; color: var(--x-primary)">
               ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
-              <el-button size="small" text type="primary" style="margin-left: 6px" @click="openAdjust(current)">调账</el-button>
             </span>
           </div>
-          <div class="row"><span class="k">到期时间</span><span class="v">{{ fmtTime(current.expire_at) }}</span></div>
           <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>
         </div>
-        <div class="detail-actions">
+
+        <div class="sec-title" style="margin-top: 20px; font-weight: 600; font-size: 14px">套餐与权限设置</div>
+        <p class="muted tip" style="font-size: 12px; margin-top: 4px; margin-bottom: 14px">
+          用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。
+        </p>
+
+        <el-form label-position="top">
+          <el-form-item label="绑定套餐">
+            <el-select v-model="userEditForm.plan_id" style="width: 100%" placeholder="选择套餐">
+              <el-option :value="0" label="无套餐" />
+              <el-option
+                v-for="p in plans"
+                :key="p.id"
+                :value="p.id"
+                :label="p.name"
+              >
+                <span>{{ p.name }}</span>
+                <span class="muted" style="font-size: 12px; margin-left: 8px">({{ groupName(p.permission_group_id) }})</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="所属权限组（覆盖套餐默认）">
+            <el-select v-model="userEditForm.permission_group_id" style="width: 100%">
+              <el-option :value="0" :label="`跟随套餐继承（当前: ${inheritedGroupName}）`" />
+              <el-option
+                v-for="g in permissionGroups"
+                :key="g.id"
+                :value="g.id"
+                :label="g.name"
+              >
+                <span>{{ g.name }}</span>
+                <span v-if="g.remark" class="muted" style="font-size: 12px; margin-left: 8px">({{ g.remark }})</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+            <el-form-item label="账户余额（元）">
+              <el-input-number
+                v-model="userEditForm.balance_yuan"
+                :controls="false"
+                :min="0"
+                :precision="2"
+                placeholder="0.00"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="设备限制（台，0=跟随套餐）">
+              <el-input-number
+                v-model="userEditForm.device_limit"
+                :controls="false"
+                :min="0"
+                :precision="0"
+                placeholder="0"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </div>
+
+          <el-form-item label="到期时间">
+            <el-date-picker
+              v-model="userEditForm.expire_at"
+              type="datetime"
+              placeholder="留空表示永不过期"
+              value-format="YYYY-MM-DDTHH:mm:ssZ"
+              :shortcuts="dateShortcuts"
+              style="width: 100%"
+            />
+            <div class="quick-expire-bar">
+              <span class="quick-label">快捷设定:</span>
+              <el-button size="small" text bg @click="addQuickExpire(30)">+1个月</el-button>
+              <el-button size="small" text bg @click="addQuickExpire(90)">+1季度</el-button>
+              <el-button size="small" text bg @click="addQuickExpire(180)">+半年</el-button>
+              <el-button size="small" text bg @click="addQuickExpire(365)">+1年</el-button>
+              <el-button size="small" text bg type="danger" @click="clearExpire">永久/清空</el-button>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="重置密码（留空不修改）">
+            <el-input v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
+          </el-form-item>
+
+          <el-button type="primary" :loading="userSaving" style="width: 100%; margin-top: 10px" @click="saveUserConfig">
+            保存用户配置
+          </el-button>
+        </el-form>
+
+        <div class="detail-actions" style="margin-top: 24px; border-top: 1px dashed var(--x-border); padding-top: 16px">
           <el-button size="small" :type="current.status === 1 ? 'warning' : 'success'" @click="doToggle(current); detailOpen = false">
-            {{ current.status === 1 ? '封禁' : '解封' }}
+            {{ current.status === 1 ? '封禁该用户' : '解封该用户' }}
           </el-button>
           <el-button v-if="current.role !== 'admin'" size="small" type="danger" plain @click="doDelete(current); detailOpen = false">
-            删除
-          </el-button>
-        </div>
-
-        <!-- 入站授权（订阅按此过滤） -->
-        <div v-loading="grantLoading" class="grant-box">
-          <div class="grant-title">节点授权（控制该用户订阅包含的入站）</div>
-          <div v-if="grantInbounds.length" class="grant-list">
-            <el-checkbox-group v-model="grantedIds">
-              <el-checkbox v-for="inb in grantInbounds" :key="inb.id" :value="inb.id" class="grant-item">
-                {{ inb.server_name }} · {{ inb.tag }}（{{ inb.protocol }}:{{ inb.port }}）
-              </el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <p v-else class="muted" style="font-size: 12px">暂无启用入站</p>
-          <el-button size="small" type="primary" :loading="grantSaving" style="margin-top: 12px" @click="saveGrants">
-            保存授权
+            删除用户
           </el-button>
         </div>
       </template>
@@ -411,6 +616,58 @@ async function copyCodes() {
           <el-form-item label="密码">
             <el-input v-model="newUserForm.password" type="password" show-password placeholder="至少 8 位" />
           </el-form-item>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+            <el-form-item label="初始套餐（选填）">
+              <el-select v-model="newUserForm.plan_id" style="width: 100%" placeholder="选择套餐">
+                <el-option :value="0" label="无套餐" />
+                <el-option v-for="p in plans" :key="p.id" :value="p.id" :label="p.name" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="权限组（选填）">
+              <el-select v-model="newUserForm.permission_group_id" style="width: 100%" placeholder="跟随套餐">
+                <el-option :value="0" label="跟随套餐" />
+                <el-option v-for="g in permissionGroups" :key="g.id" :value="g.id" :label="g.name" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="初始余额（元）">
+              <el-input-number
+                v-model="newUserForm.balance_yuan"
+                :controls="false"
+                :min="0"
+                :precision="2"
+                placeholder="0.00"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="设备限制（台，0=跟随套餐）">
+              <el-input-number
+                v-model="newUserForm.device_limit"
+                :controls="false"
+                :min="0"
+                :precision="0"
+                placeholder="0"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </div>
+          <el-form-item label="到期时间（选填）">
+            <el-date-picker
+              v-model="newUserForm.expire_at"
+              type="datetime"
+              placeholder="留空表示永不过期"
+              value-format="YYYY-MM-DDTHH:mm:ssZ"
+              :shortcuts="dateShortcuts"
+              style="width: 100%"
+            />
+            <div class="quick-expire-bar">
+              <span class="quick-label">快捷设定:</span>
+              <el-button size="small" text bg @click="addNewUserQuickExpire(30)">+1个月</el-button>
+              <el-button size="small" text bg @click="addNewUserQuickExpire(90)">+1季度</el-button>
+              <el-button size="small" text bg @click="addNewUserQuickExpire(180)">+半年</el-button>
+              <el-button size="small" text bg @click="addNewUserQuickExpire(365)">+1年</el-button>
+              <el-button size="small" text bg type="danger" @click="clearNewUserExpire">清空</el-button>
+            </div>
+          </el-form-item>
         </el-form>
       </template>
       <template v-else>
@@ -425,7 +682,7 @@ async function copyCodes() {
             <code>{{ newUserResult.uuid }}</code>
             <el-button size="small" text @click="copyText(newUserResult.uuid, 'UUID')"><el-icon><CopyDocument /></el-icon></el-button>
           </div>
-          <p class="muted" style="margin: 0; font-size: 12px">UUID 已生成，用户可通过此 UUID 导入订阅（待订阅模块开放）。</p>
+          <p class="muted" style="margin: 0; font-size: 12px">UUID 已生成，用户购买套餐或由管理员分配权限组后即可生效使用节点。</p>
         </div>
       </template>
       <template #footer>
@@ -439,50 +696,33 @@ async function copyCodes() {
       </template>
     </el-dialog>
 
-    <!-- 生成邀请码弹窗 -->
-    <el-dialog v-model="invOpen" title="生成邀请码" width="440px">
-      <template v-if="!generated.length">
-        <el-form label-position="top">
-          <el-form-item label="生成数量">
-            <el-input-number v-model="invForm.count" :min="1" :max="100" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="过期时间（选填，RFC3339，如 2026-12-31T23:59:59+08:00）">
-            <el-input v-model="invForm.expires" placeholder="留空 = 永不过期" />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template v-else>
-        <p class="muted" style="margin: 0 0 8px">已生成 {{ generated.length }} 个邀请码（一次性使用）：</p>
-        <div class="inv-codes">
-          <code v-for="c in generated" :key="c" class="inv-code">{{ c }}</code>
-        </div>
-      </template>
-      <template #footer>
-        <template v-if="!generated.length">
-          <el-button @click="invOpen = false">取消</el-button>
-          <el-button type="primary" :loading="invCreating" @click="createInv">生成</el-button>
-        </template>
-        <template v-else>
-          <el-button @click="invOpen = false; generated = []">完成</el-button>
-          <el-button type="primary" @click="copyCodes">复制全部</el-button>
-        </template>
-      </template>
-    </el-dialog>
-
-    <!-- 调整余额弹窗 -->
-    <el-dialog v-model="adjustOpen" title="调整用户余额" width="440px">
-      <div v-if="adjustUser" style="margin-bottom: 16px; background: var(--x-bg); padding: 12px 14px; border-radius: var(--x-radius); border: 1px solid var(--x-border)">
-        <div>目标用户: <b style="color: var(--x-text)">{{ adjustUser.username }}</b> <code class="cell-mono">#{{ adjustUser.id }}</code></div>
-        <div style="margin-top: 6px; color: var(--x-text-3); font-size: 13px">
-          当前余额: <span class="cell-mono" style="font-weight: 700; color: var(--x-primary); font-size: 15px">¥ {{ (((adjustUser.balance_cents || 0) / 100)).toFixed(2) }}</span>
-        </div>
-      </div>
+    <!-- 独立余额调账弹窗 -->
+    <el-dialog v-model="adjustOpen" title="用户余额调账" width="420px">
       <el-form label-position="top">
-        <el-form-item label="调整金额（元，增加填正数，扣减填负数，如 50 或 -20）">
-          <el-input-number v-model="adjustForm.delta_yuan" :precision="2" :step="10" style="width: 100%" />
+        <div class="adjust-header">
+          <div class="user-meta">
+            <span class="k">用户:</span>
+            <span class="v" style="font-weight: 600">{{ adjustUser?.username }}</span>
+          </div>
+          <div class="user-meta">
+            <span class="k">当前余额:</span>
+            <span class="v cell-mono" style="font-weight: 700; color: var(--x-primary)">
+              ¥ {{ (((adjustUser as any)?.balance_cents || 0) / 100).toFixed(2) }}
+            </span>
+          </div>
+        </div>
+        <el-form-item label="变动金额（元，支持负数扣款）" style="margin-top: 14px">
+          <el-input-number
+            v-model="adjustForm.delta_yuan"
+            :controls="false"
+            :precision="2"
+            :step="10"
+            placeholder="正数充值，负数扣减"
+            style="width: 100%"
+          />
         </el-form-item>
-        <el-form-item label="调账原因 / 备注（写入账本流水）">
-          <el-input v-model="adjustForm.remark" placeholder="如 活动赠送 / 线下补款 / 异常退款" />
+        <el-form-item label="调账备注（选填）">
+          <el-input v-model="adjustForm.remark" placeholder="如：活动赠送、售后退款、误充扣除" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -494,26 +734,87 @@ async function copyCodes() {
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
-.muted { color: var(--x-text-3); }
-.x-pager { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
-.detail-rows .row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--x-border); font-size: 13.5px; }
-.detail-rows .k { color: var(--x-text-2); }
-.detail-rows .v { font-weight: 500; }
-.detail-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
-.inv-codes { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
-.inv-code {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 13px;
-  background: var(--x-primary-soft);
-  color: var(--x-primary);
-  border-radius: 8px;
-  padding: 10px 12px;
-  word-break: break-all;
+.traffic-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.grant-box { margin-top: 20px; border-top: 1px dashed var(--x-border); padding-top: 14px; }
-.grant-title { font-weight: 600; font-size: 13.5px; margin-bottom: 10px; }
-.grant-list { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
-.grant-item { margin-right: 0; width: 100%; }
+.traffic-text {
+  font-size: 12px;
+}
+.x-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding: 8px 16px;
+}
+.detail-rows {
+  background: var(--x-bg, #f4f5fb);
+  border-radius: var(--x-radius-sm, 8px);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.detail-rows .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.detail-rows .k {
+  color: var(--x-text-2, #6b7280);
+}
+.detail-rows .v {
+  font-weight: 500;
+  color: var(--x-text, #1e2333);
+}
+.secret-box {
+  background: var(--x-bg, #f4f5fb);
+  border-radius: var(--x-radius-sm, 8px);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.secret-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.secret-row .k {
+  color: var(--x-text-2, #6b7280);
+}
+.secret-row code {
+  font-size: 12px;
+}
+.adjust-header {
+  background: var(--x-bg, #f4f5fb);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.adjust-header .user-meta {
+  display: flex;
+  justify-content: space-between;
+}
 
+.quick-expire-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-label {
+  font-size: 12px;
+  color: var(--x-text-3, #9ca3af);
+  margin-right: 2px;
+}
 </style>

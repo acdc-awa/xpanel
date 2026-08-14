@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Refresh, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, Refresh, Edit, Delete, Check, Aim, Compass, Connection, Grid, Share } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import OutboundConfigEditor from './servers/OutboundConfigEditor.vue'
 import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
@@ -52,8 +53,6 @@ async function loadServers() {
 }
 
 // ---- 默认出口 & 出站/路由策略（随服务器切换） ----
-// 出站策略 = 默认出口（freedom）的域名解析策略 AsIs/UseIP/UseIPv4/UseIPv6（出站连接阶段）；
-// 路由策略 = routing 段 domainStrategy AsIs/IPIfNonMatch/IPOnDemand（路由匹配阶段，语义不同）
 const defaultOutboundTag = ref('direct')
 const defaultOutboundDS = ref('AsIs')
 const routingDomainStrategy = ref('AsIs')
@@ -79,7 +78,7 @@ async function saveDefaultOutbound() {
       routing_domain_strategy: routingDomainStrategy.value,
     })
     if (data.code === 0) {
-      ElMessage.success('默认出口已更新，下次生成配置生效')
+      ElMessage.success('默认出口与策略已更新，下次配置推送生效')
       const s = currentServer.value
       if (s) {
         s.default_outbound_tag = defaultOutboundTag.value
@@ -233,6 +232,12 @@ async function removeRule(row: any) {
   }
 }
 
+// 辅助：将多行或逗号分隔的文本拆解为数组
+function parseTagList(val?: string): string[] {
+  if (!val) return []
+  return val.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
+}
+
 // ---- 服务器切换：重载表格数据 ----
 watch(serverFilter, (v) => {
   router.replace({ query: v ? { server_id: v } : {} })
@@ -275,7 +280,7 @@ watch(viewMode, (m) => {
   if (m === 'canvas') loadTopology()
 })
 
-// 双击画布盒子 → 打开服务器抽屉
+// 双击画布盒子 → 打开服务器详情弹窗
 const drawerOpen = ref(false)
 const drawerServer = ref<ServerItem | null>(null)
 
@@ -293,132 +298,250 @@ onMounted(async () => {
 
 <template>
   <div class="x-page">
+    <!-- 顶部工具栏 -->
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-select v-model="serverFilter" placeholder="选择服务器" style="width: 200px" :loading="serverLoading">
-          <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
-        </el-select>
-        <el-button @click="viewMode === 'table' ? reloadTable() : loadTopology()">
-          <el-icon><Refresh /></el-icon>&nbsp;刷新
-        </el-button>
+        <template v-if="viewMode === 'table'">
+          <el-select v-model="serverFilter" placeholder="选择目标服务器" style="width: 220px" :loading="serverLoading">
+            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+          </el-select>
+          <el-button @click="reloadTable">
+            <el-icon><Refresh /></el-icon>&nbsp;刷新
+          </el-button>
+        </template>
+        <template v-else>
+          <div class="canvas-badge">
+            <span class="x-status-dot online" />
+            <span style="font-weight: 600; font-size: 13.5px">全局可视化拓扑画布</span>
+            <span class="muted" style="font-size: 12px; margin-left: 4px">（共 {{ topology?.servers?.length || 0 }} 个节点）</span>
+          </div>
+          <el-button size="small" @click="loadTopology">
+            <el-icon><Refresh /></el-icon>&nbsp;刷新拓扑
+          </el-button>
+        </template>
       </div>
-      <el-radio-group v-model="viewMode" size="default">
-        <el-radio-button value="table">表格</el-radio-button>
-        <el-radio-button value="canvas">画布</el-radio-button>
-      </el-radio-group>
-    </div>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      :title="viewMode === 'table'
-        ? '按服务器管理出站与路由规则；切到「画布」可拖线编辑：入站→出站建规则、入站→他服务器入站自动建中转出站+规则、出站→入站建引用。'
-        : '拖线：入站→本盒出站 = 路由规则（虚线）；入站→他服务器入站 = 自动建中转出站（via-<落地>）+ 规则；出站→入站 = 设置引用（实线）。direct 为每台服务器默认直连出站，blocked 在服务器表单单独管理。点击连线可删除（自动建的中转出站会连同规则一起清理）。双击盒子打开节点管理。'"
-      style="margin-bottom: 14px"
-    />
+      <div style="display: flex; gap: 12px; align-items: center">
+        <el-radio-group v-model="viewMode" size="default">
+          <el-radio-button value="table">
+            <span style="display: inline-flex; align-items: center; gap: 4px">
+              <el-icon><Grid /></el-icon>表格视图
+            </span>
+          </el-radio-button>
+          <el-radio-button value="canvas">
+            <span style="display: inline-flex; align-items: center; gap: 4px">
+              <el-icon><Share /></el-icon>拓扑画布
+            </span>
+          </el-radio-button>
+        </el-radio-group>
+      </div>
+    </div>
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <BaseCard v-if="currentServer" title="默认出口与出站策略" style="margin-bottom: 14px">
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap">默认出口：</span>
-          <el-select v-model="defaultOutboundTag" style="width: 150px" size="small" :disabled="outboundTags.length === 0">
-            <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
-          </el-select>
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">出站策略：</span>
-          <el-select v-model="defaultOutboundDS" style="width: 170px" size="small">
-            <el-option label="AsIs（域名直连）" value="AsIs" />
-            <el-option label="UseIP（解析为 IP 连接）" value="UseIP" />
-            <el-option label="UseIPv4（仅 IPv4）" value="UseIPv4" />
-            <el-option label="UseIPv6（仅 IPv6）" value="UseIPv6" />
-          </el-select>
-          <span style="font-weight: 600; font-size: 13px; color: var(--x-text-2); white-space: nowrap; margin-left: 12px">路由策略：</span>
-          <el-select v-model="routingDomainStrategy" style="width: 180px" size="small">
-            <el-option label="AsIs（保持原样）" value="AsIs" />
-            <el-option label="IPIfNonMatch（先域名后 IP）" value="IPIfNonMatch" />
-            <el-option label="IPOnDemand（按需解析 IP）" value="IPOnDemand" />
-          </el-select>
-          <el-button size="small" type="primary" :loading="defaultSaving" @click="saveDefaultOutbound">保存</el-button>
-          <span v-if="outboundTags.length === 0" class="muted" style="font-size: 12px">（暂无出站，请先在「出站」中添加）</span>
+      <!-- 默认出口与策略 Hero Grid -->
+      <BaseCard v-if="currentServer" style="margin-bottom: 16px">
+        <div class="hero-strategy-wrap">
+          <div class="hero-card">
+            <div class="hero-head">
+              <span class="hero-icon"><el-icon><Aim /></el-icon></span>
+              <span class="hero-title">默认出口 Outbound</span>
+              <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。" placement="top">
+                <span class="help-q">?</span>
+              </el-tooltip>
+            </div>
+            <div class="hero-body">
+              <el-select v-model="defaultOutboundTag" style="width: 100%" :disabled="outboundTags.length === 0">
+                <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
+              </el-select>
+              <div class="hero-sub">
+                <span v-if="outboundTags.length > 0" class="muted">当前选用：<code class="cell-mono">{{ defaultOutboundTag }}</code></span>
+                <span v-else class="text-danger" style="font-size: 12px">暂无可用出站，请先在下方添加出站</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-card">
+            <div class="hero-head">
+              <span class="hero-icon"><el-icon><Compass /></el-icon></span>
+              <span class="hero-title">出站域名解析 (Freedom DNS)</span>
+              <el-tooltip content="默认出口（freedom）对目标域名的解析方式。AsIs=直连原域名，UseIP=主控/系统解析为 IP 后连接。" placement="top">
+                <span class="help-q">?</span>
+              </el-tooltip>
+            </div>
+            <div class="hero-body">
+              <el-select v-model="defaultOutboundDS" style="width: 100%">
+                <el-option label="AsIs（保持域名直连）" value="AsIs" />
+                <el-option label="UseIP（解析为 IP 连接）" value="UseIP" />
+                <el-option label="UseIPv4（仅解析 IPv4）" value="UseIPv4" />
+                <el-option label="UseIPv6（仅解析 IPv6）" value="UseIPv6" />
+              </el-select>
+              <div class="hero-sub">
+                <span class="muted">出站连接阶段生效</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-card">
+            <div class="hero-head">
+              <span class="hero-icon"><el-icon><Connection /></el-icon></span>
+              <span class="hero-title">路由匹配策略 (DomainStrategy)</span>
+              <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
+                <span class="help-q">?</span>
+              </el-tooltip>
+            </div>
+            <div class="hero-body">
+              <el-select v-model="routingDomainStrategy" style="width: 100%">
+                <el-option label="AsIs（保持原样）" value="AsIs" />
+                <el-option label="IPIfNonMatch（先域名后 IP）" value="IPIfNonMatch" />
+                <el-option label="IPOnDemand（按需解析 IP）" value="IPOnDemand" />
+              </el-select>
+              <div class="hero-sub">
+                <span class="muted">规则分流阶段生效</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-action">
+            <el-button type="primary" :loading="defaultSaving" style="width: 100%" @click="saveDefaultOutbound">
+              <el-icon><Check /></el-icon>&nbsp;保存策略
+            </el-button>
+            <div class="muted" style="font-size: 11.5px; text-align: center; margin-top: 6px">
+              修改后自动重编节点配置
+            </div>
+          </div>
         </div>
-        <p class="muted" style="font-size: 12px; margin: 6px 0 0">
-          出站策略：默认出口（freedom）对目标域名的解析方式（UseIP 系列）；路由策略：路由规则匹配阶段的域名解析策略（IPIfNonMatch 系列）——两者语义不同，独立生效。
-        </p>
       </BaseCard>
 
       <BaseCard>
         <el-tabs>
-          <!-- 出站 -->
-          <el-tab-pane label="出站">
+          <!-- 出站管理 -->
+          <el-tab-pane label="出站规则 (Outbounds)">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
             </div>
-            <el-table v-loading="outboundsLoading" :data="outbounds" size="small">
-              <el-table-column prop="tag" label="标签" min-width="130">
-                <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
-              </el-table-column>
-              <el-table-column prop="protocol" label="协议" width="110">
+            <el-table v-loading="outboundsLoading" :data="outbounds" size="default">
+              <el-table-column prop="tag" label="出站标签 (Tag)" min-width="140">
                 <template #default="{ row }">
-                  <el-tag size="small" :type="row.protocol === 'vless' ? 'warning' : row.protocol === 'blackhole' ? 'danger' : 'success'">{{ row.protocol }}</el-tag>
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <span class="tag-badge">{{ row.tag }}</span>
+                    <el-tag v-if="row.tag === defaultOutboundTag" size="small" type="success" effect="plain" style="font-size: 10px">默认出口</el-tag>
+                  </div>
                 </template>
               </el-table-column>
-              <el-table-column label="引用落地" width="100">
+              <el-table-column prop="protocol" label="协议" width="120">
                 <template #default="{ row }">
-                  <el-tag v-if="row.inbound_ref" size="small" type="warning">InboundRef</el-tag>
+                  <el-tag v-if="row.protocol === 'freedom'" size="small" type="success" effect="light">直连 (freedom)</el-tag>
+                  <el-tag v-else-if="row.protocol === 'vless'" size="small" type="warning" effect="light">VLESS 链</el-tag>
+                  <el-tag v-else-if="row.protocol === 'blackhole'" size="small" type="danger" effect="light">黑洞 (blackhole)</el-tag>
+                  <el-tag v-else size="small" type="info">{{ row.protocol }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="连接与引用" min-width="160">
+                <template #default="{ row }">
+                  <el-tag v-if="row.inbound_ref" size="small" type="warning" effect="plain">
+                    🔗 引用入站 #{{ row.inbound_ref }}
+                  </el-tag>
+                  <span v-else class="muted" style="font-size: 12px">自主连接 / 直连</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="send_through" label="发送出口 IP" width="130">
+                <template #default="{ row }">
+                  <code v-if="row.send_through" class="cell-mono">{{ row.send_through }}</code>
                   <span v-else class="muted">—</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="send_through" label="发送 IP" width="120">
-                <template #default="{ row }">{{ row.send_through || '—' }}</template>
+              <el-table-column prop="priority" label="优先级" width="90">
+                <template #default="{ row }">
+                  <code class="cell-mono">{{ row.priority ?? 0 }}</code>
+                </template>
               </el-table-column>
-              <el-table-column prop="priority" label="优先级" width="80" />
               <el-table-column label="状态" width="80">
                 <template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggleOutbound(row)" /></template>
               </el-table-column>
               <el-table-column prop="remark" label="备注" min-width="120">
-                <template #default="{ row }">{{ row.remark || '—' }}</template>
+                <template #default="{ row }"><span class="muted" style="font-size: 12.5px">{{ row.remark || '—' }}</span></template>
               </el-table-column>
               <el-table-column label="操作" width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button size="small" text @click="openOutboundEdit(row)"><el-icon><Edit /></el-icon></el-button>
+                  <el-button size="small" text type="primary" @click="openOutboundEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
                   <el-button size="small" text type="danger" @click="removeOutbound(row)"><el-icon><Delete /></el-icon></el-button>
                 </template>
               </el-table-column>
-              <template #empty><div class="table-empty">尚未配置出站，点击右上角「新增出站」</div></template>
+              <template #empty><div class="table-empty">该服务器暂无出站规则，点击右上角「新增出站」</div></template>
             </el-table>
           </el-tab-pane>
 
-          <!-- 路由规则 -->
-          <el-tab-pane label="路由规则">
+          <!-- 路由规则管理 -->
+          <el-tab-pane label="分流规则 (Routing Rules)">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
             </div>
-            <el-table v-loading="routingLoading" :data="routingRules" size="small">
-              <el-table-column prop="outbound_tag" label="出站标签" min-width="120">
-                <template #default="{ row }"><el-tag size="small">{{ row.outbound_tag }}</el-tag></template>
+            <el-table v-loading="routingLoading" :data="routingRules" size="default">
+              <el-table-column prop="outbound_tag" label="目标出站 (Outbound)" min-width="140">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain" style="font-weight: 600">{{ row.outbound_tag }}</el-tag>
+                </template>
               </el-table-column>
-              <el-table-column label="域名匹配" min-width="140">
-                <template #default="{ row }"><span class="ellipsis-text">{{ row.domain || '—' }}</span></template>
+              <el-table-column label="域名规则 (Domain)" min-width="160">
+                <template #default="{ row }">
+                  <template v-if="parseTagList(row.domain).length">
+                    <div class="chip-container">
+                      <code v-for="(item, idx) in parseTagList(row.domain).slice(0, 2)" :key="idx" class="rule-chip">
+                        {{ item }}
+                      </code>
+                      <el-tooltip v-if="parseTagList(row.domain).length > 2" :content="row.domain" placement="top">
+                        <span class="chip-more">+{{ parseTagList(row.domain).length - 2 }}</span>
+                      </el-tooltip>
+                    </div>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </template>
               </el-table-column>
-              <el-table-column label="IP 匹配" min-width="140">
-                <template #default="{ row }"><span class="ellipsis-text">{{ row.ip || '—' }}</span></template>
+              <el-table-column label="IP 规则 (IP)" min-width="150">
+                <template #default="{ row }">
+                  <template v-if="parseTagList(row.ip).length">
+                    <div class="chip-container">
+                      <code v-for="(item, idx) in parseTagList(row.ip).slice(0, 2)" :key="idx" class="rule-chip">
+                        {{ item }}
+                      </code>
+                      <el-tooltip v-if="parseTagList(row.ip).length > 2" :content="row.ip" placement="top">
+                        <span class="chip-more">+{{ parseTagList(row.ip).length - 2 }}</span>
+                      </el-tooltip>
+                    </div>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </template>
               </el-table-column>
-              <el-table-column prop="protocol" label="协议" width="100">
-                <template #default="{ row }"><span class="ellipsis-text">{{ row.protocol || '—' }}</span></template>
+              <el-table-column prop="protocol" label="协议嗅探" width="110">
+                <template #default="{ row }">
+                  <template v-if="parseTagList(row.protocol).length">
+                    <el-tag v-for="p in parseTagList(row.protocol)" :key="p" size="small" type="info" style="margin-right: 3px; font-size: 11px">
+                      {{ p }}
+                    </el-tag>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </template>
               </el-table-column>
-              <el-table-column label="入站标签" min-width="110">
-                <template #default="{ row }"><span class="ellipsis-text">{{ row.inbound_tag || '—' }}</span></template>
+              <el-table-column label="入站来源" min-width="110">
+                <template #default="{ row }">
+                  <code v-if="row.inbound_tag" class="cell-mono" style="font-size: 12px">{{ row.inbound_tag }}</code>
+                  <span v-else class="muted" style="font-size: 12px">全部入站</span>
+                </template>
               </el-table-column>
-              <el-table-column prop="network" label="网络" width="70">
-                <template #default="{ row }">{{ row.network || '—' }}</template>
+              <el-table-column prop="port" label="端口" width="90">
+                <template #default="{ row }">
+                  <code v-if="row.port" class="cell-mono" style="font-size: 12px">{{ row.port }}</code>
+                  <span v-else class="muted">—</span>
+                </template>
               </el-table-column>
-              <el-table-column prop="port" label="端口" width="80">
-                <template #default="{ row }">{{ row.port || '—' }}</template>
+              <el-table-column prop="priority" label="优先级" width="80">
+                <template #default="{ row }">
+                  <code class="cell-mono">{{ row.priority ?? 0 }}</code>
+                </template>
               </el-table-column>
-              <el-table-column prop="priority" label="优先级" width="80" />
               <el-table-column label="状态" width="80">
                 <template #default="{ row }">
                   <el-switch :model-value="row.enabled" @change="toggleRule(row)" />
@@ -426,11 +549,11 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column label="操作" width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button size="small" text @click="openRuleEdit(row)"><el-icon><Edit /></el-icon></el-button>
+                  <el-button size="small" text type="primary" @click="openRuleEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
                   <el-button size="small" text type="danger" @click="removeRule(row)"><el-icon><Delete /></el-icon></el-button>
                 </template>
               </el-table-column>
-              <template #empty><div class="table-empty">尚未配置路由规则，点击右上角「新增规则」</div></template>
+              <template #empty><div class="table-empty">该服务器暂无分流规则，点击右上角「新增规则」</div></template>
             </el-table>
           </el-tab-pane>
         </el-tabs>
@@ -459,10 +582,12 @@ onMounted(async () => {
 
     <!-- 画布视图（T8） -->
     <template v-else>
-      <div class="canvas-toolbar">
-        <span class="muted" style="font-size: 12px">
-          实线 = InboundRef 引用（跨服务器）；虚线 = 路由规则（盒内）；连线可点选删除
-        </span>
+      <div class="canvas-bar">
+        <div class="canvas-tip">
+          <span class="tip-pill"><span class="legend-solid" /> 实线 InboundRef 引用</span>
+          <span class="tip-pill"><span class="legend-dash" /> 虚线 路由规则</span>
+          <span class="muted" style="font-size: 12px; margin-left: 6px">点击连线可删除；拖拽把手可建线；双击卡片管理节点</span>
+        </div>
         <div style="display: flex; gap: 10px; align-items: center">
           <span style="font-size: 13px; color: var(--x-text-2)">编辑模式</span>
           <el-switch v-model="canvasEdit" />
@@ -476,7 +601,7 @@ onMounted(async () => {
       />
     </template>
 
-    <!-- 双击画布盒子 → 节点管理抽屉 -->
+    <!-- 双击画布盒子 → 节点管理详情弹窗 -->
     <ServerNodeDrawer
       v-model="drawerOpen"
       :server="drawerServer"
@@ -493,24 +618,162 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 12px;
 }
-.canvas-toolbar {
+.canvas-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.canvas-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border);
+  padding: 8px 14px;
+  border-radius: var(--x-radius);
+}
+.canvas-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--x-text-2);
+  background: var(--x-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.legend-solid {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  background: var(--x-primary);
+}
+.legend-dash {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  border-top: 2px dashed #e6a23c;
 }
 .muted {
   color: var(--x-text-3);
+}
+.text-danger {
+  color: var(--el-color-danger);
+}
+.cell-mono {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--x-text-2);
+}
+.tag-badge {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--x-primary);
+  font-size: 13px;
 }
 .table-empty {
   padding: 30px 0;
   color: var(--x-text-3);
 }
-.ellipsis-text {
-  display: inline-block;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.chip-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.rule-chip {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--x-text-2);
   white-space: nowrap;
 }
+.chip-more {
+  font-size: 11px;
+  color: var(--x-primary);
+  background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+// Hero Strategy Grid
+.hero-strategy-wrap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr) 140px;
+  gap: 16px;
+  align-items: center;
+}
+@media (max-width: 1100px) {
+  .hero-strategy-wrap {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 680px) {
+  .hero-strategy-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+.hero-card {
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hero-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-icon {
+  display: flex;
+  align-items: center;
+  color: var(--x-primary);
+  font-size: 15px;
+}
+.hero-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--x-text-1);
+}
+.help-q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--x-border);
+  color: var(--x-text-3);
+  font-size: 10px;
+  cursor: help;
+  margin-left: auto;
+}
+.hero-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hero-sub {
+  font-size: 11px;
+  line-height: 1.3;
+}
+.hero-action {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 </style>
+

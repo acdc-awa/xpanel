@@ -34,12 +34,12 @@ onMounted(loadGroups)
 
 const formOpen = ref(false)
 const editing = ref(false)
-const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
+const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, device_limit: 0, permission_group_id: 0 })
 const saving = ref(false)
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, permission_group_id: 0 })
+  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, device_limit: 0, permission_group_id: 0 })
   formOpen.value = true
 }
 
@@ -52,6 +52,7 @@ function openEdit(row: any) {
     traffic_gb: row.traffic_gb,
     duration_days: row.duration_days,
     speed_limit_kbps: row.speed_limit_kbps,
+    device_limit: row.device_limit || 0,
     permission_group_id: row.permission_group_id || 0,
   })
   formOpen.value = true
@@ -70,6 +71,7 @@ async function save() {
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
       speed_limit_kbps: form.speed_limit_kbps,
+      device_limit: form.device_limit,
       permission_group_id: form.permission_group_id || undefined,
     }
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
@@ -139,7 +141,14 @@ async function remove(row: any) {
             {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
           </template>
         </el-table-column>
-        <el-table-column prop="duration_days" label="时长(天)" width="100" />
+        <el-table-column prop="duration_days" label="时长(天)" width="90" />
+        <el-table-column label="设备限制" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
+              {{ row.device_limit ? `${row.device_limit} 台` : '不限' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="限速" width="110">
           <template #default="{ row }">{{ row.speed_limit_kbps ? `${(row.speed_limit_kbps / 1000).toFixed(1)} Mbps` : '不限' }}</template>
         </el-table-column>
@@ -157,7 +166,7 @@ async function remove(row: any) {
       </el-table>
     </BaseCard>
 
-    <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="480px">
+    <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="500px">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 月付 200G" /></el-form-item>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
@@ -169,6 +178,9 @@ async function remove(row: any) {
           </el-form-item>
           <el-form-item label="流量（GB）">
             <el-input-number v-model="form.traffic_gb" :min="1" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="设备限制（台，0=不限）">
+            <el-input-number v-model="form.device_limit" :min="0" style="width: 100%" />
           </el-form-item>
           <el-form-item label="限速（kbps，0=不限）">
             <el-input-number v-model="form.speed_limit_kbps" :min="0" :step="1000" style="width: 100%" />

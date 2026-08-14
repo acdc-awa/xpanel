@@ -2,10 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Delete, Key, CopyDocument, VideoPlay, Connection } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   deleteServer,
-  generateAndPushConfig,
+  getServerConfigPreview,
   getInbounds,
   resetServerSecret,
   type InboundItem,
@@ -39,7 +39,7 @@ function fmtTime(t: string | null) {
   return new Date(t).toLocaleString('zh-CN', { hour12: false })
 }
 
-// ---- 概览：接入点摘要（增删改统一在「节点（接入点）」页） ----
+// ---- 概览：接入点摘要 ----
 const inbounds = ref<InboundItem[]>([])
 const inboundsLoading = ref(false)
 
@@ -131,34 +131,41 @@ async function copyText(text: string, label: string) {
   }
 }
 
-// ---- 配置预览 Tab（uuid 脱敏展示，复制时保留原文） ----
+// ---- 配置预览 Tab（声明式只读预览） ----
 const cfgLoading = ref(false)
 const cfgText = ref('')
-const cfgMessage = ref('')
 
-async function generatePreview() {
+async function loadConfigPreview() {
   if (!props.server) return
   cfgLoading.value = true
   cfgText.value = ''
-  cfgMessage.value = ''
   try {
-    const { data } = await generateAndPushConfig(props.server.id)
+    const { data } = await getServerConfigPreview(props.server.id)
     if (data.code === 0) {
       cfgText.value = data.data.config || ''
-      cfgMessage.value = data.data.message || ''
-      if (data.data.ok) ElMessage.success(data.data.message || '配置已生成')
-      else ElMessage.warning(data.data.message || '配置已保存但未推送')
-      emit('changed')
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    cfgMessage.value = `生成失败：${errMsg(e)}`
-    ElMessage.error(errMsg(e, '生成失败'))
+    ElMessage.error(errMsg(e, '加载配置预览失败'))
   } finally {
     cfgLoading.value = false
   }
 }
+
+watch(
+  () => [props.modelValue, props.server, activeTab.value],
+  () => {
+    if (props.modelValue && props.server) {
+      if (activeTab.value === 'overview' && inbounds.value.length === 0) {
+        loadInbounds()
+      } else if (activeTab.value === 'config' && !cfgText.value) {
+        loadConfigPreview()
+      }
+    }
+  },
+  { immediate: true },
+)
 
 watch(
   () => [props.modelValue, props.server],
@@ -167,77 +174,85 @@ watch(
       activeTab.value = 'overview'
       secretInfo.value = null
       cfgText.value = ''
-      cfgMessage.value = ''
       loadInbounds()
     }
   },
-  { immediate: true },
 )
 </script>
 
 <template>
-  <el-drawer
-    :model-value="visible"
-    :title="`节点管理 · ${server?.name ?? ''}`"
-    size="78%"
-    class="node-drawer"
-    @update:model-value="(v: boolean) => (visible = v)"
+  <el-dialog
+    v-model="visible"
+    :title="server?.name ? `服务器详情 · ${server.name}` : '服务器详情'"
+    width="640px"
+    :append-to-body="true"
   >
-    <el-tabs v-model="activeTab" class="drawer-tabs">
+    <el-tabs v-model="activeTab" class="dialog-tabs">
       <!-- 概览 -->
-      <el-tab-pane label="概览" name="overview">
+      <el-tab-pane label="基本信息" name="overview">
         <template v-if="server">
           <div class="desc-grid">
-            <div class="desc-row"><span class="k">名称</span><span class="v">{{ server.name }}</span></div>
-            <div class="desc-row"><span class="k">地址</span><span class="v"><code class="cell-mono">{{ server.host }}</code></span></div>
-            <div class="desc-row"><span class="k">Node ID</span><span class="v"><code class="cell-mono">{{ server.node_id }}</code>
-              <el-button size="small" text @click="copyText(server.node_id, 'node_id')"><el-icon><CopyDocument /></el-icon></el-button>
-            </span></div>
-            <div class="desc-row"><span class="k">地区</span><span class="v">{{ server.location || '—' }}</span></div>
-            <div class="desc-row"><span class="k">备注</span><span class="v">{{ server.remark || '—' }}</span></div>
-            <div class="desc-row"><span class="k">状态</span><span class="v">
-              <el-tag :type="server.status === 1 ? 'success' : 'info'" size="small">
-                <span class="x-status-dot" :class="server.status === 1 ? 'online' : 'offline'" />{{ server.status === 1 ? '在线' : '离线' }}
-              </el-tag>
-            </span></div>
-            <div class="desc-row"><span class="k">配置同步</span><span class="v">
-              <el-tag v-if="server.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
-              <el-tag v-else-if="server.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
-            </span></div>
+            <div class="desc-row"><span class="k">节点名称</span><span class="v">{{ server.name }}</span></div>
+            <div class="desc-row"><span class="k">主机地址</span><span class="v"><code class="cell-mono">{{ server.host }}</code></span></div>
+            <div class="desc-row">
+              <span class="k">Node ID</span>
+              <span class="v">
+                <code class="cell-mono">{{ server.node_id }}</code>
+                <el-button size="small" text @click="copyText(server.node_id, 'Node ID')"><el-icon><CopyDocument /></el-icon></el-button>
+              </span>
+            </div>
+            <div class="desc-row"><span class="k">所在地区</span><span class="v">{{ server.location || '—' }}</span></div>
+            <div class="desc-row"><span class="k">备注说明</span><span class="v">{{ server.remark || '—' }}</span></div>
+            <div class="desc-row">
+              <span class="k">连接状态</span>
+              <span class="v">
+                <el-tag :type="server.status === 1 ? 'success' : 'info'" size="small">
+                  <span class="x-status-dot" :class="server.status === 1 ? 'online' : 'offline'" />{{ server.status === 1 ? '在线' : '离线' }}
+                </el-tag>
+              </span>
+            </div>
+            <div class="desc-row">
+              <span class="k">配置同步</span>
+              <span class="v">
+                <el-tag v-if="server.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
+                <el-tag v-else-if="server.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
+                <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+              </span>
+            </div>
             <div class="desc-row"><span class="k">最后心跳</span><span class="v">{{ fmtTime(server.last_seen_at) }}</span></div>
             <div class="desc-row">
-              <span class="k">接入点</span>
+              <span class="k">已配置接入点</span>
               <span class="v">
                 <template v-if="inboundsLoading">…</template>
-                <template v-else>{{ inbounds.length }} 个</template>
+                <template v-else>{{ inbounds.length }} 个入站</template>
                 <el-button size="small" text type="primary" @click="goInbounds">
-                  <el-icon><Connection /></el-icon>&nbsp;管理
+                  <el-icon><Connection /></el-icon>&nbsp;去管理
                 </el-button>
               </span>
             </div>
           </div>
 
-          <el-divider />
-          <div class="sec-title">节点密钥</div>
-          <p class="muted tip">
-            密钥仅在创建/重置时显示一次；重置后需更新节点 /etc/xray-agent/config.yml 中的 secret（或重新执行安装命令）。
-          </p>
-          <div v-if="secretInfo" class="secret-box">
+          <div v-if="secretInfo" class="secret-box" style="margin-top: 14px">
+            <div class="sec-title">重置凭据</div>
             <div class="secret-row"><span class="k">node_id</span><code>{{ secretInfo.node_id }}</code></div>
             <div class="secret-row">
               <span class="k">secret</span><code>{{ secretInfo.secret }}</code>
               <el-button size="small" text @click="copyText(secretInfo.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
             </div>
             <div v-if="secretInfo.install_cmd" class="secret-row">
-              <span class="k">安装</span>
+              <span class="k">一键安装</span>
               <code class="install-cmd">{{ secretInfo.install_cmd }}</code>
               <el-button size="small" text @click="copyText(secretInfo.install_cmd!, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
             </div>
           </div>
-          <div class="action-row">
-            <el-button :loading="resetting" @click="resetSecret"><el-icon><Key /></el-icon>&nbsp;重置密钥</el-button>
-            <el-button type="danger" plain :loading="deleting" @click="removeServer"><el-icon><Delete /></el-icon>&nbsp;删除节点</el-button>
+
+          <div class="action-row" style="margin-top: 18px">
+            <el-button :loading="resetting" @click="resetSecret">
+              <el-icon><Key /></el-icon>&nbsp;重置密钥
+            </el-button>
+            <el-button type="danger" plain :loading="deleting" @click="removeServer">
+              <el-icon><Delete /></el-icon>&nbsp;删除服务器
+            </el-button>
           </div>
         </template>
         <el-empty v-else description="未选择节点" />
@@ -246,61 +261,65 @@ watch(
       <!-- 配置预览 -->
       <el-tab-pane label="配置预览" name="config">
         <div class="tab-toolbar">
-          <el-button size="small" type="primary" :loading="cfgLoading" @click="generatePreview">
-            <el-icon><VideoPlay /></el-icon>&nbsp;生成并预览
+          <el-button size="small" :loading="cfgLoading" @click="loadConfigPreview">
+            <el-icon><Refresh /></el-icon>&nbsp;刷新
           </el-button>
           <el-button
             size="small"
+            type="primary"
             :disabled="!cfgText"
             @click="copyText(cfgText, '配置 JSON')"
           >
             <el-icon><CopyDocument /></el-icon>&nbsp;复制配置
           </el-button>
         </div>
-        <p v-if="cfgMessage" class="cfg-message">{{ cfgMessage }}</p>
-        <p class="muted tip" style="margin: 0 0 8px">
-          按该节点启用入站 + 出站 + 路由规则 + 全部启用用户生成完整 Xray 配置；生成即保存待推送（节点在线自动下发）。
-          展示内容已对用户 UUID 打码，复制配置得到原始 JSON。
+        <p class="muted tip" style="margin: 0 0 10px; font-size: 12.5px">
+          此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送节点）。展示内容已对用户 UUID 脱敏，复制时保留原文。
         </p>
-        <pre v-loading="cfgLoading" class="cfg-view">{{ maskUUIDs(cfgText) || '点击「生成并预览」生成配置…' }}</pre>
+        <pre v-loading="cfgLoading" class="cfg-view">{{ maskUUIDs(cfgText) || '正在计算并加载配置预览…' }}</pre>
       </el-tab-pane>
     </el-tabs>
-  </el-drawer>
+
+    <template #footer>
+      <el-button type="primary" @click="visible = false">关闭</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped lang="scss">
-.drawer-tabs {
-  height: 100%;
+.dialog-tabs {
+  margin-top: -6px;
 }
 .tab-toolbar {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .sec-title {
   font-weight: 600;
   font-size: 13px;
-  margin: 4px 0 10px;
+  margin: 4px 0 8px;
   color: var(--x-primary);
-}
-.muted {
-  color: var(--x-text-3);
-}
-.tip {
-  font-size: 12px;
 }
 .desc-grid {
   display: grid;
   gap: 0;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  padding: 4px 16px;
 }
 .desc-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 0;
+  padding: 9px 0;
   border-bottom: 1px solid var(--x-border);
-  font-size: 13.5px;
+  font-size: 13px;
+  &:last-child {
+    border-bottom: none;
+  }
   .k {
     color: var(--x-text-2);
     flex: none;
@@ -319,8 +338,7 @@ watch(
 }
 .secret-box {
   display: grid;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 8px;
 }
 .secret-row {
   display: flex;
@@ -328,42 +346,43 @@ watch(
   gap: 10px;
   background: var(--x-primary-soft);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   .k {
     color: var(--x-text-2);
-    font-size: 12.5px;
+    font-size: 12px;
     flex: none;
-    width: 56px;
+    width: 60px;
   }
   code {
     font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--x-primary);
     word-break: break-all;
     flex: 1;
   }
   .install-cmd {
-    font-size: 11.5px;
+    font-size: 11px;
   }
 }
 .action-row {
   display: flex;
+  justify-content: flex-end;
   gap: 10px;
 }
 .cfg-message {
   color: var(--x-text-2);
-  font-size: 13px;
+  font-size: 12.5px;
   margin: 0 0 8px;
 }
 .cfg-view {
   background: #171b2e;
   color: #c7d2fe;
   border-radius: 8px;
-  padding: 14px;
+  padding: 12px 14px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
-  max-height: 560px;
+  max-height: 380px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;

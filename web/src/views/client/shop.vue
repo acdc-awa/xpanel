@@ -178,6 +178,10 @@ async function confirmPay() {
           </li>
           <li>
             <el-icon class="check-icon"><Check /></el-icon>
+            <span>{{ p.device_limit ? `同时在线上限 ${p.device_limit} 台设备` : '不限制同时在线设备数' }}</span>
+          </li>
+          <li>
+            <el-icon class="check-icon"><Check /></el-icon>
             <span>全量节点与中转链路授权</span>
           </li>
           <li>

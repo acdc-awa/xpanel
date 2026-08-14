@@ -73,7 +73,7 @@ func (p *Proc) CleanupStale() {
 		if perr != nil || pid <= 0 || pid == os.Getpid() {
 			continue
 		}
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+		_ = killProcess(pid, syscall.SIGTERM)
 	}
 	// 等待残留进程退出（最多 3s）
 	deadline := time.Now().Add(3 * time.Second)
@@ -81,7 +81,7 @@ func (p *Proc) CleanupStale() {
 		left := false
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			pid, perr := strconv.Atoi(strings.TrimSpace(line))
-			if perr == nil && pid > 0 && pid != os.Getpid() && syscall.Kill(pid, 0) == nil {
+			if perr == nil && pid > 0 && pid != os.Getpid() && isProcessAlive(pid) {
 				left = true
 				break
 			}
@@ -143,19 +143,19 @@ func (p *Proc) Stop() error {
 		_ = os.Remove(p.PidFile)
 		return nil
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := killProcess(pid, syscall.SIGTERM); err != nil {
 		_ = os.Remove(p.PidFile)
 		return nil // 进程已不存在
 	}
 	deadline := time.Now().Add(stopGracePeriod)
 	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
+		if !isProcessAlive(pid) {
 			_ = os.Remove(p.PidFile)
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	_ = killProcess(pid, syscall.SIGKILL)
 	_ = os.Remove(p.PidFile)
 	return nil
 }
@@ -177,13 +177,13 @@ func (p *Proc) RestartWithConfig(configJSON string) error {
 	return p.Start()
 }
 
-// IsRunning 通过 pid 文件 + kill(0) 判断进程存活；僵尸（Z）视为不在运行。
+// IsRunning 通过 pid 文件 + isProcessAlive 判断进程存活；僵尸（Z）视为不在运行。
 func (p *Proc) IsRunning() bool {
 	pid := p.pidFromFile()
 	if pid <= 0 {
 		return false
 	}
-	if syscall.Kill(pid, 0) != nil {
+	if !isProcessAlive(pid) {
 		return false
 	}
 	// 僵尸进程 kill(0) 仍成功，需检查 /proc/<pid>/stat 的 state

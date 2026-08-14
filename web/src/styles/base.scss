@@ -148,61 +148,184 @@ a { color: inherit; text-decoration: none; }
   .x-client-body { padding: 32px 48px; }
 }
 
-// 弹窗与确认框美化
+// ==========================================
+// 统一弹窗体系 (Dialog / MessageBox / Drawer)
+// ==========================================
+
+// 1. 全局遮罩层 (Overlay)
+.el-overlay {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  background-color: rgba(15, 23, 42, 0.45) !important;
+  overflow: auto;
+}
+
+// 严禁对 display 进行 !important 覆盖，确保 style="display: none;" 能够正确隐藏
+.el-overlay[style*="display: none"],
+.el-overlay[style*="display:none"] {
+  display: none !important;
+}
+
+.el-overlay-dialog,
+.el-overlay-message-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+// 2. ElMessageBox 确认框（统一固定 440px 宽度，防止横向拉伸变形）
 .el-message-box {
-  border-radius: var(--x-radius) !important;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.16) !important;
-  border: 1px solid var(--x-border) !important;
-  padding: 22px !important;
-  background: var(--x-card) !important;
+  width: 440px !important;
   max-width: calc(100vw - 32px) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
+  border: 1px solid var(--x-border) !important;
+  padding: 24px 24px 20px !important;
+  background: var(--x-card) !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+  margin: auto !important;
+  text-align: left !important;
+  overflow: hidden !important;
 
   .el-message-box__header {
-    padding-bottom: 12px;
+    padding: 0 0 14px 0 !important;
+    border-bottom: 1px solid var(--x-border);
+    margin-right: 0 !important;
   }
+
   .el-message-box__title {
-    font-weight: 700;
-    font-size: 16px;
-    color: var(--x-text);
+    font-weight: 700 !important;
+    font-size: 16px !important;
+    color: var(--x-text) !important;
   }
+
+  .el-message-box__headerbtn {
+    top: 18px !important;
+    right: 20px !important;
+    .el-message-box__close {
+      color: var(--x-text-3) !important;
+      font-size: 16px !important;
+      transition: color 0.15s ease;
+      &:hover {
+        color: var(--x-text) !important;
+      }
+    }
+  }
+
+  .el-message-box__content {
+    padding: 16px 0 6px 0 !important;
+  }
+
+  .el-message-box__container {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .el-message-box__status {
+    position: static !important;
+    transform: none !important;
+    font-size: 22px !important;
+    margin-top: 1px !important;
+  }
+
   .el-message-box__message {
-    font-size: 14px;
-    color: var(--x-text-2);
-    line-height: 1.6;
+    font-size: 14px !important;
+    color: var(--x-text-2) !important;
+    line-height: 1.6 !important;
+    padding-left: 0 !important;
   }
+
   .el-message-box__btns {
-    padding-top: 18px;
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
+    padding: 18px 0 0 0 !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+    border-top: 1px solid var(--x-border);
+    margin-top: 14px;
   }
 }
 
-// 全局 Dialog 弹窗规范（紧凑自适应，高宽根据内容自然包裹，不上下拉伸）
+// 3. ElDialog 通用对话框（紧凑自适应，高宽根据内容自然包裹）
 .el-dialog {
-  border-radius: var(--x-radius) !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   border: 1px solid var(--x-border) !important;
   background: var(--x-card) !important;
   max-width: calc(100vw - 32px) !important;
   box-sizing: border-box !important;
   height: auto !important;
+  margin: auto !important;
+  overflow: hidden !important;
 
   .el-dialog__header {
-    padding: 16px 20px 12px !important;
+    padding: 16px 22px 14px !important;
     margin-right: 0 !important;
     border-bottom: 1px solid var(--x-border);
   }
+
   .el-dialog__title {
-    font-size: 15px !important;
+    font-size: 15.5px !important;
     font-weight: 700 !important;
     color: var(--x-text);
   }
-  .el-dialog__body {
-    padding: 16px 20px !important;
+
+  .el-dialog__headerbtn {
+    top: 16px !important;
+    right: 20px !important;
+    .el-dialog__close {
+      color: var(--x-text-3) !important;
+      font-size: 16px !important;
+      transition: color 0.15s ease;
+      &:hover {
+        color: var(--x-text) !important;
+      }
+    }
   }
+
+  .el-dialog__body {
+    padding: 20px 22px !important;
+    max-height: calc(85vh - 120px) !important;
+    overflow-y: auto !important;
+  }
+
   .el-dialog__footer {
-    padding: 12px 20px 16px !important;
+    padding: 14px 22px 18px !important;
+    border-top: 1px solid var(--x-border);
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+  }
+}
+
+// 4. ElDrawer 抽屉风格统合
+.el-drawer {
+  background: var(--x-card) !important;
+  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.22) !important;
+  border-left: 1px solid var(--x-border) !important;
+
+  .el-drawer__header {
+    padding: 16px 22px 14px !important;
+    margin-bottom: 0 !important;
+    border-bottom: 1px solid var(--x-border);
+  }
+
+  .el-drawer__title {
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    color: var(--x-text);
+  }
+
+  .el-drawer__body {
+    padding: 20px 22px !important;
+  }
+
+  .el-drawer__footer {
+    padding: 14px 22px 18px !important;
     border-top: 1px solid var(--x-border);
   }
 }
@@ -213,14 +336,19 @@ a { color: inherit; text-decoration: none; }
     margin: auto !important;
 
     .el-dialog__header {
-      padding: 14px 16px 10px !important;
+      padding: 14px 18px 12px !important;
     }
     .el-dialog__body {
-      padding: 14px 16px !important;
+      padding: 16px 18px !important;
     }
     .el-dialog__footer {
-      padding: 10px 16px 14px !important;
+      padding: 12px 18px 14px !important;
     }
+  }
+
+  .el-message-box {
+    width: 90% !important;
+    padding: 20px 18px 16px !important;
   }
 }
 

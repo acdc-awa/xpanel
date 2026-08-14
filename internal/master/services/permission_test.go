@@ -55,43 +55,46 @@ func TestGroupInboundIDs(t *testing.T) {
 	}
 }
 
-func TestAuthorizedInboundSet(t *testing.T) {
+func TestAuthorizedInboundSet_UnifiedPermissionGroup(t *testing.T) {
 	db := testDB(t)
 
-	group := models.PermissionGroup{Name: "g2"}
-	db.Create(&group)
-	plan := models.Plan{Name: "p3", PriceCents: 100, TrafficGB: 10, DurationDays: 30, PermissionGroupID: group.ID}
-	db.Create(&plan)
-	db.Create(&models.PermissionGroupInbound{PermissionGroupID: group.ID, InboundID: 21})
-	db.Create(&models.PermissionGroupInbound{PermissionGroupID: group.ID, InboundID: 22})
+	group1 := models.PermissionGroup{Name: "VIP 1"}
+	group2 := models.PermissionGroup{Name: "VIP 2"}
+	db.Create(&group1)
+	db.Create(&group2)
 
-	user := models.User{Username: "u1", Email: "u1@example.com", UUID: "uuid-1", PlanID: plan.ID}
-	db.Create(&user)
-	// 手动授权一个（叠加场景）
-	db.Create(&models.UserInbound{UserID: user.ID, InboundID: 23, Enabled: true})
-	// 禁用授权不计入（Enabled=false 是零值，GORM INSERT 会省略 → 先建后改）
-	dis := models.UserInbound{UserID: user.ID, InboundID: 24, Enabled: true}
-	db.Create(&dis)
-	db.Model(&dis).Update("enabled", false)
+	plan1 := models.Plan{Name: "p1", PermissionGroupID: group1.ID}
+	db.Create(&plan1)
 
-	set := AuthorizedInboundSet(db, &user)
-	for _, id := range []uint64{21, 22, 23} {
-		if !set[id] {
-			t.Errorf("入站 %d 应已授权", id)
-		}
+	// 入站 101 开放给 group1 和 group2
+	SyncInboundPermissionGroups(db, 101, []uint64{group1.ID, group2.ID})
+	// 入站 102 仅开放给 group2
+	SyncInboundPermissionGroups(db, 102, []uint64{group2.ID})
+
+	// 用户 u1 购买 plan1（继承 group1）
+	user1 := models.User{Username: "u1", PlanID: plan1.ID}
+	db.Create(&user1)
+
+	set1 := AuthorizedInboundSet(db, &user1)
+	if !set1[101] {
+		t.Errorf("u1 应可访问入站 101")
 	}
-	if set[24] {
-		t.Error("禁用授权不应计入")
-	}
-	if len(set) != 3 {
-		t.Errorf("集合大小 = %d, want 3 (21,22,23)", len(set))
+	if set1[102] {
+		t.Errorf("u1 不应访问仅开放给 VIP2 的入站 102")
 	}
 
-	// 无 plan 用户：仅手动授权
-	user2 := models.User{Username: "u2", Email: "u2@example.com", UUID: "uuid-2"}
-	db.Create(&user2)
-	set2 := AuthorizedInboundSet(db, &user2)
-	if len(set2) != 0 {
-		t.Errorf("无授权用户应为空: %v", set2)
+	// 管理员手动将 user1 权限组覆盖为 group2
+	db.Model(&user1).Update("permission_group_id", group2.ID)
+	user1.PermissionGroupID = group2.ID
+
+	set2 := AuthorizedInboundSet(db, &user1)
+	if !set2[101] || !set2[102] {
+		t.Errorf("u1 覆盖为 VIP2 后应可访问 101 与 102, got %v", set2)
+	}
+
+	// 批量查询测试
+	inboundGroups := BatchInboundPermissionGroupIDs(db, []uint64{101, 102})
+	if len(inboundGroups[101]) != 2 || len(inboundGroups[102]) != 1 {
+		t.Errorf("BatchInboundPermissionGroupIDs returned unexpected: %v", inboundGroups)
 	}
 }

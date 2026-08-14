@@ -1,6 +1,8 @@
 import { http } from './http'
 import type {
-  AdminDashboard,
+  DashboardData,
+  ServerMetricsData,
+  AdminUser,
   AdminUserPage,
   ApiResp,
   AuditLog,
@@ -18,7 +20,9 @@ import type {
 } from './types'
 
 export type {
-  AdminDashboard,
+  DashboardData,
+  ServerMetricsData,
+  AdminUser,
   AdminUserPage,
   AuditLog,
   CertItem,
@@ -34,7 +38,11 @@ export type {
 } from './types'
 
 export function getDashboard() {
-  return http.get<ApiResp<AdminDashboard>>('/admin/dashboard')
+  return http.get<ApiResp<DashboardData>>('/admin/dashboard')
+}
+
+export function getServerMetrics(id: number, range = '1h') {
+  return http.get<ApiResp<ServerMetricsData>>(`/admin/servers/${id}/metrics`, { params: { range } })
 }
 
 // ===== 站点设置（设置页） =====
@@ -53,6 +61,21 @@ export function updateSettings(payload: Partial<SiteSettings>) {
 
 export function getUsers(page = 1, size = 20) {
   return http.get<ApiResp<AdminUserPage>>('/admin/users', { params: { page, size } })
+}
+
+export function updateUser(
+  id: number,
+  payload: {
+    plan_id?: number
+    permission_group_id?: number
+    device_limit?: number
+    balance_cents?: number
+    expire_at?: string | null
+    status?: number
+    password?: string
+  },
+) {
+  return http.put<ApiResp<{ user: AdminUser }>>(`/admin/users/${id}`, payload)
 }
 
 export function getInvitations() {
@@ -154,6 +177,7 @@ export interface InboundPayload {
   share_addr_strategy?: string // node / listen / custom（订阅专用）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
+  permission_group_ids?: number[] // 开放权限组 ID 列表
 }
 
 export function getInbounds(serverId?: number) {
@@ -219,6 +243,7 @@ export function getPermissionGroups() {
 export interface PermissionGroupPayload {
   name: string
   remark?: string
+  clash_template?: string
 }
 
 export function createPermissionGroup(payload: PermissionGroupPayload) {
@@ -227,6 +252,19 @@ export function createPermissionGroup(payload: PermissionGroupPayload) {
 
 export function updatePermissionGroup(id: number, payload: Partial<PermissionGroupPayload>) {
   return http.put<ApiResp<{ group: PermissionGroup }>>(`/admin/permission-groups/${id}`, payload)
+}
+
+export interface TemplatePreviewResult {
+  rendered: string
+  proxy_count: number
+  proxy_names: string[]
+  is_sample_nodes: boolean
+}
+
+export function previewPermissionGroupTemplate(id: number, template: string) {
+  return http.post<ApiResp<TemplatePreviewResult>>(`/admin/permission-groups/${id}/preview-template`, {
+    template,
+  })
 }
 
 export function deletePermissionGroup(id: number) {
@@ -252,6 +290,10 @@ export function previewConfig(serverId: number, form?: Partial<InboundPayload>) 
 
 export function getXrayKeys() {
   return http.get<ApiResp<{ private_key: string; public_key: string }>>('/admin/xray/keys')
+}
+
+export function getServerConfigPreview(serverId: number) {
+  return http.get<ApiResp<{ config: string }>>(`/admin/servers/${serverId}/config-preview`)
 }
 
 export function generateAndPushConfig(serverId: number) {
@@ -435,7 +477,15 @@ export interface CreateUserResult {
   status: number
 }
 
-export function createUser(payload: { email: string; password: string }) {
+export function createUser(payload: {
+  email: string
+  password: string
+  plan_id?: number
+  permission_group_id?: number
+  device_limit?: number
+  balance_cents?: number
+  expire_at?: string | null
+}) {
   return http.post<ApiResp<CreateUserResult>>('/admin/users', payload)
 }
 

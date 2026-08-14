@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -75,17 +76,16 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	for _, g := range grants {
 		flowByInbound[g.InboundID] = g.Flow
 	}
-	// 动态授权：UserInbound 授权 ∪ Plan→权限组→入站集合（T4，不写授权表避免膨胀）
+	// 动态授权：根据用户生效权限组过滤入站（纯净 Xboard 权限组架构）。
+	// 若用户未分配权限组（无套餐且未指定权限组），granted 为空集，inbounds 过滤后为 0，不返回任何节点。
 	granted := services.AuthorizedInboundSet(d.DB, &user)
-	if len(granted) > 0 {
-		filtered := inbounds[:0]
-		for _, inb := range inbounds {
-			if granted[inb.ID] {
-				filtered = append(filtered, inb)
-			}
+	filtered := make([]models.Inbound, 0, len(granted))
+	for _, inb := range inbounds {
+		if granted[inb.ID] {
+			filtered = append(filtered, inb)
 		}
-		inbounds = filtered
 	}
+	inbounds = filtered
 	items := make([]subscribe.ProxyItem, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
@@ -134,7 +134,27 @@ func (d *Deps) Subscribe(c *gin.Context) {
 
 	var content string
 	if isClash {
-		content = subscribe.BuildClash(&user, items)
+		var clashTemplate string
+		var permGroupID uint64
+		if user.PermissionGroupID > 0 {
+			permGroupID = user.PermissionGroupID
+		} else if user.PlanID > 0 {
+			var plan models.Plan
+			if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
+				permGroupID = plan.PermissionGroupID
+			}
+		}
+		if permGroupID > 0 {
+			var pg models.PermissionGroup
+			if err := d.DB.First(&pg, permGroupID).Error; err == nil {
+				clashTemplate = pg.ClashTemplate
+			}
+		}
+		panelHost := c.Request.Host
+		if h, _, err := net.SplitHostPort(panelHost); err == nil {
+			panelHost = h
+		}
+		content = subscribe.BuildClashWithTemplate(&user, items, clashTemplate, panelHost)
 		c.Header("Content-Type", "application/yaml; charset=utf-8")
 	} else {
 		content = subscribe.BuildBase64(&user, items)

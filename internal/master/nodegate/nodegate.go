@@ -281,9 +281,14 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		ServerID:    conn.ServerID,
 		CPU:         hb.CPU,
 		Mem:         hb.Mem,
+		MemTotal:    uint64(hb.MemTotal),
+		Disk:        hb.Disk,
+		DiskTotal:   uint64(hb.DiskTotal),
 		OnlineUsers: hb.OnlineUsers,
 		RxRate:      hb.RxRate,
 		TxRate:      hb.TxRate,
+		RxBytes:     hb.RxBytes,
+		TxBytes:     hb.TxBytes,
 		ReportedAt:  time.Now(),
 	}).Error
 }

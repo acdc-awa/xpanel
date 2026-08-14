@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Check } from '@element-plus/icons-vue'
+import { Check, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   createServerRoutingRule,
@@ -52,6 +52,88 @@ function onProtocolsChange(vals: any) {
   form.protocol = (vals as string[]).join(',')
 }
 
+// ===== 常用规则预设 =====
+interface PresetRule {
+  name: string
+  icon: string
+  domain?: string
+  ip?: string
+  protocols?: string[]
+  network?: string
+  outbound_tag: string
+  remark: string
+}
+
+const PRESET_RULES: PresetRule[] = [
+  {
+    name: '屏蔽 BT 下载',
+    icon: '🚫',
+    protocols: ['bittorrent'],
+    outbound_tag: 'blocked',
+    remark: '屏蔽 BitTorrent P2P 下载流量',
+  },
+  {
+    name: '中国大陆直连',
+    icon: '🇨🇳',
+    domain: 'geosite:cn',
+    ip: 'geoip:cn',
+    outbound_tag: 'direct',
+    remark: '中国大陆域名与 IP 直连',
+  },
+  {
+    name: '屏蔽私有局域网',
+    icon: '🔒',
+    ip: 'geoip:private',
+    outbound_tag: 'blocked',
+    remark: '阻止访问 10.x/172.16.x/192.168.x 私有网段',
+  },
+  {
+    name: '常见流媒体代理',
+    icon: '🍿',
+    domain: 'geosite:netflix\ngeosite:youtube\ngeosite:disney\ngeosite:spotify',
+    outbound_tag: 'proxy',
+    remark: '常见海外流媒体分流',
+  },
+  {
+    name: '海外社交平台',
+    icon: '💬',
+    domain: 'geosite:telegram\ngeosite:twitter\ngeosite:facebook\ngeosite:instagram',
+    outbound_tag: 'proxy',
+    remark: '海外社交与通讯平台',
+  },
+  {
+    name: '广告与追踪拦截',
+    icon: '🛡️',
+    domain: 'geosite:category-ads-all',
+    outbound_tag: 'blocked',
+    remark: '全局广告与跟踪器拦截',
+  },
+]
+
+function applyPreset(p: PresetRule) {
+  if (p.domain !== undefined) form.domain = p.domain
+  if (p.ip !== undefined) form.ip = p.ip
+  if (p.network !== undefined) form.network = p.network
+  if (p.protocols) {
+    selectedProtocols.value = [...p.protocols]
+    form.protocol = p.protocols.join(',')
+  } else {
+    selectedProtocols.value = []
+    form.protocol = ''
+  }
+  // 查找匹配的出站标签，优先选用当前服务器已有的同名出站标签
+  const matchTag = props.outboundTags?.find((t) => t === p.outbound_tag || (p.outbound_tag === 'blocked' && t === 'blackhole'))
+  if (matchTag) {
+    form.outbound_tag = matchTag
+  } else if (!form.outbound_tag) {
+    form.outbound_tag = p.outbound_tag
+  }
+  if (!form.remark || form.remark.includes('分流') || form.remark.includes('屏蔽')) {
+    form.remark = p.remark
+  }
+  ElMessage.success(`已应用「${p.name}」规则预设`)
+}
+
 onMounted(() => {
   if (props.rule) {
     form.outbound_tag = props.rule.outbound_tag
@@ -65,7 +147,9 @@ onMounted(() => {
     form.enabled = props.rule.enabled
     form.priority = props.rule.priority
     form.remark = props.rule.remark
-    selectedProtocols.value = form.protocol ? form.protocol.split(',').map(s => s.trim()).filter(Boolean) : []
+    selectedProtocols.value = form.protocol ? form.protocol.split(',').map((s) => s.trim()).filter(Boolean) : []
+  } else if (props.outboundTags && props.outboundTags.length > 0 && !form.outbound_tag) {
+    form.outbound_tag = props.outboundTags[0]
   }
   visible.value = true
 })
@@ -77,7 +161,9 @@ async function save() {
     return
   }
   if (form.rule_json?.trim()) {
-    try { JSON.parse(form.rule_json) } catch {
+    try {
+      JSON.parse(form.rule_json)
+    } catch {
       jsonError.value = 'Rule JSON 不是合法 JSON'
       return
     }
@@ -118,7 +204,7 @@ async function save() {
 const selectedInboundTags = computed<string[]>({
   get: () => {
     const raw = form.inbound_tag || ''
-    return raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []
+    return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : []
   },
   set: () => {},
 })
@@ -127,134 +213,271 @@ function onInboundTagsChange(vals: string[]) {
   form.inbound_tag = vals.join(',')
 }
 
-function onClosed() { emit('close') }
+function onClosed() {
+  emit('close')
+}
 </script>
 
 <template>
   <el-dialog
     :model-value="visible"
-    :title="rule ? '编辑路由规则' : '新增路由规则'"
+    :title="rule ? `编辑路由分流规则 · ${rule.outbound_tag}` : '新增路由分流规则'"
     width="760px"
     @closed="onClosed"
   >
-    <el-form label-position="top">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px">
+    <!-- 顶部常用预设气泡栏 -->
+    <div class="preset-section">
+      <div class="preset-title">
+        <el-icon><MagicStick /></el-icon>&nbsp;常用规则一键预设：
+      </div>
+      <div class="preset-chips">
+        <button
+          v-for="p in PRESET_RULES"
+          :key="p.name"
+          type="button"
+          class="preset-chip"
+          @click="applyPreset(p)"
+        >
+          <span>{{ p.icon }}</span>&nbsp;{{ p.name }}
+        </button>
+      </div>
+    </div>
+
+    <el-form label-position="top" class="rule-form">
+      <div class="dual-panel-grid">
         <!-- ===== 左栏：入站匹配条件 ===== -->
-        <div>
-          <div class="col-header">匹配条件（入站流量）</div>
+        <div class="panel-card">
+          <div class="panel-header">
+            <span class="panel-title">1. 入站流量匹配条件 (Match Criteria)</span>
+          </div>
 
           <el-form-item label="协议嗅探 Protocol">
             <el-checkbox-group v-model="selectedProtocols" @change="onProtocolsChange">
-              <el-checkbox label="bittorrent">BitTorrent（BT 下载）</el-checkbox>
-              <el-checkbox label="http">HTTP（明文）</el-checkbox>
-              <el-checkbox label="tls">TLS（加密流量）</el-checkbox>
+              <el-checkbox label="bittorrent">BitTorrent (BT)</el-checkbox>
+              <el-checkbox label="http">HTTP</el-checkbox>
+              <el-checkbox label="tls">TLS</el-checkbox>
             </el-checkbox-group>
-            <p class="muted tip">选中后匹配对应流量特征，常用于「bittorrent → blackhole」屏蔽 BT</p>
           </el-form-item>
 
-          <el-form-item label="Domain（域名）">
-            <el-input v-model="form.domain" type="textarea" :rows="3"
-              placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com" />
+          <el-form-item label="域名匹配 Domain（每行一条）">
+            <el-input
+              v-model="form.domain"
+              type="textarea"
+              :rows="3"
+              class="code-textarea"
+              placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com"
+            />
           </el-form-item>
 
-          <el-form-item label="IP（地址段）">
-            <el-input v-model="form.ip" type="textarea" :rows="3"
-              placeholder="geoip:private&#10;8.8.8.8&#10;10.0.0.0/8" />
+          <el-form-item label="IP 段匹配 IP（每行一条）">
+            <el-input
+              v-model="form.ip"
+              type="textarea"
+              :rows="3"
+              class="code-textarea"
+              placeholder="geoip:private&#10;geoip:cn&#10;8.8.8.8"
+            />
           </el-form-item>
 
-          <el-form-item label="Port（目标端口）">
-            <el-input v-model="form.port" placeholder="如 443 或 80,443 或 1000-2000" />
-          </el-form-item>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px">
+            <el-form-item label="目标端口 Port">
+              <el-input v-model="form.port" placeholder="如 443 或 80,443" />
+            </el-form-item>
+            <el-form-item label="传输层网络">
+              <el-select v-model="form.network" style="width: 100%" clearable placeholder="全部网络">
+                <el-option label="TCP" value="tcp" />
+                <el-option label="UDP" value="udp" />
+                <el-option label="TCP, UDP" value="tcp,udp" />
+              </el-select>
+            </el-form-item>
+          </div>
 
-          <el-form-item label="InboundTag（入站标签）">
-            <el-select v-model="selectedInboundTags" style="width: 100%"
-              multiple filterable allow-create default-first-option
-              placeholder="不选 = 匹配全部入站"
-              @change="onInboundTagsChange">
+          <el-form-item label="限定入站 InboundTag" style="margin-bottom: 0">
+            <el-select
+              v-model="selectedInboundTags"
+              style="width: 100%"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              placeholder="默认匹配全部入站"
+              @change="onInboundTagsChange"
+            >
               <el-option v-for="t in inboundTags ?? []" :key="t" :label="t" :value="t" />
             </el-select>
           </el-form-item>
         </div>
 
         <!-- ===== 右栏：路由目标 ===== -->
-        <div>
-          <div class="col-header">路由目标（出站侧）</div>
+        <div class="panel-card">
+          <div class="panel-header">
+            <span class="panel-title">2. 转发目标与属性 (Target & Control)</span>
+          </div>
 
-          <el-form-item label="OutboundTag（出站标签，必填）">
-            <el-select v-model="form.outbound_tag" style="width: 100%"
-              filterable allow-create default-first-option
-              placeholder="选择或输入出站标签">
+          <el-form-item label="目标出站标签 (OutboundTag)">
+            <el-select
+              v-model="form.outbound_tag"
+              style="width: 100%"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="请选择转发到的出站"
+            >
               <el-option v-for="t in outboundTags ?? []" :key="t" :label="t" :value="t" />
             </el-select>
           </el-form-item>
 
-          <el-form-item label="Network（网络协议）">
-            <el-select v-model="form.network" style="width: 100%" clearable placeholder="不限制">
-              <el-option label="tcp" value="tcp" />
-              <el-option label="udp" value="udp" />
-              <el-option label="tcp,udp" value="tcp,udp" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="优先级（数字越小越靠前）">
+          <el-form-item label="规则优先级 (Priority)">
             <el-input-number v-model="form.priority" :min="0" style="width: 100%" />
+            <span class="muted" style="font-size: 11px; margin-top: 3px; display: block">数字越小越先被 Xray 规则链评估匹配</span>
           </el-form-item>
 
-          <el-form-item label="启用">
-            <el-switch v-model="form.enabled" />
+          <el-form-item label="启用规则">
+            <el-switch v-model="form.enabled" active-text="生效此规则" />
           </el-form-item>
 
-          <el-form-item label="备注">
-            <el-input v-model="form.remark" placeholder="选填" />
+          <el-form-item label="规则备注">
+            <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽BT下载" />
           </el-form-item>
+
+          <div class="info-tip-box" style="margin-top: 10px">
+            💡 规则将按优先级升序生成到节点 Xray <code>routing.rules</code> 中，优先命中先执行。
+          </div>
         </div>
       </div>
 
-      <!-- ===== 高级（全宽） ===== -->
-      <div class="sec-title">Rule JSON（高级：填写后覆盖上述所有匹配条件，直接透传）</div>
-      <el-input v-model="form.rule_json" type="textarea" :rows="4" class="code-textarea"
-        placeholder='{"type":"field","inboundTag":["api"],"outboundTag":"direct"}' />
-      <p class="muted tip">
-        填写后生成配置时按原样透传（自动补 <code>type:"field"</code> 与 outboundTag），其他字段不再参与组装。
-      </p>
+      <!-- ===== 高级：自定义 Rule JSON ===== -->
+      <details class="json-collapse">
+        <summary class="collapse-summary">
+          <span>⚙️ 高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）</span>
+        </summary>
+        <div style="margin-top: 10px">
+          <el-input
+            v-model="form.rule_json"
+            type="textarea"
+            :rows="3"
+            class="code-textarea"
+            placeholder='{"type":"field","inboundTag":["api"],"outboundTag":"direct"}'
+          />
+          <p class="muted" style="font-size: 11.5px; margin: 4px 0 0">
+            填写后配置生成器将直接透传此 JSON 对象（自动补全 <code>type:"field"</code> 与 outboundTag）。
+          </p>
+        </div>
+      </details>
 
-      <el-alert v-if="jsonError" type="error" :closable="false" :title="jsonError" style="margin-top: 10px" />
-      <el-alert v-else type="info" :closable="false" show-icon
-        title="保存后将自动重新生成该节点的 Xray 配置并推送（节点离线时保留，上线自动补推）"
-        style="margin-top: 10px" />
+      <el-alert v-if="jsonError" type="error" :closable="false" :title="jsonError" style="margin-top: 12px" />
     </el-form>
+
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="save">
-        <el-icon><Check /></el-icon>&nbsp;保存
-      </el-button>
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <span class="muted" style="font-size: 12px">保存后主控自动编译并推送到节点</span>
+        <div style="display: flex; gap: 10px">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="save">
+            <el-icon><Check /></el-icon>&nbsp;保存规则
+          </el-button>
+        </div>
+      </div>
     </template>
   </el-dialog>
 </template>
 
 <style scoped lang="scss">
-.col-header {
-  font-weight: 700;
-  font-size: 13.5px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--x-primary);
-  color: var(--x-primary);
-  text-align: center;
+.preset-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
 }
-.sec-title {
+.preset-title {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
   font-weight: 600;
-  font-size: 13px;
-  margin: 6px 0 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--x-border);
+  color: var(--x-primary);
+  white-space: nowrap;
+}
+.preset-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--x-text-1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  &:hover {
+    border-color: var(--x-primary);
+    color: var(--x-primary);
+    background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.05);
+  }
+}
+.dual-panel-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 14px;
+}
+@media (max-width: 680px) {
+  .dual-panel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.panel-card {
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.panel-header {
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--x-border);
+}
+.panel-title {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--x-primary);
 }
-.muted { color: var(--x-text-3); }
-.tip { font-size: 12px; margin: 6px 0 0; }
 .code-textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
+.info-tip-box {
+  font-size: 11.5px;
+  color: var(--x-text-2);
+  line-height: 1.5;
+  background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.json-collapse {
+  margin-top: 12px;
+  border: 1px dashed var(--x-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.collapse-summary {
+  font-size: 12px;
+  color: var(--x-text-2);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+.muted {
+  color: var(--x-text-3);
+}
 </style>
+

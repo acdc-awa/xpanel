@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
@@ -39,6 +40,50 @@ type routingRuleForm struct {
 	Remark      string `json:"remark"`
 }
 
+// EnsureDefaultServerOutbounds 保证该服务器拥有默认的 direct (freedom) 与 blocked (blackhole) 出站，并保证 default_outbound_tag 为 direct。
+func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
+	if db == nil || serverID == 0 {
+		return
+	}
+	var countDirect int64
+	db.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", serverID, "direct").Count(&countDirect)
+	if countDirect == 0 {
+		directOb := models.ServerOutbound{
+			ServerID:     serverID,
+			Tag:          "direct",
+			Protocol:     "freedom",
+			SettingsJSON: `{"domainStrategy":"AsIs"}`,
+			Remark:       "默认直连出站",
+			Priority:     0,
+			Enabled:      true,
+		}
+		_ = db.Create(&directOb).Error
+	}
+
+	var countBlocked int64
+	db.Model(&models.ServerOutbound{}).Where("server_id = ? AND (tag = ? OR tag = ?)", serverID, "blocked", "blackhole").Count(&countBlocked)
+	if countBlocked == 0 {
+		blockedOb := models.ServerOutbound{
+			ServerID:     serverID,
+			Tag:          "blocked",
+			Protocol:     "blackhole",
+			SettingsJSON: `{"response":{"type":"none"}}`,
+			Remark:       "默认黑洞阻断",
+			Priority:     10,
+			Enabled:      true,
+		}
+		_ = db.Create(&blockedOb).Error
+	}
+
+	// 确保 default_outbound_tag 为 direct（若为空）
+	var srv models.Server
+	if err := db.First(&srv, serverID).Error; err == nil {
+		if srv.DefaultOutboundTag == "" {
+			db.Model(&srv).Update("default_outbound_tag", "direct")
+		}
+	}
+}
+
 // AdminGetServerOutbounds GET /api/v1/admin/servers/:id/outbounds
 func (d *Deps) AdminGetServerOutbounds(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -46,6 +91,7 @@ func (d *Deps) AdminGetServerOutbounds(c *gin.Context) {
 		util.BadRequest(c, "非法服务器 ID")
 		return
 	}
+	EnsureDefaultServerOutbounds(d.DB, id)
 	var list []models.ServerOutbound
 	if err := d.DB.Where("server_id = ?", id).Order("priority ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询出站规则失败")
