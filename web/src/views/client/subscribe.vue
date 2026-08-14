@@ -25,11 +25,6 @@ const subscribeUrl = computed(() => {
   return token ? buildSubscribeUrl(token) : ''
 })
 
-const vlessBase64Url = computed(() => {
-  if (!subscribeUrl.value) return ''
-  const sep = subscribeUrl.value.includes('?') ? '&' : '?'
-  return `${subscribeUrl.value}${sep}format=base64`
-})
 
 // 一键唤醒 Clash Scheme
 const clashSchemeUrl = computed(() => {
@@ -144,9 +139,6 @@ const clashApps: ClientApp[] = [
             </div>
 
             <div class="sub-minor-actions">
-              <el-button text size="small" @click="copyText(vlessBase64Url, 'VLESS Base64 订阅')">
-                <el-icon><Link /></el-icon>&nbsp;复制 VLESS 通用订阅 (Base64)
-              </el-button>
               <el-button text size="small" @click="qrModalOpen = true">
                 <el-icon><Cellphone /></el-icon>&nbsp;手机扫码导入
               </el-button>

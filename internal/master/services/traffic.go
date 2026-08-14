@@ -19,12 +19,22 @@ type TrafficService struct {
 }
 
 // Save 处理 traffic_report（幂等：同一 (user, inbound, period) 覆盖合并）。
-func (s *TrafficService) Save(tr protocol.TrafficReportPayload) error {
+// serverID 用于把上报的入站 tag 解析为入站 ID（2026-08-14 J10：入站级统计激活）。
+func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64) error {
 	periodStart, err := time.Parse(time.RFC3339, tr.Period)
 	if err != nil {
 		return err
 	}
 	periodEnd := time.Now()
+
+	// 该节点入站 tag → ID 映射（一次查询，循环复用）
+	inboundIDByTag := map[string]uint64{}
+	var inbs []models.Inbound
+	if err := s.DB.Where("server_id = ?", serverID).Find(&inbs).Error; err == nil {
+		for _, inb := range inbs {
+			inboundIDByTag[inb.Tag] = inb.ID
+		}
+	}
 
 	for i := range tr.Entries {
 		e := &tr.Entries[i]
@@ -52,21 +62,32 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload) error {
 			}
 		}
 
+		// 入站 tag → ID（agent 按 tag 上报；未知 tag 按 0 处理，用户级统计不受影响）
+		inboundID := inboundIDByTag[e.Inbound]
+
 		var log models.TrafficLog
 		err := s.DB.Where(
 			"user_id = ? AND inbound_id = ? AND period_start = ?",
-			userID, e.Inbound, periodStart,
+			userID, inboundID, periodStart,
 		).First(&log).Error
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := s.DB.Create(&models.TrafficLog{
 				UserID:      userID,
-				InboundID:   0,
+				InboundID:   inboundID, // 2026-08-14 J10：原恒为 0，入站级统计整条链空转
 				UpBytes:     e.UpBytes,
 				DownBytes:   e.DownBytes,
 				PeriodStart: periodStart,
 				PeriodEnd:   periodEnd,
 			}).Error; err != nil {
 				return err
+			}
+			// 入站冗余计数累计（仅首次创建时；重复投递由 TrafficLog 合并口径覆盖，避免重复累计）
+			if inboundID > 0 {
+				s.DB.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
+					"up":   gorm.Expr("up + ?", e.UpBytes),
+					"down": gorm.Expr("down + ?", e.DownBytes),
+				})
 			}
 		} else if err == nil {
 			// 重复投递：合并累加
@@ -123,6 +144,7 @@ func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
 				return
 			case <-ticker.C:
 				s.resetInboundTraffic()
+				s.checkInboundLifecycle()
 			}
 		}
 	}()
@@ -216,4 +238,25 @@ func parsePanelEmail(email string) (uint64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// checkInboundLifecycle 每 5 分钟检查入站生命周期（J9 激活）：
+// Total 跑满（up+down >= total）或 ExpiryTime 到期 → 自动停用。
+// 停用后订阅端实时生效（查询同源过滤）；节点配置由 1h 校准/下次推送收敛。
+func (s *TrafficService) checkInboundLifecycle() {
+	var inbounds []models.Inbound
+	if err := s.DB.Find(&inbounds).Error; err != nil {
+		return
+	}
+	now := time.Now()
+	for _, inb := range inbounds {
+		if !inb.Enabled {
+			continue
+		}
+		expired := (inb.Total > 0 && inb.Up+inb.Down >= inb.Total) ||
+			(inb.ExpiryTime != nil && now.After(*inb.ExpiryTime))
+		if expired {
+			_ = s.DB.Model(&inb).Update("enabled", false)
+		}
+	}
 }

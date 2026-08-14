@@ -58,9 +58,8 @@ func main() {
 
 	jwtMgr := services.NewJWTManager(cfg.JWT.Secret, cfg.JWT.AccessTTL, cfg.JWT.RefreshTTL)
 	authSvc := &services.AuthService{
-		DB:             database,
-		JWT:            jwtMgr,
-		InviteRequired: cfg.Auth.InviteRequired,
+		DB:  database,
+		JWT: jwtMgr,
 	}
 
 	ensureAdmin(database, cfg)
@@ -93,7 +92,9 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
+	otpSvc := services.NewOTPService(database, cfg)
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, OTP: otpSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
+	hub.CertPusher = deps.PushPendingCerts
 	router := deps.NewRouter()
 
 	// Web Base：在 gin 路由前剥离自定义前缀（如 /panel/api/v1/... → /api/v1/...）。

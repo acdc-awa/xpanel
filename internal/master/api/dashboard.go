@@ -26,7 +26,6 @@ type DashboardData struct {
 		TotalServers        int64   `json:"total_servers"`
 		ActiveUsers         int64   `json:"active_users"`
 		TotalUsers          int64   `json:"total_users"`
-		PendingOrders       int64   `json:"pending_orders"`
 		TotalOrders         int64   `json:"total_orders"`
 		TodayOrders         int64   `json:"today_orders"`
 		RealtimeRxRate      float64 `json:"realtime_rx_rate"`
@@ -159,7 +158,6 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	d.DB.Model(&models.User{}).Count(&data.Summary.TotalUsers)
 	d.DB.Model(&models.User{}).Where("status = 1").Count(&data.Summary.ActiveUsers)
 
-	d.DB.Model(&models.Order{}).Where("status = 'pending'").Count(&data.Summary.PendingOrders)
 	d.DB.Model(&models.Order{}).Count(&data.Summary.TotalOrders)
 	d.DB.Model(&models.Order{}).Where("created_at >= ?", todayStart).Count(&data.Summary.TodayOrders)
 

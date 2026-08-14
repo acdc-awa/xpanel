@@ -174,7 +174,6 @@ async function confirmPay() {
           </li>
           <li>
             <el-icon class="check-icon"><Check /></el-icon>
-            <span>{{ p.speed_limit_kbps ? `限速 ${(p.speed_limit_kbps / 1000).toFixed(1)} Mbps` : '不限速峰值吞吐' }}</span>
           </li>
           <li>
             <el-icon class="check-icon"><Check /></el-icon>

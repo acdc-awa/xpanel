@@ -3,7 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
@@ -119,11 +119,11 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 		util.ServerError(c, "保存邀请码失败")
 		return
 	}
-	d.Audit.Log("admin", adminID, "invitation.batch_create", "批量生成邀请码 "+strconv.Itoa(req.Count)+" 个", c.ClientIP())
 	util.OK(c, gin.H{"codes": codeStrs})
 }
 
 // AdminCreateUser POST /api/v1/admin/users —— 管理员手动创建用户。
+// 2026-08-14 方向④：余额只来自兑换码/调账，创建用户不再支持初始余额。
 func (d *Deps) AdminCreateUser(c *gin.Context) {
 	var req struct {
 		Email             string     `json:"email" binding:"required,email"`
@@ -131,7 +131,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		PlanID            uint64     `json:"plan_id"`
 		PermissionGroupID uint64     `json:"permission_group_id"`
 		DeviceLimit       int        `json:"device_limit"`
-		BalanceCents      int64      `json:"balance_cents"`
 		ExpireAt          *time.Time `json:"expire_at"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -165,7 +164,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		PlanID:            req.PlanID,
 		PermissionGroupID: req.PermissionGroupID,
 		DeviceLimit:       req.DeviceLimit,
-		BalanceCents:      req.BalanceCents,
 		ExpireAt:          req.ExpireAt,
 	}
 	if err := d.DB.Create(&user).Error; err != nil {
@@ -176,7 +174,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		}
 		return
 	}
-	d.Audit.Log("admin", middleware.CurrentUser(c), "user.create", "创建用户 "+req.Email, c.ClientIP())
 
 	// 用户变更 → 全量重推所有有入站的服务器的配置
 	d.enqueueForAllWithInbounds()
@@ -191,7 +188,8 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	})
 }
 
-// AdminUpdateUser PUT /api/v1/admin/users/:id —— 更新用户信息（权限组/套餐/过期时间/密码/余额/设备限制）。
+// AdminUpdateUser PUT /api/v1/admin/users/:id —— 更新用户信息（权限组/套餐/过期时间/密码/设备限制）。
+// 2026-08-14 方向④：余额只走调账（AdminAdjustUserBalance，记流水），禁止直写 balance_cents。
 func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
@@ -204,10 +202,10 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 	var req struct {
+		Email             *string    `json:"email" binding:"omitempty,email,max=128"` // 管理员可改邮箱（=用户名，记审计）
 		PlanID            *uint64    `json:"plan_id"`
 		PermissionGroupID *uint64    `json:"permission_group_id"` // 0=跟随套餐
 		DeviceLimit       *int       `json:"device_limit"`        // 0=跟随套餐
-		BalanceCents      *int64     `json:"balance_cents"`       // 直接设置余额（分）
 		ExpireAt          *time.Time `json:"expire_at"`
 		Status            *int       `json:"status"`
 		Password          *string    `json:"password"`
@@ -217,6 +215,17 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
+	if req.Email != nil && *req.Email != "" {
+		email := strings.ToLower(strings.TrimSpace(*req.Email))
+		var cnt int64
+		d.DB.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", email, email, id).Count(&cnt)
+		if cnt > 0 {
+			util.BadRequest(c, "邮箱已被使用")
+			return
+		}
+		updates["email"] = email
+		updates["username"] = email // 用户名=邮箱同值
+	}
 	if req.PlanID != nil {
 		updates["plan_id"] = *req.PlanID
 	}
@@ -226,9 +235,6 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	if req.DeviceLimit != nil {
 		updates["device_limit"] = *req.DeviceLimit
 	}
-	if req.BalanceCents != nil {
-		updates["balance_cents"] = *req.BalanceCents
-	}
 	if req.ExpireAt != nil {
 		updates["expire_at"] = req.ExpireAt
 	}
@@ -236,12 +242,12 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		updates["status"] = *req.Status
 	}
 	if req.Password != nil && *req.Password != "" {
-		hash, err := argon2id.CreateHash(*req.Password, argon2id.DefaultParams)
-		if err != nil {
-			util.ServerError(c, "密码哈希失败")
+		// 管理员改密：bump token_version 吊销该用户全部旧会话（J5）
+		if err := d.Auth.AdminSetPassword(c.Request.Context(), id, *req.Password); err != nil {
+			util.ServerError(c, "密码更新失败")
 			return
 		}
-		updates["password_hash"] = hash
+		delete(updates, "password_hash")
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&user).Updates(updates).Error; err != nil {
@@ -249,7 +255,6 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			return
 		}
 	}
-	d.Audit.Log("admin", middleware.CurrentUser(c), "user.update", "更新用户 "+user.Email, c.ClientIP())
 	d.enqueueForAllWithInbounds()
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
@@ -271,18 +276,43 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 		return
 	}
 	newStatus := models.StatusDisabled
-	action := "封禁"
 	if user.Status == models.StatusDisabled {
 		newStatus = models.StatusActive
-		action = "解封"
 	}
-	if err := d.DB.Model(&user).Update("status", newStatus).Error; err != nil {
+	updates := map[string]any{"status": newStatus}
+	if newStatus == models.StatusDisabled {
+		// 封禁即吊销会话（J5：bump token_version，旧 refresh/access 立即失效）
+		updates["token_version"] = gorm.Expr("token_version + 1")
+	}
+	if err := d.DB.Model(&user).Updates(updates).Error; err != nil {
 		util.ServerError(c, "更新失败")
 		return
 	}
-	d.Audit.Log("admin", middleware.CurrentUser(c), "user.toggle", action+"用户 "+user.Email, c.ClientIP())
 	d.enqueueForAllWithInbounds()
 	util.OK(c, gin.H{"id": id, "status": newStatus})
+}
+
+// AdminResetUserTraffic POST /api/v1/admin/users/:id/reset-traffic —— 重置用户流量周期起点（J12）。
+func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
+	id, err := parseUint(c.Param("id"))
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var user models.User
+	if err := d.DB.First(&user, id).Error; err != nil {
+		util.Fail(c, 404, "用户不存在")
+		return
+	}
+	if err := d.Traffic.ResetUserTraffic(id); err != nil {
+		util.ServerError(c, "重置失败")
+		return
+	}
+	d.enqueueForAllWithInbounds()
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
+	util.OK(c, gin.H{"ok": true})
 }
 
 // AdminDeleteUser DELETE /api/v1/admin/users/:id —— 硬删除用户（清理授权后移除记录）。
@@ -301,19 +331,24 @@ func (d *Deps) AdminDeleteUser(c *gin.Context) {
 		util.BadRequest(c, "不能删除自己")
 		return
 	}
-	email := user.Email
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", id).Delete(&models.UserInbound{}).Error; err != nil {
-			return err
-		}
 		return tx.Delete(&user).Error
 	}); err != nil {
 		util.ServerError(c, "删除失败")
 		return
 	}
-	d.Audit.Log("admin", middleware.CurrentUser(c), "user.delete", "删除用户 "+email, c.ClientIP())
 	d.enqueueForAllWithInbounds()
 	util.OK(c, gin.H{"deleted": id})
+}
+
+// TriggerUserChange 用户/权限相关变更统一出口（J17）：
+// 热更新在线节点用户列表（SyncUsersToAll，秒级）+ 全量重推所有有入站的服务器配置（拉取型兜底）。
+// 权限组节点集合/套餐绑定等变更后必须调用，消除「在线用户失效窗口不可控」。
+func (d *Deps) TriggerUserChange() {
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
+	d.enqueueForAllWithInbounds()
 }
 
 // enqueueForAllWithInbounds 对所有有启用入站的服务器触发配置重推。

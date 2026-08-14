@@ -36,12 +36,10 @@ func shareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 }
 
 // subscribeFlow 计算订阅中的 flow（与生成侧 buildClients 同源）：
-// UserInbound.Flow（最高）→ 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
-func subscribeFlow(userInboundFlow, inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
-	flow = userInboundFlow
-	if flow == "" {
-		flow = inboundFlow
-	}
+// 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
+// （UserInbound per-user Flow 覆盖已随 2026-08-14 批2 冻结删除）
+func subscribeFlow(inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
+	flow = inboundFlow
 	if flow == "none" {
 		return "", true
 	}
@@ -64,17 +62,11 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 
-	// 收集用户可用节点（有授权记录则过滤；无记录回退全部 type=user 入站）
+	// 收集用户可用节点（无授权记录则全部 type=user 入站；再按用户生效权限组过滤）
 	var inbounds []models.Inbound
 	if err := d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Order("id ASC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
-	}
-	var grants []models.UserInbound
-	d.DB.Where("user_id = ? AND enabled = ?", user.ID, true).Find(&grants)
-	flowByInbound := make(map[uint64]string, len(grants))
-	for _, g := range grants {
-		flowByInbound[g.InboundID] = g.Flow
 	}
 	// 动态授权：根据用户生效权限组过滤入站（纯净 Xboard 权限组架构）。
 	// 若用户未分配权限组（无套餐且未指定权限组），granted 为空集，inbounds 过滤后为 0，不返回任何节点。
@@ -85,7 +77,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			filtered = append(filtered, inb)
 		}
 	}
-	inbounds = filtered
+	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
+	inbounds = services.FilterAvailableInbounds(filtered)
 	items := make([]subscribe.ProxyItem, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
@@ -104,7 +97,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			continue
 		}
 		host, port := shareAddrOf(&srv, inb)
-		flow, noAutoFlow := subscribeFlow(flowByInbound[inb.ID], inb.Flow,
+		flow, noAutoFlow := subscribeFlow(inb.Flow,
 			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
 		item := subscribe.ProxyItem{
 			Name:    subscribe.NodeName(&srv, inb),
@@ -156,6 +149,14 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 		content = subscribe.BuildClashWithTemplate(&user, items, clashTemplate, panelHost)
 		c.Header("Content-Type", "application/yaml; charset=utf-8")
+		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 文件名 / 配置文件网页地址
+		c.Header("Profile-Update-Interval", "24")
+		c.Header("Content-Disposition", `attachment; filename="xray.yaml"`)
+		webPage := "http://" + c.Request.Host
+		if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {
+			webPage = scheme + "://" + c.Request.Host
+		}
+		c.Header("Profile-Web-Page-Url", webPage)
 	} else {
 		content = subscribe.BuildBase64(&user, items)
 		c.Header("Content-Type", "text/plain; charset=utf-8")

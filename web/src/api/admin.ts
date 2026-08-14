@@ -16,7 +16,6 @@ import type {
   Plan,
   ServerOutbound,
   ServerRoutingRule,
-  UserInboundGrant,
 } from './types'
 
 export type {
@@ -34,7 +33,6 @@ export type {
   Plan,
   ServerOutbound,
   ServerRoutingRule,
-  UserInboundGrant,
 } from './types'
 
 export function getDashboard() {
@@ -69,7 +67,6 @@ export function updateUser(
     plan_id?: number
     permission_group_id?: number
     device_limit?: number
-    balance_cents?: number
     expire_at?: string | null
     status?: number
     password?: string
@@ -441,29 +438,11 @@ export function getOrders(page = 1, size = 20, status?: string) {
   )
 }
 
-export function confirmOrder(id: number) {
-  return http.post<ApiResp<{ confirmed: number }>>(`/admin/orders/${id}/confirm`)
-}
-
-export function cancelOrder(id: number) {
-  return http.post<ApiResp<{ cancelled: number }>>(`/admin/orders/${id}/cancel`)
-}
-
 export function getAuditLogs(page = 1, size = 20, action?: string) {
   return http.get<ApiResp<{ total: number; page: number; size: number; items: AuditLog[] }>>(
     '/admin/audit-logs',
     { params: { page, size, action } },
   )
-}
-
-export function getUserInbounds(userId: number) {
-  return http.get<ApiResp<UserInboundGrant>>(`/admin/users/${userId}/inbounds`)
-}
-
-export function setUserInbounds(userId: number, inboundIds: number[]) {
-  return http.post<ApiResp<{ user_id: number; granted: number }>>(`/admin/users/${userId}/inbounds`, {
-    inbound_ids: inboundIds,
-  })
 }
 
 // ===== 手动用户管理 =====
@@ -483,7 +462,6 @@ export function createUser(payload: {
   plan_id?: number
   permission_group_id?: number
   device_limit?: number
-  balance_cents?: number
   expire_at?: string | null
 }) {
   return http.post<ApiResp<CreateUserResult>>('/admin/users', payload)
@@ -491,6 +469,10 @@ export function createUser(payload: {
 
 export function toggleUser(id: number) {
   return http.post<ApiResp<{ id: number; status: number }>>(`/admin/users/${id}/toggle`)
+}
+
+export function resetUserTraffic(id: number) {
+  return http.post<ApiResp<{ ok: boolean }>>(`/admin/users/${id}/reset-traffic`)
 }
 
 export function deleteUser(id: number) {

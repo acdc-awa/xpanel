@@ -11,13 +11,16 @@ import {
   User,
   Calendar,
   Lock,
+  Key,
+  Unlock,
+  RefreshRight,
   Ticket,
   List,
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { buildSubscribeUrl } from '@/config/site'
-import { changePassword, updateProfile } from '@/api/user'
+import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import { formatBytes } from '@/utils/format'
@@ -26,7 +29,6 @@ import type { BalanceLog } from '@/api/types'
 const auth = useAuthStore()
 const router = useRouter()
 
-const email = ref('')
 const createdText = ref('—')
 const qrDataUrl = ref('')
 const qrModalOpen = ref(false)
@@ -66,16 +68,10 @@ const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
   return token ? buildSubscribeUrl(token) : ''
 })
-const vlessBase64Url = computed(() => {
-  if (!subscribeUrl.value) return ''
-  const sep = subscribeUrl.value.includes('?') ? '&' : '?'
-  return `${subscribeUrl.value}${sep}format=base64`
-})
 
 async function refresh() {
   try {
     await auth.fetchMe()
-    email.value = auth.user?.email ?? ''
     createdText.value = (auth.user?.created_at ?? '').replace('T', ' ').slice(0, 16) || '—'
     if (subscribeUrl.value) {
       qrDataUrl.value = await QRCode.toDataURL(subscribeUrl.value, {
@@ -130,28 +126,10 @@ async function openBalanceLogs() {
   }
 }
 
-// 资料
-const savingProfile = ref(false)
-async function saveProfile() {
-  savingProfile.value = true
-  try {
-    const { data } = await updateProfile(email.value)
-    if (data.code === 0) {
-      ElMessage.success('资料已保存')
-      await auth.fetchMe()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
-  } finally {
-    savingProfile.value = false
-  }
-}
-
 // 修改密码
 const pwd = reactive({ old: '', next: '', confirm: '' })
 const savingPwd = ref(false)
+
 async function savePwd() {
   if (!pwd.old || !pwd.next) {
     ElMessage.warning('请填写当前密码与新密码')
@@ -196,6 +174,119 @@ function importClash() {
   const url = `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=XrayPanel`
   window.location.href = url
   ElMessage.info('正在唤醒 Clash 客户端…')
+}
+
+// ---- 两步验证（TOTP，2026-08-14 方向③）----
+const twofaOpen = ref(false)
+const twofaStep = ref<'setup' | 'confirm' | 'backup' | 'disable'>('setup')
+const twofaSecret = ref('')
+const twofaQrUrl = ref('')
+const twofaCode = ref('')
+const twofaLoading = ref(false)
+const backupCodes = ref<string[]>([])
+
+// 关闭验证：需验证码/恢复码/密码任其一
+const disableForm = reactive({ code: '', password: '' })
+
+async function openTwofaSetup() {
+  twofaStep.value = 'setup'
+  twofaCode.value = ''
+  backupCodes.value = []
+  twofaOpen.value = true
+  twofaLoading.value = true
+  try {
+    const { data } = await setup2FA()
+    if (data.code === 0) {
+      twofaSecret.value = data.data.secret
+      twofaQrUrl.value = await QRCode.toDataURL(data.data.otpauth_url, { width: 220, margin: 1 })
+      twofaStep.value = 'confirm'
+    } else {
+      ElMessage.error(data.message)
+      twofaOpen.value = false
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '获取绑定参数失败'))
+    twofaOpen.value = false
+  } finally {
+    twofaLoading.value = false
+  }
+}
+
+async function submitTwofaConfirm() {
+  if (!twofaCode.value) {
+    ElMessage.warning('请输入 6 位动态验证码')
+    return
+  }
+  twofaLoading.value = true
+  try {
+    const { data } = await confirm2FA(twofaSecret.value, twofaCode.value.trim())
+    if (data.code === 0) {
+      backupCodes.value = data.data.backup_codes
+      twofaStep.value = 'backup'
+      await auth.fetchMe()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '绑定失败'))
+  } finally {
+    twofaLoading.value = false
+  }
+}
+
+async function submitTwofaDisable() {
+  if (!disableForm.code && !disableForm.password) {
+    ElMessage.warning('请输入动态验证码/恢复码或当前密码')
+    return
+  }
+  twofaLoading.value = true
+  try {
+    const { data } = await disable2FA({
+      code: disableForm.code || undefined,
+      password: disableForm.password || undefined,
+    })
+    if (data.code === 0) {
+      ElMessage.success('已关闭两步验证')
+      twofaOpen.value = false
+      disableForm.code = ''
+      disableForm.password = ''
+      await auth.fetchMe()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '解绑失败'))
+  } finally {
+    twofaLoading.value = false
+  }
+}
+
+// ---- 重置订阅密钥（17 号 P0 ⑤）----
+const resettingSub = ref(false)
+async function onResetSubscribe() {
+  try {
+    await ElMessageBox.confirm(
+      '重置后旧订阅链接立即失效，所有客户端需重新导入新链接。确认重置？',
+      '重置订阅密钥',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  resettingSub.value = true
+  try {
+    const { data } = await resetSubscribeToken()
+    if (data.code === 0) {
+      ElMessage.success('订阅密钥已重置，请使用新链接重新导入客户端')
+      await auth.fetchMe()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重置失败'))
+  } finally {
+    resettingSub.value = false
+  }
 }
 
 function onLogout() {
@@ -295,11 +386,11 @@ function onLogout() {
             </div>
 
             <div class="sub-extra-links">
-              <el-button text size="small" @click="copy(vlessBase64Url, 'VLESS Base64 订阅')">
-                <el-icon><Link /></el-icon>&nbsp;复制 VLESS 通用订阅 (Base64)
-              </el-button>
               <el-button text size="small" @click="qrModalOpen = true">
                 <el-icon><Cellphone /></el-icon>&nbsp;手机扫码
+              </el-button>
+              <el-button text size="small" type="danger" :loading="resettingSub" @click="onResetSubscribe">
+                <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅密钥
               </el-button>
             </div>
           </div>
@@ -315,19 +406,16 @@ function onLogout() {
           </div>
           <div class="x-card-body">
             <el-form label-position="top">
-              <el-form-item label="用户名">
-                <el-input :model-value="auth.username" disabled />
-              </el-form-item>
-              <el-form-item label="邮箱">
-                <el-input v-model="email" placeholder="用于接收通知（选填）" />
+              <el-form-item label="邮箱（用户名）">
+                <el-input :model-value="auth.user?.email ?? ''" disabled />
               </el-form-item>
               <el-form-item label="注册时间">
                 <span class="muted cell-mono" style="font-size: 13px">{{ createdText }}</span>
               </el-form-item>
-              <el-button type="primary" style="width: 100%" :loading="savingProfile" @click="saveProfile">
-                保存资料
-              </el-button>
             </el-form>
+            <p class="muted" style="font-size: 12.5px; margin-top: -4px">
+              邮箱即登录用户名，如需修改请联系管理员
+            </p>
           </div>
         </div>
 
@@ -335,8 +423,16 @@ function onLogout() {
         <div class="x-card">
           <div class="x-card-head">
             <span><el-icon><Lock /></el-icon>&nbsp;修改登录密码</span>
+            <el-tag v-if="auth.user?.must_change_pwd" type="danger" size="small" effect="plain">首次登录需修改</el-tag>
           </div>
           <div class="x-card-body">
+            <el-alert
+              v-if="auth.user?.must_change_pwd"
+              type="warning"
+              :closable="false"
+              style="margin-bottom: 14px"
+              title="当前为初始密码，为保障账号安全请立即修改"
+            />
             <el-form label-position="top">
               <el-form-item label="当前密码">
                 <el-input v-model="pwd.old" type="password" show-password placeholder="请输入当前密码" />
@@ -351,6 +447,38 @@ function onLogout() {
                 修改密码
               </el-button>
             </el-form>
+          </div>
+        </div>
+
+        <!-- 两步验证（TOTP） -->
+        <div class="x-card">
+          <div class="x-card-head">
+            <span><el-icon><Key /></el-icon>&nbsp;两步验证（Google Authenticator）</span>
+            <el-tag v-if="auth.user?.totp_enabled" type="success" size="small" effect="plain">已开启</el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">未开启</el-tag>
+          </div>
+          <div class="x-card-body">
+            <p class="muted" style="font-size: 13px; margin-bottom: 12px; line-height: 1.7">
+              开启后登录需要动态验证码；<b>忘记密码重置必须使用两步验证码</b>（未开启的账号请联系管理员重置密码）。建议同时妥善保存恢复码。
+            </p>
+            <el-button
+              v-if="!auth.user?.totp_enabled"
+              type="primary"
+              plain
+              style="width: 100%"
+              @click="openTwofaSetup"
+            >
+              <el-icon><Unlock /></el-icon>&nbsp;开启两步验证
+            </el-button>
+            <el-button
+              v-else
+              type="danger"
+              plain
+              style="width: 100%"
+              @click="twofaStep = 'disable'; disableForm.code = ''; disableForm.password = ''; twofaOpen = true"
+            >
+              <el-icon><Key /></el-icon>&nbsp;关闭两步验证
+            </el-button>
           </div>
         </div>
 
@@ -391,6 +519,77 @@ function onLogout() {
           支持 Stash / Flclash 手机扫码一键添加配置。
         </p>
       </div>
+    </el-dialog>
+
+    <!-- 两步验证弹窗 -->
+    <el-dialog
+      v-model="twofaOpen"
+      :title="twofaStep === 'disable' ? '关闭两步验证' : '开启两步验证'"
+      width="400px"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <!-- 绑定：扫码 + 输入验证码 -->
+      <template v-if="twofaStep === 'confirm'">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+          <img
+            v-if="twofaQrUrl"
+            :src="twofaQrUrl"
+            alt="TOTP 二维码"
+            style="width: 200px; height: 200px; border-radius: 10px; border: 1px solid var(--x-border)"
+          />
+          <p class="muted" style="font-size: 12px; text-align: center">
+            使用 Google Authenticator / Authy 等扫码，或手动输入密钥：
+            <code class="cell-mono" style="user-select: all">{{ twofaSecret }}</code>
+          </p>
+          <el-input
+            v-model="twofaCode"
+            placeholder="输入 App 显示的 6 位动态验证码"
+            maxlength="6"
+            size="large"
+            style="font-family: var(--x-font-mono)"
+          />
+          <el-button type="primary" style="width: 100%" :loading="twofaLoading" @click="submitTwofaConfirm">
+            确认绑定
+          </el-button>
+        </div>
+      </template>
+
+      <!-- 备份码（仅展示一次） -->
+      <template v-else-if="twofaStep === 'backup'">
+        <el-alert type="warning" :closable="false" style="margin-bottom: 14px">
+          请立即保存以下恢复码（仅此一次展示）。设备丢失时用恢复码登录或重置密码，每个恢复码只能使用一次。
+        </el-alert>
+        <div class="backup-codes">
+          <code v-for="c in backupCodes" :key="c" class="cell-mono">{{ c }}</code>
+        </div>
+        <el-button type="primary" style="width: 100%; margin-top: 14px" @click="twofaOpen = false">
+          我已保存
+        </el-button>
+      </template>
+
+      <!-- 关闭：验证 -->
+      <template v-else-if="twofaStep === 'disable'">
+        <p class="muted" style="font-size: 13px; margin-bottom: 12px">
+          请输入动态验证码、恢复码或当前密码（任选其一）以确认身份
+        </p>
+        <el-input
+          v-model="disableForm.code"
+          placeholder="动态验证码或恢复码"
+          maxlength="16"
+          style="font-family: var(--x-font-mono); margin-bottom: 10px"
+        />
+        <el-input
+          v-model="disableForm.password"
+          type="password"
+          show-password
+          placeholder="或当前密码"
+          style="margin-bottom: 14px"
+        />
+        <el-button type="danger" style="width: 100%" :loading="twofaLoading" @click="submitTwofaDisable">
+          关闭两步验证
+        </el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -584,5 +783,24 @@ function onLogout() {
 
 .muted {
   color: var(--x-text-3);
+}
+
+.backup-codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: var(--x-bg);
+  border: 1px dashed var(--x-border);
+  border-radius: 10px;
+}
+.backup-codes code {
+  font-family: var(--x-font-mono);
+  font-size: 12.5px;
+  padding: 4px 8px;
+  background: var(--x-card);
+  border-radius: 6px;
+  border: 1px solid var(--x-border);
+  user-select: all;
 }
 </style>

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
   getUsers,
   createUser,
   toggleUser,
+  resetUserTraffic,
   deleteUser,
   updateUser,
   getPlans,
@@ -95,7 +96,6 @@ async function submitAdjust() {
       adjustOpen.value = false
       if (current.value && current.value.id === adjustUser.value.id) {
         current.value.balance_cents = data.data.new_balance
-        userEditForm.balance_yuan = Number((data.data.new_balance / 100).toFixed(2))
       }
       load()
     } else {
@@ -203,7 +203,6 @@ const userEditForm = reactive({
   plan_id: 0,
   permission_group_id: 0,
   device_limit: 0,
-  balance_yuan: 0,
   expire_at: '',
   password: '',
 })
@@ -226,7 +225,6 @@ function openDetail(row: any) {
   userEditForm.plan_id = row.plan_id || 0
   userEditForm.permission_group_id = row.permission_group_id || 0
   userEditForm.device_limit = row.device_limit || 0
-  userEditForm.balance_yuan = Number(((row.balance_cents || 0) / 100).toFixed(2))
   userEditForm.expire_at = row.expire_at || ''
   userEditForm.password = ''
   detailOpen.value = true
@@ -240,7 +238,6 @@ async function saveUserConfig() {
       plan_id: userEditForm.plan_id,
       permission_group_id: userEditForm.permission_group_id,
       device_limit: userEditForm.device_limit,
-      balance_cents: Math.round(userEditForm.balance_yuan * 100),
       expire_at: userEditForm.expire_at || null,
       password: userEditForm.password.trim() || undefined,
     }
@@ -267,7 +264,6 @@ const newUserForm = reactive({
   plan_id: 0,
   permission_group_id: 0,
   device_limit: 0,
-  balance_yuan: 0,
   expire_at: '',
 })
 const newUserCreating = ref(false)
@@ -286,7 +282,6 @@ async function submitNewUser() {
       plan_id: newUserForm.plan_id || undefined,
       permission_group_id: newUserForm.permission_group_id || undefined,
       device_limit: newUserForm.device_limit || undefined,
-      balance_cents: newUserForm.balance_yuan ? Math.round(newUserForm.balance_yuan * 100) : undefined,
       expire_at: newUserForm.expire_at || undefined,
     }
     const { data } = await createUser(payload)
@@ -297,7 +292,6 @@ async function submitNewUser() {
       newUserForm.plan_id = 0
       newUserForm.permission_group_id = 0
       newUserForm.device_limit = 0
-      newUserForm.balance_yuan = 0
       newUserForm.expire_at = ''
       load()
     } else {
@@ -326,6 +320,29 @@ async function doToggle(row: any) {
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '操作失败'))
+  }
+}
+
+async function doResetTraffic(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认重置「${row.username}」的流量周期？重置后其已用流量清零并重新计算限额。`,
+      '重置流量',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data } = await resetUserTraffic(row.id)
+    if (data.code === 0) {
+      ElMessage.success('流量已重置')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重置失败'))
   }
 }
 
@@ -459,6 +476,9 @@ const filteredList = computed(() => {
             <el-button size="small" text type="success" title="调整用户账户余额" @click="openAdjust(row)">
               <el-icon><Wallet /></el-icon>&nbsp;调账
             </el-button>
+            <el-button size="small" text type="warning" title="重置该用户流量周期" @click="doResetTraffic(row)">
+              <el-icon><RefreshRight /></el-icon>&nbsp;重置流量
+            </el-button>
             <el-button
               size="small"
               text
@@ -545,16 +565,6 @@ const filteredList = computed(() => {
           </el-form-item>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-            <el-form-item label="账户余额（元）">
-              <el-input-number
-                v-model="userEditForm.balance_yuan"
-                :controls="false"
-                :min="0"
-                :precision="2"
-                placeholder="0.00"
-                style="width: 100%"
-              />
-            </el-form-item>
             <el-form-item label="设备限制（台，0=跟随套餐）">
               <el-input-number
                 v-model="userEditForm.device_limit"
@@ -628,16 +638,6 @@ const filteredList = computed(() => {
                 <el-option :value="0" label="跟随套餐" />
                 <el-option v-for="g in permissionGroups" :key="g.id" :value="g.id" :label="g.name" />
               </el-select>
-            </el-form-item>
-            <el-form-item label="初始余额（元）">
-              <el-input-number
-                v-model="newUserForm.balance_yuan"
-                :controls="false"
-                :min="0"
-                :precision="2"
-                placeholder="0.00"
-                style="width: 100%"
-              />
             </el-form-item>
             <el-form-item label="设备限制（台，0=跟随套餐）">
               <el-input-number

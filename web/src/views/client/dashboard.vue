@@ -16,7 +16,8 @@ import { useAuthStore } from '@/stores/auth'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 import { formatBytes } from '@/utils/format'
-import { mockNotices, mockServers } from '@/mock/data'
+import { mockNotices } from '@/mock/data'
+import { getMyServers, type MyServerItem } from '@/api/user'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -62,6 +63,7 @@ const subscribeUrl = computed(() => {
 })
 
 onMounted(async () => {
+  loadServers()
   if (auth.user) return
   loading.value = true
   try {
@@ -92,6 +94,19 @@ function importClash() {
   const url = `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=XrayPanel`
   window.location.href = url
   ElMessage.info('正在唤醒 Clash 客户端…')
+}
+
+const servers = ref<MyServerItem[]>([])
+
+async function loadServers() {
+  try {
+    const { data } = await getMyServers()
+    if (data.code === 0) {
+      servers.value = data.data.items
+    }
+  } catch {
+    servers.value = []
+  }
 }
 
 const statusText: Record<string, { dot: string; text: string }> = {
@@ -194,16 +209,19 @@ const statusText: Record<string, { dot: string; text: string }> = {
         <div class="x-card">
           <div class="x-card-head">
             <span><el-icon><Connection /></el-icon>&nbsp;节点可用性</span>
-            <span class="demo-tag">实时心跳</span>
+            <span class="muted" style="font-size: 12px">心跳 90s 内为在线</span>
           </div>
           <div style="padding: 8px 16px">
-            <div v-for="s in mockServers" :key="s.id" class="x-row-line">
+            <div v-for="s in servers" :key="s.id" class="x-row-line">
               <span class="k">
-                <span class="x-status-dot" :class="statusText[s.status]?.dot || 'offline'" />
-                {{ s.location }} · {{ s.name }}
+                <span class="x-status-dot" :class="s.online ? 'online' : 'offline'" />
+                {{ s.location || '未知地区' }} · {{ s.name }}
               </span>
-              <span class="v muted" style="font-size: 12px">{{ statusText[s.status]?.text || '离线' }}</span>
+              <span class="v muted" style="font-size: 12px">{{ s.online ? '在线' : '离线' }}</span>
             </div>
+            <p v-if="!servers.length" class="muted" style="font-size: 12px; padding: 4px 0">
+              暂无可用节点（需购买套餐后自动授权）
+            </p>
           </div>
         </div>
 

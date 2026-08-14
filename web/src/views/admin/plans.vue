@@ -34,12 +34,12 @@ onMounted(loadGroups)
 
 const formOpen = ref(false)
 const editing = ref(false)
-const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, device_limit: 0, permission_group_id: 0 })
+const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, device_limit: 0, permission_group_id: 0 })
 const saving = ref(false)
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, speed_limit_kbps: 0, device_limit: 0, permission_group_id: 0 })
+  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, device_limit: 0, permission_group_id: 0 })
   formOpen.value = true
 }
 
@@ -51,7 +51,6 @@ function openEdit(row: any) {
     price_yuan: Number((row.price_cents / 100).toFixed(2)),
     traffic_gb: row.traffic_gb,
     duration_days: row.duration_days,
-    speed_limit_kbps: row.speed_limit_kbps,
     device_limit: row.device_limit || 0,
     permission_group_id: row.permission_group_id || 0,
   })
@@ -70,7 +69,6 @@ async function save() {
       price_cents: Math.round(form.price_yuan * 100),
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
-      speed_limit_kbps: form.speed_limit_kbps,
       device_limit: form.device_limit,
       permission_group_id: form.permission_group_id || undefined,
     }
@@ -150,7 +148,6 @@ async function remove(row: any) {
           </template>
         </el-table-column>
         <el-table-column label="限速" width="110">
-          <template #default="{ row }">{{ row.speed_limit_kbps ? `${(row.speed_limit_kbps / 1000).toFixed(1)} Mbps` : '不限' }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -181,9 +178,6 @@ async function remove(row: any) {
           </el-form-item>
           <el-form-item label="设备限制（台，0=不限）">
             <el-input-number v-model="form.device_limit" :min="0" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="限速（kbps，0=不限）">
-            <el-input-number v-model="form.speed_limit_kbps" :min="0" :step="1000" style="width: 100%" />
           </el-form-item>
         </div>
         <el-form-item label="权限组（选填，购买后自动授权组内入站）">

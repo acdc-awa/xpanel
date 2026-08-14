@@ -16,6 +16,7 @@ type Deps struct {
 	Cfg     *config.Config
 	JWT     *services.JWTManager
 	Auth    *services.AuthService
+	OTP     *services.OTPService
 	Hub     *nodegate.Hub
 	Traffic *services.TrafficService
 	Order   *services.OrderService

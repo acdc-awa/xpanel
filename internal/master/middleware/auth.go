@@ -2,9 +2,13 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/services"
+	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
@@ -61,10 +65,38 @@ func CurrentUser(c *gin.Context) uint64 {
 	return 0
 }
 
+// CurrentClaims 取当前 JWT claims（须在 AuthRequired 之后；未认证返回 nil）。
+func CurrentClaims(c *gin.Context) *services.Claims {
+	if v, ok := c.Get(CtxClaimsKey); ok {
+		return v.(*services.Claims)
+	}
+	return nil
+}
+
 // CurrentRole 取当前角色。
 func CurrentRole(c *gin.Context) string {
 	if v, ok := c.Get(CtxClaimsKey); ok {
 		return v.(*services.Claims).Role
 	}
 	return ""
+}
+
+// RequirePwdChanged 强制改密拦截（J8）：must_change_pwd=true 时仅放行改密/登出，
+// 其余接口返回 403 引导先改密。须在 AuthRequired 之后挂载。
+func RequirePwdChanged(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.FullPath() {
+		case "/api/v1/user/password", "/api/v1/auth/logout", "/api/v1/user/me":
+			c.Next()
+			return
+		}
+		uid := CurrentUser(c)
+		var u models.User
+		if err := db.First(&u, uid).Error; err == nil && u.MustChangePwd {
+			util.Fail(c, http.StatusForbidden, "首次登录请先修改初始密码")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }

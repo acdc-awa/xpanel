@@ -15,7 +15,6 @@ func (d *Deps) AdminCreateBackup(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "备份失败: "+err.Error())
 		return
 	}
-	d.Audit.Log("admin", 0, "backup.manual", info.File, c.ClientIP())
 	util.OK(c, info)
 }
 
@@ -37,6 +36,5 @@ func (d *Deps) AdminDownloadBackup(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	d.Audit.Log("admin", 0, "backup.download", name, c.ClientIP())
 	c.FileAttachment(path, name)
 }

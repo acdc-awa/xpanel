@@ -1,7 +1,6 @@
 package api
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,26 +40,7 @@ func (d *Deps) toOrderView(o *models.Order) orderView {
 	return v
 }
 
-// UserCreateOrder POST /api/v1/user/orders —— 用户下单。
-func (d *Deps) UserCreateOrder(c *gin.Context) {
-	uid := middleware.CurrentUser(c)
-	var req struct {
-		PlanID uint64 `json:"plan_id" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
-		return
-	}
-	order, err := d.Order.Create(uid, req.PlanID)
-	if err != nil {
-		util.BadRequest(c, err.Error())
-		return
-	}
-	d.Audit.Log("user", uid, "order.create", "下单套餐 #"+strconv.FormatUint(req.PlanID, 10), c.ClientIP())
-	util.OK(c, gin.H{"order": d.toOrderView(order)})
-}
-
-// UserOrders GET /api/v1/user/orders —— 我的订单。
+// UserOrders GET /api/v1/user/orders —— 我的订单（余额直付记录，只读）。
 func (d *Deps) UserOrders(c *gin.Context) {
 	uid := middleware.CurrentUser(c)
 	list, err := d.Order.ListByUser(uid)
@@ -75,7 +55,7 @@ func (d *Deps) UserOrders(c *gin.Context) {
 	util.OK(c, gin.H{"items": items})
 }
 
-// AdminOrders GET /api/v1/admin/orders —— 订单列表（分页）。
+// AdminOrders GET /api/v1/admin/orders —— 订单列表（分页，只读支付记录）。
 func (d *Deps) AdminOrders(c *gin.Context) {
 	page := atoiDefault(c.Query("page"), 1)
 	size := atoiDefault(c.Query("size"), 20)
@@ -104,39 +84,4 @@ func (d *Deps) AdminOrders(c *gin.Context) {
 		items = append(items, d.toOrderView(&list[i]))
 	}
 	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": items})
-}
-
-// AdminConfirmOrder POST /api/v1/admin/orders/:id/confirm —— 确认收款，套餐生效。
-func (d *Deps) AdminConfirmOrder(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法 ID")
-		return
-	}
-	adminID := middleware.CurrentUser(c)
-	if err := d.Order.Confirm(id, adminID); err != nil {
-		util.BadRequest(c, err.Error())
-		return
-	}
-	if d.Hub != nil {
-		d.Hub.SyncUsersToAll()
-	}
-	d.Audit.Log("admin", adminID, "order.confirm", "确认订单 #"+strconv.FormatUint(id, 10), c.ClientIP())
-	util.OK(c, gin.H{"confirmed": id})
-}
-
-// AdminCancelOrder POST /api/v1/admin/orders/:id/cancel
-func (d *Deps) AdminCancelOrder(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法 ID")
-		return
-	}
-	adminID := middleware.CurrentUser(c)
-	if err := d.Order.Cancel(id, adminID); err != nil {
-		util.BadRequest(c, err.Error())
-		return
-	}
-	d.Audit.Log("admin", adminID, "order.cancel", "取消订单 #"+strconv.FormatUint(id, 10), c.ClientIP())
-	util.OK(c, gin.H{"cancelled": id})
 }

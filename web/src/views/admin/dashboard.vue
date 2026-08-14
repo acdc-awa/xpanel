@@ -318,7 +318,7 @@ onUnmounted(() => {
             {{ dashData?.summary.active_users || 0 }} / {{ dashData?.summary.total_users || 0 }}
           </div>
           <div class="kpi-sub">
-            今日订单 {{ dashData?.summary.today_orders || 0 }} 笔 / 待确认 {{ dashData?.summary.pending_orders || 0 }}
+            今日订单 {{ dashData?.summary.today_orders || 0 }} 笔 / 累计 {{ dashData?.summary.total_orders || 0 }}
           </div>
         </div>
       </div>
@@ -496,9 +496,7 @@ onUnmounted(() => {
               </el-table-column>
               <el-table-column label="状态" width="80">
                 <template #default="{ row }">
-                  <el-tag :type="row.status === 'paid' ? 'success' : row.status === 'pending' ? 'warning' : 'info'" size="small">
-                    {{ row.status === 'paid' ? '已支付' : row.status === 'pending' ? '待付款' : '已取消' }}
-                  </el-tag>
+                  <el-tag type="success" size="small">已生效</el-tag>
                 </template>
               </el-table-column>
             </el-table>

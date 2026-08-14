@@ -19,9 +19,7 @@ const (
 	InviteUsed     = 1 // 邀请码已使用
 	InviteDisabled = 2 // 邀请码已禁用/过期
 
-	OrderPending   = "pending"
-	OrderPaid      = "paid"
-	OrderCancelled = "cancelled"
+	OrderPaid = "paid" // 订单状态（余额直付即时生效，无 pending/人工确认）
 
 	// Phase T：入站三态
 	InboundTypeUser  = "user"  // 进订阅、参与用户授权与 SyncUsers（默认）
@@ -33,7 +31,7 @@ const (
 func All() []any {
 	return []any{
 		&User{}, &InvitationCode{}, &GiftCard{}, &BalanceLog{},
-		&Server{}, &Inbound{}, &UserInbound{}, &PendingConfig{},
+		&Server{}, &Inbound{}, &PendingConfig{}, &PendingCert{},
 		&ServerOutbound{}, &ServerRoutingRule{},
 		&Plan{}, &Order{}, &Cert{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},

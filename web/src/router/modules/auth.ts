@@ -14,4 +14,10 @@ export const authRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/register.vue'),
     meta: { title: '注册', guestOnly: true },
   },
+  {
+    path: '/forgot',
+    name: 'forgot',
+    component: () => import('@/views/auth/forgot.vue'),
+    meta: { title: '重置密码', guestOnly: true },
+  },
 ]

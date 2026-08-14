@@ -117,7 +117,7 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 			limit, _ := UserEffectiveDeviceLimit(s.DB, &u)
 			protoUsers = append(protoUsers, protocol.User{
 				UUID:  u.UUID,
-				Email: xray.UserEmail(u.ID),
+				Email: xray.UserEmail(&u),
 				Flow:  flow,
 				Level: 0,
 				Limit: limit,
@@ -180,6 +180,7 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Find(&inbounds).Error; err != nil {
 		return "", err
 	}
+	inbounds = FilterAvailableInbounds(inbounds)
 	var outbounds []models.ServerOutbound
 	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
 		return "", err
@@ -195,7 +196,7 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, nil, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, validUsers, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
 	if err != nil {
 		return "", err
 	}
@@ -275,4 +276,21 @@ func (s *ConfigService) MarkPushedByServerIfSame(serverID uint64, configJSON str
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// FilterAvailableInbounds 过滤不可用入站（J9 激活，订阅与生成双端同源）：
+// Total>0 且 up+down >= Total（入站总流量跑满）→ 移除；ExpiryTime 已过 → 移除。
+func FilterAvailableInbounds(inbounds []models.Inbound) []models.Inbound {
+	now := time.Now()
+	out := inbounds[:0]
+	for _, inb := range inbounds {
+		if inb.Total > 0 && inb.Up+inb.Down >= inb.Total {
+			continue
+		}
+		if inb.ExpiryTime != nil && now.After(*inb.ExpiryTime) {
+			continue
+		}
+		out = append(out, inb)
+	}
+	return out
 }

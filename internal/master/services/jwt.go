@@ -16,9 +16,12 @@ const (
 
 // Claims JWT 载荷。
 type Claims struct {
-	UserID uint64 `json:"uid"`
-	Role   string `json:"role"`
-	Type   string `json:"typ"` // access | refresh
+	UserID  uint64 `json:"uid"`
+	Role    string `json:"role"`
+	Type    string `json:"typ"`  // access | refresh
+	Version uint32 `json:"tv"`   // token_version（会话吊销：改密/重置密码/封禁后 bump，refresh 时校验）
+	TwoFA   bool   `json:"tfa"`  // 已通过 2FA（完整 access 标记）
+	Pending bool   `json:"pend"` // 2FA 待验证临时 access（仅可调 /auth/2fa/verify）
 	jwt.RegisteredClaims
 }
 
@@ -34,17 +37,37 @@ func NewJWTManager(secret string, accessTTL, refreshTTL time.Duration) *JWTManag
 	return &JWTManager{secret: []byte(secret), accessTTL: accessTTL, refreshTTL: refreshTTL}
 }
 
-// Generate 签发指定类型 token。
-func (m *JWTManager) Generate(userID uint64, role, typ string) (string, error) {
+// Generate 签发指定类型 token（version = users.token_version，用于会话吊销校验）。
+func (m *JWTManager) Generate(userID uint64, role, typ string, version uint32) (string, error) {
+	return m.generate(userID, role, typ, version, false, false)
+}
+
+// GeneratePending2FA 签发 2FA 待验证临时 access（短 TTL，仅可调 verify 接口）。
+func (m *JWTManager) GeneratePending2FA(userID uint64, role string, version uint32) (string, error) {
+	return m.generate(userID, role, TokenAccess, version, false, true)
+}
+
+// GenerateVerified 签发已通过 2FA 的完整 access。
+func (m *JWTManager) GenerateVerified(userID uint64, role string, version uint32) (string, error) {
+	return m.generate(userID, role, TokenAccess, version, true, false)
+}
+
+func (m *JWTManager) generate(userID uint64, role, typ string, version uint32, twoFA, pending bool) (string, error) {
 	ttl := m.accessTTL
 	if typ == TokenRefresh {
 		ttl = m.refreshTTL
 	}
+	if pending {
+		ttl = 2 * time.Minute
+	}
 	now := time.Now()
 	claims := Claims{
-		UserID: userID,
-		Role:   role,
-		Type:   typ,
+		UserID:  userID,
+		Role:    role,
+		Type:    typ,
+		Version: version,
+		TwoFA:   twoFA,
+		Pending: pending,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -55,12 +78,12 @@ func (m *JWTManager) Generate(userID uint64, role, typ string) (string, error) {
 }
 
 // GeneratePair 同时签发 access + refresh。
-func (m *JWTManager) GeneratePair(userID uint64, role string) (access, refresh string, err error) {
-	access, err = m.Generate(userID, role, TokenAccess)
+func (m *JWTManager) GeneratePair(userID uint64, role string, version uint32) (access, refresh string, err error) {
+	access, err = m.generate(userID, role, TokenAccess, version, false, false)
 	if err != nil {
 		return "", "", err
 	}
-	refresh, err = m.Generate(userID, role, TokenRefresh)
+	refresh, err = m.generate(userID, role, TokenRefresh, version, false, false)
 	if err != nil {
 		return "", "", err
 	}

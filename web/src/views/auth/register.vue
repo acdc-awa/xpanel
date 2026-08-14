@@ -1,25 +1,47 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Lock, Message, Ticket } from '@element-plus/icons-vue'
+import { Lock, Message, Ticket } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
+import { getPublicConfig } from '@/api/config'
+import TurnstileWidget from '@/components/TurnstileWidget.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 
 const form = reactive({
-  username: '',
   email: '',
   password: '',
   confirm: '',
   invite_code: '',
+  turnstile_token: '',
 })
 const loading = ref(false)
+const captchaEnabled = ref(false)
+const siteKey = ref('')
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+onMounted(async () => {
+  try {
+    const { data } = await getPublicConfig()
+    if (data.code === 0) {
+      captchaEnabled.value = data.data.captcha_enable
+      siteKey.value = data.data.turnstile_site_key
+    }
+  } catch {
+    // 配置接口失败不阻断注册
+  }
+})
 
 async function onSubmit() {
-  if (!form.username || !form.password || !form.invite_code) {
-    ElMessage.warning('请填写用户名、密码和邀请码')
+  if (!form.email || !EMAIL_RE.test(form.email)) {
+    ElMessage.warning('请输入正确的邮箱（用户名即邮箱）')
+    return
+  }
+  if (!form.invite_code) {
+    ElMessage.warning('请填写邀请码（注册需要邀请码）')
     return
   }
   if (form.password.length < 8) {
@@ -30,13 +52,17 @@ async function onSubmit() {
     ElMessage.warning('两次输入的密码不一致')
     return
   }
+  if (captchaEnabled.value && !form.turnstile_token) {
+    ElMessage.warning('请完成人机验证')
+    return
+  }
   loading.value = true
   try {
     await auth.register({
-      username: form.username,
-      email: form.email,
+      email: form.email.trim().toLowerCase(),
       password: form.password,
-      invite_code: form.invite_code,
+      invite_code: form.invite_code.trim(),
+      turnstile_token: form.turnstile_token,
     })
     ElMessage.success('注册成功，已自动登录')
     router.replace(auth.homePath())
@@ -60,11 +86,11 @@ async function onSubmit() {
       </div>
 
       <el-form label-position="top" size="large" @submit.prevent="onSubmit">
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="3-32 位字母/数字" :prefix-icon="User" autofocus />
+        <el-form-item label="邮箱（用户名）">
+          <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="Message" autofocus />
         </el-form-item>
-        <el-form-item label="邮箱（选填）">
-          <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="Message" />
+        <el-form-item label="邀请码">
+          <el-input v-model="form.invite_code" placeholder="请输入邀请码" :prefix-icon="Ticket" />
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位" :prefix-icon="Lock" />
@@ -72,9 +98,11 @@ async function onSubmit() {
         <el-form-item label="确认密码">
           <el-input v-model="form.confirm" type="password" show-password placeholder="再次输入密码" :prefix-icon="Lock" @keyup.enter="onSubmit" />
         </el-form-item>
-        <el-form-item label="邀请码">
-          <el-input v-model="form.invite_code" placeholder="请输入邀请码" :prefix-icon="Ticket" />
-        </el-form-item>
+        <TurnstileWidget
+          v-if="captchaEnabled && siteKey"
+          :site-key="siteKey"
+          @token="(t) => (form.turnstile_token = t)"
+        />
         <el-button type="primary" size="large" class="auth-submit" :loading="loading" native-type="submit">
           注 册
         </el-button>

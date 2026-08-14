@@ -1,32 +1,89 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { User, Lock } from '@element-plus/icons-vue'
+import { User, Lock, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
+import { getPublicConfig } from '@/api/config'
+import TurnstileWidget from '@/components/TurnstileWidget.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const form = reactive({ username: '', password: '' })
+const form = reactive({ username: '', password: '', turnstile_token: '' })
 const loading = ref(false)
+const captchaEnabled = ref(false)
+const siteKey = ref('')
+
+// 2FA 二次验证
+const twofaOpen = ref(false)
+const twofaCode = ref('')
+const twofaLoading = ref(false)
+
+onMounted(async () => {
+  try {
+    const { data } = await getPublicConfig()
+    if (data.code === 0) {
+      captchaEnabled.value = data.data.captcha_enable
+      siteKey.value = data.data.turnstile_site_key
+    }
+  } catch {
+    // 配置接口失败不阻断登录
+  }
+})
 
 async function onSubmit() {
   if (!form.username || !form.password) {
-    ElMessage.warning('请输入用户名和密码')
+    ElMessage.warning('请输入邮箱和密码')
+    return
+  }
+  if (captchaEnabled.value && !form.turnstile_token) {
+    ElMessage.warning('请完成人机验证')
     return
   }
   loading.value = true
   try {
-    await auth.login(form.username, form.password)
-    const redirect = (route.query.redirect as string) || auth.homePath()
-    router.replace(redirect)
+    const result = await auth.login(form.username.trim(), form.password)
+    if (result === '2fa') {
+      twofaOpen.value = true
+      twofaCode.value = ''
+      return
+    }
+    gotoHome()
   } catch (e) {
     ElMessage.error(errMsg(e, '登录失败'))
   } finally {
     loading.value = false
   }
+}
+
+async function confirm2fa() {
+  if (!twofaCode.value) {
+    ElMessage.warning('请输入动态验证码')
+    return
+  }
+  twofaLoading.value = true
+  try {
+    await auth.verify2fa(twofaCode.value.trim())
+    twofaOpen.value = false
+    gotoHome()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '验证失败'))
+  } finally {
+    twofaLoading.value = false
+  }
+}
+
+function gotoHome() {
+  // 强制改密（J8）：初始 admin123 等账号首次登录必须先改密码
+  if (auth.user?.must_change_pwd) {
+    ElMessage.warning('首次登录请先修改初始密码')
+    router.replace('/account')
+    return
+  }
+  const redirect = (route.query.redirect as string) || auth.homePath()
+  router.replace(redirect)
 }
 </script>
 
@@ -42,8 +99,8 @@ async function onSubmit() {
       </div>
 
       <el-form label-position="top" size="large" @submit.prevent="onSubmit">
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入用户名" :prefix-icon="User" autofocus />
+        <el-form-item label="邮箱（用户名）">
+          <el-input v-model="form.username" placeholder="you@example.com" :prefix-icon="User" autofocus />
         </el-form-item>
         <el-form-item label="密码">
           <el-input
@@ -55,6 +112,11 @@ async function onSubmit() {
             @keyup.enter="onSubmit"
           />
         </el-form-item>
+        <TurnstileWidget
+          v-if="captchaEnabled && siteKey"
+          :site-key="siteKey"
+          @token="(t) => (form.turnstile_token = t)"
+        />
         <el-button
           type="primary"
           size="large"
@@ -67,10 +129,33 @@ async function onSubmit() {
       </el-form>
 
       <div class="auth-foot">
+        <router-link class="auth-link" to="/forgot">忘记密码？</router-link>
+        <span style="margin: 0 8px">·</span>
         还没有账号？
         <router-link class="auth-link" to="/register">使用邀请码注册</router-link>
       </div>
     </div>
+
+    <!-- 2FA 二次验证 -->
+    <el-dialog v-model="twofaOpen" title="两步验证" width="360px" :close-on-click-modal="false" append-to-body>
+      <p style="font-size: 13px; color: var(--x-text-2); margin-bottom: 14px">
+        该账号已开启两步验证，请输入 Google Authenticator 动态验证码或恢复码
+      </p>
+      <el-input
+        v-model="twofaCode"
+        placeholder="6 位动态验证码"
+        :prefix-icon="Key"
+        size="large"
+        maxlength="16"
+        style="font-family: var(--x-font-mono)"
+        @keyup.enter="confirm2fa"
+      />
+      <template #footer>
+        <el-button type="primary" style="width: 100%" :loading="twofaLoading" @click="confirm2fa">
+          验 证
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

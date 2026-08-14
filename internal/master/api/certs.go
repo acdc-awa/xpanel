@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -219,13 +220,41 @@ func (d *Deps) pushCertToUsers(cert *models.Cert) {
 			continue
 		}
 		seen[inb.ServerID] = true
-		go func(serverID uint64) {
-			_, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
-				protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
-				nodegate.AskTimeout)
-			if err != nil {
-				log.Printf("certs: 推送证书 %s 到节点 %d 失败: %v（上线后需重推）", cert.Domain, serverID, err)
+		serverID := inb.ServerID
+		_, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
+			protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
+			nodegate.AskTimeout)
+		if err != nil {
+			// U7：离线节点落待推记录，上线后由 nodegate 回调补推
+			log.Printf("certs: 推送证书 %s 到节点 %d 失败: %v（已记待推）", cert.Domain, serverID, err)
+			var pc models.PendingCert
+			if e := d.DB.Where("server_id = ?", serverID).First(&pc).Error; e == nil {
+				_ = d.DB.Model(&pc).Updates(map[string]any{"cert_id": cert.ID, "status": "pending", "updated_at": time.Now()})
+			} else {
+				_ = d.DB.Create(&models.PendingCert{ServerID: serverID, CertID: cert.ID, Status: "pending"})
 			}
-		}(inb.ServerID)
+		}
+	}
+}
+
+// PushPendingCerts 补推某节点的待推证书（节点上线回调 / 手动触发）。
+func (d *Deps) PushPendingCerts(serverID uint64) {
+	if d.Hub == nil {
+		return
+	}
+	var pc models.PendingCert
+	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").First(&pc).Error; err != nil {
+		return
+	}
+	var cert models.Cert
+	if err := d.DB.First(&cert, pc.CertID).Error; err != nil {
+		_ = d.DB.Delete(&pc)
+		return
+	}
+	_, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
+		protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
+		nodegate.AskTimeout)
+	if err == nil {
+		_ = d.DB.Model(&pc).Update("status", "pushed")
 	}
 }

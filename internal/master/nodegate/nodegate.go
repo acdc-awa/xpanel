@@ -64,6 +64,8 @@ type Hub struct {
 	Traffic  *services.TrafficService
 	Config   *services.ConfigService
 	Upgrader websocket.Upgrader
+	// CertPusher 节点上线后补推待推证书的回调（U7，由 main 注入 api 层实现）。
+	CertPusher func(serverID uint64)
 
 	mu      sync.RWMutex
 	conns   map[uint64]*Conn                        // by server_id
@@ -154,8 +156,11 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	h.DB.Model(&models.Server{}).Where("id = ?", server.ID).
 		Updates(map[string]any{"status": 1, "last_seen_at": time.Now()})
 
-	// 节点上线：自动补推待推送配置（非阻塞）
+	// 节点上线：自动补推待推送配置 + 待推证书（非阻塞）
 	go h.PushPending(server.ID)
+	if h.CertPusher != nil {
+		go h.CertPusher(server.ID)
+	}
 
 	go h.writePump(conn)
 	h.readPump(conn)
@@ -264,7 +269,7 @@ func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	if err := msg.PayloadTo(&tr); err != nil {
 		return
 	}
-	if err := h.Traffic.Save(tr); err != nil {
+	if err := h.Traffic.Save(tr, conn.ServerID); err != nil {
 		log.Printf("nodegate: 流量落库失败 (server=%d): %v", conn.ServerID, err)
 	}
 }

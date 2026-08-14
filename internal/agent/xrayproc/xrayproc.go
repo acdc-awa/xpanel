@@ -165,16 +165,38 @@ func (p *Proc) RestartWithConfig(configJSON string) error {
 	if err := os.MkdirAll(filepath.Dir(p.ConfigPath), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(p.ConfigPath, []byte(configJSON), 0o644); err != nil {
-		return fmt.Errorf("写入配置失败: %w", err)
+	// U5（2026-08-14）：先 -test 后落盘——临时文件校验通过才原子替换，
+	// 避免坏配置覆盖磁盘上的好配置（xray 崩溃后 watchdog 用坏配置反复拉起失败，节点永久宕机）。
+	tmp := p.ConfigPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(configJSON), 0o644); err != nil {
+		return fmt.Errorf("写入临时配置失败: %w", err)
 	}
-	if err := p.TestConfig(p.ConfigPath); err != nil {
+	if err := p.TestConfig(tmp); err != nil {
+		_ = os.Remove(tmp)
 		return err
+	}
+	// 保留上一份好配置作回滚（覆盖前备份）
+	if _, err := os.Stat(p.ConfigPath); err == nil {
+		_ = os.Rename(p.ConfigPath, p.ConfigPath+".bak")
+	}
+	if err := os.Rename(tmp, p.ConfigPath); err != nil {
+		return fmt.Errorf("替换配置失败: %w", err)
 	}
 	if err := p.Stop(); err != nil {
 		return err
 	}
-	return p.Start()
+	if err := p.Start(); err != nil {
+		// 启动失败：回滚到上一份好配置并再试一次
+		if _, serr := os.Stat(p.ConfigPath + ".bak"); serr == nil {
+			_ = os.Rename(p.ConfigPath+".bak", p.ConfigPath)
+			_ = p.Stop()
+			return p.Start()
+		}
+		return err
+	}
+	// 新配置已生效：清理备份
+	_ = os.Remove(p.ConfigPath + ".bak")
+	return nil
 }
 
 // IsRunning 通过 pid 文件 + isProcessAlive 判断进程存活；僵尸（Z）视为不在运行。

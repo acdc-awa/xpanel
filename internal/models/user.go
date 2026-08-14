@@ -24,8 +24,16 @@ type User struct {
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
 	MustChangePwd       bool       `gorm:"default:false" json:"must_change_pwd"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	// 会话吊销版本号（改密/重置密码/封禁后 bump；JWT claims 携带，refresh 时校验）
+	TokenVersion uint32 `gorm:"default:0" json:"-"`
+	// TOTP 2FA（2026-08-14 方向③）：secret AES 加密存储；BackupCodes 为 bcrypt 哈希 JSON 数组
+	TotpSecret      string     `gorm:"size:512" json:"-"`
+	TotpEnabled     bool       `gorm:"default:false" json:"totp_enabled"`
+	TotpFailedCount int        `gorm:"default:0" json:"-"`
+	TotpLockedUntil *time.Time `json:"-"`
+	BackupCodes     string     `gorm:"type:text" json:"-"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // BeforeCreate 自动设置流量周期起点（首次创建时）。

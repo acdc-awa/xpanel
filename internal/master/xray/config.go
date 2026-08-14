@@ -151,9 +151,13 @@ type TLSSettings struct {
 	AllowInsecure bool   `json:"allowInsecure"` // stream_settings 线格式 camelCase；订阅 skip-cert-verify 透传
 }
 
-// UserEmail 用户在 Xray 中的 email（固定格式，stats 上报按此回查 user_id）。
-func UserEmail(userID uint64) string {
-	return fmt.Sprintf("user-%d@panel.local", userID)
+// UserEmail 用户在 Xray 中的 email（2026-08-14 方向①：同步用户真实邮箱，stats 上报按此回查 user_id；
+// 空邮箱回退固定格式 user-<id>@panel.local 兼容存量）。注册起 username=email 且必填，新用户均为真邮箱。
+func UserEmail(u *models.User) string {
+	if u.Email != "" {
+		return u.Email
+	}
+	return fmt.Sprintf("user-%d@panel.local", u.ID)
 }
 
 // RelayEmail relay 入站在 Xray 中的 email（不入用户体系，仅 stats 标识）。
@@ -339,7 +343,8 @@ type GenerateContext struct {
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
 // defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, userInbounds []models.UserInbound, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
+// 2026-08-14 方向①/批2：UserInbound 冻结删除，per-user 覆盖不再存在（仅入站级 Flow 三态）。
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, users []models.User, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
 	cfg := LoadTemplate()
 
 	// 旧数据/测试夹具可能无 Type（DB 默认 user）——归一化避免"未知类型"
@@ -347,12 +352,6 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if inbounds[i].Type == "" {
 			inbounds[i].Type = models.InboundTypeUser
 		}
-	}
-
-	// 索引：userID → UserInbound（per-inbound 覆盖配置）
-	uiByUser := make(map[uint64]*models.UserInbound, len(userInbounds))
-	for i := range userInbounds {
-		uiByUser[userInbounds[i].UserID] = &userInbounds[i]
 	}
 
 	// Phase T 预检：InboundRef 出站的落地入站必须已完成 setup（InternalUUID 非空）
@@ -408,7 +407,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !inb.Enabled || inb.Type == models.InboundTypeIdle {
 			continue
 		}
-		item, err := buildInbound(&inb, users, uiByUser, ctx)
+		item, err := buildInbound(&inb, users, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
 		}
@@ -710,7 +709,7 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
 // 动态注入 clients 列表（Phase T：按入站三态分流——user 动态用户 / relay 内部 UUID /
 // idle 由 Generate 过滤不达此处）。其余字段完全透传。
-func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound, ctx *GenerateContext) (map[string]any, error) {
+func buildInbound(inb *models.Inbound, users []models.User, ctx *GenerateContext) (map[string]any, error) {
 	// 1. 解析协议 settings JSON → 注入 clients
 	settings := map[string]any{}
 	if inb.SettingsJSON != "" {
@@ -744,7 +743,7 @@ func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 		}
 		clients = []any{client}
 	case models.InboundTypeUser:
-		clients = buildClients(inb, users, uiByUser)
+		clients = buildClients(inb, users)
 	default:
 		return nil, fmt.Errorf("未知入站类型 %q", inb.Type)
 	}
@@ -794,32 +793,21 @@ func buildInbound(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 	return item, nil
 }
 
-// buildClients 从用户列表 + UserInbound 覆盖配置构建 Xray clients JSON。
+// buildClients 从用户列表构建 Xray clients JSON。
 // 按协议分派：vless → {id,email,flow,level,limit}，vmess/trojan 预留。
-// flow 优先级：UserInbound.Flow（最高）→ 入站级 inb.Flow（none 视为空）→ TCP+REALITY 自动注入
-// （inb.Flow == "none" 时禁用自动注入）。
-func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]*models.UserInbound) []any {
+// flow 优先级：入站级 inb.Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动注入。
+// （UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
+func buildClients(inb *models.Inbound, users []models.User) []any {
 	clients := make([]any, 0, len(users))
 	disableAutoFlow := inb.Flow == "none"
 	for _, u := range users {
 		if u.Status != models.StatusActive || u.UUID == "" {
 			continue
 		}
-		// 合并 User 基础 + UserInbound 覆盖
-		uuid := u.UUID
 		flow := ""
 		limit := 0
 		if inb.Flow != "" && inb.Flow != "none" {
 			flow = inb.Flow
-		}
-		if ui, ok := uiByUser[u.ID]; ok {
-			if ui.UUID != "" {
-				uuid = ui.UUID
-			}
-			if ui.Flow != "" {
-				flow = ui.Flow
-			}
-			limit = ui.LimitedDevice
 		}
 		if limit == 0 && u.DeviceLimit > 0 {
 			limit = u.DeviceLimit
@@ -830,12 +818,12 @@ func buildClients(inb *models.Inbound, users []models.User, uiByUser map[uint64]
 		}
 
 		c := map[string]any{
-			"email": UserEmail(u.ID),
+			"email": UserEmail(&u),
 			"level": 0,
 		}
 		switch inb.Protocol {
 		case "vless":
-			c["id"] = uuid
+			c["id"] = u.UUID
 			if flow != "" {
 				c["flow"] = flow
 			}

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { login as apiLogin, register as apiRegister, logout as apiLogout, type RegisterPayload } from '@/api/auth'
+import { login as apiLogin, login2fa as apiLogin2fa, register as apiRegister, logout as apiLogout, type RegisterPayload } from '@/api/auth'
 import { getMe } from '@/api/user'
 import type { Role, UserInfo } from '@/api/types'
 
@@ -23,16 +23,26 @@ export const useAuthStore = defineStore('auth', {
       this.isInitialized = true
     },
 
-    async login(username: string, password: string) {
+    /** 登录：返回 'ok'（已签发）或 '2fa'（需二次验证）。 */
+    async login(username: string, password: string): Promise<'ok' | '2fa'> {
       const { data } = await apiLogin(username, password)
       if (data.code !== 0) throw new Error(data.message || '登录失败')
-      this.applyUser(data.data.user)
+      if (data.data.twofa_required) return '2fa'
+      this.applyUser(data.data.user!)
+      return 'ok'
+    },
+
+    /** 2FA 二次验证：验证通过后签发完整令牌并写入用户信息。 */
+    async verify2fa(code: string) {
+      const { data } = await apiLogin2fa(code)
+      if (data.code !== 0) throw new Error(data.message || '验证失败')
+      this.applyUser(data.data.user!)
     },
 
     async register(payload: RegisterPayload) {
       const { data } = await apiRegister(payload)
       if (data.code !== 0) throw new Error(data.message || '注册失败')
-      this.applyUser(data.data.user)
+      this.applyUser(data.data.user!)
     },
 
     /** 拉取当前用户资料（刷新页面后恢复 user 信息）。 */

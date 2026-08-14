@@ -24,8 +24,6 @@ admin:
   username: admin
   password: admin123
 
-auth:
-  invite_required: true   # 是否强制邀请码注册
 
 backup:
   enabled: true            # 定时备份开关（BACKUP_ENABLED）

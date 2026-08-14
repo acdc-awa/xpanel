@@ -27,6 +27,8 @@ type inboundView struct {
 	StreamSettings string    `json:"stream_settings"`
 	Sniffing       string    `json:"sniffing"`
 	Ratio          float64   `json:"ratio"`
+	TotalGB        int64     `json:"total_gb"`
+	ExpiryTime     *time.Time `json:"expiry_time,omitempty"`
 	Enabled        bool      `json:"enabled"`
 	Type           string    `json:"type"`                       // user / relay / idle（Phase T）
 	InternalUUID   string    `json:"internal_uuid,omitempty"`    // relay 只读（节点上报）
@@ -50,6 +52,8 @@ type inboundForm struct {
 	StreamSettings string  `json:"stream_settings"` // 传输 streamSettings（透传）
 	Sniffing       string  `json:"sniffing"`        // 嗅探（透传）
 	Ratio          float64 `json:"ratio"`
+	TotalGB        int64     `json:"total_gb"`          // J9：入站总流量上限（GB，0=不限）
+	ExpiryTime     *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
 	Type           string  `json:"type"`      // user / relay / idle（空 = user，T4）
 	CertID         *uint64 `json:"cert_id"`   // 绑定证书（T5 校验存在性）
 	Flow              string  `json:"flow"`      // 入站级流控（空=自动 / xtls-rprx-vision / none）
@@ -68,7 +72,8 @@ func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inbo
 		Tag: i.Tag, Protocol: i.Protocol, Port: i.Port,
 		Listen: i.Listen, SettingsJSON: i.SettingsJSON,
 		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
-		Ratio: i.Ratio, Enabled: i.Enabled, CreatedAt: i.CreatedAt,
+		Ratio: i.Ratio, TotalGB: i.Total, ExpiryTime: i.ExpiryTime,
+		Enabled: i.Enabled, CreatedAt: i.CreatedAt,
 		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
 		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
 		SharePort: i.SharePort,
@@ -134,7 +139,8 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		ServerID: req.ServerID, Tag: req.Tag, Protocol: req.Protocol,
 		Port: req.Port, Listen: req.Listen,
 		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
-		Sniffing: req.Sniffing, Ratio: req.Ratio, Enabled: true,
+		Sniffing: req.Sniffing, Ratio: req.Ratio,
+		Total: req.TotalGB, ExpiryTime: req.ExpiryTime, Enabled: true,
 		Type:   req.Type,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
@@ -181,7 +187,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		SettingsJSON   *string  `json:"settings_json"`
 		StreamSettings *string  `json:"stream_settings"`
 		Sniffing       *string  `json:"sniffing"`
-		Ratio          *float64 `json:"ratio"`
+		Ratio          *float64   `json:"ratio"`
+		TotalGB        *int64     `json:"total_gb"`
+		ExpiryTime     *time.Time `json:"expiry_time,omitempty"`
 		Enabled        *bool    `json:"enabled"`
 		Type           *string  `json:"type"`
 		InternalUUID   *string  `json:"internal_uuid"` // 仅节点回执写入（管理员只读展示）
@@ -250,6 +258,12 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.Ratio != nil {
 		updates["ratio"] = *req.Ratio
 	}
+	if req.TotalGB != nil {
+		updates["total"] = *req.TotalGB
+	}
+	if req.ExpiryTime != nil {
+		updates["expiry_time"] = req.ExpiryTime
+	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
@@ -311,6 +325,10 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	}
 	var inb models.Inbound
 	d.DB.First(&inb, id)
+	// U4：被出站引用（落地）的入站禁止删除——删除会导致引用方配置生成死锁
+	if d.refInboundProtected(c, id) {
+		return
+	}
 	_ = d.DB.Where("inbound_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error
 	if err := d.DB.Delete(&models.Inbound{}, id).Error; err != nil {
 		util.ServerError(c, "删除失败")
@@ -336,6 +354,10 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
+	// U4：停用被引用的落地入站同样禁止（生成器会产出指向不存在入站的 vnext）
+	if inb.Enabled && d.refInboundProtected(c, id) {
+		return
+	}
 	inb.Enabled = !inb.Enabled
 	if err := d.DB.Model(&inb).Update("enabled", inb.Enabled).Error; err != nil {
 		util.ServerError(c, "更新失败")
@@ -345,6 +367,17 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		log.Printf("inbounds: 自动推送配置失败 (server=%d): %v", inb.ServerID, err)
 	}
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
+}
+
+// refInboundProtected 检查入站是否被其他出站 inbound_ref 引用（U4：删除/停用保护）。
+func (d *Deps) refInboundProtected(c *gin.Context, inbID uint64) bool {
+	var cnt int64
+	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", inbID).Count(&cnt)
+	if cnt > 0 {
+		util.BadRequest(c, "该入站被 "+strconv.FormatInt(cnt, 10)+" 个出站引用（落地），无法删除/停用，请先解除引用")
+		return true
+	}
+	return false
 }
 
 // AdminXrayKeys GET /api/v1/admin/xray/keys —— REALITY x25519 + shortId 一键生成。
@@ -434,7 +467,7 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.ServerError(c, "查询生成上下文失败")
 		return
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, nil, ctx, "", "")
+	cfg, err := xray.Generate(inbounds, outbounds, routingRules, users, ctx, "", "")
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return

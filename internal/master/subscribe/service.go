@@ -24,7 +24,7 @@ type ProxyItem struct {
 	UUID    string
 	Network string
 	TLSType string
-	Flow    string // 用户在该入站上的 flow（UserInbound 覆盖 → 入站级 Flow，与生成侧 clients 注入同源）
+	Flow    string // 入站级 flow（与生成侧 clients 注入同源；UserInbound 覆盖已随 2026-08-14 批2 冻结删除）
 	// NoAutoFlow 禁用 reality+tcp 的自动 vision 兜底（对应入站 Flow = "none"，
 	// 服务端 clients 不注入 flow，订阅必须保持一致否则握手不匹配）。
 	NoAutoFlow bool
@@ -58,93 +58,6 @@ proxy-groups:
 
 rules:
   - MATCH,节点选择
-`
-
-// BuiltinAdvancedClashTemplate 系统推荐多地区与分流高级模板（依据 docs/example.yaml 标准生产配置）
-const BuiltinAdvancedClashTemplate = `mixed-port: 7890
-allow-lan: true
-ipv6: true
-bind-address: '*'
-mode: rule
-log-level: info
-unified-delay: true
-tcp-concurrent: true
-geodata-mode: true
-geo-auto-update: true
-geo-update-interval: 24
-geox-url:
-    geoip: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat'
-    geosite: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat'
-dns:
-    enable: true
-    ipv6: true
-    prefer-h3: false
-    use-hosts: true
-    use-system-hosts: true
-    respect-rules: true
-    enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
-    default-nameserver: [223.5.5.5, 119.29.29.29]
-    proxy-server-nameserver: [223.5.5.5, 119.29.29.29]
-    direct-nameserver: [223.5.5.5, 119.29.29.29]
-    direct-nameserver-follow-policy: true
-    fake-ip-filter: ['geosite:private', 'geosite:cn', +.lan, +.local, +.localhost, +.home.arpa, '*.msftncsi.com', '*.msftconnecttest.com', '+.stun.*', '+.stun.*.*', lens.l.google.com]
-    nameserver-policy: { +.lan: system, +.local: system, +.home.arpa: system, 'geosite:cn': [223.5.5.5, 119.29.29.29], 'geosite:geolocation-!cn': ['tcp://1.1.1.1#节点选择', 'tcp://8.8.8.8#节点选择'] }
-    nameserver: ['tcp://1.1.1.1#节点选择', 'tcp://8.8.8.8#节点选择']
-proxies:
-$PROXIES$
-proxy-groups:
-    - { name: 节点选择, type: select, proxies: [DIRECT, $ALL_PROXIES$] }
-    - { name: 自动选择, type: url-test, url: http://cp.cloudflare.com/generate_204, interval: 300, proxies: [$ALL_PROXIES$] }
-    - { name: 香港节点, type: select, proxies: [$FILTER_PROXIES(HK|香港)$] }
-    - { name: 日本节点, type: select, proxies: [$FILTER_PROXIES(JP|日本)$] }
-    - { name: 美国节点, type: select, proxies: [$FILTER_PROXIES(US|美国)$] }
-    - { name: 台湾节点, type: select, proxies: [$FILTER_PROXIES(TW|台湾)$] }
-    - { name: 新加坡节点, type: select, proxies: [$FILTER_PROXIES(SG|新加坡)$] }
-    - { name: Anthropic, type: select, proxies: [节点选择, $FILTER_PROXIES(家宽|台湾|日本|香港)$] }
-    - { name: Google, type: select, proxies: [节点选择, $ALL_PROXIES$] }
-    - { name: OpenAI, type: select, proxies: [节点选择, $ALL_PROXIES$] }
-rule-providers:
-    google: { type: http, behavior: classical, format: yaml, url: 'https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Google/Google.yaml', path: ./ruleset/ios-rule-script/google.yaml, interval: 86400, proxy: 节点选择 }
-    anthropic: { type: http, behavior: classical, format: yaml, url: 'https://raw.githubusercontent.com/jinxinkai/clash-ai-rules/refs/heads/master/Anthropic.yaml', path: ./ruleset/clash-ai-rules/anthropic.yaml, interval: 86400, proxy: 节点选择, size-limit: 0 }
-    gemini: { type: http, behavior: classical, format: yaml, url: 'https://raw.githubusercontent.com/jinxinkai/clash-ai-rules/refs/heads/master/Gemini.yaml', path: ./ruleset/clash-ai-rules/gemini.yaml, interval: 86400, proxy: 节点选择, size-limit: 0 }
-    openai: { type: http, behavior: classical, format: yaml, url: 'https://raw.githubusercontent.com/jinxinkai/clash-ai-rules/refs/heads/master/OpenAI.yaml', path: ./ruleset/clash-ai-rules/openai.yaml, interval: 86400, proxy: 节点选择, size-limit: 0 }
-    tiktok: { type: http, behavior: classical, format: yaml, url: 'https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/TikTok/TikTok.yaml', path: ./ruleset/ios-rule-script/tiktok.yaml, interval: 86400, proxy: 节点选择 }
-rules:
-    - 'DOMAIN,$PANEL_HOST$,DIRECT'
-    - 'GEOIP,private,DIRECT,no-resolve'
-    - 'GEOSITE,private,DIRECT'
-    - 'DOMAIN,localhost,DIRECT'
-    - 'DOMAIN-SUFFIX,lan,DIRECT'
-    - 'DOMAIN-SUFFIX,local,DIRECT'
-    - 'DOMAIN-SUFFIX,home.arpa,DIRECT'
-    - 'IP-CIDR,0.0.0.0/8,DIRECT,no-resolve'
-    - 'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve'
-    - 'IP-CIDR,100.64.0.0/10,DIRECT,no-resolve'
-    - 'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve'
-    - 'IP-CIDR,169.254.0.0/16,DIRECT,no-resolve'
-    - 'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve'
-    - 'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve'
-    - 'IP-CIDR6,::1/128,DIRECT,no-resolve'
-    - 'IP-CIDR6,fc00::/7,DIRECT,no-resolve'
-    - 'IP-CIDR6,fe80::/10,DIRECT,no-resolve'
-    - 'IP-CIDR6,ff00::/8,DIRECT,no-resolve'
-    - 'DOMAIN-SUFFIX,daily-cloudcode-pa.googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,daily-cloudcode-pa.sandbox.googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,www.googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,play.googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,oauth2.googleapis.com,Google'
-    - 'DOMAIN-SUFFIX,antigravity-unleash.goog,Google'
-    - 'DOMAIN-SUFFIX,lh3.googleusercontent.com,Google'
-    - 'RULE-SET,anthropic,Anthropic'
-    - 'RULE-SET,openai,OpenAI'
-    - 'RULE-SET,gemini,Google'
-    - 'RULE-SET,google,Google'
-    - 'DOMAIN-SUFFIX,cdn.bootcdn.net,DIRECT'
-    - 'GEOSITE,cn,DIRECT'
-    - 'GEOIP,CN,DIRECT'
-    - 'MATCH,节点选择'
 `
 
 var filterRegex = regexp.MustCompile(`(?i)(?:-\s*)?\$FILTER_PROXIES\(([^)]+)\)\$?`)

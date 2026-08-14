@@ -103,7 +103,6 @@ func (d *Deps) AdminGiftCards(c *gin.Context) {
 
 // AdminBatchCreateGiftCards POST /api/v1/admin/gift-cards —— 批量生成礼品卡。
 func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
-	adminID := middleware.CurrentUser(c)
 	var req struct {
 		Count          int    `json:"count" binding:"required,min=1,max=500"`
 		Name           string `json:"name"`
@@ -123,13 +122,13 @@ func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
 		}
 	}
 
+	adminID := middleware.CurrentUser(c)
 	cards, err := d.GiftCard.BatchGenerate(adminID, req.Count, req.Name, req.FaceValueCents, exp)
 	if err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
 
-	d.Audit.Log("admin", adminID, "gift_card.create", "批量生成礼品卡 "+strconv.Itoa(req.Count)+" 张 (面值: ¥"+strconv.FormatFloat(float64(req.FaceValueCents)/100, 'f', 2, 64)+")", c.ClientIP())
 	util.OK(c, gin.H{
 		"items": cards,
 		"count": len(cards),
@@ -143,12 +142,10 @@ func (d *Deps) AdminDeleteGiftCard(c *gin.Context) {
 		util.BadRequest(c, "非法 ID")
 		return
 	}
-	adminID := middleware.CurrentUser(c)
 	if err := d.GiftCard.DisableOrDelete(id); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	d.Audit.Log("admin", adminID, "gift_card.delete", "删除/作废礼品卡 #"+strconv.FormatUint(id, 10), c.ClientIP())
 	util.OK(c, gin.H{"deleted": id})
 }
 
@@ -159,7 +156,6 @@ func (d *Deps) AdminAdjustUserBalance(c *gin.Context) {
 		util.BadRequest(c, "非法用户 ID")
 		return
 	}
-	adminID := middleware.CurrentUser(c)
 	var req struct {
 		AmountCents int64  `json:"amount_cents" binding:"required"`
 		Remark      string `json:"remark"`
@@ -169,13 +165,13 @@ func (d *Deps) AdminAdjustUserBalance(c *gin.Context) {
 		return
 	}
 
+	adminID := middleware.CurrentUser(c)
 	newBalance, err := d.GiftCard.AdminAdjustBalance(adminID, targetUID, req.AmountCents, req.Remark)
 	if err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
 
-	d.Audit.Log("admin", adminID, "user.adjust_balance", "为用户 #"+strconv.FormatUint(targetUID, 10)+" 调账 (变动: ¥"+strconv.FormatFloat(float64(req.AmountCents)/100, 'f', 2, 64)+", 备注: "+req.Remark+")", c.ClientIP())
 	util.OK(c, gin.H{
 		"user_id":       targetUID,
 		"new_balance":   newBalance,

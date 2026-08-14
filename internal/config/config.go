@@ -14,8 +14,8 @@ type Config struct {
 	App    App    `yaml:"app"`
 	DB     DB     `yaml:"db"`
 	JWT    JWT    `yaml:"jwt"`
+	Totp   Totp   `yaml:"totp"`
 	Admin  Admin  `yaml:"admin"`
-	Auth   Auth   `yaml:"auth"`
 	Backup Backup `yaml:"backup"`
 }
 
@@ -46,13 +46,15 @@ type JWT struct {
 	RefreshTTL time.Duration `yaml:"refresh_ttl"`
 }
 
+// Totp 2FA 加密密钥（2026-08-14 方向③）：totp_secret 入库前 AES-GCM 加密。
+// 为空时回退用 JWT.Secret 派生（开发可用；生产建议单独配置）。
+type Totp struct {
+	EncryptKey string `yaml:"encrypt_key"`
+}
+
 type Admin struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
-}
-
-type Auth struct {
-	InviteRequired bool `yaml:"invite_required"`
 }
 
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
@@ -61,7 +63,6 @@ func Default() *Config {
 		App:    App{Name: "xray-panel", Env: "dev", Port: 8080},
 		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
 		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
-		Auth:   Auth{InviteRequired: true},
 		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},
 	}
 }

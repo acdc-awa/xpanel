@@ -5,10 +5,6 @@ export function getPublicPlans() {
   return http.get<ApiResp<{ items: Plan[] }>>('/plans')
 }
 
-export function createOrder(planId: number) {
-  return http.post<ApiResp<{ order: Order }>>('/user/orders', { plan_id: planId })
-}
-
 export function payOrderByBalance(planId: number) {
   return http.post<ApiResp<{ order: Order }>>('/user/orders/pay-balance', { plan_id: planId })
 }

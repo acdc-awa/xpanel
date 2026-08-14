@@ -54,31 +54,12 @@ type Inbound struct {
 	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
 	Enabled       bool    `gorm:"default:true" json:"enabled"`
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
-	// 空 = 自动（UserInbound.Flow 覆盖 → TCP+REALITY 自动注入 xtls-rprx-vision）；
-	// xtls-rprx-vision = 为该入站用户全部开启（UserInbound 仍可覆盖）；
-	// none = 禁用自动注入（UserInbound.Flow 仍生效）。
+	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
+	// xtls-rprx-vision = 为该入站用户全部开启；
+	// none = 禁用自动注入。（UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
 	Flow          string    `gorm:"size:32" json:"flow"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-// UserInbound 用户-入站授权关系（Client 模型）。
-// 控制粒度为 per-user per-inbound：UUID/Flow/LimitedDevice/TotalGB/ExpiryTime。
-// 零值字段表示"从 User/Plan 继承"，非零值表示覆盖。
-type UserInbound struct {
-	ID                uint64     `gorm:"primaryKey" json:"id"`
-	UserID            uint64     `gorm:"index;not null" json:"user_id"`
-	InboundID         uint64     `gorm:"index;not null" json:"inbound_id"`
-	UUID              string     `gorm:"size:36" json:"uuid,omitempty"`              // 从 User 继承，可覆盖
-	Flow              string     `gorm:"size:32" json:"flow,omitempty"`              // xtls-rprx-vision / ""
-	LimitedDevice     int        `gorm:"default:0" json:"limited_device"`            // xray maxClientDevices（0=不限）
-	TotalGB           int64      `gorm:"default:0" json:"total_gb"`                  // 覆盖套餐流量（0=继承）
-	ExpiryTime        *time.Time `json:"expiry_time,omitempty"`                      // 覆盖到期时间（nil=继承）
-	Enabled           bool       `gorm:"default:true" json:"enabled"`                // 启用→gRPC AddUser，禁用→RemoveUser
-	PermissionGroupID uint64     `gorm:"index;default:0" json:"permission_group_id"` // 来源追溯
-	Remark            string     `gorm:"size:255" json:"remark"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Plan 套餐。
@@ -88,7 +69,6 @@ type Plan struct {
 	PriceCents        int64     `gorm:"not null" json:"price_cents"` // 价格（分）
 	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
 	DurationDays      int       `gorm:"not null" json:"duration_days"`
-	SpeedLimitKbps    int64     `json:"speed_limit_kbps"`                           // 0 = 不限速
 	DeviceLimit       int       `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
 	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
 	Enabled           bool      `gorm:"default:true" json:"enabled"`
@@ -96,29 +76,29 @@ type Plan struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-// Order 订单（人工确认制 / 余额直付：pending → paid / cancelled）。
+// Order 订单（余额直付即时生效：paid）。人工确认收款已去除（2026-08-14 方向④）。
 type Order struct {
-	ID             uint64     `gorm:"primaryKey" json:"id"`
-	OrderNo        string     `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
-	UserID         uint64     `gorm:"index;not null" json:"user_id"`
-	PlanID         uint64     `gorm:"index;not null" json:"plan_id"`
-	AmountCents    int64      `gorm:"not null" json:"amount_cents"`
-	PaymentMethod  string     `gorm:"size:32;default:manual;index" json:"payment_method"` // balance / manual
-	Status         string     `gorm:"size:16;default:pending;index" json:"status"`
-	ConfirmAdminID uint64     `gorm:"index" json:"confirm_admin_id"`
-	CreatedAt      time.Time  `json:"created_at"`
-	PaidAt         *time.Time `json:"paid_at"`
+	ID            uint64     `gorm:"primaryKey" json:"id"`
+	OrderNo       string     `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
+	UserID        uint64     `gorm:"index;not null" json:"user_id"`
+	PlanID        uint64     `gorm:"index;not null" json:"plan_id"`
+	AmountCents   int64      `gorm:"not null" json:"amount_cents"`
+	PaymentMethod string     `gorm:"size:32;default:balance;index" json:"payment_method"` // balance（唯一）
+	Status        string     `gorm:"size:16;default:paid;index" json:"status"`            // paid（唯一）
+	CreatedAt     time.Time  `json:"created_at"`
+	PaidAt        *time.Time `json:"paid_at"`
 }
 
 // TrafficLog 节点上报的流量明细（按 用户×入站×周期）。
-// (user_id, inbound_id, period_start) 唯一：同一上报周期重复投递时覆盖合并（补报幂等）。
+// (user_id, inbound_id, period_start) 三列唯一：同一上报周期重复投递时覆盖合并（补报幂等）。
+// 2026-08-14 U1 修复：原仅 period_start 单列唯一索引 → 多用户共周期上报时互相冲突丢数据。
 type TrafficLog struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`
-	UserID      uint64    `gorm:"index;not null" json:"user_id"`
-	InboundID   uint64    `gorm:"index" json:"inbound_id"`
+	UserID      uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:1;not null" json:"user_id"`
+	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:2;index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`
-	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_period" json:"period_start"`
+	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:3" json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -170,6 +150,16 @@ type PendingConfig struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	PushedAt   *time.Time `json:"pushed_at"`
+}
+
+// PendingCert 证书待推记录（U7：节点离线时上传的证书，上线后补推）。
+type PendingCert struct {
+	ID        uint64    `gorm:"primaryKey" json:"id"`
+	ServerID  uint64    `gorm:"uniqueIndex;not null" json:"server_id"`
+	CertID    uint64    `gorm:"not null" json:"cert_id"`
+	Status    string    `gorm:"size:16;default:pending" json:"status"` // pending / pushed
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Setting 站点配置（公告等键值对）。

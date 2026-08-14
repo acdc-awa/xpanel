@@ -251,15 +251,21 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		util.BadRequest(c, "非法 ID")
 		return
 	}
+	// U4：检查其他服务器出站是否引用本服务器入站（落地链路）——删除会使引用方配置生成死锁
+	var refCnt int64
+	d.DB.Model(&models.ServerOutbound{}).
+		Joins("JOIN inbounds ON inbounds.id = server_outbounds.inbound_ref").
+		Where("inbounds.server_id = ?", id).Count(&refCnt)
+	if refCnt > 0 {
+		util.BadRequest(c, "该服务器有 "+strconv.FormatInt(refCnt, 10)+" 个出站引用其入站（落地），无法删除，请先解除引用")
+		return
+	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		var inboundIDs []uint64
 		if err := tx.Model(&models.Inbound{}).Where("server_id = ?", id).Pluck("id", &inboundIDs).Error; err != nil {
 			return err
 		}
 		if len(inboundIDs) > 0 {
-			if err := tx.Where("inbound_id IN ?", inboundIDs).Delete(&models.UserInbound{}).Error; err != nil {
-				return err
-			}
 			if err := tx.Where("inbound_id IN ?", inboundIDs).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
 				return err
 			}

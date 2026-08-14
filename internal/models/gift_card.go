@@ -15,8 +15,7 @@ const (
 	BalanceLogAdminAdjust      = "admin_adjust"      // 管理员调账
 	BalanceLogRefund           = "refund"            // 退款
 
-	PaymentMethodBalance = "balance" // 余额支付
-	PaymentMethodManual  = "manual"  // 人工/线下转账
+	PaymentMethodBalance = "balance" // 余额支付（唯一支付方式；人工收款已去除）
 )
 
 // GiftCard 礼品卡（卡密充值）。

@@ -145,6 +145,7 @@ func (d *Deps) AdminCreatePermissionGroup(c *gin.Context) {
 		util.BadRequest(c, "创建失败（名称可能重复）")
 		return
 	}
+	d.TriggerUserChange()
 	util.OK(c, gin.H{"group": g})
 }
 
@@ -239,7 +240,7 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 			continue
 		}
 		host, port := shareAddrOf(&srv, inb)
-		flow, noAutoFlow := subscribeFlow("", inb.Flow,
+		flow, noAutoFlow := subscribeFlow(inb.Flow,
 			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
 		item := subscribe.ProxyItem{
 			Name:       subscribe.NodeName(&srv, inb),
@@ -297,6 +298,7 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 		util.ServerError(c, "删除失败")
 		return
 	}
+	d.TriggerUserChange()
 	util.OK(c, gin.H{"ok": true})
 }
 
@@ -366,6 +368,7 @@ func (d *Deps) AdminSetGroupInbounds(c *gin.Context) {
 		util.ServerError(c, "保存失败")
 		return
 	}
+	d.TriggerUserChange()
 	util.OK(c, gin.H{"group_id": id, "count": len(req.InboundIDs)})
 }
 

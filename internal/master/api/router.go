@@ -39,11 +39,17 @@ func (d *Deps) NewRouter() *gin.Engine {
 
 	v1 := r.Group("/api/v1")
 	{
+		// 公开配置（captcha site key 等）
+		v1.GET("/config", d.PublicConfig)
+
 		// 认证（登录/注册限流 5 次/分钟）
 		auth := v1.Group("/auth", middleware.RateLimit(5, time.Minute))
 		{
 			auth.POST("/register", d.Register)
 			auth.POST("/login", d.Login)
+			auth.POST("/2fa/verify", d.TwoFAVerify)
+			auth.POST("/forgot", d.ForgotPassword)
+			auth.POST("/reset", d.ResetPassword)
 			auth.POST("/refresh", d.Refresh)
 			auth.POST("/logout", d.Logout)
 		}
@@ -51,21 +57,25 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 节点 WebSocket 网关（节点 Agent 连接）
 		v1.GET("/node/ws", d.Hub.ServeWS)
 
-		// 订阅（公开，token 鉴权）
-		v1.GET("/sub/:token", d.Subscribe)
+		// 订阅（公开，token 鉴权；J19-④ 按 IP+路径限流防盗刷）
+		v1.GET("/sub/:token", middleware.RateLimit(120, time.Minute), d.Subscribe)
 
-		// 用户端
-		user := v1.Group("/user", middleware.AuthRequired(d.JWT))
-		{
-			user.GET("/me", d.Me)
-			user.POST("/orders", d.UserCreateOrder)
-			user.GET("/orders", d.UserOrders)
-			user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
-			user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
-			user.GET("/balance-logs", d.UserBalanceLogs)
-			user.POST("/password", d.UserChangePassword)
-			user.PUT("/profile", d.UserUpdateProfile)
-		}
+			// 用户端
+			user := v1.Group("/user", middleware.AuthRequired(d.JWT), middleware.RequirePwdChanged(d.DB))
+			{
+				user.GET("/me", d.Me)
+				user.GET("/servers", d.UserServers)
+				user.GET("/orders", d.UserOrders)
+				user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
+				user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
+				user.GET("/balance-logs", d.UserBalanceLogs)
+				user.POST("/password", d.UserChangePassword)
+				user.PUT("/profile", d.UserUpdateProfile)
+				user.POST("/2fa/setup", d.UserOTPSetup)
+				user.POST("/2fa/confirm", d.UserOTPConfirm)
+				user.POST("/2fa/disable", d.UserOTPDisable)
+				user.POST("/subscribe/reset", d.UserResetSubscribe)
+			}
 
 		// 公开：上架套餐
 		v1.GET("/plans", d.PublicPlans)
@@ -73,8 +83,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh）
 		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
 
-		// 节点 Agent 二进制下载（部署用；优先内嵌二进制，其次 AGENT_BIN_PATH / Docker 内置 /app/agent / 本地文件兜底）
-		v1.GET("/download/agent", func(c *gin.Context) {
+		// 节点 Agent 二进制下载（部署用；J19-④ 限流防盗刷）
+		v1.GET("/download/agent", middleware.RateLimit(60, time.Minute), func(c *gin.Context) {
 			var data []byte
 			if len(embed.AgentBinary) > 0 {
 				data = embed.AgentBinary
@@ -115,6 +125,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 		admin := v1.Group("/admin",
 			middleware.AuthRequired(d.JWT),
 			middleware.RequireRole("admin"),
+			middleware.Audit(d.DB),
+			middleware.RequirePwdChanged(d.DB),
 		)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
@@ -152,8 +164,6 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.PUT("/plans/:id", d.AdminUpdatePlan)
 			admin.DELETE("/plans/:id", d.AdminDeletePlan)
 			admin.GET("/orders", d.AdminOrders)
-			admin.POST("/orders/:id/confirm", d.AdminConfirmOrder)
-			admin.POST("/orders/:id/cancel", d.AdminCancelOrder)
 			admin.GET("/audit-logs", d.AdminAuditLogs)
 			admin.POST("/backup", d.AdminCreateBackup)
 			admin.GET("/backup", d.AdminListBackups)
@@ -162,10 +172,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.PUT("/users/:id", d.AdminUpdateUser)
 			admin.DELETE("/users/:id", d.AdminDeleteUser)
 			admin.POST("/users/:id/toggle", d.AdminToggleUser)
+			admin.POST("/users/:id/2fa/disable", d.AdminDisableOTP)
+			admin.POST("/users/:id/reset-traffic", d.AdminResetUserTraffic)
 			admin.POST("/users/:id/balance", d.AdminAdjustUserBalance)
-			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
-			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
-			admin.POST("/user-inbounds/:id/toggle", d.AdminToggleUserInbound)
 			admin.GET("/gift-cards", d.AdminGiftCards)
 			admin.POST("/gift-cards", d.AdminBatchCreateGiftCards)
 			admin.DELETE("/gift-cards/:id", d.AdminDeleteGiftCard)

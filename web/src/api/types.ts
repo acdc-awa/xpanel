@@ -24,12 +24,15 @@ export interface UserInfo {
   down_bytes: number
   used_bytes: number
   total_bytes: number
+  must_change_pwd?: boolean
+  totp_enabled?: boolean
 }
 
 export interface LoginResult {
-  user: UserInfo
-  access_token: string
-  refresh_token: string
+  user?: UserInfo
+  twofa_required?: boolean
+  access_token?: string
+  refresh_token?: string
 }
 
 export interface DashboardSummary {
@@ -45,7 +48,6 @@ export interface DashboardSummary {
   total_servers: number
   active_users: number
   total_users: number
-  pending_orders: number
   total_orders: number
   today_orders: number
   realtime_rx_rate: number
@@ -225,14 +227,13 @@ export interface Plan {
   price_cents: number
   traffic_gb: number
   duration_days: number
-  speed_limit_kbps: number
   device_limit: number
   enabled: boolean
   permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
   created_at: string
 }
 
-export type OrderStatus = 'pending' | 'paid' | 'cancelled'
+export type OrderStatus = 'paid'
 
 export interface Order {
   id: number
@@ -242,7 +243,7 @@ export interface Order {
   plan_id: number
   plan_name: string
   amount_cents: number
-  payment_method?: 'balance' | 'manual'
+  payment_method?: 'balance'
   status: OrderStatus
   created_at: string
   paid_at: string | null
@@ -437,7 +438,3 @@ export interface ServerRoutingRule {
   updated_at: string
 }
 
-export interface UserInboundGrant {
-  inbounds: InboundItem[]
-  granted_ids: number[]
-}

@@ -116,16 +116,4 @@ rules:
 		}
 	})
 
-	t.Run("AdvancedPresetTemplateTest", func(t *testing.T) {
-		res := BuildClashWithTemplate(user, items, BuiltinAdvancedClashTemplate, "panel.example.com")
-		if !strings.Contains(res, "🇭🇰香港01 x1 | IEPL") {
-			t.Errorf("advanced template missing HK node")
-		}
-		if !strings.Contains(res, "Anthropic") {
-			t.Errorf("advanced template missing Anthropic group")
-		}
-		if !strings.Contains(res, "DOMAIN,panel.example.com,DIRECT") {
-			t.Errorf("advanced template missing domain replacement")
-		}
-	})
 }

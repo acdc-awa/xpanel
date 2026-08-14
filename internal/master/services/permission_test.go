@@ -17,7 +17,7 @@ func testDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&models.Plan{}, &models.PermissionGroup{}, &models.PermissionGroupInbound{},
-		&models.User{}, &models.UserInbound{},
+		&models.User{},
 	); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}

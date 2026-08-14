@@ -158,13 +158,30 @@ func TestOrder_PayWithBalance(t *testing.T) {
 		t.Errorf("unexpected deduction log: %+v", logs[0])
 	}
 
-	// 6. 余额不足测试
-	// 再买一次 (扣 2500 -> 0)
+	// 6. 幂等：窗口内重复支付同套餐 → 复用同一订单，不重复扣款
+	dup, err := orderSvc.PayWithBalance(user.ID, plan.ID)
+	if err != nil {
+		t.Fatalf("idempotent re-purchase failed: %v", err)
+	}
+	if dup == nil || dup.ID != order.ID {
+		t.Errorf("expected same order reused (original %d), got %+v", order.ID, dup)
+	}
+	var afterIdem models.User
+	db.First(&afterIdem, user.ID)
+	if afterIdem.BalanceCents != 2500 {
+		t.Errorf("expected balance still 2500 after idempotent call, got %d", afterIdem.BalanceCents)
+	}
+
+	// 7. 余额不足测试（模拟幂等窗口过期后再购买）
+	// 窗口过期 → 真实再次购买（扣 2500 -> 0）
+	db.Model(&models.Order{}).Where("id = ?", order.ID).Update("created_at", time.Now().Add(-time.Minute))
 	_, err = orderSvc.PayWithBalance(user.ID, plan.ID)
 	if err != nil {
-		t.Fatalf("second purchase should succeed: %v", err)
+		t.Fatalf("purchase after window should succeed: %v", err)
 	}
-	// 第三次 (余额 0 < 2500) 应该失败
+	// 把全部订单移出幂等窗口（模拟时间流逝），余额 0 < 2500 应该失败
+	db.Model(&models.Order{}).Where("user_id = ? AND plan_id = ?", user.ID, plan.ID).
+		Update("created_at", time.Now().Add(-time.Minute))
 	_, err = orderSvc.PayWithBalance(user.ID, plan.ID)
 	if err == nil {
 		t.Errorf("expected error for insufficient balance, got nil")

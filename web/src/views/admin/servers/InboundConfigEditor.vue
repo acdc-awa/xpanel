@@ -27,6 +27,8 @@ export interface InboundEditorChangePayload {
   listen: string
   flow: string
   ratio: number
+  total_gb: number
+  expiry_time: string | null
   shareAddrStrategy: string
   shareAddr: string
   sharePort: number
@@ -91,6 +93,8 @@ const localTag = ref(props.tag || '')
 // 入站级扩展字段
 const localFlow = ref('')
 const localRatio = ref(1)
+const localTotalGB = ref(0)
+const localExpiryTime = ref<string | null>(null)
 const localShareStrategy = ref('node')
 const localShareAddr = ref('')
 const localSharePort = ref(0)
@@ -346,6 +350,8 @@ function syncFormToJson() {
     listen: '0.0.0.0',
     flow: localFlow.value,
     ratio: localRatio.value,
+    total_gb: localTotalGB.value,
+    expiry_time: localExpiryTime.value,
     shareAddrStrategy: localShareStrategy.value,
     shareAddr: localShareAddr.value,
     sharePort: localSharePort.value,
@@ -378,6 +384,8 @@ function parseJsonToForm(str: string) {
 
     if (typeof parsed.flow === 'string') localFlow.value = parsed.flow
     if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
+    if (typeof parsed.total_gb === 'number') localTotalGB.value = parsed.total_gb
+    if (typeof parsed.expiry_time === 'string' && parsed.expiry_time) localExpiryTime.value = parsed.expiry_time
     if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
     if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
     if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
@@ -662,6 +670,26 @@ async function copyText(text: string, label: string) {
                   </el-tooltip>
                 </template>
                 <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span>入站总流量上限 (GB)</span>
+                  <el-tooltip content="该入站所有用户合计流量上限，0 = 不限；跑满后自动停用（临时节点按量租用场景）。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" />
+              </el-form-item>
+
+              <el-form-item label="入站到期时间">
+                <el-date-picker
+                  v-model="localExpiryTime"
+                  type="datetime"
+                  placeholder="留空 = 永久"
+                  style="width: 100%"
+                  value-format="YYYY-MM-DDTHH:mm:ssZ"
+                />
               </el-form-item>
             </div>
           </div>

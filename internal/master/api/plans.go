@@ -16,7 +16,6 @@ type planView struct {
 	PriceCents       int64     `json:"price_cents"`
 	TrafficGB        int64     `json:"traffic_gb"`
 	DurationDays     int       `json:"duration_days"`
-	SpeedLimitKbps   int64     `json:"speed_limit_kbps"`
 	DeviceLimit      int       `json:"device_limit"`        // 0=不限
 	PermissionGroupID uint64   `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
 	Enabled          bool      `json:"enabled"`
@@ -26,7 +25,7 @@ type planView struct {
 func toPlanView(p *models.Plan) planView {
 	return planView{
 		ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
-		DurationDays: p.DurationDays, SpeedLimitKbps: p.SpeedLimitKbps,
+		DurationDays: p.DurationDays,
 		DeviceLimit: p.DeviceLimit,
 		PermissionGroupID: p.PermissionGroupID,
 		Enabled: p.Enabled, CreatedAt: p.CreatedAt,
@@ -54,7 +53,6 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		PriceCents        int64  `json:"price_cents" binding:"required,min=0"`
 		TrafficGB         int64  `json:"traffic_gb" binding:"required,min=1"`
 		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
-		SpeedLimitKbps    int64  `json:"speed_limit_kbps"`
 		DeviceLimit       int    `json:"device_limit"`
 		PermissionGroupID uint64 `json:"permission_group_id"` // 0=不绑定
 	}
@@ -72,7 +70,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 	}
 	plan := models.Plan{
 		Name: req.Name, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
-		DurationDays: req.DurationDays, SpeedLimitKbps: req.SpeedLimitKbps,
+		DurationDays: req.DurationDays,
 		DeviceLimit: req.DeviceLimit,
 		PermissionGroupID: req.PermissionGroupID, Enabled: true,
 	}
@@ -80,6 +78,10 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	d.TriggerUserChange()
+
+	d.TriggerUserChange()
+
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})
 }
 
@@ -100,7 +102,6 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		PriceCents        *int64  `json:"price_cents"`
 		TrafficGB         *int64  `json:"traffic_gb"`
 		DurationDays      *int    `json:"duration_days"`
-		SpeedLimitKbps    *int64  `json:"speed_limit_kbps"`
 		DeviceLimit       *int    `json:"device_limit"`
 		PermissionGroupID *uint64 `json:"permission_group_id"` // 显式 0 解绑
 		Enabled           *bool   `json:"enabled"`
@@ -130,9 +131,6 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	if req.DurationDays != nil {
 		updates["duration_days"] = *req.DurationDays
 	}
-	if req.SpeedLimitKbps != nil {
-		updates["speed_limit_kbps"] = *req.SpeedLimitKbps
-	}
 	if req.DeviceLimit != nil {
 		updates["device_limit"] = *req.DeviceLimit
 	}
@@ -153,10 +151,23 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 }
 
 // AdminDeletePlan DELETE /api/v1/admin/plans/:id
+// 2026-08-14 U6：有用户/订单引用时拒绝删除（防悬挂 plan_id 与流量限额失效）。
 func (d *Deps) AdminDeletePlan(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var userCnt int64
+	d.DB.Model(&models.User{}).Where("plan_id = ?", id).Count(&userCnt)
+	if userCnt > 0 {
+		util.BadRequest(c, "该套餐有 "+strconv.FormatInt(userCnt, 10)+" 个用户持有，无法删除（可先停用套餐）")
+		return
+	}
+	var orderCnt int64
+	d.DB.Model(&models.Order{}).Where("plan_id = ?", id).Count(&orderCnt)
+	if orderCnt > 0 {
+		util.BadRequest(c, "该套餐存在订单记录，无法删除（可先停用套餐）")
 		return
 	}
 	if err := d.DB.Delete(&models.Plan{}, id).Error; err != nil {
