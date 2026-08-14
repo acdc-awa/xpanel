@@ -82,7 +82,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"uuid": u.UUID,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
-			"expire_at": u.ExpireAt, "created_at": u.CreatedAt,
+			"expire_at": u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
 			"up_bytes": up, "down_bytes": down,
 			"used_bytes": used, "total_bytes": totalBytes,
 		})

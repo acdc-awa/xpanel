@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh, Check, Close } from '@element-plus/icons-vue'
+import { Refresh, Check, Close, Tickets } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { cancelOrder, confirmOrder, getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -38,7 +38,7 @@ onMounted(load)
 
 function fmtTime(t: string | null) {
   if (!t) return '—'
-  return t.replace('T', ' ').slice(0, 16)
+  return String(t).replace('T', ' ').slice(0, 16)
 }
 
 async function confirm(row: any) {
@@ -75,6 +75,8 @@ async function cancel(row: any) {
     if (data.code === 0) {
       ElMessage.success('已取消')
       load()
+    } else {
+      ElMessage.error(data.message)
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '操作失败'))
@@ -87,8 +89,9 @@ async function cancel(row: any) {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="page = 1; load()">
-          <el-option label="待确认" value="pending" />
+          <el-option label="全部状态" value="" />
           <el-option label="已生效" value="paid" />
+          <el-option label="待确认" value="pending" />
           <el-option label="已取消" value="cancelled" />
         </el-select>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
@@ -97,33 +100,57 @@ async function cancel(row: any) {
 
     <BaseCard>
       <el-table v-loading="loading" :data="list">
-        <el-table-column prop="order_no" label="订单号" min-width="150">
+        <el-table-column prop="order_no" label="订单号" min-width="190">
           <template #default="{ row }"><code class="cell-mono">{{ row.order_no }}</code></template>
         </el-table-column>
-        <el-table-column prop="username" label="用户" width="100" />
-        <el-table-column prop="plan_name" label="套餐" min-width="110" />
-        <el-table-column label="金额" width="90">
-          <template #default="{ row }">¥ {{ (row.amount_cents / 100).toFixed(2) }}</template>
+        <el-table-column prop="username" label="用户" width="110">
+          <template #default="{ row }"><span style="font-weight: 600">{{ row.username }}</span></template>
+        </el-table-column>
+        <el-table-column prop="plan_name" label="套餐名称" min-width="130" />
+        <el-table-column label="支付金额" width="110">
+          <template #default="{ row }">
+            <span class="cell-mono" style="font-weight: 700; color: var(--x-text)">
+              ¥ {{ (row.amount_cents / 100).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="支付方式" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.payment_method === 'balance'" type="success" size="small" effect="plain">
+              余额直付
+            </el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">
+              线下转账
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusMap[row.status]?.type ?? 'info'" size="small">{{ statusMap[row.status]?.text ?? row.status }}</el-tag>
+            <el-tag :type="statusMap[row.status]?.type ?? 'info'" size="small">
+              {{ statusMap[row.status]?.text ?? row.status }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="160">
-          <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+        <el-table-column label="支付时间" width="160">
+          <template #default="{ row }"><span class="cell-mono muted" style="font-size: 12px">{{ fmtTime(row.paid_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="下单时间" width="160">
+          <template #default="{ row }"><span class="cell-mono muted" style="font-size: 12px">{{ fmtTime(row.created_at) }}</span></template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <template v-if="row.status === 'pending'">
-              <el-button size="small" type="primary" plain @click="confirm(row)"><el-icon><Check /></el-icon>&nbsp;确认收款</el-button>
+              <el-button size="small" type="primary" plain @click="confirm(row)"><el-icon><Check /></el-icon>&nbsp;确认</el-button>
               <el-button size="small" text type="danger" @click="cancel(row)"><el-icon><Close /></el-icon></el-button>
             </template>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
         <template #empty>
-          <div style="padding: 30px 0; color: var(--x-text-3)">暂无订单（用户下单后在此确认收款）</div>
+          <div style="padding: 30px 0; color: var(--x-text-3)">
+            <el-icon style="font-size: 32px"><Tickets /></el-icon>
+            <p style="margin-top: 8px">暂无订单记录</p>
+          </div>
         </template>
       </el-table>
       <div class="x-pager">
@@ -142,7 +169,7 @@ async function cancel(row: any) {
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
+.cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
 .x-pager { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
 </style>

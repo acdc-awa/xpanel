@@ -60,6 +60,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 			user.GET("/me", d.Me)
 			user.POST("/orders", d.UserCreateOrder)
 			user.GET("/orders", d.UserOrders)
+			user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
+			user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
+			user.GET("/balance-logs", d.UserBalanceLogs)
 			user.POST("/password", d.UserChangePassword)
 			user.PUT("/profile", d.UserUpdateProfile)
 		}
@@ -156,9 +159,13 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/users", d.AdminCreateUser)
 			admin.DELETE("/users/:id", d.AdminDeleteUser)
 			admin.POST("/users/:id/toggle", d.AdminToggleUser)
+			admin.POST("/users/:id/balance", d.AdminAdjustUserBalance)
 			admin.GET("/users/:id/inbounds", d.AdminUserInbounds)
 			admin.POST("/users/:id/inbounds", d.AdminSetUserInbounds)
 			admin.POST("/user-inbounds/:id/toggle", d.AdminToggleUserInbound)
+			admin.GET("/gift-cards", d.AdminGiftCards)
+			admin.POST("/gift-cards", d.AdminBatchCreateGiftCards)
+			admin.DELETE("/gift-cards/:id", d.AdminDeleteGiftCard)
 			// Phase T：内部账户指令 / 证书 / 权限组
 			admin.POST("/inbounds/:id/setup-internal", d.AdminSetupInternal)
 			admin.POST("/inbounds/:id/rotate-internal", d.AdminRotateInternal)

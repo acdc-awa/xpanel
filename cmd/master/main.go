@@ -73,6 +73,7 @@ func main() {
 	auditSvc := &services.AuditService{DB: database}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
 	siteSvc := services.NewSiteService(database, cfg)
+	giftCardSvc := &services.GiftCardService{DB: database}
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
 	backupSvc, err := backup.New(cfg.DB.DSN, cfg.Backup, auditSvc)
@@ -92,7 +93,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, Backup: backupSvc}
+	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
 	router := deps.NewRouter()
 
 	// Web Base：在 gin 路由前剥离自定义前缀（如 /panel/api/v1/... → /api/v1/...）。

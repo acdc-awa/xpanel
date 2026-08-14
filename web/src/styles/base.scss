@@ -155,6 +155,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--x-border) !important;
   padding: 22px !important;
   background: var(--x-card) !important;
+  max-width: calc(100vw - 32px) !important;
 
   .el-message-box__header {
     padding-bottom: 12px;
@@ -176,3 +177,51 @@ a { color: inherit; text-decoration: none; }
     gap: 10px;
   }
 }
+
+// 全局 Dialog 弹窗规范（紧凑自适应，高宽根据内容自然包裹，不上下拉伸）
+.el-dialog {
+  border-radius: var(--x-radius) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16) !important;
+  border: 1px solid var(--x-border) !important;
+  background: var(--x-card) !important;
+  max-width: calc(100vw - 32px) !important;
+  box-sizing: border-box !important;
+  height: auto !important;
+
+  .el-dialog__header {
+    padding: 16px 20px 12px !important;
+    margin-right: 0 !important;
+    border-bottom: 1px solid var(--x-border);
+  }
+  .el-dialog__title {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    color: var(--x-text);
+  }
+  .el-dialog__body {
+    padding: 16px 20px !important;
+  }
+  .el-dialog__footer {
+    padding: 12px 20px 16px !important;
+    border-top: 1px solid var(--x-border);
+  }
+}
+
+@media (max-width: 640px) {
+  .el-dialog {
+    max-width: calc(100vw - 32px) !important;
+    margin: auto !important;
+
+    .el-dialog__header {
+      padding: 14px 16px 10px !important;
+    }
+    .el-dialog__body {
+      padding: 14px 16px !important;
+    }
+    .el-dialog__footer {
+      padding: 10px 16px 14px !important;
+    }
+  }
+}
+
+

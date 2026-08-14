@@ -32,7 +32,7 @@ const (
 // All 返回全部模型，供 AutoMigrate 使用。
 func All() []any {
 	return []any{
-		&User{}, &InvitationCode{},
+		&User{}, &InvitationCode{}, &GiftCard{}, &BalanceLog{},
 		&Server{}, &Inbound{}, &UserInbound{}, &PendingConfig{},
 		&ServerOutbound{}, &ServerRoutingRule{},
 		&Plan{}, &Order{}, &Cert{},

@@ -1,17 +1,50 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { Check, CreditCard, Box, Ticket, ShoppingCart, InfoFilled } from '@element-plus/icons-vue'
-import { createOrder, getMyOrders, getPublicPlans } from '@/api/shop'
+import { computed, onMounted, ref } from 'vue'
+import {
+  Check,
+  Box,
+  Ticket,
+  ShoppingCart,
+  InfoFilled,
+  Wallet,
+} from '@element-plus/icons-vue'
+import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
+import { redeemGiftCard } from '@/api/gift_card'
+import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import type { Order, Plan } from '@/api/types'
+
+const auth = useAuthStore()
 
 const plans = ref<Plan[]>([])
 const orders = ref<Order[]>([])
 const loading = ref(false)
-const buyingId = ref<number | null>(null)
+
+// 结账收银台
+const checkoutOpen = ref(false)
+const selectedPlan = ref<Plan | null>(null)
+const paying = ref(false)
+
+// 收银台内快捷兑换卡密
+const quickRedeemCode = ref('')
+const quickRedeeming = ref(false)
+
+const userBalanceCents = computed(() => auth.user?.balance_cents ?? 0)
+const balanceYuan = computed(() => (userBalanceCents.value / 100).toFixed(2))
+
+const isBalanceSufficient = computed(() => {
+  if (!selectedPlan.value) return false
+  return userBalanceCents.value >= selectedPlan.value.price_cents
+})
+
+const balanceDeficitYuan = computed(() => {
+  if (!selectedPlan.value) return '0.00'
+  const diff = selectedPlan.value.price_cents - userBalanceCents.value
+  return diff > 0 ? (diff / 100).toFixed(2) : '0.00'
+})
 
 const orderStatusMap: Record<string, { type: 'warning' | 'success' | 'info'; text: string }> = {
-  pending: { type: 'warning', text: '待确认' },
+  pending: { type: 'warning', text: '待处理' },
   paid: { type: 'success', text: '已生效' },
   cancelled: { type: 'info', text: '已取消' },
 }
@@ -27,7 +60,7 @@ function fmtGb(gb: number) {
 async function load() {
   loading.value = true
   try {
-    const [p, o] = await Promise.all([getPublicPlans(), getMyOrders()])
+    const [p, o] = await Promise.all([getPublicPlans(), getMyOrders(), auth.fetchMe()])
     if (p.data.code === 0) plans.value = p.data.data.items
     if (o.data.code === 0) orders.value = o.data.data.items
   } catch (e) {
@@ -38,31 +71,77 @@ async function load() {
 }
 onMounted(load)
 
-async function buy(plan: Plan) {
-  buyingId.value = plan.id
+function openCheckout(plan: Plan) {
+  selectedPlan.value = plan
+  quickRedeemCode.value = ''
+  checkoutOpen.value = true
+}
+
+// 快捷卡密充值
+async function handleQuickRedeem() {
+  const code = quickRedeemCode.value.trim()
+  if (!code) {
+    ElMessage.warning('请输入充值卡密')
+    return
+  }
+  quickRedeeming.value = true
   try {
-    const { data } = await createOrder(plan.id)
+    const { data } = await redeemGiftCard(code)
     if (data.code === 0) {
-      ElMessage.success('下单成功！请按提示完成线下转账，管理员确认后自动生效')
-      load()
+      ElMessage.success(`充值成功！已到账 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
+      quickRedeemCode.value = ''
+      await auth.fetchMe()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '下单失败'))
+    ElMessage.error(errMsg(e, '兑换失败'))
   } finally {
-    buyingId.value = null
+    quickRedeeming.value = false
+  }
+}
+
+// 确认结账支付
+async function confirmPay() {
+  if (!selectedPlan.value) return
+  paying.value = true
+  try {
+    const { data } = await payOrderByBalance(selectedPlan.value.id)
+    if (data.code === 0) {
+      ElMessage.success('🎉 购买成功！套餐已即时开通生效')
+      checkoutOpen.value = false
+      await Promise.all([load(), auth.fetchMe()])
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '支付失败'))
+  } finally {
+    paying.value = false
   }
 }
 </script>
 
 <template>
   <div class="x-client-body" v-loading="loading">
-    <!-- 头部横幅 -->
-    <div class="shop-hero">
-      <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅套餐与增值服务</div>
-      <h1 class="shop-title">套餐商店</h1>
-      <p class="shop-desc">高速节点无缝中转，4K 极速秒开，全平台 Clash / Mihomo 客户端即插即用。</p>
+    <!-- 头部横幅与用户余额卡 -->
+    <div class="shop-header-row">
+      <div class="shop-hero">
+        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅套餐与增值服务</div>
+        <h1 class="shop-title">套餐商店</h1>
+        <p class="shop-desc">高速节点无缝中转，4K 极速秒开，全平台 Clash / Mihomo 客户端即插即用。</p>
+      </div>
+
+      <div class="shop-wallet-badge">
+        <div class="wallet-icon"><el-icon><Wallet /></el-icon></div>
+        <div class="wallet-text">
+          <span class="wallet-lbl">账户可用余额</span>
+          <span class="wallet-val cell-mono">¥ {{ balanceYuan }}</span>
+        </div>
+        <router-link to="/account">
+          <el-button size="small" type="primary" plain style="margin-left: 8px">充值</el-button>
+        </router-link>
+      </div>
     </div>
 
     <!-- 定价方案网格 -->
@@ -113,8 +192,7 @@ async function buy(plan: Plan) {
             size="large"
             class="buy-btn"
             :class="{ 'glow-btn': idx === 0 }"
-            :loading="buyingId === p.id"
-            @click="buy(p)"
+            @click="openCheckout(p)"
           >
             立即订购
           </el-button>
@@ -127,16 +205,10 @@ async function buy(plan: Plan) {
       </div>
     </div>
 
-    <!-- 支付与转账提示 -->
-    <div class="x-pill-note" style="margin-top: 24px">
-      <el-icon style="font-size: 18px"><CreditCard /></el-icon>
-      <span>下单后请按提示完成付款/线下转账，管理员确认收款后套餐将自动充值到账并即时生效。</span>
-    </div>
-
     <!-- 我的订单记录 -->
-    <div class="x-card" style="margin-top: 20px">
+    <div class="x-card" style="margin-top: 24px">
       <div class="x-card-head">
-        <span><el-icon><Box /></el-icon>&nbsp;我的订单记录</span>
+        <span><el-icon><Box /></el-icon>&nbsp;我的订购记录</span>
       </div>
       <div v-if="orders.length">
         <div v-for="o in orders" :key="o.id" class="x-order-item">
@@ -145,6 +217,9 @@ async function buy(plan: Plan) {
             <div class="x-order-name">{{ o.plan_name }}</div>
             <div class="x-order-sub">
               <code class="cell-mono">{{ o.order_no }}</code> · {{ String(o.created_at).replace('T', ' ').slice(0, 16) }}
+              <el-tag size="small" type="success" effect="plain" style="margin-left: 6px">
+                余额直付
+              </el-tag>
             </div>
           </div>
           <div style="text-align: right">
@@ -159,12 +234,107 @@ async function buy(plan: Plan) {
         <el-icon><Ticket /></el-icon>&nbsp;暂无订单记录
       </div>
     </div>
+
+    <!-- 结账收银台弹窗 -->
+    <el-dialog
+      v-model="checkoutOpen"
+      title="🛒 结算收银台"
+      width="420px"
+      align-center
+      :append-to-body="true"
+    >
+      <div v-if="selectedPlan" class="checkout-body">
+        <!-- 选购商品概要 -->
+        <div class="checkout-plan-card">
+          <div>
+            <div class="cp-title">{{ selectedPlan.name }}</div>
+            <div class="cp-sub">{{ fmtGb(selectedPlan.traffic_gb) }} 高速流量 · 有效期 {{ selectedPlan.duration_days }} 天</div>
+          </div>
+          <div class="cp-price cell-mono">
+            {{ fmtMoney(selectedPlan.price_cents) }}
+          </div>
+        </div>
+
+        <!-- 账户余额支付方式 -->
+        <div class="pay-method-wrap">
+          <div class="pay-option active">
+            <div class="opt-info">
+              <div class="opt-title">
+                <el-icon color="#6366f1"><Wallet /></el-icon>&nbsp;账户余额支付
+                <el-tag size="small" type="success" effect="dark" style="margin-left: 6px; font-size: 10px">即时开通</el-tag>
+              </div>
+              <div class="opt-desc cell-mono">
+                当前可用余额: <b>¥ {{ balanceYuan }}</b>
+              </div>
+            </div>
+          </div>
+
+          <!-- 余额不足时的卡密充值辅助栏 -->
+          <div v-if="!isBalanceSufficient" class="deficit-topup-box">
+            <div class="deficit-msg">
+              <el-icon color="#f59e0b"><InfoFilled /></el-icon>
+              <span>余额不足，还差 <b>¥ {{ balanceDeficitYuan }}</b>。可直接输入充值卡密：</span>
+            </div>
+            <div class="topup-input-row">
+              <el-input
+                v-model="quickRedeemCode"
+                placeholder="输入礼品卡卡密 GIFT-..."
+                class="cell-mono"
+                size="small"
+                @keyup.enter="handleQuickRedeem"
+              />
+              <el-button
+                type="primary"
+                size="small"
+                :loading="quickRedeeming"
+                @click="handleQuickRedeem"
+              >
+                充值
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="checkout-footer">
+          <div class="total-bar">
+            <span>实付金额:</span>
+            <span class="total-amount cell-mono">
+              {{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥ 0.00' }}
+            </span>
+          </div>
+          <div class="footer-btn-group">
+            <el-button @click="checkoutOpen = false">取消</el-button>
+            <el-button
+              type="primary"
+              :disabled="!isBalanceSufficient"
+              :loading="paying"
+              @click="confirmPay"
+            >
+              确认余额支付
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped lang="scss">
-.shop-hero {
+.shop-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
   margin-bottom: 24px;
+}
+
+.shop-hero {
+  flex: 1;
+  min-width: 280px;
+
   .shop-badge {
     display: inline-flex;
     align-items: center;
@@ -186,6 +356,43 @@ async function buy(plan: Plan) {
     color: var(--x-text-2);
     font-size: 13.5px;
     margin-top: 6px;
+  }
+}
+
+.shop-wallet-badge {
+  background: var(--x-card);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--x-shadow);
+
+  .wallet-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--x-primary-soft);
+    color: var(--x-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  .wallet-text {
+    display: flex;
+    flex-direction: column;
+  }
+  .wallet-lbl {
+    font-size: 11px;
+    color: var(--x-text-3);
+  }
+  .wallet-val {
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--x-text);
   }
 }
 
@@ -369,6 +576,139 @@ async function buy(plan: Plan) {
   font-weight: 700;
   font-size: 15px;
   color: var(--x-text);
+}
+
+/* 结算收银台 */
+.checkout-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.checkout-plan-card {
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .cp-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--x-text);
+  }
+  .cp-sub {
+    font-size: 12px;
+    color: var(--x-text-3);
+    margin-top: 2px;
+  }
+  .cp-price {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--x-text);
+  }
+}
+
+.pay-method-wrap {
+  .pay-option {
+    border: 1.5px solid var(--x-primary);
+    background: var(--x-primary-soft);
+    border-radius: var(--x-radius);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .opt-info {
+      flex: 1;
+      .opt-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--x-text);
+        display: flex;
+        align-items: center;
+      }
+      .opt-desc {
+        font-size: 12px;
+        color: var(--x-text-3);
+        margin-top: 2px;
+      }
+    }
+  }
+
+  .deficit-topup-box {
+    background: #fffbeb;
+    border: 1px dashed #fde68a;
+    border-radius: var(--x-radius);
+    padding: 10px 14px;
+    margin-top: 8px;
+
+    .deficit-msg {
+      font-size: 12px;
+      color: #92400e;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .topup-input-row {
+      display: flex;
+      gap: 8px;
+    }
+  }
+}
+
+.checkout-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+
+  .total-bar {
+    font-size: 13px;
+    color: var(--x-text-2);
+    display: flex;
+    align-items: baseline;
+    .total-amount {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--x-primary);
+      margin-left: 6px;
+    }
+  }
+
+  .footer-btn-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .checkout-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+
+    .total-bar {
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    .footer-btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1.5fr;
+      width: 100%;
+      gap: 8px;
+
+      .el-button {
+        margin: 0 !important;
+      }
+    }
+  }
 }
 
 .muted {

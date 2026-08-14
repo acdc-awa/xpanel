@@ -9,6 +9,7 @@ import {
   Connection,
   Calendar,
   CircleCheckFilled,
+  Wallet,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { buildSubscribeUrl } from '@/config/site'
@@ -18,6 +19,11 @@ import { mockNotices, mockServers } from '@/mock/data'
 
 const auth = useAuthStore()
 const loading = ref(false)
+
+const balanceYuan = computed(() => {
+  const cents = auth.user?.balance_cents ?? 0
+  return (cents / 100).toFixed(2)
+})
 
 const planLabel = computed(() => (auth.user?.plan_id ? `已购套餐 #${auth.user.plan_id}` : '暂无生效套餐'))
 const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
@@ -100,8 +106,13 @@ const statusText: Record<string, { dot: string; text: string }> = {
             <div class="hero-plan-badge">
               <el-icon><CircleCheckFilled /></el-icon>&nbsp;{{ planLabel }}
             </div>
-            <div v-if="daysLeft !== null" class="hero-days-tag">
-              <el-icon><Calendar /></el-icon>&nbsp;剩余 {{ daysLeft }} 天到期
+            <div class="hero-top-right">
+              <div class="hero-wallet-tag">
+                <el-icon><Wallet /></el-icon>&nbsp;余额 ¥ {{ balanceYuan }}
+              </div>
+              <div v-if="daysLeft !== null" class="hero-days-tag">
+                <el-icon><Calendar /></el-icon>&nbsp;剩余 {{ daysLeft }} 天到期
+              </div>
             </div>
           </div>
 
@@ -256,6 +267,26 @@ const statusText: Record<string, { dot: string; text: string }> = {
     border-radius: 20px;
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .hero-top-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .hero-wallet-tag {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(254, 240, 138, 0.25);
+    border: 1px solid rgba(254, 240, 138, 0.4);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fef08a;
+    font-family: var(--x-font-mono);
   }
 
   .hero-days-tag {

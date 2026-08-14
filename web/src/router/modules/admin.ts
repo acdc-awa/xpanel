@@ -61,10 +61,16 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '用户管理' },
       },
       {
+        path: 'gift-cards',
+        name: 'admin.gift-cards',
+        component: () => import('@/views/admin/gift_cards.vue'),
+        meta: { title: '礼品卡' },
+      },
+      {
         path: 'orders',
         name: 'admin.orders',
         component: () => import('@/views/admin/orders.vue'),
-        meta: { title: '订单确认' },
+        meta: { title: '订单记录' },
       },
       {
         path: 'invitations',

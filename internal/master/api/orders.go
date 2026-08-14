@@ -12,22 +12,23 @@ import (
 )
 
 type orderView struct {
-	ID          uint64     `json:"id"`
-	OrderNo     string     `json:"order_no"`
-	UserID      uint64     `json:"user_id"`
-	Username    string     `json:"username"`
-	PlanID      uint64     `json:"plan_id"`
-	PlanName    string     `json:"plan_name"`
-	AmountCents int64      `json:"amount_cents"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	PaidAt      *time.Time `json:"paid_at"`
+	ID            uint64     `json:"id"`
+	OrderNo       string     `json:"order_no"`
+	UserID        uint64     `json:"user_id"`
+	Username      string     `json:"username"`
+	PlanID        uint64     `json:"plan_id"`
+	PlanName      string     `json:"plan_name"`
+	AmountCents   int64      `json:"amount_cents"`
+	PaymentMethod string     `json:"payment_method"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	PaidAt        *time.Time `json:"paid_at"`
 }
 
 func (d *Deps) toOrderView(o *models.Order) orderView {
 	v := orderView{
 		ID: o.ID, OrderNo: o.OrderNo, UserID: o.UserID, PlanID: o.PlanID,
-		AmountCents: o.AmountCents, Status: o.Status, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
+		AmountCents: o.AmountCents, PaymentMethod: o.PaymentMethod, Status: o.Status, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
 	}
 	var user models.User
 	if err := d.DB.First(&user, o.UserID).Error; err == nil {

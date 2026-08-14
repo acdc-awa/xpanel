@@ -34,6 +34,7 @@ func (d *Deps) Me(c *gin.Context) {
 		"status":          user.Status,
 		"plan_id":         user.PlanID,
 		"expire_at":       user.ExpireAt,
+		"balance_cents":   user.BalanceCents,
 		"subscribe_token": user.SubscribeToken,
 		"created_at":      user.CreatedAt,
 		"up_bytes":        up,

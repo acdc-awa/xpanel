@@ -95,13 +95,14 @@ type Plan struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-// Order 订单（人工确认制：pending → paid / cancelled）。
+// Order 订单（人工确认制 / 余额直付：pending → paid / cancelled）。
 type Order struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
 	OrderNo        string     `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
 	UserID         uint64     `gorm:"index;not null" json:"user_id"`
 	PlanID         uint64     `gorm:"index;not null" json:"plan_id"`
 	AmountCents    int64      `gorm:"not null" json:"amount_cents"`
+	PaymentMethod  string     `gorm:"size:32;default:manual;index" json:"payment_method"` // balance / manual
 	Status         string     `gorm:"size:16;default:pending;index" json:"status"`
 	ConfirmAdminID uint64     `gorm:"index" json:"confirm_admin_id"`
 	CreatedAt      time.Time  `json:"created_at"`

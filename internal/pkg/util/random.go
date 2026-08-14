@@ -36,6 +36,16 @@ func NewUUID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
+// NewGiftCardCode 生成礼品卡卡密（形如 GIFT-XXXX-XXXX-XXXX-XXXX）。
+func NewGiftCardCode() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	h := hex.EncodeToString(b)
+	return fmt.Sprintf("GIFT-%s-%s-%s-%s", h[0:4], h[4:8], h[8:12], h[12:16]), nil
+}
+
 // RandomID 生成短随机 ID（请求配对用，n 字节 hex）。
 func RandomID(n int) string {
 	s, err := RandomHex(n)
@@ -45,3 +55,4 @@ func RandomID(n int) string {
 	}
 	return s
 }
+

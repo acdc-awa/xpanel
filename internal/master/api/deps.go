@@ -20,7 +20,8 @@ type Deps struct {
 	Traffic *services.TrafficService
 	Order   *services.OrderService
 	Audit   *services.AuditService
-	Config  *services.ConfigService
-	Site    *services.SiteService
-	Backup  *backup.Service
+	Config   *services.ConfigService
+	Site     *services.SiteService
+	GiftCard *services.GiftCardService
+	Backup   *backup.Service
 }

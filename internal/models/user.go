@@ -19,11 +19,12 @@ type User struct {
 	SubscribeToken string     `gorm:"size:64;uniqueIndex" json:"-"`
 	PlanID              uint64     `gorm:"index" json:"plan_id"`
 	ExpireAt            *time.Time `json:"expire_at"`
+	BalanceCents        int64      `gorm:"default:0;not null" json:"balance_cents"`     // 账户余额（分）
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
 	MustChangePwd       bool       `gorm:"default:false" json:"must_change_pwd"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // BeforeCreate 自动设置流量周期起点（首次创建时）。

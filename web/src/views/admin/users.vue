@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Ticket, Delete, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Ticket, Delete, CopyDocument, Wallet } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getUsers, createInvitations, getUserInbounds, setUserInbounds, createUser, toggleUser, deleteUser } from '@/api/admin'
+import { adjustUserBalance } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { AdminUser, InboundItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
@@ -13,6 +14,52 @@ const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
+
+// ---- 调整余额 ----
+const adjustOpen = ref(false)
+const adjustUser = ref<AdminUser | null>(null)
+const adjustForm = reactive({
+  delta_yuan: 0,
+  remark: '',
+})
+const adjusting = ref(false)
+
+function openAdjust(row: any) {
+  adjustUser.value = row
+  adjustForm.delta_yuan = 0
+  adjustForm.remark = ''
+  adjustOpen.value = true
+}
+
+async function submitAdjust() {
+  if (!adjustUser.value) return
+  if (adjustForm.delta_yuan === 0) {
+    ElMessage.warning('变动金额不能为 0')
+    return
+  }
+  adjusting.value = true
+  try {
+    const payload = {
+      amount_cents: Math.round(adjustForm.delta_yuan * 100),
+      remark: adjustForm.remark || undefined,
+    }
+    const { data } = await adjustUserBalance(adjustUser.value.id, payload)
+    if (data.code === 0) {
+      ElMessage.success('余额调整成功')
+      adjustOpen.value = false
+      if (current.value && current.value.id === adjustUser.value.id) {
+        current.value.balance_cents = data.data.new_balance
+      }
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '调账失败'))
+  } finally {
+    adjusting.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -244,6 +291,13 @@ async function copyCodes() {
             <span class="muted">{{ row.plan_id ? `#${row.plan_id}` : '—' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="余额" width="110">
+          <template #default="{ row }">
+            <span class="cell-mono" style="font-weight: 700; color: var(--x-text)">
+              ¥ {{ ((row.balance_cents || 0) / 100).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="剩余流量" min-width="160">
           <template #default="{ row }">
             <div v-if="row.total_bytes > 0" class="usage-cell">
@@ -261,10 +315,13 @@ async function copyCodes() {
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text type="primary" title="查看用户详情并管理入站授权" @click="openDetail(row)">
               <el-icon><Setting /></el-icon>&nbsp;详情/授权
+            </el-button>
+            <el-button size="small" text type="success" title="调整用户账户余额" @click="openAdjust(row)">
+              <el-icon><Wallet /></el-icon>&nbsp;调账
             </el-button>
             <el-button
               size="small"
@@ -307,6 +364,13 @@ async function copyCodes() {
           </div>
           <div class="row"><span class="k">角色</span><span class="v">{{ current.role === 'admin' ? '管理员' : '用户' }}</span></div>
           <div class="row"><span class="k">套餐</span><span class="v">{{ current.plan_id ? `#${current.plan_id}` : '—' }}</span></div>
+          <div class="row">
+            <span class="k">账户余额</span>
+            <span class="v cell-mono" style="font-weight: 700; color: var(--x-primary)">
+              ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
+              <el-button size="small" text type="primary" style="margin-left: 6px" @click="openAdjust(current)">调账</el-button>
+            </span>
+          </div>
           <div class="row"><span class="k">到期时间</span><span class="v">{{ fmtTime(current.expire_at) }}</span></div>
           <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>
         </div>
@@ -402,6 +466,28 @@ async function copyCodes() {
           <el-button @click="invOpen = false; generated = []">完成</el-button>
           <el-button type="primary" @click="copyCodes">复制全部</el-button>
         </template>
+      </template>
+    </el-dialog>
+
+    <!-- 调整余额弹窗 -->
+    <el-dialog v-model="adjustOpen" title="调整用户余额" width="440px">
+      <div v-if="adjustUser" style="margin-bottom: 16px; background: var(--x-bg); padding: 12px 14px; border-radius: var(--x-radius); border: 1px solid var(--x-border)">
+        <div>目标用户: <b style="color: var(--x-text)">{{ adjustUser.username }}</b> <code class="cell-mono">#{{ adjustUser.id }}</code></div>
+        <div style="margin-top: 6px; color: var(--x-text-3); font-size: 13px">
+          当前余额: <span class="cell-mono" style="font-weight: 700; color: var(--x-primary); font-size: 15px">¥ {{ (((adjustUser.balance_cents || 0) / 100)).toFixed(2) }}</span>
+        </div>
+      </div>
+      <el-form label-position="top">
+        <el-form-item label="调整金额（元，增加填正数，扣减填负数，如 50 或 -20）">
+          <el-input-number v-model="adjustForm.delta_yuan" :precision="2" :step="10" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="调账原因 / 备注（写入账本流水）">
+          <el-input v-model="adjustForm.remark" placeholder="如 活动赠送 / 线下补款 / 异常退款" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="adjustOpen = false">取消</el-button>
+        <el-button type="primary" :loading="adjusting" @click="submitAdjust">确认调账</el-button>
       </template>
     </el-dialog>
   </div>

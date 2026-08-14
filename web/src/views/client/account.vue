@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   CopyDocument,
-  Key,
   Wallet,
   Promotion,
   Cellphone,
@@ -12,13 +11,17 @@ import {
   User,
   Calendar,
   Lock,
+  Ticket,
+  List,
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { buildSubscribeUrl } from '@/config/site'
 import { changePassword, updateProfile } from '@/api/user'
+import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import { formatBytes } from '@/utils/format'
+import type { BalanceLog } from '@/api/types'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -27,6 +30,18 @@ const email = ref('')
 const createdText = ref('—')
 const qrDataUrl = ref('')
 const qrModalOpen = ref(false)
+
+// 余额 & 卡密兑换
+const redeemCode = ref('')
+const redeeming = ref(false)
+const balanceLogsOpen = ref(false)
+const balanceLogs = ref<BalanceLog[]>([])
+const loadingLogs = ref(false)
+
+const balanceYuan = computed(() => {
+  const cents = auth.user?.balance_cents ?? 0
+  return (cents / 100).toFixed(2)
+})
 
 const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
 const totalBytes = computed(() => auth.user?.total_bytes ?? 0)
@@ -74,6 +89,46 @@ async function refresh() {
   }
 }
 onMounted(refresh)
+
+// 兑换礼品卡
+async function submitRedeem() {
+  const code = redeemCode.value.trim()
+  if (!code) {
+    ElMessage.warning('请输入礼品卡卡密')
+    return
+  }
+  redeeming.value = true
+  try {
+    const { data } = await redeemGiftCard(code)
+    if (data.code === 0) {
+      ElMessage.success(`🎉 充值成功！增加余额 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
+      redeemCode.value = ''
+      await auth.fetchMe()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '兑换失败'))
+  } finally {
+    redeeming.value = false
+  }
+}
+
+// 查看余额流水
+async function openBalanceLogs() {
+  balanceLogsOpen.value = true
+  loadingLogs.value = true
+  try {
+    const { data } = await getMyBalanceLogs(1, 50)
+    if (data.code === 0) {
+      balanceLogs.value = data.data.items
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载流水失败'))
+  } finally {
+    loadingLogs.value = false
+  }
+}
 
 // 资料
 const savingProfile = ref(false)
@@ -152,9 +207,9 @@ function onLogout() {
 <template>
   <div class="x-client-body">
     <div class="x-acct-grid">
-      <!-- 左侧：套餐与订阅 -->
+      <!-- 左侧：用量、钱包与礼品卡充值 -->
       <div>
-        <!-- 套餐用量 Hero 卡片 -->
+        <!-- 账户余额与用量 Hero 卡片 -->
         <div class="acct-hero">
           <div class="acct-hero-top">
             <span class="hero-tag">当前套餐 · {{ planLabel }}</span>
@@ -163,9 +218,18 @@ function onLogout() {
             </span>
           </div>
 
-          <div class="acct-hero-num">
-            <span class="used-val">{{ formatBytes(usedBytes) }}</span>
-            <span class="total-val">/ {{ totalBytes ? formatBytes(totalBytes) : '0 B' }}</span>
+          <div class="acct-hero-stats">
+            <div class="stat-item">
+              <div class="stat-lbl">账户可用余额</div>
+              <div class="stat-money">¥ {{ balanceYuan }}</div>
+            </div>
+            <div class="stat-divider-v" />
+            <div class="stat-item">
+              <div class="stat-lbl">已用 / 总量</div>
+              <div class="stat-traffic">
+                {{ formatBytes(usedBytes) }} <small>/ {{ totalBytes ? formatBytes(totalBytes) : '0 B' }}</small>
+              </div>
+            </div>
           </div>
 
           <div class="acct-progress-bg">
@@ -175,6 +239,33 @@ function onLogout() {
           <div class="acct-plan-meta">
             <span>剩余流量: {{ totalBytes ? formatBytes(Math.max(0, totalBytes - usedBytes)) : '0 B' }}</span>
             <span>到期: {{ expireText }}</span>
+          </div>
+        </div>
+
+        <!-- 礼品卡充值兑换卡片 -->
+        <div class="x-card">
+          <div class="x-card-head">
+            <span><el-icon><Ticket /></el-icon>&nbsp;礼品卡充值余额</span>
+            <el-button text size="small" type="primary" @click="openBalanceLogs">
+              <el-icon><List /></el-icon>&nbsp;余额明细
+            </el-button>
+          </div>
+          <div class="x-card-body">
+            <p class="muted" style="font-size: 13px; margin-bottom: 12px">
+              输入管理员发放或购买的充值卡密（格式如 <code>GIFT-XXXX-XXXX-XXXX-XXXX</code>），充值后余额即时到账，可在套餐商店一键免审核开通套餐。
+            </p>
+            <div class="redeem-box">
+              <el-input
+                v-model="redeemCode"
+                placeholder="请输入礼品卡充值卡密"
+                clearable
+                class="cell-mono"
+                @keyup.enter="submitRedeem"
+              />
+              <el-button type="primary" :loading="redeeming" @click="submitRedeem">
+                立即充值
+              </el-button>
+            </div>
           </div>
         </div>
 
@@ -211,10 +302,6 @@ function onLogout() {
                 <el-icon><Cellphone /></el-icon>&nbsp;手机扫码
               </el-button>
             </div>
-
-            <p class="muted" style="font-size: 12px; margin-top: 14px">
-              💡 导入 Clash / Mihomo / Stash 客户端后即可连接全量节点，用量实时同步。
-            </p>
           </div>
         </div>
       </div>
@@ -273,6 +360,29 @@ function onLogout() {
       </div>
     </div>
 
+    <!-- 余额明细抽屉 -->
+    <el-drawer v-model="balanceLogsOpen" title="💰 账户余额变动明细" size="460px">
+      <div v-loading="loadingLogs">
+        <div v-if="balanceLogs.length" class="log-list">
+          <div v-for="log in balanceLogs" :key="log.id" class="log-item">
+            <div class="log-left">
+              <div class="log-title">{{ log.remark || log.type }}</div>
+              <div class="log-time cell-mono">{{ String(log.created_at).replace('T', ' ').slice(0, 16) }}</div>
+            </div>
+            <div class="log-right">
+              <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
+                {{ log.amount_cents > 0 ? '+' : '' }}¥ {{ (log.amount_cents / 100).toFixed(2) }}
+              </div>
+              <div class="log-balance cell-mono">结余: ¥ {{ (log.balance_after / 100).toFixed(2) }}</div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="muted" style="text-align: center; padding: 40px 0">
+          暂无余额变动记录
+        </div>
+      </div>
+    </el-drawer>
+
     <!-- 扫码弹窗 -->
     <el-dialog v-model="qrModalOpen" title="手机扫码导入订阅" width="320px" append-to-body center>
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
@@ -298,7 +408,7 @@ function onLogout() {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
 
     .hero-tag {
       font-size: 13px;
@@ -318,21 +428,44 @@ function onLogout() {
     }
   }
 
-  .acct-hero-num {
-    font-family: var(--x-font-mono);
-    margin-bottom: 14px;
+  .acct-hero-stats {
     display: flex;
-    align-items: baseline;
-    gap: 6px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
 
-    .used-val {
-      font-size: 26px;
+    .stat-item {
+      flex: 1;
+    }
+
+    .stat-divider-v {
+      width: 1px;
+      height: 32px;
+      background: rgba(255, 255, 255, 0.2);
+      margin: 0 16px;
+    }
+
+    .stat-lbl {
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.75);
+    }
+    .stat-money {
+      font-family: var(--x-font-mono);
+      font-size: 24px;
+      font-weight: 800;
+      color: #fde047;
+      margin-top: 2px;
+    }
+    .stat-traffic {
+      font-family: var(--x-font-mono);
+      font-size: 20px;
       font-weight: 800;
       color: #ffffff;
-    }
-    .total-val {
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.7);
+      margin-top: 2px;
+      small {
+        font-size: 13px;
+        opacity: 0.8;
+      }
     }
   }
 
@@ -357,6 +490,11 @@ function onLogout() {
     opacity: 0.85;
     font-family: var(--x-font-mono);
   }
+}
+
+.redeem-box {
+  display: flex;
+  gap: 10px;
 }
 
 .sub-link-preview {
@@ -397,6 +535,51 @@ function onLogout() {
 
 .glow-btn {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.log-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+
+  .log-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--x-text);
+  }
+  .log-time {
+    font-size: 11.5px;
+    color: var(--x-text-3);
+    margin-top: 2px;
+  }
+
+  .log-amount {
+    font-size: 15px;
+    font-weight: 700;
+    text-align: right;
+    &.plus {
+      color: var(--x-success);
+    }
+    &.minus {
+      color: var(--x-text);
+    }
+  }
+  .log-balance {
+    font-size: 11.5px;
+    color: var(--x-text-3);
+    text-align: right;
+    margin-top: 2px;
+  }
 }
 
 .muted {

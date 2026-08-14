@@ -15,6 +15,7 @@ export interface UserInfo {
   status: number
   plan_id: number
   expire_at: string | null
+  balance_cents?: number
   subscribe_token?: string
   created_at: string
   up_bytes: number
@@ -47,6 +48,7 @@ export interface AdminUser {
   status: number
   plan_id: number
   expire_at: string | null
+  balance_cents?: number
   created_at: string
   up_bytes: number
   down_bytes: number
@@ -77,6 +79,31 @@ export interface CreateInvitationResult {
   codes: string[]
 }
 
+// ===== 礼品卡与账务系统 =====
+export interface GiftCard {
+  id: number
+  code: string
+  name: string
+  face_value_cents: number
+  status: 'unused' | 'used' | 'disabled'
+  used_by: number
+  used_at: string | null
+  expires_at: string | null
+  created_by: number
+  created_at: string
+}
+
+export interface BalanceLog {
+  id: number
+  user_id: number
+  amount_cents: number
+  balance_after: number
+  type: 'recharge_gift_card' | 'order_payment' | 'admin_adjust' | 'refund'
+  related_id: number
+  remark: string
+  created_at: string
+}
+
 // ===== P5 套餐 / 订单 / 审计 =====
 
 export interface Plan {
@@ -101,6 +128,7 @@ export interface Order {
   plan_id: number
   plan_name: string
   amount_cents: number
+  payment_method?: 'balance' | 'manual'
   status: OrderStatus
   created_at: string
   paid_at: string | null
