@@ -68,6 +68,7 @@ func main() {
 	trafficSvc := &services.TrafficService{DB: database}
 	trafficSvc.StartDailyAgg(context.Background())
 	trafficSvc.StartTrafficResetCron(context.Background())
+	trafficSvc.StartRetentionCron(context.Background())
 	orderSvc := &services.OrderService{DB: database}
 	auditSvc := &services.AuditService{DB: database}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
@@ -75,7 +76,7 @@ func main() {
 	giftCardSvc := &services.GiftCardService{DB: database}
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
-	backupSvc, err := backup.New(cfg.DB.DSN, cfg.Backup, auditSvc)
+	backupSvc, err := backup.New(cfg.DB.DSN, cfg.DB.Driver, cfg.Backup, auditSvc)
 	if err != nil {
 		log.Fatalf("初始化备份服务失败: %v", err)
 	}

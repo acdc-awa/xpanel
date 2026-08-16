@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
@@ -37,19 +37,39 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
+	// ISSUE-10：套餐信息一次批量预取，避免逐行查询 plan（用户流量仍按行统计）。
+	planIDs := make([]uint64, 0, len(users))
+	for _, u := range users {
+		if u.PlanID > 0 {
+			planIDs = append(planIDs, u.PlanID)
+		}
+	}
+	planMap := make(map[uint64]models.Plan)
+	if len(planIDs) > 0 {
+		var plans []models.Plan
+		if err := d.DB.Where("id IN ?", planIDs).Find(&plans).Error; err == nil {
+			for _, p := range plans {
+				planMap[p.ID] = p
+			}
+		}
+	}
+
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
 		up, down, _ := d.Traffic.UserUsed(u.ID)
 		used := up + down
 		totalBytes := int64(0)
-		if u.PlanID > 0 {
-			var plan models.Plan
-			if err := d.DB.First(&plan, u.PlanID).Error; err == nil && plan.Enabled {
-				totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+		effectiveGroupID := u.PermissionGroupID
+		effectiveLimit, isCustomLimit := 0, false
+		if u.DeviceLimit > 0 {
+			effectiveLimit, isCustomLimit = u.DeviceLimit, true
+		} else if plan, ok := planMap[u.PlanID]; ok && plan.Enabled {
+			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+			effectiveLimit = plan.DeviceLimit
+			if effectiveGroupID == 0 {
+				effectiveGroupID = plan.PermissionGroupID
 			}
 		}
-		effectiveGroupID := services.UserEffectiveGroupID(d.DB, &u)
-		effectiveLimit, isCustomLimit := services.UserEffectiveDeviceLimit(d.DB, &u)
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"uuid": u.UUID,
@@ -120,6 +140,29 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"codes": codeStrs})
+}
+
+// AdminRevokeInvitation DELETE /api/v1/admin/invitations/:id —— 作废未使用的邀请码（ISSUE-17）。
+func (d *Deps) AdminRevokeInvitation(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法邀请码 ID")
+		return
+	}
+	var inv models.InvitationCode
+	if err := d.DB.First(&inv, id).Error; err != nil {
+		util.Fail(c, 404, "邀请码不存在")
+		return
+	}
+	if inv.Status != models.InviteUnused {
+		util.BadRequest(c, "仅未使用的邀请码可作废")
+		return
+	}
+	if err := d.DB.Model(&inv).Update("status", models.InviteDisabled).Error; err != nil {
+		util.ServerError(c, "作废失败")
+		return
+	}
+	util.OK(c, gin.H{"id": id, "status": models.InviteDisabled})
 }
 
 // AdminCreateUser POST /api/v1/admin/users —— 管理员手动创建用户。

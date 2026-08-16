@@ -114,6 +114,8 @@ func (s *OTPService) Confirm(userID uint64, secret, code string) (backupCodes []
 		"totp_failed_count": 0,
 		"totp_locked_until": nil,
 		"backup_codes":      string(raw),
+		// ISSUE-02 收尾：开启 TOTP 后立即吊销开启前的旧 access/refresh（重新登录换取 TwoFA 令牌）。
+		"token_version":    gorm.Expr("token_version + 1"),
 	}).Error; err != nil {
 		return nil, err
 	}
@@ -132,6 +134,8 @@ func (s *OTPService) Disable(userID uint64) error {
 		"totp_failed_count": 0,
 		"totp_locked_until": nil,
 		"backup_codes":      "",
+		// 解绑 TOTP 同样吊销旧会话，防止关闭 TOTP 后旧的非 2FA access 重新可用。
+		"token_version":     gorm.Expr("token_version + 1"),
 	}).Error
 }
 

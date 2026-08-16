@@ -73,3 +73,13 @@ func TestBackupEnvOverride(t *testing.T) {
 		t.Errorf("dir = %q", cfg.Backup.Dir)
 	}
 }
+
+
+func TestAppEnvOverride(t *testing.T) {
+	t.Setenv("APP_ENV", "prod")
+	cfg := Default()
+	cfg.applyEnv()
+	if cfg.App.Env != "prod" {
+		t.Errorf("APP_ENV 应覆盖为 prod, got %q", cfg.App.Env)
+	}
+}

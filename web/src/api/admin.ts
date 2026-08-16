@@ -107,6 +107,10 @@ export function createInvitations(count: number, expires?: string) {
   })
 }
 
+export function revokeInvitation(id: number) {
+  return http.delete<ApiResp<{ id: number; status: number }>>(`/admin/invitations/${id}`)
+}
+
 // ===== P1 节点通道：服务器管理 =====
 
 export interface ServerItem {

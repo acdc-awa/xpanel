@@ -34,7 +34,7 @@ func TestSnapshotCreatesValidBackup(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
 	cfg := configForTest(dir)
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSnapshotQuotedPath(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
 	cfg := configForTest(filepath.Join(dir, "back'ups"))
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestSnapshotQuotedPath(t *testing.T) {
 func TestSnapshotUsesProvidedTime(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
-	svc, err := New(dsn, configForTest(dir), nil)
+	svc, err := New(dsn, "sqlite", configForTest(dir), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRotateKeepsNewest(t *testing.T) {
 	dsn, _ := setupDB(t, dir)
 	cfg := configForTest(dir)
 	cfg.Keep = 2
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestRotateKeepsNewest(t *testing.T) {
 func TestListSortedDesc(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
-	svc, err := New(dsn, configForTest(dir), nil)
+	svc, err := New(dsn, "sqlite", configForTest(dir), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestListSortedDesc(t *testing.T) {
 func TestOpenFileRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
-	svc, err := New(dsn, configForTest(dir), nil)
+	svc, err := New(dsn, "sqlite", configForTest(dir), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

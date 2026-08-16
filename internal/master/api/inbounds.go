@@ -145,6 +145,30 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "该服务器上已存在同名入站标签")
 		return
 	}
+	if req.Type != "" && !validInboundType(req.Type) {
+		util.BadRequest(c, "入站类型仅支持 user / relay / idle")
+		return
+	}
+	if req.Flow != "" && !validInboundFlow(req.Flow) {
+		util.BadRequest(c, "入站流控仅支持空（自动）/ xtls-rprx-vision / none")
+		return
+	}
+	if req.ShareAddrStrategy != "" && !validShareAddrStrategy(req.ShareAddrStrategy) {
+		util.BadRequest(c, "分享地址策略仅支持 node / listen / custom")
+		return
+	}
+	if req.SharePort < 0 || req.SharePort > 65535 {
+		util.BadRequest(c, "分享端口需在 0-65535 之间（0=使用入站端口）")
+		return
+	}
+	if req.Ratio < 0 {
+		util.BadRequest(c, "流量倍率不能为负数")
+		return
+	}
+	if req.TotalGB < 0 {
+		util.BadRequest(c, "流量上限不能为负数（0=不限）")
+		return
+	}
 	if req.CertID != nil && *req.CertID != 0 {
 		var cert models.Cert
 		if err := d.DB.First(&cert, *req.CertID).Error; err != nil {
@@ -262,6 +286,35 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
 		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless/vmess/trojan/ss）")
+		return
+	}
+	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
+	if req.Port != nil && (*req.Port < 1 || *req.Port > 65535) {
+		util.BadRequest(c, "端口需在 1-65535 之间")
+		return
+	}
+	if req.Type != nil && !validInboundType(*req.Type) {
+		util.BadRequest(c, "入站类型仅支持 user / relay / idle")
+		return
+	}
+	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {
+		util.BadRequest(c, "入站流控仅支持空（自动）/ xtls-rprx-vision / none")
+		return
+	}
+	if req.ShareAddrStrategy != nil && *req.ShareAddrStrategy != "" && !validShareAddrStrategy(*req.ShareAddrStrategy) {
+		util.BadRequest(c, "分享地址策略仅支持 node / listen / custom")
+		return
+	}
+	if req.SharePort != nil && (*req.SharePort < 0 || *req.SharePort > 65535) {
+		util.BadRequest(c, "分享端口需在 0-65535 之间（0=使用入站端口）")
+		return
+	}
+	if req.Ratio != nil && *req.Ratio < 0 {
+		util.BadRequest(c, "流量倍率不能为负数")
+		return
+	}
+	if req.TotalGB != nil && *req.TotalGB < 0 {
+		util.BadRequest(c, "流量上限不能为负数（0=不限）")
 		return
 	}
 	if req.CertID != nil && *req.CertID != 0 {
@@ -452,6 +505,26 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 func validInboundProtocol(p string) bool {
 	switch p {
 	case "vless", "vmess", "trojan", "ss":
+		return true
+	}
+	return false
+}
+
+func validInboundType(t string) bool {
+	switch t {
+	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeIdle:
+		return true
+	}
+	return false
+}
+
+func validInboundFlow(f string) bool {
+	return f == "xtls-rprx-vision" || f == "none"
+}
+
+func validShareAddrStrategy(s string) bool {
+	switch s {
+	case "node", "listen", "custom":
 		return true
 	}
 	return false

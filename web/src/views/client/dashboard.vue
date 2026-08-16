@@ -73,7 +73,7 @@ const subscribeUrl = computed(() => {
 
 onMounted(async () => {
   loadServers()
-  if (auth.user) return
+  // ISSUE-16：登录响应可能只是浅层摘要，首页挂载始终拉取 /user/me，保证首屏数据与刷新后一致。
   loading.value = true
   try {
     await auth.fetchMe()

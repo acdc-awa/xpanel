@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -79,9 +80,6 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		return
 	}
 	d.TriggerUserChange()
-
-	d.TriggerUserChange()
-
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})
 }
 
@@ -118,9 +116,33 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 			return
 		}
 	}
+	// ISSUE-13：更新接口语义校验（创建接口由 binding 兜底，更新指针字段无 binding）。
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" || len(name) > 64 {
+			util.BadRequest(c, "套餐名称需为 1-64 字符")
+			return
+		}
+	}
+	if req.PriceCents != nil && *req.PriceCents < 0 {
+		util.BadRequest(c, "价格不能为负数")
+		return
+	}
+	if req.TrafficGB != nil && *req.TrafficGB < 1 {
+		util.BadRequest(c, "套餐流量至少为 1GB")
+		return
+	}
+	if req.DurationDays != nil && *req.DurationDays < 1 {
+		util.BadRequest(c, "套餐时长至少为 1 天")
+		return
+	}
+	if req.DeviceLimit != nil && *req.DeviceLimit < 0 {
+		util.BadRequest(c, "设备限制不能为负数（0=不限）")
+		return
+	}
 	updates := map[string]any{}
 	if req.Name != nil {
-		updates["name"] = *req.Name
+		updates["name"] = strings.TrimSpace(*req.Name)
 	}
 	if req.PriceCents != nil {
 		updates["price_cents"] = *req.PriceCents
@@ -145,6 +167,7 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 			util.ServerError(c, "更新失败")
 			return
 		}
+		d.TriggerUserChange()
 	}
 	d.DB.First(&plan, id)
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})

@@ -3,6 +3,7 @@ package db
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -12,6 +13,15 @@ import (
 
 	"github.com/zhx/xray-panel/internal/config"
 )
+
+// sqliteDSN 追加 busy_timeout（ISSUE-15），并发写冲突时等待而不是立刻返回 database is locked。
+func sqliteDSN(dsn string) string {
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_pragma=busy_timeout(5000)"
+}
 
 // Open 按配置打开数据库连接，返回 *gorm.DB。
 func Open(cfg *config.DB) (*gorm.DB, error) {
@@ -24,7 +34,7 @@ func Open(cfg *config.DB) (*gorm.DB, error) {
 	switch cfg.Driver {
 	case "sqlite":
 		// glebarez/sqlite 为纯 Go 实现，无需 cgo；生产换 mysql 仅需改配置。
-		dialector = sqlite.Open(cfg.DSN)
+		dialector = sqlite.Open(sqliteDSN(cfg.DSN))
 	case "mysql":
 		dialector = mysql.Open(cfg.DSN)
 	default:
@@ -37,8 +47,14 @@ func Open(cfg *config.DB) (*gorm.DB, error) {
 	}
 	sqlDB, err := db.DB()
 	if err == nil {
-		sqlDB.SetMaxIdleConns(10)
-		sqlDB.SetMaxOpenConns(100)
+		if cfg.Driver == "sqlite" {
+			// SQLite 单写者：连接池收敛为 1，配合 busy_timeout 避免并发写直接报 database is locked。
+			sqlDB.SetMaxIdleConns(1)
+			sqlDB.SetMaxOpenConns(1)
+		} else {
+			sqlDB.SetMaxIdleConns(10)
+			sqlDB.SetMaxOpenConns(100)
+		}
 		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
 	return db, nil

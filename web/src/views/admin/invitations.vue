@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Plus, CopyDocument, Refresh, Ticket } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { createInvitations, getInvitations, type Invitation } from '@/api/admin'
+import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
 const list = ref<Invitation[]>([])
@@ -53,6 +53,29 @@ async function copyAll() {
   }
 }
 
+async function revoke(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认作废邀请码 ${row.code}？作废后无法注册。`, '作废邀请码', {
+      type: 'warning',
+      confirmButtonText: '作废',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await revokeInvitation(row.id)
+    if (data.code === 0) {
+      ElMessage.success('已作废')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '作废失败'))
+  }
+}
+
 const statusMap: Record<number, { type: 'success' | 'info' | 'danger'; text: string }> = {
   0: { type: 'success', text: '未使用' },
   1: { type: 'info', text: '已使用' },
@@ -93,6 +116,12 @@ function fmtTime(t: string | null) {
         </el-table-column>
         <el-table-column label="创建时间" width="160">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 0" link type="danger" @click="revoke(row)">作废</el-button>
+            <span v-else class="muted">—</span>
+          </template>
         </el-table-column>
       </el-table>
     </BaseCard>

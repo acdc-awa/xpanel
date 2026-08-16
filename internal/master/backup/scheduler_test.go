@@ -14,7 +14,7 @@ func TestStartRunsScheduledSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
 	cfg := config.Backup{Enabled: true, Schedule: "* * * * * *", Keep: 14, Dir: filepath.Join(dir, "backups")} // 每秒
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestStartDisabledNoSchedule(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
 	cfg := config.Backup{Enabled: false, Schedule: "* * * * * *", Keep: 14, Dir: filepath.Join(dir, "backups")}
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestStartInvalidScheduleLogsAndContinues(t *testing.T) {
 	dir := t.TempDir()
 	dsn, _ := setupDB(t, dir)
 	cfg := config.Backup{Enabled: true, Schedule: "not-a-cron", Keep: 14, Dir: filepath.Join(dir, "backups")}
-	svc, err := New(dsn, cfg, nil)
+	svc, err := New(dsn, "sqlite", cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,10 @@ func (s *Service) Start(ctx context.Context) {
 	if !s.enabled {
 		return
 	}
+	if s.driver != "sqlite" {
+		log.Printf("backup: 驱动 %q 暂不支持在线快照，定时备份已禁用（可接入外部 mysqldump）", s.driver)
+		return
+	}
 	c := cron.New(cron.WithParser(cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)))
 	spec := s.schedule
 	if spec == "" {

@@ -37,7 +37,7 @@ func (d *Deps) Register(c *gin.Context) {
 	}
 	d.setAuthCookies(c, access, refresh)
 	util.OK(c, gin.H{
-		"user": userSummary(user),
+		"user": d.userView(user),
 	})
 }
 
@@ -120,8 +120,20 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 }
 
 // finishLogin 签发完整令牌并写入 cookie + 审计。
+// ISSUE-02：TOTP 用户必须签发 TwoFA=true 的完整 access；普通用户签普通 access。
 func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
-	access, refresh, err := d.JWT.GeneratePair(user.ID, user.Role, user.TokenVersion)
+	var access string
+	var err error
+	if user.TotpEnabled {
+		access, err = d.JWT.GenerateVerified(user.ID, user.Role, user.TokenVersion)
+	} else {
+		access, err = d.JWT.Generate(user.ID, user.Role, services.TokenAccess, user.TokenVersion)
+	}
+	if err != nil {
+		util.ServerError(c, "签发令牌失败")
+		return
+	}
+	refresh, err := d.JWT.Generate(user.ID, user.Role, services.TokenRefresh, user.TokenVersion)
 	if err != nil {
 		util.ServerError(c, "签发令牌失败")
 		return
@@ -129,7 +141,7 @@ func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
 	d.Audit.Log("user", user.ID, "auth.login", "登录成功", c.ClientIP())
 	d.setAuthCookies(c, access, refresh)
 	util.OK(c, gin.H{
-		"user": userSummary(user),
+		"user": d.userView(user),
 	})
 }
 

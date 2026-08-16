@@ -19,34 +19,52 @@ func (d *Deps) Me(c *gin.Context) {
 		util.Fail(c, 404, "用户不存在")
 		return
 	}
+	util.OK(c, d.userView(&user))
+}
 
+// userView 构造用户资料视图（登录/注册响应与 /user/me 同源，避免首屏数据失真）。
+// ISSUE-16：补齐余额/流量/订阅 token/设备限制/权限组字段。
+func (d *Deps) userView(user *models.User) gin.H {
 	totalBytes := int64(0)
+	planName := ""
 	if user.PlanID > 0 {
 		var plan models.Plan
 		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled {
 			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+			planName = plan.Name
 		}
 	}
-	up, down, _ := d.Traffic.UserUsed(user.ID)
+	var up, down int64
+	if d.Traffic != nil {
+		up, down, _ = d.Traffic.UserUsed(user.ID)
+	}
+	effectiveGroupID := services.UserEffectiveGroupID(d.DB, user)
+	effectiveLimit, isCustomLimit := services.UserEffectiveDeviceLimit(d.DB, user)
 
-	util.OK(c, gin.H{
-		"id":              user.ID,
-		"username":        user.Username,
-		"email":           user.Email,
-		"role":            user.Role,
-		"status":          user.Status,
-		"plan_id":         user.PlanID,
-		"expire_at":       user.ExpireAt,
-		"balance_cents":   user.BalanceCents,
-		"subscribe_token": user.SubscribeToken,
-		"created_at":      user.CreatedAt,
-		"up_bytes":        up,
-		"down_bytes":      down,
-		"used_bytes":      up + down,
-		"total_bytes":     totalBytes,
-		"must_change_pwd": user.MustChangePwd,
-		"totp_enabled":    user.TotpEnabled,
-	})
+	return gin.H{
+		"id":                     user.ID,
+		"username":               user.Username,
+		"email":                  user.Email,
+		"role":                   user.Role,
+		"status":                 user.Status,
+		"plan_id":                user.PlanID,
+		"plan_name":              planName,
+		"expire_at":              user.ExpireAt,
+		"balance_cents":          user.BalanceCents,
+		"subscribe_token":        user.SubscribeToken,
+		"created_at":             user.CreatedAt,
+		"up_bytes":               up,
+		"down_bytes":             down,
+		"used_bytes":             up + down,
+		"total_bytes":            totalBytes,
+		"must_change_pwd":        user.MustChangePwd,
+		"totp_enabled":           user.TotpEnabled,
+		"device_limit":           user.DeviceLimit,
+		"effective_device_limit": effectiveLimit,
+		"is_custom_device_limit": isCustomLimit,
+		"permission_group_id":    user.PermissionGroupID,
+		"effective_group_id":     effectiveGroupID,
+	}
 }
 
 // UserChangePassword POST /api/v1/user/password —— 修改密码。

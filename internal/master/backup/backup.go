@@ -34,6 +34,7 @@ type BackupInfo struct {
 // Service 备份服务：快照 / 列表 / 轮转（调度器见 scheduler.go）。
 type Service struct {
 	dsn      string
+	driver   string
 	dir      string
 	keep     int
 	enabled  bool
@@ -45,12 +46,15 @@ type Service struct {
 }
 
 // New 创建备份服务；备份目录不存在则创建。
-func New(dsn string, cfg config.Backup, audit *services.AuditService) (*Service, error) {
+// driver 用于 ISSUE-08 路线收口：当前在线快照仅支持 sqlite（VACUUM INTO），
+// MySQL 场景明确报错并禁用定时备份，避免误导性的驱动错误。
+func New(dsn, driver string, cfg config.Backup, audit *services.AuditService) (*Service, error) {
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
 		return nil, fmt.Errorf("创建备份目录失败: %w", err)
 	}
 	return &Service{
 		dsn:      dsn,
+		driver:   driver,
 		dir:      cfg.Dir,
 		keep:     cfg.Keep,
 		enabled:  cfg.Enabled,
@@ -68,6 +72,9 @@ func (s *Service) Snapshot() (BackupInfo, error) {
 }
 
 func (s *Service) snapshotLocked() (BackupInfo, error) {
+	if s.driver != "sqlite" {
+		return BackupInfo{}, fmt.Errorf("当前数据库驱动 %q 不支持在线快照（仅 sqlite 支持 VACUUM INTO）；生产路线请使用 SQLite 或外部 mysqldump", s.driver)
+	}
 	ts := s.now()
 	name := ts.Format("panel-20060102-150405.db")
 	dst := filepath.Join(s.dir, name)

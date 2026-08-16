@@ -31,7 +31,7 @@ func newBackupTestEnv(t *testing.T) (*gin.Engine, *backup.Service) {
 	// Windows 下连接池未关闭会锁住 panel.db，导致 t.TempDir 清理失败
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	audit := &services.AuditService{DB: db}
-	svc, err := backup.New(filepath.Join(dir, "panel.db"), config.Backup{Enabled: false, Schedule: "0 3 * * *", Keep: 14, Dir: filepath.Join(dir, "backups")}, audit)
+	svc, err := backup.New(filepath.Join(dir, "panel.db"), "sqlite", config.Backup{Enabled: false, Schedule: "0 3 * * *", Keep: 14, Dir: filepath.Join(dir, "backups")}, audit)
 	if err != nil {
 		t.Fatal(err)
 	}

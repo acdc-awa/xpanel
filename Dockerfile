@@ -35,4 +35,5 @@ RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 EXPOSE 18080
 ENV APP_PORT=18080
+ENV APP_ENV=prod
 CMD ["/app/master", "-config", "/app/configs/config.yaml"]

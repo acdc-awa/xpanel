@@ -309,6 +309,10 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			snap := c.Collector.Snapshot()
+			onlineUsers := 0
+			if c.Stats != nil {
+				onlineUsers = c.Stats.OnlineUsers()
+			}
 			hb := protocol.HeartbeatPayload{
 				CPU:         snap.CPU,
 				Mem:         snap.Mem,
@@ -316,7 +320,7 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 				Disk:        snap.Disk,
 				DiskTotal:   snap.DiskTotal,
 				XrayRunning: c.Xray.IsRunning(),
-				OnlineUsers: 0,
+				OnlineUsers: onlineUsers,
 				RxRate:      snap.RxRate,
 				TxRate:      snap.TxRate,
 				RxBytes:     snap.RxBytes,

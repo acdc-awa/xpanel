@@ -42,6 +42,7 @@ type Inbound struct {
 	Down         int64      `gorm:"default:0" json:"down"`
 	Total        int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
 	TrafficReset string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
+	LastResetDate string    `gorm:"size:10" json:"-"`                           // ISSUE-05：上次清零周期键（YYYY-MM-DD / YYYY-MM），防止同周期重复清零
 	ExpiryTime   *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
 	// 分享地址（订阅专用，与节点监听解耦：四层转发场景监听为内网，订阅给用户的是转发端点）
 	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
@@ -98,7 +99,7 @@ type TrafficLog struct {
 	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:2;index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`
-	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:3" json:"period_start"`
+	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:3;index:idx_traffic_period_start" json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	CreatedAt   time.Time `json:"created_at"`
 }

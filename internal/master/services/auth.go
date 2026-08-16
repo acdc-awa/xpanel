@@ -256,6 +256,13 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string,
 	if user.TokenVersion != claims.Version {
 		return "", ErrInvalidRefresh
 	}
+	if user.Role != claims.Role {
+		return "", ErrInvalidRefresh
+	}
+	// ISSUE-02：TOTP 用户的 access 必须携带 TwoFA 标记，否则刷新出的 access 会被 AuthRequired 拒绝。
+	if user.TotpEnabled {
+		return s.JWT.GenerateVerified(user.ID, user.Role, user.TokenVersion)
+	}
 	return s.JWT.Generate(user.ID, user.Role, TokenAccess, user.TokenVersion)
 }
 

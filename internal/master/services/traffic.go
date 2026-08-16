@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -13,9 +14,26 @@ import (
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 )
 
+// 数据保留与聚合窗口（ISSUE-09）。
+const (
+	aggWindowDays           = 7   // AggDaily 只扫描最近 N 天，覆盖节点补报窗口
+	trafficLogRetentionDays = 90  // traffic_logs 保留天数
+	nodeReportRetentionDays = 30  // node_reports 保留天数
+	auditLogRetentionDays   = 180 // audit_logs 保留天数
+)
+
 // TrafficService 处理节点流量上报与聚合。
 type TrafficService struct {
-	DB *gorm.DB
+	DB  *gorm.DB
+	now func() time.Time // 可注入时钟（测试用）
+}
+
+// nowOrReal 返回当前时间（未注入时钟时用真实时间）。
+func (s *TrafficService) nowOrReal() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 // Save 处理 traffic_report（幂等：同一 (user, inbound, period) 覆盖合并）。
@@ -150,27 +168,45 @@ func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
 	}()
 }
 
+// resetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
+func resetPeriodKey(now time.Time, policy string) string {
+	switch policy {
+	case "daily":
+		return now.Format("2006-01-02")
+	case "weekly":
+		daysFromMonday := (int(now.Weekday()) + 6) % 7 // Monday=0 ... Sunday=6
+		return now.AddDate(0, 0, -daysFromMonday).Format("2006-01-02")
+	case "monthly":
+		return now.Format("2006-01") + "-01"
+	default:
+		return ""
+	}
+}
+
 func (s *TrafficService) resetInboundTraffic() {
 	var inbounds []models.Inbound
 	if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&inbounds).Error; err != nil {
 		return
 	}
-	now := time.Now()
+	now := s.nowOrReal()
 	for _, inb := range inbounds {
-		shouldReset := false
-		switch inb.TrafficReset {
-		case "daily":
-			shouldReset = true // 每 5 分钟 tick 时简单清零，daily 粒度通过日期去重保证
-		case "weekly":
-			shouldReset = now.Weekday() == time.Monday
-		case "monthly":
-			shouldReset = now.Day() == 1
+		key := resetPeriodKey(now, inb.TrafficReset)
+		if key == "" {
+			continue
 		}
-		if shouldReset {
-			_ = s.DB.Model(&inb).Updates(map[string]any{
-				"up":   0,
-				"down": 0,
+		if inb.LastResetDate == key {
+			continue
+		}
+		// 条件更新：只有仍处于旧周期/首次运行时才清零；并发 tick 只有一个能命中。
+		res := s.DB.Model(&models.Inbound{}).
+			Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", inb.ID, key).
+			Updates(map[string]any{
+				"up":              0,
+				"down":            0,
+				"last_reset_date": key,
 			})
+		if res.Error != nil {
+			continue
 		}
 	}
 }
@@ -193,9 +229,11 @@ func (s *TrafficService) StartDailyAgg(ctx context.Context) {
 }
 
 // AggDaily 按 用户×日期 汇总流量到 traffic_daily（upsert）。
+// ISSUE-09：只扫描最近 aggWindowDays 天的 logs，避免全表读入内存重算全部历史。
 func (s *TrafficService) AggDaily() {
 	var logs []models.TrafficLog
-	if err := s.DB.Find(&logs).Error; err != nil {
+	windowStart := s.nowOrReal().AddDate(0, 0, -aggWindowDays)
+	if err := s.DB.Where("period_start >= ?", windowStart).Find(&logs).Error; err != nil {
 		return
 	}
 	type key struct {
@@ -222,6 +260,47 @@ func (s *TrafficService) AggDaily() {
 				"down_bytes": d.DownBytes,
 			})
 		}
+	}
+}
+
+// StartRetentionCron 每天 04:00 清理过期明细数据（ISSUE-09 保留策略）。
+func (s *TrafficService) StartRetentionCron(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if s.nowOrReal().Hour() == 4 {
+					s.runRetention()
+				}
+			}
+		}
+	}()
+}
+
+func (s *TrafficService) runRetention() {
+	now := s.nowOrReal()
+	cutLogs := now.AddDate(0, 0, -trafficLogRetentionDays)
+	cutReports := now.AddDate(0, 0, -nodeReportRetentionDays)
+	cutAudit := now.AddDate(0, 0, -auditLogRetentionDays)
+
+	if res := s.DB.Where("period_start < ?", cutLogs).Delete(&models.TrafficLog{}); res.Error != nil {
+		log.Printf("traffic: 清理 traffic_logs 失败: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Printf("traffic: 清理 %d 条过期 traffic_logs（保留 %d 天）", res.RowsAffected, trafficLogRetentionDays)
+	}
+	if res := s.DB.Where("reported_at < ?", cutReports).Delete(&models.NodeReport{}); res.Error != nil {
+		log.Printf("traffic: 清理 node_reports 失败: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Printf("traffic: 清理 %d 条过期 node_reports（保留 %d 天）", res.RowsAffected, nodeReportRetentionDays)
+	}
+	if res := s.DB.Where("created_at < ?", cutAudit).Delete(&models.AuditLog{}); res.Error != nil {
+		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, auditLogRetentionDays)
 	}
 }
 

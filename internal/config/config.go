@@ -93,6 +93,9 @@ func Load(path string) (*Config, error) {
 
 // applyEnv 用环境变量覆盖关键项（便于容器/部署场景）。
 func (c *Config) applyEnv() {
+	if v := os.Getenv("APP_ENV"); v != "" {
+		c.App.Env = v
+	}
 	if v := os.Getenv("APP_PUBLIC_URL"); v != "" {
 		c.App.PublicURL = v
 	}

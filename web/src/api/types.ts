@@ -14,8 +14,12 @@ export interface UserInfo {
   role: Role
   status: number
   plan_id: number
+  plan_name?: string
   device_limit?: number
   effective_device_limit?: number
+  is_custom_device_limit?: boolean
+  permission_group_id?: number
+  effective_group_id?: number
   expire_at: string | null
   balance_cents?: number
   subscribe_token?: string

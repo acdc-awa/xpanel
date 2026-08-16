@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -11,6 +13,29 @@ import (
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
+
+// validOutboundProtocol 出站协议白名单（与生成器支持范围保持一致）。
+func validOutboundProtocol(p string) bool {
+	switch p {
+	case "freedom", "blackhole", "vless", "socks":
+		return true
+	}
+	return false
+}
+
+// serverOutboundTagExists 校验出站 tag 存在（含模板内置 direct/blocked）。
+func serverOutboundTagExists(db *gorm.DB, serverID uint64, tag string) bool {
+	if tag == "" {
+		return false
+	}
+	var cnt int64
+	db.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", serverID, tag).Count(&cnt)
+	return cnt > 0
+}
+
+func validRuleJSON(raw string) bool {
+	return raw == "" || json.Valid([]byte(raw))
+}
 
 // outboundForm 出站创建/修改表单
 type outboundForm struct {
@@ -123,6 +148,22 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	// ISSUE-13：tag 非空/同服务器唯一、协议白名单。
+	req.Tag = strings.TrimSpace(req.Tag)
+	if req.Tag == "" {
+		util.BadRequest(c, "出站 Tag 不能为空")
+		return
+	}
+	var tagCnt int64
+	d.DB.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", id, req.Tag).Count(&tagCnt)
+	if tagCnt > 0 {
+		util.BadRequest(c, "该服务器上已存在同名出站 Tag")
+		return
+	}
+	if !validOutboundProtocol(req.Protocol) {
+		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks）")
+		return
+	}
 	// Phase T：InboundRef 校验（引用存在 + 无环）+ 目标自动标 relay（记录 PreviousType）
 	if req.InboundRef != nil {
 		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
@@ -217,15 +258,22 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 
 	updates := map[string]any{}
 	if req.Tag != nil {
-		if *req.Tag == "" {
+		tag := strings.TrimSpace(*req.Tag)
+		if tag == "" {
 			util.BadRequest(c, "Tag 不能为空")
 			return
 		}
-		updates["tag"] = *req.Tag
+		var tagCnt int64
+		d.DB.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ? AND id != ?", id, tag, outboundID).Count(&tagCnt)
+		if tagCnt > 0 {
+			util.BadRequest(c, "该服务器上已存在同名出站 Tag")
+			return
+		}
+		updates["tag"] = tag
 	}
 	if req.Protocol != nil {
-		if *req.Protocol == "" {
-			util.BadRequest(c, "Protocol 不能为空")
+		if !validOutboundProtocol(*req.Protocol) {
+			util.BadRequest(c, "不支持的出站协议: "+*req.Protocol+"（支持 freedom/blackhole/vless/socks）")
 			return
 		}
 		updates["protocol"] = *req.Protocol
@@ -442,6 +490,16 @@ func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 		return
 	}
 
+	// ISSUE-13：outboundTag 必须真实存在（含内置 direct/blocked）；RuleJSON 必须是合法 JSON。
+	if !serverOutboundTagExists(d.DB, id, req.OutboundTag) {
+		util.BadRequest(c, "路由目标出站不存在: "+req.OutboundTag)
+		return
+	}
+	if !validRuleJSON(req.RuleJSON) {
+		util.BadRequest(c, "RuleJSON 不是合法 JSON")
+		return
+	}
+
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -521,7 +579,15 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 			util.BadRequest(c, "OutboundTag 不能为空")
 			return
 		}
+		if !serverOutboundTagExists(d.DB, id, *req.OutboundTag) {
+			util.BadRequest(c, "路由目标出站不存在: "+*req.OutboundTag)
+			return
+		}
 		updates["outbound_tag"] = *req.OutboundTag
+	}
+	if req.RuleJSON != nil && !validRuleJSON(*req.RuleJSON) {
+		util.BadRequest(c, "RuleJSON 不是合法 JSON")
+		return
 	}
 	if req.RuleJSON != nil {
 		updates["rule_json"] = *req.RuleJSON

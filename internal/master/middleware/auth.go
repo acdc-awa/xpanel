@@ -14,8 +14,9 @@ import (
 
 const CtxClaimsKey = "claims"
 
-// AuthRequired 解析 Bearer access token 并注入 claims。
-func AuthRequired(jwtMgr *services.JWTManager) gin.HandlerFunc {
+// AuthRequired 解析 Cookie access token、拒绝 2FA pending token，并按 DB 实时校验
+// 用户存在、账号状态、token_version 与角色（ISSUE-03：封禁/改密/角色变更立即吊销旧 access）。
+func AuthRequired(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr, err := c.Cookie("access_token")
 		if err != nil || tokenStr == "" {
@@ -26,6 +27,86 @@ func AuthRequired(jwtMgr *services.JWTManager) gin.HandlerFunc {
 		claims, err := jwtMgr.Parse(tokenStr)
 		if err != nil || claims.Type != services.TokenAccess {
 			util.Unauthorized(c, "访问令牌无效或已过期")
+			c.Abort()
+			return
+		}
+		// ISSUE-02：2FA pending token 只允许访问 /auth/2fa/verify（由 AuthPending2FA 放行），
+		// 其余受保护接口一律拒绝。
+		if claims.Pending {
+			util.Unauthorized(c, "请先完成两步验证")
+			c.Abort()
+			return
+		}
+
+		var user models.User
+		if err := db.First(&user, claims.UserID).Error; err != nil {
+			util.Unauthorized(c, "用户不存在或已被删除")
+			c.Abort()
+			return
+		}
+		if user.Status != models.StatusActive {
+			util.Unauthorized(c, "账号已被禁用")
+			c.Abort()
+			return
+		}
+		if user.TokenVersion != claims.Version {
+			util.Unauthorized(c, "会话已失效，请重新登录")
+			c.Abort()
+			return
+		}
+		if user.Role != claims.Role {
+			util.Unauthorized(c, "权限已变更，请重新登录")
+			c.Abort()
+			return
+		}
+		if user.TotpEnabled && !claims.TwoFA {
+			util.Unauthorized(c, "请先完成两步验证")
+			c.Abort()
+			return
+		}
+
+		// 以 DB 实时值为准回写 claims，避免旧 token 中的过期角色/版本继续被下游消费。
+		claims.Role = user.Role
+		claims.Version = user.TokenVersion
+		c.Set(CtxClaimsKey, claims)
+		c.Next()
+	}
+}
+
+// AuthPending2FA 解析并放行 2FA pending access（仅 /auth/2fa/verify 路由使用）。
+// 同样按 DB 校验用户状态与 token_version，防止封禁/改密后的 pending token 换发完整令牌。
+func AuthPending2FA(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenStr, err := c.Cookie("access_token")
+		if err != nil || tokenStr == "" {
+			util.Unauthorized(c, "缺少访问令牌")
+			c.Abort()
+			return
+		}
+		claims, err := jwtMgr.Parse(tokenStr)
+		if err != nil || claims.Type != services.TokenAccess || !claims.Pending {
+			util.Unauthorized(c, "请先完成密码登录")
+			c.Abort()
+			return
+		}
+		var user models.User
+		if err := db.First(&user, claims.UserID).Error; err != nil {
+			util.Unauthorized(c, "用户不存在或已被删除")
+			c.Abort()
+			return
+		}
+		if user.Status != models.StatusActive {
+			util.Unauthorized(c, "账号已被禁用")
+			c.Abort()
+			return
+		}
+		if user.TokenVersion != claims.Version {
+			util.Unauthorized(c, "会话已失效，请重新登录")
+			c.Abort()
+			return
+		}
+		if !user.TotpEnabled {
+			util.BadRequest(c, "未开启两步验证")
 			c.Abort()
 			return
 		}

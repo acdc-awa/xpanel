@@ -908,6 +908,46 @@ func clientFlowOf(t *testing.T, streamJSON, userFlow string) (string, bool) {
 // TestGenerate_ClientFlowPassthrough 用户 Flow 线格式透传：
 // 有值 → clients[0].flow 输出；空 → 不输出 flow 字段。
 // （入站级流控三态：空=自动 / xtls-rprx-vision=全开 / none=禁自动——的计算与测试在服务层）
+// TestGenerateConfig_VLESSInboundDecryptionForced ISSUE-14 回归：
+// API 允许空 settings_json 创建 VLESS 入站，生成器必须强制注入 decryption:"none" 并移除 encryption。
+func TestGenerateConfig_VLESSInboundDecryptionForced(t *testing.T) {
+	inbounds := []models.Inbound{{
+		ID: 1, ServerID: 1, Tag: "vless-empty", Protocol: "vless", Port: 443,
+		Type:           models.InboundTypeUser,
+		StreamSettings: inbStream("tcp", "none", ""),
+		Enabled:        true,
+	}}
+	cfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-empty"), &xray.GenerateContext{}, "direct", "AsIs")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var root struct {
+		Inbounds []struct {
+			Tag      string         `json:"tag"`
+			Settings map[string]any `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(cfg, &root); err != nil {
+		t.Fatalf("unmarshal generated config: %v", err)
+	}
+	var target map[string]any
+	for _, inb := range root.Inbounds {
+		if inb.Tag == "vless-empty" {
+			target = inb.Settings
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("generated config 中未找到入站 vless-empty: %s", cfg)
+	}
+	if target["decryption"] != "none" {
+		t.Fatalf("settings.decryption = %v, want none", target["decryption"])
+	}
+	if _, ok := target["encryption"]; ok {
+		t.Fatalf("VLESS 入站不应包含 encryption 字段: %v", target)
+	}
+}
+
 func TestGenerate_ClientFlowPassthrough(t *testing.T) {
 	realityTCP := inbStream("tcp", "reality", `"realitySettings":{"dest":"1.2.3.4:443","serverNames":["r.example.com"],"privateKey":"sk","shortIds":["abcd"]}`)
 

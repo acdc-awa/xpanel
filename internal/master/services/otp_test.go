@@ -186,6 +186,8 @@ func TestOTP_ResetPassword(t *testing.T) {
 	if _, err := svc.Confirm(u.ID, secret, code); err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
+	// Confirm 启用 TOTP 现在会 bump token_version（吊销旧会话），因此以 Confirm 后的值为基准。
+	db.First(&u, u.ID)
 	before := u.TokenVersion
 
 	good, _ := totp.GenerateCode(secret, time.Now())

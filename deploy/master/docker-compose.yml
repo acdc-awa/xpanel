@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      APP_ENV: ${APP_ENV:-prod}
       APP_PORT: "18080"
       DB_DRIVER: sqlite
       DB_DSN: /app/data/panel.db

@@ -2,6 +2,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -41,8 +42,28 @@ func All() []any {
 }
 
 // AutoMigrate 建表/补列（生产环境由启动时执行，后续可切换为显式迁移）。
+// ISSUE-04：先显式删除旧版 traffic_logs 的单列唯一索引 idx_traffic_period，
+// 再执行 AutoMigrate 建立 (user_id, inbound_id, period_start) 复合唯一索引。
 func AutoMigrate(db *gorm.DB) error {
+	if err := dropLegacyTrafficPeriodIndex(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(All()...)
+}
+
+// dropLegacyTrafficPeriodIndex 幂等删除旧库中的单列唯一索引（GORM AutoMigrate 只增不删）。
+func dropLegacyTrafficPeriodIndex(db *gorm.DB) error {
+	const legacy = "idx_traffic_period"
+	if !db.Migrator().HasTable(&TrafficLog{}) {
+		return nil
+	}
+	if !db.Migrator().HasIndex(&TrafficLog{}, legacy) {
+		return nil
+	}
+	if err := db.Migrator().DropIndex(&TrafficLog{}, legacy); err != nil {
+		return fmt.Errorf("删除旧唯一索引 %s 失败: %w", legacy, err)
+	}
+	return nil
 }
 
 // 时间辅助

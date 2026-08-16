@@ -33,6 +33,9 @@ type Entry struct {
 // user 计数器命名：user>>>email>>>traffic>>>(uplink|downlink)
 var userRe = regexp.MustCompile(`^user>>>(.+?)>>>traffic>>>(uplink|downlink)$`)
 
+// online 计数器命名：user>>>email>>>online（xray stats 中的在线连接计数）。
+var onlineRe = regexp.MustCompile(`^user>>>.*>>>online$`)
+
 // Collector 采集 Xray stats 并通过 HandlerService 动态同步用户。
 type Collector struct {
 	apiAddr string
@@ -44,6 +47,7 @@ type Collector struct {
 	last         map[string]int64                    // 计数器名 → 上次累计值
 	baseline     bool                                // 是否已建立基线
 	currentUsers map[string]map[string]protocol.User // inboundTag -> email -> protocol.User
+	online       int                                 // 最近一次 Collect 观测到的在线用户数
 }
 
 // New 构造采集器（apiAddr 如 127.0.0.1:10085）。
@@ -53,6 +57,13 @@ func New(apiAddr string) *Collector {
 		last:         make(map[string]int64),
 		currentUsers: make(map[string]map[string]protocol.User),
 	}
+}
+
+// OnlineUsers 返回最近一次 Collect 观测到的在线用户数（未采集过则 0）。
+func (c *Collector) OnlineUsers() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.online
 }
 
 // Connect 建立 gRPC 连接（xray 重启后需重新连接）。
@@ -229,6 +240,15 @@ func (c *Collector) Collect(ctx context.Context) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// ISSUE-11：从 `user>>>email>>>online` 计数器统计在线用户数（值 > 0 视为在线）。
+	online := 0
+	for _, st := range resp.Stat {
+		if onlineRe.MatchString(st.Name) && st.Value > 0 {
+			online++
+		}
+	}
+	c.online = online
 
 	// 先建基线：首次调用只记录当前值，不产出增量
 	if !c.baseline {

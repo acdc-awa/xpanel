@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -183,20 +184,32 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		}
 	}
 
-	// 叠加今日未落 Daily 的最新 TrafficLog
-	var todayLogs []models.TrafficLog
-	d.DB.Where("period_start >= ?", todayStart).Find(&todayLogs)
-	for _, log := range todayLogs {
-		if pt, ok := dailyMap[todayStr]; ok {
-			pt.UpBytes += log.UpBytes
-			pt.DownBytes += log.DownBytes
-			pt.TotalBytes += (log.UpBytes + log.DownBytes)
-		}
-		data.Summary.TodayTrafficUp += log.UpBytes
-		data.Summary.TodayTrafficDown += log.DownBytes
-		data.Summary.MonthTrafficTotal += (log.UpBytes + log.DownBytes)
+	// ISSUE-06：traffic_dailies 已包含今日（每 5 分钟聚合），不能再与 traffic_logs 相加。
+	// 只取 max(daily, 实时 logs) 修正最近 5 分钟未聚合窗口，保持单一数据源、无重复计数。
+	var todayLog struct {
+		Up   int64
+		Down int64
 	}
-	data.Summary.TodayTrafficTotal = data.Summary.TodayTrafficUp + data.Summary.TodayTrafficDown
+	d.DB.Model(&models.TrafficLog{}).
+		Where("period_start >= ?", todayStart).
+		Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").
+		Scan(&todayLog)
+	if pt, ok := dailyMap[todayStr]; ok {
+		deltaUp := todayLog.Up - pt.UpBytes
+		deltaDown := todayLog.Down - pt.DownBytes
+		if deltaUp > 0 {
+			data.Summary.MonthTrafficTotal += deltaUp
+			pt.UpBytes = todayLog.Up
+		}
+		if deltaDown > 0 {
+			data.Summary.MonthTrafficTotal += deltaDown
+			pt.DownBytes = todayLog.Down
+		}
+		pt.TotalBytes = pt.UpBytes + pt.DownBytes
+		data.Summary.TodayTrafficUp = pt.UpBytes
+		data.Summary.TodayTrafficDown = pt.DownBytes
+		data.Summary.TodayTrafficTotal = pt.TotalBytes
+	}
 
 	data.TrafficTrend = make([]TrafficTrendPoint, 0, trendDays)
 	for i := 0; i < trendDays; i++ {
@@ -210,9 +223,18 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	var servers []models.Server
 	d.DB.Find(&servers)
 
+	// ISSUE-10：一次查询取每台服务器最新上报，避免 N+1。
+	var latestReports []models.NodeReport
+	d.DB.Raw(`SELECT nr.* FROM node_reports nr
+		JOIN (SELECT server_id, MAX(reported_at) AS max_at FROM node_reports GROUP BY server_id) x
+		ON nr.server_id = x.server_id AND nr.reported_at = x.max_at`).Scan(&latestReports)
+	latestByServer := make(map[uint64]models.NodeReport, len(latestReports))
+	for _, nr := range latestReports {
+		latestByServer[nr.ServerID] = nr
+	}
+
 	for _, s := range servers {
-		var latestReport models.NodeReport
-		d.DB.Where("server_id = ?", s.ID).Order("reported_at DESC").First(&latestReport)
+		latestReport := latestByServer[s.ID]
 
 		isActiveFlow := (latestReport.RxRate > 1024 || latestReport.TxRate > 1024)
 		if s.Status == 1 {
@@ -268,7 +290,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		data.ServerBreakdown = append(data.ServerBreakdown, *item)
 	}
 
-	// 6. 用户流量消耗排行榜 Top 10
+	// 6. 用户流量消耗排行榜 Top 10（ISSUE-10：单条 SQL 聚合替代逐用户 UserUsed）
 	var users []models.User
 	d.DB.Find(&users)
 	var plans []models.Plan
@@ -278,32 +300,42 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		planMap[p.ID] = p.Name
 	}
 
-	userRankList := make([]UserTrafficRankItem, 0, len(users))
-	for _, u := range users {
-		up, down, _ := d.Traffic.UserUsed(u.ID)
-		tot := up + down
-		pName := planMap[u.PlanID]
+	type userTrafficRow struct {
+		UserID   uint64
+		Username string
+		Email    string
+		PlanID   uint64
+		UpBytes  int64
+		DownBytes int64
+	}
+	var trafficRows []userTrafficRow
+	d.DB.Raw(`
+		SELECT u.id AS user_id, u.username, u.email, u.plan_id,
+		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.up_bytes ELSE 0 END), 0) AS up_bytes,
+		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.down_bytes ELSE 0 END), 0) AS down_bytes
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		GROUP BY u.id, u.username, u.email, u.plan_id`).Scan(&trafficRows)
+
+	userRankList := make([]UserTrafficRankItem, 0, len(trafficRows))
+	for _, r := range trafficRows {
+		pName := planMap[r.PlanID]
 		if pName == "" {
 			pName = "无套餐"
 		}
 		userRankList = append(userRankList, UserTrafficRankItem{
-			UserID:     u.ID,
-			Username:   u.Username,
-			Email:      u.Email,
+			UserID:     r.UserID,
+			Username:   r.Username,
+			Email:      r.Email,
 			PlanName:   pName,
-			UpBytes:    up,
-			DownBytes:  down,
-			TotalBytes: tot,
+			UpBytes:    r.UpBytes,
+			DownBytes:  r.DownBytes,
+			TotalBytes: r.UpBytes + r.DownBytes,
 		})
 	}
-	// 排序取前 10
-	for i := 0; i < len(userRankList); i++ {
-		for j := i + 1; j < len(userRankList); j++ {
-			if userRankList[j].TotalBytes > userRankList[i].TotalBytes {
-				userRankList[i], userRankList[j] = userRankList[j], userRankList[i]
-			}
-		}
-	}
+	sort.Slice(userRankList, func(i, j int) bool {
+		return userRankList[i].TotalBytes > userRankList[j].TotalBytes
+	})
 	if len(userRankList) > 10 {
 		data.UserRank = userRankList[:10]
 	} else {

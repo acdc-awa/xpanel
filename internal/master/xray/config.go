@@ -723,6 +723,7 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	// VLESS: xray 拒绝入站级别的 encryption 字段（运行时固定为 "none"）
 	if inb.Protocol == "vless" {
 		delete(settings, "encryption")
+		settings["decryption"] = "none"
 	}
 
 	// Phase T：入站三态分流

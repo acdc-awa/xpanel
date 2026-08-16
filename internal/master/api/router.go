@@ -31,10 +31,33 @@ func agentDownloadHeaders(data []byte, version string) (versionHdr, shaHdr strin
 	return
 }
 
+// maskSensitivePath 对访问日志中的敏感路径脱敏（订阅 token、节点 secret 等）。
+func maskSensitivePath(p string) string {
+	if strings.HasPrefix(p, "/api/v1/sub/") {
+		return "/api/v1/sub/***"
+	}
+	return p
+}
+
+// accessLogFormatter 自定义 Gin 访问日志格式，确保订阅 token 不打全量进日志。
+func accessLogFormatter(param gin.LogFormatterParams) string {
+	return fmt.Sprintf("[GIN] %s | %3d | %13v | %15s | %-7s %s %#v\n",
+		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+		param.StatusCode,
+		param.Latency,
+		param.ClientIP,
+		param.Method,
+		maskSensitivePath(param.Path),
+		param.ErrorMessage,
+	)
+}
+
+
 // NewRouter 组装全部路由。
 func (d *Deps) NewRouter() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	// ISSUE-12：访问日志对订阅 token 路径脱敏，避免完整 token 进入日志。
+	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery())
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -50,7 +73,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 		{
 			auth.POST("/register", d.Register)
 			auth.POST("/login", d.Login)
-			auth.POST("/2fa/verify", d.TwoFAVerify)
+			// ISSUE-01：verify 单独挂 pending-token 认证中间件，注入 claims 供 handler 使用。
+			auth.POST("/2fa/verify", middleware.AuthPending2FA(d.JWT, d.DB), d.TwoFAVerify)
 			auth.POST("/forgot", d.ForgotPassword)
 			auth.POST("/reset", d.ResetPassword)
 			auth.POST("/refresh", d.Refresh)
@@ -64,7 +88,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 		v1.GET("/sub/:token", middleware.RateLimit(120, time.Minute), d.Subscribe)
 
 			// 用户端
-			user := v1.Group("/user", middleware.AuthRequired(d.JWT), middleware.RequirePwdChanged(d.DB))
+			user := v1.Group("/user", middleware.AuthRequired(d.JWT, d.DB), middleware.RequirePwdChanged(d.DB))
 			{
 				user.GET("/me", d.Me)
 				user.GET("/servers", d.UserServers)
@@ -126,7 +150,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",
-			middleware.AuthRequired(d.JWT),
+			middleware.AuthRequired(d.JWT, d.DB),
 			middleware.RequireRole("admin"),
 			middleware.Audit(d.DB),
 			middleware.RequirePwdChanged(d.DB),
@@ -138,6 +162,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/users", d.AdminUsers)
 			admin.GET("/invitations", d.AdminInvitations)
 			admin.POST("/invitations", d.AdminCreateInvitations)
+			admin.DELETE("/invitations/:id", d.AdminRevokeInvitation)
 			admin.GET("/servers", d.AdminServers)
 			admin.GET("/servers/:id/metrics", d.AdminServerMetrics)
 			admin.POST("/servers", d.AdminCreateServer)
