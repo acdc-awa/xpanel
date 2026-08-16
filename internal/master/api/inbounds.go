@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/xray"
@@ -428,13 +429,21 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		return
 	}
 	var inb models.Inbound
-	d.DB.First(&inb, id)
+	if err := d.DB.First(&inb, id).Error; err != nil {
+		util.Fail(c, 404, "入站不存在")
+		return
+	}
 	// U4：被出站引用（落地）的入站禁止删除——删除会导致引用方配置生成死锁
 	if d.refInboundProtected(c, id) {
 		return
 	}
-	_ = d.DB.Where("inbound_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error
-	if err := d.DB.Delete(&models.Inbound{}, id).Error; err != nil {
+	// P2-11：权限组链接删除与入站删除放入同一事务；不存在时返回 404。
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("inbound_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&models.Inbound{}, id).Error
+	}); err != nil {
 		util.ServerError(c, "删除失败")
 		return
 	}

@@ -92,9 +92,19 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 	return res, nil
 }
 
+// validUser 过滤后的用户候选：用户实体 + 预计算的生效权限组/设备限制/已用流量。
+// 预计算目的：避免 protoUsersFor 在用户×入站维度反复查库（ISSUE-10）。
+type validUser struct {
+	User             models.User
+	GroupID          uint64
+	DeviceLimit      int
+	UsedBytes        int64
+	PlanTrafficBytes int64
+}
+
 // protoUsersFor 按权限组规则从 validUsers 计算单个入站的用户列表（GetValidUsers 与预览共用）。
 // Xboard 规范：用户必须拥有生效权限组（uGroup > 0）；入站声明开放组时，用户组须在开放组内。
-func (s *ConfigService) protoUsersFor(validUsers []models.User, inb *models.Inbound, allowedGroups []uint64) []protocol.User {
+func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inbound, allowedGroups []uint64) []protocol.User {
 	hasGroupLimit := len(allowedGroups) > 0
 	allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
 	for _, g := range allowedGroups {
@@ -102,13 +112,13 @@ func (s *ConfigService) protoUsersFor(validUsers []models.User, inb *models.Inbo
 	}
 
 	var protoUsers []protocol.User
-	for _, u := range validUsers {
-		uGroup := UserEffectiveGroupID(s.DB, &u)
+	for _, vu := range validUsers {
+		u := vu.User
 		// 未分配权限组的用户（uGroup == 0）不具备任何节点的访问权限，不注入 UUID
-		if uGroup == 0 {
+		if vu.GroupID == 0 {
 			continue
 		}
-		if hasGroupLimit && !allowedGroupSet[uGroup] {
+		if hasGroupLimit && !allowedGroupSet[vu.GroupID] {
 			continue
 		}
 		flow := inb.Flow
@@ -117,13 +127,12 @@ func (s *ConfigService) protoUsersFor(validUsers []models.User, inb *models.Inbo
 		} else if flow == "none" {
 			flow = ""
 		}
-		limit, _ := UserEffectiveDeviceLimit(s.DB, &u)
 		protoUsers = append(protoUsers, protocol.User{
 			UUID:  u.UUID,
 			Email: xray.UserEmail(&u),
 			Flow:  flow,
 			Level: 0,
-			Limit: limit,
+			Limit: vu.DeviceLimit,
 		})
 	}
 	return protoUsers
@@ -138,20 +147,43 @@ func (s *ConfigService) PreviewUsers(inb *models.Inbound, groupIDs []uint64) []p
 }
 
 // filterValidUsers 返回全部有效的用户（状态正常、有 UUID、未过期、未超流量）。
-// 与 GetValidUsers 共享同一过滤逻辑，避免两处重复。
-func (s *ConfigService) filterValidUsers() []models.User {
+// ISSUE-10：套餐、权限组与设备限制批量预取；已用流量单条 SQL 聚合，不再逐用户查询。
+func (s *ConfigService) filterValidUsers() []validUser {
 	var users []models.User
 	if err := s.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
 		return nil
 	}
+	if len(users) == 0 {
+		return nil
+	}
+
 	var plans []models.Plan
 	_ = s.DB.Find(&plans)
 	planMap := make(map[uint64]models.Plan, len(plans))
 	for _, p := range plans {
 		planMap[p.ID] = p
 	}
+
+	// 单条 SQL 计算每个有效用户在其计费周期内的已用流量。
+	type usedRow struct {
+		UserID    uint64
+		UsedBytes int64
+	}
+	var usedRows []usedRow
+	s.DB.Raw(`
+		SELECT u.id AS user_id,
+		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.up_bytes + l.down_bytes ELSE 0 END), 0) AS used_bytes
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		WHERE u.status = ?
+		GROUP BY u.id, u.traffic_cycle_start`, models.StatusActive).Scan(&usedRows)
+	usedMap := make(map[uint64]int64, len(usedRows))
+	for _, r := range usedRows {
+		usedMap[r.UserID] = r.UsedBytes
+	}
+
 	now := time.Now()
-	valid := make([]models.User, 0, len(users))
+	valid := make([]validUser, 0, len(users))
 	for _, u := range users {
 		if u.UUID == "" {
 			continue
@@ -159,19 +191,33 @@ func (s *ConfigService) filterValidUsers() []models.User {
 		if u.ExpireAt != nil && now.After(*u.ExpireAt) {
 			continue
 		}
-		if u.PlanID > 0 {
-			if plan, ok := planMap[u.PlanID]; ok && plan.Enabled && plan.TrafficGB > 0 {
-				if s.Traffic != nil {
-					up, down, err := s.Traffic.UserUsed(u.ID)
-					if err == nil {
-						if up+down >= plan.TrafficGB*1024*1024*1024 {
-							continue
-						}
-					}
-				}
+
+		vu := validUser{User: u}
+		if plan, ok := planMap[u.PlanID]; ok && plan.Enabled {
+			if u.DeviceLimit > 0 {
+				vu.DeviceLimit = u.DeviceLimit
+			} else {
+				vu.DeviceLimit = plan.DeviceLimit
+			}
+			if u.PermissionGroupID > 0 {
+				vu.GroupID = u.PermissionGroupID
+			} else {
+				vu.GroupID = plan.PermissionGroupID
+			}
+			vu.PlanTrafficBytes = plan.TrafficGB * 1024 * 1024 * 1024
+		} else {
+			// 无有效套餐：设备限制仅看用户自定义；权限组仅看用户显式分组。
+			vu.DeviceLimit = u.DeviceLimit
+			vu.GroupID = u.PermissionGroupID
+		}
+
+		if vu.PlanTrafficBytes > 0 {
+			vu.UsedBytes = usedMap[u.ID]
+			if vu.UsedBytes >= vu.PlanTrafficBytes {
+				continue
 			}
 		}
-		valid = append(valid, u)
+		valid = append(valid, vu)
 	}
 	return valid
 }

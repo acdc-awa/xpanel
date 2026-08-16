@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -282,6 +281,10 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		if err := tx.Where("server_id = ?", id).Delete(&models.PendingConfig{}).Error; err != nil {
 			return err
 		}
+		// P2-6：删除服务器时同步清理待推证书，避免悬挂 PendingCert。
+		if err := tx.Where("server_id = ?", id).Delete(&models.PendingCert{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("server_id = ?", id).Delete(&models.NodeReport{}).Error; err != nil {
 			return err
 		}
@@ -401,34 +404,21 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		util.OK(c, gin.H{
 			"ok":      true,
 			"pushed":  false,
+			"queued":  true,
 			"message": "节点离线，配置已保存，节点上线后自动推送",
 			"config":  cfgStr,
 		})
 		return
 	}
 
-	res, err := d.Hub.Ask(id, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: cfgStr}, nodegate.AskTimeout)
-	if err != nil || res == nil || !res.OK {
-		msg := "节点在线但下发失败"
-		if err != nil {
-			msg += ": " + err.Error()
-		} else if res != nil && res.Error != "" {
-			msg += ": " + res.Error
-		}
-		msg += "（配置已保存，节点重连后将自动补推）"
-		util.OK(c, gin.H{"ok": false, "pushed": false, "message": msg, "config": cfgStr})
-		return
-	}
-	if d.Config != nil {
-		// 条件标记：若 Ask 期间 pending 被并发覆盖（内容不一致），保持 pending 待后续推送
-		if _, serr := d.Config.MarkPushedByServerIfSame(id, cfgStr); serr != nil {
-			log.Printf("api: 标记配置已推送失败 (server=%d): %v", id, serr)
-		}
-	}
+	// P2-7：generate-config 恢复为真正的非阻塞——API 立即返回 queued，
+	// 由后台 PushPending 完成下发与回执处理，不再同步等待最长 30s。
+	go d.Hub.PushPending(id)
 	util.OK(c, gin.H{
 		"ok":      true,
-		"pushed":  true,
-		"message": "配置已生成并下发到节点",
+		"pushed":  false,
+		"queued":  true,
+		"message": "配置已保存，正在后台推送到节点",
 		"config":  cfgStr,
 	})
 }

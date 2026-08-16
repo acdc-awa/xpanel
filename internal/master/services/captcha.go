@@ -126,6 +126,15 @@ func VerifyCaptcha(db *gorm.DB, token, remoteIP, host, action string) error {
 			delete(captchaUsed.m, k)
 		}
 	}
+	// P2-12：token 消费表设上限，异常流量下不无限增长。
+	if len(captchaUsed.m) > 10000 {
+		for k := range captchaUsed.m {
+			delete(captchaUsed.m, k)
+			if len(captchaUsed.m) <= 10000 {
+				break
+			}
+		}
+	}
 	captchaUsed.m[token] = now
 	captchaUsed.Unlock()
 

@@ -39,6 +39,23 @@ func (l *rateLimiter) allow(key string) bool {
 		return false
 	}
 	l.hits[key] = append(recent, now)
+
+	// P2-12：map 大小上限，超过时清理过期 key，避免内存无限增长。
+	if len(l.hits) > 10000 {
+		for k, ts := range l.hits {
+			keep := ts[:0]
+			for _, t := range ts {
+				if t.After(cutoff) {
+					keep = append(keep, t)
+				}
+			}
+			if len(keep) == 0 {
+				delete(l.hits, k)
+			} else {
+				l.hits[k] = keep
+			}
+		}
+	}
 	return true
 }
 
@@ -49,6 +66,25 @@ func RateLimit(limit int, window time.Duration) gin.HandlerFunc {
 		key := c.ClientIP() + "|" + c.FullPath()
 		if !rl.allow(key) {
 			util.Fail(c, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// RateLimitWrite 仅对写请求（非 GET/HEAD/OPTIONS）限流；用于管理端写操作面（P2-3）。
+func RateLimitWrite(limit int, window time.Duration) gin.HandlerFunc {
+	rl := newRateLimiter(limit, window)
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+		key := c.ClientIP() + "|" + c.FullPath()
+		if !rl.allow(key) {
+			util.Fail(c, http.StatusTooManyRequests, "操作过于频繁，请稍后再试")
 			c.Abort()
 			return
 		}

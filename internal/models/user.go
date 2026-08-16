@@ -32,8 +32,9 @@ type User struct {
 	TotpFailedCount int        `gorm:"default:0" json:"-"`
 	TotpLockedUntil *time.Time `json:"-"`
 	BackupCodes     string     `gorm:"type:text" json:"-"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // BeforeCreate 自动设置流量周期起点（首次创建时）。

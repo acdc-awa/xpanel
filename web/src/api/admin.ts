@@ -39,6 +39,48 @@ export function getDashboard() {
   return http.get<ApiResp<DashboardData>>('/admin/dashboard')
 }
 
+export interface BackupItem {
+  file: string
+  size: number
+  created_at: string
+}
+
+export function getBackups() {
+  return http.get<ApiResp<{ items: BackupItem[] }>>('/admin/backup')
+}
+
+export function createBackup() {
+  return http.post<ApiResp<BackupItem>>('/admin/backup')
+}
+
+export interface SystemStatus {
+  app_name: string
+  app_env: string
+  go_version: string
+  goroutines: number
+  uptime_seconds: number
+  server_time: string
+  db_driver: string
+  db_ok: boolean
+  db_latency_ms: number
+  db_error?: string
+  mem_alloc_mb: number
+  mem_sys_mb: number
+  backup_enabled: boolean
+  counts: {
+    users: number
+    servers: number
+    inbounds: number
+    orders: number
+    gift_cards: number
+    audit_logs: number
+  }
+}
+
+export function getSystemStatus() {
+  return http.get<ApiResp<SystemStatus>>('/admin/system/status')
+}
+
 export function getServerMetrics(id: number, range = '1h') {
   return http.get<ApiResp<ServerMetricsData>>(`/admin/servers/${id}/metrics`, { params: { range } })
 }

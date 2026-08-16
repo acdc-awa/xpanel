@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -381,6 +381,89 @@ const filteredList = computed(() => {
       (u.uuid && u.uuid.toLowerCase().includes(kw)),
   )
 })
+
+// ---- 批量操作与 CSV 导出（ISSUE-17 用户管理增强） ----
+const selected = ref<AdminUser[]>([])
+const batchBusy = ref(false)
+
+function onSelectionChange(rows: AdminUser[]) {
+  selected.value = rows
+}
+
+function csvCell(v: any) {
+  const s = String(v ?? '')
+  return `"${s.split('"').join('""')}"`
+}
+
+function exportCSV() {
+  const rows = selected.value.length ? selected.value : filteredList.value
+  if (!rows.length) {
+    ElMessage.warning('没有可导出的用户')
+    return
+  }
+  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '设备限制', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间']
+  const lines = rows.map((u: any) =>
+    [
+      u.id,
+      u.username,
+      u.email,
+      u.uuid,
+      u.role,
+      u.status === 1 ? '正常' : '禁用',
+      planName(u.plan_id),
+      userGroupDisplay(u).name,
+      u.effective_device_limit || 0,
+      u.balance_cents || 0,
+      u.used_bytes || 0,
+      u.total_bytes || 0,
+      u.expire_at ? String(u.expire_at).replace('T', ' ').slice(0, 19) : '',
+      u.created_at ? String(u.created_at).replace('T', ' ').slice(0, 19) : '',
+    ].map(csvCell).join(','),
+  )
+  const csv = '\ufeff' + [header.map(csvCell).join(','), ...lines].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success(`已导出 ${rows.length} 位用户`)
+}
+
+async function batchToggle(targetStatus: 0 | 1) {
+  const rows = selected.value.filter((u) => u.status !== targetStatus)
+  if (!rows.length) {
+    ElMessage.warning(targetStatus === 1 ? '所选用户均已启用' : '所选用户均已禁用')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      targetStatus === 1
+        ? `确认启用所选 ${rows.length} 位用户？`
+        : `确认封禁所选 ${rows.length} 位用户？封禁后其会话与订阅立即失效。`,
+      targetStatus === 1 ? '批量启用' : '批量封禁',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  try {
+    let ok = 0
+    for (const u of rows) {
+      const { data } = await toggleUser(u.id)
+      if (data.code === 0) ok++
+    }
+    ElMessage.success(`已完成 ${ok}/${rows.length}`)
+    selected.value = []
+    load()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '批量操作失败'))
+  } finally {
+    batchBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -392,16 +475,20 @@ const filteredList = computed(() => {
         </el-input>
       </div>
       <div style="display: flex; gap: 8px">
+        <el-button :icon="Download" @click="exportCSV">导出 CSV</el-button>
+        <el-button :loading="batchBusy" type="warning" @click="batchToggle(0)">批量封禁</el-button>
+        <el-button :loading="batchBusy" type="success" @click="batchToggle(1)">批量启用</el-button>
         <el-button type="primary" :icon="Plus" @click="newUserOpen = true">添加用户</el-button>
       </div>
     </div>
 
     <BaseCard title="用户列表">
       <template #extra>
-        <span class="muted" style="font-size: 13px">共 {{ total }} 位用户</span>
+        <span class="muted" style="font-size: 13px">已选 {{ selected.length }} 人 · 共 {{ total }} 位用户</span>
       </template>
 
-      <el-table v-loading="loading" :data="filteredList" style="width: 100%">
+      <el-table v-loading="loading" :data="filteredList" style="width: 100%" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="46" />
         <el-table-column prop="id" label="#" width="65" />
         <el-table-column label="用户" min-width="170">
           <template #default="{ row }">

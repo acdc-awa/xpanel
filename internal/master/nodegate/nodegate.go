@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,8 +85,18 @@ func NewHub(db *gorm.DB, traffic *services.TrafficService, config *services.Conf
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			// dev 环境放开跨域；生产由 Nginx/Caddy 同域反代并收紧
-			CheckOrigin: func(r *http.Request) bool { return true },
+			// P2-4：无 Origin 的 agent/CLI 放行；浏览器带 Origin 时仅允许与请求 Host 同源。
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil || u.Host == "" {
+					return false
+				}
+				return strings.EqualFold(u.Host, r.Host)
+			},
 		},
 		conns:   make(map[uint64]*Conn),
 		pending: make(map[string]chan *protocol.ResultPayload),
@@ -196,10 +208,16 @@ func (h *Hub) unregister(conn *Conn) {
 	if cur, ok := h.conns[conn.ServerID]; ok && cur == conn {
 		delete(h.conns, conn.ServerID)
 	}
+	_, hasReplacement := h.conns[conn.ServerID]
 	h.mu.Unlock()
 	conn.closeSafe() // 幂等；只关闭 done/WS，不关闭 Send 通道（避免与并发 Send 竞态 panic）
-	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
-		Update("status", 0)
+
+	// P2-10：仅当注册表中已无该节点的新连接时才把 DB 状态置 0，
+	// 避免旧连接退出与新连接注册交错时把在线节点短暂标离线。
+	if !hasReplacement {
+		h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
+			Update("status", 0)
+	}
 }
 
 // readPump 读取消息循环。

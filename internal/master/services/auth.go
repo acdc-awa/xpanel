@@ -140,9 +140,29 @@ type loginFail struct {
 }
 
 const (
-	loginFailLimit  = 5
-	loginFailWindow = 30 * time.Minute
+	loginFailLimit    = 5
+	loginFailWindow   = 30 * time.Minute
+	loginFailMaxEntry = 10000 // P2-12：失败计数 map 上限，防止内存无限增长
 )
+
+// cleanupLoginFailuresLocked 清理过期/超量的失败计数（调用方须持有 loginFailures 锁）。
+func cleanupLoginFailuresLocked(now time.Time) {
+	for k, f := range loginFailures.m {
+		if f.until.IsZero() || !now.Before(f.until) {
+			if f.count == 0 {
+				delete(loginFailures.m, k)
+			}
+		}
+	}
+	if len(loginFailures.m) > loginFailMaxEntry {
+		for k := range loginFailures.m {
+			delete(loginFailures.m, k)
+			if len(loginFailures.m) <= loginFailMaxEntry {
+				break
+			}
+		}
+	}
+}
 
 // Login 校验用户名密码与账号状态（含账号级失败锁定）。
 func (s *AuthService) Login(ctx context.Context, username, password string) (*models.User, error) {
@@ -177,6 +197,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 			cur.count = 0
 		}
 		loginFailures.m[key] = cur
+		cleanupLoginFailuresLocked(now)
 		loginFailures.Unlock()
 		return nil, ErrInvalidCreds
 	}

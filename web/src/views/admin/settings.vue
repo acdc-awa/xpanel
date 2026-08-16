@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Check } from '@element-plus/icons-vue'
+import { Check, Download, Refresh } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { getSettings, updateSettings, type SiteGroup, type CaptchaGroup } from '@/api/admin'
+import {
+  getSettings,
+  updateSettings,
+  getBackups,
+  createBackup,
+  getSystemStatus,
+  type SiteGroup,
+  type CaptchaGroup,
+  type BackupItem,
+  type SystemStatus,
+} from '@/api/admin'
+import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
 
 const activeTab = ref('site')
@@ -50,7 +61,79 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  loadBackups()
+  loadSystem()
+})
+
+// ---- 备份管理（ISSUE-17） ----
+const backups = ref<BackupItem[]>([])
+const backupLoading = ref(false)
+const backupCreating = ref(false)
+
+async function loadBackups() {
+  backupLoading.value = true
+  try {
+    const { data } = await getBackups()
+    if (data.code === 0) backups.value = data.data.items
+    else ElMessage.error(data.message)
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载备份列表失败'))
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+async function createBackupNow() {
+  backupCreating.value = true
+  try {
+    const { data } = await createBackup()
+    if (data.code === 0) {
+      ElMessage.success(`备份成功：${data.data.file}`)
+      loadBackups()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '创建备份失败'))
+  } finally {
+    backupCreating.value = false
+  }
+}
+
+function downloadBackup(file: string) {
+  window.open(`${apiBase}/admin/backup/${encodeURIComponent(file)}`, '_blank')
+}
+
+function fmtSize(n: number) {
+  if (!n) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+// ---- 系统状态（ISSUE-17） ----
+const system = ref<SystemStatus | null>(null)
+const systemLoading = ref(false)
+
+async function loadSystem() {
+  systemLoading.value = true
+  try {
+    const { data } = await getSystemStatus()
+    if (data.code === 0) system.value = data.data
+    else ElMessage.error(data.message)
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载系统状态失败'))
+  } finally {
+    systemLoading.value = false
+  }
+}
 
 async function save() {
   saving.value = true
@@ -175,6 +258,67 @@ async function save() {
             </p>
           </el-form>
         </el-tab-pane>
+
+        <!-- ==================== TAB 4: 备份 ==================== -->
+        <el-tab-pane label="💾 备份" name="backup">
+          <div style="max-width: 720px">
+            <div class="x-toolbar" style="margin-bottom: 12px">
+              <div class="x-toolbar-left">
+                <el-button :loading="backupLoading" :icon="Refresh" @click="loadBackups">刷新列表</el-button>
+              </div>
+              <el-button type="primary" :loading="backupCreating" @click="createBackupNow">立即备份</el-button>
+            </div>
+            <el-table v-loading="backupLoading" :data="backups" size="small">
+              <el-table-column prop="file" label="备份文件" min-width="220">
+                <template #default="{ row }"><code class="cell-mono">{{ row.file }}</code></template>
+              </el-table-column>
+              <el-table-column label="大小" width="110">
+                <template #default="{ row }">{{ fmtSize(row.size) }}</template>
+              </el-table-column>
+              <el-table-column label="创建时间" width="170">
+                <template #default="{ row }">{{ String(row.created_at).replace('T', ' ').slice(0, 19) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" :icon="Download" @click="downloadBackup(row.file)">下载</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p class="muted tip">备份文件保存在主控备份目录，按配置定期轮转；建议每月下载一份离线保存。</p>
+          </div>
+        </el-tab-pane>
+
+        <!-- ==================== TAB 5: 系统状态 ==================== -->
+        <el-tab-pane label="🩺 系统状态" name="system">
+          <div v-loading="systemLoading" style="max-width: 720px; min-height: 200px">
+            <template v-if="system">
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="应用">{{ system.app_name }}（{{ system.app_env }}）</el-descriptions-item>
+                <el-descriptions-item label="Go 版本">{{ system.go_version }}</el-descriptions-item>
+                <el-descriptions-item label="运行时长">{{ Math.floor(system.uptime_seconds / 3600) }}h {{ Math.floor((system.uptime_seconds % 3600) / 60) }}m</el-descriptions-item>
+                <el-descriptions-item label="Goroutines">{{ system.goroutines }}</el-descriptions-item>
+                <el-descriptions-item label="数据库">
+                  <el-tag :type="system.db_ok ? 'success' : 'danger'" size="small">{{ system.db_ok ? '正常' : '异常' }}</el-tag>
+                  <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="备份调度">{{ system.backup_enabled ? '已启用' : '未启用' }}</el-descriptions-item>
+                <el-descriptions-item label="内存占用">{{ system.mem_alloc_mb }} MB</el-descriptions-item>
+                <el-descriptions-item label="服务时间">{{ system.server_time }}</el-descriptions-item>
+              </el-descriptions>
+              <div class="status-count-grid">
+                <div v-for="(v, k) in system.counts" :key="k" class="status-count">
+                  <strong>{{ v }}</strong>
+                  <span>{{ { users: '用户', servers: '服务器', inbounds: '入站', orders: '订单', gift_cards: '礼品卡', audit_logs: '审计日志' }[k] ?? k }}</span>
+                </div>
+              </div>
+              <p v-if="!system.db_ok" class="muted tip">数据库异常：{{ system.db_error }}</p>
+              <div class="x-toolbar" style="margin-top: 12px">
+                <el-button :icon="Refresh" @click="loadSystem">刷新状态</el-button>
+              </div>
+            </template>
+            <el-empty v-else-if="!systemLoading" description="暂无状态数据" />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </BaseCard>
   </div>
@@ -190,4 +334,22 @@ async function save() {
   }
 }
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
+.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
+.status-count-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.status-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--x-border-color, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--x-bg-2, var(--el-bg-color-page));
+}
+.status-count strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.status-count span { font-size: 12px; color: var(--x-text-3); }
 </style>

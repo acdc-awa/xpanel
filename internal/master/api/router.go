@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -57,10 +58,32 @@ func accessLogFormatter(param gin.LogFormatterParams) string {
 func (d *Deps) NewRouter() *gin.Engine {
 	r := gin.New()
 	// ISSUE-12：访问日志对订阅 token 路径脱敏，避免完整 token 进入日志。
-	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery())
+	// P2-2：全局请求体上限 10MB（配置 JSON/拓扑布局/审计均远小于该值）。
+	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery(), middleware.BodyLimit(10<<20))
 
+	// P2-1：/healthz 为进程存活探针；/readyz 额外检查数据库连通性。
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	r.GET("/readyz", func(c *gin.Context) {
+		ready := d.DB != nil
+		latency := int64(0)
+		if d.DB != nil {
+			if sqlDB, err := d.DB.DB(); err == nil {
+				ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+				start := time.Now()
+				ready = sqlDB.PingContext(ctx) == nil
+				latency = time.Since(start).Milliseconds()
+				cancel()
+			} else {
+				ready = false
+			}
+		}
+		if !ready {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "db_latency_ms": latency})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready", "db_latency_ms": latency})
 	})
 
 	v1 := r.Group("/api/v1")
@@ -154,9 +177,11 @@ func (d *Deps) NewRouter() *gin.Engine {
 			middleware.RequireRole("admin"),
 			middleware.Audit(d.DB),
 			middleware.RequirePwdChanged(d.DB),
+			middleware.RateLimitWrite(120, time.Minute),
 		)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
+			admin.GET("/system/status", d.AdminSystemStatus)
 			admin.GET("/settings", d.AdminSettings)
 			admin.PUT("/settings", d.AdminUpdateSettings)
 			admin.GET("/users", d.AdminUsers)
