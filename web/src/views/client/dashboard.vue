@@ -15,13 +15,16 @@ import {
   InfoFilled,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
-import { formatBytes } from '@/utils/format'
-import { mockNotices } from '@/mock/data'
-import { getMyServers, type MyServerItem } from '@/api/user'
+import { formatBytes, formatDate } from '@/utils/format'
+import { renderMarkdown } from '@/utils/markdown'
+import { getMyServers, getUserNotices, type MyServerItem } from '@/api/user'
+import type { NoticeItem } from '@/api/types'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const loading = ref(false)
 
 const balanceYuan = computed(() => {
@@ -68,7 +71,7 @@ const daysLeft = computed(() => {
 
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
-  return token ? buildSubscribeUrl(token) : ''
+  return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
 onMounted(async () => {
@@ -123,6 +126,58 @@ const statusText: Record<string, { dot: string; text: string }> = {
   connecting: { dot: 'connecting', text: '维护中' },
   offline: { dot: 'offline', text: '离线' },
 }
+
+// 公告系统（真实接口 + 弹窗与强提醒）
+const notices = ref<NoticeItem[]>([])
+const noticeLoading = ref(false)
+const selectedNotice = ref<NoticeItem | null>(null)
+const noticeModalOpen = ref(false)
+const popupNotice = ref<NoticeItem | null>(null)
+const popupOpen = ref(false)
+
+async function loadNotices() {
+  noticeLoading.value = true
+  try {
+    const { data } = await getUserNotices()
+    if (data.code === 0) {
+      notices.value = data.data
+      checkPopupNotice(data.data)
+    }
+  } catch {
+    notices.value = []
+  } finally {
+    noticeLoading.value = false
+  }
+}
+
+function checkPopupNotice(list: NoticeItem[]) {
+  const target = list.find((n) => n.is_popup)
+  if (!target) return
+  const key = `xpanel_popup_notice_${target.id}`
+  const lastReadTime = localStorage.getItem(key)
+  if (!lastReadTime || lastReadTime !== target.updated_at) {
+    popupNotice.value = target
+    popupOpen.value = true
+  }
+}
+
+function handleClosePopup() {
+  if (popupNotice.value) {
+    const key = `xpanel_popup_notice_${popupNotice.value.id}`
+    localStorage.setItem(key, popupNotice.value.updated_at)
+  }
+  popupOpen.value = false
+}
+
+function viewNotice(n: NoticeItem) {
+  selectedNotice.value = n
+  noticeModalOpen.value = true
+}
+
+onMounted(() => {
+  loadServers()
+  loadNotices()
+})
 </script>
 
 <template>
@@ -255,9 +310,23 @@ const statusText: Record<string, { dot: string; text: string }> = {
           <div class="x-card-head">
             <span><el-icon><Bell /></el-icon>&nbsp;最新公告</span>
           </div>
-          <div v-for="n in mockNotices" :key="n.id" class="x-notice-item">
-            <div class="x-notice-title">{{ n.title }}</div>
-            <div class="x-notice-date">{{ n.date }}</div>
+          <div v-if="noticeLoading" style="padding: 16px; text-align: center" class="muted">
+            加载公告中...
+          </div>
+          <div v-else-if="!notices.length" style="padding: 16px; text-align: center" class="muted">
+            暂无系统公告
+          </div>
+          <div
+            v-for="n in notices"
+            :key="n.id"
+            class="x-notice-item cursor-pointer"
+            @click="viewNotice(n)"
+          >
+            <div class="x-notice-title">
+              <el-tag v-if="n.is_pinned" size="small" type="danger" effect="dark" class="mr-1">置顶</el-tag>
+              {{ n.title }}
+            </div>
+            <div class="x-notice-date">{{ formatDate(n.created_at || n.updated_at) }}</div>
           </div>
         </div>
 
@@ -268,15 +337,54 @@ const statusText: Record<string, { dot: string; text: string }> = {
           </div>
           <div style="display: grid; gap: 10px; padding: 14px 16px">
             <router-link to="/subscribe" class="muted help-link">
-              ⚡ Clash Verge Rev 快速导入教程
+              Clash Verge Rev 快速导入教程
             </router-link>
             <router-link to="/subscribe" class="muted help-link">
-              🍎 苹果 iOS Stash 配置指南
+              苹果 iOS Stash 配置指南
             </router-link>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 公告详情弹窗 -->
+    <el-dialog
+      v-model="noticeModalOpen"
+      :title="selectedNotice?.title || '公告详情'"
+      width="580px"
+      destroy-on-close
+    >
+      <div v-if="selectedNotice" class="notice-detail-dialog">
+        <div class="notice-meta">
+          <el-tag v-if="selectedNotice.is_pinned" size="small" type="danger" effect="dark" class="mr-1">置顶</el-tag>
+          <span class="notice-time muted">发布于 {{ formatDate(selectedNotice.created_at) }}</span>
+        </div>
+        <div class="notice-body markdown-content" v-html="renderMarkdown(selectedNotice.content)" />
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="noticeModalOpen = false">我知道了</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 首页重要公告强提醒弹窗 -->
+    <el-dialog
+      v-model="popupOpen"
+      :title="popupNotice?.title || '重要通知'"
+      width="540px"
+      :before-close="handleClosePopup"
+      destroy-on-close
+    >
+      <div v-if="popupNotice" class="notice-detail-dialog">
+        <div class="notice-meta">
+          <el-tag size="small" type="warning" effect="dark" class="mr-1">重要通知</el-tag>
+          <span class="notice-time muted">{{ formatDate(popupNotice.updated_at) }}</span>
+        </div>
+        <div class="notice-body popup-emphasis markdown-content" v-html="renderMarkdown(popupNotice.content)" />
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="handleClosePopup">已了解并关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -542,5 +650,48 @@ const statusText: Record<string, { dot: string; text: string }> = {
   border-radius: 6px;
   padding: 1px 7px;
   font-weight: 500;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  &:hover {
+    background-color: var(--x-fill-2, rgba(0, 0, 0, 0.03));
+  }
+}
+
+.mr-1 {
+  margin-right: 4px;
+}
+
+.notice-detail-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .notice-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .notice-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--x-text);
+    word-break: break-word;
+    background: var(--x-fill-1, #f8fafc);
+    border: 1px solid var(--x-border-light, #e2e8f0);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-height: 480px;
+    overflow-y: auto;
+
+    &.popup-emphasis {
+      border-left: 4px solid var(--x-warning, #f59e0b);
+      background: var(--x-fill-1, #fffbeb);
+    }
+  }
 }
 </style>

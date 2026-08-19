@@ -20,7 +20,7 @@ func (d *Deps) Register(c *gin.Context) {
 		return
 	}
 	// 人机验证（方向②：captcha_enable 开启时校验）
-	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, c.ClientIP(), c.Request.Host, "register"); err != nil {
+	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "register"); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
@@ -53,7 +53,7 @@ func (d *Deps) Login(c *gin.Context) {
 		return
 	}
 	// 人机验证（方向②：登录也校验）
-	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, c.ClientIP(), c.Request.Host, "login"); err != nil {
+	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "login"); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
@@ -115,7 +115,7 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 			return
 		}
 	}
-	d.Audit.Log("user", user.ID, "auth.login_2fa", "两步验证登录成功", c.ClientIP())
+	d.Audit.Log("user", user.ID, "auth.login_2fa", "两步验证登录成功", util.ClientIPFromContext(c))
 	d.finishLogin(c, &user)
 }
 
@@ -138,7 +138,7 @@ func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
 		util.ServerError(c, "签发令牌失败")
 		return
 	}
-	d.Audit.Log("user", user.ID, "auth.login", "登录成功", c.ClientIP())
+	d.Audit.Log("user", user.ID, "auth.login", "登录成功", util.ClientIPFromContext(c))
 	d.setAuthCookies(c, access, refresh)
 	util.OK(c, gin.H{
 		"user": d.userView(user),

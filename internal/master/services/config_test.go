@@ -239,21 +239,16 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		t.Errorf("in2 limit = %d, want 3（套餐继承）", got[0].Limit)
 	}
 
-	// in3：无开放组 → 全部有组用户（u1/u2），显式 vision
+	// in3：未配置开放权限组 → 默认不对任何人开放（0 个用户）
 	got = m["in3"]
-	if len(got) != 2 {
-		t.Fatalf("in3 users = %d, want 2（无组限制时所有有组用户）", len(got))
-	}
-	for _, u := range got {
-		if u.Flow != "xtls-rprx-vision" {
-			t.Errorf("in3 flow = %q, want 显式 vision", u.Flow)
-		}
+	if len(got) != 0 {
+		t.Fatalf("in3 users = %d, want 0（未分配权限组不对任何人开放）", len(got))
 	}
 
 	// u3（无组）与 u4（过期）不得出现在任何入站
 	total := len(m["in1"]) + len(m["in2"]) + len(m["in3"])
-	if total != 4 {
-		t.Errorf("用户总数 = %d, want 4（u1×2 + u2×2）", total)
+	if total != 2 {
+		t.Errorf("用户总数 = %d, want 2（u1×1 + u2×1）", total)
 	}
 	for _, u := range append(append(m["in1"], m["in2"]...), m["in3"]...) {
 		if u.UUID == users[2].UUID || u.UUID == users[3].UUID {

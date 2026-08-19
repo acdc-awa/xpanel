@@ -1,11 +1,10 @@
 // Package xray 负责从「服务器 + 入站 + 用户」生成 Xray 配置。
-// 支持协议：VLESS（tcp+reality+vision / tcp+tls+fallbacks / ws+tls / xhttp+reality / grpc+tls / grpc+reality）；其他协议后续扩展。
+// 支持协议：VLESS（tcp+reality+vision / tcp+tls+fallbacks / xhttp+reality / xhttp+tls）；其他协议后续扩展。
 package xray
 
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -16,9 +15,7 @@ import (
 // InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。
 type InboundSettings struct {
 	Reality *RealitySettings `json:"reality,omitempty"`
-	WS      *WSSettings      `json:"ws,omitempty"`
 	XHTTP   *XHTTPSettings   `json:"xhttp,omitempty"`
-	GRPC    *GRPCSettings    `json:"grpc,omitempty"`
 	TLS     *TLSSettings     `json:"tls,omitempty"`
 	// Fallbacks 仅应用于 tcp 传输（VLESS settings.fallbacks 线格式）。
 	Fallbacks []FallbackSettings `json:"fallbacks,omitempty"`
@@ -41,64 +38,10 @@ type RealitySettings struct {
 	Dest       string `json:"dest"`        // 服务端借壳目标 host:port
 }
 
-type WSSettings struct {
-	Path string `json:"path"`
-	Host string `json:"host"`
-}
-
 type XHTTPSettings struct {
 	Mode string `json:"mode"`
 	Path string `json:"path"`
 	Host string `json:"host"`
-}
-
-type GRPCSettings struct {
-	ServiceName string `json:"serviceName,omitempty"`
-	Authority   string `json:"authority,omitempty"`
-	MultiMode   bool   `json:"multiMode,omitempty"`
-}
-
-// MarshalJSON 以 snake_case 输出（service_name/multi_mode/authority），与 InboundSettings 其余字段
-// 及 TEST_INFRA §4.1 载荷一致，保证 marshalSettings 落库后前端表单（只认 snake_case）编辑不丢字段。
-// xray 线格式不受影响：buildInbound 直接构造 grpcSettings map（camelCase，xray 要求）。
-func (g GRPCSettings) MarshalJSON() ([]byte, error) {
-	wire := struct {
-		ServiceName string `json:"service_name,omitempty"`
-		Authority   string `json:"authority,omitempty"`
-		MultiMode   bool   `json:"multi_mode,omitempty"`
-	}{
-		ServiceName: g.ServiceName,
-		Authority:   g.Authority,
-		MultiMode:   g.MultiMode,
-	}
-	return json.Marshal(wire)
-}
-
-// UnmarshalJSON 支持 camelCase (serviceName/multiMode) 与 snake_case (service_name/multi_mode) 双写；
-// authority 两种写法相同。两套键同时出现时显式 camelCase 优先。
-func (g *GRPCSettings) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		ServiceName    string `json:"serviceName"`
-		Authority      string `json:"authority"`
-		MultiMode      *bool  `json:"multiMode"`
-		ServiceNameAlt string `json:"service_name"`
-		MultiModeAlt   *bool  `json:"multi_mode"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	g.ServiceName = raw.ServiceName
-	if g.ServiceName == "" {
-		g.ServiceName = raw.ServiceNameAlt
-	}
-	g.Authority = raw.Authority
-	g.MultiMode = false
-	if raw.MultiMode != nil {
-		g.MultiMode = *raw.MultiMode
-	} else if raw.MultiModeAlt != nil {
-		g.MultiMode = *raw.MultiModeAlt
-	}
-	return nil
 }
 
 // SniffingSettings 入站流量嗅探（存储层 snake_case；前端表单以 camelCase 发送，UnmarshalJSON 双写兼容）。
@@ -289,21 +232,6 @@ func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 	return nil
 }
 
-// checkGRPCServiceName 校验 grpc 传输必填字段 serviceName：去空白后非空，且不含控制字符。
-func checkGRPCServiceName(g *GRPCSettings) error {
-	if g == nil || strings.TrimSpace(g.ServiceName) == "" {
-		return errors.New("grpc 传输需要配置 serviceName")
-	}
-	if strings.ContainsFunc(g.ServiceName, isControlChar) {
-		return errors.New("grpc serviceName 不能包含控制字符")
-	}
-	return nil
-}
-
-func isControlChar(r rune) bool {
-	return r < 0x20 || r == 0x7f
-}
-
 // parseStringList 解析 JSON 数组字符串或逗号/换行/分号分隔字符串。
 func parseStringList(s string) []string {
 	s = strings.TrimSpace(s)
@@ -398,7 +326,8 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 			routing[k] = v
 		}
 	}
-	routing["rules"] = mergeRoutingRules(routingRules)
+	blockCN := checkBlockCN(outbounds, defaultOutboundTag)
+	routing["rules"] = mergeRoutingRules(routingRules, blockCN)
 	if routingDomainStrategy != "" {
 		routing["domainStrategy"] = routingDomainStrategy
 	}
@@ -554,22 +483,13 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 
 	// streamSettings：传输参数透传目标 + 安全参数自动填充
 	ss := map[string]any{"network": net, "security": sec}
-	switch net {
-	case "xhttp":
+	if net == "xhttp" {
 		if x := StreamXHTTP(inb.StreamSettings); x != nil {
 			xh := map[string]any{"mode": x.Mode, "path": x.Path}
 			if x.Host != "" {
 				xh["host"] = x.Host
 			}
 			ss["xhttpSettings"] = xh
-		}
-	case "ws":
-		if w := StreamWS(inb.StreamSettings); w != nil {
-			ws := map[string]any{"path": w.Path}
-			if w.Host != "" {
-				ws["host"] = w.Host
-			}
-			ss["wsSettings"] = ws
 		}
 	}
 	switch sec {
@@ -625,9 +545,29 @@ func normalizeVlessOutbound(item map[string]any) {
 	}
 }
 
+// checkBlockCN 检查启用的 direct 出站或默认出口是否开启了 block_cn 开关。
+func checkBlockCN(outbounds []models.ServerOutbound, defaultOutboundTag string) bool {
+	for _, ob := range outbounds {
+		if !ob.Enabled {
+			continue
+		}
+		if ob.Tag == "direct" || (defaultOutboundTag != "" && ob.Tag == defaultOutboundTag) || ob.Protocol == "freedom" {
+			if ob.SettingsJSON != "" {
+				var s struct {
+					BlockCN bool `json:"block_cn"`
+				}
+				if err := json.Unmarshal([]byte(ob.SettingsJSON), &s); err == nil && s.BlockCN {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网直连）→ 节点规则（按 Priority ASC, id ASC 排序）。
-func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
+// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网直连 / 阻断回国）→ 节点规则（按 Priority ASC, id ASC 排序）。
+func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any {
 	list := []any{
 		map[string]any{
 			"type":        "field",
@@ -636,10 +576,11 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 		},
 	}
 
-	// 默认内置规则（3x-ui 风格）：BT 流量屏蔽、内网 IP 直连
+	// 默认内置规则（3x-ui 风格）：BT 流量屏蔽、内网 IP 直连、阻断回国流量（若开启）
 	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）
 	hasBT := false
 	hasPrivate := false
+	hasCN := false
 	for _, rule := range rules {
 		if rule.Enabled {
 			if rule.Protocol == "bittorrent" {
@@ -647,6 +588,9 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 			}
 			if rule.IP == "geoip:private" {
 				hasPrivate = true
+			}
+			if strings.Contains(rule.Domain, "geosite:cn") || strings.Contains(rule.IP, "geoip:cn") {
+				hasCN = true
 			}
 		}
 	}
@@ -662,6 +606,14 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 			"type":        "field",
 			"ip":          []string{"geoip:private"},
 			"outboundTag": "direct",
+		})
+	}
+	if len(blockCN) > 0 && blockCN[0] && !hasCN {
+		list = append(list, map[string]any{
+			"type":        "field",
+			"domain":      []string{"geosite:cn"},
+			"ip":          []string{"geoip:cn"},
+			"outboundTag": "blocked",
 		})
 	}
 
@@ -738,73 +690,64 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			(StreamHasReality(inb.StreamSettings) || StreamSecurity(inb.StreamSettings) == "tls") {
 			flow = "xtls-rprx-vision"
 		}
-		client := map[string]any{
+		c := map[string]any{
 			"id":    inb.InternalUUID,
 			"email": RelayEmail(inb.Tag),
 		}
 		if flow != "" {
-			client["flow"] = flow
+			c["flow"] = flow
 		}
-		clients = []any{client}
-	case models.InboundTypeUser:
-		clients = buildProtocolClients(usersByTag[inb.Tag])
+		clients = []any{c}
 	default:
-		return nil, fmt.Errorf("未知入站类型 %q", inb.Type)
-	}
-	// U25：允许空 clients（全部用户未启用/过期/超量时输出空数组，xray -test 通过）——
-	// 让"清空配置"推得动，节点立即移除失效用户，而不是卡在旧配置上继续放行。
-	// 注意：非 user 类型（relay）若缺内部 UUID 已在上面报错，此处仅 user 型可能为空。
-	if clients == nil {
-		clients = []any{}
+		// user 入站：动态用户列表（已由服务层 GetValidUsers 按入站开放权限组过滤，空组返回空列表）
+		userList := usersByTag[inb.Tag]
+		clients = buildClients(userList, inb)
 	}
 	settings["clients"] = clients
 
 	// 2. 解析 streamSettings JSON（完全透传）
 	item := map[string]any{
 		"tag":      inb.Tag,
-		"listen":   inb.Listen,
-		"port":     inb.Port,
 		"protocol": inb.Protocol,
+		"port":     inb.Port,
 		"settings": settings,
 	}
-	if item["listen"] == "" || item["listen"] == nil {
-		item["listen"] = "0.0.0.0"
+	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
+		item["listen"] = inb.Listen
 	}
-
 	if inb.StreamSettings != "" {
 		cleaned := sanitizeStreamSettings(inb.StreamSettings)
 		var stream map[string]any
 		if err := json.Unmarshal([]byte(cleaned), &stream); err != nil {
 			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
 		}
-		// Phase T：证书路径注入（绑定 CertID 的 TLS 入站 → 固定托管路径）
-		if domain, ok := certDomainFor(inb, ctx); ok {
-			if tls, ok := stream["tlsSettings"].(map[string]any); ok {
-				tls["certificates"] = []any{map[string]any{
-					"certificateFile": certFilePath(domain, "fullchain.pem"),
-					"keyFile":         certFilePath(domain, "key.pem"),
-				}}
+		// 证书路径动态注入（Phase T）：当关联了 CertID 且为 TLS 入站时，覆盖 certificates 路径
+		if StreamSecurity(inb.StreamSettings) == "tls" {
+			if domain, ok := certDomainFor(inb, ctx); ok {
+				stream["tlsSettings"] = map[string]any{
+					"certificates": []any{
+						map[string]any{
+							"certificateFile": certFilePath(domain, "fullchain.pem"),
+							"keyFile":         certFilePath(domain, "key.pem"),
+						},
+					},
+				}
 			}
 		}
 		item["streamSettings"] = stream
 	}
-
-	// 3. sniffing（透传）
+	// 3. 解析 sniffing JSON（完全透传）
 	if inb.Sniffing != "" {
-		var sniff map[string]any
-		if err := json.Unmarshal([]byte(inb.Sniffing), &sniff); err == nil {
-			item["sniffing"] = sniff
+		var sniffing map[string]any
+		if err := json.Unmarshal([]byte(inb.Sniffing), &sniffing); err == nil {
+			item["sniffing"] = sniffing
 		}
 	}
-
 	return item, nil
 }
 
-// buildProtocolClients 从 GetValidUsers 计算结果（入站 tag → 已按权限组过滤的用户）构建
-// Xray clients JSON。单一数据源：热更新 SyncUsers 与全量配置生成共用同一组用户，
-// flow（入站三态）与设备限制（三级继承）均由服务层计算完毕，此处仅做线格式转换。
-// 协议：仅 VLESS 全功能（vmess/trojan 为预留 switch，不注入）。
-func buildProtocolClients(users []protocol.User) []any {
+// buildClients 将有效用户转换为 Xray clients 列表。
+func buildClients(users []protocol.User, inb *models.Inbound) []any {
 	clients := make([]any, 0, len(users))
 	for _, u := range users {
 		if u.UUID == "" {
@@ -813,7 +756,6 @@ func buildProtocolClients(users []protocol.User) []any {
 		c := map[string]any{
 			"id":    u.UUID,
 			"email": u.Email,
-			"level": 0,
 		}
 		if u.Flow != "" {
 			c["flow"] = u.Flow
@@ -839,7 +781,9 @@ func StreamNetwork(raw string) string {
 	var s struct {
 		Network string `json:"network"`
 	}
-	json.Unmarshal([]byte(raw), &s)
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return ""
+	}
 	return s.Network
 }
 
@@ -851,34 +795,40 @@ func StreamSecurity(raw string) string {
 	var s struct {
 		Security string `json:"security"`
 	}
-	json.Unmarshal([]byte(raw), &s)
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return ""
+	}
 	return s.Security
 }
 
 // StreamReality 从 streamSettings JSON 中提取 realitySettings。
-// stream_settings 存 xray 入站线格式（camelCase：serverNames[]/shortIds[]/publicKey/privateKey），
-// serverName 取 serverNames[0]、shortId 取 shortIds[0]（客户端订阅用单数）。
 func StreamReality(raw string) *RealitySettings {
 	if raw == "" {
 		return nil
 	}
 	var s struct {
-		RealitySettings *struct {
-			ServerName  string   `json:"serverName"`
+		Security string `json:"security"`
+		Reality  *struct {
 			ServerNames []string `json:"serverNames"`
+			ServerName  string   `json:"serverName"`
 			PublicKey   string   `json:"publicKey"`
-			ShortID     string   `json:"shortId"`
-			ShortIDs    []string `json:"shortIds"`
+			Password    string   `json:"password"`
 			PrivateKey  string   `json:"privateKey"`
+			ShortIDs    []string `json:"shortIds"`
+			ShortID     string   `json:"shortId"`
 			Dest        string   `json:"dest"`
 		} `json:"realitySettings"`
 	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.RealitySettings == nil {
+	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Reality == nil || s.Security != "reality" {
 		return nil
 	}
-	r := s.RealitySettings
+	r := s.Reality
+	pk := r.Password
+	if pk == "" {
+		pk = r.PublicKey
+	}
 	out := &RealitySettings{
-		PublicKey:  r.PublicKey,
+		PublicKey:  pk,
 		PrivateKey: r.PrivateKey,
 		Dest:       r.Dest,
 	}
@@ -896,21 +846,6 @@ func StreamReality(raw string) *RealitySettings {
 		return nil
 	}
 	return out
-}
-
-// StreamWS 从 streamSettings JSON 中提取 wsSettings。
-func StreamWS(raw string) *WSSettings {
-	if raw == "" {
-		return nil
-	}
-	var s struct {
-		WSSettings WSSettings `json:"wsSettings"`
-	}
-	json.Unmarshal([]byte(raw), &s)
-	if s.WSSettings.Path == "" {
-		return nil
-	}
-	return &s.WSSettings
 }
 
 // StreamTLS 从 streamSettings JSON 中提取 tlsSettings（订阅 servername / skip-cert-verify 透传）。

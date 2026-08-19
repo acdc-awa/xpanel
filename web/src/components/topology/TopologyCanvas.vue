@@ -338,20 +338,13 @@ function buildGraph(data: TopologyData) {
 
   const outByServer = new Map<number, BoxOutbound[]>()
   for (const out of data.outbounds) {
-    if (out.protocol === 'blackhole') continue
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
-    outByServer.get(out.server_id)!.push({ ...out, id: String(out.id) })
-  }
-  for (const s of data.servers) {
-    const list = outByServer.get(s.id) ?? []
-    list.push({
-      id: `direct-${s.id}`,
-      tag: s.default_outbound_tag || 'direct',
-      protocol: 'freedom',
-      inbound_ref: null,
-      virtual: true,
+    const isDirect = (out.tag === 'direct' || out.protocol === 'freedom') && !out.inbound_ref
+    outByServer.get(out.server_id)!.push({
+      ...out,
+      id: String(out.id),
+      virtual: isDirect,
     })
-    outByServer.set(s.id, list)
   }
 
   nodes.value = data.servers.map((s, idx) => ({
@@ -400,22 +393,14 @@ function buildGraph(data: TopologyData) {
     if (!rule.inbound_tag || !rule.enabled) continue
     const inb = data.inbounds.find((i) => i.tag === rule.inbound_tag && i.server_id === rule.server_id)
     if (!inb) continue
-    const srv = data.servers.find((s) => s.id === rule.server_id)
-    const out = data.outbounds.find((o) => o.tag === rule.outbound_tag && o.server_id === rule.server_id && o.protocol !== 'blackhole')
-    let targetHandle: string
-    if (out) {
-      targetHandle = `out-tgt-${out.id}`
-    } else if (srv && rule.outbound_tag === (srv.default_outbound_tag || 'direct')) {
-      targetHandle = `out-tgt-direct-${rule.server_id}`
-    } else {
-      continue
-    }
+    const out = data.outbounds.find((o) => o.tag === rule.outbound_tag && o.server_id === rule.server_id)
+    if (!out) continue
     es.push({
       id: `rule-${rule.id}`,
       source: `server-${rule.server_id}`,
       sourceHandle: `inb-src-${inb.id}`,
       target: `server-${rule.server_id}`,
-      targetHandle,
+      targetHandle: `out-tgt-${out.id}`,
       type: 'boxrule',
       markerEnd: { type: MarkerType.ArrowClosed },
     })
@@ -441,7 +426,7 @@ function isValidConnection(conn: Connection): boolean {
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
-  const outAny = tgt.match(/^(?:out-src|out-tgt)-(?:(\d+)|direct-(\d+))$/)
+  const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
   if (outSrc && inbAny) {
     const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
@@ -455,12 +440,8 @@ function isValidConnection(conn: Connection): boolean {
   }
   if (inbSrc && outAny) {
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbSrc[1]))
-    if (!inb) return false
-    if (outAny[2]) {
-      return inb.server_id === Number(outAny[2])
-    }
     const out = props.topology.outbounds.find((o) => o.id === Number(outAny[1]))
-    return !!(out && inb.server_id === out.server_id)
+    return !!(inb && out && inb.server_id === out.server_id)
   }
   return false
 }
@@ -474,18 +455,14 @@ async function handleConnect(conn: Connection) {
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
-  const outAny = tgt.match(/^(?:out-src|out-tgt)-(?:(\d+)|direct-(\d+))$/)
+  const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
   if (outSrc && inbAny) {
     await createRef(Number(outSrc[1]), Number(inbAny[1]))
   } else if (inbSrcExt && inbAny) {
     await createViaOutbound(Number(inbSrcExt[1]), Number(inbAny[1]))
   } else if (inbSrc && outAny) {
-    if (outAny[2]) {
-      openDirectRuleDialog(Number(inbSrc[1]), Number(outAny[2]))
-    } else {
-      openRuleDialog(Number(inbSrc[1]), Number(outAny[1]))
-    }
+    openRuleDialog(Number(inbSrc[1]), Number(outAny[1]))
   } else if (inbSrc && inbAny) {
     ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
   } else {
@@ -626,27 +603,6 @@ function openRuleDialog(inboundId: number, outboundId: number) {
   ruleForm.serverId = inb.server_id
   ruleForm.inboundTag = inb.tag
   ruleForm.outboundTag = out.tag
-  ruleForm.domain = ''
-  ruleForm.ip = ''
-  ruleForm.protocol = ''
-  ruleForm.port = ''
-  ruleForm.network = ''
-  ruleForm.priority = 0
-  ruleOpen.value = true
-}
-
-function openDirectRuleDialog(inboundId: number, serverId: number) {
-  const data = props.topology!
-  const inb = data.inbounds.find((i) => i.id === inboundId)
-  const srv = data.servers.find((s) => s.id === serverId)
-  if (!inb || !srv) return
-  if (inb.server_id !== serverId) {
-    ElMessage.warning('路由规则只能在同一服务器内（入站 → 出站）')
-    return
-  }
-  ruleForm.serverId = inb.server_id
-  ruleForm.inboundTag = inb.tag
-  ruleForm.outboundTag = srv.default_outbound_tag || 'direct'
   ruleForm.domain = ''
   ruleForm.ip = ''
   ruleForm.protocol = ''
@@ -1071,13 +1027,14 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   />
                   <span
                     class="tag out-tag"
-                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : ''"
+                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : ''"
                     :title="out.tag"
                   >
                     {{ out.tag }}
                   </span>
                   <span v-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
+                  <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
                   <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
                   <Handle
@@ -1447,6 +1404,11 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         background: rgba(52, 211, 153, 0.15);
         color: #34d399;
         border: 1px solid rgba(52, 211, 153, 0.3);
+      }
+      &.blocked {
+        background: rgba(248, 113, 113, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(248, 113, 113, 0.3);
       }
     }
 

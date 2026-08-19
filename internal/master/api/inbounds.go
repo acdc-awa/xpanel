@@ -40,6 +40,11 @@ type inboundView struct {
 	ShareAddrStrategy string    `json:"share_addr_strategy"`        // node / listen / custom
 	ShareAddr         string    `json:"share_addr"`                 // 自定义分享地址（订阅专用，域名/IP）
 	SharePort         int       `json:"share_port"`                 // 自定义分享端口（0 = 使用入站端口）
+	ShareSecurity      string    `json:"share_security"`             // auto / tls / none
+	ShareSNI           string    `json:"share_sni"`                  // 订阅 SNI 覆写
+	ShareHost          string    `json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
+	SharePath          string    `json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
+	ShareAllowInsecure bool      `json:"share_allow_insecure"`       // 订阅跳过证书校验
 	PermissionGroupIDs []uint64  `json:"permission_group_ids"`       // 开放权限组 ID 列表（权威来源：节点入站定义权限组）
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -63,12 +68,21 @@ type inboundForm struct {
 	ShareAddrStrategy string  `json:"share_addr_strategy"` // node / listen / custom
 	ShareAddr         string  `json:"share_addr"` // 自定义分享地址（订阅专用，域名/IP）
 	SharePort         int     `json:"share_port"` // 自定义分享端口（0 = 使用入站端口）
+	ShareSecurity      string  `json:"share_security"` // auto / tls / none
+	ShareSNI           string  `json:"share_sni"`
+	ShareHost          string  `json:"share_host"`
+	SharePath          string  `json:"share_path"`
+	ShareAllowInsecure bool    `json:"share_allow_insecure"`
 	PermissionGroupIDs []uint64 `json:"permission_group_ids"` // 开放权限组 ID 列表
 }
 
 func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inboundView {
 	if groupIDs == nil {
 		groupIDs = []uint64{}
+	}
+	sec := i.ShareSecurity
+	if sec == "" {
+		sec = "auto"
 	}
 	return inboundView{
 		ID: i.ID, ServerID: i.ServerID, ServerName: serverName,
@@ -80,6 +94,8 @@ func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inbo
 		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
 		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
 		SharePort: i.SharePort,
+		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
+		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
 		PermissionGroupIDs: groupIDs,
 	}
 }
@@ -203,6 +219,13 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	if inb.ShareAddrStrategy == "" {
 		inb.ShareAddrStrategy = "node"
 	}
+	if inb.ShareSecurity == "" {
+		inb.ShareSecurity = "auto"
+	}
+	if inb.ShareSecurity != "" && !validShareSecurity(inb.ShareSecurity) {
+		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
+		return
+	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
 		return
@@ -248,6 +271,11 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ShareAddrStrategy *string `json:"share_addr_strategy"` //
 		ShareAddr         *string `json:"share_addr"`          //
 		SharePort         *int    `json:"share_port"`          // 0 = 使用入站端口
+		ShareSecurity      *string `json:"share_security"`      // auto / tls / none
+		ShareSNI           *string `json:"share_sni"`
+		ShareHost          *string `json:"share_host"`
+		SharePath          *string `json:"share_path"`
+		ShareAllowInsecure *bool   `json:"share_allow_insecure"`
 		PermissionGroupIDs *[]uint64 `json:"permission_group_ids"` // 开放权限组（nil 不更新）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -308,6 +336,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.SharePort != nil && (*req.SharePort < 0 || *req.SharePort > 65535) {
 		util.BadRequest(c, "分享端口需在 0-65535 之间（0=使用入站端口）")
+		return
+	}
+	if req.ShareSecurity != nil && *req.ShareSecurity != "" && !validShareSecurity(*req.ShareSecurity) {
+		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
 		return
 	}
 	if req.Ratio != nil && *req.Ratio < 0 {
@@ -397,6 +429,21 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.SharePort != nil {
 		updates["share_port"] = *req.SharePort
+	}
+	if req.ShareSecurity != nil {
+		updates["share_security"] = *req.ShareSecurity
+	}
+	if req.ShareSNI != nil {
+		updates["share_sni"] = *req.ShareSNI
+	}
+	if req.ShareHost != nil {
+		updates["share_host"] = *req.ShareHost
+	}
+	if req.SharePath != nil {
+		updates["share_path"] = *req.SharePath
+	}
+	if req.ShareAllowInsecure != nil {
+		updates["share_allow_insecure"] = *req.ShareAllowInsecure
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
@@ -534,6 +581,14 @@ func validInboundFlow(f string) bool {
 func validShareAddrStrategy(s string) bool {
 	switch s {
 	case "node", "listen", "custom":
+		return true
+	}
+	return false
+}
+
+func validShareSecurity(s string) bool {
+	switch s {
+	case "auto", "tls", "none":
 		return true
 	}
 	return false

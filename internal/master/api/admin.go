@@ -231,7 +231,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	})
 }
 
-// AdminUpdateUser PUT /api/v1/admin/users/:id —— 更新用户信息（权限组/套餐/过期时间/密码/设备限制）。
+// AdminUpdateUser PUT /api/v1/admin/users/:id —— 更新用户信息（角色/权限组/套餐/过期时间/密码/设备限制）。
 // 2026-08-14 方向④：余额只走调账（AdminAdjustUserBalance，记流水），禁止直写 balance_cents。
 func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
@@ -246,6 +246,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	}
 	var req struct {
 		Email             *string    `json:"email" binding:"omitempty,email,max=128"` // 管理员可改邮箱（=用户名，记审计）
+		Role              *string    `json:"role"`                                    // "admin" | "user"
 		PlanID            *uint64    `json:"plan_id"`
 		PermissionGroupID *uint64    `json:"permission_group_id"` // 0=跟随套餐
 		DeviceLimit       *int       `json:"device_limit"`        // 0=跟随套餐
@@ -269,6 +270,23 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		updates["email"] = email
 		updates["username"] = email // 用户名=邮箱同值
 	}
+	if req.Role != nil {
+		role := strings.ToLower(strings.TrimSpace(*req.Role))
+		if role != models.RoleAdmin && role != models.RoleUser {
+			util.BadRequest(c, "非法角色（仅支持 admin 或 user）")
+			return
+		}
+		// 防死锁：如果试图将管理员降级为普通用户，必须确保系统中至少保留 1 名激活状态管理员
+		if user.Role == models.RoleAdmin && role != models.RoleAdmin {
+			var activeAdminCount int64
+			d.DB.Model(&models.User{}).Where("role = ? AND status = ?", models.RoleAdmin, models.StatusActive).Count(&activeAdminCount)
+			if activeAdminCount <= 1 {
+				util.BadRequest(c, "系统必须至少保留一名处于激活状态的管理员，无法降级该账号")
+				return
+			}
+		}
+		updates["role"] = role
+	}
 	if req.PlanID != nil {
 		updates["plan_id"] = *req.PlanID
 	}
@@ -282,7 +300,17 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		updates["expire_at"] = req.ExpireAt
 	}
 	if req.Status != nil {
-		updates["status"] = *req.Status
+		status := *req.Status
+		// 防死锁：如果试图禁用管理员，必须确保系统中至少保留 1 名激活状态管理员
+		if user.Role == models.RoleAdmin && status != models.StatusActive {
+			var activeAdminCount int64
+			d.DB.Model(&models.User{}).Where("role = ? AND status = ?", models.RoleAdmin, models.StatusActive).Count(&activeAdminCount)
+			if activeAdminCount <= 1 {
+				util.BadRequest(c, "系统必须至少保留一名处于激活状态的管理员，无法禁用该账号")
+				return
+			}
+		}
+		updates["status"] = status
 	}
 	if req.Password != nil && *req.Password != "" {
 		// 管理员改密：bump token_version 吊销该用户全部旧会话（J5）
@@ -321,6 +349,16 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 	newStatus := models.StatusDisabled
 	if user.Status == models.StatusDisabled {
 		newStatus = models.StatusActive
+	} else {
+		// 防死锁：如果试图禁用管理员，必须确保系统中至少保留 1 名激活状态管理员
+		if user.Role == models.RoleAdmin {
+			var activeAdminCount int64
+			d.DB.Model(&models.User{}).Where("role = ? AND status = ?", models.RoleAdmin, models.StatusActive).Count(&activeAdminCount)
+			if activeAdminCount <= 1 {
+				util.BadRequest(c, "系统必须至少保留一名处于激活状态的管理员，无法禁用该账号")
+				return
+			}
+		}
 	}
 	updates := map[string]any{"status": newStatus}
 	if newStatus == models.StatusDisabled {
@@ -347,7 +385,7 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 		util.Fail(c, 404, "用户不存在")
 		return
 	}
-	if err := d.Traffic.ResetUserTraffic(id); err != nil {
+	if err := d.DB.Model(&user).Update("traffic_cycle_start", time.Now()).Error; err != nil {
 		util.ServerError(c, "重置失败")
 		return
 	}
@@ -373,6 +411,15 @@ func (d *Deps) AdminDeleteUser(c *gin.Context) {
 	if user.ID == middleware.CurrentUser(c) {
 		util.BadRequest(c, "不能删除自己")
 		return
+	}
+	// 防死锁：如果试图删除管理员，必须确保系统中至少保留 1 名激活状态管理员
+	if user.Role == models.RoleAdmin {
+		var activeAdminCount int64
+		d.DB.Model(&models.User{}).Where("role = ? AND status = ?", models.RoleAdmin, models.StatusActive).Count(&activeAdminCount)
+		if activeAdminCount <= 1 {
+			util.BadRequest(c, "系统必须至少保留一名处于激活状态的管理员，无法删除该账号")
+			return
+		}
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&user).Error

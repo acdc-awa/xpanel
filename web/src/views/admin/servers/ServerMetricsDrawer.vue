@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onUnmounted, nextTick, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const range = ref<'1h' | '6h' | '24h' | '7d'>('1h')
 const loading = ref(false)
 const metricsData = ref<ServerMetricsData | null>(null)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
 
 const netChartRef = ref<HTMLDivElement | null>(null)
 const cpuChartRef = ref<HTMLDivElement | null>(null)
@@ -31,12 +32,12 @@ let memChart: echarts.ECharts | null = null
 let userChart: echarts.ECharts | null = null
 let refreshTimer: any = null
 
-const commonGrid = {
+const commonGrid = computed(() => ({
   top: 30,
-  right: 20,
+  right: isMobile.value ? 10 : 20,
   bottom: 25,
-  left: 55,
-}
+  left: isMobile.value ? 42 : 55,
+}))
 
 const tooltipConfig = {
   backgroundColor: 'rgba(15, 23, 42, 0.9)',
@@ -45,6 +46,10 @@ const tooltipConfig = {
   padding: [8, 12],
   textStyle: { color: '#ffffff', fontSize: 12 },
   extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;',
+}
+
+function updateMobileState() {
+  isMobile.value = window.innerWidth <= 768
 }
 
 function initCharts() {
@@ -63,6 +68,7 @@ function initCharts() {
 }
 
 function resizeCharts() {
+  updateMobileState()
   netChart?.resize()
   cpuChart?.resize()
   memChart?.resize()
@@ -88,8 +94,8 @@ function updateCharts() {
       },
     },
     legend: { data: ['下行 / 入口 (Rx)', '上行 / 出口 (Tx)'], top: 0, textStyle: { color: '#64748b', fontSize: 12 } },
-    grid: commonGrid,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
+    grid: commonGrid.value,
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', name: 'Mbps', nameTextStyle: { color: '#64748b' }, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b' } },
     series: [
       {
@@ -126,8 +132,8 @@ function updateCharts() {
   // 2. CPU 使用率
   cpuChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} %` },
-    grid: commonGrid,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
+    grid: commonGrid.value,
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b', formatter: '{value}%' } },
     series: [
       {
@@ -156,8 +162,8 @@ function updateCharts() {
   memChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} %` },
     legend: { data: ['内存占用率', '磁盘占用率'], top: 0, textStyle: { color: '#64748b', fontSize: 12 } },
-    grid: commonGrid,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
+    grid: commonGrid.value,
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b', formatter: '{value}%' } },
     series: [
       {
@@ -182,8 +188,8 @@ function updateCharts() {
   // 4. 在线用户数
   userChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} 人` },
-    grid: commonGrid,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
+    grid: commonGrid.value,
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b' } },
     series: [
       {
@@ -228,6 +234,7 @@ watch(
   () => props.modelValue,
   async (open) => {
     if (open) {
+      updateMobileState()
       await nextTick()
       initCharts()
       window.addEventListener('resize', resizeCharts)
@@ -255,13 +262,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <el-drawer
+  <el-dialog
     :model-value="modelValue"
     :title="`时序性能监控 · ${serverName}`"
-    size="760px"
+    :width="isMobile ? '94vw' : '820px'"
+    top="5vh"
+    align-center
+    destroy-on-close
+    class="server-metrics-dialog"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <div class="metrics-drawer-body" v-loading="loading">
+    <div class="metrics-modal-body" v-loading="loading">
       <!-- 顶栏时间范围切换 -->
       <div class="range-toolbar">
         <div class="range-tabs">
@@ -317,15 +328,21 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </el-drawer>
+  </el-dialog>
 </template>
 
-<style scoped>
-.metrics-drawer-body {
+<style scoped lang="scss">
+:deep(.el-dialog__body) {
+  max-height: 76vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 18px 20px;
+}
+
+.metrics-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-height: 100%;
+  gap: 14px;
 }
 
 .range-toolbar {
@@ -333,10 +350,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: var(--x-card, #ffffff);
+  background: var(--x-bg, #f8fafc);
   border: 1px solid var(--x-border, #e6e8f0);
-  border-radius: var(--x-radius, 12px);
-  box-shadow: var(--x-shadow, 0 1px 3px rgba(23, 27, 46, 0.06));
+  border-radius: var(--x-radius, 10px);
 }
 
 .range-actions {
@@ -353,35 +369,92 @@ onUnmounted(() => {
 .charts-grid {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .chart-card {
   background: var(--x-card, #ffffff);
   border: 1px solid var(--x-border, #e6e8f0);
-  border-radius: var(--x-radius, 12px);
-  box-shadow: var(--x-shadow, 0 1px 3px rgba(23, 27, 46, 0.06));
-  padding: 16px 18px;
+  border-radius: var(--x-radius, 10px);
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .chart-header {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .chart-header .title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--x-text, #1e2333);
 }
 
 .chart-header .sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--x-text-2, #6b7280);
   margin-top: 2px;
 }
 
 .echart-box {
   width: 100%;
-  height: 220px;
+  height: 210px;
+}
+
+@media (max-width: 768px) {
+  :deep(.el-dialog__body) {
+    max-height: calc(85vh - 70px) !important;
+    padding: 10px 12px 16px !important;
+  }
+
+  .metrics-modal-body {
+    gap: 12px;
+  }
+
+  .range-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px 10px;
+
+    .range-tabs {
+      width: 100%;
+
+      .el-radio-group {
+        display: flex;
+        width: 100%;
+
+        .el-radio-button {
+          flex: 1;
+
+          :deep(.el-radio-button__inner) {
+            width: 100%;
+            padding: 6px 2px;
+            font-size: 11px;
+          }
+        }
+      }
+    }
+
+    .range-actions {
+      justify-content: space-between;
+    }
+  }
+
+  .chart-card {
+    padding: 10px 8px;
+
+    .chart-header .title {
+      font-size: 13px;
+    }
+
+    .chart-header .sub {
+      font-size: 11px;
+    }
+  }
+
+  .echart-box {
+    height: 185px;
+  }
 }
 </style>

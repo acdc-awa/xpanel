@@ -56,3 +56,35 @@ func RandomID(n int) string {
 	return s
 }
 
+// GenerateSecurePassword 生成指定长度的高强度安全随机密码（包含大写、小写、数字与特殊符号）。
+func GenerateSecurePassword(length int) string {
+	if length < 8 {
+		length = 16
+	}
+	const (
+		upper   = "ABCDEFGHJKLMNPQRSTUVWXYZ" // 排除易混淆的 I, O
+		lower   = "abcdefghijkmnopqrstuvwxyz" // 排除易混淆的 l
+		digits  = "23456789"                 // 排除易混淆的 0, 1
+		symbols = "!@#$%^&*"
+		all     = upper + lower + digits + symbols
+	)
+
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		// 极端兜底
+		return fmt.Sprintf("Xray%d#Admin!", time.Now().Unix())
+	}
+
+	for i := range b {
+		b[i] = all[int(b[i])%len(all)]
+	}
+
+	// 保证各字符集至少出现一次
+	b[0] = upper[int(b[0])%len(upper)]
+	b[1] = lower[int(b[1])%len(lower)]
+	b[2] = digits[int(b[2])%len(digits)]
+	b[3] = symbols[int(b[3])%len(symbols)]
+
+	return string(b)
+}
+

@@ -14,6 +14,8 @@ import type {
   Order,
   PermissionGroup,
   Plan,
+  NoticeItem,
+  NoticePayload,
   ServerOutbound,
   ServerRoutingRule,
 } from './types'
@@ -93,6 +95,12 @@ export interface SiteGroup {
   logo: string
   favicon: string
   subscribe_domain: string
+  subscribe_url: string
+  subscribe_path: string
+  subscribe_port: string
+  sub_clean_ua: string
+  sub_strict_ua: string
+  sub_blocked_ua: string
   tos_url: string
   stop_register: string
   currency: string
@@ -127,6 +135,8 @@ export function getUsers(page = 1, size = 20) {
 export function updateUser(
   id: number,
   payload: {
+    email?: string
+    role?: 'admin' | 'user'
     plan_id?: number
     permission_group_id?: number
     device_limit?: number
@@ -544,4 +554,26 @@ export function resetUserTraffic(id: number) {
 
 export function deleteUser(id: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/users/${id}`)
+}
+
+// ===== 公告管理 =====
+
+export function getAdminNotices(params?: { keyword?: string; status?: number }) {
+  return http.get<ApiResp<NoticeItem[]>>('/admin/notices', { params })
+}
+
+export function createAdminNotice(payload: NoticePayload) {
+  return http.post<ApiResp<NoticeItem>>('/admin/notices', payload)
+}
+
+export function updateAdminNotice(id: number, payload: NoticePayload) {
+  return http.put<ApiResp<NoticeItem>>(`/admin/notices/${id}`, payload)
+}
+
+export function deleteAdminNotice(id: number) {
+  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/notices/${id}`)
+}
+
+export function toggleAdminNotice(id: number, field: 'status' | 'is_pinned' | 'is_popup') {
+  return http.post<ApiResp<NoticeItem>>(`/admin/notices/${id}/toggle`, { field })
 }

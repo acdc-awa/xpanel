@@ -102,17 +102,16 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 	}
 }
 
-func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
-
+func TestGenerateConfig_VLESS_XHTTP_REALITY(t *testing.T) {
 	inbounds := []models.Inbound{
 		{
-			ID: 101, ServerID: 1, Tag: "vless-grpc-reality-in", Protocol: "vless", Port: 443,
-			StreamSettings: `{"network":"grpc","security":"reality","grpcSettings":{"serviceName":"vless-grpc-svc","authority":"grpc.example.com","multiMode":true},"realitySettings":{"serverNames":["example.com"],"publicKey":"pk123","privateKey":"sk456","shortIds":["12345678"],"dest":"1.1.1.1:443"}}`,
+			ID: 101, ServerID: 1, Tag: "vless-xhttp-reality-in", Protocol: "vless", Port: 443,
+			StreamSettings: `{"network":"xhttp","security":"reality","xhttpSettings":{"mode":"auto","path":"/xhttp-stream","host":"xhttp.example.com"},"realitySettings":{"serverNames":["example.com"],"publicKey":"pk123","privateKey":"sk456","shortIds":["12345678"],"dest":"1.1.1.1:443"}}`,
 			Enabled:        true,
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-grpc-tls-in"), nil, "", "")
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-xhttp-reality-in"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -124,17 +123,17 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 
 	inboundList := asArray(t, parsed["inbounds"], "inbounds")
 	vlessIn := asObject(t, inboundList[0], "inbounds[0]")
-	if vlessIn["tag"] != "vless-grpc-reality-in" {
+	if vlessIn["tag"] != "vless-xhttp-reality-in" {
 		t.Errorf("tag mismatch: %v", vlessIn["tag"])
 	}
 
 	stream := asObject(t, vlessIn["streamSettings"], "streamSettings")
-	if stream["network"] != "grpc" || stream["security"] != "reality" {
+	if stream["network"] != "xhttp" || stream["security"] != "reality" {
 		t.Errorf("streamSettings mismatch: %v", stream)
 	}
-	grpcSettings := asObject(t, stream["grpcSettings"], "grpcSettings")
-	if grpcSettings["serviceName"] != "vless-grpc-svc" {
-		t.Errorf("grpcSettings.serviceName mismatch: %v", grpcSettings)
+	xhttpSettings := asObject(t, stream["xhttpSettings"], "xhttpSettings")
+	if xhttpSettings["path"] != "/xhttp-stream" {
+		t.Errorf("xhttpSettings.path mismatch: %v", xhttpSettings)
 	}
 	realitySettings := asObject(t, stream["realitySettings"], "realitySettings")
 	if realitySettings["dest"] != "1.1.1.1:443" {
@@ -142,17 +141,16 @@ func TestGenerateConfig_VLESS_gRPC_REALITY(t *testing.T) {
 	}
 }
 
-func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
-
+func TestGenerateConfig_VLESS_XHTTP_TLS(t *testing.T) {
 	inbounds := []models.Inbound{
 		{
-			ID: 102, ServerID: 1, Tag: "vless-grpc-tls-in", Protocol: "vless", Port: 8443,
-			StreamSettings: `{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"grpc-tls-service"},"tlsSettings":{"serverName":"mydomain.com","certificates":[{"certificateFile":"/etc/cert.pem","keyFile":"/etc/key.pem"}]}}`,
+			ID: 102, ServerID: 1, Tag: "vless-xhttp-tls-in", Protocol: "vless", Port: 8443,
+			StreamSettings: `{"network":"xhttp","security":"tls","xhttpSettings":{"mode":"stream-up","path":"/xp"},"tlsSettings":{"serverName":"mydomain.com","certificates":[{"certificateFile":"/etc/cert.pem","keyFile":"/etc/key.pem"}]}}`,
 			Enabled:        true,
 		},
 	}
 
-	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-grpc-tls-in"), nil, "", "")
+	rawCfg, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-xhttp-tls-in"), nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -165,7 +163,7 @@ func TestGenerateConfig_VLESS_gRPC_TLS(t *testing.T) {
 	inboundList := asArray(t, parsed["inbounds"], "inbounds")
 	vlessIn := asObject(t, inboundList[0], "inbounds[0]")
 	stream := asObject(t, vlessIn["streamSettings"], "streamSettings")
-	if stream["network"] != "grpc" || stream["security"] != "tls" {
+	if stream["network"] != "xhttp" || stream["security"] != "tls" {
 		t.Errorf("streamSettings mismatch: %v", stream)
 	}
 	tlsSettings := asObject(t, stream["tlsSettings"], "tlsSettings")
@@ -184,7 +182,7 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 	outbounds := []models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIP"}`, StreamSettingsJSON: `{"sockopt":{"mark":255}}`, Enabled: true},
 		{ID: 2, ServerID: 1, Tag: "blocked", Protocol: "blackhole", SettingsJSON: `{"response":{"type":"http"}}`, Enabled: true},
-		{ID: 3, ServerID: 1, Tag: "outbound-vless-grpc", Protocol: "vless", SettingsJSON: `{"vnext":[{"address":"remote.proxy.com","port":443,"users":[{"id":"uuid","encryption":"none"}]}]}`, StreamSettingsJSON: `{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"out-grpc-svc"}}`, SendThrough: "192.168.1.100", Enabled: true},
+		{ID: 3, ServerID: 1, Tag: "outbound-vless-xhttp", Protocol: "vless", SettingsJSON: `{"vnext":[{"address":"remote.proxy.com","port":443,"users":[{"id":"uuid","encryption":"none"}]}]}`, StreamSettingsJSON: `{"network":"xhttp","security":"tls","xhttpSettings":{"mode":"auto","path":"/out-xhttp"}}`, SendThrough: "192.168.1.100", Enabled: true},
 	}
 
 	rawCfg, err := xray.Generate(inbounds, outbounds, nil, users, nil, "", "")
@@ -199,7 +197,7 @@ func TestGenerateConfig_ComplexOutbounds(t *testing.T) {
 
 	obs := asArray(t, parsed["outbounds"], "outbounds")
 	if len(obs) != 4 {
-		t.Fatalf("expected 4 outbounds (direct+blocked+api from template + vless-grpc from DB), got %d", len(obs))
+		t.Fatalf("expected 4 outbounds (direct+blocked+api from template + vless-xhttp from DB), got %d", len(obs))
 	}
 	obDirect := asObject(t, obs[0], "obs[0]")
 	if obDirect["tag"] != "direct" {
@@ -726,47 +724,7 @@ func TestGenerateShortID(t *testing.T) {
 	}
 }
 
-func TestGRPCSettingsUnmarshalJSON(t *testing.T) {
-	parse := func(t *testing.T, payload string) xray.GRPCSettings {
-		t.Helper()
-		var g xray.GRPCSettings
-		if err := json.Unmarshal([]byte(payload), &g); err != nil {
-			t.Fatalf("unmarshal failed: %v", err)
-		}
-		return g
-	}
 
-	t.Run("snake_case", func(t *testing.T) {
-		g := parse(t, `{"service_name":"svc","multi_mode":true}`)
-		if g.ServiceName != "svc" || !g.MultiMode {
-			t.Errorf("parse error: %+v", g)
-		}
-	})
-	t.Run("camelCase", func(t *testing.T) {
-		g := parse(t, `{"serviceName":"svc","multiMode":true}`)
-		if g.ServiceName != "svc" || !g.MultiMode {
-			t.Errorf("parse error: %+v", g)
-		}
-	})
-	t.Run("camelCase wins", func(t *testing.T) {
-		g := parse(t, `{"serviceName":"camel","service_name":"snake"}`)
-		if g.ServiceName != "camel" {
-			t.Errorf("ServiceName = %q", g.ServiceName)
-		}
-	})
-}
-
-func TestGRPCSettingsMarshalJSON(t *testing.T) {
-	g := xray.GRPCSettings{ServiceName: "my-svc", Authority: "grpc.example.com", MultiMode: true}
-	b, err := json.Marshal(g)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-	s := string(b)
-	if !strings.Contains(s, `"service_name":"my-svc"`) || !strings.Contains(s, `"multi_mode":true`) {
-		t.Errorf("marshal must use snake_case: %s", s)
-	}
-}
 
 func TestSniffingSettingsUnmarshalJSON(t *testing.T) {
 	parse := func(payload string) xray.SniffingSettings {
@@ -962,3 +920,56 @@ func TestGenerate_ClientFlowPassthrough(t *testing.T) {
 		t.Errorf("Flow 为空不应输出 flow 字段: flow=%q", flow)
 	}
 }
+
+func TestGenerate_BlockCN(t *testing.T) {
+	inbounds := []models.Inbound{
+		{ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
+	}
+	outbounds := []models.ServerOutbound{
+		{
+			ID:           1,
+			ServerID:     1,
+			Tag:          "direct",
+			Protocol:     "freedom",
+			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true}`,
+			Enabled:      true,
+		},
+		{
+			ID:           2,
+			ServerID:     1,
+			Tag:          "blocked",
+			Protocol:     "blackhole",
+			Enabled:      true,
+		},
+	}
+
+	cfgBytes, err := xray.Generate(inbounds, outbounds, nil, vlessUsers("vless-in"), nil, "direct", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var root struct {
+		Routing struct {
+			Rules []map[string]any `json:"rules"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(cfgBytes, &root); err != nil {
+		t.Fatalf("Unmarshal config failed: %v", err)
+	}
+
+	hasCNRule := false
+	for _, rule := range root.Routing.Rules {
+		if rule["outboundTag"] == "blocked" {
+			domains, _ := rule["domain"].([]any)
+			ips, _ := rule["ip"].([]any)
+			if len(domains) > 0 && len(ips) > 0 && domains[0] == "geosite:cn" && ips[0] == "geoip:cn" {
+				hasCNRule = true
+				break
+			}
+		}
+	}
+	if !hasCNRule {
+		t.Errorf("expected block CN rule (geosite:cn / geoip:cn -> blocked), but not found in rules: %+v", root.Routing.Rules)
+	}
+}
+

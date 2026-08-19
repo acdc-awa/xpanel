@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,6 +22,12 @@ const (
 	SettingLogo            = "logo"              // LOGO URL（注入 window.__PANEL_SETTINGS__）
 	SettingFavicon         = "favicon"           // favicon URL（注入 <link rel="icon">）
 	SettingSubscribeDomain = "subscribe_domain"  // 订阅域名（预留：多域名分发 P2）
+	SettingSubscribeURL    = "subscribe_url"     // 订阅访问根 URL（如 https://sub.example.com）
+	SettingSubscribePath   = "subscribe_path"    // 订阅路径前缀（如 /sub，/link）
+	SettingSubscribePort   = "subscribe_port"    // 独立订阅监听端口（如 5000，0/空为禁用）
+	SettingSubCleanUA      = "sub_clean_ua"      // 订阅爬虫清洗（1=开启，阻断 curl/python/空UA）
+	SettingSubStrictUA     = "sub_strict_ua"     // 严格客户端模式（1=仅放行知名代理客户端）
+	SettingSubBlockedUA    = "sub_blocked_ua"    // 自定义封禁 UA 关键词（逗号分隔）
 	SettingTOSURL          = "tos_url"           // 服务条款 URL
 	SettingStopRegister    = "stop_register"     // 关闭注册（1=关闭，注册接口拒绝）
 	SettingCurrency        = "currency"          // 货币代码（CNY/USD）
@@ -30,8 +37,9 @@ const (
 // SiteKeys 站点分组全部键（设置页「站点」tab；SetSiteGroup 白名单）。
 var SiteKeys = []string{
 	SettingAppName, SettingAppDesc, SettingLogo, SettingFavicon,
-	SettingSubscribeDomain, SettingTOSURL, SettingStopRegister,
-	SettingCurrency, SettingCurrencySymbol,
+	SettingSubscribeDomain, SettingSubscribeURL, SettingSubscribePath, SettingSubscribePort,
+	SettingSubCleanUA, SettingSubStrictUA, SettingSubBlockedUA,
+	SettingTOSURL, SettingStopRegister, SettingCurrency, SettingCurrencySymbol,
 }
 
 // GetSetting 读取单个设置（DB 直读；不存在返回空串）。设置写入极少，无需缓存。
@@ -147,9 +155,41 @@ func (s *SiteService) SetSiteGroup(vals map[string]string) error {
 			if len(v) > 64 {
 				return errors.New("站点名称过长（最多 64 字符）")
 			}
-		case SettingLogo, SettingFavicon, SettingSubscribeDomain, SettingTOSURL:
+		case SettingLogo, SettingFavicon:
+			if strings.HasPrefix(v, "data:image/") {
+				if len(v) > 2*1024*1024 {
+					return errors.New("图片 Base64 数据过大（最大支持 2MB）")
+				}
+			} else if len(v) > 2048 {
+				return errors.New("URL 过长（最多 2048 字符）")
+			}
+		case SettingSubscribeDomain, SettingSubscribeURL, SettingTOSURL:
+			if len(v) > 1024 {
+				return errors.New("URL 过长（最多 1024 字符）")
+			}
+		case SettingSubscribePath:
+			v = strings.TrimSpace(v)
+			if v != "" && !strings.HasPrefix(v, "/") {
+				return errors.New("订阅路径必须以 / 开头（例如 /sub 或 /link）")
+			}
+			if len(v) > 128 {
+				return errors.New("订阅路径过长（最多 128 字符）")
+			}
+		case SettingSubscribePort:
+			v = strings.TrimSpace(v)
+			if v != "" && v != "0" {
+				p, err := strconv.Atoi(v)
+				if err != nil || p < 1 || p > 65535 {
+					return errors.New("订阅端口必须为 1~65535 的合法端口号（或 0/留空禁用独立端口）")
+				}
+			}
+		case SettingSubCleanUA, SettingSubStrictUA:
+			if v != "" && v != "0" && v != "1" {
+				return errors.New("开关仅接受 1（启用）/ 0（关闭）")
+			}
+		case SettingSubBlockedUA:
 			if len(v) > 500 {
-				return errors.New("URL 过长（最多 500 字符）")
+				return errors.New("封禁 UA 列表过长（最多 500 字符）")
 			}
 		}
 	}

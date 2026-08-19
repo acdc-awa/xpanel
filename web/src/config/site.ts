@@ -33,7 +33,23 @@ export function withBase(p: string): string {
   return panelBase ? `${panelBase}${p}` : p
 }
 
-/** 拼接完整订阅链接（location.origin + web base + /api/v1/sub/:token）。 */
-export function buildSubscribeUrl(token: string): string {
-  return `${location.origin}${panelBase}/api/v1/sub/${token}`
+/** 拼接完整订阅链接（智能兼容自定义对外订阅 URL、路径前缀与面板默认路径）。 */
+export function buildSubscribeUrl(token: string, customUrl?: string, customPath?: string): string {
+  if (!token) return ''
+  let baseOrigin = (customUrl || window.__PANEL_SETTINGS__?.subscribe_url || '').trim()
+  if (!baseOrigin) {
+    baseOrigin = location.origin
+  }
+  baseOrigin = baseOrigin.replace(/\/+$/, '')
+
+  let pathPrefix = (customPath || window.__PANEL_SETTINGS__?.subscribe_path || '').trim()
+  if (!pathPrefix) {
+    pathPrefix = `${panelBase}/api/v1/sub`
+  }
+  if (!pathPrefix.startsWith('/')) {
+    pathPrefix = `/${pathPrefix}`
+  }
+  pathPrefix = pathPrefix.replace(/\/+$/, '')
+
+  return `${baseOrigin}${pathPrefix}/${token}`
 }

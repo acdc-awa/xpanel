@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import {
   Plus,
   Delete,
@@ -15,7 +15,7 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCerts, getPermissionGroups, getXrayKeys, rotateInternalInbound, type CertItem, type PermissionGroup } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, WSSettings, XHTTPSettings } from '@/api/types'
+import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings } from '@/api/types'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -32,6 +32,11 @@ export interface InboundEditorChangePayload {
   shareAddrStrategy: string
   shareAddr: string
   sharePort: number
+  shareSecurity: string
+  shareSni: string
+  shareHost: string
+  sharePath: string
+  shareAllowInsecure: boolean
   permissionGroupIds: number[]
 }
 
@@ -48,6 +53,7 @@ const props = withDefaults(
     tlsType?: string
     port?: number
     tag?: string
+    listen?: string
     showBaseFields?: boolean
     inboundType?: string
     internalUUID?: string
@@ -62,12 +68,18 @@ const props = withDefaults(
     tlsType: 'reality',
     port: 443,
     tag: '',
+    listen: '0.0.0.0',
     showBaseFields: true,
     inboundType: 'user',
     internalUUID: '',
     inboundId: 0,
     certId: 0,
     permissionGroupIds: () => [],
+    shareSecurity: 'auto',
+    shareSni: '',
+    shareHost: '',
+    sharePath: '',
+    shareAllowInsecure: false,
   },
 )
 
@@ -89,6 +101,7 @@ const localNetwork = ref(props.network || 'tcp')
 const localTlsType = ref(props.tlsType || 'reality')
 const localPort = ref(props.port || 443)
 const localTag = ref(props.tag || '')
+const localListen = ref(props.listen || '0.0.0.0')
 
 // 入站级扩展字段
 const localFlow = ref('')
@@ -98,6 +111,11 @@ const localExpiryTime = ref<string | null>(null)
 const localShareStrategy = ref('node')
 const localShareAddr = ref('')
 const localSharePort = ref(0)
+const localShareSecurity = ref('auto')
+const localShareSni = ref('')
+const localShareHost = ref('')
+const localSharePath = ref('')
+const localShareAllowInsecure = ref(false)
 const localPermissionGroupIds = ref<number[]>(props.permissionGroupIds ? [...props.permissionGroupIds] : [])
 const permissionGroups = ref<PermissionGroup[]>([])
 
@@ -111,9 +129,7 @@ const certs = ref<CertItem[]>([])
 const fallbacks = ref<FallbackItem[]>([])
 
 // 传输层参数
-const wsForm = reactive<WSSettings>({ path: '/', host: '' })
-const xhttpForm = reactive<XHTTPSettings>({ mode: 'auto', path: '/', host: '' })
-const grpcForm = reactive({ service_name: 'grpc', authority: '', multi_mode: false })
+const xhttpForm = reactive<XHTTPSettings>({ mode: 'auto', path: '/xhttp-stream', host: '' })
 const tcpForm = reactive({ header_type: 'none', request_host: '', request_path: '/' })
 const acceptProxyProtocol = ref(false)
 const fingerprint = ref('chrome')
@@ -165,6 +181,41 @@ function applyRealityPreset(preset: { dest: string; sni: string }) {
   realityForm.dest = preset.dest
   realityForm.server_name = preset.sni
   ElMessage.success(`已应用借壳预设: ${preset.sni}`)
+}
+
+// Caddyfile 反代配置片段生成
+const caddySnippet = computed(() => {
+  const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
+  const path = localSharePath.value || xhttpForm.path || '/xhttp-stream'
+  const port = localPort.value || 10086
+  return `${domain} {\n    # 前置 TLS 解密并反代到本地明文 Xray xhttp 入站\n    reverse_proxy ${path} 127.0.0.1:${port}\n}`
+})
+
+function copyCaddySnippet() {
+  copyText(caddySnippet.value, 'Caddyfile 反代配置')
+}
+
+function applyCaddyOffloadPreset() {
+  localNetwork.value = 'xhttp'
+  localTlsType.value = 'none'
+  localListen.value = '127.0.0.1'
+  if (localPort.value === 443) {
+    localPort.value = 10086
+  }
+  localShareStrategy.value = 'custom'
+  localSharePort.value = 443
+  localShareSecurity.value = 'tls'
+  if (!localShareSni.value && !localShareAddr.value) {
+    localShareAddr.value = 'node.example.com'
+    localShareSni.value = 'node.example.com'
+  }
+  if (!localSharePath.value) {
+    localSharePath.value = '/xhttp-stream'
+    xhttpForm.path = '/xhttp-stream'
+  }
+  xhttpForm.mode = 'auto'
+  acceptProxyProtocol.value = false
+  ElMessage.success('已切换为前置反代模式 (Caddy/Nginx TLS 卸载 + xhttp 传输)')
 }
 
 // JSON 编辑状态
@@ -262,18 +313,9 @@ function buildStreamSettingsJSON(): string {
   }
   if (acceptProxyProtocol.value) s.acceptProxyProtocol = true
 
-  if (localNetwork.value === 'ws') {
-    const ws: Record<string, any> = { path: wsForm.path || '/' }
-    if (wsForm.host) ws.host = wsForm.host
-    s.wsSettings = ws
-  } else if (localNetwork.value === 'xhttp') {
+  if (localNetwork.value === 'xhttp') {
     s.xhttpSettings = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/' }
     if (xhttpForm.host) s.xhttpSettings.host = xhttpForm.host
-  } else if (localNetwork.value === 'grpc') {
-    const g: Record<string, any> = { serviceName: grpcForm.service_name || 'grpc' }
-    if (grpcForm.authority) g.authority = grpcForm.authority
-    if (grpcForm.multi_mode) g.multiMode = true
-    s.grpcSettings = g
   } else if (localNetwork.value === 'tcp' && tcpForm.header_type !== 'none') {
     const hdr: Record<string, any> = { type: tcpForm.header_type }
     if (tcpForm.header_type === 'http') {
@@ -347,7 +389,7 @@ function syncFormToJson() {
     protocol: localProtocol.value,
     port: localPort.value,
     tag: localTag.value,
-    listen: '0.0.0.0',
+    listen: localListen.value || '0.0.0.0',
     flow: localFlow.value,
     ratio: localRatio.value,
     total_gb: localTotalGB.value,
@@ -355,6 +397,11 @@ function syncFormToJson() {
     shareAddrStrategy: localShareStrategy.value,
     shareAddr: localShareAddr.value,
     sharePort: localSharePort.value,
+    shareSecurity: localShareSecurity.value,
+    shareSni: localShareSni.value,
+    shareHost: localShareHost.value,
+    sharePath: localSharePath.value,
+    shareAllowInsecure: localShareAllowInsecure.value,
     permissionGroupIds: localPermissionGroupIds.value,
   })
   isInternalUpdating.value = false
@@ -381,6 +428,7 @@ function parseJsonToForm(str: string) {
     else if (parsed.streamSettings?.security) localTlsType.value = parsed.streamSettings.security
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
+    if (typeof parsed.listen === 'string') localListen.value = parsed.listen
 
     if (typeof parsed.flow === 'string') localFlow.value = parsed.flow
     if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
@@ -389,6 +437,11 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
     if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
     if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
+    if (typeof parsed.share_security === 'string') localShareSecurity.value = parsed.share_security
+    if (typeof parsed.share_sni === 'string') localShareSni.value = parsed.share_sni
+    if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
+    if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
+    if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
     if (Array.isArray(parsed.permission_group_ids)) localPermissionGroupIds.value = parsed.permission_group_ids
 
     if (Array.isArray(s.fallbacks)) {
@@ -401,19 +454,10 @@ function parseJsonToForm(str: string) {
       }))
     }
 
-    if (s.ws) {
-      wsForm.path = s.ws.path || '/'
-      wsForm.host = s.ws.host || s.ws.headers?.Host || ''
-    }
     if (s.xhttp) {
       xhttpForm.mode = s.xhttp.mode || 'auto'
       xhttpForm.path = s.xhttp.path || '/'
       xhttpForm.host = s.xhttp.host || ''
-    }
-    if (s.grpc) {
-      grpcForm.service_name = s.grpc.service_name || 'grpc'
-      grpcForm.authority = s.grpc.authority || ''
-      grpcForm.multi_mode = !!s.grpc.multi_mode
     }
 
     if (s.sniffing) {
@@ -477,16 +521,20 @@ watch(
     localTlsType,
     localPort,
     localTag,
+    localListen,
     localFlow,
     localRatio,
     localShareStrategy,
     localShareAddr,
     localSharePort,
+    localShareSecurity,
+    localShareSni,
+    localShareHost,
+    localSharePath,
+    localShareAllowInsecure,
     localPermissionGroupIds,
     fallbacks,
-    wsForm,
     xhttpForm,
-    grpcForm,
     tcpForm,
     acceptProxyProtocol,
     realityForm,
@@ -546,6 +594,10 @@ watch(
   () => props.permissionGroupIds,
   (v) => { if (v) localPermissionGroupIds.value = [...v] },
 )
+watch(
+  () => props.listen,
+  (v) => { if (v !== undefined) localListen.value = v || '0.0.0.0' },
+)
 
 function onTypeChange(v: any) {
   localInboundType.value = String(v || 'user')
@@ -597,20 +649,20 @@ async function copyText(text: string, label: string) {
             <el-radio-group v-model="localInboundType" class="type-radios" @change="onTypeChange">
               <el-radio value="user">
                 <span>用户入站</span>
-                <span class="type-sub">进入客户端订阅</span>
+                <span class="type-sub">下发客户端订阅</span>
               </el-radio>
               <el-radio value="relay">
                 <span>转发落地</span>
-                <span class="type-sub">中转内部节点</span>
+                <span class="type-sub">链式转发内部节点</span>
               </el-radio>
               <el-radio value="idle">
                 <span>闲置预留</span>
-                <span class="type-sub">暂不生成配置</span>
+                <span class="type-sub">保留不生成配置</span>
               </el-radio>
             </el-radio-group>
 
             <div v-if="localInboundType === 'relay'" class="relay-box">
-              <el-form-item label="内部 UUID（由节点自治生成）">
+              <el-form-item label="内部 UUID">
                 <div style="display: flex; gap: 8px; width: 100%">
                   <el-input :model-value="localInternalUUID" placeholder="保存并下发后由节点回填" disabled />
                   <el-button v-if="localInternalUUID" @click="copyText(localInternalUUID, '内部 UUID')">
@@ -635,17 +687,27 @@ async function copyText(text: string, label: string) {
                 <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
               </el-form-item>
 
+              <el-form-item>
+                <template #label>
+                  <span>监听地址 (Listen)</span>
+                  <el-tooltip content="物理监听 IP。默认 0.0.0.0（监听所有网卡）；前置 Caddy/Nginx 本地反代时可填 127.0.0.1。" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input v-model="localListen" placeholder="默认 0.0.0.0（本地反代填 127.0.0.1）" />
+              </el-form-item>
+
               <el-form-item v-if="localInboundType === 'user'">
                 <template #label>
                   <span>开放权限组</span>
-                  <el-tooltip content="多选指定允许订阅该入站的权限组。留空则对所有正常用户开放。" placement="top">
+                  <el-tooltip content="多选指定允许连接与订阅该入站的权限组。未设置权限组时默认处于隔离保护状态，不对任何用户开放。" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </template>
                 <el-select
                   v-model="localPermissionGroupIds"
                   multiple
-                  placeholder="留空 = 全员开放"
+                  placeholder="请选择开放权限组（未分配则不对任何人开放）"
                   style="width: 100%"
                   collapse-tags
                   collapse-tags-tooltip
@@ -674,7 +736,7 @@ async function copyText(text: string, label: string) {
 
               <el-form-item>
                 <template #label>
-                  <span>入站总流量上限 (GB)</span>
+                  <span>流量上限 (GB)</span>
                   <el-tooltip content="该入站所有用户合计流量上限，0 = 不限；跑满后自动停用（临时节点按量租用场景）。" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
@@ -682,7 +744,7 @@ async function copyText(text: string, label: string) {
                 <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" />
               </el-form-item>
 
-              <el-form-item label="入站到期时间">
+              <el-form-item label="到期时间">
                 <el-date-picker
                   v-model="localExpiryTime"
                   type="datetime"
@@ -703,18 +765,16 @@ async function copyText(text: string, label: string) {
             <div class="form-grid">
               <el-form-item label="传输协议 (Network)">
                 <el-select v-model="localNetwork" style="width: 100%">
-                  <el-option label="TCP (REALITY 最佳)" value="tcp" />
-                  <el-option label="WebSocket (WS 兼容)" value="ws" />
-                  <el-option label="xhttp (新一代高性能)" value="xhttp" />
-                  <el-option label="gRPC" value="grpc" />
+                  <el-option label="TCP" value="tcp" />
+                  <el-option label="xhttp" value="xhttp" />
                 </el-select>
               </el-form-item>
 
               <el-form-item label="安全层 (Security)">
                 <el-select v-model="localTlsType" style="width: 100%">
-                  <el-option label="REALITY (免证书伪装 · 推荐)" value="reality" />
-                  <el-option label="TLS (SSL 证书托管)" value="tls" />
-                  <el-option label="none (无加密明文)" value="none" />
+                  <el-option label="REALITY" value="reality" />
+                  <el-option label="TLS" value="tls" />
+                  <el-option label="none (明文)" value="none" />
                 </el-select>
               </el-form-item>
 
@@ -726,9 +786,9 @@ async function copyText(text: string, label: string) {
                   </el-tooltip>
                 </template>
                 <el-select v-model="localFlow" style="width: 100%">
-                  <el-option label="自动 (TCP+REALITY 自动注入 Vision)" value="" />
-                  <el-option label="开启 (xtls-rprx-vision)" value="xtls-rprx-vision" />
-                  <el-option label="关闭 (禁用流控)" value="none" />
+                  <el-option label="自动 (Vision)" value="" />
+                  <el-option label="开启 (Vision)" value="xtls-rprx-vision" />
+                  <el-option label="关闭" value="none" />
                 </el-select>
               </el-form-item>
 
@@ -740,14 +800,14 @@ async function copyText(text: string, label: string) {
                   </el-tooltip>
                 </template>
                 <el-select v-model="fingerprint" style="width: 100%">
-                  <el-option label="chrome (推荐)" value="chrome" />
-                  <el-option label="firefox" value="firefox" />
-                  <el-option label="safari" value="safari" />
-                  <el-option label="edge" value="edge" />
+                  <el-option label="Chrome" value="chrome" />
+                  <el-option label="Firefox" value="firefox" />
+                  <el-option label="Safari" value="safari" />
+                  <el-option label="Edge" value="edge" />
                   <el-option label="360" value="360" />
-                  <el-option label="qq" value="qq" />
-                  <el-option label="random" value="random" />
-                  <el-option label="randomized (随机)" value="randomized" />
+                  <el-option label="QQ" value="qq" />
+                  <el-option label="Random" value="random" />
+                  <el-option label="Randomized (随机)" value="randomized" />
                 </el-select>
               </el-form-item>
             </div>
@@ -761,8 +821,8 @@ async function copyText(text: string, label: string) {
             <div v-if="localNetwork === 'tcp'" class="form-grid">
               <el-form-item label="伪装类型 (Header)">
                 <el-select v-model="tcpForm.header_type" style="width: 100%">
-                  <el-option label="none (无伪装)" value="none" />
-                  <el-option label="http (HTTP 报文伪装)" value="http" />
+                  <el-option label="none (无)" value="none" />
+                  <el-option label="http" value="http" />
                 </el-select>
               </el-form-item>
 
@@ -782,21 +842,6 @@ async function copyText(text: string, label: string) {
               </template>
             </div>
 
-            <!-- WebSocket -->
-            <div v-if="localNetwork === 'ws'" class="form-grid">
-              <el-form-item label="Path 路径">
-                <el-input v-model="wsForm.path" placeholder="/ws" />
-              </el-form-item>
-              <el-form-item label="Host 域名标头 (可选)">
-                <el-input v-model="wsForm.host" placeholder="留空默认" />
-              </el-form-item>
-              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
-                </div>
-              </el-form-item>
-            </div>
-
             <!-- xhttp -->
             <div v-if="localNetwork === 'xhttp'" class="form-grid">
               <el-form-item label="Mode 传输模式">
@@ -808,7 +853,7 @@ async function copyText(text: string, label: string) {
                 </el-select>
               </el-form-item>
               <el-form-item label="Path 路径">
-                <el-input v-model="xhttpForm.path" placeholder="/" />
+                <el-input v-model="xhttpForm.path" placeholder="/xhttp-stream" />
               </el-form-item>
               <el-form-item label="Host 域名标头 (可选)">
                 <el-input v-model="xhttpForm.host" placeholder="留空默认" />
@@ -816,21 +861,6 @@ async function copyText(text: string, label: string) {
               <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
                 <div style="padding-top: 6px">
                   <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
-                </div>
-              </el-form-item>
-            </div>
-
-            <!-- gRPC -->
-            <div v-if="localNetwork === 'grpc'" class="form-grid">
-              <el-form-item label="Service Name">
-                <el-input v-model="grpcForm.service_name" placeholder="grpc" />
-              </el-form-item>
-              <el-form-item label="Authority 标头 (可选)">
-                <el-input v-model="grpcForm.authority" placeholder="留空默认" />
-              </el-form-item>
-              <el-form-item label="Multi Mode (多路复用)">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="grpcForm.multi_mode" active-text="开启 Multi Mode" />
                 </div>
               </el-form-item>
             </div>
@@ -974,37 +1004,81 @@ async function copyText(text: string, label: string) {
               :closable="false"
               show-icon
               title="当前为明文传输 (none)"
-              description="无 TLS / REALITY 加密的流量极易被 DPI 识别与封锁，建议在生产环境选用 REALITY 或 TLS。"
+              description="无 TLS / REALITY 加密的流量极易被识别与阻断，建议在生产环境选用 REALITY 或 TLS。"
             />
           </div>
         </div>
 
         <!-- ==================== 3. 高级设置 Tab ==================== -->
         <div v-show="activeTab === 'advanced'" class="tab-pane">
-          <!-- 订阅分享地址与端口 -->
+          <!-- 订阅分享与外部反代覆写 -->
           <div v-if="localInboundType === 'user'" class="form-card">
-            <div class="card-title">
-              <span>订阅分享端点 (与节点监听解耦)</span>
-              <el-tooltip content="订阅链接中生成的节点连接地址/端口，常用于端口转发或 CDN 转发场景。" placement="top">
-                <el-icon class="help-icon"><QuestionFilled /></el-icon>
-              </el-tooltip>
+            <div class="card-head-flex">
+              <div class="card-title">
+                <span>订阅分享与反代覆写</span>
+                <el-tooltip content="订阅链接中生成的节点连接地址/端口/TLS安全层。支持服务端明文运行 + 前置 Caddy/Nginx TLS 卸载与 CDN 模式。" placement="top">
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-button size="small" type="primary" plain @click="applyCaddyOffloadPreset">
+                <el-icon><MagicStick /></el-icon>&nbsp;一键配置反代模式
+              </el-button>
             </div>
+
             <div class="form-grid">
               <el-form-item label="分享地址策略">
                 <el-select v-model="localShareStrategy" style="width: 100%">
-                  <el-option label="跟随服务器地址 (默认)" value="node" />
-                  <el-option label="监听地址 (Listen)" value="listen" />
-                  <el-option label="自定义端点 (CDN/转发)" value="custom" />
+                  <el-option label="跟随服务器" value="node" />
+                  <el-option label="监听地址" value="listen" />
+                  <el-option label="自定义地址" value="custom" />
                 </el-select>
               </el-form-item>
+
+              <el-form-item label="订阅安全层 (TLS)">
+                <el-select v-model="localShareSecurity" style="width: 100%">
+                  <el-option label="auto (跟随传输层)" value="auto" />
+                  <el-option label="tls (强制启用)" value="tls" />
+                  <el-option label="none (明文)" value="none" />
+                </el-select>
+              </el-form-item>
+
               <template v-if="localShareStrategy === 'custom'">
                 <el-form-item label="自定义分享地址">
-                  <el-input v-model="localShareAddr" placeholder="如 cdn.example.com" />
+                  <el-input v-model="localShareAddr" placeholder="如 cdn.example.com 或 node.example.com" />
                 </el-form-item>
                 <el-form-item label="自定义分享端口">
-                  <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 使用入站端口" style="width: 100%" />
+                  <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 默认入站端口 (反代通常 443)" style="width: 100%" />
                 </el-form-item>
               </template>
+
+              <el-form-item label="分享 SNI">
+                <el-input v-model="localShareSni" placeholder="留空默认跟随节点配置" />
+              </el-form-item>
+
+              <el-form-item label="分享 Host">
+                <el-input v-model="localShareHost" placeholder="留空默认跟随传输配置" />
+              </el-form-item>
+
+              <el-form-item label="分享 Path">
+                <el-input v-model="localSharePath" placeholder="留空默认跟随传输路径" />
+              </el-form-item>
+
+              <el-form-item label="客户端允许不安全证书">
+                <div style="padding-top: 6px">
+                  <el-switch v-model="localShareAllowInsecure" active-text="允许不安全证书" />
+                </div>
+              </el-form-item>
+            </div>
+
+            <!-- Caddyfile 片段参考 -->
+            <div v-if="localShareSecurity === 'tls' || localTlsType === 'none'" class="caddy-snippet-box">
+              <div class="caddy-head">
+                <span class="caddy-title">Caddyfile 反代参考片段</span>
+                <el-button size="small" text type="primary" @click="copyCaddySnippet">
+                  <el-icon><CopyDocument /></el-icon>&nbsp;复制 Caddyfile
+                </el-button>
+              </div>
+              <pre class="caddy-code"><code>{{ caddySnippet }}</code></pre>
             </div>
           </div>
 
@@ -1278,6 +1352,42 @@ async function copyText(text: string, label: string) {
     font-size: 12.5px;
     background: var(--x-bg);
     color: var(--x-text);
+  }
+}
+
+.caddy-snippet-box {
+  margin-top: 14px;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .caddy-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .caddy-title {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--x-text);
+  }
+
+  .caddy-code {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--x-card);
+    border: 1px solid var(--x-border);
+    border-radius: 6px;
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    color: var(--x-brand, #3b82f6);
+    line-height: 1.5;
+    overflow-x: auto;
   }
 }
 

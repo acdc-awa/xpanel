@@ -284,6 +284,11 @@ export interface InboundItem {
   share_addr_strategy?: string // node / listen / custom（订阅专用）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
+  share_security?: string // auto / tls / none（订阅安全层覆写）
+  share_sni?: string // 订阅 SNI 覆写
+  share_host?: string // 订阅 HTTP/WS Host 覆写
+  share_path?: string // 订阅 WS/XHTTP Path 覆写
+  share_allow_insecure?: boolean // 订阅跳过证书检查
   permission_group_ids?: number[] // 开放权限组 ID 列表（权威来源：节点定义权限组）
   created_at: string
 }
@@ -305,22 +310,10 @@ export interface RealitySettings {
   spider_x?: string
 }
 
-export interface WSSettings {
-  path?: string
-  host?: string
-  headers?: { Host?: string }
-}
-
 export interface XHTTPSettings {
   mode?: string
   path?: string
   host?: string
-}
-
-export interface GRPCSettings {
-  service_name?: string
-  authority?: string
-  multi_mode?: boolean
 }
 
 export interface SniffingSettings {
@@ -365,9 +358,7 @@ export interface InboundSettings {
   uuid?: string
   clients?: VlessClientItem[]
   reality?: RealitySettings
-  ws?: WSSettings
   xhttp?: XHTTPSettings
-  grpc?: GRPCSettings
   tls?: TLSSettings
   sniffing?: SniffingSettings
   fallbacks?: FallbackItem[]
@@ -442,3 +433,23 @@ export interface ServerRoutingRule {
   updated_at: string
 }
 
+export interface NoticeItem {
+  id: number
+  title: string
+  content: string
+  is_pinned: boolean
+  is_popup: boolean
+  status: number
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface NoticePayload {
+  title: string
+  content: string
+  is_pinned?: boolean
+  is_popup?: boolean
+  status?: number
+  sort_order?: number
+}

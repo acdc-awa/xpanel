@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zhx/xray-panel/internal/models"
+	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
 // sensitiveKeys 审计脱敏字段（Xboard RequestLog 同款：password/token/secret/key/code）。
@@ -86,7 +87,7 @@ func Audit(db *gorm.DB) gin.HandlerFunc {
 			OperatorID:   uid,
 			Action:       action,
 			Detail:       detail,
-			IP:           c.ClientIP(),
+			IP:           util.ClientIPFromContext(c),
 		})
 	}
 }

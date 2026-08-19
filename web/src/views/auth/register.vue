@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Lock, Message, Ticket } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { errMsg } from '@/api/http'
-import { getPublicConfig } from '@/api/config'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 
 const auth = useAuthStore()
+const site = useSiteStore()
+const route = useRoute()
 const router = useRouter()
+
+const autoFilledCode = ref(false)
 
 const form = reactive({
   email: '',
@@ -18,20 +22,22 @@ const form = reactive({
   turnstile_token: '',
 })
 const loading = ref(false)
-const captchaEnabled = ref(false)
-const siteKey = ref('')
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// 二次密码匹配状态：空不提示；匹配绿色；不匹配红色
+const confirmStatus = computed(() => {
+  if (!form.confirm) return ''
+  if (form.password && form.confirm === form.password) return 'success'
+  return 'error'
+})
+
 onMounted(async () => {
-  try {
-    const { data } = await getPublicConfig()
-    if (data.code === 0) {
-      captchaEnabled.value = data.data.captcha_enable
-      siteKey.value = data.data.turnstile_site_key
-    }
-  } catch {
-    // 配置接口失败不阻断注册
+  await site.fetchConfig()
+  const codeParam = (route.query.code || route.query.invite || route.query.invite_code) as string | undefined
+  if (codeParam && codeParam.trim()) {
+    form.invite_code = codeParam.trim()
+    autoFilledCode.value = true
   }
 })
 
@@ -52,7 +58,7 @@ async function onSubmit() {
     ElMessage.warning('两次输入的密码不一致')
     return
   }
-  if (captchaEnabled.value && !form.turnstile_token) {
+  if (site.captchaEnable && !form.turnstile_token) {
     ElMessage.warning('请完成人机验证')
     return
   }
@@ -78,9 +84,10 @@ async function onSubmit() {
   <div class="auth-stage">
     <div class="auth-card">
       <div class="auth-brand">
-        <span class="auth-logo">X</span>
+        <span v-if="site.logo" class="auth-logo-img"><img :src="site.logo" alt="logo" /></span>
+        <span v-else class="auth-logo">X</span>
         <div>
-          <div class="auth-title">注册账号</div>
+          <div class="auth-title">注册 {{ site.appName }}</div>
           <div class="auth-sub">需要邀请码才能注册</div>
         </div>
       </div>
@@ -90,17 +97,33 @@ async function onSubmit() {
           <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="Message" autofocus />
         </el-form-item>
         <el-form-item label="邀请码">
-          <el-input v-model="form.invite_code" placeholder="请输入邀请码" :prefix-icon="Ticket" />
+          <el-input
+            v-model="form.invite_code"
+            placeholder="请输入邀请码"
+            :prefix-icon="Ticket"
+            :disabled="autoFilledCode"
+            :clearable="!autoFilledCode"
+          />
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位" :prefix-icon="Lock" />
         </el-form-item>
-        <el-form-item label="确认密码">
-          <el-input v-model="form.confirm" type="password" show-password placeholder="再次输入密码" :prefix-icon="Lock" @keyup.enter="onSubmit" />
+        <el-form-item
+          label="确认密码"
+          :class="['confirm-pwd-item', confirmStatus]"
+        >
+          <el-input
+            v-model="form.confirm"
+            type="password"
+            show-password
+            placeholder="再次输入密码"
+            :prefix-icon="Lock"
+            @keyup.enter="onSubmit"
+          />
         </el-form-item>
         <TurnstileWidget
-          v-if="captchaEnabled && siteKey"
-          :site-key="siteKey"
+          v-if="site.captchaEnable && site.turnstileSiteKey"
+          :site-key="site.turnstileSiteKey"
           @token="(t) => (form.turnstile_token = t)"
         />
         <el-button type="primary" size="large" class="auth-submit" :loading="loading" native-type="submit">
@@ -152,9 +175,44 @@ async function onSubmit() {
   flex: none;
   box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
 }
+.auth-logo-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  flex: none;
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
 .auth-title { font-size: 19px; font-weight: 700; }
 .auth-sub { font-size: 12.5px; color: var(--x-text-3); margin-top: 3px; }
 .auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
 .auth-foot { margin-top: 18px; text-align: center; font-size: 13px; color: var(--x-text-2); }
 .auth-link { color: var(--x-primary); font-weight: 600; }
+
+:deep(.confirm-pwd-item) {
+  &.success .el-input__wrapper {
+    box-shadow: 0 0 0 1px var(--el-color-success, #10b981) inset !important;
+    background-color: rgba(16, 185, 129, 0.04);
+    &:focus-within {
+      box-shadow: 0 0 0 1px var(--el-color-success, #10b981) inset, 0 0 0 3px rgba(16, 185, 129, 0.2) !important;
+    }
+  }
+
+  &.error .el-input__wrapper {
+    box-shadow: 0 0 0 1px var(--el-color-danger, #ef4444) inset !important;
+    background-color: rgba(239, 68, 68, 0.04);
+    &:focus-within {
+      box-shadow: 0 0 0 1px var(--el-color-danger, #ef4444) inset, 0 0 0 3px rgba(239, 68, 68, 0.2) !important;
+    }
+  }
+}
 </style>

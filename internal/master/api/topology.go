@@ -11,7 +11,6 @@ import (
 	"github.com/zhx/xray-panel/internal/master/nodegate"
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/subscribe"
-	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/protocol"
 	"github.com/zhx/xray-panel/internal/pkg/util"
@@ -239,23 +238,7 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		host, port := shareAddrOf(&srv, inb)
-		flow, noAutoFlow := subscribeFlow(inb.Flow,
-			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
-		item := subscribe.ProxyItem{
-			Name:       subscribe.NodeName(&srv, inb),
-			Host:       host,
-			Port:       port,
-			UUID:       mockUser.UUID,
-			Network:    xray.StreamNetwork(inb.StreamSettings),
-			TLSType:    xray.StreamSecurity(inb.StreamSettings),
-			Flow:       flow,
-			NoAutoFlow: noAutoFlow,
-			Reality:    xray.StreamReality(inb.StreamSettings),
-			TLS:        xray.StreamTLS(inb.StreamSettings),
-			WS:         xray.StreamWS(inb.StreamSettings),
-			XHTTP:      xray.StreamXHTTP(inb.StreamSettings),
-		}
+		item := subscribe.BuildProxyItem(&srv, inb, mockUser.UUID)
 		items = append(items, item)
 	}
 

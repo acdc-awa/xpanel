@@ -25,7 +25,13 @@ http.interceptors.response.use(
     const cfg = error.config as RetriableRequest | undefined
     const status = error.response?.status
 
-    if (status === 401 && cfg && !cfg._retried && window.location.pathname !== withBase('/login')) {
+    // 访客页面（login / register / forgot）未登录探针返回 401 为正常现象，不触发刷新与强跳
+    const currentPath = window.location.pathname
+    const isGuestPage = [withBase('/login'), withBase('/register'), withBase('/forgot')].some(
+      (p) => currentPath === p || currentPath.startsWith(`${p}/`)
+    )
+
+    if (status === 401 && cfg && !cfg._retried && !isGuestPage) {
       cfg._retried = true
       try {
         const { data } = await axios.post<{ code: number }>(
@@ -41,7 +47,7 @@ http.interceptors.response.use(
       }
       const auth = useAuthStore()
       await auth.logout()
-      if (window.location.pathname !== withBase('/login')) {
+      if (!isGuestPage) {
         ElMessage.error('登录已过期，请重新登录')
         window.location.href = withBase('/login')
       }

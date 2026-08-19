@@ -103,9 +103,15 @@ type validUser struct {
 }
 
 // protoUsersFor 按权限组规则从 validUsers 计算单个入站的用户列表（GetValidUsers 与预览共用）。
-// Xboard 规范：用户必须拥有生效权限组（uGroup > 0）；入站声明开放组时，用户组须在开放组内。
+// 零信任与默认安全规范：
+// 1. 入站必须显式声明开放权限组（len(allowedGroups) > 0），未配置权限组的入站不对任何人开放（返回空）；
+// 2. 用户必须拥有生效权限组（vu.GroupID > 0）；
+// 3. 用户的生效组必须命中入站的开放组集合（allowedGroupSet[vu.GroupID]）。
 func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inbound, allowedGroups []uint64) []protocol.User {
-	hasGroupLimit := len(allowedGroups) > 0
+	if len(allowedGroups) == 0 {
+		// 未分配权限组的入站不对任何用户开放（默认安全/隔离状态）
+		return nil
+	}
 	allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
 	for _, g := range allowedGroups {
 		allowedGroupSet[g] = true
@@ -118,7 +124,7 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 		if vu.GroupID == 0 {
 			continue
 		}
-		if hasGroupLimit && !allowedGroupSet[vu.GroupID] {
+		if !allowedGroupSet[vu.GroupID] {
 			continue
 		}
 		flow := inb.Flow

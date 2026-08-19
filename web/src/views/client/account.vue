@@ -21,6 +21,7 @@ import {
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'
 import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
@@ -29,6 +30,7 @@ import { formatBytes } from '@/utils/format'
 import type { BalanceLog } from '@/api/types'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const router = useRouter()
 
 const createdText = ref('—')
@@ -75,7 +77,7 @@ const daysLeft = computed(() => {
 const planLabel = computed(() => (auth.user?.plan_id ? `套餐 #${auth.user.plan_id}` : '暂无套餐'))
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
-  return token ? buildSubscribeUrl(token) : ''
+  return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
 async function refresh() {
@@ -106,7 +108,7 @@ async function submitRedeem() {
   try {
     const { data } = await redeemGiftCard(code)
     if (data.code === 0) {
-      ElMessage.success(`🎉 充值成功！增加余额 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
+      ElMessage.success(`充值成功！增加余额 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
       redeemCode.value = ''
       await auth.fetchMe()
     } else {
@@ -298,9 +300,9 @@ async function onResetSubscribe() {
   }
 }
 
-function onLogout() {
-  auth.logout()
-  router.replace('/login')
+async function onLogout() {
+  await auth.logout()
+  await router.replace('/login')
 }
 </script>
 
@@ -514,7 +516,7 @@ function onLogout() {
     </div>
 
     <!-- 余额明细抽屉 -->
-    <el-drawer v-model="balanceLogsOpen" title="💰 账户余额变动明细" size="460px">
+    <el-drawer v-model="balanceLogsOpen" title="账户余额变动明细" size="460px">
       <div v-loading="loadingLogs">
         <div v-if="balanceLogs.length" class="log-list">
           <div v-for="log in balanceLogs" :key="log.id" class="log-item">

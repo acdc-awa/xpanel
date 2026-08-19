@@ -65,14 +65,22 @@ type routingRuleForm struct {
 	Remark      string `json:"remark"`
 }
 
-// EnsureDefaultServerOutbounds 保证该服务器拥有默认的 direct (freedom) 与 blocked (blackhole) 出站，并保证 default_outbound_tag 为 direct。
+// isReservedOutboundTag 判断是否为系统预留内置出站 Tag（direct 与 blocked）。
+func isReservedOutboundTag(tag string) bool {
+	t := strings.ToLower(strings.TrimSpace(tag))
+	return t == "direct" || t == "blocked"
+}
+
+// EnsureDefaultServerOutbounds 保证该服务器拥有且仅拥有一份默认的 direct (freedom) 与 blocked (blackhole) 内置出站，并保证 default_outbound_tag 为 direct。
 func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 	if db == nil || serverID == 0 {
 		return
 	}
-	var countDirect int64
-	db.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", serverID, "direct").Count(&countDirect)
-	if countDirect == 0 {
+
+	// 1. 确保并清理重复的 direct 出站
+	var directs []models.ServerOutbound
+	db.Where("server_id = ? AND tag = ?", serverID, "direct").Order("id ASC").Find(&directs)
+	if len(directs) == 0 {
 		directOb := models.ServerOutbound{
 			ServerID:     serverID,
 			Tag:          "direct",
@@ -83,24 +91,34 @@ func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 			Enabled:      true,
 		}
 		_ = db.Create(&directOb).Error
+	} else if len(directs) > 1 {
+		// 保留第一个，清理多余的重复项
+		for i := 1; i < len(directs); i++ {
+			_ = db.Delete(&models.ServerOutbound{}, directs[i].ID).Error
+		}
 	}
 
-	var countBlocked int64
-	db.Model(&models.ServerOutbound{}).Where("server_id = ? AND (tag = ? OR tag = ?)", serverID, "blocked", "blackhole").Count(&countBlocked)
-	if countBlocked == 0 {
+	// 2. 确保并清理重复的 blocked 出站
+	var blockeds []models.ServerOutbound
+	db.Where("server_id = ? AND (tag = ? OR tag = ?)", serverID, "blocked", "blackhole").Order("id ASC").Find(&blockeds)
+	if len(blockeds) == 0 {
 		blockedOb := models.ServerOutbound{
 			ServerID:     serverID,
 			Tag:          "blocked",
 			Protocol:     "blackhole",
 			SettingsJSON: `{"response":{"type":"none"}}`,
 			Remark:       "默认黑洞阻断",
-			Priority:     10,
+			Priority:     99,
 			Enabled:      true,
 		}
 		_ = db.Create(&blockedOb).Error
+	} else if len(blockeds) > 1 {
+		for i := 1; i < len(blockeds); i++ {
+			_ = db.Delete(&models.ServerOutbound{}, blockeds[i].ID).Error
+		}
 	}
 
-	// 确保 default_outbound_tag 为 direct（若为空）
+	// 3. 确保 default_outbound_tag 为 direct（若为空）
 	var srv models.Server
 	if err := db.First(&srv, serverID).Error; err == nil {
 		if srv.DefaultOutboundTag == "" {
@@ -152,6 +170,10 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	req.Tag = strings.TrimSpace(req.Tag)
 	if req.Tag == "" {
 		util.BadRequest(c, "出站 Tag 不能为空")
+		return
+	}
+	if isReservedOutboundTag(req.Tag) {
+		util.BadRequest(c, "direct 与 blocked 为系统内置预留出站，不可重复手动创建")
 		return
 	}
 	var tagCnt int64
@@ -263,6 +285,16 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 			util.BadRequest(c, "Tag 不能为空")
 			return
 		}
+		// 若当前记录是系统内置出站，禁止修改 Tag
+		if isReservedOutboundTag(ob.Tag) && strings.ToLower(tag) != strings.ToLower(ob.Tag) {
+			util.BadRequest(c, "系统内置出站（direct/blocked）不可修改 Tag")
+			return
+		}
+		// 若当前是非内置出站，禁止重命名为预留 Tag
+		if !isReservedOutboundTag(ob.Tag) && isReservedOutboundTag(tag) {
+			util.BadRequest(c, "不可将出站 Tag 修改为系统预留名称（direct/blocked）")
+			return
+		}
 		var tagCnt int64
 		d.DB.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ? AND id != ?", id, tag, outboundID).Count(&tagCnt)
 		if tagCnt > 0 {
@@ -274,6 +306,10 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	if req.Protocol != nil {
 		if !validOutboundProtocol(*req.Protocol) {
 			util.BadRequest(c, "不支持的出站协议: "+*req.Protocol+"（支持 freedom/blackhole/vless/socks）")
+			return
+		}
+		if isReservedOutboundTag(ob.Tag) && *req.Protocol != ob.Protocol {
+			util.BadRequest(c, "系统内置出站不可修改协议")
 			return
 		}
 		updates["protocol"] = *req.Protocol
@@ -299,6 +335,10 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 
 	// Phase T：InboundRef 变更（>0 设置 / 0 解除），校验无环 + 维护目标入站标记
 	if req.InboundRef != nil {
+		if isReservedOutboundTag(ob.Tag) && *req.InboundRef > 0 {
+			util.BadRequest(c, "系统内置直连/黑洞出站不支持设置落地入站引用")
+			return
+		}
 		if *req.InboundRef > 0 {
 			if msg := d.checkInboundRef(ob.ServerID, *req.InboundRef, outboundID); msg != "" {
 				util.BadRequest(c, msg)
@@ -349,9 +389,17 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 		return
 	}
 
-	// Phase T：删除前记录引用目标，删除后无其他引用则回退原类型
 	var ob models.ServerOutbound
-	d.DB.Where("id = ? AND server_id = ?", outboundID, id).First(&ob)
+	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).First(&ob).Error; err != nil {
+		util.Fail(c, 404, "出站规则不存在")
+		return
+	}
+	// 保护系统预留出站不可被删除
+	if isReservedOutboundTag(ob.Tag) {
+		util.BadRequest(c, "系统内置出站（direct/blocked）不可删除")
+		return
+	}
+
 	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).Delete(&models.ServerOutbound{}).Error; err != nil {
 		util.ServerError(c, "删除出站规则失败")
 		return

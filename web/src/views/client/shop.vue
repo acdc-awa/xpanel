@@ -108,7 +108,7 @@ async function confirmPay() {
   try {
     const { data } = await payOrderByBalance(selectedPlan.value.id)
     if (data.code === 0) {
-      ElMessage.success('🎉 购买成功！套餐已即时开通生效')
+      ElMessage.success('购买成功！套餐已即时开通生效')
       checkoutOpen.value = false
       await Promise.all([load(), auth.fetchMe()])
     } else {
@@ -152,7 +152,7 @@ async function confirmPay() {
         class="pricing-card"
         :class="{ featured: idx === 0 }"
       >
-        <span v-if="idx === 0" class="featured-badge">🔥 热门推荐</span>
+        <span v-if="idx === 0" class="featured-badge">热门推荐</span>
 
         <div class="card-top">
           <div class="plan-title">{{ p.name }}</div>
@@ -241,7 +241,7 @@ async function confirmPay() {
     <!-- 结账收银台弹窗 -->
     <el-dialog
       v-model="checkoutOpen"
-      title="🛒 结算收银台"
+      title="结算收银台"
       width="420px"
       align-center
       :append-to-body="true"

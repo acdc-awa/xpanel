@@ -1,5 +1,6 @@
 import type { Router } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 
 /**
  * 全局路由守卫：
@@ -7,10 +8,16 @@ import { useAuthStore } from '@/stores/auth'
  * - 游客页（login/register）已登录 → 跳角色首页
  * - requiresAuth 未登录 → /login?redirect=...
  * - meta.roles 与当前角色不符 → 跳角色首页
+ * - 路由切换后动态同步 document.title
  */
 export function setupRouterGuards(router: Router) {
   router.beforeEach(async (to) => {
     const auth = useAuthStore()
+    const site = useSiteStore()
+
+    if (!site.isLoaded) {
+      await site.fetchConfig()
+    }
 
     if (!auth.isInitialized) {
       await auth.fetchMe()
@@ -30,5 +37,11 @@ export function setupRouterGuards(router: Router) {
     }
 
     return true
+  })
+
+  router.afterEach((to) => {
+    const site = useSiteStore()
+    const title = to.meta.title as string | undefined
+    document.title = title ? `${title} - ${site.appName}` : site.appName
   })
 }

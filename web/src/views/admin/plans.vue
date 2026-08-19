@@ -124,43 +124,103 @@ async function remove(row: any) {
     </div>
 
     <BaseCard>
-      <el-table v-loading="loading" :data="list">
-        <el-table-column prop="id" label="ID" width="60">
-          <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-        </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="130">
-          <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
-        </el-table-column>
-        <el-table-column label="价格" width="100">
-          <template #default="{ row }">¥ {{ (row.price_cents / 100).toFixed(2) }}</template>
-        </el-table-column>
-        <el-table-column label="流量" width="120">
-          <template #default="{ row }">
-            {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="duration_days" label="时长(天)" width="90" />
-        <el-table-column label="设备限制" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
-              {{ row.device_limit ? `${row.device_limit} 台` : '不限' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="限速" width="110">
-        </el-table-column>
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled" @change="togglePlan(row)" />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="110" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
-            <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- 桌面端表格视图 -->
+      <div class="desktop-table-view">
+        <el-table v-loading="loading" :data="list">
+          <el-table-column prop="id" label="ID" width="60">
+            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="130">
+            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column label="价格" width="100">
+            <template #default="{ row }"><span class="cell-mono" style="font-weight: 600">¥ {{ (row.price_cents / 100).toFixed(2) }}</span></template>
+          </el-table-column>
+          <el-table-column label="流量" width="120">
+            <template #default="{ row }">
+              <span class="cell-mono">{{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="duration_days" label="时长(天)" width="90">
+            <template #default="{ row }"><span class="cell-mono">{{ row.duration_days }} 天</span></template>
+          </el-table-column>
+          <el-table-column label="设备限制" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
+                {{ row.device_limit ? `${row.device_limit} 台` : '不限' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-switch :model-value="row.enabled" @change="togglePlan(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
+              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <!-- 移动端卡片流视图 -->
+      <div class="mobile-cards-view">
+        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
+          暂无套餐，点击右上角「新增套餐」
+        </div>
+        <div v-else class="mobile-data-card-list">
+          <div v-for="row in list" :key="row.id" class="mobile-data-card">
+            <div class="card-head">
+              <div class="head-title">
+                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+                <span style="font-weight: 700">{{ row.name }}</span>
+                <el-tag size="small" :type="row.enabled ? 'success' : 'info'">
+                  {{ row.enabled ? '已上架' : '已下架' }}
+                </el-tag>
+              </div>
+              <el-switch :model-value="row.enabled" size="small" @change="togglePlan(row)" />
+            </div>
+
+            <div class="card-grid">
+              <div class="grid-item">
+                <span class="item-label">套餐价格</span>
+                <div class="item-value cell-mono" style="color: #059669; font-weight: 700; font-size: 14px">
+                  ¥ {{ (row.price_cents / 100).toFixed(2) }}
+                </div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">包含流量</span>
+                <div class="item-value cell-mono" style="font-weight: 600">
+                  {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
+                </div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">有效周期</span>
+                <div class="item-value cell-mono">{{ row.duration_days }} 天</div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">设备限制</span>
+                <div class="item-value">
+                  <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
+                    {{ row.device_limit ? `${row.device_limit} 台` : '不限设备' }}
+                  </el-tag>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-foot-actions">
+              <el-button size="small" type="primary" plain @click="openEdit(row)">
+                <el-icon><Edit /></el-icon>&nbsp;编辑套餐
+              </el-button>
+              <el-button size="small" type="danger" plain @click="remove(row)">
+                <el-icon><Delete /></el-icon>&nbsp;删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
     </BaseCard>
 
     <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="500px">

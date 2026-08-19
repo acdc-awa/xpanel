@@ -272,11 +272,13 @@ async function resetSecret(row: any) {
   }
 }
 
-// ---- 更多操作（编辑/重置密钥/删除） ----
+// ---- 更多操作（编辑/重置密钥/删除/状态/日志） ----
 function onMore(cmd: string, row: any) {
   if (cmd === 'edit') openEdit(row)
   else if (cmd === 'reset') resetSecret(row)
   else if (cmd === 'delete') removeServer(row)
+  else if (cmd === 'status') openStatus(row)
+  else if (cmd === 'logs') openLogs(row)
 }
 
 // ---- 删除 ----
@@ -313,69 +315,150 @@ async function removeServer(row: any) {
     </div>
 
     <BaseCard>
-      <el-table v-loading="loading" :data="filtered">
-        <el-table-column prop="name" label="名称" min-width="120">
-          <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
-        </el-table-column>
-        <el-table-column prop="host" label="地址" min-width="160">
-          <template #default="{ row }">
-            <code class="cell-mono" style="cursor: pointer" :title="'点击复制: ' + row.host" @click="copyText(row.host, '节点地址')">
-              {{ row.host }}
-            </code>
+      <!-- 桌面端表格视图 -->
+      <div class="desktop-table-view">
+        <el-table v-loading="loading" :data="filtered">
+          <el-table-column prop="name" label="名称" min-width="120">
+            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column prop="host" label="地址" min-width="160">
+            <template #default="{ row }">
+              <code class="cell-mono" style="cursor: pointer" :title="'点击复制: ' + row.host" @click="copyText(row.host, '节点地址')">
+                {{ row.host }}
+              </code>
+            </template>
+          </el-table-column>
+          <el-table-column prop="location" label="地区" width="110">
+            <template #default="{ row }">{{ row.location || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />{{ row.status === 1 ? '在线' : '离线' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="接入点" width="90">
+            <template #default="{ row }">
+              <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                {{ inboundCount(row.id) }} 个
+              </el-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="配置同步" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
+              <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="最后心跳" width="170">
+            <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="340" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
+              <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
+              <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
+              <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
+              <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
+              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+                <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
+                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <div style="padding: 30px 0; color: var(--x-text-3)">
+              尚未添加服务器。点击右上角「新增服务器」，按提示配置节点 Agent。
+            </div>
           </template>
-        </el-table-column>
-        <el-table-column prop="location" label="地区" width="110">
-          <template #default="{ row }">{{ row.location || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />{{ row.status === 1 ? '在线' : '离线' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="接入点" width="90">
-          <template #default="{ row }">
-            <el-link type="primary" :underline="false" @click="goInbounds(row)">
-              {{ inboundCount(row.id) }} 个
-            </el-link>
-          </template>
-        </el-table-column>
-        <el-table-column label="配置同步" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
-            <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
-            <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="最后心跳" width="170">
-          <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span></template>
-        </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
-            <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
-            <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
-            <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
-            <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
-            <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-              <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
-                  <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <div style="padding: 30px 0; color: var(--x-text-3)">
-            尚未添加服务器。点击右上角「新增服务器」，按提示配置节点 Agent。
+        </el-table>
+      </div>
+
+      <!-- 移动端卡片流视图 -->
+      <div class="mobile-cards-view">
+        <div v-if="filtered.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
+          {{ keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」' }}
+        </div>
+        <div v-else class="mobile-data-card-list">
+          <div v-for="row in filtered" :key="row.id" class="mobile-data-card">
+            <div class="card-head">
+              <div class="head-title">
+                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+                <span style="font-weight: 700">{{ row.name }}</span>
+                <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                  {{ row.status === 1 ? '在线' : '离线' }}
+                </el-tag>
+              </div>
+              <el-tag v-if="row.config_status === 'pushed'" type="success" size="small" effect="plain">已同步</el-tag>
+              <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small" effect="plain">待推送</el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+            </div>
+
+            <div class="card-grid">
+              <div class="grid-item full-width">
+                <span class="item-label">节点地址</span>
+                <div class="item-value">
+                  <code class="cell-mono" style="cursor: pointer; color: var(--x-primary); font-weight: 600" @click="copyText(row.host, '节点地址')">
+                    {{ row.host }}
+                  </code>
+                </div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">地区位置</span>
+                <div class="item-value">{{ row.location || '—' }}</div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">接入点</span>
+                <div class="item-value">
+                  <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                    {{ inboundCount(row.id) }} 个入站
+                  </el-link>
+                </div>
+              </div>
+              <div class="grid-item full-width">
+                <span class="item-label">最后心跳</span>
+                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.last_seen_at) }}</div>
+              </div>
+            </div>
+
+            <div class="card-foot-actions">
+              <el-button size="small" type="primary" plain @click="openDrawer(row)">
+                <el-icon><Setting /></el-icon>&nbsp;详情
+              </el-button>
+              <el-button size="small" type="success" plain @click="openMetrics(row)">
+                <el-icon><TrendCharts /></el-icon>&nbsp;监控
+              </el-button>
+              <el-button size="small" @click="restartXray(row)">
+                <el-icon><RefreshRight /></el-icon>&nbsp;重启
+              </el-button>
+              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+                <el-button size="small">
+                  更多&nbsp;<el-icon><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
+                    <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                    <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
+                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                    <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
+                      <el-icon><Delete /></el-icon>删除服务器
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </div>
-        </template>
-      </el-table>
+        </div>
+      </div>
     </BaseCard>
 
     <!-- 新增服务器 -->
@@ -424,7 +507,7 @@ async function removeServer(row: any) {
     <el-dialog v-model="statusOpen" title="节点状态" width="420px">
       <div v-loading="statusLoading" class="status-rows">
         <template v-if="statusData">
-          <div class="row"><span class="k">Xray 运行</span><span class="v">{{ statusData.data?.xray_running ? '✅ 运行中' : '⛔ 已停止' }}</span></div>
+          <div class="row"><span class="k">Xray 运行</span><span class="v">{{ statusData.data?.xray_running ? '运行中' : '已停止' }}</span></div>
           <div class="row"><span class="k">进程 PID</span><span class="v">{{ statusData.data?.pid ?? '—' }}</span></div>
           <div class="row"><span class="k">启动时间</span><span class="v">{{ statusData.data?.started_at ? fmtTime(statusData.data.started_at) : '—' }}</span></div>
           <div class="row"><span class="k">运行时长</span><span class="v">{{ statusData.data?.uptime_sec ?? 0 }} 秒</span></div>
@@ -527,5 +610,25 @@ async function removeServer(row: any) {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+@media (max-width: 768px) {
+  .secret-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+
+    .k {
+      width: auto;
+      font-weight: 600;
+    }
+  }
+
+  .status-rows .row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 8px 0;
+  }
 }
 </style>

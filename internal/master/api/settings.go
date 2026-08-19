@@ -1,6 +1,9 @@
 package api
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/zhx/xray-panel/internal/master/services"
@@ -46,6 +49,13 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 			return
 		}
 		changed = true
+		if d.SubServer != nil {
+			siteMap := *req.Site
+			if portStr, ok := siteMap[services.SettingSubscribePort]; ok {
+				port, _ := strconv.Atoi(strings.TrimSpace(portStr))
+				_ = d.SubServer.Reload(port)
+			}
+		}
 	}
 	if req.Captcha != nil {
 		if err := services.SaveCaptchaSettings(d.DB, *req.Captcha); err != nil {

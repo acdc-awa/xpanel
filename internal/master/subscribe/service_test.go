@@ -16,7 +16,7 @@ func testUser() *models.User {
 // A-G 差距回归（03 号文档 §4）：
 // A tcp+tls+vision 缺 flow · B xhttp 缺 alpn:[h2] · C tls 缺 servername ·
 // D xhttp 缺 host · E 缺 skip-cert-verify 透传 · F url-test 用 cloudflare ·
-// G BuildBase64 同步（tcp+tls+flow / xhttp host / ws+tls 无 flow）
+// G BuildBase64 同步（tcp+tls+flow / xhttp host / xhttp+tls 无 flow）
 func TestBuildClash_Gaps(t *testing.T) {
 	items := []ProxyItem{
 		{
@@ -30,10 +30,10 @@ func TestBuildClash_Gaps(t *testing.T) {
 			TLS: &xray.TLSSettings{ServerName: "t.example.com", AllowInsecure: true},
 		},
 		{
-			Name: "ws-tls", Host: "w.example.com", Port: 8443,
-			UUID: "uuid-w", Network: "ws", TLSType: "tls",
-			TLS: &xray.TLSSettings{ServerName: "w.example.com"},
-			WS:  &xray.WSSettings{Path: "/ws", Host: "cdn.example.com"},
+			Name: "xhttp-tls", Host: "w.example.com", Port: 8443,
+			UUID: "uuid-w", Network: "xhttp", TLSType: "tls",
+			TLS:   &xray.TLSSettings{ServerName: "w.example.com"},
+			XHTTP: &xray.XHTTPSettings{Mode: "auto", Path: "/xp-tls", Host: "cdn.example.com"},
 		},
 		{
 			Name: "xhttp-reality", Host: "x.example.com", Port: 443,
@@ -54,7 +54,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 		"public-key: pbk123",            // reality 公钥
 		"servername: t.example.com",     // C tls servername
 		"skip-cert-verify: true",        // E allowInsecure 透传
-		"ws-opts:",                      // ws 保留
+		"network: xhttp",                // xhttp
 		"alpn: [h2]",                    // B xhttp 显式 alpn
 		"host: h.example.com",           // D xhttp host
 		"cp.cloudflare.com/generate_204", // F url-test 地址
@@ -67,20 +67,20 @@ func TestBuildClash_Gaps(t *testing.T) {
 		t.Error("Reality=nil 的节点应被跳过")
 	}
 	if strings.Contains(yaml, "flow:") && !strings.Contains(yaml, "tcp-reality") && !strings.Contains(yaml, "tcp-tls-vision") {
-		t.Error("flow 不应出现在 ws 节点")
+		t.Error("flow 不应出现在 xhttp 节点")
 	}
-	// ws-tls 节点（无 flow 覆盖）不应输出 flow
-	wsIdx := strings.Index(yaml, "'ws-tls'")
-	if wsIdx < 0 {
-		wsIdx = strings.Index(yaml, `"ws-tls"`)
+	// xhttp-tls 节点（无 flow 覆盖）不应输出 flow
+	xhIdx := strings.Index(yaml, "'xhttp-tls'")
+	if xhIdx < 0 {
+		xhIdx = strings.Index(yaml, `"xhttp-tls"`)
 	}
-	if wsIdx >= 0 {
-		rest := yaml[wsIdx:]
+	if xhIdx >= 0 {
+		rest := yaml[xhIdx:]
 		if idx := strings.Index(rest, "\n"); idx > 0 {
 			rest = rest[:idx]
 		}
 		if strings.Contains(rest, "flow:") {
-			t.Error("ws+tls 节点不应输出 flow")
+			t.Error("xhttp+tls 节点不应输出 flow")
 		}
 	}
 }
@@ -99,9 +99,9 @@ func TestBuildBase64_Gaps(t *testing.T) {
 			XHTTP:   &xray.XHTTPSettings{Mode: "auto", Path: "/xp", Host: "h.example.com"},
 		},
 		{
-			Name: "ws-tls", Host: "w.example.com", Port: 8443,
-			UUID: "uuid-w", Network: "ws", TLSType: "tls",
-			WS: &xray.WSSettings{Path: "/ws", Host: "cdn.example.com"},
+			Name: "xhttp-tls", Host: "w.example.com", Port: 8443,
+			UUID: "uuid-w", Network: "xhttp", TLSType: "tls",
+			XHTTP: &xray.XHTTPSettings{Mode: "auto", Path: "/xp", Host: "cdn.example.com"},
 		},
 	}
 	b64 := BuildBase64(testUser(), items)
@@ -118,16 +118,16 @@ func TestBuildBase64_Gaps(t *testing.T) {
 		"sni=t.example.com",     // C tls servername
 		"allowInsecure=1",       // E
 		"host=h.example.com",    // D/G xhttp host
-		"type=ws",               // ws 保留
+		"type=xhttp",            // xhttp
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("BuildBase64 缺少 %q\n---\n%s", want, raw)
 		}
 	}
-	// ws+tls 不应有 flow
+	// xhttp+tls 不应有 flow
 	for _, l := range links {
-		if strings.Contains(l, "ws-tls") && strings.Contains(l, "flow=") {
-			t.Errorf("ws+tls 链接不应带 flow: %s", l)
+		if strings.Contains(l, "xhttp-tls") && strings.Contains(l, "flow=") {
+			t.Errorf("xhttp+tls 链接不应带 flow: %s", l)
 		}
 	}
 }

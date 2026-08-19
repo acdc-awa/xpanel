@@ -9,50 +9,20 @@ import (
 
 	"github.com/zhx/xray-panel/internal/master/services"
 	"github.com/zhx/xray-panel/internal/master/subscribe"
-	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 	"github.com/zhx/xray-panel/internal/pkg/util"
 )
 
-// shareAddrOf 计算订阅对外地址与端口（订阅专用，与 xray 监听解耦——四层转发场景
-// 监听为内网，订阅给用户的是转发端点）。
-// custom 且 ShareAddr 非空 → ShareAddr +（SharePort>0 ? SharePort : 入站端口）；
-// listen 且 Listen 非空非 0.0.0.0 → Listen + 入站端口；默认 node → 服务器 Host + 入站端口。
-func shareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
-	switch inb.ShareAddrStrategy {
-	case "custom":
-		if inb.ShareAddr != "" {
-			port := inb.Port
-			if inb.SharePort > 0 {
-				port = inb.SharePort
-			}
-			return inb.ShareAddr, port
-		}
-	case "listen":
-		if inb.Listen != "" && inb.Listen != "0.0.0.0" {
-			return inb.Listen, inb.Port
-		}
-	}
-	return srv.Host, inb.Port
-}
-
-// subscribeFlow 计算订阅中的 flow（与生成侧 buildClients 同源）：
-// 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
-// （UserInbound per-user Flow 覆盖已随 2026-08-14 批2 冻结删除）
-func subscribeFlow(inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
-	flow = inboundFlow
-	if flow == "none" {
-		return "", true
-	}
-	if flow == "" && tcpReality {
-		flow = "xtls-rprx-vision"
-	}
-	return flow, false
-}
-
-// Subscribe GET /api/v1/sub/:token —— 订阅生成（按 UA 区分 Clash YAML / Base64）。
+// Subscribe GET /sub/:token | GET /sub?token=xxx —— 订阅生成（按 UA 区分 Clash YAML / Base64）。
 func (d *Deps) Subscribe(c *gin.Context) {
-	token := c.Param("token")
+	token := strings.TrimSpace(c.Param("token"))
+	if token == "" {
+		token = strings.TrimSpace(c.Query("token"))
+	}
+	if token == "" || token == "healthz" || token == "favicon.ico" {
+		util.Fail(c, 404, "订阅链接无效")
+		return
+	}
 	var user models.User
 	if err := d.DB.Where("subscribe_token = ?", token).First(&user).Error; err != nil {
 		util.Fail(c, 404, "订阅链接无效")
@@ -113,23 +83,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		host, port := shareAddrOf(&srv, inb)
-		flow, noAutoFlow := subscribeFlow(inb.Flow,
-			xray.StreamNetwork(inb.StreamSettings) == "tcp" && xray.StreamHasReality(inb.StreamSettings))
-		item := subscribe.ProxyItem{
-			Name:    subscribe.NodeName(&srv, inb),
-			Host:    host,
-			Port:    port,
-			UUID:    user.UUID,
-			Network: xray.StreamNetwork(inb.StreamSettings),
-			TLSType: xray.StreamSecurity(inb.StreamSettings),
-			Flow:    flow,
-			NoAutoFlow: noAutoFlow,
-			Reality: xray.StreamReality(inb.StreamSettings),
-			TLS:     xray.StreamTLS(inb.StreamSettings),
-			WS:      xray.StreamWS(inb.StreamSettings),
-			XHTTP:   xray.StreamXHTTP(inb.StreamSettings),
-		}
+		item := subscribe.BuildProxyItem(&srv, inb, user.UUID)
 		items = append(items, item)
 	}
 	if len(items) == 0 {

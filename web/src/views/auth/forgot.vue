@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Lock, Key } from '@element-plus/icons-vue'
 import { forgotPassword, resetPassword } from '@/api/auth'
 import { errMsg } from '@/api/http'
+import { useSiteStore } from '@/stores/site'
 
+const site = useSiteStore()
 const router = useRouter()
 
 const step = ref<'email' | 'reset'>('email')
@@ -15,6 +17,10 @@ const submitting = ref(false)
 const hint = ref('')
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+onMounted(async () => {
+  await site.fetchConfig()
+})
 
 async function submitEmail() {
   if (!email.value || !EMAIL_RE.test(email.value)) {
@@ -71,9 +77,10 @@ async function submitReset() {
   <div class="auth-stage">
     <div class="auth-card">
       <div class="auth-brand">
-        <span class="auth-logo">X</span>
+        <span v-if="site.logo" class="auth-logo-img"><img :src="site.logo" alt="logo" /></span>
+        <span v-else class="auth-logo">X</span>
         <div>
-          <div class="auth-title">重置密码</div>
+          <div class="auth-title">{{ site.appName }} · 重置密码</div>
           <div class="auth-sub">邮箱 + 两步验证码（未开启两步验证的账号请联系管理员）</div>
         </div>
       </div>
@@ -160,6 +167,23 @@ async function submitReset() {
   justify-content: center;
   flex: none;
   box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+.auth-logo-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  flex: none;
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
 }
 .auth-title { font-size: 19px; font-weight: 700; }
 .auth-sub { font-size: 12.5px; color: var(--x-text-3); margin-top: 3px; }

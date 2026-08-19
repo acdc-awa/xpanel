@@ -125,10 +125,13 @@ func (d *Deps) NewRouter() *gin.Engine {
 				user.POST("/2fa/confirm", d.UserOTPConfirm)
 				user.POST("/2fa/disable", d.UserOTPDisable)
 				user.POST("/subscribe/reset", d.UserResetSubscribe)
+				user.GET("/notices", d.UserListNotices)
+				user.GET("/notices/:id", d.UserGetNotice)
 			}
 
-		// 公开：上架套餐
+		// 公开：上架套餐与公开公告
 		v1.GET("/plans", d.PublicPlans)
+		v1.GET("/notices", d.UserListNotices)
 
 		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh）
 		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
@@ -248,6 +251,11 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/topology", d.AdminTopology)
 			admin.GET("/topology-layout", d.AdminGetTopologyLayout)
 			admin.PUT("/topology-layout", d.AdminSaveTopologyLayout)
+			admin.GET("/notices", d.AdminListNotices)
+			admin.POST("/notices", d.AdminCreateNotice)
+			admin.PUT("/notices/:id", d.AdminUpdateNotice)
+			admin.DELETE("/notices/:id", d.AdminDeleteNotice)
+			admin.POST("/notices/:id/toggle", d.AdminToggleNotice)
 		}
 	}
 

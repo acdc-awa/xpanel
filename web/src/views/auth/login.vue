@@ -5,17 +5,16 @@ import { User, Lock, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import { getPublicConfig } from '@/api/config'
-import { appName, siteLogo, stopRegister } from '@/config/site'
+import { useSiteStore } from '@/stores/site'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const router = useRouter()
 const route = useRoute()
 
 const form = reactive({ username: '', password: '', turnstile_token: '' })
 const loading = ref(false)
-const captchaEnabled = ref(false)
-const siteKey = ref('')
 
 // 2FA 二次验证
 const twofaOpen = ref(false)
@@ -23,15 +22,7 @@ const twofaCode = ref('')
 const twofaLoading = ref(false)
 
 onMounted(async () => {
-  try {
-    const { data } = await getPublicConfig()
-    if (data.code === 0) {
-      captchaEnabled.value = data.data.captcha_enable
-      siteKey.value = data.data.turnstile_site_key
-    }
-  } catch {
-    // 配置接口失败不阻断登录
-  }
+  await site.fetchConfig()
 })
 
 async function onSubmit() {
@@ -39,7 +30,7 @@ async function onSubmit() {
     ElMessage.warning('请输入邮箱和密码')
     return
   }
-  if (captchaEnabled.value && !form.turnstile_token) {
+  if (site.captchaEnable && !form.turnstile_token) {
     ElMessage.warning('请完成人机验证')
     return
   }
@@ -92,11 +83,11 @@ function gotoHome() {
   <div class="auth-stage">
     <div class="auth-card">
       <div class="auth-brand">
-        <span v-if="siteLogo" class="auth-logo-img"><img :src="siteLogo" alt="logo" /></span>
+        <span v-if="site.logo" class="auth-logo-img"><img :src="site.logo" alt="logo" /></span>
         <span v-else class="auth-logo">X</span>
         <div>
-          <div class="auth-title">{{ appName }}</div>
-          <div class="auth-sub">主控 · 节点 · 用户 一体化代理分发系统</div>
+          <div class="auth-title">{{ site.appName }}</div>
+          <div class="auth-sub">{{ site.appDescription }}</div>
         </div>
       </div>
 
@@ -115,8 +106,8 @@ function gotoHome() {
           />
         </el-form-item>
         <TurnstileWidget
-          v-if="captchaEnabled && siteKey"
-          :site-key="siteKey"
+          v-if="site.captchaEnable && site.turnstileSiteKey"
+          :site-key="site.turnstileSiteKey"
           @token="(t) => (form.turnstile_token = t)"
         />
         <el-button
@@ -132,7 +123,7 @@ function gotoHome() {
 
       <div class="auth-foot">
         <router-link class="auth-link" to="/forgot">忘记密码？</router-link>
-        <template v-if="!stopRegister">
+        <template v-if="!site.stopRegister">
           <span style="margin: 0 8px">·</span>
           还没有账号？
           <router-link class="auth-link" to="/register">使用邀请码注册</router-link>
@@ -184,23 +175,42 @@ function gotoHome() {
   box-shadow: var(--x-shadow-lg);
   padding: 32px 28px;
 }
-.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
 .auth-logo {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   background: linear-gradient(135deg, #6366f1, #a855f7);
   color: #fff;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
 }
-.auth-title { font-size: 20px; font-weight: 700; }
-.auth-sub { font-size: 12.5px; color: var(--x-text-3); margin-top: 3px; }
+.auth-logo-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--x-bg, #f8fafc);
+  border: 1px solid var(--x-border, #e2e8f0);
+  flex: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+.auth-title { font-size: 19px; font-weight: 700; color: var(--x-text, #0f172a); }
+.auth-sub { font-size: 12px; color: var(--x-text-3, #64748b); margin-top: 2px; }
 .auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
 .auth-foot { margin-top: 20px; text-align: center; font-size: 13px; color: var(--x-text-2); }
 .auth-link { color: var(--x-primary); font-weight: 600; }

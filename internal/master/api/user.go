@@ -82,7 +82,7 @@ func (d *Deps) UserChangePassword(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	d.Audit.Log("user", uid, "auth.change_password", "修改密码", c.ClientIP())
+	d.Audit.Log("user", uid, "auth.change_password", "修改密码", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"ok": true})
 }
 

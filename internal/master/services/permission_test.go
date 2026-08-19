@@ -11,14 +11,11 @@ import (
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.Plan{}, &models.PermissionGroup{}, &models.PermissionGroupInbound{},
-		&models.User{},
-	); err != nil {
+	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	return db
@@ -98,3 +95,44 @@ func TestAuthorizedInboundSet_UnifiedPermissionGroup(t *testing.T) {
 		t.Errorf("BatchInboundPermissionGroupIDs returned unexpected: %v", inboundGroups)
 	}
 }
+
+func TestProtoUsersFor_UnassignedPermissionGroup(t *testing.T) {
+	db := testDB(t)
+	_ = db.AutoMigrate(&models.Inbound{}, &models.Order{}, &models.TrafficDaily{})
+
+	cfgSvc := &ConfigService{DB: db}
+
+	group := models.PermissionGroup{Name: "VIP 1"}
+	db.Create(&group)
+
+	user := models.User{
+		Username:          "active_user",
+		UUID:              "11111111-2222-3333-4444-555555555555",
+		Email:             "active_user@test.local",
+		Status:            models.StatusActive,
+		PermissionGroupID: group.ID,
+	}
+	db.Create(&user)
+
+	inb := models.Inbound{
+		ID:       201,
+		ServerID: 1,
+		Tag:      "vless-test",
+		Type:     models.InboundTypeUser,
+		Enabled:  true,
+	}
+	db.Create(&inb)
+
+	// 1. 当入站未绑定任何权限组（allowedGroups 为空）时，不对任何用户开放
+	usersEmpty := cfgSvc.PreviewUsers(&inb, nil)
+	if len(usersEmpty) != 0 {
+		t.Fatalf("未分配权限组的入站应该返回 0 个用户（不对任何人开放），got %d", len(usersEmpty))
+	}
+
+	// 2. 当入站绑定了 group.ID 时，应该成功返回 user
+	usersAllowed := cfgSvc.PreviewUsers(&inb, []uint64{group.ID})
+	if len(usersAllowed) != 1 || usersAllowed[0].UUID != user.UUID {
+		t.Fatalf("分配匹配权限组后应返回用户，got %+v", usersAllowed)
+	}
+}
+

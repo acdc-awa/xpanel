@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { Setting, SwitchButton } from '@element-plus/icons-vue'
 import { clientMenus } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const router = useRouter()
 const route = useRoute()
 
 async function handleLogout() {
-  await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
-  auth.logout()
-  router.replace('/login')
+  try {
+    await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  await auth.logout()
+  await router.replace('/login')
 }
 const activeMenu = () => route.path
 </script>
@@ -22,8 +29,9 @@ const activeMenu = () => route.path
       <!-- 顶栏：移动端品牌栏，桌面端含顶部导航 -->
       <header class="client-header">
         <div class="client-logo">
-          <span class="client-logo-mark">X</span>
-          <span class="client-title">XrayPanel</span>
+          <img v-if="site.logo" :src="site.logo" class="client-logo-img" alt="logo" />
+          <span v-else class="client-logo-mark">X</span>
+          <span class="client-title">{{ site.appName || 'XrayPanel' }}</span>
         </div>
 
         <nav class="client-nav">
@@ -40,12 +48,29 @@ const activeMenu = () => route.path
         </nav>
 
         <div class="client-header-right">
+          <!-- 管理员专属快捷按钮 -->
+          <el-button
+            v-if="auth.role === 'admin'"
+            size="small"
+            type="primary"
+            plain
+            class="admin-portal-btn"
+            @click="router.push('/admin/dashboard')"
+          >
+            <el-icon :size="14"><Setting /></el-icon>&nbsp;管理后台
+          </el-button>
+
           <el-dropdown trigger="click">
             <div class="client-avatar" title="用户菜单">{{ auth.avatarText }}</div>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+                <el-dropdown-item v-if="auth.role === 'admin'" divided @click="router.push('/admin/dashboard')">
+                  <el-icon><Setting /></el-icon>进入管理后台
+                </el-dropdown-item>
+                <el-dropdown-item divided @click="handleLogout">
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -129,6 +154,15 @@ const activeMenu = () => route.path
   font-weight: 800;
   flex: none;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.client-logo-img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.03);
+  flex: none;
 }
 
 .client-nav {

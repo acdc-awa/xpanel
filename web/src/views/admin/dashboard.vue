@@ -55,12 +55,14 @@ function initCharts() {
 }
 
 function resizeCharts() {
+  updateCharts()
   trendChart?.resize()
   donutChart?.resize()
 }
 
 function updateCharts() {
   if (!dashData.value) return
+  const isMob = typeof window !== 'undefined' ? window.innerWidth <= 768 : false
 
   // 1. 流量趋势面积图
   const trend = dashData.value.traffic_trend || []
@@ -86,17 +88,22 @@ function updateCharts() {
       },
     },
     legend: {
-      data: ['上行流量 (Upload)', '下行流量 (Download)'],
+      data: isMob ? ['上行', '下行'] : ['上行流量 (Upload)', '下行流量 (Download)'],
       top: 0,
-      right: 10,
-      textStyle: { color: '#64748b', fontSize: 12 },
+      right: isMob ? 'center' : 10,
+      textStyle: { color: '#64748b', fontSize: isMob ? 11 : 12 },
     },
-    grid: { top: 35, right: 20, bottom: 25, left: 55 },
+    grid: {
+      top: 35,
+      right: isMob ? 12 : 20,
+      bottom: 25,
+      left: isMob ? 42 : 55,
+    },
     xAxis: {
       type: 'category',
       data: dates,
       axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisLabel: { color: '#64748b', fontSize: 11 },
+      axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true },
     },
     yAxis: {
       type: 'value',
@@ -107,7 +114,7 @@ function updateCharts() {
     },
     series: [
       {
-        name: '上行流量 (Upload)',
+        name: isMob ? '上行' : '上行流量 (Upload)',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -121,7 +128,7 @@ function updateCharts() {
         },
       },
       {
-        name: '下行流量 (Download)',
+        name: isMob ? '下行' : '下行流量 (Download)',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -159,17 +166,19 @@ function updateCharts() {
       formatter: '{b}: <b>{c} GB</b> ({d}%)',
     },
     legend: {
-      orient: 'vertical',
-      right: '2%',
-      top: 'middle',
+      orient: isMob ? 'horizontal' : 'vertical',
+      right: isMob ? 'auto' : '2%',
+      left: isMob ? 'center' : 'auto',
+      top: isMob ? 'auto' : 'middle',
+      bottom: isMob ? 0 : 'auto',
       textStyle: { color: '#64748b', fontSize: 11 },
     },
     series: [
       {
         name: '节点流量',
         type: 'pie',
-        radius: ['50%', '76%'],
-        center: ['38%', '50%'],
+        radius: isMob ? ['42%', '65%'] : ['50%', '76%'],
+        center: isMob ? ['50%', '42%'] : ['38%', '50%'],
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 6,
@@ -351,155 +360,298 @@ onUnmounted(() => {
           <div class="title">节点健康度与系统负载矩阵</div>
           <div class="sub">节点实时心跳、CPU、内存与出口带宽监控</div>
         </div>
-        <el-table :data="dashData?.server_matrix || []" size="small" style="width: 100%">
-          <el-table-column label="节点" min-width="120">
-            <template #default="{ row }">
-              <div style="font-weight: 600; color: var(--x-text)">{{ row.name }}</div>
-              <div class="muted cell-mono" style="font-size: 11px">{{ row.host }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
-                {{ row.status === 1 ? '在线' : '离线' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="CPU" width="110">
-            <template #default="{ row }">
-              <div style="display: flex; align-items: center; gap: 6px">
-                <el-progress
-                  :percentage="Math.min(100, Math.round(row.cpu || 0))"
-                  :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
-                  :stroke-width="6"
-                  :show-text="false"
-                  style="width: 45px"
-                />
-                <span class="cell-mono" style="font-size: 11px">{{ (row.cpu || 0).toFixed(0) }}%</span>
+
+        <!-- 桌面端表格视图 -->
+        <div class="desktop-table-view">
+          <el-table :data="dashData?.server_matrix || []" size="small" style="width: 100%">
+            <el-table-column label="节点" min-width="120">
+              <template #default="{ row }">
+                <div style="font-weight: 600; color: var(--x-text)">{{ row.name }}</div>
+                <div class="muted cell-mono" style="font-size: 11px">{{ row.host }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                  <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+                  {{ row.status === 1 ? '在线' : '离线' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="CPU" width="110">
+              <template #default="{ row }">
+                <div style="display: flex; align-items: center; gap: 6px">
+                  <el-progress
+                    :percentage="Math.min(100, Math.round(row.cpu || 0))"
+                    :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
+                    :stroke-width="6"
+                    :show-text="false"
+                    style="width: 45px"
+                  />
+                  <span class="cell-mono" style="font-size: 11px">{{ (row.cpu || 0).toFixed(0) }}%</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="内存" width="110">
+              <template #default="{ row }">
+                <div style="display: flex; align-items: center; gap: 6px">
+                  <el-progress
+                    :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
+                    color="#3b82f6"
+                    :stroke-width="6"
+                    :show-text="false"
+                    style="width: 45px"
+                  />
+                  <span class="cell-mono" style="font-size: 11px">
+                    {{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="实时带宽" min-width="130">
+              <template #default="{ row }">
+                <div class="cell-mono" style="font-size: 11.5px">
+                  <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
+                  <span style="color: #6366f1; margin-left: 6px">↑{{ formatBandwidth(row.tx_rate) }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="在线设备" width="80">
+              <template #default="{ row }">
+                <span class="cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" text type="primary" @click="openServerMetrics(row as ServerMatrixItem)">
+                  <el-icon><TrendCharts /></el-icon>&nbsp;图表
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <!-- 移动端卡片流视图 -->
+        <div class="mobile-cards-view">
+          <div v-if="!dashData?.server_matrix || dashData.server_matrix.length === 0" style="text-align: center; padding: 24px 0; color: var(--x-text-3); font-size: 13px">
+            暂无节点监控数据
+          </div>
+          <div v-else class="mobile-data-card-list">
+            <div v-for="row in dashData.server_matrix" :key="row.id" class="mobile-data-card">
+              <div class="card-head">
+                <div class="head-title">
+                  <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+                  <span style="font-weight: 700">{{ row.name }}</span>
+                  <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                    {{ row.status === 1 ? '在线' : '离线' }}
+                  </el-tag>
+                </div>
+                <el-button size="small" type="primary" plain @click="openServerMetrics(row as ServerMatrixItem)">
+                  <el-icon><TrendCharts /></el-icon>&nbsp;监控
+                </el-button>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="内存" width="110">
-            <template #default="{ row }">
-              <div style="display: flex; align-items: center; gap: 6px">
-                <el-progress
-                  :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
-                  color="#3b82f6"
-                  :stroke-width="6"
-                  :show-text="false"
-                  style="width: 45px"
-                />
-                <span class="cell-mono" style="font-size: 11px">
-                  {{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}
-                </span>
+
+              <div class="card-grid">
+                <div class="grid-item">
+                  <span class="item-label">CPU 负载</span>
+                  <div class="item-value" style="display: flex; align-items: center; gap: 6px">
+                    <el-progress
+                      :percentage="Math.min(100, Math.round(row.cpu || 0))"
+                      :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
+                      :stroke-width="6"
+                      :show-text="false"
+                      style="width: 45px"
+                    />
+                    <span class="cell-mono font-12">{{ (row.cpu || 0).toFixed(0) }}%</span>
+                  </div>
+                </div>
+                <div class="grid-item">
+                  <span class="item-label">内存占用</span>
+                  <div class="item-value" style="display: flex; align-items: center; gap: 6px">
+                    <el-progress
+                      :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
+                      color="#3b82f6"
+                      :stroke-width="6"
+                      :show-text="false"
+                      style="width: 45px"
+                    />
+                    <span class="cell-mono font-12">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
+                  </div>
+                </div>
+                <div class="grid-item">
+                  <span class="item-label">实时吞吐 (下行 / 上行)</span>
+                  <div class="item-value cell-mono font-12">
+                    <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
+                    <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
+                  </div>
+                </div>
+                <div class="grid-item">
+                  <span class="item-label">在线设备数</span>
+                  <div class="item-value cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</div>
+                </div>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="实时带宽" min-width="130">
-            <template #default="{ row }">
-              <div class="cell-mono" style="font-size: 11.5px">
-                <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
-                <span style="color: #6366f1; margin-left: 6px">↑{{ formatBandwidth(row.tx_rate) }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="在线设备" width="80">
-            <template #default="{ row }">
-              <span class="cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openServerMetrics(row as ServerMatrixItem)">
-                <el-icon><TrendCharts /></el-icon>&nbsp;图表
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧：榜单与流水切换 Tabs -->
       <div class="ledger-card">
         <el-tabs v-model="activeTab" class="ledger-tabs">
           <!-- 1. 用户流量排行 -->
-          <el-tab-pane label="🏆 流量排行榜" name="users">
-            <el-table :data="dashData?.user_rank || []" size="small">
-              <el-table-column label="#" width="45">
-                <template #default="{ $index }">
-                  <span v-if="$index === 0" style="color: #f59e0b; font-weight: 700">🥇</span>
-                  <span v-else-if="$index === 1" style="color: #94a3b8; font-weight: 700">🥈</span>
-                  <span v-else-if="$index === 2" style="color: #b45309; font-weight: 700">🥉</span>
-                  <span v-else class="cell-mono muted">{{ $index + 1 }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="用户" min-width="120">
-                <template #default="{ row }">
-                  <span style="font-weight: 600; color: var(--x-text)">{{ row.username }}</span>
-                  <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="plan_name" label="套餐" width="95">
-                <template #default="{ row }">
-                  <el-tag size="small" type="info" effect="plain">{{ row.plan_name }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="已用总流量" width="105">
-                <template #default="{ row }">
-                  <span class="cell-mono" style="font-weight: 700; color: var(--x-primary)">
-                    {{ formatBytes(row.total_bytes) }}
-                  </span>
-                </template>
-              </el-table-column>
-            </el-table>
+          <el-tab-pane label="流量排行榜" name="users">
+            <!-- 桌面端表格 -->
+            <div class="desktop-table-view">
+              <el-table :data="dashData?.user_rank || []" size="small">
+                <el-table-column label="#" width="45">
+                  <template #default="{ $index }">
+                    <span class="cell-mono" :style="{ fontWeight: $index < 3 ? '700' : '400', color: $index === 0 ? '#f59e0b' : $index === 1 ? '#64748b' : $index === 2 ? '#b45309' : 'inherit' }">
+                      {{ $index + 1 }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="用户" min-width="120">
+                  <template #default="{ row }">
+                    <span style="font-weight: 600; color: var(--x-text)">{{ row.username }}</span>
+                    <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="plan_name" label="套餐" width="95">
+                  <template #default="{ row }">
+                    <el-tag size="small" type="info" effect="plain">{{ row.plan_name }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="已用总流量" width="105">
+                  <template #default="{ row }">
+                    <span class="cell-mono" style="font-weight: 700; color: var(--x-primary)">
+                      {{ formatBytes(row.total_bytes) }}
+                    </span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 移动端流式卡片 -->
+            <div class="mobile-cards-view">
+              <div v-if="!dashData?.user_rank || dashData.user_rank.length === 0" style="text-align: center; padding: 20px 0; color: var(--x-text-3); font-size: 13px">
+                暂无流量排行数据
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="(row, idx) in dashData.user_rank" :key="row.user_id" class="mobile-data-card" style="padding: 10px 12px">
+                  <div class="card-head" style="padding-bottom: 6px">
+                    <div class="head-title">
+                      <span class="cell-mono" :style="{ fontWeight: idx < 3 ? '700' : '400', color: idx === 0 ? '#f59e0b' : idx === 1 ? '#64748b' : idx === 2 ? '#b45309' : 'inherit', fontSize: '12px' }">
+                        #{{ idx + 1 }}
+                      </span>
+                      <span style="font-weight: 700">{{ row.username }}</span>
+                      <el-tag size="small" type="info" effect="plain">{{ row.plan_name }}</el-tag>
+                    </div>
+                    <span class="cell-mono" style="font-weight: 700; color: var(--x-primary); font-size: 13px">
+                      {{ formatBytes(row.total_bytes) }}
+                    </span>
+                  </div>
+                  <div class="muted cell-mono" style="font-size: 11px; margin-top: 4px">{{ row.email || '—' }}</div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
 
           <!-- 2. 最近卡密激活流水 -->
-          <el-tab-pane label="🎫 最近卡密激活" name="cards">
-            <el-table :data="dashData?.recent_gift_cards || []" size="small">
-              <el-table-column label="卡密" min-width="130">
-                <template #default="{ row }">
-                  <code class="cell-mono" style="font-size: 11.5px">{{ row.code_masked }}</code>
-                </template>
-              </el-table-column>
-              <el-table-column label="面值" width="90">
-                <template #default="{ row }">
-                  <span class="cell-mono" style="font-weight: 700; color: #059669">
-                    +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="used_by_username" label="兑换用户" width="100" />
-              <el-table-column label="激活时间" width="120">
-                <template #default="{ row }">
-                  <span class="muted cell-mono" style="font-size: 11px">
-                    {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
-                  </span>
-                </template>
-              </el-table-column>
-            </el-table>
+          <el-tab-pane label="最近卡密激活" name="cards">
+            <!-- 桌面端表格 -->
+            <div class="desktop-table-view">
+              <el-table :data="dashData?.recent_gift_cards || []" size="small">
+                <el-table-column label="卡密" min-width="130">
+                  <template #default="{ row }">
+                    <code class="cell-mono" style="font-size: 11.5px">{{ row.code_masked }}</code>
+                  </template>
+                </el-table-column>
+                <el-table-column label="面值" width="90">
+                  <template #default="{ row }">
+                    <span class="cell-mono" style="font-weight: 700; color: #059669">
+                      +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="used_by_username" label="兑换用户" width="100" />
+                <el-table-column label="激活时间" width="120">
+                  <template #default="{ row }">
+                    <span class="muted cell-mono" style="font-size: 11px">
+                      {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
+                    </span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 移动端流式卡片 -->
+            <div class="mobile-cards-view">
+              <div v-if="!dashData?.recent_gift_cards || dashData.recent_gift_cards.length === 0" style="text-align: center; padding: 20px 0; color: var(--x-text-3); font-size: 13px">
+                暂无卡密激活记录
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="row in dashData.recent_gift_cards" :key="row.code_masked" class="mobile-data-card" style="padding: 10px 12px">
+                  <div class="card-head" style="padding-bottom: 6px">
+                    <div class="head-title">
+                      <code class="cell-mono" style="font-weight: 600; font-size: 12px">{{ row.code_masked }}</code>
+                    </div>
+                    <span class="cell-mono" style="font-weight: 700; color: #059669; font-size: 13px">
+                      +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
+                    </span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px">
+                    <span style="font-size: 12px; font-weight: 500">用户：{{ row.used_by_username || '—' }}</span>
+                    <span class="muted cell-mono" style="font-size: 11px">{{ String(row.used_at).replace('T', ' ').slice(5, 16) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
 
           <!-- 3. 最近套餐订单 -->
-          <el-tab-pane label="📦 最近套餐订单" name="orders">
-            <el-table :data="dashData?.recent_orders || []" size="small">
-              <el-table-column label="订单号" min-width="130">
-                <template #default="{ row }">
-                  <code class="cell-mono" style="font-size: 11px">{{ row.order_no }}</code>
-                </template>
-              </el-table-column>
-              <el-table-column prop="username" label="用户" width="90" />
-              <el-table-column label="金额" width="85">
-                <template #default="{ row }">
-                  <span class="cell-mono" style="font-weight: 600">¥ {{ (row.amount_cents / 100).toFixed(2) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="80">
-                <template #default="{ row }">
-                  <el-tag type="success" size="small">已生效</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
+          <el-tab-pane label="最近套餐订单" name="orders">
+            <!-- 桌面端表格 -->
+            <div class="desktop-table-view">
+              <el-table :data="dashData?.recent_orders || []" size="small">
+                <el-table-column label="订单号" min-width="130">
+                  <template #default="{ row }">
+                    <code class="cell-mono" style="font-size: 11px">{{ row.order_no }}</code>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="username" label="用户" width="90" />
+                <el-table-column label="金额" width="85">
+                  <template #default="{ row }">
+                    <span class="cell-mono" style="font-weight: 600">¥ {{ (row.amount_cents / 100).toFixed(2) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="80">
+                  <template #default="{ row }">
+                    <el-tag type="success" size="small">已生效</el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 移动端流式卡片 -->
+            <div class="mobile-cards-view">
+              <div v-if="!dashData?.recent_orders || dashData.recent_orders.length === 0" style="text-align: center; padding: 20px 0; color: var(--x-text-3); font-size: 13px">
+                暂无订单流水记录
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="row in dashData.recent_orders" :key="row.order_no" class="mobile-data-card" style="padding: 10px 12px">
+                  <div class="card-head" style="padding-bottom: 6px">
+                    <div class="head-title">
+                      <code class="cell-mono" style="font-size: 11.5px">{{ row.order_no }}</code>
+                      <el-tag type="success" size="small" effect="light">已生效</el-tag>
+                    </div>
+                    <span class="cell-mono" style="font-weight: 700; color: #059669; font-size: 13px">
+                      ¥ {{ (row.amount_cents / 100).toFixed(2) }}
+                    </span>
+                  </div>
+                  <div style="font-size: 12px; margin-top: 4px">购买用户：<b>{{ row.username }}</b></div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
         </el-tabs>
       </div>
@@ -543,6 +695,15 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpi-card {
@@ -557,6 +718,11 @@ onUnmounted(() => {
   gap: 14px;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+
+  @media (max-width: 768px) {
+    padding: 12px 14px;
+    gap: 10px;
+  }
 
   &:hover {
     transform: translateY(-2px);
@@ -574,6 +740,12 @@ onUnmounted(() => {
   justify-content: center;
   font-size: 22px;
   flex-shrink: 0;
+
+  @media (max-width: 768px) {
+    width: 38px;
+    height: 38px;
+    font-size: 19px;
+  }
 }
 
 .card-cyan .kpi-icon-box { background: #e0f2fe; color: #0284c7; }
@@ -593,6 +765,10 @@ onUnmounted(() => {
   font-size: 12.5px;
   color: var(--x-text-2);
   font-weight: 500;
+
+  @media (max-width: 768px) {
+    font-size: 11.5px;
+  }
 }
 
 .kpi-val {
@@ -604,6 +780,11 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--x-font-mono);
+
+  @media (max-width: 768px) {
+    font-size: 16px;
+    margin: 2px 0 1px;
+  }
 }
 
 .kpi-sub {
@@ -612,6 +793,10 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  @media (max-width: 768px) {
+    font-size: 10.5px;
+  }
 }
 
 /* 图表双栏 */
@@ -619,6 +804,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 
   @media (max-width: 1024px) {
     grid-template-columns: 1fr;
@@ -631,6 +818,14 @@ onUnmounted(() => {
   border-radius: var(--x-radius);
   box-shadow: var(--x-shadow);
   padding: 18px 20px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    padding: 14px 12px;
+  }
 }
 
 .panel-head .title {
@@ -647,7 +842,13 @@ onUnmounted(() => {
 
 .echart-container {
   width: 100%;
+  max-width: 100%;
   height: 250px;
+  overflow: hidden;
+
+  @media (max-width: 768px) {
+    height: 220px;
+  }
 }
 
 /* 下部双栏 */
@@ -668,6 +869,10 @@ onUnmounted(() => {
   border-radius: var(--x-radius);
   box-shadow: var(--x-shadow);
   padding: 18px 20px;
+
+  @media (max-width: 768px) {
+    padding: 14px 12px;
+  }
 }
 
 .cell-mono {

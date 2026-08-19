@@ -9,9 +9,9 @@ services:
       APP_PORT: "18080"
       DB_DRIVER: sqlite
       DB_DSN: /app/data/panel.db
-      JWT_SECRET: ${JWT_SECRET}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      JWT_SECRET: ${JWT_SECRET:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - master-data:/app/data
     healthcheck:

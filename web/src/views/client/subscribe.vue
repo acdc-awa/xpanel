@@ -12,17 +12,19 @@ import {
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const qrDataUrl = ref('')
 const loading = ref(false)
 const qrModalOpen = ref(false)
 
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
-  return token ? buildSubscribeUrl(token) : ''
+  return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
 
@@ -78,7 +80,7 @@ const clashApps: ClientApp[] = [
     name: 'Clash Verge Rev',
     tag: '首选推荐',
     platform: 'Windows / macOS / Linux',
-    icon: '⚡',
+    icon: 'CV',
     desc: '基于 Mihomo 核心，现代极简 UI，性能卓越，全协议完美兼容。',
     url: 'https://github.com/clash-verge-rev/clash-verge-rev',
   },
@@ -86,7 +88,7 @@ const clashApps: ClientApp[] = [
     name: 'Mihomo Party',
     tag: '优雅开源',
     platform: 'Windows / macOS / Linux',
-    icon: '🎉',
+    icon: 'MP',
     desc: '专为 Mihomo 定制的优雅桌面客户端，内置丰富规则与节点测速。',
     url: 'https://github.com/mihomo-party-org/mihomo-party',
   },
@@ -94,7 +96,7 @@ const clashApps: ClientApp[] = [
     name: 'Flclash',
     tag: '全平台',
     platform: 'Android / iOS / Win / Mac',
-    icon: '📱',
+    icon: 'FL',
     desc: '基于 Flutter 的跨平台 Clash/Mihomo 客户端，轻量美观。',
     url: 'https://github.com/chen08209/FlClash',
   },
@@ -102,7 +104,7 @@ const clashApps: ClientApp[] = [
     name: 'Stash',
     tag: 'iOS 推荐',
     platform: 'iOS / iPadOS / macOS / tvOS',
-    icon: '🍎',
+    icon: 'ST',
     desc: '苹果生态顶级的 Clash 规则分流代理客户端，支持按需连接。',
     url: 'https://stash.ws/',
   },
@@ -159,13 +161,13 @@ const clashApps: ClientApp[] = [
 
     <!-- 推荐客户端生态 -->
     <div class="section-title">
-      <span>🚀 推荐客户端（Clash / Mihomo 生态）</span>
+      <span>推荐客户端（Clash / Mihomo 生态）</span>
     </div>
 
     <div class="client-grid">
       <div v-for="app in clashApps" :key="app.name" class="client-card">
         <div class="client-head">
-          <div class="client-icon">{{ app.icon }}</div>
+          <div class="client-icon cell-mono" style="font-weight: 700; font-size: 13px; color: var(--x-primary)">{{ app.icon }}</div>
           <div class="client-meta">
             <div class="client-name">
               {{ app.name }}
@@ -185,7 +187,7 @@ const clashApps: ClientApp[] = [
 
     <!-- 极简使用说明 -->
     <div class="x-card" style="margin-top: 20px">
-      <div class="x-card-head"><span>📖 快速上手 3 步指引</span></div>
+      <div class="x-card-head"><span>快速上手 3 步指引</span></div>
       <div class="sub-steps">
         <div class="sub-step">
           <span class="step-num">1</span>

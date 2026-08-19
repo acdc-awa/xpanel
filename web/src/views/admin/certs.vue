@@ -113,35 +113,86 @@ function expireTag(row: any) {
     </div>
 
     <BaseCard>
-      <el-table v-loading="loading" :data="list" size="small">
-        <el-table-column prop="domain" label="域名" min-width="180">
-          <template #default="{ row }"><code class="cell-mono">{{ row.domain }}</code></template>
-        </el-table-column>
-        <el-table-column label="到期" width="130">
-          <template #default="{ row }">
-            <el-tag :type="expireTag(row).type" size="small">{{ row.not_after }}（{{ expireTag(row).text }}）</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="140" />
-        <el-table-column label="引用节点（服务器 / 入站）" min-width="200">
-          <template #default="{ row }">
-            <template v-if="row.refs && row.refs.length > 0">
-              <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
-                {{ r.server_name }} / {{ r.inbound_tag }}
-              </el-tag>
+      <!-- 桌面端表格视图 -->
+      <div class="desktop-table-view">
+        <el-table v-loading="loading" :data="list" size="small">
+          <el-table-column prop="domain" label="域名" min-width="180">
+            <template #default="{ row }"><code class="cell-mono">{{ row.domain }}</code></template>
+          </el-table-column>
+          <el-table-column label="到期" width="130">
+            <template #default="{ row }">
+              <el-tag :type="expireTag(row).type" size="small">{{ row.not_after }}（{{ expireTag(row).text }}）</el-tag>
             </template>
-            <span v-else class="muted">未引用</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="上传时间" width="130" />
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-          </template>
-        </el-table-column>
-        <template #empty><div class="table-empty">尚无证书，点击右上角「上传证书」</div></template>
-      </el-table>
+          </el-table-column>
+          <el-table-column prop="remark" label="备注" min-width="140" />
+          <el-table-column label="引用节点（服务器 / 入站）" min-width="200">
+            <template #default="{ row }">
+              <template v-if="row.refs && row.refs.length > 0">
+                <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
+                  {{ r.server_name }} / {{ r.inbound_tag }}
+                </el-tag>
+              </template>
+              <span v-else class="muted">未引用</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="上传时间" width="130" />
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
+            </template>
+          </el-table-column>
+          <template #empty><div class="table-empty">尚无证书，点击右上角「上传证书」</div></template>
+        </el-table>
+      </div>
+
+      <!-- 移动端卡片流视图 -->
+      <div class="mobile-cards-view">
+        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
+          尚无证书，点击右上角「上传证书」
+        </div>
+        <div v-else class="mobile-data-card-list">
+          <div v-for="row in list" :key="row.id" class="mobile-data-card">
+            <div class="card-head">
+              <div class="head-title">
+                <code class="cell-mono" style="font-weight: 700; color: var(--x-primary)">{{ row.domain }}</code>
+              </div>
+              <el-tag :type="expireTag(row).type" size="small">{{ expireTag(row).text }}</el-tag>
+            </div>
+
+            <div class="card-grid">
+              <div class="grid-item">
+                <span class="item-label">到期日期</span>
+                <div class="item-value cell-mono font-12">{{ row.not_after || '—' }}</div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">备注</span>
+                <div class="item-value">{{ row.remark || '—' }}</div>
+              </div>
+              <div class="grid-item full-width">
+                <span class="item-label">引用节点</span>
+                <div class="item-value">
+                  <template v-if="row.refs && row.refs.length > 0">
+                    <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
+                      {{ r.server_name }} / {{ r.inbound_tag }}
+                    </el-tag>
+                  </template>
+                  <span v-else class="muted font-12">未被任何入站引用</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-foot-actions">
+              <el-button size="small" type="primary" plain @click="openEdit(row)">
+                <el-icon><Edit /></el-icon>&nbsp;编辑
+              </el-button>
+              <el-button size="small" type="danger" plain @click="remove(row)">
+                <el-icon><Delete /></el-icon>&nbsp;删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
     </BaseCard>
 
     <el-dialog v-model="formOpen" :title="editing ? '编辑证书（' + form.domain + '）' : '上传证书'" width="640px" :append-to-body="true">

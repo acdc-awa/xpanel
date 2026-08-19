@@ -85,6 +85,12 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '审计日志' },
       },
       {
+        path: 'notices',
+        name: 'admin.notices',
+        component: () => import('@/views/admin/notices.vue'),
+        meta: { title: '公告管理' },
+      },
+      {
         path: 'settings',
         name: 'admin.settings',
         component: () => import('@/views/admin/settings.vue'),

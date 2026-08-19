@@ -108,6 +108,7 @@ function editorModelValue(): string {
     protocol: editing.value.protocol,
     port: editing.value.port,
     tag: editing.value.tag,
+    listen: editing.value.listen || '0.0.0.0',
     flow: editing.value.flow || '',
     ratio: editing.value.ratio ?? 1,
     share_addr_strategy: editing.value.share_addr_strategy || 'node',
@@ -250,63 +251,141 @@ function transportOf(row: any): string {
     <el-alert type="info" :closable="false" show-icon title="在此为服务器添加接入点（入站）：用户入站进订阅、转发入站作为内部落地（需执行「生成内部 UUID」）、闲置仅预留。新增/编辑/停用后自动生成配置推送到节点（离线保存，上线补推）。" style="margin-bottom: 14px" />
 
     <BaseCard>
-      <el-table v-loading="loading" :data="list">
-        <el-table-column prop="id" label="ID" width="64">
-          <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-        </el-table-column>
-        <el-table-column label="服务器" min-width="110">
-          <template #default="{ row }">{{ serverName(row.server_id) }}</template>
-        </el-table-column>
-        <el-table-column label="类型" width="90">
-          <template #default="{ row }">
-            <el-tag v-if="row.type === 'relay'" size="small" type="warning">转发</el-tag>
-            <el-tag v-else-if="row.type === 'idle'" size="small" type="info">闲置</el-tag>
-            <el-tag v-else size="small" type="success">用户</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="tag" label="标签" min-width="130">
-          <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
-        </el-table-column>
-        <el-table-column prop="protocol" label="协议" width="80" />
-        <el-table-column label="端口" width="80">
-          <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
-        </el-table-column>
-        <el-table-column label="传输/TLS" width="130">
-          <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
-        </el-table-column>
-        <el-table-column label="开放权限组" min-width="140">
-          <template #default="{ row }">
-            <template v-if="row.permission_group_ids && row.permission_group_ids.length">
-              <el-tag
-                v-for="gid in row.permission_group_ids"
-                :key="gid"
-                size="small"
-                effect="plain"
-                style="margin-right: 4px; margin-bottom: 2px"
-              >
-                {{ groupName(gid) }}
+      <!-- 桌面端表格视图 -->
+      <div class="desktop-table-view">
+        <el-table v-loading="loading" :data="list">
+          <el-table-column prop="id" label="ID" width="64">
+            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
+          </el-table-column>
+          <el-table-column label="服务器" min-width="110">
+            <template #default="{ row }">{{ serverName(row.server_id) }}</template>
+          </el-table-column>
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">
+              <el-tag v-if="row.type === 'relay'" size="small" type="warning">转发</el-tag>
+              <el-tag v-else-if="row.type === 'idle'" size="small" type="info">闲置</el-tag>
+              <el-tag v-else size="small" type="success">用户</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="tag" label="标签" min-width="130">
+            <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
+          </el-table-column>
+          <el-table-column prop="protocol" label="协议" width="80" />
+          <el-table-column label="端口" width="80">
+            <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
+          </el-table-column>
+          <el-table-column label="传输/TLS" width="130">
+            <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
+          </el-table-column>
+          <el-table-column label="开放权限组" min-width="150">
+            <template #default="{ row }">
+              <template v-if="row.type === 'relay' || row.type === 'idle'">
+                <span class="muted" style="font-size: 12px">内部/落地</span>
+              </template>
+              <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
+                <el-tag
+                  v-for="gid in row.permission_group_ids"
+                  :key="gid"
+                  size="small"
+                  effect="plain"
+                  style="margin-right: 4px; margin-bottom: 2px"
+                >
+                  {{ groupName(gid) }}
+                </el-tag>
+              </template>
+              <el-tag v-else size="small" type="warning" effect="plain" style="font-size: 11px">
+                未分配 (不对外开放)
               </el-tag>
             </template>
-            <span v-else class="muted" style="font-size: 12px">全员开放</span>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-switch :model-value="row.enabled" @change="toggle(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
+              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <div style="padding: 30px 0; color: var(--x-text-3)">
+              {{ serverFilter ? '该服务器尚未配置接入点，点击右上角「新增入站」' : '尚未配置任何接入点。先到「服务器」页添加服务器，再点击右上角「新增入站」' }}
+            </div>
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled" @change="toggle(row)" />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
-            <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <div style="padding: 30px 0; color: var(--x-text-3)">
-            {{ serverFilter ? '该服务器尚未配置接入点，点击右上角「新增入站」' : '尚未配置任何接入点。先到「服务器」页添加服务器，再点击右上角「新增入站」' }}
+        </el-table>
+      </div>
+
+      <!-- 移动端卡片流视图 -->
+      <div class="mobile-cards-view">
+        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
+          {{ serverFilter ? '该服务器尚未配置接入点，点击右上角「新增入站」' : '尚未配置任何接入点，点击右上角「新增入站」' }}
+        </div>
+        <div v-else class="mobile-data-card-list">
+          <div v-for="row in list" :key="row.id" class="mobile-data-card">
+            <div class="card-head">
+              <div class="head-title">
+                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+                <span style="font-weight: 700">{{ row.tag }}</span>
+                <el-tag v-if="row.type === 'relay'" size="small" type="warning">转发</el-tag>
+                <el-tag v-else-if="row.type === 'idle'" size="small" type="info">闲置</el-tag>
+                <el-tag v-else size="small" type="success">用户</el-tag>
+              </div>
+              <el-switch :model-value="row.enabled" size="small" @change="toggle(row)" />
+            </div>
+
+            <div class="card-grid">
+              <div class="grid-item">
+                <span class="item-label">所属服务器</span>
+                <div class="item-value" style="font-weight: 600">{{ serverName(row.server_id) }}</div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">协议 / 端口</span>
+                <div class="item-value">
+                  <span style="text-transform: uppercase; font-weight: 600">{{ row.protocol }}</span>
+                  <code class="cell-mono" style="margin-left: 4px">:{{ row.port }}</code>
+                </div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">传输与 TLS</span>
+                <div class="item-value cell-mono" style="font-size: 11.5px">{{ transportOf(row) }}</div>
+              </div>
+              <div class="grid-item">
+                <span class="item-label">开放权限组</span>
+                <div class="item-value">
+                  <template v-if="row.type === 'relay' || row.type === 'idle'">
+                    <span class="muted" style="font-size: 11.5px">内部/落地</span>
+                  </template>
+                  <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
+                    <el-tag
+                      v-for="gid in row.permission_group_ids"
+                      :key="gid"
+                      size="small"
+                      effect="plain"
+                      style="margin-right: 4px; margin-bottom: 2px"
+                    >
+                      {{ groupName(gid) }}
+                    </el-tag>
+                  </template>
+                  <el-tag v-else size="small" type="warning" effect="plain" style="font-size: 11px">
+                    未分配 (不对外开放)
+                  </el-tag>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-foot-actions">
+              <el-button size="small" type="primary" plain @click="openEdit(row)">
+                <el-icon><Edit /></el-icon>&nbsp;编辑入站
+              </el-button>
+              <el-button size="small" type="danger" plain @click="remove(row)">
+                <el-icon><Delete /></el-icon>&nbsp;删除
+              </el-button>
+            </div>
           </div>
-        </template>
-      </el-table>
+        </div>
+      </div>
     </BaseCard>
 
     <!-- 新增/编辑入站 -->
@@ -329,6 +408,7 @@ function transportOf(row: any): string {
         :key="editing ? `edit-${editing.id}` : 'create'"
         :model-value="editorModelValue()"
         :inbound-type="formType"
+        :listen="editing?.listen || '0.0.0.0'"
         :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"

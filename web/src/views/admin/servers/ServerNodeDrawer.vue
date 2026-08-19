@@ -387,4 +387,44 @@ watch(
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+@media (max-width: 768px) {
+  .desc-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 8px 0;
+
+    .v {
+      word-break: break-all;
+      flex-wrap: wrap;
+    }
+  }
+
+  .secret-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+
+    .k {
+      width: auto;
+      font-weight: 600;
+    }
+
+    .install-cmd {
+      font-size: 10.5px;
+      word-break: break-all;
+    }
+  }
+
+  .action-row {
+    flex-direction: column;
+    gap: 8px;
+
+    .el-button {
+      width: 100%;
+      margin: 0;
+    }
+  }
+}
 </style>

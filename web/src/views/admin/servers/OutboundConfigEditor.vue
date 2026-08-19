@@ -64,9 +64,9 @@ async function loadRefTargets() {
 
 // ===== 协议选项（去掉 socks/vmess） =====
 const PROTOCOL_OPTIONS = [
-  { label: 'freedom（直连）', value: 'freedom' },
-  { label: 'blackhole（黑洞/屏蔽）', value: 'blackhole' },
-  { label: 'vless（VLESS 代理链）', value: 'vless' },
+  { label: 'freedom (直连)', value: 'freedom' },
+  { label: 'blackhole (阻断)', value: 'blackhole' },
+  { label: 'vless (代理链)', value: 'vless' },
 ]
 
 // ===== 表单 =====
@@ -80,6 +80,7 @@ const form = reactive({
   // freedom 子字段
   domain_strategy: 'AsIs' as string,
   block_private: true,
+  block_cn: false,
   redirect: '',
   // blackhole 子字段
   response_type: 'none' as string,
@@ -128,9 +129,9 @@ const NETWORK_OPTIONS = [
 ]
 
 const SECURITY_OPTIONS = [
-  { label: 'none（无加密）', value: 'none' },
-  { label: 'tls（TLS 加密）', value: 'tls' },
-  { label: 'reality（伪装防封）', value: 'reality' },
+  { label: 'none (明文)', value: 'none' },
+  { label: 'tls (TLS)', value: 'tls' },
+  { label: 'reality (REALITY)', value: 'reality' },
 ]
 
 const FINGERPRINT_OPTIONS = [
@@ -138,8 +139,8 @@ const FINGERPRINT_OPTIONS = [
 ]
 
 const DOMAIN_STRATEGY_OPTIONS = [
-  { label: 'AsIs（保持原样）', value: 'AsIs' },
-  { label: 'UseIP（解析后连接）', value: 'UseIP' },
+  { label: 'AsIs (保持原样)', value: 'AsIs' },
+  { label: 'UseIP (解析后连接)', value: 'UseIP' },
   { label: 'UseIPv4', value: 'UseIPv4' },
   { label: 'UseIPv6', value: 'UseIPv6' },
 ]
@@ -177,6 +178,7 @@ function buildSettingsJSON(): string {
     case 'freedom': {
       const s: Record<string, any> = { domainStrategy: form.domain_strategy }
       if (form.redirect) s.redirect = form.redirect
+      if (form.block_cn) s.block_cn = true
       if (form.block_private) {
         s.finalRules = [
           { action: 'block', ip: ['geoip:private'] },
@@ -269,6 +271,7 @@ function parseExisting() {
     if (form.protocol === 'freedom') {
       form.domain_strategy = settings.domainStrategy || 'AsIs'
       form.block_private = Array.isArray(settings.finalRules) && settings.finalRules.some((r: any) => r.action === 'block' && r.ip?.includes?.('geoip:private'))
+      form.block_cn = !!settings.block_cn
       form.redirect = settings.redirect || ''
     } else if (form.protocol === 'blackhole') {
       form.response_type = settings.response?.type || 'none'
@@ -317,6 +320,11 @@ onMounted(() => {
 
 async function save() {
   if (!form.tag?.trim()) { ElMessage.warning('请填写出站标签'); return }
+  const lowerTag = form.tag?.trim().toLowerCase()
+  if (!props.outbound && (lowerTag === 'direct' || lowerTag === 'blocked')) {
+    ElMessage.warning('direct 与 blocked 为系统内置预留出站，请使用其他 Tag')
+    return
+  }
   if (form.protocol === 'vless' && !refMode.value && (!form.vless_address || !form.vless_uuid)) {
     ElMessage.warning('VLESS 出站需填写远端地址和 UUID，或改用「引用落地入站」')
     return
@@ -358,6 +366,8 @@ async function save() {
 
 function onClosed() { emit('close') }
 
+const isSystemReserved = computed(() => props.outbound?.tag === 'direct' || props.outbound?.tag === 'blocked')
+
 async function copyText(text: string, label: string) {
   try { await navigator.clipboard.writeText(text); ElMessage.success(`${label}已复制`) }
   catch { ElMessage.warning('复制失败') }
@@ -372,6 +382,15 @@ const activeTab = ref('basic')
     width="720px"
     @closed="onClosed"
   >
+    <el-alert
+      v-if="isSystemReserved"
+      type="info"
+      :closable="false"
+      show-icon
+      title="系统内置核心出站（Tag 与协议已锁定，可调整内部策略与备注）"
+      style="margin-bottom: 14px"
+    />
+
     <el-form label-position="top">
       <el-tabs v-model="activeTab" class="editor-tabs">
         <!-- ===== TAB 1: 基础配置 ===== -->
@@ -386,7 +405,7 @@ const activeTab = ref('basic')
                   </el-tooltip>
                 </div>
               </template>
-              <el-select v-model="form.protocol" style="width: 100%">
+              <el-select v-model="form.protocol" :disabled="isSystemReserved" style="width: 100%">
                 <el-option v-for="opt in PROTOCOL_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
@@ -401,7 +420,7 @@ const activeTab = ref('basic')
                   </el-tooltip>
                 </div>
               </template>
-              <el-input v-model="form.tag" placeholder="如 direct / proxy-out / blocked" />
+              <el-input v-model="form.tag" :disabled="isSystemReserved" placeholder="如 proxy-out / via-japan" />
             </el-form-item>
 
             <el-form-item>
@@ -460,10 +479,19 @@ const activeTab = ref('basic')
               <!-- 屏蔽内网私有 IP Toggle -->
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
-                  <span class="toggle-title">🛡️ 屏蔽内网私有 IP (block_private)</span>
+                  <span class="toggle-title">屏蔽内网私有 IP (block_private)</span>
                   <span class="toggle-sub">自动注入规则禁止访问 10.x / 172.16.x / 192.168.x 等局域网私有段</span>
                 </div>
                 <el-switch v-model="form.block_private" />
+              </div>
+
+              <!-- 阻止回国流量 Toggle -->
+              <div class="toggle-card inner-toggle" style="margin-top: 8px">
+                <div class="toggle-info">
+                  <span class="toggle-title">阻止回国流量 (block_cn)</span>
+                  <span class="toggle-sub">自动注入规则阻断访问大陆域名与 IP (geosite:cn / geoip:cn)，防止海外节点被滥用回国</span>
+                </div>
+                <el-switch v-model="form.block_cn" />
               </div>
             </div>
           </template>
@@ -511,7 +539,7 @@ const activeTab = ref('basic')
                 </el-form-item>
               </div>
               <div class="tip-banner" style="margin-top: 10px">
-                💡 保存后主控将根据引用的落地入站自动生成中转 vnext 地址、端口、落地 UUID、流控与 REALITY/TLS 参数。
+                保存后主控将根据引用的落地入站自动生成中转 vnext 地址、端口、落地 UUID、流控与 REALITY/TLS 参数。
               </div>
             </div>
           </template>

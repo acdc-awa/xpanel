@@ -27,7 +27,7 @@ func (d *Deps) UserRedeemGiftCard(c *gin.Context) {
 		return
 	}
 
-	d.Audit.Log("user", uid, "gift_card.redeem", "兑换礼品卡 "+card.Code+" (+¥"+strconv.FormatFloat(float64(card.FaceValueCents)/100, 'f', 2, 64)+")", c.ClientIP())
+	d.Audit.Log("user", uid, "gift_card.redeem", "兑换礼品卡 "+card.Code+" (+¥"+strconv.FormatFloat(float64(card.FaceValueCents)/100, 'f', 2, 64)+")", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{
 		"face_value_cents": card.FaceValueCents,
 		"balance_cents":    newBalance,
@@ -56,7 +56,7 @@ func (d *Deps) UserPayOrderByBalance(c *gin.Context) {
 		d.Hub.SyncUsersToAll()
 	}
 
-	d.Audit.Log("user", uid, "order.pay_balance", "余额直付购买套餐 #"+strconv.FormatUint(req.PlanID, 10)+" (订单 #"+order.OrderNo+")", c.ClientIP())
+	d.Audit.Log("user", uid, "order.pay_balance", "余额直付购买套餐 #"+strconv.FormatUint(req.PlanID, 10)+" (订单 #"+order.OrderNo+")", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{
 		"order": d.toOrderView(order),
 	})

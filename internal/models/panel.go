@@ -48,6 +48,12 @@ type Inbound struct {
 	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
 	ShareAddr         string    `gorm:"size:255" json:"share_addr"`                      // 自定义分享地址（域名/IP，不带端口）
 	SharePort         int       `gorm:"default:0" json:"share_port"`                     // 自定义分享端口（0 = 使用入站端口）
+	// 外部反代与订阅覆写字段（与本地物理监听解耦，支持 Caddy/CDN TLS 卸载模式）
+	ShareSecurity      string `gorm:"size:16;default:auto" json:"share_security"` // auto（跟随stream_settings）/ tls / none
+	ShareSNI           string `gorm:"size:255" json:"share_sni"`                  // 订阅 SNI 覆写（如反代域名）
+	ShareHost          string `gorm:"size:255" json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
+	SharePath          string `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
+	ShareAllowInsecure bool   `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
 	// Phase T 拓扑化：入站三态
 	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（进订阅）/ relay（内部转发）/ idle（闲置）
 	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 原本即 relay/idle，保持不动）

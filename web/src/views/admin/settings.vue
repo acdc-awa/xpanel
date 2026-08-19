@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { Check, Download, Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Check, Download, Refresh, Upload, Delete, Picture, Scissor, CopyDocument, Link, Lock, Cpu } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
+import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
   getSettings,
   updateSettings,
@@ -15,10 +16,21 @@ import {
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
+import { useSiteStore } from '@/stores/site'
 
+const siteStore = useSiteStore()
 const activeTab = ref('site')
 const loading = ref(false)
 const saving = ref(false)
+const logoInputRef = ref<HTMLInputElement | null>(null)
+const faviconInputRef = ref<HTMLInputElement | null>(null)
+
+// 图片裁剪状态
+const cropperVisible = ref(false)
+const cropperImageSrc = ref('')
+const cropperTitle = ref('')
+const cropperTargetSize = ref(256)
+const cropperType = ref<'logo' | 'favicon'>('logo')
 
 const emptySite = (): SiteGroup => ({
   app_name: '',
@@ -26,6 +38,12 @@ const emptySite = (): SiteGroup => ({
   logo: '',
   favicon: '',
   subscribe_domain: '',
+  subscribe_url: '',
+  subscribe_path: '/sub',
+  subscribe_port: '',
+  sub_clean_ua: '1',
+  sub_strict_ua: '0',
+  sub_blocked_ua: '',
   tos_url: '',
   stop_register: '0',
   currency: 'CNY',
@@ -43,6 +61,115 @@ const form = reactive({
   captcha: emptyCaptcha(),
   web_base: '',
 })
+
+const subHostName = computed(() => {
+  if (form.site.subscribe_url) {
+    try {
+      const u = new URL(form.site.subscribe_url)
+      return u.host || form.site.subscribe_url
+    } catch {
+      return form.site.subscribe_url.replace(/^https?:\/\//, '').split('/')[0] || 'sub.example.com'
+    }
+  }
+  return 'sub.example.com'
+})
+
+const caddySnippet = computed(() => {
+  const port = form.site.subscribe_port ? form.site.subscribe_port : '18080'
+  return `${subHostName.value} {
+    # 物理隔离：反向代理至独立订阅端口（自动透传真实客户端 IP 与 Cloudflare 标头）
+    reverse_proxy localhost:${port} {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up CF-Connecting-IP {http.request.header.CF-Connecting-IP}
+    }
+}`
+})
+
+const nginxSnippet = computed(() => {
+  const port = form.site.subscribe_port ? form.site.subscribe_port : '18080'
+  return `server {
+    listen 80;
+    listen 443 ssl http2;
+    server_name ${subHostName.value};
+
+    # 透传真实 IP 及 Cloudflare 标头
+    location / {
+        proxy_pass http://127.0.0.1:${port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    }
+}`
+})
+
+function copySnippet(text: string, label: string) {
+  if (!text) return
+  navigator.clipboard?.writeText(text).then(
+    () => ElMessage.success(`${label}已复制到剪贴板`),
+    () => ElMessage.warning('复制失败，请手动复制'),
+  )
+}
+
+function onLogoFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    cropperImageSrc.value = reader.result as string
+    cropperTitle.value = '裁剪站点 LOGO 图标'
+    cropperTargetSize.value = 256
+    cropperType.value = 'logo'
+    cropperVisible.value = true
+  }
+  reader.onerror = () => {
+    ElMessage.error('读取图片文件失败')
+  }
+  reader.readAsDataURL(file)
+  target.value = ''
+}
+
+function onFaviconFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    cropperImageSrc.value = reader.result as string
+    cropperTitle.value = '裁剪 Favicon 标签页图标'
+    cropperTargetSize.value = 64
+    cropperType.value = 'favicon'
+    cropperVisible.value = true
+  }
+  reader.onerror = () => {
+    ElMessage.error('读取图标文件失败')
+  }
+  reader.readAsDataURL(file)
+  target.value = ''
+}
+
+function openCropperForCurrent(type: 'logo' | 'favicon') {
+  const src = type === 'logo' ? form.site.logo : form.site.favicon
+  if (!src) return
+  cropperImageSrc.value = src
+  cropperTitle.value = type === 'logo' ? '裁剪站点 LOGO 图标' : '裁剪 Favicon 标签页图标'
+  cropperTargetSize.value = type === 'logo' ? 256 : 64
+  cropperType.value = type
+  cropperVisible.value = true
+}
+
+function onCropFinished(dataUrl: string) {
+  if (cropperType.value === 'logo') {
+    form.site.logo = dataUrl
+    ElMessage.success('LOGO 已裁剪并生成轻量 Base64 格式')
+  } else {
+    form.site.favicon = dataUrl
+    ElMessage.success('Favicon 已裁剪并生成轻量 Base64 格式')
+  }
+}
 
 async function load() {
   loading.value = true
@@ -144,7 +271,12 @@ async function save() {
       web_base: form.web_base,
     })
     if (data.code === 0) {
-      ElMessage.success('设置已保存并立即生效')
+      ElMessage.success('设置已保存并立即全站生效')
+      siteStore.applyConfig({
+        ...form.site,
+        stop_register: form.site.stop_register === '1',
+      })
+      await siteStore.fetchConfig()
       form.web_base = data.data.web_base
       if (form.web_base !== window.__PANEL_BASE__) {
         ElMessage.warning('访问路径已变更，刷新页面后请按新路径访问')
@@ -173,8 +305,23 @@ async function save() {
     <BaseCard v-loading="loading" style="max-width: 860px">
       <el-tabs v-model="activeTab">
         <!-- ==================== TAB 1: 站点 ==================== -->
-        <el-tab-pane label="🏷️ 站点" name="site">
-          <el-form label-position="top" style="max-width: 640px">
+        <el-tab-pane label="站点品牌" name="site">
+          <input
+            ref="logoInputRef"
+            type="file"
+            accept="image/*,.ico"
+            style="display: none"
+            @change="onLogoFileSelected"
+          />
+          <input
+            ref="faviconInputRef"
+            type="file"
+            accept="image/*,.ico"
+            style="display: none"
+            @change="onFaviconFileSelected"
+          />
+
+          <el-form label-position="top" style="max-width: 680px">
             <div class="form-grid">
               <el-form-item label="站点名称（浏览器标题 / 订阅文件名）">
                 <el-input v-model="form.site.app_name" placeholder="例如：星云机场" maxlength="64" />
@@ -182,15 +329,103 @@ async function save() {
               <el-form-item label="站点描述">
                 <el-input v-model="form.site.app_description" placeholder="一句话描述站点" maxlength="200" />
               </el-form-item>
-              <el-form-item label="LOGO URL（登录页 / 管理端品牌展示）">
-                <el-input v-model="form.site.logo" placeholder="https://example.com/logo.png" />
-              </el-form-item>
-              <el-form-item label="Favicon URL（浏览器标签图标）">
-                <el-input v-model="form.site.favicon" placeholder="https://example.com/favicon.ico" />
-              </el-form-item>
-              <el-form-item label="订阅域名（预留：多域名分发）">
-                <el-input v-model="form.site.subscribe_domain" placeholder="sub.example.com（可多个，逗号分隔）" />
-              </el-form-item>
+            </div>
+
+            <!-- LOGO 上传与自定义 -->
+            <el-form-item label="站点 LOGO（管理端侧栏 / 用户端顶栏 / 登录页品牌）">
+              <div class="upload-row">
+                <el-input
+                  v-model="form.site.logo"
+                  placeholder="可粘贴图片 URL / Base64 或点击右侧上传本地图片"
+                  clearable
+                />
+                <el-button type="primary" plain :icon="Upload" @click="logoInputRef?.click()">
+                  上传并裁剪
+                </el-button>
+                <el-button
+                  v-if="form.site.logo"
+                  plain
+                  :icon="Scissor"
+                  @click="openCropperForCurrent('logo')"
+                >
+                  重新裁剪
+                </el-button>
+                <el-button v-if="form.site.logo" type="danger" text :icon="Delete" @click="form.site.logo = ''">
+                  恢复默认
+                </el-button>
+              </div>
+              <div class="form-item-tip">
+                支持 <code>.png</code>, <code>.jpg</code>, <code>.ico</code>, <code>.svg</code>, <code>.webp</code> 等格式，内置 1:1 智能裁剪与平滑缩放，生成轻量 Base64 格式安全存储。
+              </div>
+            </el-form-item>
+
+            <!-- Favicon 上传与自定义 -->
+            <el-form-item label="Favicon（浏览器标签页图标）">
+              <div class="upload-row">
+                <el-input
+                  v-model="form.site.favicon"
+                  placeholder="可粘贴 Favicon URL / Base64 或点击右侧上传本地图标"
+                  clearable
+                />
+                <el-button plain :icon="Upload" @click="faviconInputRef?.click()">
+                  上传并裁剪
+                </el-button>
+                <el-button
+                  v-if="form.site.favicon"
+                  plain
+                  :icon="Scissor"
+                  @click="openCropperForCurrent('favicon')"
+                >
+                  重新裁剪
+                </el-button>
+                <el-button v-if="form.site.favicon" type="danger" text :icon="Delete" @click="form.site.favicon = ''">
+                  清空
+                </el-button>
+              </div>
+            </el-form-item>
+
+            <!-- 品牌全景实时预览卡片 -->
+            <div class="brand-preview-section">
+              <div class="preview-header">
+                <el-icon><Picture /></el-icon>&nbsp;全场景实时效果预览（当前编辑状态）
+              </div>
+              <div class="preview-grid">
+                <!-- 1. 管理端侧栏效果 -->
+                <div class="preview-item dark-theme">
+                  <div class="preview-tag">管理端侧栏</div>
+                  <div class="preview-logo-box">
+                    <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
+                    <span v-else class="p-logo-mark">X</span>
+                    <span class="p-title">{{ form.site.app_name || 'Xray 管理面板' }}</span>
+                  </div>
+                </div>
+
+                <!-- 2. 用户端顶栏效果 -->
+                <div class="preview-item light-theme">
+                  <div class="preview-tag">用户端顶栏</div>
+                  <div class="preview-logo-box">
+                    <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
+                    <span v-else class="p-logo-mark">X</span>
+                    <span class="p-title">{{ form.site.app_name || 'XrayPanel' }}</span>
+                  </div>
+                </div>
+
+                <!-- 3. 登录页品牌效果 -->
+                <div class="preview-item auth-theme">
+                  <div class="preview-tag">登录认证页</div>
+                  <div class="preview-auth-box">
+                    <img v-if="form.site.logo" :src="form.site.logo" class="p-auth-img" alt="logo" />
+                    <span v-else class="p-auth-logo">X</span>
+                    <div>
+                      <div class="p-auth-title">{{ form.site.app_name || 'Xray 面板' }}</div>
+                      <div class="p-auth-sub">{{ form.site.app_description || '主控 · 节点 · 用户 一体化代理分发系统' }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-grid" style="margin-top: 14px">
               <el-form-item label="服务条款 URL">
                 <el-input v-model="form.site.tos_url" placeholder="https://example.com/tos" />
               </el-form-item>
@@ -201,6 +436,7 @@ async function save() {
                 <el-input v-model="form.site.currency_symbol" placeholder="¥" maxlength="8" />
               </el-form-item>
             </div>
+
             <el-form-item label="关闭注册">
               <el-switch
                 v-model="form.site.stop_register"
@@ -213,8 +449,112 @@ async function save() {
           </el-form>
         </el-tab-pane>
 
-        <!-- ==================== TAB 2: 安全（人机验证） ==================== -->
-        <el-tab-pane label="🛡️ 安全" name="captcha">
+        <!-- ==================== TAB 2: 订阅与清洗网关 ==================== -->
+        <el-tab-pane label="订阅与清洗网关" name="subscribe">
+          <el-form label-position="top" style="max-width: 820px">
+            <el-alert
+              title="物理端口隔离与反代解耦"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 20px"
+            >
+              <template #default>
+                <div style="font-size: 13px; line-height: 1.6">
+                  将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 节点长连接</b>物理分离。
+                  独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或节点网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
+                </div>
+              </template>
+            </el-alert>
+
+            <div class="section-subtitle">独立端口与路径分发</div>
+            <div class="form-grid">
+              <el-form-item label="独立订阅物理监听端口 (subscribe_port)">
+                <el-input v-model="form.site.subscribe_port" placeholder="如 5000（留空或 0 则仅在主端口提供）" clearable />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  保存后后台立即<b>热重载启动/切换</b>该端口监听。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="对外订阅根地址 (subscribe_url)">
+                <el-input v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  用户端获取的订阅链接根域名（留空则默认使用当前面板域名）。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="对外订阅路径前缀 (subscribe_path)">
+                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /link（默认 /sub）" clearable />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  订阅路径前缀，自动兼容 /sub/:token、/link/:token 及 ?token=xxx。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="多域名分发（预留）">
+                <el-input v-model="form.site.subscribe_domain" placeholder="sub1.com,sub2.com（逗号分隔）" clearable />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  用于轮询或备份的多订阅分发域名。
+                </span>
+              </el-form-item>
+            </div>
+
+            <div class="section-subtitle" style="margin-top: 24px">原生订阅清洗防探测网关 (Subscribe Sieve)</div>
+            <div class="form-grid">
+              <el-form-item label="智能 UA 过滤与爬虫拦截">
+                <el-switch
+                  v-model="form.site.sub_clean_ua"
+                  active-value="1"
+                  inactive-value="0"
+                  active-text="已开启（阻断 curl/python/空UA/扫描器）"
+                  inactive-text="已关闭（放行所有请求）"
+                />
+              </el-form-item>
+
+              <el-form-item label="严格客户端白名单模式">
+                <el-switch
+                  v-model="form.site.sub_strict_ua"
+                  active-value="1"
+                  inactive-value="0"
+                  active-text="已开启（仅放行知名代理客户端）"
+                  inactive-text="已关闭（宽松模式）"
+                />
+              </el-form-item>
+            </div>
+
+            <el-form-item label="自定义封禁 UA 关键词 (sub_blocked_ua)">
+              <el-input
+                v-model="form.site.sub_blocked_ua"
+                placeholder="如 scan,exploit,badbot（英文逗号分隔，命中即拦截）"
+                clearable
+              />
+            </el-form-item>
+
+            <!-- 反代配置代码片段展示 -->
+            <div class="section-subtitle" style="margin-top: 24px">生产反向代理配置参考 (含 Cloudflare 真实 IP 透传)</div>
+            <div class="proxy-snippet-box">
+              <div class="snippet-header">
+                <span>Caddyfile 配置示例（推荐）</span>
+                <el-button size="small" :icon="CopyDocument" @click="copySnippet(caddySnippet, 'Caddyfile 配置')">
+                  复制 Caddy 配置
+                </el-button>
+              </div>
+              <pre class="snippet-code"><code>{{ caddySnippet }}</code></pre>
+            </div>
+
+            <div class="proxy-snippet-box" style="margin-top: 14px">
+              <div class="snippet-header">
+                <span>Nginx 配置示例</span>
+                <el-button size="small" :icon="CopyDocument" @click="copySnippet(nginxSnippet, 'Nginx 配置')">
+                  复制 Nginx 配置
+                </el-button>
+              </div>
+              <pre class="snippet-code"><code>{{ nginxSnippet }}</code></pre>
+            </div>
+          </el-form>
+        </el-tab-pane>
+
+        <!-- ==================== TAB 3: 安全（人机验证） ==================== -->
+        <el-tab-pane label="安全设置" name="captcha">
           <el-form label-position="top" style="max-width: 640px">
             <el-form-item label="Cloudflare Turnstile 人机验证（登录 / 注册）">
               <el-switch
@@ -243,8 +583,8 @@ async function save() {
           </el-form>
         </el-tab-pane>
 
-        <!-- ==================== TAB 3: 访问路径 ==================== -->
-        <el-tab-pane label="🔗 访问路径" name="web_base">
+        <!-- ==================== TAB 4: 访问路径 ==================== -->
+        <el-tab-pane label="访问路径" name="web_base">
           <el-form label-position="top" style="max-width: 640px">
             <el-form-item label="Web Base（自定义访问路径前缀）">
               <el-input v-model="form.web_base" placeholder="留空为根路径，如 /panel" />
@@ -259,8 +599,8 @@ async function save() {
           </el-form>
         </el-tab-pane>
 
-        <!-- ==================== TAB 4: 备份 ==================== -->
-        <el-tab-pane label="💾 备份" name="backup">
+        <!-- ==================== TAB 5: 备份 ==================== -->
+        <el-tab-pane label="数据备份" name="backup">
           <div style="max-width: 720px">
             <div class="x-toolbar" style="margin-bottom: 12px">
               <div class="x-toolbar-left">
@@ -288,8 +628,8 @@ async function save() {
           </div>
         </el-tab-pane>
 
-        <!-- ==================== TAB 5: 系统状态 ==================== -->
-        <el-tab-pane label="🩺 系统状态" name="system">
+        <!-- ==================== TAB 6: 系统状态 ==================== -->
+        <el-tab-pane label="系统状态" name="system">
           <div v-loading="systemLoading" style="max-width: 720px; min-height: 200px">
             <template v-if="system">
               <el-descriptions :column="2" border size="small">
@@ -321,6 +661,15 @@ async function save() {
         </el-tab-pane>
       </el-tabs>
     </BaseCard>
+
+    <!-- 图片裁剪弹窗 -->
+    <ImageCropperDialog
+      v-model="cropperVisible"
+      :image-src="cropperImageSrc"
+      :title="cropperTitle"
+      :target-size="cropperTargetSize"
+      @crop="onCropFinished"
+    />
   </div>
 </template>
 
@@ -335,6 +684,156 @@ async function save() {
 }
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
+.form-item-tip { font-size: 11.5px; color: var(--x-text-3); margin-top: 4px; line-height: 1.5; }
+
+.upload-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+
+  .el-input {
+    flex: 1;
+  }
+}
+
+.brand-preview-section {
+  margin-top: 8px;
+  padding: 14px 16px;
+  background: var(--x-bg, #f8fafc);
+  border: 1px dashed var(--x-border, #e2e8f0);
+  border-radius: var(--x-radius, 12px);
+}
+
+.preview-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--x-text-2, #475569);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.preview-item {
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--x-border, #e2e8f0);
+  position: relative;
+
+  .preview-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    align-self: flex-start;
+    opacity: 0.8;
+  }
+
+  &.dark-theme {
+    background: #111422;
+    color: #ffffff;
+    border-color: #1e2338;
+    .preview-tag { background: rgba(255, 255, 255, 0.1); color: #c7d2fe; }
+    .p-title { color: #ffffff; font-weight: 700; font-size: 14px; }
+  }
+
+  &.light-theme {
+    background: #ffffff;
+    color: #0f172a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    .preview-tag { background: #f1f5f9; color: #475569; }
+    .p-title { color: #0f172a; font-weight: 800; font-size: 14px; }
+  }
+
+  &.auth-theme {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    .preview-tag { background: #ede9fe; color: #6366f1; }
+  }
+}
+
+.preview-logo-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.p-logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.08);
+  flex: none;
+}
+
+.p-logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  flex: none;
+}
+
+.preview-auth-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.p-auth-img {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: var(--x-bg);
+  border: 1px solid var(--x-border);
+  flex: none;
+}
+
+.p-auth-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.p-auth-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.p-auth-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
 .status-count-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -352,4 +851,43 @@ async function save() {
 }
 .status-count strong { font-size: 20px; font-variant-numeric: tabular-nums; }
 .status-count span { font-size: 12px; color: var(--x-text-3); }
+
+.section-subtitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--x-text, #0f172a);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.proxy-snippet-box {
+  background: #0f172a;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  overflow: hidden;
+
+  .snippet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: #1e293b;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .snippet-code {
+    margin: 0;
+    padding: 12px 14px;
+    font-family: var(--x-font-mono, 'JetBrains Mono', Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    color: #38bdf8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+}
 </style>

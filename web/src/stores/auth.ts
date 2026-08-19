@@ -62,12 +62,13 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async logout() {
+      this.user = null
+      this.isInitialized = true
       try {
         await apiLogout()
       } catch {
         // ignore
       }
-      this.user = null
     },
 
     /** 按角色返回登录后首页。 */

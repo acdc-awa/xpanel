@@ -55,7 +55,7 @@ function onProtocolsChange(vals: any) {
 // ===== 常用规则预设 =====
 interface PresetRule {
   name: string
-  icon: string
+  icon?: string
   domain?: string
   ip?: string
   protocols?: string[]
@@ -66,47 +66,41 @@ interface PresetRule {
 
 const PRESET_RULES: PresetRule[] = [
   {
-    name: '屏蔽 BT 下载',
-    icon: '🚫',
+    name: '阻断 BT 下载',
     protocols: ['bittorrent'],
     outbound_tag: 'blocked',
-    remark: '屏蔽 BitTorrent P2P 下载流量',
+    remark: '阻断 BitTorrent P2P 下载',
   },
   {
     name: '中国大陆直连',
-    icon: '🇨🇳',
     domain: 'geosite:cn',
     ip: 'geoip:cn',
     outbound_tag: 'direct',
-    remark: '中国大陆域名与 IP 直连',
+    remark: '大陆域名与 IP 直连',
   },
   {
-    name: '屏蔽私有局域网',
-    icon: '🔒',
+    name: '阻断私有局域网',
     ip: 'geoip:private',
     outbound_tag: 'blocked',
-    remark: '阻止访问 10.x/172.16.x/192.168.x 私有网段',
+    remark: '阻断 10.x/172.16.x/192.168.x 等私网',
   },
   {
-    name: '常见流媒体代理',
-    icon: '🍿',
+    name: '流媒体分流',
     domain: 'geosite:netflix\ngeosite:youtube\ngeosite:disney\ngeosite:spotify',
     outbound_tag: 'proxy',
-    remark: '常见海外流媒体分流',
+    remark: '海外流媒体定向分流',
   },
   {
-    name: '海外社交平台',
-    icon: '💬',
+    name: '社交平台分流',
     domain: 'geosite:telegram\ngeosite:twitter\ngeosite:facebook\ngeosite:instagram',
     outbound_tag: 'proxy',
-    remark: '海外社交与通讯平台',
+    remark: '海外通讯与社交平台分流',
   },
   {
     name: '广告与追踪拦截',
-    icon: '🛡️',
     domain: 'geosite:category-ads-all',
     outbound_tag: 'blocked',
-    remark: '全局广告与跟踪器拦截',
+    remark: '全局广告与跟踪拦截',
   },
 ]
 
@@ -238,7 +232,7 @@ function onClosed() {
           class="preset-chip"
           @click="applyPreset(p)"
         >
-          <span>{{ p.icon }}</span>&nbsp;{{ p.name }}
+          <span>{{ p.name }}</span>
         </button>
       </div>
     </div>
@@ -341,7 +335,7 @@ function onClosed() {
           </el-form-item>
 
           <div class="info-tip-box" style="margin-top: 10px">
-            💡 规则将按优先级升序生成到节点 Xray <code>routing.rules</code> 中，优先命中先执行。
+            规则将按优先级升序生成到节点 Xray <code>routing.rules</code> 中，优先命中先执行。
           </div>
         </div>
       </div>
@@ -349,7 +343,7 @@ function onClosed() {
       <!-- ===== 高级：自定义 Rule JSON ===== -->
       <details class="json-collapse">
         <summary class="collapse-summary">
-          <span>⚙️ 高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）</span>
+          <span>高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）</span>
         </summary>
         <div style="margin-top: 10px">
           <el-input

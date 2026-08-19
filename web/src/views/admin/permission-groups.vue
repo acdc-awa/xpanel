@@ -335,55 +335,117 @@ async function copyPreview() {
     </div>
 
     <BaseCard>
-      <el-table v-loading="loading" :data="list">
-        <el-table-column prop="id" label="ID" width="70">
-          <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-        </el-table-column>
-        <el-table-column prop="name" label="权限组名称" min-width="160">
-          <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注说明" min-width="180" />
-        <el-table-column label="包含入站节点" min-width="200">
-          <template #default="{ row }">
-            <template v-if="row.inbound_tags && row.inbound_tags.length">
-              <el-tag
-                v-for="tag in row.inbound_tags"
-                :key="tag"
-                size="small"
-                effect="plain"
-                style="margin-right: 4px; margin-bottom: 2px"
-              >
-                {{ tag }}
+      <!-- 桌面端表格视图 -->
+      <div class="desktop-table-view">
+        <el-table v-loading="loading" :data="list">
+          <el-table-column prop="id" label="ID" width="70">
+            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
+          </el-table-column>
+          <el-table-column prop="name" label="权限组名称" min-width="160">
+            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column prop="remark" label="备注说明" min-width="180" />
+          <el-table-column label="包含入站节点" min-width="200">
+            <template #default="{ row }">
+              <template v-if="row.inbound_tags && row.inbound_tags.length">
+                <el-tag
+                  v-for="tag in row.inbound_tags"
+                  :key="tag"
+                  size="small"
+                  effect="plain"
+                  style="margin-right: 4px; margin-bottom: 2px"
+                >
+                  {{ tag }}
+                </el-tag>
+              </template>
+              <span v-else class="muted" style="font-size: 12px">暂无节点（在「节点」页编辑入站加入）</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="订阅模板" width="130">
+            <template #default="{ row }">
+              <el-tag v-if="row.clash_template && row.clash_template.trim()" size="small" type="success" effect="light">
+                自定义模板
+              </el-tag>
+              <el-tag v-else size="small" type="info" effect="plain">
+                系统默认
               </el-tag>
             </template>
-            <span v-else class="muted" style="font-size: 12px">暂无节点（在「节点」页编辑入站加入）</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="订阅模板" width="130">
-          <template #default="{ row }">
-            <el-tag v-if="row.clash_template && row.clash_template.trim()" size="small" type="success" effect="light">
-              🎨 自定义模板
-            </el-tag>
-            <el-tag v-else size="small" type="info" effect="plain">
-              ⚡ 系统默认
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text type="warning" @click="openTemplateEditor(row)">
-              <el-icon><Document /></el-icon>&nbsp;订阅模板
-            </el-button>
-            <el-button size="small" text type="primary" @click="openEdit(row)">
-              <el-icon><Edit /></el-icon>&nbsp;编辑
-            </el-button>
-            <el-button size="small" text type="danger" @click="remove(row)">
-              <el-icon><Delete /></el-icon>&nbsp;删除
-            </el-button>
-          </template>
-        </el-table-column>
-        <template #empty><div class="table-empty">尚无权限组，点击右上角「新增权限组」</div></template>
-      </el-table>
+          </el-table-column>
+          <el-table-column label="操作" width="220" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="warning" @click="openTemplateEditor(row)">
+                订阅模板
+              </el-button>
+              <el-button size="small" text type="primary" @click="openEdit(row)">
+                编辑
+              </el-button>
+              <el-button size="small" text type="danger" @click="remove(row)">
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty><div class="table-empty">尚无权限组，点击右上角「新增权限组」</div></template>
+        </el-table>
+      </div>
+
+      <!-- 移动端卡片流视图 -->
+      <div class="mobile-cards-view">
+        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
+          尚无权限组，点击右上角「新增权限组」
+        </div>
+        <div v-else class="mobile-data-card-list">
+          <div v-for="row in list" :key="row.id" class="mobile-data-card">
+            <div class="card-head">
+              <div class="head-title">
+                <span class="cell-mono muted font-12">#{{ row.id }}</span>
+                <span style="font-weight: 700">{{ row.name }}</span>
+              </div>
+              <el-tag v-if="row.clash_template && row.clash_template.trim()" size="small" type="success" effect="light">
+                自定义模板
+              </el-tag>
+              <el-tag v-else size="small" type="info" effect="plain">
+                系统默认
+              </el-tag>
+            </div>
+
+            <div class="card-grid">
+              <div class="grid-item full-width">
+                <span class="item-label">备注说明</span>
+                <div class="item-value">{{ row.remark || '—' }}</div>
+              </div>
+              <div class="grid-item full-width">
+                <span class="item-label">包含入站节点</span>
+                <div class="item-value">
+                  <template v-if="row.inbound_tags && row.inbound_tags.length">
+                    <el-tag
+                      v-for="tag in row.inbound_tags"
+                      :key="tag"
+                      size="small"
+                      effect="plain"
+                      style="margin-right: 4px; margin-bottom: 2px"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                  </template>
+                  <span v-else class="muted font-12">暂无节点</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-foot-actions">
+              <el-button size="small" type="warning" plain @click="openTemplateEditor(row)">
+                订阅模板
+              </el-button>
+              <el-button size="small" type="primary" plain @click="openEdit(row)">
+                编辑
+              </el-button>
+              <el-button size="small" type="danger" plain @click="remove(row)">
+                删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
     </BaseCard>
 
     <!-- ===== 权限组基础信息编辑弹窗 ===== -->
@@ -408,22 +470,22 @@ async function copyPreview() {
       <!-- 顶部常用预设与占位符栏 -->
       <div class="preset-section">
         <div class="preset-row">
-          <span class="preset-label"><el-icon><MagicStick /></el-icon>&nbsp;载入推荐模板：</span>
+          <span class="preset-label">载入推荐模板：</span>
           <div class="preset-chips">
             <button type="button" class="preset-chip primary" @click="loadPreset('advanced')">
-              ⚡ 多地区与流媒体高级模板
+              多地区与流媒体高级模板
             </button>
             <button type="button" class="preset-chip" @click="loadPreset('basic')">
-              ⚡ 极简基础模板
+              极简基础模板
             </button>
             <button type="button" class="preset-chip danger" @click="loadPreset('clear')">
-              🗑️ 清空（恢复系统默认）
+              清空（恢复系统默认）
             </button>
           </div>
         </div>
 
         <div class="preset-row" style="margin-top: 8px">
-          <span class="preset-label">📋 常用占位符：</span>
+          <span class="preset-label">常用占位符：</span>
           <div class="preset-chips">
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PROXIES$')">
               + $PROXIES$（节点池）
@@ -432,22 +494,22 @@ async function copyPreview() {
               + $ALL_PROXIES$（全部节点）
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(HK|香港)$')">
-              + 🇭🇰 香港过滤
+              + 香港过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(JP|日本)$')">
-              + 🇯🇵 日本过滤
+              + 日本过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(TW|台湾)$')">
-              + 🇹🇼 台湾过滤
+              + 台湾过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(US|美国)$')">
-              + 🇺🇸 美国过滤
+              + 美国过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(SG|新加坡)$')">
-              + 🇸🇬 新加坡过滤
+              + 新加坡过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(NF|流媒体)$')">
-              + 🍿 流媒体过滤
+              + 流媒体过滤
             </button>
             <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PANEL_HOST$')">
               + $PANEL_HOST$（面板防回环）
@@ -458,7 +520,7 @@ async function copyPreview() {
 
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <!-- TAB 1: 模板编辑 -->
-        <el-tab-pane label="📝 模板代码 (YAML)" name="edit">
+        <el-tab-pane label="模板代码 (YAML)" name="edit">
           <el-input
             ref="editorTextareaRef"
             v-model="templateCode"
@@ -468,20 +530,20 @@ async function copyPreview() {
             placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
           />
           <div class="tip-banner" style="margin-top: 10px">
-            💡 占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时自动兜底）。
+            占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时自动兜底）。
           </div>
         </el-tab-pane>
 
         <!-- TAB 2: 实时编译预览 -->
-        <el-tab-pane label="🔍 实时编译预览 (Preview)" name="preview">
+        <el-tab-pane label="实时编译预览 (Preview)" name="preview">
           <div v-loading="previewLoading">
             <div v-if="previewData" class="preview-header">
               <div class="preview-stats">
                 <span class="stat-badge">
-                  🎯 注入节点数：<strong>{{ previewData.proxy_count }}</strong>
+                  注入节点数：<strong>{{ previewData.proxy_count }}</strong>
                 </span>
                 <span v-if="previewData.is_sample_nodes" class="stat-badge warning">
-                  ⚠️ 该组暂无入站节点，已使用样例节点模拟编译
+                  该组暂无入站节点，已使用样例节点模拟编译
                 </span>
               </div>
               <div style="display: flex; gap: 8px">

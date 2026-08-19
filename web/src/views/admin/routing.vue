@@ -158,6 +158,16 @@ async function removeOutbound(row: any) {
   }
 }
 
+function isBlockCN(row: any): boolean {
+  if (row.protocol !== 'freedom') return false
+  try {
+    const s = JSON.parse(row.settings_json || '{}')
+    return !!s.block_cn
+  } catch {
+    return false
+  }
+}
+
 // ---- 路由规则 ----
 const routingRules = ref<ServerRoutingRule[]>([])
 const routingLoading = ref(false)
@@ -421,56 +431,134 @@ onMounted(async () => {
               <el-button size="small" :disabled="!serverFilter" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
             </div>
-            <el-table v-loading="outboundsLoading" :data="outbounds" size="default">
-              <el-table-column prop="tag" label="出站标签 (Tag)" min-width="140">
-                <template #default="{ row }">
-                  <div style="display: flex; align-items: center; gap: 6px">
-                    <span class="tag-badge">{{ row.tag }}</span>
-                    <el-tag v-if="row.tag === defaultOutboundTag" size="small" type="success" effect="plain" style="font-size: 10px">默认出口</el-tag>
+
+            <!-- 桌面端表格视图 -->
+            <div class="desktop-table-view">
+              <el-table v-loading="outboundsLoading" :data="outbounds" size="default">
+                <el-table-column prop="tag" label="出站标签 (Tag)" min-width="170">
+                  <template #default="{ row }">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+                      <span class="tag-badge">{{ row.tag }}</span>
+                      <el-tag v-if="row.tag === defaultOutboundTag" size="small" type="success" effect="plain" style="font-size: 10px">默认出口</el-tag>
+                      <el-tag v-if="row.tag === 'direct' || row.tag === 'blocked'" size="small" type="info" effect="light" style="font-size: 10px">系统内置</el-tag>
+                      <el-tag v-if="isBlockCN(row)" size="small" type="danger" effect="plain" style="font-size: 10px">阻断回国</el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="protocol" label="协议" width="120">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.protocol === 'freedom'" size="small" type="success" effect="light">直连 (freedom)</el-tag>
+                    <el-tag v-else-if="row.protocol === 'vless'" size="small" type="warning" effect="light">VLESS 链</el-tag>
+                    <el-tag v-else-if="row.protocol === 'blackhole'" size="small" type="danger" effect="light">黑洞 (blackhole)</el-tag>
+                    <el-tag v-else size="small" type="info">{{ row.protocol }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="连接与引用" min-width="160">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.inbound_ref" size="small" type="warning" effect="plain">
+                      引用入站 #{{ row.inbound_ref }}
+                    </el-tag>
+                    <span v-else-if="row.tag === 'direct'" class="muted" style="font-size: 12px">节点直连互联网</span>
+                    <span v-else-if="row.tag === 'blocked'" class="muted" style="font-size: 12px">黑洞丢弃阻断</span>
+                    <span v-else class="muted" style="font-size: 12px">自主连接 / 直连</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="send_through" label="发送出口 IP" width="130">
+                  <template #default="{ row }">
+                    <code v-if="row.send_through" class="cell-mono">{{ row.send_through }}</code>
+                    <span v-else class="muted">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="priority" label="优先级" width="90">
+                  <template #default="{ row }">
+                    <code class="cell-mono">{{ row.priority ?? 0 }}</code>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="80">
+                  <template #default="{ row }"><el-switch :model-value="row.enabled" :disabled="row.tag === 'direct'" @change="toggleOutbound(row)" /></template>
+                </el-table-column>
+                <el-table-column prop="remark" label="备注" min-width="120">
+                  <template #default="{ row }"><span class="muted" style="font-size: 12.5px">{{ row.remark || '—' }}</span></template>
+                </el-table-column>
+                <el-table-column label="操作" width="120" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="primary" @click="openOutboundEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
+                    <el-tooltip v-if="row.tag === 'direct' || row.tag === 'blocked'" content="系统内置出站不可删除" placement="top">
+                      <span><el-button size="small" text type="danger" disabled><el-icon><Delete /></el-icon></el-button></span>
+                    </el-tooltip>
+                    <el-button v-else size="small" text type="danger" @click="removeOutbound(row)"><el-icon><Delete /></el-icon></el-button>
+                  </template>
+                </el-table-column>
+                <template #empty><div class="table-empty">该服务器暂无出站规则，点击右上角「新增出站」</div></template>
+              </el-table>
+            </div>
+
+            <!-- 移动端卡片流视图 -->
+            <div class="mobile-cards-view">
+              <div v-if="outbounds.length === 0" style="text-align: center; padding: 30px 0; color: var(--x-text-3); font-size: 13px">
+                该服务器暂无出站规则，点击右上角「新增出站」
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="row in outbounds" :key="row.id" class="mobile-data-card">
+                  <div class="card-head">
+                    <div class="head-title">
+                      <span class="tag-badge">{{ row.tag }}</span>
+                      <el-tag v-if="row.tag === defaultOutboundTag" size="small" type="success" effect="plain">默认出口</el-tag>
+                      <el-tag v-if="row.tag === 'direct' || row.tag === 'blocked'" size="small" type="info" effect="light">系统内置</el-tag>
+                      <el-tag v-if="isBlockCN(row)" size="small" type="danger" effect="plain">阻断回国</el-tag>
+                    </div>
+                    <el-switch :model-value="row.enabled" :disabled="row.tag === 'direct'" size="small" @change="toggleOutbound(row)" />
                   </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="protocol" label="协议" width="120">
-                <template #default="{ row }">
-                  <el-tag v-if="row.protocol === 'freedom'" size="small" type="success" effect="light">直连 (freedom)</el-tag>
-                  <el-tag v-else-if="row.protocol === 'vless'" size="small" type="warning" effect="light">VLESS 链</el-tag>
-                  <el-tag v-else-if="row.protocol === 'blackhole'" size="small" type="danger" effect="light">黑洞 (blackhole)</el-tag>
-                  <el-tag v-else size="small" type="info">{{ row.protocol }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="连接与引用" min-width="160">
-                <template #default="{ row }">
-                  <el-tag v-if="row.inbound_ref" size="small" type="warning" effect="plain">
-                    🔗 引用入站 #{{ row.inbound_ref }}
-                  </el-tag>
-                  <span v-else class="muted" style="font-size: 12px">自主连接 / 直连</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="send_through" label="发送出口 IP" width="130">
-                <template #default="{ row }">
-                  <code v-if="row.send_through" class="cell-mono">{{ row.send_through }}</code>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="priority" label="优先级" width="90">
-                <template #default="{ row }">
-                  <code class="cell-mono">{{ row.priority ?? 0 }}</code>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="80">
-                <template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggleOutbound(row)" /></template>
-              </el-table-column>
-              <el-table-column prop="remark" label="备注" min-width="120">
-                <template #default="{ row }"><span class="muted" style="font-size: 12.5px">{{ row.remark || '—' }}</span></template>
-              </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
-                <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="openOutboundEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
-                  <el-button size="small" text type="danger" @click="removeOutbound(row)"><el-icon><Delete /></el-icon></el-button>
-                </template>
-              </el-table-column>
-              <template #empty><div class="table-empty">该服务器暂无出站规则，点击右上角「新增出站」</div></template>
-            </el-table>
+
+                  <div class="card-grid">
+                    <div class="grid-item">
+                      <span class="item-label">出站协议</span>
+                      <div class="item-value">
+                        <el-tag v-if="row.protocol === 'freedom'" size="small" type="success" effect="light">直连 (freedom)</el-tag>
+                        <el-tag v-else-if="row.protocol === 'vless'" size="small" type="warning" effect="light">VLESS 链</el-tag>
+                        <el-tag v-else-if="row.protocol === 'blackhole'" size="small" type="danger" effect="light">黑洞 (blackhole)</el-tag>
+                        <el-tag v-else size="small" type="info">{{ row.protocol }}</el-tag>
+                      </div>
+                    </div>
+                    <div class="grid-item">
+                      <span class="item-label">连接与引用</span>
+                      <div class="item-value">
+                        <el-tag v-if="row.inbound_ref" size="small" type="warning" effect="plain">
+                          引用入站 #{{ row.inbound_ref }}
+                        </el-tag>
+                        <span v-else-if="row.tag === 'direct'" class="muted" style="font-size: 11.5px">节点直连互联网</span>
+                        <span v-else-if="row.tag === 'blocked'" class="muted" style="font-size: 11.5px">黑洞丢弃阻断</span>
+                        <span v-else class="muted" style="font-size: 11.5px">自主直连</span>
+                      </div>
+                    </div>
+                    <div v-if="row.send_through" class="grid-item">
+                      <span class="item-label">发送出口 IP</span>
+                      <div class="item-value cell-mono font-12">{{ row.send_through }}</div>
+                    </div>
+                    <div class="grid-item">
+                      <span class="item-label">优先级</span>
+                      <div class="item-value cell-mono font-12">{{ row.priority ?? 0 }}</div>
+                    </div>
+                    <div v-if="row.remark" class="grid-item full-width">
+                      <span class="item-label">备注说明</span>
+                      <div class="item-value font-12">{{ row.remark }}</div>
+                    </div>
+                  </div>
+
+                  <div class="card-foot-actions">
+                    <el-button size="small" type="primary" plain @click="openOutboundEdit(row)">
+                      <el-icon><Edit /></el-icon>&nbsp;编辑出站
+                    </el-button>
+                    <el-tooltip v-if="row.tag === 'direct' || row.tag === 'blocked'" content="系统内置出站不可删除" placement="top">
+                      <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
+                    </el-tooltip>
+                    <el-button v-else size="small" type="danger" plain @click="removeOutbound(row)">
+                      <el-icon><Delete /></el-icon>&nbsp;删除
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
 
           <!-- 路由规则管理 -->
@@ -479,82 +567,160 @@ onMounted(async () => {
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
             </div>
-            <el-table v-loading="routingLoading" :data="routingRules" size="default">
-              <el-table-column prop="outbound_tag" label="目标出站 (Outbound)" min-width="140">
-                <template #default="{ row }">
-                  <el-tag size="small" effect="plain" style="font-weight: 600">{{ row.outbound_tag }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="域名规则 (Domain)" min-width="160">
-                <template #default="{ row }">
-                  <template v-if="parseTagList(row.domain).length">
-                    <div class="chip-container">
-                      <code v-for="(item, idx) in parseTagList(row.domain).slice(0, 2)" :key="idx" class="rule-chip">
-                        {{ item }}
-                      </code>
-                      <el-tooltip v-if="parseTagList(row.domain).length > 2" :content="row.domain" placement="top">
-                        <span class="chip-more">+{{ parseTagList(row.domain).length - 2 }}</span>
-                      </el-tooltip>
+
+            <!-- 桌面端表格视图 -->
+            <div class="desktop-table-view">
+              <el-table v-loading="routingLoading" :data="routingRules" size="default">
+                <el-table-column prop="outbound_tag" label="目标出站 (Outbound)" min-width="140">
+                  <template #default="{ row }">
+                    <el-tag size="small" effect="plain" style="font-weight: 600">{{ row.outbound_tag }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="域名规则 (Domain)" min-width="160">
+                  <template #default="{ row }">
+                    <template v-if="parseTagList(row.domain).length">
+                      <div class="chip-container">
+                        <code v-for="(item, idx) in parseTagList(row.domain).slice(0, 2)" :key="idx" class="rule-chip">
+                          {{ item }}
+                        </code>
+                        <el-tooltip v-if="parseTagList(row.domain).length > 2" :content="row.domain" placement="top">
+                          <span class="chip-more">+{{ parseTagList(row.domain).length - 2 }}</span>
+                        </el-tooltip>
+                      </div>
+                    </template>
+                    <span v-else class="muted">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="IP 规则 (IP)" min-width="150">
+                  <template #default="{ row }">
+                    <template v-if="parseTagList(row.ip).length">
+                      <div class="chip-container">
+                        <code v-for="(item, idx) in parseTagList(row.ip).slice(0, 2)" :key="idx" class="rule-chip">
+                          {{ item }}
+                        </code>
+                        <el-tooltip v-if="parseTagList(row.ip).length > 2" :content="row.ip" placement="top">
+                          <span class="chip-more">+{{ parseTagList(row.ip).length - 2 }}</span>
+                        </el-tooltip>
+                      </div>
+                    </template>
+                    <span v-else class="muted">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="protocol" label="协议嗅探" width="110">
+                  <template #default="{ row }">
+                    <template v-if="parseTagList(row.protocol).length">
+                      <el-tag v-for="p in parseTagList(row.protocol)" :key="p" size="small" type="info" style="margin-right: 3px; font-size: 11px">
+                        {{ p }}
+                      </el-tag>
+                    </template>
+                    <span v-else class="muted">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="入站来源" min-width="110">
+                  <template #default="{ row }">
+                    <code v-if="row.inbound_tag" class="cell-mono" style="font-size: 12px">{{ row.inbound_tag }}</code>
+                    <span v-else class="muted" style="font-size: 12px">全部入站</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="port" label="端口" width="90">
+                  <template #default="{ row }">
+                    <code v-if="row.port" class="cell-mono" style="font-size: 12px">{{ row.port }}</code>
+                    <span v-else class="muted">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="priority" label="优先级" width="80">
+                  <template #default="{ row }">
+                    <code class="cell-mono">{{ row.priority ?? 0 }}</code>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="80">
+                  <template #default="{ row }">
+                    <el-switch :model-value="row.enabled" @change="toggleRule(row)" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="120" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="primary" @click="openRuleEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
+                    <el-button size="small" text type="danger" @click="removeRule(row)"><el-icon><Delete /></el-icon></el-button>
+                  </template>
+                </el-table-column>
+                <template #empty><div class="table-empty">该服务器暂无分流规则，点击右上角「新增规则」</div></template>
+              </el-table>
+            </div>
+
+            <!-- 移动端卡片流视图 -->
+            <div class="mobile-cards-view">
+              <div v-if="routingRules.length === 0" style="text-align: center; padding: 30px 0; color: var(--x-text-3); font-size: 13px">
+                该服务器暂无分流规则，点击右上角「新增规则」
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="row in routingRules" :key="row.id" class="mobile-data-card">
+                  <div class="card-head">
+                    <div class="head-title">
+                      <span style="font-weight: 600; font-size: 13px">目标出站：</span>
+                      <el-tag size="small" effect="plain" style="font-weight: 700">{{ row.outbound_tag }}</el-tag>
                     </div>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="IP 规则 (IP)" min-width="150">
-                <template #default="{ row }">
-                  <template v-if="parseTagList(row.ip).length">
-                    <div class="chip-container">
-                      <code v-for="(item, idx) in parseTagList(row.ip).slice(0, 2)" :key="idx" class="rule-chip">
-                        {{ item }}
-                      </code>
-                      <el-tooltip v-if="parseTagList(row.ip).length > 2" :content="row.ip" placement="top">
-                        <span class="chip-more">+{{ parseTagList(row.ip).length - 2 }}</span>
-                      </el-tooltip>
+                    <el-switch :model-value="row.enabled" size="small" @change="toggleRule(row)" />
+                  </div>
+
+                  <div class="card-grid">
+                    <div class="grid-item full-width">
+                      <span class="item-label">域名规则 (Domain)</span>
+                      <div class="item-value">
+                        <template v-if="parseTagList(row.domain).length">
+                          <div class="chip-container">
+                            <code v-for="(item, idx) in parseTagList(row.domain)" :key="idx" class="rule-chip">
+                              {{ item }}
+                            </code>
+                          </div>
+                        </template>
+                        <span v-else class="muted font-12">—</span>
+                      </div>
                     </div>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="protocol" label="协议嗅探" width="110">
-                <template #default="{ row }">
-                  <template v-if="parseTagList(row.protocol).length">
-                    <el-tag v-for="p in parseTagList(row.protocol)" :key="p" size="small" type="info" style="margin-right: 3px; font-size: 11px">
-                      {{ p }}
-                    </el-tag>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="入站来源" min-width="110">
-                <template #default="{ row }">
-                  <code v-if="row.inbound_tag" class="cell-mono" style="font-size: 12px">{{ row.inbound_tag }}</code>
-                  <span v-else class="muted" style="font-size: 12px">全部入站</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="port" label="端口" width="90">
-                <template #default="{ row }">
-                  <code v-if="row.port" class="cell-mono" style="font-size: 12px">{{ row.port }}</code>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="priority" label="优先级" width="80">
-                <template #default="{ row }">
-                  <code class="cell-mono">{{ row.priority ?? 0 }}</code>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="80">
-                <template #default="{ row }">
-                  <el-switch :model-value="row.enabled" @change="toggleRule(row)" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
-                <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="openRuleEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
-                  <el-button size="small" text type="danger" @click="removeRule(row)"><el-icon><Delete /></el-icon></el-button>
-                </template>
-              </el-table-column>
-              <template #empty><div class="table-empty">该服务器暂无分流规则，点击右上角「新增规则」</div></template>
-            </el-table>
+                    <div class="grid-item full-width">
+                      <span class="item-label">IP 规则 (IP)</span>
+                      <div class="item-value">
+                        <template v-if="parseTagList(row.ip).length">
+                          <div class="chip-container">
+                            <code v-for="(item, idx) in parseTagList(row.ip)" :key="idx" class="rule-chip">
+                              {{ item }}
+                            </code>
+                          </div>
+                        </template>
+                        <span v-else class="muted font-12">—</span>
+                      </div>
+                    </div>
+                    <div class="grid-item">
+                      <span class="item-label">入站来源</span>
+                      <div class="item-value cell-mono font-12">{{ row.inbound_tag || '全部入站' }}</div>
+                    </div>
+                    <div class="grid-item">
+                      <span class="item-label">端口 / 协议</span>
+                      <div class="item-value">
+                        <span v-if="row.port" class="cell-mono font-12">{{ row.port }}</span>
+                        <span v-else class="muted font-12">全部端口</span>
+                        <el-tag v-for="p in parseTagList(row.protocol)" :key="p" size="small" type="info" style="margin-left: 4px; font-size: 10px">
+                          {{ p }}
+                        </el-tag>
+                      </div>
+                    </div>
+                    <div class="grid-item">
+                      <span class="item-label">规则优先级</span>
+                      <div class="item-value cell-mono font-12">{{ row.priority ?? 0 }}</div>
+                    </div>
+                  </div>
+
+                  <div class="card-foot-actions">
+                    <el-button size="small" type="primary" plain @click="openRuleEdit(row)">
+                      <el-icon><Edit /></el-icon>&nbsp;编辑规则
+                    </el-button>
+                    <el-button size="small" type="danger" plain @click="removeRule(row)">
+                      <el-icon><Delete /></el-icon>&nbsp;删除
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
         </el-tabs>
       </BaseCard>
@@ -774,6 +940,50 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .x-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    .x-toolbar-left {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+
+      .el-select {
+        width: 100% !important;
+      }
+    }
+
+    .el-radio-group {
+      width: 100%;
+      display: flex;
+
+      .el-radio-button {
+        flex: 1;
+
+        :deep(.el-radio-button__inner) {
+          width: 100%;
+          display: flex;
+          justify-content: center;
+        }
+      }
+    }
+  }
+
+  .canvas-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+
+    .canvas-tip {
+      flex-wrap: wrap;
+    }
+  }
 }
 </style>
 

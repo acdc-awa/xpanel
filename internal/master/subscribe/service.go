@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
+	"github.com/zhx/xray-panel/internal/contracts"
 	"github.com/zhx/xray-panel/internal/master/xray"
 	"github.com/zhx/xray-panel/internal/models"
 )
@@ -30,7 +30,6 @@ type ProxyItem struct {
 	NoAutoFlow bool
 	Reality *xray.RealitySettings
 	TLS     *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
-	WS      *xray.WSSettings
 	XHTTP   *xray.XHTTPSettings
 }
 
@@ -110,17 +109,7 @@ func FormatSingleProxyItem(it *ProxyItem) string {
 		parts = append(parts, "tls: false")
 	}
 
-	switch it.Network {
-	case "ws":
-		parts = append(parts, "network: ws")
-		if it.WS != nil {
-			if it.WS.Host != "" {
-				parts = append(parts, fmt.Sprintf("ws-opts: { path: %s, headers: { Host: %s } }", it.WS.Path, it.WS.Host))
-			} else {
-				parts = append(parts, fmt.Sprintf("ws-opts: { path: %s }", it.WS.Path))
-			}
-		}
-	case "xhttp":
+	if it.Network == "xhttp" {
 		parts = append(parts, "network: xhttp")
 		parts = append(parts, "alpn: [h2]")
 		if it.XHTTP != nil {
@@ -130,7 +119,7 @@ func FormatSingleProxyItem(it *ProxyItem) string {
 			}
 			parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", it.XHTTP.Mode, it.XHTTP.Path, hostField))
 		}
-	default:
+	} else {
 		parts = append(parts, "network: tcp")
 	}
 
@@ -374,7 +363,7 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 	b.WriteString("proxies:\n")
 	b.WriteString(proxiesYAML)
 	b.WriteString("proxy-groups:\n")
-	b.WriteString("  - name: \"🚀 节点选择\"\n    type: select\n    proxies:\n")
+	b.WriteString("  - name: \"节点选择\"\n    type: select\n    proxies:\n")
 	if len(names) > 0 {
 		for _, n := range names {
 			b.WriteString(fmt.Sprintf("      - %q\n", n))
@@ -382,7 +371,7 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 	} else {
 		b.WriteString("      - DIRECT\n")
 	}
-	b.WriteString("  - name: \"♻️ 自动选择\"\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    proxies:\n")
+	b.WriteString("  - name: \"自动选择\"\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    proxies:\n")
 	if len(names) > 0 {
 		for _, n := range names {
 			b.WriteString(fmt.Sprintf("      - %q\n", n))
@@ -390,7 +379,7 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 	} else {
 		b.WriteString("      - DIRECT\n")
 	}
-	b.WriteString("rules:\n  - MATCH,🚀 节点选择\n")
+	b.WriteString("rules:\n  - MATCH,节点选择\n")
 	return b.String()
 }
 
@@ -437,16 +426,7 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 			q.Set("security", "none")
 		}
 		// 传输层参数（与 TLS 类型无关，独立输出）
-		switch it.Network {
-		case "ws":
-			q.Set("type", "ws")
-			if it.WS != nil {
-				q.Set("path", url.QueryEscape(it.WS.Path))
-				if it.WS.Host != "" {
-					q.Set("host", it.WS.Host)
-				}
-			}
-		case "xhttp":
+		if it.Network == "xhttp" {
 			q.Set("type", "xhttp")
 			if it.XHTTP != nil {
 				q.Set("mode", it.XHTTP.Mode)
@@ -455,10 +435,8 @@ func BuildBase64(user *models.User, items []ProxyItem) string {
 					q.Set("host", it.XHTTP.Host)
 				}
 			}
-		default:
-			if it.Network == "tcp" && it.TLSType != "reality" {
-				q.Set("type", "tcp")
-			}
+		} else if it.Network == "tcp" && it.TLSType != "reality" {
+			q.Set("type", "tcp")
 		}
 		frag := url.QueryEscape(it.Name)
 		link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", it.UUID, it.Host, it.Port, q.Encode(), frag)
@@ -481,7 +459,7 @@ func UserInfoHeader(up, down, total, expire int64) string {
 	return fmt.Sprintf("upload=%d; download=%d; total=%d", up, down, total)
 }
 
-// NodeName 生成节点名（服务器名 + 倍率 + 入站标签，如 '🇭🇰香港01 x1 | IEPL'）。
+// NodeName 生成节点名（服务器名 + 倍率 + 入站标签，如 '香港01 x1 | IEPL'）。
 func NodeName(server *models.Server, inb *models.Inbound) string {
 	ratioStr := ""
 	if inb.Ratio > 0 {
@@ -497,4 +475,132 @@ func NodeName(server *models.Server, inb *models.Inbound) string {
 	return fmt.Sprintf("%s%s", server.Name, ratioStr)
 }
 
-var _ = time.Now
+// ShareAddrOf 计算订阅对外地址与端口（订阅专用，与 xray 物理监听解耦）。
+func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
+	port := inb.Port
+	if inb.SharePort > 0 {
+		port = inb.SharePort
+	}
+	switch inb.ShareAddrStrategy {
+	case "custom":
+		if inb.ShareAddr != "" {
+			return inb.ShareAddr, port
+		}
+	case "listen":
+		if inb.Listen != "" && inb.Listen != "0.0.0.0" {
+			return inb.Listen, port
+		}
+	}
+	return srv.Host, port
+}
+
+// SubscribeFlow 计算订阅中的 flow（与生成侧 buildClients 同源）：
+// 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
+func SubscribeFlow(inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
+	flow = inboundFlow
+	if flow == "none" {
+		return "", true
+	}
+	if flow == "" && tcpReality {
+		flow = "xtls-rprx-vision"
+	}
+	return flow, false
+}
+
+// BuildProxyItem 将 Inbound 模型与 Server 模型转换为订阅用的 ProxyItem，
+// 自动消费 ShareSecurity、ShareSNI、ShareHost、SharePath、ShareAllowInsecure 等反代覆写字段。
+func BuildProxyItem(srv *models.Server, inb *models.Inbound, uuid string) ProxyItem {
+	host, port := ShareAddrOf(srv, inb)
+
+	net := xray.StreamNetwork(inb.StreamSettings)
+	sec := xray.StreamSecurity(inb.StreamSettings)
+
+	// 1. 安全层覆写 (ShareSecurity: auto / tls / none)
+	switch inb.ShareSecurity {
+	case "tls":
+		sec = "tls"
+	case "none":
+		sec = "none"
+	}
+
+	// 2. TLS 参数与覆写
+	tlsSettings := xray.StreamTLS(inb.StreamSettings)
+	if sec == "tls" {
+		if tlsSettings == nil {
+			tlsSettings = &xray.TLSSettings{}
+		}
+		if inb.ShareSNI != "" {
+			tlsSettings.ServerName = inb.ShareSNI
+		}
+		if inb.ShareAllowInsecure {
+			tlsSettings.AllowInsecure = true
+		}
+	}
+
+	// 3. XHTTP 传输参数与覆写
+	xhttpSettings := xray.StreamXHTTP(inb.StreamSettings)
+	if xhttpSettings != nil {
+		if inb.SharePath != "" {
+			xhttpSettings.Path = inb.SharePath
+		}
+		if inb.ShareHost != "" {
+			xhttpSettings.Host = inb.ShareHost
+		}
+	} else if net == "xhttp" && (inb.SharePath != "" || inb.ShareHost != "") {
+		xhttpSettings = &xray.XHTTPSettings{
+			Mode: "auto",
+			Path: inb.SharePath,
+			Host: inb.ShareHost,
+		}
+		if xhttpSettings.Path == "" {
+			xhttpSettings.Path = "/"
+		}
+	}
+
+	flow, noAutoFlow := SubscribeFlow(inb.Flow, net == "tcp" && sec == "reality")
+
+	return ProxyItem{
+		Name:       NodeName(srv, inb),
+		Host:       host,
+		Port:       port,
+		UUID:       uuid,
+		Network:    net,
+		TLSType:    sec,
+		Flow:       flow,
+		NoAutoFlow: noAutoFlow,
+		Reality:    xray.StreamReality(inb.StreamSettings),
+		TLS:        tlsSettings,
+		XHTTP:      xhttpSettings,
+	}
+}
+
+// ToDTO 将 ProxyItem 转换为标准纯数据契约 ProxyNodeDTO。
+func (it *ProxyItem) ToDTO() contracts.ProxyNodeDTO {
+	dto := contracts.ProxyNodeDTO{
+		Name:          it.Name,
+		ServerHost:    it.Host,
+		ServerPort:    it.Port,
+		Protocol:      "vless",
+		Network:       it.Network,
+		TLSType:       it.TLSType,
+		Flow:          it.Flow,
+		NoAutoFlow:    it.NoAutoFlow,
+	}
+	if it.TLS != nil {
+		dto.SNI = it.TLS.ServerName
+		dto.AllowInsecure = it.TLS.AllowInsecure
+	}
+	if it.Reality != nil {
+		dto.SNI = it.Reality.ServerName
+		dto.Reality = &contracts.RealityOptions{
+			PublicKey: it.Reality.PublicKey,
+			ShortID:   it.Reality.ShortID,
+		}
+	}
+	if it.XHTTP != nil {
+		dto.Mode = it.XHTTP.Mode
+		dto.Path = it.XHTTP.Path
+		dto.Host = it.XHTTP.Host
+	}
+	return dto
+}

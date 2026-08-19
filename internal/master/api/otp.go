@@ -40,7 +40,7 @@ func (d *Deps) UserOTPConfirm(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	d.Audit.Log("user", uid, "otp.enable", "开启两步验证", c.ClientIP())
+	d.Audit.Log("user", uid, "otp.enable", "开启两步验证", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"backup_codes": codes})
 }
 
@@ -82,7 +82,7 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 		util.ServerError(c, "解绑失败")
 		return
 	}
-	d.Audit.Log("user", uid, "otp.disable", "关闭两步验证", c.ClientIP())
+	d.Audit.Log("user", uid, "otp.disable", "关闭两步验证", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"ok": true})
 }
 
@@ -108,6 +108,6 @@ func (d *Deps) UserResetSubscribe(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	d.Audit.Log("user", uid, "subscribe.reset_token", "重置订阅密钥", c.ClientIP())
+	d.Audit.Log("user", uid, "subscribe.reset_token", "重置订阅密钥", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"subscribe_token": token})
 }

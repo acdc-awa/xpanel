@@ -23,6 +23,7 @@ type Deps struct {
 	Audit   *services.AuditService
 	Config   *services.ConfigService
 	Site     *services.SiteService
-	GiftCard *services.GiftCardService
-	Backup   *backup.Service
+	GiftCard  *services.GiftCardService
+	Backup    *backup.Service
+	SubServer *SubscribeServer
 }

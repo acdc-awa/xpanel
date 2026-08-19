@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { ApiResp, UserInfo } from './types'
+import type { ApiResp, UserInfo, NoticeItem } from './types'
 
 export function getMe() {
   return http.get<ApiResp<UserInfo>>('/user/me')
@@ -52,4 +52,14 @@ export interface MyServerItem {
 
 export function getMyServers() {
   return http.get<ApiResp<{ items: MyServerItem[] }>>('/user/servers')
+}
+
+// ---- 用户端公告（方向 2）----
+
+export function getUserNotices() {
+  return http.get<ApiResp<NoticeItem[]>>('/user/notices')
+}
+
+export function getUserNotice(id: number) {
+  return http.get<ApiResp<NoticeItem>>(`/user/notices/${id}`)
 }
