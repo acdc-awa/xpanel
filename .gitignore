@@ -63,3 +63,5 @@ tools/xray-windows-64/geoip.dat
 tools/xray-windows-64/geosite.dat
 tools/xray-windows-64/wintun.dll
 tools/xray-windows-64/xray_no_window.*
+# UI audit artifacts (Playwright screenshots / temp verify reports)
+ui-audit-screenshots/
