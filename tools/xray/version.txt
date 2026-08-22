@@ -1,2 +1,0 @@
-Xray 26.6.27 (Xray, Penetrates Everything.) 45cf289 (go1.26.4 linux/amd64)
-A unified platform for anti-censorship.

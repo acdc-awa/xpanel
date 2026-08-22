@@ -1,1 +1,0 @@
-vless://34903645-2a21-4d15-b8e4-57784431114d@127.0.0.1:8443?encryption=none&security=reality&flow=xtls-rprx-vision&fp=chrome&type=tcp&sni=www.apple.com&pbk=SUjqUBVYjar8Q1-XQnFy4u86-ISFWyH3RKm3BoNPcDQ&sid=abcdef0123456789#VLESS-TCP-REALITY
