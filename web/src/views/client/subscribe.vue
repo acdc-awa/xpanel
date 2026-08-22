@@ -80,7 +80,7 @@ const clashApps: ClientApp[] = [
     name: 'Clash Verge Rev',
     tag: '首选推荐',
     platform: 'Windows / macOS / Linux',
-    icon: 'CV',
+    icon: '⚡',
     desc: '基于 Mihomo 核心，现代极简 UI，性能卓越，全协议完美兼容。',
     url: 'https://github.com/clash-verge-rev/clash-verge-rev',
   },
@@ -88,7 +88,7 @@ const clashApps: ClientApp[] = [
     name: 'Mihomo Party',
     tag: '优雅开源',
     platform: 'Windows / macOS / Linux',
-    icon: 'MP',
+    icon: '🎉',
     desc: '专为 Mihomo 定制的优雅桌面客户端，内置丰富规则与节点测速。',
     url: 'https://github.com/mihomo-party-org/mihomo-party',
   },
@@ -96,7 +96,7 @@ const clashApps: ClientApp[] = [
     name: 'Flclash',
     tag: '全平台',
     platform: 'Android / iOS / Win / Mac',
-    icon: 'FL',
+    icon: '📱',
     desc: '基于 Flutter 的跨平台 Clash/Mihomo 客户端，轻量美观。',
     url: 'https://github.com/chen08209/FlClash',
   },
@@ -104,7 +104,7 @@ const clashApps: ClientApp[] = [
     name: 'Stash',
     tag: 'iOS 推荐',
     platform: 'iOS / iPadOS / macOS / tvOS',
-    icon: 'ST',
+    icon: '🍎',
     desc: '苹果生态顶级的 Clash 规则分流代理客户端，支持按需连接。',
     url: 'https://stash.ws/',
   },
@@ -167,7 +167,7 @@ const clashApps: ClientApp[] = [
     <div class="client-grid">
       <div v-for="app in clashApps" :key="app.name" class="client-card">
         <div class="client-head">
-          <div class="client-icon cell-mono" style="font-weight: 700; font-size: 13px; color: var(--x-primary)">{{ app.icon }}</div>
+          <div class="client-icon">{{ app.icon }}</div>
           <div class="client-meta">
             <div class="client-name">
               {{ app.name }}
@@ -369,6 +369,10 @@ const clashApps: ClientApp[] = [
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 14px;
+
+  @media (max-width: 768px) {
+    gap: 10px;
+  }
 }
 
 .client-card {
@@ -381,6 +385,10 @@ const clashApps: ClientApp[] = [
   flex-direction: column;
   justify-content: space-between;
   transition: all 0.2s ease;
+
+  @media (max-width: 768px) {
+    padding: 12px 14px;
+  }
 
   &:hover {
     transform: translateY(-3px);
@@ -403,6 +411,13 @@ const clashApps: ClientApp[] = [
     justify-content: center;
     font-size: 20px;
     flex: none;
+
+    @media (max-width: 768px) {
+      width: 34px;
+      height: 34px;
+      font-size: 17px;
+      border-radius: 8px;
+    }
   }
   .client-meta {
     min-width: 0;
@@ -434,6 +449,11 @@ const clashApps: ClientApp[] = [
     color: var(--x-text-2);
     line-height: 1.5;
     margin: 12px 0 14px;
+
+    @media (max-width: 768px) {
+      margin: 6px 0 8px;
+      font-size: 12px;
+    }
   }
   .client-footer {
     display: flex;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, Check, Aim, Compass, Connection, Grid, Share } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -28,6 +28,18 @@ import { errMsg } from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
+
+const isMobile = ref(false)
+let mq: MediaQueryList | null = null
+const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
+  isMobile.value = e.matches
+}
+onMounted(() => {
+  mq = window.matchMedia('(max-width: 768px)')
+  onMq(mq)
+  mq.addEventListener('change', onMq)
+})
+onUnmounted(() => mq?.removeEventListener('change', onMq))
 
 const servers = ref<ServerItem[]>([])
 const serverFilter = ref<number | undefined>(undefined)
@@ -426,7 +438,7 @@ onMounted(async () => {
       <BaseCard>
         <el-tabs>
           <!-- 出站管理 -->
-          <el-tab-pane label="出站规则 (Outbounds)">
+          <el-tab-pane :label="isMobile ? '出站规则' : '出站规则 (Outbounds)'">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
@@ -439,25 +451,25 @@ onMounted(async () => {
                   <template #default="{ row }">
                     <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
                       <span class="tag-badge">{{ row.tag }}</span>
-                      <el-tag v-if="row.tag === defaultOutboundTag" size="small" type="success" effect="plain" style="font-size: 10px">默认出口</el-tag>
-                      <el-tag v-if="row.tag === 'direct' || row.tag === 'blocked'" size="small" type="info" effect="light" style="font-size: 10px">系统内置</el-tag>
-                      <el-tag v-if="isBlockCN(row)" size="small" type="danger" effect="plain" style="font-size: 10px">阻断回国</el-tag>
+                      <span v-if="row.tag === defaultOutboundTag" class="x-chip green" style="font-size: 10px">默认出口</span>
+                      <span v-if="row.tag === 'direct' || row.tag === 'blocked'" class="x-chip gray" style="font-size: 10px">系统内置</span>
+                      <span v-if="isBlockCN(row)" class="x-chip red" style="font-size: 10px">阻断回国</span>
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="protocol" label="协议" width="120">
+                <el-table-column prop="protocol" label="协议" width="130">
                   <template #default="{ row }">
-                    <el-tag v-if="row.protocol === 'freedom'" size="small" type="success" effect="light">直连 (freedom)</el-tag>
-                    <el-tag v-else-if="row.protocol === 'vless'" size="small" type="warning" effect="light">VLESS 链</el-tag>
-                    <el-tag v-else-if="row.protocol === 'blackhole'" size="small" type="danger" effect="light">黑洞 (blackhole)</el-tag>
-                    <el-tag v-else size="small" type="info">{{ row.protocol }}</el-tag>
+                    <span v-if="row.protocol === 'freedom'" class="x-chip green">直连 (freedom)</span>
+                    <span v-else-if="row.protocol === 'vless'" class="x-chip purple">VLESS 链</span>
+                    <span v-else-if="row.protocol === 'blackhole'" class="x-chip red">黑洞 (blackhole)</span>
+                    <span v-else class="x-chip blue">{{ row.protocol }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column label="连接与引用" min-width="160">
                   <template #default="{ row }">
-                    <el-tag v-if="row.inbound_ref" size="small" type="warning" effect="plain">
+                    <span v-if="row.inbound_ref" class="x-chip orange">
                       引用入站 #{{ row.inbound_ref }}
-                    </el-tag>
+                    </span>
                     <span v-else-if="row.tag === 'direct'" class="muted" style="font-size: 12px">节点直连互联网</span>
                     <span v-else-if="row.tag === 'blocked'" class="muted" style="font-size: 12px">黑洞丢弃阻断</span>
                     <span v-else class="muted" style="font-size: 12px">自主连接 / 直连</span>
@@ -562,7 +574,7 @@ onMounted(async () => {
           </el-tab-pane>
 
           <!-- 路由规则管理 -->
-          <el-tab-pane label="分流规则 (Routing Rules)">
+          <el-tab-pane :label="isMobile ? '分流规则' : '分流规则 (Routing Rules)'">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
@@ -854,19 +866,19 @@ onMounted(async () => {
   align-items: center;
 }
 .rule-chip {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--x-font-mono, monospace);
   font-size: 11px;
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   padding: 1px 6px;
   border-radius: 4px;
-  color: var(--x-text-2);
+  color: var(--x-text);
   white-space: nowrap;
 }
 .chip-more {
   font-size: 11px;
   color: var(--x-primary);
-  background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.1);
+  background: var(--x-primary-soft);
   padding: 1px 5px;
   border-radius: 4px;
   cursor: pointer;
@@ -890,7 +902,7 @@ onMounted(async () => {
   }
 }
 .hero-card {
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: 8px;
   padding: 10px 14px;
@@ -983,6 +995,21 @@ onMounted(async () => {
     .canvas-tip {
       flex-wrap: wrap;
     }
+  }
+
+  :deep(.el-tabs__header) {
+    margin-bottom: 12px;
+  }
+  :deep(.el-tabs__nav-wrap) {
+    padding: 0 !important;
+  }
+  :deep(.el-tabs__nav-prev),
+  :deep(.el-tabs__nav-next) {
+    display: none !important;
+  }
+  :deep(.el-tabs__item) {
+    padding: 0 14px !important;
+    font-size: 13.5px !important;
   }
 }
 </style>

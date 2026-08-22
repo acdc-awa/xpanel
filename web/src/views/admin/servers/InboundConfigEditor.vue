@@ -1348,16 +1348,16 @@ async function copyText(text: string, label: string) {
 
 .code-textarea {
   :deep(textarea) {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--x-font-mono, monospace);
     font-size: 12.5px;
-    background: var(--x-bg);
+    background: var(--x-card-soft);
     color: var(--x-text);
   }
 }
 
 .caddy-snippet-box {
   margin-top: 14px;
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: 8px;
   padding: 12px;
@@ -1383,9 +1383,9 @@ async function copyText(text: string, label: string) {
     background: var(--x-card);
     border: 1px solid var(--x-border);
     border-radius: 6px;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--x-font-mono, monospace);
     font-size: 12px;
-    color: var(--x-brand, #3b82f6);
+    color: var(--x-primary);
     line-height: 1.5;
     overflow-x: auto;
   }

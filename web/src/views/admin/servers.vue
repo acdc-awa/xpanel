@@ -331,11 +331,12 @@ async function removeServer(row: any) {
           <el-table-column prop="location" label="地区" width="110">
             <template #default="{ row }">{{ row.location || '—' }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="100">
+          <el-table-column label="状态" width="110">
             <template #default="{ row }">
-              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />{{ row.status === 1 ? '在线' : '离线' }}
-              </el-tag>
+              <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
+                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+                {{ row.status === 1 ? '在线' : '离线' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="接入点" width="90">
@@ -345,11 +346,11 @@ async function removeServer(row: any) {
               </el-link>
             </template>
           </el-table-column>
-          <el-table-column label="配置同步" width="100">
+          <el-table-column label="配置同步" width="105">
             <template #default="{ row }">
-              <el-tag v-if="row.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
-              <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
+              <span v-else class="x-chip gray">未生成</span>
             </template>
           </el-table-column>
           <el-table-column label="最后心跳" width="170">
@@ -393,13 +394,13 @@ async function removeServer(row: any) {
               <div class="head-title">
                 <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                 <span style="font-weight: 700">{{ row.name }}</span>
-                <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
                   {{ row.status === 1 ? '在线' : '离线' }}
-                </el-tag>
+                </span>
               </div>
-              <el-tag v-if="row.config_status === 'pushed'" type="success" size="small" effect="plain">已同步</el-tag>
-              <el-tag v-else-if="row.config_status === 'pending'" type="warning" size="small" effect="plain">待推送</el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
+              <span v-else class="x-chip gray">未生成</span>
             </div>
 
             <div class="card-grid">

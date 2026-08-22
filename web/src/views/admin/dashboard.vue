@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   TrendCharts,
   Money,
@@ -18,8 +18,10 @@ import { getDashboard } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { DashboardData, ServerMatrixItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
+import { useThemeStore } from '@/stores/theme'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 
+const theme = useThemeStore()
 const loading = ref(false)
 const dashData = ref<DashboardData | null>(null)
 const activeTab = ref('users')
@@ -63,6 +65,15 @@ function resizeCharts() {
 function updateCharts() {
   if (!dashData.value) return
   const isMob = typeof window !== 'undefined' ? window.innerWidth <= 768 : false
+  const isDark = theme.isDark
+
+  const textColor = isDark ? '#94a3b8' : '#64748b'
+  const axisLineColor = isDark ? '#25334d' : '#e2e8f0'
+  const splitLineColor = isDark ? '#1e293b' : '#f1f5f9'
+  const tooltipBg = isDark ? 'rgba(19, 27, 46, 0.95)' : 'rgba(15, 23, 42, 0.9)'
+  const tooltipBorder = isDark ? '#25334d' : '#334155'
+  const pieBorderColor = isDark ? '#131b2e' : '#ffffff'
+  const emphasisColor = isDark ? '#f8fafc' : '#1e293b'
 
   // 1. 流量趋势面积图
   const trend = dashData.value.traffic_trend || []
@@ -73,12 +84,12 @@ function updateCharts() {
   trendChart?.setOption({
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15, 23, 42, 0.9)',
-      borderColor: '#334155',
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
       formatter: (params: any) => {
         let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
         params.forEach((item: any) => {
@@ -91,7 +102,7 @@ function updateCharts() {
       data: isMob ? ['上行', '下行'] : ['上行流量 (Upload)', '下行流量 (Download)'],
       top: 0,
       right: isMob ? 'center' : 10,
-      textStyle: { color: '#64748b', fontSize: isMob ? 11 : 12 },
+      textStyle: { color: textColor, fontSize: isMob ? 11 : 12 },
     },
     grid: {
       top: 35,
@@ -102,15 +113,15 @@ function updateCharts() {
     xAxis: {
       type: 'category',
       data: dates,
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true },
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true },
     },
     yAxis: {
       type: 'value',
       name: 'GB',
-      nameTextStyle: { color: '#64748b' },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
-      axisLabel: { color: '#64748b' },
+      nameTextStyle: { color: textColor },
+      splitLine: { lineStyle: { color: splitLineColor } },
+      axisLabel: { color: textColor },
     },
     series: [
       {
@@ -122,7 +133,7 @@ function updateCharts() {
         itemStyle: { color: '#6366f1' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(99, 102, 241, 0.25)' },
+            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.25)' },
             { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
           ]),
         },
@@ -136,7 +147,7 @@ function updateCharts() {
         itemStyle: { color: '#10b981' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(16, 185, 129, 0.25)' },
+            { offset: 0, color: isDark ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)' },
             { offset: 1, color: 'rgba(16, 185, 129, 0.0)' },
           ]),
         },
@@ -157,12 +168,12 @@ function updateCharts() {
     color: ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6'],
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(15, 23, 42, 0.9)',
-      borderColor: '#334155',
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
       formatter: '{b}: <b>{c} GB</b> ({d}%)',
     },
     legend: {
@@ -171,7 +182,7 @@ function updateCharts() {
       left: isMob ? 'center' : 'auto',
       top: isMob ? 'auto' : 'middle',
       bottom: isMob ? 0 : 'auto',
-      textStyle: { color: '#64748b', fontSize: 11 },
+      textStyle: { color: textColor, fontSize: 11 },
     },
     series: [
       {
@@ -182,7 +193,7 @@ function updateCharts() {
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 6,
-          borderColor: '#ffffff',
+          borderColor: pieBorderColor,
           borderWidth: 2,
         },
         label: { show: false },
@@ -191,7 +202,7 @@ function updateCharts() {
             show: true,
             fontSize: 13,
             fontWeight: 'bold',
-            color: '#1e293b',
+            color: emphasisColor,
           },
         },
         data: pieData.length ? pieData : [{ name: '暂无流量', value: 0 }],
@@ -199,6 +210,15 @@ function updateCharts() {
     ],
   })
 }
+
+// 监听主题切换，动态重绘 ECharts
+watch(
+  () => theme.isDark,
+  async () => {
+    await nextTick()
+    updateCharts()
+  }
+)
 
 async function load() {
   loading.value = true
@@ -690,13 +710,17 @@ onUnmounted(() => {
   color: var(--x-text-2);
 }
 
-/* 6 张 KPI 卡片 */
+/* 6 张 KPI 卡片（严格对称响应式：6列 -> 3+3列 -> 2+2+2列 -> 1列） */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
 
-  @media (max-width: 768px) {
+  @media (max-width: 1560px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (max-width: 900px) {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
@@ -748,12 +772,12 @@ onUnmounted(() => {
   }
 }
 
-.card-cyan .kpi-icon-box { background: #e0f2fe; color: #0284c7; }
-.card-purple .kpi-icon-box { background: #f3e8ff; color: #9333ea; }
-.card-blue .kpi-icon-box { background: #dbeafe; color: #2563eb; }
-.card-emerald .kpi-icon-box { background: #d1fae5; color: #059669; }
-.card-indigo .kpi-icon-box { background: #e0e7ff; color: #4338ca; }
-.card-amber .kpi-icon-box { background: #fef3c7; color: #d97706; }
+.card-cyan .kpi-icon-box { background: var(--x-info-soft, #e0f2fe); color: var(--x-info, #0284c7); }
+.card-purple .kpi-icon-box { background: var(--x-primary-soft, #f3e8ff); color: var(--x-primary, #9333ea); }
+.card-blue .kpi-icon-box { background: var(--x-info-soft, #dbeafe); color: #3b82f6; }
+.card-emerald .kpi-icon-box { background: var(--x-success-soft, #d1fae5); color: var(--x-success, #059669); }
+.card-indigo .kpi-icon-box { background: var(--x-primary-soft, #e0e7ff); color: var(--x-primary, #4338ca); }
+.card-amber .kpi-icon-box { background: var(--x-warning-soft, #fef3c7); color: var(--x-warning, #d97706); }
 
 .kpi-content {
   display: flex;

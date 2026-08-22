@@ -57,6 +57,30 @@ function fmtGb(gb: number) {
   return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`
 }
 
+function getPlanFeatures(plan: Plan): string[] {
+  const defaultTemplate = `包含 $TRAFFIC$ 周期高速流量
+有效周期 $DURATION$ 天
+$DEVICE_LIMIT$
+全量节点与中转链路授权
+深度兼容 Clash / Mihomo / Stash`
+
+  const rawText = plan.description?.trim() ? plan.description : defaultTemplate
+  const trafficStr = fmtGb(plan.traffic_gb)
+  const durationStr = `${plan.duration_days} 天`
+  const deviceStr = plan.device_limit > 0 ? `同时在线上限 ${plan.device_limit} 台设备` : '不限制同时在线设备数'
+
+  return rawText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) =>
+      line
+        .replace(/(\$TRAFFIC\$|\{traffic\}|\{\{traffic\}\})/gi, trafficStr)
+        .replace(/(\$DURATION\$|\{duration\}|\{\{duration\}\}|\$DAYS\$|\{days\})/gi, durationStr)
+        .replace(/(\$DEVICE_LIMIT\$|\{device_limit\}|\{\{device_limit\}\}|\$DEVICES\$|\{devices\})/gi, deviceStr),
+    )
+}
+
 async function load() {
   loading.value = true
   try {
@@ -168,24 +192,9 @@ async function confirmPay() {
         <div class="plan-divider" />
 
         <ul class="plan-features">
-          <li>
+          <li v-for="(feat, fIdx) in getPlanFeatures(p)" :key="fIdx">
             <el-icon class="check-icon"><Check /></el-icon>
-            <span>包含 <b>{{ fmtGb(p.traffic_gb) }}</b> 周期高速流量</span>
-          </li>
-          <li>
-            <el-icon class="check-icon"><Check /></el-icon>
-          </li>
-          <li>
-            <el-icon class="check-icon"><Check /></el-icon>
-            <span>{{ p.device_limit ? `同时在线上限 ${p.device_limit} 台设备` : '不限制同时在线设备数' }}</span>
-          </li>
-          <li>
-            <el-icon class="check-icon"><Check /></el-icon>
-            <span>全量节点与中转链路授权</span>
-          </li>
-          <li>
-            <el-icon class="check-icon"><Check /></el-icon>
-            <span>深度兼容 Clash / Mihomo / Stash</span>
+            <span>{{ feat }}</span>
           </li>
         </ul>
 
@@ -220,16 +229,16 @@ async function confirmPay() {
             <div class="x-order-name">{{ o.plan_name }}</div>
             <div class="x-order-sub">
               <code class="cell-mono">{{ o.order_no }}</code> · {{ String(o.created_at).replace('T', ' ').slice(0, 16) }}
-              <el-tag size="small" type="success" effect="plain" style="margin-left: 6px">
+              <span class="x-chip green" style="margin-left: 6px; font-size: 10.5px">
                 余额直付
-              </el-tag>
+              </span>
             </div>
           </div>
           <div style="text-align: right">
             <div class="x-order-amount cell-mono">{{ fmtMoney(o.amount_cents) }}</div>
-            <el-tag :type="orderStatusMap[o.status]?.type ?? 'info'" size="small" style="margin-top: 4px">
+            <span class="x-chip" :class="o.status === 'paid' ? 'green' : 'orange'" style="margin-top: 4px">
               {{ orderStatusMap[o.status]?.text ?? o.status }}
-            </el-tag>
+            </span>
           </div>
         </div>
       </div>
@@ -589,7 +598,7 @@ async function confirmPay() {
 }
 
 .checkout-plan-card {
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
   padding: 12px 14px;

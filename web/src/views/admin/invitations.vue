@@ -140,7 +140,9 @@ function fmtTime(t: string | null) {
           </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
-              <el-tag :type="statusMap[row.status]?.type ?? 'info'" size="small">{{ statusMap[row.status]?.text ?? row.status }}</el-tag>
+              <span v-if="row.status === 0" class="x-chip blue">未使用</span>
+              <span v-else-if="row.status === 1" class="x-chip green">已使用</span>
+              <span v-else class="x-chip red">已禁用</span>
             </template>
           </el-table-column>
           <el-table-column prop="created_by" label="创建人" width="80" />

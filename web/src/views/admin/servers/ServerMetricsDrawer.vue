@@ -6,6 +6,10 @@ import * as echarts from 'echarts'
 import { getServerMetrics } from '@/api/admin'
 import type { ServerMetricsData } from '@/api/types'
 
+import { useThemeStore } from '@/stores/theme'
+
+const theme = useThemeStore()
+
 const props = defineProps<{
   modelValue: boolean
   serverId: number
@@ -39,14 +43,14 @@ const commonGrid = computed(() => ({
   left: isMobile.value ? 42 : 55,
 }))
 
-const tooltipConfig = {
-  backgroundColor: 'rgba(15, 23, 42, 0.9)',
-  borderColor: '#334155',
+const tooltipConfig = computed(() => ({
+  backgroundColor: theme.isDark ? 'rgba(19, 27, 46, 0.95)' : 'rgba(15, 23, 42, 0.9)',
+  borderColor: theme.isDark ? '#25334d' : '#334155',
   borderWidth: 1,
   padding: [8, 12],
   textStyle: { color: '#ffffff', fontSize: 12 },
-  extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;',
-}
+  extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
+}))
 
 function updateMobileState() {
   isMobile.value = window.innerWidth <= 768
@@ -79,12 +83,17 @@ function updateCharts() {
   if (!metricsData.value) return
   const data = metricsData.value
   const ts = data.timestamps || []
+  const isDark = theme.isDark
+
+  const textColor = isDark ? '#94a3b8' : '#64748b'
+  const axisLineColor = isDark ? '#25334d' : '#e2e8f0'
+  const splitLineColor = isDark ? '#1e293b' : '#f1f5f9'
 
   // 1. 网络带宽图
   netChart?.setOption({
     tooltip: {
       trigger: 'axis',
-      ...tooltipConfig,
+      ...tooltipConfig.value,
       formatter: (params: any) => {
         let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
         params.forEach((item: any) => {
@@ -93,10 +102,10 @@ function updateCharts() {
         return res
       },
     },
-    legend: { data: ['下行 / 入口 (Rx)', '上行 / 出口 (Tx)'], top: 0, textStyle: { color: '#64748b', fontSize: 12 } },
+    legend: { data: ['下行 / 入口 (Rx)', '上行 / 出口 (Tx)'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', name: 'Mbps', nameTextStyle: { color: '#64748b' }, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b' } },
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
+    yAxis: { type: 'value', name: 'Mbps', nameTextStyle: { color: textColor }, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
     series: [
       {
         name: '下行 / 入口 (Rx)',
@@ -107,7 +116,7 @@ function updateCharts() {
         itemStyle: { color: '#0284c7' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(2, 132, 199, 0.25)' },
+            { offset: 0, color: isDark ? 'rgba(2, 132, 199, 0.35)' : 'rgba(2, 132, 199, 0.25)' },
             { offset: 1, color: 'rgba(2, 132, 199, 0.0)' },
           ]),
         },
@@ -121,7 +130,7 @@ function updateCharts() {
         itemStyle: { color: '#6366f1' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(99, 102, 241, 0.25)' },
+            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.25)' },
             { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
           ]),
         },
@@ -131,10 +140,10 @@ function updateCharts() {
 
   // 2. CPU 使用率
   cpuChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} %` },
+    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b', formatter: '{value}%' } },
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
+    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
     series: [
       {
         name: 'CPU 使用率',
@@ -145,7 +154,7 @@ function updateCharts() {
         itemStyle: { color: '#10b981' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(16, 185, 129, 0.25)' },
+            { offset: 0, color: isDark ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)' },
             { offset: 1, color: 'rgba(16, 185, 129, 0.0)' },
           ]),
         },
@@ -160,11 +169,11 @@ function updateCharts() {
 
   // 3. 内存 & 磁盘负载
   memChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} %` },
-    legend: { data: ['内存占用率', '磁盘占用率'], top: 0, textStyle: { color: '#64748b', fontSize: 12 } },
+    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
+    legend: { data: ['内存占用率', '磁盘占用率'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b', formatter: '{value}%' } },
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
+    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
     series: [
       {
         name: '内存占用率',
@@ -187,10 +196,10 @@ function updateCharts() {
 
   // 4. 在线用户数
   userChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig, valueFormatter: (val: any) => `${val} 人` },
+    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} 人` },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { color: '#64748b' } },
+    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
+    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
     series: [
       {
         name: '在线设备数',
@@ -201,7 +210,7 @@ function updateCharts() {
         itemStyle: { color: '#6366f1' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(99, 102, 241, 0.2)' },
+            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)' },
             { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
           ]),
         },
@@ -209,6 +218,15 @@ function updateCharts() {
     ],
   })
 }
+
+// 监听主题切换，动态重绘
+watch(
+  () => theme.isDark,
+  async () => {
+    await nextTick()
+    updateCharts()
+  }
+)
 
 async function loadData() {
   if (!props.serverId) return

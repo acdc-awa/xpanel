@@ -262,15 +262,19 @@ function transportOf(row: any): string {
           </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
-              <el-tag v-if="row.type === 'relay'" size="small" type="warning">转发</el-tag>
-              <el-tag v-else-if="row.type === 'idle'" size="small" type="info">闲置</el-tag>
-              <el-tag v-else size="small" type="success">用户</el-tag>
+              <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
+              <span v-else-if="row.type === 'idle'" class="x-chip gray">闲置</span>
+              <span v-else class="x-chip purple">用户</span>
             </template>
           </el-table-column>
           <el-table-column prop="tag" label="标签" min-width="130">
             <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
           </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="80" />
+          <el-table-column prop="protocol" label="协议" width="80">
+            <template #default="{ row }">
+              <span class="x-chip blue" style="text-transform: uppercase">{{ row.protocol }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="端口" width="80">
             <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
           </el-table-column>
@@ -283,19 +287,18 @@ function transportOf(row: any): string {
                 <span class="muted" style="font-size: 12px">内部/落地</span>
               </template>
               <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
-                <el-tag
+                <span
                   v-for="gid in row.permission_group_ids"
                   :key="gid"
-                  size="small"
-                  effect="plain"
+                  class="x-chip blue"
                   style="margin-right: 4px; margin-bottom: 2px"
                 >
                   {{ groupName(gid) }}
-                </el-tag>
+                </span>
               </template>
-              <el-tag v-else size="small" type="warning" effect="plain" style="font-size: 11px">
+              <span v-else class="x-chip orange" style="font-size: 11px">
                 未分配 (不对外开放)
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80">
@@ -328,9 +331,9 @@ function transportOf(row: any): string {
               <div class="head-title">
                 <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
                 <span style="font-weight: 700">{{ row.tag }}</span>
-                <el-tag v-if="row.type === 'relay'" size="small" type="warning">转发</el-tag>
-                <el-tag v-else-if="row.type === 'idle'" size="small" type="info">闲置</el-tag>
-                <el-tag v-else size="small" type="success">用户</el-tag>
+                <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
+                <span v-else-if="row.type === 'idle'" class="x-chip gray">闲置</span>
+                <span v-else class="x-chip purple">用户</span>
               </div>
               <el-switch :model-value="row.enabled" size="small" @change="toggle(row)" />
             </div>

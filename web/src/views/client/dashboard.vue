@@ -578,7 +578,7 @@ onMounted(() => {
 
 .dash-tiles {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 
@@ -591,6 +591,7 @@ onMounted(() => {
     display: flex;
     gap: 14px;
     align-items: center;
+    min-width: 0;
     transition: all 0.2s ease;
 
     &:hover {
@@ -619,15 +620,26 @@ onMounted(() => {
       }
     }
 
+    .tile-info {
+      min-width: 0;
+      flex: 1;
+    }
+
     .tile-title {
       font-size: 14px;
       font-weight: 700;
       color: var(--x-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .tile-desc {
       font-size: 12px;
       color: var(--x-text-3);
       margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 }

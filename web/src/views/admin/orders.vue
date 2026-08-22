@@ -64,17 +64,17 @@ function fmtTime(t: string | null) {
           </el-table-column>
           <el-table-column label="支付方式" width="110">
             <template #default="{ row }">
-              <el-tag v-if="row.payment_method === 'balance'" type="success" size="small" effect="plain">
+              <span v-if="row.payment_method === 'balance'" class="x-chip green">
                 余额直付
-              </el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">
+              </span>
+              <span v-else class="x-chip blue">
                 {{ row.payment_method }}
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag type="success" size="small">已生效</el-tag>
+              <span class="x-chip green">已生效</span>
             </template>
           </el-table-column>
           <el-table-column label="支付时间" width="160">

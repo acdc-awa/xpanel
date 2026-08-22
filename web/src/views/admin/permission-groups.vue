@@ -348,27 +348,26 @@ async function copyPreview() {
           <el-table-column label="包含入站节点" min-width="200">
             <template #default="{ row }">
               <template v-if="row.inbound_tags && row.inbound_tags.length">
-                <el-tag
+                <span
                   v-for="tag in row.inbound_tags"
                   :key="tag"
-                  size="small"
-                  effect="plain"
+                  class="x-chip blue"
                   style="margin-right: 4px; margin-bottom: 2px"
                 >
                   {{ tag }}
-                </el-tag>
+                </span>
               </template>
               <span v-else class="muted" style="font-size: 12px">暂无节点（在「节点」页编辑入站加入）</span>
             </template>
           </el-table-column>
           <el-table-column label="订阅模板" width="130">
             <template #default="{ row }">
-              <el-tag v-if="row.clash_template && row.clash_template.trim()" size="small" type="success" effect="light">
+              <span v-if="row.clash_template && row.clash_template.trim()" class="x-chip purple">
                 自定义模板
-              </el-tag>
-              <el-tag v-else size="small" type="info" effect="plain">
+              </span>
+              <span v-else class="x-chip gray">
                 系统默认
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" fixed="right">

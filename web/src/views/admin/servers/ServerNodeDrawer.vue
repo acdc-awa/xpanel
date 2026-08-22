@@ -206,17 +206,17 @@ watch(
             <div class="desc-row">
               <span class="k">连接状态</span>
               <span class="v">
-                <el-tag :type="server.status === 1 ? 'success' : 'info'" size="small">
+                <span class="x-chip" :class="server.status === 1 ? 'green' : 'gray'">
                   <span class="x-status-dot" :class="server.status === 1 ? 'online' : 'offline'" />{{ server.status === 1 ? '在线' : '离线' }}
-                </el-tag>
+                </span>
               </span>
             </div>
             <div class="desc-row">
               <span class="k">配置同步</span>
               <span class="v">
-                <el-tag v-if="server.config_status === 'pushed'" type="success" size="small">已同步</el-tag>
-                <el-tag v-else-if="server.config_status === 'pending'" type="warning" size="small">待推送</el-tag>
-                <el-tag v-else type="info" size="small" effect="plain">未生成</el-tag>
+                <span v-if="server.config_status === 'pushed'" class="x-chip green">已同步</span>
+                <span v-else-if="server.config_status === 'pending'" class="x-chip orange">待推送</span>
+                <span v-else class="x-chip gray">未生成</span>
               </span>
             </div>
             <div class="desc-row"><span class="k">最后心跳</span><span class="v">{{ fmtTime(server.last_seen_at) }}</span></div>
@@ -305,7 +305,7 @@ watch(
 .desc-grid {
   display: grid;
   gap: 0;
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
   padding: 4px 16px;

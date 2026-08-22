@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Check, Download, Refresh, Upload, Delete, Picture, Scissor, CopyDocument, Link, Lock, Cpu } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
@@ -17,6 +17,18 @@ import {
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
 import { useSiteStore } from '@/stores/site'
+
+const isMobile = ref(false)
+let mq: MediaQueryList | null = null
+const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
+  isMobile.value = e.matches
+}
+onMounted(() => {
+  mq = window.matchMedia('(max-width: 768px)')
+  onMq(mq)
+  mq.addEventListener('change', onMq)
+})
+onUnmounted(() => mq?.removeEventListener('change', onMq))
 
 const siteStore = useSiteStore()
 const activeTab = ref('site')
@@ -305,7 +317,7 @@ async function save() {
     <BaseCard v-loading="loading" style="max-width: 860px">
       <el-tabs v-model="activeTab">
         <!-- ==================== TAB 1: 站点 ==================== -->
-        <el-tab-pane label="站点品牌" name="site">
+        <el-tab-pane :label="isMobile ? '品牌' : '站点品牌'" name="site">
           <input
             ref="logoInputRef"
             type="file"
@@ -450,7 +462,7 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 2: 订阅与清洗网关 ==================== -->
-        <el-tab-pane label="订阅与清洗网关" name="subscribe">
+        <el-tab-pane :label="isMobile ? '网关' : '订阅与清洗网关'" name="subscribe">
           <el-form label-position="top" style="max-width: 820px">
             <el-alert
               title="物理端口隔离与反代解耦"
@@ -554,7 +566,7 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 3: 安全（人机验证） ==================== -->
-        <el-tab-pane label="安全设置" name="captcha">
+        <el-tab-pane :label="isMobile ? '安全' : '安全设置'" name="captcha">
           <el-form label-position="top" style="max-width: 640px">
             <el-form-item label="Cloudflare Turnstile 人机验证（登录 / 注册）">
               <el-switch
@@ -584,7 +596,7 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 4: 访问路径 ==================== -->
-        <el-tab-pane label="访问路径" name="web_base">
+        <el-tab-pane :label="isMobile ? '路径' : '访问路径'" name="web_base">
           <el-form label-position="top" style="max-width: 640px">
             <el-form-item label="Web Base（自定义访问路径前缀）">
               <el-input v-model="form.web_base" placeholder="留空为根路径，如 /panel" />
@@ -600,7 +612,7 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 5: 备份 ==================== -->
-        <el-tab-pane label="数据备份" name="backup">
+        <el-tab-pane :label="isMobile ? '备份' : '数据备份'" name="backup">
           <div style="max-width: 720px">
             <div class="x-toolbar" style="margin-bottom: 12px">
               <div class="x-toolbar-left">
@@ -629,7 +641,7 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 6: 系统状态 ==================== -->
-        <el-tab-pane label="系统状态" name="system">
+        <el-tab-pane :label="isMobile ? '状态' : '系统状态'" name="system">
           <div v-loading="systemLoading" style="max-width: 720px; min-height: 200px">
             <template v-if="system">
               <el-descriptions :column="2" border size="small">
@@ -755,10 +767,10 @@ async function save() {
   }
 
   &.auth-theme {
-    background: #ffffff;
-    border-color: #e2e8f0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    .preview-tag { background: #ede9fe; color: #6366f1; }
+    background: var(--x-card);
+    border-color: var(--x-border);
+    box-shadow: var(--x-shadow-md);
+    .preview-tag { background: var(--x-primary-soft); color: var(--x-primary); }
   }
 }
 
@@ -802,7 +814,7 @@ async function save() {
   height: 38px;
   border-radius: 10px;
   object-fit: contain;
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   flex: none;
 }
@@ -825,12 +837,12 @@ async function save() {
 .p-auth-title {
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--x-text);
 }
 
 .p-auth-sub {
   font-size: 11px;
-  color: #64748b;
+  color: var(--x-text-2);
   margin-top: 1px;
 }
 
@@ -845,17 +857,17 @@ async function save() {
   flex-direction: column;
   gap: 2px;
   padding: 12px;
-  border: 1px solid var(--x-border-color, var(--el-border-color-lighter));
+  border: 1px solid var(--x-border);
   border-radius: 10px;
-  background: var(--x-bg-2, var(--el-bg-color-page));
+  background: var(--x-card-soft);
 }
-.status-count strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.status-count strong { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--x-text); }
 .status-count span { font-size: 12px; color: var(--x-text-3); }
 
 .section-subtitle {
   font-size: 14px;
   font-weight: 700;
-  color: var(--x-text, #0f172a);
+  color: var(--x-text);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -888,6 +900,30 @@ async function save() {
     color: #38bdf8;
     overflow-x: auto;
     white-space: pre;
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.el-tabs__header) {
+    margin-bottom: 14px;
+  }
+  :deep(.el-tabs__nav-wrap) {
+    padding: 0 !important;
+  }
+  :deep(.el-tabs__nav-prev),
+  :deep(.el-tabs__nav-next) {
+    display: none !important;
+  }
+  :deep(.el-tabs__nav-scroll) {
+    overflow-x: auto;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+  :deep(.el-tabs__item) {
+    padding: 0 10px !important;
+    font-size: 13px !important;
   }
 }
 </style>

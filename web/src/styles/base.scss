@@ -92,7 +92,7 @@ a { color: inherit; text-decoration: none; }
 // 提示条
 .x-pill-note {
   background: var(--x-primary-soft);
-  border: 1px solid #dcdcfb;
+  border: 1px solid var(--x-border);
   color: var(--x-primary);
   border-radius: var(--x-radius);
   padding: 12px 16px;
@@ -102,8 +102,69 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
 }
 
-// 客户端共用
-.x-client-body { padding: 20px; max-width: 1100px; margin: 0 auto; }
+// 统一胶囊芯片 (Chip / Badge / Pill)
+.x-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+
+  &.purple { background: var(--x-primary-soft); color: var(--x-primary); }
+  &.green  { background: var(--x-success-soft); color: var(--x-success); }
+  &.orange { background: var(--x-warning-soft); color: var(--x-warning); }
+  &.red    { background: var(--x-danger-soft);  color: var(--x-danger); }
+  &.blue   { background: var(--x-info-soft);    color: var(--x-info); }
+  &.gray   { background: var(--x-fill-2);       color: var(--x-text-2); }
+}
+
+// 统一独立开关设置卡片 (Toggle Card)
+.x-toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--x-card-soft, #f8fafc);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm, 8px);
+  gap: 16px;
+  transition: border-color 0.18s ease, background 0.18s ease;
+
+  &:hover {
+    border-color: rgba(99, 102, 241, 0.35);
+  }
+
+  .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+
+    .toggle-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--x-text);
+    }
+    .toggle-desc {
+      font-size: 12px;
+      color: var(--x-text-2);
+      line-height: 1.4;
+    }
+  }
+}
+
+// 客户端共用 (Fluid 响应式容器)
+.x-client-body {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0;
+}
 .x-card {
   background: var(--x-card);
   border: 1px solid var(--x-border);
@@ -140,12 +201,16 @@ a { color: inherit; text-decoration: none; }
   .x-toolbar-left { width: 100%; }
 }
 @media (min-width: 768px) {
-  .x-client-body { padding: 28px 36px; }
-  .x-dash-grid { display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; align-items: start; }
-  .x-acct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .x-dash-grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+  .x-acct-grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
 }
-@media (min-width: 1200px) {
-  .x-client-body { padding: 32px 48px; }
+@media (min-width: 992px) {
+  .x-dash-grid { grid-template-columns: 1.4fr 1fr; gap: 20px; }
+  .x-acct-grid { grid-template-columns: 1.2fr 1fr; gap: 20px; }
+}
+@media (min-width: 1280px) {
+  .x-dash-grid { grid-template-columns: 1.55fr 1fr; gap: 24px; }
+  .x-acct-grid { grid-template-columns: 1.25fr 1fr; gap: 24px; }
 }
 
 // ==========================================

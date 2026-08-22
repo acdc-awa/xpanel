@@ -6,6 +6,7 @@ import {
   Box,
   User,
   HomeFilled,
+  Promotion,
   ShoppingCart,
   UserFilled,
   Tickets,
@@ -15,6 +16,7 @@ import {
   Setting,
   Connection,
   Bell,
+  Opportunity,
 } from '@element-plus/icons-vue'
 
 export interface SubMenuItem {
@@ -74,6 +76,7 @@ export const adminMenuGroups: MenuGroup[] = [
     icon: Setting,
     children: [
       { title: '系统配置', path: '/admin/settings', icon: Setting },
+      { title: '设计规范 Demo', path: '/admin/design-demo', icon: Opportunity },
     ],
   },
 ]
@@ -107,6 +110,7 @@ export const adminMenus: MenuItem[] = [
 
 export const clientMenus: MenuItem[] = [
   { title: '首页', path: '/dashboard', icon: HomeFilled },
+  { title: '订阅中心', path: '/subscribe', icon: Promotion },
   { title: '商店', path: '/shop', icon: ShoppingCart },
   { title: '我的', path: '/account', icon: UserFilled },
 ]

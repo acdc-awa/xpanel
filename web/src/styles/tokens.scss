@@ -1,14 +1,27 @@
-// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，暗色主题后续只切这里
+// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，亮/暗主题在此统一切换
 :root {
+  /* ===== 品牌主色 (Brand Primary) ===== */
   --x-primary: #6366f1;
   --x-primary-hover: #4f46e5;
   --x-primary-soft: #eef2ff;
+
+  /* ===== 背景与表面 (Surfaces & Backgrounds) ===== */
   --x-bg: #f4f5fb;
   --x-card: #ffffff;
+  --x-card-soft: #f8fafc;
+  --x-card-muted: #f1f5f9;
   --x-border: #e6e8f0;
+  --x-border-soft: #f1f5f9;
+  --x-fill-1: #f8fafc;
+  --x-fill-2: rgba(0, 0, 0, 0.04);
+  --x-sidebar-bg: #171b2e;
+
+  /* ===== 文字阶梯 (Typography Colors) ===== */
   --x-text: #1e2333;
   --x-text-2: #6b7280;
   --x-text-3: #9ca3af;
+
+  /* ===== 语义状态色 (Semantic Status) ===== */
   --x-success: #10b981;
   --x-success-soft: #ecfdf5;
   --x-warning: #f59e0b;
@@ -17,14 +30,19 @@
   --x-danger-soft: #fef2f2;
   --x-info: #3b82f6;
   --x-info-soft: #eff6ff;
-  --x-sidebar-bg: #171b2e;
+
+  /* ===== 尺寸与圆角 ===== */
   --x-radius: 12px;
   --x-radius-sm: 8px;
+  --el-border-radius-base: 8px;
+  --x-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ===== 阴影系统 ===== */
   --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
   --x-shadow-md: 0 4px 12px rgba(23, 27, 46, 0.08);
   --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
-  --x-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
+  /* Element Plus 亮色变量 */
   --el-color-primary: #6366f1;
   --el-color-primary-light-3: #8b8cf5;
   --el-color-primary-light-5: #adaef8;
@@ -32,6 +50,65 @@
   --el-color-primary-light-8: #e1e1fc;
   --el-color-primary-light-9: #f2f2fe;
   --el-color-primary-dark-2: #4f52c9;
-  --el-border-radius-base: 8px;
   --el-font-family: 'Inter', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+html.dark {
+  /* ===== 品牌主色 (Brand Primary in Dark) ===== */
+  --x-primary: #818cf8;
+  --x-primary-hover: #6366f1;
+  --x-primary-soft: rgba(99, 102, 241, 0.16);
+
+  /* ===== 背景与表面 (Surfaces & Backgrounds in Dark) ===== */
+  --x-bg: #0b0f19;
+  --x-card: #131b2e;
+  --x-card-soft: #1a233a;
+  --x-card-muted: #212c45;
+  --x-border: #1e293b;
+  --x-border-soft: #25334d;
+  --x-fill-1: #1a233a;
+  --x-fill-2: rgba(255, 255, 255, 0.06);
+  --x-sidebar-bg: #0f1422;
+
+  /* ===== 文字阶梯 (Typography Colors in Dark) ===== */
+  --x-text: #f8fafc;
+  --x-text-2: #94a3b8;
+  --x-text-3: #64748b;
+
+  /* ===== 语义状态色 (Semantic Status in Dark) ===== */
+  --x-success: #34d399;
+  --x-success-soft: rgba(16, 185, 129, 0.16);
+  --x-warning: #fbbf24;
+  --x-warning-soft: rgba(245, 158, 11, 0.16);
+  --x-danger: #f87171;
+  --x-danger-soft: rgba(239, 68, 68, 0.16);
+  --x-info: #60a5fa;
+  --x-info-soft: rgba(59, 130, 246, 0.16);
+
+  /* ===== 阴影系统 (Elevation in Dark) ===== */
+  --x-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --x-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --x-shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.6);
+
+  /* Element Plus 深色变量覆盖 */
+  --el-bg-color: #131b2e;
+  --el-bg-color-overlay: #1a233a;
+  --el-bg-color-page: #0b0f19;
+  --el-border-color: #1e293b;
+  --el-border-color-light: #25334d;
+  --el-border-color-lighter: #2d3b55;
+  --el-border-color-extra-light: #334155;
+  --el-fill-color: #1e293b;
+  --el-fill-color-light: #182236;
+  --el-fill-color-blank: #131b2e;
+  --el-text-color-primary: #f8fafc;
+  --el-text-color-regular: #cbd5e1;
+  --el-text-color-secondary: #94a3b8;
+  --el-text-color-placeholder: #64748b;
+  --el-color-primary: #818cf8;
+  --el-color-primary-light-3: #6366f1;
+  --el-color-primary-light-5: #4f46e5;
+  --el-color-primary-light-7: rgba(99, 102, 241, 0.35);
+  --el-color-primary-light-8: rgba(99, 102, 241, 0.25);
+  --el-color-primary-light-9: rgba(99, 102, 241, 0.16);
 }

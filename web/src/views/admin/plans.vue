@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createPlan, deletePlan, getPermissionGroups, getPlans, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
@@ -34,12 +34,66 @@ onMounted(loadGroups)
 
 const formOpen = ref(false)
 const editing = ref(false)
-const form = reactive({ id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, device_limit: 0, permission_group_id: 0 })
+const descInputRef = ref<any>(null)
+const form = reactive({
+  id: 0,
+  name: '',
+  description: '',
+  price_yuan: 25,
+  traffic_gb: 200,
+  duration_days: 30,
+  device_limit: 0,
+  permission_group_id: 0,
+})
 const saving = ref(false)
+
+const defaultPlanDesc = `包含 $TRAFFIC$ 周期高速流量
+有效周期 $DURATION$ 天
+$DEVICE_LIMIT$
+全量节点与中转链路授权
+深度兼容 Clash / Mihomo / Stash`
+
+function insertPlaceholder(placeholder: string) {
+  const el = (descInputRef.value?.textarea ||
+    descInputRef.value?.$el?.querySelector('textarea')) as HTMLTextAreaElement | undefined
+
+  if (!el) {
+    // 降级：未获取到 textarea 元素时追加到末尾
+    form.description += (form.description.endsWith('\n') || !form.description ? '' : '\n') + placeholder
+    ElMessage.success(`已插入占位符 ${placeholder}`)
+    return
+  }
+
+  const start = el.selectionStart ?? form.description.length
+  const end = el.selectionEnd ?? form.description.length
+  const text = form.description || ''
+
+  const before = text.substring(0, start)
+  const after = text.substring(end)
+  form.description = before + placeholder + after
+
+  ElMessage.success(`已在光标处插入 ${placeholder}`)
+
+  // 恢复光标至插入内容之后并保持聚焦
+  nextTick(() => {
+    el.focus()
+    const newPos = start + placeholder.length
+    el.setSelectionRange(newPos, newPos)
+  })
+}
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, name: '', price_yuan: 25, traffic_gb: 200, duration_days: 30, device_limit: 0, permission_group_id: 0 })
+  Object.assign(form, {
+    id: 0,
+    name: '',
+    description: defaultPlanDesc,
+    price_yuan: 25,
+    traffic_gb: 200,
+    duration_days: 30,
+    device_limit: 0,
+    permission_group_id: 0,
+  })
   formOpen.value = true
 }
 
@@ -48,6 +102,7 @@ function openEdit(row: any) {
   Object.assign(form, {
     id: row.id,
     name: row.name,
+    description: row.description || '',
     price_yuan: Number((row.price_cents / 100).toFixed(2)),
     traffic_gb: row.traffic_gb,
     duration_days: row.duration_days,
@@ -66,6 +121,7 @@ async function save() {
   try {
     const payload = {
       name: form.name,
+      description: form.description,
       price_cents: Math.round(form.price_yuan * 100),
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
@@ -126,37 +182,42 @@ async function remove(row: any) {
     <BaseCard>
       <!-- 桌面端表格视图 -->
       <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="id" label="ID" width="60">
-            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
+        <el-table v-loading="loading" :data="list" style="width: 100%">
+          <el-table-column prop="id" label="ID" width="70">
+            <template #default="{ row }"><code class="cell-mono font-12">#{{ row.id }}</code></template>
           </el-table-column>
-          <el-table-column prop="name" label="名称" min-width="130">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
+          <el-table-column prop="name" label="套餐名称" min-width="160">
+            <template #default="{ row }">
+              <div style="font-weight: 600">{{ row.name }}</div>
+              <div v-if="row.description" class="plan-desc-preview" :title="row.description">
+                {{ row.description.split('\n')[0] }}{{ row.description.includes('\n') ? ' ...' : '' }}
+              </div>
+            </template>
           </el-table-column>
-          <el-table-column label="价格" width="100">
-            <template #default="{ row }"><span class="cell-mono" style="font-weight: 600">¥ {{ (row.price_cents / 100).toFixed(2) }}</span></template>
+          <el-table-column label="价格" min-width="110">
+            <template #default="{ row }"><span class="cell-mono" style="font-weight: 600; color: #059669">¥ {{ (row.price_cents / 100).toFixed(2) }}</span></template>
           </el-table-column>
-          <el-table-column label="流量" width="120">
+          <el-table-column label="包含流量" min-width="120">
             <template #default="{ row }">
               <span class="cell-mono">{{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="duration_days" label="时长(天)" width="90">
+          <el-table-column prop="duration_days" label="有效期" min-width="100">
             <template #default="{ row }"><span class="cell-mono">{{ row.duration_days }} 天</span></template>
           </el-table-column>
-          <el-table-column label="设备限制" width="100">
+          <el-table-column label="设备限制" min-width="100">
             <template #default="{ row }">
-              <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
+              <span class="x-chip" :class="row.device_limit ? 'blue' : 'gray'">
                 {{ row.device_limit ? `${row.device_limit} 台` : '不限' }}
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="90">
+          <el-table-column label="上架状态" min-width="90" align="center">
             <template #default="{ row }">
               <el-switch :model-value="row.enabled" @change="togglePlan(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column label="操作" width="110" fixed="right" align="right">
             <template #default="{ row }">
               <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
               <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
@@ -181,6 +242,10 @@ async function remove(row: any) {
                 </el-tag>
               </div>
               <el-switch :model-value="row.enabled" size="small" @change="togglePlan(row)" />
+            </div>
+
+            <div v-if="row.description" class="card-desc-box">
+              {{ row.description }}
             </div>
 
             <div class="card-grid">
@@ -223,9 +288,45 @@ async function remove(row: any) {
       </div>
     </BaseCard>
 
-    <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="500px">
+    <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="520px">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 月付 200G" /></el-form-item>
+        <el-form-item label="套餐文案 / 特性描述（每行一条特性，支持占位符）">
+          <div class="placeholder-chips">
+            <span class="chip-label">快捷插入占位符：</span>
+            <el-tag
+              size="small"
+              class="placeholder-tag"
+              effect="plain"
+              @click="insertPlaceholder('$TRAFFIC$')"
+            >
+              $TRAFFIC$ (流量)
+            </el-tag>
+            <el-tag
+              size="small"
+              class="placeholder-tag"
+              effect="plain"
+              @click="insertPlaceholder('$DURATION$')"
+            >
+              $DURATION$ (周期)
+            </el-tag>
+            <el-tag
+              size="small"
+              class="placeholder-tag"
+              effect="plain"
+              @click="insertPlaceholder('$DEVICE_LIMIT$')"
+            >
+              $DEVICE_LIMIT$ (设备限制)
+            </el-tag>
+          </div>
+          <el-input
+            ref="descInputRef"
+            v-model="form.description"
+            type="textarea"
+            :rows="5"
+            placeholder="如：&#10;包含 $TRAFFIC$ 周期高速流量&#10;有效周期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;解锁流媒体与 ChatGPT"
+          />
+        </el-form-item>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
           <el-form-item label="价格（元）">
             <el-input-number v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
@@ -256,4 +357,49 @@ async function remove(row: any) {
 
 <style scoped lang="scss">
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
+.plan-desc-preview {
+  font-size: 11.5px;
+  color: var(--x-text-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.card-desc-box {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--x-bg);
+  border-radius: var(--x-radius-sm);
+  font-size: 12px;
+  color: var(--x-text-2);
+  white-space: pre-line;
+  line-height: 1.4;
+}
+.placeholder-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-size: 12px;
+
+  .chip-label {
+    color: var(--x-text-3);
+    font-size: 11.5px;
+  }
+
+  .placeholder-tag {
+    cursor: pointer;
+    font-family: var(--x-font-mono, monospace);
+    font-size: 11px;
+    user-select: none;
+    transition: all 0.15s ease;
+    &:hover {
+      background: var(--x-primary-soft, #eef2ff);
+      border-color: var(--x-primary, #6366f1);
+      color: var(--x-primary, #6366f1);
+    }
+  }
+}
 </style>

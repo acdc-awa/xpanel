@@ -1,9 +1,18 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xray 面板</title>
+  <script>
+    (function () {
+      try {
+        var m = localStorage.getItem('theme_mode') || 'auto';
+        var d = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (d) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

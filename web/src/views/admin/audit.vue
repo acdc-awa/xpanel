@@ -39,6 +39,14 @@ const actionText: Record<string, string> = {
   'order.confirm': '确认订单',
   'order.cancel': '取消订单',
 }
+
+const detailModalOpen = ref(false)
+const currentDetail = ref('')
+function viewDetail(detail: string) {
+  if (!detail) return
+  currentDetail.value = detail
+  detailModalOpen.value = true
+}
 </script>
 
 <template>
@@ -58,9 +66,9 @@ const actionText: Record<string, string> = {
           </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
-              <el-tag :type="row.operator_type === 'admin' ? 'warning' : 'info'" size="small">
+              <span class="x-chip" :class="row.operator_type === 'admin' ? 'orange' : 'blue'">
                 {{ row.operator_type === 'admin' ? '管理员' : '用户' }}
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="operator_id" label="操作者 ID" width="100" />
@@ -91,8 +99,20 @@ const actionText: Record<string, string> = {
 
             <div class="card-grid">
               <div class="grid-item full-width">
-                <span class="item-label">操作详情</span>
-                <div class="item-value" style="font-size: 12px">{{ row.detail || '—' }}</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px">
+                  <span class="item-label">操作详情</span>
+                  <el-button v-if="row.detail && row.detail.length > 50" type="primary" link size="small" style="font-size: 11px; padding: 0" @click="viewDetail(row.detail)">
+                    查看完整
+                  </el-button>
+                </div>
+                <div
+                  class="item-value audit-detail-clamp"
+                  style="font-size: 12px"
+                  :title="row.detail"
+                  @click="viewDetail(row.detail)"
+                >
+                  {{ row.detail || '—' }}
+                </div>
               </div>
               <div class="grid-item full-width">
                 <span class="item-label">发生时间</span>
@@ -115,9 +135,46 @@ const actionText: Record<string, string> = {
         />
       </div>
     </BaseCard>
+
+    <!-- 详情弹窗 -->
+    <el-dialog v-model="detailModalOpen" title="操作详情" width="520px" append-to-body>
+      <div v-if="currentDetail" class="audit-modal-body">
+        <pre class="audit-pre">{{ currentDetail }}</pre>
+      </div>
+      <template #footer>
+        <el-button @click="detailModalOpen = false">关 闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped lang="scss">
 .x-pager { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
+.audit-detail-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+  line-height: 1.45;
+  color: var(--x-text-2);
+  cursor: pointer;
+  &:hover {
+    color: var(--x-text);
+  }
+}
+.audit-pre {
+  background: var(--x-fill-2, #f1f5f9);
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-family: var(--x-font-mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--x-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 380px;
+  overflow-y: auto;
+  margin: 0;
+}
 </style>

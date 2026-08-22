@@ -206,9 +206,9 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
           </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
-                {{ statusMap[row.status]?.text || row.status }}
-              </el-tag>
+              <span v-if="row.status === 'unused'" class="x-chip blue">未使用</span>
+              <span v-else-if="row.status === 'used'" class="x-chip green">已使用</span>
+              <span v-else class="x-chip red">已作废</span>
             </template>
           </el-table-column>
           <el-table-column label="兑换用户" width="110">

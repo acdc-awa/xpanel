@@ -541,10 +541,10 @@ function handleCardAction(cmd: string, row: AdminUser) {
         </el-input>
       </div>
       <div class="toolbar-actions">
-        <el-button :icon="Download" @click="exportCSV">导出 CSV</el-button>
-        <el-button :loading="batchBusy" type="warning" @click="batchToggle(0)">批量封禁</el-button>
-        <el-button :loading="batchBusy" type="success" @click="batchToggle(1)">批量启用</el-button>
-        <el-button type="primary" :icon="Plus" @click="newUserOpen = true">添加用户</el-button>
+        <el-button :size="isMobile ? 'small' : 'default'" :icon="Download" @click="exportCSV">导出 CSV</el-button>
+        <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="warning" @click="batchToggle(0)">批量封禁</el-button>
+        <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="success" @click="batchToggle(1)">批量启用</el-button>
+        <el-button :size="isMobile ? 'small' : 'default'" type="primary" :icon="Plus" @click="newUserOpen = true">添加用户</el-button>
       </div>
     </div>
 
@@ -566,20 +566,20 @@ function handleCardAction(cmd: string, row: AdminUser) {
             <template #default="{ row }">
               <div style="display: flex; align-items: center; gap: 6px">
                 <span style="font-weight: 600">{{ row.username }}</span>
-                <el-tag v-if="row.role === 'admin'" size="small" type="warning" effect="dark" style="font-size: 10px; height: 18px; padding: 0 4px">管理员</el-tag>
+                <span v-if="row.role === 'admin'" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">管理员</span>
               </div>
               <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="套餐 / 权限组" width="140">
+          <el-table-column label="套餐 / 权限组" width="145">
             <template #default="{ row }">
               <div style="display: flex; flex-direction: column; gap: 3px; align-items: flex-start">
-                <el-tag size="small" :type="row.plan_id ? 'primary' : 'info'" effect="plain">
+                <span class="x-chip purple">
                   {{ planName(row.plan_id) }}
-                </el-tag>
-                <el-tag :type="(userGroupDisplay(row).type as any)" size="small" effect="light" style="font-size: 10.5px; height: 20px; padding: 0 5px">
+                </span>
+                <span class="x-chip" :class="userGroupDisplay(row).custom ? 'blue' : 'green'" style="font-size: 10.5px">
                   {{ userGroupDisplay(row).name }}
-                </el-tag>
+                </span>
               </div>
             </template>
           </el-table-column>
@@ -1191,12 +1191,14 @@ function handleCardAction(cmd: string, row: AdminUser) {
     .toolbar-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 6px;
       width: 100%;
 
       .el-button {
         margin: 0;
         width: 100%;
+        height: 32px;
+        font-size: 12.5px;
       }
     }
   }

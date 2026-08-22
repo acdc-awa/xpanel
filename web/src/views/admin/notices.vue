@@ -236,12 +236,12 @@ async function remove(row: NoticeItem) {
           <el-table-column label="标题" min-width="200">
             <template #default="{ row }">
               <div class="notice-title-cell">
-                <el-tag v-if="(row as NoticeItem).is_pinned" size="small" type="danger" effect="dark" class="mr-1">
+                <span v-if="(row as NoticeItem).is_pinned" class="x-chip red mr-1">
                   置顶
-                </el-tag>
-                <el-tag v-if="(row as NoticeItem).is_popup" size="small" type="warning" effect="dark" class="mr-1">
+                </span>
+                <span v-if="(row as NoticeItem).is_popup" class="x-chip orange mr-1">
                   强弹窗
-                </el-tag>
+                </span>
                 <span class="notice-title-text">{{ (row as NoticeItem).title }}</span>
               </div>
             </template>
@@ -695,7 +695,7 @@ async function remove(row: NoticeItem) {
 }
 
 .font-mono {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--x-font-mono, monospace);
 }
 
 .mr-1 {

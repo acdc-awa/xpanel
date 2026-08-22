@@ -404,18 +404,19 @@ function onClosed() {
 .preset-chip {
   display: inline-flex;
   align-items: center;
-  background: var(--x-card-bg, #fff);
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
-  padding: 3px 8px;
   border-radius: 6px;
   font-size: 11.5px;
-  color: var(--x-text-1);
+  color: var(--x-text);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
   &:hover {
     border-color: var(--x-primary);
     color: var(--x-primary);
-    background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.05);
+    background: var(--x-primary-soft);
   }
 }
 .dual-panel-grid {
@@ -429,7 +430,7 @@ function onClosed() {
   }
 }
 .panel-card {
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: 8px;
   padding: 12px 14px;
@@ -445,7 +446,7 @@ function onClosed() {
   color: var(--x-primary);
 }
 .code-textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--x-font-mono, monospace);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -453,7 +454,8 @@ function onClosed() {
   font-size: 11.5px;
   color: var(--x-text-2);
   line-height: 1.5;
-  background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.06);
+  background: var(--x-primary-soft);
+  border: 1px solid var(--x-border);
   border-radius: 6px;
   padding: 8px 10px;
 }

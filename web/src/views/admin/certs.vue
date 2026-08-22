@@ -119,18 +119,20 @@ function expireTag(row: any) {
           <el-table-column prop="domain" label="域名" min-width="180">
             <template #default="{ row }"><code class="cell-mono">{{ row.domain }}</code></template>
           </el-table-column>
-          <el-table-column label="到期" width="130">
+          <el-table-column label="到期" width="170">
             <template #default="{ row }">
-              <el-tag :type="expireTag(row).type" size="small">{{ row.not_after }}（{{ expireTag(row).text }}）</el-tag>
+              <span class="x-chip" :class="expireTag(row).type === 'danger' ? 'red' : (expireTag(row).type === 'warning' ? 'orange' : 'green')">
+                {{ expireTag(row).text }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="140" />
           <el-table-column label="引用节点（服务器 / 入站）" min-width="200">
             <template #default="{ row }">
               <template v-if="row.refs && row.refs.length > 0">
-                <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
+                <span v-for="r in row.refs" :key="r.inbound_id" class="x-chip purple" style="margin: 1px 4px 1px 0">
                   {{ r.server_name }} / {{ r.inbound_tag }}
-                </el-tag>
+                </span>
               </template>
               <span v-else class="muted">未引用</span>
             </template>
