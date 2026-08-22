@@ -12,20 +12,21 @@ import (
 )
 
 type planView struct {
-	ID               uint64    `json:"id"`
-	Name             string    `json:"name"`
-	PriceCents       int64     `json:"price_cents"`
-	TrafficGB        int64     `json:"traffic_gb"`
-	DurationDays     int       `json:"duration_days"`
-	DeviceLimit      int       `json:"device_limit"`        // 0=不限
-	PermissionGroupID uint64   `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID                uint64    `json:"id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	PriceCents        int64     `json:"price_cents"`
+	TrafficGB         int64     `json:"traffic_gb"`
+	DurationDays      int       `json:"duration_days"`
+	DeviceLimit       int       `json:"device_limit"`        // 0=不限
+	PermissionGroupID uint64    `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
+	Enabled           bool      `json:"enabled"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 func toPlanView(p *models.Plan) planView {
 	return planView{
-		ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
+		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays: p.DurationDays,
 		DeviceLimit: p.DeviceLimit,
 		PermissionGroupID: p.PermissionGroupID,
@@ -51,6 +52,7 @@ func (d *Deps) AdminPlans(c *gin.Context) {
 func (d *Deps) AdminCreatePlan(c *gin.Context) {
 	var req struct {
 		Name              string `json:"name" binding:"required,max=64"`
+		Description       string `json:"description"`
 		PriceCents        int64  `json:"price_cents" binding:"required,min=0"`
 		TrafficGB         int64  `json:"traffic_gb" binding:"required,min=1"`
 		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
@@ -70,7 +72,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		}
 	}
 	plan := models.Plan{
-		Name: req.Name, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
+		Name: req.Name, Description: req.Description, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
 		DurationDays: req.DurationDays,
 		DeviceLimit: req.DeviceLimit,
 		PermissionGroupID: req.PermissionGroupID, Enabled: true,
@@ -97,6 +99,7 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	}
 	var req struct {
 		Name              *string `json:"name"`
+		Description       *string `json:"description"`
 		PriceCents        *int64  `json:"price_cents"`
 		TrafficGB         *int64  `json:"traffic_gb"`
 		DurationDays      *int    `json:"duration_days"`
@@ -143,6 +146,9 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	updates := map[string]any{}
 	if req.Name != nil {
 		updates["name"] = strings.TrimSpace(*req.Name)
+	}
+	if req.Description != nil {
+		updates["description"] = *req.Description
 	}
 	if req.PriceCents != nil {
 		updates["price_cents"] = *req.PriceCents

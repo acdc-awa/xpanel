@@ -73,6 +73,7 @@ type Inbound struct {
 type Plan struct {
 	ID                uint64    `gorm:"primaryKey" json:"id"`
 	Name              string    `gorm:"size:64;not null" json:"name"`
+	Description       string    `gorm:"type:text" json:"description"`                // 自定义文案/套餐特性说明
 	PriceCents        int64     `gorm:"not null" json:"price_cents"` // 价格（分）
 	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
 	DurationDays      int       `gorm:"not null" json:"duration_days"`

@@ -228,6 +228,7 @@ export interface BalanceLog {
 export interface Plan {
   id: number
   name: string
+  description?: string
   price_cents: number
   traffic_gb: number
   duration_days: number

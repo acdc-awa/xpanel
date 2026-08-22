@@ -137,3 +137,46 @@ func TestAdminCreateOutboundTagUnique(t *testing.T) {
 		t.Fatalf("duplicate tag => HTTP %d, want 400, resp=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestAdminPlanDescriptionCreateAndUpdate(t *testing.T) {
+	db := validationTestDB(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	d := &Deps{DB: db}
+	r.POST("/api/v1/admin/plans", d.AdminCreatePlan)
+	r.PUT("/api/v1/admin/plans/:id", d.AdminUpdatePlan)
+
+	// Create with description
+	createBody := `{"name":"VIP Plan","description":"Line 1\nLine 2","price_cents":5000,"traffic_gb":100,"duration_days":30,"device_limit":5}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plans", strings.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create plan => HTTP %d, resp=%s", w.Code, w.Body.String())
+	}
+
+	var plan models.Plan
+	if err := db.First(&plan, "name = ?", "VIP Plan").Error; err != nil {
+		t.Fatalf("find plan: %v", err)
+	}
+	if plan.Description != "Line 1\nLine 2" {
+		t.Fatalf("plan description = %q, want %q", plan.Description, "Line 1\nLine 2")
+	}
+
+	// Update description
+	updateBody := `{"description":"Updated description line"}`
+	idStr := strconv.FormatUint(plan.ID, 10)
+	req2 := httptest.NewRequest(http.MethodPut, "/api/v1/admin/plans/"+idStr, strings.NewReader(updateBody))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("update plan => HTTP %d, resp=%s", w2.Code, w2.Body.String())
+	}
+
+	db.First(&plan, plan.ID)
+	if plan.Description != "Updated description line" {
+		t.Fatalf("updated plan description = %q, want %q", plan.Description, "Updated description line")
+	}
+}
