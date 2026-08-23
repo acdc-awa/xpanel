@@ -17,10 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // 心跳与超时参数

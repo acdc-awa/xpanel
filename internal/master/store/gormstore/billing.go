@@ -10,9 +10,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/db"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/db"
 )
 
 // BillingStore 是 contracts.BillingStore 的 GORM 实现。

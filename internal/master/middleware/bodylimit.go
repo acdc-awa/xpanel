@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // BodyLimit 限制请求体大小（P2-2）。Content-Length 超限直接 413；

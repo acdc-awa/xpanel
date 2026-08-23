@@ -10,9 +10,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // OrderService 订单服务（余额直付：购买/续费套餐即时生效）。

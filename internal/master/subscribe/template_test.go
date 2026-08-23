@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 func TestBuildClashWithTemplate(t *testing.T) {

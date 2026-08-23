@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/config"
 )
 
 func TestStartRunsScheduledSnapshot(t *testing.T) {

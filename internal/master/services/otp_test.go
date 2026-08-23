@@ -8,9 +8,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 func otpTestSvc(t *testing.T) (*OTPService, *gorm.DB) {

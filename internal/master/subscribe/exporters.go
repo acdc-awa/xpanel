@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // DefaultRegistry 返回系统内置的订阅导出器注册表。

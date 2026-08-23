@@ -11,8 +11,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/tlscert"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 )
 
 func apiTestDB(t *testing.T) *gorm.DB {

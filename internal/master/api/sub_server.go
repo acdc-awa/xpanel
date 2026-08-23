@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/master/middleware"
 )
 
 // SubscribeServer 独立订阅 HTTP 服务（物理端口隔离，无特权管理 API）。

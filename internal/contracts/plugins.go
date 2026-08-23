@@ -1,6 +1,6 @@
 package contracts
 
-import "github.com/acdc/xray-panel/internal/pkg/protocol"
+import "github.com/acdc-awa/xpanel-node/pkg/protocol"
 
 // ShareOverride 订阅分享覆写（入站 share_* 字段的纯数据快照）。
 // 服务端物理监听与外部反代/订阅视图解耦：覆写只影响客户端可见参数。

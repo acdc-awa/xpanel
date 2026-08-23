@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/master/backup"
-	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc-awa/xpanel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/master/backup"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"gorm.io/gorm"
 )
 

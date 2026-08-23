@@ -9,9 +9,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/store/gormstore"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/store/gormstore"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {

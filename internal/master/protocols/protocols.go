@@ -4,8 +4,8 @@
 package protocols
 
 import (
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 var registry = contracts.NewPluginRegistry()

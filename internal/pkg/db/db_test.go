@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/config"
 )
 
 func TestSQLiteDSNBusyTimeout(t *testing.T) {

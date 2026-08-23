@@ -11,10 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/middleware"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/db"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/db"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // AdminUsers GET /api/v1/admin/users —— 用户列表（分页）。

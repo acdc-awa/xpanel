@@ -11,7 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // TestAdminDashboardNoDoubleCountToday ISSUE-06：traffic_dailies 已含今日，traffic_logs 不得再叠加。

@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/protocols"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。

@@ -13,9 +13,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/protocols"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // BuiltinDefaultClashTemplate 系统内置基础默认模板

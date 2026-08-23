@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {

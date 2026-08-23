@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // Driver Xray 核心驱动：Generate 复用模板生成器，ValidateConfig 走官方二进制 xray -test。

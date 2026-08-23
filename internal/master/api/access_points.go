@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/master/services"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // accessPointForm 用户接入点请求体（消费者模型：核心为 Name + 权限组，Host/Port 可选覆写）

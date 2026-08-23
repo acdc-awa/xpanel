@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/xray"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // testXrayBin 定位仓库内锁定的官方 xray 二进制（不存在则跳过金标准校验测试）。

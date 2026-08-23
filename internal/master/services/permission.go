@@ -3,7 +3,7 @@ package services
 import (
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // 访问控制单点化（2026-08-23）：

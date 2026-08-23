@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // Token 类型

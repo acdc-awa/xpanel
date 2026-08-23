@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // TestDefaultRegistry_ClashAndBase64 注册表调度与导出一致性：

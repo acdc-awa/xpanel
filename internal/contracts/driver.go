@@ -3,8 +3,8 @@ package contracts
 import (
 	"context"
 
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // RefTarget 出站 InboundRef 引用的目标入站（可跨服务器）。

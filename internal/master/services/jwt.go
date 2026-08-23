@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // Token 类型（保留 services 别名，兼容既有调用）。

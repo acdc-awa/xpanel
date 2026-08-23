@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // 构造 DTO 时 flow 已由协议插件决议（生成侧同源），导出器为哑渲染器。

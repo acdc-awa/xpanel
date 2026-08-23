@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // rateLimiter 简易内存滑动窗口限流（单实例够用；多实例部署需换 Redis）。

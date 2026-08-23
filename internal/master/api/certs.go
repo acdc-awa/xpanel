@@ -7,12 +7,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc/xray-panel/internal/master/nodegate"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/db"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
-	"github.com/acdc/xray-panel/internal/pkg/tlscert"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/db"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // certRefView 证书被引用位置（入站所在服务器 + 入站标签）。

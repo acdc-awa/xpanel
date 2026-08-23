@@ -12,9 +12,9 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/master/services"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/master/services"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func setupReservedOutboundsTest(t *testing.T) (*Deps, *gin.Engine, *models.Server) {

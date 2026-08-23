@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/xray"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func setupTestDBForL4(t *testing.T) *gorm.DB {

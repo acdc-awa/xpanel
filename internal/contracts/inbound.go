@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // InboundSpec 入站统一类型化解码结果：settings/streamSettings/sniffing 三段 JSON 一次解析，

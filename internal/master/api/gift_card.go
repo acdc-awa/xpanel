@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc/xray-panel/internal/master/middleware"
-	"github.com/acdc/xray-panel/internal/pkg/util"
+	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // UserRedeemGiftCard POST /api/v1/user/gift-cards/redeem —— 用户卡密兑换充值。

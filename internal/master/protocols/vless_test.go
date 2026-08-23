@@ -3,7 +3,7 @@ package protocols
 import (
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // TestVLESSResolveFlow flow 决议（生成侧盖戳与订阅侧同源）：

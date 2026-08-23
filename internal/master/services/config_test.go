@@ -8,7 +8,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func newTestDB(t *testing.T) *gorm.DB {

@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/config"
 )
 
 // sqliteDSN 追加生产化 pragma：

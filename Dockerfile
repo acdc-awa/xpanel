@@ -14,11 +14,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
-      -ldflags "-X github.com/acdc/xray-panel/internal/agent/upgrade.Version=docker" \
+      -ldflags "-X github.com/acdc-awa/xpanel/internal/agent/upgrade.Version=docker" \
       -o /out/agent ./cmd/agent && \
     cp /out/agent internal/master/embed/agent-linux && \
     CGO_ENABLED=0 GOOS=linux go build -tags embedagent \
-      -ldflags "-X github.com/acdc/xray-panel/internal/master/embed.AgentVersion=docker" \
+      -ldflags "-X github.com/acdc-awa/xpanel/internal/master/embed.AgentVersion=docker" \
       -o /out/master ./cmd/master
 
 # ---- 运行镜像 ----

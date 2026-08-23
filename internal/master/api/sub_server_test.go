@@ -10,8 +10,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func TestSubscribeServer_Lifecycle(t *testing.T) {

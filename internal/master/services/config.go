@@ -8,11 +8,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/protocols"
-	"github.com/acdc/xray-panel/internal/master/xray"
-	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
+	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // ConfigService 服务器 Xray 配置的生成与待推送管理。

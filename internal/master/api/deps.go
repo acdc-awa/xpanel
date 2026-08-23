@@ -4,9 +4,9 @@ package api
 import (
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/config"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 )
 
 // Deps 集中注入 handler 依赖。

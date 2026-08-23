@@ -1,8 +1,8 @@
 package protocols
 
 import (
-	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // VLESSPlugin VLESS 协议插件（tcp/xhttp + reality/tls/none）。

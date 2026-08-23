@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // GiftCardQuery 礼品卡列表查询（Page/Size 由调用方归一化，1-based）。
