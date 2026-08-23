@@ -28,6 +28,7 @@ import (
 	"github.com/acdc/xray-panel/internal/master/billing"
 	"github.com/acdc/xray-panel/internal/master/nodegate"
 	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/master/store/gormstore"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/db"
@@ -60,6 +61,9 @@ func main() {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
+	// Stage 8：仓储适配层——GORM 实现为默认适配器；更换数据库适配只需替换此处构造。
+	billingStore := gormstore.NewBillingStore(database)
+
 	// 支持 CLI 子命令（如 reset-admin）
 	args := flag.Args()
 	if len(args) > 0 && args[0] == "reset-admin" {
@@ -83,7 +87,7 @@ func main() {
 	trafficSvc.StartDailyAgg(context.Background())
 	trafficSvc.StartTrafficResetCron(context.Background())
 	trafficSvc.StartRetentionCron(context.Background())
-	orderSvc := billing.NewOrderService(database)
+	orderSvc := billing.NewOrderService(billingStore)
 	auditSvc := &services.AuditService{DB: database}
 
 	// Stage 5：进程内同步事件总线（订阅者在 Publish 调用栈内执行，失败仅记日志）。
@@ -104,7 +108,7 @@ func main() {
 	}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc, Driver: coreDriver}
 	siteSvc := services.NewSiteService(database, cfg)
-	giftCardSvc := billing.NewGiftCardService(database)
+	giftCardSvc := billing.NewGiftCardService(billingStore)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
 	// Stage 5 事件订阅：订单支付成功 → 热更新用户到所有在线节点（原 api 层直调 Hub 的收口）。

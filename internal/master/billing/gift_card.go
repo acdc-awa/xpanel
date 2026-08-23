@@ -1,25 +1,27 @@
 package billing
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // GiftCardService 礼品卡与余额账务服务。
+// 2026-08-23 Stage 8：存储访问收口 contracts.BillingStore（GORM 实现见 store/gormstore）。
 type GiftCardService struct {
-	DB *gorm.DB
+	store contracts.BillingStore
 }
 
 // NewGiftCardService 构造礼品卡/余额服务。
-func NewGiftCardService(db *gorm.DB) *GiftCardService {
-	return &GiftCardService{DB: db}
+func NewGiftCardService(store contracts.BillingStore) *GiftCardService {
+	return &GiftCardService{store: store}
 }
 
 // BatchGenerate 批量生成礼品卡。
@@ -37,8 +39,9 @@ func (s *GiftCardService) BatchGenerate(adminID uint64, count int, name string, 
 
 	cards := make([]models.GiftCard, 0, count)
 	now := time.Now()
+	ctx := context.Background()
 
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
 		for i := 0; i < count; i++ {
 			code, err := util.NewGiftCardCode()
 			if err != nil {
@@ -53,7 +56,7 @@ func (s *GiftCardService) BatchGenerate(adminID uint64, count int, name string, 
 				CreatedBy:      adminID,
 				CreatedAt:      now,
 			}
-			if err := tx.Create(&card).Error; err != nil {
+			if err := tx.CreateGiftCard(ctx, &card); err != nil {
 				return err
 			}
 			cards = append(cards, card)
@@ -66,24 +69,27 @@ func (s *GiftCardService) BatchGenerate(adminID uint64, count int, name string, 
 	return cards, nil
 }
 
-// Redeem 兑换礼品卡充值余额（原子事务 + 行锁；SQLite 下 FOR UPDATE 被驱动丢弃，由 pkg/db 单连接池串行兜底）。
+// Redeem 兑换礼品卡充值余额（原子事务 + 行锁；行锁方言差异在 pkg/db.LockForUpdate 收口）。
 func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, int64, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, 0, errors.New("卡密不能为空")
 	}
 
-	var card models.GiftCard
+	var card *models.GiftCard
 	var newBalance int64
+	ctx := context.Background()
 
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
 		// 1. 查找并锁定卡密
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code = ?", code).First(&card).Error; err != nil {
+		c, err := tx.LockGiftCardByCode(ctx, code)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New("卡密不存在或无效")
 			}
 			return err
 		}
+		card = c
 
 		// 2. 校验状态与有效期
 		if card.Status != models.GiftCardUnused {
@@ -98,28 +104,27 @@ func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, 
 		}
 
 		// 3. 查找并锁定用户
-		var user models.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+		user, err := tx.LockUser(ctx, userID)
+		if err != nil {
 			return errors.New("用户不存在")
 		}
 
-		// 4. 更新卡密为已使用
-		if err := tx.Model(&card).Updates(map[string]any{
-			"status":  models.GiftCardUsed,
-			"used_by": userID,
-			"used_at": now,
-		}).Error; err != nil {
+		// 4. 更新卡密为已使用（同步本地实体状态：仓储更新不走 GORM 模型回写）
+		if err := tx.MarkGiftCardUsed(ctx, card.ID, userID, now); err != nil {
 			return err
 		}
+		card.Status = models.GiftCardUsed
+		card.UsedBy = userID
+		card.UsedAt = &now
 
 		// 5. 更新用户余额
 		newBalance = user.BalanceCents + card.FaceValueCents
-		if err := tx.Model(&user).Update("balance_cents", newBalance).Error; err != nil {
+		if err := tx.UpdateBalance(ctx, userID, newBalance); err != nil {
 			return err
 		}
 
-		// 6. 记录变动流水
-		log := models.BalanceLog{
+		// 6. 记流水
+		entry := models.BalanceLog{
 			UserID:       userID,
 			AmountCents:  card.FaceValueCents,
 			BalanceAfter: newBalance,
@@ -128,7 +133,7 @@ func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, 
 			Remark:       "兑换礼品卡: " + card.Name + " (" + card.Code + ")",
 			CreatedAt:    now,
 		}
-		if err := tx.Create(&log).Error; err != nil {
+		if err := tx.CreateBalanceLog(ctx, &entry); err != nil {
 			return err
 		}
 
@@ -138,7 +143,7 @@ func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, 
 	if err != nil {
 		return nil, 0, err
 	}
-	return &card, newBalance, nil
+	return card, newBalance, nil
 }
 
 // ListCards 管理端查询礼品卡列表。
@@ -149,35 +154,25 @@ func (s *GiftCardService) ListCards(page, size int, status, search string) ([]mo
 	if size < 1 || size > 100 {
 		size = 20
 	}
-	q := s.DB.Model(&models.GiftCard{})
-	if status != "" {
-		q = q.Where("status = ?", status)
-	}
-	if search = strings.TrimSpace(search); search != "" {
-		kw := "%" + search + "%"
-		q = q.Where("code LIKE ? OR name LIKE ?", kw, kw)
-	}
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []models.GiftCard
-	if err := q.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return list, total, nil
+	return s.store.ListGiftCards(context.Background(), contracts.GiftCardQuery{
+		Status: status,
+		Search: search,
+		Page:   page,
+		Size:   size,
+	})
 }
 
 // DisableOrDelete 作废或删除礼品卡（未使用的删除或标记作废）。
 func (s *GiftCardService) DisableOrDelete(cardID uint64) error {
-	var card models.GiftCard
-	if err := s.DB.First(&card, cardID).Error; err != nil {
+	ctx := context.Background()
+	card, err := s.store.GetGiftCard(ctx, cardID)
+	if err != nil {
 		return errors.New("卡密不存在")
 	}
 	if card.Status == models.GiftCardUsed {
 		return errors.New("已使用的卡密不可删除或作废")
 	}
-	return s.DB.Delete(&card).Error
+	return s.store.DeleteGiftCard(ctx, cardID)
 }
 
 // ListBalanceLogs 查询用户余额流水。
@@ -188,16 +183,7 @@ func (s *GiftCardService) ListBalanceLogs(userID uint64, page, size int) ([]mode
 	if size < 1 || size > 100 {
 		size = 20
 	}
-	q := s.DB.Model(&models.BalanceLog{}).Where("user_id = ?", userID)
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []models.BalanceLog
-	if err := q.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return list, total, nil
+	return s.store.ListBalanceLogs(context.Background(), userID, page, size)
 }
 
 // AdminAdjustBalance 管理员手动调整用户余额。
@@ -211,9 +197,10 @@ func (s *GiftCardService) AdminAdjustBalance(adminID, targetUserID uint64, delta
 	}
 
 	var newBalance int64
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var user models.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, targetUserID).Error; err != nil {
+	ctx := context.Background()
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		user, err := tx.LockUser(ctx, targetUserID)
+		if err != nil {
 			return errors.New("目标用户不存在")
 		}
 
@@ -222,21 +209,20 @@ func (s *GiftCardService) AdminAdjustBalance(adminID, targetUserID uint64, delta
 			return errors.New("调账后余额不能小于 0")
 		}
 
-		if err := tx.Model(&user).Update("balance_cents", newBalance).Error; err != nil {
+		if err := tx.UpdateBalance(ctx, targetUserID, newBalance); err != nil {
 			return err
 		}
 
-		now := time.Now()
-		log := models.BalanceLog{
+		entry := models.BalanceLog{
 			UserID:       targetUserID,
 			AmountCents:  deltaCents,
 			BalanceAfter: newBalance,
 			Type:         models.BalanceLogAdminAdjust,
 			RelatedID:    adminID,
 			Remark:       remark,
-			CreatedAt:    now,
+			CreatedAt:    time.Now(),
 		}
-		if err := tx.Create(&log).Error; err != nil {
+		if err := tx.CreateBalanceLog(ctx, &entry); err != nil {
 			return err
 		}
 		return nil

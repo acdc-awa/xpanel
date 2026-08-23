@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
@@ -18,15 +17,16 @@ import (
 
 // OrderService 订单服务（余额直付：购买/续费套餐即时生效）。
 // 2026-08-14 方向④：人工确认收款（manual 订单）已整体去除，充值=兑换码、购买=余额。
+// 2026-08-23 Stage 8：存储访问收口 contracts.BillingStore（GORM 实现见 store/gormstore）。
 // Events（Stage 5）：事务提交后发布 OrderPaidEvent；nil 时不发布（兼容测试与旧构造）。
 type OrderService struct {
-	DB     *gorm.DB
+	store  contracts.BillingStore
 	Events contracts.EventPublisher
 }
 
 // NewOrderService 构造订单服务。
-func NewOrderService(db *gorm.DB) *OrderService {
-	return &OrderService{DB: db}
+func NewOrderService(store contracts.BillingStore) *OrderService {
+	return &OrderService{store: store}
 }
 
 // payIdempotentWindow 余额直付幂等窗口：同用户+同套餐在此窗口内已支付则直接复用订单，防重放双扣款。
@@ -37,9 +37,10 @@ const payIdempotentWindow = 30 * time.Second
 func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, error) {
 	var order *models.Order
 	paid := false // 本次是否真实扣款（幂等复用旧订单不算新支付，不发布事件）
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var plan models.Plan
-		if err := tx.First(&plan, planID).Error; err != nil {
+	ctx := context.Background()
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		plan, err := tx.GetPlan(ctx, planID)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New("套餐不存在")
 			}
@@ -50,21 +51,21 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		}
 
 		// 先锁用户行：序列化同一用户的并发支付。
-		// 注意方言差异：SQLite 驱动静默丢弃 FOR UPDATE，由 pkg/db 的单连接池串行兜底；
-		// MySQL 下此行锁真实生效，是防双扣款的关键。
-		var user models.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+		// 方言差异在 pkg/db.LockForUpdate 收口：SQLite 由单连接池串行兜底，MySQL 真实行锁。
+		user, err := tx.LockUser(ctx, userID)
+		if err != nil {
 			return errors.New("用户不存在")
 		}
 
 		// 幂等：窗口内已支付同套餐 → 直接复用。
 		// 必须在行锁之后检查：MySQL 并发事务各自持旧快照，锁前检查会双双通过（TOCTOU 双扣款）；
 		// 锁后由 InnoDB 等待-提交顺序保证看到对方已提交的订单。
-		var recent models.Order
-		if err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND created_at >= ?",
-			userID, planID, models.OrderPaid, time.Now().Add(-payIdempotentWindow)).
-			Order("id DESC").First(&recent).Error; err == nil {
-			order = &recent
+		recent, err := tx.FindRecentPaidOrder(ctx, userID, planID, time.Now().Add(-payIdempotentWindow))
+		if err != nil {
+			return err
+		}
+		if recent != nil {
+			order = recent
 			return nil
 		}
 
@@ -74,7 +75,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 
 		now := time.Now()
 		newBalance := user.BalanceCents - plan.PriceCents
-		if err := tx.Model(&user).Update("balance_cents", newBalance).Error; err != nil {
+		if err := tx.UpdateBalance(ctx, userID, newBalance); err != nil {
 			return err
 		}
 
@@ -88,12 +89,12 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			Status:        models.OrderPaid,
 			PaidAt:        &now,
 		}
-		if err := tx.Create(order).Error; err != nil {
+		if err := tx.CreateOrder(ctx, order); err != nil {
 			return err
 		}
 
 		// 记录扣款流水
-		log := models.BalanceLog{
+		entry := models.BalanceLog{
 			UserID:       userID,
 			AmountCents:  -plan.PriceCents,
 			BalanceAfter: newBalance,
@@ -102,7 +103,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			Remark:       "余额购买套餐 #" + strconv.FormatUint(plan.ID, 10) + " (" + plan.Name + ")",
 			CreatedAt:    now,
 		}
-		if err := tx.Create(&log).Error; err != nil {
+		if err := tx.CreateBalanceLog(ctx, &entry); err != nil {
 			return err
 		}
 
@@ -112,16 +113,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			base = *user.ExpireAt
 		}
 		newExpire := base.AddDate(0, 0, plan.DurationDays)
-
-		updates := map[string]any{
-			"plan_id":             plan.ID,
-			"expire_at":           newExpire,
-			"traffic_cycle_start": now,
-		}
-		if plan.PermissionGroupID > 0 {
-			updates["permission_group_id"] = plan.PermissionGroupID
-		}
-		if err := tx.Model(&user).Updates(updates).Error; err != nil {
+		if err := tx.UpdateSubscription(ctx, userID, plan.ID, newExpire, now, plan.PermissionGroupID); err != nil {
 			return err
 		}
 
@@ -150,9 +142,5 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 
 // ListByUser 用户订单列表。
 func (s *OrderService) ListByUser(userID uint64) ([]models.Order, error) {
-	var list []models.Order
-	if err := s.DB.Where("user_id = ?", userID).Order("id DESC").Limit(50).Find(&list).Error; err != nil {
-		return nil, err
-	}
-	return list, nil
+	return s.store.ListOrdersByUser(context.Background(), userID, 50)
 }

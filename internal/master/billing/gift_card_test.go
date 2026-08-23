@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc/xray-panel/internal/master/store/gormstore"
 	"github.com/acdc/xray-panel/internal/models"
 )
 
@@ -27,7 +28,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 func TestGiftCard_BatchGenerateAndRedeem(t *testing.T) {
 	db := setupTestDB(t)
-	svc := NewGiftCardService(db)
+	svc := NewGiftCardService(gormstore.NewBillingStore(db))
 
 	// 1. 创建测试用户
 	user := models.User{
@@ -96,8 +97,8 @@ func TestGiftCard_BatchGenerateAndRedeem(t *testing.T) {
 
 func TestOrder_PayWithBalance(t *testing.T) {
 	db := setupTestDB(t)
-	cardSvc := NewGiftCardService(db)
-	orderSvc := NewOrderService(db)
+	cardSvc := NewGiftCardService(gormstore.NewBillingStore(db))
+	orderSvc := NewOrderService(gormstore.NewBillingStore(db))
 
 	// 1. 创建套餐 (2500分 = 25元, 30天)
 	plan := models.Plan{
@@ -192,7 +193,7 @@ func TestOrder_PayWithBalance(t *testing.T) {
 
 func TestGiftCard_AdminAdjustBalance(t *testing.T) {
 	db := setupTestDB(t)
-	svc := NewGiftCardService(db)
+	svc := NewGiftCardService(gormstore.NewBillingStore(db))
 
 	user := models.User{
 		Username:       "adjuser",
@@ -236,7 +237,7 @@ func (p *capturePublisher) Publish(_ context.Context, ev contracts.DomainEvent) 
 func TestOrder_PayWithBalance_PublishesEvent(t *testing.T) {
 	db := setupTestDB(t)
 	pub := &capturePublisher{}
-	orderSvc := NewOrderService(db)
+	orderSvc := NewOrderService(gormstore.NewBillingStore(db))
 	orderSvc.Events = pub
 
 	plan := models.Plan{Name: "事件套餐", PriceCents: 2500, TrafficGB: 100, DurationDays: 30, Enabled: true}

@@ -16,6 +16,7 @@ import (
 	"github.com/acdc/xray-panel/internal/config"
 	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/services"
+	pkgdb "github.com/acdc/xray-panel/internal/pkg/db"
 )
 
 // tsRe 备份文件名格式：panel-20060102-150405.db（捕获时间戳段）。
@@ -69,8 +70,8 @@ func (s *Service) Snapshot() (BackupInfo, error) {
 }
 
 func (s *Service) snapshotLocked() (BackupInfo, error) {
-	if s.driver != "sqlite" {
-		return BackupInfo{}, fmt.Errorf("当前数据库驱动 %q 不支持在线快照（仅 sqlite 支持 VACUUM INTO）；生产路线请使用 SQLite 或外部 mysqldump", s.driver)
+	if !pkgdb.SupportsOnlineSnapshot(s.driver) {
+		return BackupInfo{}, fmt.Errorf("当前数据库驱动 %q 不支持在线快照（仅 sqlite 支持 VACUUM INTO）；请使用外部备份工具（如 mysqldump）", s.driver)
 	}
 	ts := s.now()
 	name := ts.Format("panel-20060102-150405.db")
