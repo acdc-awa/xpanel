@@ -315,6 +315,29 @@ export interface L4PortRule {
   updated_at?: string
 }
 
+// 用户接入点（消费者模型：定义 Tag 别名与权限组，连接数据沿管道自适应继承）
+export interface UserAccessPoint {
+  id: number
+  name: string
+  custom_host?: string
+  custom_port?: number
+  target_type: 'inbound' | 'l4_rule' | ''
+  target_inbound_id?: number
+  target_l4_rule_id?: number
+  resolved_host?: string
+  resolved_port?: number
+  resolved_protocol?: string
+  resolved_target_desc?: string
+  target_server_name?: string
+  target_inbound_tag?: string
+  target_l4_port?: number
+  enabled: boolean
+  remark?: string
+  permission_group_ids: number[]
+  created_at?: string
+  updated_at?: string
+}
+
 
 export interface RealitySettings {
   server_name?: string
@@ -430,6 +453,8 @@ export interface PermissionGroup {
   clash_template?: string // 自定义 Clash/Mihomo 模板
   inbound_count?: number
   inbound_tags?: string[]
+  access_point_count?: number
+  access_point_names?: string[]
   created_at: string
   updated_at: string
 }

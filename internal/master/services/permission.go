@@ -238,4 +238,53 @@ func SyncL4RulePermissionGroups(tx *gorm.DB, ruleID uint64, groupIDs []uint64) e
 	return nil
 }
 
+// AccessPointPermissionGroupIDs 获取用户接入点绑定的开放权限组 ID 列表。
+func AccessPointPermissionGroupIDs(db *gorm.DB, apID uint64) []uint64 {
+	var links []models.PermissionGroupAccessPoint
+	if err := db.Where("access_point_id = ?", apID).Find(&links).Error; err != nil {
+		return nil
+	}
+	ids := make([]uint64, 0, len(links))
+	for _, l := range links {
+		ids = append(ids, l.PermissionGroupID)
+	}
+	return ids
+}
+
+// BatchAccessPointPermissionGroupIDs 批量查询用户接入点绑定的权限组映射 (apID -> []permissionGroupID)。
+func BatchAccessPointPermissionGroupIDs(db *gorm.DB, apIDs []uint64) map[uint64][]uint64 {
+	res := make(map[uint64][]uint64)
+	if len(apIDs) == 0 {
+		return res
+	}
+	var links []models.PermissionGroupAccessPoint
+	if err := db.Where("access_point_id IN ?", apIDs).Find(&links).Error; err != nil {
+		return res
+	}
+	for _, l := range links {
+		res[l.AccessPointID] = append(res[l.AccessPointID], l.PermissionGroupID)
+	}
+	return res
+}
+
+// SyncAccessPointPermissionGroups 同步用户接入点的开放权限组（原子替换；空列表 = 全部不可见）。
+func SyncAccessPointPermissionGroups(tx *gorm.DB, apID uint64, groupIDs []uint64) error {
+	if err := tx.Where("access_point_id = ?", apID).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {
+		return err
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	rows := make([]models.PermissionGroupAccessPoint, 0, len(groupIDs))
+	for _, gid := range groupIDs {
+		if gid > 0 {
+			rows = append(rows, models.PermissionGroupAccessPoint{PermissionGroupID: gid, AccessPointID: apID})
+		}
+	}
+	if len(rows) > 0 {
+		return tx.Create(&rows).Error
+	}
+	return nil
+}
+
 

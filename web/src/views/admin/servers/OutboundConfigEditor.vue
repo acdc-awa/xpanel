@@ -341,7 +341,7 @@ async function save() {
       priority: form.priority,
       remark: form.remark || '',
       // Phase T：引用模式只发 inbound_ref（vnext/streamSettings 由生成器自动构造）
-      inbound_ref: refMode.value ? refInboundId.value : undefined,
+      inbound_ref: refMode.value ? (refInboundId.value || undefined) : undefined,
     }
     const { data } = props.outbound
       ? await updateServerOutbound(props.serverId, props.outbound.id, payload)

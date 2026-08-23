@@ -39,6 +39,7 @@ func All() []any {
 		&PermissionGroup{}, &PermissionGroupInbound{},
 		&InboundEndpoint{}, &PermissionGroupEndpoint{},
 		&L4PortRule{}, &PermissionGroupL4Rule{},
+		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 	}
 }

@@ -649,15 +649,11 @@ async function copyText(text: string, label: string) {
             <el-radio-group v-model="localInboundType" class="type-radios" @change="onTypeChange">
               <el-radio value="user">
                 <span>用户入站</span>
-                <span class="type-sub">下发客户端订阅</span>
+                <span class="type-sub">承载用户真实流量并下发订阅</span>
               </el-radio>
               <el-radio value="relay">
-                <span>转发落地</span>
-                <span class="type-sub">链式转发内部节点</span>
-              </el-radio>
-              <el-radio value="idle">
-                <span>闲置预留</span>
-                <span class="type-sub">保留不生成配置</span>
+                <span>转发入站</span>
+                <span class="type-sub">供上游节点链式代理连接落地</span>
               </el-radio>
             </el-radio-group>
 

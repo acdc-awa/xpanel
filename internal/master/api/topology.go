@@ -84,8 +84,10 @@ func (d *Deps) AdminRotateInternal(c *gin.Context) {
 
 type permissionGroupView struct {
 	models.PermissionGroup
-	InboundCount int      `json:"inbound_count"`
-	InboundTags  []string `json:"inbound_tags"`
+	InboundCount     int      `json:"inbound_count"`
+	InboundTags      []string `json:"inbound_tags"`
+	AccessPointCount int      `json:"access_point_count"`
+	AccessPointNames []string `json:"access_point_names"`
 }
 
 // AdminPermissionGroups GET /api/v1/admin/permission-groups
@@ -113,6 +115,23 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		inboundTagMap[inb.ID] = inb.Tag
 	}
 
+	var apLinks []models.PermissionGroupAccessPoint
+	_ = d.DB.Find(&apLinks)
+	groupAPMap := make(map[uint64][]uint64)
+	allAPIDs := make([]uint64, 0, len(apLinks))
+	for _, l := range apLinks {
+		groupAPMap[l.PermissionGroupID] = append(groupAPMap[l.PermissionGroupID], l.AccessPointID)
+		allAPIDs = append(allAPIDs, l.AccessPointID)
+	}
+	var aps []models.UserAccessPoint
+	if len(allAPIDs) > 0 {
+		_ = d.DB.Select("id, name").Where("id IN ?", allAPIDs).Find(&aps)
+	}
+	apNameMap := make(map[uint64]string, len(aps))
+	for _, ap := range aps {
+		apNameMap[ap.ID] = ap.Name
+	}
+
 	items := make([]permissionGroupView, 0, len(list))
 	for _, g := range list {
 		tags := make([]string, 0)
@@ -121,10 +140,18 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 				tags = append(tags, tag)
 			}
 		}
+		apNames := make([]string, 0)
+		for _, apID := range groupAPMap[g.ID] {
+			if name, ok := apNameMap[apID]; ok && name != "" {
+				apNames = append(apNames, name)
+			}
+		}
 		items = append(items, permissionGroupView{
-			PermissionGroup: g,
-			InboundCount:    len(groupInboundMap[g.ID]),
-			InboundTags:     tags,
+			PermissionGroup:  g,
+			InboundCount:     len(groupInboundMap[g.ID]),
+			InboundTags:      tags,
+			AccessPointCount: len(groupAPMap[g.ID]),
+			AccessPointNames: apNames,
 		})
 	}
 	util.OK(c, gin.H{"items": items})
@@ -335,7 +362,7 @@ func (d *Deps) AdminSetGroupInbounds(c *gin.Context) {
 		util.BadRequest(c, "参数错误")
 		return
 	}
-	// 校验只包含 type=user 入站（relay/idle 不进用户授权体系）
+	// 校验只包含 type=user 入站（relay 不进用户授权体系）
 	if len(req.InboundIDs) > 0 {
 		var cnt int64
 		d.DB.Model(&models.Inbound{}).
@@ -508,11 +535,31 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
+	// 用户接入点（面向客户端与订阅的入口端点 + 开放权限组）
+	var accessPoints []models.UserAccessPoint
+	if err := d.DB.Order("id ASC").Find(&accessPoints).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	apIDs := make([]uint64, 0, len(accessPoints))
+	for i := range accessPoints {
+		apIDs = append(apIDs, accessPoints[i].ID)
+	}
+	apGroupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, apIDs)
+	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+	apViews := make([]AccessPointView, 0, len(accessPoints))
+
+	for i := range accessPoints {
+		ap := accessPoints[i]
+		apViews = append(apViews, buildAccessPointView(ap, apGroupMap[ap.ID], srvMap, inbMap, l4Map))
+	}
+
 	util.OK(c, gin.H{
 		"servers":           srvViews,
 		"inbounds":          inbViews,
 		"inbound_endpoints": epViews,
 		"l4_rules":          l4Views,
+		"access_points":     apViews,
 		"outbounds":         outViews,
 		"routing_rules":     ruleViews,
 	})

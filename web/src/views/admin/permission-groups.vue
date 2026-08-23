@@ -330,7 +330,7 @@ async function copyPreview() {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增权限组</el-button>
-        <span class="muted" style="font-size: 12px">节点入站定义所属权限组；每个权限组可自由定制专属 Clash / Mihomo 订阅模板与分流策略。</span>
+        <span class="muted" style="font-size: 12px">权限组用于组织与分发用户接入点；每个权限组可自由定制专属 Clash / Mihomo 订阅模板与分流策略。</span>
       </div>
     </div>
 
@@ -345,19 +345,29 @@ async function copyPreview() {
             <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
           </el-table-column>
           <el-table-column prop="remark" label="备注说明" min-width="180" />
-          <el-table-column label="包含入站节点" min-width="200">
+          <el-table-column label="包含用户接入点 (Endpoints)" min-width="220">
             <template #default="{ row }">
-              <template v-if="row.inbound_tags && row.inbound_tags.length">
+              <template v-if="row.access_point_names && row.access_point_names.length">
+                <span
+                  v-for="name in row.access_point_names"
+                  :key="name"
+                  class="x-chip blue"
+                  style="margin-right: 4px; margin-bottom: 2px"
+                >
+                  🌐 {{ name }}
+                </span>
+              </template>
+              <template v-else-if="row.inbound_tags && row.inbound_tags.length">
                 <span
                   v-for="tag in row.inbound_tags"
                   :key="tag"
-                  class="x-chip blue"
+                  class="x-chip purple"
                   style="margin-right: 4px; margin-bottom: 2px"
                 >
                   {{ tag }}
                 </span>
               </template>
-              <span v-else class="muted" style="font-size: 12px">暂无节点（在「节点」页编辑入站加入）</span>
+              <span v-else class="muted" style="font-size: 12px">暂无接入点（在「路由管理 - 拓扑画布」中配置接入点并绑定该组）</span>
             </template>
           </el-table-column>
           <el-table-column label="订阅模板" width="130">
@@ -413,9 +423,20 @@ async function copyPreview() {
                 <div class="item-value">{{ row.remark || '—' }}</div>
               </div>
               <div class="grid-item full-width">
-                <span class="item-label">包含入站节点</span>
+                <span class="item-label">包含接入点 (Endpoints)</span>
                 <div class="item-value">
-                  <template v-if="row.inbound_tags && row.inbound_tags.length">
+                  <template v-if="row.access_point_names && row.access_point_names.length">
+                    <el-tag
+                      v-for="name in row.access_point_names"
+                      :key="name"
+                      size="small"
+                      effect="plain"
+                      style="margin-right: 4px; margin-bottom: 2px"
+                    >
+                      🌐 {{ name }}
+                    </el-tag>
+                  </template>
+                  <template v-else-if="row.inbound_tags && row.inbound_tags.length">
                     <el-tag
                       v-for="tag in row.inbound_tags"
                       :key="tag"
@@ -426,7 +447,7 @@ async function copyPreview() {
                       {{ tag }}
                     </el-tag>
                   </template>
-                  <span v-else class="muted font-12">暂无节点</span>
+                  <span v-else class="muted font-12">暂无接入点</span>
                 </div>
               </div>
             </div>

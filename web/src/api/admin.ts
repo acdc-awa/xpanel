@@ -12,6 +12,7 @@ import type {
   InboundSettings,
   InboundEndpoint,
   L4PortRule,
+  UserAccessPoint,
   Invitation,
   Order,
   PermissionGroup,
@@ -33,6 +34,7 @@ export type {
   InboundSettings,
   InboundEndpoint,
   L4PortRule,
+  UserAccessPoint,
   Invitation,
   Order,
   PermissionGroup,
@@ -251,12 +253,17 @@ export interface InboundPayload {
   stream_settings?: string
   sniffing?: string
   ratio?: number
-  type?: string // user / relay / idle（Phase T）
+  type?: string // user / relay
   cert_id?: number
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
   share_addr_strategy?: string // node / listen / custom（订阅专用）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
+  share_security?: string // auto / tls / none
+  share_sni?: string
+  share_host?: string
+  share_path?: string
+  share_allow_insecure?: boolean
   permission_group_ids?: number[] // 开放权限组 ID 列表
 }
 
@@ -480,12 +487,33 @@ export interface TopologyData {
   inbounds: InboundItem[]
   inbound_endpoints?: InboundEndpoint[]
   l4_rules?: L4PortRule[]
+  access_points?: UserAccessPoint[]
   outbounds: TopologyOutbound[]
   routing_rules: TopologyRule[]
 }
 
 export function getTopology() {
   return http.get<ApiResp<TopologyData>>('/admin/topology')
+}
+
+export function getAccessPoints() {
+  return http.get<ApiResp<{ items: UserAccessPoint[] }>>('/admin/access-points')
+}
+
+export function createAccessPoint(payload: Partial<UserAccessPoint>) {
+  return http.post<ApiResp<{ access_point: UserAccessPoint }>>('/admin/access-points', payload)
+}
+
+export function updateAccessPoint(id: number, payload: Partial<UserAccessPoint>) {
+  return http.put<ApiResp<{ access_point: UserAccessPoint }>>(`/admin/access-points/${id}`, payload)
+}
+
+export function setAccessPointTarget(id: number, payload: { target_type: string; target_inbound_id?: number | null; target_l4_rule_id?: number | null }) {
+  return http.put<ApiResp<{ access_point: UserAccessPoint }>>(`/admin/access-points/${id}/target`, payload)
+}
+
+export function deleteAccessPoint(id: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/access-points/${id}`)
 }
 
 export function getInboundEndpoints(inboundId: number) {

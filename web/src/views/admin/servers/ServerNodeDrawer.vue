@@ -78,7 +78,6 @@ const l4RuleSaving = ref(false)
 const l4RuleEditing = ref<L4PortRule | null>(null)
 const allServers = ref<ServerItem[]>([])
 const allInbounds = ref<InboundItem[]>([])
-const permissionGroups = ref<PermissionGroup[]>([])
 
 const l4Form = reactive({
   listen_port: 30001,
@@ -86,7 +85,6 @@ const l4Form = reactive({
   target_inbound_id: 0,
   remark: '',
   enabled: true,
-  permission_group_ids: [] as number[],
 })
 
 const availableXrayServers = computed(() => {
@@ -115,10 +113,9 @@ async function loadL4Rules() {
 
 async function prepareL4FormData() {
   try {
-    const [s, i, g] = await Promise.all([getServers(), getInbounds(), getPermissionGroups()])
+    const [s, i] = await Promise.all([getServers(), getInbounds()])
     if (s.data.code === 0) allServers.value = s.data.data.items
     if (i.data.code === 0) allInbounds.value = i.data.data.items
-    if (g.data.code === 0) permissionGroups.value = g.data.data.items
   } catch {}
 }
 
@@ -131,7 +128,6 @@ async function openCreateL4Rule() {
   l4Form.target_inbound_id = 0
   l4Form.remark = ''
   l4Form.enabled = true
-  l4Form.permission_group_ids = []
   l4RuleOpen.value = true
 }
 
@@ -144,7 +140,6 @@ async function openEditL4Rule(rule: L4PortRule) {
   l4Form.target_inbound_id = rule.target_inbound_id
   l4Form.remark = rule.remark || ''
   l4Form.enabled = rule.enabled
-  l4Form.permission_group_ids = rule.permission_group_ids || []
   l4RuleOpen.value = true
 }
 
@@ -166,7 +161,6 @@ async function submitL4Rule() {
       target_inbound_id: l4Form.target_inbound_id,
       remark: l4Form.remark,
       enabled: l4Form.enabled,
-      permission_group_ids: l4Form.permission_group_ids,
     }
     const { data } = l4RuleEditing.value
       ? await updateL4Rule(props.server.id, l4RuleEditing.value.id, payload)
@@ -511,11 +505,6 @@ watch(
       <el-form-item label="目标用户入站 (Target Inbound)" required>
         <el-select v-model="l4Form.target_inbound_id" style="width: 100%" placeholder="请选择目标用户入站">
           <el-option v-for="inb in availableTargetInbounds" :key="inb.id" :label="`${inb.tag} (:${inb.port})`" :value="inb.id" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="开放权限组（显式白名单，留空对全员不可见）">
-        <el-select v-model="l4Form.permission_group_ids" multiple collapse-tags collapse-tags-tooltip placeholder="请勾选可见权限组" style="width: 100%">
-          <el-option v-for="g in permissionGroups" :key="g.id" :label="g.name" :value="g.id" />
         </el-select>
       </el-form-item>
       <el-form-item label="备注说明">

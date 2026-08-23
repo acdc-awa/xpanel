@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, VideoPlay } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -27,6 +27,8 @@ const servers = ref<ServerItem[]>([])
 const groups = ref<PermissionGroup[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
+
+const xrayServers = computed(() => servers.value.filter((s) => s.server_type !== 'l4_relay'))
 
 function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
@@ -102,18 +104,26 @@ function editorModelValue(): string {
     /* 保持默认 */
   }
   return JSON.stringify({
-    settings_json: editing.value.settings_json,
+    tag: editing.value.tag,
+    port: editing.value.port,
+    listen: editing.value.listen,
     network,
     tls_type: tlsType,
-    protocol: editing.value.protocol,
-    port: editing.value.port,
-    tag: editing.value.tag,
-    listen: editing.value.listen || '0.0.0.0',
     flow: editing.value.flow || '',
-    ratio: editing.value.ratio ?? 1,
-    share_addr_strategy: editing.value.share_addr_strategy || 'node',
-    share_addr: editing.value.share_addr || '',
-    share_port: editing.value.share_port || 0,
+    settings_json: editing.value.settings_json,
+    stream_settings: editing.value.stream_settings,
+    sniffing: editing.value.sniffing,
+    ratio: editing.value.ratio,
+    type: editing.value.type || 'user',
+    cert_id: editing.value.cert_id || 0,
+    share_addr_strategy: editing.value.share_addr_strategy,
+    share_addr: editing.value.share_addr,
+    share_port: editing.value.share_port,
+    share_security: editing.value.share_security,
+    share_sni: editing.value.share_sni,
+    share_host: editing.value.share_host,
+    share_path: editing.value.share_path,
+    share_allow_insecure: editing.value.share_allow_insecure,
     permission_group_ids: editing.value.permission_group_ids || [],
   })
 }
@@ -121,14 +131,14 @@ function editorModelValue(): string {
 function openCreate() {
   editing.value = null
   inboundChange.value = null
-  formServerId.value = serverFilter.value ?? servers.value[0]?.id ?? 0
+  formServerId.value = serverFilter.value || xrayServers.value[0]?.id || 0
   formType.value = 'user'
   formCertId.value = 0
   editorOpen.value = true
 }
 
 function openEdit(row: any) {
-  editing.value = row
+  editing.value = row as InboundItem
   inboundChange.value = null
   formServerId.value = row.server_id
   formType.value = row.type || 'user'
@@ -136,27 +146,28 @@ function openEdit(row: any) {
   editorOpen.value = true
 }
 
-function onInboundChange(payload: InboundEditorChangePayload) {
+function onInboundEditorChange(payload: InboundEditorChangePayload) {
   inboundChange.value = payload
 }
 
 async function save() {
   const c = inboundChange.value
   if (!c) {
-    ElMessage.warning('请先在表单中编辑参数')
-    return
-  }
-  if (!c.tag.trim() || !c.port) {
-    ElMessage.warning('请填写标签与端口')
+    ElMessage.warning('请先在表单中编辑入站配置')
     return
   }
   if (!formServerId.value) {
     ElMessage.warning('请选择所属服务器')
     return
   }
+  if (!c.tag.trim() || !c.port) {
+    ElMessage.warning('请填写标签与端口')
+    return
+  }
+
   saving.value = true
   try {
-    const payload: Partial<InboundPayload> = {
+    const payload: InboundPayload = {
       server_id: formServerId.value,
       tag: c.tag,
       protocol: c.protocol,
@@ -172,18 +183,32 @@ async function save() {
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
       share_port: c.sharePort || undefined,
+      share_security: c.shareSecurity || undefined,
+      share_sni: c.shareSni || undefined,
+      share_host: c.shareHost || undefined,
+      share_path: c.sharePath || undefined,
+      share_allow_insecure: c.shareAllowInsecure,
       permission_group_ids: c.permissionGroupIds,
     }
-    const { data } = editing.value
-      ? await updateInbound(editing.value.id, payload)
-      : await createInbound(payload as InboundPayload)
-    if (data.code === 0) {
-      ElMessage.success(editing.value ? '入站已更新（将自动推送到节点）' : '入站已创建（将自动推送到节点）')
-      editorOpen.value = false
-      editing.value = null
-      load()
+
+    if (editing.value) {
+      const { data } = await updateInbound(editing.value.id, payload)
+      if (data.code === 0) {
+        ElMessage.success('已保存')
+        editorOpen.value = false
+        load()
+      } else {
+        ElMessage.error(data.message)
+      }
     } else {
-      ElMessage.error(data.message)
+      const { data } = await createInbound(payload)
+      if (data.code === 0) {
+        ElMessage.success('已创建')
+        editorOpen.value = false
+        load()
+      } else {
+        ElMessage.error(data.message)
+      }
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '保存失败'))
@@ -197,7 +222,7 @@ async function toggle(row: any) {
   try {
     const { data } = await toggleInbound(row.id)
     if (data.code === 0) {
-      ElMessage.success(data.data.enabled ? '已启用' : '已停用')
+      ElMessage.success(row.enabled ? '已停用' : '已启用')
       load()
     } else {
       ElMessage.error(data.message)
@@ -218,6 +243,8 @@ async function remove(row: any) {
     if (data.code === 0) {
       ElMessage.success('已删除')
       load()
+    } else {
+      ElMessage.error(errMsg(data.message, '删除失败'))
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '删除失败'))
@@ -238,8 +265,8 @@ function transportOf(row: any): string {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-select v-model="serverFilter" placeholder="全部服务器" clearable style="width: 200px">
-          <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
+        <el-select v-model="serverFilter" placeholder="全部 Xray 服务器" clearable style="width: 200px">
+          <el-option v-for="s in xrayServers" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
@@ -248,7 +275,13 @@ function transportOf(row: any): string {
       </div>
     </div>
 
-    <el-alert type="info" :closable="false" show-icon title="在此为服务器添加接入点（入站）：用户入站进订阅、转发入站作为内部落地（需执行「生成内部 UUID」）、闲置仅预留。新增/编辑/停用后自动生成配置推送到节点（离线保存，上线补推）。" style="margin-bottom: 14px" />
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      title="在此为 Xray 服务器配置物理入站：用户入站承载用户真实流量，转发入站作为内部链式落地节点。新增/编辑/停用后自动生成配置推送到节点（离线保存，上线补推）。"
+      style="margin-bottom: 14px"
+    />
 
     <BaseCard>
       <!-- 桌面端表格视图 -->
@@ -263,7 +296,6 @@ function transportOf(row: any): string {
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
               <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
-              <span v-else-if="row.type === 'idle'" class="x-chip gray">闲置</span>
               <span v-else class="x-chip purple">用户</span>
             </template>
           </el-table-column>
@@ -283,7 +315,7 @@ function transportOf(row: any): string {
           </el-table-column>
           <el-table-column label="开放权限组" min-width="150">
             <template #default="{ row }">
-              <template v-if="row.type === 'relay' || row.type === 'idle'">
+              <template v-if="row.type === 'relay'">
                 <span class="muted" style="font-size: 12px">内部/落地</span>
               </template>
               <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
@@ -314,7 +346,7 @@ function transportOf(row: any): string {
           </el-table-column>
           <template #empty>
             <div style="padding: 30px 0; color: var(--x-text-3)">
-              {{ serverFilter ? '该服务器尚未配置接入点，点击右上角「新增入站」' : '尚未配置任何接入点。先到「服务器」页添加服务器，再点击右上角「新增入站」' }}
+              {{ serverFilter ? '该服务器尚未配置入站，点击右上角「新增入站」' : '尚未配置任何入站。先到「服务器」页添加服务器，再点击右上角「新增入站」' }}
             </div>
           </template>
         </el-table>
@@ -323,7 +355,7 @@ function transportOf(row: any): string {
       <!-- 移动端卡片流视图 -->
       <div class="mobile-cards-view">
         <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          {{ serverFilter ? '该服务器尚未配置接入点，点击右上角「新增入站」' : '尚未配置任何接入点，点击右上角「新增入站」' }}
+          {{ serverFilter ? '该服务器尚未配置入站，点击右上角「新增入站」' : '尚未配置任何入站，点击右上角「新增入站」' }}
         </div>
         <div v-else class="mobile-data-card-list">
           <div v-for="row in list" :key="row.id" class="mobile-data-card">
@@ -332,7 +364,6 @@ function transportOf(row: any): string {
                 <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
                 <span style="font-weight: 700">{{ row.tag }}</span>
                 <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
-                <span v-else-if="row.type === 'idle'" class="x-chip gray">闲置</span>
                 <span v-else class="x-chip purple">用户</span>
               </div>
               <el-switch :model-value="row.enabled" size="small" @change="toggle(row)" />
@@ -357,7 +388,7 @@ function transportOf(row: any): string {
               <div class="grid-item">
                 <span class="item-label">开放权限组</span>
                 <div class="item-value">
-                  <template v-if="row.type === 'relay' || row.type === 'idle'">
+                  <template v-if="row.type === 'relay'">
                     <span class="muted" style="font-size: 11.5px">内部/落地</span>
                   </template>
                   <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
@@ -402,7 +433,7 @@ function transportOf(row: any): string {
       <div v-if="!editing" style="margin-bottom: 14px">
         <el-form-item label="所属目标服务器" style="margin-bottom: 0">
           <el-select v-model="formServerId" style="width: 100%" placeholder="请选择要绑定入站的服务器">
-            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+            <el-option v-for="s in xrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
           </el-select>
         </el-form-item>
       </div>
@@ -416,7 +447,7 @@ function transportOf(row: any): string {
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"
         :permission-group-ids="editing?.permission_group_ids || []"
-        @change="onInboundChange"
+        @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"
         @internal-uuid-changed="load"

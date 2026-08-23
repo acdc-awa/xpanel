@@ -669,8 +669,7 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 }
 
 // buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
-// 动态注入 clients 列表（Phase T：按入站三态分流——user 动态用户 / relay 内部 UUID /
-// idle 由 Generate 过滤不达此处）。其余字段完全透传。
+// 动态注入 clients 列表（按入站二态分流——user 动态用户 / relay 内部 UUID）。其余字段完全透传。
 func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ctx *GenerateContext) (map[string]any, error) {
 	spec := contracts.DecodeInbound(inb)
 

@@ -32,7 +32,7 @@ type inboundView struct {
 	TotalGB        int64     `json:"total_gb"`
 	ExpiryTime     *time.Time `json:"expiry_time,omitempty"`
 	Enabled        bool      `json:"enabled"`
-	Type           string    `json:"type"`                       // user / relay / idle（Phase T）
+	Type           string    `json:"type"`                       // user / relay
 	InternalUUID   string    `json:"internal_uuid,omitempty"`    // relay 只读（节点上报）
 	CertID         *uint64   `json:"cert_id,omitempty"`          // 绑定的证书
 	Flow              string    `json:"flow"`                       // 入站级流控（空=自动 / xtls-rprx-vision / none）
@@ -61,7 +61,7 @@ type inboundForm struct {
 	Ratio          float64 `json:"ratio"`
 	TotalGB        int64     `json:"total_gb"`          // J9：入站总流量上限（GB，0=不限）
 	ExpiryTime     *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
-	Type           string  `json:"type"`      // user / relay / idle（空 = user，T4）
+	Type           string  `json:"type"`      // user / relay（空 = user）
 	CertID         *uint64 `json:"cert_id"`   // 绑定证书（T5 校验存在性）
 	Flow              string  `json:"flow"`      // 入站级流控（空=自动 / xtls-rprx-vision / none）
 	ShareAddrStrategy string  `json:"share_addr_strategy"` // node / listen / custom
@@ -142,6 +142,10 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "服务器不存在")
 		return
 	}
+	if srv.ServerType == "l4_relay" {
+		util.BadRequest(c, "L4纯四层中转服务器不支持创建Xray入站，请在拓扑中配置端口转发规则")
+		return
+	}
 	if err := xray.ValidateInbound(req.SettingsJSON, req.StreamSettings, req.Sniffing); err != nil {
 		util.BadRequest(c, err.Error())
 		return
@@ -162,7 +166,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != "" && !validInboundType(req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / idle")
+		util.BadRequest(c, "入站类型仅支持 user / relay")
 		return
 	}
 	if req.Flow != "" && !validInboundFlow(req.Flow) {
@@ -322,7 +326,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != nil && !validInboundType(*req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / idle")
+		util.BadRequest(c, "入站类型仅支持 user / relay")
 		return
 	}
 	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {

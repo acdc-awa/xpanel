@@ -187,12 +187,14 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		return
 	}
 	// Phase T：InboundRef 校验（引用存在 + 无环）+ 目标自动标 relay（记录 PreviousType）
-	if req.InboundRef != nil {
+	if req.InboundRef != nil && *req.InboundRef > 0 {
 		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
 			util.BadRequest(c, msg)
 			return
 		}
 		d.ensureRelayMark(*req.InboundRef)
+	} else {
+		req.InboundRef = nil
 	}
 
 	enabled := true
@@ -358,7 +360,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 			return
 		}
 	}
-	// 引用目标维护：新目标标 relay；旧目标（被改走/解除）无其他引用则回 idle
+	// 引用目标维护：新目标标 relay；旧目标（被改走/解除）无其他引用则回退为原有类型
 	if req.InboundRef != nil {
 		if *req.InboundRef > 0 {
 			d.ensureRelayMark(*req.InboundRef)
@@ -485,7 +487,7 @@ func (d *Deps) ensureRelayMark(targetInboundID uint64) {
 }
 
 // demoteIfUnreferenced 目标入站不再被任何出站引用时回退到引用前类型（PreviousType）；
-// 无 PreviousType（原本即 relay/idle 或手动管理）则保持现状不动。
+// 无 PreviousType 则保持现状不动。
 func (d *Deps) demoteIfUnreferenced(targetInboundID uint64) {
 	var cnt int64
 	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", targetInboundID).Count(&cnt)

@@ -55,9 +55,9 @@ type Inbound struct {
 	ShareHost          string `gorm:"size:255" json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
 	SharePath          string `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
 	ShareAllowInsecure bool   `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
-	// Phase T 拓扑化：入站三态
-	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（进订阅）/ relay（内部转发）/ idle（闲置）
-	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 原本即 relay/idle，保持不动）
+	// 入站物理类型二态：user / relay
+	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（用户入站）/ relay（内部链式转发入站）
+	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
 	InternalUUID  string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
 	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
 	Enabled       bool    `gorm:"default:true" json:"enabled"`
