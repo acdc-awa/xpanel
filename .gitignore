@@ -16,6 +16,7 @@ Thumbs.db
 # 本地缓存/临时
 .cache/
 tmp/
+.worktrees/
 
 # 构建生成
 web/auto-imports.d.ts
@@ -53,6 +54,11 @@ configs/config.yaml
 .agent/
 .claude/
 .zcode/
+
+# 自升级分发包与临时备份（.gitignore 显式忽略，防污染 git 树）
+internal/master/embed/agent-dist/
+internal/master/embed/agent-dist/**
+
 
 # 外部参考仓库素材（XTLS/REALITY、Xray-examples、chika0801、lxhao61 等；提炼文档入库，素材不入库）
 .references/
