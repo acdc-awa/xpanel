@@ -528,60 +528,10 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 			}
 		}
 
-		var dto *contracts.ProxyNodeDTO
-		if ap.TargetType == "inbound" && ap.TargetInboundID != nil {
-			targetInb, ok := inbMap[*ap.TargetInboundID]
-			if !ok {
-				continue
-			}
-			targetSrv, ok := srvMap[targetInb.ServerID]
-			if !ok {
-				continue
-			}
-			dto = subscribe.BuildNodeDTO(&targetSrv, &targetInb, mockUUID)
-			if dto != nil {
-				if ap.CustomHost != "" {
-					dto.ServerHost = ap.CustomHost
-				}
-				if ap.CustomPort > 0 {
-					dto.ServerPort = ap.CustomPort
-				}
-			}
-		} else if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil {
-			l4Rule, ok := l4Map[*ap.TargetL4RuleID]
-			if !ok {
-				continue
-			}
-			l4Srv, ok := srvMap[l4Rule.ServerID]
-			if !ok {
-				continue
-			}
-			targetInb, ok := inbMap[l4Rule.TargetInboundID]
-			if !ok {
-				continue
-			}
-			targetSrv, ok := srvMap[targetInb.ServerID]
-			if !ok {
-				continue
-			}
-			dto = subscribe.BuildNodeDTO(&targetSrv, &targetInb, mockUUID)
-			if dto != nil {
-				if ap.CustomHost != "" {
-					dto.ServerHost = ap.CustomHost
-				} else {
-					dto.ServerHost = l4Srv.Host
-				}
-				if ap.CustomPort > 0 {
-					dto.ServerPort = ap.CustomPort
-				} else {
-					dto.ServerPort = l4Rule.ListenPort
-				}
-			}
-		}
+		dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4Map, mockUUID)
 		if dto == nil {
 			continue
 		}
-		dto.Name = ap.Name
 		dtos = append(dtos, *dto)
 	}
 	return dtos

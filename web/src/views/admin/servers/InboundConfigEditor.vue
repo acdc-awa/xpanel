@@ -971,7 +971,7 @@ async function copyText(text: string, label: string) {
             <div class="card-head-flex">
               <div class="card-title">
                 <span>订阅分享与反代覆写</span>
-                <el-tooltip content="订阅链接中生成的节点连接地址/端口/TLS安全层。支持服务端明文运行 + 前置 Caddy/Nginx TLS 卸载与 CDN 模式。" placement="top">
+                <el-tooltip content="订阅链接中生成的节点连接地址/端口/TLS安全层。地址为本卡片「分享地址」组（节点自有 IP/端口，直连兜底），接入点覆写优先，L4 中转时取转发端点；支持服务端明文运行 + 前置 Caddy/Nginx TLS 卸载与 CDN 模式。" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
@@ -988,6 +988,10 @@ async function copyText(text: string, label: string) {
                   <el-option label="自定义地址" value="custom" />
                 </el-select>
               </el-form-item>
+
+              <div style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
+                节点自有 IP/端口（兜底层）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
+              </div>
 
               <el-form-item label="订阅安全层 (TLS)">
                 <el-select v-model="localShareSecurity" style="width: 100%">

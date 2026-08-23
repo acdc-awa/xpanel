@@ -2001,7 +2001,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <!-- 高级覆写（可选） -->
         <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
           <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
-            高级自定义覆写（选填，留空则完全自动继承连线机器的 Host 与 Port）
+            订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址，中转→转发机 Host/监听端口）
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
             <el-form-item label="自定义连接 Host" style="margin-bottom: 0">

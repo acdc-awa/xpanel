@@ -112,64 +112,12 @@ func (d *Deps) Subscribe(c *gin.Context) {
 				continue
 			}
 
-			// 情况 A：直连用户入站
-			if ap.TargetType == "inbound" && ap.TargetInboundID != nil {
-				targetInb, ok := inbMap[*ap.TargetInboundID]
-				if !ok {
-					continue
-				}
-				targetSrv, ok := srvMap[targetInb.ServerID]
-				if !ok {
-					continue
-				}
-				dto := subscribe.BuildNodeDTO(&targetSrv, &targetInb, user.UUID)
-				if dto != nil {
-					dto.Name = ap.Name
-					if ap.CustomHost != "" {
-						dto.ServerHost = ap.CustomHost
-					}
-					if ap.CustomPort > 0 {
-						dto.ServerPort = ap.CustomPort
-					}
-					dtos = append(dtos, *dto)
-				}
+			// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址）→ 经 L4 覆写为转发端点 → AP 消费（命名/可选覆写）
+			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4RuleMap, user.UUID)
+			if dto == nil {
 				continue
 			}
-
-			// 情况 B：经 L4 端口转发中转（host/port 沿管道覆写为中转机监听）
-			if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil {
-				l4Rule, ok := l4RuleMap[*ap.TargetL4RuleID]
-				if !ok {
-					continue
-				}
-				l4Srv, ok := srvMap[l4Rule.ServerID]
-				if !ok {
-					continue
-				}
-				targetInb, ok := inbMap[l4Rule.TargetInboundID]
-				if !ok {
-					continue
-				}
-				targetSrv, ok := srvMap[targetInb.ServerID]
-				if !ok {
-					continue
-				}
-				dto := subscribe.BuildNodeDTO(&targetSrv, &targetInb, user.UUID)
-				if dto != nil {
-					dto.Name = ap.Name
-					if ap.CustomHost != "" {
-						dto.ServerHost = ap.CustomHost
-					} else {
-						dto.ServerHost = l4Srv.Host
-					}
-					if ap.CustomPort > 0 {
-						dto.ServerPort = ap.CustomPort
-					} else {
-						dto.ServerPort = l4Rule.ListenPort
-					}
-					dtos = append(dtos, *dto)
-				}
-			}
+			dtos = append(dtos, *dto)
 		}
 	}
 	if len(dtos) == 0 {

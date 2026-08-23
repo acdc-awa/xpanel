@@ -587,7 +587,7 @@ function transportOf(row: any): string {
           type="info"
           :closable="false"
           show-icon
-          title="用户接入点是订阅的唯一生成来源：定义别名与开放权限组（白名单），连接配置沿拓扑管道自动继承连线机器的 Host 与 Port，亦可在此手动绑定目标或覆写。"
+          title="用户接入点是订阅的唯一生成来源：定义别名与开放权限组（白名单）。订阅地址沿管道继承：直连继承入站分享地址（节点 IP/端口），经 L4 中转继承转发机 Host/监听端口，接入点可再覆写。"
           style="margin-bottom: 14px"
         />
 
@@ -722,7 +722,7 @@ function transportOf(row: any): string {
 
             <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
               <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
-                高级自定义覆写（选填，留空则完全自动继承连线机器的 Host 与 Port）
+                订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址，中转→转发机 Host/监听端口）
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
                 <el-form-item label="自定义连接 Host" style="margin-bottom: 0">

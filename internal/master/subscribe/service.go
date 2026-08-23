@@ -459,6 +459,9 @@ func NodeName(server *models.Server, inb *models.Inbound) string {
 }
 
 // ShareAddrOf 计算订阅对外地址与端口（订阅专用，与 xray 物理监听解耦）。
+// ShareAddrOf 解析入站「节点自有地址」：按 ShareAddrStrategy 取自定义/监听地址，否则回退
+// 服务器 Host 与入站端口。这是订阅管道的第一层；经 L4 中转的订阅会被转发端点覆写（见
+// ResolveAPSubscription），直连入站且接入点未覆写时本值是最终地址。
 func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 	port := inb.Port
 	if inb.SharePort > 0 {
@@ -504,6 +507,78 @@ func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string) *con
 	})
 	if dto == nil {
 		log.Printf("[subscribe] 入站 %s 协议参数不足以产出订阅节点（如 reality 缺 SNI/公钥），跳过", inb.Tag)
+	}
+	return dto
+}
+
+// ResolveAPSubscription 沿订阅管道解析用户接入点（AP）产出的订阅节点（/sub 实时订阅与画布预览同源）：
+//  1. 入站自有地址：BuildNodeDTO 按入站 ShareAddrStrategy（custom/listen/回退）解析节点 IP/端口；
+//  2. 管道覆写：AP 指向 L4 转发规则时，订阅消费者实际连接转发端点，host/port 覆写为
+//     转发机 Host + L4 监听端口（入站分享地址描述的是目标入站自身，在此语义不适用）；
+//  3. AP 消费层：命名 + 可选 CustomHost/CustomPort 覆写（最高优先）。
+//
+// 目标缺失 / 权限组过滤由调用方负责；此处仅解析，解析失败返回 nil。
+func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.Server, inbMap map[uint64]models.Inbound, l4Map map[uint64]models.L4PortRule, userUUID string) *contracts.ProxyNodeDTO {
+	var (
+		targetInb models.Inbound
+		targetSrv models.Server
+		ok        bool
+		viaL4     bool
+		l4Host    string
+		l4Port    int
+	)
+	switch ap.TargetType {
+	case "inbound":
+		if ap.TargetInboundID == nil {
+			return nil
+		}
+		targetInb, ok = inbMap[*ap.TargetInboundID]
+		if !ok {
+			return nil
+		}
+		targetSrv, ok = srvMap[targetInb.ServerID]
+		if !ok {
+			return nil
+		}
+	case "l4_rule":
+		if ap.TargetL4RuleID == nil {
+			return nil
+		}
+		l4Rule, ok := l4Map[*ap.TargetL4RuleID]
+		if !ok {
+			return nil
+		}
+		l4Srv, ok := srvMap[l4Rule.ServerID]
+		if !ok {
+			return nil
+		}
+		targetInb, ok = inbMap[l4Rule.TargetInboundID]
+		if !ok {
+			return nil
+		}
+		targetSrv, ok = srvMap[targetInb.ServerID]
+		if !ok {
+			return nil
+		}
+		viaL4, l4Host, l4Port = true, l4Srv.Host, l4Rule.ListenPort
+	default:
+		return nil
+	}
+
+	dto := BuildNodeDTO(&targetSrv, &targetInb, userUUID)
+	if dto == nil {
+		return nil
+	}
+	if viaL4 {
+		dto.ServerHost = l4Host
+		dto.ServerPort = l4Port
+	}
+	dto.Name = ap.Name
+	if ap.CustomHost != "" {
+		dto.ServerHost = ap.CustomHost
+	}
+	if ap.CustomPort > 0 {
+		dto.ServerPort = ap.CustomPort
 	}
 	return dto
 }
