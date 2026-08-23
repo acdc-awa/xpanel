@@ -20,6 +20,7 @@ import (
 // serverView 服务器对外结构。
 type serverView struct {
 	ID                    uint64     `json:"id"`
+	ServerType            string     `json:"server_type"`             // xray / l4_relay
 	Name                  string     `json:"name"`
 	Host                  string     `json:"host"`
 	NodeID                string     `json:"node_id"`
@@ -35,8 +36,12 @@ type serverView struct {
 }
 
 func toServerView(s *models.Server) serverView {
+	st := s.ServerType
+	if st == "" {
+		st = models.ServerTypeXray
+	}
 	return serverView{
-		ID: s.ID, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
+		ID: s.ID, ServerType: st, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
 		Location: s.Location, Remark: s.Remark, Status: s.Status,
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
@@ -74,6 +79,7 @@ func (d *Deps) AdminServers(c *gin.Context) {
 
 func (d *Deps) AdminCreateServer(c *gin.Context) {
 	var req struct {
+		ServerType            string `json:"server_type"`
 		Name                  string `json:"name" binding:"required,max=64"`
 		Host                  string `json:"host" binding:"required,max=255"`
 		Location              string `json:"location" binding:"max=64"`
@@ -89,6 +95,10 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 	if req.DefaultOutboundTag == "" {
 		req.DefaultOutboundTag = "direct"
 	}
+	st := req.ServerType
+	if st == "" {
+		st = models.ServerTypeXray
+	}
 	nodeID := "node-" + util.RandomID(6)
 	secret, err := util.NewNodeSecret()
 	if err != nil {
@@ -96,6 +106,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		return
 	}
 	server := models.Server{
+		ServerType:            st,
 		Name:                  req.Name,
 		Host:                  req.Host,
 		NodeID:                nodeID,
@@ -159,6 +170,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		return
 	}
 	var req struct {
+		ServerType            *string `json:"server_type"`
 		Name                  *string `json:"name"`
 		Host                  *string `json:"host"`
 		Location              *string `json:"location"`
@@ -172,6 +184,9 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
+	if req.ServerType != nil && *req.ServerType != "" {
+		updates["server_type"] = *req.ServerType
+	}
 	if req.Name != nil {
 		if *req.Name == "" {
 			util.BadRequest(c, "名称不能为空")

@@ -454,11 +454,67 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
+	// 附加接入点（轻量 + 开放权限组）
+	var endpoints []models.InboundEndpoint
+	if err := d.DB.Order("inbound_id ASC, priority ASC, id ASC").Find(&endpoints).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	epIDs := make([]uint64, 0, len(endpoints))
+	for i := range endpoints {
+		epIDs = append(epIDs, endpoints[i].ID)
+	}
+	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
+	epViews := make([]InboundEndpointView, 0, len(endpoints))
+	for i := range endpoints {
+		gids := epGroupMap[endpoints[i].ID]
+		if gids == nil {
+			gids = []uint64{}
+		}
+		epViews = append(epViews, InboundEndpointView{
+			InboundEndpoint:    endpoints[i],
+			PermissionGroupIDs: gids,
+		})
+	}
+
+	// L4 端口转发规则（轻量 + 开放权限组）
+	var l4Rules []models.L4PortRule
+	if err := d.DB.Order("server_id ASC, listen_port ASC, id ASC").Find(&l4Rules).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	l4RuleIDs := make([]uint64, 0, len(l4Rules))
+	for i := range l4Rules {
+		l4RuleIDs = append(l4RuleIDs, l4Rules[i].ID)
+	}
+	l4GroupMap := services.BatchL4RulePermissionGroupIDs(d.DB, l4RuleIDs)
+	l4Views := make([]l4RuleView, 0, len(l4Rules))
+	for i := range l4Rules {
+		gids := l4GroupMap[l4Rules[i].ID]
+		if gids == nil {
+			gids = []uint64{}
+		}
+		l4Views = append(l4Views, l4RuleView{
+			ID:                 l4Rules[i].ID,
+			ServerID:           l4Rules[i].ServerID,
+			ListenPort:         l4Rules[i].ListenPort,
+			TargetServerID:     l4Rules[i].TargetServerID,
+			TargetInboundID:    l4Rules[i].TargetInboundID,
+			Remark:             l4Rules[i].Remark,
+			Enabled:            l4Rules[i].Enabled,
+			PermissionGroupIDs: gids,
+			CreatedAt:          l4Rules[i].CreatedAt,
+			UpdatedAt:          l4Rules[i].UpdatedAt,
+		})
+	}
+
 	util.OK(c, gin.H{
-		"servers":       srvViews,
-		"inbounds":      inbViews,
-		"outbounds":     outViews,
-		"routing_rules": ruleViews,
+		"servers":           srvViews,
+		"inbounds":          inbViews,
+		"inbound_endpoints": epViews,
+		"l4_rules":          l4Views,
+		"outbounds":         outViews,
+		"routing_rules":     ruleViews,
 	})
 }
 

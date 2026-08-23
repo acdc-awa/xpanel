@@ -145,14 +145,9 @@ func TestCheckInboundRefTargets(t *testing.T) {
 	if msg := d.checkInboundRef(s1, 9999, 0); msg == "" {
 		t.Error("引用不存在的入站应报错")
 	}
-	// 目标为 idle
+	// 目标停用
 	var a models.Inbound
 	db.First(&a, aIn)
-	db.Model(&a).Update("type", models.InboundTypeIdle)
-	if msg := d.checkInboundRef(s1, aIn, 0); msg == "" {
-		t.Error("引用 idle 入站应报错")
-	}
-	// 目标停用
 	db.Model(&a).Updates(map[string]any{"type": models.InboundTypeRelay, "enabled": false})
 	if msg := d.checkInboundRef(s1, aIn, 0); msg == "" {
 		t.Error("引用停用入站应报错")

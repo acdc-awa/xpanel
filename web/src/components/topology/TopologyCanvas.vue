@@ -17,7 +17,7 @@ import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FullScreen, MagicStick, RefreshRight } from '@element-plus/icons-vue'
+import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Link, Setting } from '@element-plus/icons-vue'
 import {
   createServerOutbound,
   createServerRoutingRule,
@@ -27,9 +27,16 @@ import {
   saveTopologyLayout,
   updateInbound,
   updateServerOutbound,
+  createL4Rule,
+  updateL4Rule,
+  deleteL4Rule,
+  getPermissionGroups,
   type TopologyData,
 } from '@/api/admin'
+import type { InboundEndpoint, InboundItem, ServerOutbound, L4PortRule, PermissionGroup } from '@/api/types'
 import { errMsg } from '@/api/http'
+import InboundEndpointsDrawer from '@/views/admin/servers/InboundEndpointsDrawer.vue'
+import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
 
 const props = defineProps<{
   topology: TopologyData | null
@@ -39,6 +46,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'changed'): void
   (e: 'open-server', serverId: number): void
+  (e: 'open-create-inbound', serverId: number): void
+  (e: 'open-create-outbound', serverId: number): void
 }>()
 
 // ---- 节点/边构建 ----
@@ -53,6 +62,8 @@ interface BoxOutbound {
 interface BoxData {
   server: TopologyData['servers'][number]
   inbounds: TopologyData['inbounds']
+  endpointsMap: Map<number, InboundEndpoint[]>
+  l4Rules?: L4PortRule[]
   outbounds: BoxOutbound[]
   boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
 }
@@ -198,8 +209,25 @@ function nodePosOf(s: TopologyData['servers'][number], idx: number) {
 
 function typeInfo(t?: string) {
   if (t === 'relay') return { cls: 'relay', text: '转发' }
-  if (t === 'idle') return { cls: 'idle', text: '闲置' }
   return { cls: 'user', text: '用户' }
+}
+
+// 快速切换入站二态 (user <-> relay)
+async function cycleInboundType(inb: InboundItem) {
+  if (!props.editable) return
+  const nextType = inb.type === 'relay' ? 'user' : 'relay'
+  const labels: Record<string, string> = { user: '用户入站', relay: '转发入站 (relay)' }
+  try {
+    const { data } = await updateInbound(inb.id, { type: nextType })
+    if (data.code === 0) {
+      ElMessage.success(`入站「${inb.tag}」已切换为 ${labels[nextType]}`)
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '切换类型失败'))
+  }
 }
 
 // 提取入站传输层与安全层摘要标签
@@ -224,6 +252,66 @@ function inboundSummary(inb: TopologyData['inbounds'][number]) {
     net,
     sec,
   }
+}
+
+// Caddy/Nginx 认知层：按域名/SNI 对 XHTTP 入站进行聚合
+export interface CaddyGroup {
+  domain: string
+  inbounds: InboundItem[]
+}
+
+function getCaddyGrouping(inbounds: InboundItem[]): { caddyGroups: CaddyGroup[]; nativeInbounds: InboundItem[] } {
+  const caddyInbs: InboundItem[] = []
+  const nativeInbs: InboundItem[] = []
+
+  for (const inb of inbounds) {
+    const summary = inboundSummary(inb)
+    const isXhttp = inb.protocol === 'vless' && (summary.net === 'XHTTP' || inb.stream_settings?.includes('"network":"xhttp"'))
+    if (isXhttp) {
+      caddyInbs.push(inb)
+    } else {
+      nativeInbs.push(inb)
+    }
+  }
+
+  const map = new Map<string, InboundItem[]>()
+  for (const inb of caddyInbs) {
+    let domain = inb.share_sni || inb.share_addr || ''
+    if (!domain) {
+      try {
+        const s = JSON.parse(inb.stream_settings || '{}')
+        domain = s.tlsSettings?.serverName || ''
+      } catch {}
+    }
+    if (!domain) domain = '默认域名 (Host)'
+    if (!map.has(domain)) map.set(domain, [])
+    map.get(domain)!.push(inb)
+  }
+
+  const caddyGroups: CaddyGroup[] = Array.from(map.entries()).map(([domain, inbs]) => ({ domain, inbounds: inbs }))
+  return { caddyGroups, nativeInbounds: nativeInbs }
+}
+
+function copyCaddySnippet(group: CaddyGroup, srvHost: string) {
+  const domain = group.domain !== '默认域名 (Host)' ? group.domain : srvHost || 'node.example.com'
+  const lines = [`# === Caddyfile 示例 (${domain}) ===`, `${domain} {`]
+  for (const inb of group.inbounds) {
+    let path = inb.share_path || ''
+    if (!path) {
+      try {
+        const s = JSON.parse(inb.stream_settings || '{}')
+        path = s.xhttpSettings?.path || '/xhttp'
+      } catch {
+        path = '/xhttp'
+      }
+    }
+    lines.push(`    # 入站 [${inb.tag}] 转发至本地 Xray 端口`)
+    lines.push(`    reverse_proxy ${path} 127.0.0.1:${inb.port}`)
+  }
+  lines.push(`}`)
+  const snippet = lines.join('\n')
+  navigator.clipboard.writeText(snippet)
+  ElMessage.success(`已复制 ${domain} 的 Caddyfile 配置片段`)
 }
 
 // 盒内路由线：S 形贝塞尔
@@ -336,6 +424,14 @@ function buildGraph(data: TopologyData) {
     inbByServer.get(inb.server_id)!.push(inb)
   }
 
+  const endpointsMap = new Map<number, InboundEndpoint[]>()
+  if (data.inbound_endpoints) {
+    for (const ep of data.inbound_endpoints) {
+      if (!endpointsMap.has(ep.inbound_id)) endpointsMap.set(ep.inbound_id, [])
+      endpointsMap.get(ep.inbound_id)!.push(ep)
+    }
+  }
+
   const outByServer = new Map<number, BoxOutbound[]>()
   for (const out of data.outbounds) {
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
@@ -347,6 +443,14 @@ function buildGraph(data: TopologyData) {
     })
   }
 
+  const l4RulesByServer = new Map<number, L4PortRule[]>()
+  if (data.l4_rules) {
+    for (const r of data.l4_rules) {
+      if (!l4RulesByServer.has(r.server_id)) l4RulesByServer.set(r.server_id, [])
+      l4RulesByServer.get(r.server_id)!.push(r)
+    }
+  }
+
   nodes.value = data.servers.map((s, idx) => ({
     id: `server-${s.id}`,
     type: 'serverbox',
@@ -354,6 +458,8 @@ function buildGraph(data: TopologyData) {
     data: {
       server: s,
       inbounds: inbByServer.get(s.id) || [],
+      endpointsMap,
+      l4Rules: l4RulesByServer.get(s.id) || [],
       outbounds: outByServer.get(s.id) || [],
       boxWidth: getBoxWidth(s.id),
     } as BoxData,
@@ -386,6 +492,24 @@ function buildGraph(data: TopologyData) {
       markerEnd: { type: MarkerType.ArrowClosed },
       data: { detour: false, drop: 0 },
     })
+  }
+
+  // L4 端口转发跨盒连接线
+  if (data.l4_rules) {
+    for (const r of data.l4_rules) {
+      if (!r.enabled || !r.target_inbound_id || !inbNode.has(r.target_inbound_id)) continue
+      es.push({
+        id: `l4-${r.id}`,
+        source: `server-${r.server_id}`,
+        sourceHandle: `l4-src-${r.id}`,
+        target: inbNode.get(r.target_inbound_id)!,
+        targetHandle: `inb-tgt-${r.target_inbound_id}`,
+        type: 'refedge',
+        animated: true,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: { detour: false, drop: 0, isL4: true },
+      })
+    }
   }
 
   // 路由规则盒内虚线
@@ -424,10 +548,16 @@ function isValidConnection(conn: Connection): boolean {
   const tgt = conn.targetHandle ?? ''
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const l4Src = src.match(/^l4-src-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
+  if (l4Src && inbAny) {
+    const rule = props.topology.l4_rules?.find((r) => r.id === Number(l4Src[1]))
+    const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
+    return !!(rule && inb && rule.server_id !== inb.server_id)
+  }
   if (outSrc && inbAny) {
     const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
@@ -453,11 +583,14 @@ async function handleConnect(conn: Connection) {
   const tgt = conn.targetHandle ?? ''
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const l4Src = src.match(/^l4-src-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  if (outSrc && inbAny) {
+  if (l4Src && inbAny) {
+    await connectL4Rule(Number(l4Src[1]), Number(inbAny[1]))
+  } else if (outSrc && inbAny) {
     await createRef(Number(outSrc[1]), Number(inbAny[1]))
   } else if (inbSrcExt && inbAny) {
     await createViaOutbound(Number(inbSrcExt[1]), Number(inbAny[1]))
@@ -466,7 +599,42 @@ async function handleConnect(conn: Connection) {
   } else if (inbSrc && inbAny) {
     ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
   } else {
-    ElMessage.warning('仅支持：入站内点 → 出站（盒内规则）、入站边缘点 → 他服务器入站（自动建中转出站）、出站边缘点 → 入站（设置引用）')
+    ElMessage.warning('仅支持：L4 端口 -> 目标入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+  }
+}
+
+// 拖线连接 L4 端口规则 -> 目标用户入站
+async function connectL4Rule(ruleId: number, targetInboundId: number) {
+  const data = props.topology!
+  const rule = data.l4_rules?.find((r) => r.id === ruleId)
+  const inb = data.inbounds.find((i) => i.id === targetInboundId)
+  if (!rule || !inb) return
+  const targetServer = data.servers.find((s) => s.id === inb.server_id)
+  try {
+    await ElMessageBox.confirm(
+      `将 L4 转发端口 :${rule.listen_port} 映射至目标「${targetServer?.name || ''}」的入站「${inb.tag}」？\n订阅系统将自动为授权用户派生该端口的中转接入点。`,
+      '设置 L4 端口转发目标',
+      { type: 'info' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data: resp } = await updateL4Rule(rule.server_id, rule.id, {
+      target_server_id: inb.server_id,
+      target_inbound_id: inb.id,
+      listen_port: rule.listen_port,
+      remark: rule.remark,
+      enabled: rule.enabled,
+    })
+    if (resp.code === 0) {
+      ElMessage.success('L4 转发映射已更新')
+      emit('changed')
+    } else {
+      ElMessage.error(resp.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '更新映射失败'))
   }
 }
 
@@ -488,11 +656,9 @@ async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
   const sameServerOuts = data.outbounds.filter((o) => o.server_id === srcInb.server_id)
   let n = 2
   while (sameServerOuts.some((o) => o.tag === tag)) tag = `via-${tgtInb.tag}-${n++}`
-  const promoteIdle = tgtInb.type === 'idle'
   try {
     await ElMessageBox.confirm(
       `将自动完成中转配置：\n` +
-        (promoteIdle ? `⓪ 将「${tgtInb.tag}」由闲置自动改为 relay（落地转发）\n` : '') +
         `① 在「${srcSrv.name}」创建出站「${tag}」（vless 引用 ${tgtSrv.name}/${tgtInb.tag} 落地，地址/端口/UUID 自动构造）\n` +
         `② 创建路由规则：${srcInb.tag} → ${tag}`,
       '自动建出站 + 路由',
@@ -502,13 +668,6 @@ async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
     return
   }
   try {
-    if (promoteIdle) {
-      const { data: r0 } = await updateInbound(tgtInb.id, { type: 'relay' })
-      if (r0.code !== 0) {
-        ElMessage.error(r0.message)
-        return
-      }
-    }
     const { data: r1 } = await createServerOutbound(srcInb.server_id, {
       tag,
       protocol: 'vless',
@@ -544,11 +703,9 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   const inbServer = data.servers.find((s) => s.id === inb.server_id)?.name ?? `#${inb.server_id}`
-  const promoteIdle = inb.type === 'idle'
   try {
     await ElMessageBox.confirm(
       `将出站「${out.tag}」设为引用落地入站「${inb.tag}」（${inbServer}）？\n` +
-        (promoteIdle ? `「${inb.tag}」当前为闲置，将自动改为 relay（落地转发）后建立引用。\n` : '') +
         'vnext 地址/端口/UUID/传输参数由主控自动构造，无需手填。',
       '创建 InboundRef 引用',
       { type: 'info' },
@@ -557,13 +714,6 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   try {
-    if (promoteIdle) {
-      const { data: r0 } = await updateInbound(inb.id, { type: 'relay' })
-      if (r0.code !== 0) {
-        ElMessage.error(r0.message)
-        return
-      }
-    }
     const { data: resp } = await updateServerOutbound(out.server_id, out.id, { inbound_ref: inboundId })
     if (resp.code === 0) {
       ElMessage.success('引用已建立，配置将自动更新')
@@ -574,6 +724,132 @@ async function createRef(outboundId: number, inboundId: number) {
   } catch (e) {
     ElMessage.error(errMsg(e, '创建引用失败'))
   }
+}
+
+// ---- L4 端口转发规则编辑弹窗 ----
+const l4RuleOpen = ref(false)
+const l4RuleSaving = ref(false)
+const l4RuleEditing = ref<L4PortRule | null>(null)
+const l4RuleServerId = ref(0)
+const permissionGroups = ref<PermissionGroup[]>([])
+const l4RuleForm = reactive({
+  listen_port: 30001,
+  target_server_id: 0,
+  target_inbound_id: 0,
+  remark: '',
+  enabled: true,
+  permission_group_ids: [] as number[],
+})
+
+const availableXrayServers = computed(() => {
+  return (props.topology?.servers || []).filter((s) => s.server_type !== 'l4_relay')
+})
+
+const availableTargetInbounds = computed(() => {
+  if (!l4RuleForm.target_server_id) return []
+  return (props.topology?.inbounds || []).filter(
+    (i) => i.server_id === l4RuleForm.target_server_id && i.enabled && i.type === 'user',
+  )
+})
+
+async function openCreateL4Rule(serverId: number) {
+  l4RuleServerId.value = serverId
+  l4RuleEditing.value = null
+  l4RuleForm.listen_port = 30001
+  l4RuleForm.target_server_id = availableXrayServers.value[0]?.id || 0
+  l4RuleForm.target_inbound_id = 0
+  l4RuleForm.remark = ''
+  l4RuleForm.enabled = true
+  l4RuleForm.permission_group_ids = []
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch {}
+  l4RuleOpen.value = true
+}
+
+async function openEditL4Rule(rule: L4PortRule) {
+  l4RuleServerId.value = rule.server_id
+  l4RuleEditing.value = rule
+  l4RuleForm.listen_port = rule.listen_port
+  l4RuleForm.target_server_id = rule.target_server_id
+  l4RuleForm.target_inbound_id = rule.target_inbound_id
+  l4RuleForm.remark = rule.remark || ''
+  l4RuleForm.enabled = rule.enabled
+  l4RuleForm.permission_group_ids = rule.permission_group_ids || []
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch {}
+  l4RuleOpen.value = true
+}
+
+async function saveL4Rule() {
+  if (!l4RuleForm.listen_port || l4RuleForm.listen_port <= 0 || l4RuleForm.listen_port > 65535) {
+    ElMessage.warning('请填写有效的中转监听端口 (1-65535)')
+    return
+  }
+  if (!l4RuleForm.target_inbound_id) {
+    ElMessage.warning('请选择目标用户入站')
+    return
+  }
+  l4RuleSaving.value = true
+  try {
+    const payload = {
+      listen_port: l4RuleForm.listen_port,
+      target_server_id: l4RuleForm.target_server_id,
+      target_inbound_id: l4RuleForm.target_inbound_id,
+      remark: l4RuleForm.remark,
+      enabled: l4RuleForm.enabled,
+      permission_group_ids: l4RuleForm.permission_group_ids,
+    }
+    const { data } = l4RuleEditing.value
+      ? await updateL4Rule(l4RuleServerId.value, l4RuleEditing.value.id, payload)
+      : await createL4Rule(l4RuleServerId.value, payload)
+    if (data.code === 0) {
+      ElMessage.success(l4RuleEditing.value ? '转发规则已更新' : '转发规则已创建')
+      l4RuleOpen.value = false
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存转发规则失败'))
+  } finally {
+    l4RuleSaving.value = false
+  }
+}
+
+// ---- 附加接入点抽屉 ----
+const epDrawerOpen = ref(false)
+const epDrawerInbound = ref<InboundItem | null>(null)
+const epDrawerServerName = ref('')
+
+function openEndpointsManager(inb: InboundItem, serverName: string) {
+  epDrawerInbound.value = inb
+  epDrawerServerName.value = serverName
+  epDrawerOpen.value = true
+}
+
+// ---- 出站编辑器弹窗 ----
+const outboundEditorOpen = ref(false)
+const outboundServerId = ref(0)
+const outboundEditing = ref<ServerOutbound | null>(null)
+
+function openCreateOutbound(serverId: number) {
+  outboundServerId.value = serverId
+  outboundEditing.value = null
+  outboundEditorOpen.value = true
+}
+
+function handleOutboundSaved() {
+  outboundEditorOpen.value = false
+  emit('changed')
+}
+
+// ---- 入站新建事件触发 ----
+function openCreateInbound(serverId: number) {
+  emit('open-create-inbound', serverId)
 }
 
 // ---- 交互：路由规则弹窗 ----
@@ -730,6 +1006,33 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       }
     } catch (e) {
       ElMessage.error(errMsg(e, '删除规则失败'))
+      deselectEdge(edge.id)
+    }
+  } else if (edge.id.startsWith('l4-')) {
+    const l4RuleId = Number(edge.id.slice(3))
+    const rule = props.topology.l4_rules?.find((r) => r.id === l4RuleId)
+    if (!rule) return
+    try {
+      await ElMessageBox.confirm(
+        `删除 L4 端口转发规则（:${rule.listen_port} → ${rule.target_inbound_tag || '目标入站'}）？`,
+        '删除 L4 转发规则',
+        { type: 'warning' },
+      )
+    } catch {
+      deselectEdge(edge.id)
+      return
+    }
+    try {
+      const { data } = await deleteL4Rule(rule.server_id, l4RuleId)
+      if (data.code === 0) {
+        ElMessage.success('已删除转发规则')
+        emit('changed')
+      } else {
+        ElMessage.error(data.message)
+        deselectEdge(edge.id)
+      }
+    } catch (e) {
+      ElMessage.error(errMsg(e, '删除转发规则失败'))
       deselectEdge(edge.id)
     }
   }
@@ -953,7 +1256,79 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       </template>
 
       <template #node-serverbox="nodeProps">
+        <!-- 1. L4 纯四层端口转发服务器卡片 -->
         <div
+          v-if="nodeProps.data.server.server_type === 'l4_relay'"
+          class="server-box l4-relay-box"
+          :class="{ offline: nodeProps.data.server.status !== 1 }"
+          :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
+        >
+          <div
+            v-show="nodeProps.selected"
+            class="custom-resizer-right"
+            @mousedown.stop.prevent="startBoxResize($event, nodeProps.data)"
+          />
+          <div class="sb-head l4-head">
+            <div class="sb-head-left">
+              <span class="status-dot online" />
+              <span class="l4-relay-badge">L4 中转</span>
+              <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
+              <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
+            </div>
+            <div class="sb-head-right">
+              <button class="sb-detail-btn" title="查看服务器详情" @click.stop="emit('open-server', nodeProps.data.server.id)">
+                <el-icon><Setting /></el-icon>&nbsp;详情
+              </button>
+            </div>
+          </div>
+
+          <div class="l4-body">
+            <div class="sb-col-head" style="margin-bottom: 8px">
+              <span class="sb-title">端口转发映射 (Port Rules)</span>
+              <button
+                v-if="editable"
+                class="sb-add-btn l4-add-btn"
+                title="为该中转机新建端口转发"
+                @click.stop="openCreateL4Rule(nodeProps.data.server.id)"
+              >
+                <el-icon><Plus /></el-icon>&nbsp;转发端口
+              </button>
+            </div>
+
+            <div v-if="nodeProps.data.l4Rules && nodeProps.data.l4Rules.length > 0" class="l4-rules-list">
+              <div
+                v-for="rule in nodeProps.data.l4Rules"
+                :key="rule.id"
+                class="sb-row l4-rule-row"
+                @click.stop="openEditL4Rule(rule)"
+              >
+                <div class="l4-rule-left">
+                  <span class="port-badge l4-port">:{{ rule.listen_port }}</span>
+                  <span v-if="rule.remark" class="l4-remark">{{ rule.remark }}</span>
+                  <span v-else class="l4-remark muted">TCP/UDP 转发</span>
+                </div>
+                <div class="l4-rule-target">
+                  <span v-if="rule.target_inbound_tag" class="tag out-tag ref" :title="`目标入站: ${rule.target_inbound_tag}`">
+                    ➜ {{ rule.target_inbound_tag }}
+                  </span>
+                  <span v-else class="tag out-tag draft" title="未映射：请拖拽右侧端点至目标节点入站">➜ 待连线</span>
+                </div>
+                <Handle
+                  type="source"
+                  :id="`l4-src-${rule.id}`"
+                  :position="Position.Right"
+                  :connectable="editable"
+                  class="ep ext-src l4-handle"
+                />
+              </div>
+            </div>
+            <div v-else class="sb-empty">暂无端口转发规则，点击右上角「+ 转发端口」创建</div>
+          </div>
+        </div>
+
+        <!-- 2. 标准 Xray 节点服务器卡片 -->
+        <div
+          v-else
           class="server-box"
           :class="{ offline: nodeProps.data.server.status !== 1 }"
           :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
@@ -964,18 +1339,123 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             @mousedown.stop.prevent="startBoxResize($event, nodeProps.data)"
           />
           <div class="sb-head">
-            <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
-            <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
-            <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
-            <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
+            <div class="sb-head-left">
+              <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
+              <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
+              <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
+              <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
+            </div>
+            <div class="sb-head-right">
+              <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', nodeProps.data.server.id)">
+                <el-icon><Setting /></el-icon>&nbsp;详情
+              </button>
+            </div>
           </div>
 
           <div class="sb-cols">
-            <!-- 入站列：边缘外点（双 handle 叠加）= 对外接口；标签贴左；盒内点（中线左）= 发盒内规则 -->
+            <!-- 入站列：包含 Caddy 认知层容器与常规入站 -->
             <div class="sb-col">
-              <div class="sb-title">入站</div>
+              <div class="sb-col-head">
+                <span class="sb-title">入站 (Inbound)</span>
+                <button
+                  v-if="editable"
+                  class="sb-add-btn"
+                  title="为该服务器新建入站"
+                  @click.stop="openCreateInbound(nodeProps.data.server.id)"
+                >
+                  <el-icon><Plus /></el-icon>&nbsp;入站
+                </button>
+              </div>
+
               <template v-if="nodeProps.data.inbounds.length > 0">
-                <div v-for="inb in nodeProps.data.inbounds" :key="inb.id" class="sb-row">
+                <!-- 1. Caddy/Nginx 认知层反代胶囊 (XHTTP 入站按域名聚合) -->
+                <div
+                  v-for="cg in getCaddyGrouping(nodeProps.data.inbounds).caddyGroups"
+                  :key="cg.domain"
+                  class="caddy-capsule"
+                >
+                  <div class="caddy-capsule-head">
+                    <div class="caddy-title">
+                      <span class="caddy-icon">🌐</span>
+                      <span class="caddy-domain" :title="cg.domain">{{ cg.domain }}:443</span>
+                    </div>
+                    <button
+                      class="caddy-copy-btn"
+                      title="一键复制 Caddyfile 反代配置片段"
+                      @click.stop="copyCaddySnippet(cg, nodeProps.data.server.host)"
+                    >
+                      <el-icon><CopyDocument /></el-icon>&nbsp;Caddyfile
+                    </button>
+                  </div>
+                  <div class="caddy-capsule-body">
+                    <div v-for="inb in cg.inbounds" :key="inb.id" class="sb-row caddy-subrow">
+                      <Handle
+                        type="target"
+                        :id="`inb-tgt-${inb.id}`"
+                        :position="Position.Left"
+                        :connectable="editable"
+                        class="ep ext-tgt"
+                      />
+                      <Handle
+                        type="source"
+                        :id="`inb-src-ext-${inb.id}`"
+                        :position="Position.Left"
+                        :connectable="editable"
+                        class="ep ext-src"
+                      />
+                      <span
+                        class="type-tag"
+                        :class="typeInfo(inb.type).cls"
+                        title="点击快速切换二态 (用户/转发)"
+                        @click.stop="cycleInboundType(inb)"
+                      >
+                        {{ typeInfo(inb.type).text }}
+                      </span>
+                      <span class="path-badge" :title="`反代至 127.0.0.1:${inb.port}`">
+                        {{ inb.share_path || '/xhttp' }}
+                      </span>
+                      <span class="port-badge">:{{ inb.port }}</span>
+                      <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
+
+                      <!-- 附加接入点胶囊 -->
+                      <div class="sb-ep-pills">
+                        <span
+                          v-for="ep in (nodeProps.data.endpointsMap?.get(inb.id) || [])"
+                          :key="ep.id"
+                          class="ep-pill"
+                          :class="{ disabled: !ep.enabled }"
+                          :title="`附加接入点: ${ep.name} (${ep.host}:${ep.port})`"
+                          @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
+                        >
+                          🔀 {{ ep.name }}
+                        </span>
+                        <button
+                          v-if="editable"
+                          class="ep-add-btn"
+                          title="管理/添加附加接入点"
+                          @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
+                        >
+                          + 接入点
+                        </button>
+                      </div>
+
+                      <Handle
+                        type="source"
+                        :id="`inb-src-${inb.id}`"
+                        :position="Position.Right"
+                        :connectable="editable"
+                        class="ep in-ep"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. 原生入站行 (TCP REALITY / WebSocket 等) -->
+                <div
+                  v-for="inb in getCaddyGrouping(nodeProps.data.inbounds).nativeInbounds"
+                  :key="inb.id"
+                  class="sb-row"
+                >
                   <Handle
                     type="target"
                     :id="`inb-tgt-${inb.id}`"
@@ -990,11 +1470,41 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :connectable="editable"
                     class="ep ext-src"
                   />
-                  <span class="type-tag" :class="typeInfo(inb.type).cls">{{ typeInfo(inb.type).text }}</span>
+                  <span
+                    class="type-tag"
+                    :class="typeInfo(inb.type).cls"
+                    title="点击快速切换二态 (用户/转发)"
+                    @click.stop="cycleInboundType(inb)"
+                  >
+                    {{ typeInfo(inb.type).text }}
+                  </span>
                   <span class="port-badge">:{{ inb.port }}</span>
                   <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
                   <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
                   <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
+
+                  <!-- 附加接入点胶囊 -->
+                  <div class="sb-ep-pills">
+                    <span
+                      v-for="ep in (nodeProps.data.endpointsMap?.get(inb.id) || [])"
+                      :key="ep.id"
+                      class="ep-pill"
+                      :class="{ disabled: !ep.enabled }"
+                      :title="`附加接入点: ${ep.name} (${ep.host}:${ep.port})`"
+                      @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
+                    >
+                      🔀 {{ ep.name }}
+                    </span>
+                    <button
+                      v-if="editable"
+                      class="ep-add-btn"
+                      title="管理/添加附加接入点"
+                      @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
+                    >
+                      + 接入点
+                    </button>
+                  </div>
+
                   <Handle
                     type="source"
                     :id="`inb-src-${inb.id}`"
@@ -1009,7 +1519,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
             <!-- 出站列：盒内点（中线右）= 收盒内规则；边缘外点（右缘）= 发引用线；direct 仅右缘绿点收线 -->
             <div class="sb-col">
-              <div class="sb-title">出站</div>
+              <div class="sb-col-head">
+                <span class="sb-title">出站 (Outbound)</span>
+                <button
+                  v-if="editable"
+                  class="sb-add-btn"
+                  title="为该服务器新建出站"
+                  @click.stop="openCreateOutbound(nodeProps.data.server.id)"
+                >
+                  <el-icon><Plus /></el-icon>&nbsp;出站
+                </button>
+              </div>
+
               <template v-if="nodeProps.data.outbounds.length > 0">
                 <div
                   v-for="out in nodeProps.data.outbounds"
@@ -1027,14 +1548,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   />
                   <span
                     class="tag out-tag"
-                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : ''"
+                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
                     :title="out.tag"
                   >
-                    {{ out.tag }}
+                    {{ (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
                   </span>
                   <span v-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
+                  <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
                   <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
                   <Handle
@@ -1061,6 +1583,56 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     <div v-else class="topology-empty">
       <el-empty description="暂无服务器。先到「服务器」页添加节点，再回来拖线接线。" />
     </div>
+
+    <!-- 附加接入点抽屉 -->
+    <InboundEndpointsDrawer
+      v-model="epDrawerOpen"
+      :inbound="epDrawerInbound"
+      :server-name="epDrawerServerName"
+      @changed="emit('changed')"
+    />
+
+    <!-- 出站新建/编辑弹窗 -->
+    <OutboundConfigEditor
+      v-if="outboundEditorOpen"
+      :server-id="outboundServerId"
+      :outbound="outboundEditing"
+      @saved="handleOutboundSaved"
+      @close="outboundEditorOpen = false"
+    />
+
+    <!-- L4 端口转发规则编辑弹窗 -->
+    <el-dialog v-model="l4RuleOpen" :title="l4RuleEditing ? '编辑 L4 端口转发规则' : '新建 L4 端口转发规则'" width="520px" append-to-body>
+      <el-form label-position="top">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+          <el-form-item label="中转监听端口 ListenPort" required>
+            <el-input-number v-model="l4RuleForm.listen_port" :min="1" :max="65535" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="目标落地服务器" required>
+            <el-select v-model="l4RuleForm.target_server_id" style="width: 100%" placeholder="选择目标节点" @change="l4RuleForm.target_inbound_id = 0">
+              <el-option v-for="s in availableXrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="目标用户入站 (Target Inbound)" required>
+          <el-select v-model="l4RuleForm.target_inbound_id" style="width: 100%" placeholder="请选择目标用户入站">
+            <el-option v-for="inb in availableTargetInbounds" :key="inb.id" :label="`${inb.tag} (:${inb.port})`" :value="inb.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开放权限组（显式白名单，留空对全员不可见）">
+          <el-select v-model="l4RuleForm.permission_group_ids" multiple collapse-tags collapse-tags-tooltip placeholder="请勾选可见权限组" style="width: 100%">
+            <el-option v-for="g in permissionGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注说明">
+          <el-input v-model="l4RuleForm.remark" placeholder="如 广州移动 10G BGP 优化" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="l4RuleOpen = false">取消</el-button>
+        <el-button type="primary" :loading="l4RuleSaving" @click="saveL4Rule">保存规则</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 路由规则弹窗 -->
     <el-dialog v-model="ruleOpen" title="新建路由规则（拖线）" width="540px" append-to-body>
@@ -1236,12 +1808,44 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   .sb-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
     padding: 0 16px;
     height: 48px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
     border-radius: 16px 16px 0 0;
+
+    .sb-head-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .sb-head-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: none;
+    }
+
+    .sb-detail-btn {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: #cbd5e1;
+      font-size: 11px;
+      padding: 3px 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      &:hover {
+        background: rgba(56, 189, 248, 0.2);
+        border-color: #38bdf8;
+        color: #38bdf8;
+      }
+    }
 
     .status-dot {
       width: 8px;
@@ -1276,13 +1880,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       font-weight: 500;
     }
     .host {
-      margin-left: auto;
       color: #94a3b8;
       font-size: 11px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 160px;
+      max-width: 140px;
     }
   }
 
@@ -1304,20 +1907,161 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     }
     .sb-col:last-child {
       align-items: flex-end;
+      .sb-col-head {
+        flex-direction: row-reverse;
+      }
       .sb-title {
         text-align: right;
       }
     }
-    .sb-title {
-      height: 30px;
+    .sb-col-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       width: 100%;
+      height: 32px;
+      padding: 6px 4px 2px;
       box-sizing: border-box;
-      padding: 8px 4px 0;
+    }
+    .sb-title {
       color: #94a3b8;
       font-size: 12px;
       letter-spacing: 0.5px;
       font-weight: 600;
       text-transform: uppercase;
+    }
+    .sb-add-btn {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 4px;
+      color: #38bdf8;
+      font-size: 11px;
+      padding: 2px 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      &:hover {
+        background: rgba(56, 189, 248, 0.25);
+        border-color: #38bdf8;
+        transform: translateY(-1px);
+      }
+    }
+  }
+
+  /* Caddy/Nginx 认知层反代网关胶囊 */
+  .caddy-capsule {
+    width: 100%;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(45, 212, 191, 0.25);
+    border-radius: 12px;
+    padding: 6px 8px 8px;
+    box-sizing: border-box;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    .caddy-capsule-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2px 4px 4px;
+      border-bottom: 1px dashed rgba(45, 212, 191, 0.2);
+
+      .caddy-title {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: #2dd4bf;
+      }
+      .caddy-copy-btn {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(45, 212, 191, 0.15);
+        border: 1px solid rgba(45, 212, 191, 0.35);
+        border-radius: 4px;
+        color: #2dd4bf;
+        font-size: 10.5px;
+        padding: 1px 6px;
+        cursor: pointer;
+        transition: all 0.15s;
+        &:hover {
+          background: rgba(45, 212, 191, 0.3);
+          border-color: #2dd4bf;
+        }
+      }
+    }
+
+    .caddy-capsule-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .caddy-subrow {
+      background: rgba(45, 212, 191, 0.06);
+      border-color: rgba(45, 212, 191, 0.15);
+      &:hover {
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.3);
+      }
+    }
+  }
+
+  .path-badge {
+    font-size: 10px;
+    color: #2dd4bf;
+    font-family: monospace;
+    background: rgba(45, 212, 191, 0.15);
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid rgba(45, 212, 191, 0.25);
+    flex: none;
+  }
+
+  /* 附加接入点小药丸 */
+  .sb-ep-pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 2px;
+
+    .ep-pill {
+      font-size: 9.5px;
+      padding: 1px 5px;
+      border-radius: 10px;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #38bdf8;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+      &:hover {
+        background: rgba(56, 189, 248, 0.3);
+        transform: translateY(-1px);
+      }
+      &.disabled {
+        opacity: 0.5;
+        border-style: dashed;
+      }
+    }
+
+    .ep-add-btn {
+      font-size: 9px;
+      padding: 0 4px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.15s;
+      &:hover {
+        border-color: #38bdf8;
+        color: #38bdf8;
+      }
     }
   }
 
@@ -1356,6 +2100,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       &.direct {
         color: #34d399;
       }
+      &.draft {
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+        padding: 1px 6px;
+        border-radius: 6px;
+      }
     }
     &.direct-row {
       background: rgba(52, 211, 153, 0.1);
@@ -1368,6 +2118,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       color: #38bdf8;
       font-family: monospace;
       flex: none;
+      &.l4-port {
+        color: #c084fc;
+      }
     }
 
     .proto-badge {
@@ -1410,6 +2163,11 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         color: #f87171;
         border: 1px solid rgba(248, 113, 113, 0.3);
       }
+      &.draft {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+      }
     }
 
     .type-tag {
@@ -1426,9 +2184,76 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
       }
-      &.idle {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
+    }
+  }
+
+  /* L4 纯四层中转卡片样式 */
+  .l4-relay-box {
+    border-color: rgba(168, 85, 247, 0.35);
+    box-shadow: 0 4px 20px rgba(168, 85, 247, 0.12);
+
+    .l4-head {
+      border-bottom-color: rgba(168, 85, 247, 0.2);
+    }
+    .l4-relay-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+    .l4-body {
+      padding: 0 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .l4-rules-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .l4-rule-row {
+      justify-content: space-between;
+      cursor: pointer;
+      background: rgba(168, 85, 247, 0.05);
+      border-color: rgba(168, 85, 247, 0.15);
+      &:hover {
+        background: rgba(168, 85, 247, 0.12);
+        border-color: rgba(168, 85, 247, 0.3);
+      }
+    }
+    .l4-rule-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .l4-rule-target {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .l4-remark {
+      font-size: 11px;
+      color: #94a3b8;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      &.muted {
+        color: #64748b;
+        font-style: italic;
+      }
+    }
+    .l4-add-btn {
+      background: rgba(168, 85, 247, 0.15);
+      border-color: rgba(168, 85, 247, 0.3);
+      color: #c084fc;
+      &:hover {
+        background: rgba(168, 85, 247, 0.3);
+        border-color: #c084fc;
       }
     }
   }

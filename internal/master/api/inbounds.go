@@ -567,7 +567,7 @@ func validInboundProtocol(p string) bool {
 
 func validInboundType(t string) bool {
 	switch t {
-	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeIdle:
+	case models.InboundTypeUser, models.InboundTypeRelay:
 		return true
 	}
 	return false
@@ -661,3 +661,243 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 	}
 	util.OK(c, gin.H{"config": cfg})
 }
+
+// InboundEndpointView 附加接入点视图对象（带开放权限组 ID 列表）。
+type InboundEndpointView struct {
+	models.InboundEndpoint
+	PermissionGroupIDs []uint64 `json:"permission_group_ids"`
+}
+
+// AdminGetInboundEndpoints GET /api/v1/admin/inbounds/:id/endpoints
+func (d *Deps) AdminGetInboundEndpoints(c *gin.Context) {
+	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法入站 ID")
+		return
+	}
+	var inb models.Inbound
+	if err := d.DB.First(&inb, inboundID).Error; err != nil {
+		util.Fail(c, 404, "入站不存在")
+		return
+	}
+	var list []models.InboundEndpoint
+	if err := d.DB.Where("inbound_id = ?", inboundID).Order("priority ASC, id ASC").Find(&list).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	epIDs := make([]uint64, len(list))
+	for i, ep := range list {
+		epIDs[i] = ep.ID
+	}
+	groupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
+	items := make([]InboundEndpointView, len(list))
+	for i, ep := range list {
+		gids := groupMap[ep.ID]
+		if gids == nil {
+			gids = []uint64{}
+		}
+		items[i] = InboundEndpointView{
+			InboundEndpoint:    ep,
+			PermissionGroupIDs: gids,
+		}
+	}
+	util.OK(c, gin.H{"items": items})
+}
+
+// AdminCreateInboundEndpoint POST /api/v1/admin/inbounds/:id/endpoints
+func (d *Deps) AdminCreateInboundEndpoint(c *gin.Context) {
+	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法入站 ID")
+		return
+	}
+	var inb models.Inbound
+	if err := d.DB.First(&inb, inboundID).Error; err != nil {
+		util.Fail(c, 404, "入站不存在")
+		return
+	}
+
+	var req struct {
+		Name               string   `json:"name" binding:"required"`
+		Host               string   `json:"host" binding:"required"`
+		Port               int      `json:"port" binding:"required,min=1,max=65535"`
+		PermissionGroupIDs []uint64 `json:"permission_group_ids"`
+		Enabled            *bool    `json:"enabled"`
+		Priority           int      `json:"priority"`
+		Remark             string   `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	host := strings.TrimSpace(req.Host)
+	if name == "" || host == "" {
+		util.BadRequest(c, "名称与主机地址不能为空")
+		return
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	ep := models.InboundEndpoint{
+		InboundID: inboundID,
+		Name:      name,
+		Host:      host,
+		Port:      req.Port,
+		Enabled:   enabled,
+		Priority:  req.Priority,
+		Remark:    req.Remark,
+	}
+
+	err = d.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&ep).Error; err != nil {
+			return err
+		}
+		if len(req.PermissionGroupIDs) > 0 {
+			if err := services.SyncEndpointPermissionGroups(tx, ep.ID, req.PermissionGroupIDs); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		util.ServerError(c, "创建附加接入点失败: "+err.Error())
+		return
+	}
+
+	gids := req.PermissionGroupIDs
+	if gids == nil {
+		gids = []uint64{}
+	}
+	util.OK(c, gin.H{"endpoint": InboundEndpointView{InboundEndpoint: ep, PermissionGroupIDs: gids}})
+}
+
+// AdminUpdateInboundEndpoint PUT /api/v1/admin/inbounds/:id/endpoints/:ep_id
+func (d *Deps) AdminUpdateInboundEndpoint(c *gin.Context) {
+	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法入站 ID")
+		return
+	}
+	epID, err := strconv.ParseUint(c.Param("ep_id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法接入点 ID")
+		return
+	}
+
+	var ep models.InboundEndpoint
+	if err := d.DB.Where("id = ? AND inbound_id = ?", epID, inboundID).First(&ep).Error; err != nil {
+		util.Fail(c, 404, "附加接入点不存在")
+		return
+	}
+
+	var req struct {
+		Name               *string   `json:"name"`
+		Host               *string   `json:"host"`
+		Port               *int      `json:"port"`
+		PermissionGroupIDs *[]uint64 `json:"permission_group_ids"`
+		Enabled            *bool     `json:"enabled"`
+		Priority           *int      `json:"priority"`
+		Remark             *string   `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	updates := map[string]any{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			util.BadRequest(c, "名称不能为空")
+			return
+		}
+		updates["name"] = name
+	}
+	if req.Host != nil {
+		host := strings.TrimSpace(*req.Host)
+		if host == "" {
+			util.BadRequest(c, "主机地址不能为空")
+			return
+		}
+		updates["host"] = host
+	}
+	if req.Port != nil {
+		if *req.Port < 1 || *req.Port > 65535 {
+			util.BadRequest(c, "端口范围须在 1-65535 之间")
+			return
+		}
+		updates["port"] = *req.Port
+	}
+	if req.Enabled != nil {
+		updates["enabled"] = *req.Enabled
+	}
+	if req.Priority != nil {
+		updates["priority"] = *req.Priority
+	}
+	if req.Remark != nil {
+		updates["remark"] = *req.Remark
+	}
+
+	err = d.DB.Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&ep).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if req.PermissionGroupIDs != nil {
+			if err := services.SyncEndpointPermissionGroups(tx, ep.ID, *req.PermissionGroupIDs); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		util.ServerError(c, "更新失败: "+err.Error())
+		return
+	}
+
+	// 重新载入更新后的对象与权限组
+	_ = d.DB.First(&ep, ep.ID)
+	gids := services.EndpointPermissionGroupIDs(d.DB, ep.ID)
+	if gids == nil {
+		gids = []uint64{}
+	}
+	util.OK(c, gin.H{"endpoint": InboundEndpointView{InboundEndpoint: ep, PermissionGroupIDs: gids}})
+}
+
+// AdminDeleteInboundEndpoint DELETE /api/v1/admin/inbounds/:id/endpoints/:ep_id
+func (d *Deps) AdminDeleteInboundEndpoint(c *gin.Context) {
+	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法入站 ID")
+		return
+	}
+	epID, err := strconv.ParseUint(c.Param("ep_id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法接入点 ID")
+		return
+	}
+
+	var ep models.InboundEndpoint
+	if err := d.DB.Where("id = ? AND inbound_id = ?", epID, inboundID).First(&ep).Error; err != nil {
+		util.Fail(c, 404, "附加接入点不存在")
+		return
+	}
+
+	err = d.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("endpoint_id = ?", epID).Delete(&models.PermissionGroupEndpoint{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&ep).Error
+	})
+	if err != nil {
+		util.ServerError(c, "删除失败: "+err.Error())
+		return
+	}
+	util.OK(c, gin.H{"deleted": epID})
+}
+

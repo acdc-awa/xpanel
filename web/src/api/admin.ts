@@ -10,6 +10,8 @@ import type {
   CreateInvitationResult,
   InboundItem,
   InboundSettings,
+  InboundEndpoint,
+  L4PortRule,
   Invitation,
   Order,
   PermissionGroup,
@@ -29,6 +31,8 @@ export type {
   CertItem,
   InboundItem,
   InboundSettings,
+  InboundEndpoint,
+  L4PortRule,
   Invitation,
   Order,
   PermissionGroup,
@@ -167,6 +171,7 @@ export function revokeInvitation(id: number) {
 
 export interface ServerItem {
   id: number
+  server_type?: 'xray' | 'l4_relay'
   name: string
   host: string
   node_id: string
@@ -199,6 +204,7 @@ export function getServers() {
 }
 
 export function createServer(payload: {
+  server_type?: 'xray' | 'l4_relay'
   name: string
   host: string
   location?: string
@@ -213,7 +219,7 @@ export function deleteServer(id: number) {
 
 export function updateServer(
   id: number,
-  payload: { name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string; default_outbound_domain_strategy?: string },
+  payload: { server_type?: 'xray' | 'l4_relay'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string; default_outbound_domain_strategy?: string },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
 }
@@ -472,12 +478,46 @@ export interface TopologyRule {
 export interface TopologyData {
   servers: ServerItem[]
   inbounds: InboundItem[]
+  inbound_endpoints?: InboundEndpoint[]
+  l4_rules?: L4PortRule[]
   outbounds: TopologyOutbound[]
   routing_rules: TopologyRule[]
 }
 
 export function getTopology() {
   return http.get<ApiResp<TopologyData>>('/admin/topology')
+}
+
+export function getInboundEndpoints(inboundId: number) {
+  return http.get<ApiResp<{ items: InboundEndpoint[] }>>(`/admin/inbounds/${inboundId}/endpoints`)
+}
+
+export function createInboundEndpoint(inboundId: number, payload: Partial<InboundEndpoint>) {
+  return http.post<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints`, payload)
+}
+
+export function updateInboundEndpoint(inboundId: number, epId: number, payload: Partial<InboundEndpoint>) {
+  return http.put<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`, payload)
+}
+
+export function deleteInboundEndpoint(inboundId: number, epId: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`)
+}
+
+export function getL4Rules(serverId: number) {
+  return http.get<ApiResp<L4PortRule[]>>(`/admin/servers/${serverId}/l4-rules`)
+}
+
+export function createL4Rule(serverId: number, payload: Partial<L4PortRule>) {
+  return http.post<ApiResp<L4PortRule>>(`/admin/servers/${serverId}/l4-rules`, payload)
+}
+
+export function updateL4Rule(serverId: number, ruleId: number, payload: Partial<L4PortRule>) {
+  return http.put<ApiResp<L4PortRule>>(`/admin/servers/${serverId}/l4-rules/${ruleId}`, payload)
+}
+
+export function deleteL4Rule(serverId: number, ruleId: number) {
+  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/servers/${serverId}/l4-rules/${ruleId}`)
 }
 
 // 画布布局云端同步（盒子位置/宽度 + 内容哈希去重，跨浏览器/设备统一；settings 表存 JSON）

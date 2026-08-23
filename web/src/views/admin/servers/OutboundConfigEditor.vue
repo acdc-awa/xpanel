@@ -45,7 +45,7 @@ const refInboundOptions = computed(() => {
 })
 
 function inboundLabel(i: InboundItem) {
-  const typeLabel = i.type === 'relay' ? '转发' : i.type === 'idle' ? '闲置' : '用户'
+  const typeLabel = i.type === 'relay' ? '转发' : '用户'
   let net = '—'
   try {
     const s = JSON.parse(i.stream_settings || '{}')
@@ -326,11 +326,7 @@ async function save() {
     return
   }
   if (form.protocol === 'vless' && !refMode.value && (!form.vless_address || !form.vless_uuid)) {
-    ElMessage.warning('VLESS 出站需填写远端地址和 UUID，或改用「引用落地入站」')
-    return
-  }
-  if (refMode.value && !refInboundId.value) {
-    ElMessage.warning('请选择引用的落地入站')
+    ElMessage.warning('手动模式需填写远端地址和 UUID，或切换为「引用落地入站 / 画布拖线」')
     return
   }
   saving.value = true
@@ -527,19 +523,21 @@ const activeTab = ref('basic')
             <div class="card-box">
               <div class="box-title">引用目标落地服务器</div>
               <div class="form-grid">
-                <el-form-item label="目标落地服务器">
-                  <el-select v-model="refServerId" style="width: 100%" placeholder="请选择目标节点" @change="refInboundId = 0">
+                <el-form-item label="目标落地服务器（选填）">
+                  <el-select v-model="refServerId" style="width: 100%" clearable placeholder="留空可在画布中拖线连接" @change="refInboundId = 0">
+                    <el-option :value="0" label="（稍后在拓扑画布中拖线连接）" />
                     <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="目标落地入站 (relay 优先)">
-                  <el-select v-model="refInboundId" style="width: 100%" placeholder="请先选择服务器">
+                <el-form-item label="目标落地入站（选填）">
+                  <el-select v-model="refInboundId" style="width: 100%" clearable placeholder="留空可在画布中拖线连接">
+                    <el-option :value="0" label="（稍后在拓扑画布中拖线连接）" />
                     <el-option v-for="i in refInboundOptions" :key="i.id" :label="inboundLabel(i)" :value="i.id" />
                   </el-select>
                 </el-form-item>
               </div>
               <div class="tip-banner" style="margin-top: 10px">
-                保存后主控将根据引用的落地入站自动生成中转 vnext 地址、端口、落地 UUID、流控与 REALITY/TLS 参数。
+                提示：在此处选择落地入站，或直接留空保存并在<b>拓扑画布中拖拽端点连线</b>，系统将自动绑定落地并生成合法中转凭据。
               </div>
             </div>
           </template>

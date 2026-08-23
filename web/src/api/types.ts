@@ -278,7 +278,7 @@ export interface InboundItem {
   sniffing: string
   ratio: number
   enabled: boolean
-  type?: string // user / relay / idle（Phase T）
+  type?: string // user / relay（Phase T）
   internal_uuid?: string // relay 只读（节点生成上报）
   cert_id?: number // 绑定的证书
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
@@ -294,10 +294,26 @@ export interface InboundItem {
   created_at: string
 }
 
-// Phase T：入站三态
+// Phase T：入站二态（面向用户 / 内部链式代理落地）
 export const INBOUND_TYPE_USER = 'user'
 export const INBOUND_TYPE_RELAY = 'relay'
-export const INBOUND_TYPE_IDLE = 'idle'
+
+// L4 端口转发规则（纯四层 TCP/UDP 转发，将中转服务器端口映射到目标节点的用户入站）
+export interface L4PortRule {
+  id: number
+  server_id: number
+  listen_port: number
+  target_server_id: number
+  target_server_name?: string
+  target_inbound_id: number
+  target_inbound_tag?: string
+  target_inbound_port?: number
+  remark?: string
+  enabled: boolean
+  permission_group_ids?: number[]
+  created_at?: string
+  updated_at?: string
+}
 
 
 export interface RealitySettings {
@@ -456,3 +472,19 @@ export interface NoticePayload {
   status?: number
   sort_order?: number
 }
+
+// InboundEndpoint 入站附加接入点（如 BGP 中转、IPv6、备用 CDN 域名）
+export interface InboundEndpoint {
+  id: number
+  inbound_id: number
+  name: string
+  host: string
+  port: number
+  permission_group_ids: number[]
+  enabled: boolean
+  priority: number
+  remark: string
+  created_at: string
+  updated_at: string
+}
+

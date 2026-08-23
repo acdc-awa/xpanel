@@ -67,6 +67,62 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
 	inbounds = services.FilterAvailableInbounds(filtered)
+	// 确定用户生效的权限组 ID
+	var permGroupID uint64
+	if user.PermissionGroupID > 0 {
+		permGroupID = user.PermissionGroupID
+	} else if user.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
+			permGroupID = plan.PermissionGroupID
+		}
+	}
+
+	// 收集入站的附加接入点与 L4 端口转发规则
+	inboundIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		inboundIDs = append(inboundIDs, inb.ID)
+	}
+	var allEndpoints []models.InboundEndpoint
+	if len(inboundIDs) > 0 {
+		_ = d.DB.Where("inbound_id IN ? AND enabled = ?", inboundIDs, true).
+			Order("priority ASC, id ASC").Find(&allEndpoints).Error
+	}
+	epIDs := make([]uint64, 0, len(allEndpoints))
+	for _, ep := range allEndpoints {
+		epIDs = append(epIDs, ep.ID)
+	}
+	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
+	endpointsByInbound := make(map[uint64][]models.InboundEndpoint)
+	for _, ep := range allEndpoints {
+		endpointsByInbound[ep.InboundID] = append(endpointsByInbound[ep.InboundID], ep)
+	}
+
+	var allL4Rules []models.L4PortRule
+	if len(inboundIDs) > 0 {
+		_ = d.DB.Where("target_inbound_id IN ? AND enabled = ?", inboundIDs, true).
+			Order("listen_port ASC, id ASC").Find(&allL4Rules).Error
+	}
+	l4RuleIDs := make([]uint64, 0, len(allL4Rules))
+	l4SrvIDs := make([]uint64, 0, len(allL4Rules))
+	for _, r := range allL4Rules {
+		l4RuleIDs = append(l4RuleIDs, r.ID)
+		l4SrvIDs = append(l4SrvIDs, r.ServerID)
+	}
+	l4GroupMap := services.BatchL4RulePermissionGroupIDs(d.DB, l4RuleIDs)
+	l4RulesByInbound := make(map[uint64][]models.L4PortRule)
+	for _, r := range allL4Rules {
+		l4RulesByInbound[r.TargetInboundID] = append(l4RulesByInbound[r.TargetInboundID], r)
+	}
+	l4ServerMap := make(map[uint64]models.Server)
+	if len(l4SrvIDs) > 0 {
+		var l4Srvs []models.Server
+		_ = d.DB.Where("id IN ?", l4SrvIDs).Find(&l4Srvs).Error
+		for _, s := range l4Srvs {
+			l4ServerMap[s.ID] = s
+		}
+	}
+
 	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
@@ -74,12 +130,66 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		// 协议插件分发：未注册协议或参数不足的入站在 BuildNodeDTO 内记日志并返回 nil
+		// 1. 协议插件分发：构建主接入点
 		dto := subscribe.BuildNodeDTO(&srv, inb, user.UUID)
-		if dto == nil {
-			continue
+		if dto != nil {
+			dtos = append(dtos, *dto)
 		}
-		dtos = append(dtos, *dto)
+
+		// 2. 附加接入点派生（显式白名单权限控制：PermissionGroupIDs 为空默认全部不可见）
+		for _, ep := range endpointsByInbound[inb.ID] {
+			gids := epGroupMap[ep.ID]
+			if len(gids) == 0 || permGroupID == 0 {
+				continue
+			}
+			matched := false
+			for _, gid := range gids {
+				if gid == permGroupID {
+					matched = true
+					break
+				}
+			}
+			if !matched || dto == nil {
+				continue
+			}
+			// 派生节点：克隆主节点 DTO 并覆写 Name、ServerHost、ServerPort
+			epDTO := *dto
+			epDTO.Name = subscribe.NodeName(&srv, inb) + " | " + ep.Name
+			epDTO.ServerHost = ep.Host
+			epDTO.ServerPort = ep.Port
+			dtos = append(dtos, epDTO)
+		}
+
+		// 3. L4 端口转发规则派生（显式白名单权限控制：PermissionGroupIDs 为空默认全部不可见）
+		for _, l4r := range l4RulesByInbound[inb.ID] {
+			gids := l4GroupMap[l4r.ID]
+			if len(gids) == 0 || permGroupID == 0 {
+				continue
+			}
+			matched := false
+			for _, gid := range gids {
+				if gid == permGroupID {
+					matched = true
+					break
+				}
+			}
+			if !matched || dto == nil {
+				continue
+			}
+			l4Srv, ok := l4ServerMap[l4r.ServerID]
+			if !ok {
+				continue
+			}
+			l4DTO := *dto
+			ruleName := l4Srv.Name
+			if l4r.Remark != "" {
+				ruleName += " (" + l4r.Remark + ")"
+			}
+			l4DTO.Name = subscribe.NodeName(&srv, inb) + " | " + ruleName
+			l4DTO.ServerHost = l4Srv.Host
+			l4DTO.ServerPort = l4r.ListenPort
+			dtos = append(dtos, l4DTO)
+		}
 	}
 	if len(dtos) == 0 {
 		util.Fail(c, 404, "暂无可用的节点")
@@ -92,15 +202,6 @@ func (d *Deps) Subscribe(c *gin.Context) {
 
 	// 权限组自定义 Clash 模板
 	var clashTemplate string
-	var permGroupID uint64
-	if user.PermissionGroupID > 0 {
-		permGroupID = user.PermissionGroupID
-	} else if user.PlanID > 0 {
-		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
-			permGroupID = plan.PermissionGroupID
-		}
-	}
 	if permGroupID > 0 {
 		var pg models.PermissionGroup
 		if err := d.DB.First(&pg, permGroupID).Error; err == nil {
@@ -148,7 +249,10 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 
 	// subscription-userinfo
-	up, down, _ := d.Traffic.UserUsed(user.ID)
+	var up, down int64
+	if d.Traffic != nil {
+		up, down, _ = d.Traffic.UserUsed(user.ID)
+	}
 	totalBytes := int64(0)
 	expire := int64(0)
 	if user.PlanID > 0 {

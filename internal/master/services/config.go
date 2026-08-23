@@ -174,7 +174,7 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 
 // PreviewUsers 预览用：按表单（可能未入库）入站的开放权限组计算其用户列表（与 GetValidUsers 同规则）。
 func (s *ConfigService) PreviewUsers(inb *models.Inbound, groupIDs []uint64) []protocol.User {
-	if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeIdle {
+	if inb.Type == models.InboundTypeRelay {
 		return nil
 	}
 	return s.protoUsersFor(s.filterValidUsers(), inb, groupIDs)
