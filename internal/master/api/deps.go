@@ -4,10 +4,10 @@ package api
 import (
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/config"
-	"github.com/zhx/xray-panel/internal/master/backup"
-	"github.com/zhx/xray-panel/internal/master/nodegate"
-	"github.com/zhx/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/master/backup"
+	"github.com/acdc/xray-panel/internal/master/nodegate"
+	"github.com/acdc/xray-panel/internal/master/services"
 )
 
 // Deps 集中注入 handler 依赖。

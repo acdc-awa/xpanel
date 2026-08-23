@@ -3,8 +3,8 @@ package api
 import (
 	"testing"
 
-	"github.com/zhx/xray-panel/internal/master/subscribe"
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/master/subscribe"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // TestShareAddrOf 订阅分享地址三态（与 xray 监听解耦：custom 时用 ShareAddr+SharePort）。

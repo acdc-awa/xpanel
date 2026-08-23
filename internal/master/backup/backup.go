@@ -13,8 +13,8 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite" // 注册 sqlite driver
-	"github.com/zhx/xray-panel/internal/config"
-	"github.com/zhx/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/master/services"
 )
 
 // tsRe 备份文件名格式：panel-20060102-150405.db（捕获时间戳段）。

@@ -3,9 +3,9 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // UserOTPSetup POST /api/v1/user/2fa/setup —— 获取 TOTP 绑定参数（otpauth URL + secret）。

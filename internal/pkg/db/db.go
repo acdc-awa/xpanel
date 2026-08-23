@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/zhx/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/config"
 )
 
 // sqliteDSN 追加 busy_timeout（ISSUE-15），并发写冲突时等待而不是立刻返回 database is locked。

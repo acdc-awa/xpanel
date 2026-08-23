@@ -3,7 +3,7 @@ package services
 import (
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // UserEffectiveGroupID 计算用户生效的权限组 ID。

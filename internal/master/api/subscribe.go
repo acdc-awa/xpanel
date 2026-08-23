@@ -7,10 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zhx/xray-panel/internal/master/services"
-	"github.com/zhx/xray-panel/internal/master/subscribe"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/master/subscribe"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // Subscribe GET /sub/:token | GET /sub?token=xxx —— 订阅生成（按 UA 区分 Clash YAML / Base64）。

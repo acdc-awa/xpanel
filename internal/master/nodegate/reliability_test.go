@@ -9,8 +9,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 func newTestHub(t *testing.T) *Hub {

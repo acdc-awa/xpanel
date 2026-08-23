@@ -11,12 +11,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/zhx/xray-panel/internal/agent/accounts"
-	"github.com/zhx/xray-panel/internal/agent/certs"
-	"github.com/zhx/xray-panel/internal/agent/collector"
-	"github.com/zhx/xray-panel/internal/agent/stats"
-	"github.com/zhx/xray-panel/internal/agent/xrayproc"
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/agent/accounts"
+	"github.com/acdc/xray-panel/internal/agent/certs"
+	"github.com/acdc/xray-panel/internal/agent/collector"
+	"github.com/acdc/xray-panel/internal/agent/stats"
+	"github.com/acdc/xray-panel/internal/agent/xrayproc"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 // pendingEntry 待上报的累积流量。

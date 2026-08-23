@@ -8,8 +8,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // OrderService 订单服务（余额直付：购买/续费套餐即时生效）。

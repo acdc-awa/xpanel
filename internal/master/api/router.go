@@ -15,10 +15,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zhx/xray-panel/internal/master/embed"
-	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/master/services"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/master/embed"
+	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // agentDownloadHeaders 计算 /download/agent 下载响应头（version 为空则不发送版本头）。

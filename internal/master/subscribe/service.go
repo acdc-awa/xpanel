@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zhx/xray-panel/internal/contracts"
-	"github.com/zhx/xray-panel/internal/master/xray"
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc/xray-panel/internal/master/xray"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // ProxyItem 订阅中的单个节点。

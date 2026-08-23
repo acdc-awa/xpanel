@@ -8,11 +8,11 @@ VERSION="$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)"
 
 echo "==> 构建 Linux agent（version=$VERSION）"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags "-X github.com/zhx/xray-panel/internal/agent/upgrade.Version=$VERSION" \
+  -ldflags "-X github.com/acdc/xray-panel/internal/agent/upgrade.Version=$VERSION" \
   -o "$EMBED/agent-linux" ./cmd/agent
 
 echo "==> 构建 master（embedagent）"
 go build -tags embedagent \
-  -ldflags "-X github.com/zhx/xray-panel/internal/master/embed.AgentVersion=$VERSION" \
+  -ldflags "-X github.com/acdc/xray-panel/internal/master/embed.AgentVersion=$VERSION" \
   -o "$ROOT/master" ./cmd/master
 echo "完成: $ROOT/master（内嵌 agent $VERSION，$(du -h "$EMBED/agent-linux" | cut -f1)）"

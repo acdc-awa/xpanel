@@ -8,8 +8,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // GiftCardService 礼品卡与余额账务服务。

@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/zhx/xray-panel/internal/pkg/tlscert"
+	"github.com/acdc/xray-panel/internal/pkg/tlscert"
 )
 
 // ValidatePair 校验证书与私钥（委托共享包）。

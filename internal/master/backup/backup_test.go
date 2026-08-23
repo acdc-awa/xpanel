@@ -9,7 +9,7 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/zhx/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/config"
 )
 
 // setupDB 在 tmpdir 建一个带数据的 sqlite 文件，返回其 DSN 与路径。

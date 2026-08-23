@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhx/xray-panel/internal/master/xray"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/master/xray"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 func asObject(t *testing.T, v any, what string) map[string]any {

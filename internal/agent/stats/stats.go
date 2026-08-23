@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 // Entry 单个用户本周期流量增量。

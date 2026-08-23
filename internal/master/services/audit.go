@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // AuditService 审计日志。

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhx/xray-panel/internal/master/xray"
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/master/xray"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 func TestBuildClashWithTemplate(t *testing.T) {

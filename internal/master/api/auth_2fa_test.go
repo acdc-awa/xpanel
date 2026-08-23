@@ -12,11 +12,11 @@ import (
 	"github.com/pquerna/otp/totp"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/config"
-	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/master/services"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // TestTwoFAVerifyRoute ISSUE-01 回归：TOTP 用户密码登录拿到 pending token 后，

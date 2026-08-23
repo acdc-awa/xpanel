@@ -7,7 +7,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 func TestResetPeriodKey(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/master/services"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // Register POST /api/v1/auth/register

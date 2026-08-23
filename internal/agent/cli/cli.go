@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zhx/xray-panel/internal/agent/config"
-	"github.com/zhx/xray-panel/internal/agent/upgrade"
-	"github.com/zhx/xray-panel/internal/agent/xrayproc"
+	"github.com/acdc/xray-panel/internal/agent/config"
+	"github.com/acdc/xray-panel/internal/agent/upgrade"
+	"github.com/acdc/xray-panel/internal/agent/xrayproc"
 )
 
 // commands 全部子命令与一句话说明（help 输出用）。

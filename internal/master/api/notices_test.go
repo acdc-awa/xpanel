@@ -13,11 +13,11 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/config"
-	"github.com/zhx/xray-panel/internal/master/middleware"
-	"github.com/zhx/xray-panel/internal/master/services"
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/master/middleware"
+	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 func setupNoticesTest(t *testing.T) (*gin.Engine, *gorm.DB, *Deps, string, string) {

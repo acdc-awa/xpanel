@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhx/xray-panel/internal/agent/accounts"
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/agent/accounts"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 func testCert(t *testing.T) (certPEM, keyPEM string) {

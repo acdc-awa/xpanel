@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/protocol"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 // InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。

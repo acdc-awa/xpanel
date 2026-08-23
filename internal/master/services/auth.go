@@ -10,8 +10,8 @@ import (
 	"github.com/alexedwards/argon2id"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
-	"github.com/zhx/xray-panel/internal/pkg/util"
+	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // 业务错误（handler 层映射为 HTTP 状态码）

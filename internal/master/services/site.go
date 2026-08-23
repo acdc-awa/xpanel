@@ -9,8 +9,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/config"
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // 站点设置键（2026-08-14 批7 设置域，17 号 P0 ①——分组式站点设置）。

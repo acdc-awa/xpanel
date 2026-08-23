@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/zhx/xray-panel/internal/agent/accounts"
-	"github.com/zhx/xray-panel/internal/agent/cli"
-	"github.com/zhx/xray-panel/internal/agent/client"
-	"github.com/zhx/xray-panel/internal/agent/collector"
-	"github.com/zhx/xray-panel/internal/agent/config"
-	"github.com/zhx/xray-panel/internal/agent/stats"
-	"github.com/zhx/xray-panel/internal/agent/xrayproc"
+	"github.com/acdc/xray-panel/internal/agent/accounts"
+	"github.com/acdc/xray-panel/internal/agent/cli"
+	"github.com/acdc/xray-panel/internal/agent/client"
+	"github.com/acdc/xray-panel/internal/agent/collector"
+	"github.com/acdc/xray-panel/internal/agent/config"
+	"github.com/acdc/xray-panel/internal/agent/stats"
+	"github.com/acdc/xray-panel/internal/agent/xrayproc"
 )
 
 var version = "dev" // 构建期 -ldflags -X main.version=<git describe>（未注入时保持 dev）

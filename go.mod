@@ -1,4 +1,4 @@
-module github.com/zhx/xray-panel
+module github.com/acdc/xray-panel
 
 go 1.26
 

@@ -14,8 +14,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/master/api"
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/master/api"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 func setupTestDBForRole(t *testing.T) *gorm.DB {

@@ -11,7 +11,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 // 人机验证（Cloudflare Turnstile）——2026-08-14 方向②。

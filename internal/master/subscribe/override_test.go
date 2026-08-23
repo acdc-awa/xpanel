@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhx/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/models"
 )
 
 func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {

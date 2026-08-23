@@ -10,7 +10,7 @@ Write-Host "==> 构建 Linux agent（version=$Version）"
 $env:CGO_ENABLED = "0"
 $env:GOOS = "linux"
 $env:GOARCH = "amd64"
-& go build "-ldflags" "-X github.com/zhx/xray-panel/internal/agent/upgrade.Version=$Version" `
+& go build "-ldflags" "-X github.com/acdc/xray-panel/internal/agent/upgrade.Version=$Version" `
   -o (Join-Path $EmbedDir "agent-linux") ./cmd/agent
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -18,7 +18,7 @@ Write-Host "==> 构建 master.exe（embedagent）"
 $env:GOOS = ""
 $env:GOARCH = ""
 & go build -tags embedagent `
-  "-ldflags" "-X github.com/zhx/xray-panel/internal/master/embed.AgentVersion=$Version" `
+  "-ldflags" "-X github.com/acdc/xray-panel/internal/master/embed.AgentVersion=$Version" `
   -o (Join-Path $Root "master.exe") ./cmd/master
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
