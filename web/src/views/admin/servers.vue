@@ -92,6 +92,7 @@ function fmtTime(t: string | null) {
 const createOpen = ref(false)
 const createForm = reactive({ server_type: 'xray' as 'xray' | 'l4_relay', name: '', host: '', location: '', remark: '' })
 const creating = ref(false)
+const createdServerType = ref<'xray' | 'l4_relay'>('xray')
 const createdResult = ref<{ node_id: string; secret: string; install_cmd: string } | null>(null)
 
 async function submitCreate() {
@@ -101,8 +102,10 @@ async function submitCreate() {
   }
   creating.value = true
   try {
+    const sType = createForm.server_type
     const { data } = await createServer({ ...createForm })
     if (data.code === 0) {
+      createdServerType.value = sType
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
       createForm.server_type = 'xray'
       createForm.name = ''
@@ -132,6 +135,11 @@ async function copyText(text: string, label: string) {
 function closeCreate() {
   createOpen.value = false
   createdResult.value = null
+}
+
+function closeCreateAndGoRouting() {
+  closeCreate()
+  router.push('/admin/routing')
 }
 
 // ---- 节点管理抽屉 ----
@@ -339,7 +347,10 @@ async function removeServer(row: any) {
           </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default="{ row }">
-              <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
+              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">
+                <span class="x-status-dot online" style="background: #c084fc; box-shadow: 0 0 8px #c084fc" /> 就绪
+              </span>
+              <span v-else class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
                 <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                 {{ row.status === 1 ? '在线' : '离线' }}
               </span>
@@ -347,38 +358,56 @@ async function removeServer(row: any) {
           </el-table-column>
           <el-table-column label="接入点" width="90">
             <template #default="{ row }">
-              <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                {{ inboundCount(row.id) }} 个
-              </el-link>
+              <template v-if="row.server_type === 'l4_relay'">
+                <el-link type="primary" :underline="false" @click="openDrawer(row)">
+                  转发规则
+                </el-link>
+              </template>
+              <template v-else>
+                <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                  {{ inboundCount(row.id) }} 个
+                </el-link>
+              </template>
             </template>
           </el-table-column>
           <el-table-column label="配置同步" width="105">
             <template #default="{ row }">
-              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">四层转发</span>
+              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </template>
           </el-table-column>
           <el-table-column label="最后心跳" width="170">
-            <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span></template>
+            <template #default="{ row }">
+              <span v-if="row.server_type === 'l4_relay'" class="muted cell-mono" style="font-size: 12px">中转机无探针</span>
+              <span v-else class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="操作" width="340" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
-              <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
-              <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
-              <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
-              <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
-              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-                <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
-                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                    <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <template v-if="row.server_type === 'l4_relay'">
+                <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;转发规则</el-button>
+                <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
+                <el-button size="small" text type="danger" @click="removeServer(row)"><el-icon><Delete /></el-icon>&nbsp;删除</el-button>
+              </template>
+              <template v-else>
+                <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
+                <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
+                <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
+                <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
+                <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
+                <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+                  <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
+                      <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
             </template>
           </el-table-column>
           <template #empty>
@@ -398,13 +427,16 @@ async function removeServer(row: any) {
           <div v-for="row in filtered" :key="row.id" class="mobile-data-card">
             <div class="card-head">
               <div class="head-title">
-                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+                <span class="x-status-dot" :class="row.status === 1 || row.server_type === 'l4_relay' ? 'online' : 'offline'" />
+                <span v-if="row.server_type === 'l4_relay'" class="x-chip purple" style="font-size: 10px; margin-right: 4px">L4 中转</span>
                 <span style="font-weight: 700">{{ row.name }}</span>
-                <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
+                <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">就绪</span>
+                <span v-else class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
                   {{ row.status === 1 ? '在线' : '离线' }}
                 </span>
               </div>
-              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">四层转发</span>
+              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </div>
@@ -423,45 +455,65 @@ async function removeServer(row: any) {
                 <div class="item-value">{{ row.location || '—' }}</div>
               </div>
               <div class="grid-item">
-                <span class="item-label">接入点</span>
+                <span class="item-label">{{ row.server_type === 'l4_relay' ? '转发规则' : '接入点' }}</span>
                 <div class="item-value">
-                  <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                    {{ inboundCount(row.id) }} 个入站
-                  </el-link>
+                  <template v-if="row.server_type === 'l4_relay'">
+                    <el-link type="primary" :underline="false" @click="openDrawer(row)">管理规则</el-link>
+                  </template>
+                  <template v-else>
+                    <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                      {{ inboundCount(row.id) }} 个入站
+                    </el-link>
+                  </template>
                 </div>
               </div>
               <div class="grid-item full-width">
                 <span class="item-label">最后心跳</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.last_seen_at) }}</div>
+                <div class="item-value cell-mono muted" style="font-size: 11.5px">
+                  {{ row.server_type === 'l4_relay' ? '中转机无探针' : fmtTime(row.last_seen_at) }}
+                </div>
               </div>
             </div>
 
             <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain @click="openDrawer(row)">
-                <el-icon><Setting /></el-icon>&nbsp;详情
-              </el-button>
-              <el-button size="small" type="success" plain @click="openMetrics(row)">
-                <el-icon><TrendCharts /></el-icon>&nbsp;监控
-              </el-button>
-              <el-button size="small" @click="restartXray(row)">
-                <el-icon><RefreshRight /></el-icon>&nbsp;重启
-              </el-button>
-              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-                <el-button size="small">
-                  更多&nbsp;<el-icon><ArrowDown /></el-icon>
+              <template v-if="row.server_type === 'l4_relay'">
+                <el-button size="small" type="primary" plain @click="openDrawer(row)">
+                  <el-icon><Setting /></el-icon>&nbsp;转发规则
                 </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
-                    <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
-                    <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
-                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                    <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
-                      <el-icon><Delete /></el-icon>删除服务器
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+                <el-button size="small" @click="openEdit(row)">
+                  <el-icon><Edit /></el-icon>&nbsp;编辑
+                </el-button>
+                <el-button size="small" type="danger" plain @click="removeServer(row)">
+                  <el-icon><Delete /></el-icon>&nbsp;删除
+                </el-button>
+              </template>
+              <template v-else>
+                <el-button size="small" type="primary" plain @click="openDrawer(row)">
+                  <el-icon><Setting /></el-icon>&nbsp;详情
+                </el-button>
+                <el-button size="small" type="success" plain @click="openMetrics(row)">
+                  <el-icon><TrendCharts /></el-icon>&nbsp;监控
+                </el-button>
+                <el-button size="small" @click="restartXray(row)">
+                  <el-icon><RefreshRight /></el-icon>&nbsp;重启
+                </el-button>
+                <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+                  <el-button size="small">
+                    更多&nbsp;<el-icon><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
+                      <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                      <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
+                      <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                      <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
+                        <el-icon><Delete /></el-icon>删除服务器
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
             </div>
           </div>
         </div>
@@ -485,32 +537,41 @@ async function removeServer(row: any) {
         </el-form>
       </template>
       <template v-else>
-        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
-        <div class="secret-box">
-          <div class="secret-row install-row">
-            <span class="k">安装</span>
-            <code class="install-cmd">{{ createdResult.install_cmd }}</code>
-            <el-button size="small" text @click="copyText(createdResult.install_cmd, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
+        <template v-if="createdServerType === 'l4_relay'">
+          <el-alert type="success" :closable="false" show-icon title="L4 端口转发服务器创建成功" description="该服务器作为纯四层端口转发中转机使用，无需部署 Xray-core 或 Agent 探针。" style="margin-bottom: 16px" />
+          <div style="display: flex; gap: 12px; justify-content: center; margin: 24px 0">
+            <el-button type="primary" @click="closeCreateAndGoRouting">前往拓扑画布配置端口连线</el-button>
+            <el-button @click="closeCreate">完成</el-button>
           </div>
-          <div class="secret-row">
-            <span class="k">node_id</span>
-            <code>{{ createdResult.node_id }}</code>
-            <el-button size="small" text @click="copyText(createdResult.node_id, 'node_id')"><el-icon><CopyDocument /></el-icon></el-button>
+        </template>
+        <template v-else>
+          <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
+          <div class="secret-box">
+            <div class="secret-row install-row">
+              <span class="k">安装</span>
+              <code class="install-cmd">{{ createdResult.install_cmd }}</code>
+              <el-button size="small" text @click="copyText(createdResult.install_cmd, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
+            </div>
+            <div class="secret-row">
+              <span class="k">node_id</span>
+              <code>{{ createdResult.node_id }}</code>
+              <el-button size="small" text @click="copyText(createdResult.node_id, 'node_id')"><el-icon><CopyDocument /></el-icon></el-button>
+            </div>
+            <div class="secret-row">
+              <span class="k">secret</span>
+              <code>{{ createdResult.secret }}</code>
+              <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+            </div>
+            <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装后回到「服务器」页可查看节点在线状态并「生成」下发配置。</p>
           </div>
-          <div class="secret-row">
-            <span class="k">secret</span>
-            <code>{{ createdResult.secret }}</code>
-            <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
-          </div>
-          <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装后回到「服务器」页可查看节点在线状态并「生成」下发配置。</p>
-        </div>
+        </template>
       </template>
       <template #footer>
         <template v-if="!createdResult">
           <el-button @click="createOpen = false">取消</el-button>
           <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
         </template>
-        <template v-else>
+        <template v-else-if="createdServerType !== 'l4_relay'">
           <el-button type="primary" @click="closeCreate">完成</el-button>
         </template>
       </template>
