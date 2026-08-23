@@ -109,8 +109,9 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 		Code int `json:"code"`
 		Data struct {
 			L4Rules []struct {
-				ID         uint64 `json:"id"`
-				ListenPort int    `json:"listen_port"`
+				ID               uint64 `json:"id"`
+				ListenPort       int    `json:"listen_port"`
+				TargetInboundTag string `json:"target_inbound_tag"`
 			} `json:"l4_rules"`
 		} `json:"data"`
 	}
@@ -118,6 +119,7 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	assert.Equal(t, 0, topoResp.Code)
 	require.Len(t, topoResp.Data.L4Rules, 1)
 	assert.Equal(t, ruleID, topoResp.Data.L4Rules[0].ID)
+	assert.Equal(t, "hk-reality", topoResp.Data.L4Rules[0].TargetInboundTag)
 
 	// 7. 建立用户接入点：直连（双组可见）+ L4 中转（仅 VIP 可见）
 	u64 := func(v uint64) *uint64 { return &v }

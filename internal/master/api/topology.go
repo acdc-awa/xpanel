@@ -8,12 +8,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/subscribe"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
@@ -352,6 +352,8 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
+	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+
 	// L4 端口转发规则（轻量）
 	var l4Rules []models.L4PortRule
 	if err := d.DB.Order("server_id ASC, listen_port ASC, id ASC").Find(&l4Rules).Error; err != nil {
@@ -360,7 +362,7 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 	}
 	l4Views := make([]l4RuleView, 0, len(l4Rules))
 	for i := range l4Rules {
-		l4Views = append(l4Views, l4RuleView{
+		v := l4RuleView{
 			ID:              l4Rules[i].ID,
 			ServerID:        l4Rules[i].ServerID,
 			ListenPort:      l4Rules[i].ListenPort,
@@ -370,7 +372,15 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 			Enabled:         l4Rules[i].Enabled,
 			CreatedAt:       l4Rules[i].CreatedAt,
 			UpdatedAt:       l4Rules[i].UpdatedAt,
-		})
+		}
+		if ts, ok := srvMap[l4Rules[i].TargetServerID]; ok {
+			v.TargetServerName = ts.Name
+		}
+		if ti, ok := inbMap[l4Rules[i].TargetInboundID]; ok {
+			v.TargetInboundTag = ti.Tag
+			v.TargetInboundPort = ti.Port
+		}
+		l4Views = append(l4Views, v)
 	}
 
 	// 用户接入点（面向客户端与订阅的入口端点 + 开放权限组）
@@ -384,7 +394,6 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		apIDs = append(apIDs, accessPoints[i].ID)
 	}
 	apGroupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, apIDs)
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
 	apViews := make([]AccessPointView, 0, len(accessPoints))
 
 	for i := range accessPoints {
