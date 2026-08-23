@@ -677,7 +677,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <el-checkbox
             :model-value="isAllSelected"
             :indeterminate="isIndeterminate"
-            @change="(v) => toggleSelectAll(!!v)"
+            @change="(v: any) => toggleSelectAll(!!v)"
           >
             全选当前页用户
           </el-checkbox>
@@ -700,7 +700,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
               <div class="head-left">
                 <el-checkbox
                   :model-value="isRowSelected(row)"
-                  @change="(val) => toggleSelectRow(row, !!val)"
+                  @change="(val: any) => toggleSelectRow(row, !!val)"
                 />
                 <div class="user-info">
                   <div class="user-name-line">

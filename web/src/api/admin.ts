@@ -10,6 +10,7 @@ import type {
   CreateInvitationResult,
   InboundItem,
   InboundSettings,
+  InboundEndpoint,
   Invitation,
   Order,
   PermissionGroup,
@@ -29,6 +30,7 @@ export type {
   CertItem,
   InboundItem,
   InboundSettings,
+  InboundEndpoint,
   Invitation,
   Order,
   PermissionGroup,
@@ -467,12 +469,29 @@ export interface TopologyRule {
 export interface TopologyData {
   servers: ServerItem[]
   inbounds: InboundItem[]
+  inbound_endpoints?: InboundEndpoint[]
   outbounds: TopologyOutbound[]
   routing_rules: TopologyRule[]
 }
 
 export function getTopology() {
   return http.get<ApiResp<TopologyData>>('/admin/topology')
+}
+
+export function getInboundEndpoints(inboundId: number) {
+  return http.get<ApiResp<{ items: InboundEndpoint[] }>>(`/admin/inbounds/${inboundId}/endpoints`)
+}
+
+export function createInboundEndpoint(inboundId: number, payload: Partial<InboundEndpoint>) {
+  return http.post<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints`, payload)
+}
+
+export function updateInboundEndpoint(inboundId: number, epId: number, payload: Partial<InboundEndpoint>) {
+  return http.put<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`, payload)
+}
+
+export function deleteInboundEndpoint(inboundId: number, epId: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`)
 }
 
 // 画布布局云端同步（盒子位置/宽度 + 内容哈希去重，跨浏览器/设备统一；settings 表存 JSON）

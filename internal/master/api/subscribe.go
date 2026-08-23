@@ -67,6 +67,37 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
 	inbounds = services.FilterAvailableInbounds(filtered)
+	// 确定用户生效的权限组 ID
+	var permGroupID uint64
+	if user.PermissionGroupID > 0 {
+		permGroupID = user.PermissionGroupID
+	} else if user.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
+			permGroupID = plan.PermissionGroupID
+		}
+	}
+
+	// 收集入站的附加接入点
+	inboundIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		inboundIDs = append(inboundIDs, inb.ID)
+	}
+	var allEndpoints []models.InboundEndpoint
+	if len(inboundIDs) > 0 {
+		_ = d.DB.Where("inbound_id IN ? AND enabled = ?", inboundIDs, true).
+			Order("priority ASC, id ASC").Find(&allEndpoints).Error
+	}
+	epIDs := make([]uint64, 0, len(allEndpoints))
+	for _, ep := range allEndpoints {
+		epIDs = append(epIDs, ep.ID)
+	}
+	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
+	endpointsByInbound := make(map[uint64][]models.InboundEndpoint)
+	for _, ep := range allEndpoints {
+		endpointsByInbound[ep.InboundID] = append(endpointsByInbound[ep.InboundID], ep)
+	}
+
 	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
@@ -74,12 +105,35 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		// 协议插件分发：未注册协议或参数不足的入站在 BuildNodeDTO 内记日志并返回 nil
+		// 1. 协议插件分发：构建主接入点
 		dto := subscribe.BuildNodeDTO(&srv, inb, user.UUID)
-		if dto == nil {
-			continue
+		if dto != nil {
+			dtos = append(dtos, *dto)
 		}
-		dtos = append(dtos, *dto)
+
+		// 2. 附加接入点派生（显式白名单权限控制：PermissionGroupIDs 为空默认全部不可见）
+		for _, ep := range endpointsByInbound[inb.ID] {
+			gids := epGroupMap[ep.ID]
+			if len(gids) == 0 || permGroupID == 0 {
+				continue
+			}
+			matched := false
+			for _, gid := range gids {
+				if gid == permGroupID {
+					matched = true
+					break
+				}
+			}
+			if !matched || dto == nil {
+				continue
+			}
+			// 派生节点：克隆主节点 DTO 并覆写 Name、ServerHost、ServerPort
+			epDTO := *dto
+			epDTO.Name = subscribe.NodeName(&srv, inb) + " | " + ep.Name
+			epDTO.ServerHost = ep.Host
+			epDTO.ServerPort = ep.Port
+			dtos = append(dtos, epDTO)
+		}
 	}
 	if len(dtos) == 0 {
 		util.Fail(c, 404, "暂无可用的节点")
@@ -92,15 +146,6 @@ func (d *Deps) Subscribe(c *gin.Context) {
 
 	// 权限组自定义 Clash 模板
 	var clashTemplate string
-	var permGroupID uint64
-	if user.PermissionGroupID > 0 {
-		permGroupID = user.PermissionGroupID
-	} else if user.PlanID > 0 {
-		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
-			permGroupID = plan.PermissionGroupID
-		}
-	}
 	if permGroupID > 0 {
 		var pg models.PermissionGroup
 		if err := d.DB.First(&pg, permGroupID).Error; err == nil {

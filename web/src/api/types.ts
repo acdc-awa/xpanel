@@ -454,3 +454,19 @@ export interface NoticePayload {
   status?: number
   sort_order?: number
 }
+
+// InboundEndpoint 入站附加接入点（如 BGP 中转、IPv6、备用 CDN 域名）
+export interface InboundEndpoint {
+  id: number
+  inbound_id: number
+  name: string
+  host: string
+  port: number
+  permission_group_ids: number[]
+  enabled: boolean
+  priority: number
+  remark: string
+  created_at: string
+  updated_at: string
+}
+

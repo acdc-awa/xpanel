@@ -284,7 +284,7 @@ function reloadTable() {
 }
 
 // ---- T8：画布视图 ----
-const viewMode = ref<'table' | 'canvas'>('table')
+const viewMode = ref<'table' | 'canvas'>('canvas')
 const topology = ref<TopologyData | null>(null)
 const canvasEdit = ref(true)
 
@@ -311,10 +311,28 @@ function openServer(serverId: number) {
   drawerOpen.value = true
 }
 
+function openInboundCreateForServer(serverId: number) {
+  openServer(serverId)
+}
+
+function openOutboundCreateForServer(serverId: number) {
+  serverFilter.value = serverId
+  openOutboundCreate()
+}
+
 onMounted(async () => {
   const q = Number(route.query.server_id)
-  if (q > 0) serverFilter.value = q
+  if (q > 0) {
+    serverFilter.value = q
+    viewMode.value = 'table'
+  }
+  if (route.query.view === 'table') {
+    viewMode.value = 'table'
+  }
   await loadServers()
+  if (viewMode.value === 'canvas') {
+    await loadTopology()
+  }
 })
 </script>
 
@@ -776,6 +794,8 @@ onMounted(async () => {
         :editable="canvasEdit"
         @changed="loadTopology"
         @open-server="openServer"
+        @open-create-inbound="openInboundCreateForServer"
+        @open-create-outbound="openOutboundCreateForServer"
       />
     </template>
 

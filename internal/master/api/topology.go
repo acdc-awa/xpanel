@@ -454,11 +454,35 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
+	// 附加接入点（轻量 + 开放权限组）
+	var endpoints []models.InboundEndpoint
+	if err := d.DB.Order("inbound_id ASC, priority ASC, id ASC").Find(&endpoints).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	epIDs := make([]uint64, 0, len(endpoints))
+	for i := range endpoints {
+		epIDs = append(epIDs, endpoints[i].ID)
+	}
+	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
+	epViews := make([]InboundEndpointView, 0, len(endpoints))
+	for i := range endpoints {
+		gids := epGroupMap[endpoints[i].ID]
+		if gids == nil {
+			gids = []uint64{}
+		}
+		epViews = append(epViews, InboundEndpointView{
+			InboundEndpoint:    endpoints[i],
+			PermissionGroupIDs: gids,
+		})
+	}
+
 	util.OK(c, gin.H{
-		"servers":       srvViews,
-		"inbounds":      inbViews,
-		"outbounds":     outViews,
-		"routing_rules": ruleViews,
+		"servers":           srvViews,
+		"inbounds":          inbViews,
+		"inbound_endpoints": epViews,
+		"outbounds":         outViews,
+		"routing_rules":     ruleViews,
 	})
 }
 
