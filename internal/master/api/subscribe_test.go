@@ -46,27 +46,3 @@ func TestShareAddrOf(t *testing.T) {
 	}
 }
 
-// TestSubscribeFlow 订阅 flow 计算（与生成侧 buildClients 同源）：
-// 入站级（none 禁用自动注入）→ TCP+REALITY 自动 vision（UserInbound 覆盖已随批2 冻结删除）。
-func TestSubscribeFlow(t *testing.T) {
-	cases := []struct {
-		name       string
-		inbFlow    string
-		tcpReality bool
-		wantFlow   string
-		wantNo     bool
-	}{
-		{"自动: tcp+reality", "", true, "xtls-rprx-vision", false},
-		{"自动: 非 reality 不注入", "", false, "", false},
-		{"入站级开启", "xtls-rprx-vision", true, "xtls-rprx-vision", false},
-		{"入站级 none 禁用", "none", true, "", true},
-		{"入站级 none + 非 reality", "none", false, "", true},
-	}
-	for _, c := range cases {
-		flow, no := subscribe.SubscribeFlow(c.inbFlow, c.tcpReality)
-		if flow != c.wantFlow || no != c.wantNo {
-			t.Errorf("%s: got flow=%q noAuto=%v, want flow=%q noAuto=%v",
-				c.name, flow, no, c.wantFlow, c.wantNo)
-		}
-	}
-}

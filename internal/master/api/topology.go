@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/nodegate"
 	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/master/subscribe"
@@ -231,23 +232,26 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 		UUID: "00000000-0000-0000-0000-000000000001",
 	}
 
-	items := make([]subscribe.ProxyItem, 0, len(inbounds))
+	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
 		var srv models.Server
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		item := subscribe.BuildProxyItem(&srv, inb, mockUser.UUID)
-		items = append(items, item)
+		dto := subscribe.BuildNodeDTO(&srv, inb, mockUser.UUID)
+		if dto == nil {
+			continue
+		}
+		dtos = append(dtos, *dto)
 	}
 
 	panelHost := c.Request.Host
 	if h, _, err := net.SplitHostPort(panelHost); err == nil {
 		panelHost = h
 	}
-	rendered := subscribe.BuildClashWithTemplate(mockUser, items, req.Template, panelHost)
-	_, names := subscribe.FormatProxiesYAML(items)
+	rendered := subscribe.BuildClashWithTemplate(dtos, req.Template, panelHost)
+	_, names := subscribe.FormatNodesYAML(dtos)
 
 	util.OK(c, gin.H{
 		"rendered":        rendered,

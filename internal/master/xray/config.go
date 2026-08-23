@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc/xray-panel/internal/master/protocols"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
@@ -453,8 +454,9 @@ func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
 // 与 streamSettings（reality 公钥/SNI/shortId 派生、tls serverName）全部由生成器填充。
 func buildRefOutbound(item map[string]any, target RefTarget) {
 	inb := target.Inbound
-	net := StreamNetwork(inb.StreamSettings)
-	sec := StreamSecurity(inb.StreamSettings)
+	spec := contracts.DecodeInbound(&inb)
+	net := spec.Network
+	sec := spec.Security
 
 	flow := ""
 	if net == "tcp" && (sec == "reality" || sec == "tls") {
@@ -479,7 +481,7 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 	// streamSettings：传输参数透传目标 + 安全参数自动填充
 	ss := map[string]any{"network": net, "security": sec}
 	if net == "xhttp" {
-		if x := StreamXHTTP(inb.StreamSettings); x != nil {
+		if x := spec.XHTTP; x != nil {
 			xh := map[string]any{"mode": x.Mode, "path": x.Path}
 			if x.Host != "" {
 				xh["host"] = x.Host
@@ -490,7 +492,7 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 	switch sec {
 	case "reality":
 		// 出站 REALITY：公钥标准名 password、SNI/shortId 单数（01 号文档 §2.2）
-		if r := StreamReality(inb.StreamSettings); r != nil {
+		if r := spec.Reality; r != nil && r.ServerName != "" {
 			ss["realitySettings"] = map[string]any{
 				"serverName":  r.ServerName,
 				"password":    r.PublicKey,
@@ -501,7 +503,7 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 		}
 	case "tls":
 		serverName := target.ServerHost
-		if t := StreamTLS(inb.StreamSettings); t != nil && t.ServerName != "" {
+		if t := spec.TLS; t != nil && t.ServerName != "" {
 			serverName = t.ServerName
 		}
 		// 注意：v26.6.27 已移除 allowInsecure（迁移 pinnedPeerCertSha256/verifyPeerCertByName），不输出
@@ -660,6 +662,8 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 // 动态注入 clients 列表（Phase T：按入站三态分流——user 动态用户 / relay 内部 UUID /
 // idle 由 Generate 过滤不达此处）。其余字段完全透传。
 func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ctx *GenerateContext) (map[string]any, error) {
+	spec := contracts.DecodeInbound(inb)
+
 	// 1. 解析协议 settings JSON → 注入 clients
 	settings := map[string]any{}
 	if inb.SettingsJSON != "" {
@@ -681,8 +685,8 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
 		}
 		flow := ""
-		if StreamNetwork(inb.StreamSettings) == "tcp" &&
-			(StreamHasReality(inb.StreamSettings) || StreamSecurity(inb.StreamSettings) == "tls") {
+		if spec.Network == "tcp" &&
+			(spec.Security == "reality" || spec.Security == "tls") {
 			flow = "xtls-rprx-vision"
 		}
 		c := map[string]any{
@@ -694,9 +698,10 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 		clients = []any{c}
 	default:
-		// user 入站：动态用户列表（已由服务层 GetValidUsers 按入站开放权限组过滤，空组返回空列表）
+		// user 入站：动态用户列表（已由服务层 GetValidUsers 按入站开放权限组过滤，空组返回空列表）；
+		// clients 结构由协议插件生成（未注册协议走最小通用注入）
 		userList := usersByTag[inb.Tag]
-		clients = buildClients(userList, inb)
+		clients = protocols.ServerClients(inb.Protocol, userList, spec)
 	}
 	settings["clients"] = clients
 
@@ -717,7 +722,7 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
 		}
 		// 证书路径动态注入（Phase T）：当关联了 CertID 且为 TLS 入站时，覆盖 certificates 路径
-		if StreamSecurity(inb.StreamSettings) == "tls" {
+		if spec.Security == "tls" {
 			if domain, ok := certDomainFor(inb, ctx); ok {
 				stream["tlsSettings"] = map[string]any{
 					"certificates": []any{
@@ -741,139 +746,56 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	return item, nil
 }
 
-// buildClients 将有效用户转换为 Xray clients 列表。
-func buildClients(users []protocol.User, inb *models.Inbound) []any {
-	clients := make([]any, 0, len(users))
-	for _, u := range users {
-		if u.UUID == "" {
-			continue
-		}
-		c := map[string]any{
-			"id":    u.UUID,
-			"email": u.Email,
-		}
-		if u.Flow != "" {
-			c["flow"] = u.Flow
-		}
-		if u.Limit > 0 {
-			c["limit"] = u.Limit
-		}
-		clients = append(clients, c)
-	}
-	return clients
-}
-
 // StreamHasReality 判断 streamSettings JSON 是否启用了 REALITY。
+// 以下为统一解码层（contracts.InboundSpec）的兼容包装：保留旧签名供既有测试与调用方，
+// 新代码应直接使用 contracts.DecodeInbound/DecodeStream。
 func StreamHasReality(raw string) bool {
 	return StreamSecurity(raw) == "reality"
 }
 
 // StreamNetwork 从 streamSettings JSON 中提取 network 字段。
 func StreamNetwork(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	var s struct {
-		Network string `json:"network"`
-	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
-		return ""
-	}
-	return s.Network
+	return contracts.DecodeStream(raw).Network
 }
 
 // StreamSecurity 从 streamSettings JSON 中提取 security 字段。
 func StreamSecurity(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	var s struct {
-		Security string `json:"security"`
-	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
-		return ""
-	}
-	return s.Security
+	return contracts.DecodeStream(raw).Security
 }
 
 // StreamReality 从 streamSettings JSON 中提取 realitySettings。
+// 与历史行为一致：security 非 reality、解析失败或缺 ServerName 时返回 nil。
 func StreamReality(raw string) *RealitySettings {
-	if raw == "" {
+	r := contracts.DecodeStream(raw).Reality
+	if r == nil || r.ServerName == "" {
 		return nil
 	}
-	var s struct {
-		Security string `json:"security"`
-		Reality  *struct {
-			ServerNames []string `json:"serverNames"`
-			ServerName  string   `json:"serverName"`
-			PublicKey   string   `json:"publicKey"`
-			Password    string   `json:"password"`
-			PrivateKey  string   `json:"privateKey"`
-			ShortIDs    []string `json:"shortIds"`
-			ShortID     string   `json:"shortId"`
-			Dest        string   `json:"dest"`
-		} `json:"realitySettings"`
-	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Reality == nil || s.Security != "reality" {
-		return nil
-	}
-	r := s.Reality
-	pk := r.Password
-	if pk == "" {
-		pk = r.PublicKey
-	}
-	out := &RealitySettings{
-		PublicKey:  pk,
+	return &RealitySettings{
+		ServerName: r.ServerName,
+		PublicKey:  r.PublicKey,
+		ShortID:    r.ShortID,
 		PrivateKey: r.PrivateKey,
 		Dest:       r.Dest,
 	}
-	if r.ServerName != "" {
-		out.ServerName = r.ServerName
-	} else if len(r.ServerNames) > 0 {
-		out.ServerName = r.ServerNames[0]
-	}
-	if r.ShortID != "" {
-		out.ShortID = r.ShortID
-	} else if len(r.ShortIDs) > 0 {
-		out.ShortID = r.ShortIDs[0]
-	}
-	if out.ServerName == "" {
-		return nil
-	}
-	return out
 }
 
 // StreamTLS 从 streamSettings JSON 中提取 tlsSettings（订阅 servername / skip-cert-verify 透传）。
 func StreamTLS(raw string) *TLSSettings {
-	if raw == "" {
-		return nil
-	}
-	var s struct {
-		TLSSettings *struct {
-			ServerName    string `json:"serverName"`
-			AllowInsecure bool   `json:"allowInsecure"`
-		} `json:"tlsSettings"`
-	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.TLSSettings == nil {
+	t := contracts.DecodeStream(raw).TLS
+	if t == nil {
 		return nil
 	}
 	return &TLSSettings{
-		ServerName:    s.TLSSettings.ServerName,
-		AllowInsecure: s.TLSSettings.AllowInsecure,
+		ServerName:    t.ServerName,
+		AllowInsecure: t.AllowInsecure,
 	}
 }
 
 // StreamXHTTP 从 streamSettings JSON 中提取 xhttpSettings。
 func StreamXHTTP(raw string) *XHTTPSettings {
-	if raw == "" {
+	x := contracts.DecodeStream(raw).XHTTP
+	if x == nil {
 		return nil
 	}
-	var s struct {
-		XHTTPSettings XHTTPSettings `json:"xhttpSettings"`
-	}
-	json.Unmarshal([]byte(raw), &s)
-	if s.XHTTPSettings.Mode == "" {
-		return nil
-	}
-	return &s.XHTTPSettings
+	return &XHTTPSettings{Mode: x.Mode, Path: x.Path, Host: x.Host}
 }

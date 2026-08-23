@@ -5,12 +5,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acdc/xray-panel/internal/master/xray"
-	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/contracts"
 )
 
-func testUser() *models.User {
-	return &models.User{ID: 1, UUID: "11111111-1111-1111-1111-111111111111"}
+// 构造 DTO 时 flow 已由协议插件决议（生成侧同源），导出器为哑渲染器。
+func dtoVless(name, host string, port int, uuid, network string, sec *contracts.SecurityOptions, tr *contracts.TransportOptions, flow string) contracts.ProxyNodeDTO {
+	if tr == nil {
+		tr = &contracts.TransportOptions{Network: network}
+	}
+	return contracts.ProxyNodeDTO{
+		Name:       name,
+		ServerHost: host,
+		ServerPort: port,
+		Protocol:   "vless",
+		Transport:  tr,
+		Security:   sec,
+		Auth:       &contracts.ClientCredentialDTO{UUID: uuid, Flow: flow},
+	}
 }
 
 // A-G 差距回归（03 号文档 §4）：
@@ -18,36 +29,27 @@ func testUser() *models.User {
 // D xhttp 缺 host · E 缺 skip-cert-verify 透传 · F url-test 用 cloudflare ·
 // G BuildBase64 同步（tcp+tls+flow / xhttp host / xhttp+tls 无 flow）
 func TestBuildClash_Gaps(t *testing.T) {
-	items := []ProxyItem{
-		{
-			Name: "tcp-reality", Host: "r.example.com", Port: 443,
-			UUID: "uuid-r", Network: "tcp", TLSType: "reality",
-			Reality: &xray.RealitySettings{ServerName: "r.example.com", PublicKey: "pbk123", ShortID: "abcd"},
-		},
-		{
-			Name: "tcp-tls-vision", Host: "t.example.com", Port: 443,
-			UUID: "uuid-t", Network: "tcp", TLSType: "tls", Flow: "xtls-rprx-vision",
-			TLS: &xray.TLSSettings{ServerName: "t.example.com", AllowInsecure: true},
-		},
-		{
-			Name: "xhttp-tls", Host: "w.example.com", Port: 8443,
-			UUID: "uuid-w", Network: "xhttp", TLSType: "tls",
-			TLS:   &xray.TLSSettings{ServerName: "w.example.com"},
-			XHTTP: &xray.XHTTPSettings{Mode: "auto", Path: "/xp-tls", Host: "cdn.example.com"},
-		},
-		{
-			Name: "xhttp-reality", Host: "x.example.com", Port: 443,
-			UUID: "uuid-x", Network: "xhttp", TLSType: "reality",
-			Reality: &xray.RealitySettings{ServerName: "x.example.com", PublicKey: "pbk456", ShortID: "ef01"},
-			XHTTP:   &xray.XHTTPSettings{Mode: "auto", Path: "/xp", Host: "h.example.com"},
-		},
-		{
-			Name: "broken-reality", Host: "b.example.com", Port: 443,
-			UUID: "uuid-b", Network: "tcp", TLSType: "reality", // Reality=nil 应跳过不崩溃
-		},
+	nodes := []contracts.ProxyNodeDTO{
+		dtoVless("tcp-reality", "r.example.com", 443, "uuid-r", "tcp",
+			&contracts.SecurityOptions{Type: "reality", SNI: "r.example.com",
+				Reality: &contracts.RealityOptions{PublicKey: "pbk123", ShortID: "abcd"}},
+			nil, "xtls-rprx-vision"), // tcp+reality 自动 vision（插件已决议）
+		dtoVless("tcp-tls-vision", "t.example.com", 443, "uuid-t", "tcp",
+			&contracts.SecurityOptions{Type: "tls", SNI: "t.example.com", AllowInsecure: true},
+			nil, "xtls-rprx-vision"),
+		dtoVless("xhttp-tls", "w.example.com", 8443, "uuid-w", "xhttp",
+			&contracts.SecurityOptions{Type: "tls", SNI: "w.example.com"},
+			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp-tls", Host: "cdn.example.com"}, ""),
+		dtoVless("xhttp-reality", "x.example.com", 443, "uuid-x", "xhttp",
+			&contracts.SecurityOptions{Type: "reality", SNI: "x.example.com",
+				Reality: &contracts.RealityOptions{PublicKey: "pbk456", ShortID: "ef01"}},
+			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp", Host: "h.example.com"}, ""),
+		// reality 参数缺失（Reality=nil）应跳过不崩溃
+		dtoVless("broken-reality", "b.example.com", 443, "uuid-b", "tcp",
+			&contracts.SecurityOptions{Type: "reality"}, nil, ""),
 	}
 
-	yaml := BuildClash(testUser(), items)
+	yaml := BuildClash(nodes)
 
 	for _, want := range []string{
 		"flow: xtls-rprx-vision",        // reality+tcp 自动 vision
@@ -64,12 +66,9 @@ func TestBuildClash_Gaps(t *testing.T) {
 		}
 	}
 	if strings.Contains(yaml, "broken-reality") {
-		t.Error("Reality=nil 的节点应被跳过")
+		t.Error("reality 参数缺失的节点应被跳过")
 	}
-	if strings.Contains(yaml, "flow:") && !strings.Contains(yaml, "tcp-reality") && !strings.Contains(yaml, "tcp-tls-vision") {
-		t.Error("flow 不应出现在 xhttp 节点")
-	}
-	// xhttp-tls 节点（无 flow 覆盖）不应输出 flow
+	// xhttp-tls 节点（无 flow）不应输出 flow
 	xhIdx := strings.Index(yaml, "'xhttp-tls'")
 	if xhIdx < 0 {
 		xhIdx = strings.Index(yaml, `"xhttp-tls"`)
@@ -83,28 +82,33 @@ func TestBuildClash_Gaps(t *testing.T) {
 			t.Error("xhttp+tls 节点不应输出 flow")
 		}
 	}
+	// xhttp-reality 节点也不应输出 flow
+	xrIdx := strings.Index(yaml, "'xhttp-reality'")
+	if xrIdx >= 0 {
+		rest := yaml[xrIdx:]
+		if idx := strings.Index(rest, "\n"); idx > 0 {
+			rest = rest[:idx]
+		}
+		if strings.Contains(rest, "flow:") {
+			t.Error("xhttp+reality 节点不应输出 flow")
+		}
+	}
 }
 
 func TestBuildBase64_Gaps(t *testing.T) {
-	items := []ProxyItem{
-		{
-			Name: "tcp-tls-vision", Host: "t.example.com", Port: 443,
-			UUID: "uuid-t", Network: "tcp", TLSType: "tls", Flow: "xtls-rprx-vision",
-			TLS: &xray.TLSSettings{ServerName: "t.example.com", AllowInsecure: true},
-		},
-		{
-			Name: "xhttp-host", Host: "x.example.com", Port: 443,
-			UUID: "uuid-x", Network: "xhttp", TLSType: "reality",
-			Reality: &xray.RealitySettings{ServerName: "x.example.com", PublicKey: "pbk456", ShortID: "ef01"},
-			XHTTP:   &xray.XHTTPSettings{Mode: "auto", Path: "/xp", Host: "h.example.com"},
-		},
-		{
-			Name: "xhttp-tls", Host: "w.example.com", Port: 8443,
-			UUID: "uuid-w", Network: "xhttp", TLSType: "tls",
-			XHTTP: &xray.XHTTPSettings{Mode: "auto", Path: "/xp", Host: "cdn.example.com"},
-		},
+	nodes := []contracts.ProxyNodeDTO{
+		dtoVless("tcp-tls-vision", "t.example.com", 443, "uuid-t", "tcp",
+			&contracts.SecurityOptions{Type: "tls", SNI: "t.example.com", AllowInsecure: true},
+			nil, "xtls-rprx-vision"),
+		dtoVless("xhttp-host", "x.example.com", 443, "uuid-x", "xhttp",
+			&contracts.SecurityOptions{Type: "reality", SNI: "x.example.com",
+				Reality: &contracts.RealityOptions{PublicKey: "pbk456", ShortID: "ef01"}},
+			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp", Host: "h.example.com"}, ""),
+		dtoVless("xhttp-tls", "w.example.com", 8443, "uuid-w", "xhttp",
+			&contracts.SecurityOptions{Type: "tls", SNI: "w.example.com"},
+			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp-tls", Host: "cdn.example.com"}, ""),
 	}
-	b64 := BuildBase64(testUser(), items)
+	b64 := BuildBase64(nodes)
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		t.Fatalf("Base64 解码失败: %v", err)
@@ -133,16 +137,19 @@ func TestBuildBase64_Gaps(t *testing.T) {
 }
 
 func TestBuildClash_SkipsBrokenReality(t *testing.T) {
-	items := []ProxyItem{
-		{Name: "ok", Host: "a.com", Port: 443, UUID: "u", Network: "tcp", TLSType: "reality",
-			Reality: &xray.RealitySettings{ServerName: "a.com", PublicKey: "pk", ShortID: "sid"}},
-		{Name: "broken", Host: "b.com", Port: 443, UUID: "u2", Network: "tcp", TLSType: "reality"},
+	nodes := []contracts.ProxyNodeDTO{
+		dtoVless("ok", "a.com", 443, "u", "tcp",
+			&contracts.SecurityOptions{Type: "reality", SNI: "a.com",
+				Reality: &contracts.RealityOptions{PublicKey: "pk", ShortID: "sid"}},
+			nil, "xtls-rprx-vision"),
+		dtoVless("broken", "b.com", 443, "u2", "tcp",
+			&contracts.SecurityOptions{Type: "reality"}, nil, ""),
 	}
-	yaml := BuildClash(testUser(), items)
+	yaml := BuildClash(nodes)
 	if strings.Contains(yaml, "broken") {
 		t.Errorf("broken 节点不应输出: %s", yaml)
 	}
-	b64 := BuildBase64(testUser(), items)
+	b64 := BuildBase64(nodes)
 	raw, _ := base64.StdEncoding.DecodeString(b64)
 	if strings.Contains(string(raw), "u2@") {
 		t.Errorf("broken 节点不应输出链接: %s", raw)

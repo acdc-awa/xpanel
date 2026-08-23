@@ -5,23 +5,20 @@ import (
 	"testing"
 
 	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/models"
 )
 
+// TestDefaultRegistry_ClashAndBase64 注册表调度与导出一致性：
+// 导出器原生消费 contracts.ProxyNodeDTO（协议插件决议语义），UA 命中 Clash、兜底 base64。
 func TestDefaultRegistry_ClashAndBase64(t *testing.T) {
-	srv := &models.Server{Name: "香港01", Host: "hk.node.local"}
-	inb := &models.Inbound{
-		Tag:            "vless-xhttp",
-		Protocol:       "vless",
-		Port:           10086,
-		StreamSettings: `{"network":"xhttp","security":"tls","xhttpSettings":{"mode":"auto","path":"/xhttp","host":"hk.node.local"}}`,
-	}
 	uuid := "11111111-2222-3333-4444-555555555555"
-	item := BuildProxyItem(srv, inb, uuid)
-	items := []ProxyItem{item}
-	user := &models.User{UUID: uuid}
-	summary := UserToSummaryDTO(user)
-	dtos := ProxyItemsToDTOs(items)
+	dto := contracts.ProxyNodeDTO{
+		ID: 1, Name: "香港01", ServerHost: "hk.node.local", ServerPort: 10086, Protocol: "vless",
+		Transport: &contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xhttp", Host: "hk.node.local"},
+		Security:  &contracts.SecurityOptions{Type: "tls"},
+		Auth:      &contracts.ClientCredentialDTO{UUID: uuid},
+	}
+	dtos := []contracts.ProxyNodeDTO{dto}
+	summary := contracts.UserSummaryDTO{UUID: uuid}
 
 	reg := DefaultRegistry()
 
@@ -30,7 +27,7 @@ func TestDefaultRegistry_ClashAndBase64(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clash export failed: %v", err)
 	}
-	expectedClash := BuildClashWithTemplate(user, items, "", "panel.test")
+	expectedClash := BuildClashWithTemplate(dtos, "", "panel.test")
 	if clashContent != expectedClash {
 		t.Errorf("Clash exporter mismatch:\n got: %s\nwant: %s", clashContent, expectedClash)
 	}
@@ -44,7 +41,7 @@ func TestDefaultRegistry_ClashAndBase64(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Base64 export failed: %v", err)
 	}
-	expectedB64 := BuildBase64(user, items)
+	expectedB64 := BuildBase64(dtos)
 	if b64Content != expectedB64 {
 		t.Errorf("Base64 exporter mismatch:\n got: %s\nwant: %s", b64Content, expectedB64)
 	}

@@ -1,4 +1,5 @@
 // Package subscribe 生成 Clash YAML / Base64 订阅（按 UA 区分）。
+// 节点组装走协议插件（protocols），导出器原生消费 contracts.ProxyNodeDTO；
 // 依据《mihomo-订阅语法.md》与《知识状态清单》A 类实测结论。
 package subscribe
 
@@ -7,31 +8,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/acdc/xray-panel/internal/contracts"
-	"github.com/acdc/xray-panel/internal/master/xray"
+	"github.com/acdc/xray-panel/internal/master/protocols"
 	"github.com/acdc/xray-panel/internal/models"
 )
-
-// ProxyItem 订阅中的单个节点。
-type ProxyItem struct {
-	Name    string
-	Host    string
-	Port    int
-	UUID    string
-	Network string
-	TLSType string
-	Flow    string // 入站级 flow（与生成侧 clients 注入同源；UserInbound 覆盖已随 2026-08-14 批2 冻结删除）
-	// NoAutoFlow 禁用 reality+tcp 的自动 vision 兜底（对应入站 Flow = "none"，
-	// 服务端 clients 不注入 flow，订阅必须保持一致否则握手不匹配）。
-	NoAutoFlow bool
-	Reality    *xray.RealitySettings
-	TLS        *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
-	XHTTP      *xray.XHTTPSettings
-}
 
 // BuiltinDefaultClashTemplate 系统内置基础默认模板
 const BuiltinDefaultClashTemplate = `mixed-port: 7890
@@ -66,58 +51,61 @@ func escapeSingleQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-// FormatSingleProxyItem 生成单行紧凑 Flow 映射的 VLESS 节点 YAML（遵循 mihomo/Clash 官方规范，移除冗余字段）。
-func FormatSingleProxyItem(it *ProxyItem) string {
+// formatClashNode 生成单行紧凑 Flow 映射的 VLESS 节点 YAML（遵循 mihomo/Clash 官方规范，移除冗余字段）。
+// 导出器为哑渲染器：flow 等协议语义已由插件决议进 DTO，此处只做格式映射；
+// 新协议的 Clash 分支在此按 dto.Protocol 扩展。
+func formatClashNode(dto *contracts.ProxyNodeDTO) string {
+	if dto.Protocol != "vless" || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
+		return ""
+	}
+	sec := dto.Security.Type
+	if sec == "reality" && dto.Security.Reality == nil {
+		return ""
+	}
 	parts := make([]string, 0, 16)
-	parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(it.Name)))
+	parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
 	parts = append(parts, "type: vless")
-	parts = append(parts, fmt.Sprintf("server: %s", it.Host))
-	parts = append(parts, fmt.Sprintf("port: %d", it.Port))
-	parts = append(parts, fmt.Sprintf("uuid: %s", it.UUID))
+	parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
+	parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
+	parts = append(parts, fmt.Sprintf("uuid: %s", dto.Auth.UUID))
 	parts = append(parts, "udp: true")
 
-	// flow: 仅 TCP 传输可用且有效
-	flow := it.Flow
-	if it.Network == "tcp" && it.TLSType == "reality" && flow == "" && !it.NoAutoFlow {
-		flow = "xtls-rprx-vision"
-	}
-	if it.Network == "tcp" && flow != "" {
-		parts = append(parts, fmt.Sprintf("flow: %s", flow))
+	// flow: 仅 TCP 传输可用且有效（插件已决议，含自动 vision 与 none 抑制）
+	network := dto.Transport.Network
+	if network == "tcp" && dto.Auth.Flow != "" {
+		parts = append(parts, fmt.Sprintf("flow: %s", dto.Auth.Flow))
 	}
 
-	switch it.TLSType {
+	switch sec {
 	case "reality":
-		if it.Reality == nil {
-			return ""
-		}
 		parts = append(parts, "tls: true")
-		if it.Reality.ServerName != "" {
-			parts = append(parts, fmt.Sprintf("servername: %s", it.Reality.ServerName))
+		if dto.Security.SNI != "" {
+			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
 		}
-		parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s }", it.Reality.PublicKey, it.Reality.ShortID))
+		parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s }", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID))
 		parts = append(parts, "client-fingerprint: chrome")
 	case "tls":
 		parts = append(parts, "tls: true")
-		if it.TLS != nil && it.TLS.AllowInsecure {
+		if dto.Security.AllowInsecure {
 			parts = append(parts, "skip-cert-verify: true")
 		}
-		if it.TLS != nil && it.TLS.ServerName != "" {
-			parts = append(parts, fmt.Sprintf("servername: %s", it.TLS.ServerName))
+		if dto.Security.SNI != "" {
+			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
 		}
 		parts = append(parts, "client-fingerprint: chrome")
 	default:
 		parts = append(parts, "tls: false")
 	}
 
-	if it.Network == "xhttp" {
+	if network == "xhttp" {
 		parts = append(parts, "network: xhttp")
 		parts = append(parts, "alpn: [h2]")
-		if it.XHTTP != nil {
+		if dto.Transport.Mode != "" {
 			hostField := ""
-			if it.XHTTP.Host != "" {
-				hostField = fmt.Sprintf(", host: %s", it.XHTTP.Host)
+			if dto.Transport.Host != "" {
+				hostField = fmt.Sprintf(", host: %s", dto.Transport.Host)
 			}
-			parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", it.XHTTP.Mode, it.XHTTP.Path, hostField))
+			parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", dto.Transport.Mode, dto.Transport.Path, hostField))
 		}
 	} else {
 		parts = append(parts, "network: tcp")
@@ -126,20 +114,16 @@ func FormatSingleProxyItem(it *ProxyItem) string {
 	return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
 }
 
-// FormatProxiesYAML 将 ProxyItem 列表格式化为 YAML 节点块（每项单行紧凑映射），并返回有效节点名称列表。
-func FormatProxiesYAML(items []ProxyItem) (string, []string) {
+// FormatNodesYAML 将节点 DTO 列表格式化为 YAML 节点块（每项单行紧凑映射），并返回有效节点名称列表。
+func FormatNodesYAML(nodes []contracts.ProxyNodeDTO) (string, []string) {
 	var b strings.Builder
-	names := make([]string, 0, len(items))
-	for _, it := range items {
-		// reality 提取失败（缺 SNI/公钥）的节点跳过，避免 nil 崩溃与 proxy-groups 悬空引用
-		if it.TLSType == "reality" && it.Reality == nil {
-			continue
-		}
-		line := FormatSingleProxyItem(&it)
+	names := make([]string, 0, len(nodes))
+	for i := range nodes {
+		line := formatClashNode(&nodes[i])
 		if line == "" {
 			continue
 		}
-		names = append(names, it.Name)
+		names = append(names, nodes[i].Name)
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -148,7 +132,7 @@ func FormatProxiesYAML(items []ProxyItem) (string, []string) {
 
 // BuildClashWithTemplate 根据自定义模板与占位符生成 Clash YAML。
 // 若 template 为空，则回退至内置标准模板。
-func BuildClashWithTemplate(user *models.User, items []ProxyItem, template string, panelHost ...string) string {
+func BuildClashWithTemplate(nodes []contracts.ProxyNodeDTO, template string, panelHost ...string) string {
 	raw := strings.TrimSpace(template)
 	if raw == "" {
 		raw = BuiltinDefaultClashTemplate
@@ -159,7 +143,7 @@ func BuildClashWithTemplate(user *models.User, items []ProxyItem, template strin
 		host = panelHost[0]
 	}
 
-	proxiesYAML, names := FormatProxiesYAML(items)
+	proxiesYAML, names := FormatNodesYAML(nodes)
 
 	// 1. 替换面板域名占位符
 	processed := raw
@@ -357,8 +341,8 @@ func getLeadingWhitespace(s string) string {
 }
 
 // BuildClash 生成 Clash YAML（proxy-providers 兼容格式，使用内置标准模板）。
-func BuildClash(user *models.User, items []ProxyItem) string {
-	proxiesYAML, names := FormatProxiesYAML(items)
+func BuildClash(nodes []contracts.ProxyNodeDTO) string {
+	proxiesYAML, names := FormatNodesYAML(nodes)
 	var b strings.Builder
 	b.WriteString("proxies:\n")
 	b.WriteString(proxiesYAML)
@@ -384,62 +368,61 @@ func BuildClash(user *models.User, items []ProxyItem) string {
 }
 
 // BuildBase64 生成 vless:// 分享链接列表的 Base64（兜底，非 Clash 客户端）。
-func BuildBase64(user *models.User, items []ProxyItem) string {
-	links := make([]string, 0, len(items))
-	for _, it := range items {
+// 哑渲染器：flow 等协议语义已由插件决议进 DTO；reality 缺参数的节点跳过。
+func BuildBase64(nodes []contracts.ProxyNodeDTO) string {
+	links := make([]string, 0, len(nodes))
+	for i := range nodes {
+		dto := &nodes[i]
+		if dto.Protocol != "vless" || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
+			continue
+		}
 		q := url.Values{}
 		q.Set("encryption", "none")
-		switch it.TLSType {
+		sec := dto.Security.Type
+		network := dto.Transport.Network
+		switch sec {
 		case "reality":
-			if it.Reality == nil {
+			if dto.Security.Reality == nil {
 				continue
 			}
 			q.Set("security", "reality")
-			q.Set("sni", it.Reality.ServerName)
+			q.Set("sni", dto.Security.SNI)
 			q.Set("fp", "chrome")
-			q.Set("pbk", it.Reality.PublicKey)
-			q.Set("sid", it.Reality.ShortID)
-			if it.Network == "tcp" {
-				flow := it.Flow
-				if flow == "" && !it.NoAutoFlow {
-					flow = "xtls-rprx-vision"
-				}
-				if flow != "" {
-					q.Set("flow", flow)
-				}
+			q.Set("pbk", dto.Security.Reality.PublicKey)
+			q.Set("sid", dto.Security.Reality.ShortID)
+			if network == "tcp" && dto.Auth.Flow != "" {
+				q.Set("flow", dto.Auth.Flow)
 			}
 		case "tls":
 			q.Set("security", "tls")
-			if it.TLS != nil {
-				if it.TLS.ServerName != "" {
-					q.Set("sni", it.TLS.ServerName)
-				}
-				if it.TLS.AllowInsecure {
-					q.Set("allowInsecure", "1")
-				}
+			if dto.Security.SNI != "" {
+				q.Set("sni", dto.Security.SNI)
+			}
+			if dto.Security.AllowInsecure {
+				q.Set("allowInsecure", "1")
 			}
 			// TCP+TLS+Vision：仅当用户已配置 flow（vision 不适用 ws/xhttp）
-			if it.Network == "tcp" && it.Flow != "" {
-				q.Set("flow", it.Flow)
+			if network == "tcp" && dto.Auth.Flow != "" {
+				q.Set("flow", dto.Auth.Flow)
 			}
 		default:
 			q.Set("security", "none")
 		}
 		// 传输层参数（与 TLS 类型无关，独立输出）
-		if it.Network == "xhttp" {
+		if network == "xhttp" {
 			q.Set("type", "xhttp")
-			if it.XHTTP != nil {
-				q.Set("mode", it.XHTTP.Mode)
-				q.Set("path", it.XHTTP.Path)
-				if it.XHTTP.Host != "" {
-					q.Set("host", it.XHTTP.Host)
+			if dto.Transport.Mode != "" {
+				q.Set("mode", dto.Transport.Mode)
+				q.Set("path", dto.Transport.Path)
+				if dto.Transport.Host != "" {
+					q.Set("host", dto.Transport.Host)
 				}
 			}
-		} else if it.Network == "tcp" && it.TLSType != "reality" {
+		} else if network == "tcp" && sec != "reality" {
 			q.Set("type", "tcp")
 		}
-		frag := url.QueryEscape(it.Name)
-		link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", it.UUID, it.Host, it.Port, q.Encode(), frag)
+		frag := url.QueryEscape(dto.Name)
+		link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag)
 		links = append(links, link)
 	}
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
@@ -494,126 +477,33 @@ func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 	return srv.Host, port
 }
 
-// SubscribeFlow 计算订阅中的 flow（与生成侧 buildClients 同源）：
-// 入站级 Flow（none 视为空并禁用自动注入）→ TCP+REALITY 自动 vision。
-func SubscribeFlow(inboundFlow string, tcpReality bool) (flow string, noAutoFlow bool) {
-	flow = inboundFlow
-	if flow == "none" {
-		return "", true
+// BuildNodeDTO 将 Inbound 模型与 Server 模型转换为订阅导出用的 ProxyNodeDTO。
+// 协议知识（传输/安全/flow/凭证派生）由协议插件承担；未注册协议或参数不足返回 nil，
+// 调用方记日志跳过（替代历史上 switch 静默 continue）。
+func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string) *contracts.ProxyNodeDTO {
+	plugin := protocols.Find(inb.Protocol)
+	if plugin == nil {
+		log.Printf("[subscribe] 入站 %s 协议 %q 未注册导出插件，跳过", inb.Tag, inb.Protocol)
+		return nil
 	}
-	if flow == "" && tcpReality {
-		flow = "xtls-rprx-vision"
-	}
-	return flow, false
-}
-
-// BuildProxyItem 将 Inbound 模型与 Server 模型转换为订阅用的 ProxyItem，
-// 自动消费 ShareSecurity、ShareSNI、ShareHost、SharePath、ShareAllowInsecure 等反代覆写字段。
-func BuildProxyItem(srv *models.Server, inb *models.Inbound, uuid string) ProxyItem {
 	host, port := ShareAddrOf(srv, inb)
-
-	net := xray.StreamNetwork(inb.StreamSettings)
-	sec := xray.StreamSecurity(inb.StreamSettings)
-
-	// 1. 安全层覆写 (ShareSecurity: auto / tls / none)
-	switch inb.ShareSecurity {
-	case "tls":
-		sec = "tls"
-	case "none":
-		sec = "none"
-	}
-
-	// 2. TLS 参数与覆写
-	tlsSettings := xray.StreamTLS(inb.StreamSettings)
-	if sec == "tls" {
-		if tlsSettings == nil {
-			tlsSettings = &xray.TLSSettings{}
-		}
-		if inb.ShareSNI != "" {
-			tlsSettings.ServerName = inb.ShareSNI
-		}
-		if inb.ShareAllowInsecure {
-			tlsSettings.AllowInsecure = true
-		}
-	}
-
-	// 3. XHTTP 传输参数与覆写
-	xhttpSettings := xray.StreamXHTTP(inb.StreamSettings)
-	if xhttpSettings != nil {
-		if inb.SharePath != "" {
-			xhttpSettings.Path = inb.SharePath
-		}
-		if inb.ShareHost != "" {
-			xhttpSettings.Host = inb.ShareHost
-		}
-	} else if net == "xhttp" && (inb.SharePath != "" || inb.ShareHost != "") {
-		xhttpSettings = &xray.XHTTPSettings{
-			Mode: "auto",
-			Path: inb.SharePath,
-			Host: inb.ShareHost,
-		}
-		if xhttpSettings.Path == "" {
-			xhttpSettings.Path = "/"
-		}
-	}
-
-	flow, noAutoFlow := SubscribeFlow(inb.Flow, net == "tcp" && sec == "reality")
-
-	return ProxyItem{
-		Name:       NodeName(srv, inb),
-		Host:       host,
-		Port:       port,
-		UUID:       uuid,
-		Network:    net,
-		TLSType:    sec,
-		Flow:       flow,
-		NoAutoFlow: noAutoFlow,
-		Reality:    xray.StreamReality(inb.StreamSettings),
-		TLS:        tlsSettings,
-		XHTTP:      xhttpSettings,
-	}
-}
-
-// ToDTO 将 ProxyItem 转换为标准纯数据契约 ProxyNodeDTO。
-func (it *ProxyItem) ToDTO() contracts.ProxyNodeDTO {
-	dto := contracts.ProxyNodeDTO{
-		Name:       it.Name,
-		ServerHost: it.Host,
-		ServerPort: it.Port,
-		Protocol:   "vless",
-		Transport: &contracts.TransportOptions{
-			Network: it.Network,
+	dto := plugin.BuildClientNode(&contracts.ClientNodeInput{
+		Name: NodeName(srv, inb),
+		Host: host,
+		Port: port,
+		Spec: contracts.DecodeInbound(inb),
+		Share: contracts.ShareOverride{
+			Security:      inb.ShareSecurity,
+			SNI:           inb.ShareSNI,
+			Host:          inb.ShareHost,
+			Path:          inb.SharePath,
+			AllowInsecure: inb.ShareAllowInsecure,
 		},
-		Security: &contracts.SecurityOptions{
-			Type: it.TLSType,
-		},
-		Auth: &contracts.ClientCredentialDTO{
-			UUID: it.UUID,
-			Flow: it.Flow,
-		},
-		Features: []string{},
-	}
-	if it.TLS != nil {
-		dto.Security.SNI = it.TLS.ServerName
-		dto.Security.AllowInsecure = it.TLS.AllowInsecure
-	}
-	if it.Reality != nil {
-		dto.Security.SNI = it.Reality.ServerName
-		dto.Security.Reality = &contracts.RealityOptions{
-			PublicKey: it.Reality.PublicKey,
-			ShortID:   it.Reality.ShortID,
-		}
-	}
-	if it.XHTTP != nil {
-		dto.Transport.Path = it.XHTTP.Path
-		dto.Transport.Host = it.XHTTP.Host
-		dto.Transport.Mode = it.XHTTP.Mode
-	}
-	if it.Flow != "" {
-		dto.Features = append(dto.Features, it.Flow)
-	}
-	if it.NoAutoFlow {
-		dto.Features = append(dto.Features, "no-auto-flow")
+		InboundFlow: inb.Flow,
+		UserUUID:    userUUID,
+	})
+	if dto == nil {
+		log.Printf("[subscribe] 入站 %s 协议参数不足以产出订阅节点（如 reality 缺 SNI/公钥），跳过", inb.Tag)
 	}
 	return dto
 }

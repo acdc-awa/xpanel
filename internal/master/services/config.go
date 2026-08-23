@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc/xray-panel/internal/contracts"
+	"github.com/acdc/xray-panel/internal/master/protocols"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
@@ -130,6 +131,10 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 		allowedGroupSet[g] = true
 	}
 
+	// 入站级解码与 flow 决议在用户循环外完成一次（协议插件同源）
+	spec := contracts.DecodeInbound(inb)
+	userFlow := protocols.ResolveFlow(inb.Protocol, spec, inb.Flow)
+
 	var protoUsers []protocol.User
 	for _, vu := range validUsers {
 		u := vu.User
@@ -140,16 +145,10 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 		if !allowedGroupSet[vu.GroupID] {
 			continue
 		}
-		flow := inb.Flow
-		if flow == "" && xray.StreamHasReality(inb.StreamSettings) && xray.StreamNetwork(inb.StreamSettings) == "tcp" {
-			flow = "xtls-rprx-vision"
-		} else if flow == "none" {
-			flow = ""
-		}
 		protoUsers = append(protoUsers, protocol.User{
 			UUID:  u.UUID,
 			Email: xray.UserEmail(&u),
-			Flow:  flow,
+			Flow:  userFlow,
 			Level: 0,
 			Limit: vu.DeviceLimit,
 		})

@@ -5,10 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 )
 
-func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {
+func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	// 场景：服务端 Xray 本地监听 127.0.0.1:10086，明文 xhttp (security: none)
 	// 外部 Caddy 监听 443，反代 /my-vless-xhttp 到 127.0.0.1:10086
 	// 订阅需导出：端口 443，TLS 开启，SNI caddy.example.com，Path /my-vless-xhttp
@@ -34,28 +35,30 @@ func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {
 	}
 
 	uuid := "11111111-2222-3333-4444-555555555555"
-	item := BuildProxyItem(srv, inb, uuid)
+	dto := BuildNodeDTO(srv, inb, uuid)
+	if dto == nil {
+		t.Fatalf("BuildNodeDTO returned nil")
+	}
 
-	// 1. 验证 ProxyItem 属性
-	if item.Host != "caddy.example.com" {
-		t.Fatalf("want Host caddy.example.com, got %s", item.Host)
+	// 1. 验证 DTO 属性
+	if dto.ServerHost != "caddy.example.com" {
+		t.Fatalf("want Host caddy.example.com, got %s", dto.ServerHost)
 	}
-	if item.Port != 443 {
-		t.Fatalf("want Port 443, got %d", item.Port)
+	if dto.ServerPort != 443 {
+		t.Fatalf("want Port 443, got %d", dto.ServerPort)
 	}
-	if item.TLSType != "tls" {
-		t.Fatalf("want TLSType tls, got %s", item.TLSType)
+	if dto.Security == nil || dto.Security.Type != "tls" {
+		t.Fatalf("want Security Type tls, got %+v", dto.Security)
 	}
-	if item.TLS == nil || item.TLS.ServerName != "caddy.example.com" {
-		t.Fatalf("want TLS SNI caddy.example.com, got %+v", item.TLS)
+	if dto.Security.SNI != "caddy.example.com" {
+		t.Fatalf("want TLS SNI caddy.example.com, got %s", dto.Security.SNI)
 	}
-	if item.XHTTP == nil || item.XHTTP.Path != "/my-vless-xhttp" || item.XHTTP.Host != "caddy.example.com" {
-		t.Fatalf("want XHTTP Path /my-vless-xhttp and Host caddy.example.com, got %+v", item.XHTTP)
+	if dto.Transport == nil || dto.Transport.Path != "/my-vless-xhttp" || dto.Transport.Host != "caddy.example.com" {
+		t.Fatalf("want XHTTP Path /my-vless-xhttp and Host caddy.example.com, got %+v", dto.Transport)
 	}
 
 	// 2. 验证 Clash YAML 输出格式
-	user := &models.User{UUID: uuid}
-	clashYAML := BuildClash(user, []ProxyItem{item})
+	clashYAML := BuildClash([]contracts.ProxyNodeDTO{*dto})
 	if !strings.Contains(clashYAML, "server: caddy.example.com") {
 		t.Errorf("Clash YAML 缺少 server: caddy.example.com:\n%s", clashYAML)
 	}
@@ -73,7 +76,7 @@ func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {
 	}
 
 	// 3. 验证 Base64 输出格式
-	b64 := BuildBase64(user, []ProxyItem{item})
+	b64 := BuildBase64([]contracts.ProxyNodeDTO{*dto})
 	dec, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		t.Fatalf("Base64 解码失败: %v", err)
@@ -90,13 +93,5 @@ func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {
 	}
 	if !strings.Contains(vlessURL, "path=%2Fmy-vless-xhttp") {
 		t.Errorf("vless:// 缺少 path=%%2Fmy-vless-xhttp: %s", vlessURL)
-	}
-
-	// 4. 验证转 DTO
-	dto := item.ToDTO()
-	if dto.ServerHost != "caddy.example.com" || dto.ServerPort != 443 ||
-		dto.Security == nil || dto.Security.Type != "tls" || dto.Security.SNI != "caddy.example.com" ||
-		dto.Transport == nil || dto.Transport.Path != "/my-vless-xhttp" {
-		t.Errorf("DTO 转换不匹配: %+v", dto)
 	}
 }

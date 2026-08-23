@@ -67,27 +67,21 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
 	inbounds = services.FilterAvailableInbounds(filtered)
-	items := make([]subscribe.ProxyItem, 0, len(inbounds))
+	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
 	for i := range inbounds {
 		inb := &inbounds[i]
-		switch inb.Protocol {
-		case "vless":
-			// 支持
-		case "vmess":
-			fallthrough
-		case "trojan":
-			fallthrough
-		default:
-			continue
-		}
 		var srv models.Server
 		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
 			continue
 		}
-		item := subscribe.BuildProxyItem(&srv, inb, user.UUID)
-		items = append(items, item)
+		// 协议插件分发：未注册协议或参数不足的入站在 BuildNodeDTO 内记日志并返回 nil
+		dto := subscribe.BuildNodeDTO(&srv, inb, user.UUID)
+		if dto == nil {
+			continue
+		}
+		dtos = append(dtos, *dto)
 	}
-	if len(items) == 0 {
+	if len(dtos) == 0 {
 		util.Fail(c, 404, "暂无可用的节点")
 		return
 	}
@@ -132,7 +126,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 
 	content, contentType, err := exporter.Export(c.Request.Context(),
 		subscribe.UserToSummaryDTO(&user),
-		subscribe.ProxyItemsToDTOs(items),
+		dtos,
 		contracts.ExportOptions{
 			Template:  clashTemplate,
 			PanelHost: panelHost,
