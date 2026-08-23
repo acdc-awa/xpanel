@@ -15,6 +15,7 @@ import (
 	"github.com/acdc/xray-panel/internal/agent/certs"
 	"github.com/acdc/xray-panel/internal/agent/collector"
 	"github.com/acdc/xray-panel/internal/agent/stats"
+	"github.com/acdc/xray-panel/internal/agent/upgrade"
 	"github.com/acdc/xray-panel/internal/agent/xrayproc"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
@@ -217,7 +218,7 @@ func (c *Client) connectAndServe(ctx context.Context, backoff *time.Duration) er
 		return err
 	}
 	msg, err := protocol.Decode(data)
-	if err != nil || msg.Type != "auth_ok" {
+	if err != nil || msg.Type != protocol.MsgAuthOK {
 		return errAuthRejected
 	}
 	const (
@@ -325,6 +326,7 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 				TxRate:      snap.TxRate,
 				RxBytes:     snap.RxBytes,
 				TxBytes:     snap.TxBytes,
+				Version:     upgrade.Version,
 				TS:          time.Now().Unix(),
 			}
 			if err := c.send(protocol.MsgHeartbeat, "", hb); err != nil {

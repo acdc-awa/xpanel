@@ -137,7 +137,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	}
 	msg, err := protocol.Decode(data)
 	if err != nil || msg.Type != protocol.MsgAuth {
-		_ = h.writeRaw(ws, "bad_auth", "", protocol.ResultPayload{OK: false, Error: "首条消息必须是 auth"})
+		_ = h.writeRaw(ws, protocol.MsgAuthBad, "", protocol.ResultPayload{OK: false, Error: "首条消息必须是 auth"})
 		_ = ws.Close()
 		return
 	}
@@ -149,7 +149,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 
 	server, err := h.authenticate(auth)
 	if err != nil {
-		_ = h.writeRaw(ws, "bad_auth", msg.ID, protocol.ResultPayload{OK: false, Error: err.Error()})
+		_ = h.writeRaw(ws, protocol.MsgAuthBad, msg.ID, protocol.ResultPayload{OK: false, Error: err.Error()})
 		_ = ws.Close()
 		return
 	}
@@ -163,7 +163,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	}
 	conn.LastSeen.Store(time.Now().Unix())
 	h.register(conn)
-	_ = h.writeRaw(ws, "auth_ok", msg.ID, protocol.ResultPayload{OK: true})
+	_ = h.writeRaw(ws, protocol.MsgAuthOK, msg.ID, protocol.ResultPayload{OK: true})
 	_ = ws.SetReadDeadline(time.Time{})
 
 	// 标记在线
@@ -298,10 +298,14 @@ func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	var hb protocol.HeartbeatPayload
 	_ = msg.PayloadTo(&hb)
-	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(map[string]any{
+	updates := map[string]any{
 		"status":       1,
 		"last_seen_at": time.Now(),
-	})
+	}
+	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
+		updates["agent_version"] = hb.Version
+	}
+	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
 	// node_reports 落库（供仪表盘趋势）
 	_ = h.DB.Create(&models.NodeReport{
 		ServerID:    conn.ServerID,

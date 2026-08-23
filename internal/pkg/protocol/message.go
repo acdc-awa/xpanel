@@ -30,6 +30,10 @@ const (
 	MsgPushCert               = "push_cert"                // 主控→节点：TLS 证书下发落盘
 	MsgInternalUUIDReport     = "internal_uuid_report"     // 节点→主控：内部 UUID 变更主动上报
 
+	// 认证握手结果（主控→节点，首条 auth 消息的应答帧类型）
+	MsgAuthOK  = "auth_ok"
+	MsgAuthBad = "bad_auth"
+
 	// upgrade_agent（预留）：主控→节点 推送升级指令（未实现；agent 升级逻辑见 internal/agent/upgrade）
 )
 

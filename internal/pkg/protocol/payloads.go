@@ -21,6 +21,7 @@ type HeartbeatPayload struct {
 	TxRate      float64 `json:"tx_rate"`
 	RxBytes     uint64  `json:"rx_bytes"`     // 累计物理网卡接收字节
 	TxBytes     uint64  `json:"tx_bytes"`     // 累计物理网卡发送字节
+	Version     string  `json:"version,omitempty"` // agent 版本（旧 agent 不上报）
 	TS          int64   `json:"ts"`           // unix 秒
 }
 

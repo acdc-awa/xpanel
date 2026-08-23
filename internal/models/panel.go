@@ -18,7 +18,8 @@ type Server struct {
 	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
 	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）
 	DefaultOutboundDS string `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
-	LastSeenAt            *time.Time `json:"last_seen_at"`
+	AgentVersion string     `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
+	LastSeenAt   *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
