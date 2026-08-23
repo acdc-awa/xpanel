@@ -22,10 +22,9 @@ const (
 
 	OrderPaid = "paid" // 订单状态（余额直付即时生效，无 pending/人工确认）
 
-	// Phase T：入站三态
+	// Phase T：入站二态（面向终端用户 / 内部链式代理落地）
 	InboundTypeUser  = "user"  // 进订阅、参与用户授权与 SyncUsers（默认）
 	InboundTypeRelay = "relay" // 内部转发入站，被出站 InboundRef 引用，clients 固定为 InternalUUID
-	InboundTypeIdle  = "idle"  // 闲置：未接线也未启用用户
 )
 
 // All 返回全部模型，供 AutoMigrate 使用。
@@ -39,6 +38,7 @@ func All() []any {
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{}, &PermissionGroupInbound{},
 		&InboundEndpoint{}, &PermissionGroupEndpoint{},
+		&L4PortRule{}, &PermissionGroupL4Rule{},
 		&Notice{},
 	}
 }

@@ -27,9 +27,13 @@ import {
   saveTopologyLayout,
   updateInbound,
   updateServerOutbound,
+  createL4Rule,
+  updateL4Rule,
+  deleteL4Rule,
+  getPermissionGroups,
   type TopologyData,
 } from '@/api/admin'
-import type { InboundEndpoint, InboundItem, ServerOutbound } from '@/api/types'
+import type { InboundEndpoint, InboundItem, ServerOutbound, L4PortRule, PermissionGroup } from '@/api/types'
 import { errMsg } from '@/api/http'
 import InboundEndpointsDrawer from '@/views/admin/servers/InboundEndpointsDrawer.vue'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
@@ -59,6 +63,7 @@ interface BoxData {
   server: TopologyData['servers'][number]
   inbounds: TopologyData['inbounds']
   endpointsMap: Map<number, InboundEndpoint[]>
+  l4Rules?: L4PortRule[]
   outbounds: BoxOutbound[]
   boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
 }
@@ -204,17 +209,14 @@ function nodePosOf(s: TopologyData['servers'][number], idx: number) {
 
 function typeInfo(t?: string) {
   if (t === 'relay') return { cls: 'relay', text: '转发' }
-  if (t === 'idle') return { cls: 'idle', text: '闲置' }
   return { cls: 'user', text: '用户' }
 }
 
-// 快速切换入站三态 (user -> relay -> idle -> user)
+// 快速切换入站二态 (user <-> relay)
 async function cycleInboundType(inb: InboundItem) {
   if (!props.editable) return
-  const order = ['user', 'relay', 'idle']
-  const curIdx = order.indexOf(inb.type || 'user')
-  const nextType = order[(curIdx + 1) % order.length]
-  const labels: Record<string, string> = { user: '用户入站', relay: '转发入站 (relay)', idle: '闲置 (idle)' }
+  const nextType = inb.type === 'relay' ? 'user' : 'relay'
+  const labels: Record<string, string> = { user: '用户入站', relay: '转发入站 (relay)' }
   try {
     const { data } = await updateInbound(inb.id, { type: nextType })
     if (data.code === 0) {
@@ -441,6 +443,14 @@ function buildGraph(data: TopologyData) {
     })
   }
 
+  const l4RulesByServer = new Map<number, L4PortRule[]>()
+  if (data.l4_rules) {
+    for (const r of data.l4_rules) {
+      if (!l4RulesByServer.has(r.server_id)) l4RulesByServer.set(r.server_id, [])
+      l4RulesByServer.get(r.server_id)!.push(r)
+    }
+  }
+
   nodes.value = data.servers.map((s, idx) => ({
     id: `server-${s.id}`,
     type: 'serverbox',
@@ -449,6 +459,7 @@ function buildGraph(data: TopologyData) {
       server: s,
       inbounds: inbByServer.get(s.id) || [],
       endpointsMap,
+      l4Rules: l4RulesByServer.get(s.id) || [],
       outbounds: outByServer.get(s.id) || [],
       boxWidth: getBoxWidth(s.id),
     } as BoxData,
@@ -481,6 +492,24 @@ function buildGraph(data: TopologyData) {
       markerEnd: { type: MarkerType.ArrowClosed },
       data: { detour: false, drop: 0 },
     })
+  }
+
+  // L4 端口转发跨盒连接线
+  if (data.l4_rules) {
+    for (const r of data.l4_rules) {
+      if (!r.enabled || !r.target_inbound_id || !inbNode.has(r.target_inbound_id)) continue
+      es.push({
+        id: `l4-${r.id}`,
+        source: `server-${r.server_id}`,
+        sourceHandle: `l4-src-${r.id}`,
+        target: inbNode.get(r.target_inbound_id)!,
+        targetHandle: `inb-tgt-${r.target_inbound_id}`,
+        type: 'refedge',
+        animated: true,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: { detour: false, drop: 0, isL4: true },
+      })
+    }
   }
 
   // 路由规则盒内虚线
@@ -519,10 +548,16 @@ function isValidConnection(conn: Connection): boolean {
   const tgt = conn.targetHandle ?? ''
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const l4Src = src.match(/^l4-src-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
+  if (l4Src && inbAny) {
+    const rule = props.topology.l4_rules?.find((r) => r.id === Number(l4Src[1]))
+    const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
+    return !!(rule && inb && rule.server_id !== inb.server_id)
+  }
   if (outSrc && inbAny) {
     const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
@@ -548,11 +583,14 @@ async function handleConnect(conn: Connection) {
   const tgt = conn.targetHandle ?? ''
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const l4Src = src.match(/^l4-src-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  if (outSrc && inbAny) {
+  if (l4Src && inbAny) {
+    await connectL4Rule(Number(l4Src[1]), Number(inbAny[1]))
+  } else if (outSrc && inbAny) {
     await createRef(Number(outSrc[1]), Number(inbAny[1]))
   } else if (inbSrcExt && inbAny) {
     await createViaOutbound(Number(inbSrcExt[1]), Number(inbAny[1]))
@@ -561,7 +599,42 @@ async function handleConnect(conn: Connection) {
   } else if (inbSrc && inbAny) {
     ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
   } else {
-    ElMessage.warning('仅支持：入站内点 → 出站（盒内规则）、入站边缘点 → 他服务器入站（自动建中转出站）、出站边缘点 → 入站（设置引用）')
+    ElMessage.warning('仅支持：L4 端口 -> 目标入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+  }
+}
+
+// 拖线连接 L4 端口规则 -> 目标用户入站
+async function connectL4Rule(ruleId: number, targetInboundId: number) {
+  const data = props.topology!
+  const rule = data.l4_rules?.find((r) => r.id === ruleId)
+  const inb = data.inbounds.find((i) => i.id === targetInboundId)
+  if (!rule || !inb) return
+  const targetServer = data.servers.find((s) => s.id === inb.server_id)
+  try {
+    await ElMessageBox.confirm(
+      `将 L4 转发端口 :${rule.listen_port} 映射至目标「${targetServer?.name || ''}」的入站「${inb.tag}」？\n订阅系统将自动为授权用户派生该端口的中转接入点。`,
+      '设置 L4 端口转发目标',
+      { type: 'info' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data: resp } = await updateL4Rule(rule.server_id, rule.id, {
+      target_server_id: inb.server_id,
+      target_inbound_id: inb.id,
+      listen_port: rule.listen_port,
+      remark: rule.remark,
+      enabled: rule.enabled,
+    })
+    if (resp.code === 0) {
+      ElMessage.success('L4 转发映射已更新')
+      emit('changed')
+    } else {
+      ElMessage.error(resp.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '更新映射失败'))
   }
 }
 
@@ -583,11 +656,9 @@ async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
   const sameServerOuts = data.outbounds.filter((o) => o.server_id === srcInb.server_id)
   let n = 2
   while (sameServerOuts.some((o) => o.tag === tag)) tag = `via-${tgtInb.tag}-${n++}`
-  const promoteIdle = tgtInb.type === 'idle'
   try {
     await ElMessageBox.confirm(
       `将自动完成中转配置：\n` +
-        (promoteIdle ? `⓪ 将「${tgtInb.tag}」由闲置自动改为 relay（落地转发）\n` : '') +
         `① 在「${srcSrv.name}」创建出站「${tag}」（vless 引用 ${tgtSrv.name}/${tgtInb.tag} 落地，地址/端口/UUID 自动构造）\n` +
         `② 创建路由规则：${srcInb.tag} → ${tag}`,
       '自动建出站 + 路由',
@@ -597,13 +668,6 @@ async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
     return
   }
   try {
-    if (promoteIdle) {
-      const { data: r0 } = await updateInbound(tgtInb.id, { type: 'relay' })
-      if (r0.code !== 0) {
-        ElMessage.error(r0.message)
-        return
-      }
-    }
     const { data: r1 } = await createServerOutbound(srcInb.server_id, {
       tag,
       protocol: 'vless',
@@ -639,11 +703,9 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   const inbServer = data.servers.find((s) => s.id === inb.server_id)?.name ?? `#${inb.server_id}`
-  const promoteIdle = inb.type === 'idle'
   try {
     await ElMessageBox.confirm(
       `将出站「${out.tag}」设为引用落地入站「${inb.tag}」（${inbServer}）？\n` +
-        (promoteIdle ? `「${inb.tag}」当前为闲置，将自动改为 relay（落地转发）后建立引用。\n` : '') +
         'vnext 地址/端口/UUID/传输参数由主控自动构造，无需手填。',
       '创建 InboundRef 引用',
       { type: 'info' },
@@ -652,13 +714,6 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   try {
-    if (promoteIdle) {
-      const { data: r0 } = await updateInbound(inb.id, { type: 'relay' })
-      if (r0.code !== 0) {
-        ElMessage.error(r0.message)
-        return
-      }
-    }
     const { data: resp } = await updateServerOutbound(out.server_id, out.id, { inbound_ref: inboundId })
     if (resp.code === 0) {
       ElMessage.success('引用已建立，配置将自动更新')
@@ -668,6 +723,100 @@ async function createRef(outboundId: number, inboundId: number) {
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '创建引用失败'))
+  }
+}
+
+// ---- L4 端口转发规则编辑弹窗 ----
+const l4RuleOpen = ref(false)
+const l4RuleSaving = ref(false)
+const l4RuleEditing = ref<L4PortRule | null>(null)
+const l4RuleServerId = ref(0)
+const permissionGroups = ref<PermissionGroup[]>([])
+const l4RuleForm = reactive({
+  listen_port: 30001,
+  target_server_id: 0,
+  target_inbound_id: 0,
+  remark: '',
+  enabled: true,
+  permission_group_ids: [] as number[],
+})
+
+const availableXrayServers = computed(() => {
+  return (props.topology?.servers || []).filter((s) => s.server_type !== 'l4_relay')
+})
+
+const availableTargetInbounds = computed(() => {
+  if (!l4RuleForm.target_server_id) return []
+  return (props.topology?.inbounds || []).filter(
+    (i) => i.server_id === l4RuleForm.target_server_id && i.enabled && i.type === 'user',
+  )
+})
+
+async function openCreateL4Rule(serverId: number) {
+  l4RuleServerId.value = serverId
+  l4RuleEditing.value = null
+  l4RuleForm.listen_port = 30001
+  l4RuleForm.target_server_id = availableXrayServers.value[0]?.id || 0
+  l4RuleForm.target_inbound_id = 0
+  l4RuleForm.remark = ''
+  l4RuleForm.enabled = true
+  l4RuleForm.permission_group_ids = []
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch {}
+  l4RuleOpen.value = true
+}
+
+async function openEditL4Rule(rule: L4PortRule) {
+  l4RuleServerId.value = rule.server_id
+  l4RuleEditing.value = rule
+  l4RuleForm.listen_port = rule.listen_port
+  l4RuleForm.target_server_id = rule.target_server_id
+  l4RuleForm.target_inbound_id = rule.target_inbound_id
+  l4RuleForm.remark = rule.remark || ''
+  l4RuleForm.enabled = rule.enabled
+  l4RuleForm.permission_group_ids = rule.permission_group_ids || []
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch {}
+  l4RuleOpen.value = true
+}
+
+async function saveL4Rule() {
+  if (!l4RuleForm.listen_port || l4RuleForm.listen_port <= 0 || l4RuleForm.listen_port > 65535) {
+    ElMessage.warning('请填写有效的中转监听端口 (1-65535)')
+    return
+  }
+  if (!l4RuleForm.target_inbound_id) {
+    ElMessage.warning('请选择目标用户入站')
+    return
+  }
+  l4RuleSaving.value = true
+  try {
+    const payload = {
+      listen_port: l4RuleForm.listen_port,
+      target_server_id: l4RuleForm.target_server_id,
+      target_inbound_id: l4RuleForm.target_inbound_id,
+      remark: l4RuleForm.remark,
+      enabled: l4RuleForm.enabled,
+      permission_group_ids: l4RuleForm.permission_group_ids,
+    }
+    const { data } = l4RuleEditing.value
+      ? await updateL4Rule(l4RuleServerId.value, l4RuleEditing.value.id, payload)
+      : await createL4Rule(l4RuleServerId.value, payload)
+    if (data.code === 0) {
+      ElMessage.success(l4RuleEditing.value ? '转发规则已更新' : '转发规则已创建')
+      l4RuleOpen.value = false
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存转发规则失败'))
+  } finally {
+    l4RuleSaving.value = false
   }
 }
 
@@ -857,6 +1006,33 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       }
     } catch (e) {
       ElMessage.error(errMsg(e, '删除规则失败'))
+      deselectEdge(edge.id)
+    }
+  } else if (edge.id.startsWith('l4-')) {
+    const l4RuleId = Number(edge.id.slice(3))
+    const rule = props.topology.l4_rules?.find((r) => r.id === l4RuleId)
+    if (!rule) return
+    try {
+      await ElMessageBox.confirm(
+        `删除 L4 端口转发规则（:${rule.listen_port} → ${rule.target_inbound_tag || '目标入站'}）？`,
+        '删除 L4 转发规则',
+        { type: 'warning' },
+      )
+    } catch {
+      deselectEdge(edge.id)
+      return
+    }
+    try {
+      const { data } = await deleteL4Rule(rule.server_id, l4RuleId)
+      if (data.code === 0) {
+        ElMessage.success('已删除转发规则')
+        emit('changed')
+      } else {
+        ElMessage.error(data.message)
+        deselectEdge(edge.id)
+      }
+    } catch (e) {
+      ElMessage.error(errMsg(e, '删除转发规则失败'))
       deselectEdge(edge.id)
     }
   }
@@ -1080,7 +1256,79 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       </template>
 
       <template #node-serverbox="nodeProps">
+        <!-- 1. L4 纯四层端口转发服务器卡片 -->
         <div
+          v-if="nodeProps.data.server.server_type === 'l4_relay'"
+          class="server-box l4-relay-box"
+          :class="{ offline: nodeProps.data.server.status !== 1 }"
+          :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
+        >
+          <div
+            v-show="nodeProps.selected"
+            class="custom-resizer-right"
+            @mousedown.stop.prevent="startBoxResize($event, nodeProps.data)"
+          />
+          <div class="sb-head l4-head">
+            <div class="sb-head-left">
+              <span class="status-dot online" />
+              <span class="l4-relay-badge">L4 中转</span>
+              <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
+              <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
+            </div>
+            <div class="sb-head-right">
+              <button class="sb-detail-btn" title="查看服务器详情" @click.stop="emit('open-server', nodeProps.data.server.id)">
+                <el-icon><Setting /></el-icon>&nbsp;详情
+              </button>
+            </div>
+          </div>
+
+          <div class="l4-body">
+            <div class="sb-col-head" style="margin-bottom: 8px">
+              <span class="sb-title">端口转发映射 (Port Rules)</span>
+              <button
+                v-if="editable"
+                class="sb-add-btn l4-add-btn"
+                title="为该中转机新建端口转发"
+                @click.stop="openCreateL4Rule(nodeProps.data.server.id)"
+              >
+                <el-icon><Plus /></el-icon>&nbsp;转发端口
+              </button>
+            </div>
+
+            <div v-if="nodeProps.data.l4Rules && nodeProps.data.l4Rules.length > 0" class="l4-rules-list">
+              <div
+                v-for="rule in nodeProps.data.l4Rules"
+                :key="rule.id"
+                class="sb-row l4-rule-row"
+                @click.stop="openEditL4Rule(rule)"
+              >
+                <div class="l4-rule-left">
+                  <span class="port-badge l4-port">:{{ rule.listen_port }}</span>
+                  <span v-if="rule.remark" class="l4-remark">{{ rule.remark }}</span>
+                  <span v-else class="l4-remark muted">TCP/UDP 转发</span>
+                </div>
+                <div class="l4-rule-target">
+                  <span v-if="rule.target_inbound_tag" class="tag out-tag ref" :title="`目标入站: ${rule.target_inbound_tag}`">
+                    ➜ {{ rule.target_inbound_tag }}
+                  </span>
+                  <span v-else class="tag out-tag draft" title="未映射：请拖拽右侧端点至目标节点入站">➜ 待连线</span>
+                </div>
+                <Handle
+                  type="source"
+                  :id="`l4-src-${rule.id}`"
+                  :position="Position.Right"
+                  :connectable="editable"
+                  class="ep ext-src l4-handle"
+                />
+              </div>
+            </div>
+            <div v-else class="sb-empty">暂无端口转发规则，点击右上角「+ 转发端口」创建</div>
+          </div>
+        </div>
+
+        <!-- 2. 标准 Xray 节点服务器卡片 -->
+        <div
+          v-else
           class="server-box"
           :class="{ offline: nodeProps.data.server.status !== 1 }"
           :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
@@ -1158,7 +1406,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       <span
                         class="type-tag"
                         :class="typeInfo(inb.type).cls"
-                        title="点击快速切换三态 (用户/转发/闲置)"
+                        title="点击快速切换二态 (用户/转发)"
                         @click.stop="cycleInboundType(inb)"
                       >
                         {{ typeInfo(inb.type).text }}
@@ -1225,7 +1473,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span
                     class="type-tag"
                     :class="typeInfo(inb.type).cls"
-                    title="点击快速切换三态 (用户/转发/闲置)"
+                    title="点击快速切换二态 (用户/转发)"
                     @click.stop="cycleInboundType(inb)"
                   >
                     {{ typeInfo(inb.type).text }}
@@ -1300,14 +1548,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   />
                   <span
                     class="tag out-tag"
-                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : ''"
+                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
                     :title="out.tag"
                   >
-                    {{ out.tag }}
+                    {{ (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
                   </span>
                   <span v-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
+                  <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
                   <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
                   <Handle
@@ -1351,6 +1600,39 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       @saved="handleOutboundSaved"
       @close="outboundEditorOpen = false"
     />
+
+    <!-- L4 端口转发规则编辑弹窗 -->
+    <el-dialog v-model="l4RuleOpen" :title="l4RuleEditing ? '编辑 L4 端口转发规则' : '新建 L4 端口转发规则'" width="520px" append-to-body>
+      <el-form label-position="top">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+          <el-form-item label="中转监听端口 ListenPort" required>
+            <el-input-number v-model="l4RuleForm.listen_port" :min="1" :max="65535" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="目标落地服务器" required>
+            <el-select v-model="l4RuleForm.target_server_id" style="width: 100%" placeholder="选择目标节点" @change="l4RuleForm.target_inbound_id = 0">
+              <el-option v-for="s in availableXrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="目标用户入站 (Target Inbound)" required>
+          <el-select v-model="l4RuleForm.target_inbound_id" style="width: 100%" placeholder="请选择目标用户入站">
+            <el-option v-for="inb in availableTargetInbounds" :key="inb.id" :label="`${inb.tag} (:${inb.port})`" :value="inb.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开放权限组（显式白名单，留空对全员不可见）">
+          <el-select v-model="l4RuleForm.permission_group_ids" multiple collapse-tags collapse-tags-tooltip placeholder="请勾选可见权限组" style="width: 100%">
+            <el-option v-for="g in permissionGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注说明">
+          <el-input v-model="l4RuleForm.remark" placeholder="如 广州移动 10G BGP 优化" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="l4RuleOpen = false">取消</el-button>
+        <el-button type="primary" :loading="l4RuleSaving" @click="saveL4Rule">保存规则</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 路由规则弹窗 -->
     <el-dialog v-model="ruleOpen" title="新建路由规则（拖线）" width="540px" append-to-body>
@@ -1818,6 +2100,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       &.direct {
         color: #34d399;
       }
+      &.draft {
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+        padding: 1px 6px;
+        border-radius: 6px;
+      }
     }
     &.direct-row {
       background: rgba(52, 211, 153, 0.1);
@@ -1830,6 +2118,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       color: #38bdf8;
       font-family: monospace;
       flex: none;
+      &.l4-port {
+        color: #c084fc;
+      }
     }
 
     .proto-badge {
@@ -1872,6 +2163,11 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         color: #f87171;
         border: 1px solid rgba(248, 113, 113, 0.3);
       }
+      &.draft {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+      }
     }
 
     .type-tag {
@@ -1888,9 +2184,76 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
       }
-      &.idle {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
+    }
+  }
+
+  /* L4 纯四层中转卡片样式 */
+  .l4-relay-box {
+    border-color: rgba(168, 85, 247, 0.35);
+    box-shadow: 0 4px 20px rgba(168, 85, 247, 0.12);
+
+    .l4-head {
+      border-bottom-color: rgba(168, 85, 247, 0.2);
+    }
+    .l4-relay-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+    .l4-body {
+      padding: 0 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .l4-rules-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .l4-rule-row {
+      justify-content: space-between;
+      cursor: pointer;
+      background: rgba(168, 85, 247, 0.05);
+      border-color: rgba(168, 85, 247, 0.15);
+      &:hover {
+        background: rgba(168, 85, 247, 0.12);
+        border-color: rgba(168, 85, 247, 0.3);
+      }
+    }
+    .l4-rule-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .l4-rule-target {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .l4-remark {
+      font-size: 11px;
+      color: #94a3b8;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      &.muted {
+        color: #64748b;
+        font-style: italic;
+      }
+    }
+    .l4-add-btn {
+      background: rgba(168, 85, 247, 0.15);
+      border-color: rgba(168, 85, 247, 0.3);
+      color: #c084fc;
+      &:hover {
+        background: rgba(168, 85, 247, 0.3);
+        border-color: #c084fc;
       }
     }
   }

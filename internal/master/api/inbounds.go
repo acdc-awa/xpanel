@@ -567,7 +567,7 @@ func validInboundProtocol(p string) bool {
 
 func validInboundType(t string) bool {
 	switch t {
-	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeIdle:
+	case models.InboundTypeUser, models.InboundTypeRelay:
 		return true
 	}
 	return false

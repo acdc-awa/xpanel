@@ -189,3 +189,53 @@ func SyncEndpointPermissionGroups(tx *gorm.DB, endpointID uint64, groupIDs []uin
 	return nil
 }
 
+// L4RulePermissionGroupIDs 获取 L4 端口转发规则绑定的开放权限组 ID 列表。
+func L4RulePermissionGroupIDs(db *gorm.DB, ruleID uint64) []uint64 {
+	var links []models.PermissionGroupL4Rule
+	if err := db.Where("l4_rule_id = ?", ruleID).Find(&links).Error; err != nil {
+		return nil
+	}
+	ids := make([]uint64, 0, len(links))
+	for _, l := range links {
+		ids = append(ids, l.PermissionGroupID)
+	}
+	return ids
+}
+
+// BatchL4RulePermissionGroupIDs 批量查询 L4 端口转发规则绑定的权限组映射 (ruleID -> []permissionGroupID)。
+func BatchL4RulePermissionGroupIDs(db *gorm.DB, ruleIDs []uint64) map[uint64][]uint64 {
+	res := make(map[uint64][]uint64)
+	if len(ruleIDs) == 0 {
+		return res
+	}
+	var links []models.PermissionGroupL4Rule
+	if err := db.Where("l4_rule_id IN ?", ruleIDs).Find(&links).Error; err != nil {
+		return res
+	}
+	for _, l := range links {
+		res[l.L4RuleID] = append(res[l.L4RuleID], l.PermissionGroupID)
+	}
+	return res
+}
+
+// SyncL4RulePermissionGroups 同步 L4 端口转发规则的开放权限组（原子替换；空列表 = 全部不可见）。
+func SyncL4RulePermissionGroups(tx *gorm.DB, ruleID uint64, groupIDs []uint64) error {
+	if err := tx.Where("l4_rule_id = ?", ruleID).Delete(&models.PermissionGroupL4Rule{}).Error; err != nil {
+		return err
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	rows := make([]models.PermissionGroupL4Rule, 0, len(groupIDs))
+	for _, gid := range groupIDs {
+		if gid > 0 {
+			rows = append(rows, models.PermissionGroupL4Rule{PermissionGroupID: gid, L4RuleID: ruleID})
+		}
+	}
+	if len(rows) > 0 {
+		return tx.Create(&rows).Error
+	}
+	return nil
+}
+
+

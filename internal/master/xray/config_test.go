@@ -346,9 +346,9 @@ func TestGenerateConfig_RelayMissingUUID(t *testing.T) {
 	}
 }
 
-func TestGenerateConfig_IdleInboundSkipped(t *testing.T) {
+func TestGenerateConfig_DisabledInboundSkipped(t *testing.T) {
 	inbounds := []models.Inbound{
-		{ID: 1, Tag: "in-idle", Protocol: "vless", Port: 8443, Type: models.InboundTypeIdle, Enabled: true},
+		{ID: 1, Tag: "in-disabled", Protocol: "vless", Port: 8443, Type: models.InboundTypeUser, Enabled: false},
 		{ID: 2, Tag: "in-user", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true},
 	}
 	raw, err := xray.Generate(inbounds, nil, nil, vlessUsers("in"), nil, "", "")
@@ -360,8 +360,8 @@ func TestGenerateConfig_IdleInboundSkipped(t *testing.T) {
 	inboundList := asArray(t, parsed["inbounds"], "inbounds")
 	for _, in := range inboundList {
 		im := asObject(t, in, "inbound")
-		if im["tag"] == "in-idle" {
-			t.Error("idle 入站不应生成")
+		if im["tag"] == "in-disabled" {
+			t.Error("禁用入站不应生成")
 		}
 	}
 	if len(inboundList) != 2 { // in-user + api

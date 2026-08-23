@@ -329,10 +329,10 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 	}
 	cfg["routing"] = routing
 
-	// 3. 入站：全部启用的入站（idle 跳过）+ api 内建入站
+	// 3. 入站：全部启用的入站 + api 内建入站
 	inboundList := []any{}
 	for _, inb := range inbounds {
-		if !inb.Enabled || inb.Type == models.InboundTypeIdle {
+		if !inb.Enabled {
 			continue
 		}
 		item, err := buildInbound(&inb, usersByTag, ctx)
@@ -370,6 +370,10 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 	}
 	for _, ob := range outs {
 		if !ob.Enabled {
+			continue
+		}
+		if ob.Protocol == "vless" && ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" {
+			// 草稿未连线出站（等待管理员在拓扑画布中拖线关联目标入站）：安全跳过注入，避免 Xray 配置校验失败
 			continue
 		}
 		item := make(map[string]any)

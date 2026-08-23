@@ -90,7 +90,7 @@ function fmtTime(t: string | null) {
 
 // ---- 新增服务器 ----
 const createOpen = ref(false)
-const createForm = reactive({ name: '', host: '', location: '', remark: '' })
+const createForm = reactive({ server_type: 'xray' as 'xray' | 'l4_relay', name: '', host: '', location: '', remark: '' })
 const creating = ref(false)
 const createdResult = ref<{ node_id: string; secret: string; install_cmd: string } | null>(null)
 
@@ -104,6 +104,7 @@ async function submitCreate() {
     const { data } = await createServer({ ...createForm })
     if (data.code === 0) {
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
+      createForm.server_type = 'xray'
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
@@ -204,12 +205,13 @@ async function openLogs(row: any) {
 
 // ---- 编辑服务器 ----
 const editOpen = ref(false)
-const editForm = reactive({ id: 0, name: '', host: '', location: '', remark: '' })
+const editForm = reactive({ id: 0, server_type: 'xray' as 'xray' | 'l4_relay', name: '', host: '', location: '', remark: '' })
 const editSaving = ref(false)
 
 function openEdit(row: any) {
   Object.assign(editForm, {
     id: row.id,
+    server_type: row.server_type || 'xray',
     name: row.name,
     host: row.host,
     location: row.location ?? '',
@@ -226,6 +228,7 @@ async function submitEdit() {
   editSaving.value = true
   try {
     const { data } = await updateServer(editForm.id, {
+      server_type: editForm.server_type,
       name: editForm.name,
       host: editForm.host,
       location: editForm.location,
@@ -318,8 +321,11 @@ async function removeServer(row: any) {
       <!-- 桌面端表格视图 -->
       <div class="desktop-table-view">
         <el-table v-loading="loading" :data="filtered">
-          <el-table-column prop="name" label="名称" min-width="120">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
+          <el-table-column prop="name" label="名称" min-width="140">
+            <template #default="{ row }">
+              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple" style="margin-right: 6px; font-size: 10px">L4 中转</span>
+              <span style="font-weight: 600">{{ row.name }}</span>
+            </template>
           </el-table-column>
           <el-table-column prop="host" label="地址" min-width="160">
             <template #default="{ row }">
@@ -466,9 +472,15 @@ async function removeServer(row: any) {
     <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
       <template v-if="!createdResult">
         <el-form label-position="top">
-          <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01" /></el-form-item>
-          <el-form-item label="地址"><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
-          <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本（选填）" /></el-form-item>
+          <el-form-item label="服务器类型">
+            <el-radio-group v-model="createForm.server_type">
+              <el-radio-button value="xray">Xray 托管计算节点</el-radio-button>
+              <el-radio-button value="l4_relay">L4 纯端口转发服务器</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" /></el-form-item>
+          <el-form-item label="地址"><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" /></el-form-item>
+          <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" /></el-form-item>
           <el-form-item label="备注"><el-input v-model="createForm.remark" placeholder="选填" /></el-form-item>
         </el-form>
       </template>
@@ -526,6 +538,12 @@ async function removeServer(row: any) {
     <!-- 编辑服务器 -->
     <el-dialog v-model="editOpen" title="编辑服务器" width="460px">
       <el-form label-position="top">
+        <el-form-item label="服务器类型">
+          <el-radio-group v-model="editForm.server_type">
+            <el-radio-button value="xray">Xray 托管计算节点</el-radio-button>
+            <el-radio-button value="l4_relay">L4 纯端口转发服务器</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="名称"><el-input v-model="editForm.name" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="editForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
         <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>

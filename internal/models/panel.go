@@ -5,6 +5,7 @@ import "time"
 // Server 节点服务器（对应 §5 servers）。
 type Server struct {
 	ID                    uint64     `gorm:"primaryKey" json:"id"`
+	ServerType            string     `gorm:"size:32;default:xray" json:"server_type"`             // xray（托管节点）/ l4_relay（纯4层中转）
 	Name                  string     `gorm:"size:64;not null" json:"name"`
 	Host                  string     `gorm:"size:255;not null" json:"host"`
 	NodeID                string     `gorm:"size:32;uniqueIndex;not null" json:"node_id"`

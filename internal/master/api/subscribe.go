@@ -78,7 +78,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 	}
 
-	// 收集入站的附加接入点
+	// 收集入站的附加接入点与 L4 端口转发规则
 	inboundIDs := make([]uint64, 0, len(inbounds))
 	for _, inb := range inbounds {
 		inboundIDs = append(inboundIDs, inb.ID)
@@ -96,6 +96,31 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	endpointsByInbound := make(map[uint64][]models.InboundEndpoint)
 	for _, ep := range allEndpoints {
 		endpointsByInbound[ep.InboundID] = append(endpointsByInbound[ep.InboundID], ep)
+	}
+
+	var allL4Rules []models.L4PortRule
+	if len(inboundIDs) > 0 {
+		_ = d.DB.Where("target_inbound_id IN ? AND enabled = ?", inboundIDs, true).
+			Order("listen_port ASC, id ASC").Find(&allL4Rules).Error
+	}
+	l4RuleIDs := make([]uint64, 0, len(allL4Rules))
+	l4SrvIDs := make([]uint64, 0, len(allL4Rules))
+	for _, r := range allL4Rules {
+		l4RuleIDs = append(l4RuleIDs, r.ID)
+		l4SrvIDs = append(l4SrvIDs, r.ServerID)
+	}
+	l4GroupMap := services.BatchL4RulePermissionGroupIDs(d.DB, l4RuleIDs)
+	l4RulesByInbound := make(map[uint64][]models.L4PortRule)
+	for _, r := range allL4Rules {
+		l4RulesByInbound[r.TargetInboundID] = append(l4RulesByInbound[r.TargetInboundID], r)
+	}
+	l4ServerMap := make(map[uint64]models.Server)
+	if len(l4SrvIDs) > 0 {
+		var l4Srvs []models.Server
+		_ = d.DB.Where("id IN ?", l4SrvIDs).Find(&l4Srvs).Error
+		for _, s := range l4Srvs {
+			l4ServerMap[s.ID] = s
+		}
 	}
 
 	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
@@ -133,6 +158,37 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			epDTO.ServerHost = ep.Host
 			epDTO.ServerPort = ep.Port
 			dtos = append(dtos, epDTO)
+		}
+
+		// 3. L4 端口转发规则派生（显式白名单权限控制：PermissionGroupIDs 为空默认全部不可见）
+		for _, l4r := range l4RulesByInbound[inb.ID] {
+			gids := l4GroupMap[l4r.ID]
+			if len(gids) == 0 || permGroupID == 0 {
+				continue
+			}
+			matched := false
+			for _, gid := range gids {
+				if gid == permGroupID {
+					matched = true
+					break
+				}
+			}
+			if !matched || dto == nil {
+				continue
+			}
+			l4Srv, ok := l4ServerMap[l4r.ServerID]
+			if !ok {
+				continue
+			}
+			l4DTO := *dto
+			ruleName := l4Srv.Name
+			if l4r.Remark != "" {
+				ruleName += " (" + l4r.Remark + ")"
+			}
+			l4DTO.Name = subscribe.NodeName(&srv, inb) + " | " + ruleName
+			l4DTO.ServerHost = l4Srv.Host
+			l4DTO.ServerPort = l4r.ListenPort
+			dtos = append(dtos, l4DTO)
 		}
 	}
 	if len(dtos) == 0 {
@@ -193,7 +249,10 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 
 	// subscription-userinfo
-	up, down, _ := d.Traffic.UserUsed(user.ID)
+	var up, down int64
+	if d.Traffic != nil {
+		up, down, _ = d.Traffic.UserUsed(user.ID)
+	}
 	totalBytes := int64(0)
 	expire := int64(0)
 	if user.PlanID > 0 {

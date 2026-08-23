@@ -431,9 +431,6 @@ func (d *Deps) checkInboundRef(outboundServerID, targetInboundID, excludeOutboun
 	if !target.Enabled {
 		return "引用的入站已停用"
 	}
-	if target.Type == models.InboundTypeIdle {
-		return "引用的入站为 idle，请先启用为 user/relay"
-	}
 	if d.wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOutboundID) {
 		return "引用将形成转发环路（A→B→A），已拒绝"
 	}
