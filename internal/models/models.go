@@ -55,7 +55,31 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := dropRetiredAccessControlTables(db); err != nil {
 		return err
 	}
+	if err := dropLegacyAccessPointHostPort(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(All()...)
+}
+
+// dropLegacyAccessPointHostPort 幂等删除早期接入点模型遗留的 host/port 列
+// （管道收口前的中途设计存在 host NOT NULL；GORM AutoMigrate 只增不删，需显式删除）。
+// 注意：glebarez/sqlite 的 Migrator().DropColumn 对未加反引号的旧列静默失效，
+// 故用原生 ALTER TABLE DROP COLUMN（SQLite ≥3.35 与 MySQL 均支持，幂等由 HasColumn 保证）。
+func dropLegacyAccessPointHostPort(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable(&UserAccessPoint{}) {
+		return nil
+	}
+	table := (&UserAccessPoint{}).TableName()
+	for _, col := range []string{"host", "port"} {
+		if !m.HasColumn(&UserAccessPoint{}, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE " + table + " DROP COLUMN " + col).Error; err != nil {
+			return fmt.Errorf("删除 user_access_points 遗留列 %s 失败: %w", col, err)
+		}
+	}
+	return nil
 }
 
 // dropRetiredAccessControlTables 幂等删除已退役的接入控制旧表（授权单点化迁移）。

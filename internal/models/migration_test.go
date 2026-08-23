@@ -83,3 +83,57 @@ func TestTrafficLogMigrationIdempotent(t *testing.T) {
 		t.Fatal("复合唯一索引应存在")
 	}
 }
+
+// TestLegacyAccessPointHostPortMigration 旧 schema 遗留 host NOT NULL / port 列必须被删除，
+// 否则创建接入点会触发 NOT NULL constraint failed（回归：创建接入点 500）。
+func TestLegacyAccessPointHostPortMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	oldDDL := `
+CREATE TABLE user_access_points (
+	id integer PRIMARY KEY AUTOINCREMENT,
+	name varchar(128) NOT NULL,
+	host varchar(255) NOT NULL,
+	port integer NOT NULL DEFAULT 0,
+	target_type varchar(32) NOT NULL DEFAULT '',
+	target_inbound_id integer,
+	target_l4_rule_id integer,
+	enabled numeric NOT NULL DEFAULT 1,
+	remark varchar(255),
+	created_at datetime,
+	updated_at datetime
+);
+`
+	for _, stmt := range strings.Split(oldDDL, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("create old schema: %v", err)
+		}
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate from legacy schema: %v", err)
+	}
+
+	for _, col := range []string{"host", "port"} {
+		if db.Migrator().HasColumn(&UserAccessPoint{}, col) {
+			t.Fatalf("遗留列 %s 应被删除", col)
+		}
+	}
+
+	// 删除后创建接入点必须成功（不再触发 host NOT NULL）
+	if err := db.Create(&UserAccessPoint{Name: "测试接入点"}).Error; err != nil {
+		t.Fatalf("create access point after migration: %v", err)
+	}
+
+	// 再次启动迁移应幂等
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate should be idempotent: %v", err)
+	}
+}
