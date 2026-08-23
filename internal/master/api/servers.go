@@ -31,6 +31,7 @@ type serverView struct {
 	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
 	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
 	DefaultOutboundDS     string     `json:"default_outbound_domain_strategy"` // 默认出口出站解析策略（freedom: AsIs/UseIP/UseIPv4/UseIPv6）
+	AgentVersion          string     `json:"agent_version"`        // 节点心跳上报的 agent 版本（旧 agent 为空）
 	LastSeenAt            *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 }
@@ -46,6 +47,7 @@ func toServerView(s *models.Server) serverView {
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		DefaultOutboundDS:     s.DefaultOutboundDS,
+		AgentVersion:          s.AgentVersion,
 		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
 	}
 }

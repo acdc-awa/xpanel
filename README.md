@@ -20,6 +20,8 @@
 
 **XrayPanel** 是一套专为高性能、高可用与抗封锁场景设计的现代机场管理系统。系统采用 **「主控（Master） - 节点（Agent） - 用户端（Client）」** 三层架构，彻底解耦物理监听与外部反代，全面拥抱 **TCP (REALITY)** 与 **XHTTP (Splithttp)** 黄金双核传输协议，提供可视化拓扑路由编排、权限组订阅模板化、礼品卡与余额直付、以及全自动安全初始化等现代化特性。
 
+> 📦 **仓库结构**：面板（本仓库，`XPanel`）与节点 Agent（[`XPanel-Node`](https://github.com/acdc-awa/XPanel-Node)）为两个独立仓库。Agent 二进制经 GitHub Actions 发布到 XPanel-Node Releases（linux/amd64 + arm64，附 sha256 校验），节点安装与自升级均从 Releases 拉取；通信协议包（`pkg/protocol`）单源托管于 XPanel-Node，本仓库经 go.mod 引入。
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           Master 主控控制面 (Docker)                          │
@@ -147,9 +149,9 @@ curl -fsSL https://panel.yourdomain.com/api/v1/download/install-agent.sh | bash 
 ```
 
 脚本将全自动完成：
-- 创建系统服务用户 `xray`
-- 下载并配置锁定的 `Xray-core v26.6.27`
-- 安装 `xray-agent` 客户端并配置 systemd 守护进程
+- 从 [XPanel-Node Releases](https://github.com/acdc-awa/XPanel-Node/releases) 下载 `xray-agent` 二进制（自动匹配 amd64/arm64，release `checksums.txt` 强制 sha256 校验）
+- 下载并配置锁定的 `Xray-core v26.6.27`（官方 Releases + `.dgst` 校验）
+- 配置 systemd 守护进程
 - 启动并建立与主控的 WSS 安全长连接，秒级自动上线！
 
 ---
@@ -201,9 +203,10 @@ xray-agent upgrade
 
 ### 1. 后端开发
 ```bash
-# 克隆代码库
-git clone https://github.com/zhx/XrayProject.git
-cd XrayProject
+# 克隆代码库（面板 + 节点两个仓库，同级目录放置）
+git clone https://github.com/acdc-awa/xpanel.git
+git clone https://github.com/acdc-awa/XPanel-Node.git
+cd xpanel
 
 # 本地运行主控
 go run ./cmd/master -config configs/config.example.yaml
@@ -211,10 +214,11 @@ go run ./cmd/master -config configs/config.example.yaml
 # 运行全量单元测试
 go test ./...
 
-# 编译主控与节点二进制
+# 编译主控
 go build -o bin/master ./cmd/master
-go build -o bin/agent ./cmd/agent
 ```
+
+> **协议包本地解析**：面板经 `go.mod` 引入 XPanel-Node 的 `pkg/protocol`。发布前 `go.mod` 以 `replace github.com/acdc-awa/xpanel-node => ../agent` 指向同级 agent 仓库目录（本地开发两仓库须同级放置）；XPanel-Node 发布后删除 replace 钉版本即可。
 
 ### 2. 前端开发
 ```bash

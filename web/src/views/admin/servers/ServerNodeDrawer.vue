@@ -376,6 +376,7 @@ watch(
                 <span v-else class="x-chip gray">未生成</span>
               </span>
             </div>
+            <div v-if="server.server_type !== 'l4_relay'" class="desc-row"><span class="k">Agent 版本</span><span class="v mono">{{ server.agent_version || '—' }}</span></div>
             <div v-if="server.server_type !== 'l4_relay'" class="desc-row"><span class="k">最后心跳</span><span class="v">{{ fmtTime(server.last_seen_at) }}</span></div>
             <div v-if="server.server_type === 'l4_relay'" class="desc-row">
               <span class="k">转发规则</span>
