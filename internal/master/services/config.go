@@ -1,27 +1,40 @@
 package services
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
 
 // ConfigService 服务器 Xray 配置的生成与待推送管理。
+// Driver 为核心驱动（Stage 4）：nil 时回退默认 Xray 实现，生成结果与旧版一致。
 type ConfigService struct {
 	DB      *gorm.DB
 	Traffic *TrafficService
+	Driver  contracts.CoreDriver
 }
 
-// BuildGenerateContext 组装生成器拓扑化上下文（Phase T T3）：
+// driver 返回注入的核心驱动；未注入时回退默认 Xray 驱动（兼容既有构造与测试）。
+func (s *ConfigService) driver() contracts.CoreDriver {
+	if s.Driver != nil {
+		return s.Driver
+	}
+	return xray.NewDriver()
+}
+
+// buildGenerateContext 组装生成器拓扑化上下文（Phase T T3）：
 // InboundRef → 目标入站（可跨服务器，含 Server Host）与 CertID → 域名映射。
-func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*xray.GenerateContext, error) {
-	ctx := &xray.GenerateContext{
-		RefTargets:  map[uint64]xray.RefTarget{},
+func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*contracts.TopologyContext, error) {
+	ctx := &contracts.TopologyContext{
+		RefTargets:  map[uint64]contracts.RefTarget{},
 		CertDomains: map[uint64]string{},
 	}
 	// 证书映射（CertID → 域名）
@@ -57,7 +70,7 @@ func BuildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 			if err := db.First(&srv, t.ServerID).Error; err != nil {
 				continue // 目标服务器缺失：Generate 预检会报引用不存在
 			}
-			ctx.RefTargets[t.ID] = xray.RefTarget{Inbound: t, ServerHost: srv.Host}
+			ctx.RefTargets[t.ID] = contracts.RefTarget{Inbound: t, ServerHost: srv.Host}
 		}
 	}
 	return ctx, nil
@@ -233,6 +246,20 @@ func (s *ConfigService) filterValidUsers() []validUser {
 // 保证全量推送与增量同步的访问控制一致（12 号文档：订阅/热更新/配置生成消费同一组计算结果）。
 // 无启用入站时返回仅含 api 入站的配置（用于全停用后清理节点入站）；
 // 入站无可用用户时输出空 clients（U25：清空配置推得动，节点立即移除失效用户）。
+// loadOutboundsAndRules 取服务器启用出站与路由规则（Generate/Preview 共用取数段）。
+func (s *ConfigService) loadOutboundsAndRules(serverID uint64) ([]models.ServerOutbound, []models.ServerRoutingRule, error) {
+	var outbounds []models.ServerOutbound
+	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
+		return nil, nil, err
+	}
+	var routingRules []models.ServerRoutingRule
+	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&routingRules).Error; err != nil {
+		return nil, nil, err
+	}
+	return outbounds, routingRules, nil
+}
+
+// Generate 生成服务器全量配置（provision 取数 → CoreDriver 生成 → 驱动可选校验）。
 func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	var srv models.Server
 	if err := s.DB.First(&srv, serverID).Error; err != nil {
@@ -243,12 +270,8 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 		return "", err
 	}
 	inbounds = FilterAvailableInbounds(inbounds)
-	var outbounds []models.ServerOutbound
-	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
-		return "", err
-	}
-	var routingRules []models.ServerRoutingRule
-	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Order("priority asc, id asc").Find(&routingRules).Error; err != nil {
+	outbounds, routingRules, err := s.loadOutboundsAndRules(serverID)
+	if err != nil {
 		return "", err
 	}
 
@@ -258,15 +281,74 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 		return "", err
 	}
 
-	ctx, err := BuildGenerateContext(s.DB, inbounds, outbounds)
+	topo, err := buildGenerateContext(s.DB, inbounds, outbounds)
 	if err != nil {
 		return "", err
 	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, usersByTag, ctx, srv.DefaultOutboundTag, srv.RoutingDomainStrategy, srv.DefaultOutboundDS)
+	drv := s.driver()
+	raw, err := drv.Generate(context.Background(), &contracts.GenerateInput{
+		Inbounds:              inbounds,
+		Outbounds:             outbounds,
+		RoutingRules:          routingRules,
+		UsersByTag:            usersByTag,
+		Topology:              topo,
+		DefaultOutboundTag:    srv.DefaultOutboundTag,
+		RoutingDomainStrategy: srv.RoutingDomainStrategy,
+		DefaultOutboundDS:     srv.DefaultOutboundDS,
+	})
 	if err != nil {
 		return "", err
 	}
-	return string(cfg), nil
+	// 驱动可选校验：xray 二进制就位（XRAY_BIN / Driver.TestBin）时执行 xray -test，缺失则跳过
+	if err := drv.ValidateConfig(context.Background(), raw); err != nil {
+		return "", fmt.Errorf("配置校验失败: %w", err)
+	}
+	return string(raw), nil
+}
+
+// Preview 按「库内拓扑 + 未落库表单入站」生成预览配置（管理端入站编辑器配置预览）。
+// 与 Generate 的既有语义差异保持不变：不读服务器默认出口/解析策略（传空）、
+// 入站不做可用性过滤、表单入站按 formGroupIDs 即时计算用户并覆盖同 tag 库内值。
+func (s *ConfigService) Preview(serverID uint64, form *models.Inbound, formGroupIDs []uint64) (string, error) {
+	q := s.DB.Where("server_id = ? AND enabled = ?", serverID, true)
+	if form != nil && form.Tag != "" {
+		q = q.Where("tag != ?", form.Tag)
+	}
+	var inbounds []models.Inbound
+	if err := q.Find(&inbounds).Error; err != nil {
+		return "", err
+	}
+	if form != nil {
+		inbounds = append(inbounds, *form)
+	}
+	// 用户按入站 tag 分组（与全量生成同源：GetValidUsers 权限组过滤 + 有效期/流量过滤）
+	usersByTag, err := s.GetValidUsers(serverID)
+	if err != nil {
+		return "", err
+	}
+	if form != nil {
+		// 表单入站尚未入库：按表单开放权限组即时计算（覆盖同 tag 的库内旧值）
+		usersByTag[form.Tag] = s.PreviewUsers(form, formGroupIDs)
+	}
+	outbounds, routingRules, err := s.loadOutboundsAndRules(serverID)
+	if err != nil {
+		return "", err
+	}
+	topo, err := buildGenerateContext(s.DB, inbounds, outbounds)
+	if err != nil {
+		return "", err
+	}
+	raw, err := s.driver().Generate(context.Background(), &contracts.GenerateInput{
+		Inbounds:     inbounds,
+		Outbounds:    outbounds,
+		RoutingRules: routingRules,
+		UsersByTag:   usersByTag,
+		Topology:     topo,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // SavePending 保存（覆盖）服务器最新待推送配置。

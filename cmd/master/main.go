@@ -22,11 +22,13 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/api"
 	"github.com/acdc/xray-panel/internal/master/backup"
 	"github.com/acdc/xray-panel/internal/master/billing"
 	"github.com/acdc/xray-panel/internal/master/nodegate"
 	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/db"
 	"github.com/acdc/xray-panel/internal/pkg/util"
@@ -83,7 +85,20 @@ func main() {
 	trafficSvc.StartRetentionCron(context.Background())
 	orderSvc := billing.NewOrderService(database)
 	auditSvc := &services.AuditService{DB: database}
-	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
+
+	// 核心驱动注册表（Stage 4）：默认 xray；CORE_DRIVER 环境变量可选注入已注册驱动。
+	driverReg := contracts.NewDriverRegistry()
+	driverReg.Register(xray.NewDriver())
+	coreDriver := driverReg.Default()
+	if name := os.Getenv("CORE_DRIVER"); name != "" {
+		if d := driverReg.Find(name); d != nil {
+			coreDriver = d
+			log.Printf("核心驱动：%s（CORE_DRIVER 注入）", name)
+		} else {
+			log.Printf("CORE_DRIVER=%q 未注册，回退默认驱动 %s", name, coreDriver.Name())
+		}
+	}
+	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc, Driver: coreDriver}
 	siteSvc := services.NewSiteService(database, cfg)
 	giftCardSvc := billing.NewGiftCardService(database)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)

@@ -90,16 +90,3 @@ type SubscriptionExporter interface {
 	MatchUserAgent(ua string) bool
 	Export(ctx context.Context, user UserSummaryDTO, nodes []ProxyNodeDTO, opts ExportOptions) (content string, contentType string, err error)
 }
-
-// CoreDriver 代理核心配置驱动接口。
-type CoreDriver interface {
-	Name() string // "xray", "sing-box"
-	ValidateConfig(ctx context.Context, rawConfig string) error
-}
-
-// IngressTopology 入站拓扑适配器接口。
-type IngressTopology interface {
-	Type() string // "standalone_direct", "caddy_reverse_proxy", "cdn_proxy"
-	BuildListen(inbound any) (listenHost string, listenPort int, security string, err error)
-	BuildShare(inbound any, serverHost string) (shareHost string, sharePort int, shareSecurity string, err error)
-}

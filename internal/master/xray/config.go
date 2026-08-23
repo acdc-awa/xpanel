@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 )
@@ -257,18 +258,12 @@ func parseStringList(s string) []string {
 	return res
 }
 
-// RefTarget 出站 InboundRef 引用的目标入站（可跨服务器）。
-type RefTarget struct {
-	Inbound    models.Inbound
-	ServerHost string // 目标服务器对外 Host（vnext address 来源）
-}
+// RefTarget / GenerateContext 已上提为契约类型（Stage 4），此处保留别名以兼容既有代码与测试。
+type RefTarget = contracts.RefTarget
 
 // GenerateContext 拓扑化上下文（Phase T）：跨服务器引用与证书映射，由调用方从 DB 组装。
 // 传 nil 时行为与旧版完全一致（无 InboundRef / CertID 注入）。
-type GenerateContext struct {
-	RefTargets  map[uint64]RefTarget // 出站 InboundRef → 目标入站
-	CertDomains map[uint64]string    // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
-}
+type GenerateContext = contracts.TopologyContext
 
 // Generate 生成完整 Xray 配置（模板驱动：不可变段来自模板，动态段由代码填空）。
 // usersByTag 为「入站 tag → 已按权限组过滤的用户列表」（服务层 GetValidUsers 计算结果，

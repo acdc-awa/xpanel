@@ -13,7 +13,6 @@ import (
 	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
-	"github.com/acdc/xray-panel/internal/pkg/protocol"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
@@ -648,52 +647,17 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.Fail(c, 404, "服务器不存在")
 		return
 	}
-	q := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true)
-	if req.Form != nil && req.Form.Tag != "" {
-		q = q.Where("tag != ?", req.Form.Tag)
-	}
-	var inbounds []models.Inbound
-	if err := q.Find(&inbounds).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
+	var formInb *models.Inbound
+	var formGroupIDs []uint64
 	if req.Form != nil {
-		inbounds = append(inbounds, formToInbound(req.Form))
+		f := formToInbound(req.Form)
+		formInb = &f
+		formGroupIDs = req.Form.PermissionGroupIDs
 	}
-	// 用户按入站 tag 分组（与全量生成同源：GetValidUsers 权限组过滤 + 有效期/流量过滤）
-	var usersByTag map[string][]protocol.User
-	if d.Config != nil {
-		var uerr error
-		usersByTag, uerr = d.Config.GetValidUsers(req.ServerID)
-		if uerr != nil {
-			util.ServerError(c, "查询用户失败")
-			return
-		}
-	}
-	if req.Form != nil && d.Config != nil {
-		// 表单入站尚未入库：按表单开放权限组即时计算（覆盖同 tag 的库内旧值）
-		formInb := formToInbound(req.Form)
-		usersByTag[req.Form.Tag] = d.Config.PreviewUsers(&formInb, req.Form.PermissionGroupIDs)
-	}
-	var outbounds []models.ServerOutbound
-	if err := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true).Order("priority asc, id asc").Find(&outbounds).Error; err != nil {
-		util.ServerError(c, "查询出站失败")
-		return
-	}
-	var routingRules []models.ServerRoutingRule
-	if err := d.DB.Where("server_id = ? AND enabled = ?", req.ServerID, true).Order("priority asc, id asc").Find(&routingRules).Error; err != nil {
-		util.ServerError(c, "查询路由失败")
-		return
-	}
-	ctx, err := services.BuildGenerateContext(d.DB, inbounds, outbounds)
-	if err != nil {
-		util.ServerError(c, "查询生成上下文失败")
-		return
-	}
-	cfg, err := xray.Generate(inbounds, outbounds, routingRules, usersByTag, ctx, "", "")
+	cfg, err := d.Config.Preview(req.ServerID, formInb, formGroupIDs)
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return
 	}
-	util.OK(c, gin.H{"config": string(cfg)})
+	util.OK(c, gin.H{"config": cfg})
 }

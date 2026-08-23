@@ -29,7 +29,7 @@ func ProxyItemsToDTOs(items []ProxyItem) []contracts.ProxyNodeDTO {
 
 // UserToSummaryDTO 将 models.User 转为订阅导出器使用的用户摘要 DTO。
 func UserToSummaryDTO(u *models.User) contracts.UserSummaryDTO {
-	dto := contracts.UserSummaryDTO{
+	return contracts.UserSummaryDTO{
 		ID:         u.ID,
 		Username:   u.Username,
 		Email:      u.Email,
@@ -38,10 +38,6 @@ func UserToSummaryDTO(u *models.User) contracts.UserSummaryDTO {
 		PlanID:     u.PlanID,
 		ExpireTime: u.ExpireAt,
 	}
-	if u.PlanID > 0 {
-		// 流量信息由调用方按需填充；这里只保留摘要结构。
-	}
-	return dto
 }
 
 // clashExporter Clash / Mihomo 订阅导出器。

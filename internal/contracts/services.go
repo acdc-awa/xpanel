@@ -90,6 +90,8 @@ type AuditService interface {
 // ConfigService 配置生成与待推送服务接口。
 type ConfigService interface {
 	Generate(serverID uint64) (string, error)
+	// Preview 按库内拓扑 + 未落库表单入站生成预览配置（form 为 nil 时等价纯库内预览）。
+	Preview(serverID uint64, form *models.Inbound, formGroupIDs []uint64) (string, error)
 	GetPending(serverID uint64) (*models.PendingConfig, error)
 	GetValidUsers(serverID uint64) (map[string][]protocol.User, error)
 	MarkPushedByServerIfSame(serverID uint64, configJSON string) (bool, error)
