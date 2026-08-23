@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
@@ -18,67 +17,63 @@ import (
 
 // inboundView 入站对外结构。
 type inboundView struct {
-	ID             uint64    `json:"id"`
-	ServerID       uint64    `json:"server_id"`
-	ServerName     string    `json:"server_name"`
-	Tag            string    `json:"tag"`
-	Protocol       string    `json:"protocol"`
-	Port           int       `json:"port"`
-	Listen         string    `json:"listen"`
-	SettingsJSON   string    `json:"settings_json"`
-	StreamSettings string    `json:"stream_settings"`
-	Sniffing       string    `json:"sniffing"`
-	Ratio          float64   `json:"ratio"`
-	TotalGB        int64     `json:"total_gb"`
-	ExpiryTime     *time.Time `json:"expiry_time,omitempty"`
-	Enabled        bool      `json:"enabled"`
-	Type           string    `json:"type"`                       // user / relay
-	InternalUUID   string    `json:"internal_uuid,omitempty"`    // relay 只读（节点上报）
-	CertID         *uint64   `json:"cert_id,omitempty"`          // 绑定的证书
-	Flow              string    `json:"flow"`                       // 入站级流控（空=自动 / xtls-rprx-vision / none）
-	ShareAddrStrategy string    `json:"share_addr_strategy"`        // node / listen / custom
-	ShareAddr         string    `json:"share_addr"`                 // 自定义分享地址（订阅专用，域名/IP）
-	SharePort         int       `json:"share_port"`                 // 自定义分享端口（0 = 使用入站端口）
-	ShareSecurity      string    `json:"share_security"`             // auto / tls / none
-	ShareSNI           string    `json:"share_sni"`                  // 订阅 SNI 覆写
-	ShareHost          string    `json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
-	SharePath          string    `json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
-	ShareAllowInsecure bool      `json:"share_allow_insecure"`       // 订阅跳过证书校验
-	PermissionGroupIDs []uint64  `json:"permission_group_ids"`       // 开放权限组 ID 列表（权威来源：节点入站定义权限组）
-	CreatedAt         time.Time `json:"created_at"`
+	ID                 uint64     `json:"id"`
+	ServerID           uint64     `json:"server_id"`
+	ServerName         string     `json:"server_name"`
+	Tag                string     `json:"tag"`
+	Protocol           string     `json:"protocol"`
+	Port               int        `json:"port"`
+	Listen             string     `json:"listen"`
+	SettingsJSON       string     `json:"settings_json"`
+	StreamSettings     string     `json:"stream_settings"`
+	Sniffing           string     `json:"sniffing"`
+	Ratio              float64    `json:"ratio"`
+	TotalGB            int64      `json:"total_gb"`
+	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
+	Enabled            bool       `json:"enabled"`
+	Type               string     `json:"type"`                    // user / relay
+	InternalUUID       string     `json:"internal_uuid,omitempty"` // relay 只读（节点上报）
+	CertID             *uint64    `json:"cert_id,omitempty"`       // 绑定的证书
+	Flow               string     `json:"flow"`                    // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	ShareAddrStrategy  string     `json:"share_addr_strategy"`     // node / listen / custom
+	ShareAddr          string     `json:"share_addr"`              // 自定义分享地址（订阅专用，域名/IP）
+	SharePort          int        `json:"share_port"`              // 自定义分享端口（0 = 使用入站端口）
+	ShareSecurity      string     `json:"share_security"`          // auto / tls / none
+	ShareSNI           string     `json:"share_sni"`               // 订阅 SNI 覆写
+	ShareHost          string     `json:"share_host"`              // 订阅 HTTP/WS Host 覆写
+	SharePath          string     `json:"share_path"`              // 订阅 WS/XHTTP Path 覆写
+	ShareAllowInsecure bool       `json:"share_allow_insecure"`    // 订阅跳过证书校验
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 // inboundForm 入站创建/更新表单（透传 JSON）。
 type inboundForm struct {
-	ServerID       uint64  `json:"server_id" binding:"required"`
-	Tag            string  `json:"tag" binding:"required,max=64"`
-	Protocol       string  `json:"protocol" binding:"required"`
-	Port           int     `json:"port" binding:"required,min=1,max=65535"`
-	Listen         string  `json:"listen"`
-	SettingsJSON   string  `json:"settings_json"`   // 协议 settings（透传）
-	StreamSettings string  `json:"stream_settings"` // 传输 streamSettings（透传）
-	Sniffing       string  `json:"sniffing"`        // 嗅探（透传）
-	Ratio          float64 `json:"ratio"`
-	TotalGB        int64     `json:"total_gb"`          // J9：入站总流量上限（GB，0=不限）
-	ExpiryTime     *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
-	Type           string  `json:"type"`      // user / relay（空 = user）
-	CertID         *uint64 `json:"cert_id"`   // 绑定证书（T5 校验存在性）
-	Flow              string  `json:"flow"`      // 入站级流控（空=自动 / xtls-rprx-vision / none）
-	ShareAddrStrategy string  `json:"share_addr_strategy"` // node / listen / custom
-	ShareAddr         string  `json:"share_addr"` // 自定义分享地址（订阅专用，域名/IP）
-	SharePort         int     `json:"share_port"` // 自定义分享端口（0 = 使用入站端口）
-	ShareSecurity      string  `json:"share_security"` // auto / tls / none
-	ShareSNI           string  `json:"share_sni"`
-	ShareHost          string  `json:"share_host"`
-	SharePath          string  `json:"share_path"`
-	ShareAllowInsecure bool    `json:"share_allow_insecure"`
-	PermissionGroupIDs []uint64 `json:"permission_group_ids"` // 开放权限组 ID 列表
+	ID                 uint64     `json:"id"` // 预览编辑已存在入站时透传（AP 授权解析用；创建时忽略）
+	ServerID           uint64     `json:"server_id" binding:"required"`
+	Tag                string     `json:"tag" binding:"required,max=64"`
+	Protocol           string     `json:"protocol" binding:"required"`
+	Port               int        `json:"port" binding:"required,min=1,max=65535"`
+	Listen             string     `json:"listen"`
+	SettingsJSON       string     `json:"settings_json"`   // 协议 settings（透传）
+	StreamSettings     string     `json:"stream_settings"` // 传输 streamSettings（透传）
+	Sniffing           string     `json:"sniffing"`        // 嗅探（透传）
+	Ratio              float64    `json:"ratio"`
+	TotalGB            int64      `json:"total_gb"`              // J9：入站总流量上限（GB，0=不限）
+	ExpiryTime         *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
+	Type               string     `json:"type"`                  // user / relay（空 = user）
+	CertID             *uint64    `json:"cert_id"`               // 绑定证书（T5 校验存在性）
+	Flow               string     `json:"flow"`                  // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / listen / custom
+	ShareAddr          string     `json:"share_addr"`            // 自定义分享地址（订阅专用，域名/IP）
+	SharePort          int        `json:"share_port"`            // 自定义分享端口（0 = 使用入站端口）
+	ShareSecurity      string     `json:"share_security"`        // auto / tls / none
+	ShareSNI           string     `json:"share_sni"`
+	ShareHost          string     `json:"share_host"`
+	SharePath          string     `json:"share_path"`
+	ShareAllowInsecure bool       `json:"share_allow_insecure"`
 }
 
-func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inboundView {
-	if groupIDs == nil {
-		groupIDs = []uint64{}
-	}
+func toInboundView(i *models.Inbound, serverName string) inboundView {
 	sec := i.ShareSecurity
 	if sec == "" {
 		sec = "auto"
@@ -92,10 +87,9 @@ func toInboundView(i *models.Inbound, serverName string, groupIDs []uint64) inbo
 		Enabled: i.Enabled, CreatedAt: i.CreatedAt,
 		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
 		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
-		SharePort: i.SharePort,
+		SharePort:     i.SharePort,
 		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
 		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
-		PermissionGroupIDs: groupIDs,
 	}
 }
 
@@ -112,12 +106,6 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	inboundIDs := make([]uint64, 0, len(list))
-	for i := range list {
-		inboundIDs = append(inboundIDs, list[i].ID)
-	}
-	groupMap := services.BatchInboundPermissionGroupIDs(d.DB, inboundIDs)
-
 	items := make([]inboundView, 0, len(list))
 	for i := range list {
 		serverName := ""
@@ -125,7 +113,7 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 		if err := d.DB.First(&srv, list[i].ServerID).Error; err == nil {
 			serverName = srv.Name
 		}
-		items = append(items, toInboundView(&list[i], serverName, groupMap[list[i].ID]))
+		items = append(items, toInboundView(&list[i], serverName))
 	}
 	util.OK(c, gin.H{"items": items})
 }
@@ -233,14 +221,11 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
-	if len(req.PermissionGroupIDs) > 0 {
-		_ = services.SyncInboundPermissionGroups(d.DB, inb.ID, req.PermissionGroupIDs)
-	}
 	if err := d.enqueueConfig(req.ServerID); err != nil {
 		pushFail(c, req.ServerID, err)
 		return
 	}
-	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name, req.PermissionGroupIDs)})
+	util.OK(c, gin.H{"inbound": toInboundView(&inb, srv.Name)})
 }
 
 // AdminUpdateInbound PUT /api/v1/admin/inbounds/:id
@@ -256,30 +241,29 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Tag            *string  `json:"tag"`
-		Protocol       *string  `json:"protocol"`
-		Port           *int     `json:"port"`
-		Listen         *string  `json:"listen"`
-		SettingsJSON   *string  `json:"settings_json"`
-		StreamSettings *string  `json:"stream_settings"`
-		Sniffing       *string  `json:"sniffing"`
-		Ratio          *float64   `json:"ratio"`
-		TotalGB        *int64     `json:"total_gb"`
-		ExpiryTime     *time.Time `json:"expiry_time,omitempty"`
-		Enabled        *bool    `json:"enabled"`
-		Type           *string  `json:"type"`
-		InternalUUID   *string  `json:"internal_uuid"` // 仅节点回执写入（管理员只读展示）
-		CertID         *uint64  `json:"cert_id"`       // nil 不更新；显式传 0 解绑
-		Flow              *string `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
-		ShareAddrStrategy *string `json:"share_addr_strategy"` //
-		ShareAddr         *string `json:"share_addr"`          //
-		SharePort         *int    `json:"share_port"`          // 0 = 使用入站端口
-		ShareSecurity      *string `json:"share_security"`      // auto / tls / none
-		ShareSNI           *string `json:"share_sni"`
-		ShareHost          *string `json:"share_host"`
-		SharePath          *string `json:"share_path"`
-		ShareAllowInsecure *bool   `json:"share_allow_insecure"`
-		PermissionGroupIDs *[]uint64 `json:"permission_group_ids"` // 开放权限组（nil 不更新）
+		Tag                *string    `json:"tag"`
+		Protocol           *string    `json:"protocol"`
+		Port               *int       `json:"port"`
+		Listen             *string    `json:"listen"`
+		SettingsJSON       *string    `json:"settings_json"`
+		StreamSettings     *string    `json:"stream_settings"`
+		Sniffing           *string    `json:"sniffing"`
+		Ratio              *float64   `json:"ratio"`
+		TotalGB            *int64     `json:"total_gb"`
+		ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
+		Enabled            *bool      `json:"enabled"`
+		Type               *string    `json:"type"`
+		InternalUUID       *string    `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
+		CertID             *uint64    `json:"cert_id"`             // nil 不更新；显式传 0 解绑
+		Flow               *string    `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
+		ShareAddrStrategy  *string    `json:"share_addr_strategy"` //
+		ShareAddr          *string    `json:"share_addr"`          //
+		SharePort          *int       `json:"share_port"`          // 0 = 使用入站端口
+		ShareSecurity      *string    `json:"share_security"`      // auto / tls / none
+		ShareSNI           *string    `json:"share_sni"`
+		ShareHost          *string    `json:"share_host"`
+		SharePath          *string    `json:"share_path"`
+		ShareAllowInsecure *bool      `json:"share_allow_insecure"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -454,9 +438,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			return
 		}
 	}
-	if req.PermissionGroupIDs != nil {
-		_ = services.SyncInboundPermissionGroups(d.DB, id, *req.PermissionGroupIDs)
-	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
 		pushFail(c, inb.ServerID, err)
 		return
@@ -467,8 +448,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		serverName = srv.Name
 	}
 	d.DB.First(&inb, id)
-	groupIDs := services.InboundPermissionGroupIDs(d.DB, id)
-	util.OK(c, gin.H{"inbound": toInboundView(&inb, serverName, groupIDs)})
+	util.OK(c, gin.H{"inbound": toInboundView(&inb, serverName)})
 }
 
 // AdminDeleteInbound DELETE /api/v1/admin/inbounds/:id
@@ -487,11 +467,20 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	if d.refInboundProtected(c, id) {
 		return
 	}
-	// P2-11：权限组链接删除与入站删除放入同一事务；不存在时返回 404。
+	// 接入点引用保护：被用户接入点直连引用 / 被 L4 转发规则指向的入站禁止删除（订阅管道断裂）
+	var apCnt int64
+	d.DB.Model(&models.UserAccessPoint{}).Where("target_type = 'inbound' AND target_inbound_id = ?", id).Count(&apCnt)
+	if apCnt > 0 {
+		util.BadRequest(c, "该入站被 "+strconv.FormatInt(apCnt, 10)+" 个用户接入点直连引用，无法删除，请先解除接入点连线")
+		return
+	}
+	var l4Cnt int64
+	d.DB.Model(&models.L4PortRule{}).Where("target_inbound_id = ?", id).Count(&l4Cnt)
+	if l4Cnt > 0 {
+		util.BadRequest(c, "该入站被 "+strconv.FormatInt(l4Cnt, 10)+" 条 L4 端口转发规则指向，无法删除，请先删除对应转发规则")
+		return
+	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("inbound_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
-			return err
-		}
 		return tx.Delete(&models.Inbound{}, id).Error
 	}); err != nil {
 		util.ServerError(c, "删除失败")
@@ -623,7 +612,7 @@ func (d *Deps) enqueueConfig(serverID uint64) error {
 // formToInbound 把入站表单转为 models.Inbound（配置预览用）。
 func formToInbound(f *inboundForm) models.Inbound {
 	inb := models.Inbound{
-		ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
+		ID: f.ID, ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
 		Port: f.Port, Listen: f.Listen,
 		SettingsJSON: f.SettingsJSON, StreamSettings: f.StreamSettings,
 		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
@@ -652,256 +641,14 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		return
 	}
 	var formInb *models.Inbound
-	var formGroupIDs []uint64
 	if req.Form != nil {
 		f := formToInbound(req.Form)
 		formInb = &f
-		formGroupIDs = req.Form.PermissionGroupIDs
 	}
-	cfg, err := d.Config.Preview(req.ServerID, formInb, formGroupIDs)
+	cfg, err := d.Config.Preview(req.ServerID, formInb)
 	if err != nil {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return
 	}
 	util.OK(c, gin.H{"config": cfg})
 }
-
-// InboundEndpointView 附加接入点视图对象（带开放权限组 ID 列表）。
-type InboundEndpointView struct {
-	models.InboundEndpoint
-	PermissionGroupIDs []uint64 `json:"permission_group_ids"`
-}
-
-// AdminGetInboundEndpoints GET /api/v1/admin/inbounds/:id/endpoints
-func (d *Deps) AdminGetInboundEndpoints(c *gin.Context) {
-	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法入站 ID")
-		return
-	}
-	var inb models.Inbound
-	if err := d.DB.First(&inb, inboundID).Error; err != nil {
-		util.Fail(c, 404, "入站不存在")
-		return
-	}
-	var list []models.InboundEndpoint
-	if err := d.DB.Where("inbound_id = ?", inboundID).Order("priority ASC, id ASC").Find(&list).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	epIDs := make([]uint64, len(list))
-	for i, ep := range list {
-		epIDs[i] = ep.ID
-	}
-	groupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
-	items := make([]InboundEndpointView, len(list))
-	for i, ep := range list {
-		gids := groupMap[ep.ID]
-		if gids == nil {
-			gids = []uint64{}
-		}
-		items[i] = InboundEndpointView{
-			InboundEndpoint:    ep,
-			PermissionGroupIDs: gids,
-		}
-	}
-	util.OK(c, gin.H{"items": items})
-}
-
-// AdminCreateInboundEndpoint POST /api/v1/admin/inbounds/:id/endpoints
-func (d *Deps) AdminCreateInboundEndpoint(c *gin.Context) {
-	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法入站 ID")
-		return
-	}
-	var inb models.Inbound
-	if err := d.DB.First(&inb, inboundID).Error; err != nil {
-		util.Fail(c, 404, "入站不存在")
-		return
-	}
-
-	var req struct {
-		Name               string   `json:"name" binding:"required"`
-		Host               string   `json:"host" binding:"required"`
-		Port               int      `json:"port" binding:"required,min=1,max=65535"`
-		PermissionGroupIDs []uint64 `json:"permission_group_ids"`
-		Enabled            *bool    `json:"enabled"`
-		Priority           int      `json:"priority"`
-		Remark             string   `json:"remark"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
-		return
-	}
-	name := strings.TrimSpace(req.Name)
-	host := strings.TrimSpace(req.Host)
-	if name == "" || host == "" {
-		util.BadRequest(c, "名称与主机地址不能为空")
-		return
-	}
-
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-
-	ep := models.InboundEndpoint{
-		InboundID: inboundID,
-		Name:      name,
-		Host:      host,
-		Port:      req.Port,
-		Enabled:   enabled,
-		Priority:  req.Priority,
-		Remark:    req.Remark,
-	}
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&ep).Error; err != nil {
-			return err
-		}
-		if len(req.PermissionGroupIDs) > 0 {
-			if err := services.SyncEndpointPermissionGroups(tx, ep.ID, req.PermissionGroupIDs); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		util.ServerError(c, "创建附加接入点失败: "+err.Error())
-		return
-	}
-
-	gids := req.PermissionGroupIDs
-	if gids == nil {
-		gids = []uint64{}
-	}
-	util.OK(c, gin.H{"endpoint": InboundEndpointView{InboundEndpoint: ep, PermissionGroupIDs: gids}})
-}
-
-// AdminUpdateInboundEndpoint PUT /api/v1/admin/inbounds/:id/endpoints/:ep_id
-func (d *Deps) AdminUpdateInboundEndpoint(c *gin.Context) {
-	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法入站 ID")
-		return
-	}
-	epID, err := strconv.ParseUint(c.Param("ep_id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法接入点 ID")
-		return
-	}
-
-	var ep models.InboundEndpoint
-	if err := d.DB.Where("id = ? AND inbound_id = ?", epID, inboundID).First(&ep).Error; err != nil {
-		util.Fail(c, 404, "附加接入点不存在")
-		return
-	}
-
-	var req struct {
-		Name               *string   `json:"name"`
-		Host               *string   `json:"host"`
-		Port               *int      `json:"port"`
-		PermissionGroupIDs *[]uint64 `json:"permission_group_ids"`
-		Enabled            *bool     `json:"enabled"`
-		Priority           *int      `json:"priority"`
-		Remark             *string   `json:"remark"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
-		return
-	}
-
-	updates := map[string]any{}
-	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
-		if name == "" {
-			util.BadRequest(c, "名称不能为空")
-			return
-		}
-		updates["name"] = name
-	}
-	if req.Host != nil {
-		host := strings.TrimSpace(*req.Host)
-		if host == "" {
-			util.BadRequest(c, "主机地址不能为空")
-			return
-		}
-		updates["host"] = host
-	}
-	if req.Port != nil {
-		if *req.Port < 1 || *req.Port > 65535 {
-			util.BadRequest(c, "端口范围须在 1-65535 之间")
-			return
-		}
-		updates["port"] = *req.Port
-	}
-	if req.Enabled != nil {
-		updates["enabled"] = *req.Enabled
-	}
-	if req.Priority != nil {
-		updates["priority"] = *req.Priority
-	}
-	if req.Remark != nil {
-		updates["remark"] = *req.Remark
-	}
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if len(updates) > 0 {
-			if err := tx.Model(&ep).Updates(updates).Error; err != nil {
-				return err
-			}
-		}
-		if req.PermissionGroupIDs != nil {
-			if err := services.SyncEndpointPermissionGroups(tx, ep.ID, *req.PermissionGroupIDs); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		util.ServerError(c, "更新失败: "+err.Error())
-		return
-	}
-
-	// 重新载入更新后的对象与权限组
-	_ = d.DB.First(&ep, ep.ID)
-	gids := services.EndpointPermissionGroupIDs(d.DB, ep.ID)
-	if gids == nil {
-		gids = []uint64{}
-	}
-	util.OK(c, gin.H{"endpoint": InboundEndpointView{InboundEndpoint: ep, PermissionGroupIDs: gids}})
-}
-
-// AdminDeleteInboundEndpoint DELETE /api/v1/admin/inbounds/:id/endpoints/:ep_id
-func (d *Deps) AdminDeleteInboundEndpoint(c *gin.Context) {
-	inboundID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法入站 ID")
-		return
-	}
-	epID, err := strconv.ParseUint(c.Param("ep_id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法接入点 ID")
-		return
-	}
-
-	var ep models.InboundEndpoint
-	if err := d.DB.Where("id = ? AND inbound_id = ?", epID, inboundID).First(&ep).Error; err != nil {
-		util.Fail(c, 404, "附加接入点不存在")
-		return
-	}
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("endpoint_id = ?", epID).Delete(&models.PermissionGroupEndpoint{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&ep).Error
-	})
-	if err != nil {
-		util.ServerError(c, "删除失败: "+err.Error())
-		return
-	}
-	util.OK(c, gin.H{"deleted": epID})
-}
-

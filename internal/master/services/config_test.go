@@ -148,12 +148,13 @@ func TestSavePendingOverwriteKeepsRowID(t *testing.T) {
 }
 
 // TestGetValidUsers_GroupFilterAndFlow 批7 核心修复验证：GetValidUsers（热更新/全量生成共用）
-// 必须按权限组过滤用户、按入站流控三态计算 flow、按三级继承计算设备限制。
+// 必须按接入点白名单派生过滤用户、按入站流控三态计算 flow、按三级继承计算设备限制。
 func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	db := newTestDB(t)
 	migrateModels := []any{
 		&models.User{}, &models.Plan{}, &models.Inbound{},
-		&models.PermissionGroup{}, &models.PermissionGroupInbound{},
+		&models.PermissionGroup{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{},
+		&models.L4PortRule{},
 	}
 	for _, m := range migrateModels {
 		if err := db.AutoMigrate(m); err != nil {
@@ -191,9 +192,18 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	if err := db.Create(&inb3).Error; err != nil {
 		t.Fatal(err)
 	}
-	// 入站-权限组绑定
-	_ = db.Create(&models.PermissionGroupInbound{PermissionGroupID: g1.ID, InboundID: inb1.ID})
-	_ = db.Create(&models.PermissionGroupInbound{PermissionGroupID: g2.ID, InboundID: inb2.ID})
+	// 入站授权由「用户接入点白名单」单点派生：inb1←ap1(组1)；inb2←ap2(组2)；inb3 无接入点指向
+	u64 := func(v uint64) *uint64 { return &v }
+	ap1 := models.UserAccessPoint{Name: "ap1", Enabled: true, TargetType: "inbound", TargetInboundID: u64(inb1.ID)}
+	ap2 := models.UserAccessPoint{Name: "ap2", Enabled: true, TargetType: "inbound", TargetInboundID: u64(inb2.ID)}
+	if err := db.Create(&ap1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&ap2).Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g1.ID, AccessPointID: ap1.ID})
+	_ = db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g2.ID, AccessPointID: ap2.ID})
 
 	// 用户：u1 显式组1（设备限制 2）；u2 套餐→组2（继承限制 3）；u3 无组；u4 已过期
 	expired := time.Now().Add(-24 * time.Hour)
@@ -239,10 +249,10 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		t.Errorf("in2 limit = %d, want 3（套餐继承）", got[0].Limit)
 	}
 
-	// in3：未配置开放权限组 → 默认不对任何人开放（0 个用户）
+	// in3：无接入点指向 → 默认不对任何人开放（0 个用户）
 	got = m["in3"]
 	if len(got) != 0 {
-		t.Fatalf("in3 users = %d, want 0（未分配权限组不对任何人开放）", len(got))
+		t.Fatalf("in3 users = %d, want 0（无接入点指向不对任何人开放）", len(got))
 	}
 
 	// u3（无组）与 u4（过期）不得出现在任何入站

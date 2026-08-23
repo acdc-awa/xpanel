@@ -95,7 +95,8 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
 // 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
-// 权限控制按权限组匹配（节点入站定义开放权限组，用户继承/指定权限组）。
+// 访问控制单点化：入站的授权权限组由「解析到该入站的启用用户接入点（AP）白名单」派生
+// （AP 直连入站 / 经 L4 转发规则解析到目标入站）。
 // 单一数据源：热更新 SyncUsers 与全量配置生成（Generate）共用本函数（批7 修正访问控制缺口）。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
@@ -113,7 +114,7 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 	for _, inb := range inbounds {
 		inboundIDs = append(inboundIDs, inb.ID)
 	}
-	inboundGroupMap := BatchInboundPermissionGroupIDs(s.DB, inboundIDs)
+	inboundGroupMap := BatchInboundAuthorizedGroupIDs(s.DB, inboundIDs)
 
 	for _, inb := range inbounds {
 		res[inb.Tag] = s.protoUsersFor(validUsers, &inb, inboundGroupMap[inb.ID])
@@ -133,13 +134,13 @@ type validUser struct {
 }
 
 // protoUsersFor 按权限组规则从 validUsers 计算单个入站的用户列表（GetValidUsers 与预览共用）。
-// 零信任与默认安全规范：
-// 1. 入站必须显式声明开放权限组（len(allowedGroups) > 0），未配置权限组的入站不对任何人开放（返回空）；
+// 零信任与默认安全规范（授权组集合由用户接入点白名单单点派生）：
+// 1. 入站必须有启用接入点授权（len(allowedGroups) > 0），无接入点指向的入站不对任何人开放（返回空）；
 // 2. 用户必须拥有生效权限组（vu.GroupID > 0）；
-// 3. 用户的生效组必须命中入站的开放组集合（allowedGroupSet[vu.GroupID]）。
+// 3. 用户的生效组必须命中入站的授权组集合（allowedGroupSet[vu.GroupID]）。
 func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inbound, allowedGroups []uint64) []protocol.User {
+	// 未接入任何启用接入点的入站不对任何用户开放（默认安全/隔离状态）
 	if len(allowedGroups) == 0 {
-		// 未分配权限组的入站不对任何用户开放（默认安全/隔离状态）
 		return nil
 	}
 	allowedGroupSet := make(map[uint64]bool, len(allowedGroups))
@@ -172,11 +173,14 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 	return protoUsers
 }
 
-// PreviewUsers 预览用：按表单（可能未入库）入站的开放权限组计算其用户列表（与 GetValidUsers 同规则）。
-func (s *ConfigService) PreviewUsers(inb *models.Inbound, groupIDs []uint64) []protocol.User {
-	if inb.Type == models.InboundTypeRelay {
+// PreviewUsers 预览用：按表单入站（可能未落库）计算其注入用户列表（与 GetValidUsers 同规则）。
+// AP 单点授权下用户注入完全由「指向该入站的启用接入点」派生：
+// 已落库入站（ID > 0）按库内 AP 白名单解析；未落库新入站（ID = 0）不可能被 AP 指向，返回空。
+func (s *ConfigService) PreviewUsers(inb *models.Inbound) []protocol.User {
+	if inb.Type == models.InboundTypeRelay || inb.ID == 0 {
 		return nil
 	}
+	groupIDs := BatchInboundAuthorizedGroupIDs(s.DB, []uint64{inb.ID})[inb.ID]
 	return s.protoUsersFor(s.filterValidUsers(), inb, groupIDs)
 }
 
@@ -323,8 +327,8 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 
 // Preview 按「库内拓扑 + 未落库表单入站」生成预览配置（管理端入站编辑器配置预览）。
 // 与 Generate 的既有语义差异保持不变：不读服务器默认出口/解析策略（传空）、
-// 入站不做可用性过滤、表单入站按 formGroupIDs 即时计算用户并覆盖同 tag 库内值。
-func (s *ConfigService) Preview(serverID uint64, form *models.Inbound, formGroupIDs []uint64) (string, error) {
+// 入站不做可用性过滤、表单入站按 AP 派生即时计算用户并覆盖同 tag 库内值。
+func (s *ConfigService) Preview(serverID uint64, form *models.Inbound) (string, error) {
 	q := s.DB.Where("server_id = ? AND enabled = ?", serverID, true)
 	if form != nil && form.Tag != "" {
 		q = q.Where("tag != ?", form.Tag)
@@ -342,8 +346,8 @@ func (s *ConfigService) Preview(serverID uint64, form *models.Inbound, formGroup
 		return "", err
 	}
 	if form != nil {
-		// 表单入站尚未入库：按表单开放权限组即时计算（覆盖同 tag 的库内旧值）
-		usersByTag[form.Tag] = s.PreviewUsers(form, formGroupIDs)
+		// 表单入站覆盖同 tag 库内值：用户注入按 AP 白名单派生（已落库入站按 ID 解析，新入站为空）
+		usersByTag[form.Tag] = s.PreviewUsers(form)
 	}
 	outbounds, routingRules, err := s.loadOutboundsAndRules(serverID)
 	if err != nil {

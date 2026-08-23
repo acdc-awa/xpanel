@@ -31,7 +31,6 @@ import {
   createL4Rule,
   updateL4Rule,
   deleteL4Rule,
-  getAccessPoints,
   createAccessPoint,
   updateAccessPoint,
   setAccessPointTarget,
@@ -39,9 +38,8 @@ import {
   getPermissionGroups,
   type TopologyData,
 } from '@/api/admin'
-import type { InboundEndpoint, InboundItem, ServerOutbound, L4PortRule, PermissionGroup, UserAccessPoint } from '@/api/types'
+import type { InboundItem, ServerOutbound, L4PortRule, PermissionGroup, UserAccessPoint } from '@/api/types'
 import { errMsg } from '@/api/http'
-import InboundEndpointsDrawer from '@/views/admin/servers/InboundEndpointsDrawer.vue'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from '@/views/admin/servers/InboundConfigEditor.vue'
 
@@ -69,7 +67,6 @@ interface BoxOutbound {
 interface BoxData {
   server: TopologyData['servers'][number]
   inbounds: TopologyData['inbounds']
-  endpointsMap: Map<number, InboundEndpoint[]>
   l4Rules?: L4PortRule[]
   outbounds: BoxOutbound[]
   boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
@@ -431,14 +428,6 @@ function buildGraph(data: TopologyData) {
     inbByServer.get(inb.server_id)!.push(inb)
   }
 
-  const endpointsMap = new Map<number, InboundEndpoint[]>()
-  if (data.inbound_endpoints) {
-    for (const ep of data.inbound_endpoints) {
-      if (!endpointsMap.has(ep.inbound_id)) endpointsMap.set(ep.inbound_id, [])
-      endpointsMap.get(ep.inbound_id)!.push(ep)
-    }
-  }
-
   const outByServer = new Map<number, BoxOutbound[]>()
   for (const out of data.outbounds) {
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
@@ -465,25 +454,21 @@ function buildGraph(data: TopologyData) {
     data: {
       server: s,
       inbounds: inbByServer.get(s.id) || [],
-      endpointsMap,
       l4Rules: l4RulesByServer.get(s.id) || [],
       outbounds: outByServer.get(s.id) || [],
       boxWidth: getBoxWidth(s.id),
     } as BoxData,
   }))
 
-  const apPos = boxPositions.get('user-access-points') ?? { x: 40, y: 24 }
-  const apNode = {
-    id: 'user-access-points',
+  // 用户接入点：每个 AP 一个独立小盒（订阅入口），连线方向 AP → 目标入站/L4 转发
+  const apNodes = (data.access_points || []).map((ap, idx) => ({
+    id: `ap-${ap.id}`,
     type: 'apbox',
-    position: apPos,
-    data: {
-      accessPoints: data.access_points || [],
-      boxWidth: 380,
-    },
-  }
+    position: boxPositions.get(`ap-${ap.id}`) ?? { x: 40, y: 24 + idx * 170 },
+    data: { ap },
+  }))
 
-  nodes.value = [apNode, ...serverNodes] as unknown as GraphNode[]
+  nodes.value = [...apNodes, ...serverNodes] as unknown as GraphNode[]
 
   const inbNode = new Map<number, string>()
   const outNode = new Map<number, string>()
@@ -496,17 +481,17 @@ function buildGraph(data: TopologyData) {
 
   const es: Edge[] = []
 
-  // 用户接入点连接线（从目标物理入站或 L4 转发端口连入用户接入点）
+  // 用户接入点连接线（方向：AP → 目标入站 / L4 转发端口，符合「订阅入口指向管道」认知）
   if (data.access_points) {
     for (const ap of data.access_points) {
       if (!ap.enabled) continue
       if (ap.target_type === 'inbound' && ap.target_inbound_id && inbNode.has(ap.target_inbound_id)) {
         es.push({
           id: `ap-${ap.id}`,
-          source: inbNode.get(ap.target_inbound_id)!,
-          sourceHandle: `inb-src-ext-${ap.target_inbound_id}`,
-          target: 'user-access-points',
-          targetHandle: `ap-tgt-${ap.id}`,
+          source: `ap-${ap.id}`,
+          sourceHandle: `ap-src-${ap.id}`,
+          target: inbNode.get(ap.target_inbound_id)!,
+          targetHandle: `inb-tgt-${ap.target_inbound_id}`,
           type: 'refedge',
           animated: true,
           markerEnd: { type: MarkerType.ArrowClosed },
@@ -517,10 +502,10 @@ function buildGraph(data: TopologyData) {
         if (l4) {
           es.push({
             id: `ap-${ap.id}`,
-            source: `server-${l4.server_id}`,
-            sourceHandle: `l4-src-${l4.id}`,
-            target: 'user-access-points',
-            targetHandle: `ap-tgt-${ap.id}`,
+            source: `ap-${ap.id}`,
+            sourceHandle: `ap-src-${ap.id}`,
+            target: `server-${l4.server_id}`,
+            targetHandle: `l4-tgt-${l4.id}`,
             type: 'refedge',
             animated: true,
             markerEnd: { type: MarkerType.ArrowClosed },
@@ -602,20 +587,22 @@ function isValidConnection(conn: Connection): boolean {
   if (!props.editable || !props.topology) return false
   const src = conn.sourceHandle ?? ''
   const tgt = conn.targetHandle ?? ''
-  const apSrc = src.match(/^(?:ap-src|ap-tgt)-(\d+)$/)
-  const apTgt = tgt.match(/^(?:ap-src|ap-tgt)-(\d+)$/)
+  const apSrc = src.match(/^ap-src-(\d+)$/)
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const l4Src = src.match(/^l4-src-(\d+)$/)
+  const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const l4Tgt = tgt.match(/^l4-tgt-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  // 物理入站或 L4 转发 -> 用户接入点（顺向管道流）
-  if ((inbSrcExt || inbSrc || l4Src) && apTgt) return true
-  // 用户接入点 -> 物理入站或 L4 转发（逆向拖拽）
-  if (apSrc && (inbAny || l4Tgt)) return true
+  // 用户接入点 -> 用户入站（仅限 type=user 物理入站）或 L4 转发端口（订阅入口指向管道）
+  if (apSrc && inbTgt) {
+    const inb = props.topology.inbounds.find((i) => i.id === Number(inbTgt[1]))
+    return !!inb && inb.type === 'user'
+  }
+  if (apSrc && l4Tgt) return true
 
   if (l4Src && inbAny) {
     const rule = props.topology.l4_rules?.find((r) => r.id === Number(l4Src[1]))
@@ -645,62 +632,33 @@ async function handleConnect(conn: Connection) {
   if (!props.editable || !props.topology) return
   const src = conn.sourceHandle ?? ''
   const tgt = conn.targetHandle ?? ''
-  const apSrc = src.match(/^(?:ap-src|ap-tgt)-(\d+)$/)
-  const apTgt = tgt.match(/^(?:ap-src|ap-tgt)-(\d+)$/)
+  const apSrc = src.match(/^ap-src-(\d+)$/)
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
   const l4Src = src.match(/^l4-src-(\d+)$/)
+  const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const l4Tgt = tgt.match(/^l4-tgt-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  // 1. 顺向拖拽：从物理入站或 L4 转发 拖到 接入点
-  if ((inbSrcExt || inbSrc) && apTgt) {
-    const inbId = Number((inbSrcExt || inbSrc)![1])
-    const apId = Number(apTgt[1])
-    try {
-      const { data } = await setAccessPointTarget(apId, { target_type: 'inbound', target_inbound_id: inbId })
-      if (data.code === 0) {
-        ElMessage.success('已连接接入点至落地物理入站')
-        emit('changed')
-      } else ElMessage.error(data.message)
-    } catch (e) {
-      ElMessage.error(errMsg(e, '连接失败'))
-    }
-    return
-  }
-  if (l4Src && apTgt) {
-    const l4Id = Number(l4Src[1])
-    const apId = Number(apTgt[1])
-    try {
-      const { data } = await setAccessPointTarget(apId, { target_type: 'l4_rule', target_l4_rule_id: l4Id })
-      if (data.code === 0) {
-        ElMessage.success('已连接接入点至 L4 端口转发')
-        emit('changed')
-      } else ElMessage.error(data.message)
-    } catch (e) {
-      ElMessage.error(errMsg(e, '连接失败'))
-    }
-    return
-  }
-
-  // 2. 逆向拖拽：从接入点 拖到 物理入站或 L4
+  // 用户接入点 → 目标（订阅入口指向管道：直连用户入站 / L4 转发端口）
   if (apSrc) {
     const apId = Number(apSrc[1])
-    if (inbAny) {
-      const inbId = Number(inbAny[1])
+    if (inbTgt) {
+      const inbId = Number(inbTgt[1])
       try {
         const { data } = await setAccessPointTarget(apId, { target_type: 'inbound', target_inbound_id: inbId })
         if (data.code === 0) {
-          ElMessage.success('已连接接入点至落地物理入站')
+          ElMessage.success('已连接接入点至用户入站')
           emit('changed')
         } else ElMessage.error(data.message)
       } catch (e) {
         ElMessage.error(errMsg(e, '连接失败'))
       }
       return
-    } else if (l4Tgt) {
+    }
+    if (l4Tgt) {
       const l4Id = Number(l4Tgt[1])
       try {
         const { data } = await setAccessPointTarget(apId, { target_type: 'l4_rule', target_l4_rule_id: l4Id })
@@ -713,7 +671,9 @@ async function handleConnect(conn: Connection) {
       }
       return
     }
-  } else if (l4Src && inbAny) {
+    return
+  }
+  if (l4Src && inbAny) {
     await connectL4Rule(Number(l4Src[1]), Number(inbAny[1]))
   } else if (outSrc && inbAny) {
     await createRef(Number(outSrc[1]), Number(inbAny[1]))
@@ -724,7 +684,7 @@ async function handleConnect(conn: Connection) {
   } else if (inbSrc && inbAny) {
     ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
   } else {
-    ElMessage.warning('仅支持：用户接入点 -> 入站/中转端口、L4 端口 -> 目标入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+    ElMessage.warning('仅支持：接入点右侧端点 -> 用户入站/L4 端口、L4 端口 -> 目标入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
   }
 }
 
@@ -1086,17 +1046,6 @@ async function saveL4Rule() {
   }
 }
 
-// ---- 附加接入点抽屉 ----
-const epDrawerOpen = ref(false)
-const epDrawerInbound = ref<InboundItem | null>(null)
-const epDrawerServerName = ref('')
-
-function openEndpointsManager(inb: InboundItem, serverName: string) {
-  epDrawerInbound.value = inb
-  epDrawerServerName.value = serverName
-  epDrawerOpen.value = true
-}
-
 // ---- 出站编辑器弹窗 ----
 const outboundEditorOpen = ref(false)
 const outboundServerId = ref(0)
@@ -1156,7 +1105,6 @@ async function handleSaveInbound() {
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
       share_port: c.sharePort || undefined,
-      permission_group_ids: c.permissionGroupIds,
     })
     if (data.code === 0) {
       ElMessage.success('入站已创建')
@@ -1472,8 +1420,10 @@ function autoLayout() {
   }
 
   const sortedLayers = Array.from(layerBuckets.keys()).sort((a, b) => a - b)
-  boxPositions.set('user-access-points', { x: 40, y: 30 })
-  let curX = 40 + 380 + 80
+  // 接入点小盒固定最左列，自上而下排布
+  const aps = data.access_points || []
+  aps.forEach((ap, i) => boxPositions.set(`ap-${ap.id}`, { x: 40, y: 30 + i * 170 }))
+  let curX = 40 + (aps.length > 0 ? 280 + 100 : 0)
   const GAP_X = 100
   const GAP_Y = 32
 
@@ -1507,9 +1457,11 @@ function autoLayout() {
 // 重置为默认一字排列
 function resetLayout() {
   if (!props.topology) return
-  boxPositions.set('user-access-points', { x: 40, y: 24 })
+  const aps = props.topology.access_points || []
+  aps.forEach((ap, i) => boxPositions.set(`ap-${ap.id}`, { x: 40, y: 24 + i * 170 }))
+  const offsetX = 40 + (aps.length > 0 ? 280 + 80 : 0)
   props.topology.servers.forEach((s, idx) => {
-    boxPositions.set(`server-${s.id}`, { x: 40 + 380 + 80 + idx * 520, y: 24 })
+    boxPositions.set(`server-${s.id}`, { x: offsetX + idx * 520, y: 24 })
     boxWidths.set(`server-${s.id}`, DEFAULT_BOX_W)
   })
   localLayout.positions = Object.fromEntries(boxPositions)
@@ -1546,6 +1498,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             <el-icon><RefreshRight /></el-icon>&nbsp;重置网格
           </el-button>
         </el-button-group>
+        <el-button v-if="editable" size="small" type="primary" plain @click="openCreateAccessPoint" title="新建用户接入点（订阅入口）">
+          <el-icon><Plus /></el-icon>&nbsp;接入点
+        </el-button>
         <el-button size="small" class="fs-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏查看'">
           <el-icon><FullScreen /></el-icon>&nbsp;{{ isFullscreen ? '退出全屏' : '全屏' }}
         </el-button>
@@ -1606,102 +1561,61 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         />
       </template>
 
-      <!-- 用户接入点卡片 (User Access Points Box - Consumer Pipeline Model) -->
+      <!-- 用户接入点独立小盒（订阅入口；右侧端点拖线指向目标入站 / L4 转发端口） -->
       <template #node-apbox="nodeProps">
-        <div class="server-box ap-box" :style="{ width: '400px' }">
-          <div class="sb-head ap-head">
-            <div class="sb-head-left">
-              <span class="ap-icon">🌐</span>
-              <span class="name" title="用户接入点">用户接入点</span>
-              <span class="offline-badge ap-badge">消费端点</span>
-            </div>
-            <div class="sb-head-right">
-              <button
-                v-if="editable"
-                class="sb-add-btn ap-add-btn"
-                title="新建用户接入点"
-                @click.stop="openCreateAccessPoint"
-              >
-                <el-icon><Plus /></el-icon>&nbsp;接入点
-              </button>
-            </div>
+        <div
+          class="ap-node"
+          :class="{ unlinked: !nodeProps.data.ap.target_type, disabled: !nodeProps.data.ap.enabled }"
+          @click.stop="openEditAccessPoint(nodeProps.data.ap)"
+        >
+          <!-- 右侧源端点：拖线至目标入站（inb-tgt）或 L4 转发端口（l4-tgt） -->
+          <Handle
+            type="source"
+            :id="`ap-src-${nodeProps.data.ap.id}`"
+            :position="Position.Right"
+            :connectable="editable"
+            class="ep ap-src-handle"
+            title="拖线至目标用户入站或 L4 转发端口"
+          />
+
+          <div class="ap-node-head">
+            <span class="ap-icon">🌐</span>
+            <span class="ap-name-text" :title="nodeProps.data.ap.name">{{ nodeProps.data.ap.name }}</span>
+            <span v-if="!nodeProps.data.ap.enabled" class="x-chip gray" style="font-size: 10px; padding: 1px 4px">禁用</span>
           </div>
 
-          <div class="ap-body">
-            <div class="sb-col-head" style="margin-bottom: 8px">
-              <span class="sb-title">用户订阅端点 (Consumer Endpoints)</span>
-              <span class="muted" style="font-size: 11px; color: #64748b">从左侧入站或中转拖线至此接入</span>
-            </div>
-
-            <div v-if="nodeProps.data.accessPoints && nodeProps.data.accessPoints.length > 0" class="ap-list">
-              <div
-                v-for="ap in nodeProps.data.accessPoints"
-                :key="ap.id"
-                class="ap-card-item"
-                :class="{ 'unlinked': !ap.target_type, 'disabled': !ap.enabled }"
-                @click.stop="openEditAccessPoint(ap)"
+          <div class="ap-node-perms">
+            <template v-if="nodeProps.data.ap.permission_group_ids && nodeProps.data.ap.permission_group_ids.length > 0">
+              <span
+                v-for="gid in nodeProps.data.ap.permission_group_ids.slice(0, 3)"
+                :key="gid"
+                class="x-chip blue"
+                style="font-size: 10px; padding: 1px 5px"
               >
-                <!-- 左侧接收端点 (Handle) -->
-                <Handle
-                  type="target"
-                  :id="`ap-tgt-${ap.id}`"
-                  :position="Position.Left"
-                  :connectable="editable"
-                  class="ep in-ep ap-handle"
-                />
-                <Handle
-                  type="source"
-                  :id="`ap-src-${ap.id}`"
-                  :position="Position.Left"
-                  :connectable="editable"
-                  class="ep ext-src ap-handle"
-                  style="opacity: 0"
-                />
+                {{ groupName(gid) }}
+              </span>
+              <span v-if="nodeProps.data.ap.permission_group_ids.length > 3" class="x-chip gray" style="font-size: 10px">
+                +{{ nodeProps.data.ap.permission_group_ids.length - 3 }}
+              </span>
+            </template>
+            <span v-else class="x-chip orange" style="font-size: 10px">未授权（全员不可见）</span>
+          </div>
 
-                <div class="ap-card-top">
-                  <div class="ap-card-title">
-                    <span class="ap-name-text">{{ ap.name }}</span>
-                    <span v-if="!ap.enabled" class="x-chip gray" style="font-size: 10px; padding: 1px 4px">已禁用</span>
-                  </div>
-                  <div class="ap-card-perms">
-                    <template v-if="ap.permission_group_ids && ap.permission_group_ids.length > 0">
-                      <span
-                        v-for="gid in ap.permission_group_ids.slice(0, 2)"
-                        :key="gid"
-                        class="x-chip blue"
-                        style="font-size: 10px; padding: 1px 5px"
-                      >
-                        {{ groupName(gid) }}
-                      </span>
-                      <span v-if="ap.permission_group_ids.length > 2" class="x-chip gray" style="font-size: 10px">
-                        +{{ ap.permission_group_ids.length - 2 }}
-                      </span>
-                    </template>
-                    <span v-else class="x-chip orange" style="font-size: 10px">未授权</span>
-                  </div>
-                </div>
+          <!-- 管道消费的实时端点展示 -->
+          <div v-if="nodeProps.data.ap.resolved_host" class="ap-resolved-text">
+            <span class="ap-dot online" />
+            <code class="cell-mono">{{ nodeProps.data.ap.resolved_host }}:{{ nodeProps.data.ap.resolved_port }}</code>
+            <span class="x-chip purple" style="font-size: 10px">
+              {{ nodeProps.data.ap.resolved_protocol?.toUpperCase() || 'VLESS' }}
+            </span>
+          </div>
+          <div v-else class="ap-resolved-text waiting">
+            <span class="ap-dot offline" />
+            <span style="font-size: 11px">待连线：从右侧端点拖出</span>
+          </div>
 
-                <!-- 管道消费的实时端点展示 -->
-                <div class="ap-card-bottom">
-                  <div v-if="ap.resolved_host" class="ap-resolved-text">
-                    <span class="ap-dot online" />
-                    <code class="cell-mono">{{ ap.resolved_host }}:{{ ap.resolved_port }}</code>
-                    <span class="x-chip purple" style="font-size: 10px; margin-left: 4px">
-                      {{ ap.resolved_protocol?.toUpperCase() || 'VLESS' }}
-                    </span>
-                  </div>
-                  <div v-else class="ap-resolved-text waiting">
-                    <span class="ap-dot offline" />
-                    <span class="muted" style="font-size: 11px">⚠️ 待连线接入（从入站或 L4 拖线）</span>
-                  </div>
-
-                  <div v-if="ap.resolved_target_desc" class="ap-desc-text" :title="ap.resolved_target_desc">
-                    {{ ap.target_type === 'inbound' ? '直连 ➜' : '中转 ➜' }} {{ ap.resolved_target_desc }}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="sb-empty">暂无用户接入点，点击右上角「+ 接入点」创建</div>
+          <div v-if="nodeProps.data.ap.resolved_target_desc" class="ap-desc-text" :title="nodeProps.data.ap.resolved_target_desc">
+            {{ nodeProps.data.ap.target_type === 'inbound' ? '直连 ➜' : '中转 ➜' }} {{ nodeProps.data.ap.resolved_target_desc }}
           </div>
         </div>
       </template>
@@ -1877,28 +1791,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       <span class="port-badge">:{{ inb.port }}</span>
                       <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
 
-                      <!-- 附加接入点胶囊 -->
-                      <div class="sb-ep-pills">
-                        <span
-                          v-for="ep in (nodeProps.data.endpointsMap?.get(inb.id) || [])"
-                          :key="ep.id"
-                          class="ep-pill"
-                          :class="{ disabled: !ep.enabled }"
-                          :title="`附加接入点: ${ep.name} (${ep.host}:${ep.port})`"
-                          @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
-                        >
-                          🔀 {{ ep.name }}
-                        </span>
-                        <button
-                          v-if="editable"
-                          class="ep-add-btn"
-                          title="管理/添加附加接入点"
-                          @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
-                        >
-                          + 接入点
-                        </button>
-                      </div>
-
                       <Handle
                         type="source"
                         :id="`inb-src-${inb.id}`"
@@ -1942,28 +1834,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
                   <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
                   <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
-
-                  <!-- 附加接入点胶囊 -->
-                  <div class="sb-ep-pills">
-                    <span
-                      v-for="ep in (nodeProps.data.endpointsMap?.get(inb.id) || [])"
-                      :key="ep.id"
-                      class="ep-pill"
-                      :class="{ disabled: !ep.enabled }"
-                      :title="`附加接入点: ${ep.name} (${ep.host}:${ep.port})`"
-                      @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
-                    >
-                      🔀 {{ ep.name }}
-                    </span>
-                    <button
-                      v-if="editable"
-                      class="ep-add-btn"
-                      title="管理/添加附加接入点"
-                      @click.stop="openEndpointsManager(inb, nodeProps.data.server.name)"
-                    >
-                      + 接入点
-                    </button>
-                  </div>
 
                   <Handle
                     type="source"
@@ -2043,14 +1913,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     <div v-else class="topology-empty">
       <el-empty description="暂无服务器。先到「服务器」页添加节点，再回来拖线接线。" />
     </div>
-
-    <!-- 附加接入点抽屉 -->
-    <InboundEndpointsDrawer
-      v-model="epDrawerOpen"
-      :inbound="epDrawerInbound"
-      :server-name="epDrawerServerName"
-      @changed="emit('changed')"
-    />
 
     <!-- 出站新建/编辑弹窗 -->
     <OutboundConfigEditor
@@ -2606,335 +2468,65 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     flex: none;
   }
 
-  /* 附加接入点小药丸 */
-  .sb-ep-pills {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: 2px;
-
-    .ep-pill {
-      font-size: 9.5px;
-      padding: 1px 5px;
-      border-radius: 10px;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      color: #38bdf8;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s;
-      &:hover {
-        background: rgba(56, 189, 248, 0.3);
-        transform: translateY(-1px);
-      }
-      &.disabled {
-        opacity: 0.5;
-        border-style: dashed;
-      }
-    }
-
-    .ep-add-btn {
-      font-size: 9px;
-      padding: 0 4px;
-      border-radius: 8px;
-      background: transparent;
-      border: 1px dashed rgba(255, 255, 255, 0.2);
-      color: #94a3b8;
-      cursor: pointer;
-      transition: all 0.15s;
-      &:hover {
-        border-color: #38bdf8;
-        color: #38bdf8;
-      }
-    }
-  }
-
-  .sb-row {
+/* 用户接入点独立小盒（订阅入口；右侧源端点拖线指向管道目标） */
+  .ap-node {
     position: relative;
+    width: 280px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 6px;
-    padding: 0 8px;
-    height: 34px;
-    max-width: 100%;
-    box-sizing: border-box;
-    background: rgba(15, 23, 42, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 17px;
-    transition: all 0.2s;
+    box-shadow: 0 4px 20px rgba(56, 189, 248, 0.1);
+    transition: all 0.2s ease;
 
     &:hover {
-      background: rgba(15, 23, 42, 0.85);
-      border-color: rgba(255, 255, 255, 0.15);
+      border-color: rgba(56, 189, 248, 0.6);
+      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.2);
+      transform: translateY(-1px);
+    }
+    &.unlinked {
+      border-style: dashed;
+      border-color: rgba(251, 191, 36, 0.45);
+      box-shadow: 0 4px 16px rgba(251, 191, 36, 0.08);
+    }
+    &.disabled {
+      opacity: 0.6;
+      filter: grayscale(0.4);
     }
 
-    .tag {
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 110px;
-    }
-    .out-tag {
-      font-weight: 600;
-      color: #93c5fd;
-      &.ref {
-        color: #fbbf24;
-      }
-      &.direct {
-        color: #34d399;
-      }
-      &.draft {
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
-        padding: 1px 6px;
-        border-radius: 6px;
-      }
-    }
-    &.direct-row {
-      background: rgba(52, 211, 153, 0.1);
-      border-color: rgba(52, 211, 153, 0.2);
-    }
-
-    .port-badge {
-      font-size: 11px;
-      font-weight: 600;
-      color: #38bdf8;
-      font-family: monospace;
-      flex: none;
-      &.l4-port {
-        color: #c084fc;
-      }
-    }
-
-    .proto-badge {
-      font-size: 9px;
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex: none;
-      &.sec {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
-      }
-      &.net {
-        background: rgba(56, 189, 248, 0.12);
-        color: #7dd3fc;
-      }
-    }
-
-    .out-proto-badge {
-      font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex: none;
-      background: rgba(148, 163, 184, 0.15);
-      color: #cbd5e1;
-      &.ref {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px solid rgba(251, 191, 36, 0.3);
-      }
-      &.direct {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.3);
-      }
-      &.blocked {
-        background: rgba(248, 113, 113, 0.15);
-        color: #f87171;
-        border: 1px solid rgba(248, 113, 113, 0.3);
-      }
-      &.draft {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
-      }
-    }
-
-    .type-tag {
-      flex: none;
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 10px;
-      font-weight: 600;
-      &.user {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-      }
-      &.relay {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-      }
-    }
-  }
-
-  /* L4 纯四层中转卡片样式 */
-  .l4-relay-box {
-    border-color: rgba(168, 85, 247, 0.35);
-    box-shadow: 0 4px 20px rgba(168, 85, 247, 0.12);
-
-    .l4-head {
-      border-bottom-color: rgba(168, 85, 247, 0.2);
-    }
-    .l4-relay-badge {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: rgba(168, 85, 247, 0.2);
-      color: #c084fc;
-      border: 1px solid rgba(168, 85, 247, 0.35);
-    }
-    .l4-body {
-      padding: 0 16px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .l4-rules-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .l4-rule-row {
-      justify-content: space-between;
-      cursor: pointer;
-      background: rgba(168, 85, 247, 0.05);
-      border-color: rgba(168, 85, 247, 0.15);
-      &:hover {
-        background: rgba(168, 85, 247, 0.12);
-        border-color: rgba(168, 85, 247, 0.3);
-      }
-    }
-    .l4-rule-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .l4-rule-target {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .l4-remark {
-      font-size: 11px;
-      color: #94a3b8;
-      max-width: 140px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      &.muted {
-        color: #64748b;
-        font-style: italic;
-      }
-    }
-    .l4-add-btn {
-      background: rgba(168, 85, 247, 0.15);
-      border-color: rgba(168, 85, 247, 0.3);
-      color: #c084fc;
-      &:hover {
-        background: rgba(168, 85, 247, 0.3);
-        border-color: #c084fc;
-      }
-    }
-  }
-
-  /* 用户接入点卡片样式 (AP Box - Consumer Pipeline Model) */
-  .ap-box {
-    border-color: rgba(56, 189, 248, 0.35);
-    box-shadow: 0 4px 24px rgba(56, 189, 248, 0.12);
-
-    .ap-head {
-      border-bottom-color: rgba(56, 189, 248, 0.2);
-    }
-    .ap-icon {
-      font-size: 16px;
-    }
-    .ap-badge {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: rgba(56, 189, 248, 0.2);
-      color: #38bdf8;
-      border: 1px solid rgba(56, 189, 248, 0.35);
-    }
-    .ap-body {
-      padding: 0 16px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .ap-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .ap-card-item {
-      position: relative;
-      background: rgba(15, 23, 42, 0.65);
-      border: 1px solid rgba(56, 189, 248, 0.2);
-      border-radius: 8px;
-      padding: 8px 12px;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      transition: all 0.2s ease;
-      &:hover {
-        background: rgba(56, 189, 248, 0.08);
-        border-color: rgba(56, 189, 248, 0.45);
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(56, 189, 248, 0.1);
-      }
-      &.unlinked {
-        border-style: dashed;
-        border-color: rgba(251, 191, 36, 0.4);
-        background: rgba(251, 191, 36, 0.03);
-      }
-      &.disabled {
-        opacity: 0.6;
-        filter: grayscale(0.4);
-      }
-    }
-    .ap-handle {
-      left: -6px !important;
+    .ap-src-handle {
+      right: -6px !important;
       top: 50% !important;
       transform: translateY(-50%) !important;
     }
-    .ap-card-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .ap-card-title {
+    .ap-node-head {
       display: flex;
       align-items: center;
       gap: 6px;
     }
+    .ap-icon {
+      font-size: 14px;
+      flex: none;
+    }
     .ap-name-text {
-      font-size: 12.5px;
+      font-size: 13px;
       font-weight: 700;
       color: #f1f5f9;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 170px;
+      flex: 1;
+      min-width: 0;
     }
-    .ap-card-perms {
+    .ap-node-perms {
       display: flex;
       align-items: center;
       gap: 4px;
-      flex-wrap: nowrap;
-    }
-    .ap-card-bottom {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      flex-wrap: wrap;
     }
     .ap-resolved-text {
       display: flex;
@@ -2950,6 +2542,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       width: 6px;
       height: 6px;
       border-radius: 50%;
+      flex: none;
       &.online {
         background: #10b981;
         box-shadow: 0 0 6px #10b981;
@@ -2965,16 +2558,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 340px;
-    }
-    .ap-add-btn {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: rgba(56, 189, 248, 0.3);
-      color: #38bdf8;
-      &:hover {
-        background: rgba(56, 189, 248, 0.3);
-        border-color: #38bdf8;
-      }
     }
   }
 

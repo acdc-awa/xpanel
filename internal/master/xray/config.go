@@ -707,7 +707,7 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 		clients = []any{c}
 	default:
-		// user 入站：动态用户列表（已由服务层 GetValidUsers 按入站开放权限组过滤，空组返回空列表）；
+		// user 入站：动态用户列表（已由服务层 GetValidUsers 按接入点白名单派生过滤，无接入点指向返回空列表）；
 		// clients 结构由协议插件生成（未注册协议走最小通用注入）
 		userList := usersByTag[inb.Tag]
 		clients = protocols.ServerClients(inb.Protocol, userList, spec)

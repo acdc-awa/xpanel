@@ -123,6 +123,43 @@ func (d *Deps) fetchTopologyContext() (map[uint64]models.Server, map[uint64]mode
 	return srvMap, inbMap, l4Map
 }
 
+// validateAccessPointTarget 校验接入点目标绑定合法性（目标类型白名单 + 引用实体存在且类型正确）。
+func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inboundID, l4RuleID *uint64) bool {
+	switch targetType {
+	case "":
+		return true
+	case "inbound":
+		if inboundID == nil || *inboundID == 0 {
+			util.BadRequest(c, "直连模式需指定目标入站")
+			return false
+		}
+		var inb models.Inbound
+		if err := d.DB.First(&inb, *inboundID).Error; err != nil {
+			util.BadRequest(c, "目标入站不存在")
+			return false
+		}
+		if inb.Type != models.InboundTypeUser {
+			util.BadRequest(c, "接入点只能直连 type=user 的用户入站（relay 为内部落地，不参与订阅）")
+			return false
+		}
+		return true
+	case "l4_rule":
+		if l4RuleID == nil || *l4RuleID == 0 {
+			util.BadRequest(c, "中转模式需指定 L4 转发规则")
+			return false
+		}
+		var rule models.L4PortRule
+		if err := d.DB.First(&rule, *l4RuleID).Error; err != nil {
+			util.BadRequest(c, "目标 L4 转发规则不存在")
+			return false
+		}
+		return true
+	default:
+		util.BadRequest(c, "目标类型仅支持 inbound / l4_rule")
+		return false
+	}
+}
+
 // AdminGetAccessPoints GET /api/v1/admin/access-points —— 查询所有用户接入点
 func (d *Deps) AdminGetAccessPoints(c *gin.Context) {
 	var list []models.UserAccessPoint
@@ -157,6 +194,9 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 		util.BadRequest(c, "接入点名称不能为空")
 		return
 	}
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -186,6 +226,8 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 		return
 	}
 
+	d.TriggerUserChange()
+
 	srvMap, inbMap, l4Map := d.fetchTopologyContext()
 	util.OK(c, gin.H{
 		"access_point": buildAccessPointView(ap, req.PermissionGroupIDs, srvMap, inbMap, l4Map),
@@ -208,6 +250,9 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 	var req accessPointForm
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
 		return
 	}
 
@@ -240,6 +285,8 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 		return
 	}
 
+	d.TriggerUserChange()
+
 	d.DB.First(&ap, id)
 	gids := services.AccessPointPermissionGroupIDs(d.DB, id)
 	srvMap, inbMap, l4Map := d.fetchTopologyContext()
@@ -270,6 +317,9 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 		util.BadRequest(c, "参数错误")
 		return
 	}
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
+		return
+	}
 
 	updates := map[string]any{
 		"target_type":       req.TargetType,
@@ -280,6 +330,8 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 		util.ServerError(c, "更新目标失败")
 		return
 	}
+
+	d.TriggerUserChange()
 
 	d.DB.First(&ap, id)
 	gids := services.AccessPointPermissionGroupIDs(d.DB, id)
@@ -303,5 +355,6 @@ func (d *Deps) AdminDeleteAccessPoint(c *gin.Context) {
 		util.ServerError(c, "删除接入点失败")
 		return
 	}
+	d.TriggerUserChange()
 	util.OK(c, gin.H{"deleted": id})
 }

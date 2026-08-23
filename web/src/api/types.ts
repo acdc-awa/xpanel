@@ -290,7 +290,6 @@ export interface InboundItem {
   share_host?: string // 订阅 HTTP/WS Host 覆写
   share_path?: string // 订阅 WS/XHTTP Path 覆写
   share_allow_insecure?: boolean // 订阅跳过证书检查
-  permission_group_ids?: number[] // 开放权限组 ID 列表（权威来源：节点定义权限组）
   created_at: string
 }
 
@@ -310,7 +309,6 @@ export interface L4PortRule {
   target_inbound_port?: number
   remark?: string
   enabled: boolean
-  permission_group_ids?: number[]
   created_at?: string
   updated_at?: string
 }
@@ -451,8 +449,6 @@ export interface PermissionGroup {
   name: string
   remark: string
   clash_template?: string // 自定义 Clash/Mihomo 模板
-  inbound_count?: number
-  inbound_tags?: string[]
   access_point_count?: number
   access_point_names?: string[]
   created_at: string
@@ -497,19 +493,3 @@ export interface NoticePayload {
   status?: number
   sort_order?: number
 }
-
-// InboundEndpoint 入站附加接入点（如 BGP 中转、IPv6、备用 CDN 域名）
-export interface InboundEndpoint {
-  id: number
-  inbound_id: number
-  name: string
-  host: string
-  port: number
-  permission_group_ids: number[]
-  enabled: boolean
-  priority: number
-  remark: string
-  created_at: string
-  updated_at: string
-}
-

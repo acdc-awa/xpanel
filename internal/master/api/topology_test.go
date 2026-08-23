@@ -24,7 +24,7 @@ func apiTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&models.Server{}, &models.Inbound{}, &models.ServerOutbound{},
-		&models.Cert{}, &models.Plan{}, &models.PermissionGroup{}, &models.PermissionGroupInbound{},
+		&models.Cert{}, &models.Plan{}, &models.PermissionGroup{},
 	); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}

@@ -10,7 +10,6 @@ import type {
   CreateInvitationResult,
   InboundItem,
   InboundSettings,
-  InboundEndpoint,
   L4PortRule,
   UserAccessPoint,
   Invitation,
@@ -32,7 +31,6 @@ export type {
   CertItem,
   InboundItem,
   InboundSettings,
-  InboundEndpoint,
   L4PortRule,
   UserAccessPoint,
   Invitation,
@@ -264,7 +262,6 @@ export interface InboundPayload {
   share_host?: string
   share_path?: string
   share_allow_insecure?: boolean
-  permission_group_ids?: number[] // 开放权限组 ID 列表
 }
 
 export function getInbounds(serverId?: number) {
@@ -361,16 +358,6 @@ export function previewPermissionGroupTemplate(id: number, template: string) {
 
 export function deletePermissionGroup(id: number) {
   return http.delete<ApiResp<{ ok: boolean }>>(`/admin/permission-groups/${id}`)
-}
-
-export function getGroupInbounds(id: number) {
-  return http.get<ApiResp<{ inbound_ids: number[] }>>(`/admin/permission-groups/${id}/inbounds`)
-}
-
-export function setGroupInbounds(id: number, inboundIds: number[]) {
-  return http.post<ApiResp<{ group_id: number; count: number }>>(`/admin/permission-groups/${id}/inbounds`, {
-    inbound_ids: inboundIds,
-  })
 }
 
 export function previewConfig(serverId: number, form?: Partial<InboundPayload>) {
@@ -485,7 +472,6 @@ export interface TopologyRule {
 export interface TopologyData {
   servers: ServerItem[]
   inbounds: InboundItem[]
-  inbound_endpoints?: InboundEndpoint[]
   l4_rules?: L4PortRule[]
   access_points?: UserAccessPoint[]
   outbounds: TopologyOutbound[]
@@ -514,22 +500,6 @@ export function setAccessPointTarget(id: number, payload: { target_type: string;
 
 export function deleteAccessPoint(id: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/access-points/${id}`)
-}
-
-export function getInboundEndpoints(inboundId: number) {
-  return http.get<ApiResp<{ items: InboundEndpoint[] }>>(`/admin/inbounds/${inboundId}/endpoints`)
-}
-
-export function createInboundEndpoint(inboundId: number, payload: Partial<InboundEndpoint>) {
-  return http.post<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints`, payload)
-}
-
-export function updateInboundEndpoint(inboundId: number, epId: number, payload: Partial<InboundEndpoint>) {
-  return http.put<ApiResp<{ endpoint: InboundEndpoint }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`, payload)
-}
-
-export function deleteInboundEndpoint(inboundId: number, epId: number) {
-  return http.delete<ApiResp<{ deleted: number }>>(`/admin/inbounds/${inboundId}/endpoints/${epId}`)
 }
 
 export function getL4Rules(serverId: number) {

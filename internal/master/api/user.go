@@ -93,7 +93,9 @@ func (d *Deps) UserUpdateProfile(c *gin.Context) {
 }
 
 // UserServers GET /api/v1/user/servers —— 用户可见节点可用性（J15：替换前端 mock）。
-// 与订阅同源（权限组过滤）；在线 = last_seen_at 在心跳窗口（90s）内。
+// 与订阅同源（AP 单点授权派生）：列出用户可见接入点的入口服务器
+// （直连 = 目标入站所在服务器；L4 中转 = 中转机）。在线 = last_seen_at 在心跳窗口（90s）内；
+// L4 纯中转服务器无 Agent 心跳，恒视为在线（可达性由管理员配置保障）。
 func (d *Deps) UserServers(c *gin.Context) {
 	uid := middleware.CurrentUser(c)
 	var user models.User
@@ -101,25 +103,25 @@ func (d *Deps) UserServers(c *gin.Context) {
 		util.Fail(c, 404, "用户不存在")
 		return
 	}
-	granted := services.AuthorizedInboundSet(d.DB, &user)
-	var inbounds []models.Inbound
-	d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbounds)
+	granted := services.AuthorizedEntryServerIDs(d.DB, &user)
+	if len(granted) == 0 {
+		util.OK(c, gin.H{"items": []gin.H{}})
+		return
+	}
 
-	serverSeen := make(map[uint64]bool)
-	items := make([]gin.H, 0, 8)
-	for i := range inbounds {
-		inb := &inbounds[i]
-		if !granted[inb.ID] || serverSeen[inb.ServerID] {
-			continue
-		}
-		serverSeen[inb.ServerID] = true
-		var srv models.Server
-		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
-			continue
-		}
-		online := false
-		if srv.LastSeenAt != nil {
-			online = time.Since(*srv.LastSeenAt) < 90*time.Second
+	ids := make([]uint64, 0, len(granted))
+	for id := range granted {
+		ids = append(ids, id)
+	}
+	var servers []models.Server
+	d.DB.Where("id IN ?", ids).Order("id ASC").Find(&servers)
+
+	items := make([]gin.H, 0, len(servers))
+	for i := range servers {
+		srv := &servers[i]
+		online := true
+		if srv.ServerType != models.ServerTypeL4Relay {
+			online = srv.LastSeenAt != nil && time.Since(*srv.LastSeenAt) < 90*time.Second
 		}
 		items = append(items, gin.H{
 			"id":           srv.ID,

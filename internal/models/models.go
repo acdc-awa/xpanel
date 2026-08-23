@@ -36,9 +36,8 @@ func All() []any {
 		&Plan{}, &Order{}, &Cert{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
 		&AuditLog{}, &Setting{},
-		&PermissionGroup{}, &PermissionGroupInbound{},
-		&InboundEndpoint{}, &PermissionGroupEndpoint{},
-		&L4PortRule{}, &PermissionGroupL4Rule{},
+		&PermissionGroup{},
+		&L4PortRule{},
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 	}
@@ -47,11 +46,31 @@ func All() []any {
 // AutoMigrate 建表/补列（生产环境由启动时执行，后续可切换为显式迁移）。
 // ISSUE-04：先显式删除旧版 traffic_logs 的单列唯一索引 idx_traffic_period，
 // 再执行 AutoMigrate 建立 (user_id, inbound_id, period_start) 复合唯一索引。
+// 2026-08-23 访问控制单点化：退役 InboundEndpoint / 入站·L4 权限白名单三表，
+// 授权收口为「用户接入点（UserAccessPoint）权限组白名单」单点，旧表显式删除（GORM 只增不删）。
 func AutoMigrate(db *gorm.DB) error {
 	if err := dropLegacyTrafficPeriodIndex(db); err != nil {
 		return err
 	}
+	if err := dropRetiredAccessControlTables(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(All()...)
+}
+
+// dropRetiredAccessControlTables 幂等删除已退役的接入控制旧表（授权单点化迁移）。
+func dropRetiredAccessControlTables(db *gorm.DB) error {
+	for _, table := range []string{
+		"inbound_endpoints",
+		"permission_group_endpoints",
+		"permission_group_l4_rules",
+		"permission_group_inbounds",
+	} {
+		if err := db.Migrator().DropTable(table); err != nil {
+			return fmt.Errorf("删除已退役表 %s 失败: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // dropLegacyTrafficPeriodIndex 幂等删除旧库中的单列唯一索引（GORM AutoMigrate 只增不删）。

@@ -21,38 +21,10 @@ func testDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestGroupInboundIDs(t *testing.T) {
-	db := testDB(t)
+func u64(v uint64) *uint64 { return &v }
 
-	group := models.PermissionGroup{Name: "g1"}
-	if err := db.Create(&group).Error; err != nil {
-		t.Fatal(err)
-	}
-	plan := models.Plan{Name: "p1", PriceCents: 100, TrafficGB: 10, DurationDays: 30, PermissionGroupID: group.ID}
-	if err := db.Create(&plan).Error; err != nil {
-		t.Fatal(err)
-	}
-	db.Create(&models.PermissionGroupInbound{PermissionGroupID: group.ID, InboundID: 11})
-	db.Create(&models.PermissionGroupInbound{PermissionGroupID: group.ID, InboundID: 12})
-
-	// 套餐绑定权限组 → 集合
-	ids := GroupInboundIDs(db, plan.ID)
-	if len(ids) != 2 {
-		t.Fatalf("ids = %v, want [11 12]", ids)
-	}
-	// planID=0 → 空
-	if got := GroupInboundIDs(db, 0); got != nil {
-		t.Errorf("planID=0 应为空: %v", got)
-	}
-	// 未绑定权限组 → 空
-	plan2 := models.Plan{Name: "p2", PriceCents: 100, TrafficGB: 1, DurationDays: 1}
-	db.Create(&plan2)
-	if got := GroupInboundIDs(db, plan2.ID); len(got) != 0 {
-		t.Errorf("未绑定权限组应为空: %v", got)
-	}
-}
-
-func TestAuthorizedInboundSet_UnifiedPermissionGroup(t *testing.T) {
+// AP 单点授权派生：用户可见入站集合 = 生效组命中的启用接入点解析结果（直连 / 经 L4 转发）。
+func TestAuthorizedInboundSet_APDerived(t *testing.T) {
 	db := testDB(t)
 
 	group1 := models.PermissionGroup{Name: "VIP 1"}
@@ -63,21 +35,58 @@ func TestAuthorizedInboundSet_UnifiedPermissionGroup(t *testing.T) {
 	plan1 := models.Plan{Name: "p1", PermissionGroupID: group1.ID}
 	db.Create(&plan1)
 
-	// 入站 101 开放给 group1 和 group2
-	SyncInboundPermissionGroups(db, 101, []uint64{group1.ID, group2.ID})
-	// 入站 102 仅开放给 group2
-	SyncInboundPermissionGroups(db, 102, []uint64{group2.ID})
+	// 接入点 1：直连入站 101，开放给 group1+group2
+	ap1 := models.UserAccessPoint{Name: "ap1", Enabled: true, TargetType: "inbound", TargetInboundID: u64(101)}
+	db.Create(&ap1)
+	// 接入点 2：直连入站 102，仅开放给 group2
+	ap2 := models.UserAccessPoint{Name: "ap2", Enabled: true, TargetType: "inbound", TargetInboundID: u64(102)}
+	db.Create(&ap2)
+	// 接入点 3：经 L4 规则（指向入站 103），开放给 group1
+	l4 := models.L4PortRule{ServerID: 9, ListenPort: 30001, TargetServerID: 1, TargetInboundID: 103, Enabled: true}
+	db.Create(&l4)
+	ap3 := models.UserAccessPoint{Name: "ap3", Enabled: true, TargetType: "l4_rule", TargetL4RuleID: u64(l4.ID)}
+	db.Create(&ap3)
+	// 接入点 4：禁用状态，即使绑定 group1 也不生效（指向入站 104）
+	// （GORM default:true 陷阱：零值 false 入库会被默认值覆盖，需创建后显式禁用）
+	ap4 := models.UserAccessPoint{Name: "ap4", Enabled: true, TargetType: "inbound", TargetInboundID: u64(104)}
+	db.Create(&ap4)
+	db.Model(&ap4).Update("enabled", false)
+	// 接入点 5：启用但未绑定权限组 = 全员不可见（零信任，指向入站 105）
+	ap5 := models.UserAccessPoint{Name: "ap5", Enabled: true, TargetType: "inbound", TargetInboundID: u64(105)}
+	db.Create(&ap5)
+
+	if err := SyncAccessPointPermissionGroups(db, ap1.ID, []uint64{group1.ID, group2.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncAccessPointPermissionGroups(db, ap2.ID, []uint64{group2.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncAccessPointPermissionGroups(db, ap3.ID, []uint64{group1.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncAccessPointPermissionGroups(db, ap4.ID, []uint64{group1.ID}); err != nil {
+		t.Fatal(err)
+	}
 
 	// 用户 u1 购买 plan1（继承 group1）
-	user1 := models.User{Username: "u1", PlanID: plan1.ID}
+	user1 := models.User{Username: "u1", UUID: "aaaaaaaa-0000-0000-0000-000000000001", PlanID: plan1.ID}
 	db.Create(&user1)
 
 	set1 := AuthorizedInboundSet(db, &user1)
 	if !set1[101] {
-		t.Errorf("u1 应可访问入站 101")
+		t.Errorf("u1 应可经 ap1 访问入站 101")
+	}
+	if !set1[103] {
+		t.Errorf("u1 应可经 ap3(L4) 访问入站 103")
 	}
 	if set1[102] {
 		t.Errorf("u1 不应访问仅开放给 VIP2 的入站 102")
+	}
+	if set1[104] {
+		t.Errorf("禁用接入点 ap4 不应产生授权（104）")
+	}
+	if set1[105] {
+		t.Errorf("未绑定权限组的 ap5 不应对任何人开放（105）")
 	}
 
 	// 管理员手动将 user1 权限组覆盖为 group2
@@ -88,15 +97,66 @@ func TestAuthorizedInboundSet_UnifiedPermissionGroup(t *testing.T) {
 	if !set2[101] || !set2[102] {
 		t.Errorf("u1 覆盖为 VIP2 后应可访问 101 与 102, got %v", set2)
 	}
+	if set2[103] {
+		t.Errorf("ap3 仅开放 group1，覆盖为 VIP2 后不应访问 103")
+	}
 
-	// 批量查询测试
-	inboundGroups := BatchInboundPermissionGroupIDs(db, []uint64{101, 102})
-	if len(inboundGroups[101]) != 2 || len(inboundGroups[102]) != 1 {
-		t.Errorf("BatchInboundPermissionGroupIDs returned unexpected: %v", inboundGroups)
+	// 无权限组用户（无套餐未指定）→ 空集
+	user2 := models.User{Username: "u2", UUID: "aaaaaaaa-0000-0000-0000-000000000002"}
+	db.Create(&user2)
+	if got := AuthorizedInboundSet(db, &user2); len(got) != 0 {
+		t.Errorf("无生效权限组用户应无任何授权, got %v", got)
+	}
+
+	// 入站授权组映射（配置注入同源）
+	m := BatchInboundAuthorizedGroupIDs(db, []uint64{101, 102, 103, 104, 105})
+	if len(m[101]) != 2 {
+		t.Errorf("入站 101 授权组应为 [g1 g2], got %v", m[101])
+	}
+	if len(m[102]) != 1 || m[102][0] != group2.ID {
+		t.Errorf("入站 102 授权组应为 [g2], got %v", m[102])
+	}
+	if len(m[103]) != 1 || m[103][0] != group1.ID {
+		t.Errorf("入站 103 应经 L4 派生授权组 [g1], got %v", m[103])
+	}
+	if len(m[104]) != 0 || len(m[105]) != 0 {
+		t.Errorf("禁用/未授权接入点不应产生授权组: 104=%v 105=%v", m[104], m[105])
 	}
 }
 
-func TestProtoUsersFor_UnassignedPermissionGroup(t *testing.T) {
+// 入口服务器集合：直连取目标入站服务器；L4 中转取中转机服务器。
+func TestAuthorizedEntryServerIDs_APDerived(t *testing.T) {
+	db := testDB(t)
+
+	group := models.PermissionGroup{Name: "g1"}
+	db.Create(&group)
+	user := models.User{Username: "u1", PermissionGroupID: group.ID}
+	db.Create(&user)
+
+	// 目标入站：服务器 2
+	db.Create(&models.Inbound{ID: 201, ServerID: 2, Tag: "in-201", Type: models.InboundTypeUser, Enabled: true})
+	// L4 规则：中转机服务器 3 → 入站 201
+	l4 := models.L4PortRule{ServerID: 3, ListenPort: 30001, TargetServerID: 2, TargetInboundID: 201, Enabled: true}
+	db.Create(&l4)
+
+	apDirect := models.UserAccessPoint{Name: "d", Enabled: true, TargetType: "inbound", TargetInboundID: u64(201)}
+	db.Create(&apDirect)
+	apL4 := models.UserAccessPoint{Name: "l", Enabled: true, TargetType: "l4_rule", TargetL4RuleID: u64(l4.ID)}
+	db.Create(&apL4)
+	_ = SyncAccessPointPermissionGroups(db, apDirect.ID, []uint64{group.ID})
+	_ = SyncAccessPointPermissionGroups(db, apL4.ID, []uint64{group.ID})
+
+	set := AuthorizedEntryServerIDs(db, &user)
+	if !set[2] {
+		t.Errorf("直连接入点应暴露目标入站服务器 2")
+	}
+	if !set[3] {
+		t.Errorf("L4 接入点应暴露中转机服务器 3（用户实际入口）")
+	}
+}
+
+// PreviewUsers（与 GetValidUsers 同规则）：入站注入用户由启用接入点白名单派生。
+func TestProtoUsersFor_APDerived(t *testing.T) {
 	db := testDB(t)
 	_ = db.AutoMigrate(&models.Inbound{}, &models.Order{}, &models.TrafficDaily{})
 
@@ -123,16 +183,25 @@ func TestProtoUsersFor_UnassignedPermissionGroup(t *testing.T) {
 	}
 	db.Create(&inb)
 
-	// 1. 当入站未绑定任何权限组（allowedGroups 为空）时，不对任何用户开放
-	usersEmpty := cfgSvc.PreviewUsers(&inb, nil)
-	if len(usersEmpty) != 0 {
-		t.Fatalf("未分配权限组的入站应该返回 0 个用户（不对任何人开放），got %d", len(usersEmpty))
+	// 1. 无任何接入点指向该入站时，不对任何用户开放
+	if got := cfgSvc.PreviewUsers(&inb); len(got) != 0 {
+		t.Fatalf("无接入点引用的入站应返回 0 个用户（不对任何人开放），got %d", len(got))
 	}
 
-	// 2. 当入站绑定了 group.ID 时，应该成功返回 user
-	usersAllowed := cfgSvc.PreviewUsers(&inb, []uint64{group.ID})
+	// 2. 建立指向该入站且绑定 group 的启用接入点后，命中用户注入
+	ap := models.UserAccessPoint{Name: "ap", Enabled: true, TargetType: "inbound", TargetInboundID: u64(inb.ID)}
+	db.Create(&ap)
+	if err := SyncAccessPointPermissionGroups(db, ap.ID, []uint64{group.ID}); err != nil {
+		t.Fatal(err)
+	}
+	usersAllowed := cfgSvc.PreviewUsers(&inb)
 	if len(usersAllowed) != 1 || usersAllowed[0].UUID != user.UUID {
-		t.Fatalf("分配匹配权限组后应返回用户，got %+v", usersAllowed)
+		t.Fatalf("接入点授权组命中后应返回用户，got %+v", usersAllowed)
+	}
+
+	// 3. 接入点禁用后不再注入
+	db.Model(&ap).Update("enabled", false)
+	if got := cfgSvc.PreviewUsers(&inb); len(got) != 0 {
+		t.Fatalf("接入点禁用后应返回 0 个用户，got %d", len(got))
 	}
 }
-

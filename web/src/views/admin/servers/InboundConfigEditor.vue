@@ -13,7 +13,7 @@ import {
   QuestionFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCerts, getPermissionGroups, getXrayKeys, rotateInternalInbound, type CertItem, type PermissionGroup } from '@/api/admin'
+import { getCerts, getXrayKeys, rotateInternalInbound, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings } from '@/api/types'
 
@@ -37,7 +37,6 @@ export interface InboundEditorChangePayload {
   shareHost: string
   sharePath: string
   shareAllowInsecure: boolean
-  permissionGroupIds: number[]
 }
 
 export interface InboundEditorEmits {
@@ -59,7 +58,6 @@ const props = withDefaults(
     internalUUID?: string
     inboundId?: number
     certId?: number
-    permissionGroupIds?: number[]
   }>(),
   {
     modelValue: '{}',
@@ -74,7 +72,6 @@ const props = withDefaults(
     internalUUID: '',
     inboundId: 0,
     certId: 0,
-    permissionGroupIds: () => [],
     shareSecurity: 'auto',
     shareSni: '',
     shareHost: '',
@@ -116,8 +113,6 @@ const localShareSni = ref('')
 const localShareHost = ref('')
 const localSharePath = ref('')
 const localShareAllowInsecure = ref(false)
-const localPermissionGroupIds = ref<number[]>(props.permissionGroupIds ? [...props.permissionGroupIds] : [])
-const permissionGroups = ref<PermissionGroup[]>([])
 
 // Phase T 入站三态与证书
 const localInboundType = ref(props.inboundType || 'user')
@@ -402,7 +397,6 @@ function syncFormToJson() {
     shareHost: localShareHost.value,
     sharePath: localSharePath.value,
     shareAllowInsecure: localShareAllowInsecure.value,
-    permissionGroupIds: localPermissionGroupIds.value,
   })
   isInternalUpdating.value = false
 }
@@ -442,7 +436,6 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
     if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
     if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
-    if (Array.isArray(parsed.permission_group_ids)) localPermissionGroupIds.value = parsed.permission_group_ids
 
     if (Array.isArray(s.fallbacks)) {
       fallbacks.value = s.fallbacks.map((f) => ({
@@ -532,7 +525,6 @@ watch(
     localShareHost,
     localSharePath,
     localShareAllowInsecure,
-    localPermissionGroupIds,
     fallbacks,
     xhttpForm,
     tcpForm,
@@ -563,19 +555,11 @@ async function loadCerts() {
   } catch { /* ignore */ }
 }
 
-async function loadPermissionGroups() {
-  try {
-    const { data } = await getPermissionGroups()
-    if (data.code === 0) permissionGroups.value = data.data.items
-  } catch { /* ignore */ }
-}
-
 onMounted(() => {
   if (!realityForm.private_key && localTlsType.value === 'reality') {
     genShortId()
   }
   loadCerts()
-  loadPermissionGroups()
 })
 
 watch(
@@ -589,10 +573,6 @@ watch(
 watch(
   () => props.certId,
   (v) => { if (v) localCertId.value = v },
-)
-watch(
-  () => props.permissionGroupIds,
-  (v) => { if (v) localPermissionGroupIds.value = [...v] },
 )
 watch(
   () => props.listen,
@@ -691,33 +671,6 @@ async function copyText(text: string, label: string) {
                   </el-tooltip>
                 </template>
                 <el-input v-model="localListen" placeholder="默认 0.0.0.0（本地反代填 127.0.0.1）" />
-              </el-form-item>
-
-              <el-form-item v-if="localInboundType === 'user'">
-                <template #label>
-                  <span>开放权限组</span>
-                  <el-tooltip content="多选指定允许连接与订阅该入站的权限组。未设置权限组时默认处于隔离保护状态，不对任何用户开放。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
-                <el-select
-                  v-model="localPermissionGroupIds"
-                  multiple
-                  placeholder="请选择开放权限组（未分配则不对任何人开放）"
-                  style="width: 100%"
-                  collapse-tags
-                  collapse-tags-tooltip
-                >
-                  <el-option
-                    v-for="g in permissionGroups"
-                    :key="g.id"
-                    :label="g.name"
-                    :value="g.id"
-                  >
-                    <span>{{ g.name }}</span>
-                    <span v-if="g.remark" class="opt-remark">({{ g.remark }})</span>
-                  </el-option>
-                </el-select>
               </el-form-item>
 
               <el-form-item>

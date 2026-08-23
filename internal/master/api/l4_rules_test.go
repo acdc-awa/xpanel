@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/master/xray"
 	"github.com/acdc/xray-panel/internal/models"
 )
@@ -27,6 +26,7 @@ func setupTestDBForL4(t *testing.T) *gorm.DB {
 	return db
 }
 
+// L4 纯转发管道 + AP 单点授权全链路：规则 CRUD / 拓扑聚合 / 订阅只从接入点生成。
 func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := setupTestDBForL4(t)
@@ -65,16 +65,14 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 		StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"serverName":"www.apple.com","publicKey":"pQDGvDURYEv8nxAVW9xsbBsQjOXzX0rCh5OWDW5q8kg","shortId":"e69c1c"}}`,
 	}
 	require.NoError(t, db.Create(&inb).Error)
-	require.NoError(t, services.SyncInboundPermissionGroups(db, inb.ID, []uint64{stdGroup.ID, vipGroup.ID}))
 
-	// 4. POST 创建 L4 规则 (仅 VIP 可见)
+	// 4. POST 创建 L4 规则（纯管道，不再携带权限组）
 	createBody := map[string]any{
-		"listen_port":          30001,
-		"target_server_id":     hkSrv.ID,
-		"target_inbound_id":    inb.ID,
-		"remark":               "广州移动 10G",
-		"enabled":              true,
-		"permission_group_ids": []uint64{vipGroup.ID},
+		"listen_port":       30001,
+		"target_server_id":  hkSrv.ID,
+		"target_inbound_id": inb.ID,
+		"remark":            "广州移动 10G",
+		"enabled":           true,
 	}
 	bodyBytes, _ := json.Marshal(createBody)
 	req := httptest.NewRequest("POST", "/api/v1/admin/servers/2/l4-rules", bytes.NewReader(bodyBytes))
@@ -101,7 +99,7 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 
-	// 6. GET /admin/topology
+	// 6. GET /admin/topology：l4_rules 聚合存在
 	req = httptest.NewRequest("GET", "/api/v1/admin/topology", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -110,9 +108,8 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 		Code int `json:"code"`
 		Data struct {
 			L4Rules []struct {
-				ID         uint64   `json:"id"`
-				ListenPort int      `json:"listen_port"`
-				PermGroups []uint64 `json:"permission_group_ids"`
+				ID         uint64 `json:"id"`
+				ListenPort int    `json:"listen_port"`
 			} `json:"l4_rules"`
 		} `json:"data"`
 	}
@@ -120,9 +117,18 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	assert.Equal(t, 0, topoResp.Code)
 	require.Len(t, topoResp.Data.L4Rules, 1)
 	assert.Equal(t, ruleID, topoResp.Data.L4Rules[0].ID)
-	assert.Equal(t, []uint64{vipGroup.ID}, topoResp.Data.L4Rules[0].PermGroups)
 
-	// 7. 验证普通用户 (标准组) 订阅 -> 只有直连节点，不派生 VIP L4 中转节点
+	// 7. 建立用户接入点：直连（双组可见）+ L4 中转（仅 VIP 可见）
+	u64 := func(v uint64) *uint64 { return &v }
+	apDirect := models.UserAccessPoint{Name: "香港直连", Enabled: true, TargetType: "inbound", TargetInboundID: u64(inb.ID)}
+	require.NoError(t, db.Create(&apDirect).Error)
+	apL4 := models.UserAccessPoint{Name: "香港·广州中转", Enabled: true, TargetType: "l4_rule", TargetL4RuleID: u64(ruleID)}
+	require.NoError(t, db.Create(&apL4).Error)
+	require.NoError(t, db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: stdGroup.ID, AccessPointID: apDirect.ID}).Error)
+	require.NoError(t, db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: vipGroup.ID, AccessPointID: apDirect.ID}).Error)
+	require.NoError(t, db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: vipGroup.ID, AccessPointID: apL4.ID}).Error)
+
+	// 8. 普通用户 (标准组) 订阅 -> 只有直连接入点，无 VIP 中转接入点；裸入站不再生成
 	stdUser := models.User{
 		Username:          "stduser",
 		Email:             "stduser@test.com",
@@ -140,9 +146,12 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	decStd, _ := base64.StdEncoding.DecodeString(w.Body.String())
 	stdSubBody := string(decStd)
 	assert.Contains(t, stdSubBody, "hk.node.com:443")
-	assert.NotContains(t, stdSubBody, "gz.relay.com:30001") // 严格白名单过滤
+	assert.NotContains(t, stdSubBody, "gz.relay.com:30001") // AP 白名单严格过滤
+	stdUnescaped, _ := url.QueryUnescape(stdSubBody)
+	assert.Contains(t, stdUnescaped, "香港直连")
+	assert.NotContains(t, stdUnescaped, "hk-reality") // 不再以入站 tag 派生裸节点
 
-	// 8. 验证 VIP 用户订阅 -> 同时拥有直连节点和 L4 中转派生节点
+	// 9. VIP 用户订阅 -> 同时拥有直连接入点与 L4 中转接入点
 	vipUser := models.User{
 		Username:          "vipuser",
 		Email:             "vipuser@test.com",
@@ -160,9 +169,9 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	decVIP, _ := base64.StdEncoding.DecodeString(w.Body.String())
 	vipSubBody := string(decVIP)
 	assert.Contains(t, vipSubBody, "hk.node.com:443")
-	assert.Contains(t, vipSubBody, "gz.relay.com:30001") // VIP 成功获取 L4 派生节点
+	assert.Contains(t, vipSubBody, "gz.relay.com:30001") // VIP 成功获取 L4 中转接入点（host/port 覆写为中转机）
 	unescaped, _ := url.QueryUnescape(vipSubBody)
-	assert.True(t, strings.Contains(unescaped, "广州中转") && strings.Contains(unescaped, "广州移动 10G"))
+	assert.True(t, strings.Contains(unescaped, "香港直连") && strings.Contains(unescaped, "香港·广州中转"))
 }
 
 func TestXrayGenerate_SafeSkip_UnlinkedOutbound(t *testing.T) {

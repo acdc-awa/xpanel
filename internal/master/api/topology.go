@@ -84,8 +84,6 @@ func (d *Deps) AdminRotateInternal(c *gin.Context) {
 
 type permissionGroupView struct {
 	models.PermissionGroup
-	InboundCount     int      `json:"inbound_count"`
-	InboundTags      []string `json:"inbound_tags"`
 	AccessPointCount int      `json:"access_point_count"`
 	AccessPointNames []string `json:"access_point_names"`
 }
@@ -96,23 +94,6 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 	if err := d.DB.Order("id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
-	}
-	var links []models.PermissionGroupInbound
-	_ = d.DB.Find(&links)
-	groupInboundMap := make(map[uint64][]uint64)
-	allInboundIDs := make([]uint64, 0, len(links))
-	for _, l := range links {
-		groupInboundMap[l.PermissionGroupID] = append(groupInboundMap[l.PermissionGroupID], l.InboundID)
-		allInboundIDs = append(allInboundIDs, l.InboundID)
-	}
-
-	var inbounds []models.Inbound
-	if len(allInboundIDs) > 0 {
-		_ = d.DB.Select("id, tag").Where("id IN ?", allInboundIDs).Find(&inbounds)
-	}
-	inboundTagMap := make(map[uint64]string, len(inbounds))
-	for _, inb := range inbounds {
-		inboundTagMap[inb.ID] = inb.Tag
 	}
 
 	var apLinks []models.PermissionGroupAccessPoint
@@ -134,12 +115,6 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 
 	items := make([]permissionGroupView, 0, len(list))
 	for _, g := range list {
-		tags := make([]string, 0)
-		for _, iid := range groupInboundMap[g.ID] {
-			if tag, ok := inboundTagMap[iid]; ok && tag != "" {
-				tags = append(tags, tag)
-			}
-		}
 		apNames := make([]string, 0)
 		for _, apID := range groupAPMap[g.ID] {
 			if name, ok := apNameMap[apID]; ok && name != "" {
@@ -148,8 +123,6 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		}
 		items = append(items, permissionGroupView{
 			PermissionGroup:  g,
-			InboundCount:     len(groupInboundMap[g.ID]),
-			InboundTags:      tags,
 			AccessPointCount: len(groupAPMap[g.ID]),
 			AccessPointNames: apNames,
 		})
@@ -236,41 +209,14 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 		req.Template = g.ClashTemplate
 	}
 
-	// 查询该权限组关联的所有有效入站
-	var links []models.PermissionGroupInbound
-	d.DB.Where("permission_group_id = ?", id).Find(&links)
-	var inbounds []models.Inbound
-	if len(links) > 0 {
-		inbIDs := make([]uint64, 0, len(links))
-		for _, l := range links {
-			inbIDs = append(inbIDs, l.InboundID)
-		}
-		d.DB.Where("id IN ? AND enabled = ? AND type = ?", inbIDs, true, models.InboundTypeUser).Find(&inbounds)
-	}
+	// AP 单点授权：查询该权限组可见的启用接入点，沿管道解析生成节点（与订阅同规则）
+	dtos := d.previewAccessPointNodes(id, "00000000-0000-0000-0000-000000000001")
 
-	// 若该组暂无节点，尝试获取任意可用节点作为样例展示
+	// 若该组暂无节点，尝试获取任意可用接入点作为样例展示
 	isSampleNodes := false
-	if len(inbounds) == 0 {
-		d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Limit(5).Find(&inbounds)
-		isSampleNodes = true
-	}
-
-	mockUser := &models.User{
-		UUID: "00000000-0000-0000-0000-000000000001",
-	}
-
-	dtos := make([]contracts.ProxyNodeDTO, 0, len(inbounds))
-	for i := range inbounds {
-		inb := &inbounds[i]
-		var srv models.Server
-		if err := d.DB.First(&srv, inb.ServerID).Error; err != nil {
-			continue
-		}
-		dto := subscribe.BuildNodeDTO(&srv, inb, mockUser.UUID)
-		if dto == nil {
-			continue
-		}
-		dtos = append(dtos, *dto)
+	if len(dtos) == 0 {
+		dtos = d.previewAccessPointNodes(0, "00000000-0000-0000-0000-000000000001")
+		isSampleNodes = len(dtos) > 0
 	}
 
 	panelHost := c.Request.Host
@@ -310,7 +256,7 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 		return
 	}
 	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("permission_group_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
+		if err := tx.Where("permission_group_id = ?", id).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&models.PermissionGroup{}, id).Error
@@ -321,76 +267,6 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 	}
 	d.TriggerUserChange()
 	util.OK(c, gin.H{"ok": true})
-}
-
-// AdminGroupInbounds GET /api/v1/admin/permission-groups/:id/inbounds —— 组内入站 ID 集合。
-func (d *Deps) AdminGroupInbounds(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法 ID")
-		return
-	}
-	var links []models.PermissionGroupInbound
-	if err := d.DB.Where("permission_group_id = ?", id).Find(&links).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	ids := make([]uint64, 0, len(links))
-	for _, l := range links {
-		ids = append(ids, l.InboundID)
-	}
-	util.OK(c, gin.H{"inbound_ids": ids})
-}
-
-// AdminSetGroupInbounds POST /api/v1/admin/permission-groups/:id/inbounds
-// body: {"inbound_ids": [1,2]} —— 全量替换（仅允许 type=user 入站）。
-func (d *Deps) AdminSetGroupInbounds(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "非法 ID")
-		return
-	}
-	var g models.PermissionGroup
-	if err := d.DB.First(&g, id).Error; err != nil {
-		util.Fail(c, 404, "权限组不存在")
-		return
-	}
-	var req struct {
-		InboundIDs []uint64 `json:"inbound_ids"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
-		return
-	}
-	// 校验只包含 type=user 入站（relay 不进用户授权体系）
-	if len(req.InboundIDs) > 0 {
-		var cnt int64
-		d.DB.Model(&models.Inbound{}).
-			Where("id IN ? AND type != ?", req.InboundIDs, models.InboundTypeUser).Count(&cnt)
-		if cnt > 0 {
-			util.BadRequest(c, "权限组只能包含 type=user 入站")
-			return
-		}
-	}
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("permission_group_id = ?", id).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
-			return err
-		}
-		if len(req.InboundIDs) == 0 {
-			return nil
-		}
-		rows := make([]models.PermissionGroupInbound, 0, len(req.InboundIDs))
-		for _, iid := range req.InboundIDs {
-			rows = append(rows, models.PermissionGroupInbound{PermissionGroupID: id, InboundID: iid})
-		}
-		return tx.Create(&rows).Error
-	})
-	if err != nil {
-		util.ServerError(c, "保存失败")
-		return
-	}
-	d.TriggerUserChange()
-	util.OK(c, gin.H{"group_id": id, "count": len(req.InboundIDs)})
 }
 
 // ---- 拓扑画布（T8）：一次拉全量 ----
@@ -408,11 +284,11 @@ type topoOutbound struct {
 
 // topoRule 画布路由规则轻量视图。
 type topoRule struct {
-	ID         uint64 `json:"id"`
-	ServerID   uint64 `json:"server_id"`
-	InboundTag string `json:"inbound_tag"`
+	ID          uint64 `json:"id"`
+	ServerID    uint64 `json:"server_id"`
+	InboundTag  string `json:"inbound_tag"`
 	OutboundTag string `json:"outbound_tag"`
-	Enabled    bool   `json:"enabled"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // AdminTopology GET /api/v1/admin/topology —— 可视化画布数据源（服务器盒子 + 入站/出站项 + 引用/规则线）。
@@ -440,14 +316,9 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	inboundIDs := make([]uint64, 0, len(inbounds))
-	for i := range inbounds {
-		inboundIDs = append(inboundIDs, inbounds[i].ID)
-	}
-	groupMap := services.BatchInboundPermissionGroupIDs(d.DB, inboundIDs)
 	inbViews := make([]inboundView, 0, len(inbounds))
 	for i := range inbounds {
-		inbViews = append(inbViews, toInboundView(&inbounds[i], srvName[inbounds[i].ServerID], groupMap[inbounds[i].ID]))
+		inbViews = append(inbViews, toInboundView(&inbounds[i], srvName[inbounds[i].ServerID]))
 	}
 
 	// 出站（轻量）
@@ -481,57 +352,24 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
-	// 附加接入点（轻量 + 开放权限组）
-	var endpoints []models.InboundEndpoint
-	if err := d.DB.Order("inbound_id ASC, priority ASC, id ASC").Find(&endpoints).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	epIDs := make([]uint64, 0, len(endpoints))
-	for i := range endpoints {
-		epIDs = append(epIDs, endpoints[i].ID)
-	}
-	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
-	epViews := make([]InboundEndpointView, 0, len(endpoints))
-	for i := range endpoints {
-		gids := epGroupMap[endpoints[i].ID]
-		if gids == nil {
-			gids = []uint64{}
-		}
-		epViews = append(epViews, InboundEndpointView{
-			InboundEndpoint:    endpoints[i],
-			PermissionGroupIDs: gids,
-		})
-	}
-
-	// L4 端口转发规则（轻量 + 开放权限组）
+	// L4 端口转发规则（轻量）
 	var l4Rules []models.L4PortRule
 	if err := d.DB.Order("server_id ASC, listen_port ASC, id ASC").Find(&l4Rules).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	l4RuleIDs := make([]uint64, 0, len(l4Rules))
-	for i := range l4Rules {
-		l4RuleIDs = append(l4RuleIDs, l4Rules[i].ID)
-	}
-	l4GroupMap := services.BatchL4RulePermissionGroupIDs(d.DB, l4RuleIDs)
 	l4Views := make([]l4RuleView, 0, len(l4Rules))
 	for i := range l4Rules {
-		gids := l4GroupMap[l4Rules[i].ID]
-		if gids == nil {
-			gids = []uint64{}
-		}
 		l4Views = append(l4Views, l4RuleView{
-			ID:                 l4Rules[i].ID,
-			ServerID:           l4Rules[i].ServerID,
-			ListenPort:         l4Rules[i].ListenPort,
-			TargetServerID:     l4Rules[i].TargetServerID,
-			TargetInboundID:    l4Rules[i].TargetInboundID,
-			Remark:             l4Rules[i].Remark,
-			Enabled:            l4Rules[i].Enabled,
-			PermissionGroupIDs: gids,
-			CreatedAt:          l4Rules[i].CreatedAt,
-			UpdatedAt:          l4Rules[i].UpdatedAt,
+			ID:              l4Rules[i].ID,
+			ServerID:        l4Rules[i].ServerID,
+			ListenPort:      l4Rules[i].ListenPort,
+			TargetServerID:  l4Rules[i].TargetServerID,
+			TargetInboundID: l4Rules[i].TargetInboundID,
+			Remark:          l4Rules[i].Remark,
+			Enabled:         l4Rules[i].Enabled,
+			CreatedAt:       l4Rules[i].CreatedAt,
+			UpdatedAt:       l4Rules[i].UpdatedAt,
 		})
 	}
 
@@ -555,13 +393,12 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 	}
 
 	util.OK(c, gin.H{
-		"servers":           srvViews,
-		"inbounds":          inbViews,
-		"inbound_endpoints": epViews,
-		"l4_rules":          l4Views,
-		"access_points":     apViews,
-		"outbounds":         outViews,
-		"routing_rules":     ruleViews,
+		"servers":       srvViews,
+		"inbounds":      inbViews,
+		"l4_rules":      l4Views,
+		"access_points": apViews,
+		"outbounds":     outViews,
+		"routing_rules": ruleViews,
 	})
 }
 
@@ -631,4 +468,112 @@ func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
 		}
 	}
 	util.OK(c, nil)
+}
+
+// previewAccessPointNodes 按权限组可见的启用接入点生成预览节点（groupID = 0 时取全部启用接入点作样例）。
+// 管道解析与订阅同源：直连入站继承节点地址/端口；L4 中转覆写为中转机 host 与监听端口；AP 自定义覆写优先。
+func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contracts.ProxyNodeDTO {
+	var aps []models.UserAccessPoint
+	_ = d.DB.Where("enabled = ?", true).Order("id ASC").Find(&aps).Error
+	if len(aps) == 0 {
+		return nil
+	}
+	apIDs := make([]uint64, 0, len(aps))
+	for _, ap := range aps {
+		apIDs = append(apIDs, ap.ID)
+	}
+	apGroupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, apIDs)
+
+	var servers []models.Server
+	_ = d.DB.Find(&servers).Error
+	srvMap := make(map[uint64]models.Server, len(servers))
+	for _, s := range servers {
+		srvMap[s.ID] = s
+	}
+	var inbs []models.Inbound
+	_ = d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbs).Error
+	inbs = services.FilterAvailableInbounds(inbs)
+	inbMap := make(map[uint64]models.Inbound, len(inbs))
+	for _, inb := range inbs {
+		inbMap[inb.ID] = inb
+	}
+	var rules []models.L4PortRule
+	_ = d.DB.Where("enabled = ?", true).Find(&rules).Error
+	l4Map := make(map[uint64]models.L4PortRule, len(rules))
+	for _, r := range rules {
+		l4Map[r.ID] = r
+	}
+
+	dtos := make([]contracts.ProxyNodeDTO, 0, len(aps))
+	for _, ap := range aps {
+		if groupID > 0 {
+			matched := false
+			for _, gid := range apGroupMap[ap.ID] {
+				if gid == groupID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		var dto *contracts.ProxyNodeDTO
+		if ap.TargetType == "inbound" && ap.TargetInboundID != nil {
+			targetInb, ok := inbMap[*ap.TargetInboundID]
+			if !ok {
+				continue
+			}
+			targetSrv, ok := srvMap[targetInb.ServerID]
+			if !ok {
+				continue
+			}
+			dto = subscribe.BuildNodeDTO(&targetSrv, &targetInb, mockUUID)
+			if dto != nil {
+				if ap.CustomHost != "" {
+					dto.ServerHost = ap.CustomHost
+				}
+				if ap.CustomPort > 0 {
+					dto.ServerPort = ap.CustomPort
+				}
+			}
+		} else if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil {
+			l4Rule, ok := l4Map[*ap.TargetL4RuleID]
+			if !ok {
+				continue
+			}
+			l4Srv, ok := srvMap[l4Rule.ServerID]
+			if !ok {
+				continue
+			}
+			targetInb, ok := inbMap[l4Rule.TargetInboundID]
+			if !ok {
+				continue
+			}
+			targetSrv, ok := srvMap[targetInb.ServerID]
+			if !ok {
+				continue
+			}
+			dto = subscribe.BuildNodeDTO(&targetSrv, &targetInb, mockUUID)
+			if dto != nil {
+				if ap.CustomHost != "" {
+					dto.ServerHost = ap.CustomHost
+				} else {
+					dto.ServerHost = l4Srv.Host
+				}
+				if ap.CustomPort > 0 {
+					dto.ServerPort = ap.CustomPort
+				} else {
+					dto.ServerPort = l4Rule.ListenPort
+				}
+			}
+		}
+		if dto == nil {
+			continue
+		}
+		dto.Name = ap.Name
+		dtos = append(dtos, *dto)
+	}
+	return dtos
 }

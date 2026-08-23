@@ -5,38 +5,35 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // l4RuleView L4 规则对外视图结构。
+// 纯传输管道定义，不含权限语义——访问控制由用户接入点（UserAccessPoint）白名单单点收口。
 type l4RuleView struct {
-	ID                 uint64    `json:"id"`
-	ServerID           uint64    `json:"server_id"`
-	ListenPort         int       `json:"listen_port"`
-	TargetServerID     uint64    `json:"target_server_id"`
-	TargetServerName   string    `json:"target_server_name,omitempty"`
-	TargetInboundID    uint64    `json:"target_inbound_id"`
-	TargetInboundTag   string    `json:"target_inbound_tag,omitempty"`
-	TargetInboundPort  int       `json:"target_inbound_port,omitempty"`
-	Remark             string    `json:"remark"`
-	Enabled            bool      `json:"enabled"`
-	PermissionGroupIDs []uint64  `json:"permission_group_ids"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                uint64    `json:"id"`
+	ServerID          uint64    `json:"server_id"`
+	ListenPort        int       `json:"listen_port"`
+	TargetServerID    uint64    `json:"target_server_id"`
+	TargetServerName  string    `json:"target_server_name,omitempty"`
+	TargetInboundID   uint64    `json:"target_inbound_id"`
+	TargetInboundTag  string    `json:"target_inbound_tag,omitempty"`
+	TargetInboundPort int       `json:"target_inbound_port,omitempty"`
+	Remark            string    `json:"remark"`
+	Enabled           bool      `json:"enabled"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // l4RuleForm L4 规则创建/更新表单。
 type l4RuleForm struct {
-	ListenPort         int      `json:"listen_port" binding:"required,min=1,max=65535"`
-	TargetServerID     uint64   `json:"target_server_id" binding:"required"`
-	TargetInboundID    uint64   `json:"target_inbound_id" binding:"required"`
-	Remark             string   `json:"remark"`
-	Enabled            *bool    `json:"enabled"`
-	PermissionGroupIDs []uint64 `json:"permission_group_ids"`
+	ListenPort      int    `json:"listen_port" binding:"required,min=1,max=65535"`
+	TargetServerID  uint64 `json:"target_server_id" binding:"required"`
+	TargetInboundID uint64 `json:"target_inbound_id" binding:"required"`
+	Remark          string `json:"remark"`
+	Enabled         *bool  `json:"enabled"`
 }
 
 // AdminGetL4Rules GET /api/v1/admin/servers/:id/l4-rules
@@ -59,16 +56,12 @@ func (d *Deps) AdminGetL4Rules(c *gin.Context) {
 		return
 	}
 
-	ruleIDs := make([]uint64, 0, len(rules))
 	targetSrvIDs := make([]uint64, 0, len(rules))
 	targetInbIDs := make([]uint64, 0, len(rules))
 	for _, r := range rules {
-		ruleIDs = append(ruleIDs, r.ID)
 		targetSrvIDs = append(targetSrvIDs, r.TargetServerID)
 		targetInbIDs = append(targetInbIDs, r.TargetInboundID)
 	}
-
-	permMap := services.BatchL4RulePermissionGroupIDs(d.DB, ruleIDs)
 
 	srvMap := make(map[uint64]models.Server)
 	if len(targetSrvIDs) > 0 {
@@ -91,16 +84,15 @@ func (d *Deps) AdminGetL4Rules(c *gin.Context) {
 	views := make([]l4RuleView, 0, len(rules))
 	for _, r := range rules {
 		v := l4RuleView{
-			ID:                 r.ID,
-			ServerID:           r.ServerID,
-			ListenPort:         r.ListenPort,
-			TargetServerID:     r.TargetServerID,
-			TargetInboundID:    r.TargetInboundID,
-			Remark:             r.Remark,
-			Enabled:            r.Enabled,
-			PermissionGroupIDs: permMap[r.ID],
-			CreatedAt:          r.CreatedAt,
-			UpdatedAt:          r.UpdatedAt,
+			ID:              r.ID,
+			ServerID:        r.ServerID,
+			ListenPort:      r.ListenPort,
+			TargetServerID:  r.TargetServerID,
+			TargetInboundID: r.TargetInboundID,
+			Remark:          r.Remark,
+			Enabled:         r.Enabled,
+			CreatedAt:       r.CreatedAt,
+			UpdatedAt:       r.UpdatedAt,
 		}
 		if ts, ok := srvMap[r.TargetServerID]; ok {
 			v.TargetServerName = ts.Name
@@ -108,9 +100,6 @@ func (d *Deps) AdminGetL4Rules(c *gin.Context) {
 		if ti, ok := inbMap[r.TargetInboundID]; ok {
 			v.TargetInboundTag = ti.Tag
 			v.TargetInboundPort = ti.Port
-		}
-		if v.PermissionGroupIDs == nil {
-			v.PermissionGroupIDs = []uint64{}
 		}
 		views = append(views, v)
 	}
@@ -171,26 +160,20 @@ func (d *Deps) AdminCreateL4Rule(c *gin.Context) {
 		Enabled:         enabled,
 	}
 
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&rule).Error; err != nil {
-			return err
-		}
-		return services.SyncL4RulePermissionGroups(tx, rule.ID, f.PermissionGroupIDs)
-	})
-	if err != nil {
+	if err := d.DB.Create(&rule).Error; err != nil {
 		util.ServerError(c, "创建 L4 规则失败: "+err.Error())
 		return
 	}
+	d.TriggerUserChange()
 
 	util.OK(c, gin.H{
-		"id":                   rule.ID,
-		"server_id":            rule.ServerID,
-		"listen_port":          rule.ListenPort,
-		"target_server_id":     rule.TargetServerID,
-		"target_inbound_id":    rule.TargetInboundID,
-		"remark":               rule.Remark,
-		"enabled":              rule.Enabled,
-		"permission_group_ids": f.PermissionGroupIDs,
+		"id":                rule.ID,
+		"server_id":         rule.ServerID,
+		"listen_port":       rule.ListenPort,
+		"target_server_id":  rule.TargetServerID,
+		"target_inbound_id": rule.TargetInboundID,
+		"remark":            rule.Remark,
+		"enabled":           rule.Enabled,
 	})
 }
 
@@ -246,30 +229,20 @@ func (d *Deps) AdminUpdateL4Rule(c *gin.Context) {
 		rule.Enabled = *f.Enabled
 	}
 
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&rule).Error; err != nil {
-			return err
-		}
-		if f.PermissionGroupIDs != nil {
-			return services.SyncL4RulePermissionGroups(tx, rule.ID, f.PermissionGroupIDs)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := d.DB.Save(&rule).Error; err != nil {
 		util.ServerError(c, "更新 L4 规则失败: "+err.Error())
 		return
 	}
+	d.TriggerUserChange()
 
-	permIDs := services.L4RulePermissionGroupIDs(d.DB, rule.ID)
 	util.OK(c, gin.H{
-		"id":                   rule.ID,
-		"server_id":            rule.ServerID,
-		"listen_port":          rule.ListenPort,
-		"target_server_id":     rule.TargetServerID,
-		"target_inbound_id":    rule.TargetInboundID,
-		"remark":               rule.Remark,
-		"enabled":              rule.Enabled,
-		"permission_group_ids": permIDs,
+		"id":                rule.ID,
+		"server_id":         rule.ServerID,
+		"listen_port":       rule.ListenPort,
+		"target_server_id":  rule.TargetServerID,
+		"target_inbound_id": rule.TargetInboundID,
+		"remark":            rule.Remark,
+		"enabled":           rule.Enabled,
 	})
 }
 
@@ -292,16 +265,19 @@ func (d *Deps) AdminDeleteL4Rule(c *gin.Context) {
 		return
 	}
 
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("l4_rule_id = ?", ruleID).Delete(&models.PermissionGroupL4Rule{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&rule).Error
-	})
-	if err != nil {
+	// 接入点引用保护：被用户接入点连线的 L4 规则禁止删除（订阅管道断裂）
+	var apCnt int64
+	d.DB.Model(&models.UserAccessPoint{}).Where("target_type = 'l4_rule' AND target_l4_rule_id = ?", ruleID).Count(&apCnt)
+	if apCnt > 0 {
+		util.BadRequest(c, "该转发规则被 "+strconv.FormatInt(apCnt, 10)+" 个用户接入点引用，无法删除，请先解除接入点连线")
+		return
+	}
+
+	if err := d.DB.Delete(&rule).Error; err != nil {
 		util.ServerError(c, "删除 L4 规则失败: "+err.Error())
 		return
 	}
+	d.TriggerUserChange()
 
 	util.OK(c, gin.H{"deleted": true})
 }

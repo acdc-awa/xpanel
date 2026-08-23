@@ -357,16 +357,6 @@ async function copyPreview() {
                   🌐 {{ name }}
                 </span>
               </template>
-              <template v-else-if="row.inbound_tags && row.inbound_tags.length">
-                <span
-                  v-for="tag in row.inbound_tags"
-                  :key="tag"
-                  class="x-chip purple"
-                  style="margin-right: 4px; margin-bottom: 2px"
-                >
-                  {{ tag }}
-                </span>
-              </template>
               <span v-else class="muted" style="font-size: 12px">暂无接入点（在「路由管理 - 拓扑画布」中配置接入点并绑定该组）</span>
             </template>
           </el-table-column>
@@ -434,17 +424,6 @@ async function copyPreview() {
                       style="margin-right: 4px; margin-bottom: 2px"
                     >
                       🌐 {{ name }}
-                    </el-tag>
-                  </template>
-                  <template v-else-if="row.inbound_tags && row.inbound_tags.length">
-                    <el-tag
-                      v-for="tag in row.inbound_tags"
-                      :key="tag"
-                      size="small"
-                      effect="plain"
-                      style="margin-right: 4px; margin-bottom: 2px"
-                    >
-                      {{ tag }}
                     </el-tag>
                   </template>
                   <span v-else class="muted font-12">暂无接入点</span>

@@ -8,13 +8,11 @@ import {
   createInbound,
   deleteInbound,
   getInbounds,
-  getPermissionGroups,
   getServers,
   toggleInbound,
   updateInbound,
   type InboundItem,
   type InboundPayload,
-  type PermissionGroup,
   type ServerItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -24,7 +22,6 @@ const router = useRouter()
 
 const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
-const groups = ref<PermissionGroup[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
 
@@ -34,23 +31,10 @@ function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
 }
 
-function groupName(id: number) {
-  return groups.value.find((g) => g.id === id)?.name ?? `组#${id}`
-}
-
 async function loadServers() {
   try {
     const { data } = await getServers()
     if (data.code === 0) servers.value = data.data.items
-  } catch {
-    /* 忽略 */
-  }
-}
-
-async function loadGroups() {
-  try {
-    const { data } = await getPermissionGroups()
-    if (data.code === 0) groups.value = data.data.items
   } catch {
     /* 忽略 */
   }
@@ -70,7 +54,7 @@ async function load() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadServers(), loadGroups()])
+  await Promise.all([loadServers()])
   // 从服务器页跳转进入：?server_id=X 预选过滤
   const q = Number(route.query.server_id)
   if (q > 0) serverFilter.value = q
@@ -124,7 +108,6 @@ function editorModelValue(): string {
     share_host: editing.value.share_host,
     share_path: editing.value.share_path,
     share_allow_insecure: editing.value.share_allow_insecure,
-    permission_group_ids: editing.value.permission_group_ids || [],
   })
 }
 
@@ -188,7 +171,6 @@ async function save() {
       share_host: c.shareHost || undefined,
       share_path: c.sharePath || undefined,
       share_allow_insecure: c.shareAllowInsecure,
-      permission_group_ids: c.permissionGroupIds,
     }
 
     if (editing.value) {
@@ -313,26 +295,6 @@ function transportOf(row: any): string {
           <el-table-column label="传输/TLS" width="130">
             <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
           </el-table-column>
-          <el-table-column label="开放权限组" min-width="150">
-            <template #default="{ row }">
-              <template v-if="row.type === 'relay'">
-                <span class="muted" style="font-size: 12px">内部/落地</span>
-              </template>
-              <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
-                <span
-                  v-for="gid in row.permission_group_ids"
-                  :key="gid"
-                  class="x-chip blue"
-                  style="margin-right: 4px; margin-bottom: 2px"
-                >
-                  {{ groupName(gid) }}
-                </span>
-              </template>
-              <span v-else class="x-chip orange" style="font-size: 11px">
-                未分配 (不对外开放)
-              </span>
-            </template>
-          </el-table-column>
           <el-table-column label="状态" width="80">
             <template #default="{ row }">
               <el-switch :model-value="row.enabled" @change="toggle(row)" />
@@ -385,28 +347,6 @@ function transportOf(row: any): string {
                 <span class="item-label">传输与 TLS</span>
                 <div class="item-value cell-mono" style="font-size: 11.5px">{{ transportOf(row) }}</div>
               </div>
-              <div class="grid-item">
-                <span class="item-label">开放权限组</span>
-                <div class="item-value">
-                  <template v-if="row.type === 'relay'">
-                    <span class="muted" style="font-size: 11.5px">内部/落地</span>
-                  </template>
-                  <template v-else-if="row.permission_group_ids && row.permission_group_ids.length">
-                    <el-tag
-                      v-for="gid in row.permission_group_ids"
-                      :key="gid"
-                      size="small"
-                      effect="plain"
-                      style="margin-right: 4px; margin-bottom: 2px"
-                    >
-                      {{ groupName(gid) }}
-                    </el-tag>
-                  </template>
-                  <el-tag v-else size="small" type="warning" effect="plain" style="font-size: 11px">
-                    未分配 (不对外开放)
-                  </el-tag>
-                </div>
-              </div>
             </div>
 
             <div class="card-foot-actions">
@@ -446,7 +386,6 @@ function transportOf(row: any): string {
         :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"
-        :permission-group-ids="editing?.permission_group_ids || []"
         @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"

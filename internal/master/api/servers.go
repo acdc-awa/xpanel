@@ -274,18 +274,43 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		util.BadRequest(c, "该服务器有 "+strconv.FormatInt(refCnt, 10)+" 个出站引用其入站（落地），无法删除，请先解除引用")
 		return
 	}
-	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		var inboundIDs []uint64
-		if err := tx.Model(&models.Inbound{}).Where("server_id = ?", id).Pluck("id", &inboundIDs).Error; err != nil {
-			return err
+
+	// 接入点/转发管道引用保护（AP 单点授权：删除会使订阅管道断裂）
+	var inboundIDs []uint64
+	d.DB.Model(&models.Inbound{}).Where("server_id = ?", id).Pluck("id", &inboundIDs)
+	var l4IDs []uint64
+	d.DB.Model(&models.L4PortRule{}).Where("server_id = ?", id).Pluck("id", &l4IDs)
+	if len(inboundIDs) > 0 {
+		var apDirect int64
+		d.DB.Model(&models.UserAccessPoint{}).Where("target_type = 'inbound' AND target_inbound_id IN ?", inboundIDs).Count(&apDirect)
+		if apDirect > 0 {
+			util.BadRequest(c, "该服务器入站被 "+strconv.FormatInt(apDirect, 10)+" 个用户接入点直连引用，无法删除，请先解除接入点连线")
+			return
 		}
+		var l4Ref int64
+		d.DB.Model(&models.L4PortRule{}).Where("target_inbound_id IN ?", inboundIDs).Count(&l4Ref)
+		if l4Ref > 0 {
+			util.BadRequest(c, "该服务器入站被 "+strconv.FormatInt(l4Ref, 10)+" 条 L4 端口转发规则指向，无法删除，请先删除对应转发规则")
+			return
+		}
+	}
+	if len(l4IDs) > 0 {
+		var apL4 int64
+		d.DB.Model(&models.UserAccessPoint{}).Where("target_type = 'l4_rule' AND target_l4_rule_id IN ?", l4IDs).Count(&apL4)
+		if apL4 > 0 {
+			util.BadRequest(c, "该服务器的 L4 转发规则被 "+strconv.FormatInt(apL4, 10)+" 个用户接入点引用，无法删除，请先解除接入点连线")
+			return
+		}
+	}
+
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		if len(inboundIDs) > 0 {
-			if err := tx.Where("inbound_id IN ?", inboundIDs).Delete(&models.PermissionGroupInbound{}).Error; err != nil {
-				return err
-			}
 			if err := tx.Where("server_id = ?", id).Delete(&models.Inbound{}).Error; err != nil {
 				return err
 			}
+		}
+		if err := tx.Where("server_id = ?", id).Delete(&models.L4PortRule{}).Error; err != nil {
+			return err
 		}
 		if err := tx.Where("server_id = ?", id).Delete(&models.ServerOutbound{}).Error; err != nil {
 			return err

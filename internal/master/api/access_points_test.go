@@ -7,20 +7,31 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
+func setupAccessPointTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, models.AutoMigrate(db))
+	return db
+}
+
 func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db := setupEndpointTestDB(t)
+	db := setupAccessPointTestDB(t)
 	deps := &Deps{DB: db}
 	r := gin.New()
 	r.GET("/api/v1/admin/access-points", deps.AdminGetAccessPoints)

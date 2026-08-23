@@ -50,23 +50,10 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 	}
 
-	// 收集用户可用节点（无授权记录则全部 type=user 入站；再按用户生效权限组过滤）
-	var inbounds []models.Inbound
-	if err := d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Order("id ASC").Find(&inbounds).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	// 动态授权：根据用户生效权限组过滤入站（纯净 Xboard 权限组架构）。
-	// 若用户未分配权限组（无套餐且未指定权限组），granted 为空集，inbounds 过滤后为 0，不返回任何节点。
-	granted := services.AuthorizedInboundSet(d.DB, &user)
-	filtered := make([]models.Inbound, 0, len(granted))
-	for _, inb := range inbounds {
-		if granted[inb.ID] {
-			filtered = append(filtered, inb)
-		}
-	}
-	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
-	inbounds = services.FilterAvailableInbounds(filtered)
+	// 访问控制单点化（2026-08-23 收口）：订阅只从「用户接入点（AP）」生成——
+	// AP 权限组白名单命中用户生效组 → 沿管道解析（直连入站 / 经 L4 转发覆写 host/port）→ 产出节点。
+	// 不再为裸入站直接生成订阅节点；无任何可见 AP 即 404。
+
 	// 确定用户生效的权限组 ID
 	var permGroupID uint64
 	if user.PermissionGroupID > 0 {
@@ -78,7 +65,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 	}
 
-	// 1. 查询所有服务器、入站与 L4 规则映射表供快速查找
+	// 1. 服务器 / 可用用户入站 / 启用 L4 规则映射表
 	var allServers []models.Server
 	_ = d.DB.Find(&allServers).Error
 	srvMap := make(map[uint64]models.Server)
@@ -88,6 +75,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 
 	var allInbs []models.Inbound
 	_ = d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&allInbs).Error
+	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
+	allInbs = services.FilterAvailableInbounds(allInbs)
 	inbMap := make(map[uint64]models.Inbound)
 	for _, i := range allInbs {
 		inbMap[i.ID] = i
@@ -100,25 +89,20 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		l4RuleMap[r.ID] = r
 	}
 
+	// 2. 用户接入点（订阅的唯一入口；严格白名单：未绑定权限组 = 全员不可见）
 	dtos := make([]contracts.ProxyNodeDTO, 0)
-
-	// 2. 优先消费「用户接入点 (UserAccessPoint)」模型（面向客户端与订阅的真正入口 + 权限组白名单）
 	var userAPs []models.UserAccessPoint
 	_ = d.DB.Where("enabled = ?", true).Order("id ASC").Find(&userAPs).Error
-	if len(userAPs) > 0 {
+	if len(userAPs) > 0 && permGroupID > 0 {
 		apIDs := make([]uint64, 0, len(userAPs))
 		for _, ap := range userAPs {
 			apIDs = append(apIDs, ap.ID)
 		}
 		apGroupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, apIDs)
 		for _, ap := range userAPs {
-			gids := apGroupMap[ap.ID]
-			// 严格白名单：PermissionGroupIDs 为空默认对全员不可见
-			if len(gids) == 0 || permGroupID == 0 {
-				continue
-			}
+			// 严格白名单：AP 开放组未命中用户生效组 → 不可见
 			matched := false
-			for _, gid := range gids {
+			for _, gid := range apGroupMap[ap.ID] {
 				if gid == permGroupID {
 					matched = true
 					break
@@ -128,7 +112,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 				continue
 			}
 
-			// 情况 A：直连 Xray 物理入站
+			// 情况 A：直连用户入站
 			if ap.TargetType == "inbound" && ap.TargetInboundID != nil {
 				targetInb, ok := inbMap[*ap.TargetInboundID]
 				if !ok {
@@ -149,8 +133,11 @@ func (d *Deps) Subscribe(c *gin.Context) {
 					}
 					dtos = append(dtos, *dto)
 				}
-			} else if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil {
-				// 情况 B：连线到 L4 端口转发中转机
+				continue
+			}
+
+			// 情况 B：经 L4 端口转发中转（host/port 沿管道覆写为中转机监听）
+			if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil {
 				l4Rule, ok := l4RuleMap[*ap.TargetL4RuleID]
 				if !ok {
 					continue
@@ -183,104 +170,6 @@ func (d *Deps) Subscribe(c *gin.Context) {
 					dtos = append(dtos, *dto)
 				}
 			}
-		}
-	}
-
-	// 3. 同时支持 Inbound 附属接入点与直连节点
-	inboundIDs := make([]uint64, 0, len(inbounds))
-	for _, inb := range inbounds {
-		inboundIDs = append(inboundIDs, inb.ID)
-	}
-	var allEndpoints []models.InboundEndpoint
-	if len(inboundIDs) > 0 {
-		_ = d.DB.Where("inbound_id IN ? AND enabled = ?", inboundIDs, true).
-			Order("priority ASC, id ASC").Find(&allEndpoints).Error
-	}
-	epIDs := make([]uint64, 0, len(allEndpoints))
-	for _, ep := range allEndpoints {
-		epIDs = append(epIDs, ep.ID)
-	}
-	epGroupMap := services.BatchEndpointPermissionGroupIDs(d.DB, epIDs)
-	endpointsByInbound := make(map[uint64][]models.InboundEndpoint)
-	for _, ep := range allEndpoints {
-		endpointsByInbound[ep.InboundID] = append(endpointsByInbound[ep.InboundID], ep)
-	}
-
-	l4GroupMap := services.BatchL4RulePermissionGroupIDs(d.DB, func() []uint64 {
-		ids := make([]uint64, 0, len(allL4Rules))
-		for _, r := range allL4Rules {
-			ids = append(ids, r.ID)
-		}
-		return ids
-	}())
-	l4RulesByInbound := make(map[uint64][]models.L4PortRule)
-	for _, r := range allL4Rules {
-		l4RulesByInbound[r.TargetInboundID] = append(l4RulesByInbound[r.TargetInboundID], r)
-	}
-
-	for i := range inbounds {
-		inb := &inbounds[i]
-		srv, ok := srvMap[inb.ServerID]
-		if !ok {
-			continue
-		}
-		dto := subscribe.BuildNodeDTO(&srv, inb, user.UUID)
-		if dto != nil {
-			dtos = append(dtos, *dto)
-		}
-
-		// 附加接入点派生
-		for _, ep := range endpointsByInbound[inb.ID] {
-			gids := epGroupMap[ep.ID]
-			if len(gids) == 0 || permGroupID == 0 {
-				continue
-			}
-			matched := false
-			for _, gid := range gids {
-				if gid == permGroupID {
-					matched = true
-					break
-				}
-			}
-			if !matched || dto == nil {
-				continue
-			}
-			epDTO := *dto
-			epDTO.Name = subscribe.NodeName(&srv, inb) + " | " + ep.Name
-			epDTO.ServerHost = ep.Host
-			epDTO.ServerPort = ep.Port
-			dtos = append(dtos, epDTO)
-		}
-
-		// L4 端口转发派生
-		for _, l4r := range l4RulesByInbound[inb.ID] {
-			gids := l4GroupMap[l4r.ID]
-			if len(gids) == 0 || permGroupID == 0 {
-				continue
-			}
-			matched := false
-			for _, gid := range gids {
-				if gid == permGroupID {
-					matched = true
-					break
-				}
-			}
-			if !matched || dto == nil {
-				continue
-			}
-			l4Srv, ok := srvMap[l4r.ServerID]
-			if !ok {
-				continue
-			}
-			l4DTO := *dto
-			ruleName := l4Srv.Name
-			if l4r.Remark != "" {
-				ruleName += " (" + l4r.Remark + ")"
-			}
-			l4DTO.Name = subscribe.NodeName(&srv, inb) + " | " + ruleName
-			l4DTO.ServerHost = l4Srv.Host
-			l4DTO.ServerPort = l4r.ListenPort
-			dtos = append(dtos, l4DTO)
 		}
 	}
 	if len(dtos) == 0 {

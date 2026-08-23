@@ -23,7 +23,7 @@ func validationTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&models.Server{}, &models.Inbound{}, &models.Plan{},
 		&models.ServerOutbound{}, &models.ServerRoutingRule{},
-		&models.PermissionGroup{}, &models.PermissionGroupInbound{},
+		&models.PermissionGroup{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

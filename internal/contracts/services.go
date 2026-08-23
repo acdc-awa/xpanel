@@ -91,12 +91,13 @@ type AuditService interface {
 type ConfigService interface {
 	Generate(serverID uint64) (string, error)
 	// Preview 按库内拓扑 + 未落库表单入站生成预览配置（form 为 nil 时等价纯库内预览）。
-	Preview(serverID uint64, form *models.Inbound, formGroupIDs []uint64) (string, error)
+	Preview(serverID uint64, form *models.Inbound) (string, error)
 	GetPending(serverID uint64) (*models.PendingConfig, error)
 	GetValidUsers(serverID uint64) (map[string][]protocol.User, error)
 	MarkPushedByServerIfSame(serverID uint64, configJSON string) (bool, error)
 	MarkPushedIfSame(id uint64, configJSON string) (bool, error)
-	PreviewUsers(inb *models.Inbound, groupIDs []uint64) []protocol.User
+	// PreviewUsers 预览用：入站注入用户列表由启用接入点白名单派生（未落库新入站返回空）。
+	PreviewUsers(inb *models.Inbound) []protocol.User
 	SavePending(serverID uint64, configJSON string) error
 }
 
