@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/middleware"
 	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/models"
@@ -14,7 +15,7 @@ import (
 
 // Register POST /api/v1/auth/register
 func (d *Deps) Register(c *gin.Context) {
-	var req services.RegisterReq
+	var req contracts.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
@@ -127,13 +128,13 @@ func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
 	if user.TotpEnabled {
 		access, err = d.JWT.GenerateVerified(user.ID, user.Role, user.TokenVersion)
 	} else {
-		access, err = d.JWT.Generate(user.ID, user.Role, services.TokenAccess, user.TokenVersion)
+		access, err = d.JWT.Generate(user.ID, user.Role, contracts.TokenAccess, user.TokenVersion)
 	}
 	if err != nil {
 		util.ServerError(c, "签发令牌失败")
 		return
 	}
-	refresh, err := d.JWT.Generate(user.ID, user.Role, services.TokenRefresh, user.TokenVersion)
+	refresh, err := d.JWT.Generate(user.ID, user.Role, contracts.TokenRefresh, user.TokenVersion)
 	if err != nil {
 		util.ServerError(c, "签发令牌失败")
 		return
@@ -196,7 +197,7 @@ func (d *Deps) Refresh(c *gin.Context) {
 	// J19-② refresh 轮换：每次刷新签发新 refresh 覆盖 cookie（缩短旧 refresh 复用窗口）
 	var newRefresh string
 	if claims, perr := d.JWT.Parse(refreshToken); perr == nil {
-		newRefresh, _ = d.JWT.Generate(claims.UserID, claims.Role, services.TokenRefresh, claims.Version)
+		newRefresh, _ = d.JWT.Generate(claims.UserID, claims.Role, contracts.TokenRefresh, claims.Version)
 	}
 	d.setAuthCookies(c, access, newRefresh)
 	util.OK(c, gin.H{"ok": true})

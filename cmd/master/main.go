@@ -24,6 +24,7 @@ import (
 	"github.com/acdc/xray-panel/internal/config"
 	"github.com/acdc/xray-panel/internal/master/api"
 	"github.com/acdc/xray-panel/internal/master/backup"
+	"github.com/acdc/xray-panel/internal/master/billing"
 	"github.com/acdc/xray-panel/internal/master/nodegate"
 	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/models"
@@ -80,11 +81,11 @@ func main() {
 	trafficSvc.StartDailyAgg(context.Background())
 	trafficSvc.StartTrafficResetCron(context.Background())
 	trafficSvc.StartRetentionCron(context.Background())
-	orderSvc := &services.OrderService{DB: database}
+	orderSvc := billing.NewOrderService(database)
 	auditSvc := &services.AuditService{DB: database}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc}
 	siteSvc := services.NewSiteService(database, cfg)
-	giftCardSvc := &services.GiftCardService{DB: database}
+	giftCardSvc := billing.NewGiftCardService(database)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
 	backupSvc, err := backup.New(cfg.DB.DSN, cfg.DB.Driver, cfg.Backup, auditSvc)

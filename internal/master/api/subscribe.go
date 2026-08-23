@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/services"
 	"github.com/acdc/xray-panel/internal/master/subscribe"
 	"github.com/acdc/xray-panel/internal/models"
@@ -94,33 +95,54 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	// 按 UA 区分输出；`?format=base64` 强制 Base64（U13：实现原忽略参数）
 	ua := strings.ToLower(c.GetHeader("User-Agent"))
 	forceBase64 := c.Query("format") == "base64"
-	isClash := !forceBase64 && (strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo") ||
-		strings.Contains(ua, "stash") || strings.Contains(ua, "verge"))
 
-	var content string
-	if isClash {
-		var clashTemplate string
-		var permGroupID uint64
-		if user.PermissionGroupID > 0 {
-			permGroupID = user.PermissionGroupID
-		} else if user.PlanID > 0 {
-			var plan models.Plan
-			if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
-				permGroupID = plan.PermissionGroupID
-			}
+	// 权限组自定义 Clash 模板
+	var clashTemplate string
+	var permGroupID uint64
+	if user.PermissionGroupID > 0 {
+		permGroupID = user.PermissionGroupID
+	} else if user.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
+			permGroupID = plan.PermissionGroupID
 		}
-		if permGroupID > 0 {
-			var pg models.PermissionGroup
-			if err := d.DB.First(&pg, permGroupID).Error; err == nil {
-				clashTemplate = pg.ClashTemplate
-			}
+	}
+	if permGroupID > 0 {
+		var pg models.PermissionGroup
+		if err := d.DB.First(&pg, permGroupID).Error; err == nil {
+			clashTemplate = pg.ClashTemplate
 		}
-		panelHost := c.Request.Host
-		if h, _, err := net.SplitHostPort(panelHost); err == nil {
-			panelHost = h
-		}
-		content = subscribe.BuildClashWithTemplate(&user, items, clashTemplate, panelHost)
-		c.Header("Content-Type", "application/yaml; charset=utf-8")
+	}
+	panelHost := c.Request.Host
+	if h, _, err := net.SplitHostPort(panelHost); err == nil {
+		panelHost = h
+	}
+
+	// 通过 exporter 注册表选择并生成订阅内容
+	registry := subscribe.DefaultRegistry()
+	var exporter contracts.SubscriptionExporter
+	if forceBase64 {
+		exporter = registry.Find("base64")
+	} else {
+		exporter = registry.Match(ua)
+	}
+	if exporter == nil {
+		exporter = registry.Find("base64")
+	}
+
+	content, contentType, err := exporter.Export(c.Request.Context(),
+		subscribe.UserToSummaryDTO(&user),
+		subscribe.ProxyItemsToDTOs(items),
+		contracts.ExportOptions{
+			Template:  clashTemplate,
+			PanelHost: panelHost,
+		})
+	if err != nil {
+		util.ServerError(c, "生成订阅失败")
+		return
+	}
+	c.Header("Content-Type", contentType)
+	if strings.Contains(contentType, "yaml") {
 		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 文件名 / 配置文件网页地址
 		c.Header("Profile-Update-Interval", "24")
 		c.Header("Content-Disposition", `attachment; filename="xray.yaml"`)
@@ -129,9 +151,6 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			webPage = scheme + "://" + c.Request.Host
 		}
 		c.Header("Profile-Web-Page-Url", webPage)
-	} else {
-		content = subscribe.BuildBase64(&user, items)
-		c.Header("Content-Type", "text/plain; charset=utf-8")
 	}
 
 	// subscription-userinfo

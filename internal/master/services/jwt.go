@@ -6,16 +6,18 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/acdc/xray-panel/internal/contracts"
 )
 
-// Token 类型
+// Token 类型（保留 services 别名，兼容既有调用）。
 const (
-	TokenAccess  = "access"
-	TokenRefresh = "refresh"
+	TokenAccess  = contracts.TokenAccess
+	TokenRefresh = contracts.TokenRefresh
 )
 
-// Claims JWT 载荷。
-type Claims struct {
+// claims 内部 JWT 载荷（transient），解析后对外统一返回 contracts.JWTClaims。
+type claims struct {
 	UserID  uint64 `json:"uid"`
 	Role    string `json:"role"`
 	Type    string `json:"typ"`  // access | refresh
@@ -61,7 +63,7 @@ func (m *JWTManager) generate(userID uint64, role, typ string, version uint32, t
 		ttl = 2 * time.Minute
 	}
 	now := time.Now()
-	claims := Claims{
+	c := claims{
 		UserID:  userID,
 		Role:    role,
 		Type:    typ,
@@ -74,7 +76,7 @@ func (m *JWTManager) generate(userID uint64, role, typ string, version uint32, t
 			Issuer:    "xray-panel",
 		},
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.secret)
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString(m.secret)
 }
 
 // GeneratePair 同时签发 access + refresh。
@@ -91,9 +93,9 @@ func (m *JWTManager) GeneratePair(userID uint64, role string, version uint32) (a
 }
 
 // Parse 校验并解析 token。
-func (m *JWTManager) Parse(tokenStr string) (*Claims, error) {
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+func (m *JWTManager) Parse(tokenStr string) (*contracts.JWTClaims, error) {
+	raw := &claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, raw, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
@@ -105,5 +107,12 @@ func (m *JWTManager) Parse(tokenStr string) (*Claims, error) {
 	if !token.Valid {
 		return nil, errors.New("invalid token")
 	}
-	return claims, nil
+	return &contracts.JWTClaims{
+		UserID:  raw.UserID,
+		Role:    raw.Role,
+		Type:    raw.Type,
+		Version: raw.Version,
+		TwoFA:   raw.TwoFA,
+		Pending: raw.Pending,
+	}, nil
 }

@@ -5,25 +5,24 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc/xray-panel/internal/config"
-	"github.com/acdc/xray-panel/internal/master/backup"
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/nodegate"
-	"github.com/acdc/xray-panel/internal/master/services"
 )
 
 // Deps 集中注入 handler 依赖。
 type Deps struct {
-	DB      *gorm.DB
-	Cfg     *config.Config
-	JWT     *services.JWTManager
-	Auth    *services.AuthService
-	OTP     *services.OTPService
-	Hub     *nodegate.Hub
-	Traffic *services.TrafficService
-	Order   *services.OrderService
-	Audit   *services.AuditService
-	Config   *services.ConfigService
-	Site     *services.SiteService
-	GiftCard  *services.GiftCardService
-	Backup    *backup.Service
+	DB        *gorm.DB
+	Cfg       *config.Config
+	JWT       contracts.JWTManager
+	Auth      contracts.AuthService
+	OTP       contracts.OTPService
+	Hub       *nodegate.Hub
+	Traffic   contracts.TrafficService
+	Order     contracts.OrderService
+	Audit     contracts.AuditService
+	Config    contracts.ConfigService
+	Site      contracts.SiteService
+	GiftCard  contracts.GiftCardService
+	Backup    contracts.BackupService
 	SubServer *SubscribeServer
 }

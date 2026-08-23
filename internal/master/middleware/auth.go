@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
@@ -16,7 +16,7 @@ const CtxClaimsKey = "claims"
 
 // AuthRequired 解析 Cookie access token、拒绝 2FA pending token，并按 DB 实时校验
 // 用户存在、账号状态、token_version 与角色（ISSUE-03：封禁/改密/角色变更立即吊销旧 access）。
-func AuthRequired(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
+func AuthRequired(jwtMgr contracts.JWTManager, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr, err := c.Cookie("access_token")
 		if err != nil || tokenStr == "" {
@@ -25,7 +25,7 @@ func AuthRequired(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		claims, err := jwtMgr.Parse(tokenStr)
-		if err != nil || claims.Type != services.TokenAccess {
+		if err != nil || claims.Type != contracts.TokenAccess {
 			util.Unauthorized(c, "访问令牌无效或已过期")
 			c.Abort()
 			return
@@ -75,7 +75,7 @@ func AuthRequired(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
 
 // AuthPending2FA 解析并放行 2FA pending access（仅 /auth/2fa/verify 路由使用）。
 // 同样按 DB 校验用户状态与 token_version，防止封禁/改密后的 pending token 换发完整令牌。
-func AuthPending2FA(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
+func AuthPending2FA(jwtMgr contracts.JWTManager, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr, err := c.Cookie("access_token")
 		if err != nil || tokenStr == "" {
@@ -84,7 +84,7 @@ func AuthPending2FA(jwtMgr *services.JWTManager, db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		claims, err := jwtMgr.Parse(tokenStr)
-		if err != nil || claims.Type != services.TokenAccess || !claims.Pending {
+		if err != nil || claims.Type != contracts.TokenAccess || !claims.Pending {
 			util.Unauthorized(c, "请先完成密码登录")
 			c.Abort()
 			return
@@ -128,7 +128,7 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		cl := claims.(*services.Claims)
+		cl := claims.(*contracts.JWTClaims)
 		if !allowed[cl.Role] {
 			util.Forbidden(c, "无权限访问")
 			c.Abort()
@@ -141,15 +141,15 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 // CurrentUser 取当前用户 ID（须在 AuthRequired 之后）。
 func CurrentUser(c *gin.Context) uint64 {
 	if v, ok := c.Get(CtxClaimsKey); ok {
-		return v.(*services.Claims).UserID
+		return v.(*contracts.JWTClaims).UserID
 	}
 	return 0
 }
 
 // CurrentClaims 取当前 JWT claims（须在 AuthRequired 之后；未认证返回 nil）。
-func CurrentClaims(c *gin.Context) *services.Claims {
+func CurrentClaims(c *gin.Context) *contracts.JWTClaims {
 	if v, ok := c.Get(CtxClaimsKey); ok {
-		return v.(*services.Claims)
+		return v.(*contracts.JWTClaims)
 	}
 	return nil
 }
@@ -157,7 +157,7 @@ func CurrentClaims(c *gin.Context) *services.Claims {
 // CurrentRole 取当前角色。
 func CurrentRole(c *gin.Context) string {
 	if v, ok := c.Get(CtxClaimsKey); ok {
-		return v.(*services.Claims).Role
+		return v.(*contracts.JWTClaims).Role
 	}
 	return ""
 }

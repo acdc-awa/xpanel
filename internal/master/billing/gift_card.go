@@ -1,4 +1,4 @@
-package services
+package billing
 
 import (
 	"errors"
@@ -15,6 +15,11 @@ import (
 // GiftCardService 礼品卡与余额账务服务。
 type GiftCardService struct {
 	DB *gorm.DB
+}
+
+// NewGiftCardService 构造礼品卡/余额服务。
+func NewGiftCardService(db *gorm.DB) *GiftCardService {
+	return &GiftCardService{DB: db}
 }
 
 // BatchGenerate 批量生成礼品卡。

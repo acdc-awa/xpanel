@@ -1,4 +1,5 @@
-package services
+// Package billing 承载订单、余额、礼品卡等资金/账务领域逻辑。
+package billing
 
 import (
 	"errors"
@@ -16,6 +17,11 @@ import (
 // 2026-08-14 方向④：人工确认收款（manual 订单）已整体去除，充值=兑换码、购买=余额。
 type OrderService struct {
 	DB *gorm.DB
+}
+
+// NewOrderService 构造订单服务。
+func NewOrderService(db *gorm.DB) *OrderService {
+	return &OrderService{DB: db}
 }
 
 // payIdempotentWindow 余额直付幂等窗口：同用户+同套餐在此窗口内已支付则直接复用订单，防重放双扣款。

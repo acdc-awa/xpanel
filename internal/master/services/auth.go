@@ -10,6 +10,7 @@ import (
 	"github.com/alexedwards/argon2id"
 	"gorm.io/gorm"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
@@ -30,15 +31,8 @@ type AuthService struct {
 	JWT *JWTManager
 }
 
-// RegisterReq 注册请求（2026-08-14 方向①：用户名=邮箱必填 + 邀请码必填；方向②：turnstile_token 人机验证）。
-type RegisterReq struct {
-	Email          string `json:"email" binding:"required,email,max=128"`
-	Password       string `json:"password" binding:"required,min=8,max=72"`
-	InviteCode     string `json:"invite_code" binding:"required"`
-	TurnstileToken string `json:"turnstile_token"`
-}
-
-func (s *AuthService) Register(ctx context.Context, req *RegisterReq) (*models.User, error) {
+// Register 注册用户（请求体使用 contracts.RegisterRequest 纯数据契约）。
+func (s *AuthService) Register(ctx context.Context, req *contracts.RegisterRequest) (*models.User, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	// 站点开关：stop_register=1 关闭注册（设置页「站点」tab，单一入口）
 	if StopRegister(s.DB) {

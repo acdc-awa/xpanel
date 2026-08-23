@@ -94,7 +94,9 @@ func TestBuildProxyItem_CaddyTLSReverseProxy(t *testing.T) {
 
 	// 4. 验证转 DTO
 	dto := item.ToDTO()
-	if dto.ServerHost != "caddy.example.com" || dto.ServerPort != 443 || dto.TLSType != "tls" || dto.SNI != "caddy.example.com" || dto.Path != "/my-vless-xhttp" {
+	if dto.ServerHost != "caddy.example.com" || dto.ServerPort != 443 ||
+		dto.Security == nil || dto.Security.Type != "tls" || dto.Security.SNI != "caddy.example.com" ||
+		dto.Transport == nil || dto.Transport.Path != "/my-vless-xhttp" {
 		t.Errorf("DTO 转换不匹配: %+v", dto)
 	}
 }

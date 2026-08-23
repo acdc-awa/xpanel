@@ -28,9 +28,9 @@ type ProxyItem struct {
 	// NoAutoFlow 禁用 reality+tcp 的自动 vision 兜底（对应入站 Flow = "none"，
 	// 服务端 clients 不注入 flow，订阅必须保持一致否则握手不匹配）。
 	NoAutoFlow bool
-	Reality *xray.RealitySettings
-	TLS     *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
-	XHTTP   *xray.XHTTPSettings
+	Reality    *xray.RealitySettings
+	TLS        *xray.TLSSettings // tls 分支 servername / skip-cert-verify 透传
+	XHTTP      *xray.XHTTPSettings
 }
 
 // BuiltinDefaultClashTemplate 系统内置基础默认模板
@@ -577,30 +577,43 @@ func BuildProxyItem(srv *models.Server, inb *models.Inbound, uuid string) ProxyI
 // ToDTO 将 ProxyItem 转换为标准纯数据契约 ProxyNodeDTO。
 func (it *ProxyItem) ToDTO() contracts.ProxyNodeDTO {
 	dto := contracts.ProxyNodeDTO{
-		Name:          it.Name,
-		ServerHost:    it.Host,
-		ServerPort:    it.Port,
-		Protocol:      "vless",
-		Network:       it.Network,
-		TLSType:       it.TLSType,
-		Flow:          it.Flow,
-		NoAutoFlow:    it.NoAutoFlow,
+		Name:       it.Name,
+		ServerHost: it.Host,
+		ServerPort: it.Port,
+		Protocol:   "vless",
+		Transport: &contracts.TransportOptions{
+			Network: it.Network,
+		},
+		Security: &contracts.SecurityOptions{
+			Type: it.TLSType,
+		},
+		Auth: &contracts.ClientCredentialDTO{
+			UUID: it.UUID,
+			Flow: it.Flow,
+		},
+		Features: []string{},
 	}
 	if it.TLS != nil {
-		dto.SNI = it.TLS.ServerName
-		dto.AllowInsecure = it.TLS.AllowInsecure
+		dto.Security.SNI = it.TLS.ServerName
+		dto.Security.AllowInsecure = it.TLS.AllowInsecure
 	}
 	if it.Reality != nil {
-		dto.SNI = it.Reality.ServerName
-		dto.Reality = &contracts.RealityOptions{
+		dto.Security.SNI = it.Reality.ServerName
+		dto.Security.Reality = &contracts.RealityOptions{
 			PublicKey: it.Reality.PublicKey,
 			ShortID:   it.Reality.ShortID,
 		}
 	}
 	if it.XHTTP != nil {
-		dto.Mode = it.XHTTP.Mode
-		dto.Path = it.XHTTP.Path
-		dto.Host = it.XHTTP.Host
+		dto.Transport.Path = it.XHTTP.Path
+		dto.Transport.Host = it.XHTTP.Host
+		dto.Transport.Mode = it.XHTTP.Mode
+	}
+	if it.Flow != "" {
+		dto.Features = append(dto.Features, it.Flow)
+	}
+	if it.NoAutoFlow {
+		dto.Features = append(dto.Features, "no-auto-flow")
 	}
 	return dto
 }

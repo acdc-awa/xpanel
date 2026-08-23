@@ -1,4 +1,4 @@
-package services
+package billing
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 func TestGiftCard_BatchGenerateAndRedeem(t *testing.T) {
 	db := setupTestDB(t)
-	svc := &GiftCardService{DB: db}
+	svc := NewGiftCardService(db)
 
 	// 1. 创建测试用户
 	user := models.User{
@@ -94,8 +94,8 @@ func TestGiftCard_BatchGenerateAndRedeem(t *testing.T) {
 
 func TestOrder_PayWithBalance(t *testing.T) {
 	db := setupTestDB(t)
-	cardSvc := &GiftCardService{DB: db}
-	orderSvc := &OrderService{DB: db}
+	cardSvc := NewGiftCardService(db)
+	orderSvc := NewOrderService(db)
 
 	// 1. 创建套餐 (2500分 = 25元, 30天)
 	plan := models.Plan{
@@ -190,7 +190,7 @@ func TestOrder_PayWithBalance(t *testing.T) {
 
 func TestGiftCard_AdminAdjustBalance(t *testing.T) {
 	db := setupTestDB(t)
-	svc := &GiftCardService{DB: db}
+	svc := NewGiftCardService(db)
 
 	user := models.User{
 		Username:       "adjuser",

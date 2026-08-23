@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
-	"github.com/acdc/xray-panel/internal/master/services"
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 	"github.com/acdc/xray-panel/internal/pkg/util"
@@ -63,8 +63,8 @@ func (c *Conn) closeSafe() {
 // Hub 节点连接注册表。
 type Hub struct {
 	DB       *gorm.DB
-	Traffic  *services.TrafficService
-	Config   *services.ConfigService
+	Traffic  contracts.TrafficService
+	Config   contracts.ConfigService
 	Upgrader websocket.Upgrader
 	// CertPusher 节点上线后补推待推证书的回调（U7，由 main 注入 api 层实现）。
 	CertPusher func(serverID uint64)
@@ -77,7 +77,7 @@ type Hub struct {
 }
 
 // NewHub 构造网关。
-func NewHub(db *gorm.DB, traffic *services.TrafficService, config *services.ConfigService) *Hub {
+func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.ConfigService) *Hub {
 	h := &Hub{
 		DB:      db,
 		Traffic: traffic,

@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/glebarez/sqlite" // 注册 sqlite driver
 	"github.com/acdc/xray-panel/internal/config"
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/master/services"
 )
 
@@ -24,12 +25,8 @@ var tsRe = regexp.MustCompile(`^panel-(\d{8}-\d{6})\.db$`)
 // 会把 \ 转成 \\ 且 \x22 无法还原，Windows 下依赖文件系统归一化属侥幸）。
 func quoteSQL(p string) string { return "'" + strings.ReplaceAll(p, "'", "''") + "'" }
 
-// BackupInfo 备份文件元信息。
-type BackupInfo struct {
-	File      string    `json:"file"`
-	Size      int64     `json:"size"`
-	CreatedAt time.Time `json:"created_at"`
-}
+// BackupInfo 备份文件元信息（契约类型别名，保持对外包名不变）。
+type BackupInfo = contracts.BackupInfo
 
 // Service 备份服务：快照 / 列表 / 轮转（调度器见 scheduler.go）。
 type Service struct {
