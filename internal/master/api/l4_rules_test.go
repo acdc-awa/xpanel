@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -172,6 +173,51 @@ func TestL4Rules_CRUD_And_Subscribe(t *testing.T) {
 	assert.Contains(t, vipSubBody, "gz.relay.com:30001") // VIP 成功获取 L4 中转接入点（host/port 覆写为中转机）
 	unescaped, _ := url.QueryUnescape(vipSubBody)
 	assert.True(t, strings.Contains(unescaped, "香港直连") && strings.Contains(unescaped, "香港·广州中转"))
+
+	// 15. 缺省规则：target 为空（0）可创建（先保存待连线，后拖线完成映射）
+	draftBody := map[string]any{
+		"listen_port":       30002,
+		"target_server_id":  0,
+		"target_inbound_id": 0,
+		"remark":            "待连线缺省规则",
+		"enabled":           true,
+	}
+	draftBytes, _ := json.Marshal(draftBody)
+	draftReq := httptest.NewRequest("POST", "/api/v1/admin/servers/2/l4-rules", bytes.NewReader(draftBytes))
+	draftReq.Header.Set("Content-Type", "application/json")
+	draftW := httptest.NewRecorder()
+	r.ServeHTTP(draftW, draftReq)
+	assert.Equal(t, 200, draftW.Code)
+	var draftResp struct {
+		Code int `json:"code"`
+		Data struct {
+			ID              uint64 `json:"id"`
+			TargetInboundID uint64 `json:"target_inbound_id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(draftW.Body.Bytes(), &draftResp))
+	assert.Equal(t, 0, draftResp.Code)
+	assert.Equal(t, uint64(0), draftResp.Data.TargetInboundID)
+
+	// 16. PUT 连线：更新缺省规则目标完成映射
+	linkBody := map[string]any{
+		"listen_port":       30002,
+		"target_server_id":  hkSrv.ID,
+		"target_inbound_id": inb.ID,
+		"remark":            "待连线缺省规则",
+		"enabled":           true,
+	}
+	linkBytes, _ := json.Marshal(linkBody)
+	linkReq := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/servers/2/l4-rules/%d", draftResp.Data.ID), bytes.NewReader(linkBytes))
+	linkReq.Header.Set("Content-Type", "application/json")
+	linkW := httptest.NewRecorder()
+	r.ServeHTTP(linkW, linkReq)
+	assert.Equal(t, 200, linkW.Code)
+	var linkResp struct {
+		Code int `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(linkW.Body.Bytes(), &linkResp))
+	assert.Equal(t, 0, linkResp.Code)
 }
 
 func TestXrayGenerate_SafeSkip_UnlinkedOutbound(t *testing.T) {

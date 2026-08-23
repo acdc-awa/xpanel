@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import {
   VueFlow,
   Handle,
@@ -74,6 +74,7 @@ interface BoxData {
 
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
+const flowRef = ref<{ updateNodeInternals?: (id: string) => void } | null>(null)
 const isFullscreen = ref(false)
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
@@ -324,35 +325,25 @@ function boxRulePath(sx: number, sy: number, tx: number, ty: number) {
   return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`
 }
 
-// 跨盒引用线：全向平滑 S 形贝塞尔走线（右出左入，遇中间盒子阻挡自动下垂 U 形绕行）
+// 跨盒引用线：方案④「先直再弯曲」——水平直出/直入 ≤30px + 贝塞尔弧过渡（遇中间盒子阻挡自动下垂 U 形绕行，同样带直段）
 function refEdgePath(sx: number, sy: number, tx: number, ty: number, detour: boolean, drop: number) {
+  const dir = tx >= sx ? 1 : -1
+  const span = Math.abs(tx - sx)
+  const seg = Math.min(30, span * 0.15)
+  const ax = sx + seg * dir
+  const bx = tx - seg * dir
+
   if (detour && drop > 0) {
-    const c1x = sx + 60
-    const c2x = tx - 60
+    // 绕行分支同样保持「先直再弯曲」：直出后以更宽缓的弧过渡到绕行高度，避免急坠成抛物线
+    const pull = Math.max(50, span * 0.25)
+    const c1x = ax + pull
+    const c2x = bx - pull
     const midX = (sx + tx) / 2
-    return `M ${sx} ${sy} C ${c1x} ${sy}, ${c1x} ${drop}, ${midX} ${drop} C ${c2x} ${drop}, ${c2x} ${ty}, ${tx} ${ty}`
+    return `M ${sx} ${sy} L ${ax} ${sy} C ${c1x} ${sy}, ${c1x} ${drop}, ${midX} ${drop} C ${c2x} ${drop}, ${c2x} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
   }
 
-  const dx = tx - sx
-  const dy = ty - sy
-
-  if (dx >= 40) {
-    // 1. 标准正向走线（源在左，目标在右）：丝滑水平 S 形贝塞尔曲线
-    const curvature = Math.max(40, dx * 0.45)
-    return `M ${sx} ${sy} C ${sx + curvature} ${sy}, ${tx - curvature} ${ty}, ${tx} ${ty}`
-  }
-
-  // 2. 反向/垂直堆叠走线（目标在源的左方、同列或垂直堆叠）：
-  // 严格保持「右侧水平向右引出 -> 大 S 弧度平滑过渡 -> 左侧水平从左接入」的接线感，彻底杜绝斜切穿模
-  const offset = Math.max(60, Math.abs(dy) * 0.4, Math.abs(dx) * 0.3)
-  let c1y = sy
-  let c2y = ty
-  if (Math.abs(dy) < 30) {
-    // 水平高度接近时略向上弯曲
-    c1y = sy - 40
-    c2y = ty - 40
-  }
-  return `M ${sx} ${sy} C ${sx + offset} ${c1y}, ${tx - offset} ${c2y}, ${tx} ${ty}`
+  const arc = Math.abs(bx - ax) * 0.25
+  return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc * dir} ${sy}, ${bx - arc * dir} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
 }
 
 // 动态重算所有跨盒引用边的阻挡与绕行高度（支持动态 boxWidth）
@@ -576,8 +567,16 @@ function buildGraph(data: TopologyData) {
 
 watch(
   () => props.topology,
-  (t) => {
+  async (t) => {
     if (t) buildGraph(t)
+    await nextTick()
+    // 行内 Handle 随行内容变化（出站 draft 连上后行宽变化等），
+    // 通知 VueFlow 重算各节点 handle 锚点，避免盒内连线端点与行位置脱节
+    if (!t) return
+    const ids: string[] = []
+    for (const s of t.servers) ids.push(`server-${s.id}`)
+    for (const ap of t.access_points ?? []) ids.push(`ap-${ap.id}`)
+    for (const id of ids) flowRef.value?.updateNodeInternals?.(id)
   },
   { immediate: true },
 )
@@ -1016,16 +1015,15 @@ async function saveL4Rule() {
     ElMessage.warning('请填写有效的中转监听端口 (1-65535)')
     return
   }
-  if (!l4RuleForm.target_inbound_id) {
-    ElMessage.warning('请选择目标用户入站')
-    return
-  }
+  // 缺省规则：允许目标为空，先保存「待连线」，后在画布上从规则行右侧端点拖线至目标入站完成映射
+  const isDraft = !l4RuleForm.target_inbound_id
+
   l4RuleSaving.value = true
   try {
     const payload = {
       listen_port: l4RuleForm.listen_port,
-      target_server_id: l4RuleForm.target_server_id,
-      target_inbound_id: l4RuleForm.target_inbound_id,
+      target_server_id: isDraft ? 0 : l4RuleForm.target_server_id,
+      target_inbound_id: isDraft ? 0 : l4RuleForm.target_inbound_id,
       remark: l4RuleForm.remark,
       enabled: l4RuleForm.enabled,
     }
@@ -1033,7 +1031,8 @@ async function saveL4Rule() {
       ? await updateL4Rule(l4RuleServerId.value, l4RuleEditing.value.id, payload)
       : await createL4Rule(l4RuleServerId.value, payload)
     if (data.code === 0) {
-      ElMessage.success(l4RuleEditing.value ? '转发规则已更新' : '转发规则已创建')
+      if (isDraft) ElMessage.success('已保存缺省规则（待连线），可在画布拖线完成目标映射')
+      else ElMessage.success(l4RuleEditing.value ? '转发规则已更新' : '转发规则已创建')
       l4RuleOpen.value = false
       emit('changed')
     } else {
@@ -1515,6 +1514,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
     <VueFlow
       v-if="hasData"
+      ref="flowRef"
       v-model:nodes="nodes"
       v-model:edges="edges"
       class="topology-canvas"
@@ -1635,8 +1635,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           />
           <div class="sb-head l4-head">
             <div class="sb-head-left">
-              <span class="status-dot online" />
+              <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
               <span class="l4-relay-badge">L4 中转</span>
+              <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
               <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
               <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
             </div>
@@ -2468,98 +2469,130 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     flex: none;
   }
 
-/* 用户接入点独立小盒（订阅入口；右侧源端点拖线指向管道目标） */
-  .ap-node {
+  .sb-row {
     position: relative;
-    width: 280px;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    border-radius: 10px;
-    padding: 10px 14px;
-    cursor: pointer;
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 6px;
-    box-shadow: 0 4px 20px rgba(56, 189, 248, 0.1);
-    transition: all 0.2s ease;
+    padding: 0 8px;
+    height: 34px;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 17px;
+    transition: all 0.2s;
 
     &:hover {
-      border-color: rgba(56, 189, 248, 0.6);
-      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.2);
-      transform: translateY(-1px);
-    }
-    &.unlinked {
-      border-style: dashed;
-      border-color: rgba(251, 191, 36, 0.45);
-      box-shadow: 0 4px 16px rgba(251, 191, 36, 0.08);
-    }
-    &.disabled {
-      opacity: 0.6;
-      filter: grayscale(0.4);
+      background: rgba(15, 23, 42, 0.85);
+      border-color: rgba(255, 255, 255, 0.15);
     }
 
-    .ap-src-handle {
-      right: -6px !important;
-      top: 50% !important;
-      transform: translateY(-50%) !important;
-    }
-    .ap-node-head {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .ap-icon {
-      font-size: 14px;
-      flex: none;
-    }
-    .ap-name-text {
-      font-size: 13px;
-      font-weight: 700;
-      color: #f1f5f9;
+    .tag {
+      font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      flex: 1;
-      min-width: 0;
+      max-width: 110px;
     }
-    .ap-node-perms {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex-wrap: wrap;
+    .out-tag {
+      font-weight: 600;
+      color: #93c5fd;
+      &.ref {
+        color: #fbbf24;
+      }
+      &.direct {
+        color: #34d399;
+      }
+      &.draft {
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+        padding: 1px 6px;
+        border-radius: 6px;
+      }
     }
-    .ap-resolved-text {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11.5px;
+    &.direct-row {
+      background: rgba(52, 211, 153, 0.1);
+      border-color: rgba(52, 211, 153, 0.2);
+    }
+
+    .port-badge {
+      font-size: 11px;
+      font-weight: 600;
       color: #38bdf8;
-      &.waiting {
+      font-family: monospace;
+      flex: none;
+      &.l4-port {
+        color: #c084fc;
+      }
+    }
+
+    .proto-badge {
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-weight: 600;
+      flex: none;
+      &.sec {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+      }
+      &.net {
+        background: rgba(56, 189, 248, 0.12);
+        color: #7dd3fc;
+      }
+    }
+
+    .out-proto-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+      flex: none;
+      background: rgba(148, 163, 184, 0.15);
+      color: #cbd5e1;
+      &.ref {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px solid rgba(251, 191, 36, 0.3);
+      }
+      &.direct {
+        background: rgba(52, 211, 153, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(52, 211, 153, 0.3);
+      }
+      &.blocked {
+        background: rgba(248, 113, 113, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(248, 113, 113, 0.3);
+      }
+      &.draft {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px dashed rgba(251, 191, 36, 0.4);
+      }
+    }
+
+    .type-tag {
+      flex: none;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 10px;
+      font-weight: 600;
+      &.user {
+        background: rgba(52, 211, 153, 0.15);
+        color: #34d399;
+      }
+      &.relay {
+        background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
       }
     }
-    .ap-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      flex: none;
-      &.online {
-        background: #10b981;
-        box-shadow: 0 0 6px #10b981;
-      }
-      &.offline {
-        background: #fbbf24;
-        box-shadow: 0 0 4px #fbbf24;
-      }
-    }
-    .ap-desc-text {
-      font-size: 10.5px;
-      color: #94a3b8;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
   }
+
+
+
 
   .sb-empty {
     padding: 4px 10px;
@@ -2572,6 +2605,231 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     border-radius: 17px;
     border: 1px dashed rgba(255, 255, 255, 0.05);
   }
+}
+
+/* L4 纯四层中转卡片样式（对齐普通 server-box 品质） */
+.server-box.l4-relay-box {
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    0 4px 20px rgba(168, 85, 247, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+
+  &.offline {
+    border-color: rgba(168, 85, 247, 0.2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    .l4-head {
+      background: linear-gradient(180deg, rgba(168, 85, 247, 0.1) 0%, transparent 100%);
+    }
+  }
+
+  .l4-head {
+    border-bottom-color: rgba(168, 85, 247, 0.2);
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.14) 0%, transparent 100%);
+  }
+  .l4-relay-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(168, 85, 247, 0.2);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.35);
+  }
+.l4-body {
+      padding: 0 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    /* L4 盒体无 .sb-cols 包裹，补齐列头布局与新建按钮样式（对齐普通盒） */
+    .l4-body .sb-col-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      height: 32px;
+      padding: 6px 4px 2px;
+      box-sizing: border-box;
+    }
+    .l4-add-btn {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 4px;
+      color: #38bdf8;
+      font-size: 11px;
+      padding: 2px 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      &:hover {
+        background: rgba(56, 189, 248, 0.25);
+        border-color: #38bdf8;
+      }
+    }
+  .l4-rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .l4-rule-row {
+    justify-content: space-between;
+    cursor: pointer;
+    background: rgba(168, 85, 247, 0.06);
+    border-color: rgba(168, 85, 247, 0.18);
+    &:hover {
+      background: rgba(168, 85, 247, 0.14);
+      border-color: rgba(168, 85, 247, 0.35);
+    }
+  }
+  .l4-rule-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .l4-rule-target {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .l4-remark {
+    font-size: 12px;
+    font-weight: 500;
+    color: #94a3b8;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    &.muted {
+      color: #64748b;
+      font-style: italic;
+    }
+  }
+}
+
+/* 用户接入点独立小盒（订阅入口；右侧源端点拖线指向管道目标） */
+.ap-node {
+  position: relative;
+  width: 280px;
+  background: rgba(30, 41, 59, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    0 4px 20px rgba(56, 189, 248, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: rgba(56, 189, 248, 0.6);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      0 6px 24px rgba(56, 189, 248, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  &.unlinked {
+    border-style: dashed;
+    border-color: rgba(251, 191, 36, 0.45);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      0 4px 16px rgba(251, 191, 36, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  &.disabled {
+    opacity: 0.6;
+    filter: grayscale(0.4);
+  }
+
+  .ap-node-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ap-icon {
+    font-size: 14px;
+    flex: none;
+  }
+  .ap-name-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f1f5f9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+  .ap-node-perms {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .ap-resolved-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: #38bdf8;
+    &.waiting {
+      color: #fbbf24;
+    }
+  }
+  .ap-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+    &.online {
+      background: #10b981;
+      box-shadow: 0 0 6px #10b981;
+    }
+    &.offline {
+      background: #fbbf24;
+      box-shadow: 0 0 4px #fbbf24;
+    }
+  }
+  .ap-desc-text {
+    font-size: 10.5px;
+    color: #94a3b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+:deep(.ap-node .ep) {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #0f172a;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  transition: all 0.2s ease;
+  &:hover {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+  }
+  &.valid,
+  &.connecting {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+  }
+}
+
+:deep(.ap-node .ap-src-handle) {
+  right: -6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
 }
 
 /* 端点双点结构 */
@@ -2600,6 +2858,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   &.ext-tgt {
     z-index: 2;
     opacity: 0;
+  }
+  /* L4 规则行两端端点：target 端是 AP 订阅连线的落点，必须可见（覆盖 ext-tgt 透明），外观与其他行端点一致 */
+  &.l4-tgt-handle {
+    opacity: 1;
+    z-index: 3;
+    border-color: rgba(255, 255, 255, 0.4);
   }
   &.in-ep {
     border-color: rgba(255, 255, 255, 0.15);
@@ -2631,7 +2895,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 }
 </style>
 
-<!-- 连线专属样式（限定在 .topology-wrap 作用域内，确保连线始终在节点上方，且防穿透 Dialog） -->
 <style>
 .topology-wrap .vue-flow__edges {
   z-index: 100 !important;

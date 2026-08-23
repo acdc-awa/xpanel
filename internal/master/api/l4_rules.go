@@ -28,10 +28,11 @@ type l4RuleView struct {
 }
 
 // l4RuleForm L4 规则创建/更新表单。
+// Target* 允许为空（0）：先保存「待连线」缺省规则，后在拓扑画布拖线完成目标映射。
 type l4RuleForm struct {
 	ListenPort      int    `json:"listen_port" binding:"required,min=1,max=65535"`
-	TargetServerID  uint64 `json:"target_server_id" binding:"required"`
-	TargetInboundID uint64 `json:"target_inbound_id" binding:"required"`
+	TargetServerID  uint64 `json:"target_server_id"`
+	TargetInboundID uint64 `json:"target_inbound_id"`
 	Remark          string `json:"remark"`
 	Enabled         *bool  `json:"enabled"`
 }
@@ -127,15 +128,17 @@ func (d *Deps) AdminCreateL4Rule(c *gin.Context) {
 		return
 	}
 
-	// 校验目标入站与服务器是否存在
-	var targetInb models.Inbound
-	if err := d.DB.First(&targetInb, f.TargetInboundID).Error; err != nil {
-		util.BadRequest(c, "目标入站不存在")
-		return
-	}
-	if targetInb.ServerID != f.TargetServerID {
-		util.BadRequest(c, "目标入站与目标服务器不匹配")
-		return
+	// 校验目标入站与服务器是否存在（缺省规则允许 target 为空，待拓扑拖线完成映射）
+	if f.TargetInboundID != 0 {
+		var targetInb models.Inbound
+		if err := d.DB.First(&targetInb, f.TargetInboundID).Error; err != nil {
+			util.BadRequest(c, "目标入站不存在")
+			return
+		}
+		if targetInb.ServerID != f.TargetServerID {
+			util.BadRequest(c, "目标入站与目标服务器不匹配")
+			return
+		}
 	}
 
 	// 校验中转端口唯一性
@@ -202,15 +205,17 @@ func (d *Deps) AdminUpdateL4Rule(c *gin.Context) {
 		return
 	}
 
-	// 校验目标入站
-	var targetInb models.Inbound
-	if err := d.DB.First(&targetInb, f.TargetInboundID).Error; err != nil {
-		util.BadRequest(c, "目标入站不存在")
-		return
-	}
-	if targetInb.ServerID != f.TargetServerID {
-		util.BadRequest(c, "目标入站与目标服务器不匹配")
-		return
+	// 校验目标入站（缺省规则允许 target 为空，待拓扑拖线完成映射）
+	if f.TargetInboundID != 0 {
+		var targetInb models.Inbound
+		if err := d.DB.First(&targetInb, f.TargetInboundID).Error; err != nil {
+			util.BadRequest(c, "目标入站不存在")
+			return
+		}
+		if targetInb.ServerID != f.TargetServerID {
+			util.BadRequest(c, "目标入站与目标服务器不匹配")
+			return
+		}
 	}
 
 	// 校验中转端口唯一性（排除自身）
