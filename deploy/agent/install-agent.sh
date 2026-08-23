@@ -1,33 +1,43 @@
 #!/bin/bash
 #
-# Xray 节点 Agent 一键安装脚本（主控-节点-用户三层中的「被控」）
+# XPanel-Node 一键安装脚本（主控-节点-用户三层中的「被控」）
 #
 # 用法：
 #   bash install-agent.sh --master <ws://host/api/v1/node/ws> --node-id <ID> --secret <SECRET> [选项]
 #
 # 选项：
-#   --master <url>      主控节点 ws 地址（生产用 wss://，由主控 Caddy 终止 TLS）
-#   --node-id <id>      主控「服务器」页新增节点时生成的 node_id
-#   --secret <secret>   同上，节点密钥（仅显示一次）
-#   --agent-url <url>   agent 二进制下载地址（默认取 --master 的 /api/v1/download/agent）
-#   --agent-file <path> 本地 agent 二进制（离线/scp 场景，优先于 --agent-url）
+#   --master <url>       主控节点 ws 地址（生产用 wss://，由主控 Caddy 终止 TLS）
+#   --node-id <id>       主控「服务器」页新增节点时生成的 node_id
+#   --secret <secret>    同上，节点密钥（仅显示一次）
+#   --agent-version <v>  钉版本安装（如 v0.1.0；缺省装最新 release）
+#   --agent-mirror <url> github.com 的替代基址/代理前缀（如 https://ghproxy.net/https://github.com）
+#   --agent-url <url>    完全自定义 agent 二进制下载地址（优先于 version/mirror 推导）
+#   --agent-file <path>  本地 agent 二进制（离线/scp 场景，优先于一切下载）
 #   --agent-digest <sha> 期望的 agent 二进制 sha256（提供则强制校验，不匹配拒绝安装）
-#   --xray-version <v>  xray 版本（默认 v26.6.27，与验证环境一致）
-#   --dry-run           只打印将执行的步骤，不实际执行
+#   --xray-version <v>   xray 版本（默认 v26.6.27，与验证环境一致）
+#   --dry-run            只打印将执行的步骤，不实际执行
+#
+# 说明：agent 二进制默认从 GitHub Releases 下载并自动用 release 的 checksums.txt
+# 做 sha256 校验（缺校验文件拒绝安装）；自定义 --agent-url 时无校验和来源，
+# 建议显式提供 --agent-digest。
 #
 set -euo pipefail
 
 MASTER=""
 NODE_ID=""
 SECRET=""
+AGENT_VERSION=""
+AGENT_MIRROR=""
 AGENT_URL=""
 AGENT_FILE=""
 AGENT_DIGEST=""
 XRAY_VERSION="v26.6.27"
 DRY_RUN=0
 
+GH_REPO="acdc-awa/XPanel-Node"
+
 usage() {
-  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -36,6 +46,8 @@ while [[ $# -gt 0 ]]; do
     --master) MASTER="$2"; shift 2;;
     --node-id) NODE_ID="$2"; shift 2;;
     --secret) SECRET="$2"; shift 2;;
+    --agent-version) AGENT_VERSION="$2"; shift 2;;
+    --agent-mirror) AGENT_MIRROR="$2"; shift 2;;
     --agent-url) AGENT_URL="$2"; shift 2;;
     --agent-file) AGENT_FILE="$2"; shift 2;;
     --agent-digest) AGENT_DIGEST="$2"; shift 2;;
@@ -47,23 +59,39 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$MASTER" || -z "$NODE_ID" || -z "$SECRET" ]] && { echo "缺少 --master / --node-id / --secret"; usage; }
-# agent 下载地址默认取主控 origin 的 /api/v1/download/agent；
-# 注意：下载走普通 HTTP(S)，不能沿用 master 的 ws(s) scheme（curl 会把 ws:// 当 WebSocket 升级）
-if [[ -z "$AGENT_URL" ]]; then
-  ORIGIN="${MASTER%%/api/*}"
-  case "$ORIGIN" in
-    wss://*) AGENT_URL="https://${ORIGIN#wss://}/api/v1/download/agent" ;;
-    ws://*)  AGENT_URL="http://${ORIGIN#ws://}/api/v1/download/agent" ;;
-    *)       AGENT_URL="${ORIGIN}/api/v1/download/agent" ;;
-  esac
+
+# 架构探测（发布流水线提供 linux/amd64 与 linux/arm64）
+ARCH=""
+case "$(uname -m)" in
+  x86_64|amd64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) echo "不支持的架构: $(uname -m)（发布仅提供 linux/amd64 与 linux/arm64）"; exit 1 ;;
+esac
+ASSET="xray-agent-linux-${ARCH}"
+
+# agent 下载地址推导：默认 GitHub Releases（latest 或钉版本），镜像前缀可注入
+GH_BASE="${AGENT_MIRROR:-https://github.com}"
+GH_BASE="${GH_BASE%/}"
+if [[ -z "$AGENT_URL" && -z "$AGENT_FILE" ]]; then
+  if [[ -n "$AGENT_VERSION" ]]; then
+    CHANNEL="download/${AGENT_VERSION}"
+  else
+    CHANNEL="latest/download"
+  fi
+  AGENT_URL="${GH_BASE}/${GH_REPO}/releases/${CHANNEL}/${ASSET}"
+  CHECKSUMS_URL="${GH_BASE}/${GH_REPO}/releases/${CHANNEL}/checksums.txt"
+else
+  CHECKSUMS_URL=""
 fi
 
 echo "==> 参数"
 echo "    master   : $MASTER"
 echo "    node_id  : $NODE_ID"
 echo "    agent    : ${AGENT_FILE:-$AGENT_URL}"
+echo "    arch     : $ARCH"
 echo "    xray     : $XRAY_VERSION"
-[[ -n "$AGENT_DIGEST" ]] && echo "    agent 校验: sha256 强制校验"
+[[ -n "$AGENT_DIGEST" ]] && echo "    agent 校验: --agent-digest 强制校验"
+[[ -n "$CHECKSUMS_URL" && -z "$AGENT_DIGEST" ]] && echo "    agent 校验: release checksums.txt 自动校验"
 [[ $DRY_RUN -eq 1 ]] && echo "    [DRY-RUN] 仅打印步骤"
 
 if [[ $DRY_RUN -eq 0 && $EUID -ne 0 ]]; then
@@ -79,29 +107,42 @@ run() {
 
 mkdir_p() { run mkdir -p "$@"; }
 
+# 校验下载/本地文件的 sha256：$1=文件 $2=期望摘要（不匹配即退出）
+verify_sha256() {
+  local file="$1" expect="$2" actual
+  actual=$(sha256sum "$file" | awk '{print $1}')
+  if [[ "$actual" != "$expect" ]]; then
+    echo "agent 校验失败: 期望 $expect 实际 $actual"
+    exit 1
+  fi
+  echo "    agent sha256 校验通过"
+}
+
 # ---------- 1. 安装 agent 二进制 ----------
 mkdir_p /usr/local/bin
 if [[ -n "$AGENT_FILE" ]]; then
   # U22：提供 --agent-digest 时强制校验（含本地文件），不匹配拒绝安装
   if [[ -n "$AGENT_DIGEST" ]]; then
-    ACTUAL=$(sha256sum "$AGENT_FILE" | awk '{print $1}')
-    if [[ "$ACTUAL" != "$AGENT_DIGEST" ]]; then
-      echo "agent 校验失败: 期望 $AGENT_DIGEST 实际 $ACTUAL"; exit 1
-    fi
-    echo "    agent sha256 校验通过"
+    verify_sha256 "$AGENT_FILE" "$AGENT_DIGEST"
   fi
   run install -m 0755 "$AGENT_FILE" /usr/local/bin/xray-agent
 else
   run curl -fsSL -o /tmp/xray-agent "$AGENT_URL"
   if [[ -n "$AGENT_DIGEST" ]]; then
-    ACTUAL=$(sha256sum /tmp/xray-agent | awk '{print $1}')
-    if [[ "$ACTUAL" != "$AGENT_DIGEST" ]]; then
-      echo "agent 校验失败: 期望 $AGENT_DIGEST 实际 $ACTUAL（请检查下载源或更新 --agent-digest）"
-      rm -f /tmp/xray-agent; exit 1
+    verify_sha256 /tmp/xray-agent "$AGENT_DIGEST"
+  elif [[ -n "$CHECKSUMS_URL" ]]; then
+    # 默认 GitHub 源：拉 release checksums.txt 强制校验（缺文件/缺条目拒绝安装）
+    run curl -fsSL -o /tmp/xray-agent.sha256 "$CHECKSUMS_URL"
+    if [[ $DRY_RUN -eq 0 ]]; then
+      EXPECT=$(awk -v a="$ASSET" '$2 == a {print $1}' /tmp/xray-agent.sha256 | head -1)
+      if [[ -z "$EXPECT" ]]; then
+        echo "checksums.txt 缺少 $ASSET 条目（拒绝安装）"; rm -f /tmp/xray-agent; exit 1
+      fi
+      verify_sha256 /tmp/xray-agent "$EXPECT"
+      rm -f /tmp/xray-agent.sha256
     fi
-    echo "    agent sha256 校验通过"
   else
-    echo "    [警告] 未提供 --agent-digest，agent 二进制未校验（供应链加固建议提供）"
+    echo "    [警告] 自定义 --agent-url 且未提供 --agent-digest，agent 二进制未校验（供应链加固建议提供）"
   fi
   run chmod 0755 /tmp/xray-agent
   run install -m 0755 /tmp/xray-agent /usr/local/bin/xray-agent
@@ -169,7 +210,7 @@ echo "==> 写入 systemd 单元"
 if [[ $DRY_RUN -eq 0 ]]; then
   cat > /etc/systemd/system/xray-agent.service <<'UNIT'
 [Unit]
-Description=Xray Agent (Xray 节点托管)
+Description=XPanel-Node Agent (Xray 节点托管)
 After=network-online.target
 Wants=network-online.target
 
