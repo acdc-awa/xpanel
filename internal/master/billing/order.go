@@ -2,21 +2,26 @@
 package billing
 
 import (
+	"context"
 	"errors"
+	"log"
 	"strconv"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
 // OrderService 订单服务（余额直付：购买/续费套餐即时生效）。
 // 2026-08-14 方向④：人工确认收款（manual 订单）已整体去除，充值=兑换码、购买=余额。
+// Events（Stage 5）：事务提交后发布 OrderPaidEvent；nil 时不发布（兼容测试与旧构造）。
 type OrderService struct {
-	DB *gorm.DB
+	DB     *gorm.DB
+	Events contracts.EventPublisher
 }
 
 // NewOrderService 构造订单服务。
@@ -31,6 +36,7 @@ const payIdempotentWindow = 30 * time.Second
 // 幂等：同用户+同套餐在 payIdempotentWindow 内已有 paid 订单 → 直接返回该订单（不重复扣款）。
 func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, error) {
 	var order *models.Order
+	paid := false // 本次是否真实扣款（幂等复用旧订单不算新支付，不发布事件）
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var plan models.Plan
 		if err := tx.First(&plan, planID).Error; err != nil {
@@ -119,10 +125,25 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			return err
 		}
 
+		paid = true
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Stage 5：事务提交后发布支付事件（如热更新用户到在线节点）。
+	// 事件失败不回滚已提交事务，仅记录日志（验收：事件发布不改变支付事务语义）。
+	if paid && s.Events != nil {
+		ev := contracts.OrderPaidEvent{
+			OrderID: order.ID,
+			OrderNo: order.OrderNo,
+			UserID:  userID,
+			PlanID:  planID,
+			PaidAt:  *order.PaidAt,
+		}
+		if err := s.Events.Publish(context.Background(), ev); err != nil {
+			log.Printf("billing: 订单 #%s 支付事件发布失败（订单已生效）: %v", order.OrderNo, err)
+		}
 	}
 	return order, nil
 }

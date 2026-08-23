@@ -86,6 +86,10 @@ func main() {
 	orderSvc := billing.NewOrderService(database)
 	auditSvc := &services.AuditService{DB: database}
 
+	// Stage 5：进程内同步事件总线（订阅者在 Publish 调用栈内执行，失败仅记日志）。
+	eventBus := contracts.NewEventBus()
+	orderSvc.Events = eventBus
+
 	// 核心驱动注册表（Stage 4）：默认 xray；CORE_DRIVER 环境变量可选注入已注册驱动。
 	driverReg := contracts.NewDriverRegistry()
 	driverReg.Register(xray.NewDriver())
@@ -102,6 +106,12 @@ func main() {
 	siteSvc := services.NewSiteService(database, cfg)
 	giftCardSvc := billing.NewGiftCardService(database)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
+
+	// Stage 5 事件订阅：订单支付成功 → 热更新用户到所有在线节点（原 api 层直调 Hub 的收口）。
+	eventBus.Subscribe(contracts.EventOrderPaid, func(ctx context.Context, ev contracts.DomainEvent) error {
+		hub.SyncUsersToAll()
+		return nil
+	})
 
 	backupSvc, err := backup.New(cfg.DB.DSN, cfg.DB.Driver, cfg.Backup, auditSvc)
 	if err != nil {

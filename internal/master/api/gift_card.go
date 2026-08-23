@@ -52,9 +52,8 @@ func (d *Deps) UserPayOrderByBalance(c *gin.Context) {
 		return
 	}
 
-	if d.Hub != nil {
-		d.Hub.SyncUsersToAll()
-	}
+	// 用户热更新已由 Stage 5 事件驱动（billing 发布 OrderPaidEvent → 订阅方 SyncUsersToAll），
+	// 此处不再直调 Hub——任何新增支付路径自动获得同步能力。
 
 	d.Audit.Log("user", uid, "order.pay_balance", "余额直付购买套餐 #"+strconv.FormatUint(req.PlanID, 10)+" (订单 #"+order.OrderNo+")", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{

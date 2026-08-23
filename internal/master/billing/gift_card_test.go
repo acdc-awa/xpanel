@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/acdc/xray-panel/internal/contracts"
 	"github.com/acdc/xray-panel/internal/models"
 )
 
@@ -216,5 +218,83 @@ func TestGiftCard_AdminAdjustBalance(t *testing.T) {
 	_, err = svc.AdminAdjustBalance(1, user.ID, -5000, "扣款超额")
 	if err == nil {
 		t.Errorf("expected error when balance becomes negative, got nil")
+	}
+}
+
+// capturePublisher 捕获发布的事件（Stage 5 测试替身）。
+type capturePublisher struct {
+	events []contracts.DomainEvent
+}
+
+func (p *capturePublisher) Publish(_ context.Context, ev contracts.DomainEvent) error {
+	p.events = append(p.events, ev)
+	return nil
+}
+
+// TestOrder_PayWithBalance_PublishesEvent 支付成功发布 OrderPaidEvent；
+// 幂等复用旧订单不重复发布；余额不足失败不发布。
+func TestOrder_PayWithBalance_PublishesEvent(t *testing.T) {
+	db := setupTestDB(t)
+	pub := &capturePublisher{}
+	orderSvc := NewOrderService(db)
+	orderSvc.Events = pub
+
+	plan := models.Plan{Name: "事件套餐", PriceCents: 2500, TrafficGB: 100, DurationDays: 30, Enabled: true}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("create plan failed: %v", err)
+	}
+	user := models.User{
+		Username: "evt-buyer", Email: "evt@test.local",
+		UUID:           "33333333-4444-5555-6666-777777777777",
+		SubscribeToken: "subtoken333333333333333333333333333333333333333333333333333333333333",
+		BalanceCents:   5000,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user failed: %v", err)
+	}
+
+	// 1. 真实支付 → 恰好 1 个事件，字段正确
+	order, err := orderSvc.PayWithBalance(user.ID, plan.ID)
+	if err != nil {
+		t.Fatalf("PayWithBalance failed: %v", err)
+	}
+	if len(pub.events) != 1 {
+		t.Fatalf("支付后应发布 1 个事件, got %d", len(pub.events))
+	}
+	ev, ok := pub.events[0].(contracts.OrderPaidEvent)
+	if !ok {
+		t.Fatalf("事件类型错误: %T", pub.events[0])
+	}
+	if ev.OrderID != order.ID || ev.UserID != user.ID || ev.PlanID != plan.ID || ev.OrderNo != order.OrderNo {
+		t.Errorf("事件字段不匹配: %+v vs 订单 #%d", ev, order.ID)
+	}
+
+	// 2. 幂等窗口内重复支付 → 复用旧订单，不再发布事件
+	dup, err := orderSvc.PayWithBalance(user.ID, plan.ID)
+	if err != nil {
+		t.Fatalf("幂等支付失败: %v", err)
+	}
+	if dup.ID != order.ID {
+		t.Fatalf("幂等应复用旧订单 #%d, got #%d", order.ID, dup.ID)
+	}
+	if len(pub.events) != 1 {
+		t.Fatalf("幂等复用不应重复发布事件, got %d", len(pub.events))
+	}
+
+	// 3. 扣空余额后窗口外支付失败 → 不发布事件
+	if err := db.Model(&user).Update("balance_cents", 0).Error; err != nil {
+		t.Fatalf("扣空余额失败: %v", err)
+	}
+	pub.events = nil
+	// 构造窗口外：把旧订单 created_at 拨回 1 分钟前，绕开幂等窗口
+	if err := db.Model(&models.Order{}).Where("id = ?", order.ID).
+		Update("created_at", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatalf("拨回订单时间失败: %v", err)
+	}
+	if _, err := orderSvc.PayWithBalance(user.ID, plan.ID); err == nil {
+		t.Fatal("余额不足应支付失败")
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("支付失败不应发布事件, got %d", len(pub.events))
 	}
 }
