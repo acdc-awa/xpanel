@@ -952,8 +952,14 @@ async function copyText(text: string, label: string) {
                   placeholder="不绑定（使用下方本地路径）"
                   @change="(v: any) => emit('update:certId', Number(v || 0))"
                 >
-                  <el-option v-for="ct in certs" :key="ct.id" :label="`${ct.domain}（到期 ${ct.not_after}）`" :value="ct.id" />
+                  <el-option v-for="ct in certs" :key="ct.id" :value="ct.id">
+                    <span>{{ ct.domain }}（到期 {{ ct.not_after }}）</span>
+                    <span v-if="ct.self_signed" class="x-chip green" style="margin-left: 6px; font-size: 11px">自签·中转自动Pin</span>
+                  </el-option>
                 </el-select>
+                <div v-if="certs.find(ct => ct.id === localCertId)?.self_signed" class="muted" style="font-size: 12px; margin-top: 4px">
+                  自签证书：引用本入站的中转出站将自动注入 pinnedPeerCertSha256（{{ certs.find(ct => ct.id === localCertId)?.pin_sha256?.slice(0, 16) }}…），链路防 MITM
+                </div>
               </el-form-item>
 
               <el-form-item label="SNI (server_name)">

@@ -32,19 +32,38 @@ func (s *ConfigService) driver() contracts.CoreDriver {
 }
 
 // buildGenerateContext 组装生成器拓扑化上下文（Phase T T3）：
-// InboundRef → 目标入站（可跨服务器，含 Server Host）与 CertID → 域名映射。
+// InboundRef → 目标入站（可跨服务器，含 Server Host 与目标证书 pin）与 CertID → 域名映射。
 func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*contracts.TopologyContext, error) {
 	ctx := &contracts.TopologyContext{
 		RefTargets:  map[uint64]contracts.RefTarget{},
 		CertDomains: map[uint64]string{},
 	}
-	// 证书映射（CertID → 域名）
-	certIDs := make([]uint64, 0, len(inbounds))
+	// 先取引用目标入站（其 CertID 与本地入站合并进同一次证书查询）
+	refIDs := make([]uint64, 0, len(outbounds))
+	for i := range outbounds {
+		if outbounds[i].InboundRef != nil {
+			refIDs = append(refIDs, *outbounds[i].InboundRef)
+		}
+	}
+	var targets []models.Inbound
+	if len(refIDs) > 0 {
+		if err := db.Where("id IN ?", refIDs).Find(&targets).Error; err != nil {
+			return nil, err
+		}
+	}
+	// 证书映射（CertID → 域名 + pin），覆盖本地入站与引用目标入站
+	certIDs := make([]uint64, 0, len(inbounds)+len(targets))
 	for i := range inbounds {
 		if inbounds[i].CertID != nil {
 			certIDs = append(certIDs, *inbounds[i].CertID)
 		}
 	}
+	for _, t := range targets {
+		if t.CertID != nil {
+			certIDs = append(certIDs, *t.CertID)
+		}
+	}
+	certPins := map[uint64]string{}
 	if len(certIDs) > 0 {
 		var certs []models.Cert
 		if err := db.Where("id IN ?", certIDs).Find(&certs).Error; err != nil {
@@ -52,26 +71,23 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 		}
 		for _, c := range certs {
 			ctx.CertDomains[c.ID] = c.Domain
+			if c.PinSHA256 != "" {
+				certPins[c.ID] = c.PinSHA256
+			}
 		}
 	}
-	// 引用映射（出站 InboundRef → 目标入站 + 服务器 Host）
-	refIDs := make([]uint64, 0, len(outbounds))
-	for i := range outbounds {
-		if outbounds[i].InboundRef != nil {
-			refIDs = append(refIDs, *outbounds[i].InboundRef)
-		}
-	}
-	if len(refIDs) > 0 {
-		var targets []models.Inbound
-		if err := db.Where("id IN ?", refIDs).Find(&targets).Error; err != nil {
-			return nil, err
-		}
+	// 引用映射（出站 InboundRef → 目标入站 + 服务器 Host + 目标证书 pin）
+	if len(targets) > 0 {
 		for _, t := range targets {
 			var srv models.Server
 			if err := db.First(&srv, t.ServerID).Error; err != nil {
 				continue // 目标服务器缺失：Generate 预检会报引用不存在
 			}
-			ctx.RefTargets[t.ID] = contracts.RefTarget{Inbound: t, ServerHost: srv.Host}
+			rt := contracts.RefTarget{Inbound: t, ServerHost: srv.Host}
+			if t.CertID != nil {
+				rt.CertPin = certPins[*t.CertID]
+			}
+			ctx.RefTargets[t.ID] = rt
 		}
 	}
 	return ctx, nil

@@ -301,6 +301,11 @@ export function createCert(payload: CertPayload) {
   return http.post<ApiResp<{ cert: CertItem }>>('/admin/certs', payload)
 }
 
+// 一键生成自签证书（链式代理 TLS 场景：自动生成 + pin 计算，中转出站自动注入）
+export function generateSelfSignedCert(payload: { domain: string; remark?: string }) {
+  return http.post<ApiResp<{ cert: CertItem }>>('/admin/certs/self-signed', payload)
+}
+
 export function updateCert(id: number, payload: Partial<CertPayload>) {
   return http.put<ApiResp<{ cert: CertItem }>>(`/admin/certs/${id}`, payload)
 }

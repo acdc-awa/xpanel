@@ -1050,3 +1050,66 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q", ds)
 	}
 }
+
+// TestGenerateConfig_InboundRefPinnedCert 链式代理 TLS 证书固定：
+// 目标入站绑定证书带 pin 时，中转出站 tlsSettings 注入 pinnedPeerCertSha256；
+// 无 pin（未绑证书）则不注入（走系统 CA 验证）。
+func TestGenerateConfig_InboundRefPinnedCert(t *testing.T) {
+	const pin = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	target := models.Inbound{
+		ID: 99, ServerID: 2, Tag: "landing-tls", Protocol: "vless", Port: 8443,
+		Type: models.InboundTypeRelay, InternalUUID: "44444444-4444-4444-4444-444444444444",
+		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"relay.example.com"}}`,
+		Enabled:        true,
+	}
+	ref := target.ID
+	ctx := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{
+			target.ID: {Inbound: target, ServerHost: "10.0.0.5", CertPin: pin},
+		},
+	}
+	outbounds := []models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "to-landing", Protocol: "vless", InboundRef: &ref, Enabled: true},
+	}
+	localIn := []models.Inbound{{ID: 1, Tag: "in", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true}}
+
+	tlsSettingsOf := func(t *testing.T, raw []byte) map[string]any {
+		var parsed map[string]any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		for _, o := range asArray(t, parsed["outbounds"], "outbounds") {
+			if om, _ := o.(map[string]any); om["tag"] == "to-landing" {
+				stream := asObject(t, om["streamSettings"], "streamSettings")
+				return asObject(t, stream["tlsSettings"], "tlsSettings")
+			}
+		}
+		t.Fatal("to-landing outbound not found")
+		return nil
+	}
+
+	// 有 pin → 注入
+	raw, err := xray.Generate(localIn, outbounds, nil, vlessUsers("in"), ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	tlsS := tlsSettingsOf(t, raw)
+	if tlsS["pinnedPeerCertSha256"] != pin {
+		t.Errorf("pinnedPeerCertSha256 = %v, 期望注入 %s", tlsS["pinnedPeerCertSha256"], pin)
+	}
+	if tlsS["serverName"] != "relay.example.com" {
+		t.Errorf("serverName = %v", tlsS["serverName"])
+	}
+
+	// 无 pin → 不注入
+	ctxNoPin := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{target.ID: {Inbound: target, ServerHost: "10.0.0.5"}},
+	}
+	raw2, err := xray.Generate(localIn, outbounds, nil, vlessUsers("in"), ctxNoPin, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if _, exists := tlsSettingsOf(t, raw2)["pinnedPeerCertSha256"]; exists {
+		t.Error("无 pin 证书不应注入 pinnedPeerCertSha256")
+	}
+}

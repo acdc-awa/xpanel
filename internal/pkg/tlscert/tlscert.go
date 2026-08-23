@@ -3,10 +3,17 @@ package tlscert
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"regexp"
 	"strings"
 	"time"
@@ -114,4 +121,58 @@ func SanitizeDomain(domain string) string {
 		}
 		return r
 	}, domain)
+}
+
+// GenerateSelfSigned 生成自签证书（链式代理 TLS + pinnedPeerCertSha256 场景）：
+// ECDSA P-256、10 年期、IsCA 自签根形态。安全性由中转出站 pin 哈希保证（pin 命中即
+// 验证通过，不依赖 CA 信任链），自签不降低链路安全性。
+func GenerateSelfSigned(domain string) (certPEM, keyPEM string, err error) {
+	if !DomainRe.MatchString(domain) {
+		return "", "", fmt.Errorf("非法 domain %q（仅允许字母数字 . -）", domain)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("生成私钥失败: %w", err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", "", fmt.Errorf("生成序列号失败: %w", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: domain, Organization: []string{"xray-panel relay"}},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	if ip := net.ParseIP(domain); ip != nil {
+		tmpl.IPAddresses = []net.IP{ip}
+	} else {
+		tmpl.DNSNames = []string{domain}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return "", "", fmt.Errorf("签发证书失败: %w", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", "", fmt.Errorf("编码私钥失败: %w", err)
+	}
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	return certPEM, keyPEM, nil
+}
+
+// PinSHA256Hex 计算证书链 leaf 的 SHA-256（DER 原始字节，小写 hex）——
+// 与 xray tlsSettings.pinnedPeerCertSha256 的格式约定一致（v26.6.27 实测）。
+func PinSHA256Hex(certPEM string) (string, error) {
+	leaf, err := ParseLeaf(certPEM)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(leaf.Raw)
+	return hex.EncodeToString(sum[:]), nil
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
-import { createCert, deleteCert, getCerts, updateCert, type CertItem } from '@/api/admin'
+import { createCert, deleteCert, generateSelfSignedCert, getCerts, updateCert, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
 const list = ref<CertItem[]>([])
@@ -22,6 +22,39 @@ async function load() {
   }
 }
 onMounted(load)
+
+// ---- 一键自签（链式代理 TLS：自动 pin 防 MITM）----
+const ssOpen = ref(false)
+const ssSaving = ref(false)
+const ssForm = reactive({ domain: '', remark: '' })
+
+function openSelfSigned() {
+  ssForm.domain = ''
+  ssForm.remark = ''
+  ssOpen.value = true
+}
+
+async function saveSelfSigned() {
+  if (!ssForm.domain.trim()) {
+    ElMessage.warning('请填写域名/标识')
+    return
+  }
+  ssSaving.value = true
+  try {
+    const { data } = await generateSelfSignedCert({ domain: ssForm.domain.trim(), remark: ssForm.remark })
+    if (data.code === 0) {
+      ElMessage.success('自签证书已生成并推送引用节点；中转链路将自动 pin 该证书')
+      ssOpen.value = false
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '生成失败'))
+  } finally {
+    ssSaving.value = false
+  }
+}
 
 // ---- 上传/编辑 ----
 const formOpen = ref(false)
@@ -108,7 +141,8 @@ function expireTag(row: any) {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;上传证书</el-button>
-        <span class="muted" style="font-size: 12px">证书由主控下发（push_cert）到引用它的节点，落盘 /etc/xray/certs/&lt;domain&gt;/，xray 每小时热重载不重启</span>
+        <el-button type="success" plain @click="openSelfSigned"><el-icon><MagicStick /></el-icon>&nbsp;生成自签证书</el-button>
+        <span class="muted" style="font-size: 12px">证书由主控下发（push_cert）到引用它的节点，落盘 /etc/xray/certs/&lt;domain&gt;/，xray 每小时热重载不重启；自签证书用于链式代理 TLS，中转出站自动 pin 防 MITM</span>
       </div>
     </div>
 
@@ -116,8 +150,13 @@ function expireTag(row: any) {
       <!-- 桌面端表格视图 -->
       <div class="desktop-table-view">
         <el-table v-loading="loading" :data="list" size="small">
-          <el-table-column prop="domain" label="域名" min-width="180">
-            <template #default="{ row }"><code class="cell-mono">{{ row.domain }}</code></template>
+          <el-table-column prop="domain" label="域名" min-width="200">
+            <template #default="{ row }">
+              <code class="cell-mono">{{ row.domain }}</code>
+              <el-tooltip v-if="row.self_signed" content="自签证书 · 链式代理 TLS 中转出站自动注入 pinnedPeerCertSha256" placement="top">
+                <span class="x-chip green" style="margin-left: 6px">自签·自动Pin</span>
+              </el-tooltip>
+            </template>
           </el-table-column>
           <el-table-column label="到期" width="170">
             <template #default="{ row }">
@@ -158,6 +197,7 @@ function expireTag(row: any) {
             <div class="card-head">
               <div class="head-title">
                 <code class="cell-mono" style="font-weight: 700; color: var(--x-primary)">{{ row.domain }}</code>
+                <span v-if="row.self_signed" class="x-chip green" style="margin-left: 6px">自签·自动Pin</span>
               </div>
               <el-tag :type="expireTag(row).type" size="small">{{ expireTag(row).text }}</el-tag>
             </div>
@@ -196,6 +236,25 @@ function expireTag(row: any) {
         </div>
       </div>
     </BaseCard>
+
+    <el-dialog v-model="ssOpen" title="生成自签证书（链式代理 TLS 专用）" width="520px" :append-to-body="true">
+      <el-alert type="success" :closable="false" show-icon style="margin-bottom: 14px">
+        <p>生成 ECDSA P-256 十年期自签证书，主控自动计算 pin（SHA-256）并下发落地节点。</p>
+        <p>拓扑中引用该证书入站的中转出站将<b>自动注入 pinnedPeerCertSha256</b>——pin 命中即验证通过，自签亦可防 MITM；换证时两端配置自动联动重推。</p>
+      </el-alert>
+      <el-form label-position="top">
+        <el-form-item label="域名 / 节点标识（唯一）">
+          <el-input v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="ssForm.remark" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="ssOpen = false">取消</el-button>
+        <el-button type="success" :loading="ssSaving" @click="saveSelfSigned">生成并下发</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="formOpen" :title="editing ? '编辑证书（' + form.domain + '）' : '上传证书'" width="640px" :append-to-body="true">
       <el-form label-position="top">

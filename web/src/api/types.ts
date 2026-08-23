@@ -399,6 +399,8 @@ export interface CertItem {
   id: number
   domain: string
   not_after: string
+  pin_sha256: string // leaf DER SHA-256（hex），链式代理 TLS 中转出站自动 pin
+  self_signed: boolean // 面板一键生成的自签证书
   remark: string
   refs: CertRef[] // 引用该证书的入站位置（服务器/入站标签）
   created_at: string

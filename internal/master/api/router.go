@@ -239,6 +239,7 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/inbounds/:id/rotate-internal", d.AdminRotateInternal)
 			admin.GET("/certs", d.AdminCerts)
 			admin.POST("/certs", d.AdminCreateCert)
+			admin.POST("/certs/self-signed", d.AdminGenerateSelfSignedCert)
 			admin.PUT("/certs/:id", d.AdminUpdateCert)
 			admin.DELETE("/certs/:id", d.AdminDeleteCert)
 			admin.GET("/permission-groups", d.AdminPermissionGroups)

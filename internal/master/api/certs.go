@@ -9,6 +9,7 @@ import (
 
 	"github.com/acdc/xray-panel/internal/master/nodegate"
 	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/db"
 	"github.com/acdc/xray-panel/internal/pkg/protocol"
 	"github.com/acdc/xray-panel/internal/pkg/tlscert"
 	"github.com/acdc/xray-panel/internal/pkg/util"
@@ -24,20 +25,24 @@ type certRefView struct {
 
 // certView 证书对外结构（PEM 不回传，防私钥泄露）。
 type certView struct {
-	ID        uint64        `json:"id"`
-	Domain    string        `json:"domain"`
-	NotAfter  string        `json:"not_after"`
-	Remark    string        `json:"remark"`
-	Refs      []certRefView `json:"refs"` // 引用该证书的入站（服务器/标签）
-	CreatedAt string        `json:"created_at"`
+	ID         uint64        `json:"id"`
+	Domain     string        `json:"domain"`
+	NotAfter   string        `json:"not_after"`
+	PinSHA256  string        `json:"pin_sha256"`  // leaf DER SHA-256（hex），链式代理自动 pin
+	SelfSigned bool          `json:"self_signed"` // 面板一键生成的自签证书
+	Remark     string        `json:"remark"`
+	Refs       []certRefView `json:"refs"` // 引用该证书的入站（服务器/标签）
+	CreatedAt  string        `json:"created_at"`
 }
 
 func toCertView(c *models.Cert) certView {
 	return certView{
 		ID: c.ID, Domain: c.Domain,
-		NotAfter:  c.NotAfter.Format("2006-01-02 15:04"),
-		Remark:    c.Remark,
-		CreatedAt: c.CreatedAt.Format("2006-01-02 15:04"),
+		NotAfter:   c.NotAfter.Format("2006-01-02 15:04"),
+		PinSHA256:  c.PinSHA256,
+		SelfSigned: c.SelfSigned,
+		Remark:     c.Remark,
+		CreatedAt:  c.CreatedAt.Format("2006-01-02 15:04"),
 	}
 }
 
@@ -117,11 +122,51 @@ func (d *Deps) AdminCreateCert(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	pin, err := tlscert.PinSHA256Hex(req.CertPEM)
+	if err != nil {
+		util.BadRequest(c, "pin 计算失败: "+err.Error())
+		return
+	}
 	cert := models.Cert{
 		Domain: req.Domain, CertPEM: req.CertPEM, KeyPEM: req.KeyPEM,
-		NotAfter: notAfter, Remark: req.Remark,
+		NotAfter: notAfter, PinSHA256: pin, Remark: req.Remark,
 	}
 	if err := d.DB.Create(&cert).Error; err != nil {
+		util.ServerError(c, "创建失败")
+		return
+	}
+	d.pushCertToUsers(&cert)
+	util.OK(c, gin.H{"cert": toCertView(&cert)})
+}
+
+// AdminGenerateSelfSignedCert POST /api/v1/admin/certs/self-signed —— 一键生成自签证书。
+// 链式代理 TLS 场景：面板生成 ECDSA P-256 十年期自签证书并计算 pin；
+// 中转出站生成时自动注入 pinnedPeerCertSha256（pin 命中即验证通过，自签亦防 MITM）。
+func (d *Deps) AdminGenerateSelfSignedCert(c *gin.Context) {
+	var req struct {
+		Domain string `json:"domain" binding:"required,max=128"`
+		Remark string `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	certPEM, keyPEM, err := tlscert.GenerateSelfSigned(req.Domain)
+	if err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
+	notAfter, _ := tlscert.NotAfter(certPEM) // 生成即合法，忽略错误
+	pin, _ := tlscert.PinSHA256Hex(certPEM)
+	cert := models.Cert{
+		Domain: req.Domain, CertPEM: certPEM, KeyPEM: keyPEM,
+		NotAfter: notAfter, PinSHA256: pin, SelfSigned: true, Remark: req.Remark,
+	}
+	if err := d.DB.Create(&cert).Error; err != nil {
+		if db.IsUniqueViolation(err, "certs.domain") {
+			util.BadRequest(c, "该域名证书已存在")
+			return
+		}
 		util.ServerError(c, "创建失败")
 		return
 	}
@@ -169,9 +214,16 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 			util.BadRequest(c, err.Error())
 			return
 		}
+		pin, err := tlscert.PinSHA256Hex(*req.CertPEM)
+		if err != nil {
+			util.BadRequest(c, "pin 计算失败: "+err.Error())
+			return
+		}
 		updates["cert_pem"] = *req.CertPEM
 		updates["key_pem"] = *req.KeyPEM
 		updates["not_after"] = notAfter
+		updates["pin_sha256"] = pin
+		updates["self_signed"] = false // 手工换证后不再是面板生成的自签证书
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&cert).Updates(updates).Error; err != nil {
@@ -180,8 +232,36 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 		}
 		d.DB.First(&cert, id)
 		d.pushCertToUsers(&cert)
+		if req.CertPEM != nil {
+			// 换证联动：pin 变化 → 引用该证书入站的中转出站配置必须重推（pin 注入在出站侧）
+			d.reenqueueRelayConfigsForCert(cert.ID)
+		}
 	}
 	util.OK(c, gin.H{"cert": toCertView(&cert)})
+}
+
+// reenqueueRelayConfigsForCert 换证/重签后重推中转配置：
+// 找到引用该证书的入站 → 找出所有 InboundRef 指向这些入站的出站所在服务器 → 重新生成并推送。
+// 落地节点自身无需重推配置（证书路径不变，push_cert 已更新文件内容，xray 热重载）。
+func (d *Deps) reenqueueRelayConfigsForCert(certID uint64) {
+	var inbounds []models.Inbound
+	if err := d.DB.Select("id").Where("cert_id = ?", certID).Find(&inbounds).Error; err != nil || len(inbounds) == 0 {
+		return
+	}
+	inboundIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		inboundIDs = append(inboundIDs, inb.ID)
+	}
+	var relayOutbounds []models.ServerOutbound
+	if err := d.DB.Select("server_id").Distinct("server_id").
+		Where("inbound_ref IN ?", inboundIDs).Find(&relayOutbounds).Error; err != nil {
+		return
+	}
+	for _, ob := range relayOutbounds {
+		if err := d.enqueueConfig(ob.ServerID); err != nil {
+			log.Printf("certs: 换证联动重推服务器 %d 配置失败: %v", ob.ServerID, err)
+		}
+	}
 }
 
 // AdminDeleteCert DELETE /api/v1/admin/certs/:id —— 有入站引用时拒绝。

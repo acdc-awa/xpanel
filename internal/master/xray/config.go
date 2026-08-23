@@ -507,7 +507,13 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 			serverName = t.ServerName
 		}
 		// 注意：v26.6.27 已移除 allowInsecure（迁移 pinnedPeerCertSha256/verifyPeerCertByName），不输出
-		ss["tlsSettings"] = map[string]any{"serverName": serverName}
+		tlsSettings := map[string]any{"serverName": serverName}
+		// 链式代理证书固定：目标入站绑定的证书带 pin（面板生成/上传时自动计算入库）时注入，
+		// pin 命中即验证通过——自签证书链路亦防 MITM（v26.6.27 实测字段为 leaf DER 的 64 位小写 hex）。
+		if target.CertPin != "" {
+			tlsSettings["pinnedPeerCertSha256"] = target.CertPin
+		}
+		ss["tlsSettings"] = tlsSettings
 	}
 	item["streamSettings"] = ss
 }
