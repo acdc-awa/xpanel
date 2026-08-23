@@ -1,8 +1,9 @@
 services:
   master:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      # 上下文 = master 与 agent 两仓库的容器目录（XPanel-Node 发布后可改回 master 仓库根 ../..）
+      context: ../../..
+      dockerfile: master/Dockerfile
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-prod}

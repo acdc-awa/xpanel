@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -15,22 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc-awa/xpanel/internal/master/embed"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
-
-// agentDownloadHeaders 计算 /download/agent 下载响应头（version 为空则不发送版本头）。
-// embed 与非 embed 路径共用；agent 升级（internal/agent/upgrade）以此为契约。
-func agentDownloadHeaders(data []byte, version string) (versionHdr, shaHdr string) {
-	if version != "" {
-		versionHdr = version
-	}
-	sum := sha256.Sum256(data)
-	shaHdr = hex.EncodeToString(sum[:])
-	return
-}
 
 // maskSensitivePath 对访问日志中的敏感路径脱敏（订阅 token、节点 secret 等）。
 func maskSensitivePath(p string) string {
@@ -133,46 +119,9 @@ func (d *Deps) NewRouter() *gin.Engine {
 		v1.GET("/plans", d.PublicPlans)
 		v1.GET("/notices", d.UserListNotices)
 
-		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh）
+		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh。
+		// agent 二进制改由 XPanel-Node 仓库 GitHub Releases 分发，面板不再内置）
 		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
-
-		// 节点 Agent 二进制下载（部署用；J19-④ 限流防盗刷）
-		v1.GET("/download/agent", middleware.RateLimit(60, time.Minute), func(c *gin.Context) {
-			var data []byte
-			if len(embed.AgentBinary) > 0 {
-				data = embed.AgentBinary
-			} else {
-				p := os.Getenv("AGENT_BIN_PATH")
-				if p == "" {
-					p = "/app/agent"
-				}
-				if _, err := os.Stat(p); err != nil {
-					p = ""
-					for _, cand := range []string{"agent-linux", "bin/agent-linux"} {
-						if _, err := os.Stat(cand); err == nil {
-							p = cand
-							break
-						}
-					}
-				}
-				if p == "" {
-					util.Fail(c, http.StatusNotFound, "agent 二进制未内置（请用 scripts/build.sh 或 build.ps1 构建，或设置 AGENT_BIN_PATH）")
-					return
-				}
-				var err error
-				if data, err = os.ReadFile(p); err != nil {
-					util.Fail(c, http.StatusInternalServerError, "读取 agent 二进制失败: "+err.Error())
-					return
-				}
-			}
-			verHdr, shaHdr := agentDownloadHeaders(data, embed.AgentVersion)
-			if verHdr != "" {
-				c.Header("X-Agent-Version", verHdr)
-			}
-			c.Header("X-Agent-Sha256", shaHdr)
-			c.Header("Content-Disposition", `attachment; filename="xray-agent"`)
-			c.Data(http.StatusOK, "application/octet-stream", data)
-		})
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",

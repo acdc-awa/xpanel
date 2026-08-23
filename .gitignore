@@ -38,14 +38,9 @@ tools/**/*.out
 data/
 /bin/
 /tmp/
-agent-linux
-internal/master/embed/agent-linux
-
-# root 构建产物（go build ./cmd/master 出 master.exe / master；go build ./cmd/agent 出 agent.exe / agent；root 锚定，避免误伤源码目录）
+# root 构建产物（go build ./cmd/master 出 master.exe / master；root 锚定，避免误伤源码目录）
 /master
 /master.exe
-/agent
-/agent.exe
 
 # 本地配置（含 JWT secret / 管理员口令，不入库；参考 configs/config.example.yaml）
 configs/config.yaml
@@ -55,9 +50,6 @@ configs/config.yaml
 .claude/
 .zcode/
 
-# 自升级分发包与临时备份（.gitignore 显式忽略，防污染 git 树）
-internal/master/embed/agent-dist/
-internal/master/embed/agent-dist/**
 
 
 # 外部参考仓库素材（XTLS/REALITY、Xray-examples、chika0801、lxhao61 等；提炼文档入库，素材不入库）
