@@ -13,6 +13,7 @@ import (
 
 	"github.com/acdc/xray-panel/internal/master/middleware"
 	"github.com/acdc/xray-panel/internal/models"
+	"github.com/acdc/xray-panel/internal/pkg/db"
 	"github.com/acdc/xray-panel/internal/pkg/util"
 )
 
@@ -210,7 +211,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		ExpireAt:          req.ExpireAt,
 	}
 	if err := d.DB.Create(&user).Error; err != nil {
-		if err.Error() == "UNIQUE constraint failed: users.username" {
+		if db.IsUniqueViolation(err, "users.username") {
 			util.BadRequest(c, "该邮箱已用作用户名")
 		} else {
 			util.ServerError(c, "创建失败")

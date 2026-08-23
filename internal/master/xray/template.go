@@ -50,11 +50,29 @@ func SetTemplate(data []byte) error {
 	return nil
 }
 
-// cloneMap 浅拷贝一层 map，避免调用方修改共享缓存。
+// cloneMap 深拷贝模板（含嵌套 map/slice）。
+// 必须深拷贝：Generate 会原地改写嵌套段（如向出站 settings 注入 domainStrategy、
+// 改写 vnext users），浅拷贝会污染共享缓存，导致跨服务器配置串扰与并发数据竞争。
 func cloneMap(src map[string]any) map[string]any {
 	dst := make(map[string]any, len(src))
 	for k, v := range src {
-		dst[k] = v
+		dst[k] = deepCopyValue(v)
 	}
 	return dst
+}
+
+// deepCopyValue 递归复制 JSON 派生值（map/slice/标量）。
+func deepCopyValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return cloneMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = deepCopyValue(item)
+		}
+		return out
+	default:
+		return v // 标量（string/float64/bool/nil）不可变，直接复用
+	}
 }

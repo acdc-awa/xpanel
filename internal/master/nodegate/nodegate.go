@@ -3,12 +3,14 @@
 package nodegate
 
 import (
+	"crypto/subtle"
 	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,13 +39,13 @@ type Conn struct {
 	WS       *websocket.Conn
 	Send     chan []byte
 	done     chan struct{} // 关闭信号：通知 writePump 退出（代替关闭 Send，避免与并发 Send 竞态）
-	LastSeen int64         // unix 秒
+	LastSeen atomic.Int64  // unix 秒：readPump/pong 写，IsOnline/watchdog 读，必须原子
 	mu       sync.Mutex
 	closed   bool
 }
 
 // touch 更新最近活跃时间。
-func (c *Conn) touch() { c.LastSeen = time.Now().Unix() }
+func (c *Conn) touch() { c.LastSeen.Store(time.Now().Unix()) }
 
 // closeSafe 幂等关闭：置 closed、关闭 done 通知 writePump 退出、关闭 WS。
 // 注意：这里刻意不 close(c.Send)——Send 通道可能正被并发 Send/Ask 选中发送，
@@ -158,8 +160,8 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		WS:       ws,
 		Send:     make(chan []byte, 64),
 		done:     make(chan struct{}),
-		LastSeen: time.Now().Unix(),
 	}
+	conn.LastSeen.Store(time.Now().Unix())
 	h.register(conn)
 	_ = h.writeRaw(ws, "auth_ok", msg.ID, protocol.ResultPayload{OK: true})
 	_ = ws.SetReadDeadline(time.Time{})
@@ -187,7 +189,8 @@ func (h *Hub) authenticate(a protocol.AuthPayload) (*models.Server, error) {
 		}
 		return nil, errors.New("数据库错误")
 	}
-	if util.HashSecret(a.Secret) != server.Secret {
+	// 无认证端点上的密钥比较必须恒定时间，防按字节猜解的时序侧信道。
+	if subtle.ConstantTimeCompare([]byte(util.HashSecret(a.Secret)), []byte(server.Secret)) != 1 {
 		return nil, errors.New("节点密钥错误")
 	}
 	return &server, nil
@@ -379,7 +382,7 @@ func (h *Hub) IsOnline(serverID uint64) bool {
 	if !ok {
 		return false
 	}
-	return time.Since(time.Unix(conn.LastSeen, 0)) < HeartbeatTimeout
+	return time.Since(time.Unix(conn.LastSeen.Load(), 0)) < HeartbeatTimeout
 }
 
 // Send 向节点发送消息（不等待回执）。
@@ -506,7 +509,7 @@ func (h *Hub) watchdog() {
 			h.mu.RLock()
 			var stale []*Conn
 			for _, c := range h.conns {
-				if time.Since(time.Unix(c.LastSeen, 0)) > HeartbeatTimeout {
+				if time.Since(time.Unix(c.LastSeen.Load(), 0)) > HeartbeatTimeout {
 					stale = append(stale, c)
 				}
 			}

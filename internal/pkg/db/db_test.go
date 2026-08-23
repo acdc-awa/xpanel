@@ -11,8 +11,10 @@ import (
 
 func TestSQLiteDSNBusyTimeout(t *testing.T) {
 	plain := sqliteDSN("./data/panel.db")
-	if !strings.Contains(plain, "_pragma=busy_timeout(5000)") {
-		t.Fatalf("plain dsn 应追加 busy_timeout, got %q", plain)
+	for _, pragma := range []string{"_pragma=busy_timeout(5000)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(NORMAL)"} {
+		if !strings.Contains(plain, pragma) {
+			t.Fatalf("plain dsn 应追加 %s, got %q", pragma, plain)
+		}
 	}
 	if strings.Count(plain, "?") != 1 {
 		t.Fatalf("plain dsn 只应有一个问号, got %q", plain)

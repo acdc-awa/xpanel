@@ -37,13 +37,14 @@ func newTestHub(t *testing.T) *Hub {
 
 // newTestConn 构造测试连接（WS 可为 nil，closeSafe 对 nil 容错）。
 func newTestConn(serverID uint64) *Conn {
-	return &Conn{
+	c := &Conn{
 		ServerID: serverID,
 		NodeID:   "test-node",
 		Send:     make(chan []byte, 64),
 		done:     make(chan struct{}),
-		LastSeen: time.Now().Unix(),
 	}
+	c.LastSeen.Store(time.Now().Unix())
+	return c
 }
 
 // TestSendRaceWithUnregister 复现"节点重连替换旧连接"与并发 Send/Ask 的竞态：

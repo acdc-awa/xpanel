@@ -66,7 +66,7 @@ func (s *GiftCardService) BatchGenerate(adminID uint64, count int, name string, 
 	return cards, nil
 }
 
-// Redeem 兑换礼品卡充值余额（原子事务 + 行级锁）。
+// Redeem 兑换礼品卡充值余额（原子事务 + 行锁；SQLite 下 FOR UPDATE 被驱动丢弃，由 pkg/db 单连接池串行兜底）。
 func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, int64, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {

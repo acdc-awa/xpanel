@@ -43,18 +43,23 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			return errors.New("套餐未上架")
 		}
 
-		// 幂等：窗口内已支付同套餐 → 直接复用
+		// 先锁用户行：序列化同一用户的并发支付。
+		// 注意方言差异：SQLite 驱动静默丢弃 FOR UPDATE，由 pkg/db 的单连接池串行兜底；
+		// MySQL 下此行锁真实生效，是防双扣款的关键。
+		var user models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+			return errors.New("用户不存在")
+		}
+
+		// 幂等：窗口内已支付同套餐 → 直接复用。
+		// 必须在行锁之后检查：MySQL 并发事务各自持旧快照，锁前检查会双双通过（TOCTOU 双扣款）；
+		// 锁后由 InnoDB 等待-提交顺序保证看到对方已提交的订单。
 		var recent models.Order
 		if err := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND created_at >= ?",
 			userID, planID, models.OrderPaid, time.Now().Add(-payIdempotentWindow)).
 			Order("id DESC").First(&recent).Error; err == nil {
 			order = &recent
 			return nil
-		}
-
-		var user models.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
-			return errors.New("用户不存在")
 		}
 
 		if user.BalanceCents < plan.PriceCents {

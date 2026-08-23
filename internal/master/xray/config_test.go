@@ -973,3 +973,80 @@ func TestGenerate_BlockCN(t *testing.T) {
 	}
 }
 
+
+// TestTemplateCacheNotPolluted 回归：自定义 DB 模板 + 默认出口 domainStrategy 注入
+// 不得污染共享模板缓存。修复前 cloneMap 仅浅拷贝顶层，Generate 原地改写嵌套
+// settings（config.go 默认出口 DS 注入段），会导致：①服务器 A（DS=UseIPv4）生成后，
+// 服务器 B（DS 空）继承 A 的值——配置跨服务器串扰；②并发 Generate 对共享 map
+// 读写构成数据竞争（race 必报）。
+func TestTemplateCacheNotPolluted(t *testing.T) {
+	t.Cleanup(func() { _ = xray.SetTemplate(nil) }) // 模板缓存为包级全局，用后还原
+
+	custom := `{
+		"log": {"loglevel": "warning"},
+		"stats": {},
+		"policy": {"levels": {"0": {"statsUserUplink": true, "statsUserDownlink": true}}},
+		"inbounds": [],
+		"outbounds": [
+			{"protocol": "freedom", "tag": "direct", "settings": {}},
+			{"protocol": "blackhole", "tag": "blocked"}
+		],
+		"routing": {"rules": []}
+	}`
+	if err := xray.SetTemplate([]byte(custom)); err != nil {
+		t.Fatalf("SetTemplate failed: %v", err)
+	}
+
+	inbounds := []models.Inbound{{
+		ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443,
+		StreamSettings: inbStream("tcp", "none", ""), Enabled: true,
+	}}
+	users := vlessUsers("vless-in")
+
+	directDS := func(rawCfg []byte) string {
+		var parsed map[string]any
+		if err := json.Unmarshal(rawCfg, &parsed); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+		for _, item := range asArray(t, parsed["outbounds"], "outbounds") {
+			m := asObject(t, item, "outbound")
+			if m["tag"] == "direct" {
+				settings := asObject(t, m["settings"], "direct.settings")
+				ds, _ := settings["domainStrategy"].(string)
+				return ds
+			}
+		}
+		t.Fatal("direct outbound not found")
+		return ""
+	}
+
+	// 服务器 A：DS=UseIPv4 → 注入生效
+	rawA, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "", "UseIPv4")
+	if err != nil {
+		t.Fatalf("Generate A failed: %v", err)
+	}
+	if ds := directDS(rawA); ds != "UseIPv4" {
+		t.Fatalf("服务器 A 的 direct.domainStrategy = %q, 期望 UseIPv4", ds)
+	}
+
+	// 缓存本体不得被 A 的注入污染
+	cached := xray.LoadTemplate()
+	for _, item := range asArray(t, cached["outbounds"], "cached.outbounds") {
+		m := asObject(t, item, "cached.outbound")
+		if m["tag"] == "direct" {
+			settings := asObject(t, m["settings"], "cached.direct.settings")
+			if ds, _ := settings["domainStrategy"].(string); ds != "" {
+				t.Fatalf("模板缓存被污染：cached direct.domainStrategy = %q", ds)
+			}
+		}
+	}
+
+	// 服务器 B：DS 为空 → 不得继承 A 注入的 UseIPv4
+	rawB, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "")
+	if err != nil {
+		t.Fatalf("Generate B failed: %v", err)
+	}
+	if ds := directDS(rawB); ds != "" {
+		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q", ds)
+	}
+}
