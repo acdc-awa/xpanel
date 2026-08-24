@@ -24,14 +24,16 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│           用户自备反向代理 (Caddy/Nginx) —— TLS 终止 + 域名/路径分流            │
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │ 127.0.0.1:18080 / 18081 / 18082 / 6000
+┌───────────────────────────────────┴─────────────────────────────────────────┐
 │                           Master 主控控制面 (Docker)                          │
 │                                                                             │
 │  ┌────────────────────────┐  ┌─────────────────────────┐  ┌──────────────┐  │
-│  │ Vue3 + Element Plus    │  │ Gin REST API + JWT 鉴权 │  │ Caddy 反代   │  │
-│  │ 管理端 & 用户端 SPA    │  │ 订阅服务 (Clash / VLESS)│  │ (自动SSL证书)│  │
+│  │ Vue3 + Element Plus    │  │ Gin REST API + JWT 鉴权 │  │ 节点 WS 网关 │  │
+│  │ 管理端 & 用户端 SPA    │  │ 订阅服务 (Clash / VLESS)│  │ (WSS 长连接) │  │
 │  └────────────────────────┘  └─────────────────────────┘  └──────────────┘  │
-│                                      │                                      │
-│                           WebSocket WSS 节点通信网关                         │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │ (双向长连接: 心跳 / 流量上报 / 配置热推)
              ┌─────────────────────────┴─────────────────────────┐
@@ -83,7 +85,7 @@
 
 ## 🚀 快速部署指南
 
-生产环境推荐使用 **Docker Compose + Caddy** 部署主控（Master），一键全自动申请 SSL 证书。
+生产环境推荐使用 **Docker Compose** 部署主控（Master），TLS 终止与域名/路径分流由**你自己部署的反向代理**（Caddy / Nginx 等）承担，本项目不随 compose 部署任何反代。
 
 ### 第一步：部署主控（Master）
 
@@ -98,15 +100,14 @@ cp .env.example .env
 ```
 
 #### 2. 配置 `.env`
-编辑 `.env` 文件，填入你的面板域名与订阅域名（可选）：
+编辑 `.env` 文件，填入你的面板公网地址与订阅域名（可选）：
 
 ```ini
-# 面板域名（Caddy 将自动申请并续签免费 HTTPS 证书）
-SITE_ADDRESS=panel.yourdomain.com
+# 面板公网地址（生成节点一键安装命令与订阅地址用）
 APP_PUBLIC_URL=https://panel.yourdomain.com
 
-# 订阅域名：整域反代到订阅端口（可选；不填则订阅走面板域名 + 订阅路径）
-# SUB_SITE_ADDRESS=sub.yourdomain.com
+# 节点 WS 对外地址（可选；不填则用面板域名 + /node/ws）
+# APP_WS_PUBLIC_URL=wss://ws.yourdomain.com/node/ws
 
 # JWT 密钥与默认管理员账密均不预设（防默认密码攻击）：
 # 留空=首次启动自动生成——JWT 密钥持久化到 DB，管理员密码在控制台高亮显示（docker compose logs master）
@@ -116,14 +117,32 @@ APP_PUBLIC_URL=https://panel.yourdomain.com
 > 四端口模型：面板由四个独立监听端口组成——**SPA 前端**（`APP_PORT`，默认 18080）、
 > **后端 API**（`APP_API_PORT`，默认 18081）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
 > 对外路径 `/node/ws`，可用 `APP_WS_PUBLIC_URL` 整体覆盖）、**订阅**（`APP_SUB_PORT`，默认 6000）。
-> 四个端口均在容器内网，由 Caddy 按域名/路径分流（详见 `.env.example` 注释与 `deploy/master/Caddyfile`）。
+> 四个端口默认只绑定宿主机 `127.0.0.1`（改 `BIND_ADDR=0.0.0.0` 可对全网卡开放，用于反代与面板
+> 不在同一台机的拓扑），由你自己部署的反代按域名/路径分流（参考模板见 `deploy/master/Caddyfile`）。
 
 #### 3. 启动容器
 ```bash
 docker compose up -d
 ```
 
-#### 4. 获取初始管理员密码
+#### 4. 配置反向代理（自备）
+本项目不再部署 Caddy，TLS 终止与 `443` 端口由你的反代接管。以 Caddy 为例，挂载仓库附带的参考模板即可（模板内已按 127.0.0.1 upstream 配置好四端口分流规则）：
+
+```bash
+docker run -d --name caddy \
+  -p 80:80 -p 443:443 \
+  -v /opt/xray-panel/deploy/master/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v caddy-data:/data -v caddy-config:/config \
+  -e SITE_ADDRESS=panel.yourdomain.com \
+  -e SUB_SITE_ADDRESS=sub.yourdomain.com \
+  caddy:2-alpine
+```
+
+- `SITE_ADDRESS` 为面板域名，Caddy 自动申请并续签 HTTPS 证书；`SUB_SITE_ADDRESS` 为订阅独立域名（可选，不用可删掉模板中对应段）；
+- 使用 Nginx 等其他反代时，按模板注释中的分流规则自行编写即可（`/node/ws` 规则必须先于 `/api/*`）；
+- 反代与面板同机时保持 `BIND_ADDR=127.0.0.1` 即可，反代容器通过 `host.docker.internal` 或宿主机网卡访问四个端口。
+
+#### 5. 获取初始管理员密码
 查看控制台日志，复制系统生成的初始高强随机密码：
 ```bash
 docker compose logs master
@@ -184,7 +203,7 @@ docker compose exec master /app/master reset-admin -password "MyNewPass2026#!"
 ### 2. 主控一键平滑升级
 ```bash
 cd /opt/xray-panel
-docker compose pull
+docker compose build --pull
 docker compose up -d --remove-orphans
 ```
 
@@ -264,7 +283,7 @@ bash tests/run_e2e.sh
 | **前端框架** | **Vue 3.5 + Vite + TypeScript** | 组合式 API (Composition API)、Pinia 状态机 |
 | **UI 组件库** | **Element Plus + SCSS** | SaaS 级响应式质感设计、深色/浅色优雅适配 |
 | **拓扑画布** | **@vue-flow/core** | 自定义节点、贝塞尔绕行算法、DAG 分层排版 |
-| **反向代理** | **Caddy 2 (内置自动化 HTTPS)** | 自动申请/续签 TLS 证书、透明 WebSocket 升级 |
+| **反向代理** | **用户自备（Caddy 2 / Nginx 等）** | 由用户部署的反代卸载 TLS、按域名/路径分流；仓库提供参考模板 `deploy/master/Caddyfile`，四端口默认仅绑 `127.0.0.1` |
 | **安全与认证** | **JWT (HMAC-SHA256) + Argon2id + TOTP** | 无状态鉴权、会话版本吊销、多因素认证 |
 
 ---

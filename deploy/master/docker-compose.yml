@@ -5,12 +5,19 @@ services:
       context: ../..
       dockerfile: Dockerfile
     restart: unless-stopped
+    ports:
+      # 四端口绑定宿主机；默认仅回环 127.0.0.1，由用户自备的反代（Caddy/Nginx 等）访问。
+      # 改 BIND_ADDR=0.0.0.0 可对全网卡开放（反代与面板不在同一台机时用，注意自行收紧防火墙）。
+      - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-18080}:${APP_PORT:-18080}"          # SPA 前端
+      - "${BIND_ADDR:-127.0.0.1}:${APP_API_PORT:-18081}:${APP_API_PORT:-18081}"  # 后端 HTTP API + 探针
+      - "${BIND_ADDR:-127.0.0.1}:${APP_WS_PORT:-18082}:${APP_WS_PORT:-18082}"    # 节点 WebSocket 网关
+      - "${BIND_ADDR:-127.0.0.1}:${APP_SUB_PORT:-6000}:${APP_SUB_PORT:-6000}"    # 订阅独立端口（0=禁用订阅服务；设为 0 时请删除本行）
     environment:
       APP_ENV: ${APP_ENV:-prod}
-      APP_PORT: ${APP_PORT:-18080}          # SPA 前端（容器内网，仅 Caddy 可达）
-      APP_API_PORT: ${APP_API_PORT:-18081}  # 后端 HTTP API + 探针（容器内网）
-      APP_WS_PORT: ${APP_WS_PORT:-18082}    # 节点 WebSocket 网关（容器内网）
-      APP_SUB_PORT: ${APP_SUB_PORT:-6000}   # 订阅独立端口（容器内网）
+      APP_PORT: ${APP_PORT:-18080}          # SPA 前端
+      APP_API_PORT: ${APP_API_PORT:-18081}  # 后端 HTTP API + 探针
+      APP_WS_PORT: ${APP_WS_PORT:-18082}    # 节点 WebSocket 网关
+      APP_SUB_PORT: ${APP_SUB_PORT:-6000}   # 订阅独立端口
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}   # 面板公网地址（如 https://panel.example.com）；空=按请求 Host
       APP_WS_PUBLIC_URL: ${APP_WS_PUBLIC_URL:-}  # 节点 WS 对外地址（如 wss://ws.example.com/node/ws）；空=面板域名 + /node/ws
       DB_DRIVER: sqlite
@@ -25,31 +32,12 @@ services:
     volumes:
       - master-data:/app/data
     healthcheck:
-      # 四端口拆分：存活/就绪探针挂在后端 API 端口
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18081/readyz"]
+      # 四端口拆分：存活/就绪探针挂在后端 API 端口（跟随 APP_API_PORT）
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${APP_API_PORT:-18081}/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-:80}          # 面板域名（如 panel.example.com）
-      SUB_SITE_ADDRESS: ${SUB_SITE_ADDRESS:-}     # 订阅域名（如 sub.example.com）；空=不启用订阅域名块
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      master:
-        condition: service_healthy
-
 volumes:
   master-data:
-  caddy-data:
-  caddy-config:
