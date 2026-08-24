@@ -1,12 +1,14 @@
 package services
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
@@ -137,5 +139,108 @@ func TestResetInboundTrafficOncePerPeriod(t *testing.T) {
 	db.First(&inb, inb.ID)
 	if inb.Up != 50 || inb.Down != 60 {
 		t.Fatalf("second tick in same period should not reset, got up=%d down=%d", inb.Up, inb.Down)
+	}
+}
+
+// TestSaveDuplicateDeliveryMergesAndBumpsInbound 同 (user, inbound, period) 重复投递：
+// TrafficLog 合并为一行且字节累加，inbounds 每次投递都补计（P1-1）。
+func TestSaveDuplicateDeliveryMergesAndBumpsInbound(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-08-24T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{UserID: 42, Inbound: "vless-in", UpBytes: 100, DownBytes: 200},
+		},
+	}
+	for i := 0; i < 2; i++ {
+		if err := svc.Save(payload, 1); err != nil {
+			t.Fatalf("Save #%d: %v", i+1, err)
+		}
+	}
+
+	var logs []models.TrafficLog
+	if err := db.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("TrafficLog 行数 = %d, want 1（重复投递应合并）", len(logs))
+	}
+	if logs[0].UpBytes != 200 || logs[0].DownBytes != 400 {
+		t.Fatalf("合并后 up=%d down=%d, want 200/400", logs[0].UpBytes, logs[0].DownBytes)
+	}
+	if err := db.First(&inb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inb.Up != 200 || inb.Down != 400 {
+		t.Fatalf("inbounds 补计 up=%d down=%d, want 200/400", inb.Up, inb.Down)
+	}
+}
+
+// TestSaveConcurrentDuplicateDeliveryMerges 并发双投同 (user, inbound, period)：
+// upsert 合并为一行、全部字节累加、inbounds 补计齐全（P1-1 并发路径）。
+func TestSaveConcurrentDuplicateDeliveryMerges(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=busy_timeout(5000)"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-08-24T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{UserID: 42, Inbound: "vless-in", UpBytes: 100, DownBytes: 200},
+		},
+	}
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = svc.Save(payload, 1)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("并发 Save #%d: %v", i, err)
+		}
+	}
+
+	var logs []models.TrafficLog
+	if err := db.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("TrafficLog 行数 = %d, want 1（并发双投应合并为一行）", len(logs))
+	}
+	if logs[0].UpBytes != 100*n || logs[0].DownBytes != 200*n {
+		t.Fatalf("并发合并后 up=%d down=%d, want %d/%d", logs[0].UpBytes, logs[0].DownBytes, 100*n, 200*n)
+	}
+	if err := db.First(&inb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inb.Up != 100*n || inb.Down != 200*n {
+		t.Fatalf("inbounds 并发补计 up=%d down=%d, want %d/%d", inb.Up, inb.Down, 100*n, 200*n)
 	}
 }

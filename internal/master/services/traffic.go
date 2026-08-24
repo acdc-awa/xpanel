@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
-	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // 数据保留与聚合窗口（ISSUE-09）。
@@ -36,7 +37,8 @@ func (s *TrafficService) nowOrReal() time.Time {
 	return time.Now()
 }
 
-// Save 处理 traffic_report（幂等：同一 (user, inbound, period) 覆盖合并）。
+// Save 处理 traffic_report（P1-1：单事务 + upsert 合并——并发/重复投递在唯一索引
+// (user_id, inbound_id, period_start) 上自动累加，不再撞索引报错；每次投递统一补计入站计数）。
 // serverID 用于把上报的入站 tag 解析为入站 ID（2026-08-14 J10：入站级统计激活）。
 func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64) error {
 	periodStart, err := time.Parse(time.RFC3339, tr.Period)
@@ -54,73 +56,70 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 	}
 
-	for i := range tr.Entries {
-		e := &tr.Entries[i]
-		if e.UpBytes <= 0 && e.DownBytes <= 0 {
-			continue
-		}
-		// 主控解析 user_id（Agent 按 email 上报）
-		userID := e.UserID
-		if userID == 0 {
-			if e.Email == "" {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		for i := range tr.Entries {
+			e := &tr.Entries[i]
+			if e.UpBytes <= 0 && e.DownBytes <= 0 {
 				continue
 			}
-			// 优先解析固定格式 user-<id>@panel.local（主控生成配置时使用）
-			if id, ok := parsePanelEmail(e.Email); ok {
-				userID = id
-			} else {
-				var user models.User
-				if err := s.DB.Where("email = ?", e.Email).First(&user).Error; err != nil {
-					if errors.Is(err, gorm.ErrRecordNotFound) {
-						continue // 未知用户（未注册/email 不匹配），跳过
-					}
-					return err
+			// 主控解析 user_id（Agent 按 email 上报）
+			userID := e.UserID
+			if userID == 0 {
+				if e.Email == "" {
+					continue
 				}
-				userID = user.ID
+				// 优先解析固定格式 user-<id>@panel.local（主控生成配置时使用）
+				if id, ok := parsePanelEmail(e.Email); ok {
+					userID = id
+				} else {
+					var user models.User
+					if err := tx.Where("email = ?", e.Email).First(&user).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							continue // 未知用户（未注册/email 不匹配），跳过
+						}
+						return err
+					}
+					userID = user.ID
+				}
 			}
-		}
 
-		// 入站 tag → ID（agent 按 tag 上报；未知 tag 按 0 处理，用户级统计不受影响）
-		inboundID := inboundIDByTag[e.Inbound]
+			// 入站 tag → ID（agent 按 tag 上报；未知 tag 按 0 处理，用户级统计不受影响）
+			inboundID := inboundIDByTag[e.Inbound]
 
-		var log models.TrafficLog
-		err := s.DB.Where(
-			"user_id = ? AND inbound_id = ? AND period_start = ?",
-			userID, inboundID, periodStart,
-		).First(&log).Error
-
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := s.DB.Create(&models.TrafficLog{
+			// P1-1：upsert 合并——唯一索引 (user_id, inbound_id, period_start) 兜底，
+			// 并发/重复投递自动累加而非撞索引报错丢弃（替代原 select-then-create 竞态路径）
+			log := models.TrafficLog{
 				UserID:      userID,
 				InboundID:   inboundID, // 2026-08-14 J10：原恒为 0，入站级统计整条链空转
 				UpBytes:     e.UpBytes,
 				DownBytes:   e.DownBytes,
 				PeriodStart: periodStart,
 				PeriodEnd:   periodEnd,
-			}).Error; err != nil {
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"},
+				},
+				DoUpdates: clause.Assignments(map[string]any{
+					"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
+					"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
+					"period_end": gorm.Expr("excluded.period_end"),
+				}),
+			}).Create(&log).Error; err != nil {
 				return err
 			}
-			// 入站冗余计数累计（仅首次创建时；重复投递由 TrafficLog 合并口径覆盖，避免重复累计）
+			// 入站冗余计数累计（P1-1：每次投递统一补计一次，与 TrafficLog 合并口径一致）
 			if inboundID > 0 {
-				s.DB.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
+				if err := tx.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
 					"up":   gorm.Expr("up + ?", e.UpBytes),
 					"down": gorm.Expr("down + ?", e.DownBytes),
-				})
+				}).Error; err != nil {
+					return err
+				}
 			}
-		} else if err == nil {
-			// 重复投递：合并累加
-			if err := s.DB.Model(&log).Updates(map[string]any{
-				"up_bytes":   gorm.Expr("up_bytes + ?", e.UpBytes),
-				"down_bytes": gorm.Expr("down_bytes + ?", e.DownBytes),
-				"period_end": periodEnd,
-			}).Error; err != nil {
-				return err
-			}
-		} else {
-			return err
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // UserUsed 用户当前计费周期内已用总流量（字节）。
