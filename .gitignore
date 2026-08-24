@@ -63,3 +63,6 @@ tools/xray-windows-64/wintun.dll
 tools/xray-windows-64/xray_no_window.*
 # UI audit artifacts (Playwright screenshots / temp verify reports)
 ui-audit-screenshots/
+
+# 项目文档（设计/部署/归档）留在本地开发机，不推送到远端仓库
+docs/
