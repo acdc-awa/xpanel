@@ -89,6 +89,13 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		l4RuleMap[r.ID] = r
 	}
 
+	var allLayers []models.AccessLayer
+	_ = d.DB.Find(&allLayers).Error
+	layerMap := make(map[uint64]models.AccessLayer)
+	for _, l := range allLayers {
+		layerMap[l.ID] = l
+	}
+
 	// 2. 用户接入点（订阅的唯一入口；严格白名单：未绑定权限组 = 全员不可见）
 	dtos := make([]contracts.ProxyNodeDTO, 0)
 	var userAPs []models.UserAccessPoint
@@ -113,7 +120,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			}
 
 			// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址）→ 经 L4 覆写为转发端点 → AP 消费（命名/可选覆写）
-			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4RuleMap, user.UUID)
+			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4RuleMap, layerMap, user.UUID)
 			if dto == nil {
 				continue
 			}

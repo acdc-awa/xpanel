@@ -39,7 +39,6 @@ func accessLogFormatter(param gin.LogFormatterParams) string {
 	)
 }
 
-
 // NewRouter 组装全部路由。
 func (d *Deps) NewRouter() *gin.Engine {
 	r := gin.New()
@@ -96,24 +95,24 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 订阅（公开，token 鉴权；J19-④ 按 IP+路径限流防盗刷）
 		v1.GET("/sub/:token", middleware.RateLimit(120, time.Minute), d.Subscribe)
 
-			// 用户端
-			user := v1.Group("/user", middleware.AuthRequired(d.JWT, d.DB), middleware.RequirePwdChanged(d.DB))
-			{
-				user.GET("/me", d.Me)
-				user.GET("/servers", d.UserServers)
-				user.GET("/orders", d.UserOrders)
-				user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
-				user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
-				user.GET("/balance-logs", d.UserBalanceLogs)
-				user.POST("/password", d.UserChangePassword)
-				user.PUT("/profile", d.UserUpdateProfile)
-				user.POST("/2fa/setup", d.UserOTPSetup)
-				user.POST("/2fa/confirm", d.UserOTPConfirm)
-				user.POST("/2fa/disable", d.UserOTPDisable)
-				user.POST("/subscribe/reset", d.UserResetSubscribe)
-				user.GET("/notices", d.UserListNotices)
-				user.GET("/notices/:id", d.UserGetNotice)
-			}
+		// 用户端
+		user := v1.Group("/user", middleware.AuthRequired(d.JWT, d.DB), middleware.RequirePwdChanged(d.DB))
+		{
+			user.GET("/me", d.Me)
+			user.GET("/servers", d.UserServers)
+			user.GET("/orders", d.UserOrders)
+			user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
+			user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
+			user.GET("/balance-logs", d.UserBalanceLogs)
+			user.POST("/password", d.UserChangePassword)
+			user.PUT("/profile", d.UserUpdateProfile)
+			user.POST("/2fa/setup", d.UserOTPSetup)
+			user.POST("/2fa/confirm", d.UserOTPConfirm)
+			user.POST("/2fa/disable", d.UserOTPDisable)
+			user.POST("/subscribe/reset", d.UserResetSubscribe)
+			user.GET("/notices", d.UserListNotices)
+			user.GET("/notices/:id", d.UserGetNotice)
+		}
 
 		// 公开：上架套餐与公开公告
 		v1.GET("/plans", d.PublicPlans)
@@ -161,14 +160,18 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.POST("/servers/:id/l4-rules", d.AdminCreateL4Rule)
 			admin.PUT("/servers/:id/l4-rules/:rule_id", d.AdminUpdateL4Rule)
 			admin.DELETE("/servers/:id/l4-rules/:rule_id", d.AdminDeleteL4Rule)
+			admin.GET("/servers/:id/layers", d.AdminGetLayers)
+			admin.POST("/servers/:id/layers", d.AdminCreateLayer)
+			admin.PUT("/servers/:id/layers/:layer_id", d.AdminUpdateLayer)
+			admin.DELETE("/servers/:id/layers/:layer_id", d.AdminDeleteLayer)
 			admin.GET("/xray/keys", d.AdminXrayKeys)
 			admin.POST("/xray/preview-config", d.AdminPreviewConfig)
 			admin.GET("/inbounds", d.AdminInbounds)
 			admin.POST("/inbounds", d.AdminCreateInbound)
 			admin.PUT("/inbounds/:id", d.AdminUpdateInbound)
 			admin.DELETE("/inbounds/:id", d.AdminDeleteInbound)
-		admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
-		admin.GET("/plans", d.AdminPlans)
+			admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
+			admin.GET("/plans", d.AdminPlans)
 			admin.POST("/plans", d.AdminCreatePlan)
 			admin.PUT("/plans/:id", d.AdminUpdatePlan)
 			admin.DELETE("/plans/:id", d.AdminDeletePlan)
@@ -198,8 +201,8 @@ func (d *Deps) NewRouter() *gin.Engine {
 			admin.GET("/permission-groups", d.AdminPermissionGroups)
 			admin.POST("/permission-groups", d.AdminCreatePermissionGroup)
 			admin.PUT("/permission-groups/:id", d.AdminUpdatePermissionGroup)
-		admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
-		admin.POST("/permission-groups/:id/preview-template", d.AdminPreviewPermissionGroupTemplate)
+			admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
+			admin.POST("/permission-groups/:id/preview-template", d.AdminPreviewPermissionGroupTemplate)
 			admin.GET("/access-points", d.AdminGetAccessPoints)
 			admin.POST("/access-points", d.AdminCreateAccessPoint)
 			admin.PUT("/access-points/:id", d.AdminUpdateAccessPoint)

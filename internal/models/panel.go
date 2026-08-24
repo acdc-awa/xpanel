@@ -4,24 +4,24 @@ import "time"
 
 // Server 节点服务器（对应 §5 servers）。
 type Server struct {
-	ID                    uint64     `gorm:"primaryKey" json:"id"`
-	ServerType            string     `gorm:"size:32;default:xray" json:"server_type"`             // xray（托管节点）/ l4_relay（纯4层中转）
-	Name                  string     `gorm:"size:64;not null" json:"name"`
-	Host                  string     `gorm:"size:255;not null" json:"host"`
-	NodeID                string     `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
-	Secret                string     `gorm:"size:64;not null" json:"-"`
-	Location              string     `gorm:"size:64" json:"location"`
-	Remark                string     `gorm:"size:255" json:"remark"`
-	Status                int        `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
-	DefaultOutboundTag    string     `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
-	RoutingDomainStrategy string     `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
+	ID                    uint64 `gorm:"primaryKey" json:"id"`
+	ServerType            string `gorm:"size:32;default:xray" json:"server_type"` // xray（托管节点）/ l4_relay（纯4层中转）
+	Name                  string `gorm:"size:64;not null" json:"name"`
+	Host                  string `gorm:"size:255;not null" json:"host"`
+	NodeID                string `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
+	Secret                string `gorm:"size:64;not null" json:"-"`
+	Location              string `gorm:"size:64" json:"location"`
+	Remark                string `gorm:"size:255" json:"remark"`
+	Status                int    `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
+	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
+	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
 	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
 	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）
-	DefaultOutboundDS string `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
-	AgentVersion string     `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
-	LastSeenAt   *time.Time `json:"last_seen_at"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	DefaultOutboundDS string     `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
+	AgentVersion      string     `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
+	LastSeenAt        *time.Time `json:"last_seen_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Inbound 入站（接入点），每节点可配多个。
@@ -40,43 +40,44 @@ type Inbound struct {
 	Sniffing       string  `gorm:"type:text" json:"sniffing"`        // 嗅探配置（透传）
 	Ratio          float64 `gorm:"default:1" json:"ratio"`
 	// 流量统计（冗余计数器，避免每次 SUM traffic_logs）
-	Up           int64      `gorm:"default:0" json:"up"`
-	Down         int64      `gorm:"default:0" json:"down"`
-	Total        int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
-	TrafficReset string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
-	LastResetDate string    `gorm:"size:10" json:"-"`                           // ISSUE-05：上次清零周期键（YYYY-MM-DD / YYYY-MM），防止同周期重复清零
-	ExpiryTime   *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
+	Up            int64      `gorm:"default:0" json:"up"`
+	Down          int64      `gorm:"default:0" json:"down"`
+	Total         int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
+	TrafficReset  string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
+	LastResetDate string     `gorm:"size:10" json:"-"`                           // ISSUE-05：上次清零周期键（YYYY-MM-DD / YYYY-MM），防止同周期重复清零
+	ExpiryTime    *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
 	// 分享地址（订阅专用，与节点监听解耦：四层转发场景监听为内网，订阅给用户的是转发端点）
-	ShareAddrStrategy string    `gorm:"size:16;default:node" json:"share_addr_strategy"` // node / listen / custom
-	ShareAddr         string    `gorm:"size:255" json:"share_addr"`                      // 自定义分享地址（域名/IP，不带端口）
-	SharePort         int       `gorm:"default:0" json:"share_port"`                     // 自定义分享端口（0 = 使用入站端口）
+	ShareAddrStrategy string `gorm:"size:16;default:node" json:"share_addr_strategy"` // node（服务器 Host）/ custom（自定义地址）
+	ShareAddr         string `gorm:"size:255" json:"share_addr"`                      // 自定义分享地址（域名/IP，不带端口）
+	SharePort         int    `gorm:"default:0" json:"share_port"`                     // 自定义分享端口（0 = 使用入站端口）
 	// 外部反代与订阅覆写字段（与本地物理监听解耦，支持 Caddy/CDN TLS 卸载模式）
-	ShareSecurity      string `gorm:"size:16;default:auto" json:"share_security"` // auto（跟随stream_settings）/ tls / none
-	ShareSNI           string `gorm:"size:255" json:"share_sni"`                  // 订阅 SNI 覆写（如反代域名）
-	ShareHost          string `gorm:"size:255" json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
-	SharePath          string `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
-	ShareAllowInsecure bool   `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
+	ShareSecurity      string  `gorm:"size:16;default:auto" json:"share_security"` // auto（跟随stream_settings）/ tls / none
+	ShareSNI           string  `gorm:"size:255" json:"share_sni"`                  // 订阅 SNI 覆写（如反代域名）
+	ShareHost          string  `gorm:"size:255" json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
+	SharePath          string  `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
+	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
+	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`            // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
 	// 入站物理类型二态：user / relay
-	Type          string  `gorm:"size:16;default:user" json:"type"`       // user（用户入站）/ relay（内部链式转发入站）
-	PreviousType  string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
-	InternalUUID  string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
-	CertID        *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
-	Enabled       bool    `gorm:"default:true" json:"enabled"`
+	Type         string  `gorm:"size:16;default:user" json:"type"`       // user（用户入站）/ relay（内部链式转发入站）
+	PreviousType string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
+	InternalUUID string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
+	CertID       *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
+	Enabled      bool    `gorm:"default:true" json:"enabled"`
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
 	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
 	// xtls-rprx-vision = 为该入站用户全部开启；
 	// none = 禁用自动注入。（UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
-	Flow          string    `gorm:"size:32" json:"flow"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Flow      string    `gorm:"size:32" json:"flow"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Plan 套餐。
 type Plan struct {
 	ID                uint64    `gorm:"primaryKey" json:"id"`
 	Name              string    `gorm:"size:64;not null" json:"name"`
-	Description       string    `gorm:"type:text" json:"description"`                // 自定义文案/套餐特性说明
-	PriceCents        int64     `gorm:"not null" json:"price_cents"` // 价格（分）
+	Description       string    `gorm:"type:text" json:"description"` // 自定义文案/套餐特性说明
+	PriceCents        int64     `gorm:"not null" json:"price_cents"`  // 价格（分）
 	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
 	DurationDays      int       `gorm:"not null" json:"duration_days"`
 	DeviceLimit       int       `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
@@ -182,18 +183,18 @@ type Setting struct {
 
 // ServerOutbound 服务器独立出站规则（§多节点 3x-ui 架构）。
 type ServerOutbound struct {
-	ID                 uint64    `gorm:"primaryKey" json:"id"`
-	ServerID           uint64    `gorm:"index;not null" json:"server_id"`
-	Tag                string    `gorm:"size:64;not null" json:"tag"`
-	Protocol           string    `gorm:"size:32;not null" json:"protocol"` // freedom / blackhole / socks / vmess / etc.
-	SettingsJSON       string    `gorm:"type:text" json:"settings_json"`
-	StreamSettingsJSON string    `gorm:"type:text" json:"stream_settings_json,omitempty"`
-	SendThrough        string    `gorm:"size:64" json:"send_through,omitempty"`
+	ID                 uint64 `gorm:"primaryKey" json:"id"`
+	ServerID           uint64 `gorm:"index;not null" json:"server_id"`
+	Tag                string `gorm:"size:64;not null" json:"tag"`
+	Protocol           string `gorm:"size:32;not null" json:"protocol"` // freedom / blackhole / socks / vmess / etc.
+	SettingsJSON       string `gorm:"type:text" json:"settings_json"`
+	StreamSettingsJSON string `gorm:"type:text" json:"stream_settings_json,omitempty"`
+	SendThrough        string `gorm:"size:64" json:"send_through,omitempty"`
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
-	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
-	Enabled    bool    `gorm:"default:true" json:"enabled"`
-	Priority   int     `gorm:"default:0" json:"priority"`
-	Remark     string  `gorm:"size:255" json:"remark"`
+	InboundRef *uint64   `gorm:"index" json:"inbound_ref,omitempty"`
+	Enabled    bool      `gorm:"default:true" json:"enabled"`
+	Priority   int       `gorm:"default:0" json:"priority"`
+	Remark     string    `gorm:"size:255" json:"remark"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

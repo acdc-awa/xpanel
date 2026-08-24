@@ -20,6 +20,7 @@ import type {
   NoticePayload,
   ServerOutbound,
   ServerRoutingRule,
+  AccessLayer,
 } from './types'
 
 export type {
@@ -39,6 +40,7 @@ export type {
   Plan,
   ServerOutbound,
   ServerRoutingRule,
+  AccessLayer,
 } from './types'
 
 export function getDashboard() {
@@ -263,6 +265,7 @@ export interface InboundPayload {
   share_host?: string
   share_path?: string
   share_allow_insecure?: boolean
+  layer_id?: number // 所属对外接入层（0/undefined = 直连；仅同一服务器的层有效）
 }
 
 export function getInbounds(serverId?: number) {
@@ -477,6 +480,7 @@ export interface TopologyData {
   access_points?: UserAccessPoint[]
   outbounds: TopologyOutbound[]
   routing_rules: TopologyRule[]
+  layers?: AccessLayer[]
 }
 
 export function getTopology() {
@@ -517,6 +521,23 @@ export function updateL4Rule(serverId: number, ruleId: number, payload: Partial<
 
 export function deleteL4Rule(serverId: number, ruleId: number) {
   return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/servers/${serverId}/l4-rules/${ruleId}`)
+}
+
+// 对外接入层（订阅端点语义的显式分组：对外 host/port/security 自定义，内部实现不可见）
+export function getLayers(serverId: number) {
+  return http.get<ApiResp<{ items: AccessLayer[] }>>(`/admin/servers/${serverId}/layers`)
+}
+
+export function createLayer(serverId: number, payload: Partial<AccessLayer>) {
+  return http.post<ApiResp<{ layer: AccessLayer }>>(`/admin/servers/${serverId}/layers`, payload)
+}
+
+export function updateLayer(serverId: number, layerId: number, payload: Partial<AccessLayer>) {
+  return http.put<ApiResp<{ layer: AccessLayer }>>(`/admin/servers/${serverId}/layers/${layerId}`, payload)
+}
+
+export function deleteLayer(serverId: number, layerId: number) {
+  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/servers/${serverId}/layers/${layerId}`)
 }
 
 // 画布布局云端同步（盒子位置/宽度 + 内容哈希去重，跨浏览器/设备统一；settings 表存 JSON）

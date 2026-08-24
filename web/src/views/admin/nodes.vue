@@ -380,6 +380,7 @@ async function save() {
       share_host: c.shareHost || undefined,
       share_path: c.sharePath || undefined,
       share_allow_insecure: c.shareAllowInsecure,
+      layer_id: c.layerId || 0,
     }
 
     if (editing.value) {
@@ -779,6 +780,8 @@ function transportOf(row: any): string {
         :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"
+        :server-id="formServerId"
+        :layer-id="editing?.layer_id || 0"
         @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"

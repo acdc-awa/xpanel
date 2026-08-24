@@ -38,6 +38,7 @@ func All() []any {
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{},
 		&L4PortRule{},
+		&AccessLayer{},
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 	}

@@ -401,6 +401,23 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		apViews = append(apViews, buildAccessPointView(ap, apGroupMap[ap.ID], srvMap, inbMap, l4Map))
 	}
 
+	// 对外接入层（显式端点分组：layers + 各层挂载入站数）
+	var layers []models.AccessLayer
+	if err := d.DB.Order("server_id ASC, id ASC").Find(&layers).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	layerInbCount := make(map[uint64]int, len(layers))
+	for i := range inbounds {
+		if inbounds[i].LayerID != nil {
+			layerInbCount[*inbounds[i].LayerID]++
+		}
+	}
+	layerViews := make([]accessLayerView, 0, len(layers))
+	for i := range layers {
+		layerViews = append(layerViews, toAccessLayerView(layers[i], layerInbCount[layers[i].ID]))
+	}
+
 	util.OK(c, gin.H{
 		"servers":       srvViews,
 		"inbounds":      inbViews,
@@ -408,6 +425,7 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		"access_points": apViews,
 		"outbounds":     outViews,
 		"routing_rules": ruleViews,
+		"layers":        layerViews,
 	})
 }
 
@@ -512,6 +530,12 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 	for _, r := range rules {
 		l4Map[r.ID] = r
 	}
+	var layers []models.AccessLayer
+	_ = d.DB.Find(&layers).Error
+	layerMap := make(map[uint64]models.AccessLayer, len(layers))
+	for _, l := range layers {
+		layerMap[l.ID] = l
+	}
 
 	dtos := make([]contracts.ProxyNodeDTO, 0, len(aps))
 	for _, ap := range aps {
@@ -528,7 +552,7 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 			}
 		}
 
-		dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4Map, mockUUID)
+		dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4Map, layerMap, mockUUID)
 		if dto == nil {
 			continue
 		}

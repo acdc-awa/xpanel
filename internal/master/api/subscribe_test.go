@@ -7,7 +7,7 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// TestShareAddrOf 订阅分享地址三态（与 xray 监听解耦：custom 时用 ShareAddr+SharePort）。
+// TestShareAddrOf 订阅分享地址二态（与 xray 监听解耦：custom 时用 ShareAddr+SharePort）。
 func TestShareAddrOf(t *testing.T) {
 	srv := &models.Server{Host: "node.example.com"}
 	inb := &models.Inbound{Port: 8443}
@@ -33,16 +33,11 @@ func TestShareAddrOf(t *testing.T) {
 	if h, p := subscribe.ShareAddrOf(srv, inb); h != "node.example.com" || p != 443 {
 		t.Errorf("custom 空地址应回退: %s:%d", h, p)
 	}
-	// listen + 内网监听 → Listen + 入站端口
+	// listen 策略已退役（分享地址只保留 node/custom）→ 一律回退 node
 	inb.ShareAddrStrategy = "listen"
 	inb.Listen = "127.0.0.1"
-	if h, p := subscribe.ShareAddrOf(srv, inb); h != "127.0.0.1" || p != 443 {
-		t.Errorf("listen: %s:%d", h, p)
-	}
-	// listen + 0.0.0.0 → 回退 node
-	inb.Listen = "0.0.0.0"
 	if h, p := subscribe.ShareAddrOf(srv, inb); h != "node.example.com" || p != 443 {
-		t.Errorf("listen 0.0.0.0 应回退: %s:%d", h, p)
+		t.Errorf("listen 应回退 node: %s:%d", h, p)
 	}
 }
 

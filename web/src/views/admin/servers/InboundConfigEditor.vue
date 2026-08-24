@@ -13,9 +13,9 @@ import {
   QuestionFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCerts, getXrayKeys, rotateInternalInbound, type CertItem } from '@/api/admin'
+import { getCerts, getXrayKeys, rotateInternalInbound, getLayers, createLayer, deleteLayer, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings } from '@/api/types'
+import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings, AccessLayer } from '@/api/types'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -37,6 +37,7 @@ export interface InboundEditorChangePayload {
   shareHost: string
   sharePath: string
   shareAllowInsecure: boolean
+  layerId: number // 所属对外接入层（0 = 直连）
 }
 
 export interface InboundEditorEmits {
@@ -58,6 +59,8 @@ const props = withDefaults(
     internalUUID?: string
     inboundId?: number
     certId?: number
+    serverId?: number
+    layerId?: number
   }>(),
   {
     modelValue: '{}',
@@ -72,6 +75,8 @@ const props = withDefaults(
     internalUUID: '',
     inboundId: 0,
     certId: 0,
+    serverId: 0,
+    layerId: 0,
     shareSecurity: 'auto',
     shareSni: '',
     shareHost: '',
@@ -113,6 +118,102 @@ const localShareSni = ref('')
 const localShareHost = ref('')
 const localSharePath = ref('')
 const localShareAllowInsecure = ref(false)
+
+// 对外接入层（挂载后订阅对外端点由层决议；分享地址组仅直连时生效）
+const localLayerId = ref(props.layerId || 0)
+const layers = ref<AccessLayer[]>([])
+const activeLayer = computed(() => layers.value.find((l) => l.id === localLayerId.value) || null)
+
+watch(
+  () => props.serverId,
+  async (sid) => {
+    if (!sid) {
+      layers.value = []
+      return
+    }
+    try {
+      const { data } = await getLayers(sid)
+      if (data.code === 0) layers.value = data.data.items
+    } catch {
+      layers.value = []
+    }
+  },
+  { immediate: true },
+)
+
+// 快捷新建对外层
+const layerQuickOpen = ref(false)
+const layerQuickSaving = ref(false)
+const layerQuickForm = reactive({ name: '', host: '', port: 443, security: 'tls' })
+
+// 删除选中层（挂载的其它入站一并回退直连端点）
+const layerDeleting = ref(false)
+async function deleteLayerFromEditor() {
+  const l = activeLayer.value
+  if (!l || !props.serverId) return
+  const count = l.inbound_count ?? 1
+  try {
+    await ElMessageBox.confirm(
+      `删除对外层「${l.name}」？该层当前挂载 ${count} 个入站（含本入站在内），删除后全部回退为直连端点（订阅端点改为各自分享地址）。`,
+      '删除对外层',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  layerDeleting.value = true
+  try {
+    const { data } = await deleteLayer(props.serverId, l.id)
+    if (data.code === 0) {
+      layers.value = layers.value.filter((x) => x.id !== l.id)
+      localLayerId.value = 0
+      ElMessage.success('对外层已删除，本入站回退直连端点')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
+  } finally {
+    layerDeleting.value = false
+  }
+}
+
+function openLayerQuick() {
+  layerQuickForm.name = ''
+  layerQuickForm.host = ''
+  layerQuickForm.port = 443
+  layerQuickForm.security = 'tls'
+  layerQuickOpen.value = true
+}
+
+async function saveLayerQuick() {
+  if (!props.serverId) return
+  if (!layerQuickForm.name.trim() || !layerQuickForm.host.trim()) {
+    ElMessage.warning('请填写层名称与对外 Host')
+    return
+  }
+  layerQuickSaving.value = true
+  try {
+    const { data } = await createLayer(props.serverId, {
+      name: layerQuickForm.name.trim(),
+      host: layerQuickForm.host.trim(),
+      port: layerQuickForm.port || 443,
+      security: layerQuickForm.security,
+    })
+    if (data.code === 0) {
+      layers.value = [...layers.value, data.data.layer]
+      localLayerId.value = data.data.layer.id
+      layerQuickOpen.value = false
+      ElMessage.success('对外层已创建并绑定到当前入站')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '创建失败'))
+  } finally {
+    layerQuickSaving.value = false
+  }
+}
 
 // Phase T 入站三态与证书
 const localInboundType = ref(props.inboundType || 'user')
@@ -178,9 +279,9 @@ function applyRealityPreset(preset: { dest: string; sni: string }) {
   ElMessage.success(`已应用借壳预设: ${preset.sni}`)
 }
 
-// Caddyfile 反代配置片段生成
+// Caddyfile 反代配置片段生成（挂载对外层时用层 Host，否则用分享地址覆写）
 const caddySnippet = computed(() => {
-  const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
+  const domain = activeLayer.value ? activeLayer.value.host : localShareSni.value || localShareAddr.value || 'node.example.com'
   const path = localSharePath.value || xhttpForm.path || '/xhttp-stream'
   const port = localPort.value || 10086
   return `${domain} {\n    # 前置 TLS 解密并反代到本地明文 Xray xhttp 入站\n    reverse_proxy ${path} 127.0.0.1:${port}\n}`
@@ -197,6 +298,29 @@ function applyCaddyOffloadPreset() {
   if (localPort.value === 443) {
     localPort.value = 10086
   }
+  if (!localSharePath.value) {
+    localSharePath.value = '/xhttp-stream'
+    xhttpForm.path = '/xhttp-stream'
+  }
+  xhttpForm.mode = 'auto'
+  acceptProxyProtocol.value = false
+  if (props.serverId) {
+    // 有服务器上下文 → 一键建层并绑定（对外端点由层决议，share 地址组不再写死）
+    const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
+    createLayer(props.serverId, { name: '反代层', host: domain, port: 443, security: 'tls' })
+      .then(({ data }) => {
+        if (data.code === 0) {
+          layers.value = [...layers.value, data.data.layer]
+          localLayerId.value = data.data.layer.id
+          ElMessage.success('已创建对外层「反代层」并绑定（TLS 卸载 + xhttp 传输）')
+        } else {
+          ElMessage.error(data.message)
+        }
+      })
+      .catch((e) => ElMessage.error(errMsg(e, '创建对外层失败')))
+    return
+  }
+  // 无服务器上下文（画布预览等）→ 沿用旧版 share 字段反代配置
   localShareStrategy.value = 'custom'
   localSharePort.value = 443
   localShareSecurity.value = 'tls'
@@ -204,12 +328,6 @@ function applyCaddyOffloadPreset() {
     localShareAddr.value = 'node.example.com'
     localShareSni.value = 'node.example.com'
   }
-  if (!localSharePath.value) {
-    localSharePath.value = '/xhttp-stream'
-    xhttpForm.path = '/xhttp-stream'
-  }
-  xhttpForm.mode = 'auto'
-  acceptProxyProtocol.value = false
   ElMessage.success('已切换为前置反代模式 (Caddy/Nginx TLS 卸载 + xhttp 传输)')
 }
 
@@ -397,6 +515,7 @@ function syncFormToJson() {
     shareHost: localShareHost.value,
     sharePath: localSharePath.value,
     shareAllowInsecure: localShareAllowInsecure.value,
+    layerId: localLayerId.value,
   })
   isInternalUpdating.value = false
 }
@@ -436,6 +555,7 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
     if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
     if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
+    if (typeof parsed.layer_id === 'number' && parsed.layer_id !== 0) localLayerId.value = parsed.layer_id
 
     if (Array.isArray(s.fallbacks)) {
       fallbacks.value = s.fallbacks.map((f) => ({
@@ -525,6 +645,7 @@ watch(
     localShareHost,
     localSharePath,
     localShareAllowInsecure,
+    localLayerId,
     fallbacks,
     xhttpForm,
     tcpForm,
@@ -971,47 +1092,80 @@ async function copyText(text: string, label: string) {
             <div class="card-head-flex">
               <div class="card-title">
                 <span>订阅分享与反代覆写</span>
-                <el-tooltip content="订阅链接中生成的节点连接地址/端口/TLS安全层。地址为本卡片「分享地址」组（节点自有 IP/端口，直连兜底），接入点覆写优先，L4 中转时取转发端点；支持服务端明文运行 + 前置 Caddy/Nginx TLS 卸载与 CDN 模式。" placement="top">
+                <el-tooltip content="订阅链接中生成的节点对外端点。挂载「对外接入层」时 host/port/安全层由层决议（内部实现——直连 TLS / Caddy 反代 / CDN——对客户端不可见）；未挂层时用本卡片分享地址组（直连端点）。接入点覆写优先，L4 中转取转发端点。" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <el-button size="small" type="primary" plain @click="applyCaddyOffloadPreset">
+              <el-button size="small" type="primary" plain @click="applyCaddyOffloadPreset" :disabled="!props.serverId">
                 <el-icon><MagicStick /></el-icon>&nbsp;一键配置反代模式
               </el-button>
             </div>
 
+            <!-- 对外接入层：挂载后订阅端点由层决议（分享地址组仅直连生效） -->
+            <div class="form-grid" style="margin-bottom: 6px">
+              <el-form-item label="对外接入层">
+                <div style="display: flex; gap: 8px; width: 100%">
+                  <el-select v-model="localLayerId" style="width: 100%" :disabled="!props.serverId" placeholder="选择对外层（或新建）">
+                    <el-option :value="0" label="不使用（直连端点，自持分享地址）" />
+                    <el-option
+                      v-for="l in layers"
+                      :key="l.id"
+                      :value="l.id"
+                      :label="`${l.name} (${l.host}:${l.port} ${l.security === 'tls' ? 'TLS' : '明文'})`"
+                    />
+                  </el-select>
+                  <el-button :disabled="!props.serverId" @click="openLayerQuick">新建对外层</el-button>
+                  <el-button
+                    :disabled="!props.serverId || !localLayerId"
+                    :loading="layerDeleting"
+                    @click="deleteLayerFromEditor"
+                  >
+                    删除该层
+                  </el-button>
+                </div>
+              </el-form-item>
+            </div>
+            <el-alert
+              v-if="localLayerId > 0"
+              type="success"
+              :closable="false"
+              style="margin-bottom: 12px"
+              title="已挂载对外层：订阅对外 host/port/安全层由层决议，下方分享地址组对本入站不再生效（SNI/Path 等覆写仍可用）。"
+            />
+
             <div class="form-grid">
-              <el-form-item label="分享地址策略">
-                <el-select v-model="localShareStrategy" style="width: 100%">
-                  <el-option label="跟随服务器" value="node" />
-                  <el-option label="监听地址" value="listen" />
-                  <el-option label="自定义地址" value="custom" />
-                </el-select>
-              </el-form-item>
-
-              <div style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
-                节点自有 IP/端口（兜底层）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
-              </div>
-
-              <el-form-item label="订阅安全层 (TLS)">
-                <el-select v-model="localShareSecurity" style="width: 100%">
-                  <el-option label="auto (跟随传输层)" value="auto" />
-                  <el-option label="tls (强制启用)" value="tls" />
-                  <el-option label="none (明文)" value="none" />
-                </el-select>
-              </el-form-item>
-
-              <template v-if="localShareStrategy === 'custom'">
-                <el-form-item label="自定义分享地址">
-                  <el-input v-model="localShareAddr" placeholder="如 cdn.example.com 或 node.example.com" />
+              <template v-if="localLayerId === 0">
+                <el-form-item label="分享地址策略">
+                  <el-select v-model="localShareStrategy" style="width: 100%">
+                    <el-option label="跟随服务器" value="node" />
+                    <el-option label="自定义地址" value="custom" />
+                  </el-select>
                 </el-form-item>
-                <el-form-item label="自定义分享端口">
-                  <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 默认入站端口 (反代通常 443)" style="width: 100%" />
+
+                <div style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
+                  节点自有 IP/端口（兜底层）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
+                </div>
+
+                <el-form-item label="订阅安全层 (TLS)">
+                  <el-select v-model="localShareSecurity" style="width: 100%">
+                    <el-option label="auto (跟随传输层)" value="auto" />
+                    <el-option label="tls (强制启用)" value="tls" />
+                    <el-option label="none (明文)" value="none" />
+                  </el-select>
                 </el-form-item>
+
+                <template v-if="localShareStrategy === 'custom'">
+                  <el-form-item label="自定义分享地址">
+                    <el-input v-model="localShareAddr" placeholder="如 cdn.example.com 或 node.example.com" />
+                  </el-form-item>
+                  <el-form-item label="自定义分享端口">
+                    <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 默认入站端口 (反代通常 443)" style="width: 100%" />
+                  </el-form-item>
+                </template>
               </template>
 
               <el-form-item label="分享 SNI">
-                <el-input v-model="localShareSni" placeholder="留空默认跟随节点配置" />
+                <el-input v-model="localShareSni" placeholder="留空默认跟随节点配置（挂层时回落层 Host）" />
               </el-form-item>
 
               <el-form-item label="分享 Host">
@@ -1030,7 +1184,7 @@ async function copyText(text: string, label: string) {
             </div>
 
             <!-- Caddyfile 片段参考 -->
-            <div v-if="localShareSecurity === 'tls' || localTlsType === 'none'" class="caddy-snippet-box">
+            <div v-if="activeLayer ? activeLayer.security === 'tls' : (localShareSecurity === 'tls' || localTlsType === 'none')" class="caddy-snippet-box">
               <div class="caddy-head">
                 <span class="caddy-title">Caddyfile 反代参考片段</span>
                 <el-button size="small" text type="primary" @click="copyCaddySnippet">
@@ -1116,6 +1270,39 @@ async function copyText(text: string, label: string) {
       />
     </div>
   </div>
+
+  <!-- 快捷新建对外层 -->
+  <el-dialog v-model="layerQuickOpen" title="新建对外接入层" width="480px" append-to-body>
+    <el-form label-position="top">
+      <el-alert
+        title="对外接入层定义订阅对外 host/port/安全层；创建后即绑定到当前入站（后续可在拓扑画布的层胶囊上管理挂载）。"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px"
+      />
+      <el-form-item label="层名称" required>
+        <el-input v-model="layerQuickForm.name" placeholder="如 HK 443 反代层" />
+      </el-form-item>
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
+        <el-form-item label="对外 Host" required>
+          <el-input v-model="layerQuickForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
+        </el-form-item>
+        <el-form-item label="对外 Port">
+          <el-input-number v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" />
+        </el-form-item>
+      </div>
+      <el-form-item label="对外安全层" style="margin-bottom: 0">
+        <el-select v-model="layerQuickForm.security" style="width: 100%">
+          <el-option label="TLS（反代/CDN 卸载，默认）" value="tls" />
+          <el-option label="明文 none" value="none" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="layerQuickOpen = false">取消</el-button>
+      <el-button type="primary" :loading="layerQuickSaving" @click="saveLayerQuick">创建并绑定</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped lang="scss">

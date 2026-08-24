@@ -12,7 +12,7 @@ import (
 func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	// 场景：服务端 Xray 本地监听 127.0.0.1:10086，明文 xhttp (security: none)
 	// 外部 Caddy 监听 443，反代 /my-vless-xhttp 到 127.0.0.1:10086
-	// 订阅需导出：端口 443，TLS 开启，SNI caddy.example.com，Path /my-vless-xhttp
+	// 未挂层路径：入站 share_* 自持覆写（订阅导出 443/TLS/SNI/Path）
 	srv := &models.Server{
 		Name: "香港01-Caddy反代",
 		Host: "hk.node.local",
@@ -35,7 +35,7 @@ func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	}
 
 	uuid := "11111111-2222-3333-4444-555555555555"
-	dto := BuildNodeDTO(srv, inb, uuid)
+	dto := BuildNodeDTO(srv, inb, uuid, nil)
 	if dto == nil {
 		t.Fatalf("BuildNodeDTO returned nil")
 	}
@@ -93,5 +93,62 @@ func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	}
 	if !strings.Contains(vlessURL, "path=%2Fmy-vless-xhttp") {
 		t.Errorf("vless:// 缺少 path=%%2Fmy-vless-xhttp: %s", vlessURL)
+	}
+}
+
+func TestBuildNodeDTO_AccessLayer(t *testing.T) {
+	// 挂层路径：入站挂对外接入层（内部实现不可见），对外 host/port/security 由层决议；
+	// SNI 缺省回落层 Host，path 沿用入站 share_path；share_security/share_sni 显式覆写优先。
+	srv := &models.Server{Name: "香港01-Layer", Host: "hk.node.local"}
+	lid := uint64(9)
+	inb := &models.Inbound{
+		Tag:            "vless-xhttp-layer",
+		Protocol:       "vless",
+		Port:           10086,
+		Listen:         "127.0.0.1",
+		StreamSettings: `{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`,
+		LayerID:        &lid,
+		SharePath:      "/my-vless-xhttp",
+	}
+	layer := &models.AccessLayer{ID: 9, ServerID: 1, Name: "HK 443 反代层", Host: "caddy.example.com", Port: 443, Security: "tls"}
+
+	uuid := "11111111-2222-3333-4444-555555555555"
+	dto := BuildNodeDTO(srv, inb, uuid, layer)
+	if dto == nil {
+		t.Fatalf("BuildNodeDTO returned nil")
+	}
+	if dto.ServerHost != "caddy.example.com" {
+		t.Fatalf("挂层 host 应由层决议: got %s", dto.ServerHost)
+	}
+	if dto.ServerPort != 443 {
+		t.Fatalf("挂层 port 应由层决议: got %d", dto.ServerPort)
+	}
+	if dto.Security == nil || dto.Security.Type != "tls" {
+		t.Fatalf("挂层 security 应由层决议 tls: got %+v", dto.Security)
+	}
+	if dto.Security.SNI != "caddy.example.com" {
+		t.Fatalf("SNI 缺省应回落层 Host: got %s", dto.Security.SNI)
+	}
+	if dto.Transport == nil || dto.Transport.Path != "/my-vless-xhttp" {
+		t.Fatalf("Path 应沿用入站 share_path: got %+v", dto.Transport)
+	}
+
+	// share_security 显式覆写优先于层；share_sni 显式覆写优先于层 Host（security=tls 才有 SNI 层）
+	inb.ShareSecurity = "tls"
+	inb.ShareSNI = "override.example.com"
+	dto2 := BuildNodeDTO(srv, inb, uuid, layer)
+	if dto2.Security == nil || dto2.Security.Type != "tls" {
+		t.Fatalf("share_security=tls 应覆写层（层也是 tls）: got %+v", dto2.Security)
+	}
+	if dto2.Security.SNI != "override.example.com" {
+		t.Fatalf("share_sni 应覆写层 Host: got %s", dto2.Security.SNI)
+	}
+
+	// security=none 覆写生效（无 TLS 层，SNI 自然不产出）
+	inb.ShareSecurity = "none"
+	inb.ShareSNI = ""
+	dto3 := BuildNodeDTO(srv, inb, uuid, layer)
+	if dto3.Security == nil || dto3.Security.Type != "none" {
+		t.Fatalf("share_security=none 应覆写层 tls: got %+v", dto3.Security)
 	}
 }

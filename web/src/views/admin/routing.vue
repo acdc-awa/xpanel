@@ -45,6 +45,9 @@ const servers = ref<ServerItem[]>([])
 const serverFilter = ref<number | undefined>(undefined)
 const serverLoading = ref(false)
 
+// 出站/分流策略只管理 Xray 托管节点；纯四层中转（l4_relay）不在此管理
+const xrayServers = computed(() => servers.value.filter((s) => s.server_type !== 'l4_relay'))
+
 const currentServer = computed(() => servers.value.find((s) => s.id === serverFilter.value) ?? null)
 
 async function loadServers() {
@@ -53,7 +56,11 @@ async function loadServers() {
     const { data } = await getServers()
     if (data.code === 0) {
       servers.value = data.data.items
-      if (!serverFilter.value && servers.value.length > 0) serverFilter.value = servers.value[0].id
+      // 已选服务器被移除 / 指向 L4 中转时，回落到首个 Xray 节点
+      if (serverFilter.value && !servers.value.some((s) => s.id === serverFilter.value && s.server_type !== 'l4_relay')) {
+        serverFilter.value = undefined
+      }
+      if (!serverFilter.value) serverFilter.value = xrayServers.value[0]?.id
     } else {
       ElMessage.error(data.message)
     }
@@ -343,7 +350,7 @@ onMounted(async () => {
       <div class="x-toolbar-left">
         <template v-if="viewMode === 'table'">
           <el-select v-model="serverFilter" placeholder="选择目标服务器" style="width: 220px" :loading="serverLoading">
-            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+            <el-option v-for="s in xrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
           </el-select>
           <el-button @click="reloadTable">
             <el-icon><Refresh /></el-icon>&nbsp;刷新
@@ -363,14 +370,14 @@ onMounted(async () => {
 
       <div style="display: flex; gap: 12px; align-items: center">
         <el-radio-group v-model="viewMode" size="default">
-          <el-radio-button value="table">
-            <span style="display: inline-flex; align-items: center; gap: 4px">
-              <el-icon><Grid /></el-icon>表格视图
-            </span>
-          </el-radio-button>
           <el-radio-button value="canvas">
             <span style="display: inline-flex; align-items: center; gap: 4px">
               <el-icon><Share /></el-icon>拓扑画布
+            </span>
+          </el-radio-button>
+          <el-radio-button value="table">
+            <span style="display: inline-flex; align-items: center; gap: 4px">
+              <el-icon><Grid /></el-icon>表格视图
             </span>
           </el-radio-button>
         </el-radio-group>

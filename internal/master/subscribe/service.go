@@ -459,9 +459,10 @@ func NodeName(server *models.Server, inb *models.Inbound) string {
 }
 
 // ShareAddrOf 计算订阅对外地址与端口（订阅专用，与 xray 物理监听解耦）。
-// ShareAddrOf 解析入站「节点自有地址」：按 ShareAddrStrategy 取自定义/监听地址，否则回退
-// 服务器 Host 与入站端口。这是订阅管道的第一层；经 L4 中转的订阅会被转发端点覆写（见
-// ResolveAPSubscription），直连入站且接入点未覆写时本值是最终地址。
+// ShareAddrOf 解析入站「节点自有地址」：策略仅 node（服务器 Host）与 custom（ShareAddr）；
+// 订阅对外地址与物理监听解耦，监听地址（Listen）不参与对外分享（四层转发场景由转发端点覆写）。
+// 这是订阅管道的第一层；经 L4 中转的订阅会被转发端点覆写（见 ResolveAPSubscription），
+// 直连入站且接入点未覆写时本值是最终地址。
 func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 	port := inb.Port
 	if inb.SharePort > 0 {
@@ -472,10 +473,6 @@ func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 		if inb.ShareAddr != "" {
 			return inb.ShareAddr, port
 		}
-	case "listen":
-		if inb.Listen != "" && inb.Listen != "0.0.0.0" {
-			return inb.Listen, port
-		}
 	}
 	return srv.Host, port
 }
@@ -483,21 +480,36 @@ func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 // BuildNodeDTO 将 Inbound 模型与 Server 模型转换为订阅导出用的 ProxyNodeDTO。
 // 协议知识（传输/安全/flow/凭证派生）由协议插件承担；未注册协议或参数不足返回 nil，
 // 调用方记日志跳过（替代历史上 switch 静默 continue）。
-func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string) *contracts.ProxyNodeDTO {
+// layer 非空表示入站挂对外接入层：对外 host/port 由层决议（内部实现——直连 TLS / 反代 / CDN——
+// 对订阅不可见），安全层取层定义（share_security 显式覆写优先），SNI 缺省回落层 Host；
+// 未挂层（layer=nil）沿用 ShareAddrStrategy 直连端点语义。
+func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string, layer *models.AccessLayer) *contracts.ProxyNodeDTO {
 	plugin := protocols.Find(inb.Protocol)
 	if plugin == nil {
 		log.Printf("[subscribe] 入站 %s 协议 %q 未注册导出插件，跳过", inb.Tag, inb.Protocol)
 		return nil
 	}
 	host, port := ShareAddrOf(srv, inb)
+	sec := inb.ShareSecurity
+	sni := inb.ShareSNI
+	if layer != nil {
+		host = layer.Host
+		port = layer.Port
+		if sec == "" || sec == "auto" {
+			sec = layer.Security
+		}
+		if sni == "" {
+			sni = layer.Host
+		}
+	}
 	dto := plugin.BuildClientNode(&contracts.ClientNodeInput{
 		Name: NodeName(srv, inb),
 		Host: host,
 		Port: port,
 		Spec: contracts.DecodeInbound(inb),
 		Share: contracts.ShareOverride{
-			Security:      inb.ShareSecurity,
-			SNI:           inb.ShareSNI,
+			Security:      sec,
+			SNI:           sni,
 			Host:          inb.ShareHost,
 			Path:          inb.SharePath,
 			AllowInsecure: inb.ShareAllowInsecure,
@@ -513,12 +525,14 @@ func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string) *con
 
 // ResolveAPSubscription 沿订阅管道解析用户接入点（AP）产出的订阅节点（/sub 实时订阅与画布预览同源）：
 //  1. 入站自有地址：BuildNodeDTO 按入站 ShareAddrStrategy（custom/listen/回退）解析节点 IP/端口；
+//     挂对外接入层（layer_id）时，对外 host/port/security 由层决议（见 BuildNodeDTO）；
 //  2. 管道覆写：AP 指向 L4 转发规则时，订阅消费者实际连接转发端点，host/port 覆写为
 //     转发机 Host + L4 监听端口（入站分享地址描述的是目标入站自身，在此语义不适用）；
+//     层语义同样不沿四层链路传递（L4 转发目标=入站内部端口，对外 TLS/SNI 无意义）；
 //  3. AP 消费层：命名 + 可选 CustomHost/CustomPort 覆写（最高优先）。
 //
 // 目标缺失 / 权限组过滤由调用方负责；此处仅解析，解析失败返回 nil。
-func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.Server, inbMap map[uint64]models.Inbound, l4Map map[uint64]models.L4PortRule, userUUID string) *contracts.ProxyNodeDTO {
+func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.Server, inbMap map[uint64]models.Inbound, l4Map map[uint64]models.L4PortRule, layerMap map[uint64]models.AccessLayer, userUUID string) *contracts.ProxyNodeDTO {
 	var (
 		targetInb models.Inbound
 		targetSrv models.Server
@@ -565,7 +579,17 @@ func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.
 		return nil
 	}
 
-	dto := BuildNodeDTO(&targetSrv, &targetInb, userUUID)
+	// 挂层解析：目标入站 layer_id → 对外接入层（L4 链不消费层语义，见函数注释）
+	var layer *models.AccessLayer
+	if targetInb.LayerID != nil {
+		if l, ok := layerMap[*targetInb.LayerID]; ok {
+			layer = &l
+		}
+	}
+	if viaL4 {
+		layer = nil
+	}
+	dto := BuildNodeDTO(&targetSrv, &targetInb, userUUID, layer)
 	if dto == nil {
 		return nil
 	}

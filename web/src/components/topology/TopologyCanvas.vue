@@ -36,9 +36,12 @@ import {
   setAccessPointTarget,
   deleteAccessPoint,
   getPermissionGroups,
+  createLayer,
+  updateLayer,
+  deleteLayer,
   type TopologyData,
 } from '@/api/admin'
-import type { InboundItem, ServerOutbound, L4PortRule, PermissionGroup, UserAccessPoint } from '@/api/types'
+import type { InboundItem, ServerOutbound, L4PortRule, PermissionGroup, UserAccessPoint, AccessLayer } from '@/api/types'
 import { errMsg } from '@/api/http'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from '@/views/admin/servers/InboundConfigEditor.vue'
@@ -69,6 +72,7 @@ interface BoxData {
   inbounds: TopologyData['inbounds']
   l4Rules?: L4PortRule[]
   outbounds: BoxOutbound[]
+  layers: AccessLayer[]
   boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
 }
 
@@ -196,7 +200,6 @@ async function saveLayoutToCloud() {
 
 const ROW_H = 40
 const HEADER_H = 48
-const TITLE_H = 30
 const DEFAULT_BOX_W = 440
 
 function getBoxWidth(serverId: number | string): number {
@@ -204,8 +207,13 @@ function getBoxWidth(serverId: number | string): number {
   return boxWidths.get(id) ?? DEFAULT_BOX_W
 }
 
-function boxHeight(inbCount: number, outCount: number) {
-  return HEADER_H + TITLE_H + Math.max(Math.max(inbCount, outCount), 1) * ROW_H + 16
+// 盒高估算（对齐 CSS 渲染附近；仅用于绕行阻挡与自动排版间距）：
+// 标准盒 = max(入站列高含层胶囊, 出站列高)；L4 盒 ≈98+40·规则数。
+function estBoxHeight(srv: TopologyData['servers'][number], inbCount: number, outCount: number, l4Count = 0) {
+  if (srv.server_type === 'l4_relay') return HEADER_H + 50 + l4Count * ROW_H
+  const inbCol = inboundColumnRows(srv.id).colH
+  const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + 16
+  return Math.max(inbCol, outCol)
 }
 
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
@@ -259,64 +267,64 @@ function inboundSummary(inb: TopologyData['inbounds'][number]) {
   }
 }
 
-// Caddy/Nginx 认知层：按域名/SNI 对 XHTTP 入站进行聚合
-export interface CaddyGroup {
-  domain: string
-  inbounds: InboundItem[]
+// 对外接入层：入站列先渲染层胶囊（显式端点点位），后渲染未挂层原生行。
+// 行号/盒高估算必须与显示顺序同源（见 inboundColumnRows / estBoxHeight）。
+function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: TopologyData['inbounds'] }[] {
+  const data = props.topology
+  if (!data) return []
+  const groups: { layer: AccessLayer; inbounds: TopologyData['inbounds'] }[] = []
+  for (const l of data.layers ?? []) {
+    if (l.server_id !== serverId) continue
+    groups.push({ layer: l, inbounds: data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id) })
+  }
+  return groups
 }
 
-function getCaddyGrouping(inbounds: InboundItem[]): { caddyGroups: CaddyGroup[]; nativeInbounds: InboundItem[] } {
-  const caddyInbs: InboundItem[] = []
-  const nativeInbs: InboundItem[] = []
-
-  for (const inb of inbounds) {
-    const summary = inboundSummary(inb)
-    const isXhttp = inb.protocol === 'vless' && (summary.net === 'XHTTP' || inb.stream_settings?.includes('"network":"xhttp"'))
-    if (isXhttp) {
-      caddyInbs.push(inb)
-    } else {
-      nativeInbs.push(inb)
-    }
-  }
-
-  const map = new Map<string, InboundItem[]>()
-  for (const inb of caddyInbs) {
-    let domain = inb.share_sni || inb.share_addr || ''
-    if (!domain) {
-      try {
-        const s = JSON.parse(inb.stream_settings || '{}')
-        domain = s.tlsSettings?.serverName || ''
-      } catch {}
-    }
-    if (!domain) domain = '默认域名 (Host)'
-    if (!map.has(domain)) map.set(domain, [])
-    map.get(domain)!.push(inb)
-  }
-
-  const caddyGroups: CaddyGroup[] = Array.from(map.entries()).map(([domain, inbs]) => ({ domain, inbounds: inbs }))
-  return { caddyGroups, nativeInbounds: nativeInbs }
+function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
+  const data = props.topology
+  if (!data) return []
+  return data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id)
 }
 
-function copyCaddySnippet(group: CaddyGroup, srvHost: string) {
-  const domain = group.domain !== '默认域名 (Host)' ? group.domain : srvHost || 'node.example.com'
-  const lines = [`# === Caddyfile 示例 (${domain}) ===`, `${domain} {`]
-  for (const inb of group.inbounds) {
-    let path = inb.share_path || ''
-    if (!path) {
-      try {
-        const s = JSON.parse(inb.stream_settings || '{}')
-        path = s.xhttpSettings?.path || '/xhttp'
-      } catch {
-        path = '/xhttp'
-      }
+// 入站列显示布局：返回每行中心 Y（相对盒顶，含 HEADER_H）与列总高（顶到底含底部内边距）。
+// 层胶囊头部开销 CAP_HED 对齐 CSS（容器上边距 6 + 头 ~26 + 头下间距 6），行距近似 ROW_H=40。
+const CAP_HED = 38
+const COL_HED = 38 // 列头 32 + 行首间距 6
+function inboundColumnRows(serverId: number): { rows: { id: number; centerY: number }[]; colH: number } {
+  const data = props.topology
+  const rows: { id: number; centerY: number }[] = []
+  if (!data) return { rows, colH: HEADER_H + COL_HED + ROW_H + 16 }
+  let y = HEADER_H + COL_HED
+  for (const g of layerGroupsOf(serverId)) {
+    y += CAP_HED
+    if (g.inbounds.length === 0) {
+      y += ROW_H // 空层仍占一行「暂无挂载」
+      continue
     }
+    for (const inb of g.inbounds) {
+      rows.push({ id: inb.id, centerY: y + ROW_H / 2 })
+      y += ROW_H
+    }
+  }
+  for (const inb of nativeInboundsOf(serverId)) {
+    rows.push({ id: inb.id, centerY: y + ROW_H / 2 })
+    y += ROW_H
+  }
+  return { rows, colH: y + 16 }
+}
+
+// 复制层级 Caddyfile 反代片段（domain = 层 Host；每个挂载入站一个 path → 本地 xray 端口）
+function copyLayerCaddyfile(layer: AccessLayer) {
+  const inbs = layerGroupsOf(layer.server_id).find((g) => g.layer.id === layer.id)?.inbounds ?? []
+  const lines = [`# === Caddyfile 示例 (${layer.host}) ===`, `${layer.host} {`]
+  for (const inb of inbs) {
+    let path = inb.share_path || '/xhttp'
     lines.push(`    # 入站 [${inb.tag}] 转发至本地 Xray 端口`)
     lines.push(`    reverse_proxy ${path} 127.0.0.1:${inb.port}`)
   }
   lines.push(`}`)
-  const snippet = lines.join('\n')
-  navigator.clipboard.writeText(snippet)
-  ElMessage.success(`已复制 ${domain} 的 Caddyfile 配置片段`)
+  navigator.clipboard.writeText(lines.join('\n'))
+  ElMessage.success(`已复制 ${layer.host} 的 Caddyfile 配置片段`)
 }
 
 // 盒内路由线：S 形贝塞尔
@@ -363,6 +371,12 @@ function recalcDetours() {
     outByServer.get(out.server_id)!.push({ ...out, id: String(out.id) })
   }
 
+  const l4ByServer = new Map<number, L4PortRule[]>()
+  for (const r of data.l4_rules ?? []) {
+    if (!l4ByServer.has(r.server_id)) l4ByServer.set(r.server_id, [])
+    l4ByServer.get(r.server_id)!.push(r)
+  }
+
   const rawEdges = edges.value as unknown as Edge[]
   for (const edge of rawEdges) {
     if (!edge.id.startsWith('ref-')) continue
@@ -383,12 +397,11 @@ function recalcDetours() {
     const outList = outByServer.get(out.server_id) ?? []
     const srcRow = outList.findIndex((o) => o.id === String(out.id))
     const sx = srcPos.x + srcW
-    const sy = srcPos.y + HEADER_H + TITLE_H + srcRow * ROW_H + ROW_H / 2
+    const sy = srcPos.y + HEADER_H + COL_HED + srcRow * ROW_H + ROW_H / 2
 
-    const inbList = inbByServer.get(inb.server_id) ?? []
-    const tgtRow = inbList.findIndex((i) => i.id === inb.id)
+    const tgtRow = inboundColumnRows(inb.server_id).rows.find((r) => r.id === inb.id)
     const tx = tgtPos.x
-    const ty = tgtPos.y + HEADER_H + TITLE_H + tgtRow * ROW_H + ROW_H / 2
+    const ty = tgtPos.y + (tgtRow?.centerY ?? HEADER_H + COL_HED + ROW_H / 2)
 
     let detour = false
     let blockBottom = 0
@@ -396,7 +409,7 @@ function recalcDetours() {
       if (s2.id === out.server_id || s2.id === inb.server_id) continue
       const p2 = nodePosOf(s2, idxByServer.get(s2.id) ?? 0)
       const w2 = getBoxWidth(s2.id)
-      const h2 = boxHeight(inbByServer.get(s2.id)?.length ?? 0, (outByServer.get(s2.id)?.length ?? 0) + 1)
+      const h2 = estBoxHeight(s2, inbByServer.get(s2.id)?.length ?? 0, outByServer.get(s2.id)?.length ?? 0, l4ByServer.get(s2.id)?.length ?? 0)
       if (
         p2.x < Math.max(sx, tx) &&
         p2.x + w2 > Math.min(sx, tx) &&
@@ -421,6 +434,7 @@ function buildGraph(data: TopologyData) {
 
   const outByServer = new Map<number, BoxOutbound[]>()
   for (const out of data.outbounds) {
+    if (out.protocol === 'blackhole') continue // blocked 保留口不入画布（后端保留，仅供规则引用）
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
     const isDirect = (out.tag === 'direct' || out.protocol === 'freedom') && !out.inbound_ref
     outByServer.get(out.server_id)!.push({
@@ -447,6 +461,7 @@ function buildGraph(data: TopologyData) {
       inbounds: inbByServer.get(s.id) || [],
       l4Rules: l4RulesByServer.get(s.id) || [],
       outbounds: outByServer.get(s.id) || [],
+      layers: (data.layers ?? []).filter((l) => l.server_id === s.id),
       boxWidth: getBoxWidth(s.id),
     } as BoxData,
   }))
@@ -550,7 +565,7 @@ function buildGraph(data: TopologyData) {
     const inb = data.inbounds.find((i) => i.tag === rule.inbound_tag && i.server_id === rule.server_id)
     if (!inb) continue
     const out = data.outbounds.find((o) => o.tag === rule.outbound_tag && o.server_id === rule.server_id)
-    if (!out) continue
+    if (!out || out.protocol === 'blackhole') continue // blocked 行已隐藏，指向它的规则线不绘制
     es.push({
       id: `rule-${rule.id}`,
       source: `server-${rule.server_id}`,
@@ -1045,6 +1060,160 @@ async function saveL4Rule() {
   }
 }
 
+// ---- 对外接入层管理弹窗（显式订阅端点分组）----
+const layerDialogOpen = ref(false)
+const layerSaving = ref(false)
+const layerEditing = ref<AccessLayer | null>(null)
+const layerServerId = ref(0)
+const layerForm = reactive({
+  name: '',
+  host: '',
+  port: 443,
+  security: 'tls',
+  remark: '',
+})
+
+function openCreateLayer(serverId: number) {
+  layerServerId.value = serverId
+  layerEditing.value = null
+  layerForm.name = ''
+  layerForm.host = ''
+  layerForm.port = 443
+  layerForm.security = 'tls'
+  layerForm.remark = ''
+  layerDialogOpen.value = true
+}
+
+function openEditLayer(layer: AccessLayer) {
+  layerServerId.value = layer.server_id
+  layerEditing.value = layer
+  layerForm.name = layer.name
+  layerForm.host = layer.host
+  layerForm.port = layer.port
+  layerForm.security = layer.security
+  layerForm.remark = layer.remark || ''
+  layerDialogOpen.value = true
+}
+
+async function saveLayer() {
+  if (!layerForm.name.trim() || !layerForm.host.trim()) {
+    ElMessage.warning('请填写层名称与对外 Host')
+    return
+  }
+  layerSaving.value = true
+  try {
+    const payload = {
+      name: layerForm.name.trim(),
+      host: layerForm.host.trim(),
+      port: layerForm.port || 443,
+      security: layerForm.security,
+      remark: layerForm.remark,
+    }
+    const { data } = layerEditing.value
+      ? await updateLayer(layerServerId.value, layerEditing.value.id, payload)
+      : await createLayer(layerServerId.value, payload)
+    if (data.code === 0) {
+      ElMessage.success(layerEditing.value ? '对外层已更新' : '对外层已创建')
+      layerDialogOpen.value = false
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存失败'))
+  } finally {
+    layerSaving.value = false
+  }
+}
+
+async function handleDeleteLayer(layer: AccessLayer) {
+  try {
+    await ElMessageBox.confirm(`删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅端点改为入站自身分享地址。`, '删除对外层', {
+      type: 'warning',
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await deleteLayer(layer.server_id, layer.id)
+    if (data.code === 0) {
+      ElMessage.success('已删除对外层')
+      layerDialogOpen.value = false
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
+  }
+}
+
+// ---- 入站挂载对外层 ----
+const bindDialogOpen = ref(false)
+const bindServerId = ref(0)
+const bindLayerId = ref(0)
+const bindInboundId = ref(0 as number | undefined)
+const bindSaving = ref(false)
+
+const availableBindInbounds = computed(() => {
+  if (!props.topology) return []
+  return props.topology.inbounds.filter((i) => i.server_id === bindServerId.value && !i.layer_id && i.type !== 'relay')
+})
+
+function openBindInbound(layer: AccessLayer) {
+  bindServerId.value = layer.server_id
+  bindLayerId.value = layer.id
+  bindInboundId.value = undefined
+  if (availableBindInbounds.value.length === 0) {
+    ElMessage.info('该服务器暂无可挂载的入站（已全部挂层或全为 relay）')
+    return
+  }
+  bindDialogOpen.value = true
+}
+
+async function confirmBindInbound() {
+  if (!bindInboundId.value) {
+    ElMessage.warning('请选择要挂载的入站')
+    return
+  }
+  bindSaving.value = true
+  try {
+    const { data } = await updateInbound(bindInboundId.value, { layer_id: bindLayerId.value })
+    if (data.code === 0) {
+      ElMessage.success('入站已挂载到对外层')
+      bindDialogOpen.value = false
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '挂载失败'))
+  } finally {
+    bindSaving.value = false
+  }
+}
+
+async function unbindInbound(inb: InboundItem) {
+  try {
+    await ElMessageBox.confirm(`将入站「${inb.tag}」移出对外层，恢复为直连端点？`, '移出对外层', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await updateInbound(inb.id, { layer_id: 0 })
+    if (data.code === 0) {
+      ElMessage.success('已移出对外层')
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '操作失败'))
+  }
+}
+
 // ---- 出站编辑器弹窗 ----
 const outboundEditorOpen = ref(false)
 const outboundServerId = ref(0)
@@ -1104,6 +1273,12 @@ async function handleSaveInbound() {
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
       share_port: c.sharePort || undefined,
+      share_security: c.shareSecurity || undefined,
+      share_sni: c.shareSni || undefined,
+      share_host: c.shareHost || undefined,
+      share_path: c.sharePath || undefined,
+      share_allow_insecure: c.shareAllowInsecure,
+      layer_id: c.layerId || undefined,
     })
     if (data.code === 0) {
       ElMessage.success('入站已创建')
@@ -1434,9 +1609,10 @@ function autoLayout() {
       const w = getBoxWidth(sid)
       maxColW = Math.max(maxColW, w)
       boxPositions.set(`server-${sid}`, { x: curX, y: curY })
+      const srv = data.servers.find((s) => s.id === sid)!
       const inbCount = data.inbounds.filter((i) => i.server_id === sid).length
-      const outCount = data.outbounds.filter((o) => o.server_id === sid && o.protocol !== 'blackhole').length + 1
-      curY += boxHeight(inbCount, outCount) + GAP_Y
+      const outCount = data.outbounds.filter((o) => o.server_id === sid && o.protocol !== 'blackhole').length
+      curY += estBoxHeight(srv, inbCount, outCount, data.l4_rules?.filter((r) => r.server_id === sid).length ?? 0) + GAP_Y
     }
     curX += maxColW + GAP_X
   }
@@ -1625,7 +1801,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <div
           v-if="nodeProps.data.server.server_type === 'l4_relay'"
           class="server-box l4-relay-box"
-          :class="{ offline: nodeProps.data.server.status !== 1 }"
           :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
         >
           <div
@@ -1635,9 +1810,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           />
           <div class="sb-head l4-head">
             <div class="sb-head-left">
-              <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
               <span class="l4-relay-badge">L4 中转</span>
-              <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
               <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
               <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
             </div>
@@ -1732,38 +1905,74 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             <div class="sb-col">
               <div class="sb-col-head">
                 <span class="sb-title">入站 (Inbound)</span>
-                <button
-                  v-if="editable"
-                  class="sb-add-btn"
-                  title="为该服务器新建入站"
-                  @click.stop="openCreateInbound(nodeProps.data.server.id)"
-                >
-                  <el-icon><Plus /></el-icon>&nbsp;入站
-                </button>
+                <div class="sb-head-actions">
+                  <button
+                    v-if="editable"
+                    class="sb-add-btn layer-add-btn"
+                    title="新建对外接入层（订阅端点分组：内部实现对外不可见）"
+                    @click.stop="openCreateLayer(nodeProps.data.server.id)"
+                  >
+                    <el-icon><Plus /></el-icon>&nbsp;层
+                  </button>
+                  <button
+                    v-if="editable"
+                    class="sb-add-btn"
+                    title="为该服务器新建入站"
+                    @click.stop="openCreateInbound(nodeProps.data.server.id)"
+                  >
+                    <el-icon><Plus /></el-icon>&nbsp;入站
+                  </button>
+                </div>
               </div>
 
               <template v-if="nodeProps.data.inbounds.length > 0">
-                <!-- 1. Caddy/Nginx 认知层反代胶囊 (XHTTP 入站按域名聚合) -->
+                <!-- 1. 对外接入层胶囊（显式端点点位；挂载入站行，端点语义全由层决议） -->
                 <div
-                  v-for="cg in getCaddyGrouping(nodeProps.data.inbounds).caddyGroups"
-                  :key="cg.domain"
-                  class="caddy-capsule"
+                  v-for="g in layerGroupsOf(nodeProps.data.server.id)"
+                  :key="`layer-${g.layer.id}`"
+                  class="layer-capsule"
                 >
-                  <div class="caddy-capsule-head">
-                    <div class="caddy-title">
-                      <span class="caddy-icon">🌐</span>
-                      <span class="caddy-domain" :title="cg.domain">{{ cg.domain }}:443</span>
+                  <div class="layer-capsule-head">
+                    <div class="layer-title">
+                      <span class="layer-icon">🌐</span>
+                      <span class="layer-name" :title="g.layer.name">{{ g.layer.name }}</span>
+                      <code class="layer-endpoint">{{ g.layer.host }}:{{ g.layer.port }}</code>
+                      <span class="layer-sec" :class="g.layer.security">
+                        {{ g.layer.security === 'tls' ? 'TLS' : '明文' }}
+                      </span>
                     </div>
-                    <button
-                      class="caddy-copy-btn"
-                      title="一键复制 Caddyfile 反代配置片段"
-                      @click.stop="copyCaddySnippet(cg, nodeProps.data.server.host)"
-                    >
-                      <el-icon><CopyDocument /></el-icon>&nbsp;Caddyfile
-                    </button>
+                    <div class="layer-actions">
+                      <button
+                        class="layer-copy-btn"
+                        title="一键复制该层的 Caddyfile 反代配置片段"
+                        @click.stop="copyLayerCaddyfile(g.layer)"
+                      >
+                        <el-icon><CopyDocument /></el-icon>&nbsp;Caddyfile
+                      </button>
+                      <button
+                        v-if="editable"
+                        class="layer-act-btn"
+                        title="将本机未挂层入站挂载到该层"
+                        @click.stop="openBindInbound(g.layer)"
+                      >
+                        <el-icon><Plus /></el-icon>&nbsp;挂载
+                      </button>
+                      <button v-if="editable" class="layer-act-btn" title="编辑对外层" @click.stop="openEditLayer(g.layer)">
+                        <el-icon><Setting /></el-icon>
+                      </button>
+                      <button
+                        v-if="editable"
+                        class="layer-act-btn danger"
+                        title="删除对外层（挂载入站回退原生行）"
+                        @click.stop="handleDeleteLayer(g.layer)"
+                      >
+                        <el-icon><Delete /></el-icon>
+                      </button>
+                    </div>
                   </div>
-                  <div class="caddy-capsule-body">
-                    <div v-for="inb in cg.inbounds" :key="inb.id" class="sb-row caddy-subrow">
+                  <div class="layer-capsule-body">
+                    <div v-if="g.inbounds.length === 0" class="sb-empty layer-empty">暂无挂载入站</div>
+                    <div v-for="inb in g.inbounds" :key="inb.id" class="sb-row layer-subrow">
                       <Handle
                         type="target"
                         :id="`inb-tgt-${inb.id}`"
@@ -1786,12 +1995,19 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       >
                         {{ typeInfo(inb.type).text }}
                       </span>
-                      <span class="path-badge" :title="`反代至 127.0.0.1:${inb.port}`">
-                        {{ inb.share_path || '/xhttp' }}
+                      <span v-if="inb.share_path" class="path-badge" :title="`反代至 127.0.0.1:${inb.port}`">
+                        {{ inb.share_path }}
                       </span>
                       <span class="port-badge">:{{ inb.port }}</span>
                       <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
-
+                      <button
+                        v-if="editable"
+                        class="layer-unbind-btn"
+                        title="移出对外层（回退直连端点）"
+                        @click.stop="unbindInbound(inb)"
+                      >
+                        ×
+                      </button>
                       <Handle
                         type="source"
                         :id="`inb-src-${inb.id}`"
@@ -1803,9 +2019,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   </div>
                 </div>
 
-                <!-- 2. 原生入站行 (TCP REALITY / WebSocket 等) -->
+                <!-- 2. 未挂层原生入站行（直连端点，ShareAddrStrategy 决定对外地址） -->
                 <div
-                  v-for="inb in getCaddyGrouping(nodeProps.data.inbounds).nativeInbounds"
+                  v-for="inb in nativeInboundsOf(nodeProps.data.server.id)"
                   :key="inb.id"
                   class="sb-row"
                 >
@@ -2043,6 +2259,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       destroy-on-close
     >
       <InboundConfigEditor
+        :server-id="inboundCreateServerId"
         @change="onInboundEditorChange"
       />
       <template #footer>
@@ -2114,6 +2331,79 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       <template #footer>
         <el-button @click="ruleOpen = false">取消</el-button>
         <el-button type="primary" :loading="ruleSaving" @click="saveRule">创建规则</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 对外接入层新建/编辑弹窗（显式订阅端点分组） -->
+    <el-dialog
+      v-model="layerDialogOpen"
+      :title="layerEditing ? '编辑对外接入层' : '新建对外接入层'"
+      width="540px"
+      append-to-body
+    >
+      <el-form label-position="top">
+        <el-alert
+          title="对外接入层定义订阅对外的 host/port/安全层。挂载的入站在订阅与画布中一律消费本层端点；内部实现（直连 TLS / Caddy 反代 / CDN）对客户端不可见。未挂层入站沿用自身分享地址（直连端点）。"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
+          <el-form-item label="层名称" required>
+            <el-input v-model="layerForm.name" placeholder="如 HK 443 反代层" />
+          </el-form-item>
+          <el-form-item label="对外安全层">
+            <el-select v-model="layerForm.security" style="width: 100%">
+              <el-option label="TLS（反代/CDN 卸载，默认）" value="tls" />
+              <el-option label="明文 none" value="none" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
+          <el-form-item label="对外 Host" required>
+            <el-input v-model="layerForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
+          </el-form-item>
+          <el-form-item label="对外 Port">
+            <el-input-number v-model="layerForm.port" :min="1" :max="65535" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <el-form-item label="备注说明" style="margin-bottom: 0">
+          <el-input v-model="layerForm.remark" placeholder="选填，如 Caddy 前置 / CDN / 直连域名" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <div>
+            <el-button v-if="layerEditing" type="danger" plain @click="handleDeleteLayer(layerEditing)">
+              删除对外层
+            </el-button>
+          </div>
+          <div>
+            <el-button @click="layerDialogOpen = false">取消</el-button>
+            <el-button type="primary" :loading="layerSaving" @click="saveLayer">保存</el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 入站挂载对外层弹窗 -->
+    <el-dialog v-model="bindDialogOpen" title="挂载入站到对外层" width="480px" append-to-body>
+      <el-form label-position="top">
+        <el-form-item label="选择本机未挂层入站">
+          <el-select v-model="bindInboundId" placeholder="选择入站" style="width: 100%">
+            <el-option
+              v-for="inb in availableBindInbounds"
+              :key="inb.id"
+              :label="`${inb.tag} (:${inb.port})`"
+              :value="inb.id"
+            />
+          </el-select>
+        </el-form-item>
+        <p class="muted tip">挂载后订阅对外端点由该层决议（host/port/security），path 沿用入站 share_path。</p>
+      </el-form>
+      <template #footer>
+        <el-button @click="bindDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="bindSaving" @click="confirmBindInbound">挂载</el-button>
       </template>
     </el-dialog>
   </div>
@@ -2396,8 +2686,23 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     }
   }
 
-  /* Caddy/Nginx 认知层反代网关胶囊 */
-  .caddy-capsule {
+  /* 对外接入层胶囊（显式订阅端点分组；挂载入站行） */
+  .sb-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+  }
+  .layer-add-btn {
+    background: rgba(45, 212, 191, 0.12);
+    border-color: rgba(45, 212, 191, 0.25);
+    color: #2dd4bf;
+    &:hover {
+      background: rgba(45, 212, 191, 0.25);
+      border-color: #2dd4bf;
+    }
+  }
+  .layer-capsule {
     width: 100%;
     background: rgba(15, 23, 42, 0.7);
     border: 1px solid rgba(45, 212, 191, 0.25);
@@ -2409,22 +2714,67 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     flex-direction: column;
     gap: 6px;
 
-    .caddy-capsule-head {
+    .layer-capsule-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
       padding: 2px 4px 4px;
       border-bottom: 1px dashed rgba(45, 212, 191, 0.2);
+      flex-wrap: wrap;
 
-      .caddy-title {
+      .layer-title {
         display: flex;
         align-items: center;
         gap: 4px;
         font-size: 11.5px;
         font-weight: 600;
         color: #2dd4bf;
+        min-width: 0;
       }
-      .caddy-copy-btn {
+      .layer-icon {
+        flex: none;
+      }
+      .layer-name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 90px;
+      }
+      .layer-endpoint {
+        font-family: monospace;
+        font-size: 10.5px;
+        color: #a5f3fc;
+        background: rgba(45, 212, 191, 0.1);
+        padding: 0 5px;
+        border-radius: 4px;
+        flex: none;
+      }
+      .layer-sec {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-weight: 600;
+        flex: none;
+        &.tls {
+          background: rgba(45, 212, 191, 0.15);
+          color: #2dd4bf;
+          border: 1px solid rgba(45, 212, 191, 0.3);
+        }
+        &.none {
+          background: rgba(148, 163, 184, 0.15);
+          color: #94a3b8;
+          border: 1px solid rgba(148, 163, 184, 0.3);
+        }
+      }
+      .layer-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: none;
+      }
+      .layer-copy-btn,
+      .layer-act-btn {
         display: inline-flex;
         align-items: center;
         background: rgba(45, 212, 191, 0.15);
@@ -2440,21 +2790,53 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           border-color: #2dd4bf;
         }
       }
+      .layer-act-btn.danger {
+        background: rgba(248, 113, 113, 0.15);
+        border-color: rgba(248, 113, 113, 0.35);
+        color: #f87171;
+        &:hover {
+          background: rgba(248, 113, 113, 0.3);
+          border-color: #f87171;
+        }
+      }
     }
 
-    .caddy-capsule-body {
+    .layer-capsule-body {
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
 
-    .caddy-subrow {
+    .layer-subrow {
       background: rgba(45, 212, 191, 0.06);
       border-color: rgba(45, 212, 191, 0.15);
       &:hover {
         background: rgba(45, 212, 191, 0.12);
         border-color: rgba(45, 212, 191, 0.3);
       }
+    }
+    .layer-unbind-btn {
+      flex: none;
+      width: 16px;
+      height: 16px;
+      line-height: 14px;
+      text-align: center;
+      border-radius: 50%;
+      font-size: 12px;
+      color: #94a3b8;
+      background: rgba(148, 163, 184, 0.15);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.15s;
+      &:hover {
+        color: #f87171;
+        background: rgba(248, 113, 113, 0.2);
+        border-color: #f87171;
+      }
+    }
+    .layer-empty {
+      font-style: italic;
     }
   }
 
@@ -2614,14 +2996,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     0 8px 32px rgba(0, 0, 0, 0.35),
     0 4px 20px rgba(168, 85, 247, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-
-  &.offline {
-    border-color: rgba(168, 85, 247, 0.2);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    .l4-head {
-      background: linear-gradient(180deg, rgba(168, 85, 247, 0.1) 0%, transparent 100%);
-    }
-  }
 
   .l4-head {
     border-bottom-color: rgba(168, 85, 247, 0.2);

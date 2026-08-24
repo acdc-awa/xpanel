@@ -290,7 +290,22 @@ export interface InboundItem {
   share_host?: string // 订阅 HTTP/WS Host 覆写
   share_path?: string // 订阅 WS/XHTTP Path 覆写
   share_allow_insecure?: boolean // 订阅跳过证书检查
+  layer_id?: number // 所属对外接入层（挂层后订阅端点由层决议）
   created_at: string
+}
+
+// 对外接入层（订阅端点语义的显式分组：对外 host/port/security 自定义，内部实现不可见）
+export interface AccessLayer {
+  id: number
+  server_id: number
+  name: string
+  host: string
+  port: number
+  security: string // tls / none
+  remark?: string
+  inbound_count?: number
+  created_at?: string
+  updated_at?: string
 }
 
 // Phase T：入站二态（面向用户 / 内部链式代理落地）

@@ -35,7 +35,7 @@ type inboundView struct {
 	InternalUUID       string     `json:"internal_uuid,omitempty"` // relay 只读（节点上报）
 	CertID             *uint64    `json:"cert_id,omitempty"`       // 绑定的证书
 	Flow               string     `json:"flow"`                    // 入站级流控（空=自动 / xtls-rprx-vision / none）
-	ShareAddrStrategy  string     `json:"share_addr_strategy"`     // node / listen / custom
+	ShareAddrStrategy  string     `json:"share_addr_strategy"`     // node / custom（订阅专用）
 	ShareAddr          string     `json:"share_addr"`              // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`              // 自定义分享端口（0 = 使用入站端口）
 	ShareSecurity      string     `json:"share_security"`          // auto / tls / none
@@ -43,6 +43,7 @@ type inboundView struct {
 	ShareHost          string     `json:"share_host"`              // 订阅 HTTP/WS Host 覆写
 	SharePath          string     `json:"share_path"`              // 订阅 WS/XHTTP Path 覆写
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`    // 订阅跳过证书校验
+	LayerID            *uint64    `json:"layer_id,omitempty"`      // 所属对外接入层（空/0 = 直连自持端点）
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
@@ -71,6 +72,7 @@ type inboundForm struct {
 	ShareHost          string     `json:"share_host"`
 	SharePath          string     `json:"share_path"`
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`
+	LayerID            *uint64    `json:"layer_id"` // 所属对外接入层（nil/0 = 直连；仅同一服务器的层有效）
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
@@ -90,6 +92,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		SharePort:     i.SharePort,
 		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
 		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
+		LayerID: i.LayerID,
 	}
 }
 
@@ -140,7 +143,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless/vmess/trojan/ss）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（暂仅支持 vless，vmess/trojan/ss 订阅导出未实现）")
 		return
 	}
 	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
@@ -184,6 +187,19 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 			return
 		}
 	}
+	if req.LayerID != nil && *req.LayerID != 0 {
+		var layer models.AccessLayer
+		if err := d.DB.First(&layer, *req.LayerID).Error; err != nil {
+			util.BadRequest(c, "所属对外层不存在")
+			return
+		}
+		if layer.ServerID != req.ServerID {
+			util.BadRequest(c, "所属对外层必须与入站同属一台服务器")
+			return
+		}
+	} else if req.LayerID != nil {
+		req.LayerID = nil // 显式 0 = 直连，与空一致
+	}
 	// 同服务器端口冲突
 	var cnt int64
 	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ?", req.ServerID, req.Port).Count(&cnt)
@@ -200,7 +216,9 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		Type:   req.Type,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
-		SharePort: req.SharePort,
+		SharePort: req.SharePort, ShareSecurity: req.ShareSecurity, ShareSNI: req.ShareSNI,
+		ShareHost: req.ShareHost, SharePath: req.SharePath,
+		ShareAllowInsecure: req.ShareAllowInsecure, LayerID: req.LayerID,
 	}
 	// Type 空 = user（与模型默认一致）
 	if inb.Type == "" {
@@ -264,6 +282,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ShareHost          *string    `json:"share_host"`
 		SharePath          *string    `json:"share_path"`
 		ShareAllowInsecure *bool      `json:"share_allow_insecure"`
+		LayerID            *uint64    `json:"layer_id"` // nil 不更新；显式传 0 解绑回原生
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -301,7 +320,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless/vmess/trojan/ss）")
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（暂仅支持 vless，vmess/trojan/ss 订阅导出未实现）")
 		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
@@ -341,6 +360,17 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		var cert models.Cert
 		if err := d.DB.First(&cert, *req.CertID).Error; err != nil {
 			util.BadRequest(c, "绑定证书不存在")
+			return
+		}
+	}
+	if req.LayerID != nil && *req.LayerID != 0 {
+		var layer models.AccessLayer
+		if err := d.DB.First(&layer, *req.LayerID).Error; err != nil {
+			util.BadRequest(c, "所属对外层不存在")
+			return
+		}
+		if layer.ServerID != inb.ServerID {
+			util.BadRequest(c, "所属对外层必须与入站同属一台服务器")
 			return
 		}
 	}
@@ -431,6 +461,13 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.ShareAllowInsecure != nil {
 		updates["share_allow_insecure"] = *req.ShareAllowInsecure
+	}
+	if req.LayerID != nil {
+		if *req.LayerID == 0 {
+			updates["layer_id"] = nil
+		} else {
+			updates["layer_id"] = *req.LayerID
+		}
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
@@ -548,14 +585,10 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 	})
 }
 
-// validInboundProtocol 入站协议白名单（仅 VLESS 全功能可用；vmess/trojan/ss 为预留 switch，
-// 防"卡出不可能存在的配置"——拼写错误/未知协议直接拒绝）。
+// validInboundProtocol 入站协议白名单（仅 VLESS 全功能可用；vmess/trojan/ss 订阅导出未实现，
+// 创建时拒绝避免"能建但订阅静默丢弃"，同时防拼写错误/未知协议卡出不可能存在的配置）。
 func validInboundProtocol(p string) bool {
-	switch p {
-	case "vless", "vmess", "trojan", "ss":
-		return true
-	}
-	return false
+	return p == "vless"
 }
 
 func validInboundType(t string) bool {
@@ -572,7 +605,7 @@ func validInboundFlow(f string) bool {
 
 func validShareAddrStrategy(s string) bool {
 	switch s {
-	case "node", "listen", "custom":
+	case "node", "custom":
 		return true
 	}
 	return false
