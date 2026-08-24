@@ -23,7 +23,7 @@ func validationTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&models.Server{}, &models.Inbound{}, &models.Plan{},
 		&models.ServerOutbound{}, &models.ServerRoutingRule{},
-		&models.PermissionGroup{},
+		&models.PermissionGroup{}, &models.User{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -96,6 +96,126 @@ func TestAdminCreateInboundSemanticValidation(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("body=%s => HTTP %d, want 400, resp=%s", body, w.Code, w.Body.String())
 		}
+	}
+}
+
+// TestAdminCreateInboundRejectsUnsupportedProtocol vmess/trojan/ss 订阅导出未实现，
+// 创建时直接拒绝（P1-6），避免"能建但订阅静默丢弃"。
+func TestAdminCreateInboundRejectsUnsupportedProtocol(t *testing.T) {
+	db := validationTestDB(t)
+	srv := seedServer(t, db)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	d := &Deps{DB: db}
+	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
+	sid := strconv.FormatUint(srv.ID, 10)
+
+	for _, proto := range []string{"vmess", "trojan", "ss"} {
+		body := `{"server_id":` + sid + `,"tag":"proto-` + proto + `","protocol":"` + proto + `","port":443}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/inbounds", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("protocol=%s => HTTP %d, want 400, resp=%s", proto, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestAdminCreateUserValidatesRefs 创建用户时 plan_id/permission_group_id 必须存在（P1-5），
+// 且邮箱统一小写化落库（与 Register/AdminUpdateUser 对齐）。
+func TestAdminCreateUserValidatesRefs(t *testing.T) {
+	db := validationTestDB(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	d := &Deps{DB: db}
+	r.POST("/api/v1/admin/users", d.AdminCreateUser)
+
+	// 缺失引用 → 400
+	bad := []string{
+		`{"email":"u1@x.com","password":"password123","plan_id":99999}`,
+		`{"email":"u1@x.com","password":"password123","permission_group_id":99999}`,
+	}
+	for _, body := range bad {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s => HTTP %d, want 400, resp=%s", body, w.Code, w.Body.String())
+		}
+	}
+
+	// 合法引用 + 邮箱大小写归一 → 200 且引用生效
+	plan := models.Plan{Name: "p1", PriceCents: 100, TrafficGB: 100, DurationDays: 30}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	pg := models.PermissionGroup{Name: "pg1"}
+	if err := db.Create(&pg).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := `{"email":"Foo@X.COM","password":"password123","plan_id":` +
+		strconv.FormatUint(plan.ID, 10) + `,"permission_group_id":` + strconv.FormatUint(pg.ID, 10) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("valid refs => HTTP %d, want 200, resp=%s", w.Code, w.Body.String())
+	}
+	var created models.User
+	if err := db.Where("username = ?", "foo@x.com").First(&created).Error; err != nil {
+		t.Fatalf("邮箱未小写化落库: %v", err)
+	}
+	if created.PlanID != plan.ID || created.PermissionGroupID != pg.ID {
+		t.Fatalf("引用未生效: plan=%d pg=%d", created.PlanID, created.PermissionGroupID)
+	}
+}
+
+// TestAdminUpdateUserValidatesRefs 更新用户时 plan_id/permission_group_id 必须存在（P1-5）；
+// 0 表示无套餐/跟随套餐，放行。
+func TestAdminUpdateUserValidatesRefs(t *testing.T) {
+	db := validationTestDB(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	d := &Deps{DB: db}
+	r.PUT("/api/v1/admin/users/:id", d.AdminUpdateUser)
+
+	u := models.User{
+		Username: "u@x.com", Email: "u@x.com",
+		UUID: "11111111-1111-1111-1111-111111111111", Status: models.StatusActive,
+	}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatUint(u.ID, 10)
+
+	assert := func(body string, want int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatalf("body=%s => HTTP %d, want %d, resp=%s", body, w.Code, want, w.Body.String())
+		}
+	}
+	assert(`{"plan_id":99999}`, http.StatusBadRequest)
+	assert(`{"permission_group_id":99999}`, http.StatusBadRequest)
+	assert(`{"plan_id":0}`, http.StatusOK) // 0 = 无套餐语义，放行
+
+	plan := models.Plan{Name: "p1", PriceCents: 100, TrafficGB: 100, DurationDays: 30}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	assert(`{"plan_id":`+strconv.FormatUint(plan.ID, 10)+`}`, http.StatusOK)
+	var updated models.User
+	if err := db.First(&updated, u.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.PlanID != plan.ID {
+		t.Fatalf("更新后 plan_id = %d, want %d", updated.PlanID, plan.ID)
 	}
 }
 

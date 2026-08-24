@@ -80,7 +80,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 			"device_limit":           u.DeviceLimit,
 			"effective_device_limit": effectiveLimit,
 			"is_custom_device_limit": isCustomLimit,
-			"expire_at": u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
+			"expire_at":              u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
 			"up_bytes": up, "down_bytes": down,
 			"used_bytes": used, "total_bytes": totalBytes,
 		})
@@ -168,6 +168,24 @@ func (d *Deps) AdminRevokeInvitation(c *gin.Context) {
 
 // AdminCreateUser POST /api/v1/admin/users —— 管理员手动创建用户。
 // 2026-08-14 方向④：余额只来自兑换码/调账，创建用户不再支持初始余额。
+// validateUserRefs 校验套餐/权限组引用存在性（P1-5；值为 0 = 不使用该引用，跳过）。
+// 返回错误文案，空字符串 = 通过。
+func (d *Deps) validateUserRefs(planID, permGroupID uint64) string {
+	if planID > 0 {
+		var n int64
+		if err := d.DB.Model(&models.Plan{}).Where("id = ?", planID).Count(&n).Error; err != nil || n == 0 {
+			return fmt.Sprintf("套餐不存在: %d", planID)
+		}
+	}
+	if permGroupID > 0 {
+		var n int64
+		if err := d.DB.Model(&models.PermissionGroup{}).Where("id = ?", permGroupID).Count(&n).Error; err != nil || n == 0 {
+			return fmt.Sprintf("权限组不存在: %d", permGroupID)
+		}
+	}
+	return ""
+}
+
 func (d *Deps) AdminCreateUser(c *gin.Context) {
 	var req struct {
 		Email             string     `json:"email" binding:"required,email"`
@@ -181,6 +199,13 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
+	// P1-5：套餐/权限组存在性校验——不存在则明确拒绝，避免"配额检查被跳过→无上限用量"
+	if msg := d.validateUserRefs(req.PlanID, req.PermissionGroupID); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
+	// 与 Register/AdminUpdateUser 对齐：邮箱小写化后作为用户名
+	email := strings.ToLower(strings.TrimSpace(req.Email))
 	hash, err := argon2id.CreateHash(req.Password, argon2id.DefaultParams)
 	if err != nil {
 		util.ServerError(c, "密码加密失败")
@@ -198,8 +223,8 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 
 	user := models.User{
-		Username:          req.Email, // 用邮箱直接做用户名
-		Email:             req.Email,
+		Username:          email, // 用邮箱直接做用户名
+		Email:             email,
 		UUID:              uuid,
 		PasswordHash:      hash,
 		Role:              models.RoleUser,
@@ -289,9 +314,21 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		updates["role"] = role
 	}
 	if req.PlanID != nil {
+		if *req.PlanID > 0 {
+			if msg := d.validateUserRefs(*req.PlanID, 0); msg != "" {
+				util.BadRequest(c, msg)
+				return
+			}
+		}
 		updates["plan_id"] = *req.PlanID
 	}
 	if req.PermissionGroupID != nil {
+		if *req.PermissionGroupID > 0 {
+			if msg := d.validateUserRefs(0, *req.PermissionGroupID); msg != "" {
+				util.BadRequest(c, msg)
+				return
+			}
+		}
 		updates["permission_group_id"] = *req.PermissionGroupID
 	}
 	if req.DeviceLimit != nil {
