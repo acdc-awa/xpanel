@@ -189,9 +189,20 @@ func main() {
 	log.Println("已退出")
 }
 
+// invalidJWTSecret 模板/示例中的占位值一律视为未配置（自动生成），杜绝弱密钥被采信。
+// 2026-08-24：密钥不再写进 configs 模板（留空=首次自动生成落库），此处防御旧配置残留。
+func invalidJWTSecret(v string) bool {
+	switch strings.TrimSpace(v) {
+	case "", "change-me-in-production-must-be-32-bytes", "dev-secret-change-in-production",
+		"change-me-in-production-at-least-32-chars", "replace-with-openssl-rand-hex-32":
+		return true
+	}
+	return false
+}
+
 // ensureJWTSecret 保证 JWT Secret 安全存在：
 // 1. 若 settings 表已有 jwt_secret，优先使用；
-// 2. 若无但 cfg.JWT.Secret 提供了显式非默认值，存入 DB 并使用；
+// 2. 若无但 cfg.JWT.Secret 提供了显式非占位值，存入 DB 并使用；
 // 3. 否则通过 crypto/rand 自动生成 64 字符安全随机 Hex 存入 DB。
 func ensureJWTSecret(database *gorm.DB, cfg *config.Config) string {
 	var s models.Setting
@@ -200,7 +211,10 @@ func ensureJWTSecret(database *gorm.DB, cfg *config.Config) string {
 	}
 
 	secret := strings.TrimSpace(cfg.JWT.Secret)
-	if secret == "" || secret == "change-me-in-production-must-be-32-bytes" || secret == "dev-secret-change-in-production" {
+	if invalidJWTSecret(secret) {
+		secret = ""
+	}
+	if secret == "" {
 		generated, err := util.RandomHex(32)
 		if err == nil && generated != "" {
 			secret = generated
@@ -217,7 +231,9 @@ func ensureJWTSecret(database *gorm.DB, cfg *config.Config) string {
 	return secret
 }
 
-// ensureAdmin 首次启动时创建初始管理员。若未在配置指定密码或使用了默认弱密码，自动生成 16 位随机强密码并在控制台高亮输出。
+// ensureAdmin 首次启动时创建初始管理员。账密不写进 configs 模板：
+// 未指定（或占位弱值）时用户名回退 admin@panel.local、密码自动生成 16 位强随机串并在控制台高亮输出；
+// 显式指定请用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（compose/.env）。
 func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 	var cnt int64
 	if err := database.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&cnt).Error; err != nil {
@@ -234,7 +250,9 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 
 	rawPassword := strings.TrimSpace(cfg.Admin.Password)
 	isRandom := false
-	if rawPassword == "" || rawPassword == "admin123" || rawPassword == "admin" {
+	// 2026-08-24：模板与 .env.example 不再提供默认账密（留空=随机生成）；
+	// 以下弱值/占位值防御旧配置与照抄示例的部署者。
+	if rawPassword == "" || rawPassword == "admin123" || rawPassword == "admin" || rawPassword == "replace-with-strong-password" {
 		rawPassword = util.GenerateSecurePassword(16)
 		isRandom = true
 	}

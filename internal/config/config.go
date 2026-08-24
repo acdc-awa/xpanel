@@ -88,9 +88,8 @@ func Load(path string) (*Config, error) {
 
 	cfg.applyEnv()
 
-	if cfg.JWT.Secret == "" {
-		return nil, fmt.Errorf("JWT secret 未配置，请在配置文件(JWT.Secret)或环境变量(JWT_SECRET)中设置")
-	}
+	// JWT secret 允许为空：首次启动由 ensureJWTSecret 自动生成强随机密钥并持久化到 DB
+	// （模板不再提供任何默认值，杜绝默认密钥；显式指定请用 env JWT_SECRET）。
 
 	return cfg, nil
 }

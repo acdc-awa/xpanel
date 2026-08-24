@@ -110,8 +110,9 @@ APP_PUBLIC_URL=https://panel.yourdomain.com
 # 订阅域名：整域反代到订阅端口（可选；不填则订阅走面板域名 + 订阅路径）
 # SUB_SITE_ADDRESS=sub.yourdomain.com
 
-# 必改：JWT 密钥（openssl rand -hex 32）
-JWT_SECRET=change-me
+# JWT 密钥与默认管理员账密均不预设（防默认密码攻击）：
+# 留空=首次启动自动生成——JWT 密钥持久化到 DB，管理员密码在控制台高亮显示（docker compose logs master）
+# 如需显式指定：JWT_SECRET=$(openssl rand -hex 32)、ADMIN_PASSWORD=<强密码>
 ```
 
 > 四端口模型：面板由四个独立监听端口组成——**SPA 前端**（`APP_PORT`，默认 18080）、

@@ -73,6 +73,63 @@ func TestEnsureAdmin_RandomPassword(t *testing.T) {
 	}
 }
 
+// TestInvalidJWTSecretPlaceholders 模板/示例占位值必须被识别为「未配置」（触发自动生成），
+// 杜绝部署者照抄 configs 模板或 .env.example 后弱密钥被采信（2026-08-24 默认值清零）。
+func TestInvalidJWTSecretPlaceholders(t *testing.T) {
+	placeholder := []string{
+		"",
+		"change-me-in-production-at-least-32-chars", // 旧 configs 模板占位值
+		"change-me-in-production-must-be-32-bytes",
+		"dev-secret-change-in-production",
+		"replace-with-openssl-rand-hex-32", // .env.example 占位值
+	}
+	for _, v := range placeholder {
+		if !invalidJWTSecret(v) {
+			t.Errorf("占位值应视为未配置: %q", v)
+		}
+	}
+	for _, v := range []string{"real-32-bytes-secret-0123456789abcdef", "abc123"} {
+		if invalidJWTSecret(v) {
+			t.Errorf("显式密钥被误判为占位值: %q", v)
+		}
+	}
+}
+
+// TestEnsureJWTSecretPlaceholderRegenerated config 携带旧模板占位值时，
+// 必须自动生成新密钥落库，而不是把占位值当密钥用。
+func TestEnsureJWTSecretPlaceholderRegenerated(t *testing.T) {
+	db := setupTestDB(t)
+	cfg := &config.Config{JWT: config.JWT{Secret: "change-me-in-production-at-least-32-chars"}}
+
+	secret := ensureJWTSecret(db, cfg)
+	if secret == cfg.JWT.Secret || len(secret) < 32 {
+		t.Fatalf("占位值未被替换为自动生成密钥: %q", secret)
+	}
+}
+
+// TestEnsureAdminPlaceholderPasswordRandomized 照抄 .env.example 占位密码时，
+// 必须自动生成强随机密码而非以占位值作密码（防默认密码攻击）。
+func TestEnsureAdminPlaceholderPasswordRandomized(t *testing.T) {
+	db := setupTestDB(t)
+	cfg := &config.Config{
+		Admin: config.Admin{
+			Username: "admin@test.local",
+			Password: "replace-with-strong-password",
+		},
+	}
+
+	ensureAdmin(db, cfg)
+
+	var admin models.User
+	if err := db.Where("role = ?", models.RoleAdmin).First(&admin).Error; err != nil {
+		t.Fatalf("admin not created: %v", err)
+	}
+	match, err := argon2id.ComparePasswordAndHash("replace-with-strong-password", admin.PasswordHash)
+	if err != nil || match {
+		t.Errorf("占位值不得作为管理员密码（match=%v err=%v）", match, err)
+	}
+}
+
 func TestHandleResetAdmin(t *testing.T) {
 	db := setupTestDB(t)
 	cfg := &config.Config{
