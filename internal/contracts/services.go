@@ -53,7 +53,7 @@ type AuthService interface {
 	ChangePassword(ctx context.Context, userID uint64, oldPwd, newPwd string) error
 	ForgotPassword(ctx context.Context, email string) (bool, error)
 	IssueTokens(user *models.User) (access, refresh string, err error)
-	Login(ctx context.Context, username, password string) (*models.User, error)
+	Login(ctx context.Context, username, password, clientIP string) (*models.User, error)
 	Refresh(ctx context.Context, refreshToken string) (string, error)
 	Register(ctx context.Context, req *RegisterRequest) (*models.User, error)
 	ResetSubscribeToken(ctx context.Context, userID uint64) (string, error)

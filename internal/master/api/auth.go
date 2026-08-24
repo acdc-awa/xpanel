@@ -58,7 +58,7 @@ func (d *Deps) Login(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	user, err := d.Auth.Login(c.Request.Context(), req.Username, req.Password)
+	user, err := d.Auth.Login(c.Request.Context(), req.Username, req.Password, util.ClientIPFromContext(c))
 	if err != nil {
 		code, msg := authError(err)
 		util.Fail(c, code, msg)

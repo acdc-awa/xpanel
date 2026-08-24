@@ -121,8 +121,9 @@ func (s *AuthService) consumeInviteTx(ctx context.Context, tx *gorm.DB, code str
 	return nil
 }
 
-// loginFailures 按邮箱的账号级失败计数（J19-③，Xboard PASSWORD_ERROR_LIMIT 模式：
-// 5 次/30 分钟锁定；与路由层 IP 限流互补，防代理池暴力破解）。内存实现，多实例需换 Redis。
+// loginFailures 按 邮箱+客户端 IP 组合 的失败计数（J19-③，Xboard PASSWORD_ERROR_LIMIT 模式改：
+// 5 次/30 分钟锁定单一组合，防攻击者用自身 IP 锁死他人账号；与路由层 IP 限流互补，防代理池暴力破解）。
+// 内存实现，多实例需换 Redis。
 var loginFailures = struct {
 	sync.Mutex
 	m map[string]loginFail
@@ -158,9 +159,9 @@ func cleanupLoginFailuresLocked(now time.Time) {
 	}
 }
 
-// Login 校验用户名密码与账号状态（含账号级失败锁定）。
-func (s *AuthService) Login(ctx context.Context, username, password string) (*models.User, error) {
-	key := strings.ToLower(strings.TrimSpace(username))
+// Login 校验用户名密码与账号状态（失败锁定按 邮箱+IP 组合，单一组合锁定不影响其他来源 IP 登录）。
+func (s *AuthService) Login(ctx context.Context, username, password, clientIP string) (*models.User, error) {
+	key := strings.ToLower(strings.TrimSpace(username)) + "|" + clientIP
 
 	loginFailures.Lock()
 	f, locked := loginFailures.m[key]
@@ -169,7 +170,9 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 		loginFailures.Unlock()
 		return nil, errors.New("密码错误次数过多，请 30 分钟后再试")
 	}
-	if locked && !now.Before(f.until) {
+	// 仅清理"已设置锁定且已过期"的条目；截至 until 为零值（累计中）的计数条目必须保留，
+	// 否则每次尝试都会重置计数，锁定永不触发（P1-4 实测暴露）。
+	if locked && !f.until.IsZero() && !now.Before(f.until) {
 		delete(loginFailures.m, key)
 	}
 	loginFailures.Unlock()
