@@ -268,3 +268,63 @@ func TestL4RuleAccessPointMigration(t *testing.T) {
 		t.Fatalf("second migrate should be idempotent: %v", err)
 	}
 }
+
+// TestUserSubscribeTokenBackfill 订阅 token 回填迁移（2026-08-24 修复「订阅中心拿不到订阅地址」）：
+// 存量用户（早期建库/初始管理员）subscribe_token 为空 → 登录后前端订阅地址显示「加载中…」；
+// AutoMigrate 必须为其补齐 64 位 hex token，已有 token 的用户保持不变，重复迁移幂等。
+func TestUserSubscribeTokenBackfill(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&User{}); err != nil {
+		t.Fatalf("create users table: %v", err)
+	}
+
+	legacy := User{Username: "admin@panel.local", Email: "admin@panel.local", UUID: "uuid-admin", PasswordHash: "h", Role: RoleAdmin, Status: StatusActive}
+	withToken := User{Username: "u@x.com", Email: "u@x.com", UUID: "uuid-user", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "already-set-token"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy user: %v", err)
+	}
+	if err := db.Create(&withToken).Error; err != nil {
+		t.Fatalf("create user with token: %v", err)
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate should backfill tokens: %v", err)
+	}
+
+	var gotWith User
+	if err := db.First(&gotWith, withToken.ID).Error; err != nil {
+		t.Fatalf("load user with token: %v", err)
+	}
+	if gotWith.SubscribeToken != "already-set-token" {
+		t.Fatalf("已有 token 被改动: %q", gotWith.SubscribeToken)
+	}
+
+	var gotLegacy User
+	if err := db.First(&gotLegacy, legacy.ID).Error; err != nil {
+		t.Fatalf("load legacy user: %v", err)
+	}
+	if len(gotLegacy.SubscribeToken) != 64 {
+		t.Fatalf("回填 token 长度应为 64，实际 %d", len(gotLegacy.SubscribeToken))
+	}
+	for _, ch := range gotLegacy.SubscribeToken {
+		if !strings.ContainsRune("0123456789abcdef", ch) {
+			t.Fatalf("回填 token 含非法字符: %q", gotLegacy.SubscribeToken)
+		}
+	}
+
+	// 幂等：再次迁移不得改动任何 token
+	tokenBefore := gotLegacy.SubscribeToken
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate should be idempotent: %v", err)
+	}
+	var again User
+	if err := db.First(&again, legacy.ID).Error; err != nil {
+		t.Fatalf("reload legacy user: %v", err)
+	}
+	if again.SubscribeToken != tokenBefore {
+		t.Fatalf("重复迁移改动了 token: %q → %q", tokenBefore, again.SubscribeToken)
+	}
+}

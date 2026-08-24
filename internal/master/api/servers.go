@@ -2,8 +2,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -127,36 +125,41 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		return
 	}
 	EnsureDefaultServerOutbounds(d.DB, server.ID)
-	webBase := ""
-	if d.Site != nil {
-		webBase = d.Site.WebBase()
-	}
 	util.OK(c, gin.H{
 		"server":      toServerView(&server),
 		"node_id":     nodeID,
 		"secret":      secret, // 仅此一次返回明文
-		"install_cmd": installCmd(webBase, d.Cfg.App.PublicURL, c.Request.Host, nodeID, secret),
+		"install_cmd": installCmd(d.Cfg.App.PublicURL, d.Cfg.App.WSPublicURL, c.Request.Host, nodeID, secret),
 	})
 }
 
-// installCmd 生成节点一键安装命令（主控作为安装脚本与 agent 二进制的下载源）。
-func installCmd(webBase, publicURL, reqHost, nodeID, secret string) string {
-	httpScheme := "http"
-	wsScheme := "ws"
-	host := publicURL
-	if host == "" {
-		host = reqHost
-	} else {
-		host = strings.TrimRight(host, "/")
-		if strings.HasPrefix(host, "https://") {
-			httpScheme = "https"
-			wsScheme = "wss"
+// AgentInstallScriptURL 节点一键安装脚本下载地址。2026-08-24 仓库拆分收口：
+// 脚本权威源在 XPanel-Node 仓库 GitHub Releases（release.yml 随 tag 发布 deploy/install-agent.sh），
+// 面板不再充当脚本下载源，杜绝多源漂移（与 agent 内部 upgrade.DefaultRepo 同仓库）。
+const AgentInstallScriptURL = "https://github.com/acdc-awa/XPanel-Node/releases/latest/download/install-agent.sh"
+
+// installCmd 生成节点一键安装命令（脚本从 GitHub Releases 拉取；--master 指向节点
+// WebSocket 网关入口——四端口拆分后对外路径固定 /node/ws（Caddy 按该路径分流到 WS 端口），
+// 也可用 env APP_WS_PUBLIC_URL（如 wss://ws.example.com/node/ws）整体覆盖为任意路径/独立域名）。
+func installCmd(publicURL, wsPublicURL, reqHost, nodeID, secret string) string {
+	master := strings.TrimSpace(wsPublicURL)
+	if master == "" {
+		wsScheme := "ws"
+		host := publicURL
+		if host == "" {
+			host = reqHost
+		} else {
+			host = strings.TrimRight(host, "/")
+			if strings.HasPrefix(host, "https://") {
+				wsScheme = "wss"
+			}
+			host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
 		}
-		host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+		master = fmt.Sprintf("%s://%s/node/ws", wsScheme, host)
 	}
 	return fmt.Sprintf(
-		"bash <(curl -fsSL %s://%s%s/api/v1/download/install-agent.sh) --master %s://%s%s/api/v1/node/ws --node-id %s --secret %s",
-		httpScheme, host, webBase, wsScheme, host, webBase, nodeID, secret)
+		"bash <(curl -fsSL %s) --master %s --node-id %s --secret %s",
+		AgentInstallScriptURL, master, nodeID, secret)
 }
 
 // AdminUpdateServer PUT /api/v1/admin/servers/:id —— 编辑服务器信息。
@@ -249,14 +252,10 @@ func (d *Deps) AdminResetSecret(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	webBase := ""
-	if d.Site != nil {
-		webBase = d.Site.WebBase()
-	}
 	util.OK(c, gin.H{
 		"node_id":     srv.NodeID,
 		"secret":      secret, // 仅此一次返回明文
-		"install_cmd": installCmd(webBase, d.Cfg.App.PublicURL, c.Request.Host, srv.NodeID, secret),
+		"install_cmd": installCmd(d.Cfg.App.PublicURL, d.Cfg.App.WSPublicURL, c.Request.Host, srv.NodeID, secret),
 	})
 }
 
@@ -448,28 +447,6 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		"message": "配置已保存，正在后台推送到节点",
 		"config":  cfgStr,
 	})
-}
-
-// DownloadInstallScript GET /api/v1/download/install-agent.sh —— 节点一键安装脚本（部署用）。
-func (d *Deps) DownloadInstallScript(c *gin.Context) {
-	p := os.Getenv("INSTALL_SCRIPT_PATH")
-	if p == "" {
-		for _, cand := range []string{"/app/install-agent.sh", "deploy/agent/install-agent.sh"} {
-			if _, err := os.Stat(cand); err == nil {
-				p = cand
-				break
-			}
-		}
-	}
-	if p == "" {
-		util.Fail(c, http.StatusNotFound, "安装脚本未内置")
-		return
-	}
-	if _, err := os.Stat(p); err != nil {
-		util.Fail(c, http.StatusNotFound, "安装脚本不存在: "+p)
-		return
-	}
-	c.File(p)
 }
 
 // AdminServerMetrics GET /api/v1/admin/servers/:id/metrics —— 查询节点时序监控数据 (1h/6h/24h/7d)。

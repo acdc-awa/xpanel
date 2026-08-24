@@ -4,7 +4,6 @@ import { CopyDocument, Refresh, Ticket } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import { withBase } from '@/config/site'
 
 const list = ref<Invitation[]>([])
 const loading = ref(false)
@@ -46,7 +45,7 @@ async function create() {
 }
 
 function getRegisterUrl(code: string) {
-  return `${location.origin}${withBase('/register')}?code=${encodeURIComponent(code)}`
+  return `${location.origin}/register?code=${encodeURIComponent(code)}`
 }
 
 async function copyCode(code: string) {

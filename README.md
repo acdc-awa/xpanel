@@ -100,12 +100,24 @@ curl -fsSL https://raw.githubusercontent.com/zhx/XrayProject/main/deploy/master/
 ```
 
 #### 2. 配置 `.env`
-编辑 `.env` 文件，仅需填入你的面板域名：
+编辑 `.env` 文件，填入你的面板域名与订阅域名（可选）：
 
 ```ini
-# 你的面板域名（Caddy 将自动申请并续签免费 HTTPS 证书）
+# 面板域名（Caddy 将自动申请并续签免费 HTTPS 证书）
 SITE_ADDRESS=panel.yourdomain.com
+APP_PUBLIC_URL=https://panel.yourdomain.com
+
+# 订阅域名：整域反代到订阅端口（可选；不填则订阅走面板域名 + 订阅路径）
+# SUB_SITE_ADDRESS=sub.yourdomain.com
+
+# 必改：JWT 密钥（openssl rand -hex 32）
+JWT_SECRET=change-me
 ```
+
+> 四端口模型：面板由四个独立监听端口组成——**SPA 前端**（`APP_PORT`，默认 18080）、
+> **后端 API**（`APP_API_PORT`，默认 18081）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
+> 对外路径 `/node/ws`，可用 `APP_WS_PUBLIC_URL` 整体覆盖）、**订阅**（`APP_SUB_PORT`，默认 6000）。
+> 四个端口均在容器内网，由 Caddy 按域名/路径分流（详见 `.env.example` 注释与 `deploy/master/Caddyfile`）。
 
 #### 3. 启动容器
 ```bash
@@ -142,7 +154,7 @@ docker compose logs master
 3. 登录海外节点 VPS，以 `root` 权限粘贴并执行该命令：
 
 ```bash
-curl -fsSL https://panel.yourdomain.com/api/v1/download/install-agent.sh | bash -s -- \
+bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/download/install-agent.sh) \
   --master wss://panel.yourdomain.com/api/v1/node/ws \
   --node-id 1 \
   --secret sec_xxxxxxxxxxxxxxxx

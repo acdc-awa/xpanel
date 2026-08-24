@@ -1,12 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { panelBase } from '@/config/site'
 import { clientRoutes } from './modules/client'
 import { adminRoutes } from './modules/admin'
 import { authRoutes } from './modules/auth'
 import { setupRouterGuards } from './guards'
 
 const router = createRouter({
-  history: createWebHistory(panelBase),
+  history: createWebHistory(),
   routes: [...authRoutes, ...clientRoutes, ...adminRoutes],
   scrollBehavior: () => ({ top: 0 }),
 })

@@ -16,7 +16,6 @@ export interface PublicConfig {
   currency_symbol?: string
   subscribe_url?: string
   subscribe_path?: string
-  subscribe_port?: string
 }
 
 export function getPublicConfig() {

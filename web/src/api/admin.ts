@@ -89,7 +89,7 @@ export function getServerMetrics(id: number, range = '1h') {
   return http.get<ApiResp<ServerMetricsData>>(`/admin/servers/${id}/metrics`, { params: { range } })
 }
 
-// ===== 站点设置（设置页，批7 分组式：site/captcha/web_base） =====
+// ===== 站点设置（设置页，批7 分组式：site/captcha） =====
 
 export interface SiteGroup {
   app_name: string
@@ -99,7 +99,7 @@ export interface SiteGroup {
   subscribe_domain: string
   subscribe_url: string
   subscribe_path: string
-  subscribe_port: string
+  sub_deny_code: string
   sub_clean_ua: string
   sub_strict_ua: string
   sub_blocked_ua: string
@@ -119,7 +119,6 @@ export interface CaptchaGroup {
 export interface SiteSettings {
   site: SiteGroup
   captcha: CaptchaGroup
-  web_base: string
 }
 
 export function getSettings() {

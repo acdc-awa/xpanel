@@ -1,9 +1,6 @@
 package api
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/acdc-awa/xpanel/internal/master/services"
@@ -11,18 +8,16 @@ import (
 )
 
 // AdminSettings GET /api/v1/admin/settings —— 站点设置读取（分组式，17 号 P0 ①）。
-// 返回三组：site（站点）/ captcha（人机验证，管理端专属，含 secret）/ web_base（访问路径）。
+// 返回两组：site（站点）/ captcha（人机验证，管理端专属，含 secret）。
+// 2026-08-24 四端口拆分：web_base 与订阅端口退役（端口走 env/配置，web_base 由域名分流取代）。
 func (d *Deps) AdminSettings(c *gin.Context) {
 	site := map[string]string{}
-	webBase := ""
 	if d.Site != nil {
 		site = d.Site.SiteGroup()
-		webBase = d.Site.WebBase()
 	}
 	util.OK(c, gin.H{
-		"site":     site,
-		"captcha":  services.CaptchaSettings(d.DB),
-		"web_base": webBase,
+		"site":    site,
+		"captcha": services.CaptchaSettings(d.DB),
 	})
 }
 
@@ -32,7 +27,6 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 	var req struct {
 		Site    *map[string]string `json:"site"`
 		Captcha *map[string]string `json:"captcha"`
-		WebBase *string            `json:"web_base"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -49,11 +43,13 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 			return
 		}
 		changed = true
+		// 订阅入口路径 / 拒绝码变更 → 重建订阅服务（端口不变）
 		if d.SubServer != nil {
 			siteMap := *req.Site
-			if portStr, ok := siteMap[services.SettingSubscribePort]; ok {
-				port, _ := strconv.Atoi(strings.TrimSpace(portStr))
-				_ = d.SubServer.Reload(port)
+			if _, ok := siteMap[services.SettingSubscribePath]; ok {
+				_ = d.SubServer.Reload()
+			} else if _, ok := siteMap[services.SettingSubDenyCode]; ok {
+				_ = d.SubServer.Reload()
 			}
 		}
 	}
@@ -64,20 +60,12 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		}
 		changed = true
 	}
-	if req.WebBase != nil {
-		if err := d.Site.SetWebBase(*req.WebBase); err != nil {
-			util.BadRequest(c, err.Error())
-			return
-		}
-		changed = true
-	}
 	if !changed {
 		util.BadRequest(c, "没有需要保存的内容")
 		return
 	}
 	util.OK(c, gin.H{
-		"site":     d.Site.SiteGroup(),
-		"captcha":  services.CaptchaSettings(d.DB),
-		"web_base": d.Site.WebBase(),
+		"site":    d.Site.SiteGroup(),
+		"captcha": services.CaptchaSettings(d.DB),
 	})
 }

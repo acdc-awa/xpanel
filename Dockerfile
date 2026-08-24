@@ -28,7 +28,6 @@ RUN apk add --no-cache ca-certificates tzdata && \
     adduser -D app
 WORKDIR /app
 COPY --from=go /out/master /app/master
-COPY master/deploy/agent/install-agent.sh /app/install-agent.sh
 COPY --from=web /web/dist /app/web/dist
 COPY master/configs/config.example.yaml /app/configs/config.yaml
 RUN mkdir -p /app/data && chown -R app:app /app

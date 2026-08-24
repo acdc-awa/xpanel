@@ -16,7 +16,6 @@ export const useSiteStore = defineStore('site', {
     currencySymbol: '¥',
     subscribeUrl: window.__PANEL_SETTINGS__?.subscribe_url || '',
     subscribePath: window.__PANEL_SETTINGS__?.subscribe_path || '',
-    subscribePort: window.__PANEL_SETTINGS__?.subscribe_port || '',
     isLoaded: false,
   }),
 
@@ -48,7 +47,6 @@ export const useSiteStore = defineStore('site', {
       if (cfg.currency_symbol !== undefined) this.currencySymbol = cfg.currency_symbol || '¥'
       if (cfg.subscribe_url !== undefined) this.subscribeUrl = cfg.subscribe_url || ''
       if (cfg.subscribe_path !== undefined) this.subscribePath = cfg.subscribe_path || ''
-      if (cfg.subscribe_port !== undefined) this.subscribePort = cfg.subscribe_port || ''
 
       // 同步更新网页 Favicon
       if (this.favicon) {

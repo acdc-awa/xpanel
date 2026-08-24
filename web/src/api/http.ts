@@ -1,7 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { apiBase, withBase } from '@/config/site'
+import { apiBase } from '@/config/site'
 
 /** Axios 实例：统一 baseURL /api/v1（dev 由 vite proxy 转发到主控 18080）。 */
 export const http = axios.create({
@@ -27,7 +27,7 @@ http.interceptors.response.use(
 
     // 访客页面（login / register / forgot）未登录探针返回 401 为正常现象，不触发刷新与强跳
     const currentPath = window.location.pathname
-    const isGuestPage = [withBase('/login'), withBase('/register'), withBase('/forgot')].some(
+    const isGuestPage = ['/login', '/register', '/forgot'].some(
       (p) => currentPath === p || currentPath.startsWith(`${p}/`)
     )
 
@@ -49,7 +49,7 @@ http.interceptors.response.use(
       await auth.logout()
       if (!isGuestPage) {
         ElMessage.error('登录已过期，请重新登录')
-        window.location.href = withBase('/login')
+        window.location.href = '/login'
       }
     }
     return Promise.reject(error)

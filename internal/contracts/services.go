@@ -101,12 +101,10 @@ type ConfigService interface {
 	SavePending(serverID uint64, configJSON string) error
 }
 
-// SiteService 站点设置服务接口。
+// SiteService 站点设置服务接口（四端口拆分后无 web_base）。
 type SiteService interface {
 	SetSiteGroup(vals map[string]string) error
-	SetWebBase(v string) error
 	SiteGroup() map[string]string
-	WebBase() string
 }
 
 // GiftCardService 礼品卡/余额账户服务接口。

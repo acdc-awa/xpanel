@@ -14,19 +14,22 @@ import (
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
-// Subscribe GET /sub/:token | GET /sub?token=xxx —— 订阅生成（按 UA 区分 Clash YAML / Base64）。
+// Subscribe GET {subscribe_path}/:token | GET {subscribe_path}?token=xxx —— 订阅生成
+// （按 UA 区分 Clash YAML / Base64）。2026-08-24 入口统一后仅由独立订阅端口调用。
 func (d *Deps) Subscribe(c *gin.Context) {
 	token := strings.TrimSpace(c.Param("token"))
 	if token == "" {
 		token = strings.TrimSpace(c.Query("token"))
 	}
-	if token == "" || token == "healthz" || token == "favicon.ico" {
-		util.Fail(c, 404, "订阅链接无效")
+	// 统一拒绝码（设置页 sub_deny_code，默认 404 防探测）：无效/缺失 token 与
+	// token 查无用户一律按该码返回，不泄露账号存在性。
+	if token == "" {
+		util.Fail(c, services.SubDenyCode(d.DB), "订阅链接无效")
 		return
 	}
 	var user models.User
 	if err := d.DB.Where("subscribe_token = ?", token).First(&user).Error; err != nil {
-		util.Fail(c, 404, "订阅链接无效")
+		util.Fail(c, services.SubDenyCode(d.DB), "订阅链接无效")
 		return
 	}
 	if user.Status != models.StatusActive {

@@ -52,7 +52,7 @@ const emptySite = (): SiteGroup => ({
   subscribe_domain: '',
   subscribe_url: '',
   subscribe_path: '/sub',
-  subscribe_port: '',
+  sub_deny_code: '404',
   sub_clean_ua: '1',
   sub_strict_ua: '0',
   sub_blocked_ua: '',
@@ -71,7 +71,6 @@ const emptyCaptcha = (): CaptchaGroup => ({
 const form = reactive({
   site: emptySite(),
   captcha: emptyCaptcha(),
-  web_base: '',
 })
 
 const subHostName = computed(() => {
@@ -87,29 +86,24 @@ const subHostName = computed(() => {
 })
 
 const caddySnippet = computed(() => {
-  const port = form.site.subscribe_port ? form.site.subscribe_port : '18080'
   return `${subHostName.value} {
-    # 物理隔离：反向代理至独立订阅端口（自动透传真实客户端 IP 与 Cloudflare 标头）
-    reverse_proxy localhost:${port} {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up CF-Connecting-IP {http.request.header.CF-Connecting-IP}
-    }
+    # 订阅整域反代至独立订阅端口（端口见 .env 的 APP_SUB_PORT，默认 6000）
+    encode zstd gzip
+    reverse_proxy localhost:6000
 }`
 })
 
 const nginxSnippet = computed(() => {
-  const port = form.site.subscribe_port ? form.site.subscribe_port : '18080'
   return `server {
     listen 80;
     listen 443 ssl http2;
     server_name ${subHostName.value};
 
-    # 透传真实 IP 及 Cloudflare 标头
+    # 订阅整域反代至独立订阅端口（端口见 .env 的 APP_SUB_PORT，默认 6000）
     location / {
-        proxy_pass http://127.0.0.1:${port};
+        proxy_pass http://127.0.0.1:6000;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
@@ -190,7 +184,6 @@ async function load() {
     if (data.code === 0) {
       Object.assign(form.site, emptySite(), data.data.site)
       Object.assign(form.captcha, emptyCaptcha(), data.data.captcha)
-      form.web_base = data.data.web_base
     } else {
       ElMessage.error(data.message)
     }
@@ -280,7 +273,6 @@ async function save() {
     const { data } = await updateSettings({
       site: { ...form.site },
       captcha: { ...form.captcha },
-      web_base: form.web_base,
     })
     if (data.code === 0) {
       ElMessage.success('设置已保存并立即全站生效')
@@ -289,10 +281,6 @@ async function save() {
         stop_register: form.site.stop_register === '1',
       })
       await siteStore.fetchConfig()
-      form.web_base = data.data.web_base
-      if (form.web_base !== window.__PANEL_BASE__) {
-        ElMessage.warning('访问路径已变更，刷新页面后请按新路径访问')
-      }
     } else {
       ElMessage.error(data.message)
     }
@@ -309,7 +297,7 @@ async function save() {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <span style="font-weight: 600">站点设置</span>
-        <span class="muted" style="font-size: 12px">站点品牌、人机验证与访问路径的统一入口，保存后立即生效。</span>
+        <span class="muted" style="font-size: 12px">站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。</span>
       </div>
       <el-button type="primary" :loading="saving" :icon="Check" @click="save">保存全部</el-button>
     </div>
@@ -479,26 +467,31 @@ async function save() {
               </template>
             </el-alert>
 
-            <div class="section-subtitle">独立端口与路径分发</div>
+            <div class="section-subtitle">订阅入口与错误码</div>
             <div class="form-grid">
-              <el-form-item label="独立订阅物理监听端口 (subscribe_port)">
-                <el-input v-model="form.site.subscribe_port" placeholder="如 5000（留空或 0 则仅在主端口提供）" clearable />
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  保存后后台立即<b>热重载启动/切换</b>该端口监听。
-                </span>
-              </el-form-item>
-
               <el-form-item label="对外订阅根地址 (subscribe_url)">
                 <el-input v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  用户端获取的订阅链接根域名（留空则默认使用当前面板域名）。
+                  用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），
+                  不设置则默认使用当前面板域名 + 订阅路径。
                 </span>
               </el-form-item>
 
-              <el-form-item label="对外订阅路径前缀 (subscribe_path)">
-                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /link（默认 /sub）" clearable />
+              <el-form-item label="订阅入口路径 (subscribe_path)">
+                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /ehisnodn（默认 /sub）" clearable />
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  订阅路径前缀，自动兼容 /sub/:token、/link/:token 及 ?token=xxx。
+                  订阅端口<b>唯一入口</b>：只认该路径（支持 /path/:token 与 ?token=xxx），
+                  其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="非订阅路径拒绝码 (sub_deny_code)">
+                <el-select v-model="form.site.sub_deny_code" style="width: 100%">
+                  <el-option label="404 Not Found（推荐，防探测）" value="404" />
+                  <el-option label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
+                </el-select>
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  订阅端口上非订阅路径的请求与<b>无效订阅 token</b> 统一返回该错误码。
                 </span>
               </el-form-item>
 
@@ -595,23 +588,7 @@ async function save() {
           </el-form>
         </el-tab-pane>
 
-        <!-- ==================== TAB 4: 访问路径 ==================== -->
-        <el-tab-pane :label="isMobile ? '路径' : '访问路径'" name="web_base">
-          <el-form label-position="top" style="max-width: 640px">
-            <el-form-item label="Web Base（自定义访问路径前缀）">
-              <el-input v-model="form.web_base" placeholder="留空为根路径，如 /panel" />
-            </el-form-item>
-            <p class="muted tip">
-              让面板（管理端 + 用户端 + API + 订阅）挂载在自定义子路径下，例如 https://example.com/panel/。
-              留空 = 根路径。保存后立即生效（刷新页面即按新路径加载）。
-            </p>
-            <p class="muted tip">
-              使用子路径时，反向代理需把该前缀（以及 /assets 静态资源）转发到主控；部署说明见 docs/部署指南.md。
-            </p>
-          </el-form>
-        </el-tab-pane>
-
-        <!-- ==================== TAB 5: 备份 ==================== -->
+        <!-- ==================== TAB 4: 备份 ==================== -->
         <el-tab-pane :label="isMobile ? '备份' : '数据备份'" name="backup">
           <div style="max-width: 720px">
             <div class="x-toolbar" style="margin-bottom: 12px">

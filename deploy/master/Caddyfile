@@ -1,7 +1,35 @@
 # 主控反向代理：TLS 终止 + WebSocket 升级（Caddy 自动处理）
-# SITE_ADDRESS 由 .env 提供（如 panel.example.com 或 :80）。
-# 有域名 → 自动 Let's Encrypt；无域名用 IP/端口时建议 tls internal（自签）。
+#
+# 四端口拆分（2026-08-24）：面板域名按路径分流——/api/* 与探针 → 后端 API 端口，
+# /node/ws → 节点 WS 网关端口，其余（SPA 页面/静态资源）→ 前端端口；
+# 订阅域名整域 → 订阅端口（订阅服务自行按 subscribe_path 裁决）。
+#
+# 变量由 .env / compose environment 提供：
+#   SITE_ADDRESS      面板域名（如 panel.example.com；无域名用 :80 时建议 tls internal 自签）
+#   SUB_SITE_ADDRESS  订阅域名（如 sub.example.com；留空则整段不生效）
 {$SITE_ADDRESS} {
 	encode zstd gzip
-	reverse_proxy master:18080
+
+	# 节点 WebSocket 网关（必须先于 /api/* 匹配，否则被后端 API 规则吞掉）
+	@ws path /node/ws
+	handle @ws {
+		reverse_proxy master:18082
+	}
+
+	# 后端 HTTP API + 存活/就绪探针
+	@api path /api/* /healthz /readyz
+	handle @api {
+		reverse_proxy master:18081
+	}
+
+	# 前端 SPA（含 history 路由 fallback）
+	handle {
+		reverse_proxy master:18080
+	}
+}
+
+# 订阅域名：整域交给订阅端口（TLS 由 Caddy 终止；端口仅认 subscribe_path 入口）
+{$SUB_SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy master:6000
 }

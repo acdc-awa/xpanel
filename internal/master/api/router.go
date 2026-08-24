@@ -39,8 +39,10 @@ func accessLogFormatter(param gin.LogFormatterParams) string {
 	)
 }
 
-// NewRouter 组装全部路由。
-func (d *Deps) NewRouter() *gin.Engine {
+// NewAPIRouter 组装后端 HTTP API 路由（四端口拆分后仅监听 APP_API_PORT）。
+// 不含静态托管与 SPA fallback（归 NewSPARouter），不含订阅（归独立订阅端口）；
+// 节点 WebSocket 网关归 NewWSRouter（APP_WS_PORT）。
+func NewAPIRouter(d *Deps) *gin.Engine {
 	r := gin.New()
 	// ISSUE-12：访问日志对订阅 token 路径脱敏，避免完整 token 进入日志。
 	// P2-2：全局请求体上限 10MB（配置 JSON/拓扑布局/审计均远小于该值）。
@@ -89,12 +91,6 @@ func (d *Deps) NewRouter() *gin.Engine {
 			auth.POST("/logout", d.Logout)
 		}
 
-		// 节点 WebSocket 网关（节点 Agent 连接）
-		v1.GET("/node/ws", d.Hub.ServeWS)
-
-		// 订阅（公开，token 鉴权；J19-④ 按 IP+路径限流防盗刷）
-		v1.GET("/sub/:token", middleware.RateLimit(120, time.Minute), d.Subscribe)
-
 		// 用户端
 		user := v1.Group("/user", middleware.AuthRequired(d.JWT, d.DB), middleware.RequirePwdChanged(d.DB))
 		{
@@ -117,10 +113,6 @@ func (d *Deps) NewRouter() *gin.Engine {
 		// 公开：上架套餐与公开公告
 		v1.GET("/plans", d.PublicPlans)
 		v1.GET("/notices", d.UserListNotices)
-
-		// 节点一键安装脚本下载（部署用；Docker 镜像内置 /app/install-agent.sh。
-		// agent 二进制改由 XPanel-Node 仓库 GitHub Releases 分发，面板不再内置）
-		v1.GET("/download/install-agent.sh", d.DownloadInstallScript)
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",
@@ -215,44 +207,69 @@ func (d *Deps) NewRouter() *gin.Engine {
 		}
 	}
 
-	// 前端静态托管：web/dist 存在时托管（生产部署；开发用 vite dev 不需要）。
-	// SPA fallback：非 API 路径返回 index.html，并注入 web base 供前端读取。
+	// 纯 API 面：未知路径一律 404（无 SPA fallback——那是前端端口的事）
+	r.NoRoute(func(c *gin.Context) {
+		util.Fail(c, http.StatusNotFound, "接口不存在")
+	})
+	return r
+}
+
+// NewSPARouter 组装前端 SPA 路由（四端口拆分后仅监听 APP_PORT）。
+// 托管 web/dist 静态资源 + history 路由 fallback（非 API 路径返回 index.html 并注入站点设置）。
+func NewSPARouter(d *Deps) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery())
+
 	dist := "web/dist"
-	if _, err := os.Stat(dist); err == nil {
-		r.Static("/assets", filepath.Join(dist, "assets"))
-		indexHTML, _ := os.ReadFile(filepath.Join(dist, "index.html"))
+	if _, err := os.Stat(dist); err != nil {
+		// 未构建前端（开发由 vite dev server 承担）：明确提示而非白屏
 		r.NoRoute(func(c *gin.Context) {
-			p := c.Request.URL.Path
-			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/sub/") ||
-				strings.HasPrefix(p, "/node/") || p == "/healthz" {
-				util.Fail(c, http.StatusNotFound, "接口不存在")
-				return
-			}
-			if len(indexHTML) == 0 {
-				util.Fail(c, http.StatusNotFound, "前端未构建")
-				return
-			}
-			base := ""
-			site := map[string]string{}
-			if d.Site != nil {
-				base = d.Site.WebBase()
-				site = d.Site.SiteGroup()
-			}
-			// 站点设置注入（17 号 P0 ②）：app_name → <title>；favicon → <link rel="icon">；
-			// 全量 site 分组 → window.__PANEL_SETTINGS__（前端读取标题/LOGO/注册开关等）。
-			head := ""
-			if title := site[services.SettingAppName]; title != "" {
-				head += "<title>" + html.EscapeString(title) + "</title>"
-			}
-			if icon := site[services.SettingFavicon]; icon != "" {
-				head += `<link rel="icon" href="` + html.EscapeString(icon) + `">`
-			}
-			settingsJSON, _ := json.Marshal(site)
-			head += fmt.Sprintf("<script>window.__PANEL_BASE__=%q;window.__PANEL_SETTINGS__=%s</script>",
-				base, settingsJSON)
-			html := strings.Replace(string(indexHTML), "</head>", head+"</head>", 1)
-			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+			util.Fail(c, http.StatusNotFound, "前端未构建（开发请用 vite dev server）")
 		})
+		return r
 	}
+
+	r.Static("/assets", filepath.Join(dist, "assets"))
+	indexHTML, _ := os.ReadFile(filepath.Join(dist, "index.html"))
+	r.NoRoute(func(c *gin.Context) {
+		p := c.Request.URL.Path
+		// 保留前缀白名单：即便 Caddy 分流遗漏，API/WS/探针路径也绝不落到 SPA
+		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/node/") ||
+			p == "/healthz" || p == "/readyz" {
+			util.Fail(c, http.StatusNotFound, "接口不存在")
+			return
+		}
+		if len(indexHTML) == 0 {
+			util.Fail(c, http.StatusNotFound, "前端未构建")
+			return
+		}
+		// 站点设置注入（17 号 P0 ②）：app_name → <title>；favicon → <link rel="icon">；
+		// 全量 site 分组 → window.__PANEL_SETTINGS__（前端读取标题/LOGO/注册开关等）。
+		site := map[string]string{}
+		if d.Site != nil {
+			site = d.Site.SiteGroup()
+		}
+		head := ""
+		if title := site[services.SettingAppName]; title != "" {
+			head += "<title>" + html.EscapeString(title) + "</title>"
+		}
+		if icon := site[services.SettingFavicon]; icon != "" {
+			head += `<link rel="icon" href="` + html.EscapeString(icon) + `">`
+		}
+		settingsJSON, _ := json.Marshal(site)
+		head += fmt.Sprintf("<script>window.__PANEL_SETTINGS__=%s</script>", settingsJSON)
+		html := strings.Replace(string(indexHTML), "</head>", head+"</head>", 1)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+	})
+	return r
+}
+
+// NewWSRouter 组装节点 WebSocket 网关（四端口拆分后仅监听 APP_WS_PORT）。
+// 端口专用：任意路径都交给 WS 网关——对外路径（默认 /node/ws，或 APP_WS_PUBLIC_URL
+// 指定的任意路径/域名）由反代裁决后原样转发，本端口无需感知具体路径。
+func NewWSRouter(d *Deps) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.NoRoute(d.Hub.ServeWS)
 	return r
 }

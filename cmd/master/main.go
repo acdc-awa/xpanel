@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -107,7 +106,7 @@ func main() {
 		}
 	}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc, Driver: coreDriver}
-	siteSvc := services.NewSiteService(database, cfg)
+	siteSvc := services.NewSiteService(database)
 	giftCardSvc := billing.NewGiftCardService(billingStore)
 	hub := nodegate.NewHub(database, trafficSvc, configSvc)
 
@@ -139,54 +138,38 @@ func main() {
 	subServer := api.NewSubscribeServer(deps)
 	deps.SubServer = subServer
 	hub.CertPusher = deps.PushPendingCerts
-	router := deps.NewRouter()
 
-	// 启动独立订阅服务（若 settings.subscribe_port 已配置）
-	subPortStr := services.GetSetting(database, services.SettingSubscribePort)
-	if subPortStr != "" {
-		if subPort, err := strconv.Atoi(strings.TrimSpace(subPortStr)); err == nil && subPort > 0 {
-			if err := subServer.Start(subPort); err != nil {
-				log.Printf("启动独立订阅服务失败: %v", err)
-			}
-		}
+	// 四端口拆分（2026-08-24 拍板）：SPA 前端 / 后端 API / 节点 WS 网关 / 订阅 各自独立监听，
+	// 域名与路径分流由反代（Caddy）承担——每个端口只做自己的职责，程序内全部根路径语义。
+	type listener struct {
+		srv  *http.Server
+		role string
 	}
-
-	// Web Base：在 gin 路由前剥离自定义前缀（如 /panel/api/v1/... → /api/v1/...）。
-	// 放在 Handler 层而不是 gin 中间件，因为 gin 的路由树在中间件执行前已按原始路径匹配。
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		base := siteSvc.WebBase()
-		if base != "" {
-			p := r.URL.Path
-			if p == "/" {
-				http.Redirect(w, r, base+"/", http.StatusFound)
-				return
-			}
-			if p == base || strings.HasPrefix(p, base+"/") {
-				rest := strings.TrimPrefix(p, base)
-				if rest == "" {
-					rest = "/"
-				}
-				r.URL.Path = rest
-			}
+	listeners := []listener{
+		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.Port), Handler: api.NewSPARouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "SPA 前端"},
+		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.APIPort), Handler: api.NewAPIRouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "后端 API"},
+		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.WSPort), Handler: api.NewWSRouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "节点 WS 网关"},
+	}
+	if cfg.App.SubPort > 0 {
+		if err := subServer.Start(cfg.App.SubPort); err != nil {
+			log.Printf("启动订阅服务失败: %v", err)
 		}
-		router.ServeHTTP(w, r)
-	})
-
-	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.App.Port),
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
+	} else {
+		log.Printf("订阅服务已禁用（sub_port=0）")
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Printf("%s 启动，监听 :%d（env=%s, db=%s）", cfg.App.Name, cfg.App.Port, cfg.App.Env, cfg.DB.Driver)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("服务启动失败: %v", err)
-		}
-	}()
+	for _, l := range listeners {
+		l := l
+		wg.Add(1)
+		go func(l listener) {
+			defer wg.Done()
+			log.Printf("%s 启动 - %s 监听 %s（env=%s, db=%s）", cfg.App.Name, l.role, l.srv.Addr, cfg.App.Env, cfg.DB.Driver)
+			if err := l.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("%s（%s）启动失败: %v", l.role, l.srv.Addr, err)
+			}
+		}(l)
+	}
 
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
@@ -195,8 +178,10 @@ func main() {
 	log.Println("收到退出信号，正在关闭…")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("主服务关闭异常: %v", err)
+	for _, l := range listeners {
+		if err := l.srv.Shutdown(ctx); err != nil {
+			log.Printf("%s（%s）关闭异常: %v", l.role, l.srv.Addr, err)
+		}
 	}
 	_ = subServer.Shutdown(ctx)
 	hub.Shutdown()

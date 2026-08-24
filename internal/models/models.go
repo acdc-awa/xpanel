@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // 角色 / 状态常量
@@ -67,7 +69,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := dropRetiredL4Tables(db); err != nil {
 		return err
 	}
-	return db.AutoMigrate(All()...)
+	if err := db.AutoMigrate(All()...); err != nil {
+		return err
+	}
+	return migrateUserSubscribeTokens(db)
 }
 
 // legacyL4RuleAP 退役 L4 建模迁移的临时读取结构（user_access_points 中 l4_rule 型存量记录）。
@@ -189,6 +194,27 @@ func retireL4RelayServers(db *gorm.DB) error {
 		}
 		if err := db.Delete(&Server{}, id).Error; err != nil {
 			return fmt.Errorf("删除 l4_relay 服务器 %d 失败: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// migrateUserSubscribeTokens 订阅 token 回填一次性迁移（2026-08-24）：
+// 早期建库的存量用户（含初始管理员）subscribe_token 为空，登录后订阅中心拿不到订阅地址
+// （前端 token 为空串时显示「加载中…」）。为所有空 token 用户补齐 64 位 hex token，
+// 与注册/新建/受控创建路径（auth.go Register / admin.go / ensureAdmin）同源生成。幂等。
+func migrateUserSubscribeTokens(db *gorm.DB) error {
+	var ids []uint64
+	if err := db.Model(&User{}).Where("subscribe_token = '' OR subscribe_token IS NULL").Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		token, err := util.NewSubscribeToken()
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&User{}).Where("id = ?", id).Update("subscribe_token", token).Error; err != nil {
+			return fmt.Errorf("回填用户 %d 订阅 token 失败: %w", id, err)
 		}
 	}
 	return nil

@@ -31,7 +31,7 @@ func setupReservedOutboundsTest(t *testing.T) (*Deps, *gin.Engine, *models.Serve
 	jwtMgr := services.NewJWTManager("test-secret-key-32-chars-long!", 0, 0)
 	authSvc := &services.AuthService{DB: db, JWT: jwtMgr}
 	cfg := &config.Config{}
-	siteSvc := services.NewSiteService(db, cfg)
+	siteSvc := services.NewSiteService(db)
 
 	deps := &Deps{
 		DB:   db,

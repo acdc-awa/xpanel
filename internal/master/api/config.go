@@ -26,6 +26,5 @@ func (d *Deps) PublicConfig(c *gin.Context) {
 		"currency_symbol":    site[services.SettingCurrencySymbol],
 		"subscribe_url":      site[services.SettingSubscribeURL],
 		"subscribe_path":     site[services.SettingSubscribePath],
-		"subscribe_port":     site[services.SettingSubscribePort],
 	})
 }
