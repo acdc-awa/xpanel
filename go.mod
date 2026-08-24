@@ -65,6 +65,4 @@ require (
 	modernc.org/sqlite v1.23.1 // indirect
 )
 
-require github.com/acdc-awa/xpanel-node v0.0.0
-
-replace github.com/acdc-awa/xpanel-node => ../agent
+require github.com/acdc-awa/xpanel-node v0.1.0
