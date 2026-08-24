@@ -312,38 +312,20 @@ export interface AccessLayer {
 export const INBOUND_TYPE_USER = 'user'
 export const INBOUND_TYPE_RELAY = 'relay'
 
-// L4 端口转发规则（纯四层 TCP/UDP 转发，将中转服务器端口映射到目标节点的用户入站）
-export interface L4PortRule {
-  id: number
-  server_id: number
-  listen_port: number
-  target_server_id: number
-  target_server_name?: string
-  target_inbound_id: number
-  target_inbound_tag?: string
-  target_inbound_port?: number
-  remark?: string
-  enabled: boolean
-  created_at?: string
-  updated_at?: string
-}
-
-// 用户接入点（消费者模型：定义 Tag 别名与权限组，连接数据沿管道自适应继承）
+// 用户接入点（消费者模型：命名 + 权限组白名单 + 可选对外端点覆写，数据沿管道自适应继承）
 export interface UserAccessPoint {
   id: number
   name: string
   custom_host?: string
   custom_port?: number
-  target_type: 'inbound' | 'l4_rule' | ''
+  target_type: 'inbound' | ''
   target_inbound_id?: number
-  target_l4_rule_id?: number
   resolved_host?: string
   resolved_port?: number
   resolved_protocol?: string
   resolved_target_desc?: string
   target_server_name?: string
   target_inbound_tag?: string
-  target_l4_port?: number
   enabled: boolean
   remark?: string
   permission_group_ids: number[]

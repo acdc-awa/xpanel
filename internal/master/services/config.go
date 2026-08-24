@@ -95,8 +95,7 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 
 // GetValidUsers 计算服务器各个 Inbound 当前有效的用户列表 (InboundTag -> []protocol.User)。
 // 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
-// 访问控制单点化：入站的授权权限组由「解析到该入站的启用用户接入点（AP）白名单」派生
-// （AP 直连入站 / 经 L4 转发规则解析到目标入站）。
+// 访问控制单点化：入站的授权权限组由「解析到该入站的启用用户接入点（AP）白名单」派生（AP 直连）。
 // 单一数据源：热更新 SyncUsers 与全量配置生成（Generate）共用本函数（批7 修正访问控制缺口）。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound

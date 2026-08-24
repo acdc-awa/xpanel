@@ -23,7 +23,7 @@ func setupTestDBForLayer(t *testing.T) *gorm.DB {
 	return db
 }
 
-// 对外接入层：CRUD / 入站挂层校验 / 删除层回退原生 / 订阅消费层端点（含 L4 不沿链）。
+// 对外接入层：CRUD / 入站挂层校验 / 删除层回退原生 / 订阅消费层端点（含 AP 覆写端点语义）。
 func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := setupTestDBForLayer(t)
@@ -111,7 +111,7 @@ func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 	srvMap := map[uint64]models.Server{hkSrv.ID: hkSrv}
 	apInbID := inbResp.Data.Inbound.ID
 	ap := models.UserAccessPoint{Name: "海外直连", TargetType: "inbound", TargetInboundID: &apInbID, Enabled: true}
-	dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, map[uint64]models.L4PortRule{}, layerMap, "11111111-2222-3333-4444-555555555555")
+	dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, layerMap, "11111111-2222-3333-4444-555555555555")
 	require.NotNil(t, dto)
 	require.Equal(t, "hk.edge.example.com", dto.ServerHost)
 	require.Equal(t, 443, dto.ServerPort)
@@ -119,20 +119,15 @@ func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 	require.Equal(t, "tls", dto.Security.Type)
 	require.Equal(t, "hk.edge.example.com", dto.Security.SNI)
 
-	// 6. L4 链不沿层：AP → L4 规则 → 挂层入站，订阅 host/port = 转发机，security 跟随入站（none）
-	l4Srv := models.Server{ServerType: models.ServerTypeL4Relay, Name: "广州中转", Host: "gz.relay.com", NodeID: "node-l4", Secret: "s", Status: 1}
-	require.NoError(t, db.Create(&l4Srv).Error)
-	srvMap[l4Srv.ID] = l4Srv
-	l4Rule := models.L4PortRule{ServerID: l4Srv.ID, ListenPort: 30001, TargetServerID: hkSrv.ID, TargetInboundID: apInbID, Enabled: true}
-	require.NoError(t, db.Create(&l4Rule).Error)
-	apL4ID := l4Rule.ID
-	ap2 := models.UserAccessPoint{Name: "中转入口", TargetType: "l4_rule", TargetL4RuleID: &apL4ID, Enabled: true}
-	dto2 := subscribe.ResolveAPSubscription(&ap2, srvMap, inbMap, map[uint64]models.L4PortRule{l4Rule.ID: l4Rule}, layerMap, "11111111-2222-3333-4444-555555555555")
+	// 6. L4 退役后的中转表达：AP Cover 端点覆写 = 原 L4 决议值（中转机 Host/端口）——
+	// 覆写只改 host/port；安全层语义仍由层（挂层）或目标入站（未挂层）决议，中转目标不挂层时与旧 L4 链等价。
+	ap2 := models.UserAccessPoint{Name: "中转入口", TargetType: "inbound", TargetInboundID: &apInbID, CustomHost: "gz.relay.com", CustomPort: 30001, Enabled: true}
+	dto2 := subscribe.ResolveAPSubscription(&ap2, srvMap, inbMap, layerMap, "11111111-2222-3333-4444-555555555555")
 	require.NotNil(t, dto2)
 	require.Equal(t, "gz.relay.com", dto2.ServerHost)
 	require.Equal(t, 30001, dto2.ServerPort)
 	require.NotNil(t, dto2.Security)
-	require.Equal(t, "none", dto2.Security.Type, "L4 链不应消费层对外 TLS")
+	require.Equal(t, "tls", dto2.Security.Type, "挂层目标安全层由层决议（覆写不消费安全层）")
 
 	// 7. 拓扑聚合返回 layers 且入站带 layer_id
 	req = httptest.NewRequest("GET", "/api/v1/admin/topology", nil)
@@ -159,7 +154,7 @@ func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 	require.Nil(t, inbAfter.LayerID)
 
 	// 9. 删除后订阅走直连端点（node → 服务器 Host + 入站端口）
-	dto3 := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, map[uint64]models.L4PortRule{}, map[uint64]models.AccessLayer{}, "11111111-2222-3333-4444-555555555555")
+	dto3 := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, map[uint64]models.AccessLayer{}, "11111111-2222-3333-4444-555555555555")
 	require.NotNil(t, dto3)
 	require.Equal(t, "hk.node.com", dto3.ServerHost)
 	require.Equal(t, 10086, dto3.ServerPort)

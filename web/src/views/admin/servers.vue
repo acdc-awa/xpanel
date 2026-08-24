@@ -90,9 +90,8 @@ function fmtTime(t: string | null) {
 
 // ---- 新增服务器 ----
 const createOpen = ref(false)
-const createForm = reactive({ server_type: 'xray' as 'xray' | 'l4_relay', name: '', host: '', location: '', remark: '' })
+const createForm = reactive({ server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
 const creating = ref(false)
-const createdServerType = ref<'xray' | 'l4_relay'>('xray')
 const createdResult = ref<{ node_id: string; secret: string; install_cmd: string } | null>(null)
 
 async function submitCreate() {
@@ -102,12 +101,9 @@ async function submitCreate() {
   }
   creating.value = true
   try {
-    const sType = createForm.server_type
     const { data } = await createServer({ ...createForm })
     if (data.code === 0) {
-      createdServerType.value = sType
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
-      createForm.server_type = 'xray'
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
@@ -135,11 +131,6 @@ async function copyText(text: string, label: string) {
 function closeCreate() {
   createOpen.value = false
   createdResult.value = null
-}
-
-function closeCreateAndGoRouting() {
-  closeCreate()
-  router.push('/admin/routing')
 }
 
 // ---- 节点管理抽屉 ----
@@ -211,13 +202,13 @@ async function openLogs(row: any) {
 
 // ---- 编辑服务器 ----
 const editOpen = ref(false)
-const editForm = reactive({ id: 0, server_type: 'xray' as 'xray' | 'l4_relay', name: '', host: '', location: '', remark: '' })
+const editForm = reactive({ id: 0, server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
 const editSaving = ref(false)
 
 function openEdit(row: any) {
   Object.assign(editForm, {
     id: row.id,
-    server_type: row.server_type || 'xray',
+    server_type: 'xray',
     name: row.name,
     host: row.host,
     location: row.location ?? '',
@@ -329,7 +320,6 @@ async function removeServer(row: any) {
         <el-table v-loading="loading" :data="filtered">
           <el-table-column prop="name" label="名称" min-width="140">
             <template #default="{ row }">
-              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple" style="margin-right: 6px; font-size: 10px">L4 中转</span>
               <span style="font-weight: 600">{{ row.name }}</span>
             </template>
           </el-table-column>
@@ -345,10 +335,7 @@ async function removeServer(row: any) {
           </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default="{ row }">
-              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">
-                <span class="x-status-dot online" style="background: #c084fc; box-shadow: 0 0 8px #c084fc" /> 就绪
-              </span>
-              <span v-else class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
+              <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
                 <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                 {{ row.status === 1 ? '在线' : '离线' }}
               </span>
@@ -356,40 +343,25 @@ async function removeServer(row: any) {
           </el-table-column>
           <el-table-column label="接入点" width="90">
             <template #default="{ row }">
-              <template v-if="row.server_type === 'l4_relay'">
-                <el-link type="primary" :underline="false" @click="openDrawer(row)">
-                  转发规则
-                </el-link>
-              </template>
-              <template v-else>
-                <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                  {{ inboundCount(row.id) }} 个
-                </el-link>
-              </template>
+              <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                {{ inboundCount(row.id) }} 个
+              </el-link>
             </template>
           </el-table-column>
           <el-table-column label="配置同步" width="105">
             <template #default="{ row }">
-              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">四层转发</span>
-              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </template>
           </el-table-column>
           <el-table-column label="最后心跳" width="170">
             <template #default="{ row }">
-              <span v-if="row.server_type === 'l4_relay'" class="muted cell-mono" style="font-size: 12px">中转机无探针</span>
-              <span v-else class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
+              <span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="340" fixed="right">
             <template #default="{ row }">
-              <template v-if="row.server_type === 'l4_relay'">
-                <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;转发规则</el-button>
-                <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon>&nbsp;编辑</el-button>
-                <el-button size="small" text type="danger" @click="removeServer(row)"><el-icon><Delete /></el-icon>&nbsp;删除</el-button>
-              </template>
-              <template v-else>
                 <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
                 <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
                 <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
@@ -405,7 +377,6 @@ async function removeServer(row: any) {
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-              </template>
             </template>
           </el-table-column>
           <template #empty>
@@ -425,16 +396,13 @@ async function removeServer(row: any) {
           <div v-for="row in filtered" :key="row.id" class="mobile-data-card">
             <div class="card-head">
               <div class="head-title">
-                <span class="x-status-dot" :class="row.status === 1 || row.server_type === 'l4_relay' ? 'online' : 'offline'" />
-                <span v-if="row.server_type === 'l4_relay'" class="x-chip purple" style="font-size: 10px; margin-right: 4px">L4 中转</span>
+                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                 <span style="font-weight: 700">{{ row.name }}</span>
-                <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">就绪</span>
-                <span v-else class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
+                <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
                   {{ row.status === 1 ? '在线' : '离线' }}
                 </span>
               </div>
-              <span v-if="row.server_type === 'l4_relay'" class="x-chip purple">四层转发</span>
-              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </div>
@@ -453,39 +421,22 @@ async function removeServer(row: any) {
                 <div class="item-value">{{ row.location || '—' }}</div>
               </div>
               <div class="grid-item">
-                <span class="item-label">{{ row.server_type === 'l4_relay' ? '转发规则' : '接入点' }}</span>
+                <span class="item-label">接入点</span>
                 <div class="item-value">
-                  <template v-if="row.server_type === 'l4_relay'">
-                    <el-link type="primary" :underline="false" @click="openDrawer(row)">管理规则</el-link>
-                  </template>
-                  <template v-else>
-                    <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                      {{ inboundCount(row.id) }} 个入站
-                    </el-link>
-                  </template>
+                  <el-link type="primary" :underline="false" @click="goInbounds(row)">
+                    {{ inboundCount(row.id) }} 个入站
+                  </el-link>
                 </div>
               </div>
               <div class="grid-item full-width">
                 <span class="item-label">最后心跳</span>
                 <div class="item-value cell-mono muted" style="font-size: 11.5px">
-                  {{ row.server_type === 'l4_relay' ? '中转机无探针' : fmtTime(row.last_seen_at) }}
+                  {{ fmtTime(row.last_seen_at) }}
                 </div>
               </div>
             </div>
 
             <div class="card-foot-actions">
-              <template v-if="row.server_type === 'l4_relay'">
-                <el-button size="small" type="primary" plain @click="openDrawer(row)">
-                  <el-icon><Setting /></el-icon>&nbsp;转发规则
-                </el-button>
-                <el-button size="small" @click="openEdit(row)">
-                  <el-icon><Edit /></el-icon>&nbsp;编辑
-                </el-button>
-                <el-button size="small" type="danger" plain @click="removeServer(row)">
-                  <el-icon><Delete /></el-icon>&nbsp;删除
-                </el-button>
-              </template>
-              <template v-else>
                 <el-button size="small" type="primary" plain @click="openDrawer(row)">
                   <el-icon><Setting /></el-icon>&nbsp;详情
                 </el-button>
@@ -511,7 +462,6 @@ async function removeServer(row: any) {
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-              </template>
             </div>
           </div>
         </div>
@@ -522,12 +472,6 @@ async function removeServer(row: any) {
     <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
       <template v-if="!createdResult">
         <el-form label-position="top">
-          <el-form-item label="服务器类型">
-            <el-radio-group v-model="createForm.server_type">
-              <el-radio-button value="xray">Xray 托管计算节点</el-radio-button>
-              <el-radio-button value="l4_relay">L4 纯端口转发服务器</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
           <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" /></el-form-item>
           <el-form-item label="地址"><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" /></el-form-item>
           <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" /></el-form-item>
@@ -535,15 +479,7 @@ async function removeServer(row: any) {
         </el-form>
       </template>
       <template v-else>
-        <template v-if="createdServerType === 'l4_relay'">
-          <el-alert type="success" :closable="false" show-icon title="L4 端口转发服务器创建成功" description="该服务器作为纯四层端口转发中转机使用，无需部署 Xray-core 或 Agent 探针。" style="margin-bottom: 16px" />
-          <div style="display: flex; gap: 12px; justify-content: center; margin: 24px 0">
-            <el-button type="primary" @click="closeCreateAndGoRouting">前往拓扑画布配置端口连线</el-button>
-            <el-button @click="closeCreate">完成</el-button>
-          </div>
-        </template>
-        <template v-else>
-          <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
+        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
           <div class="secret-box">
             <div class="secret-row install-row">
               <span class="k">安装</span>
@@ -562,14 +498,13 @@ async function removeServer(row: any) {
             </div>
             <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装后回到「服务器」页可查看节点在线状态并「生成」下发配置。</p>
           </div>
-        </template>
       </template>
       <template #footer>
         <template v-if="!createdResult">
           <el-button @click="createOpen = false">取消</el-button>
           <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
         </template>
-        <template v-else-if="createdServerType !== 'l4_relay'">
+        <template v-else>
           <el-button type="primary" @click="closeCreate">完成</el-button>
         </template>
       </template>
@@ -597,12 +532,6 @@ async function removeServer(row: any) {
     <!-- 编辑服务器 -->
     <el-dialog v-model="editOpen" title="编辑服务器" width="460px">
       <el-form label-position="top">
-        <el-form-item label="服务器类型">
-          <el-radio-group v-model="editForm.server_type">
-            <el-radio-button value="xray">Xray 托管计算节点</el-radio-button>
-            <el-radio-button value="l4_relay">L4 纯端口转发服务器</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
         <el-form-item label="名称"><el-input v-model="editForm.name" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="editForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
         <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>

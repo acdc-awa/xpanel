@@ -154,7 +154,6 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	migrateModels := []any{
 		&models.User{}, &models.Plan{}, &models.Inbound{},
 		&models.PermissionGroup{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{},
-		&models.L4PortRule{},
 	}
 	for _, m := range migrateModels {
 		if err := db.AutoMigrate(m); err != nil {

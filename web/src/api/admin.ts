@@ -9,7 +9,6 @@ import type {
   CertItem,
   CreateInvitationResult,
   InboundItem,
-  L4PortRule,
   UserAccessPoint,
   Invitation,
   Order,
@@ -30,7 +29,6 @@ export type {
   AuditLog,
   CertItem,
   InboundItem,
-  L4PortRule,
   UserAccessPoint,
   Invitation,
   Order,
@@ -171,7 +169,7 @@ export function revokeInvitation(id: number) {
 
 export interface ServerItem {
   id: number
-  server_type?: 'xray' | 'l4_relay'
+  server_type?: 'xray'
   name: string
   host: string
   node_id: string
@@ -205,7 +203,7 @@ export function getServers() {
 }
 
 export function createServer(payload: {
-  server_type?: 'xray' | 'l4_relay'
+  server_type?: 'xray'
   name: string
   host: string
   location?: string
@@ -220,7 +218,7 @@ export function deleteServer(id: number) {
 
 export function updateServer(
   id: number,
-  payload: { server_type?: 'xray' | 'l4_relay'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string; default_outbound_domain_strategy?: string },
+  payload: { server_type?: 'xray'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string; default_outbound_domain_strategy?: string },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
 }
@@ -474,7 +472,6 @@ export interface TopologyRule {
 export interface TopologyData {
   servers: ServerItem[]
   inbounds: InboundItem[]
-  l4_rules?: L4PortRule[]
   access_points?: UserAccessPoint[]
   outbounds: TopologyOutbound[]
   routing_rules: TopologyRule[]
@@ -497,28 +494,12 @@ export function updateAccessPoint(id: number, payload: Partial<UserAccessPoint>)
   return http.put<ApiResp<{ access_point: UserAccessPoint }>>(`/admin/access-points/${id}`, payload)
 }
 
-export function setAccessPointTarget(id: number, payload: { target_type: string; target_inbound_id?: number | null; target_l4_rule_id?: number | null }) {
+export function setAccessPointTarget(id: number, payload: { target_type: string; target_inbound_id?: number | null }) {
   return http.put<ApiResp<{ access_point: UserAccessPoint }>>(`/admin/access-points/${id}/target`, payload)
 }
 
 export function deleteAccessPoint(id: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/access-points/${id}`)
-}
-
-export function getL4Rules(serverId: number) {
-  return http.get<ApiResp<L4PortRule[]>>(`/admin/servers/${serverId}/l4-rules`)
-}
-
-export function createL4Rule(serverId: number, payload: Partial<L4PortRule>) {
-  return http.post<ApiResp<L4PortRule>>(`/admin/servers/${serverId}/l4-rules`, payload)
-}
-
-export function updateL4Rule(serverId: number, ruleId: number, payload: Partial<L4PortRule>) {
-  return http.put<ApiResp<L4PortRule>>(`/admin/servers/${serverId}/l4-rules/${ruleId}`, payload)
-}
-
-export function deleteL4Rule(serverId: number, ruleId: number) {
-  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/servers/${serverId}/l4-rules/${ruleId}`)
 }
 
 // 对外接入层（订阅端点语义的显式分组：对外 host/port/security 自定义，内部实现不可见）

@@ -2,10 +2,13 @@ package models
 
 import "time"
 
+// ServerTypeXray 托管 Xray-core 计算节点（默认服务器类型；l4_relay 已于 2026-08-24 退役）。
+const ServerTypeXray = "xray"
+
 // Server 节点服务器（对应 §5 servers）。
 type Server struct {
 	ID                    uint64 `gorm:"primaryKey" json:"id"`
-	ServerType            string `gorm:"size:32;default:xray" json:"server_type"` // xray（托管节点）/ l4_relay（纯4层中转）
+	ServerType            string `gorm:"size:32;default:xray" json:"server_type"` // xray（托管节点；l4_relay 已于 2026-08-24 退役）
 	Name                  string `gorm:"size:64;not null" json:"name"`
 	Host                  string `gorm:"size:255;not null" json:"host"`
 	NodeID                string `gorm:"size:32;uniqueIndex;not null" json:"node_id"`

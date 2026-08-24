@@ -94,8 +94,7 @@ func (d *Deps) UserUpdateProfile(c *gin.Context) {
 
 // UserServers GET /api/v1/user/servers —— 用户可见节点可用性（J15：替换前端 mock）。
 // 与订阅同源（AP 单点授权派生）：列出用户可见接入点的入口服务器
-// （直连 = 目标入站所在服务器；L4 中转 = 中转机）。在线 = last_seen_at 在心跳窗口（90s）内；
-// L4 纯中转服务器无 Agent 心跳，恒视为在线（可达性由管理员配置保障）。
+// （入口 = 目标入站所在服务器）。在线 = last_seen_at 在心跳窗口（90s）内。
 func (d *Deps) UserServers(c *gin.Context) {
 	uid := middleware.CurrentUser(c)
 	var user models.User
@@ -119,10 +118,7 @@ func (d *Deps) UserServers(c *gin.Context) {
 	items := make([]gin.H, 0, len(servers))
 	for i := range servers {
 		srv := &servers[i]
-		online := true
-		if srv.ServerType != models.ServerTypeL4Relay {
-			online = srv.LastSeenAt != nil && time.Since(*srv.LastSeenAt) < 90*time.Second
-		}
+		online := srv.LastSeenAt != nil && time.Since(*srv.LastSeenAt) < 90*time.Second
 		items = append(items, gin.H{
 			"id":           srv.ID,
 			"name":         srv.Name,

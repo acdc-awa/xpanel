@@ -8,7 +8,7 @@ import (
 
 // 访问控制单点化（2026-08-23）：
 // 用户可见性/可注入性的唯一权威来源 = 用户接入点（UserAccessPoint）的权限组白名单。
-// - 订阅生成：只从「用户生效权限组命中的启用 AP」产出节点（直连入站 / 经 L4 转发管道继承）。
+// - 订阅生成：只从「用户生效权限组命中的启用 AP」产出节点（直连目标入站，端点可被 CustomHost/Port 覆写）。
 // - 配置注入：入站 clients = 所有「解析到该入站的启用 AP」的权限组并集命中的用户。
 // 零信任：AP 未绑定权限组 = 对全员不可见；用户无生效权限组 = 无任何节点。
 
@@ -102,46 +102,28 @@ func SyncAccessPointPermissionGroups(tx *gorm.DB, apID uint64, groupIDs []uint64
 	return nil
 }
 
-// ResolveAccessPointInboundID 解析接入点最终落地（消费）的用户入站 ID：
-// 直连 = TargetInboundID；L4 中转 = 规则的目标入站。无法解析返回 0。
-func ResolveAccessPointInboundID(ap *models.UserAccessPoint, l4Map map[uint64]models.L4PortRule) uint64 {
-	if ap == nil {
+// ResolveAccessPointInboundID 解析接入点最终落地（消费）的用户入站 ID。
+// AP 只直连入站（L4 中转建模已退役，端点由 CustomHost/Port 覆写表达）。无法解析返回 0。
+func ResolveAccessPointInboundID(ap *models.UserAccessPoint) uint64 {
+	if ap == nil || ap.TargetType != "inbound" || ap.TargetInboundID == nil {
 		return 0
 	}
-	switch ap.TargetType {
-	case "inbound":
-		if ap.TargetInboundID != nil {
-			return *ap.TargetInboundID
-		}
-	case "l4_rule":
-		if ap.TargetL4RuleID != nil {
-			if rule, ok := l4Map[*ap.TargetL4RuleID]; ok {
-				return rule.TargetInboundID
-			}
-		}
-	}
-	return 0
+	return *ap.TargetInboundID
 }
 
-// loadEnabledAPsAndL4 加载全部启用接入点与 L4 规则映射（AP 派生计算共用取数段）。
-func loadEnabledAPsAndL4(db *gorm.DB) ([]models.UserAccessPoint, map[uint64]models.L4PortRule, map[uint64][]uint64) {
+// loadEnabledAPs 加载全部启用接入点与其权限组映射（AP 派生计算共用取数段）。
+func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64) {
 	var aps []models.UserAccessPoint
 	_ = db.Where("enabled = ?", true).Find(&aps).Error
-	var rules []models.L4PortRule
-	_ = db.Where("enabled = ?", true).Find(&rules).Error
-	l4Map := make(map[uint64]models.L4PortRule, len(rules))
-	for _, r := range rules {
-		l4Map[r.ID] = r
-	}
 	apIDs := make([]uint64, 0, len(aps))
 	for _, ap := range aps {
 		apIDs = append(apIDs, ap.ID)
 	}
-	return aps, l4Map, BatchAccessPointPermissionGroupIDs(db, apIDs)
+	return aps, BatchAccessPointPermissionGroupIDs(db, apIDs)
 }
 
 // AuthorizedInboundSet 用户当前可用入站集合（AP 单点授权派生）。
-// 计算逻辑：用户生效权限组命中的启用 AP → 解析落地入站（直连 / 经 L4 转发）。
+// 计算逻辑：用户生效权限组命中的启用 AP → 解析落地入站（直连）。
 func AuthorizedInboundSet(db *gorm.DB, user *models.User) map[uint64]bool {
 	set := make(map[uint64]bool)
 	if user == nil {
@@ -151,13 +133,13 @@ func AuthorizedInboundSet(db *gorm.DB, user *models.User) map[uint64]bool {
 	if groupID == 0 {
 		return set
 	}
-	aps, l4Map, apGroupMap := loadEnabledAPsAndL4(db)
+	aps, apGroupMap := loadEnabledAPs(db)
 	for i := range aps {
 		ap := &aps[i]
 		if !groupHit(apGroupMap[ap.ID], groupID) {
 			continue
 		}
-		if inbID := ResolveAccessPointInboundID(ap, l4Map); inbID > 0 {
+		if inbID := ResolveAccessPointInboundID(ap); inbID > 0 {
 			set[inbID] = true
 		}
 	}
@@ -165,7 +147,7 @@ func AuthorizedInboundSet(db *gorm.DB, user *models.User) map[uint64]bool {
 }
 
 // BatchInboundAuthorizedGroupIDs 批量计算入站的授权权限组映射（inboundID -> []permissionGroupID），
-// 由启用 AP 白名单派生：AP 直连入站 / 经 L4 规则解析到目标入站，AP 的开放组并入该入站的授权组集。
+// 由启用 AP 白名单派生：AP 直连入站，AP 的开放组并入该入站的授权组集。
 // 配置生成（GetValidUsers）与用户注入的唯一权威来源。
 func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) map[uint64][]uint64 {
 	res := make(map[uint64][]uint64)
@@ -176,11 +158,11 @@ func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) map[uint64
 	for _, id := range inboundIDs {
 		wanted[id] = true
 	}
-	aps, l4Map, apGroupMap := loadEnabledAPsAndL4(db)
+	aps, apGroupMap := loadEnabledAPs(db)
 	sets := make(map[uint64]map[uint64]bool)
 	for i := range aps {
 		ap := &aps[i]
-		inbID := ResolveAccessPointInboundID(ap, l4Map)
+		inbID := ResolveAccessPointInboundID(ap)
 		if inbID == 0 || !wanted[inbID] {
 			continue
 		}
@@ -212,7 +194,7 @@ func groupHit(groupIDs []uint64, groupID uint64) bool {
 }
 
 // AuthorizedEntryServerIDs 用户可见接入点的「入口服务器」集合（用户端节点可用性展示用）：
-// 直连 = 目标入站所在服务器；L4 中转 = 中转机服务器（用户实际连接的入口）。
+// 入口 = 目标入站所在服务器（用户实际连接的对外端点由 AP 覆写/接入层决议，展示归服务器维度）。
 func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 	set := make(map[uint64]bool)
 	if user == nil {
@@ -222,7 +204,7 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 	if groupID == 0 {
 		return set
 	}
-	aps, l4Map, apGroupMap := loadEnabledAPsAndL4(db)
+	aps, apGroupMap := loadEnabledAPs(db)
 	var inbs []models.Inbound
 	_ = db.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbs).Error
 	inbServer := make(map[uint64]uint64, len(inbs))
@@ -234,21 +216,9 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 		if !groupHit(apGroupMap[ap.ID], groupID) {
 			continue
 		}
-		switch ap.TargetType {
-		case "inbound":
-			if ap.TargetInboundID != nil {
-				if sid, ok := inbServer[*ap.TargetInboundID]; ok {
-					set[sid] = true
-				}
-			}
-		case "l4_rule":
-			if ap.TargetL4RuleID != nil {
-				if rule, ok := l4Map[*ap.TargetL4RuleID]; ok {
-					// 入口 = 中转机；目标入站可用才展示（管道完整）
-					if _, ok := inbServer[rule.TargetInboundID]; ok {
-						set[rule.ServerID] = true
-					}
-				}
+		if ap.TargetType == "inbound" && ap.TargetInboundID != nil {
+			if sid, ok := inbServer[*ap.TargetInboundID]; ok {
+				set[sid] = true
 			}
 		}
 	}

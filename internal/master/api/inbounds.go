@@ -133,10 +133,6 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "服务器不存在")
 		return
 	}
-	if srv.ServerType == "l4_relay" {
-		util.BadRequest(c, "L4纯四层中转服务器不支持创建Xray入站，请在拓扑中配置端口转发规则")
-		return
-	}
 	if err := xray.ValidateInbound(req.SettingsJSON, req.StreamSettings, req.Sniffing); err != nil {
 		util.BadRequest(c, err.Error())
 		return
@@ -504,17 +500,11 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	if d.refInboundProtected(c, id) {
 		return
 	}
-	// 接入点引用保护：被用户接入点直连引用 / 被 L4 转发规则指向的入站禁止删除（订阅管道断裂）
+	// 接入点引用保护：被用户接入点直连引用的入站禁止删除（订阅管道断裂）
 	var apCnt int64
 	d.DB.Model(&models.UserAccessPoint{}).Where("target_type = 'inbound' AND target_inbound_id = ?", id).Count(&apCnt)
 	if apCnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(apCnt, 10)+" 个用户接入点直连引用，无法删除，请先解除接入点连线")
-		return
-	}
-	var l4Cnt int64
-	d.DB.Model(&models.L4PortRule{}).Where("target_inbound_id = ?", id).Count(&l4Cnt)
-	if l4Cnt > 0 {
-		util.BadRequest(c, "该入站被 "+strconv.FormatInt(l4Cnt, 10)+" 条 L4 端口转发规则指向，无法删除，请先删除对应转发规则")
 		return
 	}
 	// 盒内路由规则引用保护：规则 InboundTag 为 JSON 数组或逗号/换行/分号分隔，与生成器同源解析精确匹配

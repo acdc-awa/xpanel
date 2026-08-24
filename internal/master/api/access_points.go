@@ -18,9 +18,8 @@ type accessPointForm struct {
 	Name               string   `json:"name" binding:"required,max=128"`
 	CustomHost         string   `json:"custom_host" binding:"max=255"`
 	CustomPort         int      `json:"custom_port"`
-	TargetType         string   `json:"target_type"` // "inbound" | "l4_rule" | ""
+	TargetType         string   `json:"target_type"` // "inbound" | ""
 	TargetInboundID    *uint64  `json:"target_inbound_id"`
-	TargetL4RuleID     *uint64  `json:"target_l4_rule_id"`
 	Enabled            *bool    `json:"enabled"`
 	Remark             string   `json:"remark" binding:"max=255"`
 	PermissionGroupIDs []uint64 `json:"permission_group_ids"`
@@ -32,7 +31,6 @@ type AccessPointView struct {
 	PermissionGroupIDs []uint64 `json:"permission_group_ids"`
 	TargetServerName   string   `json:"target_server_name,omitempty"`
 	TargetInboundTag   string   `json:"target_inbound_tag,omitempty"`
-	TargetL4Port       int      `json:"target_l4_port,omitempty"`
 	ResolvedHost       string   `json:"resolved_host,omitempty"`
 	ResolvedPort       int      `json:"resolved_port,omitempty"`
 	ResolvedProtocol   string   `json:"resolved_protocol,omitempty"`
@@ -44,7 +42,6 @@ func buildAccessPointView(
 	gids []uint64,
 	srvMap map[uint64]models.Server,
 	inbMap map[uint64]models.Inbound,
-	l4Map map[uint64]models.L4PortRule,
 ) AccessPointView {
 	if gids == nil {
 		gids = []uint64{}
@@ -72,36 +69,12 @@ func buildAccessPointView(
 			}
 			v.ResolvedTargetDesc = fmt.Sprintf("%s · %s", srv.Name, inb.Tag)
 		}
-	} else if ap.TargetType == "l4_rule" && ap.TargetL4RuleID != nil && *ap.TargetL4RuleID > 0 {
-		if rule, ok := l4Map[*ap.TargetL4RuleID]; ok {
-			v.TargetL4Port = rule.ListenPort
-			l4Srv := srvMap[rule.ServerID]
-			v.TargetServerName = l4Srv.Name
-			if ap.CustomHost != "" {
-				v.ResolvedHost = ap.CustomHost
-			} else {
-				v.ResolvedHost = l4Srv.Host
-			}
-			if ap.CustomPort > 0 {
-				v.ResolvedPort = ap.CustomPort
-			} else {
-				v.ResolvedPort = rule.ListenPort
-			}
-			if inb, ok := inbMap[rule.TargetInboundID]; ok {
-				v.TargetInboundTag = inb.Tag
-				v.ResolvedProtocol = inb.Protocol
-				targetSrv := srvMap[inb.ServerID]
-				v.ResolvedTargetDesc = fmt.Sprintf("%s :%d ➜ %s · %s", l4Srv.Name, rule.ListenPort, targetSrv.Name, inb.Tag)
-			} else {
-				v.ResolvedTargetDesc = fmt.Sprintf("%s :%d", l4Srv.Name, rule.ListenPort)
-			}
-		}
 	}
 
 	return v
 }
 
-func (d *Deps) fetchTopologyContext() (map[uint64]models.Server, map[uint64]models.Inbound, map[uint64]models.L4PortRule) {
+func (d *Deps) fetchTopologyContext() (map[uint64]models.Server, map[uint64]models.Inbound) {
 	var servers []models.Server
 	_ = d.DB.Find(&servers).Error
 	srvMap := make(map[uint64]models.Server)
@@ -114,17 +87,11 @@ func (d *Deps) fetchTopologyContext() (map[uint64]models.Server, map[uint64]mode
 	for _, inb := range inbounds {
 		inbMap[inb.ID] = inb
 	}
-	var l4Rules []models.L4PortRule
-	_ = d.DB.Find(&l4Rules).Error
-	l4Map := make(map[uint64]models.L4PortRule)
-	for _, r := range l4Rules {
-		l4Map[r.ID] = r
-	}
-	return srvMap, inbMap, l4Map
+	return srvMap, inbMap
 }
 
 // validateAccessPointTarget 校验接入点目标绑定合法性（目标类型白名单 + 引用实体存在且类型正确）。
-func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inboundID, l4RuleID *uint64) bool {
+func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inboundID *uint64) bool {
 	switch targetType {
 	case "":
 		return true
@@ -143,19 +110,8 @@ func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inbo
 			return false
 		}
 		return true
-	case "l4_rule":
-		if l4RuleID == nil || *l4RuleID == 0 {
-			util.BadRequest(c, "中转模式需指定 L4 转发规则")
-			return false
-		}
-		var rule models.L4PortRule
-		if err := d.DB.First(&rule, *l4RuleID).Error; err != nil {
-			util.BadRequest(c, "目标 L4 转发规则不存在")
-			return false
-		}
-		return true
 	default:
-		util.BadRequest(c, "目标类型仅支持 inbound / l4_rule")
+		util.BadRequest(c, "目标类型仅支持 inbound")
 		return false
 	}
 }
@@ -172,12 +128,12 @@ func (d *Deps) AdminGetAccessPoints(c *gin.Context) {
 		ids = append(ids, list[i].ID)
 	}
 	groupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, ids)
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+	srvMap, inbMap := d.fetchTopologyContext()
 
 	views := make([]AccessPointView, 0, len(list))
 	for i := range list {
 		ap := list[i]
-		views = append(views, buildAccessPointView(ap, groupMap[ap.ID], srvMap, inbMap, l4Map))
+		views = append(views, buildAccessPointView(ap, groupMap[ap.ID], srvMap, inbMap))
 	}
 	util.OK(c, gin.H{"items": views})
 }
@@ -194,7 +150,7 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 		util.BadRequest(c, "接入点名称不能为空")
 		return
 	}
-	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID) {
 		return
 	}
 	enabled := true
@@ -208,7 +164,6 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 		CustomPort:      req.CustomPort,
 		TargetType:      req.TargetType,
 		TargetInboundID: req.TargetInboundID,
-		TargetL4RuleID:  req.TargetL4RuleID,
 		Enabled:         enabled,
 		Remark:          req.Remark,
 	}
@@ -228,9 +183,9 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 
 	d.TriggerUserChange()
 
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+	srvMap, inbMap := d.fetchTopologyContext()
 	util.OK(c, gin.H{
-		"access_point": buildAccessPointView(ap, req.PermissionGroupIDs, srvMap, inbMap, l4Map),
+		"access_point": buildAccessPointView(ap, req.PermissionGroupIDs, srvMap, inbMap),
 	})
 }
 
@@ -252,7 +207,7 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID) {
 		return
 	}
 
@@ -264,7 +219,6 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 	updates["custom_port"] = req.CustomPort
 	updates["target_type"] = req.TargetType
 	updates["target_inbound_id"] = req.TargetInboundID
-	updates["target_l4_rule_id"] = req.TargetL4RuleID
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
@@ -289,9 +243,9 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 
 	d.DB.First(&ap, id)
 	gids := services.AccessPointPermissionGroupIDs(d.DB, id)
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+	srvMap, inbMap := d.fetchTopologyContext()
 	util.OK(c, gin.H{
-		"access_point": buildAccessPointView(ap, gids, srvMap, inbMap, l4Map),
+		"access_point": buildAccessPointView(ap, gids, srvMap, inbMap),
 	})
 }
 
@@ -309,22 +263,20 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 	}
 
 	var req struct {
-		TargetType      string  `json:"target_type"` // "inbound" | "l4_rule" | ""
+		TargetType      string  `json:"target_type"` // "inbound" | ""
 		TargetInboundID *uint64 `json:"target_inbound_id"`
-		TargetL4RuleID  *uint64 `json:"target_l4_rule_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误")
 		return
 	}
-	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID, req.TargetL4RuleID) {
+	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID) {
 		return
 	}
 
 	updates := map[string]any{
 		"target_type":       req.TargetType,
 		"target_inbound_id": req.TargetInboundID,
-		"target_l4_rule_id": req.TargetL4RuleID,
 	}
 	if err := d.DB.Model(&ap).Updates(updates).Error; err != nil {
 		util.ServerError(c, "更新目标失败")
@@ -335,9 +287,9 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 
 	d.DB.First(&ap, id)
 	gids := services.AccessPointPermissionGroupIDs(d.DB, id)
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
+	srvMap, inbMap := d.fetchTopologyContext()
 	util.OK(c, gin.H{
-		"access_point": buildAccessPointView(ap, gids, srvMap, inbMap, l4Map),
+		"access_point": buildAccessPointView(ap, gids, srvMap, inbMap),
 	})
 }
 

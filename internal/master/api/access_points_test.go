@@ -70,28 +70,7 @@ func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 	}
 	require.NoError(t, deps.DB.Create(&inb).Error)
 
-	// 3. 准备 L4 中转服务器与规则
-	l4Srv := models.Server{
-		ServerType: models.ServerTypeL4Relay,
-		Name:       "广州中转机",
-		Host:       "gz.relay.com",
-		NodeID:     "node-l4",
-		Secret:     util.HashSecret("secret-l4"),
-		Status:     1,
-	}
-	require.NoError(t, deps.DB.Create(&l4Srv).Error)
-
-	l4Rule := models.L4PortRule{
-		ServerID:        l4Srv.ID,
-		ListenPort:      30001,
-		TargetServerID:  nodeSrv.ID,
-		TargetInboundID: inb.ID,
-		Remark:          "广州->日本",
-		Enabled:         true,
-	}
-	require.NoError(t, deps.DB.Create(&l4Rule).Error)
-
-	// 4. 测试 POST /api/v1/admin/access-points 创建直连接入点（零手填 IP/端口，自动继承落地节点与端口）
+	// 3. 准备落地 Xray 节点与入站
 	apPayload := map[string]any{
 		"name":                 "香港直连接入",
 		"target_type":          "inbound",
@@ -120,11 +99,14 @@ func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 	assert.Equal(t, "jp.node.com", createResp.Data.AccessPoint.ResolvedHost)
 	assert.Equal(t, 443, createResp.Data.AccessPoint.ResolvedPort)
 
-	// 5. 测试 POST /api/v1/admin/access-points 创建通过 L4 中转的接入点（自动改写为中转机 Host 与端口）
+	// 5. 测试 POST /api/v1/admin/access-points 创建带端点覆写的接入点（L4 退役后的中转表达：
+	// 直连目标入站 + CustomHost/CustomPort 覆写为转发端点，视图解析为覆写值）
 	apL4Payload := map[string]any{
 		"name":                 "广州 BGP 接入点",
-		"target_type":          "l4_rule",
-		"target_l4_rule_id":    l4Rule.ID,
+		"target_type":          "inbound",
+		"target_inbound_id":    inb.ID,
+		"custom_host":          "gz.relay.com",
+		"custom_port":          30001,
 		"permission_group_ids": []uint64{vipGroup.ID},
 		"remark":               "BGP 加速",
 	}

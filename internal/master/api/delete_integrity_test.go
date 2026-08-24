@@ -21,7 +21,7 @@ func TestAdminDeleteInboundBlockedByRoutingRule(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.ServerRoutingRule{}, &models.ServerOutbound{}, &models.UserAccessPoint{}, &models.L4PortRule{}))
+	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.ServerRoutingRule{}, &models.ServerOutbound{}, &models.UserAccessPoint{}))
 
 	srv := models.Server{Name: "s1", Host: "1.2.3.4", NodeID: "n1", Secret: "s1"}
 	require.NoError(t, db.Create(&srv).Error)
@@ -65,7 +65,7 @@ func TestAdminDeleteServerCascadesAccessLayer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.L4PortRule{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.UserAccessPoint{}))
+	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.UserAccessPoint{}))
 
 	srv := models.Server{Name: "s1", Host: "1.2.3.4", NodeID: "n1", Secret: "s1"}
 	require.NoError(t, db.Create(&srv).Error)

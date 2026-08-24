@@ -41,10 +41,8 @@ func TestAuthorizedInboundSet_APDerived(t *testing.T) {
 	// 接入点 2：直连入站 102，仅开放给 group2
 	ap2 := models.UserAccessPoint{Name: "ap2", Enabled: true, TargetType: "inbound", TargetInboundID: u64(102)}
 	db.Create(&ap2)
-	// 接入点 3：经 L4 规则（指向入站 103），开放给 group1
-	l4 := models.L4PortRule{ServerID: 9, ListenPort: 30001, TargetServerID: 1, TargetInboundID: 103, Enabled: true}
-	db.Create(&l4)
-	ap3 := models.UserAccessPoint{Name: "ap3", Enabled: true, TargetType: "l4_rule", TargetL4RuleID: u64(l4.ID)}
+	// 接入点 3：直连入站 103 + 端点覆写（L4 退役后的中转表达），开放给 group1
+	ap3 := models.UserAccessPoint{Name: "ap3", Enabled: true, TargetType: "inbound", TargetInboundID: u64(103), CustomHost: "gz.relay.com", CustomPort: 30001}
 	db.Create(&ap3)
 	// 接入点 4：禁用状态，即使绑定 group1 也不生效（指向入站 104）
 	// （GORM default:true 陷阱：零值 false 入库会被默认值覆盖，需创建后显式禁用）
@@ -77,7 +75,7 @@ func TestAuthorizedInboundSet_APDerived(t *testing.T) {
 		t.Errorf("u1 应可经 ap1 访问入站 101")
 	}
 	if !set1[103] {
-		t.Errorf("u1 应可经 ap3(L4) 访问入站 103")
+		t.Errorf("u1 应可经 ap3（覆写端点）访问入站 103")
 	}
 	if set1[102] {
 		t.Errorf("u1 不应访问仅开放给 VIP2 的入站 102")
@@ -117,14 +115,14 @@ func TestAuthorizedInboundSet_APDerived(t *testing.T) {
 		t.Errorf("入站 102 授权组应为 [g2], got %v", m[102])
 	}
 	if len(m[103]) != 1 || m[103][0] != group1.ID {
-		t.Errorf("入站 103 应经 L4 派生授权组 [g1], got %v", m[103])
+		t.Errorf("入站 103 应经接入点派生授权组 [g1], got %v", m[103])
 	}
 	if len(m[104]) != 0 || len(m[105]) != 0 {
 		t.Errorf("禁用/未授权接入点不应产生授权组: 104=%v 105=%v", m[104], m[105])
 	}
 }
 
-// 入口服务器集合：直连取目标入站服务器；L4 中转取中转机服务器。
+// 入口服务器集合：入口 = 目标入站所在服务器（端点覆写不改变入口归属）。
 func TestAuthorizedEntryServerIDs_APDerived(t *testing.T) {
 	db := testDB(t)
 
@@ -135,23 +133,21 @@ func TestAuthorizedEntryServerIDs_APDerived(t *testing.T) {
 
 	// 目标入站：服务器 2
 	db.Create(&models.Inbound{ID: 201, ServerID: 2, Tag: "in-201", Type: models.InboundTypeUser, Enabled: true})
-	// L4 规则：中转机服务器 3 → 入站 201
-	l4 := models.L4PortRule{ServerID: 3, ListenPort: 30001, TargetServerID: 2, TargetInboundID: 201, Enabled: true}
-	db.Create(&l4)
 
 	apDirect := models.UserAccessPoint{Name: "d", Enabled: true, TargetType: "inbound", TargetInboundID: u64(201)}
 	db.Create(&apDirect)
-	apL4 := models.UserAccessPoint{Name: "l", Enabled: true, TargetType: "l4_rule", TargetL4RuleID: u64(l4.ID)}
-	db.Create(&apL4)
+	// 覆写端点（原 L4 中转表达）同样归属目标入站所在服务器
+	apOverride := models.UserAccessPoint{Name: "o", Enabled: true, TargetType: "inbound", TargetInboundID: u64(201), CustomHost: "gz.relay.com", CustomPort: 30001}
+	db.Create(&apOverride)
 	_ = SyncAccessPointPermissionGroups(db, apDirect.ID, []uint64{group.ID})
-	_ = SyncAccessPointPermissionGroups(db, apL4.ID, []uint64{group.ID})
+	_ = SyncAccessPointPermissionGroups(db, apOverride.ID, []uint64{group.ID})
 
 	set := AuthorizedEntryServerIDs(db, &user)
 	if !set[2] {
-		t.Errorf("直连接入点应暴露目标入站服务器 2")
+		t.Errorf("接入点应暴露目标入站所在服务器 2，got %v", set)
 	}
-	if !set[3] {
-		t.Errorf("L4 接入点应暴露中转机服务器 3（用户实际入口）")
+	if len(set) != 1 {
+		t.Errorf("多余入口服务器（不应包含中转机），got %v", set)
 	}
 }
 

@@ -352,36 +352,7 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		})
 	}
 
-	srvMap, inbMap, l4Map := d.fetchTopologyContext()
-
-	// L4 端口转发规则（轻量）
-	var l4Rules []models.L4PortRule
-	if err := d.DB.Order("server_id ASC, listen_port ASC, id ASC").Find(&l4Rules).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	l4Views := make([]l4RuleView, 0, len(l4Rules))
-	for i := range l4Rules {
-		v := l4RuleView{
-			ID:              l4Rules[i].ID,
-			ServerID:        l4Rules[i].ServerID,
-			ListenPort:      l4Rules[i].ListenPort,
-			TargetServerID:  l4Rules[i].TargetServerID,
-			TargetInboundID: l4Rules[i].TargetInboundID,
-			Remark:          l4Rules[i].Remark,
-			Enabled:         l4Rules[i].Enabled,
-			CreatedAt:       l4Rules[i].CreatedAt,
-			UpdatedAt:       l4Rules[i].UpdatedAt,
-		}
-		if ts, ok := srvMap[l4Rules[i].TargetServerID]; ok {
-			v.TargetServerName = ts.Name
-		}
-		if ti, ok := inbMap[l4Rules[i].TargetInboundID]; ok {
-			v.TargetInboundTag = ti.Tag
-			v.TargetInboundPort = ti.Port
-		}
-		l4Views = append(l4Views, v)
-	}
+	srvMap, inbMap := d.fetchTopologyContext()
 
 	// 用户接入点（面向客户端与订阅的入口端点 + 开放权限组）
 	var accessPoints []models.UserAccessPoint
@@ -398,7 +369,7 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 
 	for i := range accessPoints {
 		ap := accessPoints[i]
-		apViews = append(apViews, buildAccessPointView(ap, apGroupMap[ap.ID], srvMap, inbMap, l4Map))
+		apViews = append(apViews, buildAccessPointView(ap, apGroupMap[ap.ID], srvMap, inbMap))
 	}
 
 	// 对外接入层（显式端点分组：layers + 各层挂载入站数）
@@ -421,7 +392,6 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 	util.OK(c, gin.H{
 		"servers":       srvViews,
 		"inbounds":      inbViews,
-		"l4_rules":      l4Views,
 		"access_points": apViews,
 		"outbounds":     outViews,
 		"routing_rules": ruleViews,
@@ -498,7 +468,7 @@ func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
 }
 
 // previewAccessPointNodes 按权限组可见的启用接入点生成预览节点（groupID = 0 时取全部启用接入点作样例）。
-// 管道解析与订阅同源：直连入站继承节点地址/端口；L4 中转覆写为中转机 host 与监听端口；AP 自定义覆写优先。
+// 管道解析与订阅同源：直连入站继承节点地址/端口（挂层走接入层决议）；AP CustomHost/Port 覆写优先。
 func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contracts.ProxyNodeDTO {
 	var aps []models.UserAccessPoint
 	_ = d.DB.Where("enabled = ?", true).Order("id ASC").Find(&aps).Error
@@ -524,12 +494,6 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 	for _, inb := range inbs {
 		inbMap[inb.ID] = inb
 	}
-	var rules []models.L4PortRule
-	_ = d.DB.Where("enabled = ?", true).Find(&rules).Error
-	l4Map := make(map[uint64]models.L4PortRule, len(rules))
-	for _, r := range rules {
-		l4Map[r.ID] = r
-	}
 	var layers []models.AccessLayer
 	_ = d.DB.Find(&layers).Error
 	layerMap := make(map[uint64]models.AccessLayer, len(layers))
@@ -552,7 +516,7 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 			}
 		}
 
-		dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4Map, layerMap, mockUUID)
+		dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, layerMap, mockUUID)
 		if dto == nil {
 			continue
 		}

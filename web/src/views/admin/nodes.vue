@@ -8,7 +8,6 @@ import {
   createInbound,
   deleteInbound,
   getInbounds,
-  getL4Rules,
   getPermissionGroups,
   getServers,
   toggleInbound,
@@ -19,7 +18,6 @@ import {
   getAccessPoints,
   type InboundItem,
   type InboundPayload,
-  type L4PortRule,
   type PermissionGroup,
   type ServerItem,
   type UserAccessPoint,
@@ -35,8 +33,6 @@ const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
-
-const xrayServers = computed(() => servers.value.filter((s) => s.server_type !== 'l4_relay'))
 
 function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
@@ -70,7 +66,7 @@ onMounted(async () => {
   const q = Number(route.query.server_id)
   if (q > 0) serverFilter.value = q
   load()
-  await Promise.all([loadAccessPoints(), loadL4Rules(), loadPermissionGroups()])
+  await Promise.all([loadAccessPoints(), loadPermissionGroups()])
   if (route.query.tab === 'access_points') activeTab.value = 'access_points'
 })
 
@@ -84,8 +80,6 @@ const apList = ref<UserAccessPoint[]>([])
 const apLoading = ref(false)
 const apGroups = ref<PermissionGroup[]>([])
 const allInbounds = ref<InboundItem[]>([])
-const l4Servers = computed(() => servers.value.filter((s) => s.server_type === 'l4_relay'))
-const l4RulesMap = ref(new Map<number, L4PortRule[]>())
 
 async function loadPermissionGroups() {
   try {
@@ -102,7 +96,6 @@ function groupName(id: number) {
 
 function apTargetDesc(ap: any): string {
   if (ap.target_type === 'inbound' && ap.target_inbound_tag) return `直连 ➜ ${ap.target_inbound_tag}`
-  if (ap.target_type === 'l4_rule' && ap.target_l4_port) return `中转 ➜ :${ap.target_l4_port}`
   return '待连线'
 }
 
@@ -120,19 +113,6 @@ async function loadAccessPoints() {
   }
 }
 
-async function loadL4Rules() {
-  const map = new Map<number, L4PortRule[]>()
-  for (const s of l4Servers.value) {
-    try {
-      const { data } = await getL4Rules(s.id)
-      if (data.code === 0) map.set(s.id, data.data)
-    } catch {
-      /* 忽略单个服务器拉取失败 */
-    }
-  }
-  l4RulesMap.value = map
-}
-
 const apDialogOpen = ref(false)
 const apEditingId = ref<number | null>(null)
 const apSaving = ref(false)
@@ -143,17 +123,14 @@ const apForm = reactive({
   remark: '',
   custom_host: '',
   custom_port: 0,
-  target_type: '' as '' | 'inbound' | 'l4_rule',
+  target_type: '' as '' | 'inbound',
   target_inbound_id: undefined as number | undefined,
-  target_l4_rule_id: undefined as number | undefined,
 })
 const apTargetServerId = ref(0)
-const apTargetL4ServerId = ref(0)
 
 const apAvailableInbounds = computed(() =>
   allInbounds.value.filter((i) => i.server_id === apTargetServerId.value && i.enabled && i.type === 'user'),
 )
-const apAvailableL4Rules = computed(() => l4RulesMap.value.get(apTargetL4ServerId.value) || [])
 
 function openCreateAccessPoint() {
   apEditingId.value = null
@@ -165,9 +142,7 @@ function openCreateAccessPoint() {
   apForm.custom_port = 0
   apForm.target_type = ''
   apForm.target_inbound_id = undefined
-  apForm.target_l4_rule_id = undefined
-  apTargetServerId.value = xrayServers.value[0]?.id || 0
-  apTargetL4ServerId.value = l4Servers.value[0]?.id || 0
+  apTargetServerId.value = servers.value[0]?.id || 0
   apDialogOpen.value = true
 }
 
@@ -181,11 +156,8 @@ function openEditAccessPoint(ap: any) {
   apForm.custom_port = ap.custom_port || 0
   apForm.target_type = ap.target_type
   apForm.target_inbound_id = ap.target_inbound_id
-  apForm.target_l4_rule_id = ap.target_l4_rule_id
   const inb = allInbounds.value.find((i) => i.id === ap.target_inbound_id)
-  apTargetServerId.value = inb?.server_id || xrayServers.value[0]?.id || 0
-  const l4Rule = [...l4RulesMap.value.values()].flat().find((r) => r.id === ap.target_l4_rule_id)
-  apTargetL4ServerId.value = l4Rule?.server_id || l4Servers.value[0]?.id || 0
+  apTargetServerId.value = inb?.server_id || servers.value[0]?.id || 0
   apDialogOpen.value = true
 }
 
@@ -199,10 +171,6 @@ async function saveAccessPoint() {
     ElMessage.warning('请选择直连落地入站')
     return
   }
-  if (apForm.target_type === 'l4_rule' && !apForm.target_l4_rule_id) {
-    ElMessage.warning('请选择 L4 端口转发规则')
-    return
-  }
   apSaving.value = true
   try {
     const payload = {
@@ -214,7 +182,6 @@ async function saveAccessPoint() {
       custom_port: apForm.custom_port || undefined,
       target_type: apForm.target_type,
       target_inbound_id: apForm.target_type === 'inbound' ? apForm.target_inbound_id : undefined,
-      target_l4_rule_id: apForm.target_type === 'l4_rule' ? apForm.target_l4_rule_id : undefined,
     }
     const { data } = apEditingId.value
       ? await updateAccessPoint(apEditingId.value, payload)
@@ -262,7 +229,6 @@ async function toggleAccessPoint(ap: any) {
       remark: ap.remark || '',
       target_type: ap.target_type,
       target_inbound_id: ap.target_inbound_id,
-      target_l4_rule_id: ap.target_l4_rule_id,
     })
     if (data.code === 0) {
       ElMessage.success(ap.enabled ? '接入点已停用' : '接入点已启用')
@@ -323,7 +289,7 @@ function editorModelValue(): string {
 function openCreate() {
   editing.value = null
   inboundChange.value = null
-  formServerId.value = serverFilter.value || xrayServers.value[0]?.id || 0
+  formServerId.value = serverFilter.value || servers.value[0]?.id || 0
   formType.value = 'user'
   formCertId.value = 0
   editorOpen.value = true
@@ -460,7 +426,7 @@ function transportOf(row: any): string {
         <div class="x-toolbar">
           <div class="x-toolbar-left">
             <el-select v-model="serverFilter" placeholder="全部 Xray 服务器" clearable style="width: 200px">
-              <el-option v-for="s in xrayServers" :key="s.id" :label="s.name" :value="s.id" />
+              <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
           </div>
@@ -588,7 +554,7 @@ function transportOf(row: any): string {
           type="info"
           :closable="false"
           show-icon
-          title="用户接入点是订阅的唯一生成来源：定义别名与开放权限组（白名单）。订阅地址沿管道继承：直连继承入站分享地址（节点 IP/端口），经 L4 中转继承转发机 Host/监听端口，接入点可再覆写。"
+          title="用户接入点是订阅的唯一生成来源：定义别名与开放权限组（白名单）。订阅地址沿管道继承：直连继承入站分享地址（节点 IP/端口）或接入层端点，接入点可再用 Host/Port 覆写（如自定义中转端点）。"
           style="margin-bottom: 14px"
         />
 
@@ -680,7 +646,6 @@ function transportOf(row: any): string {
               <el-radio-group v-model="apForm.target_type" style="width: 100%">
                 <el-radio-button value="">待连线 / 未绑定</el-radio-button>
                 <el-radio-button value="inbound">直连落地入站</el-radio-button>
-                <el-radio-button value="l4_rule">L4 端口中转</el-radio-button>
               </el-radio-group>
             </el-form-item>
 
@@ -690,7 +655,7 @@ function transportOf(row: any): string {
             >
               <el-form-item label="目标落地服务器" style="margin-bottom: 0">
                 <el-select v-model="apTargetServerId" placeholder="选择 Xray 服务器" style="width: 100%" @change="apForm.target_inbound_id = undefined">
-                  <el-option v-for="s in xrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+                  <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
                 </el-select>
               </el-form-item>
               <el-form-item label="目标用户入站 (Target Inbound)" style="margin-bottom: 0">
@@ -700,30 +665,9 @@ function transportOf(row: any): string {
               </el-form-item>
             </div>
 
-            <div
-              v-if="apForm.target_type === 'l4_rule'"
-              style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; background: rgba(168, 85, 247, 0.05); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed rgba(168, 85, 247, 0.2)"
-            >
-              <el-form-item label="L4 中转服务器" style="margin-bottom: 0">
-                <el-select v-model="apTargetL4ServerId" placeholder="选择中转服务器" style="width: 100%" @change="apForm.target_l4_rule_id = undefined">
-                  <el-option v-for="s in l4Servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="端口转发映射 (Port Rule)" style="margin-bottom: 0">
-                <el-select v-model="apForm.target_l4_rule_id" placeholder="选择端口规则" style="width: 100%">
-                  <el-option
-                    v-for="r in apAvailableL4Rules"
-                    :key="r.id"
-                    :label="`:${r.listen_port} ${r.remark ? ' - ' + r.remark : ''} ${r.target_inbound_tag ? '➜ ' + r.target_inbound_tag : ''}`"
-                    :value="r.id"
-                  />
-                </el-select>
-              </el-form-item>
-            </div>
-
             <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
               <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
-                订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址，中转→转发机 Host/监听端口）
+                订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址 / 接入层端点）
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
                 <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
@@ -767,7 +711,7 @@ function transportOf(row: any): string {
       <div v-if="!editing" style="margin-bottom: 14px">
         <el-form-item label="所属目标服务器" style="margin-bottom: 0">
           <el-select v-model="formServerId" style="width: 100%" placeholder="请选择要绑定入站的服务器">
-            <el-option v-for="s in xrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
+            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
           </el-select>
         </el-form-item>
       </div>

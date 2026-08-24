@@ -51,7 +51,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 
 	// 访问控制单点化（2026-08-23 收口）：订阅只从「用户接入点（AP）」生成——
-	// AP 权限组白名单命中用户生效组 → 沿管道解析（直连入站 / 经 L4 转发覆写 host/port）→ 产出节点。
+	// AP 权限组白名单命中用户生效组 → 沿管道解析（直连目标入站，端点可被 CustomHost/Port 覆写）→ 产出节点。
 	// 不再为裸入站直接生成订阅节点；无任何可见 AP 即 404。
 
 	// 确定用户生效的权限组 ID
@@ -65,7 +65,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 	}
 
-	// 1. 服务器 / 可用用户入站 / 启用 L4 规则映射表
+	// 1. 服务器 / 可用用户入站映射表
 	var allServers []models.Server
 	_ = d.DB.Find(&allServers).Error
 	srvMap := make(map[uint64]models.Server)
@@ -80,13 +80,6 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	inbMap := make(map[uint64]models.Inbound)
 	for _, i := range allInbs {
 		inbMap[i.ID] = i
-	}
-
-	var allL4Rules []models.L4PortRule
-	_ = d.DB.Where("enabled = ?", true).Find(&allL4Rules).Error
-	l4RuleMap := make(map[uint64]models.L4PortRule)
-	for _, r := range allL4Rules {
-		l4RuleMap[r.ID] = r
 	}
 
 	var allLayers []models.AccessLayer
@@ -119,8 +112,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 				continue
 			}
 
-			// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址）→ 经 L4 覆写为转发端点 → AP 消费（命名/可选覆写）
-			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, l4RuleMap, layerMap, user.UUID)
+			// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址/挂层端点）→ AP 消费（命名/可选覆写）
+			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, layerMap, user.UUID)
 			if dto == nil {
 				continue
 			}
