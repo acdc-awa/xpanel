@@ -517,6 +517,23 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(l4Cnt, 10)+" 条 L4 端口转发规则指向，无法删除，请先删除对应转发规则")
 		return
 	}
+	// 盒内路由规则引用保护：规则 InboundTag 为 JSON 数组或逗号/换行/分号分隔，与生成器同源解析精确匹配
+	var rules []models.ServerRoutingRule
+	if err := d.DB.Where("server_id = ?", inb.ServerID).Find(&rules).Error; err == nil {
+		ruleCnt := int64(0)
+		for _, r := range rules {
+			for _, tg := range xray.ParseStringList(r.InboundTag) {
+				if tg == inb.Tag {
+					ruleCnt++
+					break
+				}
+			}
+		}
+		if ruleCnt > 0 {
+			util.BadRequest(c, "该入站被 "+strconv.FormatInt(ruleCnt, 10)+" 条路由规则引用，无法删除，请先删除对应规则")
+			return
+		}
+	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&models.Inbound{}, id).Error
 	}); err != nil {

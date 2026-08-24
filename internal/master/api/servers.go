@@ -330,6 +330,10 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		if err := tx.Where("server_id = ?", id).Delete(&models.NodeReport{}).Error; err != nil {
 			return err
 		}
+		// 悬空引用收口：对外接入层随服务器级联删除（层无宿主后成孤儿）
+		if err := tx.Where("server_id = ?", id).Delete(&models.AccessLayer{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&models.Server{}, id).Error
 	}); err != nil {
 		util.ServerError(c, "删除失败")

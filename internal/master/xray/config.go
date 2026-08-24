@@ -234,8 +234,8 @@ func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 	return nil
 }
 
-// parseStringList 解析 JSON 数组字符串或逗号/换行/分号分隔字符串。
-func parseStringList(s string) []string {
+// ParseStringList 解析 JSON 数组字符串或逗号/换行/分号分隔字符串。
+func ParseStringList(s string) []string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
@@ -645,10 +645,10 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 			"type":        "field",
 			"outboundTag": rule.OutboundTag,
 		}
-		if domains := parseStringList(rule.Domain); len(domains) > 0 {
+		if domains := ParseStringList(rule.Domain); len(domains) > 0 {
 			rmap["domain"] = domains
 		}
-		if ips := parseStringList(rule.IP); len(ips) > 0 {
+		if ips := ParseStringList(rule.IP); len(ips) > 0 {
 			rmap["ip"] = ips
 		}
 		if rule.Port != "" {
@@ -657,11 +657,11 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 		if rule.Network != "" {
 			rmap["network"] = rule.Network
 		}
-		if protocols := parseStringList(rule.Protocol); len(protocols) > 0 {
+		if protocols := ParseStringList(rule.Protocol); len(protocols) > 0 {
 			rmap["protocol"] = protocols
 		}
 		if rule.InboundTag != "" {
-			rmap["inboundTag"] = parseStringList(rule.InboundTag)
+			rmap["inboundTag"] = ParseStringList(rule.InboundTag)
 		}
 		list = append(list, rmap)
 	}
