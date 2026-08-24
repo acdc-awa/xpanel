@@ -66,3 +66,7 @@ ui-audit-screenshots/
 
 # 项目文档（设计/部署/归档）留在本地开发机，不推送到远端仓库
 docs/
+
+# AI 会话指令文件（AGENTS/CLAUDE）仅本地开发使用，不入库
+/AGENTS.md
+/CLAUDE.md
