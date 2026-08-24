@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Refresh, Search, Delete, CopyDocument, Ticket, Check } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Delete, CopyDocument, Ticket } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
   getAdminGiftCards,

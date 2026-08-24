@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { User, Lock, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
-import { getPublicConfig } from '@/api/config'
 import { useSiteStore } from '@/stores/site'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 

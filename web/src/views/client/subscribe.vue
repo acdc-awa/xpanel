@@ -3,10 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   CopyDocument,
   Download,
-  Link,
   Cellphone,
-  Monitor,
-  Check,
   Promotion,
   View,
 } from '@element-plus/icons-vue'

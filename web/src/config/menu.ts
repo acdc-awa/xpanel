@@ -88,26 +88,6 @@ export interface MenuItem {
   roles?: ('admin' | 'user')[]
 }
 
-/**
- * 平铺菜单（向下兼容）
- */
-export const adminMenus: MenuItem[] = [
-  { title: '仪表盘', path: '/admin/dashboard', icon: Odometer },
-  { title: '服务器', path: '/admin/servers', icon: Monitor },
-  { title: '节点（接入点）', path: '/admin/nodes', icon: Share },
-  { title: '路由管理', path: '/admin/routing', icon: Connection },
-  { title: '权限组', path: '/admin/permission-groups', icon: UserFilled },
-  { title: '套餐', path: '/admin/plans', icon: Box },
-  { title: '证书管理', path: '/admin/certs', icon: Lock },
-  { title: '用户管理', path: '/admin/users', icon: User },
-  { title: '礼品卡', path: '/admin/gift-cards', icon: Tickets },
-  { title: '订单记录', path: '/admin/orders', icon: Box },
-  { title: '邀请码', path: '/admin/invitations', icon: Key },
-  { title: '公告管理', path: '/admin/notices', icon: Bell },
-  { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
-  { title: '设置', path: '/admin/settings', icon: Setting },
-]
-
 export const clientMenus: MenuItem[] = [
   { title: '首页', path: '/dashboard', icon: HomeFilled },
   { title: '订阅中心', path: '/subscribe', icon: Promotion },

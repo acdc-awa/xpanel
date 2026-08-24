@@ -121,12 +121,6 @@ async function loadServers() {
   }
 }
 
-const statusText: Record<string, { dot: string; text: string }> = {
-  online: { dot: 'online', text: '在线' },
-  connecting: { dot: 'connecting', text: '维护中' },
-  offline: { dot: 'offline', text: '离线' },
-}
-
 // 公告系统（真实接口 + 弹窗与强提醒）
 const notices = ref<NoticeItem[]>([])
 const noticeLoading = ref(false)

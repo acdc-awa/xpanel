@@ -17,7 +17,7 @@ import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Link, Setting, Delete } from '@element-plus/icons-vue'
+import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete } from '@element-plus/icons-vue'
 import {
   createServerOutbound,
   createServerRoutingRule,
@@ -209,7 +209,7 @@ function getBoxWidth(serverId: number | string): number {
 
 // 盒高估算（对齐 CSS 渲染附近；仅用于绕行阻挡与自动排版间距）：
 // 标准盒 = max(入站列高含层胶囊, 出站列高)；L4 盒 ≈98+40·规则数。
-function estBoxHeight(srv: TopologyData['servers'][number], inbCount: number, outCount: number, l4Count = 0) {
+function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, outCount: number, l4Count = 0) {
   if (srv.server_type === 'l4_relay') return HEADER_H + 50 + l4Count * ROW_H
   const inbCol = inboundColumnRows(srv.id).colH
   const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + 16

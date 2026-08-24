@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Delete, Key, CopyDocument, Refresh, Plus, Edit } from '@element-plus/icons-vue'
+import { Delete, Key, CopyDocument, Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   deleteServer,
@@ -12,13 +12,11 @@ import {
   createL4Rule,
   updateL4Rule,
   deleteL4Rule,
-  getPermissionGroups,
   getServers,
   type InboundItem,
   type ServerItem,
   type L4PortRule,
-  type PermissionGroup,
-} from '@/api/admin'
+  } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { maskUUIDs } from '@/utils/mask'
 

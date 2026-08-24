@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from 'vue'
-import { Plus, Delete, Edit, Document, Check, Refresh, CopyDocument, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Check, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {

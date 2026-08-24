@@ -73,7 +73,7 @@ function fmtTime(t: string | null) {
             </template>
           </el-table-column>
           <el-table-column label="状态" width="100">
-            <template #default="{ row }">
+            <template #default>
               <span class="x-chip green">已生效</span>
             </template>
           </el-table-column>

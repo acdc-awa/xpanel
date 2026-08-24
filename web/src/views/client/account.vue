@@ -6,7 +6,6 @@ import {
   Wallet,
   Promotion,
   Cellphone,
-  Link,
   DataLine,
   User,
   Calendar,

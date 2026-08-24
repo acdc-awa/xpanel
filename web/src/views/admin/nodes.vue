@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Refresh, Edit, Delete, VideoPlay } from '@element-plus/icons-vue'
+import { Plus, Refresh, Edit, Delete } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
 import {

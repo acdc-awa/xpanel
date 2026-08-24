@@ -151,8 +151,6 @@ function openDrawer(row: any) {
   drawerOpen.value = true
 }
 
-// ---- 下发配置（走 generate-config：主控生成完整配置并保存待推送，在线自动下发） ----
-const pushOpen = ref(false)
 // ---- 状态详情 ----
 const statusOpen = ref(false)
 const statusData = ref<CommandResult<any> | null>(null)

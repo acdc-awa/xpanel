@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, CopyDocument, Refresh, Ticket } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, Ticket } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'

@@ -10,8 +10,6 @@ import {
   Moon,
   Opportunity,
   Setting,
-  Share,
-  Lock,
   Plus,
   Refresh,
 } from '@element-plus/icons-vue'

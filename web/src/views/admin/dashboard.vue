@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   TrendCharts,
   Money,
@@ -8,10 +8,6 @@ import {
   Connection,
   User,
   Refresh,
-  Wallet,
-  Present,
-  ShoppingCart,
-  Cpu,
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { getDashboard } from '@/api/admin'
@@ -645,7 +641,7 @@ onUnmounted(() => {
                   </template>
                 </el-table-column>
                 <el-table-column label="状态" width="80">
-                  <template #default="{ row }">
+                  <template #default>
                     <el-tag type="success" size="small">已生效</el-tag>
                   </template>
                 </el-table-column>

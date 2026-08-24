@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, MagicStick, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
@@ -115,10 +115,6 @@ const form = reactive({
 const FLOW_OPTIONS = [
   { label: '无', value: '' },
   { label: 'xtls-rprx-vision', value: 'xtls-rprx-vision' },
-]
-
-const ENCRYPTION_OPTIONS = [
-  { label: 'none', value: 'none' },
 ]
 
 const NETWORK_OPTIONS = [

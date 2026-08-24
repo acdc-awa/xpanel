@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Check, Download, Refresh, Upload, Delete, Picture, Scissor, CopyDocument, Link, Lock, Cpu } from '@element-plus/icons-vue'
+import { Check, Download, Refresh, Upload, Delete, Picture, Scissor, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
