@@ -37,7 +37,10 @@ onMounted(() => {
   onMq(mq)
   mq.addEventListener('change', onMq)
 })
-onUnmounted(() => mq?.removeEventListener('change', onMq))
+onUnmounted(() => {
+  mq?.removeEventListener('change', onMq)
+  window.clearTimeout(searchTimer)
+})
 
 const plans = ref<Plan[]>([])
 const permissionGroups = ref<PermissionGroup[]>([])
@@ -120,10 +123,21 @@ async function submitAdjust() {
   }
 }
 
+let searchTimer: number | undefined
+function onSearchInput() {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(onSearch, 300)
+}
+
+function onSearch() {
+  page.value = 1
+  load()
+}
+
 async function load() {
   loading.value = true
   try {
-    const { data } = await getUsers(page.value, size.value)
+    const { data } = await getUsers(page.value, size.value, keyword.value.trim())
     if (data.code === 0) {
       list.value = data.data.items
       total.value = data.data.total
@@ -386,17 +400,6 @@ function copyText(text: string, label: string) {
   ElMessage.success(`${label}已复制到剪贴板`)
 }
 
-const filteredList = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return list.value
-  return list.value.filter(
-    (u) =>
-      u.username.toLowerCase().includes(kw) ||
-      (u.email && u.email.toLowerCase().includes(kw)) ||
-      (u.uuid && u.uuid.toLowerCase().includes(kw)),
-  )
-})
-
 // ---- 批量操作与 CSV 导出（ISSUE-17 用户管理增强） ----
 const selected = ref<AdminUser[]>([])
 const batchBusy = ref(false)
@@ -411,7 +414,7 @@ function csvCell(v: any) {
 }
 
 function exportCSV() {
-  const rows = selected.value.length ? selected.value : filteredList.value
+  const rows = selected.value.length ? selected.value : list.value
   if (!rows.length) {
     ElMessage.warning('没有可导出的用户')
     return
@@ -496,23 +499,23 @@ function toggleSelectRow(row: AdminUser, checked: boolean) {
 }
 
 const isAllSelected = computed(() => {
-  if (!filteredList.value.length) return false
-  return filteredList.value.every((u) => isRowSelected(u))
+  if (!list.value.length) return false
+  return list.value.every((u) => isRowSelected(u))
 })
 
 const isIndeterminate = computed(() => {
-  const count = filteredList.value.filter((u) => isRowSelected(u)).length
-  return count > 0 && count < filteredList.value.length
+  const count = list.value.filter((u) => isRowSelected(u)).length
+  return count > 0 && count < list.value.length
 })
 
 function toggleSelectAll(checked: boolean) {
   if (checked) {
     const map = new Map<number, AdminUser>()
     for (const u of selected.value) map.set(u.id, u)
-    for (const u of filteredList.value) map.set(u.id, u)
+    for (const u of list.value) map.set(u.id, u)
     selected.value = Array.from(map.values())
   } else {
-    const set = new Set(filteredList.value.map((u) => u.id))
+    const set = new Set(list.value.map((u) => u.id))
     selected.value = selected.value.filter((u) => !set.has(u.id))
   }
 }
@@ -536,7 +539,15 @@ function handleCardAction(cmd: string, row: AdminUser) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input v-model="keyword" placeholder="搜索用户名 / 邮箱 / UUID" clearable style="width: 280px">
+        <el-input
+          v-model="keyword"
+          placeholder="搜索用户名 / 邮箱 / UUID"
+          clearable
+          style="width: 280px"
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+          @input="onSearchInput"
+        >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
@@ -555,7 +566,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
 
       <!-- 桌面端表格视图 (自适应紧凑单屏展示) -->
       <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="filteredList" style="width: 100%" @selection-change="onSelectionChange">
+        <el-table v-loading="loading" :data="list" style="width: 100%" @selection-change="onSelectionChange">
           <el-table-column type="selection" width="40" align="center" />
           <el-table-column prop="id" label="#" width="45" align="center">
             <template #default="{ row }">
@@ -681,16 +692,16 @@ function handleCardAction(cmd: string, row: AdminUser) {
           >
             全选当前页用户
           </el-checkbox>
-          <span class="muted font-12">共 {{ filteredList.length }} 位</span>
+          <span class="muted font-12">共 {{ total }} 位</span>
         </div>
 
-        <div v-if="filteredList.length === 0" class="mobile-empty">
+        <div v-if="list.length === 0" class="mobile-empty">
           暂无匹配用户
         </div>
 
         <div v-else class="mobile-user-card-list">
           <div
-            v-for="row in filteredList"
+            v-for="row in list"
             :key="row.id"
             class="mobile-user-card"
             :class="{ selected: isRowSelected(row), banned: row.status !== 1 }"

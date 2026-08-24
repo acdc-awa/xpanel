@@ -9,7 +9,6 @@ import type {
   CertItem,
   CreateInvitationResult,
   InboundItem,
-  InboundSettings,
   L4PortRule,
   UserAccessPoint,
   Invitation,
@@ -31,7 +30,6 @@ export type {
   AuditLog,
   CertItem,
   InboundItem,
-  InboundSettings,
   L4PortRule,
   UserAccessPoint,
   Invitation,
@@ -134,8 +132,8 @@ export function updateSettings(payload: Partial<SiteSettings>) {
   return http.put<ApiResp<SiteSettings>>('/admin/settings', payload)
 }
 
-export function getUsers(page = 1, size = 20) {
-  return http.get<ApiResp<AdminUserPage>>('/admin/users', { params: { page, size } })
+export function getUsers(page = 1, size = 20, keyword = '') {
+  return http.get<ApiResp<AdminUserPage>>('/admin/users', { params: { page, size, keyword } })
 }
 
 export function updateUser(

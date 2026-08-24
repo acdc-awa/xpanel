@@ -28,13 +28,20 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		size = 20
 	}
 
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	base := d.DB.Model(&models.User{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("username LIKE ? OR email LIKE ? OR uuid LIKE ?", like, like, like)
+	}
+
 	var total int64
-	if err := d.DB.Model(&models.User{}).Count(&total).Error; err != nil {
+	if err := base.Count(&total).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
 	var users []models.User
-	if err := d.DB.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&users).Error; err != nil {
+	if err := base.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&users).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
