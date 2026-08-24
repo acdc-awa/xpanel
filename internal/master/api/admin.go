@@ -467,7 +467,7 @@ func (d *Deps) AdminDeleteUser(c *gin.Context) {
 		}
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		return tx.Delete(&user).Error
+		return tx.Unscoped().Delete(&user).Error
 	}); err != nil {
 		util.ServerError(c, "删除失败")
 		return
