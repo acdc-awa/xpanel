@@ -22,6 +22,12 @@ jwt:
   access_ttl: 2h      # 短期 access token 有效期
   refresh_ttl: 168h   # 长期 refresh token 有效期（7 天）
 
+# TOTP 2FA 加密密钥：用户 TOTP secret 入库前用 AES-GCM 加密，密钥 = sha256(本值)（见 internal/master/services/otp.go）
+# 留空=回退用 jwt.secret（即自动生成并持久化到 DB 的那份）——推荐，无固定值风险、每套部署互不相同
+# 如需独立于 JWT 的密钥：请用 openssl rand -hex 32 生成随机值填入，且不要写死进仓库/模板
+totp:
+  encrypt_key: ""
+
 admin:
   # 账密不预设默认值（防默认密码攻击）：留空=首次启动自动生成 16 位强随机密码（控制台高亮显示）
   # 显式指定请用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（compose/.env）

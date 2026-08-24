@@ -1,0 +1,25 @@
+# 固定运行时镜像（压缩包挂载形态专用）
+#
+# 与 Dockerfile（源码构建、产物 COPY 进镜像）不同，本镜像只提供运行环境，不含任何业务代码：
+#   - ca-certificates / tzdata：TLS 证书与时区（生产必需）
+#   - wget：healthcheck 探针（与 restore.sh 一致）
+#   - app 用户（uid 1000）：宿主目录挂载的数据需 chown 给 1000 才能写入
+#
+# 用法：docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
+# 升级/回滚只替换挂载目录里的 master + web/dist，本镜像构建一次即可，不随版本变。
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    adduser -D app
+
+WORKDIR /app
+
+# 挂载点约定（与 docker-compose.yml 对应）：
+#   ./master          → /app/master         (ro)
+#   ./web/dist        → /app/web/dist       (ro)
+#   ./configs/config.yaml → /app/configs/config.yaml (ro)
+#   ./data            → /app/data           (rw, chown 1000)
+
+USER app
+EXPOSE 18080 18081 18082 6000
+CMD ["/app/master", "-config", "/app/configs/config.yaml"]

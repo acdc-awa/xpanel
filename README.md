@@ -85,53 +85,71 @@
 
 ## 🚀 快速部署指南
 
-生产环境推荐使用 **Docker Compose** 部署主控（Master），TLS 终止与域名/路径分流由**你自己部署的反向代理**（Caddy / Nginx 等）承担，本项目不随 compose 部署任何反代。
+生产环境推荐使用 **Docker Compose + 压缩包挂载形态**部署主控（Master）：release 压缩包包含编译好的二进制与前端产物，解压到宿主目录、配好 config 即可启动；TLS 终止与域名/路径分流由**你自己部署的反向代理**（Caddy / Nginx 等）承担，本项目不随 compose 部署任何反代。
+
+### 目录结构（解压后）
+
+```
+/opt/xray-panel/
+├── master                  # 主控二进制（挂载进容器，升级时替换）
+├── web/dist/               # 前端产物（挂载进容器，升级时替换）
+├── configs/config.yaml     # 配置文件（挂载进容器，编辑后重启生效）
+├── data/                   # 数据目录（SQLite + JWT + 备份，持久化）
+├── docker-compose.yml
+├── .env.example
+└── Caddyfile.reference     # 自备反代参考模板
+```
 
 ### 第一步：部署主控（Master）
 
-#### 1. 克隆仓库并准备配置
-克隆主控仓库（compose 构建需要整个仓库作为上下文）并进入部署目录：
+#### 1. 下载并解压 release 包
+从 [GitHub Releases](https://github.com/acdc-awa/xpanel/releases) 下载 `xpanel-master-<version>-linux-amd64.tar.gz`（含 `.sha256` 校验）：
 
 ```bash
-git clone https://github.com/acdc-awa/xpanel.git /opt/xray-panel && cd /opt/xray-panel/deploy/master
-
-# 准备环境变量模板
-cp .env.example .env
+cd /opt && mkdir -p xray-panel && cd xray-panel
+# 下载后校验
+sha256sum -c xpanel-master-*.tar.gz.sha256
+tar -xzf xpanel-master-*.tar.gz
 ```
 
-#### 2. 配置 `.env`
-编辑 `.env` 文件，填入你的面板公网地址与订阅域名（可选）：
+#### 2. 配置 `config.yaml`
+编辑 `configs/config.yaml`，填入你的面板公网地址（JWT 密钥与管理员账密留空=首次启动自动生成，见文件内注释）：
 
-```ini
-# 面板公网地址（生成节点一键安装命令与订阅地址用）
-APP_PUBLIC_URL=https://panel.yourdomain.com
-
-# 节点 WS 对外地址（可选；不填则用面板域名 + /node/ws）
-# APP_WS_PUBLIC_URL=wss://ws.yourdomain.com/node/ws
-
-# JWT 密钥与默认管理员账密均不预设（防默认密码攻击）：
-# 留空=首次启动自动生成——JWT 密钥持久化到 DB，管理员密码在控制台高亮显示（docker compose logs master）
-# 如需显式指定：JWT_SECRET=$(openssl rand -hex 32)、ADMIN_PASSWORD=<强密码>
+```yaml
+app:
+  env: prod
+  public_url: https://panel.yourdomain.com
+  # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；不填则用面板域名 + /node/ws
 ```
 
 > 四端口模型：面板由四个独立监听端口组成——**SPA 前端**（`APP_PORT`，默认 18080）、
 > **后端 API**（`APP_API_PORT`，默认 18081）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
 > 对外路径 `/node/ws`，可用 `APP_WS_PUBLIC_URL` 整体覆盖）、**订阅**（`APP_SUB_PORT`，默认 6000）。
-> 四个端口默认只绑定宿主机 `127.0.0.1`（改 `BIND_ADDR=0.0.0.0` 可对全网卡开放，用于反代与面板
-> 不在同一台机的拓扑），由你自己部署的反代按域名/路径分流（参考模板见 `deploy/master/Caddyfile`）。
+> 四个端口默认只绑定宿主机 `127.0.0.1`（改 `.env` 里 `BIND_ADDR=0.0.0.0` 可对全网卡开放），
+> 由你自己部署的反代按域名/路径分流（参考模板见 `Caddyfile.reference`）。
 
-#### 3. 启动容器
+#### 3. 准备数据目录与运行时镜像
+```bash
+# data 目录需属主为容器内 app 用户（uid 1000）才能写入
+sudo chown -R 1000:1000 data
+
+# 构建固定运行时镜像（一次性；只装运行时依赖，不含业务代码，不随版本变）
+docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
+```
+> `Dockerfile.runtime` 在仓库根目录；也可以 `docker build -t xpanel-master-runtime:latest https://github.com/acdc-awa/xpanel.git#master` 在线构建（须含 Dockerfile.runtime 的 tag/分支）。
+
+#### 4. 启动容器
 ```bash
 docker compose up -d
 ```
 
-#### 4. 配置反向代理（自备）
-本项目不再部署 Caddy，TLS 终止与 `443` 端口由你的反代接管。以 Caddy 为例，挂载仓库附带的参考模板即可（模板内已按 127.0.0.1 upstream 配置好四端口分流规则）：
+#### 5. 配置反向代理（自备）
+本项目不部署 Caddy，TLS 终止与 `443` 端口由你的反代接管。以 Caddy 为例，使用包内 `Caddyfile.reference`（模板已按 127.0.0.1 upstream 配好四端口分流规则）:
 
 ```bash
 docker run -d --name caddy \
   -p 80:80 -p 443:443 \
-  -v /opt/xray-panel/deploy/master/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v /opt/xray-panel/Caddyfile.reference:/etc/caddy/Caddyfile:ro \
   -v caddy-data:/data -v caddy-config:/config \
   -e SITE_ADDRESS=panel.yourdomain.com \
   -e SUB_SITE_ADDRESS=sub.yourdomain.com \
@@ -142,7 +160,7 @@ docker run -d --name caddy \
 - 使用 Nginx 等其他反代时，按模板注释中的分流规则自行编写即可（`/node/ws` 规则必须先于 `/api/*`）；
 - 反代与面板同机时保持 `BIND_ADDR=127.0.0.1` 即可，反代容器通过 `host.docker.internal` 或宿主机网卡访问四个端口。
 
-#### 5. 获取初始管理员密码
+#### 6. 获取初始管理员密码
 查看控制台日志，复制系统生成的初始高强随机密码：
 ```bash
 docker compose logs master
@@ -200,12 +218,19 @@ docker compose exec master /app/master reset-admin -password "MyNewPass2026#!"
 ```
 > **安全机制**：执行重置后，系统将自动递增 `token_version`，**全网所有已签发的旧会话 Token 将被即刻强制失效**。
 
-### 2. 主控一键平滑升级
+### 2. 主控升级（压缩包挂载形态）
 ```bash
 cd /opt/xray-panel
-docker compose build --pull
-docker compose up -d --remove-orphans
+# 下载新 release 包并校验
+curl -fLO https://github.com/acdc-awa/xpanel/releases/latest/download/xpanel-master-<ver>-linux-amd64.tar.gz
+sha256sum -c xpanel-master-<ver>-linux-amd64.tar.gz.sha256
+# 解压并覆盖二进制与前端产物（config.yaml / data 保留不动）
+tar -xzf xpanel-master-<ver>-linux-amd64.tar.gz -C /opt/xray-panel
+# 重启容器完成升级
+docker compose restart master
 ```
+> 升级只替换 `master` 与 `web/dist`，`configs/config.yaml` 与 `data/`（SQLite + JWT + 备份）持久化不丢失；
+> 回滚 = 用上一版文件覆盖同名路径再 `restart` 即可。
 
 ### 3. 节点 Agent 状态与维护（在节点 VPS 执行）
 ```bash
@@ -283,7 +308,7 @@ bash tests/run_e2e.sh
 | **前端框架** | **Vue 3.5 + Vite + TypeScript** | 组合式 API (Composition API)、Pinia 状态机 |
 | **UI 组件库** | **Element Plus + SCSS** | SaaS 级响应式质感设计、深色/浅色优雅适配 |
 | **拓扑画布** | **@vue-flow/core** | 自定义节点、贝塞尔绕行算法、DAG 分层排版 |
-| **反向代理** | **用户自备（Caddy 2 / Nginx 等）** | 由用户部署的反代卸载 TLS、按域名/路径分流；仓库提供参考模板 `deploy/master/Caddyfile`，四端口默认仅绑 `127.0.0.1` |
+| **反向代理** | **用户自备（Caddy 2 / Nginx 等）** | 由用户部署的反代卸载 TLS、按域名/路径分流；仓库提供参考模板 `Caddyfile.reference`（release 包内 / `deploy/master/Caddyfile`），四端口默认仅绑 `127.0.0.1` |
 | **安全与认证** | **JWT (HMAC-SHA256) + Argon2id + TOTP** | 无状态鉴权、会话版本吊销、多因素认证 |
 
 ---
