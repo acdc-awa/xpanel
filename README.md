@@ -87,16 +87,14 @@
 
 ### 第一步：部署主控（Master）
 
-#### 1. 准备目录与配置文件
-在主控服务器上创建部署目录并获取配置文件：
+#### 1. 克隆仓库并准备配置
+克隆主控仓库（compose 构建需要整个仓库作为上下文）并进入部署目录：
 
 ```bash
-mkdir -p /opt/xray-panel && cd /opt/xray-panel
+git clone https://github.com/acdc-awa/xpanel.git /opt/xray-panel && cd /opt/xray-panel/deploy/master
 
-# 下载部署文件
-curl -fsSL https://raw.githubusercontent.com/zhx/XrayProject/main/deploy/master/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/zhx/XrayProject/main/deploy/master/Caddyfile -o Caddyfile
-curl -fsSL https://raw.githubusercontent.com/zhx/XrayProject/main/deploy/master/.env.example -o .env
+# 准备环境变量模板
+cp .env.example .env
 ```
 
 #### 2. 配置 `.env`
