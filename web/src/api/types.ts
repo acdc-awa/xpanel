@@ -23,6 +23,8 @@ export interface UserInfo {
   expire_at: string | null
   balance_cents?: number
   subscribe_token?: string
+  subscribe_url?: string
+  subscribe_path?: string
   created_at: string
   up_bytes: number
   down_bytes: number

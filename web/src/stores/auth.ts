@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { login as apiLogin, login2fa as apiLogin2fa, register as apiRegister, logout as apiLogout, type RegisterPayload } from '@/api/auth'
 import { getMe } from '@/api/user'
+import { useSiteStore } from '@/stores/site'
 import type { Role, UserInfo } from '@/api/types'
 
 export const useAuthStore = defineStore('auth', {
@@ -21,6 +22,8 @@ export const useAuthStore = defineStore('auth', {
     applyUser(user: UserInfo) {
       this.user = user
       this.isInitialized = true
+      // 订阅端点信息（subscribe_url/path）仅登录态下发，同步给 site store 供订阅页拼链接
+      useSiteStore().applyMeInfo(user)
     },
 
     /** 登录：返回 'ok'（已签发）或 '2fa'（需二次验证）。 */

@@ -1,8 +1,11 @@
 # XrayPanel 反代参考模板（用户自备 Caddy 时使用）
 #
 # 本项目不再随 compose 部署 Caddy——TLS 终止与域名/路径分流由你自己部署的
-# 反向代理承担（Caddy / Nginx 均可）。四个业务端口默认只绑定宿主机 127.0.0.1，
+# 反向代理承担（Caddy / Nginx 均可）。业务端口默认只绑定宿主机 127.0.0.1，
 # 因此反代与面板同机时，upstream 直接写 127.0.0.1:端口 即可。
+#
+# 三端口模型（2026-08-25 拍板）：面板端口（SPA+API 合并）与节点 WS 网关分离，
+# 订阅走独立端口/独立域名。
 #
 # 使用方式（以自备 Caddy 为例）：
 #   1. 将本文件放到你的 Caddy 配置目录（或复制内容并入现有 Caddyfile）；
@@ -13,25 +16,19 @@
 #      （Linux 需加 --add-host=host.docker.internal:host-gateway）或宿主机网卡 IP；
 #   5. 无需订阅独立域名时，删掉（或注释掉）{$SUB_SITE_ADDRESS} 整段。
 #
-# 分流规则（保持此顺序，否则 /node/ws 会被 /api/* 规则吞掉）：
-#   /node/ws（节点 WS 网关）必须先于 /api/* 匹配。
+# 分流规则（保持此顺序，否则 /node/ws 会被默认处理吞掉）：
+#   /node/ws（节点 WS 网关）必须先于默认反代匹配。
 
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
-	# 节点 WebSocket 网关（必须先于 /api/* 匹配，否则被后端 API 规则吞掉）
+	# 节点 WebSocket 网关（必须先匹配，其余全部交给面板端口）
 	@ws path /node/ws
 	handle @ws {
 		reverse_proxy 127.0.0.1:18082
 	}
 
-	# 后端 HTTP API + 存活/就绪探针
-	@api path /api/* /healthz /readyz
-	handle @api {
-		reverse_proxy 127.0.0.1:18081
-	}
-
-	# 前端 SPA（含 history 路由 fallback）
+	# 其余全部 → 面板端口（SPA 前端 + /api/* + /healthz /readyz）
 	handle {
 		reverse_proxy 127.0.0.1:18080
 	}

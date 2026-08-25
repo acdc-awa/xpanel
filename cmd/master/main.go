@@ -139,15 +139,14 @@ func main() {
 	deps.SubServer = subServer
 	hub.CertPusher = deps.PushPendingCerts
 
-	// 四端口拆分（2026-08-24 拍板）：SPA 前端 / 后端 API / 节点 WS 网关 / 订阅 各自独立监听，
+	// 三端口模型（2026-08-25 拍板）：面板（SPA+API 合并）/ 节点 WS 网关 / 订阅 各自独立监听，
 	// 域名与路径分流由反代（Caddy）承担——每个端口只做自己的职责，程序内全部根路径语义。
 	type listener struct {
 		srv  *http.Server
 		role string
 	}
 	listeners := []listener{
-		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.Port), Handler: api.NewSPARouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "SPA 前端"},
-		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.APIPort), Handler: api.NewAPIRouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "后端 API"},
+		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.Port), Handler: api.NewWebRouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "面板(SPA+API)"},
 		{srv: &http.Server{Addr: fmt.Sprintf(":%d", cfg.App.WSPort), Handler: api.NewWSRouter(deps), ReadHeaderTimeout: 10 * time.Second}, role: "节点 WS 网关"},
 	}
 	if cfg.App.SubPort > 0 {

@@ -16,7 +16,6 @@ import {
   Setting,
   Connection,
   Bell,
-  Opportunity,
 } from '@element-plus/icons-vue'
 
 export interface SubMenuItem {
@@ -76,7 +75,6 @@ export const adminMenuGroups: MenuGroup[] = [
     icon: Setting,
     children: [
       { title: '系统配置', path: '/admin/settings', icon: Setting },
-      { title: '设计规范 Demo', path: '/admin/design-demo', icon: Opportunity },
     ],
   },
 ]

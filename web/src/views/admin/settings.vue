@@ -641,6 +641,19 @@ async function save() {
                 </div>
               </div>
               <p v-if="!system.db_ok" class="muted tip">数据库异常：{{ system.db_error }}</p>
+
+              <!-- 客户端 IP 来源说明（与 util.GetRealIP 语义对应） -->
+              <div class="ip-hdr-note">
+                <p class="ip-hdr-title">客户端 IP 识别</p>
+                <p class="muted tip">
+                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
+                  <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
+                  请保持「面板端口仅绑定 127.0.0.1 + 由反向代理（Caddy/Nginx）前置」的部署形态：
+                  反代会覆盖/追加可信的 IP 头，限流与审计才能按真实 IP 生效。
+                  切勿将面板端口直接暴露公网（否则攻击者可伪造 IP 头绕过按 IP 的限流）。
+                </p>
+              </div>
+
               <div class="x-toolbar" style="margin-top: 12px">
                 <el-button :icon="Refresh" @click="loadSystem">刷新状态</el-button>
               </div>
@@ -674,6 +687,19 @@ async function save() {
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .form-item-tip { font-size: 11.5px; color: var(--x-text-3); margin-top: 4px; line-height: 1.5; }
+.ip-hdr-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--x-border);
+  border-radius: 8px;
+  background: var(--x-bg);
+  code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--x-primary);
+  }
+}
+.ip-hdr-title { font-size: 12.5px; font-weight: 600; color: var(--x-text-2); margin-bottom: 4px; }
 
 .upload-row {
   display: flex;

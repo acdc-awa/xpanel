@@ -34,6 +34,28 @@ func toPlanView(p *models.Plan) planView {
 	}
 }
 
+// publicPlanView 公开套餐视图：隐藏 permission_group_id（内部权限组 ID 不下发，防枚举/探测）。
+type publicPlanView struct {
+	ID           uint64    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	PriceCents   int64     `json:"price_cents"`
+	TrafficGB    int64     `json:"traffic_gb"`
+	DurationDays int       `json:"duration_days"`
+	DeviceLimit  int       `json:"device_limit"` // 0=不限
+	Enabled      bool      `json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func toPublicPlanView(p *models.Plan) publicPlanView {
+	return publicPlanView{
+		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
+		DurationDays: p.DurationDays,
+		DeviceLimit: p.DeviceLimit,
+		Enabled: p.Enabled, CreatedAt: p.CreatedAt,
+	}
+}
+
 // AdminPlans GET /api/v1/admin/plans
 func (d *Deps) AdminPlans(c *gin.Context) {
 	var list []models.Plan
@@ -207,15 +229,16 @@ func (d *Deps) AdminDeletePlan(c *gin.Context) {
 }
 
 // PublicPlans GET /api/v1/plans —— 用户端上架套餐列表。
+// PublicPlans GET /api/v1/plans —— 公开上架套餐（未登录可见；隐藏内部 permission_group_id）。
 func (d *Deps) PublicPlans(c *gin.Context) {
 	var list []models.Plan
 	if err := d.DB.Where("enabled = ?", true).Order("price_cents ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	items := make([]planView, 0, len(list))
+	items := make([]publicPlanView, 0, len(list))
 	for i := range list {
-		items = append(items, toPlanView(&list[i]))
+		items = append(items, toPublicPlanView(&list[i]))
 	}
 	util.OK(c, gin.H{"items": items})
 }

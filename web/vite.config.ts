@@ -23,7 +23,8 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     proxy: {
-      // 开发期把 /api 转发到主控后端（避免 CORS）；生产由 Nginx 同域反代
+      // 开发期把 /api 转发到主控后端（避免 CORS）；生产由反代同域反代
+      // 三端口模型：SPA 与 API 合并监听 APP_PORT（默认 18080），故直接指面板端口
       '/api': {
         target: 'http://127.0.0.1:18080',
         changeOrigin: true,

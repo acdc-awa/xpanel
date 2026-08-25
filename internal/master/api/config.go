@@ -8,7 +8,7 @@ import (
 )
 
 // PublicConfig GET /api/v1/config —— 公开配置（人机验证与站点品牌展示前端初始化所需）。
-// 仅下发非敏感项（site key 公开；secret key 永不下发）。
+// 仅下发非敏感项（site key 公开；secret key 永不下发；订阅端点/权限组等内部信息不下发）。
 func (d *Deps) PublicConfig(c *gin.Context) {
 	cfg := services.LoadCaptchaConfig(d.DB)
 	site := d.Site.SiteGroup()
@@ -24,7 +24,5 @@ func (d *Deps) PublicConfig(c *gin.Context) {
 		"tos_url":            site[services.SettingTOSURL],
 		"currency":           site[services.SettingCurrency],
 		"currency_symbol":    site[services.SettingCurrencySymbol],
-		"subscribe_url":      site[services.SettingSubscribeURL],
-		"subscribe_path":     site[services.SettingSubscribePath],
 	})
 }

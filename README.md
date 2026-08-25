@@ -26,7 +26,7 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │           用户自备反向代理 (Caddy/Nginx) —— TLS 终止 + 域名/路径分流            │
 └───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │ 127.0.0.1:18080 / 18081 / 18082 / 6000
+                                    │ 127.0.0.1:18080 / 18082 / 6000
 ┌───────────────────────────────────┴─────────────────────────────────────────┐
 │                           Master 主控控制面 (Docker)                          │
 │                                                                             │
@@ -122,10 +122,10 @@ app:
   # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；不填则用面板域名 + /node/ws
 ```
 
-> 四端口模型：面板由四个独立监听端口组成——**SPA 前端**（`APP_PORT`，默认 18080）、
-> **后端 API**（`APP_API_PORT`，默认 18081）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
+> 三端口模型：面板由三个独立监听端口组成——**面板**（`APP_PORT`，默认 18080，SPA 前端与
+> **后端 API** 合并监听，含 `/healthz` `/readyz` 探针）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
 > 对外路径 `/node/ws`，可用 `APP_WS_PUBLIC_URL` 整体覆盖）、**订阅**（`APP_SUB_PORT`，默认 6000）。
-> 四个端口默认只绑定宿主机 `127.0.0.1`（改 `.env` 里 `BIND_ADDR=0.0.0.0` 可对全网卡开放），
+> 三个端口默认只绑定宿主机 `127.0.0.1`（改 `.env` 里 `BIND_ADDR=0.0.0.0` 可对全网卡开放），
 > 由你自己部署的反代按域名/路径分流（参考模板见 `Caddyfile.reference`）。
 
 #### 3. 准备数据目录与运行时镜像
@@ -144,7 +144,7 @@ docker compose up -d
 ```
 
 #### 5. 配置反向代理（自备）
-本项目不部署 Caddy，TLS 终止与 `443` 端口由你的反代接管。以 Caddy 为例，使用包内 `Caddyfile.reference`（模板已按 127.0.0.1 upstream 配好四端口分流规则）:
+本项目不部署 Caddy，TLS 终止与 `443` 端口由你的反代接管。以 Caddy 为例，使用包内 `Caddyfile.reference`（模板已按 127.0.0.1 upstream 配好三端口分流规则）:
 
 ```bash
 docker run -d --name caddy \
@@ -157,8 +157,13 @@ docker run -d --name caddy \
 ```
 
 - `SITE_ADDRESS` 为面板域名，Caddy 自动申请并续签 HTTPS 证书；`SUB_SITE_ADDRESS` 为订阅独立域名（可选，不用可删掉模板中对应段）；
-- 使用 Nginx 等其他反代时，按模板注释中的分流规则自行编写即可（`/node/ws` 规则必须先于 `/api/*`）；
-- 反代与面板同机时保持 `BIND_ADDR=127.0.0.1` 即可，反代容器通过 `host.docker.internal` 或宿主机网卡访问四个端口。
+- 使用 Nginx 等其他反代时，按模板注释中的分流规则自行编写即可（`/node/ws` 规则必须先于默认反代匹配）；
+- 反代与面板同机时保持 `BIND_ADDR=127.0.0.1` 即可，反代容器通过 `host.docker.internal` 或宿主机网卡访问各端口。
+
+> **安全提醒（IP 头与限流）**：面板按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For` → `RemoteAddr`
+> 的优先级识别客户端 IP，用于登录/订阅限流、审计日志与人机验证。请务必保持
+> **「面板端口仅绑定 127.0.0.1 + 反代前置」**的部署形态——反代会覆盖/追加可信的 IP 头，
+> 限流与审计才能按真实 IP 生效。**切勿将面板端口直接暴露公网**（否则攻击者可伪造 IP 头绕过按 IP 的限流）。
 
 #### 6. 获取初始管理员密码
 查看控制台日志，复制系统生成的初始高强随机密码：
@@ -191,7 +196,7 @@ docker compose logs master
 
 ```bash
 bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/download/install-agent.sh) \
-  --master wss://panel.yourdomain.com/api/v1/node/ws \
+  --master wss://panel.yourdomain.com/node/ws \
   --node-id 1 \
   --secret sec_xxxxxxxxxxxxxxxx
 ```
@@ -308,7 +313,7 @@ bash tests/run_e2e.sh
 | **前端框架** | **Vue 3.5 + Vite + TypeScript** | 组合式 API (Composition API)、Pinia 状态机 |
 | **UI 组件库** | **Element Plus + SCSS** | SaaS 级响应式质感设计、深色/浅色优雅适配 |
 | **拓扑画布** | **@vue-flow/core** | 自定义节点、贝塞尔绕行算法、DAG 分层排版 |
-| **反向代理** | **用户自备（Caddy 2 / Nginx 等）** | 由用户部署的反代卸载 TLS、按域名/路径分流；仓库提供参考模板 `Caddyfile.reference`（release 包内 / `deploy/master/Caddyfile`），四端口默认仅绑 `127.0.0.1` |
+| **反向代理** | **用户自备（Caddy 2 / Nginx 等）** | 由用户部署的反代卸载 TLS、按域名/路径分流；仓库提供参考模板 `Caddyfile.reference`（release 包内 / `deploy/master/Caddyfile`），三端口默认仅绑 `127.0.0.1` |
 | **安全与认证** | **JWT (HMAC-SHA256) + Argon2id + TOTP** | 无状态鉴权、会话版本吊销、多因素认证 |
 
 ---

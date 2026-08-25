@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Lock, Key } from '@element-plus/icons-vue'
+import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { forgotPassword, resetPassword } from '@/api/auth'
 import { errMsg } from '@/api/http'
 import { useSiteStore } from '@/stores/site'
@@ -12,6 +13,7 @@ const router = useRouter()
 const step = ref<'email' | 'reset'>('email')
 const email = ref('')
 const form = reactive({ code: '', password: '', confirm: '' })
+const turnstileToken = ref('')
 const loading = ref(false)
 const submitting = ref(false)
 const hint = ref('')
@@ -27,9 +29,13 @@ async function submitEmail() {
     ElMessage.warning('请输入正确的邮箱')
     return
   }
+  if (site.captchaEnable && !turnstileToken.value) {
+    ElMessage.warning('请先完成人机验证')
+    return
+  }
   loading.value = true
   try {
-    const { data } = await forgotPassword(email.value.trim().toLowerCase())
+    const { data } = await forgotPassword(email.value.trim().toLowerCase(), turnstileToken.value || undefined)
     if (data.code === 0) {
       hint.value = data.data.message
       step.value = 'reset'
@@ -56,9 +62,18 @@ async function submitReset() {
     ElMessage.warning('两次输入的新密码不一致')
     return
   }
+  if (site.captchaEnable && !turnstileToken.value) {
+    ElMessage.warning('请先完成人机验证')
+    return
+  }
   submitting.value = true
   try {
-    const { data } = await resetPassword(email.value.trim().toLowerCase(), form.code.trim(), form.password)
+    const { data } = await resetPassword(
+      email.value.trim().toLowerCase(),
+      form.code.trim(),
+      form.password,
+      turnstileToken.value || undefined,
+    )
     if (data.code === 0) {
       ElMessage.success('密码已重置，请重新登录')
       router.replace('/login')
@@ -90,6 +105,11 @@ async function submitReset() {
         <el-form-item label="注册邮箱">
           <el-input v-model="email" placeholder="you@example.com" :prefix-icon="Message" autofocus />
         </el-form-item>
+        <TurnstileWidget
+          v-if="site.captchaEnable && site.turnstileSiteKey"
+          :site-key="site.turnstileSiteKey"
+          @token="(t) => (turnstileToken = t)"
+        />
         <el-button type="primary" size="large" class="auth-submit" :loading="loading" native-type="submit">
           下一步
         </el-button>
@@ -120,6 +140,11 @@ async function submitReset() {
             @keyup.enter="submitReset"
           />
         </el-form-item>
+        <TurnstileWidget
+          v-if="site.captchaEnable && site.turnstileSiteKey"
+          :site-key="site.turnstileSiteKey"
+          @token="(t) => (turnstileToken = t)"
+        />
         <el-button type="primary" size="large" class="auth-submit" :loading="submitting" native-type="submit">
           重置密码
         </el-button>

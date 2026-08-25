@@ -45,19 +45,20 @@ XrayPanel 主控 release 包（压缩包挂载形态）
 2. 编辑 configs/config.yaml（至少填 public_url；JWT/管理员留空=首次启动自动生成）
 3. chown data 目录给容器内 app 用户（uid 1000）：
      sudo chown -R 1000:1000 data   # 或 sudo chown -R 1000:1000 /opt/xray-panel/data
-4. 构建/获取固定运行时镜像（一次性）：
+4. 构建/获取固定运行时镜像（一次性；Dockerfile.runtime 已包含在本包内）：
      docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest /opt/xray-panel
-   （Dockerfile.runtime 在仓库 deploy/master 或根目录；已构建过可跳过）
+   （已构建过可跳过）
 5. 启动：
      cd /opt/xray-panel && docker compose up -d
 6. 升级：下载新 release 包 → 覆盖 master/master 与 web/dist → docker compose restart master
-7. 反代：四个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 deploy/master/Caddyfile 参考模板）
+7. 反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference 参考模板）
 
 数据目录 data/（SQLite + JWT + 备份）务必定期备份。
 EOF
 cp "$ROOT/deploy/master/docker-compose.yml" "$STAGE/docker-compose.yml"
 cp "$ROOT/deploy/master/.env.example" "$STAGE/.env.example"
 cp "$ROOT/deploy/master/Caddyfile" "$STAGE/Caddyfile.reference"
+cp "$ROOT/Dockerfile.runtime" "$STAGE/Dockerfile.runtime"
 
 echo "==> 打包 $TARBALL"
 ( cd "$OUT" && tar -czf "$TARBALL" -C "$STAGE" . )

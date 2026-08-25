@@ -148,12 +148,18 @@ func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
 
 // ForgotPassword POST /api/v1/auth/forgot —— 忘记密码第一步：提交邮箱。
 // 统一文案防枚举；已绑定 TOTP 的账号可自助重置（第二步 /auth/reset），否则提示联系管理员。
+// 人机验证：防自动化邮箱枚举轰炸（与 login/register 同链路）。
 func (d *Deps) ForgotPassword(c *gin.Context) {
 	var req struct {
-		Email string `json:"email" binding:"required,email"`
+		Email          string `json:"email" binding:"required,email"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误")
+		return
+	}
+	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "forgot"); err != nil {
+		util.BadRequest(c, err.Error())
 		return
 	}
 	_, _ = d.Auth.ForgotPassword(c.Request.Context(), req.Email)
@@ -164,14 +170,20 @@ func (d *Deps) ForgotPassword(c *gin.Context) {
 }
 
 // ResetPassword POST /api/v1/auth/reset —— 忘记密码第二步：TOTP/恢复码 + 新密码。
+// 人机验证：防自动化尝试（即使已持有邮箱+验证码，也要求通过验证）。
 func (d *Deps) ResetPassword(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email" binding:"required,email"`
-		Code     string `json:"code" binding:"required"`
-		Password string `json:"password" binding:"required,min=8,max=72"`
+		Email          string `json:"email" binding:"required,email"`
+		Code           string `json:"code" binding:"required"`
+		Password       string `json:"password" binding:"required,min=8,max=72"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "reset"); err != nil {
+		util.BadRequest(c, err.Error())
 		return
 	}
 	if err := d.OTP.ResetPassword(c.Request.Context(), req.Email, req.Code, req.Password); err != nil {
@@ -233,9 +245,12 @@ func authError(err error) (int, string) {
 		return 409, err.Error()
 	case errors.Is(err, services.ErrInviteInvalid):
 		return 400, err.Error()
-	case errors.Is(err, services.ErrInvalidCreds), errors.Is(err, services.ErrInvalidRefresh):
+	// 凭据错误与账号禁用统一 401 同文案：不暴露「账号存在但被禁用」的可枚举信号
+	case errors.Is(err, services.ErrInvalidCreds), errors.Is(err, services.ErrUserDisabled):
+		return 401, "用户名或密码错误"
+	case errors.Is(err, services.ErrInvalidRefresh):
 		return 401, err.Error()
-	case errors.Is(err, services.ErrUserDisabled), errors.Is(err, services.ErrRegisterClosed):
+	case errors.Is(err, services.ErrRegisterClosed):
 		return 403, err.Error()
 	default:
 		return 500, "服务器内部错误"

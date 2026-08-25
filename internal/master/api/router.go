@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
+
+// reTitle 匹配 index.html 中的静态 <title>（含属性、跨行），供站点标题替换。
+var reTitle = regexp.MustCompile(`(?is)<title[^>]*>.*?</title>`)
 
 // maskSensitivePath 对访问日志中的敏感路径脱敏（订阅 token、节点 secret 等）。
 func maskSensitivePath(p string) string {
@@ -39,14 +43,22 @@ func accessLogFormatter(param gin.LogFormatterParams) string {
 	)
 }
 
-// NewAPIRouter 组装后端 HTTP API 路由（四端口拆分后仅监听 APP_API_PORT）。
-// 不含静态托管与 SPA fallback（归 NewSPARouter），不含订阅（归独立订阅端口）；
-// 节点 WebSocket 网关归 NewWSRouter（APP_WS_PORT）。
-func NewAPIRouter(d *Deps) *gin.Engine {
+// NewWebRouter 组装面板端口路由（三端口模型 2026-08-25 拍板：SPA 静态托管与后端 API 合并监听 APP_PORT）。
+// 命中 /api/v1/* 与探针路径走 API 处理；其余路径托管前端 SPA（history fallback 注入站点设置）。
+// 节点 WebSocket 网关归 NewWSRouter（APP_WS_PORT），订阅归独立订阅端口（APP_SUB_PORT）。
+func NewWebRouter(d *Deps) *gin.Engine {
 	r := gin.New()
 	// ISSUE-12：访问日志对订阅 token 路径脱敏，避免完整 token 进入日志。
 	// P2-2：全局请求体上限 10MB（配置 JSON/拓扑布局/审计均远小于该值）。
 	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery(), middleware.BodyLimit(10<<20))
+
+	registerAPI(r, d)
+	registerSPA(r, d)
+	return r
+}
+
+// registerAPI 注册后端 HTTP API 路由（/healthz /readyz 探针 + /api/v1/*）。
+func registerAPI(r *gin.Engine, d *Deps) {
 
 	// P2-1：/healthz 为进程存活探针；/readyz 额外检查数据库连通性。
 	r.GET("/healthz", func(c *gin.Context) {
@@ -207,33 +219,25 @@ func NewAPIRouter(d *Deps) *gin.Engine {
 		}
 	}
 
-	// 纯 API 面：未知路径一律 404（无 SPA fallback——那是前端端口的事）
-	r.NoRoute(func(c *gin.Context) {
-		util.Fail(c, http.StatusNotFound, "接口不存在")
-	})
-	return r
+	// registerAPI 不设 NoRoute：未匹配路径统一由 registerSPA 的 fallback 处理（守卫拒绝 API/WS 路径）
 }
 
-// NewSPARouter 组装前端 SPA 路由（四端口拆分后仅监听 APP_PORT）。
-// 托管 web/dist 静态资源 + history 路由 fallback（非 API 路径返回 index.html 并注入站点设置）。
-func NewSPARouter(d *Deps) *gin.Engine {
-	r := gin.New()
-	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery())
-
+// registerSPA 注册前端 SPA 静态托管与 history 路由 fallback。
+// 未构建前端（开发由 vite dev server 承担）：明确提示而非白屏。
+func registerSPA(r *gin.Engine, d *Deps) {
 	dist := "web/dist"
 	if _, err := os.Stat(dist); err != nil {
-		// 未构建前端（开发由 vite dev server 承担）：明确提示而非白屏
 		r.NoRoute(func(c *gin.Context) {
 			util.Fail(c, http.StatusNotFound, "前端未构建（开发请用 vite dev server）")
 		})
-		return r
+		return
 	}
 
 	r.Static("/assets", filepath.Join(dist, "assets"))
 	indexHTML, _ := os.ReadFile(filepath.Join(dist, "index.html"))
 	r.NoRoute(func(c *gin.Context) {
 		p := c.Request.URL.Path
-		// 保留前缀白名单：即便 Caddy 分流遗漏，API/WS/探针路径也绝不落到 SPA
+		// 前缀守卫：未匹配的 API/WS/探针路径绝不返回 index.html（防反代误分流落到 SPA fallback）
 		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/node/") ||
 			p == "/healthz" || p == "/readyz" {
 			util.Fail(c, http.StatusNotFound, "接口不存在")
@@ -243,28 +247,54 @@ func NewSPARouter(d *Deps) *gin.Engine {
 			util.Fail(c, http.StatusNotFound, "前端未构建")
 			return
 		}
-		// 站点设置注入（17 号 P0 ②）：app_name → <title>；favicon → <link rel="icon">；
-		// 全量 site 分组 → window.__PANEL_SETTINGS__（前端读取标题/LOGO/注册开关等）。
+		// 站点设置注入（17 号 P0 ②）：app_name 替换静态 <title>（DB 优先，静态兜底）；
+		// favicon → <link rel="icon">；全量 site 分组 → window.__PANEL_SETTINGS__（前端读取标题/LOGO/注册开关等）。
 		site := map[string]string{}
 		if d.Site != nil {
 			site = d.Site.SiteGroup()
 		}
-		head := ""
-		if title := site[services.SettingAppName]; title != "" {
-			head += "<title>" + html.EscapeString(title) + "</title>"
-		}
-		if icon := site[services.SettingFavicon]; icon != "" {
-			head += `<link rel="icon" href="` + html.EscapeString(icon) + `">`
-		}
-		settingsJSON, _ := json.Marshal(site)
-		head += fmt.Sprintf("<script>window.__PANEL_SETTINGS__=%s</script>", settingsJSON)
-		html := strings.Replace(string(indexHTML), "</head>", head+"</head>", 1)
+		html := injectSiteHead(string(indexHTML), site)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 	})
-	return r
 }
 
-// NewWSRouter 组装节点 WebSocket 网关（四端口拆分后仅监听 APP_WS_PORT）。
+// injectSiteHead 向 index.html 注入站点设置：DB 配置的 app_name 替换静态 <title>
+// （避免出现双 title——浏览器只取第一个，静态默认会永远盖过 DB 配置）；
+// 公开白名单站点设置（不含订阅端点/UA 规则等内部信息）与 favicon 追加到 </head> 前。
+func injectSiteHead(indexHTML string, site map[string]string) string {
+	doc := indexHTML
+	if title := site[services.SettingAppName]; title != "" {
+		newTitle := "<title>" + html.EscapeString(title) + "</title>"
+		if reTitle.MatchString(doc) {
+			doc = reTitle.ReplaceAllString(doc, newTitle)
+		} else {
+			doc = strings.Replace(doc, "</head>", newTitle+"</head>", 1)
+		}
+	}
+	head := ""
+	if icon := site[services.SettingFavicon]; icon != "" {
+		head += `<link rel="icon" href="` + html.EscapeString(icon) + `">`
+	}
+	settingsJSON, _ := json.Marshal(publicSiteSettings(site))
+	head += fmt.Sprintf("<script>window.__PANEL_SETTINGS__=%s</script>", settingsJSON)
+	return strings.Replace(doc, "</head>", head+"</head>", 1)
+}
+
+// publicSiteSettings 公开站点设置白名单：仅品牌/展示/注册开关/条款/货币——订阅端点、
+// UA 规则与拒绝码等内部信息不下发（与 PublicConfig 口径一致，防未登录探测订阅入口）。
+func publicSiteSettings(site map[string]string) map[string]string {
+	out := make(map[string]string, 8)
+	for _, k := range []string{
+		services.SettingAppName, services.SettingAppDesc, services.SettingLogo,
+		services.SettingFavicon, services.SettingTOSURL, services.SettingStopRegister,
+		services.SettingCurrency, services.SettingCurrencySymbol,
+	} {
+		out[k] = site[k]
+	}
+	return out
+}
+
+// NewWSRouter 组装节点 WebSocket 网关（三端口模型下仅监听 APP_WS_PORT）。
 // 端口专用：任意路径都交给 WS 网关——对外路径（默认 /node/ws，或 APP_WS_PUBLIC_URL
 // 指定的任意路径/域名）由反代裁决后原样转发，本端口无需感知具体路径。
 func NewWSRouter(d *Deps) *gin.Engine {

@@ -14,8 +14,9 @@ export const useSiteStore = defineStore('site', {
     tosUrl: '',
     currency: 'CNY',
     currencySymbol: '¥',
-    subscribeUrl: window.__PANEL_SETTINGS__?.subscribe_url || '',
-    subscribePath: window.__PANEL_SETTINGS__?.subscribe_path || '',
+    // 订阅端点属登录态信息：公开面（window.__PANEL_SETTINGS__）不下发，登录后由 /user/me 填充
+    subscribeUrl: '',
+    subscribePath: '',
     isLoaded: false,
   }),
 
@@ -33,6 +34,12 @@ export const useSiteStore = defineStore('site', {
       }
     },
 
+    /** 登录态填充订阅端点信息（来源 /user/me；公开面不携带该信息）。 */
+    applyMeInfo(user: { subscribe_url?: string; subscribe_path?: string }) {
+      if (user.subscribe_url !== undefined) this.subscribeUrl = user.subscribe_url || ''
+      if (user.subscribe_path !== undefined) this.subscribePath = user.subscribe_path || ''
+    },
+
     applyConfig(cfg: Partial<PublicConfig>) {
       if (cfg.app_name !== undefined) this.appName = cfg.app_name || 'XrayPanel'
       if (cfg.app_description !== undefined) this.appDescription = cfg.app_description || '主控 · 节点 · 用户 一体化代理分发系统'
@@ -45,8 +52,6 @@ export const useSiteStore = defineStore('site', {
       if (cfg.tos_url !== undefined) this.tosUrl = cfg.tos_url || ''
       if (cfg.currency !== undefined) this.currency = cfg.currency || 'CNY'
       if (cfg.currency_symbol !== undefined) this.currencySymbol = cfg.currency_symbol || '¥'
-      if (cfg.subscribe_url !== undefined) this.subscribeUrl = cfg.subscribe_url || ''
-      if (cfg.subscribe_path !== undefined) this.subscribePath = cfg.subscribe_path || ''
 
       // 同步更新网页 Favicon
       if (this.favicon) {

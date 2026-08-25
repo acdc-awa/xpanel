@@ -11,23 +11,21 @@
 #
 # 注意：
 #   - data 目录需 chown 给 uid 1000（容器内 app 用户）才能写入，见 deploy/master/README 或安装脚本；
-#   - 四个端口默认绑 127.0.0.1，由用户自备反代访问；改 BIND_ADDR=0.0.0.0 可对全网卡开放（自行收紧防火墙）。
+#   - 三个端口默认绑 127.0.0.1，由用户自备反代访问；改 BIND_ADDR=0.0.0.0 可对全网卡开放（自行收紧防火墙）。
 
 services:
   master:
     image: xpanel-master-runtime:latest
     restart: unless-stopped
     ports:
-      # 四端口绑定宿主机；默认仅回环 127.0.0.1，由用户自备的反代（Caddy/Nginx 等）访问。
+      # 三端口绑定宿主机；默认仅回环 127.0.0.1，由用户自备的反代（Caddy/Nginx 等）访问。
       # 改 BIND_ADDR=0.0.0.0 可对全网卡开放（反代与面板不在同一台机时用，注意自行收紧防火墙）。
-      - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-18080}:18080"          # SPA 前端
-      - "${BIND_ADDR:-127.0.0.1}:${APP_API_PORT:-18081}:18081"      # 后端 HTTP API + 探针
+      - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-18080}:18080"          # 面板：SPA 前端 + 后端 HTTP API + 探针
       - "${BIND_ADDR:-127.0.0.1}:${APP_WS_PORT:-18082}:18082"       # 节点 WebSocket 网关
       - "${BIND_ADDR:-127.0.0.1}:${APP_SUB_PORT:-6000}:6000"        # 订阅独立端口（0=禁用订阅服务；设为 0 时请删除本行）
     environment:
       APP_ENV: ${APP_ENV:-prod}
-      APP_PORT: ${APP_PORT:-18080}          # SPA 前端
-      APP_API_PORT: ${APP_API_PORT:-18081}  # 后端 HTTP API + 探针
+      APP_PORT: ${APP_PORT:-18080}          # 面板：SPA 前端 + 后端 HTTP API + 探针
       APP_WS_PORT: ${APP_WS_PORT:-18082}    # 节点 WebSocket 网关
       APP_SUB_PORT: ${APP_SUB_PORT:-6000}   # 订阅独立端口
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}   # 面板公网地址（如 https://panel.example.com）；空=按请求 Host
@@ -47,8 +45,8 @@ services:
       - ./configs/config.yaml:/app/configs/config.yaml:ro
       - ./data:/app/data
     healthcheck:
-      # 四端口拆分：存活/就绪探针挂在后端 API 端口（跟随 APP_API_PORT）
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${APP_API_PORT:-18081}/readyz"]
+      # 存活/就绪探针挂在面板端口（跟随 APP_PORT）
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${APP_PORT:-18080}/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3

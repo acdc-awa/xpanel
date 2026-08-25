@@ -2,8 +2,7 @@
 app:
   name: xray-panel
   env: dev            # dev | prod（prod 关闭 gin debug 日志）
-  port: 18080         # SPA 前端端口（APP_PORT）
-  api_port: 18081     # 后端 HTTP API 端口，含 /healthz /readyz（APP_API_PORT）
+  port: 18080         # 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz；APP_PORT）
   ws_port: 18082      # 节点 WebSocket 网关端口（APP_WS_PORT）
   sub_port: 6000      # 订阅独立端口（APP_SUB_PORT；0=禁用订阅服务）
   # public_url: https://panel.example.com   # 面板公网地址；设置后节点「一键安装命令」用 wss://，留空则按请求 Host + ws://

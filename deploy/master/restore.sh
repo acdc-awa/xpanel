@@ -57,10 +57,10 @@ if ! docker compose exec -T master sh -c 'test -w /app/data/panel.db'; then
   exit 1
 fi
 
-echo "==> 验证服务健康（healthz 为第二层）"
+echo "==> 验证服务健康（healthz 为第二层；端口跟随 APP_PORT）"
 OK=""
 for i in 1 2 3 4 5; do
-  if docker compose exec -T master sh -c 'wget -qO- http://127.0.0.1:18081/healthz' 2>/dev/null | grep -q '"ok"'; then
+  if docker compose exec -T master sh -c 'wget -qO- http://127.0.0.1:${APP_PORT:-18080}/healthz' 2>/dev/null | grep -q '"ok"'; then
     OK="1"; break
   fi
   sleep 2

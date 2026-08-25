@@ -21,12 +21,12 @@ export function login2fa(code: string) {
   return http.post<ApiResp<LoginResult>>('/auth/2fa/verify', { code })
 }
 
-export function forgotPassword(email: string) {
-  return http.post<ApiResp<{ message: string }>>('/auth/forgot', { email })
+export function forgotPassword(email: string, turnstile_token?: string) {
+  return http.post<ApiResp<{ message: string }>>('/auth/forgot', { email, turnstile_token })
 }
 
-export function resetPassword(email: string, code: string, password: string) {
-  return http.post<ApiResp<{ ok: boolean; message: string }>>('/auth/reset', { email, code, password })
+export function resetPassword(email: string, code: string, password: string, turnstile_token?: string) {
+  return http.post<ApiResp<{ ok: boolean; message: string }>>('/auth/reset', { email, code, password, turnstile_token })
 }
 
 export function logout() {

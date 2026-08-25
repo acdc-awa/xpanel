@@ -96,12 +96,6 @@ export const adminRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/settings.vue'),
         meta: { title: '设置' },
       },
-      {
-        path: 'design-demo',
-        name: 'admin.design-demo',
-        component: () => import('@/views/admin/design_demo.vue'),
-        meta: { title: '设计系统 Demo' },
-      },
     ],
   },
 ]

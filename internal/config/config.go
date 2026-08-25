@@ -31,8 +31,7 @@ type Backup struct {
 type App struct {
 	Name        string `yaml:"name"`
 	Env         string `yaml:"env"`
-	Port        int    `yaml:"port"`        // SPA 前端端口
-	APIPort     int    `yaml:"api_port"`     // 后端 HTTP API 端口（含 /healthz /readyz 探针）
+	Port        int    `yaml:"port"`        // 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz 探针）
 	WSPort      int    `yaml:"ws_port"`      // 节点 WebSocket 网关端口
 	SubPort     int    `yaml:"sub_port"`     // 订阅独立端口（0=禁用订阅服务）
 	PublicURL   string `yaml:"public_url"`   // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
@@ -64,7 +63,7 @@ type Admin struct {
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
 func Default() *Config {
 	return &Config{
-		App:    App{Name: "xray-panel", Env: "dev", Port: 18080, APIPort: 18081, WSPort: 18082, SubPort: 6000},
+		App:    App{Name: "xray-panel", Env: "dev", Port: 18080, WSPort: 18082, SubPort: 6000},
 		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
 		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
 		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},
@@ -110,7 +109,6 @@ func (c *Config) applyEnv() {
 		dst  *int
 	}{
 		{"APP_PORT", &c.App.Port},
-		{"APP_API_PORT", &c.App.APIPort},
 		{"APP_WS_PORT", &c.App.WSPort},
 		{"APP_SUB_PORT", &c.App.SubPort},
 	} {

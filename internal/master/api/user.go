@@ -24,6 +24,7 @@ func (d *Deps) Me(c *gin.Context) {
 
 // userView 构造用户资料视图（登录/注册响应与 /user/me 同源，避免首屏数据失真）。
 // ISSUE-16：补齐余额/流量/订阅 token/设备限制/权限组字段。
+// 订阅对外根地址/入口路径仅在登录态下发（前端拼接订阅链接用；公开面不暴露订阅端点）。
 func (d *Deps) userView(user *models.User) gin.H {
 	totalBytes := int64(0)
 	planName := ""
@@ -41,6 +42,11 @@ func (d *Deps) userView(user *models.User) gin.H {
 	effectiveGroupID := services.UserEffectiveGroupID(d.DB, user)
 	effectiveLimit, isCustomLimit := services.UserEffectiveDeviceLimit(d.DB, user)
 
+	site := map[string]string{}
+	if d.Site != nil {
+		site = d.Site.SiteGroup()
+	}
+
 	return gin.H{
 		"id":                     user.ID,
 		"username":               user.Username,
@@ -52,6 +58,8 @@ func (d *Deps) userView(user *models.User) gin.H {
 		"expire_at":              user.ExpireAt,
 		"balance_cents":          user.BalanceCents,
 		"subscribe_token":        user.SubscribeToken,
+		"subscribe_url":          site[services.SettingSubscribeURL],
+		"subscribe_path":         site[services.SettingSubscribePath],
 		"created_at":             user.CreatedAt,
 		"up_bytes":               up,
 		"down_bytes":             down,

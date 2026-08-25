@@ -28,9 +28,8 @@ COPY --from=web /web/dist /app/web/dist
 COPY configs/config.example.yaml /app/configs/config.yaml
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
-EXPOSE 18080 18081 18082 6000
+EXPOSE 18080 18082 6000
 ENV APP_PORT=18080
-ENV APP_API_PORT=18081
 ENV APP_WS_PORT=18082
 ENV APP_SUB_PORT=6000
 ENV APP_ENV=prod
