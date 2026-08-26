@@ -41,17 +41,32 @@ cp "$ROOT/configs/config.example.yaml" "$STAGE/configs/config.yaml"
 cat > "$STAGE/README.txt" <<'EOF'
 XrayPanel 主控 release 包（压缩包挂载形态）
 ===========================================
-1. 解压本包到宿主目录，如 /opt/xray-panel
-2. 编辑 configs/config.yaml（至少填 public_url；JWT/管理员留空=首次启动自动生成）
-3. chown data 目录给容器内 app 用户（uid 1000）：
-     sudo chown -R 1000:1000 data   # 或 sudo chown -R 1000:1000 /opt/xray-panel/data
-4. 构建/获取固定运行时镜像（一次性；Dockerfile.runtime 已包含在本包内）：
-     docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest /opt/xray-panel
-   （已构建过可跳过）
-5. 启动：
-     cd /opt/xray-panel && docker compose up -d
-6. 升级：下载新 release 包 → 覆盖 master/master 与 web/dist → docker compose restart master
-7. 反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference 参考模板）
+一、一键部署（推荐）：运行包内 install.sh，自动下载并解压本包、
+生成 configs/config.yaml 与 .env、创建 data 目录
+    1. 上传本包到你打算部署的目录（或任选目录后加 --dir 指定）：
+         cd /opt/xray-panel
+         bash install.sh            # 或 bash install.sh --dir /opt/xray-panel
+    2. 编辑 configs/config.yaml（至少填 public_url；JWT/管理员留空=首次启动自动生成）
+    3. 编辑 .env（端口/公网地址/备份等；有默认值可先不动）
+    4. data 目录属主（本机已自动建 ./data，但 uid 1000 属主需 root 执行）：
+         sudo chown -R 1000:1000 data
+    5. 构建固定运行时镜像（一次性；Dockerfile.runtime 已在本包内）：
+         docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
+       （已构建过可跳过）
+    6. 启动：
+         docker compose up -d
+    7. 查看初始管理员密码：
+         docker compose logs master
+
+二、手动安装（等价）
+    1. 解压本包到宿主目录，如 /opt/xray-panel
+    2. 编辑 configs/config.yaml 与 .env
+    3. sudo chown -R 1000:1000 data
+    4. docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
+    5. cd /opt/xray-panel && docker compose up -d
+
+三、升级：重新运行 install.sh（或覆盖 master/ 与 web/dist）→ docker compose restart master
+四、反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference）
 
 数据目录 data/（SQLite + JWT + 备份）务必定期备份。
 EOF
@@ -59,6 +74,7 @@ cp "$ROOT/deploy/master/docker-compose.yml" "$STAGE/docker-compose.yml"
 cp "$ROOT/deploy/master/.env.example" "$STAGE/.env.example"
 cp "$ROOT/deploy/master/Caddyfile" "$STAGE/Caddyfile.reference"
 cp "$ROOT/Dockerfile.runtime" "$STAGE/Dockerfile.runtime"
+cp "$ROOT/deploy/master/install.sh" "$STAGE/install.sh"
 
 echo "==> 打包 $TARBALL"
 ( cd "$OUT" && tar -czf "$TARBALL" -C "$STAGE" . )

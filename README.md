@@ -91,28 +91,39 @@
 
 ```
 /opt/xray-panel/
+├── install.sh               # 一键部署/升级脚本（自动下载+校验+解压+生成配置）
 ├── master                  # 主控二进制（挂载进容器，升级时替换）
 ├── web/dist/               # 前端产物（挂载进容器，升级时替换）
 ├── configs/config.yaml     # 配置文件（挂载进容器，编辑后重启生效）
 ├── data/                   # 数据目录（SQLite + JWT + 备份，持久化）
 ├── docker-compose.yml
+├── .env                    # 环境变量（compose 部署下优先级最高）
 ├── .env.example
+├── Dockerfile.runtime      # 固定运行时镜像（仅运行时依赖，不含业务代码）
 └── Caddyfile.reference     # 自备反代参考模板
 ```
 
 ### 第一步：部署主控（Master）
 
-#### 1. 下载并解压 release 包
-从 [GitHub Releases](https://github.com/acdc-awa/xpanel/releases) 下载 `xpanel-master-<version>-linux-amd64.tar.gz`（含 `.sha256` 校验）：
+#### 1. 一键部署脚本（推荐）
+
+在部署目录直接运行 [deploy/master/install.sh](deploy/master/install.sh)（或包内 release 自带的），自动下载二进制/前端/编排模板、生成配置文件、创建数据目录：
 
 ```bash
-cd /opt && mkdir -p xray-panel && cd xray-panel
-# 下载后校验
-sha256sum -c xpanel-master-*.tar.gz.sha256
-tar -xzf xpanel-master-*.tar.gz
+# 方式 A：在线一键（默认取最新 release，解压到当前目录）
+curl -fsSL https://raw.githubusercontent.com/acdc-awa/xpanel/master/deploy/master/install.sh | bash
+
+# 方式 B：下载 release 包到服务器后，用包内脚本
+bash install.sh                 # 解压到当前目录
+bash install.sh --dir /opt/xray-panel   # 或指定目录
 ```
 
-#### 2. 配置 `config.yaml`
+脚本会自动：架构探测（amd64/arm64）→ 下载对应 release 包 → **sha256 强制校验** → 解压
+`master` / `web/dist` / `docker-compose.yml` / `.env` / `Caddyfile.reference` / `Dockerfile.runtime`
+到当前目录，首次安装生成 `configs/config.yaml` 与 `.env`（从 example 复制），并创建 `./data` 数据目录。
+重复运行默认只更新二进制与前端、**保留已有配置与数据**（升级语义；`--fresh` 可强制覆盖）。
+
+#### 2. 配置 `config.yaml` 与 `.env`
 编辑 `configs/config.yaml`，填入你的面板公网地址（JWT 密钥与管理员账密留空=首次启动自动生成，见文件内注释）：
 
 ```yaml
@@ -121,6 +132,10 @@ app:
   public_url: https://panel.yourdomain.com
   # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；不填则用面板域名 + /node/ws
 ```
+
+> **配置双源口径**：compose 部署下 `.env`（环境变量）**优先**，覆盖 `config.yaml` 中同名项
+> （端口 `APP_*`、公网地址、DB、备份等）；`config.yaml` 只保留 env 管不到的项（`app.name`、
+> `jwt.ttl`、`totp.encrypt_key`）。JWT 与管理密码两边都留空=首次启动自动生成。
 
 > 三端口模型：面板由三个独立监听端口组成——**面板**（`APP_PORT`，默认 18080，SPA 前端与
 > **后端 API** 合并监听，含 `/healthz` `/readyz` 探针）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
