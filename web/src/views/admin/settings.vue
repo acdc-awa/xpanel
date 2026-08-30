@@ -275,7 +275,7 @@ const updateInfo = ref<UpdateCheckResult | null>(null)
 const updateChecking = ref(false)
 const updateApplying = ref(false)
 
-async function checkUpdate() {
+async function onCheckUpdate() {
   updateChecking.value = true
   try {
     const { data } = await checkUpdate()
@@ -700,7 +700,7 @@ async function save() {
                   <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small" style="margin-left: 8px">更新已禁用</el-tag>
                 </div>
                 <div class="x-toolbar" style="margin-top: 10px">
-                  <el-button :icon="Refresh" :loading="updateChecking" @click="checkUpdate">检查更新</el-button>
+                  <el-button :icon="Refresh" :loading="updateChecking" @click="onCheckUpdate">检查更新</el-button>
                   <el-button
                     type="primary"
                     :icon="Download"
