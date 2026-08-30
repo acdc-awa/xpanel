@@ -28,7 +28,7 @@ func TestInstallCmdPublicURLFallback(t *testing.T) {
 	}
 }
 
-// TestInstallCmdWSPublicURLOverride APP_WS_PUBLIC_URL 提供时整体覆盖 --master
+// TestInstallCmdWSPublicURLOverride config.yaml 的 app.ws_public_url 提供时整体覆盖 --master
 // （独立 WS 域名/任意路径场景，与面板 public_url 无关）。
 func TestInstallCmdWSPublicURLOverride(t *testing.T) {
 	cmd := installCmd("https://panel.example.com", "wss://ws.example.com/node/ws", "", "2", "s2")

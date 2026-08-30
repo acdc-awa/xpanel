@@ -296,8 +296,8 @@ func publicSiteSettings(site map[string]string) map[string]string {
 	return out
 }
 
-// NewWSRouter 组装节点 WebSocket 网关（三端口模型下仅监听 APP_WS_PORT）。
-// 端口专用：任意路径都交给 WS 网关——对外路径（默认 /node/ws，或 APP_WS_PUBLIC_URL
+// NewWSRouter 组装节点 WebSocket 网关（三端口模型下仅监听 app.ws_port）。
+// 端口专用：任意路径都交给 WS 网关——对外路径（默认 /node/ws，或 config.yaml 的 app.ws_public_url
 // 指定的任意路径/域名）由反代裁决后原样转发，本端口无需感知具体路径。
 func NewWSRouter(d *Deps) *gin.Engine {
 	r := gin.New()

@@ -1,10 +1,10 @@
-// Package config 负责主控配置加载（YAML + 环境变量覆盖）。
+// Package config 负责主控配置加载。configs/config.yaml 是唯一配置入口
+// （2026-08-30 拍板：退役环境变量覆盖，杜绝双源漂移；编排参数见 deploy 侧 .env）。
 package config
 
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -79,7 +79,7 @@ func Default() *Config {
 	}
 }
 
-// Load 读取 YAML 文件并应用环境变量覆盖。
+// Load 读取 YAML 配置文件（唯一入口，无环境变量覆盖）。
 func Load(path string) (*Config, error) {
 	cfg := Default()
 
@@ -94,67 +94,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
 
-	cfg.applyEnv()
-
 	// JWT secret 允许为空：首次启动由 ensureJWTSecret 自动生成强随机密钥并持久化到 DB
-	// （模板不再提供任何默认值，杜绝默认密钥；显式指定请用 env JWT_SECRET）。
+	// （模板不再提供任何默认值，杜绝默认密钥；显式指定请写进本文件 jwt.secret 段）。
 
 	return cfg, nil
 }
 
-// applyEnv 用环境变量覆盖关键项（便于容器/部署场景）。
-func (c *Config) applyEnv() {
-	if v := os.Getenv("APP_ENV"); v != "" {
-		c.App.Env = v
-	}
-	if v := os.Getenv("APP_PUBLIC_URL"); v != "" {
-		c.App.PublicURL = v
-	}
-	if v := os.Getenv("APP_WS_PUBLIC_URL"); v != "" {
-		c.App.WSPublicURL = v
-	}
-	for _, e := range []struct {
-		env string
-		dst *int
-	}{
-		{"APP_PORT", &c.App.Port},
-		{"APP_WS_PORT", &c.App.WSPort},
-		{"APP_SUB_PORT", &c.App.SubPort},
-	} {
-		if v := os.Getenv(e.env); v != "" {
-			if p, err := strconv.Atoi(v); err == nil {
-				*e.dst = p
-			}
-		}
-	}
-	if v := os.Getenv("DB_DRIVER"); v != "" {
-		c.DB.Driver = v
-	}
-	if v := os.Getenv("DB_DSN"); v != "" {
-		c.DB.DSN = v
-	}
-	if v := os.Getenv("JWT_SECRET"); v != "" {
-		c.JWT.Secret = v
-	}
-	if v := os.Getenv("ADMIN_USERNAME"); v != "" {
-		c.Admin.Username = v
-	}
-	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
-		c.Admin.Password = v
-	}
-	if v := os.Getenv("BACKUP_ENABLED"); v != "" {
-		c.Backup.Enabled = v == "1" || v == "true"
-	}
-	if v := os.Getenv("BACKUP_SCHEDULE"); v != "" {
-		c.Backup.Schedule = v
-	}
-	if v := os.Getenv("BACKUP_KEEP"); v != "" {
-		var k int
-		if _, err := fmt.Sscanf(v, "%d", &k); err == nil {
-			c.Backup.Keep = k
-		}
-	}
-	if v := os.Getenv("BACKUP_DIR"); v != "" {
-		c.Backup.Dir = v
-	}
-}
+// applyEnv 已退役（2026-08-30 拍板）：config.yaml 唯一入口，杜绝 env/config 双源漂移。
+// 历史版本用环境变量覆盖的字段（APP_* / DB_* / JWT_SECRET / ADMIN_* / BACKUP_*）一律改在该文件配置。

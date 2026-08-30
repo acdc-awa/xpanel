@@ -271,7 +271,7 @@ func ensureJWTSecret(database *gorm.DB, cfg *config.Config) string {
 
 // ensureAdmin 首次启动时创建初始管理员。账密不写进 configs 模板：
 // 未指定（或占位弱值）时用户名回退 admin@panel.local、密码自动生成 16 位强随机串并在控制台高亮输出；
-// 显式指定请用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（compose/.env）。
+// 显式指定请写入 config.yaml 的 admin.username / admin.password（唯一配置入口，2026-08-30 起环境变量退役）。
 func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 	var cnt int64
 	if err := database.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&cnt).Error; err != nil {

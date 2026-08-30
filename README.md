@@ -94,10 +94,10 @@
 ├── install.sh               # 一键部署/升级脚本（自动下载+校验+解压+生成配置）
 ├── master                  # 主控二进制（挂载进容器，升级时替换）
 ├── web/dist/               # 前端产物（挂载进容器，升级时替换）
-├── configs/config.yaml     # 配置文件（挂载进容器，编辑后重启生效）
+├── configs/config.yaml     # 配置文件（唯一配置入口，挂载进容器，编辑后重启生效）
 ├── data/                   # 数据目录（SQLite + JWT + 备份，持久化）
 ├── docker-compose.yml
-├── .env                    # 环境变量（compose 部署下优先级最高）
+├── .env                    # 仅 compose 编排参数（宿主端口映射/BIND_ADDR，不进进程）
 ├── .env.example
 ├── Dockerfile.runtime      # 固定运行时镜像（仅运行时依赖，不含业务代码）
 └── Caddyfile.reference     # 自备反代参考模板
@@ -123,8 +123,8 @@ bash install.sh --dir /opt/xray-panel   # 或指定目录
 到当前目录，首次安装生成 `configs/config.yaml` 与 `.env`（从 example 复制），并创建 `./data` 数据目录。
 重复运行默认只更新二进制与前端、**保留已有配置与数据**（升级语义；`--fresh` 可强制覆盖）。
 
-#### 2. 配置 `config.yaml` 与 `.env`
-编辑 `configs/config.yaml`，填入你的面板公网地址（JWT 密钥与管理员账密留空=首次启动自动生成，见文件内注释）：
+#### 2. 配置 `configs/config.yaml`（唯一入口）
+编辑 `configs/config.yaml`（应用配置**唯一入口**，环境变量不再覆盖任何项），填入你的面板公网地址（JWT 密钥与管理员账密留空=首次启动自动生成，见文件内注释）：
 
 ```yaml
 app:
@@ -133,13 +133,15 @@ app:
   # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；不填则用面板域名 + /node/ws
 ```
 
-> **配置双源口径**：compose 部署下 `.env`（环境变量）**优先**，覆盖 `config.yaml` 中同名项
-> （端口 `APP_*`、公网地址、DB、备份等）；`config.yaml` 只保留 env 管不到的项（`app.name`、
-> `jwt.ttl`、`totp.encrypt_key`）。JWT 与管理密码两边都留空=首次启动自动生成。
+> **配置唯一入口（2026-08-30 拍板）**：`configs/config.yaml` 是应用配置唯一来源——端口、
+> 公网地址、DB、JWT、TOTP、备份、更新全部在此配置；`.env` 只承载 compose **编排参数**
+> （`BIND_ADDR` 与宿主端口映射），不进进程，不再是配置来源。
+> JWT 与管理密码留空=首次启动自动生成。「升级旧版本（曾用 .env 配过 JWT_SECRET）」时
+> install.sh 会自动把该值固化进 config.yaml（迁移），TOTP 2FA 不受影响。
 
-> 三端口模型：面板由三个独立监听端口组成——**面板**（`APP_PORT`，默认 18080，SPA 前端与
-> **后端 API** 合并监听，含 `/healthz` `/readyz` 探针）、**节点 WS 网关**（`APP_WS_PORT`，默认 18082，
-> 对外路径 `/node/ws`，可用 `APP_WS_PUBLIC_URL` 整体覆盖）、**订阅**（`APP_SUB_PORT`，默认 6000）。
+> 三端口模型：面板由三个独立监听端口组成——**面板**（`app.port`，默认 18080，SPA 前端与
+> **后端 API** 合并监听，含 `/healthz` `/readyz` 探针）、**节点 WS 网关**（`app.ws_port`，默认 18082，
+> 对外路径 `/node/ws`，可用 `app.ws_public_url` 整体覆盖）、**订阅**（`app.sub_port`，默认 6000）。
 > 三个端口默认只绑定宿主机 `127.0.0.1`（改 `.env` 里 `BIND_ADDR=0.0.0.0` 可对全网卡开放），
 > 由你自己部署的反代按域名/路径分流（参考模板见 `Caddyfile.reference`）。
 

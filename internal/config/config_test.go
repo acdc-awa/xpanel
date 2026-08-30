@@ -56,30 +56,3 @@ backup:
 		t.Errorf("dir = %q", cfg.Backup.Dir)
 	}
 }
-
-func TestBackupEnvOverride(t *testing.T) {
-	t.Setenv("BACKUP_ENABLED", "false")
-	t.Setenv("BACKUP_KEEP", "3")
-	t.Setenv("BACKUP_DIR", "/env/backups")
-	cfg := Default()
-	cfg.applyEnv()
-	if cfg.Backup.Enabled {
-		t.Error("BACKUP_ENABLED=false 应覆盖为 false")
-	}
-	if cfg.Backup.Keep != 3 {
-		t.Errorf("keep = %d, want 3", cfg.Backup.Keep)
-	}
-	if cfg.Backup.Dir != "/env/backups" {
-		t.Errorf("dir = %q", cfg.Backup.Dir)
-	}
-}
-
-
-func TestAppEnvOverride(t *testing.T) {
-	t.Setenv("APP_ENV", "prod")
-	cfg := Default()
-	cfg.applyEnv()
-	if cfg.App.Env != "prod" {
-		t.Errorf("APP_ENV 应覆盖为 prod, got %q", cfg.App.Env)
-	}
-}

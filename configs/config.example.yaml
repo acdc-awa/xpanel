@@ -1,10 +1,16 @@
 # Xray 面板主控配置示例（复制为 config.yaml 并按环境修改）
+#
+# ⚠️ 唯一入口（2026-08-30 拍板）：本文件（部署时复制为 configs/config.yaml）是应用配置的唯一
+#    来源，环境变量不再覆盖任何项；deploy 侧 .env 只承载 compose 编排参数（宿主端口映射/BIND_ADDR）。
+#    容器形态：compose 将宿主 configs/ 只读挂载进 /app/configs，entrypoint 固定
+#    -config /app/configs/config.yaml；镜像 WORKDIR=/app，相对路径（./data/...）在容器内即
+#    挂载的宿主 data 目录，与本地开发（cwd=仓库根）行为一致。
 app:
   name: xray-panel
   env: dev            # dev | prod（prod 关闭 gin debug 日志）
-  port: 18080         # 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz；APP_PORT）
-  ws_port: 18082      # 节点 WebSocket 网关端口（APP_WS_PORT）
-  sub_port: 6000      # 订阅独立端口（APP_SUB_PORT；0=禁用订阅服务）
+  port: 18080         # 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz）
+  ws_port: 18082      # 节点 WebSocket 网关端口
+  sub_port: 6000      # 订阅独立端口（0=禁用订阅服务）
   # public_url: https://panel.example.com   # 面板公网地址；设置后节点「一键安装命令」用 wss://，留空则按请求 Host + ws://
   # ws_public_url: wss://ws.example.com/node/ws   # 节点 WS 对外地址（可独立域名/任意路径）；留空=面板域名 + /node/ws
 
@@ -17,7 +23,7 @@ db:
 
 jwt:
   # 密钥不预设默认值：留空=首次启动自动生成 64 位强随机密钥并持久化到 DB（settings.jwt_secret）；
-  # 显式指定请用环境变量 JWT_SECRET（生产建议留空自动生成）
+  # 显式指定请写入本文件 jwt.secret（生产建议留空自动生成）
   access_ttl: 2h      # 短期 access token 有效期
   refresh_ttl: 168h   # 长期 refresh token 有效期（7 天）
 
@@ -29,14 +35,14 @@ totp:
 
 admin:
   # 账密不预设默认值（防默认密码攻击）：留空=首次启动自动生成 16 位强随机密码（控制台高亮显示）
-  # 显式指定请用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（compose/.env）
+  # 显式指定请写入本文件 admin.username / admin.password
 
 
 backup:
-  enabled: true            # 定时备份开关（BACKUP_ENABLED）
-  schedule: "0 3 * * *"    # cron 表达式：每天 03:00（BACKUP_SCHEDULE）
-  keep: 14                 # 保留最近 N 份备份（BACKUP_KEEP）
-  dir: ./data/backups      # 备份目录（compose 下位于数据卷）（BACKUP_DIR）
+  enabled: true            # 定时备份开关
+  schedule: "0 3 * * *"    # cron 表达式：每天 03:00
+  keep: 14                 # 保留最近 N 份备份
+  dir: ./data/backups      # 备份目录（容器形态下位于挂载的 data 卷）
 
 # 面板内更新（容器形态：下载+校验+替换后进程自杀退出，restart: unless-stopped 自动拉起新版本）
 update:

@@ -172,7 +172,7 @@ run cp "$STAGE/.dockerignore" ./.dockerignore 2>/dev/null || true
 mkdir -p configs
 if [[ ! -f configs/config.yaml ]]; then
   run cp "$STAGE/configs/config.yaml" configs/config.yaml
-  echo "    （首次安装）已生成 configs/config.yaml，请按需编辑 public_url"
+  echo "    （首次安装）已生成 configs/config.yaml（应用配置唯一入口），请按需编辑 public_url / ws_public_url 等"
 else
   echo "    configs/config.yaml 已存在，保留（如需重置请手动删除后重跑）"
 fi
@@ -180,11 +180,27 @@ fi
 # ---------- 3. .env 与数据目录 ----------
 if [[ ! -f .env ]]; then
   run cp ./.env.example ./.env
-  echo "    （首次安装）已从 .env.example 生成 .env，请编辑 BIND_ADDR/端口/公网地址等"
+  echo "    （首次安装）已从 .env.example 生成 .env（仅编排参数：BIND_ADDR/宿主端口映射），应用配置在 configs/config.yaml"
 else
   echo "    .env 已存在，保留"
 fi
 run mkdir -p data
+
+# ---------- 3.5 迁移：.env 的 JWT_SECRET 固化进 config.yaml（2026-08-30 起环境变量退役） ----------
+# 老部署曾在 .env 配过 JWT_SECRET 而 config.yaml 尚未写入 jwt.secret 时，把该值写入 yaml：
+# TOTP 加密 key 由 jwt.secret 派生（services/otp.go），若不固化，删环境变量后派生 key 漂移，
+# 已启用 2FA 用户的密文将无法解密（登录失败）。
+if [[ -f .env && -f configs/config.yaml ]] && ! grep -qE '^[[:space:]]*secret:' configs/config.yaml; then
+  ENV_JWT="$(sed -n 's/^JWT_SECRET=//p' .env | head -1 | tr -d ' \r"'"'"'')"
+  if [[ -n "$ENV_JWT" && "$ENV_JWT" != \#* ]]; then
+    if grep -qE '^jwt:' configs/config.yaml; then
+      awk -v s="$ENV_JWT" '/^jwt:/{print; print "  secret: " s; next} {print}' configs/config.yaml > configs/config.yaml.tmp && mv configs/config.yaml.tmp configs/config.yaml
+    else
+      printf '\njwt:\n  secret: %s\n' "$ENV_JWT" >> configs/config.yaml
+    fi
+    echo "    （迁移）已把 .env 的 JWT_SECRET 固化进 configs/config.yaml；JWT_SECRET 从环境变量退役（config.yaml 成为唯一入口）"
+  fi
+fi
 
 # 安装目录属主（容器内 app 用户 uid 1000）：整目录 chown，面板内更新需写 master/web 与根目录标记；非 root 时提示
 if [[ $DRY_RUN -eq 0 ]]; then
@@ -206,7 +222,8 @@ cat <<EOF
 安装完成。目录: $TARGET
 
 下一步：
-  1. 编辑 .env（端口/公网地址等）与 configs/config.yaml（至少 public_url；JWT/管理员留空=首次启动自动生成）
+  1. 编辑 configs/config.yaml（应用配置唯一入口：至少填 public_url；JWT/管理员留空=首次启动自动生成）。
+     .env 仅在需要改宿主端口映射/BIND_ADDR 时编辑（纯编排参数，不进进程）
   2. 启动（首次自动构建固定运行时镜像，无需手动 docker build；仅装运行时依赖不含业务代码）：
        docker compose up -d
   3. 查看初始管理员密码：

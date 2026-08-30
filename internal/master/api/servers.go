@@ -140,7 +140,7 @@ const AgentInstallScriptURL = "https://github.com/acdc-awa/XPanel-Node/releases/
 
 // installCmd 生成节点一键安装命令（脚本从 GitHub Releases 拉取；--master 指向节点
 // WebSocket 网关入口——四端口拆分后对外路径固定 /node/ws（Caddy 按该路径分流到 WS 端口），
-// 也可用 env APP_WS_PUBLIC_URL（如 wss://ws.example.com/node/ws）整体覆盖为任意路径/独立域名）。
+// 也可用 config.yaml 的 app.ws_public_url（如 wss://ws.example.com/node/ws）整体覆盖为任意路径/独立域名）。
 func installCmd(publicURL, wsPublicURL, reqHost, nodeID, secret string) string {
 	master := strings.TrimSpace(wsPublicURL)
 	if master == "" {

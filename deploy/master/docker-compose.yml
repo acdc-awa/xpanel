@@ -24,32 +24,20 @@ services:
     ports:
       # 三端口绑定宿主机；默认仅回环 127.0.0.1，由用户自备的反代（Caddy/Nginx 等）访问。
       # 改 BIND_ADDR=0.0.0.0 可对全网卡开放（反代与面板不在同一台机时用，注意自行收紧防火墙）。
+      # 注意：容器内端口（右侧 18080/18082/6000）跟随 configs/config.yaml 的 app.port/ws_port/sub_port，
+      # 改 yaml 时请同步本段与下方 healthcheck。
       - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-18080}:18080"          # 面板：SPA 前端 + 后端 HTTP API + 探针
       - "${BIND_ADDR:-127.0.0.1}:${APP_WS_PORT:-18082}:18082"       # 节点 WebSocket 网关
       - "${BIND_ADDR:-127.0.0.1}:${APP_SUB_PORT:-6000}:6000"        # 订阅独立端口（0=禁用订阅服务；设为 0 时请删除本行）
-    environment:
-      APP_ENV: ${APP_ENV:-prod}
-      APP_PORT: ${APP_PORT:-18080}          # 面板：SPA 前端 + 后端 HTTP API + 探针
-      APP_WS_PORT: ${APP_WS_PORT:-18082}    # 节点 WebSocket 网关
-      APP_SUB_PORT: ${APP_SUB_PORT:-6000}   # 订阅独立端口
-      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}   # 面板公网地址（如 https://panel.example.com）；空=按请求 Host
-      APP_WS_PUBLIC_URL: ${APP_WS_PUBLIC_URL:-}  # 节点 WS 对外地址（如 wss://ws.example.com/node/ws）；空=面板域名 + /node/ws
-      DB_DRIVER: sqlite
-      DB_DSN: /app/data/panel.db
-      JWT_SECRET: ${JWT_SECRET:-}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      BACKUP_ENABLED: ${BACKUP_ENABLED:-1}
-      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
-      BACKUP_KEEP: ${BACKUP_KEEP:-14}
-      BACKUP_DIR: /app/data/backups
+    # 应用配置唯一入口 = configs/config.yaml（2026-08-30 拍板：退役环境变量覆盖，杜绝双源漂移）。
+    # .env 仅提供编排参数（BIND_ADDR 与上面的宿主端口映射）：容器内应用端口以 config.yaml 为准。
     volumes:
       - .:/app:rw               # 宿主安装目录整挂（rw：面板内更新下载/原子替换/回滚标记）
       - ./configs:/app/configs:ro
       - ./data:/app/data
     healthcheck:
-      # 存活/就绪探针挂在面板端口（跟随 APP_PORT）
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${APP_PORT:-18080}/readyz"]
+      # 存活/就绪探针挂在面板端口（跟随 config.yaml app.port，默认 18080）
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18080/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3
