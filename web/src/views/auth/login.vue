@@ -35,7 +35,7 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    const result = await auth.login(form.username.trim(), form.password)
+    const result = await auth.login(form.username.trim(), form.password, form.turnstile_token)
     if (result === '2fa') {
       twofaOpen.value = true
       twofaCode.value = ''

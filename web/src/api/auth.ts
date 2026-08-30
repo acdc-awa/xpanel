@@ -9,8 +9,8 @@ export interface RegisterPayload {
   turnstile_token?: string
 }
 
-export function login(username: string, password: string) {
-  return http.post<ApiResp<LoginResult>>('/auth/login', { username, password })
+export function login(username: string, password: string, turnstile_token?: string) {
+  return http.post<ApiResp<LoginResult>>('/auth/login', { username, password, turnstile_token })
 }
 
 export function register(payload: RegisterPayload) {
