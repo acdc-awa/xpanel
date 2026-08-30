@@ -26,9 +26,9 @@ export const useAuthStore = defineStore('auth', {
       useSiteStore().applyMeInfo(user)
     },
 
-    /** 登录：返回 'ok'（已签发）或 '2fa'（需二次验证）。 */
-    async login(username: string, password: string): Promise<'ok' | '2fa'> {
-      const { data } = await apiLogin(username, password)
+    /** 登录：返回 'ok'（已签发）或 '2fa'（需二次验证）。turnstileToken 为人机验证 token（captcha 开启时必传）。 */
+    async login(username: string, password: string, turnstileToken?: string): Promise<'ok' | '2fa'> {
+      const { data } = await apiLogin(username, password, turnstileToken)
       if (data.code !== 0) throw new Error(data.message || '登录失败')
       if (data.data.twofa_required) return '2fa'
       this.applyUser(data.data.user!)
