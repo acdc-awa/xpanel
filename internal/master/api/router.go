@@ -137,6 +137,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
 			admin.GET("/system/status", d.AdminSystemStatus)
+			admin.GET("/update/check", d.AdminUpdateCheck)
+			admin.POST("/update/apply", d.AdminUpdateApply)
 			admin.GET("/settings", d.AdminSettings)
 			admin.PUT("/settings", d.AdminUpdateSettings)
 			admin.GET("/users", d.AdminUsers)

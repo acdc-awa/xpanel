@@ -37,3 +37,9 @@ backup:
   schedule: "0 3 * * *"    # cron 表达式：每天 03:00（BACKUP_SCHEDULE）
   keep: 14                 # 保留最近 N 份备份（BACKUP_KEEP）
   dir: ./data/backups      # 备份目录（compose 下位于数据卷）（BACKUP_DIR）
+
+# 面板内更新（容器形态：下载+校验+替换后进程自杀退出，restart: unless-stopped 自动拉起新版本）
+update:
+  enabled: true            # 面板内更新开关（false=仅显示版本，不做更新）
+  repo: acdc-awa/xpanel    # GitHub owner/repo（留空=默认 acdc-awa/xpanel）
+  # mirror: https://ghproxy.net/https://github.com   # github.com 替代基址/代理前缀（可选）

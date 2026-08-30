@@ -1,0 +1,35 @@
+name: release
+
+# 打 tag（v*）即发布：构建 linux/amd64 + linux/arm64 压缩包（含前端产物与部署脚本），
+# 附 .sha256 校验和与 install.sh。命名为 xpanel-master-<tag>-linux-<arch>.tar.gz，
+# 与 deploy/master/install.sh 的下载/校验约定一致（install.sh 自动取 latest 或 --version 钉版本）。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 构建 amd64 release 包（含前端构建）
+        run: bash scripts/build-release.sh "${GITHUB_REF_NAME}"
+      - name: 构建 arm64 release 包（复用前端产物）
+        run: GOOS=linux GOARCH=arm64 bash scripts/build-release.sh "${GITHUB_REF_NAME}" --no-web
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/xpanel-master-*.tar.gz
+            dist/xpanel-master-*.tar.gz.sha256
+            deploy/master/install.sh
+          generate_release_notes: true

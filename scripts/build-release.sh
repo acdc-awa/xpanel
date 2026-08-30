@@ -12,7 +12,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)}"
 NO_WEB=0
-[[ "${1:-}" == "--no-web" ]] && { VERSION="$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)"; NO_WEB=1; }
+for arg in "$@"; do [[ "$arg" == "--no-web" ]] && NO_WEB=1; done
+[[ "${1:-}" == "--no-web" ]] && VERSION="$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)"
 
 GOOS="${GOOS:-linux}"
 GOARCH="${GOARCH:-amd64}"
@@ -31,7 +32,7 @@ fi
 [[ -d "$ROOT/web/dist" ]] || { echo "错误: 缺少 $ROOT/web/dist（先 npm run build，或用 --no-web 跳过）"; exit 1; }
 
 echo "==> 构建 master 二进制 (version=$VERSION, $GOOS/$GOARCH)"
-( cd "$ROOT" && CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -o "$OUT/master" ./cmd/master )
+( cd "$ROOT" && CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags "-s -w -X main.Version=${VERSION}" -o "$OUT/master" ./cmd/master )
 
 echo "==> 组装 release 目录"
 mkdir -p "$STAGE/master" "$STAGE/web" "$STAGE/configs"
@@ -48,8 +49,8 @@ XrayPanel 主控 release 包（压缩包挂载形态）
          bash install.sh            # 或 bash install.sh --dir /opt/xray-panel
     2. 编辑 configs/config.yaml（至少填 public_url；JWT/管理员留空=首次启动自动生成）
     3. 编辑 .env（端口/公网地址/备份等；有默认值可先不动）
-    4. data 目录属主（本机已自动建 ./data，但 uid 1000 属主需 root 执行）：
-         sudo chown -R 1000:1000 data
+    4. 安装目录属主（本机已自动创建，但 uid 1000 属主需 root 执行——面板内更新需写整目录）：
+         sudo chown -R 1000:1000 /opt/xray-panel
     5. 构建固定运行时镜像（一次性；Dockerfile.runtime 已在本包内）：
          docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
        （已构建过可跳过）
@@ -61,11 +62,12 @@ XrayPanel 主控 release 包（压缩包挂载形态）
 二、手动安装（等价）
     1. 解压本包到宿主目录，如 /opt/xray-panel
     2. 编辑 configs/config.yaml 与 .env
-    3. sudo chown -R 1000:1000 data
+    3. sudo chown -R 1000:1000 /opt/xray-panel
     4. docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
     5. cd /opt/xray-panel && docker compose up -d
 
-三、升级：重新运行 install.sh（或覆盖 master/ 与 web/dist）→ docker compose restart master
+三、升级：面板内「系统设置 → 更新」自更新（下载校验替换后容器自重启）；
+    或重新运行 install.sh（覆盖 master/ 与 web/dist）→ docker compose restart master
 四、反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference）
 
 数据目录 data/（SQLite + JWT + 备份）务必定期备份。

@@ -182,13 +182,13 @@ else
 fi
 run mkdir -p data
 
-# 数据目录属主（容器内 app 用户 uid 1000）；非 root 时提示
+# 安装目录属主（容器内 app 用户 uid 1000）：整目录 chown，面板内更新需写 master/web 与根目录标记；非 root 时提示
 if [[ $DRY_RUN -eq 0 ]]; then
   if [[ "$(id -u)" -eq 0 ]]; then
-    chown -R 1000:1000 data
+    chown -R 1000:1000 "$TARGET"
   else
-    echo "    [提示] 已创建 ./data；容器内 app 用户（uid 1000）需写入，请以 root 执行："
-    echo "      sudo chown -R 1000:1000 $TARGET/data"
+    echo "    [提示] 已创建安装目录；容器内 app 用户（uid 1000）需整目录写入（面板内更新），请以 root 执行："
+    echo "      sudo chown -R 1000:1000 $TARGET"
   fi
 fi
 

@@ -34,6 +34,9 @@ import (
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
+// Version 面板版本（构建期 ldflags 注入：-X main.Version=<release tag>；未注入为 dev）。
+var Version = "dev"
+
 func main() {
 	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径")
 	flag.Parse()
@@ -41,6 +44,13 @@ func main() {
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
+	}
+
+	// 冒烟自检（面板内更新用）：仅验证配置可加载，退出码 0=通过。
+	// 刻意不连库不带任何副作用——新二进制执行本检查时旧进程仍在运行，
+	// 避免 SQLite 并发写与误锁；运行时风险由 entrypoint 失败回滚兜底。
+	if len(flag.Args()) > 0 && flag.Args()[0] == "self-test" {
+		os.Exit(runSelfTest(*cfgPath))
 	}
 
 	// sqlite 需要保证数据目录存在
@@ -135,6 +145,7 @@ func main() {
 
 	otpSvc := services.NewOTPService(database, cfg)
 	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, OTP: otpSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
+	api.PanelVersion = Version
 	subServer := api.NewSubscribeServer(deps)
 	deps.SubServer = subServer
 	hub.CertPusher = deps.PushPendingCerts
@@ -157,13 +168,18 @@ func main() {
 		log.Printf("订阅服务已禁用（sub_port=0）")
 	}
 
+	// 容器形态：本版本已完成全部初始化并即将监听，视为「更新已确认」——
+	// 清理更新待确认标记与回滚备份（master.prev / web.prev），此后 crash 由 entrypoint 直接拉起不再回滚。
+	// 仅在自更新流程写入这些文件时执行清理；非容器形态下文件不存在，无副作用。
+	cleanupUpdateMarker()
+
 	var wg sync.WaitGroup
 	for _, l := range listeners {
 		l := l
 		wg.Add(1)
 		go func(l listener) {
 			defer wg.Done()
-			log.Printf("%s 启动 - %s 监听 %s（env=%s, db=%s）", cfg.App.Name, l.role, l.srv.Addr, cfg.App.Env, cfg.DB.Driver)
+			log.Printf("%s v%s 启动 - %s 监听 %s（env=%s, db=%s）", cfg.App.Name, Version, l.role, l.srv.Addr, cfg.App.Env, cfg.DB.Driver)
 			if err := l.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("%s（%s）启动失败: %v", l.role, l.srv.Addr, err)
 			}
@@ -186,6 +202,29 @@ func main() {
 	hub.Shutdown()
 	wg.Wait()
 	log.Println("已退出")
+}
+
+// cleanupUpdateMarker 清理容器自更新遗留的待确认标记与回滚备份
+// （面板内更新 API 写入，见 internal/master/api/update.go；entrypoint 据此判定失败回滚）。
+func cleanupUpdateMarker() {
+	for _, p := range []string{"/app/.update-pending", "/app/master.prev", "/app/web.prev"} {
+		if _, err := os.Stat(p); err == nil {
+			log.Printf("清理更新确认标记/回滚备份: %s", p)
+			_ = os.RemoveAll(p)
+		}
+	}
+}
+
+// runSelfTest 冒烟自检：加载配置并打印版本概要，返回退出码（0=通过）。
+// 供面板内更新下载新二进制后先试跑（挡架构错误/损坏/配置兼容性），不连库无副作用。
+func runSelfTest(cfgPath string) int {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "self-test 失败: %v\n", err)
+		return 1
+	}
+	fmt.Printf("self-test OK: app=%s version=%s env=%s db=%s\n", cfg.App.Name, Version, cfg.App.Env, cfg.DB.Driver)
+	return 0
 }
 
 // invalidJWTSecret 模板/示例中的占位值一律视为未配置（自动生成），杜绝弱密钥被采信。

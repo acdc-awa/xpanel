@@ -16,7 +16,8 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/master ./cmd/master
+ARG PANEL_VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -X main.Version=${PANEL_VERSION}" -o /out/master ./cmd/master
 
 # ---- 运行镜像 ----
 FROM alpine:3.20

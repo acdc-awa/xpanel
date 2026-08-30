@@ -13,14 +13,18 @@ import (
 
 var processStartedAt = time.Now()
 
+// PanelVersion 面板版本（由 cmd/master 启动时注入；未注入为 dev）。
+var PanelVersion = "dev"
+
 // AdminSystemStatus GET /api/v1/admin/system/status —— 系统状态页数据（ISSUE-17）。
 // 只暴露运维信息，不返回任何密钥/令牌。
 func (d *Deps) AdminSystemStatus(c *gin.Context) {
 	data := gin.H{
-		"go_version":    runtime.Version(),
-		"goroutines":    runtime.NumGoroutine(),
+		"go_version":     runtime.Version(),
+		"panel_version":  PanelVersion,
+		"goroutines":     runtime.NumGoroutine(),
 		"uptime_seconds": int64(time.Since(processStartedAt).Seconds()),
-		"server_time":   time.Now().Format(time.RFC3339),
+		"server_time":    time.Now().Format(time.RFC3339),
 	}
 	if d.Cfg != nil {
 		data["app_name"] = d.Cfg.App.Name

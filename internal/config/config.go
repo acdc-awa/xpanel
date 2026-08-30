@@ -18,6 +18,14 @@ type Config struct {
 	Totp   Totp   `yaml:"totp"`
 	Admin  Admin  `yaml:"admin"`
 	Backup Backup `yaml:"backup"`
+	Update Update `yaml:"update"`
+}
+
+// Update 面板内更新配置（容器内自更新：下载/校验/替换后自杀退出，由 restart: unless-stopped 拉起新版本）。
+type Update struct {
+	Enabled bool   `yaml:"enabled"` // 面板内更新开关（false 时仅展示版本，不提供更新入口）
+	Repo    string `yaml:"repo"`    // GitHub owner/repo，空 = acdc-awa/xpanel
+	Mirror  string `yaml:"mirror"`  // github.com 的替代基址/代理前缀（可选，如 https://ghproxy.net/https://github.com）
 }
 
 // Backup 备份配置。
@@ -31,10 +39,10 @@ type Backup struct {
 type App struct {
 	Name        string `yaml:"name"`
 	Env         string `yaml:"env"`
-	Port        int    `yaml:"port"`        // 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz 探针）
-	WSPort      int    `yaml:"ws_port"`      // 节点 WebSocket 网关端口
-	SubPort     int    `yaml:"sub_port"`     // 订阅独立端口（0=禁用订阅服务）
-	PublicURL   string `yaml:"public_url"`   // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
+	Port        int    `yaml:"port"`          // 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz 探针）
+	WSPort      int    `yaml:"ws_port"`       // 节点 WebSocket 网关端口
+	SubPort     int    `yaml:"sub_port"`      // 订阅独立端口（0=禁用订阅服务）
+	PublicURL   string `yaml:"public_url"`    // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
 	WSPublicURL string `yaml:"ws_public_url"` // 节点 WebSocket 对外地址（如 wss://ws.example.com/node/ws；空=默认面板域名 + /node/ws）
 }
 
@@ -67,6 +75,7 @@ func Default() *Config {
 		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
 		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
 		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},
+		Update: Update{Enabled: true, Repo: "acdc-awa/xpanel"},
 	}
 }
 
@@ -105,8 +114,8 @@ func (c *Config) applyEnv() {
 		c.App.WSPublicURL = v
 	}
 	for _, e := range []struct {
-		env  string
-		dst  *int
+		env string
+		dst *int
 	}{
 		{"APP_PORT", &c.App.Port},
 		{"APP_WS_PORT", &c.App.WSPort},

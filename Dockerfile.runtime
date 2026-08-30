@@ -3,6 +3,7 @@
 # 与 Dockerfile（源码构建、产物 COPY 进镜像）不同，本镜像只提供运行环境，不含任何业务代码：
 #   - ca-certificates / tzdata：TLS 证书与时区（生产必需）
 #   - wget：healthcheck 探针（与 restore.sh 一致）
+#   - entrypoint：PID 1 包装（master 原生启动 + 更新失败回滚），不含守护进程
 #   - app 用户（uid 1000）：宿主目录挂载的数据需 chown 给 1000 才能写入
 #
 # 用法：docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
@@ -13,13 +14,15 @@ RUN apk add --no-cache ca-certificates tzdata wget && \
     adduser -D app
 
 WORKDIR /app
+COPY deploy/master/entrypoint.sh /app/entrypoint.sh
+RUN chmod 0755 /app/entrypoint.sh
 
-# 挂载点约定（与 docker-compose.yml 对应）：
-#   ./master          → /app/master         (ro)
-#   ./web/dist        → /app/web/dist       (ro)
-#   ./configs/config.yaml → /app/configs/config.yaml (ro)
-#   ./data            → /app/data           (rw, chown 1000)
+# 挂载点约定（与 docker-compose.yml 对应，目录挂载 rw 供面板内更新替换）：
+#   .               → /app               (rw；master / web / .update-pending / .prev)
+#   ./configs       → /app/configs       (ro；配置文件不被更新流程触碰)
+#   ./data          → /app/data          (rw, chown 1000)
 
 USER app
 EXPOSE 18080 18082 6000
-CMD ["/app/master", "-config", "/app/configs/config.yaml"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["-config", "/app/configs/config.yaml"]

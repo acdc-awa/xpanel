@@ -60,6 +60,7 @@ export function createBackup() {
 export interface SystemStatus {
   app_name: string
   app_env: string
+  panel_version: string
   go_version: string
   goroutines: number
   uptime_seconds: number
@@ -83,6 +84,25 @@ export interface SystemStatus {
 
 export function getSystemStatus() {
   return http.get<ApiResp<SystemStatus>>('/admin/system/status')
+}
+
+// ===== 面板内更新（容器形态自更新：下载校验替换后容器自重启） =====
+
+export interface UpdateCheckResult {
+  enabled: boolean
+  current_version: string
+  latest_version?: string
+  available?: boolean
+  asset_url?: string
+  sha256_url?: string
+}
+
+export function checkUpdate() {
+  return http.get<ApiResp<UpdateCheckResult>>('/admin/update/check')
+}
+
+export function applyUpdate(version = '') {
+  return http.post<ApiResp<{ ok: boolean; version: string; message: string }>>('/admin/update/apply', { version })
 }
 
 export function getServerMetrics(id: number, range = '1h') {

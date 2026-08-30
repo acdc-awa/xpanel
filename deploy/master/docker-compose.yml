@@ -1,16 +1,15 @@
 # XrayPanel 主控 Compose（压缩包挂载形态）
 #
 # 运行方式：release 压缩包解压到宿主目录（如 /opt/xray-panel），此 compose 用固定运行时镜像
-# 把产物挂载进容器跑。升级/回滚 = 替换宿主目录里的 master + web/dist + config，然后 restart。
+# 把产物挂载进容器跑。升级/回滚 = 替换宿主目录里的 master + web/dist，然后 restart。
 #
 # 目录约定（与 Dockerfile.runtime 对应）：
-#   ./master              二进制        → /app/master        (ro)
-#   ./web/dist            前端产物      → /app/web/dist      (ro)
-#   ./configs/config.yaml 配置文件      → /app/configs/config.yaml (ro)
-#   ./data                数据目录      → /app/data          (rw)
+#   .            宿主安装目录整挂  → /app            (rw；面板内更新需写 master/web 与 .update-pending)
+#   ./configs    配置文件只读      → /app/configs     (ro；更新流程不触碰)
+#   ./data       数据目录          → /app/data        (rw)
 #
 # 注意：
-#   - data 目录需 chown 给 uid 1000（容器内 app 用户）才能写入，见 deploy/master/README 或安装脚本；
+#   - 整个安装目录需 chown 给 uid 1000（容器内 app 用户）才能被面板内更新写入，见安装脚本；
 #   - 三个端口默认绑 127.0.0.1，由用户自备反代访问；改 BIND_ADDR=0.0.0.0 可对全网卡开放（自行收紧防火墙）。
 
 services:
@@ -40,9 +39,8 @@ services:
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
       BACKUP_DIR: /app/data/backups
     volumes:
-      - ./master:/app/master:ro
-      - ./web/dist:/app/web/dist:ro
-      - ./configs/config.yaml:/app/configs/config.yaml:ro
+      - .:/app:rw               # 宿主安装目录整挂（rw：面板内更新下载/原子替换/回滚标记）
+      - ./configs:/app/configs:ro
       - ./data:/app/data
     healthcheck:
       # 存活/就绪探针挂在面板端口（跟随 APP_PORT）

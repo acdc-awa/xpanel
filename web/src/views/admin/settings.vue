@@ -9,10 +9,13 @@ import {
   getBackups,
   createBackup,
   getSystemStatus,
+  checkUpdate,
+  applyUpdate,
   type SiteGroup,
   type CaptchaGroup,
   type BackupItem,
   type SystemStatus,
+  type UpdateCheckResult,
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
@@ -264,6 +267,48 @@ async function loadSystem() {
     ElMessage.error(errMsg(e, '加载系统状态失败'))
   } finally {
     systemLoading.value = false
+  }
+}
+
+// ---- 面板内更新（容器形态：下载校验替换后容器自重启，失败自动回滚） ----
+const updateInfo = ref<UpdateCheckResult | null>(null)
+const updateChecking = ref(false)
+const updateApplying = ref(false)
+
+async function checkUpdate() {
+  updateChecking.value = true
+  try {
+    const { data } = await checkUpdate()
+    if (data.code === 0) updateInfo.value = data.data
+    else ElMessage.error(data.message)
+  } catch (e) {
+    ElMessage.error(errMsg(e, '检查更新失败'))
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+async function confirmApply() {
+  if (!updateInfo.value?.available) return
+  try {
+    await ElMessageBox.confirm(
+      `将下载 ${updateInfo.value.latest_version} 并替换当前版本（${updateInfo.value.current_version}）。\n流程：下载 → sha256 校验 → 自检 → 替换 → 容器自动重启（restart: unless-stopped）。\n期间面板短暂不可用；新版本启动失败会自动回滚上一版本。`,
+      '应用更新',
+      { type: 'warning', confirmButtonText: '应用更新', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  updateApplying.value = true
+  try {
+    const { data } = await applyUpdate()
+    if (data.code === 0) ElMessage.success(data.message)
+    else ElMessage.error(data.message)
+  } catch {
+    // 进程可能已开始退出（连接中断），按已触发提示
+    ElMessage.info('更新已触发，等待容器重启…')
+  } finally {
+    updateApplying.value = false
   }
 }
 
@@ -623,6 +668,7 @@ async function save() {
             <template v-if="system">
               <el-descriptions :column="2" border size="small">
                 <el-descriptions-item label="应用">{{ system.app_name }}（{{ system.app_env }}）</el-descriptions-item>
+                <el-descriptions-item label="面板版本"><code class="cell-mono">{{ system.panel_version }}</code></el-descriptions-item>
                 <el-descriptions-item label="Go 版本">{{ system.go_version }}</el-descriptions-item>
                 <el-descriptions-item label="运行时长">{{ Math.floor(system.uptime_seconds / 3600) }}h {{ Math.floor((system.uptime_seconds % 3600) / 60) }}m</el-descriptions-item>
                 <el-descriptions-item label="Goroutines">{{ system.goroutines }}</el-descriptions-item>
@@ -641,6 +687,35 @@ async function save() {
                 </div>
               </div>
               <p v-if="!system.db_ok" class="muted tip">数据库异常：{{ system.db_error }}</p>
+
+              <!-- 面板内更新（容器形态自更新） -->
+              <div class="update-card">
+                <p class="ip-hdr-title">面板更新</p>
+                <div class="update-row">
+                  <span class="muted">当前</span>
+                  <code class="cell-mono">{{ system.panel_version }}</code>
+                  <span class="muted">最新</span>
+                  <code class="cell-mono">{{ updateInfo?.latest_version || '—' }}</code>
+                  <el-tag v-if="updateInfo?.available" type="success" size="small" style="margin-left: 8px">有可用更新</el-tag>
+                  <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small" style="margin-left: 8px">更新已禁用</el-tag>
+                </div>
+                <div class="x-toolbar" style="margin-top: 10px">
+                  <el-button :icon="Refresh" :loading="updateChecking" @click="checkUpdate">检查更新</el-button>
+                  <el-button
+                    type="primary"
+                    :icon="Download"
+                    :disabled="!updateInfo?.available"
+                    :loading="updateApplying"
+                    @click="confirmApply"
+                  >
+                    应用更新
+                  </el-button>
+                </div>
+                <p class="muted tip">
+                  应用更新将下载最新 release 包并强制校验 sha256，替换后进程主动退出，由容器
+                  <code>restart: unless-stopped</code> 自动拉起新版本；新版本启动失败时自动回滚上一版本。应用更新前请先手动备份。
+                </p>
+              </div>
 
               <!-- 客户端 IP 来源说明（与 util.GetRealIP 语义对应） -->
               <div class="ip-hdr-note">
@@ -700,6 +775,20 @@ async function save() {
   }
 }
 .ip-hdr-title { font-size: 12.5px; font-weight: 600; color: var(--x-text-2); margin-bottom: 4px; }
+.update-card {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--x-border);
+  border-radius: 8px;
+  background: var(--x-bg);
+}
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
 
 .upload-row {
   display: flex;
