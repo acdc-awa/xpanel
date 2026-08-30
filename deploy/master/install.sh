@@ -165,6 +165,10 @@ run cp "$STAGE/docker-compose.yml" ./docker-compose.yml
 run cp "$STAGE/.env.example" ./.env.example
 run cp "$STAGE/Caddyfile.reference" ./Caddyfile.reference 2>/dev/null || true
 run cp "$STAGE/Dockerfile.runtime" ./Dockerfile.runtime 2>/dev/null || true
+# 运行时镜像构建文件（compose 带 build 块，缺失即自动构建）
+run mkdir -p ./deploy/master
+run cp "$STAGE/deploy/master/entrypoint.sh" ./deploy/master/entrypoint.sh
+run cp "$STAGE/.dockerignore" ./.dockerignore 2>/dev/null || true
 mkdir -p configs
 if [[ ! -f configs/config.yaml ]]; then
   run cp "$STAGE/configs/config.yaml" configs/config.yaml
@@ -203,13 +207,11 @@ cat <<EOF
 
 下一步：
   1. 编辑 .env（端口/公网地址等）与 configs/config.yaml（至少 public_url；JWT/管理员留空=首次启动自动生成）
-  2. 构建固定运行时镜像（一次性，仅装运行时依赖不含业务代码）：
-       docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
-  3. 启动：
+  2. 启动（首次自动构建固定运行时镜像，无需手动 docker build；仅装运行时依赖不含业务代码）：
        docker compose up -d
-  4. 查看初始管理员密码：
+  3. 查看初始管理员密码：
        docker compose logs master
-  5. 反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference）
+  4. 反代：三个端口默认绑 127.0.0.1，需自备 Caddy/Nginx 按路径分流（见 Caddyfile.reference）
 
 升级：重新运行本脚本即覆盖 master+web/dist、保留配置与数据。
 EOF

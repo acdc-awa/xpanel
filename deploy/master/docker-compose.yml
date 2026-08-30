@@ -15,6 +15,11 @@
 services:
   master:
     image: xpanel-master-runtime:latest
+    # 运行时镜像本地构建（固定壳，不随版本变）；compose up 时缺失即自动构建，
+    # 无需手动 docker build；context 经 .dockerignore 收敛为仅 entrypoint（几 KB）。
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
     restart: unless-stopped
     ports:
       # 三端口绑定宿主机；默认仅回环 127.0.0.1，由用户自备的反代（Caddy/Nginx 等）访问。

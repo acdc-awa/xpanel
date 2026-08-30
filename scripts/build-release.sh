@@ -51,20 +51,16 @@ XrayPanel 主控 release 包（压缩包挂载形态）
     3. 编辑 .env（端口/公网地址/备份等；有默认值可先不动）
     4. 安装目录属主（本机已自动创建，但 uid 1000 属主需 root 执行——面板内更新需写整目录）：
          sudo chown -R 1000:1000 /opt/xray-panel
-    5. 构建固定运行时镜像（一次性；Dockerfile.runtime 已在本包内）：
-         docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
-       （已构建过可跳过）
-    6. 启动：
+    5. 启动（首次自动构建固定运行时镜像，无需手动 docker build）：
          docker compose up -d
-    7. 查看初始管理员密码：
+    6. 查看初始管理员密码：
          docker compose logs master
 
 二、手动安装（等价）
     1. 解压本包到宿主目录，如 /opt/xray-panel
     2. 编辑 configs/config.yaml 与 .env
     3. sudo chown -R 1000:1000 /opt/xray-panel
-    4. docker build -f Dockerfile.runtime -t xpanel-master-runtime:latest .
-    5. cd /opt/xray-panel && docker compose up -d
+    4. cd /opt/xray-panel && docker compose up -d
 
 三、升级：面板内「系统设置 → 更新」自更新（下载校验替换后容器自重启）；
     或重新运行 install.sh（覆盖 master/ 与 web/dist）→ docker compose restart master
@@ -77,6 +73,17 @@ cp "$ROOT/deploy/master/.env.example" "$STAGE/.env.example"
 cp "$ROOT/deploy/master/Caddyfile" "$STAGE/Caddyfile.reference"
 cp "$ROOT/Dockerfile.runtime" "$STAGE/Dockerfile.runtime"
 cp "$ROOT/deploy/master/install.sh" "$STAGE/install.sh"
+# 运行时镜像构建所需（Dockerfile.runtime 的 COPY 路径与仓库结构一致，宿主目录直接 docker build）
+mkdir -p "$STAGE/deploy/master"
+cp "$ROOT/deploy/master/entrypoint.sh" "$STAGE/deploy/master/entrypoint.sh"
+# .dockerignore：宿主目录内 docker build context 只含 Dockerfile.runtime 与 entrypoint（排除 data/业务文件）
+cat > "$STAGE/.dockerignore" <<'EOF'
+*
+!Dockerfile.runtime
+!deploy/
+!deploy/master/
+!deploy/master/entrypoint.sh
+EOF
 
 echo "==> 打包 $TARBALL"
 ( cd "$OUT" && tar -czf "$TARBALL" -C "$STAGE" . )
