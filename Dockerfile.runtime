@@ -17,8 +17,10 @@ RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
     adduser -D app
 
 WORKDIR /app
-COPY deploy/master/entrypoint.sh /app/entrypoint.sh
-RUN chmod 0755 /app/entrypoint.sh
+# entrypoint 放 /usr/local/bin 而非 /app：compose 把宿主整目录 bind mount 到 /app，
+# 挂载会完全遮蔽镜像内的 /app（含镜像内文件）——放 /app 下运行时必然 stat 不到。
+COPY deploy/master/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.sh
 
 # 挂载点约定（与 docker-compose.yml 对应，目录挂载 rw 供面板内更新替换）：
 #   .               → /app               (rw；master / web / .update-pending / .prev)
@@ -27,5 +29,5 @@ RUN chmod 0755 /app/entrypoint.sh
 
 USER app
 EXPOSE 18080 18082 6000
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["-config", "/app/configs/config.yaml"]
