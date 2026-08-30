@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -24,7 +25,29 @@ func otpTestSvc(t *testing.T) (*OTPService, *gorm.DB) {
 	}
 	cfg := config.Default()
 	cfg.JWT.Secret = "test-secret"
-	return NewOTPService(db, cfg), db
+	return NewOTPService(db, cfg, cfg.JWT.Secret), db
+}
+
+// TestOTPEncryptKeyFallback 验证 2026-08-30 修复：JWT 配置原文为空（留空自动生成场景）时，
+// 加密 key 必须用实际使用的 jwtSecret 派生，而非空串弱 key。
+func TestOTPEncryptKeyFallback(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default() // cfg.JWT.Secret == ""
+	svc := NewOTPService(db, cfg, "real-secret-from-db")
+	want := sha256.Sum256([]byte("real-secret-from-db"))
+	if string(svc.Encrypt) != string(want[:]) {
+		t.Fatalf("加密 key 未用实际 jwtSecret 派生: got %x", svc.Encrypt)
+	}
+	// 显式 encrypt_key 仍优先
+	cfg.Totp.EncryptKey = "explicit-key"
+	svc2 := NewOTPService(db, cfg, "real-secret-from-db")
+	want2 := sha256.Sum256([]byte("explicit-key"))
+	if string(svc2.Encrypt) != string(want2[:]) {
+		t.Fatalf("显式 encrypt_key 未优先: got %x", svc2.Encrypt)
+	}
 }
 
 func mkUser(t *testing.T, db *gorm.DB, name string) models.User {

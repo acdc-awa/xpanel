@@ -48,11 +48,14 @@ type OTPService struct {
 	Encrypt []byte // AES-256 key
 }
 
-// NewOTPService 构造（encryptKey 为空回退 jwt secret 派生）。
-func NewOTPService(db *gorm.DB, cfg *config.Config) *OTPService {
+// NewOTPService 构造：TOTP 加密 key = totp.encrypt_key（显式配置）或 jwtSecret（实际使用的
+// JWT secret——ensureJWTSecret 的返回值，DB 里落库/自动生成的那份）。
+// 2026-08-30 修复：历史实现误用 cfg.JWT.Secret 配置原文，JWT 留空自动生成场景下退化为空串
+// 派生弱 key（sha256("")）；现改为与登录签发一致的密钥，显式 encrypt_key 语义不变。
+func NewOTPService(db *gorm.DB, cfg *config.Config, jwtSecret string) *OTPService {
 	key := cfg.Totp.EncryptKey
 	if key == "" {
-		key = cfg.JWT.Secret
+		key = jwtSecret
 	}
 	sum := sha256.Sum256([]byte(key))
 	return &OTPService{DB: db, Encrypt: sum[:]}

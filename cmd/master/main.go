@@ -143,7 +143,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	otpSvc := services.NewOTPService(database, cfg)
+	otpSvc := services.NewOTPService(database, cfg, jwtSecret)
 	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, OTP: otpSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
 	api.PanelVersion = Version
 	subServer := api.NewSubscribeServer(deps)

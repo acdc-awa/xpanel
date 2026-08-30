@@ -47,7 +47,7 @@ func TestTwoFAVerifyRoute(t *testing.T) {
 
 	cfg := &config.Config{JWT: config.JWT{Secret: "test-secret-at-least-32-chars-long-123456", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour}}
 	jwt := services.NewJWTManager(cfg.JWT.Secret, cfg.JWT.AccessTTL, cfg.JWT.RefreshTTL)
-	otpSvc := services.NewOTPService(db, cfg)
+	otpSvc := services.NewOTPService(db, cfg, cfg.JWT.Secret)
 
 	// 通过服务启用 TOTP（Confirm 会生成真实 secret 并写入加密字段）
 	secret, _, err := otpSvc.Setup(user.ID, user.Email)
