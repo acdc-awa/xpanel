@@ -10,7 +10,10 @@
 # 升级/回滚只替换挂载目录里的 master + web/dist，本镜像构建一次即可，不随版本变。
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata wget && \
+# apk 源默认 dl-cdn.alpinelinux.org（国内直连常卡死）；换阿里云镜像。
+# 若部署机仍需离线安装，可自行在执行前 COPY pkgs + --allow-untrusted（见 commit 说明）。
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories && \
+    apk add --no-cache ca-certificates tzdata wget && \
     adduser -D app
 
 WORKDIR /app
