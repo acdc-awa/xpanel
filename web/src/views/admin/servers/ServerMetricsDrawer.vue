@@ -79,6 +79,20 @@ function resizeCharts() {
   userChart?.resize()
 }
 
+// destroy-on-close 会在关闭动画结束后销毁弹窗内 DOM，
+// 实例必须跟着释放并置空，否则下次打开时 initCharts 会因实例非空跳过初始化，
+// setOption 全打在已脱离文档的旧 DOM 上，表现为数据拿到了但图表空白
+function disposeCharts() {
+  netChart?.dispose()
+  cpuChart?.dispose()
+  memChart?.dispose()
+  userChart?.dispose()
+  netChart = null
+  cpuChart = null
+  memChart = null
+  userChart = null
+}
+
 function updateCharts() {
   if (!metricsData.value) return
   const data = metricsData.value
@@ -261,6 +275,7 @@ watch(
     } else {
       if (refreshTimer) clearInterval(refreshTimer)
       window.removeEventListener('resize', resizeCharts)
+      disposeCharts()
     }
   },
 )
@@ -272,10 +287,7 @@ watch(range, () => {
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   window.removeEventListener('resize', resizeCharts)
-  netChart?.dispose()
-  cpuChart?.dispose()
-  memChart?.dispose()
-  userChart?.dispose()
+  disposeCharts()
 })
 </script>
 
