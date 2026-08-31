@@ -535,10 +535,29 @@ function parseJsonToForm(str: string) {
       s = parsed.settings
     }
 
+    // 传输层参数在顶层 stream_settings（字符串或对象）里，settings_json 只含协议设置——
+    // 历史回填误从 s.reality/s.tls/s.xhttp（settings_json 内）查找，永远取不到（2026-08-31 修复）。
+    let streamObj: Record<string, any> = {}
+    const ssRaw: any = parsed.stream_settings ?? parsed.streamSettings
+    if (typeof ssRaw === 'string') {
+      try {
+        streamObj = JSON.parse(ssRaw)
+      } catch {
+        streamObj = {}
+      }
+    } else if (ssRaw && typeof ssRaw === 'object') {
+      streamObj = ssRaw
+    }
+    const realitySettings: any = streamObj.realitySettings
+    const tlsSettings: any = streamObj.tlsSettings
+    const xhttpSettings: any = streamObj.xhttpSettings
+    const tcpSettings: any = streamObj.tcpSettings
+
     if (parsed.protocol && typeof parsed.protocol === 'string') localProtocol.value = parsed.protocol
     if (parsed.network && typeof parsed.network === 'string') localNetwork.value = parsed.network
     if (parsed.tls_type && typeof parsed.tls_type === 'string') localTlsType.value = parsed.tls_type
     else if (parsed.streamSettings?.security) localTlsType.value = parsed.streamSettings.security
+    else if (streamObj.security) localTlsType.value = streamObj.security
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
     if (typeof parsed.listen === 'string') localListen.value = parsed.listen
@@ -567,40 +586,79 @@ function parseJsonToForm(str: string) {
       }))
     }
 
-    if (s.xhttp) {
-      xhttpForm.mode = s.xhttp.mode || 'auto'
-      xhttpForm.path = s.xhttp.path || '/'
-      xhttpForm.host = s.xhttp.host || ''
+    if (xhttpSettings && typeof xhttpSettings === 'object') {
+      xhttpForm.mode = xhttpSettings.mode || 'auto'
+      xhttpForm.path = xhttpSettings.path || '/'
+      xhttpForm.host = xhttpSettings.host || ''
     }
 
-    if (s.sniffing) {
-      sniffingForm.enabled = !!s.sniffing.enabled
-      sniffingForm.destOverride = Array.isArray(s.sniffing.destOverride)
-        ? s.sniffing.destOverride
-        : Array.isArray(s.sniffing.dest_override)
-          ? s.sniffing.dest_override
+    const sniffRaw: any = parsed.sniffing ?? (s && typeof s === 'object' ? s.sniffing : undefined)
+    let sniffObj: any = null
+    if (typeof sniffRaw === 'string') {
+      try {
+        sniffObj = JSON.parse(sniffRaw)
+      } catch {
+        sniffObj = null
+      }
+    } else if (sniffRaw && typeof sniffRaw === 'object') {
+      sniffObj = sniffRaw
+    }
+    if (sniffObj) {
+      sniffingForm.enabled = !!sniffObj.enabled
+      sniffingForm.destOverride = Array.isArray(sniffObj.destOverride)
+        ? sniffObj.destOverride
+        : Array.isArray(sniffObj.dest_override)
+          ? sniffObj.dest_override
           : ['http', 'tls', 'quic']
-      sniffingForm.metadataOnly = !!s.sniffing.metadataOnly || !!s.sniffing.metadata_only
-      sniffingForm.routeOnly = !!s.sniffing.routeOnly || !!s.sniffing.route_only
+      sniffingForm.metadataOnly = !!sniffObj.metadataOnly || !!sniffObj.metadata_only
+      sniffingForm.routeOnly = !!sniffObj.routeOnly || !!sniffObj.route_only
     }
 
-    if (s.reality) {
-      realityForm.dest = s.reality.dest || ''
-      realityForm.server_name = s.reality.server_name || (s.reality.server_names?.[0] ?? '')
-      realityForm.private_key = s.reality.private_key || ''
-      realityForm.public_key = s.reality.public_key || ''
-      realityForm.short_id = s.reality.short_id || (s.reality.short_ids?.[0] ?? '')
-      realityForm.spider_x = s.reality.spider_x || '/'
+    // REALITY：存储/生成均为 camelCase 规范（dest/serverNames/privateKey/shortIds/spiderX/min|maxClientVer/maxTimeDiff）
+    if (realitySettings && typeof realitySettings === 'object') {
+      realityForm.dest = realitySettings.dest || ''
+      const sn = Array.isArray(realitySettings.serverNames)
+        ? realitySettings.serverNames.filter(Boolean)[0]
+        : realitySettings.serverName || ''
+      realityForm.server_name = sn || ''
+      realityForm.private_key = realitySettings.privateKey || ''
+      realityForm.public_key = realitySettings.publicKey || ''
+      const sid = Array.isArray(realitySettings.shortIds)
+        ? realitySettings.shortIds.filter(Boolean)[0]
+        : realitySettings.shortId || ''
+      realityForm.short_id = sid || ''
+      realityForm.spider_x = realitySettings.spiderX || '/'
+      realityMinClientVer.value = realitySettings.minClientVer ? String(realitySettings.minClientVer) : ''
+      realityMaxClientVer.value = realitySettings.maxClientVer ? String(realitySettings.maxClientVer) : ''
+      realityMaxTimeDiff.value = realitySettings.maxTimeDiff ? Number(realitySettings.maxTimeDiff) : 0
     }
 
-    if (s.tls) {
-      tlsForm.server_name = s.tls.server_name || ''
-      tlsForm.cert_file = s.tls.cert_file || ''
-      tlsForm.key_file = s.tls.key_file || ''
-      if (Array.isArray(s.tls.alpn)) {
-        tlsAlpnText.value = s.tls.alpn.join(',')
+    if (tlsSettings && typeof tlsSettings === 'object') {
+      tlsForm.server_name = tlsSettings.serverName || ''
+      const cert = Array.isArray(tlsSettings.certificates) ? tlsSettings.certificates[0] : undefined
+      if (cert) {
+        tlsForm.cert_file = cert.certificateFile || ''
+        tlsForm.key_file = cert.keyFile || ''
+      }
+      if (Array.isArray(tlsSettings.alpn)) {
+        tlsAlpnText.value = tlsSettings.alpn.join(',')
+      }
+      tlsMinVersion.value = tlsSettings.minVersion || ''
+      tlsMaxVersion.value = tlsSettings.maxVersion || ''
+      tlsCipherSuites.value = tlsSettings.cipherSuites ? tlsSettings.cipherSuites.join(',') : ''
+      tlsAllowInsecure.value = !!tlsSettings.allowInsecure
+    }
+
+    if (tcpSettings && typeof tcpSettings === 'object' && tcpSettings.header) {
+      tcpForm.header_type = tcpSettings.header.type || 'none'
+      const req = tcpSettings.header.request
+      if (req && typeof req === 'object') {
+        tcpForm.request_host = Array.isArray(req.headers?.Host) ? req.headers.Host.join(',') : ''
+        tcpForm.request_path = Array.isArray(req.path) ? req.path.join(',') : '/'
       }
     }
+    fingerprint.value = streamObj.fingerprint || 'chrome'
+    acceptProxyProtocol.value = !!streamObj.acceptProxyProtocol
   } catch (e: any) {
     jsonError.value = `JSON 语法错误: ${e?.message || '解析失败'}`
   }

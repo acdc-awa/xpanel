@@ -434,28 +434,46 @@ func (h *Hub) Ask(serverID uint64, typ string, payload any, timeout time.Duratio
 }
 
 // PushPending 若存在待推送配置且节点在线，则下发并标记已推送（非阻塞，调用方用 goroutine）。
+// 2026-08-31：失败路径补日志——此前 Ask 出错/节点拒绝均静默，生成后"没推送"无从诊断。
 func (h *Hub) PushPending(serverID uint64) {
 	if h.Config == nil {
 		return
 	}
 	p, err := h.Config.GetPending(serverID)
-	if err != nil || p == nil || p.Status == "pushed" {
+	if err != nil {
+		log.Printf("nodegate: 读取待推送配置失败 (server=%d): %v", serverID, err)
+		return
+	}
+	if p == nil || p.Status == "pushed" {
 		return
 	}
 	if !h.IsOnline(serverID) {
-		return // 节点离线，保留待推送（上线时由 ServeWS 再次触发）
+		log.Printf("nodegate: 节点 %d 离线，配置待推送（上线时由 ServeWS 自动补推）", serverID)
+		return
 	}
 	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
-	if err == nil && res != nil && res.OK {
-		marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
-		if merr == nil {
-			if marked {
-				log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
-			} else {
-				// 推送期间 pending 已被更新（如用户编辑/每小时校准），保持 pending 待下一轮推送
-				log.Printf("nodegate: 节点 %d 推送成功但 pending 内容已被更新，保留待推送", serverID)
-			}
+	if err != nil {
+		log.Printf("nodegate: 推送配置失败 (server=%d): %v（保留待推送）", serverID, err)
+		return
+	}
+	if res == nil || !res.OK {
+		msg := "无回执"
+		if res != nil && res.Error != "" {
+			msg = res.Error
 		}
+		log.Printf("nodegate: 节点 %d 拒绝推送的配置: %s（保留待推送）", serverID, msg)
+		return
+	}
+	marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
+	if merr != nil {
+		log.Printf("nodegate: 标记已推送失败 (server=%d): %v", serverID, merr)
+		return
+	}
+	if marked {
+		log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
+	} else {
+		// 推送期间 pending 已被更新（如用户编辑/每小时校准），保持 pending 待下一轮推送
+		log.Printf("nodegate: 节点 %d 推送成功但 pending 内容已被更新，保留待推送", serverID)
 	}
 }
 
