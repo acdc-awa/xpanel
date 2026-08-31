@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -126,7 +127,8 @@ func (d *Deps) UserServers(c *gin.Context) {
 	items := make([]gin.H, 0, len(servers))
 	for i := range servers {
 		srv := &servers[i]
-		online := srv.LastSeenAt != nil && time.Since(*srv.LastSeenAt) < 90*time.Second
+		// 在线口径与网关一致：复用 nodegate.HeartbeatTimeout（90s），不再写死魔法数字
+		online := srv.LastSeenAt != nil && time.Since(*srv.LastSeenAt) < nodegate.HeartbeatTimeout
 		items = append(items, gin.H{
 			"id":           srv.ID,
 			"name":         srv.Name,

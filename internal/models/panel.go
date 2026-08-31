@@ -21,7 +21,8 @@ type Server struct {
 	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
 	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）
 	DefaultOutboundDS string     `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
-	AgentVersion      string     `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
+	AgentVersion      string     `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning       bool       `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
 	LastSeenAt        *time.Time `json:"last_seen_at"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -157,13 +158,18 @@ type AuditLog struct {
 
 // PendingConfig 服务器待推送的 Xray 配置（每服务器一条最新；节点离线时保留，上线后自动补推）。
 type PendingConfig struct {
-	ID         uint64     `gorm:"primaryKey" json:"id"`
-	ServerID   uint64     `gorm:"uniqueIndex;not null" json:"server_id"`
-	ConfigJSON string     `gorm:"type:text" json:"-"`
-	Status     string     `gorm:"size:16;default:pending" json:"status"` // pending / pushed
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	PushedAt   *time.Time `json:"pushed_at"`
+	ID         uint64 `gorm:"primaryKey" json:"id"`
+	ServerID   uint64 `gorm:"uniqueIndex;not null" json:"server_id"`
+	ConfigJSON string `gorm:"type:text" json:"-"`
+	Status     string `gorm:"size:16;default:pending" json:"status"` // pending / pushed
+	// 推送可观测性（2026-08-31）：pending 期间最近一次失败原因/累计失败次数/最后尝试时间，
+	// 面板直接展示失败原因；成功推送（MarkPushedIfSame）或重新生成（SavePending）后清零。
+	LastError     string     `gorm:"size:500" json:"last_error"`
+	Attempts      int        `json:"attempts"`
+	LastAttemptAt *time.Time `json:"last_attempt_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	PushedAt      *time.Time `json:"pushed_at"`
 }
 
 // PendingCert 证书待推记录（U7：节点离线时上传的证书，上线后补推）。

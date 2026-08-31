@@ -350,7 +350,14 @@ async function removeServer(row: any) {
           </el-table-column>
           <el-table-column label="配置同步" width="105">
             <template #default="{ row }">
-              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <el-tooltip
+                v-if="row.config_status === 'pending' && row.push_error"
+                :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
+                placement="top"
+              >
+                <span class="x-chip orange" style="cursor: help">待推送</span>
+              </el-tooltip>
+              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </template>
@@ -402,7 +409,14 @@ async function removeServer(row: any) {
                   {{ row.status === 1 ? '在线' : '离线' }}
                 </span>
               </div>
-              <span v-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
+              <el-tooltip
+                v-if="row.config_status === 'pending' && row.push_error"
+                :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
+                placement="top"
+              >
+                <span class="x-chip orange" style="cursor: help">待推送</span>
+              </el-tooltip>
+              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
               <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
               <span v-else class="x-chip gray">未生成</span>
             </div>

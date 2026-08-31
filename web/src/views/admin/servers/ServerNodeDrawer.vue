@@ -218,11 +218,25 @@ watch(
               </span>
             </div>
             <div class="desc-row">
+              <span class="k">Xray 进程</span>
+              <span class="v">
+                <span class="x-chip" :class="server.xray_running ? 'green' : 'red'">
+                  <span class="x-status-dot" :class="server.xray_running ? 'online' : 'offline'" />{{ server.xray_running ? '运行中' : '未运行' }}
+                </span>
+              </span>
+            </div>
+            <div class="desc-row">
               <span class="k">配置同步</span>
               <span class="v">
                 <span v-if="server.config_status === 'pushed'" class="x-chip green">已同步</span>
                 <span v-else-if="server.config_status === 'pending'" class="x-chip orange">待推送</span>
                 <span v-else class="x-chip gray">未生成</span>
+              </span>
+            </div>
+            <div v-if="server.config_status === 'pending' && server.push_error" class="desc-row">
+              <span class="k">推送失败</span>
+              <span class="v" style="color: var(--el-color-danger, #ef4444); font-size: 12px; word-break: break-all">
+                {{ server.push_error }}（已尝试 {{ server.push_attempts || 0 }} 次，最后尝试 {{ fmtTime(server.push_last_try_at ?? null) }}）
               </span>
             </div>
             <div class="desc-row"><span class="k">Agent 版本</span><span class="v mono">{{ server.agent_version || '—' }}</span></div>

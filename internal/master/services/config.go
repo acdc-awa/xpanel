@@ -8,11 +8,11 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // ConfigService 服务器 Xray 配置的生成与待推送管理。
@@ -387,10 +387,13 @@ func (s *ConfigService) SavePending(serverID uint64, configJSON string) error {
 		return err
 	}
 	return s.DB.Model(&p).Updates(map[string]any{
-		"config_json": configJSON,
-		"status":      "pending",
-		"pushed_at":   nil,
-		"updated_at":  now,
+		"config_json":     configJSON,
+		"status":          "pending",
+		"pushed_at":       nil,
+		"last_error":      "", // 新内容 = 新一轮推送，清空上一轮失败痕迹
+		"attempts":        0,
+		"last_attempt_at": nil,
+		"updated_at":      now,
 	}).Error
 }
 
@@ -417,9 +420,12 @@ func (s *ConfigService) MarkPushedIfSame(id uint64, configJSON string) (bool, er
 	res := s.DB.Model(&models.PendingConfig{}).
 		Where("id = ? AND config_json = ? AND status = ?", id, configJSON, "pending").
 		Updates(map[string]any{
-			"status":     "pushed",
-			"pushed_at":  now,
-			"updated_at": now,
+			"status":          "pushed",
+			"pushed_at":       now,
+			"last_error":      "",
+			"attempts":        0,
+			"last_attempt_at": nil,
+			"updated_at":      now,
 		})
 	if res.Error != nil {
 		return false, res.Error
@@ -434,9 +440,12 @@ func (s *ConfigService) MarkPushedByServerIfSame(serverID uint64, configJSON str
 	res := s.DB.Model(&models.PendingConfig{}).
 		Where("server_id = ? AND config_json = ? AND status = ?", serverID, configJSON, "pending").
 		Updates(map[string]any{
-			"status":     "pushed",
-			"pushed_at":  now,
-			"updated_at": now,
+			"status":          "pushed",
+			"pushed_at":       now,
+			"last_error":      "",
+			"attempts":        0,
+			"last_attempt_at": nil,
+			"updated_at":      now,
 		})
 	if res.Error != nil {
 		return false, res.Error

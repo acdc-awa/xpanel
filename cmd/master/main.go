@@ -74,6 +74,13 @@ func main() {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
+	// 启动清零节点在线标记：进程崩溃/被杀退出时 unregister 不执行，DB 里的 status=1
+	// 会永久残留（面板"永远在线"假象）。启动瞬间进程内必然没有任何节点连接，清零恒安全，
+	// 节点重连后 ServeWS 会立即写回 1。
+	if err := database.Model(&models.Server{}).Where("status = 1").Update("status", 0).Error; err != nil {
+		log.Printf("重置节点在线状态失败: %v", err)
+	}
+
 	// Stage 8：仓储适配层——GORM 实现为默认适配器；更换数据库适配只需替换此处构造。
 	billingStore := gormstore.NewBillingStore(database)
 

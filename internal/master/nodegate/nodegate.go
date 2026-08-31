@@ -17,9 +17,9 @@ import (
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
@@ -301,6 +301,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	updates := map[string]any{
 		"status":       1,
 		"last_seen_at": time.Now(),
+		"xray_running": hb.XrayRunning,
 	}
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
 		updates["agent_version"] = hb.Version
@@ -449,11 +450,13 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 	if !h.IsOnline(serverID) {
 		log.Printf("nodegate: 节点 %d 离线，配置待推送（上线时由 ServeWS 自动补推）", serverID)
+		h.recordPushFailure(p.ID, "节点离线，等待上线自动补推")
 		return
 	}
 	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
 	if err != nil {
 		log.Printf("nodegate: 推送配置失败 (server=%d): %v（保留待推送）", serverID, err)
+		h.recordPushFailure(p.ID, err.Error())
 		return
 	}
 	if res == nil || !res.OK {
@@ -462,6 +465,7 @@ func (h *Hub) PushPending(serverID uint64) {
 			msg = res.Error
 		}
 		log.Printf("nodegate: 节点 %d 拒绝推送的配置: %s（保留待推送）", serverID, msg)
+		h.recordPushFailure(p.ID, "节点拒绝: "+msg)
 		return
 	}
 	marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
@@ -474,6 +478,22 @@ func (h *Hub) PushPending(serverID uint64) {
 	} else {
 		// 推送期间 pending 已被更新（如用户编辑/每小时校准），保持 pending 待下一轮推送
 		log.Printf("nodegate: 节点 %d 推送成功但 pending 内容已被更新，保留待推送", serverID)
+	}
+}
+
+// recordPushFailure 记录一次配置推送失败：last_error/attempts/last_attempt_at 落到
+// PendingConfig 行上，面板"待推送"旁直接展示原因，不必翻主控日志。失败不改变 pending 状态。
+func (h *Hub) recordPushFailure(pendingID uint64, reason string) {
+	if len(reason) > 500 { // 与模型列宽一致，防 agent 回执里的配置报错细节超长；按 rune 截避免切断多字节字符
+		reason = string([]rune(reason)[:500])
+	}
+	if err := h.DB.Model(&models.PendingConfig{}).Where("id = ?", pendingID).
+		Updates(map[string]any{
+			"last_error":      reason,
+			"attempts":        gorm.Expr("attempts + 1"),
+			"last_attempt_at": time.Now(),
+		}).Error; err != nil {
+		log.Printf("nodegate: 记录推送失败状态出错 (pending=%d): %v", pendingID, err)
 	}
 }
 
@@ -520,13 +540,28 @@ func (h *Hub) SyncUsersToAll() {
 func (h *Hub) watchdog() {
 	defer h.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
+	retryTicker := time.NewTicker(2 * time.Minute) // 待推送配置短周期补推（2026-08-31）
 	alignTicker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
+	defer retryTicker.Stop()
 	defer alignTicker.Stop()
 	for {
 		select {
 		case <-h.quit:
 			return
+		case <-retryTicker.C:
+			// 在线节点的待推送配置每 2 分钟补推一次：推送失败（Ask 出错/节点拒绝）不再依赖
+			// 1 小时校准兜底。推的是已保存的 config_json（不重新 Generate），绕开 Generate
+			// 失败导致的重推死锁；离线节点由上线时 ServeWS 自动补推覆盖，故只遍历注册表。
+			h.mu.RLock()
+			var serverIDs []uint64
+			for id := range h.conns {
+				serverIDs = append(serverIDs, id)
+			}
+			h.mu.RUnlock()
+			for _, id := range serverIDs {
+				go h.PushPending(id)
+			}
 		case <-ticker.C:
 			h.mu.RLock()
 			var stale []*Conn

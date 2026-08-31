@@ -303,8 +303,12 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 	srvName := map[uint64]string{}
 	for i := range servers {
 		v := toServerView(&servers[i])
-		if d.Hub != nil && d.Hub.IsOnline(v.ID) {
-			v.Status = 1
+		// 在线状态以网关注册表为准双向覆盖（同 AdminServers：防 DB 残留 status=1 假在线）
+		if d.Hub != nil {
+			v.Status = 0
+			if d.Hub.IsOnline(v.ID) {
+				v.Status = 1
+			}
 		}
 		srvViews = append(srvViews, v)
 		srvName[servers[i].ID] = servers[i].Name

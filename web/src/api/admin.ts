@@ -198,6 +198,10 @@ export interface ServerItem {
   remark: string
   status: number // 0 离线 1 在线
   config_status: string // pushed / pending / ''（无待推送配置）
+  push_error?: string // 待推送配置最近一次失败原因（仅 pending 时有值）
+  push_attempts?: number // 待推送配置累计失败次数
+  push_last_try_at?: string | null
+  xray_running: boolean // 节点心跳上报的 xray 进程运行状态
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   default_outbound_domain_strategy: string // 默认出口出站解析策略（freedom: AsIs/UseIP/UseIPv4/UseIPv6）

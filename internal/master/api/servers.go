@@ -9,16 +9,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 // serverView 服务器对外结构。
 type serverView struct {
 	ID                    uint64     `json:"id"`
-	ServerType            string     `json:"server_type"`             // xray（托管 Xray-core 计算节点）
+	ServerType            string     `json:"server_type"` // xray（托管 Xray-core 计算节点）
 	Name                  string     `json:"name"`
 	Host                  string     `json:"host"`
 	NodeID                string     `json:"node_id"`
@@ -26,10 +26,14 @@ type serverView struct {
 	Remark                string     `json:"remark"`
 	Status                int        `json:"status"`                  // 0 离线 1 在线
 	ConfigStatus          string     `json:"config_status"`           // pushed / pending / ""（无待推送配置）
-	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
-	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
+	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
+	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
+	PushLastTryAt         *time.Time `json:"push_last_try_at,omitempty"`
+	DefaultOutboundTag    string     `json:"default_outbound_tag"`             // 路由默认出口
+	RoutingDomainStrategy string     `json:"routing_domain_strategy"`          // 路由域名策略（路由匹配阶段）
 	DefaultOutboundDS     string     `json:"default_outbound_domain_strategy"` // 默认出口出站解析策略（freedom: AsIs/UseIP/UseIPv4/UseIPv6）
-	AgentVersion          string     `json:"agent_version"`        // 节点心跳上报的 agent 版本（旧 agent 为空）
+	AgentVersion          string     `json:"agent_version"`                    // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning           bool       `json:"xray_running"`                     // 节点心跳上报的 xray 进程运行状态
 	LastSeenAt            *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 }
@@ -46,6 +50,7 @@ func toServerView(s *models.Server) serverView {
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		DefaultOutboundDS:     s.DefaultOutboundDS,
 		AgentVersion:          s.AgentVersion,
+		XrayRunning:           s.XrayRunning,
 		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
 	}
 }
@@ -57,21 +62,42 @@ func (d *Deps) AdminServers(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	// 一次查询所有待推送配置状态
-	statusMap := map[uint64]string{}
-	var pends []models.PendingConfig
-	if err := d.DB.Select("server_id", "status").Find(&pends).Error; err == nil {
+	// 一次查询所有待推送配置状态（含最近一次失败原因，面板直接展示）
+	type pendRow struct {
+		ServerID      uint64
+		Status        string
+		LastError     string
+		Attempts      int
+		LastAttemptAt *time.Time
+	}
+	statusMap := map[uint64]pendRow{}
+	var pends []pendRow
+	if err := d.DB.Model(&models.PendingConfig{}).
+		Select("server_id", "status", "last_error", "attempts", "last_attempt_at").
+		Find(&pends).Error; err == nil {
 		for _, p := range pends {
-			statusMap[p.ServerID] = p.Status
+			statusMap[p.ServerID] = p
 		}
 	}
 	items := make([]serverView, 0, len(list))
 	for i := range list {
 		v := toServerView(&list[i])
-		if d.Hub != nil && d.Hub.IsOnline(v.ID) {
-			v.Status = 1
+		// 在线状态以网关注册表为唯一事实来源双向覆盖：DB status 仅作 Hub 为空时的兜底。
+		// 只升不降的话，master 崩溃重启（unregister 未执行）后残留的 status=1 会让节点"永远在线"。
+		if d.Hub != nil {
+			v.Status = 0
+			if d.Hub.IsOnline(v.ID) {
+				v.Status = 1
+			}
 		}
-		v.ConfigStatus = statusMap[list[i].ID]
+		if pend, ok := statusMap[list[i].ID]; ok {
+			v.ConfigStatus = pend.Status
+			if pend.Status == "pending" {
+				v.PushError = pend.LastError
+				v.PushAttempts = pend.Attempts
+				v.PushLastTryAt = pend.LastAttemptAt
+			}
+		}
 		items = append(items, v)
 	}
 	util.OK(c, gin.H{"items": items})
@@ -501,16 +527,16 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	}
 
 	type bucketAgg struct {
-		timeStr    string
-		cpuSum     float64
-		memSum     float64
-		memTotal   uint64
-		diskSum    float64
-		diskTotal  uint64
-		rxRateSum  float64
-		txRateSum  float64
-		usersSum   int
-		count      int
+		timeStr   string
+		cpuSum    float64
+		memSum    float64
+		memTotal  uint64
+		diskSum   float64
+		diskTotal uint64
+		rxRateSum float64
+		txRateSum float64
+		usersSum  int
+		count     int
 	}
 
 	buckets := make([]bucketAgg, numBuckets)
@@ -570,7 +596,15 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 			if lastMemTotal > 0 {
 				memPercentList[i] = float64(int((mVal/float64(lastMemTotal)*100)*10)) / 10
 			}
-			diskPercentList[i] = float64(int(dVal*10)) / 10
+			// 磁盘占用率 = 已用字节均值 / 总量 * 100（2026-08-31 修复：此前漏除总量，
+			// 已用字节数被直接当百分数输出，出现 3797404720% 这类值）
+			if lastDiskTotal > 0 {
+				pct := dVal / float64(lastDiskTotal) * 100
+				if pct > 100 {
+					pct = 100
+				}
+				diskPercentList[i] = float64(int(pct*10)) / 10
+			}
 			// 字节/秒 -> Mbps (8 / 1,000,000)
 			rxMbps := (b.rxRateSum / float64(b.count)) * 8 / 1_000_000
 			txMbps := (b.txRateSum / float64(b.count)) * 8 / 1_000_000

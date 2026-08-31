@@ -43,6 +43,11 @@ function formatBandwidth(bytesPerSec: number): string {
   return `${mbps.toFixed(2)} Mbps`
 }
 
+function fmtTime(t: string | null) {
+  if (!t) return '—'
+  return new Date(t).toLocaleString('zh-CN', { hour12: false })
+}
+
 function initCharts() {
   if (trendChartRef.value && !trendChart) {
     trendChart = echarts.init(trendChartRef.value)
@@ -394,6 +399,11 @@ onUnmounted(() => {
                 </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="最后心跳" width="140">
+              <template #default="{ row }">
+                <span class="muted cell-mono" style="font-size: 11px">{{ fmtTime(row.last_seen_at) }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="CPU" width="110">
               <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 6px">
@@ -504,6 +514,10 @@ onUnmounted(() => {
                 <div class="grid-item">
                   <span class="item-label">在线设备数</span>
                   <div class="item-value cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</div>
+                </div>
+                <div class="grid-item full-width">
+                  <span class="item-label">最后心跳</span>
+                  <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.last_seen_at) }}</div>
                 </div>
               </div>
             </div>
