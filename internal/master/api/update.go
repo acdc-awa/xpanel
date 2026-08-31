@@ -117,7 +117,10 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	}
 
 	// 2. 下载 + sha256 校验
-	stage, err := os.MkdirTemp(d.dataDir(), "update-staging-")
+	// staging 必须与替换目标同挂载点（/app = 宿主安装目录整挂）才能原子 rename：
+	// /app/data 是独立 bind mount（./data:/app/data），staging 放那里跨挂载 rename 必报
+	// EXDEV（invalid cross-device link），自更新会卡死在替换一步（2026-08-31 实机复现路径）。
+	stage, err := os.MkdirTemp(appRoot, ".update-staging-")
 	if err != nil {
 		util.ServerError(c, "创建暂存目录失败: "+err.Error())
 		return
@@ -271,16 +274,6 @@ func (d *Deps) repo() string {
 		return d.Cfg.Update.Repo
 	}
 	return "acdc-awa/xpanel"
-}
-
-// dataDir 容器形态的数据目录（staging 需与 /app 同文件系统才能原子 rename）。
-func (d *Deps) dataDir() string {
-	if d.Cfg != nil && d.Cfg.DB.Driver == "sqlite" && d.Cfg.DB.DSN != "" {
-		if dir := filepath.Dir(d.Cfg.DB.DSN); dir != "" && dir != "." {
-			return dir
-		}
-	}
-	return "/app/data"
 }
 
 // verifyChecksum 用 release 的 .sha256 强制校验（与 install.sh 相同信任模型）。

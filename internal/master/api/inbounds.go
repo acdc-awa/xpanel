@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -64,7 +65,7 @@ type inboundForm struct {
 	Type               string     `json:"type"`                  // user / relay（空 = user）
 	CertID             *uint64    `json:"cert_id"`               // 绑定证书（T5 校验存在性）
 	Flow               string     `json:"flow"`                  // 入站级流控（空=自动 / xtls-rprx-vision / none）
-	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / listen / custom
+	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / custom（订阅专用，listen 已退役）
 	ShareAddr          string     `json:"share_addr"`            // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`            // 自定义分享端口（0 = 使用入站端口）
 	ShareSecurity      string     `json:"share_security"`        // auto / tls / none
@@ -161,7 +162,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		return
 	}
 	if req.ShareAddrStrategy != "" && !validShareAddrStrategy(req.ShareAddrStrategy) {
-		util.BadRequest(c, "分享地址策略仅支持 node / listen / custom")
+		util.BadRequest(c, "分享地址策略仅支持 node / custom")
 		return
 	}
 	if req.SharePort < 0 || req.SharePort > 65535 {
@@ -263,8 +264,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		StreamSettings     *string    `json:"stream_settings"`
 		Sniffing           *string    `json:"sniffing"`
 		Ratio              *float64   `json:"ratio"`
-		TotalGB            *int64     `json:"total_gb"`
-		ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
+		TotalGB            *int64          `json:"total_gb"`
+		ExpiryTime         json.RawMessage `json:"expiry_time"` // 三元：字段缺省=不动 / null=清空 / 字符串=设置
 		Enabled            *bool      `json:"enabled"`
 		Type               *string    `json:"type"`
 		InternalUUID       *string    `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
@@ -333,7 +334,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.ShareAddrStrategy != nil && *req.ShareAddrStrategy != "" && !validShareAddrStrategy(*req.ShareAddrStrategy) {
-		util.BadRequest(c, "分享地址策略仅支持 node / listen / custom")
+		util.BadRequest(c, "分享地址策略仅支持 node / custom")
 		return
 	}
 	if req.SharePort != nil && (*req.SharePort < 0 || *req.SharePort > 65535) {
@@ -410,8 +411,15 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.TotalGB != nil {
 		updates["total"] = *req.TotalGB
 	}
-	if req.ExpiryTime != nil {
-		updates["expiry_time"] = req.ExpiryTime
+	if req.ExpiryTime != nil && len(req.ExpiryTime) > 0 && string(req.ExpiryTime) != "null" {
+		var t time.Time
+		if err := json.Unmarshal(req.ExpiryTime, &t); err != nil {
+			util.BadRequest(c, "到期时间格式错误（需 RFC3339，如 2026-12-31T23:59:59Z）")
+			return
+		}
+		updates["expiry_time"] = t
+	} else if req.ExpiryTime != nil && len(req.ExpiryTime) > 0 {
+		updates["expiry_time"] = nil // 显式 null = 清空到期时间
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled

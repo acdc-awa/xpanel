@@ -304,9 +304,11 @@ async function confirmApply() {
     const { data } = await applyUpdate()
     if (data.code === 0) ElMessage.success(data.message)
     else ElMessage.error(data.message)
-  } catch {
-    // 进程可能已开始退出（连接中断），按已触发提示
-    ElMessage.info('更新已触发，等待容器重启…')
+  } catch (e: any) {
+    // 服务端返回了 4xx/5xx（下载失败/校验不过/自检不过等）→ 展示真实原因；
+    // 仅连接中断（旧进程被杀、套餐失败前已开始替换）才算「已触发」。
+    if (e?.response?.data?.message) ElMessage.error(e.response.data.message)
+    else ElMessage.info('更新已触发，等待容器重启…')
   } finally {
     updateApplying.value = false
   }

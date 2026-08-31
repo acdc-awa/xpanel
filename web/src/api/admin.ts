@@ -102,7 +102,9 @@ export function checkUpdate() {
 }
 
 export function applyUpdate(version = '') {
-  return http.post<ApiResp<{ ok: boolean; version: string; message: string }>>('/admin/update/apply', { version })
+  // 应用更新在服务端完成下载+校验+替换，耗时远超实例默认 10s，必须单独放宽超时
+  // （2026-08-31 实机：10s 掐断导致前端永远只看到「已触发」而版本不涨）。
+  return http.post<ApiResp<{ ok: boolean; version: string; message: string }>>('/admin/update/apply', { version }, { timeout: 300000 })
 }
 
 export function getServerMetrics(id: number, range = '1h') {
@@ -269,10 +271,12 @@ export interface InboundPayload {
   stream_settings?: string
   sniffing?: string
   ratio?: number
+  total_gb?: number // 入站总流量上限（GB，0=不限）
+  expiry_time?: string | null // 入站到期时间（null=永久；更新时 null 显式清空）
   type?: string // user / relay
   cert_id?: number
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
-  share_addr_strategy?: string // node / listen / custom（订阅专用）
+  share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
   share_security?: string // auto / tls / none

@@ -279,12 +279,14 @@ export interface InboundItem {
   stream_settings: string
   sniffing: string
   ratio: number
+  total_gb?: number // 入站总流量上限（GB，0=不限）
+  expiry_time?: string | null // 入站到期时间（null/缺失=永久）
   enabled: boolean
   type?: string // user / relay（Phase T）
   internal_uuid?: string // relay 只读（节点生成上报）
   cert_id?: number // 绑定的证书
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
-  share_addr_strategy?: string // node / listen / custom（订阅专用）
+  share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
   share_security?: string // auto / tls / none（订阅安全层覆写）

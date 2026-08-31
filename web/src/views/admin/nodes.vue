@@ -273,6 +273,8 @@ function editorModelValue(): string {
     stream_settings: editing.value.stream_settings,
     sniffing: editing.value.sniffing,
     ratio: editing.value.ratio,
+    total_gb: editing.value.total_gb ?? 0,
+    expiry_time: editing.value.expiry_time ?? null,
     type: editing.value.type || 'user',
     cert_id: editing.value.cert_id || 0,
     share_addr_strategy: editing.value.share_addr_strategy,
@@ -283,6 +285,7 @@ function editorModelValue(): string {
     share_host: editing.value.share_host,
     share_path: editing.value.share_path,
     share_allow_insecure: editing.value.share_allow_insecure,
+    layer_id: editing.value.layer_id || 0,
   })
 }
 
@@ -335,6 +338,8 @@ async function save() {
       stream_settings: c.streamSettings,
       sniffing: c.sniffing || undefined,
       ratio: c.ratio,
+      total_gb: c.total_gb,
+      expiry_time: c.expiry_time ?? null,
       type: formType.value,
       cert_id: formCertId.value || undefined,
       flow: c.flow || undefined,
@@ -417,6 +422,13 @@ function transportOf(row: any): string {
     return '—'
   }
 }
+
+// 流量/到期摘要：如 "100 GB · 09-30 到期" / "不限 · 永久" / "100 GB · 永久"
+function quotaOf(row: any): string {
+  const gb = typeof row.total_gb === 'number' && row.total_gb > 0 ? `${row.total_gb} GB` : '不限'
+  const exp = row.expiry_time ? new Date(row.expiry_time).toLocaleDateString('zh-CN') + ' 到期' : '永久'
+  return `${gb} · ${exp}`
+}
 </script>
 
 <template>
@@ -472,6 +484,11 @@ function transportOf(row: any): string {
           </el-table-column>
           <el-table-column label="传输/TLS" width="130">
             <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
+          </el-table-column>
+          <el-table-column label="流量/到期" min-width="120">
+            <template #default="{ row }">
+              <span class="muted" style="font-size: 12px">{{ quotaOf(row) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="状态" width="80">
             <template #default="{ row }">

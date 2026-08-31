@@ -39,6 +39,10 @@ var Version = "dev"
 
 func main() {
 	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径")
+	// 冒烟自检标志（面板内更新用）：update.go 以「-self-test」形态调用新下载二进制，
+	// 这里必须注册为布尔标志，否则 flag 解析直接报「flag provided but not defined」退出 2，
+	// 自更新会卡在自检一步永远无法替换（2026-08-31 实机定位）；位置参数形态亦保留兼容。
+	selfTest := flag.Bool("self-test", false, "冒烟自检：加载配置后退出（面板内更新用）")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -49,7 +53,7 @@ func main() {
 	// 冒烟自检（面板内更新用）：仅验证配置可加载，退出码 0=通过。
 	// 刻意不连库不带任何副作用——新二进制执行本检查时旧进程仍在运行，
 	// 避免 SQLite 并发写与误锁；运行时风险由 entrypoint 失败回滚兜底。
-	if len(flag.Args()) > 0 && flag.Args()[0] == "self-test" {
+	if *selfTest || (len(flag.Args()) > 0 && flag.Args()[0] == "self-test") {
 		os.Exit(runSelfTest(*cfgPath))
 	}
 
