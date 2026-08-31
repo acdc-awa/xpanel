@@ -237,7 +237,6 @@ const realityForm = reactive<RealitySettings>({
   public_key: '',
   private_key: '',
   short_id: 'abcdef0123456789',
-  spider_x: '/',
 })
 const realityMinClientVer = ref('')
 const realityMaxClientVer = ref('')
@@ -448,7 +447,6 @@ function buildStreamSettingsJSON(): string {
       shortIds: realityForm.short_id ? realityForm.short_id.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
     }
     if (realityForm.public_key) s.realitySettings.publicKey = realityForm.public_key
-    if (realityForm.spider_x && realityForm.spider_x !== '/') s.realitySettings.spiderX = realityForm.spider_x
     if (realityMinClientVer.value) s.realitySettings.minClientVer = realityMinClientVer.value
     if (realityMaxClientVer.value) s.realitySettings.maxClientVer = realityMaxClientVer.value
     if (realityMaxTimeDiff.value > 0) s.realitySettings.maxTimeDiff = realityMaxTimeDiff.value
@@ -614,7 +612,7 @@ function parseJsonToForm(str: string) {
       sniffingForm.routeOnly = !!sniffObj.routeOnly || !!sniffObj.route_only
     }
 
-    // REALITY：存储/生成均为 camelCase 规范（dest/serverNames/privateKey/shortIds/spiderX/min|maxClientVer/maxTimeDiff）
+    // REALITY：存储/生成均为 camelCase 规范（dest/serverNames/privateKey/shortIds/min|maxClientVer/maxTimeDiff）；publicKey 为客户端字段仅供订阅消费
     if (realitySettings && typeof realitySettings === 'object') {
       realityForm.dest = realitySettings.dest || ''
       const sn = Array.isArray(realitySettings.serverNames)
@@ -627,7 +625,6 @@ function parseJsonToForm(str: string) {
         ? realitySettings.shortIds.filter(Boolean)[0]
         : realitySettings.shortId || ''
       realityForm.short_id = sid || ''
-      realityForm.spider_x = realitySettings.spiderX || '/'
       realityMinClientVer.value = realitySettings.minClientVer ? String(realitySettings.minClientVer) : ''
       realityMaxClientVer.value = realitySettings.maxClientVer ? String(realitySettings.maxClientVer) : ''
       realityMaxTimeDiff.value = realitySettings.maxTimeDiff ? Number(realitySettings.maxTimeDiff) : 0
@@ -1026,10 +1023,6 @@ async function copyText(text: string, label: string) {
                   <el-input v-model="realityForm.short_id" placeholder="16 位十六进制" />
                   <el-button @click="genShortId"><el-icon><Refresh /></el-icon></el-button>
                 </div>
-              </el-form-item>
-
-              <el-form-item label="SpiderX 爬虫路径">
-                <el-input v-model="realityForm.spider_x" placeholder="/" />
               </el-form-item>
             </div>
 

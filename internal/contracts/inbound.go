@@ -18,11 +18,15 @@ type InboundSpec struct {
 	Listen   string
 	Port     int
 
-	Network  string       // streamSettings.network（tcp / xhttp / ...，原样透传）
-	Security string       // streamSettings.security（none / tls / reality，原样透传）
-	TLS      *TLSSpec     // tlsSettings 存在时非 nil（不限于 security=tls）
-	Reality  *RealitySpec // security=reality 且 realitySettings 存在时非 nil
-	XHTTP    *XHTTPSpec   // network=xhttp 且 xhttpSettings.mode 非空时非 nil
+	Network  string // streamSettings.network（tcp / xhttp / ...，原样透传）
+	Security string // streamSettings.security（none / tls / reality，原样透传）
+	// Fingerprint 客户端 utls 指纹（streamSettings.fingerprint）。该字段属于客户端角色：
+	// 订阅/中转出站消费，服务端配置输出时由 sanitize 剥离（xray 对未知字段静默忽略，
+	// 但透传属于脏配置）。
+	Fingerprint string
+	TLS         *TLSSpec     // tlsSettings 存在时非 nil（不限于 security=tls）
+	Reality     *RealitySpec // security=reality 且 realitySettings 存在时非 nil
+	XHTTP       *XHTTPSpec   // network=xhttp 且 xhttpSettings.mode 非空时非 nil
 
 	Settings map[string]any // 协议 settings 解码（clients 由后端注入，不经此结构）
 	Stream   map[string]any // streamSettings 原始 map（高级/新增字段兜底通道）
@@ -98,6 +102,7 @@ func decodeStreamInto(spec *InboundSpec, raw string) {
 	spec.Stream = m
 	spec.Network, _ = m["network"].(string)
 	spec.Security, _ = m["security"].(string)
+	spec.Fingerprint, _ = m["fingerprint"].(string)
 
 	if tls, ok := m["tlsSettings"].(map[string]any); ok {
 		spec.TLS = &TLSSpec{

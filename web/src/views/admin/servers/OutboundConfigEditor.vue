@@ -227,8 +227,9 @@ function buildStreamJSON(): string {
   if (form.vless_security === 'tls') {
     const t: Record<string, any> = { serverName: form.tls_server_name || undefined }
     if (form.tls_allow_insecure) t.allowInsecure = true
+    // 指纹是客户端角色字段，合法位置在 tlsSettings 内（顶层字段不存在，xray 会静默忽略）
+    if (form.vless_fingerprint) t.fingerprint = form.vless_fingerprint
     s.tlsSettings = t
-    if (form.vless_fingerprint) s.fingerprint = form.vless_fingerprint
   } else if (form.vless_security === 'reality') {
     // 出站 REALITY 公钥标准字段为 password（publicKey 是兼容旧名，见 01 号文档 §2.2）
     s.realitySettings = {

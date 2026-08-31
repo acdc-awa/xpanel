@@ -1,8 +1,8 @@
 package protocols
 
 import (
-	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 // VLESSPlugin VLESS 协议插件（tcp/xhttp + reality/tls/none）。
@@ -86,6 +86,12 @@ func (VLESSPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.Pro
 	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）
 	dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
 
+	// 指纹为客户端角色字段（streamSettings.fingerprint），tls/reality 均消费，空兜底 chrome
+	fp := spec.Fingerprint
+	if fp == "" {
+		fp = "chrome"
+	}
+
 	switch sec {
 	case "tls":
 		sni, allowInsecure := "", false
@@ -100,12 +106,14 @@ func (VLESSPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.Pro
 		}
 		dto.Security.SNI = sni
 		dto.Security.AllowInsecure = allowInsecure
+		dto.Security.Fingerprint = fp
 	case "reality":
 		r := spec.Reality
 		if r == nil || r.ServerName == "" {
 			return nil
 		}
 		dto.Security.SNI = r.ServerName
+		dto.Security.Fingerprint = fp
 		dto.Security.Reality = &contracts.RealityOptions{
 			PublicKey: r.PublicKey,
 			ShortID:   r.ShortID,

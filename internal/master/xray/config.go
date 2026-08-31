@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 // InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。
@@ -322,8 +322,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 			routing[k] = v
 		}
 	}
-	blockCN := checkBlockCN(outbounds, defaultOutboundTag)
-	routing["rules"] = mergeRoutingRules(routingRules, blockCN)
+	routing["rules"] = mergeRoutingRules(routingRules)
 	if routingDomainStrategy != "" {
 		routing["domainStrategy"] = routingDomainStrategy
 	}
@@ -417,6 +416,8 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		}
 		// vless 出站 users 兜底注入 encryption:"none"（xray 校验强制，见 01 号文档 §2.2）
 		normalizeVlessOutbound(item)
+		// freedom 出站面板开关（block_cn）拆分为 finalRules，面板键不透传给 xray
+		translateFreedomPanelKeys(item)
 		tag, _ := item["tag"].(string)
 		if tag != "" {
 			if idx, exists := seen[tag]; exists {
@@ -495,13 +496,18 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 	}
 	switch sec {
 	case "reality":
-		// 出站 REALITY：公钥标准名 password、SNI/shortId 单数（01 号文档 §2.2）
+		// 出站 REALITY：公钥标准名 password、SNI/shortId 单数（01 号文档 §2.2）；
+		// 指纹取目标入站存储的 fingerprint（客户端角色字段），空兜底 chrome
 		if r := spec.Reality; r != nil && r.ServerName != "" {
+			fp := spec.Fingerprint
+			if fp == "" {
+				fp = "chrome"
+			}
 			ss["realitySettings"] = map[string]any{
 				"serverName":  r.ServerName,
 				"password":    r.PublicKey,
 				"shortId":     r.ShortID,
-				"fingerprint": "chrome",
+				"fingerprint": fp,
 				"spiderX":     "/",
 			}
 		}
@@ -512,6 +518,9 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 		}
 		// 注意：v26.6.27 已移除 allowInsecure（迁移 pinnedPeerCertSha256/verifyPeerCertByName），不输出
 		tlsSettings := map[string]any{"serverName": serverName}
+		if fp := spec.Fingerprint; fp != "" {
+			tlsSettings["fingerprint"] = fp
+		}
 		// 链式代理证书固定：目标入站绑定的证书带 pin（面板生成/上传时自动计算入库）时注入，
 		// pin 命中即验证通过——自签证书链路亦防 MITM（v26.6.27 实测字段为 leaf DER 的 64 位小写 hex）。
 		if target.CertPin != "" {
@@ -552,29 +561,55 @@ func normalizeVlessOutbound(item map[string]any) {
 	}
 }
 
-// checkBlockCN 检查启用的 direct 出站或默认出口是否开启了 block_cn 开关。
-func checkBlockCN(outbounds []models.ServerOutbound, defaultOutboundTag string) bool {
-	for _, ob := range outbounds {
-		if !ob.Enabled {
+// translateFreedomPanelKeys 把 freedom 出站 settings 中的面板专用开关拆分为真实 xray 表达，
+// 面板键本身不透传（xray freedom settings 无 block_cn 字段，静默忽略属于脏配置）。
+// block_cn（阻止回国流量）→ 出站级 finalRules 注入 {"action":"block","ip":["geoip:cn"]}：
+// 路由层规则是全局分发（会误伤中转等其他出口的合法回国链路），finalRules 只拦走该出站的
+// 流量，且在解析出最终 IP 后、拨号前匹配，域名会被强制解析，比 geosite 更彻底；
+// 域名级拦截无此字段，故仅支持 IP 级。
+func translateFreedomPanelKeys(item map[string]any) {
+	proto, _ := item["protocol"].(string)
+	if proto != "freedom" {
+		return
+	}
+	settings, _ := item["settings"].(map[string]any)
+	if settings == nil {
+		return
+	}
+	blockCN, _ := settings["block_cn"].(bool)
+	delete(settings, "block_cn")
+	if !blockCN {
+		return
+	}
+	rules, _ := settings["finalRules"].([]any)
+	for _, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
 			continue
 		}
-		if ob.Tag == "direct" || (defaultOutboundTag != "" && ob.Tag == defaultOutboundTag) || ob.Protocol == "freedom" {
-			if ob.SettingsJSON != "" {
-				var s struct {
-					BlockCN bool `json:"block_cn"`
-				}
-				if err := json.Unmarshal([]byte(ob.SettingsJSON), &s); err == nil && s.BlockCN {
-					return true
-				}
+		if action, _ := m["action"].(string); action == "block" {
+			if ips, ok := m["ip"].([]any); ok && len(ips) > 0 && ips[0] == "geoip:cn" {
+				return // 已有同类规则（存量数据），不重复注入
 			}
 		}
 	}
-	return false
+	newRule := map[string]any{"action": "block", "ip": []string{"geoip:cn"}}
+	for i, r := range rules {
+		if m, ok := r.(map[string]any); ok {
+			if action, _ := m["action"].(string); action == "allow" {
+				// 插在 allow 兜底之前（兜底后的规则永不匹配）
+				updated := append(append(rules[:i:i], newRule), rules[i:]...)
+				settings["finalRules"] = updated
+				return
+			}
+		}
+	}
+	settings["finalRules"] = append(rules, newRule)
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网直连 / 阻断回国）→ 节点规则（按 Priority ASC, id ASC 排序）。
-func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any {
+// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网阻断）→ 节点规则（按 Priority ASC, id ASC 排序）。
+func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 	list := []any{
 		map[string]any{
 			"type":        "field",
@@ -583,11 +618,12 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 		},
 	}
 
-	// 默认内置规则（3x-ui 风格）：BT 流量屏蔽、内网 IP 直连、阻断回国流量（若开启）
+	// 默认内置规则：BT 流量屏蔽、内网 IP 阻断。
+	// 内网走 blocked 而非 direct：direct 出站 finalRules 兜底也拦 private（出站级第二道防线），
+	// 路由层显式 blocked 保证立即断开（否则流量被送进 direct 后经历 30-90s 黑洞才关闭）。
 	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）
 	hasBT := false
 	hasPrivate := false
-	hasCN := false
 	for _, rule := range rules {
 		if rule.Enabled {
 			if rule.Protocol == "bittorrent" {
@@ -595,9 +631,6 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 			}
 			if rule.IP == "geoip:private" {
 				hasPrivate = true
-			}
-			if strings.Contains(rule.Domain, "geosite:cn") || strings.Contains(rule.IP, "geoip:cn") {
-				hasCN = true
 			}
 		}
 	}
@@ -612,14 +645,6 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, blockCN ...bool) []any 
 		list = append(list, map[string]any{
 			"type":        "field",
 			"ip":          []string{"geoip:private"},
-			"outboundTag": "direct",
-		})
-	}
-	if len(blockCN) > 0 && blockCN[0] && !hasCN {
-		list = append(list, map[string]any{
-			"type":        "field",
-			"domain":      []string{"geosite:cn"},
-			"ip":          []string{"geoip:cn"},
 			"outboundTag": "blocked",
 		})
 	}

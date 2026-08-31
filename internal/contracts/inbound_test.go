@@ -8,11 +8,11 @@ import (
 
 func TestDecodeInbound_Full(t *testing.T) {
 	inb := &models.Inbound{
-		ID:       7,
-		Tag:      "vless-reality",
-		Protocol: "vless",
-		Port:     443,
-		Listen:   "0.0.0.0",
+		ID:           7,
+		Tag:          "vless-reality",
+		Protocol:     "vless",
+		Port:         443,
+		Listen:       "0.0.0.0",
 		SettingsJSON: `{"decryption":"none","fallbacks":[{"dest":"8080"}]}`,
 		StreamSettings: `{
 			"network": "xhttp",
@@ -89,6 +89,14 @@ func TestDecodeInbound_RealityCompat(t *testing.T) {
 	spec = DecodeStream(`{"security":"tls","realitySettings":{"serverName":"s.com","publicKey":"pk"}}`)
 	if spec.Reality != nil {
 		t.Errorf("security=tls 不应解析 Reality: %+v", spec.Reality)
+	}
+	// 顶层 fingerprint（客户端角色字段）解码，供订阅消费
+	spec = DecodeStream(`{"security":"reality","fingerprint":"firefox","realitySettings":{"serverName":"s.com"}}`)
+	if spec.Fingerprint != "firefox" {
+		t.Errorf("fingerprint 解码错误: %q", spec.Fingerprint)
+	}
+	if spec = DecodeStream(`{"security":"reality","realitySettings":{"serverName":"s.com"}}`); spec.Fingerprint != "" {
+		t.Errorf("缺省 fingerprint 应为空: %q", spec.Fingerprint)
 	}
 }
 

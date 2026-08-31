@@ -42,6 +42,27 @@ func TestSanitizeStreamSettings(t *testing.T) {
 			},
 		},
 		{
+			name: "delete client-only fields (fingerprint/publicKey/spiderX)",
+			in:   `{"network":"tcp","security":"reality","fingerprint":"chrome","realitySettings":{"dest":"a.com:443","privateKey":"k","publicKey":"pub","spiderX":"/","serverNames":["a.com"],"shortIds":["ab"]}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				if _, ok := m["fingerprint"]; ok {
+					t.Error("顶层 fingerprint（客户端字段）应删除")
+				}
+				r := m["realitySettings"].(map[string]any)
+				if _, ok := r["publicKey"]; ok {
+					t.Error("realitySettings.publicKey（客户端字段）应删除")
+				}
+				if _, ok := r["spiderX"]; ok {
+					t.Error("realitySettings.spiderX（客户端字段）应删除")
+				}
+				if r["dest"] != "a.com:443" || r["privateKey"] != "k" {
+					t.Error("服务端字段 dest/privateKey 应保留")
+				}
+			},
+		},
+		{
 			name: "delete tlsSettings.settings",
 			in:   `{"security":"tls","tlsSettings":{"serverName":"x.com","settings":{"allowInsecure":true}}}`,
 			want: func(t *testing.T, out string) {

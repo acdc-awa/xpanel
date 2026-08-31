@@ -18,6 +18,13 @@ func sanitizeStreamSettings(raw string) string {
 	// 面板专用字段，xray 不识别
 	delete(stream, "externalProxy")
 
+	// 客户端角色字段，不属于服务端 streamSettings（xray 静默忽略未知字段，但透传属于脏配置）。
+	// DB 原文保留：fingerprint 供订阅 client-fingerprint / vless fp= 消费，
+	// publicKey 供订阅 reality public-key / pbk= 消费；spiderX 无消费方仅随存。
+	delete(stream, "fingerprint")
+	deleteNestedKey(stream, "realitySettings", "publicKey")
+	deleteNestedKey(stream, "realitySettings", "spiderX")
+
 	// tlsSettings / realitySettings 下的 "settings" 是面板嵌套存储，不进 xray 配置
 	deleteNestedKey(stream, "tlsSettings", "settings")
 	deleteNestedKey(stream, "realitySettings", "settings")

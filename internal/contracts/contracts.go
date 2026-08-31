@@ -40,6 +40,7 @@ type SecurityOptions struct {
 	Type          string // none, tls, reality, ech ...
 	SNI           string // 已由 share_sni 或安全设置决策
 	AllowInsecure bool   // 是否跳过证书校验
+	Fingerprint   string // 客户端 utls 指纹（streamSettings.fingerprint；空视为 chrome）
 	Reality       *RealityOptions
 }
 

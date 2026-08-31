@@ -931,7 +931,8 @@ func TestGenerate_BlockCN(t *testing.T) {
 			ServerID:     1,
 			Tag:          "direct",
 			Protocol:     "freedom",
-			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true}`,
+			// block_cn 为面板专用开关：DB 存原文，生成时拆分为 finalRules，面板键不透传
+			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true,"finalRules":[{"action":"block","ip":["geoip:private"]},{"action":"allow"}]}`,
 			Enabled:      true,
 		},
 		{
@@ -949,6 +950,10 @@ func TestGenerate_BlockCN(t *testing.T) {
 	}
 
 	var root struct {
+		Outbounds []struct {
+			Tag      string `json:"tag"`
+			Settings map[string]any `json:"settings"`
+		} `json:"outbounds"`
 		Routing struct {
 			Rules []map[string]any `json:"rules"`
 		} `json:"routing"`
@@ -957,20 +962,97 @@ func TestGenerate_BlockCN(t *testing.T) {
 		t.Fatalf("Unmarshal config failed: %v", err)
 	}
 
-	hasCNRule := false
-	for _, rule := range root.Routing.Rules {
-		if rule["outboundTag"] == "blocked" {
-			domains, _ := rule["domain"].([]any)
-			ips, _ := rule["ip"].([]any)
-			if len(domains) > 0 && len(ips) > 0 && domains[0] == "geosite:cn" && ips[0] == "geoip:cn" {
-				hasCNRule = true
-				break
-			}
+	// 1. 面板键不透传：settings 中不应有 block_cn
+	var direct *struct {
+		Tag      string
+		Settings map[string]any
+	}
+	for i := range root.Outbounds {
+		if root.Outbounds[i].Tag == "direct" {
+			o := root.Outbounds[i]
+			direct = (*struct {
+				Tag      string
+				Settings map[string]any
+			})(&o)
 		}
 	}
-	if !hasCNRule {
-		t.Errorf("expected block CN rule (geosite:cn / geoip:cn -> blocked), but not found in rules: %+v", root.Routing.Rules)
+	if direct == nil {
+		t.Fatalf("direct outbound not found: %+v", root.Outbounds)
 	}
+	if _, ok := direct.Settings["block_cn"]; ok {
+		t.Errorf("block_cn 面板键不应透传给 xray: %+v", direct.Settings)
+	}
+
+	// 2. block_cn 拆分为 finalRules：{"block","geoip:cn"} 注入且位于 allow 兜底之前
+	rules, _ := direct.Settings["finalRules"].([]any)
+	blockCNIdx, allowIdx := -1, -1
+	for i, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		action, _ := m["action"].(string)
+		ips, _ := m["ip"].([]any)
+		if action == "block" && len(ips) > 0 && ips[0] == "geoip:cn" {
+			blockCNIdx = i
+		}
+		if action == "allow" && allowIdx == -1 {
+			allowIdx = i
+		}
+	}
+	if blockCNIdx == -1 {
+		t.Errorf("finalRules 中缺少 {block, geoip:cn}: %+v", rules)
+	}
+	if allowIdx != -1 && blockCNIdx > allowIdx {
+		t.Errorf("block geoip:cn 必须在 allow 兜底之前: %+v", rules)
+	}
+	if allowIdx != -1 && blockCNIdx != -1 {
+		// 已有的 block private 应保留在 block cn 之前
+		first := rules[0].(map[string]any)
+		if ips, _ := first["ip"].([]any); len(ips) == 0 || ips[0] != "geoip:private" {
+			t.Errorf("既有 block private 规则应保留: %+v", rules)
+		}
+	}
+
+	// 3. 路由层不再注入 AND 短路的 cn 规则（domain+ip 同规则需同时满足，基本永不命中）
+	for _, rule := range root.Routing.Rules {
+		if rule["outboundTag"] != "blocked" {
+			continue
+		}
+		domains, _ := rule["domain"].([]any)
+		ips, _ := rule["ip"].([]any)
+		if len(domains) > 0 && len(ips) > 0 {
+			t.Errorf("路由规则不应同时含 domain 与 ip（AND 语义短路）: %+v", rule)
+		}
+	}
+}
+
+func TestGenerate_PrivateRoutedToBlocked(t *testing.T) {
+	inbounds := []models.Inbound{
+		{ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
+	}
+	cfgBytes, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-in"), nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var root struct {
+		Routing struct {
+			Rules []map[string]any `json:"rules"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(cfgBytes, &root); err != nil {
+		t.Fatalf("Unmarshal config failed: %v", err)
+	}
+	for _, rule := range root.Routing.Rules {
+		ips, _ := rule["ip"].([]any)
+		if len(ips) > 0 && ips[0] == "geoip:private" {
+			if rule["outboundTag"] != "blocked" {
+				t.Errorf("geoip:private 应路由至 blocked（direct 出站 finalRules 会拦 private，路由 direct 会造成 30-90s 黑洞）: %+v", rule)
+			}
+			return
+		}
+	}
+	t.Errorf("缺少内网防护注入规则: %+v", root.Routing.Rules)
 }
 
 

@@ -76,6 +76,12 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 		parts = append(parts, fmt.Sprintf("flow: %s", dto.Auth.Flow))
 	}
 
+	// 客户端 utls 指纹：入站 streamSettings.fingerprint（插件已兜底 chrome）
+	fp := dto.Security.Fingerprint
+	if fp == "" {
+		fp = "chrome"
+	}
+
 	switch sec {
 	case "reality":
 		parts = append(parts, "tls: true")
@@ -83,7 +89,7 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
 		}
 		parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s }", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID))
-		parts = append(parts, "client-fingerprint: chrome")
+		parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
 	case "tls":
 		parts = append(parts, "tls: true")
 		if dto.Security.AllowInsecure {
@@ -92,7 +98,7 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 		if dto.Security.SNI != "" {
 			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
 		}
-		parts = append(parts, "client-fingerprint: chrome")
+		parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
 	default:
 		parts = append(parts, "tls: false")
 	}
@@ -380,6 +386,9 @@ func BuildBase64(nodes []contracts.ProxyNodeDTO) string {
 		q.Set("encryption", "none")
 		sec := dto.Security.Type
 		network := dto.Transport.Network
+		if fp := dto.Security.Fingerprint; fp != "" {
+			q.Set("fp", fp)
+		}
 		switch sec {
 		case "reality":
 			if dto.Security.Reality == nil {
@@ -387,7 +396,6 @@ func BuildBase64(nodes []contracts.ProxyNodeDTO) string {
 			}
 			q.Set("security", "reality")
 			q.Set("sni", dto.Security.SNI)
-			q.Set("fp", "chrome")
 			q.Set("pbk", dto.Security.Reality.PublicKey)
 			q.Set("sid", dto.Security.Reality.ShortID)
 			if network == "tcp" && dto.Auth.Flow != "" {
