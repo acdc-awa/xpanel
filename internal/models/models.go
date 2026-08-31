@@ -72,7 +72,31 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(All()...); err != nil {
 		return err
 	}
+	if err := migrateDefaultOutboundDSColumn(db); err != nil {
+		return err
+	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// migrateDefaultOutboundDSColumn 默认出口出站解析策略列名修正（2026-08-31）：
+// 模型字段 DefaultOutboundDS 被 GORM 命名策略推导为 default_outbound_ds（缩写不展开），
+// 而更新接口手写 UPDATE 用 JSON 名 default_outbound_domain_strategy → 列不存在，
+// PUT /admin/servers/:id 恒 500「no such column」（路由页默认出口/解析策略从未保存成功过）。
+// 模型列名已显式统一为 API 同名，AutoMigrate 补出新列后：旧列存量值（仅创建路径写入过）
+// 搬入新列，再删除旧列。幂等（无旧列即跳过）。DROP COLUMN 写法同 dropLegacyAccessPointHostPort
+// （glebarez Migrator().DropColumn 对裸列名静默失效，须原生 ALTER）。
+func migrateDefaultOutboundDSColumn(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable(&Server{}) || !m.HasColumn(&Server{}, "default_outbound_ds") {
+		return nil
+	}
+	if err := db.Exec("UPDATE servers SET default_outbound_domain_strategy = default_outbound_ds WHERE default_outbound_ds != ''").Error; err != nil {
+		return fmt.Errorf("搬迁 servers.default_outbound_ds 存量值失败: %w", err)
+	}
+	if err := db.Exec("ALTER TABLE servers DROP COLUMN default_outbound_ds").Error; err != nil {
+		return fmt.Errorf("删除 servers 遗留列 default_outbound_ds 失败: %w", err)
+	}
+	return nil
 }
 
 // legacyL4RuleAP 退役 L4 建模迁移的临时读取结构（user_access_points 中 l4_rule 型存量记录）。

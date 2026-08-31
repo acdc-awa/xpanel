@@ -19,8 +19,10 @@ type Server struct {
 	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
 	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
-	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）
-	DefaultOutboundDS string     `gorm:"size:16;default:AsIs" json:"default_outbound_domain_strategy"`
+	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）。
+	// 列名必须显式指定为 API 同名：字段名 DefaultOutboundDS 会被 GORM 命名策略推导为
+	// default_outbound_ds（缩写不展开），与手写 UPDATE/前端 JSON 名漂移 → 500 no such column（2026-08-31 修复）
+	DefaultOutboundDS string     `gorm:"column:default_outbound_domain_strategy;size:16;default:AsIs" json:"default_outbound_domain_strategy"`
 	AgentVersion      string     `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
 	XrayRunning       bool       `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
 	LastSeenAt        *time.Time `json:"last_seen_at"`

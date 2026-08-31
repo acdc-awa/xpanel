@@ -269,6 +269,59 @@ func TestL4RuleAccessPointMigration(t *testing.T) {
 	}
 }
 
+// TestDefaultOutboundDSColumnMigration 默认出口出站解析策略列名修正迁移（2026-08-31）：
+// 旧库列名 default_outbound_ds（GORM 对字段名缩写 DS 不展开）与更新接口手写的
+// default_outbound_domain_strategy 不一致 → PUT /admin/servers/:id 恒 500「no such column」。
+// 模型列名显式统一为 API 同名后，旧列存量值必须搬入新列再删除旧列（回归：路由页保存 500）。
+func TestDefaultOutboundDSColumnMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	// 新模型建表（只有新列 default_outbound_domain_strategy），再手工补旧库遗留列并写入存量值（模拟升级前状态）
+	if err := db.AutoMigrate(&Server{}); err != nil {
+		t.Fatalf("create servers table: %v", err)
+	}
+	if err := db.Exec("ALTER TABLE servers ADD COLUMN default_outbound_ds varchar(16) DEFAULT 'AsIs'").Error; err != nil {
+		t.Fatalf("add legacy column: %v", err)
+	}
+	legacy := Server{ServerType: ServerTypeXray, Name: "香港01", Host: "hk.node.com", NodeID: "node-hk", Secret: "s"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := db.Exec("UPDATE servers SET default_outbound_ds = 'UseIP' WHERE id = ?", legacy.ID).Error; err != nil {
+		t.Fatalf("seed legacy value: %v", err)
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	if db.Migrator().HasColumn(&Server{}, "default_outbound_ds") {
+		t.Fatal("遗留列 default_outbound_ds 应被删除")
+	}
+	var got Server
+	if err := db.First(&got, legacy.ID).Error; err != nil {
+		t.Fatalf("load server: %v", err)
+	}
+	if got.DefaultOutboundDS != "UseIP" {
+		t.Fatalf("旧列存量值应搬入新列 default_outbound_domain_strategy，got %q", got.DefaultOutboundDS)
+	}
+
+	// 幂等：再次迁移不报错、值不变
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate should be idempotent: %v", err)
+	}
+	var again Server
+	if err := db.First(&again, legacy.ID).Error; err != nil {
+		t.Fatalf("reload server: %v", err)
+	}
+	if again.DefaultOutboundDS != "UseIP" {
+		t.Fatalf("重复迁移改动存量值: UseIP → %q", again.DefaultOutboundDS)
+	}
+}
+
 // TestUserSubscribeTokenBackfill 订阅 token 回填迁移（2026-08-24 修复「订阅中心拿不到订阅地址」）：
 // 存量用户（早期建库/初始管理员）subscribe_token 为空 → 登录后前端订阅地址显示「加载中…」；
 // AutoMigrate 必须为其补齐 64 位 hex token，已有 token 的用户保持不变，重复迁移幂等。
