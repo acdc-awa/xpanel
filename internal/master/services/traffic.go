@@ -40,6 +40,8 @@ func (s *TrafficService) nowOrReal() time.Time {
 // Save 处理 traffic_report（P1-1：单事务 + upsert 合并——并发/重复投递在唯一索引
 // (user_id, inbound_id, period_start) 上自动累加，不再撞索引报错；每次投递统一补计入站计数）。
 // serverID 用于把上报的入站 tag 解析为入站 ID（2026-08-14 J10：入站级统计激活）。
+// 2026-09-01 入站维度接通：agent 额外上报 inbound>>> 计数器派生条目（Email 恒空、Inbound=tag），
+// 仅累计 inbounds.up/down 冗余计数器；用户维度条目照旧落 traffic_logs。
 func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64) error {
 	periodStart, err := time.Parse(time.RFC3339, tr.Period)
 	if err != nil {
@@ -62,6 +64,25 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 			if e.UpBytes <= 0 && e.DownBytes <= 0 {
 				continue
 			}
+			// 入站 tag → ID（agent 按 tag 上报；未知 tag 按 0 处理，用户级统计不受影响）
+			inboundID := inboundIDByTag[e.Inbound]
+
+			// 入站维度条目（agent 从 inbound>>> 计数器派生，Email 恒空）：仅累计
+			// inbounds.up/down——dashboard 节点流量占比/入站限额/lifecycle 消费；
+			// 不落 traffic_logs（流水严格用户维度，防今日流量 KPI 双计）。
+			// relay 入站与未知用户的节点流量由此入账（此前入站维度整条链空转）。
+			if e.UserID == 0 && e.Email == "" {
+				if inboundID > 0 {
+					if err := tx.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
+						"up":   gorm.Expr("up + ?", e.UpBytes),
+						"down": gorm.Expr("down + ?", e.DownBytes),
+					}).Error; err != nil {
+						return err
+					}
+				}
+				continue
+			}
+
 			// 主控解析 user_id（Agent 按 email 上报）
 			userID := e.UserID
 			if userID == 0 {
@@ -83,14 +104,11 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				}
 			}
 
-			// 入站 tag → ID（agent 按 tag 上报；未知 tag 按 0 处理，用户级统计不受影响）
-			inboundID := inboundIDByTag[e.Inbound]
-
 			// P1-1：upsert 合并——唯一索引 (user_id, inbound_id, period_start) 兜底，
 			// 并发/重复投递自动累加而非撞索引报错丢弃（替代原 select-then-create 竞态路径）
 			log := models.TrafficLog{
 				UserID:      userID,
-				InboundID:   inboundID, // 2026-08-14 J10：原恒为 0，入站级统计整条链空转
+				InboundID:   inboundID, // 用户条目携带 tag 时记录归属（当前 agent 用户维度不填，恒 0）
 				UpBytes:     e.UpBytes,
 				DownBytes:   e.DownBytes,
 				PeriodStart: periodStart,
@@ -108,7 +126,8 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 			}).Create(&log).Error; err != nil {
 				return err
 			}
-			// 入站冗余计数累计（P1-1：每次投递统一补计一次，与 TrafficLog 合并口径一致）
+			// 用户条目携带入站 tag 时同步补计入站计数（入站维度条目已在上方单独处理，不会双计；
+			// 与 TrafficLog 合并口径一致，每次投递补计一次）
 			if inboundID > 0 {
 				if err := tx.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
 					"up":   gorm.Expr("up + ?", e.UpBytes),

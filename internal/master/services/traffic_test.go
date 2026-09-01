@@ -188,6 +188,48 @@ func TestSaveDuplicateDeliveryMergesAndBumpsInbound(t *testing.T) {
 	}
 }
 
+// TestSaveInboundDimensionEntryOnlyBumpsInbound 入站维度条目（Email 恒空、Inbound=tag，
+// agent 从 inbound>>> 计数器派生）：仅累计 inbounds.up/down，不落 traffic_logs
+// （流水严格用户维度，防今日流量 KPI 双计）；未知 tag 与无从归属条目安全跳过。
+func TestSaveInboundDimensionEntryOnlyBumpsInbound(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-09-01T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Inbound: "vless-in", UpBytes: 500, DownBytes: 700},  // 已知 tag：入账
+			{Inbound: "ghost-tag", UpBytes: 100, DownBytes: 100}, // 未知 tag：跳过
+			{UpBytes: 50, DownBytes: 50},                         // 无从归属：跳过
+		},
+	}
+	if err := svc.Save(payload, 1); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var logs int64
+	db.Model(&models.TrafficLog{}).Count(&logs)
+	if logs != 0 {
+		t.Fatalf("入站维度条目不得落 traffic_logs，行数 = %d", logs)
+	}
+	if err := db.First(&inb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inb.Up != 500 || inb.Down != 700 {
+		t.Fatalf("inbounds 计数 up=%d down=%d, want 500/700", inb.Up, inb.Down)
+	}
+}
+
 // TestSaveConcurrentDuplicateDeliveryMerges 并发双投同 (user, inbound, period)：
 // upsert 合并为一行、全部字节累加、inbounds 补计齐全（P1-1 并发路径）。
 func TestSaveConcurrentDuplicateDeliveryMerges(t *testing.T) {
