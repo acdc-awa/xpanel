@@ -22,12 +22,16 @@ type Server struct {
 	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）。
 	// 列名必须显式指定为 API 同名：字段名 DefaultOutboundDS 会被 GORM 命名策略推导为
 	// default_outbound_ds（缩写不展开），与手写 UPDATE/前端 JSON 名漂移 → 500 no such column（2026-08-31 修复）
-	DefaultOutboundDS string     `gorm:"column:default_outbound_domain_strategy;size:16;default:AsIs" json:"default_outbound_domain_strategy"`
-	AgentVersion      string     `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayRunning       bool       `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
-	LastSeenAt        *time.Time `json:"last_seen_at"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	DefaultOutboundDS string `gorm:"column:default_outbound_domain_strategy;size:16;default:AsIs" json:"default_outbound_domain_strategy"`
+	AgentVersion      string `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning       bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
+	// 当前在线用户 IP 快照：agent 心跳每次覆写的 JSON（[]{email,ips}，源自 xray GetUsersStats，
+	// refcount 语义=当前活跃连接的去重源 IP）。不直接 JSON 透出，经 GET /admin/servers/:id/online-ips
+	// 解析归类后返回。
+	OnlineIPs  string     `gorm:"type:text" json:"-"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // Inbound 入站（接入点），每节点可配多个。

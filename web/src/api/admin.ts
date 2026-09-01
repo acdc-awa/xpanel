@@ -111,6 +111,19 @@ export function getServerMetrics(id: number, range = '1h') {
   return http.get<ApiResp<ServerMetricsData>>(`/admin/servers/${id}/metrics`, { params: { range } })
 }
 
+// 节点当前在线用户（agent 心跳携带的 xray OnlineMap 快照，连接级实时数据）
+export interface OnlineUserIPItem {
+  email: string
+  kind: 'user' | 'relay' | 'other' // user=面板用户 / relay=中转内部账户 / other=自定义 email
+  name?: string // kind=user 时的面板用户名
+  user_id?: number
+  ips: string[]
+}
+
+export function getServerOnlineIPs(id: number) {
+  return http.get<ApiResp<{ online_users: number; users: OnlineUserIPItem[] }>>(`/admin/servers/${id}/online-ips`)
+}
+
 // ===== 站点设置（设置页，批7 分组式：site/captcha） =====
 
 export interface SiteGroup {

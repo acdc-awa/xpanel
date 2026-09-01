@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -641,4 +643,76 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		"tx_mbps":      txMbpsList,
 		"online_users": usersList,
 	})
+}
+
+// onlineUserEmailRe 匹配面板生成的用户 email（xray.UserEmail：user-{id}@panel.local）。
+var onlineUserEmailRe = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
+
+// onlineIPEntry 在线用户条目（email 已归类：user=面板用户 / relay=中转内部账户 / other=自定义 email）。
+type onlineIPEntry struct {
+	Email  string   `json:"email"`
+	Kind   string   `json:"kind"`
+	Name   string   `json:"name,omitempty"` // kind=user 时的面板用户名
+	UserID uint64   `json:"user_id,omitempty"`
+	IPs    []string `json:"ips"`
+}
+
+// AdminServerOnlineIPs GET /api/v1/admin/servers/:id/online-ips —— 节点当前在线用户
+// 与连接源 IP（agent 心跳的最新快照；users 为空 = 无人在线或 agent 版本过旧未上报）。
+func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+
+	type rawEntry struct {
+		Email string   `json:"email"`
+		IPs   []string `json:"ips"`
+	}
+	var raw []rawEntry
+	if srv.OnlineIPs != "" && srv.OnlineIPs != "null" {
+		_ = json.Unmarshal([]byte(srv.OnlineIPs), &raw)
+	}
+
+	entries := make([]onlineIPEntry, 0, len(raw))
+	userIDs := make(map[uint64]bool)
+	for _, e := range raw {
+		entry := onlineIPEntry{Email: e.Email, Kind: "other", IPs: e.IPs}
+		if m := onlineUserEmailRe.FindStringSubmatch(e.Email); m != nil {
+			if uid, perr := strconv.ParseUint(m[1], 10, 64); perr == nil {
+				entry.Kind = "user"
+				entry.UserID = uid
+				userIDs[uid] = true
+			}
+		} else if strings.HasPrefix(e.Email, "relay-") && strings.HasSuffix(e.Email, "@panel.local") {
+			entry.Kind = "relay" // 中转内部账户（xray.RelayEmail），非面板用户
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(userIDs) > 0 {
+		ids := make([]uint64, 0, len(userIDs))
+		for uid := range userIDs {
+			ids = append(ids, uid)
+		}
+		var users []models.User
+		d.DB.Select("id, username").Where("id IN ?", ids).Find(&users)
+		names := make(map[uint64]string, len(users))
+		for _, u := range users {
+			names[u.ID] = u.Username
+		}
+		for i := range entries {
+			if entries[i].Kind == "user" {
+				entries[i].Name = names[entries[i].UserID]
+			}
+		}
+	}
+
+	util.OK(c, gin.H{"online_users": len(entries), "users": entries})
 }

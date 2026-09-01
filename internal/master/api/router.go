@@ -144,6 +144,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/invitations/:id", d.AdminRevokeInvitation)
 			admin.GET("/servers", d.AdminServers)
 			admin.GET("/servers/:id/metrics", d.AdminServerMetrics)
+			admin.GET("/servers/:id/online-ips", d.AdminServerOnlineIPs)
 			admin.POST("/servers", d.AdminCreateServer)
 			admin.PUT("/servers/:id", d.AdminUpdateServer)
 			admin.DELETE("/servers/:id", d.AdminDeleteServer)

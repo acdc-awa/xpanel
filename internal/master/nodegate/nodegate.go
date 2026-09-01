@@ -4,6 +4,7 @@ package nodegate
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -305,6 +306,12 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	}
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
 		updates["agent_version"] = hb.Version
+	}
+	// 在线用户 IP 快照每次覆写：新版 agent 心跳携带；旧 agent 或无人在线为空列表（如实清空）
+	if len(hb.OnlineIPs) == 0 {
+		updates["online_ips"] = "[]"
+	} else if b, err := json.Marshal(hb.OnlineIPs); err == nil {
+		updates["online_ips"] = string(b)
 	}
 	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
 	// node_reports 落库（供仪表盘趋势）
