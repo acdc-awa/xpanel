@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, ArrowDown, Edit, Setting, RefreshRight, TrendCharts } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, ArrowDown, Edit, Setting, RefreshRight, TrendCharts, Upload } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
@@ -12,6 +12,7 @@ import {
   getServers,
   resetServerSecret,
   serverCommand,
+  upgradeAgent,
   type CommandResult,
   type ServerItem,
   updateServer,
@@ -179,6 +180,37 @@ async function restartXray(row: any) {
   }
 }
 
+// ---- Agent 升级（面板触发节点自升级，节点从 GitHub Releases 拉取） ----
+const upgradingId = ref(0)
+
+async function upgradeNodeAgent(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `将从 GitHub Releases 下载最新版 Agent 并在节点「${row.name}」上升级（sha256 校验），完成后节点自动重启，期间短暂离线。当前版本：${row.agent_version || '未知'}`,
+      '升级 Agent',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  upgradingId.value = row.id
+  try {
+    const { data } = await upgradeAgent(row.id)
+    if (data.code === 0 && data.data.ok) {
+      ElMessage.success((data.data.data as string) || '已触发升级')
+      load()
+      // 新版本号要等节点重启后的首次心跳（约 30s）才回填，延迟再刷一次
+      setTimeout(load, 35000)
+    } else {
+      ElMessage.error(data.data?.error || data.message || '升级失败')
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '升级失败（节点可能仍在下载，可稍后刷新查看版本；若节点 Agent 过旧不支持远程升级，请在节点重跑安装命令）'))
+  } finally {
+    upgradingId.value = 0
+  }
+}
+
 // ---- 日志 ----
 const logOpen = ref(false)
 const logContent = ref('')
@@ -272,13 +304,14 @@ async function resetSecret(row: any) {
   }
 }
 
-// ---- 更多操作（编辑/重置密钥/删除/状态/日志） ----
+// ---- 更多操作（编辑/重置密钥/删除/状态/日志/升级） ----
 function onMore(cmd: string, row: any) {
   if (cmd === 'edit') openEdit(row)
   else if (cmd === 'reset') resetSecret(row)
   else if (cmd === 'delete') removeServer(row)
   else if (cmd === 'status') openStatus(row)
   else if (cmd === 'logs') openLogs(row)
+  else if (cmd === 'upgrade') upgradeNodeAgent(row)
 }
 
 // ---- 删除 ----
@@ -362,6 +395,21 @@ async function removeServer(row: any) {
               <span v-else class="x-chip gray">未生成</span>
             </template>
           </el-table-column>
+          <el-table-column label="Agent" width="130">
+            <template #default="{ row }">
+              <div class="agent-cell">
+                <span class="cell-mono" style="font-size: 12px">{{ row.agent_version || '—' }}</span>
+                <el-link
+                  v-if="row.status === 1"
+                  type="primary"
+                  :underline="false"
+                  :disabled="upgradingId === row.id"
+                  style="font-size: 12px"
+                  @click="upgradeNodeAgent(row)"
+                >升级</el-link>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="最后心跳" width="170">
             <template #default="{ row }">
               <span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
@@ -442,6 +490,10 @@ async function removeServer(row: any) {
                   </el-link>
                 </div>
               </div>
+              <div class="grid-item">
+                <span class="item-label">Agent</span>
+                <div class="item-value cell-mono">{{ row.agent_version || '—' }}</div>
+              </div>
               <div class="grid-item full-width">
                 <span class="item-label">最后心跳</span>
                 <div class="item-value cell-mono muted" style="font-size: 11.5px">
@@ -468,6 +520,7 @@ async function removeServer(row: any) {
                     <el-dropdown-menu>
                       <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
                       <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                      <el-dropdown-item command="upgrade"><el-icon><Upload /></el-icon>升级 Agent</el-dropdown-item>
                       <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
                       <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
                       <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
@@ -600,6 +653,7 @@ async function removeServer(row: any) {
 
 <style scoped lang="scss">
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
+.agent-cell { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--x-text-3); }
 .secret-box { display: grid; gap: 10px; }
 .tip { font-size: 12px; color: var(--x-text-3); }

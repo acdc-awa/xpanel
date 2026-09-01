@@ -276,6 +276,12 @@ export function serverCommand(
   })
 }
 
+// 升级节点 Agent：节点侧要从 GitHub Releases 下载二进制（主控侧等待回执最长 5 分钟），
+// 全局 axios 超时仅 10s，必须单独放宽（略大于主控的 UpgradeAskTimeout）
+export function upgradeAgent(id: number) {
+  return http.post<ApiResp<CommandResult>>(`/admin/servers/${id}/command`, { type: 'upgrade_agent' }, { timeout: 320000 })
+}
+
 // ===== P3 入站管理 + 配置生成 =====
 
 export interface InboundPayload {

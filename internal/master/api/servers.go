@@ -351,7 +351,7 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 }
 
 // AdminServerCommand POST /api/v1/admin/servers/:id/command
-// body: {"type":"push_config|restart_xray|get_status|get_logs", "config_json": "...", "lines": 100}
+// body: {"type":"push_config|restart_xray|get_status|get_logs|upgrade_agent", "config_json": "...", "lines": 100}
 func (d *Deps) AdminServerCommand(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -382,12 +382,19 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		payload = nil
 	case protocol.MsgGetLogs:
 		payload = protocol.GetLogsPayload{Lines: req.Lines}
+	case protocol.MsgUpgradeAgent:
+		payload = protocol.UpgradeAgentPayload{}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
 		return
 	}
 
-	res, err := d.Hub.Ask(id, req.Type, payload, nodegate.AskTimeout)
+	// 自升级的回执要等节点从 GitHub 拉完二进制才发，用专用的长超时
+	askTimeout := nodegate.AskTimeout
+	if req.Type == protocol.MsgUpgradeAgent {
+		askTimeout = nodegate.UpgradeAskTimeout
+	}
+	res, err := d.Hub.Ask(id, req.Type, payload, askTimeout)
 	if err != nil {
 		util.Fail(c, 502, "指令失败: "+err.Error())
 		return

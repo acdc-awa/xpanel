@@ -29,8 +29,11 @@ const (
 	HeartbeatTimeout = 90 * time.Second // 超过此时长无心跳视为失联
 	WriteTimeout     = 10 * time.Second
 	AskTimeout       = 30 * time.Second // 指令等待回执超时（需 > testTimeout + stopGracePeriod + RTT）
-	PongWait         = 60 * time.Second // 等待 pong 回复超时
-	PingPeriod       = (PongWait * 9) / 10
+	// UpgradeAskTimeout 自升级指令等待回执超时：节点需从 GitHub Releases 拉取二进制
+	//（网络慢时可达数分钟），且成功回执在二进制替换完成后才发出。
+	UpgradeAskTimeout = 5 * time.Minute
+	PongWait          = 60 * time.Second // 等待 pong 回复超时
+	PingPeriod        = (PongWait * 9) / 10
 )
 
 // Conn 一条节点连接。
