@@ -29,13 +29,6 @@ func NewSubscribeServer(deps *Deps) *SubscribeServer {
 	return &SubscribeServer{deps: deps}
 }
 
-// Port 返回当前监听端口（0 表示未启动）。
-func (s *SubscribeServer) Port() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.port
-}
-
 // buildEngine 构建独立订阅服务的极简 Gin Engine（纯订阅路由与清洗网关，零后台 API）。
 // 2026-08-24 入口统一：唯一订阅入口 = 设置页 subscribe_path（如 /ehisnodn），
 // 路径参数与 ?token= 查询参数两种形式；其余路径一律按 sub_deny_code 返回 404/401。
@@ -112,30 +105,6 @@ func (s *SubscribeServer) Reload() error {
 	s.server = nil
 	s.port = 0
 	return s.startLocked(port)
-}
-
-// ReloadPort 热重载监听端口（newPort <= 0 时优雅关闭服务）。
-func (s *SubscribeServer) ReloadPort(newPort int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if newPort == s.port {
-		return nil
-	}
-
-	if s.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = s.server.Shutdown(ctx)
-		cancel()
-		s.server = nil
-		s.port = 0
-	}
-
-	if newPort <= 0 {
-		return nil
-	}
-
-	return s.startLocked(newPort)
 }
 
 // Shutdown 优雅关闭独立订阅服务。

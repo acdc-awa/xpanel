@@ -16,9 +16,6 @@ export const siteSettings: Record<string, string> = window.__PANEL_SETTINGS__ ||
 /** 系统标题（app_name 未配置时兜底）。 */
 export const appName: string = siteSettings.app_name || 'Xray 面板'
 
-/** 站点 LOGO URL（未配置时用默认图形）。 */
-export const siteLogo: string = siteSettings.logo || ''
-
 /** 注册是否关闭（stop_register=1）。 */
 export const stopRegister: boolean = siteSettings.stop_register === '1'
 

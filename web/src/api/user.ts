@@ -12,10 +12,6 @@ export function changePassword(oldPassword: string, newPassword: string) {
   })
 }
 
-export function updateProfile(email: string) {
-  return http.put<ApiResp<{ email: string }>>('/user/profile', { email })
-}
-
 // ---- TOTP 2FA（2026-08-14 方向③）----
 
 export interface TwoFASetupResult {
@@ -58,8 +54,4 @@ export function getMyServers() {
 
 export function getUserNotices() {
   return http.get<ApiResp<NoticeItem[]>>('/user/notices')
-}
-
-export function getUserNotice(id: number) {
-  return http.get<ApiResp<NoticeItem>>(`/user/notices/${id}`)
 }

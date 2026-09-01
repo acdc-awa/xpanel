@@ -313,11 +313,6 @@ export function toggleInbound(id: number) {
   return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
 }
 
-// Phase T：relay 内部账户指令（UUID 由节点生成上报）
-export function setupInternalInbound(id: number) {
-  return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/setup-internal`)
-}
-
 export function rotateInternalInbound(id: number) {
   return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/rotate-internal`)
 }
@@ -387,25 +382,12 @@ export function deletePermissionGroup(id: number) {
   return http.delete<ApiResp<{ ok: boolean }>>(`/admin/permission-groups/${id}`)
 }
 
-export function previewConfig(serverId: number, form?: Partial<InboundPayload>) {
-  return http.post<ApiResp<{ config: string }>>('/admin/xray/preview-config', {
-    server_id: serverId,
-    form,
-  })
-}
-
 export function getXrayKeys() {
   return http.get<ApiResp<{ private_key: string; public_key: string }>>('/admin/xray/keys')
 }
 
 export function getServerConfigPreview(serverId: number) {
   return http.get<ApiResp<{ config: string }>>(`/admin/servers/${serverId}/config-preview`)
-}
-
-export function generateAndPushConfig(serverId: number) {
-  return http.post<ApiResp<{ ok: boolean; pushed: boolean; message: string; config: string }>>(
-    `/admin/servers/${serverId}/generate-config`,
-  )
 }
 
 // ===== M2 节点出站（3x-ui outbound） =====

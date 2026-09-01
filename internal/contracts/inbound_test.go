@@ -6,6 +6,11 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
+// decodeStream 测试辅助：仅解码 streamSettings（生产统一入口为 DecodeInbound）。
+func decodeStream(raw string) *InboundSpec {
+	return DecodeInbound(&models.Inbound{StreamSettings: raw})
+}
+
 func TestDecodeInbound_Full(t *testing.T) {
 	inb := &models.Inbound{
 		ID:           7,
@@ -81,40 +86,40 @@ func TestDecodeInbound_Full(t *testing.T) {
 
 func TestDecodeInbound_RealityCompat(t *testing.T) {
 	// 旧名 publicKey / 单数 serverName / 单数 shortId
-	spec := DecodeStream(`{"security":"reality","realitySettings":{"serverName":"s.com","publicKey":"pk","shortId":"sid"}}`)
+	spec := decodeStream(`{"security":"reality","realitySettings":{"serverName":"s.com","publicKey":"pk","shortId":"sid"}}`)
 	if spec.Reality == nil || spec.Reality.ServerName != "s.com" || spec.Reality.PublicKey != "pk" || spec.Reality.ShortID != "sid" {
 		t.Errorf("旧名兼容错误: %+v", spec.Reality)
 	}
 	// security 非 reality 时不解析 realitySettings
-	spec = DecodeStream(`{"security":"tls","realitySettings":{"serverName":"s.com","publicKey":"pk"}}`)
+	spec = decodeStream(`{"security":"tls","realitySettings":{"serverName":"s.com","publicKey":"pk"}}`)
 	if spec.Reality != nil {
 		t.Errorf("security=tls 不应解析 Reality: %+v", spec.Reality)
 	}
 	// 顶层 fingerprint（客户端角色字段）解码，供订阅消费
-	spec = DecodeStream(`{"security":"reality","fingerprint":"firefox","realitySettings":{"serverName":"s.com"}}`)
+	spec = decodeStream(`{"security":"reality","fingerprint":"firefox","realitySettings":{"serverName":"s.com"}}`)
 	if spec.Fingerprint != "firefox" {
 		t.Errorf("fingerprint 解码错误: %q", spec.Fingerprint)
 	}
-	if spec = DecodeStream(`{"security":"reality","realitySettings":{"serverName":"s.com"}}`); spec.Fingerprint != "" {
+	if spec = decodeStream(`{"security":"reality","realitySettings":{"serverName":"s.com"}}`); spec.Fingerprint != "" {
 		t.Errorf("缺省 fingerprint 应为空: %q", spec.Fingerprint)
 	}
 }
 
 func TestDecodeStream_Lenient(t *testing.T) {
 	// 空串 / 非法 JSON → 零值不 panic
-	if spec := DecodeStream(""); spec.Network != "" || spec.Security != "" || spec.Reality != nil {
+	if spec := decodeStream(""); spec.Network != "" || spec.Security != "" || spec.Reality != nil {
 		t.Errorf("空串应零值: %+v", spec)
 	}
-	if spec := DecodeStream(`{invalid`); spec.Network != "" || spec.Stream != nil {
+	if spec := decodeStream(`{invalid`); spec.Network != "" || spec.Stream != nil {
 		t.Errorf("非法 JSON 应零值: %+v", spec)
 	}
 	// tlsSettings 存在即解析（不限 security=tls）
-	spec := DecodeStream(`{"security":"none","tlsSettings":{"serverName":"s.com","allowInsecure":true}}`)
+	spec := decodeStream(`{"security":"none","tlsSettings":{"serverName":"s.com","allowInsecure":true}}`)
 	if spec.TLS == nil || spec.TLS.ServerName != "s.com" || !spec.TLS.AllowInsecure {
 		t.Errorf("TLS 解析错误: %+v", spec.TLS)
 	}
-	// xhttpSettings mode 为空视为未配置（与历史 StreamXHTTP 语义一致）
-	spec = DecodeStream(`{"network":"xhttp","xhttpSettings":{"path":"/p"}}`)
+	// xhttpSettings mode 为空视为未配置 xhttp
+	spec = decodeStream(`{"network":"xhttp","xhttpSettings":{"path":"/p"}}`)
 	if spec.XHTTP != nil {
 		t.Errorf("mode 空应视为未配置: %+v", spec.XHTTP)
 	}

@@ -14,89 +14,6 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// InboundSettings 对应 inbounds.settings_json（主控既用于生成服务端配置，也用于生成订阅）。
-type InboundSettings struct {
-	Reality *RealitySettings `json:"reality,omitempty"`
-	XHTTP   *XHTTPSettings   `json:"xhttp,omitempty"`
-	TLS     *TLSSettings     `json:"tls,omitempty"`
-	// Fallbacks 仅应用于 tcp 传输（VLESS settings.fallbacks 线格式）。
-	Fallbacks []FallbackSettings `json:"fallbacks,omitempty"`
-	// Sniffing 入站流量嗅探（存储层 snake_case；前端表单以 camelCase 发送，UnmarshalJSON 双写兼容）。
-	Sniffing *SniffingSettings `json:"sniffing,omitempty"`
-}
-
-// FallbackSettings 对应 xray-core VLESS settings.fallbacks 条目（infra/conf/vless.go 的 VLessInboundFallback）。
-type FallbackSettings struct {
-	Dest string `json:"dest"`
-	Path string `json:"path,omitempty"`
-	Xver int    `json:"xver,omitempty"`
-}
-
-type RealitySettings struct {
-	ServerName string `json:"server_name"` // 客户端 SNI
-	PublicKey  string `json:"public_key"`  // 客户端公钥
-	ShortID    string `json:"short_id"`    // 客户端 shortId
-	PrivateKey string `json:"private_key"` // 服务端私钥（不出现在订阅）
-	Dest       string `json:"dest"`        // 服务端借壳目标 host:port
-}
-
-type XHTTPSettings struct {
-	Mode string `json:"mode"`
-	Path string `json:"path"`
-	Host string `json:"host"`
-}
-
-// SniffingSettings 入站流量嗅探（存储层 snake_case；前端表单以 camelCase 发送，UnmarshalJSON 双写兼容）。
-type SniffingSettings struct {
-	Enabled      bool     `json:"enabled"`
-	DestOverride []string `json:"dest_override,omitempty"`
-	MetadataOnly bool     `json:"metadata_only,omitempty"`
-	RouteOnly    bool     `json:"route_only,omitempty"`
-}
-
-// UnmarshalJSON 支持 camelCase (destOverride/metadataOnly/routeOnly) 与 snake_case (dest_override/
-// metadata_only/route_only) 双写；enabled 两写法相同。前端表单按 camelCase 发送，存储按 snake_case。
-// 两套键同时出现时显式 camelCase 优先（与 GRPCSettings 一致）。
-func (s *SniffingSettings) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Enabled         bool     `json:"enabled"`
-		DestOverride    []string `json:"destOverride"`
-		DestOverrideAlt []string `json:"dest_override"`
-		MetadataOnly    *bool    `json:"metadataOnly"`
-		MetadataOnlyAlt *bool    `json:"metadata_only"`
-		RouteOnly       *bool    `json:"routeOnly"`
-		RouteOnlyAlt    *bool    `json:"route_only"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	s.Enabled = raw.Enabled
-	s.DestOverride = raw.DestOverride
-	if len(s.DestOverride) == 0 {
-		s.DestOverride = raw.DestOverrideAlt
-	}
-	s.MetadataOnly = false
-	if raw.MetadataOnly != nil {
-		s.MetadataOnly = *raw.MetadataOnly
-	} else if raw.MetadataOnlyAlt != nil {
-		s.MetadataOnly = *raw.MetadataOnlyAlt
-	}
-	s.RouteOnly = false
-	if raw.RouteOnly != nil {
-		s.RouteOnly = *raw.RouteOnly
-	} else if raw.RouteOnlyAlt != nil {
-		s.RouteOnly = *raw.RouteOnlyAlt
-	}
-	return nil
-}
-
-type TLSSettings struct {
-	ServerName    string `json:"server_name"`
-	CertFile      string `json:"cert_file"`
-	KeyFile       string `json:"key_file"`
-	AllowInsecure bool   `json:"allowInsecure"` // stream_settings 线格式 camelCase；订阅 skip-cert-verify 透传
-}
-
 // UserEmail 用户在 Xray 中的 email（2026-08-14 方向①：同步用户真实邮箱，stats 上报按此回查 user_id；
 // 空邮箱回退固定格式 user-<id>@panel.local 兼容存量）。注册起 username=email 且必填，新用户均为真邮箱。
 func UserEmail(u *models.User) string {
@@ -126,18 +43,6 @@ func certDomainFor(inb *models.Inbound, ctx *GenerateContext) (string, bool) {
 // certFilePath 托管证书固定路径（与 agent push_cert 落盘一致，见 05 号文档 §4）。
 func certFilePath(domain, file string) string {
 	return "/etc/xray/certs/" + domain + "/" + file
-}
-
-// ParseSettings 解析入站 settings_json。
-func ParseSettings(inb *models.Inbound) (*InboundSettings, error) {
-	s := &InboundSettings{}
-	if inb.SettingsJSON == "" {
-		return s, nil
-	}
-	if err := json.Unmarshal([]byte(inb.SettingsJSON), s); err != nil {
-		return nil, fmt.Errorf("入站 %s settings_json 解析失败: %w", inb.Tag, err)
-	}
-	return s, nil
 }
 
 // ValidateInbound 校验入站 JSON 基本有效性（透传模式：仅检查 JSON 可解析）。
@@ -226,11 +131,6 @@ func checkX25519Key(k string) error {
 	if len(dec) != 32 {
 		return fmt.Errorf("解码后 %d 字节，须为 32 字节", len(dec))
 	}
-	return nil
-}
-
-// ValidateSettings 保留旧签名（向后兼容，委托给 ValidateInbound）。
-func ValidateSettings(s *InboundSettings, network, tlsType string) error {
 	return nil
 }
 
@@ -780,56 +680,3 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	return item, nil
 }
 
-// StreamHasReality 判断 streamSettings JSON 是否启用了 REALITY。
-// 以下为统一解码层（contracts.InboundSpec）的兼容包装：保留旧签名供既有测试与调用方，
-// 新代码应直接使用 contracts.DecodeInbound/DecodeStream。
-func StreamHasReality(raw string) bool {
-	return StreamSecurity(raw) == "reality"
-}
-
-// StreamNetwork 从 streamSettings JSON 中提取 network 字段。
-func StreamNetwork(raw string) string {
-	return contracts.DecodeStream(raw).Network
-}
-
-// StreamSecurity 从 streamSettings JSON 中提取 security 字段。
-func StreamSecurity(raw string) string {
-	return contracts.DecodeStream(raw).Security
-}
-
-// StreamReality 从 streamSettings JSON 中提取 realitySettings。
-// 与历史行为一致：security 非 reality、解析失败或缺 ServerName 时返回 nil。
-func StreamReality(raw string) *RealitySettings {
-	r := contracts.DecodeStream(raw).Reality
-	if r == nil || r.ServerName == "" {
-		return nil
-	}
-	return &RealitySettings{
-		ServerName: r.ServerName,
-		PublicKey:  r.PublicKey,
-		ShortID:    r.ShortID,
-		PrivateKey: r.PrivateKey,
-		Dest:       r.Dest,
-	}
-}
-
-// StreamTLS 从 streamSettings JSON 中提取 tlsSettings（订阅 servername / skip-cert-verify 透传）。
-func StreamTLS(raw string) *TLSSettings {
-	t := contracts.DecodeStream(raw).TLS
-	if t == nil {
-		return nil
-	}
-	return &TLSSettings{
-		ServerName:    t.ServerName,
-		AllowInsecure: t.AllowInsecure,
-	}
-}
-
-// StreamXHTTP 从 streamSettings JSON 中提取 xhttpSettings。
-func StreamXHTTP(raw string) *XHTTPSettings {
-	x := contracts.DecodeStream(raw).XHTTP
-	if x == nil {
-		return nil
-	}
-	return &XHTTPSettings{Mode: x.Mode, Path: x.Path, Host: x.Host}
-}

@@ -24,7 +24,7 @@ func testDB(t *testing.T) *gorm.DB {
 func u64(v uint64) *uint64 { return &v }
 
 // AP 单点授权派生：用户可见入站集合 = 生效组命中的启用接入点解析结果（直连 / 经 L4 转发）。
-func TestAuthorizedInboundSet_APDerived(t *testing.T) {
+func TestBatchInboundAuthorizedGroupIDs_APDerived(t *testing.T) {
 	db := testDB(t)
 
 	group1 := models.PermissionGroup{Name: "VIP 1"}
@@ -64,46 +64,6 @@ func TestAuthorizedInboundSet_APDerived(t *testing.T) {
 	}
 	if err := SyncAccessPointPermissionGroups(db, ap4.ID, []uint64{group1.ID}); err != nil {
 		t.Fatal(err)
-	}
-
-	// 用户 u1 购买 plan1（继承 group1）
-	user1 := models.User{Username: "u1", UUID: "aaaaaaaa-0000-0000-0000-000000000001", PlanID: plan1.ID}
-	db.Create(&user1)
-
-	set1 := AuthorizedInboundSet(db, &user1)
-	if !set1[101] {
-		t.Errorf("u1 应可经 ap1 访问入站 101")
-	}
-	if !set1[103] {
-		t.Errorf("u1 应可经 ap3（覆写端点）访问入站 103")
-	}
-	if set1[102] {
-		t.Errorf("u1 不应访问仅开放给 VIP2 的入站 102")
-	}
-	if set1[104] {
-		t.Errorf("禁用接入点 ap4 不应产生授权（104）")
-	}
-	if set1[105] {
-		t.Errorf("未绑定权限组的 ap5 不应对任何人开放（105）")
-	}
-
-	// 管理员手动将 user1 权限组覆盖为 group2
-	db.Model(&user1).Update("permission_group_id", group2.ID)
-	user1.PermissionGroupID = group2.ID
-
-	set2 := AuthorizedInboundSet(db, &user1)
-	if !set2[101] || !set2[102] {
-		t.Errorf("u1 覆盖为 VIP2 后应可访问 101 与 102, got %v", set2)
-	}
-	if set2[103] {
-		t.Errorf("ap3 仅开放 group1，覆盖为 VIP2 后不应访问 103")
-	}
-
-	// 无权限组用户（无套餐未指定）→ 空集
-	user2 := models.User{Username: "u2", UUID: "aaaaaaaa-0000-0000-0000-000000000002"}
-	db.Create(&user2)
-	if got := AuthorizedInboundSet(db, &user2); len(got) != 0 {
-		t.Errorf("无生效权限组用户应无任何授权, got %v", got)
 	}
 
 	// 入站授权组映射（配置注入同源）

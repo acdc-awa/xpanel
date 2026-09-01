@@ -256,18 +256,3 @@ func authError(err error) (int, string) {
 		return 500, "服务器内部错误"
 	}
 }
-
-// userSummary 用户公开信息（不含密码哈希与订阅 token 之外的敏感字段）。
-func userSummary(u *models.User) gin.H {
-	return gin.H{
-		"id":              u.ID,
-		"username":        u.Username,
-		"email":           u.Email,
-		"role":            u.Role,
-		"status":          u.Status,
-		"plan_id":         u.PlanID,
-		"expire_at":       u.ExpireAt,
-		"created_at":      u.CreatedAt,
-		"must_change_pwd": u.MustChangePwd,
-	}
-}

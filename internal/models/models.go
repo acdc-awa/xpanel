@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -302,6 +301,3 @@ func dropLegacyTrafficPeriodIndex(db *gorm.DB) error {
 	}
 	return nil
 }
-
-// 时间辅助
-func Now() time.Time { return time.Now() }

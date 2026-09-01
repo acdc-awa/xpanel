@@ -346,33 +346,6 @@ func getLeadingWhitespace(s string) string {
 	return s
 }
 
-// BuildClash 生成 Clash YAML（proxy-providers 兼容格式，使用内置标准模板）。
-func BuildClash(nodes []contracts.ProxyNodeDTO) string {
-	proxiesYAML, names := FormatNodesYAML(nodes)
-	var b strings.Builder
-	b.WriteString("proxies:\n")
-	b.WriteString(proxiesYAML)
-	b.WriteString("proxy-groups:\n")
-	b.WriteString("  - name: \"节点选择\"\n    type: select\n    proxies:\n")
-	if len(names) > 0 {
-		for _, n := range names {
-			b.WriteString(fmt.Sprintf("      - %q\n", n))
-		}
-	} else {
-		b.WriteString("      - DIRECT\n")
-	}
-	b.WriteString("  - name: \"自动选择\"\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    proxies:\n")
-	if len(names) > 0 {
-		for _, n := range names {
-			b.WriteString(fmt.Sprintf("      - %q\n", n))
-		}
-	} else {
-		b.WriteString("      - DIRECT\n")
-	}
-	b.WriteString("rules:\n  - MATCH,节点选择\n")
-	return b.String()
-}
-
 // BuildBase64 生成 vless:// 分享链接列表的 Base64（兜底，非 Clash 客户端）。
 // 哑渲染器：flow 等协议语义已由插件决议进 DTO；reality 缺参数的节点跳过。
 func BuildBase64(nodes []contracts.ProxyNodeDTO) string {

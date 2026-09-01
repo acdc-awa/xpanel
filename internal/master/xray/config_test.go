@@ -726,54 +726,6 @@ func TestGenerateShortID(t *testing.T) {
 
 
 
-func TestSniffingSettingsUnmarshalJSON(t *testing.T) {
-	parse := func(payload string) xray.SniffingSettings {
-		var s xray.SniffingSettings
-		json.Unmarshal([]byte(payload), &s)
-		return s
-	}
-
-	t.Run("camelCase", func(t *testing.T) {
-		s := parse(`{"enabled":true,"destOverride":["http"],"metadataOnly":true,"routeOnly":true}`)
-		if len(s.DestOverride) != 1 || s.DestOverride[0] != "http" || !s.MetadataOnly || !s.RouteOnly {
-			t.Errorf("parse error: %+v", s)
-		}
-	})
-	t.Run("snake_case", func(t *testing.T) {
-		s := parse(`{"enabled":true,"dest_override":["http","tls"],"metadata_only":true,"route_only":true}`)
-		if len(s.DestOverride) != 2 || !s.MetadataOnly || !s.RouteOnly {
-			t.Errorf("parse error: %+v", s)
-		}
-	})
-}
-
-func TestStreamHasReality(t *testing.T) {
-	if xray.StreamHasReality(``) {
-		t.Error("empty should be false")
-	}
-	if !xray.StreamHasReality(`{"security":"reality"}`) {
-		t.Error("reality should be true")
-	}
-	if xray.StreamHasReality(`{"security":"tls"}`) {
-		t.Error("tls should be false")
-	}
-}
-
-func TestStreamNetwork(t *testing.T) {
-	if n := xray.StreamNetwork(`{"network":"grpc"}`); n != "grpc" {
-		t.Errorf("got %q", n)
-	}
-	if n := xray.StreamNetwork(``); n != "" {
-		t.Errorf("got %q", n)
-	}
-}
-
-func TestStreamSecurity(t *testing.T) {
-	if s := xray.StreamSecurity(`{"security":"reality"}`); s != "reality" {
-		t.Errorf("got %q", s)
-	}
-}
-
 // TestGenerate_DefaultOutboundDS：默认出口（freedom）出站解析策略注入——
 // Server 配 UseIP → direct 出站 settings.domainStrategy=UseIP；AsIs → 模板默认不动；
 // DB 出站显式 UseIPv4 → 不被覆盖；routing.domainStrategy 独立不受影响。
@@ -1056,29 +1008,12 @@ func TestGenerate_PrivateRoutedToBlocked(t *testing.T) {
 }
 
 
-// TestTemplateCacheNotPolluted 回归：自定义 DB 模板 + 默认出口 domainStrategy 注入
-// 不得污染共享模板缓存。修复前 cloneMap 仅浅拷贝顶层，Generate 原地改写嵌套
-// settings（config.go 默认出口 DS 注入段），会导致：①服务器 A（DS=UseIPv4）生成后，
-// 服务器 B（DS 空）继承 A 的值——配置跨服务器串扰；②并发 Generate 对共享 map
-// 读写构成数据竞争（race 必报）。
+// TestTemplateCacheNotPolluted 回归：默认出口 domainStrategy 注入不得污染共享模板。
+// 修复前 cloneMap 仅浅拷贝顶层，Generate 原地改写嵌套 settings（config.go 默认出口
+// DS 注入段），会导致：①服务器 A（DS=UseIPv4）生成后，服务器 B（DS 空）继承 A 的
+// 值——配置跨服务器串扰；②并发 Generate 对共享 map 读写构成数据竞争（race 必报）。
+// 模板现为只读内嵌默认（无 DB 覆盖入口），隔离要求不变：每次 Generate 领独立深拷贝。
 func TestTemplateCacheNotPolluted(t *testing.T) {
-	t.Cleanup(func() { _ = xray.SetTemplate(nil) }) // 模板缓存为包级全局，用后还原
-
-	custom := `{
-		"log": {"loglevel": "warning"},
-		"stats": {},
-		"policy": {"levels": {"0": {"statsUserUplink": true, "statsUserDownlink": true}}},
-		"inbounds": [],
-		"outbounds": [
-			{"protocol": "freedom", "tag": "direct", "settings": {}},
-			{"protocol": "blackhole", "tag": "blocked"}
-		],
-		"routing": {"rules": []}
-	}`
-	if err := xray.SetTemplate([]byte(custom)); err != nil {
-		t.Fatalf("SetTemplate failed: %v", err)
-	}
-
 	inbounds := []models.Inbound{{
 		ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443,
 		StreamSettings: inbStream("tcp", "none", ""), Enabled: true,
@@ -1102,7 +1037,7 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		return ""
 	}
 
-	// 服务器 A：DS=UseIPv4 → 注入生效
+	// 服务器 A：DS=UseIPv4 → 注入生效（默认模板 direct.domainStrategy=AsIs 允许覆盖）
 	rawA, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "", "UseIPv4")
 	if err != nil {
 		t.Fatalf("Generate A failed: %v", err)
@@ -1111,24 +1046,24 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		t.Fatalf("服务器 A 的 direct.domainStrategy = %q, 期望 UseIPv4", ds)
 	}
 
-	// 缓存本体不得被 A 的注入污染
+	// 模板本体不得被 A 的注入污染（默认值仍为 AsIs）
 	cached := xray.LoadTemplate()
 	for _, item := range asArray(t, cached["outbounds"], "cached.outbounds") {
 		m := asObject(t, item, "cached.outbound")
 		if m["tag"] == "direct" {
 			settings := asObject(t, m["settings"], "cached.direct.settings")
-			if ds, _ := settings["domainStrategy"].(string); ds != "" {
-				t.Fatalf("模板缓存被污染：cached direct.domainStrategy = %q", ds)
+			if ds, _ := settings["domainStrategy"].(string); ds != "AsIs" {
+				t.Fatalf("模板被污染：cached direct.domainStrategy = %q, 期望 AsIs", ds)
 			}
 		}
 	}
 
-	// 服务器 B：DS 为空 → 不得继承 A 注入的 UseIPv4
+	// 服务器 B：DS 为空 → 不得继承 A 注入的 UseIPv4（回落模板默认）
 	rawB, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "")
 	if err != nil {
 		t.Fatalf("Generate B failed: %v", err)
 	}
-	if ds := directDS(rawB); ds != "" {
+	if ds := directDS(rawB); ds == "UseIPv4" {
 		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q", ds)
 	}
 }

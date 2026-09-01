@@ -84,13 +84,6 @@ func DecodeInbound(inb *models.Inbound) *InboundSpec {
 	return spec
 }
 
-// DecodeStream 仅解码 streamSettings（只有原始 JSON 而非完整入站模型时使用）。
-func DecodeStream(raw string) *InboundSpec {
-	spec := &InboundSpec{}
-	decodeStreamInto(spec, raw)
-	return spec
-}
-
 func decodeStreamInto(spec *InboundSpec, raw string) {
 	if raw == "" {
 		return

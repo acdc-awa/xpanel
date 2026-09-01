@@ -60,8 +60,13 @@ func TestAdminDashboardNoDoubleCountToday(t *testing.T) {
 	if s.TodayTrafficUp != 1000 {
 		t.Fatalf("today up = %d, want 1000（daily 与 log 不得叠加）", s.TodayTrafficUp)
 	}
-	if s.MonthTrafficTotal != 1500 {
-		t.Fatalf("month total = %d, want 1500（500 + 1000，不含重复今日 log）", s.MonthTrafficTotal)
+	// 月合计期望按日历月计算：月初 1 号时"昨日"属上月，不计入本月（500 只在同时月时计入）
+	wantMonth := int64(1000)
+	if yesterday[:7] == today[:7] {
+		wantMonth += 500
+	}
+	if s.MonthTrafficTotal != wantMonth {
+		t.Fatalf("month total = %d, want %d（昨日同月时 500 + 1000，不含重复今日 log）", s.MonthTrafficTotal, wantMonth)
 	}
 	for _, p := range resp.Data.TrafficTrend {
 		if p.Date == today && p.UpBytes != 1000 {

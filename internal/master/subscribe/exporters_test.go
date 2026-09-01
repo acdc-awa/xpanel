@@ -22,8 +22,12 @@ func TestDefaultRegistry_ClashAndBase64(t *testing.T) {
 
 	reg := DefaultRegistry()
 
-	// 1. Clash by UA
-	clashContent, _, err := reg.Export(context.Background(), "clash.meta", summary, dtos, contracts.ExportOptions{Template: "", PanelHost: "panel.test"})
+	// 1. Clash by UA（生产流程：Match 选型 → 导出器接口直调，nil 时上层兜底 base64）
+	exporter := reg.Match("clash.meta")
+	if exporter == nil {
+		t.Fatal("clash exporter not matched")
+	}
+	clashContent, _, err := exporter.Export(context.Background(), summary, dtos, contracts.ExportOptions{Template: "", PanelHost: "panel.test"})
 	if err != nil {
 		t.Fatalf("Clash export failed: %v", err)
 	}

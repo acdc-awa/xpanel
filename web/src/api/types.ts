@@ -312,10 +312,6 @@ export interface AccessLayer {
   updated_at?: string
 }
 
-// Phase T：入站二态（面向用户 / 内部链式代理落地）
-export const INBOUND_TYPE_USER = 'user'
-export const INBOUND_TYPE_RELAY = 'relay'
-
 // 用户接入点（消费者模型：命名 + 权限组白名单 + 可选对外端点覆写，数据沿管道自适应继承）
 export interface UserAccessPoint {
   id: number

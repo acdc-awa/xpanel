@@ -49,7 +49,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 			&contracts.SecurityOptions{Type: "reality"}, nil, ""),
 	}
 
-	yaml := BuildClash(nodes)
+	yaml := BuildClashWithTemplate(nodes, "")
 
 	for _, want := range []string{
 		"flow: xtls-rprx-vision",        // reality+tcp 自动 vision
@@ -62,7 +62,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 		"cp.cloudflare.com/generate_204", // F url-test 地址
 	} {
 		if !strings.Contains(yaml, want) {
-			t.Errorf("BuildClash 缺少 %q\n---\n%s", want, yaml)
+			t.Errorf("BuildClashWithTemplate 缺少 %q\n---\n%s", want, yaml)
 		}
 	}
 	if strings.Contains(yaml, "broken-reality") {
@@ -145,7 +145,7 @@ func TestBuildClash_SkipsBrokenReality(t *testing.T) {
 		dtoVless("broken", "b.com", 443, "u2", "tcp",
 			&contracts.SecurityOptions{Type: "reality"}, nil, ""),
 	}
-	yaml := BuildClash(nodes)
+	yaml := BuildClashWithTemplate(nodes, "")
 	if strings.Contains(yaml, "broken") {
 		t.Errorf("broken 节点不应输出: %s", yaml)
 	}

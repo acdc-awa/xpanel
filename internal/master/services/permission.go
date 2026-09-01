@@ -122,30 +122,6 @@ func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64)
 	return aps, BatchAccessPointPermissionGroupIDs(db, apIDs)
 }
 
-// AuthorizedInboundSet 用户当前可用入站集合（AP 单点授权派生）。
-// 计算逻辑：用户生效权限组命中的启用 AP → 解析落地入站（直连）。
-func AuthorizedInboundSet(db *gorm.DB, user *models.User) map[uint64]bool {
-	set := make(map[uint64]bool)
-	if user == nil {
-		return set
-	}
-	groupID := UserEffectiveGroupID(db, user)
-	if groupID == 0 {
-		return set
-	}
-	aps, apGroupMap := loadEnabledAPs(db)
-	for i := range aps {
-		ap := &aps[i]
-		if !groupHit(apGroupMap[ap.ID], groupID) {
-			continue
-		}
-		if inbID := ResolveAccessPointInboundID(ap); inbID > 0 {
-			set[inbID] = true
-		}
-	}
-	return set
-}
-
 // BatchInboundAuthorizedGroupIDs 批量计算入站的授权权限组映射（inboundID -> []permissionGroupID），
 // 由启用 AP 白名单派生：AP 直连入站，AP 的开放组并入该入站的授权组集。
 // 配置生成（GetValidUsers）与用户注入的唯一权威来源。

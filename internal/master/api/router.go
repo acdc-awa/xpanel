@@ -113,18 +113,15 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
 			user.GET("/balance-logs", d.UserBalanceLogs)
 			user.POST("/password", d.UserChangePassword)
-			user.PUT("/profile", d.UserUpdateProfile)
 			user.POST("/2fa/setup", d.UserOTPSetup)
 			user.POST("/2fa/confirm", d.UserOTPConfirm)
 			user.POST("/2fa/disable", d.UserOTPDisable)
 			user.POST("/subscribe/reset", d.UserResetSubscribe)
 			user.GET("/notices", d.UserListNotices)
-			user.GET("/notices/:id", d.UserGetNotice)
 		}
 
-		// 公开：上架套餐与公开公告
+		// 公开：上架套餐（公告仅登录用户可见）
 		v1.GET("/plans", d.PublicPlans)
-		v1.GET("/notices", d.UserListNotices)
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",

@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -54,10 +53,5 @@ func TestExporterRegistry_NoMatch(t *testing.T) {
 	r.Register(&fakeExporter{key: "clash", uaHit: false})
 	if got := r.Match("unknown"); got != nil {
 		t.Fatalf("Match(unknown) = %#v, want nil", got)
-	}
-	if _, _, err := r.Export(context.Background(), "unknown", UserSummaryDTO{}, nil, ExportOptions{}); err == nil {
-		t.Fatal("expected ErrNoExporterMatched")
-	} else if !strings.Contains(err.Error(), "no subscription exporter matched") {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -1,7 +1,5 @@
 package contracts
 
-import "context"
-
 // ExporterRegistry 订阅导出器注册表。
 // 支持按 FormatKey 查找，也支持按 User-Agent 匹配选型。
 type ExporterRegistry struct {
@@ -49,19 +47,3 @@ func (r *ExporterRegistry) Match(ua string) SubscriptionExporter {
 	return nil
 }
 
-// Export 按 UA 选择导出器并导出订阅内容。
-func (r *ExporterRegistry) Export(ctx context.Context, ua string, user UserSummaryDTO, nodes []ProxyNodeDTO, opts ExportOptions) (string, string, error) {
-	e := r.Match(ua)
-	if e == nil {
-		return "", "", ErrNoExporterMatched
-	}
-	return e.Export(ctx, user, nodes, opts)
-}
-
-// ErrNoExporterMatched 没有匹配到订阅导出器。
-var ErrNoExporterMatched = &ExporterNotFoundError{}
-
-// ExporterNotFoundError 导出器未匹配错误。
-type ExporterNotFoundError struct{}
-
-func (e *ExporterNotFoundError) Error() string { return "no subscription exporter matched" }

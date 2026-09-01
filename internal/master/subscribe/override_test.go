@@ -58,7 +58,7 @@ func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	}
 
 	// 2. 验证 Clash YAML 输出格式
-	clashYAML := BuildClash([]contracts.ProxyNodeDTO{*dto})
+	clashYAML := BuildClashWithTemplate([]contracts.ProxyNodeDTO{*dto}, "")
 	if !strings.Contains(clashYAML, "server: caddy.example.com") {
 		t.Errorf("Clash YAML 缺少 server: caddy.example.com:\n%s", clashYAML)
 	}

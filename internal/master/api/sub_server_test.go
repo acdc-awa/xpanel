@@ -43,17 +43,11 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 	if err := subSrv.Start(0); err != nil {
 		t.Errorf("Start(0) should succeed with no-op: %v", err)
 	}
-	if subSrv.Port() != 0 {
-		t.Errorf("Port() = %d, want 0", subSrv.Port())
-	}
 
 	// 启动独立端口（缺省订阅入口 /sub）
 	port := 15001
 	if err := subSrv.Start(port); err != nil {
 		t.Fatalf("Start(%d) failed: %v", port, err)
-	}
-	if subSrv.Port() != port {
-		t.Errorf("Port() = %d, want %d", subSrv.Port(), port)
 	}
 	time.Sleep(100 * time.Millisecond)
 
@@ -107,27 +101,11 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 		t.Errorf("GET /sub/tok-valid（退役后）= %d %q, want 401 未授权", status, body)
 	}
 
-	// 端口热重载仍可用
-	if err := subSrv.ReloadPort(15002); err != nil {
-		t.Fatalf("ReloadPort(15002) failed: %v", err)
-	}
-	if subSrv.Port() != 15002 {
-		t.Errorf("Port() = %d, want 15002", subSrv.Port())
-	}
-	time.Sleep(100 * time.Millisecond)
-	status, body = getBody(t, "http://127.0.0.1:15002/ehisnodn/tok-valid")
-	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用的节点") {
-		t.Errorf("GET reloaded /ehisnodn/tok-valid = %d %q", status, body)
-	}
-
 	// 优雅关闭
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := subSrv.Shutdown(ctx); err != nil {
 		t.Errorf("Shutdown failed: %v", err)
-	}
-	if subSrv.Port() != 0 {
-		t.Errorf("Port() after shutdown = %d, want 0", subSrv.Port())
 	}
 }
 

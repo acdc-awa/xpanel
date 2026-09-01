@@ -4,7 +4,13 @@ import (
 	"testing"
 
 	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
+
+// decodeStream 测试辅助：仅解码 streamSettings（生产统一入口为 contracts.DecodeInbound）。
+func decodeStream(raw string) *contracts.InboundSpec {
+	return contracts.DecodeInbound(&models.Inbound{StreamSettings: raw})
+}
 
 // TestVLESSResolveFlow flow 决议（生成侧盖戳与订阅侧同源）：
 // 入站级 none 禁用自动注入 → 空 + tcp+reality 自动 vision → 其余透传。
@@ -57,7 +63,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	p := VLESSPlugin{}
 
 	// reality 完整参数
-	spec := contracts.DecodeStream(`{"network":"tcp","security":"reality","realitySettings":{
+	spec := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{
 		"serverNames":["www.example.com"],"publicKey":"pbk","shortIds":["ab12"],"privateKey":"priv","dest":"www.example.com:443"}}`)
 	dto := p.BuildClientNode(&contracts.ClientNodeInput{
 		Name: "n1", Host: "h1", Port: 443, Spec: spec, UserUUID: "uuid-1",
@@ -74,7 +80,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	}
 
 	// reality 缺 serverName → nil（缺 SNI/公钥不产出订阅节点）
-	bad := contracts.DecodeStream(`{"network":"tcp","security":"reality","realitySettings":{"publicKey":"pbk"}}`)
+	bad := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{"publicKey":"pbk"}}`)
 	if dto := p.BuildClientNode(&contracts.ClientNodeInput{
 		Name: "n2", Host: "h2", Port: 443, Spec: bad, UserUUID: "uuid-2",
 	}); dto != nil {
@@ -82,7 +88,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	}
 
 	// share 覆写：security none→tls + SNI/Path/Host（Caddy 反代场景）
-	caddy := contracts.DecodeStream(`{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`)
+	caddy := decodeStream(`{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`)
 	dto = p.BuildClientNode(&contracts.ClientNodeInput{
 		Name: "n3", Host: "caddy.example.com", Port: 443, Spec: caddy,
 		Share: contracts.ShareOverride{
@@ -105,7 +111,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	}
 
 	// 入站级 flow=none + tcp+reality → 不注入（与服务端 clients 一致）
-	noneFlow := contracts.DecodeStream(`{"network":"tcp","security":"reality","realitySettings":{"serverName":"s.com","publicKey":"pbk"}}`)
+	noneFlow := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{"serverName":"s.com","publicKey":"pbk"}}`)
 	dto = p.BuildClientNode(&contracts.ClientNodeInput{
 		Name: "n4", Host: "h4", Port: 443, Spec: noneFlow, InboundFlow: "none", UserUUID: "uuid-4",
 	})

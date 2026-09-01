@@ -71,7 +71,6 @@ func setupNoticesTest(t *testing.T) (*gin.Engine, *gorm.DB, *Deps, string, strin
 	userGroup := r.Group("/api/v1/user", middleware.AuthRequired(jwt, db))
 	{
 		userGroup.GET("/notices", deps.UserListNotices)
-		userGroup.GET("/notices/:id", deps.UserGetNotice)
 	}
 
 	return r, db, deps, adminToken, userToken

@@ -95,12 +95,6 @@ func (d *Deps) UserChangePassword(c *gin.Context) {
 	util.OK(c, gin.H{"ok": true})
 }
 
-// UserUpdateProfile PUT /api/v1/user/profile —— 资料（用户名=邮箱，2026-08-14 起用户不可自助改邮箱，
-// 仅管理员可改（AdminUpdateUser，记审计）。本接口保留为空操作以兼容旧客户端）。
-func (d *Deps) UserUpdateProfile(c *gin.Context) {
-	util.OK(c, gin.H{"ok": true})
-}
-
 // UserServers GET /api/v1/user/servers —— 用户可见节点可用性（J15：替换前端 mock）。
 // 与订阅同源（AP 单点授权派生）：列出用户可见接入点的入口服务器
 // （入口 = 目标入站所在服务器）。在线 = last_seen_at 在心跳窗口（90s）内。

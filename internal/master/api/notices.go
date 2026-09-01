@@ -199,19 +199,3 @@ func (d *Deps) UserListNotices(c *gin.Context) {
 	}
 	util.OK(c, list)
 }
-
-// UserGetNotice GET /api/v1/user/notices/:id —— 用户端获取单条公告详情。
-func (d *Deps) UserGetNotice(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "无效的公告 ID")
-		return
-	}
-
-	var notice models.Notice
-	if err := d.DB.Where("status = ?", models.StatusActive).First(&notice, id).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "公告不存在或已被隐藏")
-		return
-	}
-	util.OK(c, notice)
-}

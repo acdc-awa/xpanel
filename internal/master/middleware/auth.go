@@ -154,14 +154,6 @@ func CurrentClaims(c *gin.Context) *contracts.JWTClaims {
 	return nil
 }
 
-// CurrentRole 取当前角色。
-func CurrentRole(c *gin.Context) string {
-	if v, ok := c.Get(CtxClaimsKey); ok {
-		return v.(*contracts.JWTClaims).Role
-	}
-	return ""
-}
-
 // RequirePwdChanged 强制改密拦截（J8）：must_change_pwd=true 时仅放行改密/登出，
 // 其余接口返回 403 引导先改密。须在 AuthRequired 之后挂载。
 func RequirePwdChanged(db *gorm.DB) gin.HandlerFunc {
