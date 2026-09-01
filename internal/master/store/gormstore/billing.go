@@ -57,11 +57,16 @@ func (s *BillingStore) UpdateBalance(ctx context.Context, userID uint64, newBala
 		Update("balance_cents", newBalanceCents).Error
 }
 
-func (s *BillingStore) UpdateSubscription(ctx context.Context, userID, planID uint64, expireAt, cycleStart time.Time, permGroupID uint64) error {
+func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time, permGroupID uint64) error {
 	updates := map[string]any{
-		"plan_id":             planID,
+		"plan_id":             plan.ID,
 		"expire_at":           expireAt,
 		"traffic_cycle_start": cycleStart,
+	}
+	// 套餐快照（2026-09-01 Xboard 式隔离：购买/续费即按当前套餐值重新快照，
+	// 此后套餐编辑不影响该用户直至下次分配/续费/勾选同步）
+	for k, v := range models.PlanSnapshotColumns(plan) {
+		updates[k] = v
 	}
 	if permGroupID > 0 {
 		updates["permission_group_id"] = permGroupID

@@ -217,6 +217,15 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// u2 分配套餐即按当前套餐值快照（2026-09-01 快照化：与生产分配路径同口径）
+	users[1].ApplyPlanSnapshot(&planA)
+	if err := db.Model(&users[1]).Updates(map[string]any{
+		"plan_traffic_bytes": users[1].PlanTrafficBytes,
+		"plan_device_limit":  users[1].PlanDeviceLimit,
+		"plan_group_id":      users[1].PlanGroupID,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	s := &ConfigService{DB: db}
 	m, err := s.GetValidUsers(1)

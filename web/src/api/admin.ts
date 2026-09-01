@@ -151,9 +151,16 @@ export interface CaptchaGroup {
   turnstile_secret_key: string
 }
 
+// 节点上报周期（秒；agent_settings 消息下发到在线节点，保存即时生效）
+export interface AgentGroup {
+  agent_report_interval: string
+  agent_heartbeat_interval: string
+}
+
 export interface SiteSettings {
   site: SiteGroup
   captcha: CaptchaGroup
+  agent: AgentGroup
 }
 
 export function getSettings() {
@@ -572,7 +579,7 @@ export function createPlan(payload: Partial<Plan>) {
   return http.post<ApiResp<{ plan: Plan }>>('/admin/plans', payload)
 }
 
-export function updatePlan(id: number, payload: Partial<Plan>) {
+export function updatePlan(id: number, payload: Partial<Plan> & { sync_users?: boolean }) {
   return http.put<ApiResp<{ plan: Plan }>>(`/admin/plans/${id}`, payload)
 }
 

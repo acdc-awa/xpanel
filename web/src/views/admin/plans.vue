@@ -44,6 +44,7 @@ const form = reactive({
   duration_days: 30,
   device_limit: 0,
   permission_group_id: 0,
+  sync_users: false, // 编辑保存时是否把新套餐值同步到存量用户（默认关：只影响新购/续费）
 })
 const saving = ref(false)
 
@@ -93,6 +94,7 @@ function openCreate() {
     duration_days: 30,
     device_limit: 0,
     permission_group_id: 0,
+    sync_users: false,
   })
   formOpen.value = true
 }
@@ -108,6 +110,7 @@ function openEdit(row: any) {
     duration_days: row.duration_days,
     device_limit: row.device_limit || 0,
     permission_group_id: row.permission_group_id || 0,
+    sync_users: false, // 每次打开默认不勾，避免误触发批量同步
   })
   formOpen.value = true
 }
@@ -119,7 +122,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = {
+    const payload: Record<string, any> = {
       name: form.name,
       description: form.description,
       price_cents: Math.round(form.price_yuan * 100),
@@ -128,6 +131,7 @@ async function save() {
       device_limit: form.device_limit,
       permission_group_id: form.permission_group_id || undefined,
     }
+    if (editing.value) payload.sync_users = form.sync_users
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
     if (data.code === 0) {
       ElMessage.success(editing.value ? '已保存' : '已创建')
@@ -345,6 +349,13 @@ async function remove(row: any) {
           <el-select v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
             <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="editing">
+          <el-checkbox v-model="form.sync_users">同步到存量用户</el-checkbox>
+          <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
+            默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。
+            勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步节点（超量用户会被即时踢除）。
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>

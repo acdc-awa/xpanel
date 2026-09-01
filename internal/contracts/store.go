@@ -30,8 +30,10 @@ type BillingStore interface {
 	// 用户（资金视角）
 	LockUser(ctx context.Context, id uint64) (*models.User, error) // 行锁读取（方言接缝内消化）
 	UpdateBalance(ctx context.Context, userID uint64, newBalanceCents int64) error
-	// UpdateSubscription 顺延套餐：permGroupID 为 0 时不改动权限组字段。
-	UpdateSubscription(ctx context.Context, userID, planID uint64, expireAt, cycleStart time.Time, permGroupID uint64) error
+	// UpdateSubscription 顺延套餐：permGroupID 为 0 时不改动权限组字段；
+	// plan 提供本次购买/续费的套餐实体，快照三列（plan_traffic_bytes/plan_device_limit/plan_group_id）
+	// 在同一事务内按其当前值写入（2026-09-01 Xboard 式隔离：分配即快照）。
+	UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time, permGroupID uint64) error
 
 	// 订单
 	FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) // 无记录返回 nil,nil

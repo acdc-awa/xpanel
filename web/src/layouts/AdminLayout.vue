@@ -7,6 +7,7 @@ import { adminMenuGroups } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
+import { getSystemStatus } from '@/api/admin'
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -146,11 +147,20 @@ const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
   isMobile.value = e.matches
   if (!e.matches) drawerOpen.value = false
 }
-onMounted(() => {
+
+// 页脚版本号：取后端 ldflags 注入的真实 panel_version（原写死 v1.0.0 与发布版本脱节）
+const panelVersion = ref('')
+onMounted(async () => {
   mq = window.matchMedia('(max-width: 900px)')
   onMq(mq)
   mq.addEventListener('change', onMq)
   window.addEventListener('keydown', handleGlobalKeydown)
+  try {
+    const { data } = await getSystemStatus()
+    if (data.code === 0) panelVersion.value = data.data.panel_version
+  } catch {
+    /* 版本获取失败静默，页脚仅显示用户名 */
+  }
 })
 onUnmounted(() => {
   if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
@@ -308,7 +318,7 @@ async function handleLogout() {
         <div class="status-dot-wrap" :title="`${auth.username} · 在线`">
           <span class="status-pulse-dot" />
         </div>
-        <span class="foot-text">{{ auth.username }} · v1.0.0</span>
+        <span class="foot-text">{{ auth.username }}<template v-if="panelVersion"> · {{ panelVersion }}</template></span>
       </div>
     </aside>
 
@@ -354,7 +364,7 @@ async function handleLogout() {
         <div class="status-dot-wrap">
           <span class="status-pulse-dot" />
         </div>
-        <span class="foot-text">{{ auth.username }} · v1.0.0</span>
+        <span class="foot-text">{{ auth.username }}<template v-if="panelVersion"> · {{ panelVersion }}</template></span>
       </div>
     </el-drawer>
 

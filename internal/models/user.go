@@ -23,7 +23,13 @@ type User struct {
 	DeviceLimit         int        `gorm:"default:0" json:"device_limit"`              // 自定义设备数限制（0=继承套餐）
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
-	MustChangePwd       bool       `gorm:"default:false" json:"must_change_pwd"`
+	// 套餐快照三列（2026-09-01 Xboard 式隔离）：购买/续费/管理员分配套餐时从 Plan 复制，
+	// 判定链（filterValidUsers/订阅/展示/超额处置）只读快照、不实时 join plans——
+	// 套餐编辑默认零影响存量用户（仅新购/续费生效），勾选「同步存量用户」才批量重快照。
+	PlanTrafficBytes int64  `gorm:"default:0" json:"plan_traffic_bytes"` // 流量额度快照（字节，0=不限）
+	PlanDeviceLimit  int    `gorm:"default:0" json:"plan_device_limit"`  // 设备限制快照（0=不限）
+	PlanGroupID      uint64 `gorm:"default:0" json:"plan_group_id"`      // 权限组快照（0=不绑定）
+	MustChangePwd    bool   `gorm:"default:false" json:"must_change_pwd"`
 	// 会话吊销版本号（改密/重置密码/封禁后 bump；JWT claims 携带，refresh 时校验）
 	TokenVersion uint32 `gorm:"default:0" json:"-"`
 	// TOTP 2FA（2026-08-14 方向③）：secret AES 加密存储；BackupCodes 为 bcrypt 哈希 JSON 数组
@@ -43,6 +49,52 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 		u.TrafficCycleStart = time.Now()
 	}
 	return nil
+}
+
+// EffectiveTrafficBytes 套餐流量额度快照（字节，0=不限）。
+func (u *User) EffectiveTrafficBytes() int64 { return u.PlanTrafficBytes }
+
+// EffectiveDeviceLimit 生效设备限制（用户自定义优先，fallback 快照；0=不限）。
+func (u *User) EffectiveDeviceLimit() int {
+	if u.DeviceLimit > 0 {
+		return u.DeviceLimit
+	}
+	return u.PlanDeviceLimit
+}
+
+// EffectiveGroupID 生效权限组（用户显式分组优先，fallback 快照；0=未分组）。
+func (u *User) EffectiveGroupID() uint64 {
+	if u.PermissionGroupID > 0 {
+		return u.PermissionGroupID
+	}
+	return u.PlanGroupID
+}
+
+// ApplyPlanSnapshot 从套餐复制快照（购买/续费/管理员分配套餐共用；Xboard 语义：
+// 分配即按当前套餐值快照，此后套餐编辑不影响该用户直至下次分配/同步）。
+func (u *User) ApplyPlanSnapshot(p *Plan) {
+	u.PlanID = p.ID
+	u.PlanTrafficBytes = p.TrafficGB * 1024 * 1024 * 1024
+	u.PlanDeviceLimit = p.DeviceLimit
+	u.PlanGroupID = p.PermissionGroupID
+}
+
+// PlanSnapshotColumns 快照三列的 UPDATE map（订单事务/批量同步共用）。
+func PlanSnapshotColumns(p *Plan) map[string]any {
+	return map[string]any{
+		"plan_traffic_bytes": p.TrafficGB * 1024 * 1024 * 1024,
+		"plan_device_limit":  p.DeviceLimit,
+		"plan_group_id":      p.PermissionGroupID,
+	}
+}
+
+// ClearPlanSnapshotColumns 解绑套餐（plan_id=0）时清空快照。
+func ClearPlanSnapshotColumns() map[string]any {
+	return map[string]any{
+		"plan_traffic_bytes": 0,
+		"plan_device_limit":  0,
+		"plan_group_id":      0,
+	}
 }
 
 // InvitationCode 邀请码（一次性，可设过期）。

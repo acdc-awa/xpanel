@@ -20,6 +20,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -34,6 +35,10 @@ const (
 	UpgradeAskTimeout = 5 * time.Minute
 	PongWait          = 60 * time.Second // 等待 pong 回复超时
 	PingPeriod        = (PongWait * 9) / 10
+
+	// enforcedThrottle 事件驱动超额/到期处置的节流窗口：同一用户命中后 3 分钟内不重复
+	// 触发全节点同步（用户被移除后不再产生上报，正常只触发一次；此为重试/多节点并发兜底）。
+	enforcedThrottle = 3 * time.Minute
 )
 
 // Conn 一条节点连接。
@@ -80,6 +85,9 @@ type Hub struct {
 	pending map[string]chan *protocol.ResultPayload // 请求 id → 回执通道
 	wg      sync.WaitGroup
 	quit    chan struct{}
+
+	enforcedMu sync.Mutex
+	enforcedAt map[uint64]time.Time // 事件驱动处置节流：userID → 上次触发时刻（watchdog 定期清理）
 }
 
 // NewHub 构造网关。
@@ -108,6 +116,7 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 		pending: make(map[string]chan *protocol.ResultPayload),
 		quit:    make(chan struct{}),
 	}
+	h.enforcedAt = make(map[uint64]time.Time)
 	h.wg.Add(1)
 	go h.watchdog()
 	return h
@@ -174,11 +183,20 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	h.DB.Model(&models.Server{}).Where("id = ?", server.ID).
 		Updates(map[string]any{"status": 1, "last_seen_at": time.Now()})
 
-	// 节点上线：自动补推待推送配置 + 待推证书（非阻塞）
+	// 节点上线：自动补推待推送配置 + 待推证书（非阻塞）+ 对齐最新用户名单 + 下发运行时设置
 	go h.PushPending(server.ID)
 	if h.CertPusher != nil {
 		go h.CertPusher(server.ID)
 	}
+	// 重连即对齐最新有效用户名单：离线期间发生的用户超额/到期/禁用，PushPending 推的
+	// 可能是旧配置，热更一次立即移除，不必等 1h 校准（2026-09-01）
+	go func(id uint64) {
+		if err := h.SyncUsers(id); err != nil {
+			log.Printf("nodegate: 节点 %d 上线同步用户列表失败: %v", id, err)
+		}
+	}(server.ID)
+	// 下发当前运行时设置（上报/心跳周期，设置页可调；旧 agent 静默忽略，yaml 兜底）
+	go h.PushAgentSettings(server.ID)
 
 	go h.writePump(conn)
 	h.readPump(conn)
@@ -285,7 +303,10 @@ func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
 	}
 }
 
-// handleTrafficReport 处理节点流量上报（幂等落库）。
+// handleTrafficReport 处理节点流量上报（幂等落库）+ 事件驱动超额/到期处置：
+// 落库后对本帧涉及用户做增量限额判定，命中即热更全节点用户列表（gRPC 秒级移除，
+// 不重启 xray）——「超额后还能跑流量 ~1h」问题的根治路径（2026-09-01），
+// 最坏端到端时延从 1h 校准兜底降为 ≈1 个上报周期。
 func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	if h.Traffic == nil {
 		return
@@ -294,8 +315,49 @@ func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	if err := msg.PayloadTo(&tr); err != nil {
 		return
 	}
-	if err := h.Traffic.Save(tr, conn.ServerID); err != nil {
+	ids, err := h.Traffic.Save(tr, conn.ServerID)
+	if err != nil {
 		log.Printf("nodegate: 流量落库失败 (server=%d): %v", conn.ServerID, err)
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+	violators, err := h.Traffic.FindViolators(ids)
+	if err != nil {
+		log.Printf("nodegate: 超额/到期判定失败 (server=%d): %v", conn.ServerID, err)
+		return
+	}
+	if len(violators) == 0 {
+		return
+	}
+	// 节流：同一用户 3 分钟内不重复触发（用户被移除后不再产生上报，正常只触发一次）
+	now := time.Now()
+	fire := false
+	h.enforcedMu.Lock()
+	for _, id := range violators {
+		if last, ok := h.enforcedAt[id]; !ok || now.Sub(last) > enforcedThrottle {
+			h.enforcedAt[id] = now
+			fire = true
+		}
+	}
+	h.enforcedMu.Unlock()
+	if !fire {
+		return
+	}
+	log.Printf("nodegate: 流量上报触发违规处置（超额/到期）共 %d 用户，热更全节点用户列表: %v", len(violators), violators)
+	h.SyncUsersToAll()
+}
+
+// pruneEnforced 清理过期的处置节流记录，防 map 无界增长（watchdog 15s tick 调用）。
+func (h *Hub) pruneEnforced() {
+	cut := time.Now().Add(-10 * time.Minute)
+	h.enforcedMu.Lock()
+	defer h.enforcedMu.Unlock()
+	for id, at := range h.enforcedAt {
+		if at.Before(cut) {
+			delete(h.enforcedAt, id)
+		}
 	}
 }
 
@@ -547,6 +609,36 @@ func (h *Hub) SyncUsersToAll() {
 	}
 }
 
+// PushAgentSettings 向单个节点下发运行时设置（上报/心跳周期，设置页「节点上报」可调）。
+// 节点连接建立与设置保存时调用；离线报错仅记日志（重连时 ServeWS 会重新下发）。
+func (h *Hub) PushAgentSettings(serverID uint64) {
+	payload := protocol.AgentSettingsPayload{
+		ReportIntervalSec:    services.AgentReportIntervalSec(h.DB),
+		HeartbeatIntervalSec: services.AgentHeartbeatIntervalSec(h.DB),
+	}
+	res, err := h.Ask(serverID, protocol.MsgAgentSettings, payload, AskTimeout)
+	if err != nil {
+		log.Printf("nodegate: 下发运行时设置失败 (server=%d): %v", serverID, err)
+		return
+	}
+	if res != nil && !res.OK {
+		log.Printf("nodegate: 节点 %d 拒绝运行时设置: %s", serverID, res.Error)
+	}
+}
+
+// BroadcastAgentSettings 向所有在线节点下发运行时设置（设置保存后调用，非阻塞）。
+func (h *Hub) BroadcastAgentSettings() {
+	h.mu.RLock()
+	var serverIDs []uint64
+	for id := range h.conns {
+		serverIDs = append(serverIDs, id)
+	}
+	h.mu.RUnlock()
+	for _, id := range serverIDs {
+		go h.PushAgentSettings(id)
+	}
+}
+
 func (h *Hub) watchdog() {
 	defer h.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
@@ -573,6 +665,7 @@ func (h *Hub) watchdog() {
 				go h.PushPending(id)
 			}
 		case <-ticker.C:
+			h.pruneEnforced()
 			h.mu.RLock()
 			var stale []*Conn
 			for _, c := range h.conns {

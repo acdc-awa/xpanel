@@ -45,39 +45,17 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	// ISSUE-10：套餐信息一次批量预取，避免逐行查询 plan（用户流量仍按行统计）。
-	planIDs := make([]uint64, 0, len(users))
-	for _, u := range users {
-		if u.PlanID > 0 {
-			planIDs = append(planIDs, u.PlanID)
-		}
-	}
-	planMap := make(map[uint64]models.Plan)
-	if len(planIDs) > 0 {
-		var plans []models.Plan
-		if err := d.DB.Where("id IN ?", planIDs).Find(&plans).Error; err == nil {
-			for _, p := range plans {
-				planMap[p.ID] = p
-			}
-		}
-	}
 
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
 		up, down, _ := d.Traffic.UserUsed(u.ID)
 		used := up + down
-		totalBytes := int64(0)
-		effectiveGroupID := u.PermissionGroupID
-		effectiveLimit, isCustomLimit := 0, false
-		if u.DeviceLimit > 0 {
-			effectiveLimit, isCustomLimit = u.DeviceLimit, true
-		} else if plan, ok := planMap[u.PlanID]; ok && plan.Enabled {
-			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
-			effectiveLimit = plan.DeviceLimit
-			if effectiveGroupID == 0 {
-				effectiveGroupID = plan.PermissionGroupID
-			}
-		}
+		// 快照化（2026-09-01）：total/生效组/生效设备限制读用户行快照列（用户自定义优先），
+		// 不再实时 join plans——与生成/订阅/用户侧同口径。
+		totalBytes := u.EffectiveTrafficBytes()
+		effectiveGroupID := u.EffectiveGroupID()
+		effectiveLimit := u.EffectiveDeviceLimit()
+		isCustomLimit := u.DeviceLimit > 0
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"uuid": u.UUID,
@@ -242,6 +220,13 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		DeviceLimit:       req.DeviceLimit,
 		ExpireAt:          req.ExpireAt,
 	}
+	// 分配套餐即按当前套餐值快照（2026-09-01 Xboard 式隔离；validateUserRefs 已保证存在）
+	if req.PlanID > 0 {
+		var plan models.Plan
+		if err := d.DB.First(&plan, req.PlanID).Error; err == nil {
+			user.ApplyPlanSnapshot(&plan)
+		}
+	}
 	if err := d.DB.Create(&user).Error; err != nil {
 		if db.IsUniqueViolation(err, "users.username") {
 			util.BadRequest(c, "该邮箱已用作用户名")
@@ -325,6 +310,18 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			if msg := d.validateUserRefs(*req.PlanID, 0); msg != "" {
 				util.BadRequest(c, msg)
 				return
+			}
+			// 变更套餐即按当前套餐值重写快照（分配/换套餐 = 重新快照点）
+			var plan models.Plan
+			if err := d.DB.First(&plan, *req.PlanID).Error; err == nil {
+				for k, v := range models.PlanSnapshotColumns(&plan) {
+					updates[k] = v
+				}
+			}
+		} else {
+			// 解绑套餐：清空快照（回退到无套餐语义：仅用户自定义字段生效）
+			for k, v := range models.ClearPlanSnapshotColumns() {
+				updates[k] = v
 			}
 		}
 		updates["plan_id"] = *req.PlanID

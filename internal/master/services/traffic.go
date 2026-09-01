@@ -42,10 +42,11 @@ func (s *TrafficService) nowOrReal() time.Time {
 // serverID 用于把上报的入站 tag 解析为入站 ID（2026-08-14 J10：入站级统计激活）。
 // 2026-09-01 入站维度接通：agent 额外上报 inbound>>> 计数器派生条目（Email 恒空、Inbound=tag），
 // 仅累计 inbounds.up/down 冗余计数器；用户维度条目照旧落 traffic_logs。
-func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64) error {
+// 返回本次投递实际计入的用户 ID 去重集合（供节点网关做事件驱动超额处置，见 FindViolators）。
+func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64) ([]uint64, error) {
 	periodStart, err := time.Parse(time.RFC3339, tr.Period)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	periodEnd := time.Now()
 
@@ -58,7 +59,8 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 	}
 
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	reportedUsers := make(map[uint64]struct{})
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		for i := range tr.Entries {
 			e := &tr.Entries[i]
 			if e.UpBytes <= 0 && e.DownBytes <= 0 {
@@ -103,6 +105,7 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 					userID = user.ID
 				}
 			}
+			reportedUsers[userID] = struct{}{}
 
 			// P1-1：upsert 合并——唯一索引 (user_id, inbound_id, period_start) 兜底，
 			// 并发/重复投递自动累加而非撞索引报错丢弃（替代原 select-then-create 竞态路径）
@@ -139,6 +142,59 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if len(reportedUsers) == 0 {
+		return nil, nil
+	}
+	ids := make([]uint64, 0, len(reportedUsers))
+	for id := range reportedUsers {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// FindViolators 判定给定用户中已「违规」的（已过期或流量超额），供流量落库后事件驱动处置：
+// 命中即热更节点用户列表将其移除，无需等 1h 校准。口径与 filterValidUsers 快照语义严格一致：
+// 额度读用户行快照列 plan_traffic_bytes，周期同口径（period_start >= traffic_cycle_start，
+// 零值起点 = 全量）。status 非活跃用户不在返回中（其移除由状态变更路径触发）。
+func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	type violatorRow struct {
+		UserID    uint64
+		UsedBytes int64
+		Quota     int64
+		ExpireAt  *time.Time
+	}
+	var rows []violatorRow
+	err := s.DB.Raw(`
+		SELECT u.id AS user_id,
+		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.up_bytes + l.down_bytes ELSE 0 END), 0) AS used_bytes,
+		       u.plan_traffic_bytes AS quota,
+		       u.expire_at AS expire_at
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		WHERE u.id IN ? AND u.status = ?
+		GROUP BY u.id, u.traffic_cycle_start, u.plan_traffic_bytes, u.expire_at`,
+		userIDs, models.StatusActive).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	var out []uint64
+	for _, r := range rows {
+		if r.ExpireAt != nil && now.After(*r.ExpireAt) {
+			out = append(out, r.UserID)
+			continue
+		}
+		if r.Quota > 0 && r.UsedBytes >= r.Quota {
+			out = append(out, r.UserID)
+		}
+	}
+	return out, nil
 }
 
 // UserUsed 用户当前计费周期内已用总流量（字节）。
@@ -161,12 +217,6 @@ func (s *TrafficService) UserUsed(userID uint64) (up, down int64, err error) {
 		return 0, 0, err
 	}
 	return row.Up, row.Down, nil
-}
-
-// ResetUserTraffic 重置用户流量周期起点（套餐续费或手动重置时调用）。
-func (s *TrafficService) ResetUserTraffic(userID uint64) error {
-	return s.DB.Model(&models.User{}).Where("id = ?", userID).
-		Update("traffic_cycle_start", time.Now()).Error
 }
 
 // StartTrafficResetCron 启动 Inbound 级流量重置定时任务（每 5 分钟检查）。

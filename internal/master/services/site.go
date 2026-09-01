@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -27,6 +28,11 @@ const (
 	SettingStopRegister    = "stop_register"     // 关闭注册（1=关闭，注册接口拒绝）
 	SettingCurrency        = "currency"          // 货币代码（CNY/USD）
 	SettingCurrencySymbol  = "currency_symbol"   // 货币符号（¥/$）
+
+	// 节点上报周期（2026-09-01，设置页「节点上报」；agent_settings 消息下发到节点）。
+	// 缩短上报周期可加快超额/到期用户的踢除时效（配合事件驱动处置，最坏延迟≈上报周期）。
+	SettingAgentReportInterval    = "agent_report_interval"    // 流量上报周期（秒，默认 60）
+	SettingAgentHeartbeatInterval = "agent_heartbeat_interval" // 状态心跳周期（秒，默认 30）
 )
 
 // SiteKeys 站点分组全部键（设置页「站点」tab；SetSiteGroup 白名单）。
@@ -64,6 +70,33 @@ func GetSetting(db *gorm.DB, key string) string {
 		return ""
 	}
 	return s.Value
+}
+
+// AgentReportIntervalSec 节点流量上报周期（秒；缺省 60，clamp 5–1800，与 agent 端 clamp 一致）。
+func AgentReportIntervalSec(db *gorm.DB) int {
+	return clampIntervalSec(GetSetting(db, SettingAgentReportInterval), 60)
+}
+
+// AgentHeartbeatIntervalSec 节点状态心跳周期（秒；缺省 30，clamp 5–1800）。
+func AgentHeartbeatIntervalSec(db *gorm.DB) int {
+	return clampIntervalSec(GetSetting(db, SettingAgentHeartbeatInterval), 30)
+}
+
+// clampIntervalSec 解析秒数设置：空/非法回退默认值，并收敛到 agent 端可接受区间。
+func clampIntervalSec(v string, def int) int {
+	n := def
+	if v != "" {
+		if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p > 0 {
+			n = p
+		}
+	}
+	if n < 5 {
+		n = 5
+	}
+	if n > 1800 {
+		n = 1800
+	}
+	return n
 }
 
 // SetSetting 保存单个设置（upsert）。
@@ -170,6 +203,39 @@ func (s *SiteService) SetSiteGroup(vals map[string]string) error {
 	}
 	for k, v := range vals {
 		if err := SetSetting(s.DB, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AgentSettingsGroup 读取「节点上报」分组（DB 直读；返回归一化后的生效值而非原始串）。
+func AgentSettingsGroup(db *gorm.DB) map[string]string {
+	return map[string]string{
+		SettingAgentReportInterval:    strconv.Itoa(AgentReportIntervalSec(db)),
+		SettingAgentHeartbeatInterval: strconv.Itoa(AgentHeartbeatIntervalSec(db)),
+	}
+}
+
+// SaveAgentSettingsGroup 保存「节点上报」分组（仅接受白名单键，值域 5–1800 秒）。
+func SaveAgentSettingsGroup(db *gorm.DB, vals map[string]string) error {
+	allowed := map[string]bool{
+		SettingAgentReportInterval:    true,
+		SettingAgentHeartbeatInterval: true,
+	}
+	parsed := map[string]string{}
+	for k, v := range vals {
+		if !allowed[k] {
+			return errors.New("未知设置键: " + k)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 5 || n > 1800 {
+			return errors.New("周期需为 5–1800 秒的整数")
+		}
+		parsed[k] = strconv.Itoa(n)
+	}
+	for k, v := range parsed {
+		if err := SetSetting(db, k, v); err != nil {
 			return err
 		}
 	}

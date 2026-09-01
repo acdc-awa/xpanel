@@ -72,7 +72,10 @@ type OTPService interface {
 
 // TrafficService 流量统计服务接口。
 type TrafficService interface {
-	Save(tr protocol.TrafficReportPayload, serverID uint64) error
+	// Save 落库一帧流量上报，返回本次投递涉及的用户 ID（供事件驱动超额处置）。
+	Save(tr protocol.TrafficReportPayload, serverID uint64) (reportedUserIDs []uint64, err error)
+	// FindViolators 判定给定用户中已违规的（过期或流量超额），口径与 filterValidUsers 快照语义一致。
+	FindViolators(userIDs []uint64) ([]uint64, error)
 	UserUsed(userID uint64) (up, down int64, err error)
 }
 

@@ -103,7 +103,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
-	d.TriggerUserChange()
+	// 新套餐无订阅者，无需触发节点同步（快照化后套餐变更不再自动联动存量用户）
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})
 }
 
@@ -128,6 +128,10 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		DeviceLimit       *int    `json:"device_limit"`
 		PermissionGroupID *uint64 `json:"permission_group_id"` // 显式 0 解绑
 		Enabled           *bool   `json:"enabled"`
+		// SyncUsers「同步存量用户」（2026-09-01 快照化）：默认 false——套餐编辑只影响新购/续费
+		// （存量用户按快照用到自己到期为止）；勾选后把新的额度/设备限制/权限组快照批量覆盖到
+		// 该套餐全部用户，并触发热更同步（立即踢除超量用户）。
+		SyncUsers *bool `json:"sync_users"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -195,7 +199,16 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 			util.ServerError(c, "更新失败")
 			return
 		}
-		d.TriggerUserChange()
+		// 快照化后套餐编辑默认零影响存量用户（判定链只读用户行快照）；
+		// 显式勾选 sync_users 才批量重快照并触发同步（立即对存量用户生效/踢除超量）。
+		if req.SyncUsers != nil && *req.SyncUsers {
+			snapUpdates := models.PlanSnapshotColumns(&plan)
+			if err := d.DB.Model(&models.User{}).Where("plan_id = ?", plan.ID).Updates(snapUpdates).Error; err != nil {
+				util.ServerError(c, "同步存量用户快照失败")
+				return
+			}
+			d.TriggerUserChange()
+		}
 	}
 	d.DB.First(&plan, id)
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})

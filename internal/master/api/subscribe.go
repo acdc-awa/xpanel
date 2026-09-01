@@ -37,19 +37,17 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 	// U13：订阅端到期/超流量过滤（与生成端 filterValidUsers 同源——
-	// 过期/超量用户不注入任何节点配置，订阅也应拒绝拉取，避免客户端持有失效配置）
+	// 过期/超量用户不注入任何节点配置，订阅也应拒绝拉取，避免客户端持有失效配置）。
+	// 2026-09-01 快照化：额度读用户行快照列（不再 join plan，套餐下架不影响存量额度判定）。
 	if user.ExpireAt != nil && time.Now().After(*user.ExpireAt) {
 		util.Fail(c, 403, "订阅已过期，请续费后使用")
 		return
 	}
-	if user.PlanID > 0 {
-		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled && plan.TrafficGB > 0 {
-			up, down, _ := d.Traffic.UserUsed(user.ID)
-			if up+down >= plan.TrafficGB*1024*1024*1024 {
-				util.Fail(c, 403, "流量已用尽，请购买新套餐")
-				return
-			}
+	if quota := user.EffectiveTrafficBytes(); quota > 0 {
+		up, down, _ := d.Traffic.UserUsed(user.ID)
+		if up+down >= quota {
+			util.Fail(c, 403, "流量已用尽，请购买新套餐")
+			return
 		}
 	}
 
@@ -57,16 +55,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	// AP 权限组白名单命中用户生效组 → 沿管道解析（直连目标入站，端点可被 CustomHost/Port 覆写）→ 产出节点。
 	// 不再为裸入站直接生成订阅节点；无任何可见 AP 即 404。
 
-	// 确定用户生效的权限组 ID
-	var permGroupID uint64
-	if user.PermissionGroupID > 0 {
-		permGroupID = user.PermissionGroupID
-	} else if user.PlanID > 0 {
-		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
-			permGroupID = plan.PermissionGroupID
-		}
-	}
+	// 确定用户生效的权限组 ID（快照化：fallback 读用户行快照列）
+	permGroupID := user.EffectiveGroupID()
 
 	// 1. 服务器 / 可用用户入站映射表
 	var allServers []models.Server
@@ -185,14 +175,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	if d.Traffic != nil {
 		up, down, _ = d.Traffic.UserUsed(user.ID)
 	}
-	totalBytes := int64(0)
+	totalBytes := user.EffectiveTrafficBytes() // 快照（0=不限）
 	expire := int64(0)
-	if user.PlanID > 0 {
-		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled {
-			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
-		}
-	}
 	if user.ExpireAt != nil {
 		expire = user.ExpireAt.Unix()
 	}

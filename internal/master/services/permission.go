@@ -11,47 +11,7 @@ import (
 // - 订阅生成：只从「用户生效权限组命中的启用 AP」产出节点（直连目标入站，端点可被 CustomHost/Port 覆写）。
 // - 配置注入：入站 clients = 所有「解析到该入站的启用 AP」的权限组并集命中的用户。
 // 零信任：AP 未绑定权限组 = 对全员不可见；用户无生效权限组 = 无任何节点。
-
-// UserEffectiveGroupID 计算用户生效的权限组 ID。
-// 规则：若 user.PermissionGroupID > 0（管理员显式指定）则优先使用；
-// 否则若 user.PlanID > 0，则继承套餐绑定的 plan.PermissionGroupID；
-// 否则返回 0。
-func UserEffectiveGroupID(db *gorm.DB, user *models.User) uint64 {
-	if user == nil {
-		return 0
-	}
-	if user.PermissionGroupID > 0 {
-		return user.PermissionGroupID
-	}
-	if user.PlanID > 0 {
-		var plan models.Plan
-		if err := db.Select("id, permission_group_id").First(&plan, user.PlanID).Error; err == nil {
-			return plan.PermissionGroupID
-		}
-	}
-	return 0
-}
-
-// UserEffectiveDeviceLimit 计算用户生效的最大在线设备限制。
-// 规则：
-// 1. 若 user.DeviceLimit > 0（管理员单独为该用户指定），则优先使用并标记 custom=true；
-// 2. 否则若 user.PlanID > 0，则继承当前套餐 plan.DeviceLimit（custom=false）；
-// 3. 否则返回 0（不限，custom=false）。
-func UserEffectiveDeviceLimit(db *gorm.DB, user *models.User) (limit int, custom bool) {
-	if user == nil {
-		return 0, false
-	}
-	if user.DeviceLimit > 0 {
-		return user.DeviceLimit, true
-	}
-	if user.PlanID > 0 {
-		var plan models.Plan
-		if err := db.Select("id, device_limit").First(&plan, user.PlanID).Error; err == nil {
-			return plan.DeviceLimit, false
-		}
-	}
-	return 0, false
-}
+// （用户生效组/设备限制已收口为 models.User 的 Effective* 快照方法，2026-09-01 套餐快照化。）
 
 // AccessPointPermissionGroupIDs 获取用户接入点绑定的开放权限组 ID 列表。
 func AccessPointPermissionGroupIDs(db *gorm.DB, apID uint64) []uint64 {
@@ -176,7 +136,7 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 	if user == nil {
 		return set
 	}
-	groupID := UserEffectiveGroupID(db, user)
+	groupID := user.EffectiveGroupID()
 	if groupID == 0 {
 		return set
 	}

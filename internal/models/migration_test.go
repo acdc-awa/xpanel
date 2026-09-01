@@ -381,3 +381,64 @@ func TestUserSubscribeTokenBackfill(t *testing.T) {
 		t.Fatalf("重复迁移改动了 token: %q → %q", tokenBefore, again.SubscribeToken)
 	}
 }
+
+// TestPlanSnapshotBackfill 套餐快照一次性回填（2026-09-01 Xboard 式隔离）：
+// 存量用户按当前套餐写入快照三列；settings 标记保证只跑一次——「改套餐未同步 + 重启」
+// 不得把存量快照冲掉（这是隔离语义的核心），重复迁移幂等。
+func TestPlanSnapshotBackfill(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&User{}, &Plan{}, &Setting{}); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+
+	plan := Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: 5, Enabled: true}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	withPlan := User{Username: "a@x.com", Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: RoleUser, Status: StatusActive, PlanID: plan.ID, SubscribeToken: "tok-a"}
+	noPlan := User{Username: "b@x.com", Email: "b@x.com", UUID: "uuid-b", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-b"}
+	if err := db.Create(&withPlan).Error; err != nil {
+		t.Fatalf("create user with plan: %v", err)
+	}
+	if err := db.Create(&noPlan).Error; err != nil {
+		t.Fatalf("create user without plan: %v", err)
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate should backfill snapshots: %v", err)
+	}
+
+	var gotWith User
+	if err := db.First(&gotWith, withPlan.ID).Error; err != nil {
+		t.Fatalf("load user with plan: %v", err)
+	}
+	wantBytes := int64(100) * 1024 * 1024 * 1024
+	if gotWith.PlanTrafficBytes != wantBytes || gotWith.PlanDeviceLimit != 3 || gotWith.PlanGroupID != 5 {
+		t.Fatalf("快照未按套餐回填: traffic=%d device=%d group=%d", gotWith.PlanTrafficBytes, gotWith.PlanDeviceLimit, gotWith.PlanGroupID)
+	}
+	var gotNo User
+	if err := db.First(&gotNo, noPlan.ID).Error; err != nil {
+		t.Fatalf("load user without plan: %v", err)
+	}
+	if gotNo.PlanTrafficBytes != 0 || gotNo.PlanDeviceLimit != 0 || gotNo.PlanGroupID != 0 {
+		t.Fatal("无套餐用户快照应保持零值")
+	}
+
+	// 关键隔离性质：改套餐（未同步）后再启动，回填不得重跑、存量快照不得被冲掉
+	if err := db.Model(&Plan{}).Where("id = ?", plan.ID).Update("traffic_gb", 999).Error; err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	var again User
+	if err := db.First(&again, withPlan.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if again.PlanTrafficBytes != wantBytes {
+		t.Fatalf("重复迁移冲掉了存量快照: %d → %d（隔离语义失效）", wantBytes, again.PlanTrafficBytes)
+	}
+}

@@ -13,6 +13,7 @@ import {
   applyUpdate,
   type SiteGroup,
   type CaptchaGroup,
+  type AgentGroup,
   type BackupItem,
   type SystemStatus,
   type UpdateCheckResult,
@@ -70,14 +71,32 @@ const emptyCaptcha = (): CaptchaGroup => ({
   turnstile_site_key: '',
   turnstile_secret_key: '',
 })
+const emptyAgent = (): AgentGroup => ({
+  agent_report_interval: '60',
+  agent_heartbeat_interval: '30',
+})
 
 const form = reactive({
   site: emptySite(),
   captcha: emptyCaptcha(),
+  agent: emptyAgent(),
 })
 
-const subHostName = computed(() => {
-  if (form.site.subscribe_url) {
+// 节点上报周期：表单存字符串（与 settings 表一致），输入控件要数字——computed 桥接
+const agentReportSec = computed<number>({
+  get: () => Number(form.agent.agent_report_interval) || 60,
+  set: (v) => {
+    form.agent.agent_report_interval = String(v ?? 60)
+  },
+})
+const agentHeartbeatSec = computed<number>({
+  get: () => Number(form.agent.agent_heartbeat_interval) || 30,
+  set: (v) => {
+    form.agent.agent_heartbeat_interval = String(v ?? 30)
+  },
+})
+
+const subHostName = computed(() => {  if (form.site.subscribe_url) {
     try {
       const u = new URL(form.site.subscribe_url)
       return u.host || form.site.subscribe_url
@@ -187,6 +206,7 @@ async function load() {
     if (data.code === 0) {
       Object.assign(form.site, emptySite(), data.data.site)
       Object.assign(form.captcha, emptyCaptcha(), data.data.captcha)
+      Object.assign(form.agent, emptyAgent(), data.data.agent)
     } else {
       ElMessage.error(data.message)
     }
@@ -320,6 +340,7 @@ async function save() {
     const { data } = await updateSettings({
       site: { ...form.site },
       captcha: { ...form.captcha },
+      agent: { ...form.agent },
     })
     if (data.code === 0) {
       ElMessage.success('设置已保存并立即全站生效')
@@ -631,6 +652,25 @@ async function save() {
             <p class="muted tip">
               在 Cloudflare 控制台创建站点并添加 Turnstile 小部件后，将 Site Key / Secret Key 填入此处并开启开关即可。
               未配置密钥时即使开启也会拒绝所有请求（fail-closed）。
+            </p>
+          </el-form>
+        </el-tab-pane>
+
+        <!-- ==================== TAB 3.5: 节点上报 ==================== -->
+        <el-tab-pane :label="isMobile ? '上报' : '节点上报'" name="agent">
+          <el-form label-position="top" style="max-width: 640px">
+            <el-form-item label="流量上报周期（秒）">
+              <el-input-number v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
+              <span class="muted tip" style="margin-left: 12px">节点每隔多久把 xray 流量增量上报给面板</span>
+            </el-form-item>
+            <el-form-item label="状态心跳周期（秒）">
+              <el-input-number v-model="agentHeartbeatSec" :min="5" :max="1800" :step="5" style="width: 220px" />
+              <span class="muted tip" style="margin-left: 12px">CPU / 内存 / 磁盘 / 在线用户等状态的上报频率</span>
+            </el-form-item>
+            <p class="muted tip">
+              保存后立即下发到所有在线节点（离线节点重连后自动生效）；agent.yaml 的本地配置作为兜底。
+              缩短流量上报周期可加快超额 / 到期用户的踢除时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；
+              周期过小会增大节点与面板的负载，建议 15–120 秒。
             </p>
           </el-form>
         </el-tab-pane>

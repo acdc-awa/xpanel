@@ -74,7 +74,37 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateDefaultOutboundDSColumn(db); err != nil {
 		return err
 	}
+	if err := backfillPlanSnapshots(db); err != nil {
+		return err
+	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// backfillPlanSnapshots 套餐快照一次性回填（2026-09-01 Xboard 式隔离）：
+// 存量用户按其当前套餐写入快照三列（plan_traffic_bytes/plan_device_limit/plan_group_id），
+// 与新购/续费/分配路径同口径。settings 标记保证只跑一次——若每次启动都回填，
+// 「改套餐未同步 + 面板重启」会把存量快照冲掉，隔离语义失效。幂等。
+func backfillPlanSnapshots(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "plan_snapshot_backfilled").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var plans []Plan
+	if err := db.Find(&plans).Error; err != nil {
+		return err
+	}
+	for _, p := range plans {
+		updates := PlanSnapshotColumns(&p)
+		updates["plan_id"] = p.ID
+		if err := db.Model(&User{}).Where("plan_id = ?", p.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("回填套餐 %d 用户快照失败: %w", p.ID, err)
+		}
+	}
+	return db.Create(&Setting{Key: "plan_snapshot_backfilled", Value: "1"}).Error
 }
 
 // migrateDefaultOutboundDSColumn 默认出口出站解析策略列名修正（2026-08-31）：

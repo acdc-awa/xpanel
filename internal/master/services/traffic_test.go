@@ -165,7 +165,7 @@ func TestSaveDuplicateDeliveryMergesAndBumpsInbound(t *testing.T) {
 		},
 	}
 	for i := 0; i < 2; i++ {
-		if err := svc.Save(payload, 1); err != nil {
+		if _, err := svc.Save(payload, 1); err != nil {
 			t.Fatalf("Save #%d: %v", i+1, err)
 		}
 	}
@@ -213,7 +213,7 @@ func TestSaveInboundDimensionEntryOnlyBumpsInbound(t *testing.T) {
 			{UpBytes: 50, DownBytes: 50},                         // 无从归属：跳过
 		},
 	}
-	if err := svc.Save(payload, 1); err != nil {
+	if _, err := svc.Save(payload, 1); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestSaveConcurrentDuplicateDeliveryMerges(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			errs[idx] = svc.Save(payload, 1)
+			_, errs[idx] = svc.Save(payload, 1)
 		}(i)
 	}
 	wg.Wait()
@@ -284,5 +284,96 @@ func TestSaveConcurrentDuplicateDeliveryMerges(t *testing.T) {
 	}
 	if inb.Up != 100*n || inb.Down != 200*n {
 		t.Fatalf("inbounds 并发补计 up=%d down=%d, want %d/%d", inb.Up, inb.Down, 100*n, 200*n)
+	}
+}
+
+// TestFindViolators 事件驱动处置的判定口径（与 filterValidUsers 快照语义严格一致）：
+// 跨阈值/未跨/已过期/无额度（不限）/非活跃 五态。
+func TestFindViolators(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	gb := int64(1024 * 1024 * 1024)
+	expired := time.Now().Add(-24 * time.Hour)
+	users := []models.User{
+		{Username: "over", Email: "over@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PlanTrafficBytes: 1 * gb},
+		{Username: "under", Email: "under@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanTrafficBytes: 10 * gb},
+		{Username: "expired", Email: "expired@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive, ExpireAt: &expired},
+		{Username: "unlimited", Email: "unlimited@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive},
+		{Username: "disabled", Email: "disabled@t.com", UUID: "55555555-5555-5555-5555-555555555555", SubscribeToken: "t5", Status: models.StatusDisabled, PlanTrafficBytes: gb},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatal(err)
+	}
+	// over 用 2GB（跨阈值）；under 用 0.5GB（未跨）；unlimited 用 100GB 但无额度快照=不限
+	logs := []models.TrafficLog{
+		{UserID: users[0].ID, UpBytes: 2 * gb, DownBytes: 0, PeriodStart: time.Now()},
+		{UserID: users[1].ID, UpBytes: gb / 2, DownBytes: 0, PeriodStart: time.Now()},
+		{UserID: users[3].ID, UpBytes: 100 * gb, DownBytes: 0, PeriodStart: time.Now()},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	got, err := svc.FindViolators([]uint64{users[0].ID, users[1].ID, users[2].ID, users[3].ID, users[4].ID})
+	if err != nil {
+		t.Fatalf("FindViolators: %v", err)
+	}
+	want := map[uint64]bool{users[0].ID: true, users[2].ID: true}
+	if len(got) != len(want) {
+		t.Fatalf("violators = %v, want 仅 over+expired (%v)", got, want)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Errorf("不应判违规: user=%d（got=%v）", id, got)
+		}
+	}
+}
+
+// TestSaveReturnsReportedUserIDs Save 返回本帧实际计入的用户 ID 去重集合
+// （入站维度条目/零字节条目/未知用户不计入）。
+func TestSaveReturnsReportedUserIDs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-09-01T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{UserID: 7, Inbound: "vless-in", UpBytes: 100, DownBytes: 0},
+			{UserID: 7, Inbound: "vless-in", UpBytes: 0, DownBytes: 50},
+			{UserID: 8, Inbound: "vless-in", UpBytes: 10, DownBytes: 10},
+			{UserID: 9, Inbound: "vless-in", UpBytes: 0, DownBytes: 0}, // 零字节：不计入
+			{Inbound: "vless-in", UpBytes: 1, DownBytes: 1},            // 入站维度：不计入
+		},
+	}
+	ids, err := svc.Save(payload, 1)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("reported ids = %v, want [7 8] 两个用户", ids)
+	}
+	seen := map[uint64]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	if !seen[7] || !seen[8] {
+		t.Fatalf("reported ids = %v, want 含 7 与 8", ids)
 	}
 }

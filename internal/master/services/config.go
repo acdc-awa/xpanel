@@ -184,7 +184,9 @@ func (s *ConfigService) PreviewUsers(inb *models.Inbound) []protocol.User {
 }
 
 // filterValidUsers 返回全部有效的用户（状态正常、有 UUID、未过期、未超流量）。
-// ISSUE-10：套餐、权限组与设备限制批量预取；已用流量单条 SQL 聚合，不再逐用户查询。
+// 2026-09-01 套餐快照化：额度/设备限制/权限组 fallback 读用户行快照列（购买/续费/分配时
+// 从 Plan 复制，见 models.User），不再实时 join plans——套餐编辑默认零影响存量用户；
+// plan_id=0 或快照全零 = 无套餐语义（仅用户自定义字段，同旧 else 分支）。
 func (s *ConfigService) filterValidUsers() []validUser {
 	var users []models.User
 	if err := s.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
@@ -192,13 +194,6 @@ func (s *ConfigService) filterValidUsers() []validUser {
 	}
 	if len(users) == 0 {
 		return nil
-	}
-
-	var plans []models.Plan
-	_ = s.DB.Find(&plans)
-	planMap := make(map[uint64]models.Plan, len(plans))
-	for _, p := range plans {
-		planMap[p.ID] = p
 	}
 
 	// 单条 SQL 计算每个有效用户在其计费周期内的已用流量。
@@ -230,24 +225,9 @@ func (s *ConfigService) filterValidUsers() []validUser {
 		}
 
 		vu := validUser{User: u}
-		if plan, ok := planMap[u.PlanID]; ok && plan.Enabled {
-			if u.DeviceLimit > 0 {
-				vu.DeviceLimit = u.DeviceLimit
-			} else {
-				vu.DeviceLimit = plan.DeviceLimit
-			}
-			if u.PermissionGroupID > 0 {
-				vu.GroupID = u.PermissionGroupID
-			} else {
-				vu.GroupID = plan.PermissionGroupID
-			}
-			vu.PlanTrafficBytes = plan.TrafficGB * 1024 * 1024 * 1024
-		} else {
-			// 无有效套餐：设备限制仅看用户自定义；权限组仅看用户显式分组。
-			vu.DeviceLimit = u.DeviceLimit
-			vu.GroupID = u.PermissionGroupID
-		}
-
+		vu.DeviceLimit = u.EffectiveDeviceLimit()
+		vu.GroupID = u.EffectiveGroupID()
+		vu.PlanTrafficBytes = u.EffectiveTrafficBytes()
 		if vu.PlanTrafficBytes > 0 {
 			vu.UsedBytes = usedMap[u.ID]
 			if vu.UsedBytes >= vu.PlanTrafficBytes {

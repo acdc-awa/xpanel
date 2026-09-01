@@ -27,12 +27,13 @@ func (d *Deps) Me(c *gin.Context) {
 // ISSUE-16：补齐余额/流量/订阅 token/设备限制/权限组字段。
 // 订阅对外根地址/入口路径仅在登录态下发（前端拼接订阅链接用；公开面不暴露订阅端点）。
 func (d *Deps) userView(user *models.User) gin.H {
-	totalBytes := int64(0)
+	// 快照化（2026-09-01）：total_bytes 读用户行快照列，不再随套餐编辑实时漂移；
+	// plan_name 仅展示用途，查得到就显示（含已下架套餐的存量用户）。
+	totalBytes := user.EffectiveTrafficBytes()
 	planName := ""
 	if user.PlanID > 0 {
 		var plan models.Plan
-		if err := d.DB.First(&plan, user.PlanID).Error; err == nil && plan.Enabled {
-			totalBytes = plan.TrafficGB * 1024 * 1024 * 1024
+		if err := d.DB.First(&plan, user.PlanID).Error; err == nil {
 			planName = plan.Name
 		}
 	}
@@ -40,8 +41,9 @@ func (d *Deps) userView(user *models.User) gin.H {
 	if d.Traffic != nil {
 		up, down, _ = d.Traffic.UserUsed(user.ID)
 	}
-	effectiveGroupID := services.UserEffectiveGroupID(d.DB, user)
-	effectiveLimit, isCustomLimit := services.UserEffectiveDeviceLimit(d.DB, user)
+	effectiveGroupID := user.EffectiveGroupID()
+	effectiveLimit := user.EffectiveDeviceLimit()
+	isCustomLimit := user.DeviceLimit > 0
 
 	site := map[string]string{}
 	if d.Site != nil {

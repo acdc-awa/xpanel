@@ -113,7 +113,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			base = *user.ExpireAt
 		}
 		newExpire := base.AddDate(0, 0, plan.DurationDays)
-		if err := tx.UpdateSubscription(ctx, userID, plan.ID, newExpire, now, plan.PermissionGroupID); err != nil {
+		if err := tx.UpdateSubscription(ctx, userID, plan, newExpire, now, plan.PermissionGroupID); err != nil {
 			return err
 		}
 
