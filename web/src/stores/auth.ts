@@ -53,7 +53,9 @@ export const useAuthStore = defineStore('auth', {
       try {
         const { data } = await getMe()
         if (data.code === 0) {
-          this.user = data.data
+          // applyUser（而非直接赋值）：同步订阅端点信息（subscribe_url/path）给 site store，
+          // 否则刷新后订阅链接回落 location.origin + /sub（站点配置丢失）
+          this.applyUser(data.data)
         } else {
           this.user = null
         }
