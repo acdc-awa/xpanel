@@ -24,9 +24,8 @@ const subscribeUrl = computed(() => {
   return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
-
-// 一键唤醒 Clash Scheme
-const clashSchemeUrl = computed(() => {
+// 一键唤醒 Mihomo Scheme
+const mihomoSchemeUrl = computed(() => {
   if (!subscribeUrl.value) return ''
   return `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=${encodeURIComponent('XrayPanel')}`
 })
@@ -57,17 +56,16 @@ function copyText(text: string, label: string) {
   )
 }
 
-function importToClash() {
-  if (!clashSchemeUrl.value) return
-  window.location.href = clashSchemeUrl.value
-  ElMessage.info('正在尝试唤醒 Clash 客户端，若未唤醒请手动复制订阅链接')
+function importToMihomo() {
+  if (!mihomoSchemeUrl.value) return
+  window.location.href = mihomoSchemeUrl.value
+  ElMessage.info('正在尝试唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址')
 }
 
 interface ClientApp {
   name: string
   tag: string
-  platform: string
-  icon: string
+  platforms: string[]
   desc: string
   url?: string
 }
@@ -76,33 +74,29 @@ const clashApps: ClientApp[] = [
   {
     name: 'Clash Verge Rev',
     tag: '首选推荐',
-    platform: 'Windows / macOS / Linux',
-    icon: '⚡',
-    desc: '基于 Mihomo 核心，现代极简 UI，性能卓越，全协议完美兼容。',
+    platforms: ['Windows', 'macOS', 'Linux'],
+    desc: '基于 Mihomo 核心，现代极简 UI，性能卓越，全协议完美兼容与流媒体策略组分流。',
     url: 'https://github.com/clash-verge-rev/clash-verge-rev',
   },
   {
     name: 'Mihomo Party',
     tag: '优雅开源',
-    platform: 'Windows / macOS / Linux',
-    icon: '🎉',
-    desc: '专为 Mihomo 定制的优雅桌面客户端，内置丰富规则与节点测速。',
+    platforms: ['Windows', 'macOS', 'Linux'],
+    desc: '专为 Mihomo 定制的优雅桌面客户端，内置丰富分流规则、节点延迟测速与拓扑视图。',
     url: 'https://github.com/mihomo-party-org/mihomo-party',
   },
   {
     name: 'Flclash',
     tag: '全平台',
-    platform: 'Android / iOS / Win / Mac',
-    icon: '📱',
-    desc: '基于 Flutter 的跨平台 Clash/Mihomo 客户端，轻量美观。',
+    platforms: ['Android', 'iOS', 'Windows', 'macOS'],
+    desc: '基于 Flutter 的跨平台客户端，轻量美观，内存占用低，移动端体验极佳。',
     url: 'https://github.com/chen08209/FlClash',
   },
   {
     name: 'Stash',
     tag: 'iOS 推荐',
-    platform: 'iOS / iPadOS / macOS / tvOS',
-    icon: '🍎',
-    desc: '苹果生态顶级的 Clash 规则分流代理客户端，支持按需连接。',
+    platforms: ['iOS', 'iPadOS', 'macOS'],
+    desc: '苹果生态顶级的规则分流代理客户端，全面支持按需连接与自动化策略。',
     url: 'https://stash.ws/',
   },
 ]
@@ -112,9 +106,9 @@ const clashApps: ClientApp[] = [
   <div class="x-client-body" v-loading="loading">
     <!-- 头部横幅 -->
     <div class="sub-hero">
-      <div class="sub-badge"><el-icon><Promotion /></el-icon>&nbsp;Mihomo / Clash 核心托管</div>
-      <h1 class="sub-title">订阅中心</h1>
-      <p class="sub-desc">专为 Clash 与 Mihomo 内核深度调优，包含完整策略组、自动故障转移与 VLESS REALITY 落地链路。</p>
+      <div class="sub-badge"><el-icon><Promotion /></el-icon>&nbsp;Mihomo 核心托管</div>
+      <h1 class="sub-title">Mihomo 订阅中心</h1>
+      <p class="sub-desc">专为 Mihomo / Clash 核心深度优化，包含策略分流、自动故障转移与 VLESS REALITY 落地链路。</p>
     </div>
 
     <!-- 核心一键导入卡片 -->
@@ -124,16 +118,16 @@ const clashApps: ClientApp[] = [
           <!-- 左侧：一键唤醒与快捷复制 -->
           <div class="sub-left">
             <div class="sub-url-box">
-              <span class="sub-url-label">Clash 订阅地址</span>
-              <code class="sub-url-code">{{ subscribeUrl || '加载中…' }}</code>
+              <span class="sub-url-label">Mihomo 订阅端点地址</span>
+              <code class="sub-url-code cell-mono">{{ subscribeUrl || '正在生成订阅凭据…' }}</code>
             </div>
 
             <div class="sub-action-buttons">
-              <el-button type="primary" size="large" class="glow-btn" @click="importToClash">
-                <el-icon><Promotion /></el-icon>&nbsp;一键导入 Clash 客户端
+              <el-button type="primary" size="large" class="glow-btn" @click="importToMihomo">
+                <el-icon><Promotion /></el-icon>&nbsp;一键导入 Mihomo 客户端
               </el-button>
-              <el-button size="large" @click="copyText(subscribeUrl, 'Clash 订阅链接')">
-                <el-icon><CopyDocument /></el-icon>&nbsp;复制 Clash 链接
+              <el-button size="large" @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">
+                <el-icon><CopyDocument /></el-icon>&nbsp;复制订阅地址
               </el-button>
             </div>
 
@@ -158,22 +152,25 @@ const clashApps: ClientApp[] = [
 
     <!-- 推荐客户端生态 -->
     <div class="section-title">
-      <span>推荐客户端（Clash / Mihomo 生态）</span>
+      <span>推荐客户端（Mihomo 核心生态）</span>
     </div>
 
     <div class="client-grid">
       <div v-for="app in clashApps" :key="app.name" class="client-card">
-        <div class="client-head">
-          <div class="client-icon">{{ app.icon }}</div>
-          <div class="client-meta">
-            <div class="client-name">
-              {{ app.name }}
-              <span class="client-tag">{{ app.tag }}</span>
+        <div>
+          <div class="client-head">
+            <div class="client-meta">
+              <div class="client-name">
+                {{ app.name }}
+                <span class="client-tag">{{ app.tag }}</span>
+              </div>
+              <div class="client-platform-tags">
+                <span v-for="plat in app.platforms" :key="plat" class="platform-chip">{{ plat }}</span>
+              </div>
             </div>
-            <div class="client-plat">{{ app.platform }}</div>
           </div>
+          <p class="client-desc">{{ app.desc }}</p>
         </div>
-        <p class="client-desc">{{ app.desc }}</p>
         <div class="client-footer">
           <a v-if="app.url" :href="app.url" target="_blank" rel="noreferrer" class="client-link">
             <el-icon><Download /></el-icon>&nbsp;获取客户端
@@ -182,39 +179,32 @@ const clashApps: ClientApp[] = [
       </div>
     </div>
 
-    <!-- 极简使用说明 -->
+    <!-- 快速接入说明 -->
     <div class="x-card" style="margin-top: 20px">
-      <div class="x-card-head"><span>快速上手 3 步指引</span></div>
+      <div class="x-card-head"><span>快速接入指引</span></div>
       <div class="sub-steps">
         <div class="sub-step">
           <span class="step-num">1</span>
           <div class="step-info">
-            <div class="step-title">下载并安装客户端</div>
-            <div class="step-desc">Windows/Mac 推荐 <b>Clash Verge Rev</b> 或 <b>Mihomo Party</b>；iOS 推荐 <b>Stash</b>；Android 推荐 <b>Flclash</b>。</div>
+            <div class="step-title">获取客户端</div>
+            <div class="step-desc">Windows / macOS 推荐使用 <b>Clash Verge Rev</b> 或 <b>Mihomo Party</b>；Android 推荐 <b>Flclash</b>；iOS 推荐 <b>Stash</b>。</div>
           </div>
         </div>
         <div class="sub-step">
           <span class="step-num">2</span>
           <div class="step-info">
-            <div class="step-title">导入订阅配置</div>
-            <div class="step-desc">点击上方「一键导入 Clash 客户端」或复制链接到客户端配置页粘贴保存。</div>
+            <div class="step-title">同步订阅配置</div>
+            <div class="step-desc">点击上方「一键导入 Mihomo 客户端」，或复制订阅端点地址至客户端配置管理中粘贴保存并更新。</div>
           </div>
         </div>
         <div class="sub-step">
           <span class="step-num">3</span>
           <div class="step-info">
-            <div class="step-title">选择节点开启代理</div>
-            <div class="step-desc">进入客户端「代理 / 节点选择」分组选择合适节点，打开「系统代理」开关即可流畅访问。</div>
+            <div class="step-title">启用系统代理</div>
+            <div class="step-desc">在客户端代理分组中选择节点或开启「自动故障转移 (Fallback)」，打开「系统代理 (System Proxy)」开关即可顺畅连接。</div>
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- 底部导航 -->
-    <div class="sub-bottom-nav">
-      <router-link to="/dashboard"><el-button>返回首页</el-button></router-link>
-      <router-link to="/shop"><el-button type="primary" plain>购买/续费套餐</el-button></router-link>
-      <router-link to="/account"><el-button>我的账户</el-button></router-link>
     </div>
 
     <!-- 二维码放大弹窗 -->
@@ -222,7 +212,7 @@ const clashApps: ClientApp[] = [
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" style="width: 220px; height: 220px; border-radius: 8px; border: 1px solid var(--x-border)" />
         <p class="muted" style="font-size: 12px; text-align: center">
-          使用手机端 Clash/Mihomo 客户端（如 Stash、Flclash）扫码即可自动导入订阅。
+          使用手机端 Mihomo 客户端（如 Stash、Flclash）扫码即可自动添加配置。
         </p>
       </div>
     </el-dialog>
@@ -231,7 +221,7 @@ const clashApps: ClientApp[] = [
 
 <style scoped lang="scss">
 .sub-hero {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   .sub-badge {
     display: inline-flex;
     align-items: center;
@@ -244,34 +234,34 @@ const clashApps: ClientApp[] = [
     margin-bottom: 8px;
   }
   .sub-title {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 800;
     color: var(--x-text);
     margin: 0;
   }
   .sub-desc {
     color: var(--x-text-2);
-    font-size: 13.5px;
-    margin-top: 6px;
-    line-height: 1.6;
+    font-size: 13px;
+    margin-top: 4px;
+    line-height: 1.5;
   }
 }
 
 .primary-card {
   border-color: rgba(99, 102, 241, 0.25);
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.08);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.06);
 }
 
 .sub-main-grid {
   display: flex;
-  gap: 24px;
+  gap: 20px;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
 
   .sub-left {
     flex: 1;
-    min-width: 280px;
+    min-width: 260px;
   }
   .sub-right {
     flex: none;
@@ -280,16 +270,15 @@ const clashApps: ClientApp[] = [
 }
 
 .sub-url-box {
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
   padding: 12px 14px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   .sub-url-label {
     display: block;
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
     color: var(--x-text-3);
     font-weight: 600;
     margin-bottom: 4px;
@@ -304,12 +293,12 @@ const clashApps: ClientApp[] = [
 
 .sub-action-buttons {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 
   .glow-btn {
-    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+    box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
   }
 }
 
@@ -324,7 +313,7 @@ const clashApps: ClientApp[] = [
   flex-direction: column;
   align-items: center;
   padding: 10px;
-  background: var(--x-bg);
+  background: var(--x-card-soft);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
   transition: all 0.2s ease;
@@ -334,13 +323,13 @@ const clashApps: ClientApp[] = [
     box-shadow: var(--x-shadow-md);
   }
   .sub-qr {
-    width: 110px;
-    height: 110px;
+    width: 100px;
+    height: 100px;
     border-radius: 6px;
   }
   .sub-qr-empty {
-    width: 110px;
-    height: 110px;
+    width: 100px;
+    height: 100px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -356,20 +345,16 @@ const clashApps: ClientApp[] = [
 }
 
 .section-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--x-text);
-  margin: 24px 0 14px;
+  margin: 20px 0 12px;
 }
 
 .client-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
-
-  @media (max-width: 768px) {
-    gap: 10px;
-  }
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
 }
 
 .client-card {
@@ -383,81 +368,65 @@ const clashApps: ClientApp[] = [
   justify-content: space-between;
   transition: all 0.2s ease;
 
-  @media (max-width: 768px) {
-    padding: 12px 14px;
-  }
-
   &:hover {
-    transform: translateY(-3px);
-    border-color: rgba(99, 102, 241, 0.4);
+    transform: translateY(-2px);
+    border-color: rgba(99, 102, 241, 0.35);
     box-shadow: var(--x-shadow-md);
   }
 
   .client-head {
     display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-  .client-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background: var(--x-primary-soft);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    flex: none;
-
-    @media (max-width: 768px) {
-      width: 34px;
-      height: 34px;
-      font-size: 17px;
-      border-radius: 8px;
-    }
+    gap: 10px;
+    align-items: flex-start;
   }
   .client-meta {
     min-width: 0;
     flex: 1;
   }
   .client-name {
-    font-size: 14px;
+    font-size: 14.5px;
     font-weight: 700;
     color: var(--x-text);
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
   }
   .client-tag {
-    font-size: 10px;
-    padding: 1px 5px;
+    font-size: 10.5px;
+    padding: 1px 6px;
     border-radius: 4px;
-    background: var(--x-success-soft);
-    color: var(--x-success);
+    background: var(--x-primary-soft);
+    color: var(--x-primary);
     font-weight: 600;
   }
-  .client-plat {
-    font-size: 11px;
-    color: var(--x-text-3);
-    margin-top: 2px;
+  .client-platform-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+
+    .platform-chip {
+      font-size: 10.5px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--x-card-soft);
+      border: 1px solid var(--x-border);
+      color: var(--x-text-3);
+    }
   }
   .client-desc {
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--x-text-2);
     line-height: 1.5;
-    margin: 12px 0 14px;
-
-    @media (max-width: 768px) {
-      margin: 6px 0 8px;
-      font-size: 12px;
-    }
+    margin: 10px 0 12px;
   }
   .client-footer {
     display: flex;
     justify-content: flex-end;
   }
   .client-link {
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--x-primary);
     font-weight: 600;
     display: flex;
@@ -469,21 +438,21 @@ const clashApps: ClientApp[] = [
 }
 
 .sub-steps {
-  padding: 16px 18px;
+  padding: 14px 16px;
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 .sub-step {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: flex-start;
   .step-num {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     background: var(--x-primary);
     color: #fff;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -495,22 +464,15 @@ const clashApps: ClientApp[] = [
     flex: 1;
   }
   .step-title {
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
     color: var(--x-text);
   }
   .step-desc {
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--x-text-2);
-    margin-top: 3px;
+    margin-top: 2px;
     line-height: 1.5;
   }
-}
-
-.sub-bottom-nav {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 24px;
 }
 </style>

@@ -837,9 +837,11 @@ async function save() {
   gap: 8px;
   align-items: center;
   width: 100%;
+  flex-wrap: wrap;
 
   .el-input {
-    flex: 1;
+    flex: 1 1 200px;
+    min-width: 180px;
   }
 }
 

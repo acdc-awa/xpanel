@@ -7,10 +7,6 @@ import {
   Document,
   Bell,
   Connection,
-  Calendar,
-  CircleCheckFilled,
-  Wallet,
-  Cellphone,
   WarningFilled,
   InfoFilled,
 } from '@element-plus/icons-vue'
@@ -89,23 +85,23 @@ onMounted(async () => {
 
 function copySub() {
   if (!subscribeUrl.value) {
-    ElMessage.warning('暂无可用订阅链接')
+    ElMessage.warning('暂无可用订阅地址')
     return
   }
   navigator.clipboard?.writeText(subscribeUrl.value).then(
-    () => ElMessage.success('Clash 订阅链接已复制'),
+    () => ElMessage.success('Mihomo 订阅地址已复制到剪贴板'),
     () => ElMessage.warning('复制失败，请前往订阅中心手动复制'),
   )
 }
 
-function importClash() {
+function importMihomo() {
   if (!subscribeUrl.value) {
-    ElMessage.warning('暂无可用订阅链接')
+    ElMessage.warning('暂无可用订阅地址')
     return
   }
   const url = `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=XrayPanel`
   window.location.href = url
-  ElMessage.info('正在唤醒 Clash 客户端…')
+  ElMessage.info('正在唤醒 Mihomo / Clash 客户端…')
 }
 
 const servers = ref<MyServerItem[]>([])
@@ -179,80 +175,82 @@ onMounted(() => {
     <div class="x-dash-grid">
       <!-- 左侧主栏：用量卡片 + 快捷操作 -->
       <div>
-        <!-- U23：到期/未开通 CTA 横幅（替代误导性的「永久有效」展示） -->
+        <!-- 到期/未开通 CTA 横幅 -->
         <div v-if="isExpired" class="dash-alert danger">
           <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>套餐已到期，节点将无法使用，请及时续费</span>
+          <span>当前服务计划已到期，节点转发已暂停，请及时续费</span>
           <router-link to="/shop">
-            <el-button size="small" type="primary" round>立即续费</el-button>
+            <el-button size="small" type="primary" round>立即续订</el-button>
           </router-link>
         </div>
         <div v-else-if="!auth.user?.plan_id" class="dash-alert">
           <el-icon><InfoFilled /></el-icon>&nbsp;
-          <span>尚未开通套餐，开通后即可获取节点订阅</span>
+          <span>尚未订购服务计划，订购后即可获取节点订阅</span>
           <router-link to="/shop">
-            <el-button size="small" type="primary" round>去开通</el-button>
+            <el-button size="small" type="primary" round>选购计划</el-button>
           </router-link>
         </div>
 
-        <!-- 现代化科技感用量 Hero 卡片 -->
+        <!-- 极简响应式用量 Hero 卡片 -->
         <div class="dash-hero">
           <div class="hero-top">
             <div class="hero-plan-badge">
-              <el-icon><CircleCheckFilled /></el-icon>&nbsp;{{ planLabel }}
+              <span class="x-status-dot online" />
+              <span>{{ planLabel }}</span>
             </div>
             <div class="hero-top-right">
-              <div class="hero-wallet-tag">
-                <el-icon><Wallet /></el-icon>&nbsp;余额 ¥ {{ balanceYuan }}
-              </div>
-              <div class="hero-wallet-tag" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.25)">
-                <el-icon><Cellphone /></el-icon>&nbsp;{{ deviceLimitText }}
-              </div>
-              <div v-if="daysLeft !== null" class="hero-days-tag">
-                <el-icon><Calendar /></el-icon>&nbsp;剩余 {{ daysLeft }} 天到期
-              </div>
+              <span class="x-chip gray cell-mono">余额 ¥ {{ balanceYuan }}</span>
+              <span class="x-chip gray">{{ deviceLimitText }}</span>
+              <span v-if="daysLeft !== null" class="x-chip gray">剩余 {{ daysLeft }} 天</span>
             </div>
           </div>
 
           <div class="hero-main-stats">
             <div class="stat-col">
               <span class="stat-lbl">已用流量</span>
-              <span class="stat-val used">{{ usedText }}</span>
+              <span class="stat-val cell-mono">{{ usedText }}</span>
             </div>
             <div class="stat-divider" />
             <div class="stat-col">
               <span class="stat-lbl">剩余可用</span>
-              <span class="stat-val remain">{{ remainText }}</span>
+              <span class="stat-val cell-mono remain">{{ remainText }}</span>
             </div>
             <div class="stat-divider" />
             <div class="stat-col">
               <span class="stat-lbl">套餐总量</span>
-              <span class="stat-val total">{{ totalText }}</span>
+              <span class="stat-val cell-mono total">{{ totalText }}</span>
             </div>
           </div>
 
-          <!-- 进度条 -->
+          <!-- 动态阈值进度条 -->
           <div class="hero-progress-wrap">
             <div class="progress-bar-bg">
-              <div class="progress-bar-fill" :style="{ width: usagePercent + '%' }" />
+              <div
+                class="progress-bar-fill"
+                :class="{
+                  'is-danger': usagePercent > 90,
+                  'is-warning': usagePercent > 75 && usagePercent <= 90,
+                }"
+                :style="{ width: usagePercent + '%' }"
+              />
             </div>
             <div class="progress-meta">
-              <span>使用占比: {{ usagePercent }}%</span>
-              <span>到期时间: {{ expireText }}</span>
+              <span>用量占比: {{ usagePercent }}%</span>
+              <span class="cell-mono">服务期限: {{ expireText }}</span>
             </div>
           </div>
 
           <!-- 卡片内快捷操作栏 -->
           <div class="hero-actions">
-            <el-button type="primary" class="hero-btn-primary" @click="importClash">
-              <el-icon><Promotion /></el-icon>&nbsp;一键导入 Clash
+            <el-button type="primary" class="hero-btn-primary" @click="importMihomo">
+              <el-icon><Promotion /></el-icon>&nbsp;一键导入 Mihomo
             </el-button>
             <el-button class="hero-btn-glass" @click="copySub">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制订阅
+              <el-icon><CopyDocument /></el-icon>&nbsp;复制订阅地址
             </el-button>
-            <router-link to="/shop">
-              <el-button class="hero-btn-glass">
-                <el-icon><ShoppingBag /></el-icon>&nbsp;购买/续费
+            <router-link to="/shop" style="flex: 1 1 110px;">
+              <el-button class="hero-btn-glass" style="width: 100%;">
+                <el-icon><ShoppingBag /></el-icon>&nbsp;选购/续订
               </el-button>
             </router-link>
           </div>
@@ -263,15 +261,15 @@ onMounted(() => {
           <router-link to="/subscribe" class="dash-tile">
             <div class="tile-icon purple"><el-icon><Promotion /></el-icon></div>
             <div class="tile-info">
-              <div class="tile-title">订阅中心</div>
-              <div class="tile-desc">Clash / Mihomo 导入与各平台客户端</div>
+              <div class="tile-title">Mihomo 订阅中心</div>
+              <div class="tile-desc">客户端下载与配置自动同步</div>
             </div>
           </router-link>
           <router-link to="/shop" class="dash-tile">
             <div class="tile-icon green"><el-icon><ShoppingBag /></el-icon></div>
             <div class="tile-info">
-              <div class="tile-title">套餐商店</div>
-              <div class="tile-desc">高速节点与无限流量包选购</div>
+              <div class="tile-title">服务计划商店</div>
+              <div class="tile-desc">高速节点方案与配额选购</div>
             </div>
           </router-link>
         </div>
@@ -289,12 +287,12 @@ onMounted(() => {
             <div v-for="s in servers" :key="s.id" class="x-row-line">
               <span class="k">
                 <span class="x-status-dot" :class="s.online ? 'online' : 'offline'" />
-                {{ s.location || '未知地区' }} · {{ s.name }}
+                {{ s.location || '优质节点' }} · {{ s.name }}
               </span>
               <span class="v muted" style="font-size: 12px">{{ s.online ? '在线' : '离线' }}</span>
             </div>
             <p v-if="!servers.length" class="muted" style="font-size: 12px; padding: 4px 0">
-              暂无可用节点（需购买套餐后自动授权）
+              暂无可用节点（订购服务计划后自动下发）
             </p>
           </div>
         </div>
@@ -302,13 +300,13 @@ onMounted(() => {
         <!-- 公告栏 -->
         <div class="x-card">
           <div class="x-card-head">
-            <span><el-icon><Bell /></el-icon>&nbsp;最新公告</span>
+            <span><el-icon><Bell /></el-icon>&nbsp;系统公告</span>
           </div>
           <div v-if="noticeLoading" style="padding: 16px; text-align: center" class="muted">
             加载公告中...
           </div>
           <div v-else-if="!notices.length" style="padding: 16px; text-align: center" class="muted">
-            暂无系统公告
+            暂无最新系统公告
           </div>
           <div
             v-for="n in notices"
@@ -327,14 +325,14 @@ onMounted(() => {
         <!-- 帮助文档 -->
         <div class="x-card">
           <div class="x-card-head">
-            <span><el-icon><Document /></el-icon>&nbsp;使用帮助</span>
+            <span><el-icon><Document /></el-icon>&nbsp;使用指南</span>
           </div>
           <div style="display: grid; gap: 10px; padding: 14px 16px">
             <router-link to="/subscribe" class="muted help-link">
-              Clash Verge Rev 快速导入教程
+              Clash Verge Rev (Mihomo) 快速导入教程
             </router-link>
             <router-link to="/subscribe" class="muted help-link">
-              苹果 iOS Stash 配置指南
+              苹果 iOS Stash 客户端配置指南
             </router-link>
           </div>
         </div>
@@ -402,25 +400,17 @@ onMounted(() => {
   }
 }
 .dash-hero {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%);
   border-radius: var(--x-radius);
-  padding: 24px;
+  padding: 22px;
   color: #fff;
-  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.25);
+  box-shadow: var(--x-shadow-md);
   margin-bottom: 16px;
   position: relative;
   overflow: hidden;
 
-  &::after {
-    content: '';
-    position: absolute;
-    top: -50px;
-    right: -50px;
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.15) 0%, transparent 70%);
-    pointer-events: none;
+  @media (max-width: 480px) {
+    padding: 16px;
   }
 }
 
@@ -428,12 +418,20 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 10px;
+
+  @media (max-width: 480px) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 
   .hero-plan-badge {
     display: inline-flex;
     align-items: center;
-    background: rgba(255, 255, 255, 0.18);
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.16);
     backdrop-filter: blur(8px);
     padding: 4px 12px;
     border-radius: 20px;
@@ -443,34 +441,16 @@ onMounted(() => {
 
   .hero-top-right {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     flex-wrap: wrap;
-  }
 
-  .hero-wallet-tag {
-    display: inline-flex;
-    align-items: center;
-    background: rgba(254, 240, 138, 0.25);
-    border: 1px solid rgba(254, 240, 138, 0.4);
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #fef08a;
-    font-family: var(--x-font-mono);
-  }
-
-  .hero-days-tag {
-    display: inline-flex;
-    align-items: center;
-    background: rgba(16, 185, 129, 0.25);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #a7f3d0;
+    .x-chip.gray {
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      color: #fff;
+      font-size: 11.5px;
+    }
   }
 }
 
@@ -478,34 +458,47 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
+
+  @media (max-width: 480px) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+
+    .stat-divider {
+      display: none;
+    }
+    .stat-col:last-child {
+      grid-column: 1 / -1;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 8px;
+    }
+  }
 
   .stat-col {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
   }
 
   .stat-divider {
     width: 1px;
-    height: 36px;
+    height: 32px;
     background: rgba(255, 255, 255, 0.15);
     margin: 0 12px;
   }
 
   .stat-lbl {
-    font-size: 12px;
+    font-size: 11.5px;
     color: rgba(255, 255, 255, 0.75);
+    font-weight: 500;
   }
 
   .stat-val {
-    font-size: 20px;
-    font-weight: 800;
-    font-family: var(--x-font-mono);
-    &.used {
-      color: #fde047;
-    }
+    font-size: 18px;
+    font-weight: 700;
+    white-space: nowrap;
     &.remain {
       color: #ffffff;
     }
@@ -516,20 +509,27 @@ onMounted(() => {
 }
 
 .hero-progress-wrap {
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 
   .progress-bar-bg {
-    height: 8px;
+    height: 6px;
     background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
+    border-radius: 3px;
     overflow: hidden;
   }
 
   .progress-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, #38bdf8 0%, #fde047 100%);
-    border-radius: 4px;
-    transition: width 0.4s ease;
+    background: #38bdf8;
+    border-radius: 3px;
+    transition: width 0.3s ease, background-color 0.3s ease;
+
+    &.is-warning {
+      background: #f59e0b;
+    }
+    &.is-danger {
+      background: #ef4444;
+    }
   }
 
   .progress-meta {
@@ -537,35 +537,38 @@ onMounted(() => {
     justify-content: space-between;
     font-size: 11.5px;
     color: rgba(255, 255, 255, 0.75);
-    margin-top: 6px;
-    font-family: var(--x-font-mono);
+    margin-top: 5px;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 }
 
 .hero-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 
   .hero-btn-primary {
     background: #ffffff;
-    color: #4f46e5;
+    color: #4338ca;
     border: none;
-    font-weight: 700;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    font-weight: 600;
+    flex: 1 1 140px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     &:hover {
-      background: #f1f5f9;
-      color: #4338ca;
+      background: #f8fafc;
+      color: #3730a3;
     }
   }
 
   .hero-btn-glass {
-    background: rgba(255, 255, 255, 0.15);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.25);
     color: #fff;
-    font-weight: 600;
+    font-weight: 500;
+    flex: 1 1 100px;
     &:hover {
-      background: rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.22);
     }
   }
 }

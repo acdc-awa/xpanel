@@ -720,22 +720,23 @@ onUnmounted(() => {
   color: var(--x-text-2);
 }
 
-/* 6 张 KPI 卡片（严格对称响应式：6列 -> 3+3列 -> 2+2+2列 -> 1列） */
+/* 6 张 KPI 卡片（严格三端分级响应式：桌面 6列 -> Pad 3列 -> 手机 2列 -> 窄屏 1列） */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
 
-  @media (max-width: 1560px) {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  @media (max-width: 900px) {
-    grid-template-columns: repeat(2, 1fr);
+  @media (max-width: 1300px) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
 
-  @media (max-width: 480px) {
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  @media (max-width: 440px) {
     grid-template-columns: 1fr;
   }
 }
@@ -746,16 +747,17 @@ onUnmounted(() => {
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
   box-shadow: var(--x-shadow);
-  padding: 16px 18px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 
   @media (max-width: 768px) {
-    padding: 12px 14px;
-    gap: 10px;
+    padding: 10px 12px;
+    gap: 8px;
   }
 
   &:hover {
@@ -766,19 +768,19 @@ onUnmounted(() => {
 }
 
 .kpi-icon-box {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 18px;
   flex-shrink: 0;
 
   @media (max-width: 768px) {
-    width: 38px;
-    height: 38px;
-    font-size: 19px;
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
   }
 }
 
@@ -793,43 +795,47 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .kpi-label {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--x-text-2);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
   @media (max-width: 768px) {
-    font-size: 11.5px;
+    font-size: 11px;
   }
 }
 
 .kpi-val {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--x-text);
-  margin: 3px 0 2px;
+  margin: 2px 0 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--x-font-mono);
 
   @media (max-width: 768px) {
-    font-size: 16px;
-    margin: 2px 0 1px;
+    font-size: 14.5px;
   }
 }
 
 .kpi-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--x-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 
   @media (max-width: 768px) {
-    font-size: 10.5px;
+    font-size: 10px;
   }
 }
 

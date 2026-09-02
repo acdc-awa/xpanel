@@ -304,12 +304,13 @@ async function resetSecret(row: any) {
   }
 }
 
-// ---- 更多操作（编辑/重置密钥/删除/状态/日志/升级） ----
+// ---- 更多操作（编辑/重置密钥/删除/状态/日志/升级/重启） ----
 function onMore(cmd: string, row: any) {
   if (cmd === 'edit') openEdit(row)
   else if (cmd === 'reset') resetSecret(row)
   else if (cmd === 'delete') removeServer(row)
   else if (cmd === 'status') openStatus(row)
+  else if (cmd === 'restart') restartXray(row)
   else if (cmd === 'logs') openLogs(row)
   else if (cmd === 'upgrade') upgradeNodeAgent(row)
 }
@@ -415,23 +416,24 @@ async function removeServer(row: any) {
               <span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="340" fixed="right">
+          <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="openDrawer(row)"><el-icon><Setting /></el-icon>&nbsp;详情</el-button>
-                <el-button size="small" text type="success" @click="openMetrics(row)"><el-icon><TrendCharts /></el-icon>&nbsp;监控</el-button>
-                <el-button size="small" text @click="openStatus(row)"><el-icon><View /></el-icon>&nbsp;状态</el-button>
-                <el-button size="small" text @click="restartXray(row)"><el-icon><RefreshRight /></el-icon>&nbsp;重启</el-button>
-                <el-button size="small" text @click="openLogs(row)"><el-icon><Document /></el-icon>&nbsp;日志</el-button>
-                <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-                  <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑</el-dropdown-item>
-                      <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                      <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>删除</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+              <el-button size="small" text type="primary" @click="openDrawer(row)">详情</el-button>
+              <el-button size="small" text type="success" @click="openMetrics(row)">监控</el-button>
+              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+                <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
+                    <el-dropdown-item command="restart"><el-icon><RefreshRight /></el-icon>重启 Xray</el-dropdown-item>
+                    <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                    <el-dropdown-item command="upgrade"><el-icon><Refresh /></el-icon>升级 Agent</el-dropdown-item>
+                    <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑节点</el-dropdown-item>
+                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)"><el-icon><Delete /></el-icon>删除服务器</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
           <template #empty>

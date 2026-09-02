@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
-import { User, SwitchButton, Search, Sunny, Moon } from '@element-plus/icons-vue'
+import { User, Search, Sunny, Moon } from '@element-plus/icons-vue'
 import { adminMenuGroups } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
 import { getSystemStatus } from '@/api/admin'
+import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -139,21 +139,35 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-// 响应式：<900px 侧栏收进抽屉
+// 响应式分级：<768px 手机端进入抽屉；768px~1024px (Pad端) 自动折叠侧栏为 Mini Dock
 const isMobile = ref(false)
+const isTablet = ref(false)
 const drawerOpen = ref(false)
-let mq: MediaQueryList | null = null
-const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
+let mobileMq: MediaQueryList | null = null
+let tabletMq: MediaQueryList | null = null
+
+const onMobileMq = (e: MediaQueryListEvent | MediaQueryList) => {
   isMobile.value = e.matches
   if (!e.matches) drawerOpen.value = false
+}
+
+const onTabletMq = (e: MediaQueryListEvent | MediaQueryList) => {
+  isTablet.value = e.matches
+  // 如果是 Pad 端且用户未手动固定展开，则默认保持折叠模式
+  if (e.matches && localStorage.getItem('admin_sidebar_collapsed') === null) {
+    isCollapsed.value = true
+  }
 }
 
 // 页脚版本号：取后端 ldflags 注入的真实 panel_version（原写死 v1.0.0 与发布版本脱节）
 const panelVersion = ref('')
 onMounted(async () => {
-  mq = window.matchMedia('(max-width: 900px)')
-  onMq(mq)
-  mq.addEventListener('change', onMq)
+  mobileMq = window.matchMedia('(max-width: 768px)')
+  tabletMq = window.matchMedia('(max-width: 1024px)')
+  onMobileMq(mobileMq)
+  onTabletMq(tabletMq)
+  mobileMq.addEventListener('change', onMobileMq)
+  tabletMq.addEventListener('change', onTabletMq)
   window.addEventListener('keydown', handleGlobalKeydown)
   try {
     const { data } = await getSystemStatus()
@@ -164,19 +178,10 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
-  mq?.removeEventListener('change', onMq)
+  mobileMq?.removeEventListener('change', onMobileMq)
+  tabletMq?.removeEventListener('change', onTabletMq)
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
-
-async function handleLogout() {
-  try {
-    await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
-  } catch {
-    return
-  }
-  await auth.logout()
-  await router.replace('/login')
-}
 </script>
 
 <template>
@@ -403,20 +408,8 @@ async function handleLogout() {
             <el-icon :size="14"><User /></el-icon><span class="switch-view-text">&nbsp;用户端视图</span>
           </el-button>
 
-          <el-dropdown trigger="click" class="admin-user">
-            <div class="admin-avatar">{{ auth.avatarText }}</div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
-                <el-dropdown-item divided @click="router.push('/dashboard')">
-                  <el-icon><User /></el-icon>切换至用户端（我的订阅）
-                </el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">
-                  <el-icon><SwitchButton /></el-icon>退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <!-- 用户头像下拉菜单（统一组件） -->
+          <UserAvatarDropdown current-portal="admin" />
         </div>
       </header>
       <main class="admin-content">

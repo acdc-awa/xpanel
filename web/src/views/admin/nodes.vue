@@ -633,13 +633,13 @@ function quotaOf(row: any): string {
         <el-dialog
           v-model="apDialogOpen"
           :title="apEditingId ? '编辑用户接入点 (Access Point)' : '新建用户接入点 (Access Point)'"
-          width="620px"
+          width="580px"
           append-to-body
         >
           <el-form label-position="top">
             <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px; align-items: start">
               <el-form-item label="接入点 Tag 名称" required>
-                <el-input v-model="apForm.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
+                <el-input v-model="apForm.name" placeholder="如 香港直连 01, 广州移动 BGP" />
               </el-form-item>
               <el-form-item label="启用状态">
                 <el-switch v-model="apForm.enabled" active-text="启用" inactive-text="禁用" style="margin-top: 4px" />
@@ -668,7 +668,7 @@ function quotaOf(row: any): string {
 
             <div
               v-if="apForm.target_type === 'inbound'"
-              style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; background: rgba(56, 189, 248, 0.05); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed rgba(56, 189, 248, 0.2)"
+              style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; background: var(--x-card-soft); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed var(--x-border)"
             >
               <el-form-item label="目标落地服务器" style="margin-bottom: 0">
                 <el-select v-model="apTargetServerId" placeholder="选择 Xray 服务器" style="width: 100%" @change="apForm.target_inbound_id = undefined">
@@ -682,8 +682,8 @@ function quotaOf(row: any): string {
               </el-form-item>
             </div>
 
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
-              <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
+            <div style="background: var(--x-card-soft); border: 1px solid var(--x-border); border-radius: 8px; padding: 12px; margin-bottom: 16px">
+              <div style="font-size: 12px; font-weight: 600; color: var(--x-text-3); margin-bottom: 8px">
                 订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址 / 接入层端点）
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
@@ -721,7 +721,7 @@ function quotaOf(row: any): string {
     <el-dialog
       v-model="editorOpen"
       :title="editing ? `编辑入站 · ${editing.tag}` : '新增节点入站'"
-      width="720px"
+      width="640px"
       :append-to-body="true"
       @closed="editing = null"
     >

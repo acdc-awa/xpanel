@@ -25,7 +25,8 @@ const checkoutOpen = ref(false)
 const selectedPlan = ref<Plan | null>(null)
 const paying = ref(false)
 
-// 收银台内快捷兑换卡密
+// 现场快速充值弹窗
+const topupModalOpen = ref(false)
 const quickRedeemCode = ref('')
 const quickRedeeming = ref(false)
 
@@ -44,7 +45,7 @@ const balanceDeficitYuan = computed(() => {
 })
 
 const orderStatusMap: Record<string, { type: 'warning' | 'success' | 'info'; text: string }> = {
-  pending: { type: 'warning', text: '待处理' },
+  pending: { type: 'warning', text: '处理中' },
   paid: { type: 'success', text: '已生效' },
   cancelled: { type: 'info', text: '已取消' },
 }
@@ -59,10 +60,10 @@ function fmtGb(gb: number) {
 
 function getPlanFeatures(plan: Plan): string[] {
   const defaultTemplate = `包含 $TRAFFIC$ 周期高速流量
-有效周期 $DURATION$ 天
+有效服务周期 $DURATION$ 天
 $DEVICE_LIMIT$
-全量节点与中转链路授权
-深度兼容 Clash / Mihomo / Stash`
+全量优质节点与中转链路
+全面兼容 Mihomo / Clash 生态`
 
   const rawText = plan.description?.trim() ? plan.description : defaultTemplate
   const trafficStr = fmtGb(plan.traffic_gb)
@@ -114,12 +115,13 @@ async function handleQuickRedeem() {
     if (data.code === 0) {
       ElMessage.success(`充值成功！已到账 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
       quickRedeemCode.value = ''
+      topupModalOpen.value = false
       await auth.fetchMe()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '兑换失败'))
+    ElMessage.error(errMsg(e, '核销充值卡失败'))
   } finally {
     quickRedeeming.value = false
   }
@@ -132,7 +134,7 @@ async function confirmPay() {
   try {
     const { data } = await payOrderByBalance(selectedPlan.value.id)
     if (data.code === 0) {
-      ElMessage.success('购买成功！套餐已即时开通生效')
+      ElMessage.success('订购成功！服务计划已即时开通下发')
       checkoutOpen.value = false
       await Promise.all([load(), auth.fetchMe()])
     } else {
@@ -151,9 +153,9 @@ async function confirmPay() {
     <!-- 头部横幅与用户余额卡 -->
     <div class="shop-header-row">
       <div class="shop-hero">
-        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅套餐与增值服务</div>
-        <h1 class="shop-title">套餐商店</h1>
-        <p class="shop-desc">高速节点无缝中转，4K 极速秒开，全平台 Clash / Mihomo 客户端即插即用。</p>
+        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅方案与服务计划</div>
+        <h1 class="shop-title">服务计划 (Plans & Pricing)</h1>
+        <p class="shop-desc">高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。</p>
       </div>
 
       <div class="shop-wallet-badge">
@@ -162,9 +164,9 @@ async function confirmPay() {
           <span class="wallet-lbl">账户可用余额</span>
           <span class="wallet-val cell-mono">¥ {{ balanceYuan }}</span>
         </div>
-        <router-link to="/account">
-          <el-button size="small" type="primary" plain style="margin-left: 8px">充值</el-button>
-        </router-link>
+        <el-button size="small" type="primary" plain style="margin-left: 8px" @click="quickRedeemCode = ''; topupModalOpen = true">
+          卡密充值
+        </el-button>
       </div>
     </div>
 
@@ -180,7 +182,7 @@ async function confirmPay() {
 
         <div class="card-top">
           <div class="plan-title">{{ p.name }}</div>
-          <div class="plan-traffic-pill">{{ fmtGb(p.traffic_gb) }} 流量</div>
+          <div class="plan-traffic-pill">{{ fmtGb(p.traffic_gb) }} 配额</div>
         </div>
 
         <div class="plan-price-wrap">
@@ -213,14 +215,14 @@ async function confirmPay() {
 
       <div v-if="!plans.length" class="empty-plan-box">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><InfoFilled /></el-icon>
-        <p class="muted" style="margin-top: 8px">暂无上架套餐，请稍后再来看看</p>
+        <p class="muted" style="margin-top: 8px">暂无在售服务计划，请稍后查看</p>
       </div>
     </div>
 
-    <!-- 我的订单记录 -->
+    <!-- 订单记录 -->
     <div class="x-card" style="margin-top: 24px">
       <div class="x-card-head">
-        <span><el-icon><Box /></el-icon>&nbsp;我的订购记录</span>
+        <span><el-icon><Box /></el-icon>&nbsp;服务订购记录</span>
       </div>
       <div v-if="orders.length">
         <div v-for="o in orders" :key="o.id" class="x-order-item">
@@ -243,9 +245,38 @@ async function confirmPay() {
         </div>
       </div>
       <div v-else class="muted" style="padding: 24px 18px; font-size: 13px; text-align: center">
-        <el-icon><Ticket /></el-icon>&nbsp;暂无订单记录
+        <el-icon><Ticket /></el-icon>&nbsp;暂无订购记录
       </div>
     </div>
+
+    <!-- 原地充值卡密弹窗 -->
+    <el-dialog
+      v-model="topupModalOpen"
+      title="充值卡核销"
+      width="400px"
+      append-to-body
+    >
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <p class="muted" style="font-size: 12.5px;">
+          输入 16 位充值卡密（格式如 <code>GIFT-XXXX-XXXX-XXXX-XXXX</code>），核销后余额即时到账。
+        </p>
+        <el-input
+          v-model="quickRedeemCode"
+          placeholder="请输入充值卡密"
+          class="cell-mono"
+          size="large"
+          @keyup.enter="handleQuickRedeem"
+        />
+        <el-button
+          type="primary"
+          size="large"
+          :loading="quickRedeeming"
+          @click="handleQuickRedeem"
+        >
+          立即核销充值
+        </el-button>
+      </div>
+    </el-dialog>
 
     <!-- 结账收银台弹窗 -->
     <el-dialog
@@ -260,7 +291,7 @@ async function confirmPay() {
         <div class="checkout-plan-card">
           <div>
             <div class="cp-title">{{ selectedPlan.name }}</div>
-            <div class="cp-sub">{{ fmtGb(selectedPlan.traffic_gb) }} 高速流量 · 有效期 {{ selectedPlan.duration_days }} 天</div>
+            <div class="cp-sub">{{ fmtGb(selectedPlan.traffic_gb) }} 高速配额 · 有效期 {{ selectedPlan.duration_days }} 天</div>
           </div>
           <div class="cp-price cell-mono">
             {{ fmtMoney(selectedPlan.price_cents) }}
@@ -273,7 +304,7 @@ async function confirmPay() {
             <div class="opt-info">
               <div class="opt-title">
                 <el-icon color="#6366f1"><Wallet /></el-icon>&nbsp;账户余额支付
-                <el-tag size="small" type="success" effect="dark" style="margin-left: 6px; font-size: 10px">即时开通</el-tag>
+                <el-tag size="small" type="success" effect="dark" style="margin-left: 6px; font-size: 10px">即时生效</el-tag>
               </div>
               <div class="opt-desc cell-mono">
                 当前可用余额: <b>¥ {{ balanceYuan }}</b>
@@ -285,12 +316,12 @@ async function confirmPay() {
           <div v-if="!isBalanceSufficient" class="deficit-topup-box">
             <div class="deficit-msg">
               <el-icon color="#f59e0b"><InfoFilled /></el-icon>
-              <span>余额不足，还差 <b>¥ {{ balanceDeficitYuan }}</b>。可直接输入充值卡密：</span>
+              <span>余额不足，还需 <b>¥ {{ balanceDeficitYuan }}</b>。可直接输入充值卡密：</span>
             </div>
             <div class="topup-input-row">
               <el-input
                 v-model="quickRedeemCode"
-                placeholder="输入礼品卡卡密 GIFT-..."
+                placeholder="输入充值卡密 GIFT-..."
                 class="cell-mono"
                 size="small"
                 @keyup.enter="handleQuickRedeem"
@@ -312,19 +343,17 @@ async function confirmPay() {
         <div class="checkout-footer">
           <div class="total-bar">
             <span>实付金额:</span>
-            <span class="total-amount cell-mono">
-              {{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥ 0.00' }}
-            </span>
+            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥ 0.00' }}</span>
           </div>
           <div class="footer-btn-group">
             <el-button @click="checkoutOpen = false">取消</el-button>
             <el-button
               type="primary"
-              :disabled="!isBalanceSufficient"
               :loading="paying"
+              :disabled="!isBalanceSufficient"
               @click="confirmPay"
             >
-              确认余额支付
+              {{ isBalanceSufficient ? '确认支付' : '余额不足' }}
             </el-button>
           </div>
         </div>
@@ -337,16 +366,13 @@ async function confirmPay() {
 .shop-header-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
+  align-items: flex-end;
   margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .shop-hero {
-  flex: 1;
-  min-width: 280px;
-
   .shop-badge {
     display: inline-flex;
     align-items: center;
@@ -359,15 +385,16 @@ async function confirmPay() {
     margin-bottom: 8px;
   }
   .shop-title {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 800;
     color: var(--x-text);
     margin: 0;
   }
   .shop-desc {
     color: var(--x-text-2);
-    font-size: 13.5px;
-    margin-top: 6px;
+    font-size: 13px;
+    margin-top: 4px;
+    line-height: 1.5;
   }
 }
 
@@ -375,7 +402,7 @@ async function confirmPay() {
   background: var(--x-card);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
-  padding: 12px 16px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -410,15 +437,15 @@ async function confirmPay() {
 
 .pricing-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 18px;
 }
 
 .pricing-card {
   background: var(--x-card);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
-  padding: 24px;
+  padding: 22px;
   box-shadow: var(--x-shadow);
   position: relative;
   display: flex;
@@ -427,38 +454,37 @@ async function confirmPay() {
   transition: all 0.25s ease;
 
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--x-shadow-lg);
+    transform: translateY(-3px);
+    box-shadow: var(--x-shadow-md);
     border-color: rgba(99, 102, 241, 0.4);
   }
 
   &.featured {
     border-color: var(--x-primary);
-    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.03) 0%, var(--x-card) 100%);
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.12);
   }
 
   .featured-badge {
     position: absolute;
-    top: -11px;
-    right: 20px;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    top: -10px;
+    right: 18px;
+    background: var(--x-primary);
     color: #fff;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
-    padding: 3px 12px;
-    border-radius: 20px;
-    box-shadow: 0 4px 10px rgba(99, 102, 241, 0.4);
+    padding: 2px 10px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
   }
 
   .card-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 
     .plan-title {
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 700;
       color: var(--x-text);
     }
@@ -468,7 +494,7 @@ async function confirmPay() {
       padding: 2px 8px;
       background: var(--x-primary-soft);
       color: var(--x-primary);
-      border-radius: 12px;
+      border-radius: 10px;
     }
   }
 
@@ -476,21 +502,21 @@ async function confirmPay() {
     display: flex;
     align-items: baseline;
     gap: 4px;
-    margin: 8px 0 16px;
+    margin: 6px 0 14px;
     font-family: var(--x-font-mono);
 
     .currency {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
       color: var(--x-text);
     }
     .price-val {
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 800;
       color: var(--x-text);
     }
     .price-period {
-      font-size: 13px;
+      font-size: 12.5px;
       color: var(--x-text-3);
       font-family: var(--el-font-family);
     }
@@ -499,36 +525,39 @@ async function confirmPay() {
   .plan-divider {
     height: 1px;
     background: var(--x-border);
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
 
   .plan-features {
     list-style: none;
     padding: 0;
-    margin: 0 0 24px;
-    display: grid;
-    gap: 10px;
+    margin: 0 0 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
 
     li {
       display: flex;
-      gap: 10px;
       align-items: center;
-      font-size: 13px;
+      gap: 8px;
+      font-size: 12.5px;
       color: var(--x-text-2);
 
       .check-icon {
         color: var(--x-success);
-        font-size: 15px;
+        font-size: 14px;
         flex: none;
       }
     }
   }
 
   .card-action {
-    margin-top: auto;
     .buy-btn {
       width: 100%;
-      font-weight: 700;
+      font-weight: 600;
+      font-size: 13.5px;
+      border-radius: var(--x-radius-sm);
     }
     .glow-btn {
       box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
@@ -541,56 +570,58 @@ async function confirmPay() {
   background: var(--x-card);
   border: 1px dashed var(--x-border);
   border-radius: var(--x-radius);
-  padding: 40px;
+  padding: 40px 20px;
   text-align: center;
 }
 
 .x-order-item {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--x-border);
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--x-border);
+  gap: 12px;
+
   &:last-child {
     border-bottom: none;
   }
-}
 
-.x-order-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--x-primary-soft);
-  color: var(--x-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex: none;
-}
+  .x-order-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--x-card-soft);
+    color: var(--x-text-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex: none;
+  }
 
-.x-order-meta {
-  flex: 1;
-  min-width: 0;
-  .x-order-name {
-    font-size: 14px;
-    font-weight: 600;
+  .x-order-meta {
+    flex: 1;
+    min-width: 0;
+
+    .x-order-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--x-text);
+    }
+    .x-order-sub {
+      font-size: 11.5px;
+      color: var(--x-text-3);
+      margin-top: 2px;
+    }
+  }
+
+  .x-order-amount {
+    font-size: 14.5px;
+    font-weight: 700;
     color: var(--x-text);
   }
-  .x-order-sub {
-    font-size: 12px;
-    color: var(--x-text-3);
-    margin-top: 2px;
-  }
 }
 
-.x-order-amount {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--x-text);
-}
-
-/* 结算收银台 */
 .checkout-body {
   display: flex;
   flex-direction: column;
@@ -598,68 +629,72 @@ async function confirmPay() {
 }
 
 .checkout-plan-card {
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 12px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 12px 14px;
+  background: var(--x-card-soft);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
 
   .cp-title {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--x-text);
   }
   .cp-sub {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--x-text-3);
     margin-top: 2px;
   }
   .cp-price {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 800;
-    color: var(--x-text);
+    color: var(--x-primary);
   }
 }
 
 .pay-method-wrap {
-  .pay-option {
-    border: 1.5px solid var(--x-primary);
-    background: var(--x-primary-soft);
-    border-radius: var(--x-radius);
-    padding: 12px 14px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 
-    .opt-info {
-      flex: 1;
-      .opt-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--x-text);
-        display: flex;
-        align-items: center;
-      }
-      .opt-desc {
-        font-size: 12px;
-        color: var(--x-text-3);
-        margin-top: 2px;
-      }
+  .pay-option {
+    border: 1px solid var(--x-border);
+    border-radius: var(--x-radius-sm);
+    padding: 10px 14px;
+    background: var(--x-card);
+    transition: all 0.15s ease;
+
+    &.active {
+      border-color: var(--x-primary);
+      background: var(--x-primary-soft);
+    }
+
+    .opt-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--x-text);
+      display: flex;
+      align-items: center;
+    }
+    .opt-desc {
+      font-size: 11.5px;
+      color: var(--x-text-2);
+      margin-top: 2px;
     }
   }
 
   .deficit-topup-box {
-    background: #fffbeb;
-    border: 1px dashed #fde68a;
+    background: var(--x-warning-soft);
+    border: 1px dashed rgba(245, 158, 11, 0.35);
     border-radius: var(--x-radius);
     padding: 10px 14px;
     margin-top: 8px;
 
     .deficit-msg {
       font-size: 12px;
-      color: #92400e;
+      color: var(--x-warning);
       display: flex;
       align-items: center;
       gap: 6px;

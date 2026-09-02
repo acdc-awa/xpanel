@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
-import { Setting, SwitchButton, Sunny, Moon, Monitor, Fold, Expand } from '@element-plus/icons-vue'
+import { Setting, Sunny, Moon, Monitor, Fold, Expand } from '@element-plus/icons-vue'
 import { clientMenus } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
+import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -15,11 +15,6 @@ const router = useRouter()
 const route = useRoute()
 
 const pageTitle = computed(() => (route.meta.title as string) || '控制中心')
-
-const balanceYuan = computed(() => {
-  const cents = auth.user?.balance_cents ?? 0
-  return (cents / 100).toFixed(2)
-})
 
 // 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
 // Pad 平板屏幕（< 1024px）默认折叠为 mini dock；宽屏可读取用户缓存
@@ -77,16 +72,6 @@ onUnmounted(() => {
   if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
-
-async function handleLogout() {
-  try {
-    await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
-  } catch {
-    return
-  }
-  await auth.logout()
-  await router.replace('/login')
-}
 </script>
 
 <template>
@@ -144,103 +129,12 @@ async function handleLogout() {
         </router-link>
       </nav>
 
-      <!-- 侧边栏底部用户面板 -->
+      <!-- 侧边栏底部简明状态 -->
       <div class="client-aside-foot" :class="{ 'is-mini': !isEffectiveExpanded }">
-        <!-- 展开态：账户余额快捷卡片 -->
-        <router-link v-if="isEffectiveExpanded" to="/account" class="aside-balance-card" title="查看账户明细">
-          <div class="bal-label">账户可用余额</div>
-          <div class="bal-val cell-mono">¥ {{ balanceYuan }}</div>
-        </router-link>
-
-        <!-- 展开态：底部用户操作条 -->
-        <div v-if="isEffectiveExpanded" class="aside-user-bar">
-          <div class="user-info" title="前往个人中心" @click="router.push('/account')">
-            <div class="user-avatar">{{ auth.avatarText }}</div>
-            <div class="user-meta">
-              <div class="user-name">{{ auth.username }}</div>
-              <div class="user-role">{{ auth.role === 'admin' ? '管理员' : '普通用户' }}</div>
-            </div>
-          </div>
-
-          <div class="user-actions">
-            <!-- 亮色/深色/跟随系统 三态切换按钮 -->
-            <button
-              type="button"
-              class="aside-icon-btn"
-              :title="theme.modeTooltip"
-              @click="theme.toggle()"
-            >
-              <el-icon :size="15">
-                <Sunny v-if="theme.mode === 'light'" />
-                <Moon v-else-if="theme.mode === 'dark'" />
-                <Monitor v-else />
-              </el-icon>
-            </button>
-
-            <!-- 管理员专属快捷按钮 -->
-            <button
-              v-if="auth.role === 'admin'"
-              type="button"
-              class="aside-icon-btn admin-btn"
-              title="进入管理后台"
-              @click="router.push('/admin/dashboard')"
-            >
-              <el-icon :size="15"><Setting /></el-icon>
-            </button>
-
-            <!-- 退出登录按钮 -->
-            <button
-              type="button"
-              class="aside-icon-btn logout-btn"
-              title="退出登录"
-              @click="handleLogout"
-            >
-              <el-icon :size="15"><SwitchButton /></el-icon>
-            </button>
-          </div>
+        <div class="status-dot-wrap" :title="`${auth.username} · 在线`">
+          <span class="status-pulse-dot" />
         </div>
-
-        <!-- Mini 折叠态：垂直紧凑图标栏 -->
-        <div v-else class="aside-mini-foot">
-          <div class="user-avatar mini" :title="`${auth.username}（${auth.role === 'admin' ? '管理员' : '用户'}）`" @click="router.push('/account')">
-            {{ auth.avatarText }}
-          </div>
-
-          <!-- 亮色/深色/跟随系统 三态切换按钮 -->
-          <button
-            type="button"
-            class="aside-icon-btn"
-            :title="theme.modeTooltip"
-            @click="theme.toggle()"
-          >
-            <el-icon :size="15">
-              <Sunny v-if="theme.mode === 'light'" />
-              <Moon v-else-if="theme.mode === 'dark'" />
-              <Monitor v-else />
-            </el-icon>
-          </button>
-
-          <!-- 管理员专属快捷按钮 -->
-          <button
-            v-if="auth.role === 'admin'"
-            type="button"
-            class="aside-icon-btn admin-btn"
-            title="进入管理后台"
-            @click="router.push('/admin/dashboard')"
-          >
-            <el-icon :size="15"><Setting /></el-icon>
-          </button>
-
-          <!-- 退出登录按钮 -->
-          <button
-            type="button"
-            class="aside-icon-btn logout-btn"
-            title="退出登录"
-            @click="handleLogout"
-          >
-            <el-icon :size="15"><SwitchButton /></el-icon>
-          </button>
-        </div>
+        <span v-if="isEffectiveExpanded" class="foot-text">{{ site.appName || 'XrayPanel' }}</span>
       </div>
     </aside>
 
@@ -274,29 +168,16 @@ async function handleLogout() {
           <el-button
             v-if="auth.role === 'admin'"
             size="small"
-            type="primary"
             plain
-            class="admin-portal-btn"
+            class="switch-view-btn"
             title="进入管理后台"
             @click="router.push('/admin/dashboard')"
           >
-            <el-icon :size="14"><Setting /></el-icon>
+            <el-icon :size="14"><Setting /></el-icon><span class="switch-view-text">&nbsp;管理后台</span>
           </el-button>
 
-          <el-dropdown trigger="click">
-            <div class="client-avatar" title="用户菜单">{{ auth.avatarText }}</div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item disabled>{{ auth.username }}（{{ auth.role === 'admin' ? '管理员' : '用户' }}）</el-dropdown-item>
-                <el-dropdown-item v-if="auth.role === 'admin'" divided @click="router.push('/admin/dashboard')">
-                  <el-icon><Setting /></el-icon>进入管理后台
-                </el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">
-                  <el-icon><SwitchButton /></el-icon>退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <!-- 用户头像下拉菜单（统一组件） -->
+          <UserAvatarDropdown current-portal="client" />
         </div>
       </header>
 
@@ -316,11 +197,35 @@ async function handleLogout() {
         </div>
 
         <div class="topbar-right">
-          <!-- 仅保留清爽的余额快速查看胶囊，彻底移除右上角重复操作 -->
-          <router-link to="/account" class="topbar-balance-pill" title="查看账户明细与充值">
-            <span class="pill-lbl">账户余额</span>
-            <span class="pill-val cell-mono">¥ {{ balanceYuan }}</span>
-          </router-link>
+          <!-- 亮色/深色/跟随系统 主题切换按钮 -->
+          <el-button
+            circle
+            size="small"
+            class="theme-toggle-btn"
+            :title="theme.modeTooltip"
+            @click="theme.toggle()"
+          >
+            <el-icon :size="15">
+              <Sunny v-if="theme.mode === 'light'" />
+              <Moon v-else-if="theme.mode === 'dark'" />
+              <Monitor v-else />
+            </el-icon>
+          </el-button>
+
+          <!-- 管理员快速切换至管理后台（组件样式与管理端一致） -->
+          <el-button
+            v-if="auth.role === 'admin'"
+            size="small"
+            plain
+            class="switch-view-btn"
+            title="进入管理后台"
+            @click="router.push('/admin/dashboard')"
+          >
+            <el-icon :size="14"><Setting /></el-icon><span class="switch-view-text">&nbsp;管理后台</span>
+          </el-button>
+
+          <!-- 用户头像下拉菜单（桌面端与移动端完全对齐置于右上角，使用统一组件） -->
+          <UserAvatarDropdown current-portal="client" />
         </div>
       </header>
 
@@ -540,142 +445,43 @@ async function handleLogout() {
   }
 }
 
-/* 侧边栏底部 */
+/* 侧边栏底部简明状态 */
 .client-aside-foot {
-  padding: 12px 10px;
+  height: 48px;
+  padding: 0 14px;
   border-top: 1px solid var(--x-border);
   background: var(--x-card-soft);
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
   flex: none;
+  user-select: none;
 
   &.is-mini {
-    padding: 10px 6px;
-  }
-}
-
-.aside-balance-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  text-decoration: none;
-  transition: all 0.18s ease;
-
-  &:hover {
-    border-color: var(--x-primary);
-    transform: translateY(-1px);
-    box-shadow: var(--x-shadow);
+    padding: 0;
+    justify-content: center;
   }
 
-  .bal-label {
-    font-size: 11px;
+  .status-dot-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  }
+
+  .foot-text {
+    font-size: 11.5px;
     color: var(--x-text-3);
-  }
-  .bal-val {
-    font-size: 13.5px;
-    font-weight: 700;
-    color: #059669;
-  }
-}
-
-.aside-user-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 2px;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-  cursor: pointer;
-}
-
-.user-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  flex: none;
-
-  &.mini {
-    cursor: pointer;
-    margin-bottom: 2px;
-  }
-}
-
-.user-meta {
-  min-width: 0;
-  flex: 1;
-}
-
-.user-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--x-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.user-role {
-  font-size: 10px;
-  color: var(--x-text-3);
-  margin-top: 1px;
-}
-
-.user-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.aside-mini-foot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.aside-icon-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--x-border);
-  background: var(--x-card);
-  color: var(--x-text-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s ease;
-
-  &:hover {
-    color: var(--x-primary);
-    border-color: var(--x-primary);
-    background: var(--x-primary-soft);
-  }
-
-  &.logout-btn:hover {
-    color: var(--x-danger);
-    border-color: var(--x-danger);
-    background: var(--x-danger-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
@@ -759,33 +565,35 @@ async function handleLogout() {
   .topbar-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
+}
 
-  .topbar-balance-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: var(--x-card-soft);
-    border: 1px solid var(--x-border);
-    border-radius: 20px;
-    font-size: 11.5px;
-    text-decoration: none;
-    transition: all 0.18s ease;
+.switch-view-btn {
+  background: var(--x-card-soft, #f8fafc);
+  border: 1px solid var(--x-border);
+  color: var(--x-text);
+  font-size: 12px;
+  transition: all 0.15s ease;
 
-    &:hover {
-      border-color: var(--x-primary);
-      background: var(--x-primary-soft);
-    }
+  &:hover {
+    color: var(--x-primary);
+    border-color: var(--x-primary);
+    background: var(--x-primary-soft);
+  }
+}
 
-    .pill-lbl {
-      color: var(--x-text-3);
-    }
-    .pill-val {
-      font-weight: 700;
-      color: #059669;
-    }
+.theme-toggle-btn {
+  background: var(--x-card-soft, #f8fafc);
+  border: 1px solid var(--x-border);
+  color: var(--x-text-2);
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+
+  &:hover {
+    color: var(--x-primary);
+    border-color: var(--x-primary);
+    background: var(--x-primary-soft);
+    transform: rotate(18deg) scale(1.05);
   }
 }
 
@@ -832,17 +640,18 @@ async function handleLogout() {
   }
 
   .client-avatar {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
     background: linear-gradient(135deg, #6366f1, #8b5cf6);
     color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
+    box-shadow: 0 1px 4px rgba(99, 102, 241, 0.25);
   }
 }
 
