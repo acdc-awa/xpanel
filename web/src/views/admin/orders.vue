@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh, Tickets } from '@element-plus/icons-vue'
+import { Refresh, Tickets, Loading } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -39,97 +39,65 @@ function fmtTime(t: string | null) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <span class="x-toolbar-hint">余额直付记录（充值=兑换码，购买=余额）</span>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="order_no" label="订单号" min-width="190">
-            <template #default="{ row }"><code class="cell-mono">{{ row.order_no }}</code></template>
-          </el-table-column>
-          <el-table-column prop="username" label="用户" width="110">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.username }}</span></template>
-          </el-table-column>
-          <el-table-column prop="plan_name" label="套餐名称" min-width="130" />
-          <el-table-column label="支付金额" width="110">
-            <template #default="{ row }">
-              <span class="cell-mono" style="font-weight: 700; color: var(--x-text)">
-                ¥ {{ (row.amount_cents / 100).toFixed(2) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="支付方式" width="110">
-            <template #default="{ row }">
-              <span v-if="row.payment_method === 'balance'" class="x-chip green">
-                余额直付
-              </span>
-              <span v-else class="x-chip blue">
-                {{ row.payment_method }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="100">
-            <template #default>
-              <span class="x-chip green">已生效</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="支付时间" width="160">
-            <template #default="{ row }"><span class="cell-mono muted" style="font-size: 12px">{{ fmtTime(row.paid_at) }}</span></template>
-          </el-table-column>
-          <el-table-column label="下单时间" width="160">
-            <template #default="{ row }"><span class="cell-mono muted" style="font-size: 12px">{{ fmtTime(row.created_at) }}</span></template>
-          </el-table-column>
-          <template #empty>
-            <div style="padding: 30px 0; color: var(--x-text-3)">
-              <el-icon style="font-size: 32px"><Tickets /></el-icon>
-              <p style="margin-top: 8px">暂无订单记录</p>
-            </div>
-          </template>
-        </el-table>
+    <BaseCard title="服务订购记录">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无订单记录
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span style="font-weight: 700">{{ row.plan_name }}</span>
-                <el-tag type="success" size="small" effect="light">已生效</el-tag>
-              </div>
-              <span class="cell-mono" style="font-weight: 700; color: #059669; font-size: 14px">
-                ¥ {{ (row.amount_cents / 100).toFixed(2) }}
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Tickets /></el-icon>
+        <p style="margin-top: 8px">暂无订购记录</p>
+      </div>
+
+      <!-- 全局统一订单卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="order-card-grid">
+        <div v-for="row in list" :key="row.id" class="order-card">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="plan-name">{{ row.plan_name }}</span>
+              <span class="x-chip" :class="row.status === 'paid' ? 'green' : 'orange'" style="font-size: 10.5px">
+                {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
               </span>
             </div>
+            <span class="cell-mono font-14" style="font-weight: 700; color: #059669">
+              ¥ {{ (row.amount_cents / 100).toFixed(2) }}
+            </span>
+          </div>
 
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">购买用户</span>
-                <div class="item-value" style="font-weight: 600">{{ row.username }}</div>
+          <!-- 订单属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">订购用户</span>
+              <div class="item-value">
+                <span class="x-chip purple" style="font-size: 11px">{{ row.username }}</span>
               </div>
-              <div class="grid-item">
-                <span class="item-label">支付方式</span>
-                <div class="item-value">
-                  <el-tag v-if="row.payment_method === 'balance'" type="success" size="small" effect="plain">
-                    余额直付
-                  </el-tag>
-                  <span v-else>{{ row.payment_method }}</span>
-                </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">支付方式</span>
+              <div class="item-value">
+                <span v-if="row.payment_method === 'balance'" class="x-chip green" style="font-size: 10.5px">
+                  余额支付
+                </span>
+                <span v-else class="x-chip blue" style="font-size: 10.5px">
+                  {{ row.payment_method }}
+                </span>
               </div>
-              <div class="grid-item full-width">
-                <span class="item-label">订单号</span>
-                <div class="item-value"><code class="cell-mono" style="font-size: 11.5px">{{ row.order_no }}</code></div>
+            </div>
+            <div class="grid-item full-width">
+              <span class="item-label">订单流水号</span>
+              <div class="item-value">
+                <code class="cell-mono font-11 muted">{{ row.order_no }}</code>
               </div>
-              <div class="grid-item full-width">
-                <span class="item-label">支付时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.paid_at) }}</div>
+            </div>
+            <div class="grid-item full-width">
+              <span class="item-label">支付生效时间</span>
+              <div class="item-value cell-mono muted font-11">
+                {{ row.paid_at ? fmtTime(row.paid_at) : fmtTime(row.created_at) }}
               </div>
             </div>
           </div>
@@ -154,6 +122,93 @@ function fmtTime(t: string | null) {
 <style scoped lang="scss">
 .cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
-.x-pager { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
+
+/* ================= 全局统一订单卡片网格流 ================= */
+.order-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.order-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .plan-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0 2px;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+}
+
+.x-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 0 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--x-border-light, #f1f5f9);
+}
 .x-toolbar-hint { font-size: 13px; color: var(--x-text-3); margin-right: 8px; }
+
+@media (max-width: 640px) {
+  .order-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

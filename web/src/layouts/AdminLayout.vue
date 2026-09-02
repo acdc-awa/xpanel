@@ -162,8 +162,8 @@ const onTabletMq = (e: MediaQueryListEvent | MediaQueryList) => {
 // 页脚版本号：取后端 ldflags 注入的真实 panel_version（原写死 v1.0.0 与发布版本脱节）
 const panelVersion = ref('')
 onMounted(async () => {
-  mobileMq = window.matchMedia('(max-width: 768px)')
-  tabletMq = window.matchMedia('(max-width: 1024px)')
+  mobileMq = window.matchMedia('(max-width: 767.98px)')
+  tabletMq = window.matchMedia('(max-width: 1023.98px)')
   onMobileMq(mobileMq)
   onTabletMq(tabletMq)
   mobileMq.addEventListener('change', onMobileMq)
@@ -987,13 +987,29 @@ onUnmounted(() => {
 /* 主内容区自适应过渡（折叠模式下固定为 58px margin，不因悬停抖动页面布局） */
 .admin-main {
   flex: 1;
-  margin-left: 236px;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  transition: margin-left 0.24s cubic-bezier(0.2, 0, 0, 1);
+  min-height: 100vh;
+  transition: margin-left 0.22s cubic-bezier(0.2, 0, 0, 1);
+
+  @media (min-width: 768px) {
+    margin-left: 236px;
+  }
+
+  @media (max-width: 767.98px) {
+    margin-left: 0 !important;
+  }
 
   &.collapsed {
+    @media (min-width: 768px) {
+      margin-left: 58px;
+    }
+  }
+}
+
+.admin-layout.is-collapsed .admin-main {
+  @media (min-width: 768px) {
     margin-left: 58px;
   }
 }
@@ -1010,6 +1026,10 @@ onUnmounted(() => {
   top: 0;
   z-index: 10;
   transition: background-color 0.24s ease, border-color 0.24s ease;
+
+  @media (max-width: 767.98px) {
+    padding: 0 14px;
+  }
 }
 .admin-topbar-left {
   display: flex;
@@ -1071,7 +1091,14 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
-.admin-content { flex: 1; padding: 20px 24px; }
+.admin-content {
+  flex: 1;
+  padding: 20px 24px 32px;
+
+  @media (max-width: 767.98px) {
+    padding: 14px 12px 24px;
+  }
+}
 
 :deep(.admin-drawer) {
   width: 236px !important;
@@ -1088,20 +1115,14 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 900px) {
-  .admin-main {
-    margin-left: 0 !important;
-  }
+@media (max-width: 767.98px) {
   .admin-topbar {
     padding: 0 12px;
     height: 52px;
   }
   .admin-content {
-    padding: 14px;
+    padding: 12px 10px;
   }
-}
-
-@media (max-width: 768px) {
   .switch-view-btn {
     padding: 0 8px;
     .switch-view-text {

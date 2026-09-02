@@ -1153,10 +1153,10 @@ async function copyText(text: string, label: string) {
             </div>
 
             <!-- 对外接入层：挂载后订阅端点由层决议（分享地址组仅直连生效） -->
-            <div class="form-grid" style="margin-bottom: 6px">
+            <div style="margin-bottom: 12px">
               <el-form-item label="对外接入层">
-                <div style="display: flex; gap: 8px; width: 100%">
-                  <el-select v-model="localLayerId" style="width: 100%" :disabled="!props.serverId" placeholder="选择对外层（或新建）">
+                <div style="display: flex; gap: 10px; width: 100%; align-items: center; flex-wrap: wrap">
+                  <el-select v-model="localLayerId" style="flex: 1; min-width: 240px" :disabled="!props.serverId" placeholder="选择对外层（或新建）">
                     <el-option :value="0" label="不使用（直连端点，自持分享地址）" />
                     <el-option
                       v-for="l in layers"
@@ -1165,10 +1165,13 @@ async function copyText(text: string, label: string) {
                       :label="`${l.name} (${l.host}:${l.port} ${l.security === 'tls' ? 'TLS' : '明文'})`"
                     />
                   </el-select>
-                  <el-button :disabled="!props.serverId" @click="openLayerQuick">新建对外层</el-button>
+                  <el-button :disabled="!props.serverId" :icon="Plus" @click="openLayerQuick">新建对外层</el-button>
                   <el-button
                     :disabled="!props.serverId || !localLayerId"
                     :loading="layerDeleting"
+                    :icon="Delete"
+                    type="danger"
+                    plain
                     @click="deleteLayerFromEditor"
                   >
                     删除该层

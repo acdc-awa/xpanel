@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from 'vue'
-import { Plus, Check, Refresh, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Check, Refresh, CopyDocument, Document, Edit, Delete, Loading, FolderChecked, Connection } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -334,114 +334,68 @@ async function copyPreview() {
       </div>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="id" label="ID" width="70">
-            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-          </el-table-column>
-          <el-table-column prop="name" label="权限组名称" min-width="160">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
-          </el-table-column>
-          <el-table-column prop="remark" label="备注说明" min-width="180" />
-          <el-table-column label="包含用户接入点 (Endpoints)" min-width="220">
-            <template #default="{ row }">
-              <template v-if="row.access_point_names && row.access_point_names.length">
-                <span
-                  v-for="name in row.access_point_names"
-                  :key="name"
-                  class="x-chip blue"
-                  style="margin-right: 4px; margin-bottom: 2px"
-                >
-                  🌐 {{ name }}
-                </span>
-              </template>
-              <span v-else class="muted" style="font-size: 12px">暂无接入点（在「路由管理 - 拓扑画布」中配置接入点并绑定该组）</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="订阅模板" width="130">
-            <template #default="{ row }">
-              <span v-if="row.clash_template && row.clash_template.trim()" class="x-chip purple">
-                自定义模板
-              </span>
-              <span v-else class="x-chip gray">
-                系统默认
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text type="warning" @click="openTemplateEditor(row)">
-                订阅模板
-              </el-button>
-              <el-button size="small" text type="primary" @click="openEdit(row)">
-                编辑
-              </el-button>
-              <el-button size="small" text type="danger" @click="remove(row)">
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty><div class="table-empty">尚无权限组，点击右上角「新增权限组」</div></template>
-        </el-table>
+    <BaseCard title="权限分组列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          尚无权限组，点击右上角「新增权限组」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="cell-mono muted font-12">#{{ row.id }}</span>
-                <span style="font-weight: 700">{{ row.name }}</span>
-              </div>
-              <el-tag v-if="row.clash_template && row.clash_template.trim()" size="small" type="success" effect="light">
-                自定义模板
-              </el-tag>
-              <el-tag v-else size="small" type="info" effect="plain">
-                系统默认
-              </el-tag>
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><FolderChecked /></el-icon>
+        <p style="margin-top: 8px">尚无权限组，点击右上角「新增权限组」</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item full-width">
-                <span class="item-label">备注说明</span>
-                <div class="item-value">{{ row.remark || '—' }}</div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">包含接入点 (Endpoints)</span>
-                <div class="item-value">
-                  <template v-if="row.access_point_names && row.access_point_names.length">
-                    <el-tag
-                      v-for="name in row.access_point_names"
-                      :key="name"
-                      size="small"
-                      effect="plain"
-                      style="margin-right: 4px; margin-bottom: 2px"
-                    >
-                      🌐 {{ name }}
-                    </el-tag>
-                  </template>
-                  <span v-else class="muted font-12">暂无接入点</span>
-                </div>
-              </div>
+      <!-- 全局统一权限组卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="group-card-grid">
+        <div v-for="row in list" :key="row.id" class="group-card">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+              <span class="group-name" title="点击编辑权限组" @click="openEdit(row)">{{ row.name }}</span>
             </div>
+            <span v-if="row.clash_template && row.clash_template.trim()" class="x-chip purple" style="font-size: 10.5px">
+              自定义模板
+            </span>
+            <span v-else class="x-chip gray" style="font-size: 10.5px">
+              系统默认
+            </span>
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="warning" plain @click="openTemplateEditor(row)">
-                订阅模板
-              </el-button>
-              <el-button size="small" type="primary" plain @click="openEdit(row)">
-                编辑
-              </el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">
-                删除
-              </el-button>
+          <!-- 属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item full-width">
+              <span class="item-label">备注说明</span>
+              <div class="item-value">{{ row.remark || '—' }}</div>
             </div>
+            <div class="grid-item full-width">
+              <span class="item-label">包含接入点 (Endpoints)</span>
+              <div class="item-value">
+                <template v-if="row.access_point_names && row.access_point_names.length">
+                  <span
+                    v-for="name in row.access_point_names"
+                    :key="name"
+                    class="x-chip blue"
+                    style="margin-right: 4px; margin-bottom: 2px; font-size: 10.5px"
+                  >
+                    <el-icon style="font-size: 11px; vertical-align: -1px"><Connection /></el-icon>&nbsp;{{ name }}
+                  </span>
+                </template>
+                <span v-else class="muted font-11">暂无接入点（在拓扑画布中绑定该组）</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="warning" plain @click="openTemplateEditor(row)">
+              <el-icon><Document /></el-icon>&nbsp;订阅模板
+            </el-button>
+            <el-button size="small" type="primary" plain @click="openEdit(row)">
+              <el-icon><Edit /></el-icon>&nbsp;编辑
+            </el-button>
+            <el-button size="small" type="danger" plain @click="remove(row)">
+              <el-icon><Delete /></el-icon>&nbsp;删除
+            </el-button>
           </div>
         </div>
       </div>
@@ -716,6 +670,107 @@ async function copyPreview() {
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 11px;
+}
+
+/* ================= 全局统一权限组卡片网格流 ================= */
+.group-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.group-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .group-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .group-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

@@ -49,10 +49,10 @@ const form = reactive({
 const saving = ref(false)
 
 const defaultPlanDesc = `包含 $TRAFFIC$ 周期高速流量
-有效周期 $DURATION$ 天
+有效服务周期 $DURATION$ 天
 $DEVICE_LIMIT$
-全量节点与中转链路授权
-深度兼容 Clash / Mihomo / Stash`
+全量优质节点与中转链路授权
+全面兼容 Mihomo / Clash 生态`
 
 function insertPlaceholder(placeholder: string) {
   const el = (descInputRef.value?.textarea ||
@@ -183,110 +183,73 @@ async function remove(row: any) {
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增套餐</el-button>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list" style="width: 100%">
-          <el-table-column prop="id" label="ID" width="70">
-            <template #default="{ row }"><code class="cell-mono font-12">#{{ row.id }}</code></template>
-          </el-table-column>
-          <el-table-column prop="name" label="套餐名称" min-width="160">
-            <template #default="{ row }">
-              <div style="font-weight: 600">{{ row.name }}</div>
-              <div v-if="row.description" class="plan-desc-preview" :title="row.description">
-                {{ row.description.split('\n')[0] }}{{ row.description.includes('\n') ? ' ...' : '' }}
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="价格" min-width="110">
-            <template #default="{ row }"><span class="cell-mono" style="font-weight: 600; color: #059669">¥ {{ (row.price_cents / 100).toFixed(2) }}</span></template>
-          </el-table-column>
-          <el-table-column label="包含流量" min-width="120">
-            <template #default="{ row }">
-              <span class="cell-mono">{{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="duration_days" label="有效期" min-width="100">
-            <template #default="{ row }"><span class="cell-mono">{{ row.duration_days }} 天</span></template>
-          </el-table-column>
-          <el-table-column label="设备限制" min-width="100">
-            <template #default="{ row }">
-              <span class="x-chip" :class="row.device_limit ? 'blue' : 'gray'">
-                {{ row.device_limit ? `${row.device_limit} 台` : '不限' }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="上架状态" min-width="90" align="center">
-            <template #default="{ row }">
-              <el-switch :model-value="row.enabled" @change="togglePlan(row)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right" align="right">
-            <template #default="{ row }">
-              <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+    <BaseCard title="服务计划套餐列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无套餐，点击右上角「新增套餐」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-                <span style="font-weight: 700">{{ row.name }}</span>
-                <el-tag size="small" :type="row.enabled ? 'success' : 'info'">
-                  {{ row.enabled ? '已上架' : '已下架' }}
-                </el-tag>
-              </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><ShoppingBag /></el-icon>
+        <p style="margin-top: 8px">暂无套餐，点击右上角「新增套餐」</p>
+      </div>
+
+      <!-- 全局统一套餐卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="plan-card-grid">
+        <div v-for="row in list" :key="row.id" class="plan-card" :class="{ disabled: !row.enabled }">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+              <span class="plan-name" title="点击编辑套餐" @click="openEdit(row)">{{ row.name }}</span>
+              <span class="x-chip" :class="row.enabled ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
+                {{ row.enabled ? '已上架' : '已下架' }}
+              </span>
+            </div>
+            <el-tooltip :content="row.enabled ? '已上架（用户可见），点击下架' : '已下架（隐藏），点击上架'" placement="top">
               <el-switch :model-value="row.enabled" size="small" @change="togglePlan(row)" />
-            </div>
+            </el-tooltip>
+          </div>
 
-            <div v-if="row.description" class="card-desc-box">
-              {{ row.description }}
-            </div>
+          <div v-if="row.description" class="card-desc-box">
+            {{ row.description }}
+          </div>
 
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">套餐价格</span>
-                <div class="item-value cell-mono" style="color: #059669; font-weight: 700; font-size: 14px">
-                  ¥ {{ (row.price_cents / 100).toFixed(2) }}
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">包含流量</span>
-                <div class="item-value cell-mono" style="font-weight: 600">
-                  {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">有效周期</span>
-                <div class="item-value cell-mono">{{ row.duration_days }} 天</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">设备限制</span>
-                <div class="item-value">
-                  <el-tag size="small" :type="row.device_limit ? 'primary' : 'info'">
-                    {{ row.device_limit ? `${row.device_limit} 台` : '不限设备' }}
-                  </el-tag>
-                </div>
+          <!-- 属性 2x2 网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">套餐价格</span>
+              <div class="item-value cell-mono font-14" style="color: #059669; font-weight: 700">
+                ¥ {{ (row.price_cents / 100).toFixed(2) }}
               </div>
             </div>
+            <div class="grid-item">
+              <span class="item-label">包含流量</span>
+              <div class="item-value cell-mono" style="font-weight: 600">
+                {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
+              </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">有效周期</span>
+              <div class="item-value cell-mono">{{ row.duration_days }} 天</div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">设备限制</span>
+              <div class="item-value">
+                <span class="x-chip" :class="row.device_limit ? 'blue' : 'gray'" style="font-size: 11px">
+                  {{ row.device_limit ? `${row.device_limit} 台` : '不限设备' }}
+                </span>
+              </div>
+            </div>
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain @click="openEdit(row)">
-                <el-icon><Edit /></el-icon>&nbsp;编辑套餐
-              </el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">
-                <el-icon><Delete /></el-icon>&nbsp;删除
-              </el-button>
-            </div>
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain @click="openEdit(row)">
+              <el-icon><Edit /></el-icon>&nbsp;编辑套餐
+            </el-button>
+            <el-button size="small" type="danger" plain @click="remove(row)">
+              <el-icon><Delete /></el-icon>&nbsp;删除
+            </el-button>
           </div>
         </div>
       </div>
@@ -328,20 +291,20 @@ async function remove(row: any) {
             v-model="form.description"
             type="textarea"
             :rows="5"
-            placeholder="如：&#10;包含 $TRAFFIC$ 周期高速流量&#10;有效周期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;解锁流媒体与 ChatGPT"
+            placeholder="如：&#10;包含 $TRAFFIC$ 周期高速流量&#10;有效服务周期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
           />
         </el-form-item>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+        <div class="form-grid-2">
           <el-form-item label="价格（元）">
             <el-input-number v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="时长（天）">
+          <el-form-item label="有效周期（天）">
             <el-input-number v-model="form.duration_days" :min="1" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="流量（GB）">
+          <el-form-item label="流量配额（GB）">
             <el-input-number v-model="form.traffic_gb" :min="1" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="设备限制（台，0=不限）">
+          <el-form-item label="并发设备上限（台，0 为不限）">
             <el-input-number v-model="form.device_limit" :min="0" style="width: 100%" />
           </el-form-item>
         </div>
@@ -387,6 +350,7 @@ async function remove(row: any) {
   white-space: pre-line;
   line-height: 1.4;
 }
+
 .placeholder-chips {
   display: flex;
   align-items: center;
@@ -411,6 +375,108 @@ async function remove(row: any) {
       border-color: var(--x-primary, #6366f1);
       color: var(--x-primary, #6366f1);
     }
+  }
+}
+
+/* ================= 全局统一套餐卡片网格流 ================= */
+.plan-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.plan-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  &.disabled {
+    opacity: 0.75;
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .plan-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--x-text, #111827);
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .plan-card-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

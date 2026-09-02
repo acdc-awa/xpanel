@@ -9,6 +9,7 @@ import {
   User,
   Refresh,
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getDashboard } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -43,6 +44,15 @@ function formatBandwidth(bytesPerSec: number): string {
   return `${mbps.toFixed(2)} Mbps`
 }
 
+function formatCompactRate(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return '0.00 M'
+  const mbps = (bytesPerSec * 8) / 1_000_000
+  if (mbps >= 1000) {
+    return `${(mbps / 1000).toFixed(1)} G`
+  }
+  return `${mbps.toFixed(2)} M`
+}
+
 function fmtTime(t: string | null) {
   if (!t) return '—'
   return new Date(t).toLocaleString('zh-CN', { hour12: false })
@@ -74,9 +84,8 @@ function updateCharts() {
   const tooltipBg = isDark ? 'rgba(19, 27, 46, 0.95)' : 'rgba(15, 23, 42, 0.9)'
   const tooltipBorder = isDark ? '#25334d' : '#334155'
   const pieBorderColor = isDark ? '#131b2e' : '#ffffff'
-  const emphasisColor = isDark ? '#f8fafc' : '#1e293b'
 
-  // 1. 流量趋势面积图
+  // 1. 流量趋势柱状图 (堆叠柱状图)
   const trend = dashData.value.traffic_trend || []
   const dates = trend.map((t) => t.date.slice(5))
   const upData = trend.map((t) => Number((t.up_bytes / (1024 * 1024 * 1024)).toFixed(2)))
@@ -85,17 +94,31 @@ function updateCharts() {
   trendChart?.setOption({
     tooltip: {
       trigger: 'axis',
+      confine: true,
+      axisPointer: {
+        type: 'shadow',
+        shadowStyle: {
+          color: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)',
+        },
+      },
       backgroundColor: tooltipBg,
       borderColor: tooltipBorder,
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: 99;',
       formatter: (params: any) => {
         let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
+        let total = 0
         params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;gap:6px;margin-top:2px">${item.marker} <span style="color:#cbd5e1">${item.seriesName}:</span> <b style="color:#fff">${item.value} GB</b></div>`
+          const val = Number(item.value || 0)
+          total += val
+          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px">
+            <span style="display:flex;align-items:center;gap:6px">${item.marker} <span style="color:#cbd5e1">${item.seriesName}</span></span>
+            <b style="color:#fff">${val.toFixed(2)} GB</b>
+          </div>`
         })
+        res += `<div style="border-top:1px dashed rgba(255,255,255,0.2);margin-top:6px;padding-top:4px;display:flex;justify-content:space-between;color:#e2e8f0;font-size:11.5px"><span>合计吞吐:</span> <b style="color:#38bdf8">${total.toFixed(2)} GB</b></div>`
         return res
       },
     },
@@ -127,36 +150,35 @@ function updateCharts() {
     series: [
       {
         name: isMob ? '上行' : '上行流量 (Upload)',
-        type: 'line',
-        smooth: true,
-        showSymbol: false,
+        type: 'bar',
+        stack: 'traffic',
+        barMaxWidth: 16,
         data: upData,
-        itemStyle: { color: '#6366f1' },
-        areaStyle: {
+        itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.25)' },
-            { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
+            { offset: 0, color: '#818cf8' },
+            { offset: 1, color: '#6366f1' },
           ]),
         },
       },
       {
         name: isMob ? '下行' : '下行流量 (Download)',
-        type: 'line',
-        smooth: true,
-        showSymbol: false,
+        type: 'bar',
+        stack: 'traffic',
+        barMaxWidth: 16,
         data: downData,
-        itemStyle: { color: '#10b981' },
-        areaStyle: {
+        itemStyle: {
+          borderRadius: [3, 3, 0, 0],
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)' },
-            { offset: 1, color: 'rgba(16, 185, 129, 0.0)' },
+            { offset: 0, color: '#34d399' },
+            { offset: 1, color: '#059669' },
           ]),
         },
       },
     ],
   })
 
-  // 2. 节点流量占比环形图
+  // 2. 节点流量占比环形图 (自适应容器宽度，彻底杜绝图例与图表重合)
   const breakdown = dashData.value.server_breakdown || []
   const pieData = breakdown
     .filter((b) => b.total_bytes > 0)
@@ -165,32 +187,56 @@ function updateCharts() {
       value: Number((b.total_bytes / (1024 * 1024 * 1024)).toFixed(2)),
     }))
 
+  const donutWidth = donutChartRef.value?.clientWidth || 360
+  const isNarrow = isMob || donutWidth < 410
+
   donutChart?.setOption({
     color: ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6'],
     tooltip: {
       trigger: 'item',
+      confine: true, // 核心修复：限制在容器内，永不发生遮挡与截断
       backgroundColor: tooltipBg,
       borderColor: tooltipBorder,
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
-      formatter: '{b}: <b>{c} GB</b> ({d}%)',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: 99;',
+      formatter: (params: any) => {
+        return `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params.name}</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${params.marker}
+          <span style="color:#cbd5e1">承载流量:</span>
+          <b style="color:#38bdf8">${params.value} GB</b>
+          <span style="color:#94a3b8">(${params.percent}%)</span>
+        </div>`
+      },
     },
-    legend: {
-      orient: isMob ? 'horizontal' : 'vertical',
-      right: isMob ? 'auto' : '2%',
-      left: isMob ? 'center' : 'auto',
-      top: isMob ? 'auto' : 'middle',
-      bottom: isMob ? 0 : 'auto',
-      textStyle: { color: textColor, fontSize: 11 },
-    },
+    legend: isNarrow
+      ? {
+          orient: 'horizontal',
+          bottom: 0,
+          left: 'center',
+          itemWidth: 10,
+          itemHeight: 10,
+          textStyle: { color: textColor, fontSize: 11 },
+        }
+      : {
+          orient: 'vertical',
+          right: '4%',
+          top: 'middle',
+          itemWidth: 10,
+          itemHeight: 10,
+          textStyle: { color: textColor, fontSize: 11.5 },
+          formatter: (name: string) => {
+            return name.length > 12 ? name.slice(0, 11) + '…' : name
+          },
+        },
     series: [
       {
         name: '节点流量',
         type: 'pie',
-        radius: isMob ? ['42%', '65%'] : ['50%', '76%'],
-        center: isMob ? ['50%', '42%'] : ['38%', '50%'],
+        radius: isNarrow ? ['38%', '60%'] : ['40%', '68%'],
+        center: isNarrow ? ['50%', '38%'] : ['28%', '50%'],
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 6,
@@ -198,13 +244,12 @@ function updateCharts() {
           borderWidth: 2,
         },
         label: { show: false },
+        labelLine: { show: false },
         emphasis: {
-          label: {
-            show: true,
-            fontSize: 13,
-            fontWeight: 'bold',
-            color: emphasisColor,
-          },
+          scale: true,
+          scaleSize: 6,
+          label: { show: false },
+          labelLine: { show: false },
         },
         data: pieData.length ? pieData : [{ name: '暂无流量', value: 0 }],
       },
@@ -266,8 +311,8 @@ onUnmounted(() => {
     <div class="x-toolbar" style="margin-bottom: 20px">
       <div class="x-toolbar-left">
         <div class="dash-title-wrap">
-          <div class="dash-main-title">运营数据中心</div>
-          <div class="dash-sub-title">实时营收、网络吞吐、集群健康度与用户用量大盘</div>
+          <div class="dash-main-title">运维监控大盘</div>
+          <div class="dash-sub-title">集群状态、吞吐速率、运营营收与用量指标大盘</div>
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 12px">
@@ -284,9 +329,9 @@ onUnmounted(() => {
       <div class="kpi-card card-cyan">
         <div class="kpi-icon-box"><el-icon><Coin /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">今日激活营收</div>
+          <div class="kpi-label">今日营收</div>
           <div class="kpi-val cell-mono">¥ {{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
-          <div class="kpi-sub">今日激活 {{ dashData?.summary.today_used_cards_count || 0 }} 张充值卡</div>
+          <div class="kpi-sub">卡密激活 {{ dashData?.summary.today_used_cards_count || 0 }} 张</div>
         </div>
       </div>
 
@@ -294,9 +339,9 @@ onUnmounted(() => {
       <div class="kpi-card card-purple">
         <div class="kpi-icon-box"><el-icon><Money /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">本月累计营收</div>
+          <div class="kpi-label">本月营收</div>
           <div class="kpi-val cell-mono">¥ {{ ((dashData?.summary.month_revenue_cents || 0) / 100).toFixed(2) }}</div>
-          <div class="kpi-sub">历史累计 ¥ {{ ((dashData?.summary.total_revenue_cents || 0) / 100).toFixed(2) }}</div>
+          <div class="kpi-sub">累计营收 ¥ {{ ((dashData?.summary.total_revenue_cents || 0) / 100).toFixed(2) }}</div>
         </div>
       </div>
 
@@ -304,22 +349,22 @@ onUnmounted(() => {
       <div class="kpi-card card-blue">
         <div class="kpi-icon-box"><el-icon><Histogram /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">今日全网流量</div>
+          <div class="kpi-label">今日流量</div>
           <div class="kpi-val cell-mono">{{ formatBytes(dashData?.summary.today_traffic_total || 0) }}</div>
           <div class="kpi-sub">
-            ↑ {{ formatBytes(dashData?.summary.today_traffic_up || 0) }} / ↓ {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}
+            ↑ {{ formatBytes(dashData?.summary.today_traffic_up || 0) }} · ↓ {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}
           </div>
         </div>
       </div>
 
-      <!-- 4. 实时出口带宽 -->
+      <!-- 4. 实时出口带宽 (优化紧凑速率展示，彻底告别遮挡) -->
       <div class="kpi-card card-emerald">
         <div class="kpi-icon-box"><el-icon><TrendCharts /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">实时出口速率</div>
+          <div class="kpi-label">实时吞吐</div>
           <div class="kpi-val cell-mono">{{ formatBandwidth((dashData?.summary.realtime_rx_rate || 0) + (dashData?.summary.realtime_tx_rate || 0)) }}</div>
           <div class="kpi-sub">
-            Rx: {{ formatBandwidth(dashData?.summary.realtime_rx_rate || 0) }} | Tx: {{ formatBandwidth(dashData?.summary.realtime_tx_rate || 0) }}
+            ↓ {{ formatCompactRate(dashData?.summary.realtime_rx_rate || 0) }} · ↑ {{ formatCompactRate(dashData?.summary.realtime_tx_rate || 0) }}
           </div>
         </div>
       </div>
@@ -328,7 +373,7 @@ onUnmounted(() => {
       <div class="kpi-card card-indigo">
         <div class="kpi-icon-box"><el-icon><Connection /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">节点集群状态</div>
+          <div class="kpi-label">节点状态</div>
           <div class="kpi-val cell-mono">
             {{ dashData?.summary.online_servers || 0 }} / {{ dashData?.summary.total_servers || 0 }}
             <span style="font-size: 13px; font-weight: 500; color: var(--x-text-3)">在线</span>
@@ -343,12 +388,12 @@ onUnmounted(() => {
       <div class="kpi-card card-amber">
         <div class="kpi-icon-box"><el-icon><User /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">有效用户数</div>
+          <div class="kpi-label">有效用户</div>
           <div class="kpi-val cell-mono">
             {{ dashData?.summary.active_users || 0 }} / {{ dashData?.summary.total_users || 0 }}
           </div>
           <div class="kpi-sub">
-            今日订单 {{ dashData?.summary.today_orders || 0 }} 笔 / 累计 {{ dashData?.summary.total_orders || 0 }}
+            今日 {{ dashData?.summary.today_orders || 0 }} 单 · 累计 {{ dashData?.summary.total_orders || 0 }} 单
           </div>
         </div>
       </div>
@@ -358,16 +403,16 @@ onUnmounted(() => {
     <div class="charts-row">
       <div class="chart-panel trend-panel">
         <div class="panel-head">
-          <div class="title">全网吞吐趋势 (近 30 天)</div>
-          <div class="sub">每日上下行流量分布汇总 (GB)</div>
+          <div class="title">吞吐趋势 (近 30 天)</div>
+          <div class="sub">每日上行 / 下行流量吞吐分布汇总 (GB)</div>
         </div>
         <div ref="trendChartRef" class="echart-container"></div>
       </div>
 
       <div class="chart-panel donut-panel">
         <div class="panel-head">
-          <div class="title">节点流量占比分布</div>
-          <div class="sub">各节点累计入站承载流量占比</div>
+          <div class="title">节点流量分布</div>
+          <div class="sub">各节点累计承载流量占比</div>
         </div>
         <div ref="donutChartRef" class="echart-container"></div>
       </div>
@@ -378,78 +423,79 @@ onUnmounted(() => {
       <!-- 左侧：服务器健康度与系统负载矩阵 -->
       <div class="matrix-card">
         <div class="panel-head" style="margin-bottom: 14px">
-          <div class="title">节点健康度与系统负载矩阵</div>
-          <div class="sub">节点实时心跳、CPU、内存与出口带宽监控</div>
+          <div class="title">节点监控矩阵</div>
+          <div class="sub">心跳、CPU、内存与实时带宽监控</div>
         </div>
 
-        <!-- 桌面端表格视图 -->
+        <!-- 桌面端表格视图 (双行紧凑聚合，告别溢出与横向滚动) -->
         <div class="desktop-table-view">
           <el-table :data="dashData?.server_matrix || []" size="small" style="width: 100%">
-            <el-table-column label="节点" min-width="120">
+            <!-- 1. 节点与地址 -->
+            <el-table-column label="节点" min-width="110">
               <template #default="{ row }">
-                <div style="font-weight: 600; color: var(--x-text)">{{ row.name }}</div>
+                <div style="font-weight: 600; color: var(--x-text); font-size: 13px">{{ row.name }}</div>
                 <div class="muted cell-mono" style="font-size: 11px">{{ row.host }}</div>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="90">
+
+            <!-- 2. 状态与心跳 -->
+            <el-table-column label="状态" width="105">
               <template #default="{ row }">
                 <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
                   <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                   {{ row.status === 1 ? '在线' : '离线' }}
                 </el-tag>
+                <div class="muted cell-mono" style="font-size: 10.5px; margin-top: 2px">
+                  {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}
+                </div>
               </template>
             </el-table-column>
-            <el-table-column label="最后心跳" width="140">
+
+            <!-- 3. 系统负载 (CPU + 内存复合) -->
+            <el-table-column label="负载 (CPU / 内存)" width="145">
               <template #default="{ row }">
-                <span class="muted cell-mono" style="font-size: 11px">{{ fmtTime(row.last_seen_at) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="CPU" width="110">
-              <template #default="{ row }">
-                <div style="display: flex; align-items: center; gap: 6px">
+                <div style="display: flex; align-items: center; gap: 4px; font-size: 11px" class="cell-mono">
+                  <span class="muted" style="font-size: 10px; width: 28px">CPU</span>
                   <el-progress
                     :percentage="Math.min(100, Math.round(row.cpu || 0))"
                     :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
-                    :stroke-width="6"
+                    :stroke-width="4"
                     :show-text="false"
-                    style="width: 45px"
+                    style="width: 42px"
                   />
-                  <span class="cell-mono" style="font-size: 11px">{{ (row.cpu || 0).toFixed(0) }}%</span>
+                  <span>{{ (row.cpu || 0).toFixed(0) }}%</span>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="内存" width="110">
-              <template #default="{ row }">
-                <div style="display: flex; align-items: center; gap: 6px">
+                <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 2px" class="cell-mono">
+                  <span class="muted" style="font-size: 10px; width: 28px">MEM</span>
                   <el-progress
                     :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
                     color="#3b82f6"
-                    :stroke-width="6"
+                    :stroke-width="4"
                     :show-text="false"
-                    style="width: 45px"
+                    style="width: 42px"
                   />
-                  <span class="cell-mono" style="font-size: 11px">
-                    {{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}
-                  </span>
+                  <span>{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="实时带宽" min-width="130">
+
+            <!-- 4. 实时速率与在线设备 -->
+            <el-table-column label="速率 / 在线" min-width="125">
               <template #default="{ row }">
-                <div class="cell-mono" style="font-size: 11.5px">
+                <div class="cell-mono" style="font-size: 11px">
                   <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
-                  <span style="color: #6366f1; margin-left: 6px">↑{{ formatBandwidth(row.tx_rate) }}</span>
+                  <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
+                </div>
+                <div class="muted cell-mono" style="font-size: 10.5px; margin-top: 2px">
+                  在线: <b style="color: var(--x-text)">{{ row.online_users || 0 }}</b> 台
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="在线设备" width="80">
+
+            <!-- 5. 操作 -->
+            <el-table-column label="操作" width="65" align="center">
               <template #default="{ row }">
-                <span class="cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="90" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="openServerMetrics(row as ServerMatrixItem)">
+                <el-button size="small" text type="primary" style="padding: 2px 4px" @click="openServerMetrics(row as ServerMatrixItem)">
                   <el-icon><TrendCharts /></el-icon>&nbsp;图表
                 </el-button>
               </template>
@@ -478,35 +524,39 @@ onUnmounted(() => {
               </div>
 
               <div class="card-grid">
+                <div class="grid-item full-width">
+                  <span class="item-label">节点地址</span>
+                  <div class="item-value cell-mono" style="font-size: 12px">{{ row.host }}</div>
+                </div>
                 <div class="grid-item">
                   <span class="item-label">CPU 负载</span>
-                  <div class="item-value" style="display: flex; align-items: center; gap: 6px">
+                  <div class="item-value cell-mono" style="display: flex; align-items: center; gap: 6px">
                     <el-progress
                       :percentage="Math.min(100, Math.round(row.cpu || 0))"
                       :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
-                      :stroke-width="6"
+                      :stroke-width="5"
                       :show-text="false"
-                      style="width: 45px"
+                      style="width: 40px"
                     />
-                    <span class="cell-mono font-12">{{ (row.cpu || 0).toFixed(0) }}%</span>
+                    <span>{{ (row.cpu || 0).toFixed(0) }}%</span>
                   </div>
                 </div>
                 <div class="grid-item">
-                  <span class="item-label">内存占用</span>
-                  <div class="item-value" style="display: flex; align-items: center; gap: 6px">
+                  <span class="item-label">内存负载</span>
+                  <div class="item-value cell-mono" style="display: flex; align-items: center; gap: 6px">
                     <el-progress
                       :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
                       color="#3b82f6"
-                      :stroke-width="6"
+                      :stroke-width="5"
                       :show-text="false"
-                      style="width: 45px"
+                      style="width: 40px"
                     />
-                    <span class="cell-mono font-12">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
+                    <span>{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
                   </div>
                 </div>
                 <div class="grid-item">
-                  <span class="item-label">实时吞吐 (下行 / 上行)</span>
-                  <div class="item-value cell-mono font-12">
+                  <span class="item-label">实时吞吐 (下行/上行)</span>
+                  <div class="item-value cell-mono" style="font-size: 11.5px">
                     <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
                     <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
                   </div>
@@ -529,29 +579,29 @@ onUnmounted(() => {
       <div class="ledger-card">
         <el-tabs v-model="activeTab" class="ledger-tabs">
           <!-- 1. 用户流量排行 -->
-          <el-tab-pane label="流量排行榜" name="users">
+          <el-tab-pane label="流量排行" name="users">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">
               <el-table :data="dashData?.user_rank || []" size="small">
-                <el-table-column label="#" width="45">
+                <el-table-column label="#" width="38">
                   <template #default="{ $index }">
                     <span class="cell-mono" :style="{ fontWeight: $index < 3 ? '700' : '400', color: $index === 0 ? '#f59e0b' : $index === 1 ? '#64748b' : $index === 2 ? '#b45309' : 'inherit' }">
                       {{ $index + 1 }}
                     </span>
                   </template>
                 </el-table-column>
-                <el-table-column label="用户" min-width="120">
+                <el-table-column label="用户" min-width="100">
                   <template #default="{ row }">
                     <span style="font-weight: 600; color: var(--x-text)">{{ row.username }}</span>
                     <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="plan_name" label="套餐" width="95">
+                <el-table-column prop="plan_name" label="套餐" width="80">
                   <template #default="{ row }">
                     <el-tag size="small" type="info" effect="plain">{{ row.plan_name }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="已用总流量" width="105">
+                <el-table-column label="已用总流量" width="95">
                   <template #default="{ row }">
                     <span class="cell-mono" style="font-weight: 700; color: var(--x-primary)">
                       {{ formatBytes(row.total_bytes) }}
@@ -587,24 +637,24 @@ onUnmounted(() => {
           </el-tab-pane>
 
           <!-- 2. 最近卡密激活流水 -->
-          <el-tab-pane label="最近卡密激活" name="cards">
+          <el-tab-pane label="卡密流水" name="cards">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">
               <el-table :data="dashData?.recent_gift_cards || []" size="small">
-                <el-table-column label="卡密" min-width="130">
+                <el-table-column label="卡密" min-width="110">
                   <template #default="{ row }">
-                    <code class="cell-mono" style="font-size: 11.5px">{{ row.code_masked }}</code>
+                    <code class="cell-mono" style="font-size: 11px">{{ row.code_masked }}</code>
                   </template>
                 </el-table-column>
-                <el-table-column label="面值" width="90">
+                <el-table-column label="面值" width="75">
                   <template #default="{ row }">
                     <span class="cell-mono" style="font-weight: 700; color: #059669">
                       +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
                     </span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="used_by_username" label="兑换用户" width="100" />
-                <el-table-column label="激活时间" width="120">
+                <el-table-column prop="used_by_username" label="用户" width="80" />
+                <el-table-column label="时间" width="95">
                   <template #default="{ row }">
                     <span class="muted cell-mono" style="font-size: 11px">
                       {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
@@ -639,11 +689,11 @@ onUnmounted(() => {
           </el-tab-pane>
 
           <!-- 3. 最近套餐订单 -->
-          <el-tab-pane label="最近套餐订单" name="orders">
+          <el-tab-pane label="订单流水" name="orders">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">
               <el-table :data="dashData?.recent_orders || []" size="small">
-                <el-table-column label="订单号" min-width="130">
+                <el-table-column label="订单号" min-width="110">
                   <template #default="{ row }">
                     <code class="cell-mono" style="font-size: 11px">{{ row.order_no }}</code>
                   </template>
@@ -842,12 +892,12 @@ onUnmounted(() => {
 /* 图表双栏 */
 .charts-row {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1.45fr 1fr;
   gap: 16px;
   min-width: 0;
   max-width: 100%;
 
-  @media (max-width: 1024px) {
+  @media (max-width: 1180px) {
     grid-template-columns: 1fr;
   }
 }
@@ -860,7 +910,6 @@ onUnmounted(() => {
   padding: 18px 20px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   box-sizing: border-box;
 
   @media (max-width: 768px) {
@@ -883,21 +932,22 @@ onUnmounted(() => {
 .echart-container {
   width: 100%;
   max-width: 100%;
-  height: 250px;
-  overflow: hidden;
+  height: 260px;
 
   @media (max-width: 768px) {
-    height: 220px;
+    height: 240px;
   }
 }
 
 /* 下部双栏 */
 .bottom-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: 1.35fr 1fr;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 
-  @media (max-width: 1120px) {
+  @media (max-width: 1180px) {
     grid-template-columns: 1fr;
   }
 }
@@ -909,6 +959,10 @@ onUnmounted(() => {
   border-radius: var(--x-radius);
   box-shadow: var(--x-shadow);
   padding: 18px 20px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 
   @media (max-width: 768px) {
     padding: 14px 12px;

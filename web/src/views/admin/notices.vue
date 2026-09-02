@@ -227,135 +227,83 @@ async function remove(row: NoticeItem) {
     </div>
 
     <!-- 表格列表 -->
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list" row-key="id" stripe>
-          <el-table-column prop="id" label="ID" width="70" />
-
-          <el-table-column label="标题" min-width="200">
-            <template #default="{ row }">
-              <div class="notice-title-cell">
-                <span v-if="(row as NoticeItem).is_pinned" class="x-chip red mr-1">
-                  置顶
-                </span>
-                <span v-if="(row as NoticeItem).is_popup" class="x-chip orange mr-1">
-                  强弹窗
-                </span>
-                <span class="notice-title-text">{{ (row as NoticeItem).title }}</span>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="内容概要" min-width="260" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="text-muted">{{ (row as NoticeItem).content }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="置顶" width="90" align="center">
-            <template #default="{ row }">
-              <el-switch
-                :model-value="(row as NoticeItem).is_pinned"
-                size="small"
-                @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
-              />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="强弹窗" width="90" align="center">
-            <template #default="{ row }">
-              <el-switch
-                :model-value="(row as NoticeItem).is_popup"
-                size="small"
-                @change="() => handleToggle(row as NoticeItem, 'is_popup')"
-              />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="状态" width="90" align="center">
-            <template #default="{ row }">
-              <el-switch
-                :model-value="(row as NoticeItem).status === 1"
-                size="small"
-                @change="() => handleToggle(row as NoticeItem, 'status')"
-              />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="更新时间" width="170">
-            <template #default="{ row }">
-              <span class="font-mono text-muted text-xs">{{ formatDate((row as NoticeItem).updated_at) }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="140" align="right">
-            <template #default="{ row }">
-              <el-button link type="primary" :icon="Edit" @click="openEdit(row as NoticeItem)">编辑</el-button>
-              <el-button link type="danger" :icon="Delete" @click="remove(row as NoticeItem)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+    <BaseCard title="全站公告列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无公告，点击右上角「发布公告」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-                <el-tag v-if="(row as NoticeItem).is_pinned" size="small" type="danger" effect="dark">置顶</el-tag>
-                <el-tag v-if="(row as NoticeItem).is_popup" size="small" type="warning" effect="dark">强弹窗</el-tag>
-                <span style="font-weight: 700">{{ (row as NoticeItem).title }}</span>
-              </div>
-              <el-switch
-                :model-value="(row as NoticeItem).status === 1"
-                size="small"
-                @change="() => handleToggle(row as NoticeItem, 'status')"
-              />
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><ChatDotSquare /></el-icon>
+        <p style="margin-top: 8px">暂无公告，点击右上角「发布公告」</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item full-width">
-                <span class="item-label">内容概要</span>
-                <div class="item-value text-muted" style="font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">
-                  {{ (row as NoticeItem).content }}
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">置顶显示</span>
-                <div class="item-value">
-                  <el-switch
-                    :model-value="(row as NoticeItem).is_pinned"
-                    size="small"
-                    @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
-                  />
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">登录强弹窗</span>
-                <div class="item-value">
-                  <el-switch
-                    :model-value="(row as NoticeItem).is_popup"
-                    size="small"
-                    @change="() => handleToggle(row as NoticeItem, 'is_popup')"
-                  />
-                </div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">更新时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ formatDate((row as NoticeItem).updated_at) }}</div>
-              </div>
+      <!-- 全局统一公告卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="notice-card-grid">
+        <div v-for="row in list" :key="row.id" class="notice-card" :class="{ disabled: row.status !== 1 }">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+              <span v-if="(row as NoticeItem).is_pinned" class="x-chip red" style="font-size: 10px; padding: 1px 5px">
+                置顶
+              </span>
+              <span v-if="(row as NoticeItem).is_popup" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">
+                强弹窗
+              </span>
+              <span class="notice-name" title="点击编辑公告" @click="openEdit(row as NoticeItem)">{{ (row as NoticeItem).title }}</span>
             </div>
+            <el-switch
+              :model-value="(row as NoticeItem).status === 1"
+              size="small"
+              @change="() => handleToggle(row as NoticeItem, 'status')"
+            />
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(row as NoticeItem)">编辑公告</el-button>
-              <el-button size="small" type="danger" plain :icon="Delete" @click="remove(row as NoticeItem)">删除</el-button>
+          <!-- 内容摘要 -->
+          <div class="card-body-content">
+            <div class="notice-content-preview">
+              {{ (row as NoticeItem).content }}
             </div>
+          </div>
+
+          <!-- 属性状态网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">置顶显示</span>
+              <div class="item-value">
+                <el-switch
+                  :model-value="(row as NoticeItem).is_pinned"
+                  size="small"
+                  @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
+                />
+              </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">登录强弹窗</span>
+              <div class="item-value">
+                <el-switch
+                  :model-value="(row as NoticeItem).is_popup"
+                  size="small"
+                  @change="() => handleToggle(row as NoticeItem, 'is_popup')"
+                />
+              </div>
+            </div>
+            <div class="grid-item full-width">
+              <span class="item-label">更新时间</span>
+              <div class="item-value cell-mono muted font-11">
+                {{ formatDate((row as NoticeItem).updated_at) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(row as NoticeItem)">
+              编辑公告
+            </el-button>
+            <el-button size="small" type="danger" plain :icon="Delete" @click="remove(row as NoticeItem)">
+              删除
+            </el-button>
           </div>
         </div>
       </div>
@@ -704,6 +652,129 @@ async function remove(row: NoticeItem) {
 
 .mt-4 {
   margin-top: 16px;
+}
+
+/* ================= 全局统一公告卡片网格流 ================= */
+.notice-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.notice-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  &.disabled {
+    opacity: 0.75;
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .notice-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+  }
+
+  .card-body-content {
+    padding: 10px 0 4px;
+    .notice-content-preview {
+      font-size: 12.5px;
+      color: var(--x-text-2, #4b5563);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      background: var(--x-bg, #f9fafb);
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--x-border-light, #f3f4f6);
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 8px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .notice-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {

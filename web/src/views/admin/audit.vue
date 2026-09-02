@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, Loading, DocumentCopy } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -57,67 +57,50 @@ function viewDetail(detail: string) {
       </div>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column label="时间" width="170">
-            <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
-          </el-table-column>
-          <el-table-column label="类型" width="90">
-            <template #default="{ row }">
-              <span class="x-chip" :class="row.operator_type === 'admin' ? 'orange' : 'blue'">
-                {{ row.operator_type === 'admin' ? '管理员' : '用户' }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="operator_id" label="操作者 ID" width="100" />
-          <el-table-column label="动作" width="110">
-            <template #default="{ row }">{{ actionText[row.action] ?? row.action }}</template>
-          </el-table-column>
-          <el-table-column prop="detail" label="详情" min-width="220" />
-          <el-table-column prop="ip" label="IP" width="140" />
-        </el-table>
+    <BaseCard title="系统审计日志">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无审计日志
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <el-tag :type="row.operator_type === 'admin' ? 'warning' : 'info'" size="small">
-                  {{ row.operator_type === 'admin' ? '管理员' : '用户' }} #{{ row.operator_id }}
-                </el-tag>
-                <span style="font-weight: 700">{{ actionText[row.action] ?? row.action }}</span>
-              </div>
-              <code class="cell-mono muted" style="font-size: 11.5px">{{ row.ip || '—' }}</code>
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><DocumentCopy /></el-icon>
+        <p style="margin-top: 8px">暂无审计日志</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item full-width">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px">
-                  <span class="item-label">操作详情</span>
-                  <el-button v-if="row.detail && row.detail.length > 50" type="primary" link size="small" style="font-size: 11px; padding: 0" @click="viewDetail(row.detail)">
-                    查看完整
-                  </el-button>
-                </div>
-                <div
-                  class="item-value audit-detail-clamp"
-                  style="font-size: 12px"
-                  :title="row.detail"
-                  @click="viewDetail(row.detail)"
-                >
-                  {{ row.detail || '—' }}
-                </div>
+      <!-- 全局统一审计日志卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="audit-card-grid">
+        <div v-for="row in list" :key="row.id" class="audit-card">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="x-chip" :class="row.operator_type === 'admin' ? 'orange' : 'blue'" style="font-size: 10px; padding: 1px 5px">
+                {{ row.operator_type === 'admin' ? '管理员' : '用户' }} #{{ row.operator_id }}
+              </span>
+              <span class="action-name">{{ actionText[row.action] ?? row.action }}</span>
+            </div>
+            <code class="cell-mono muted" style="font-size: 11px">{{ row.ip || '—' }}</code>
+          </div>
+
+          <!-- 属性网格与日志详情 -->
+          <div class="card-grid">
+            <div class="grid-item full-width">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px">
+                <span class="item-label">操作详情</span>
+                <el-button v-if="row.detail && row.detail.length > 40" type="primary" link size="small" style="font-size: 11px; padding: 0" @click="viewDetail(row.detail)">
+                  查看完整
+                </el-button>
               </div>
-              <div class="grid-item full-width">
-                <span class="item-label">发生时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.created_at) }}</div>
+              <div
+                class="item-value audit-detail-clamp"
+                :title="row.detail"
+                @click="viewDetail(row.detail)"
+              >
+                {{ row.detail || '—' }}
               </div>
+            </div>
+            <div class="grid-item full-width">
+              <span class="item-label">记录时间</span>
+              <div class="item-value cell-mono muted font-11">{{ fmtTime(row.created_at) }}</div>
             </div>
           </div>
         </div>
@@ -149,18 +132,106 @@ function viewDetail(detail: string) {
 </template>
 
 <style scoped lang="scss">
-.x-pager { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
+.cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
+.muted { color: var(--x-text-3); }
+
+/* ================= 全局统一审计日志卡片网格流 ================= */
+.audit-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.audit-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .action-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--x-text, #111827);
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0 2px;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+}
+
+.x-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 0 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--x-border-light, #f1f5f9);
+}
 .audit-detail-clamp {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-all;
   line-height: 1.45;
   color: var(--x-text-2);
   cursor: pointer;
+  background: var(--x-bg, #f9fafb);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--x-border-light, #f3f4f6);
+  font-size: 12px;
   &:hover {
-    color: var(--x-text);
+    color: var(--x-primary);
   }
 }
 .audit-pre {
@@ -176,5 +247,11 @@ function viewDetail(detail: string) {
   max-height: 380px;
   overflow-y: auto;
   margin: 0;
+}
+
+@media (max-width: 640px) {
+  .audit-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

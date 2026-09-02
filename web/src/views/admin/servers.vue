@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, ArrowDown, Edit, Setting, RefreshRight, TrendCharts, Upload } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
@@ -348,190 +348,109 @@ async function removeServer(row: any) {
       <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="filtered">
-          <el-table-column prop="name" label="名称" min-width="140">
-            <template #default="{ row }">
-              <span style="font-weight: 600">{{ row.name }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="host" label="地址" min-width="160">
-            <template #default="{ row }">
-              <code class="cell-mono" style="cursor: pointer" :title="'点击复制: ' + row.host" @click="copyText(row.host, '节点地址')">
-                {{ row.host }}
-              </code>
-            </template>
-          </el-table-column>
-          <el-table-column prop="location" label="地区" width="110">
-            <template #default="{ row }">{{ row.location || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="110">
-            <template #default="{ row }">
-              <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
-                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+    <BaseCard title="服务器节点列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+      </div>
+
+      <div v-else-if="filtered.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Platform /></el-icon>
+        <p style="margin-top: 8px">{{ keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」' }}</p>
+      </div>
+
+      <!-- 全局统一服务器卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="server-card-grid">
+        <div v-for="row in filtered" :key="row.id" class="server-card">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
+              <span class="server-name" title="点击查看详情" @click="openDrawer(row)">{{ row.name }}</span>
+              <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
                 {{ row.status === 1 ? '在线' : '离线' }}
               </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="接入点" width="90">
-            <template #default="{ row }">
-              <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                {{ inboundCount(row.id) }} 个
-              </el-link>
-            </template>
-          </el-table-column>
-          <el-table-column label="配置同步" width="105">
-            <template #default="{ row }">
-              <el-tooltip
-                v-if="row.config_status === 'pending' && row.push_error"
-                :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
-                placement="top"
-              >
-                <span class="x-chip orange" style="cursor: help">待推送</span>
-              </el-tooltip>
-              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
-              <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
-              <span v-else class="x-chip gray">未生成</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="Agent" width="130">
-            <template #default="{ row }">
-              <div class="agent-cell">
-                <span class="cell-mono" style="font-size: 12px">{{ row.agent_version || '—' }}</span>
+              <span v-if="row.location" class="x-chip blue" style="font-size: 10px; padding: 1px 5px">{{ row.location }}</span>
+            </div>
+            <el-tooltip
+              v-if="row.config_status === 'pending' && row.push_error"
+              :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
+              placement="top"
+            >
+              <span class="x-chip orange" style="cursor: help; font-size: 10.5px">待推送</span>
+            </el-tooltip>
+            <span v-else-if="row.config_status === 'pushed'" class="x-chip green" style="font-size: 10.5px">已同步</span>
+            <span v-else-if="row.config_status === 'pending'" class="x-chip orange" style="font-size: 10.5px">待推送</span>
+            <span v-else class="x-chip gray" style="font-size: 10.5px">未生成</span>
+          </div>
+
+          <!-- 属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item full-width">
+              <span class="item-label">节点地址</span>
+              <div class="item-value">
+                <code class="cell-mono font-12" style="cursor: pointer; color: var(--x-primary); font-weight: 600" title="点击复制" @click="copyText(row.host, '节点地址')">
+                  {{ row.host }}
+                </code>
+              </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">接入点</span>
+              <div class="item-value">
+                <el-link type="primary" :underline="false" style="font-size: 12.5px; font-weight: 600" @click="goInbounds(row)">
+                  {{ inboundCount(row.id) }} 个入站
+                </el-link>
+              </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">Agent 版本</span>
+              <div class="item-value" style="display: flex; align-items: center; gap: 4px">
+                <span class="cell-mono muted font-12">{{ row.agent_version || 'v—' }}</span>
                 <el-link
                   v-if="row.status === 1"
                   type="primary"
                   :underline="false"
                   :disabled="upgradingId === row.id"
-                  style="font-size: 12px"
+                  style="font-size: 11px"
                   @click="upgradeNodeAgent(row)"
                 >升级</el-link>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="最后心跳" width="170">
-            <template #default="{ row }">
-              <span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.last_seen_at) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="140" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openDrawer(row)">详情</el-button>
-              <el-button size="small" text type="success" @click="openMetrics(row)">监控</el-button>
-              <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-                <el-button size="small" text>更多<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
-                    <el-dropdown-item command="restart"><el-icon><RefreshRight /></el-icon>重启 Xray</el-dropdown-item>
-                    <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
-                    <el-dropdown-item command="upgrade"><el-icon><Refresh /></el-icon>升级 Agent</el-dropdown-item>
-                    <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑节点</el-dropdown-item>
-                    <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                    <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)"><el-icon><Delete /></el-icon>删除服务器</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <div style="padding: 30px 0; color: var(--x-text-3)">
-              尚未添加服务器。点击右上角「新增服务器」，按提示配置节点 Agent。
             </div>
-          </template>
-        </el-table>
-      </div>
+            <div class="grid-item full-width">
+              <span class="item-label">最后心跳</span>
+              <div class="item-value cell-mono muted" style="font-size: 11.5px">
+                {{ row.last_seen_at ? fmtTime(row.last_seen_at) : '未有心跳记录' }}
+              </div>
+            </div>
+          </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="filtered.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          {{ keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」' }}
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in filtered" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
-                <span style="font-weight: 700">{{ row.name }}</span>
-                <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'">
-                  {{ row.status === 1 ? '在线' : '离线' }}
-                </span>
-              </div>
-              <el-tooltip
-                v-if="row.config_status === 'pending' && row.push_error"
-                :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
-                placement="top"
-              >
-                <span class="x-chip orange" style="cursor: help">待推送</span>
-              </el-tooltip>
-              <span v-else-if="row.config_status === 'pushed'" class="x-chip green">已同步</span>
-              <span v-else-if="row.config_status === 'pending'" class="x-chip orange">待推送</span>
-              <span v-else class="x-chip gray">未生成</span>
-            </div>
-
-            <div class="card-grid">
-              <div class="grid-item full-width">
-                <span class="item-label">节点地址</span>
-                <div class="item-value">
-                  <code class="cell-mono" style="cursor: pointer; color: var(--x-primary); font-weight: 600" @click="copyText(row.host, '节点地址')">
-                    {{ row.host }}
-                  </code>
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">地区位置</span>
-                <div class="item-value">{{ row.location || '—' }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">接入点</span>
-                <div class="item-value">
-                  <el-link type="primary" :underline="false" @click="goInbounds(row)">
-                    {{ inboundCount(row.id) }} 个入站
-                  </el-link>
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">Agent</span>
-                <div class="item-value cell-mono">{{ row.agent_version || '—' }}</div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">最后心跳</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">
-                  {{ fmtTime(row.last_seen_at) }}
-                </div>
-              </div>
-            </div>
-
-            <div class="card-foot-actions">
-                <el-button size="small" type="primary" plain @click="openDrawer(row)">
-                  <el-icon><Setting /></el-icon>&nbsp;详情
-                </el-button>
-                <el-button size="small" type="success" plain @click="openMetrics(row)">
-                  <el-icon><TrendCharts /></el-icon>&nbsp;监控
-                </el-button>
-                <el-button size="small" @click="restartXray(row)">
-                  <el-icon><RefreshRight /></el-icon>&nbsp;重启
-                </el-button>
-                <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-                  <el-button size="small">
-                    更多&nbsp;<el-icon><ArrowDown /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
-                      <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
-                      <el-dropdown-item command="upgrade"><el-icon><Upload /></el-icon>升级 Agent</el-dropdown-item>
-                      <el-dropdown-item command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
-                      <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                      <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
-                        <el-icon><Delete /></el-icon>删除服务器
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-            </div>
+          <!-- 操作按钮栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain @click="openDrawer(row)">
+              <el-icon><Setting /></el-icon>&nbsp;详情
+            </el-button>
+            <el-button size="small" type="success" plain @click="openMetrics(row)">
+              <el-icon><TrendCharts /></el-icon>&nbsp;监控
+            </el-button>
+            <el-button size="small" @click="restartXray(row)">
+              <el-icon><RefreshRight /></el-icon>&nbsp;重启
+            </el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
+              <el-button size="small" style="flex: none; padding: 0 8px">
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
+                  <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                  <el-dropdown-item command="upgrade"><el-icon><Upload /></el-icon>升级 Agent</el-dropdown-item>
+                  <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
+                  <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)">
+                    <el-icon><Delete /></el-icon>删除服务器
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -689,6 +608,101 @@ async function removeServer(row: any) {
   word-break: break-all;
 }
 
+/* ================= 全局统一服务器卡片网格流 ================= */
+.server-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.server-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .server-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--x-text, #111827);
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
 @media (max-width: 768px) {
   .secret-row {
     flex-direction: column;
@@ -706,6 +720,12 @@ async function removeServer(row: any) {
     align-items: flex-start;
     gap: 4px;
     padding: 8px 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .server-card-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

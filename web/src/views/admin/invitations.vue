@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { CopyDocument, Refresh, Ticket } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, Ticket, Link, Delete } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -130,89 +130,79 @@ function fmtTime(t: string | null) {
       <el-button type="primary" @click="genOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="code" label="邀请码" min-width="180">
-            <template #default="{ row }"><code class="cell-mono">{{ row.code }}</code></template>
-          </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <span v-if="row.status === 0" class="x-chip blue">未使用</span>
-              <span v-else-if="row.status === 1" class="x-chip green">已使用</span>
-              <span v-else class="x-chip red">已禁用</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_by" label="创建人" width="80" />
-          <el-table-column label="过期时间" width="160">
-            <template #default="{ row }">{{ fmtTime(row.expires_at) }}</template>
-          </el-table-column>
-          <el-table-column label="使用时间" width="160">
-            <template #default="{ row }">{{ fmtTime(row.used_at) }}</template>
-          </el-table-column>
-          <el-table-column label="创建时间" width="160">
-            <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <template v-if="row.status === 0">
-                <el-button link type="primary" @click="copyRegisterLink(row.code)">复制链接</el-button>
-                <el-button link type="default" @click="copyCode(row.code)">复制码</el-button>
-                <el-button link type="danger" @click="revoke(row)">作废</el-button>
-              </template>
-              <span v-else class="muted">—</span>
-            </template>
-          </el-table-column>
-        </el-table>
+    <BaseCard title="邀请注册码列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无邀请码，点击右上角「生成邀请码」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <code class="cell-mono" style="font-weight: 700; color: var(--x-primary); font-size: 13px">{{ row.code }}</code>
-              </div>
-              <el-tag :type="statusMap[row.status]?.type ?? 'info'" size="small">
-                {{ statusMap[row.status]?.text ?? row.status }}
-              </el-tag>
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
+        <p style="margin-top: 8px">暂无邀请码，点击右上角「生成邀请码」</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">创建人</span>
-                <div class="item-value">{{ row.created_by || '系统' }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">过期时间</span>
-                <div class="item-value cell-mono" style="font-size: 11.5px">{{ fmtTime(row.expires_at) }}</div>
-              </div>
-              <div v-if="row.used_at" class="grid-item full-width">
-                <span class="item-label">使用时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.used_at) }}</div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">创建时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.created_at) }}</div>
+      <!-- 全局统一邀请码卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="inv-card-grid">
+        <div v-for="row in list" :key="row.id" class="inv-card" :class="{ disabled: row.status !== 0 }">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <code
+                class="cell-mono inv-code-text"
+                title="点击复制邀请码"
+                @click="copyCode(row.code)"
+              >
+                {{ row.code }}
+              </code>
+            </div>
+            <span
+              class="x-chip"
+              :class="row.status === 0 ? 'blue' : (row.status === 1 ? 'green' : 'red')"
+              style="font-size: 10.5px"
+            >
+              {{ statusMap[row.status]?.text ?? row.status }}
+            </span>
+          </div>
+
+          <!-- 邀请码属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">创建人</span>
+              <div class="item-value">{{ row.created_by || '系统生成' }}</div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">有效期</span>
+              <div class="item-value cell-mono font-11">
+                {{ row.expires_at ? '至 ' + fmtTime(row.expires_at) : '永不过期' }}
               </div>
             </div>
+            <div class="grid-item">
+              <span class="item-label">创建时间</span>
+              <div class="item-value cell-mono muted font-11">{{ fmtTime(row.created_at) }}</div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">核销时间</span>
+              <div class="item-value cell-mono font-11" :style="{ color: row.used_at ? '#10b981' : 'var(--x-text-3)' }">
+                {{ row.used_at ? fmtTime(row.used_at) : '待核销' }}
+              </div>
+            </div>
+          </div>
 
-            <div v-if="row.status === 0" class="card-foot-actions" style="display: flex; gap: 8px; flex-wrap: wrap">
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <template v-if="row.status === 0">
               <el-button size="small" type="primary" plain @click="copyRegisterLink(row.code)">
-                复制注册链接
+                <el-icon><Link /></el-icon>&nbsp;复制链接
               </el-button>
               <el-button size="small" type="default" plain @click="copyCode(row.code)">
-                复制邀请码
+                <el-icon><CopyDocument /></el-icon>&nbsp;复制码
               </el-button>
               <el-button size="small" type="danger" plain @click="revoke(row)">
-                作废
+                <el-icon><Delete /></el-icon>&nbsp;作废
               </el-button>
-            </div>
+            </template>
+            <span v-else class="muted font-11" style="line-height: 30px">
+              {{ row.status === 1 ? '该邀请码已被成功核销' : '该邀请码已被作废禁用' }}
+            </span>
           </div>
         </div>
       </div>
@@ -256,6 +246,104 @@ function fmtTime(t: string | null) {
 <style scoped lang="scss">
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
+
+/* ================= 全局统一邀请码卡片网格流 ================= */
+.inv-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.inv-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  &.disabled {
+    opacity: 0.75;
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .inv-code-text {
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--x-primary);
+      cursor: pointer;
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
 .inv-codes { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
 .inv-code-row {
   display: flex;
@@ -270,5 +358,11 @@ function fmtTime(t: string | null) {
   font-size: 13px;
   color: var(--x-primary);
   word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .inv-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

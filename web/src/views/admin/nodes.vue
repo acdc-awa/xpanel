@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Refresh, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, Refresh, Edit, Delete, Loading, Connection, Promotion } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
 import {
@@ -455,178 +455,157 @@ function quotaOf(row: any): string {
       style="margin-bottom: 14px"
     />
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="id" label="ID" width="64">
-            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-          </el-table-column>
-          <el-table-column label="服务器" min-width="110">
-            <template #default="{ row }">{{ serverName(row.server_id) }}</template>
-          </el-table-column>
-          <el-table-column label="类型" width="90">
-            <template #default="{ row }">
-              <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
-              <span v-else class="x-chip purple">用户</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="tag" label="标签" min-width="130">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.tag }}</span></template>
-          </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="80">
-            <template #default="{ row }">
-              <span class="x-chip blue" style="text-transform: uppercase">{{ row.protocol }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="端口" width="80">
-            <template #default="{ row }"><code class="cell-mono">{{ row.port }}</code></template>
-          </el-table-column>
-          <el-table-column label="传输/TLS" width="130">
-            <template #default="{ row }"><code class="cell-mono" style="font-size: 11px">{{ transportOf(row) }}</code></template>
-          </el-table-column>
-          <el-table-column label="流量/到期" min-width="120">
-            <template #default="{ row }">
-              <span class="muted" style="font-size: 12px">{{ quotaOf(row) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }">
-              <el-switch :model-value="row.enabled" @change="toggle(row)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text @click="openEdit(row)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <div style="padding: 30px 0; color: var(--x-text-3)">
-              {{ serverFilter ? '该服务器尚未配置入站，点击右上角「新增入站」' : '尚未配置任何入站。先到「服务器」页添加服务器，再点击右上角「新增入站」' }}
-            </div>
-          </template>
-        </el-table>
+    <BaseCard title="服务器物理入站列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          {{ serverFilter ? '该服务器尚未配置入站，点击右上角「新增入站」' : '尚未配置任何入站，点击右上角「新增入站」' }}
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-                <span style="font-weight: 700">{{ row.tag }}</span>
-                <span v-if="row.type === 'relay'" class="x-chip orange">转发</span>
-                <span v-else class="x-chip purple">用户</span>
-              </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Connection /></el-icon>
+        <p style="margin-top: 8px">尚未为任何服务器添加物理入站。点击右上角「新增入站」开始配置。</p>
+      </div>
+
+      <!-- 全局统一物理入站卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="node-card-grid">
+        <div v-for="row in list" :key="row.id" class="node-card" :class="{ disabled: !row.enabled }">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+              <span class="node-name" title="点击编辑入站" @click="openEdit(row)">{{ row.tag }}</span>
+              <span class="x-chip" :class="row.type === 'relay' ? 'orange' : 'purple'" style="font-size: 10px; padding: 1px 5px">
+                {{ row.type === 'relay' ? '转发' : '用户' }}
+              </span>
+            </div>
+            <el-tooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'" placement="top">
               <el-switch :model-value="row.enabled" size="small" @change="toggle(row)" />
-            </div>
+            </el-tooltip>
+          </div>
 
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">所属服务器</span>
-                <div class="item-value" style="font-weight: 600">{{ serverName(row.server_id) }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">协议 / 端口</span>
-                <div class="item-value">
-                  <span style="text-transform: uppercase; font-weight: 600">{{ row.protocol }}</span>
-                  <code class="cell-mono" style="margin-left: 4px">:{{ row.port }}</code>
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">传输与 TLS</span>
-                <div class="item-value cell-mono" style="font-size: 11.5px">{{ transportOf(row) }}</div>
+          <!-- 属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">所属服务器</span>
+              <div class="item-value" style="font-weight: 600">{{ serverName(row.server_id) }}</div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">协议与端口</span>
+              <div class="item-value">
+                <span class="x-chip blue" style="text-transform: uppercase; font-size: 10.5px">{{ row.protocol }}</span>
+                <code class="cell-mono font-12" style="font-weight: 600; margin-left: 4px">:{{ row.port }}</code>
               </div>
             </div>
+            <div class="grid-item">
+              <span class="item-label">传输与 TLS</span>
+              <div class="item-value cell-mono font-11">{{ transportOf(row) }}</div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">流量与到期</span>
+              <div class="item-value cell-mono muted font-11">{{ quotaOf(row) }}</div>
+            </div>
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain @click="openEdit(row)">
-                <el-icon><Edit /></el-icon>&nbsp;编辑入站
-              </el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">
-                <el-icon><Delete /></el-icon>&nbsp;删除
-              </el-button>
-            </div>
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain @click="openEdit(row)">
+              <el-icon><Edit /></el-icon>&nbsp;编辑入站
+            </el-button>
+            <el-button size="small" type="danger" plain @click="remove(row)">
+              <el-icon><Delete /></el-icon>&nbsp;删除
+            </el-button>
           </div>
         </div>
       </div>
     </BaseCard>
       </el-tab-pane>
 
-      <!-- 用户接入点（Access Points）统一管理 -->
+      <!-- Tab 2: 用户接入点 (Access Points) -->
       <el-tab-pane label="用户接入点 (Access Points)" name="access_points">
         <div class="x-toolbar">
           <div class="x-toolbar-left">
+            <span class="muted" style="font-size: 13.5px">面向订阅分发的用户接入点定义</span>
             <el-button @click="loadAccessPoints"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
           </div>
-          <el-button type="primary" @click="openCreateAccessPoint"><el-icon><Plus /></el-icon>&nbsp;新建接入点</el-button>
+          <div style="display: flex; gap: 10px">
+            <el-button type="primary" @click="openCreateAccessPoint"><el-icon><Plus /></el-icon>&nbsp;新建接入点</el-button>
+          </div>
         </div>
 
         <el-alert
           type="info"
           :closable="false"
           show-icon
-          title="用户接入点是订阅的唯一生成来源：定义别名与开放权限组（白名单）。订阅地址沿管道继承：直连继承入站分享地址（节点 IP/端口）或接入层端点，接入点可再用 Host/Port 覆写（如自定义中转端点）。"
+          title="用户接入点是用户订阅中实际看到的“节点”，通过白名单权限组控制哪些用户组可见。接入点可直接绑定物理入站，亦可在拓扑中参与链式转发中转。"
           style="margin-bottom: 14px"
         />
 
-        <BaseCard>
-          <el-table v-loading="apLoading" :data="apList">
-            <el-table-column prop="id" label="ID" width="64">
-              <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="170">
-              <template #default="{ row }"><span style="font-weight: 600">{{ row.name }}</span></template>
-            </el-table-column>
-            <el-table-column label="开放权限组" min-width="160">
-              <template #default="{ row }">
-                <template v-if="row.permission_group_ids && row.permission_group_ids.length > 0">
-                  <span
-                    v-for="gid in row.permission_group_ids.slice(0, 3)"
-                    :key="gid"
-                    class="x-chip blue"
-                    style="margin-right: 4px"
-                  >{{ groupName(gid) }}</span>
-                  <span v-if="row.permission_group_ids.length > 3" class="x-chip gray">+{{ row.permission_group_ids.length - 3 }}</span>
-                </template>
-                <span v-else class="x-chip orange">未授权（全员不可见）</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="目标" min-width="160">
-              <template #default="{ row }">
-                <span v-if="apTargetDesc(row) === '待连线'" class="x-chip orange">{{ apTargetDesc(row) }}</span>
-                <span v-else class="x-chip purple">{{ apTargetDesc(row) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="连接覆写" width="140">
-              <template #default="{ row }">
-                <code class="cell-mono" style="font-size: 11px">
-                  {{ row.custom_host ? `${row.custom_host}:${row.custom_port || '自动'}` : '自动继承' }}
-                </code>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="80">
-              <template #default="{ row }">
-                <el-switch :model-value="row.enabled" @change="toggleAccessPoint(row)" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" text @click="openEditAccessPoint(row)"><el-icon><Edit /></el-icon></el-button>
-                <el-button size="small" text type="danger" @click="removeAccessPoint(row)"><el-icon><Delete /></el-icon></el-button>
-              </template>
-            </el-table-column>
-            <template #empty>
-              <div style="padding: 30px 0; color: var(--x-text-3)">
-                尚未创建任何用户接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。
+        <BaseCard title="用户接入点分发列表">
+          <div v-if="apLoading" style="padding: 48px 0; text-align: center">
+            <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+          </div>
+
+          <div v-else-if="apList.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+            <el-icon style="font-size: 32px; color: var(--x-text-3)"><Promotion /></el-icon>
+            <p style="margin-top: 8px">尚未创建任何用户接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。</p>
+          </div>
+
+          <!-- 全局统一用户接入点卡片网格流 (自适应 1~4 列) -->
+          <div v-else class="node-card-grid">
+            <div v-for="row in apList" :key="row.id" class="node-card" :class="{ disabled: !row.enabled }">
+              <!-- 头部 -->
+              <div class="card-head">
+                <div class="head-title">
+                  <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+                  <span class="node-name" title="点击编辑接入点" @click="openEditAccessPoint(row)">{{ row.name }}</span>
+                </div>
+                <el-tooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'" placement="top">
+                  <el-switch :model-value="row.enabled" size="small" @change="toggleAccessPoint(row)" />
+                </el-tooltip>
               </div>
-            </template>
-          </el-table>
+
+              <!-- 接入点属性网格 -->
+              <div class="card-grid">
+                <div class="grid-item">
+                  <span class="item-label">目标绑定</span>
+                  <div class="item-value">
+                    <span v-if="apTargetDesc(row) === '待连线'" class="x-chip orange" style="font-size: 10.5px">{{ apTargetDesc(row) }}</span>
+                    <span v-else class="x-chip purple" style="font-size: 10.5px">{{ apTargetDesc(row) }}</span>
+                  </div>
+                </div>
+                <div class="grid-item">
+                  <span class="item-label">连接地址覆写</span>
+                  <div class="item-value cell-mono font-11">
+                    {{ row.custom_host ? `${row.custom_host}:${row.custom_port || '自动'}` : '自动继承入站地址' }}
+                  </div>
+                </div>
+                <div class="grid-item full-width">
+                  <span class="item-label">开放权限组 (白名单)</span>
+                  <div class="item-value">
+                    <template v-if="row.permission_group_ids && row.permission_group_ids.length > 0">
+                      <span
+                        v-for="gid in row.permission_group_ids.slice(0, 3)"
+                        :key="gid"
+                        class="x-chip blue"
+                        style="margin-right: 4px; font-size: 10px"
+                      >{{ groupName(gid) }}</span>
+                      <span v-if="row.permission_group_ids.length > 3" class="x-chip gray" style="font-size: 10px">+{{ row.permission_group_ids.length - 3 }}</span>
+                    </template>
+                    <span v-else class="x-chip orange" style="font-size: 10px">全员不可见</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 底部操作栏 -->
+              <div class="card-foot-actions">
+                <el-button size="small" type="primary" plain @click="openEditAccessPoint(row)">
+                  <el-icon><Edit /></el-icon>&nbsp;编辑接入点
+                </el-button>
+                <el-button size="small" type="danger" plain @click="removeAccessPoint(row)">
+                  <el-icon><Delete /></el-icon>&nbsp;删除
+                </el-button>
+              </div>
+            </div>
+          </div>
         </BaseCard>
 
         <!-- 新建/编辑用户接入点 -->
@@ -765,6 +744,107 @@ function quotaOf(row: any): string {
 .muted {
   color: var(--x-text-3);
 }
+
+/* ================= 全局统一入站/接入点卡片网格流 ================= */
+.node-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.node-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  &.disabled {
+    opacity: 0.75;
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .node-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
 .cfg-view {
   background: #171b2e;
   color: #c7d2fe;
@@ -777,5 +857,11 @@ function quotaOf(row: any): string {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .node-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -170,150 +170,86 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
       <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>&nbsp;批量生成礼品卡
+        <el-icon><Plus /></el-icon>&nbsp;批量生成充值卡
       </el-button>
     </div>
 
     <!-- 数据表格 -->
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list">
-          <el-table-column prop="id" label="ID" width="70">
-            <template #default="{ row }"><code class="cell-mono">#{{ row.id }}</code></template>
-          </el-table-column>
-          <el-table-column prop="code" label="卡密" min-width="210">
-            <template #default="{ row }">
-              <code
-                class="cell-mono"
-                style="font-size: 12px; cursor: pointer; color: var(--x-primary); font-weight: 600"
-                :title="'点击复制卡密: ' + row.code"
-                @click="copyText(row.code, '卡密')"
-              >
-                {{ row.code }}
-              </code>
-            </template>
-          </el-table-column>
-          <el-table-column prop="name" label="批次/名称" min-width="130">
-            <template #default="{ row }"><span style="font-weight: 600">{{ row.name || '通用充值卡' }}</span></template>
-          </el-table-column>
-          <el-table-column label="面值" width="110">
-            <template #default="{ row }">
-              <span class="cell-mono" style="font-weight: 700; color: var(--x-text)">
-                {{ fmtMoney(row.face_value_cents) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="100">
-            <template #default="{ row }">
-              <span v-if="row.status === 'unused'" class="x-chip blue">未使用</span>
-              <span v-else-if="row.status === 'used'" class="x-chip green">已使用</span>
-              <span v-else class="x-chip red">已作废</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="兑换用户" width="110">
-            <template #default="{ row }">
-              <span v-if="row.used_by" class="cell-mono">用户 #{{ row.used_by }}</span>
-              <span v-else class="muted">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="兑换时间" width="160">
-            <template #default="{ row }"><span class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.used_at) }}</span></template>
-          </el-table-column>
-          <el-table-column label="过期时间" width="160">
-            <template #default="{ row }">
-              <span v-if="row.expires_at" class="muted cell-mono" style="font-size: 12px">{{ fmtTime(row.expires_at) }}</span>
-              <span v-else class="muted">永久有效</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                size="small"
-                text
-                type="danger"
-                :disabled="row.status === 'used'"
-                :title="row.status === 'used' ? '已使用的卡密不可删除' : '作废/删除此卡密'"
-                @click="remove(row)"
-              >
-                <el-icon><Delete /></el-icon>&nbsp;作废
-              </el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <div style="padding: 30px 0; color: var(--x-text-3)">
-              <el-icon style="font-size: 32px"><Ticket /></el-icon>
-              <p style="margin-top: 8px">暂无礼品卡记录，点击右上角「批量生成礼品卡」</p>
-            </div>
-          </template>
-        </el-table>
+    <BaseCard title="充值卡密列表">
+      <!-- 桌面端表格视图 (双行紧凑聚合自适应展示) -->
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          暂无礼品卡记录，点击右上角「批量生成礼品卡」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-                <span style="font-weight: 700">{{ row.name || '通用充值卡' }}</span>
-                <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
-                  {{ statusMap[row.status]?.text || row.status }}
-                </el-tag>
-              </div>
-              <span class="cell-mono" style="font-weight: 700; color: #059669; font-size: 14px">
-                {{ fmtMoney(row.face_value_cents) }}
-              </span>
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
+        <p style="margin-top: 8px">暂无充值卡记录，点击右上角「批量生成充值卡」</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item full-width">
-                <span class="item-label">卡密（点击复制）</span>
-                <div class="item-value">
-                  <code
-                    class="cell-mono"
-                    style="font-size: 12px; cursor: pointer; color: var(--x-primary); font-weight: 600"
-                    @click="copyText(row.code, '卡密')"
-                  >
-                    {{ row.code }}
-                  </code>
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">兑换用户</span>
-                <div class="item-value cell-mono">
-                  {{ row.used_by ? `用户 #${row.used_by}` : '—' }}
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">过期时间</span>
-                <div class="item-value cell-mono" style="font-size: 11.5px">
-                  {{ row.expires_at ? fmtTime(row.expires_at) : '永久有效' }}
-                </div>
-              </div>
-              <div v-if="row.used_at" class="grid-item full-width">
-                <span class="item-label">兑换时间</span>
-                <div class="item-value cell-mono muted" style="font-size: 11.5px">{{ fmtTime(row.used_at) }}</div>
-              </div>
+      <!-- 全局统一礼品卡卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="gift-card-grid">
+        <div v-for="row in list" :key="row.id" class="gift-card" :class="{ used: row.status === 'used' }">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
+              <span class="card-name">{{ row.name || '通用充值卡' }}</span>
+              <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
+                {{ statusMap[row.status]?.text || row.status }}
+              </el-tag>
             </div>
+            <span class="cell-mono font-14" style="font-weight: 700; color: #059669">
+              {{ fmtMoney(row.face_value_cents) }}
+            </span>
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain @click="copyText(row.code, '卡密')">
-                <el-icon><CopyDocument /></el-icon>&nbsp;复制卡密
-              </el-button>
-              <el-button
-                size="small"
-                type="danger"
-                plain
-                :disabled="row.status === 'used'"
-                @click="remove(row)"
-              >
-                <el-icon><Delete /></el-icon>&nbsp;作废/删除
-              </el-button>
+          <!-- 卡密与属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item full-width">
+              <span class="item-label">卡密（点击复制）</span>
+              <div class="item-value">
+                <code
+                  class="cell-mono font-12"
+                  style="cursor: pointer; color: var(--x-primary); font-weight: 600"
+                  title="点击复制卡密"
+                  @click="copyText(row.code, '卡密')"
+                >
+                  {{ row.code }}
+                </code>
+              </div>
             </div>
+            <div class="grid-item">
+              <span class="item-label">兑换用户</span>
+              <div class="item-value cell-mono">
+                {{ row.used_by ? `用户 #${row.used_by}` : '待兑换' }}
+              </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">有效期</span>
+              <div class="item-value cell-mono font-11">
+                {{ row.expires_at ? fmtTime(row.expires_at) : '永久有效' }}
+              </div>
+            </div>
+            <div v-if="row.used_at" class="grid-item full-width">
+              <span class="item-label">兑换时间</span>
+              <div class="item-value cell-mono muted font-11">{{ fmtTime(row.used_at) }}</div>
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain @click="copyText(row.code, '卡密')">
+              <el-icon><CopyDocument /></el-icon>&nbsp;复制卡密
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :disabled="row.status === 'used'"
+              @click="remove(row)"
+            >
+              <el-icon><Delete /></el-icon>&nbsp;作废/删除
+            </el-button>
           </div>
         </div>
       </div>
@@ -332,12 +268,12 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
     </BaseCard>
 
     <!-- 批量生成弹窗 -->
-    <el-dialog v-model="createOpen" title="批量生成礼品卡" width="460px">
+    <el-dialog v-model="createOpen" title="批量生成充值卡" width="460px">
       <el-form label-position="top">
         <el-form-item label="批次名称 / 备注">
           <el-input v-model="createForm.name" placeholder="如 新年促销50元充值卡" />
         </el-form-item>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+        <div class="form-grid-2">
           <el-form-item label="生成数量（张）">
             <el-input-number v-model="createForm.count" :min="1" :max="500" style="width: 100%" />
           </el-form-item>
@@ -388,13 +324,116 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
 </template>
 
 <style scoped lang="scss">
+/* ================= 全局统一礼品卡卡片网格流 ================= */
+.gift-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.gift-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  &.used {
+    opacity: 0.75;
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .card-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
 .x-pager {
-  padding: 16px 20px;
+  padding: 14px 0 0;
+  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
-  border-top: 1px solid var(--x-border);
+  border-top: 1px solid var(--x-border-light, #f1f5f9);
 }
 .muted {
   color: var(--x-text-3);
+}
+
+@media (max-width: 640px) {
+  .gift-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

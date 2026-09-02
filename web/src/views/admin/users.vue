@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, ArrowDown, MoreFilled } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, MoreFilled, Loading, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -404,10 +404,6 @@ function copyText(text: string, label: string) {
 const selected = ref<AdminUser[]>([])
 const batchBusy = ref(false)
 
-function onSelectionChange(rows: AdminUser[]) {
-  selected.value = rows
-}
-
 function csvCell(v: any) {
   const s = String(v ?? '')
   return `"${s.split('"').join('""')}"`
@@ -522,6 +518,9 @@ function toggleSelectAll(checked: boolean) {
 
 function handleCardAction(cmd: string, row: AdminUser) {
   switch (cmd) {
+    case 'adjust':
+      openAdjust(row)
+      break
     case 'reset_traffic':
       doResetTraffic(row)
       break
@@ -561,265 +560,143 @@ function handleCardAction(cmd: string, row: AdminUser) {
 
     <BaseCard title="用户列表">
       <template #extra>
-        <span class="muted" style="font-size: 13px">已选 {{ selected.length }} 人 · 共 {{ total }} 位用户</span>
-      </template>
-
-      <!-- 桌面端表格视图 (自适应紧凑单屏展示) -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list" style="width: 100%" @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="40" align="center" />
-          <el-table-column prop="id" label="#" width="45" align="center">
-            <template #default="{ row }">
-              <span class="cell-mono muted font-12">#{{ row.id }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="用户" min-width="150">
-            <template #default="{ row }">
-              <div style="display: flex; align-items: center; gap: 6px">
-                <span style="font-weight: 600">{{ row.username }}</span>
-                <span v-if="row.role === 'admin'" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">管理员</span>
-              </div>
-              <div class="muted cell-mono" style="font-size: 11px">{{ row.email || '—' }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column label="套餐 / 权限组" width="145">
-            <template #default="{ row }">
-              <div style="display: flex; flex-direction: column; gap: 3px; align-items: flex-start">
-                <span class="x-chip purple">
-                  {{ planName(row.plan_id) }}
-                </span>
-                <span class="x-chip" :class="userGroupDisplay(row).custom ? 'blue' : 'green'" style="font-size: 10.5px">
-                  {{ userGroupDisplay(row).name }}
-                </span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="设备" width="75" align="center">
-            <template #default="{ row }">
-              <span v-if="row.is_custom_device_limit" class="cell-mono font-12" style="font-weight: 600; color: var(--x-primary)">
-                {{ row.effective_device_limit }} 台
-              </span>
-              <span v-else-if="row.effective_device_limit && row.effective_device_limit > 0" class="cell-mono font-12 muted">
-                {{ row.effective_device_limit }} 台
-              </span>
-              <span v-else class="muted font-12">不限</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="账户余额" width="90" align="right">
-            <template #default="{ row }">
-              <span class="cell-mono font-12" style="font-weight: 700; color: #059669">
-                ¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="已用流量 / 总量" min-width="145">
-            <template #default="{ row }">
-              <div class="traffic-cell">
-                <div class="traffic-text">
-                  <span class="cell-mono" style="font-weight: 600">{{ formatBytes(row.used_bytes) }}</span>
-                  <span class="muted cell-mono"> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}</span>
-                </div>
-                <el-progress
-                  v-if="row.total_bytes"
-                  :percentage="usagePercent(row)"
-                  :stroke-width="4"
-                  :show-text="false"
-                  :status="usagePercent(row) > 90 ? 'exception' : undefined"
-                />
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="到期时间" width="125">
-            <template #default="{ row }">
-              <span v-if="row.expire_at" class="cell-mono font-12" style="display: block; line-height: 1.3">
-                {{ fmtTime(row.expire_at) }}
-              </span>
-              <span v-else class="muted font-12">长期有效</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="70" align="center">
-            <template #default="{ row }">
-              <el-tooltip :content="row.status === 1 ? '点击封禁该用户' : '点击解封该用户'" placement="top">
-                <el-switch
-                  :model-value="row.status === 1"
-                  size="small"
-                  @change="doToggle(row)"
-                />
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="135" align="right">
-            <template #default="{ row }">
-              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 2px">
-                <el-button size="small" text type="primary" style="padding: 0 4px" title="编辑用户套餐、权限组与配置" @click="openDetail(row)">
-                  <el-icon><Setting /></el-icon>&nbsp;编辑
-                </el-button>
-                <el-button size="small" text type="success" style="padding: 0 4px" title="调整用户账户余额" @click="openAdjust(row)">
-                  <el-icon><Wallet /></el-icon>&nbsp;调账
-                </el-button>
-                <el-dropdown trigger="click" @command="(cmd: string) => handleCardAction(cmd, row as any)">
-                  <el-button size="small" text type="info" style="padding: 0 4px">
-                    <el-icon><MoreFilled /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="reset_traffic">
-                        <el-icon><RefreshRight /></el-icon>重置流量
-                      </el-dropdown-item>
-                      <el-dropdown-item command="toggle">
-                        <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>
-                        {{ row.status === 1 ? '封禁用户' : '解封用户' }}
-                      </el-dropdown-item>
-                      <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
-                        <el-icon><Delete /></el-icon>删除用户
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <!-- 移动端卡片流视图 (竖屏窄屏自适应) -->
-      <div class="mobile-cards-view">
-        <div class="mobile-select-bar">
+        <div class="user-select-bar">
           <el-checkbox
             :model-value="isAllSelected"
             :indeterminate="isIndeterminate"
             @change="(v: any) => toggleSelectAll(!!v)"
           >
-            全选当前页用户
+            全选当前页 (已选 {{ selected.length }} / {{ total }})
           </el-checkbox>
-          <span class="muted font-12">共 {{ total }} 位</span>
         </div>
+      </template>
 
-        <div v-if="list.length === 0" class="mobile-empty">
-          暂无匹配用户
-        </div>
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+      </div>
 
-        <div v-else class="mobile-user-card-list">
-          <div
-            v-for="row in list"
-            :key="row.id"
-            class="mobile-user-card"
-            :class="{ selected: isRowSelected(row), banned: row.status !== 1 }"
-          >
-            <!-- 头部 -->
-            <div class="card-head">
-              <div class="head-left">
-                <el-checkbox
-                  :model-value="isRowSelected(row)"
-                  @change="(val: any) => toggleSelectRow(row, !!val)"
-                />
-                <div class="user-info">
-                  <div class="user-name-line">
-                    <span class="user-id">#{{ row.id }}</span>
-                    <span class="user-name">{{ row.username }}</span>
-                    <el-tag v-if="row.role === 'admin'" size="small" type="warning" effect="dark" style="font-size: 10px; height: 18px; padding: 0 4px">
-                      管理员
-                    </el-tag>
-                    <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small" effect="light" class="status-tag">
-                      {{ row.status === 1 ? '正常' : '已禁用' }}
-                    </el-tag>
-                  </div>
-                  <div class="user-email cell-mono">{{ row.email || '—' }}</div>
-                </div>
-              </div>
-              <div class="head-right">
-                <el-switch :model-value="row.status === 1" size="small" @change="doToggle(row)" />
-              </div>
-            </div>
+      <div v-else-if="list.length === 0" class="user-empty-state">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><User /></el-icon>
+        <p style="margin-top: 8px">暂无匹配用户</p>
+      </div>
 
-            <!-- 关键指标 2x2 网格 -->
-            <div class="card-body-grid">
-              <div class="grid-item">
-                <span class="grid-label">套餐计划</span>
-                <span class="grid-value">
-                  <el-tag size="small" :type="row.plan_id ? 'primary' : 'info'" effect="plain">
-                    {{ planName(row.plan_id) }}
-                  </el-tag>
-                </span>
-              </div>
-
-              <div class="grid-item">
-                <span class="grid-label">所属权限组</span>
-                <span class="grid-value">
-                  <el-tag :type="(userGroupDisplay(row).type as any)" size="small" effect="plain">
-                    {{ userGroupDisplay(row).name }}
-                  </el-tag>
-                </span>
-              </div>
-
-              <div class="grid-item">
-                <span class="grid-label">账户余额</span>
-                <span class="grid-value balance-value cell-mono">
-                  ¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}
-                </span>
-              </div>
-
-              <div class="grid-item">
-                <span class="grid-label">设备限制</span>
-                <span class="grid-value device-value cell-mono">
-                  {{ row.is_custom_device_limit ? `${row.effective_device_limit} 台 (自定义)` : (row.effective_device_limit && row.effective_device_limit > 0) ? `${row.effective_device_limit} 台` : '不限' }}
-                </span>
-              </div>
-
-              <div class="grid-item full-width">
-                <span class="grid-label">到期时间</span>
-                <span class="grid-value cell-mono">
-                  {{ row.expire_at ? fmtTime(row.expire_at) : '长期有效' }}
-                </span>
-              </div>
-            </div>
-
-            <!-- 流量使用进度条 -->
-            <div class="card-traffic-bar">
-              <div class="traffic-meta">
-                <span class="traffic-lbl">流量使用</span>
-                <span class="traffic-val cell-mono">
-                  <strong>{{ formatBytes(row.used_bytes) }}</strong>
-                  <span class="muted"> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}</span>
-                </span>
-              </div>
-              <el-progress
-                v-if="row.total_bytes"
-                :percentage="usagePercent(row)"
-                :stroke-width="5"
-                :show-text="false"
-                :status="usagePercent(row) > 90 ? 'exception' : undefined"
+      <!-- 全局统一卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="user-card-grid">
+        <div
+          v-for="row in list"
+          :key="row.id"
+          class="user-card"
+          :class="{ selected: isRowSelected(row), banned: row.status !== 1 }"
+        >
+          <!-- 卡片头部 -->
+          <div class="card-head">
+            <div class="head-left">
+              <el-checkbox
+                :model-value="isRowSelected(row)"
+                @change="(val: any) => toggleSelectRow(row, !!val)"
               />
+              <div class="user-info">
+                <div class="user-name-line">
+                  <span class="user-id cell-mono">#{{ row.id }}</span>
+                  <span class="user-name" title="点击查看与编辑详情" @click="openDetail(row)">{{ row.username }}</span>
+                  <span v-if="row.role === 'admin'" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">管理员</span>
+                  <span class="x-chip" :class="row.status === 1 ? 'green' : 'red'" style="font-size: 10px; padding: 1px 5px">
+                    {{ row.status === 1 ? '正常' : '已封禁' }}
+                  </span>
+                </div>
+                <div class="user-email cell-mono">{{ row.email || '—' }}</div>
+              </div>
+            </div>
+            <div class="head-right">
+              <el-tooltip :content="row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
+                <el-switch :model-value="row.status === 1" size="small" @change="doToggle(row)" />
+              </el-tooltip>
+            </div>
+          </div>
+
+          <!-- 关键指标 2x2 网格 -->
+          <div class="card-body-grid">
+            <div class="grid-item">
+              <span class="grid-label">套餐计划</span>
+              <span class="grid-value">
+                <span class="x-chip purple" style="font-size: 11px">
+                  {{ planName(row.plan_id) }}
+                </span>
+              </span>
             </div>
 
-            <!-- 底部操作按钮栏 -->
-            <div class="card-actions">
-              <el-button size="small" type="primary" plain @click="openDetail(row)">
-                <el-icon><Setting /></el-icon>&nbsp;编辑/权限
-              </el-button>
-              <el-button size="small" type="success" plain @click="openAdjust(row)">
-                <el-icon><Wallet /></el-icon>&nbsp;调账
-              </el-button>
-              <el-dropdown trigger="click" @command="(cmd: string) => handleCardAction(cmd, row)">
-                <el-button size="small">
-                  更多&nbsp;<el-icon><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="reset_traffic">
-                      <el-icon><RefreshRight /></el-icon>重置流量
-                    </el-dropdown-item>
-                    <el-dropdown-item command="toggle">
-                      <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>
-                      {{ row.status === 1 ? '封禁用户' : '解封用户' }}
-                    </el-dropdown-item>
-                    <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
-                      <el-icon><Delete /></el-icon>删除用户
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+            <div class="grid-item">
+              <span class="grid-label">所属权限组</span>
+              <span class="grid-value">
+                <span class="x-chip" :class="userGroupDisplay(row).custom ? 'blue' : 'green'" style="font-size: 10.5px">
+                  {{ userGroupDisplay(row).name }}
+                </span>
+              </span>
             </div>
+
+            <div class="grid-item">
+              <span class="grid-label">账户余额</span>
+              <span class="grid-value balance-value cell-mono">
+                ¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}
+              </span>
+            </div>
+
+            <div class="grid-item">
+              <span class="grid-label">设备限制</span>
+              <span class="grid-value device-value cell-mono">
+                {{ row.is_custom_device_limit ? `${row.effective_device_limit} 台 (自定义)` : (row.effective_device_limit && row.effective_device_limit > 0) ? `${row.effective_device_limit} 台` : '不限' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 流量使用与到期 -->
+          <div class="card-traffic">
+            <div class="traffic-header">
+              <span class="traffic-label">流量使用</span>
+              <span class="traffic-val cell-mono">
+                <strong>{{ formatBytes(row.used_bytes) }}</strong> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}
+                <span v-if="row.total_bytes" class="percent">({{ usagePercent(row) }}%)</span>
+              </span>
+            </div>
+            <el-progress
+              v-if="row.total_bytes"
+              :percentage="usagePercent(row)"
+              :stroke-width="5"
+              :show-text="false"
+              :status="usagePercent(row) > 90 ? 'exception' : undefined"
+            />
+            <div class="traffic-expire muted cell-mono" style="font-size: 11px; margin-top: 6px">
+              {{ row.expire_at ? fmtTime(row.expire_at) + ' 到期' : '长期有效' }}
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="card-actions">
+            <el-button size="small" type="primary" plain @click="openDetail(row)">
+              <el-icon><Setting /></el-icon>&nbsp;编辑配置
+            </el-button>
+            <el-button size="small" type="success" plain @click="openAdjust(row)">
+              <el-icon><Wallet /></el-icon>&nbsp;调账
+            </el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => handleCardAction(cmd, row)">
+              <el-button size="small" plain style="flex: none; padding: 0 8px">
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="reset_traffic">
+                    <el-icon><RefreshRight /></el-icon>重置流量
+                  </el-dropdown-item>
+                  <el-dropdown-item command="toggle">
+                    <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>
+                    {{ row.status === 1 ? '封禁用户' : '解封用户' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
+                    <el-icon><Delete /></el-icon>删除用户
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -858,7 +735,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
           </div>
           <div class="row">
             <span class="k">账户余额</span>
-            <span class="v cell-mono" style="font-weight: 700; color: var(--x-primary)">
+            <span class="v cell-mono" style="font-weight: 700; color: #059669">
               ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
             </span>
           </div>
@@ -973,7 +850,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <el-form-item label="密码">
             <el-input v-model="newUserForm.password" type="password" show-password placeholder="至少 8 位" />
           </el-form-item>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
+          <div class="form-grid-2">
             <el-form-item label="初始套餐（选填）">
               <el-select v-model="newUserForm.plan_id" style="width: 100%" placeholder="选择套餐">
                 <el-option :value="0" label="无套餐" />
@@ -1178,15 +1055,191 @@ function handleCardAction(cmd: string, row: AdminUser) {
   flex-wrap: wrap;
 }
 
-/* ================= 移动端响应式与卡片流 (<= 768px) ================= */
-@media (max-width: 768px) {
-  .desktop-table-view {
-    display: none;
-  }
-  .mobile-cards-view {
-    display: block;
+/* ================= 全局统一响应式卡片网格流 ================= */
+.user-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-empty-state {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--x-text-3);
+  font-size: 13.5px;
+}
+
+.user-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.user-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
   }
 
+  &.selected {
+    border-color: var(--x-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.02);
+  }
+  &.banned {
+    opacity: 0.88;
+    border-color: rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.02);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-left {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .user-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .user-name-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .user-id {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--x-text-3, #9ca3af);
+      background: var(--x-fill-2, rgba(0, 0, 0, 0.05));
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .user-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text, #111827);
+      word-break: break-all;
+      cursor: pointer;
+      &:hover {
+        color: var(--x-primary);
+      }
+    }
+
+    .user-email {
+      font-size: 11.5px;
+      color: var(--x-text-2, #6b7280);
+      margin-top: 2px;
+      word-break: break-all;
+    }
+
+    .head-right {
+      padding-left: 8px;
+      flex: none;
+    }
+  }
+
+  .card-body-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      .grid-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .grid-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+
+      .balance-value {
+        color: #059669;
+        font-weight: 700;
+      }
+
+      .device-value {
+        font-size: 12px;
+      }
+    }
+  }
+
+  .card-traffic {
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+    border: 1px solid var(--x-border, #f1f3f9);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 2px 0 10px;
+
+    .traffic-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      margin-bottom: 5px;
+
+      .traffic-label {
+        color: var(--x-text-2, #6b7280);
+      }
+
+      .traffic-val {
+        color: var(--x-text, #111827);
+        .percent {
+          color: var(--x-text-3, #9ca3af);
+          margin-left: 2px;
+        }
+      }
+    }
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    padding-top: 4px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
+@media (max-width: 768px) {
   .x-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -1218,192 +1271,11 @@ function handleCardAction(cmd: string, row: AdminUser) {
     justify-content: center;
     padding: 12px 0 4px;
   }
+}
 
-  .mobile-select-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-    border: 1px dashed var(--x-border, #e5e7eb);
-    border-radius: var(--x-radius-sm, 6px);
-    margin-bottom: 12px;
-    font-size: 13px;
-  }
-
-  .mobile-empty {
-    text-align: center;
-    padding: 36px 0;
-    color: var(--x-text-3, #9ca3af);
-    font-size: 13.5px;
-  }
-
-  .mobile-user-card-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .mobile-user-card {
-    background: var(--x-card, #ffffff);
-    border: 1px solid var(--x-border, #e5e7eb);
-    border-radius: var(--x-radius, 10px);
-    padding: 14px;
-    transition: all 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-
-    &.selected {
-      border-color: var(--x-primary, #6366f1);
-      background: rgba(99, 102, 241, 0.02);
-    }
-    &.banned {
-      opacity: 0.88;
-      border-color: rgba(239, 68, 68, 0.25);
-      background: rgba(239, 68, 68, 0.02);
-    }
-
-    .card-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding-bottom: 10px;
-      border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-      .head-left {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        flex: 1;
-        min-width: 0;
-      }
-
-      .user-info {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .user-name-line {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-
-      .user-id {
-        font-size: 11px;
-        font-weight: 700;
-        color: var(--x-text-3, #9ca3af);
-        background: var(--x-fill-2, rgba(0, 0, 0, 0.05));
-        padding: 1px 5px;
-        border-radius: 4px;
-      }
-
-      .user-name {
-        font-weight: 600;
-        font-size: 14px;
-        color: var(--x-text, #111827);
-        word-break: break-all;
-      }
-
-      .status-tag {
-        font-size: 11px;
-        height: 20px;
-        line-height: 18px;
-        padding: 0 6px;
-      }
-
-      .user-email {
-        font-size: 11.5px;
-        color: var(--x-text-2, #6b7280);
-        margin-top: 2px;
-        word-break: break-all;
-      }
-
-      .head-right {
-        padding-left: 8px;
-        flex: none;
-      }
-    }
-
-    .card-body-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 12px;
-      padding: 10px 0;
-
-      .grid-item {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-
-        &.full-width {
-          grid-column: 1 / -1;
-        }
-
-        .item-label {
-          font-size: 11px;
-          color: var(--x-text-3, #9ca3af);
-        }
-
-        .item-value {
-          font-size: 12.5px;
-          color: var(--x-text, #1f2937);
-          font-weight: 500;
-        }
-
-        .balance-value {
-          color: #059669;
-          font-weight: 700;
-        }
-
-        .device-value .custom {
-          color: var(--x-primary, #6366f1);
-          font-weight: 600;
-        }
-      }
-    }
-
-    .card-traffic {
-      background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-      border: 1px solid var(--x-border, #f1f3f9);
-      border-radius: 6px;
-      padding: 8px 10px;
-      margin: 2px 0 10px;
-
-      .traffic-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 11.5px;
-        margin-bottom: 5px;
-
-        .traffic-label {
-          color: var(--x-text-2, #6b7280);
-        }
-
-        .traffic-val {
-          color: var(--x-text, #111827);
-          .percent {
-            color: var(--x-text-3, #9ca3af);
-            margin-left: 2px;
-          }
-        }
-      }
-    }
-
-    .card-actions {
-      display: flex;
-      gap: 6px;
-      justify-content: flex-end;
-      padding-top: 4px;
-
-      .el-button {
-        flex: 1;
-        margin: 0;
-        font-size: 12px;
-        padding: 6px 6px;
-      }
-    }
+@media (max-width: 640px) {
+  .user-card-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

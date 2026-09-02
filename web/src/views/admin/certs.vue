@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Delete, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Delete, MagicStick, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createCert, deleteCert, generateSelfSignedCert, getCerts, updateCert, type CertItem } from '@/api/admin'
@@ -146,92 +146,63 @@ function expireTag(row: any) {
       </div>
     </div>
 
-    <BaseCard>
-      <!-- 桌面端表格视图 -->
-      <div class="desktop-table-view">
-        <el-table v-loading="loading" :data="list" size="small">
-          <el-table-column prop="domain" label="域名" min-width="200">
-            <template #default="{ row }">
-              <code class="cell-mono">{{ row.domain }}</code>
-              <el-tooltip v-if="row.self_signed" content="自签证书 · 链式代理 TLS 中转出站自动注入 pinnedPeerCertSha256" placement="top">
-                <span class="x-chip green" style="margin-left: 6px">自签·自动Pin</span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="到期" width="170">
-            <template #default="{ row }">
-              <span class="x-chip" :class="expireTag(row).type === 'danger' ? 'red' : (expireTag(row).type === 'warning' ? 'orange' : 'green')">
-                {{ expireTag(row).text }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="140" />
-          <el-table-column label="引用节点（服务器 / 入站）" min-width="200">
-            <template #default="{ row }">
-              <template v-if="row.refs && row.refs.length > 0">
-                <span v-for="r in row.refs" :key="r.inbound_id" class="x-chip purple" style="margin: 1px 4px 1px 0">
-                  {{ r.server_name }} / {{ r.inbound_tag }}
-                </span>
-              </template>
-              <span v-else class="muted">未引用</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="上传时间" width="130" />
-          <el-table-column label="操作" width="140" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" text type="danger" @click="remove(row)"><el-icon><Delete /></el-icon></el-button>
-            </template>
-          </el-table-column>
-          <template #empty><div class="table-empty">尚无证书，点击右上角「上传证书」</div></template>
-        </el-table>
+    <BaseCard title="TLS 证书列表">
+      <div v-if="loading" style="padding: 48px 0; text-align: center">
+        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <!-- 移动端卡片流视图 -->
-      <div class="mobile-cards-view">
-        <div v-if="list.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13.5px">
-          尚无证书，点击右上角「上传证书」
-        </div>
-        <div v-else class="mobile-data-card-list">
-          <div v-for="row in list" :key="row.id" class="mobile-data-card">
-            <div class="card-head">
-              <div class="head-title">
-                <code class="cell-mono" style="font-weight: 700; color: var(--x-primary)">{{ row.domain }}</code>
-                <span v-if="row.self_signed" class="x-chip green" style="margin-left: 6px">自签·自动Pin</span>
-              </div>
-              <el-tag :type="expireTag(row).type" size="small">{{ expireTag(row).text }}</el-tag>
-            </div>
+      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Key /></el-icon>
+        <p style="margin-top: 8px">尚无证书，点击右上角「上传证书」或「生成自签证书」</p>
+      </div>
 
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">到期日期</span>
-                <div class="item-value cell-mono font-12">{{ row.not_after || '—' }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">备注</span>
-                <div class="item-value">{{ row.remark || '—' }}</div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">引用节点</span>
-                <div class="item-value">
-                  <template v-if="row.refs && row.refs.length > 0">
-                    <el-tag v-for="r in row.refs" :key="r.inbound_id" size="small" style="margin: 1px 4px 1px 0">
-                      {{ r.server_name }} / {{ r.inbound_tag }}
-                    </el-tag>
-                  </template>
-                  <span v-else class="muted font-12">未被任何入站引用</span>
-                </div>
-              </div>
+      <!-- 全局统一证书卡片网格流 (自适应 1~4 列) -->
+      <div v-else class="cert-card-grid">
+        <div v-for="row in list" :key="row.id" class="cert-card">
+          <!-- 头部 -->
+          <div class="card-head">
+            <div class="head-title">
+              <code class="cell-mono cert-domain">{{ row.domain }}</code>
+              <el-tooltip v-if="row.self_signed" content="自签证书 · 链式代理 TLS 中转出站自动注入 pinnedPeerCertSha256" placement="top">
+                <span class="x-chip green" style="font-size: 10px; padding: 1px 5px">自签·自动Pin</span>
+              </el-tooltip>
             </div>
+            <span class="x-chip" :class="expireTag(row).type === 'danger' ? 'red' : (expireTag(row).type === 'warning' ? 'orange' : 'green')" style="font-size: 10.5px">
+              {{ expireTag(row).text }}
+            </span>
+          </div>
 
-            <div class="card-foot-actions">
-              <el-button size="small" type="primary" plain @click="openEdit(row)">
-                <el-icon><Edit /></el-icon>&nbsp;编辑
-              </el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">
-                <el-icon><Delete /></el-icon>&nbsp;删除
-              </el-button>
+          <!-- 证书属性网格 -->
+          <div class="card-grid">
+            <div class="grid-item">
+              <span class="item-label">证书备注</span>
+              <div class="item-value">{{ row.remark || '标准 TLS 证书' }}</div>
             </div>
+            <div class="grid-item">
+              <span class="item-label">到期日期</span>
+              <div class="item-value cell-mono font-12">{{ row.not_after || '—' }}</div>
+            </div>
+            <div class="grid-item full-width">
+              <span class="item-label">引用接入节点</span>
+              <div class="item-value">
+                <template v-if="row.refs && row.refs.length > 0">
+                  <span v-for="r in row.refs" :key="r.inbound_id" class="x-chip purple" style="margin: 1px 4px 1px 0; font-size: 10.5px">
+                    {{ r.server_name }} / {{ r.inbound_tag }}
+                  </span>
+                </template>
+                <span v-else class="muted font-11">未被任何入站引用</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="card-foot-actions">
+            <el-button size="small" type="primary" plain @click="openEdit(row)">
+              <el-icon><Edit /></el-icon>&nbsp;编辑证书
+            </el-button>
+            <el-button size="small" type="danger" plain @click="remove(row)">
+              <el-icon><Delete /></el-icon>&nbsp;删除
+            </el-button>
           </div>
         </div>
       </div>
@@ -284,5 +255,101 @@ function expireTag(row: any) {
 <style scoped lang="scss">
 .muted { color: var(--x-text-3); }
 .cell-mono { font-family: var(--x-mono); font-size: 12px; }
-.table-empty { padding: 30px 0; text-align: center; color: var(--x-text-3); font-size: 13px; }
+
+/* ================= 全局统一证书卡片网格流 ================= */
+.cert-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.cert-card {
+  background: var(--x-card, #ffffff);
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: var(--x-radius, 10px);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    box-shadow: var(--x-shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+    .head-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .cert-domain {
+      font-weight: 700;
+      font-size: 13.5px;
+      color: var(--x-primary);
+    }
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px 0;
+
+    .grid-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      &.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .item-label {
+        font-size: 11px;
+        color: var(--x-text-3, #9ca3af);
+      }
+
+      .item-value {
+        font-size: 12.5px;
+        color: var(--x-text, #1f2937);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .card-foot-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid var(--x-border-light, #f1f5f9);
+    margin-top: 6px;
+
+    .el-button {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+      height: 30px;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .cert-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
