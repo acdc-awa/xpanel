@@ -31,7 +31,7 @@ func newTestHub(t *testing.T) *Hub {
 	return &Hub{
 		DB:      db,
 		conns:   make(map[uint64]*Conn),
-		pending: make(map[string]chan *protocol.ResultPayload),
+		pending: make(map[string]*pendingReq),
 	}
 }
 
@@ -73,5 +73,50 @@ func TestSendRaceWithUnregister(t *testing.T) {
 			}()
 		}
 		wg.Wait()
+	}
+}
+
+// TestAskAbortedOnUnregister 验证节点断连时，正在等待该节点回执的 Ask 立即被唤醒返回错误，
+// 而不需要死等超时。
+func TestAskAbortedOnUnregister(t *testing.T) {
+	h := newTestHub(t)
+	conn := newTestConn(1)
+	h.mu.Lock()
+	h.conns[1] = conn
+	h.mu.Unlock()
+
+	// 消耗 conn.Send 中的消息，避免 Ask 写入 Send 阻塞
+	go func() {
+		for {
+			select {
+			case <-conn.Send:
+			case <-conn.done:
+				return
+			}
+		}
+	}()
+
+	resCh := make(chan *protocol.ResultPayload, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		// 发起一个超时长达 10 秒的 Ask 指令
+		res, err := h.Ask(1, "test_cmd", nil, 10*time.Second)
+		resCh <- res
+		errCh <- err
+	}()
+
+	// 稍作等待确保 Ask 已经注册到 pending 映射并写入 Send
+	time.Sleep(50 * time.Millisecond)
+
+	// 模拟节点连接断开
+	h.unregister(conn)
+
+	select {
+	case res := <-resCh:
+		if res == nil || res.OK || res.Error != "节点连接已断开" {
+			t.Fatalf("预期收到节点断开回执, 实际: %+v", res)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("unregister 未能立即唤醒正在等待的 Ask，仍在阻塞等待！")
 	}
 }

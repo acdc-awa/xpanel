@@ -10,7 +10,7 @@ import (
 )
 
 func TestSQLiteDSNBusyTimeout(t *testing.T) {
-	plain := sqliteDSN("./data/panel.db")
+	plain := SqliteDSN("./data/panel.db")
 	for _, pragma := range []string{"_pragma=busy_timeout(5000)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(NORMAL)"} {
 		if !strings.Contains(plain, pragma) {
 			t.Fatalf("plain dsn 应追加 %s, got %q", pragma, plain)
@@ -20,7 +20,7 @@ func TestSQLiteDSNBusyTimeout(t *testing.T) {
 		t.Fatalf("plain dsn 只应有一个问号, got %q", plain)
 	}
 
-	file := sqliteDSN("file:panel.db?mode=memory&cache=shared")
+	file := SqliteDSN("file:panel.db?mode=memory&cache=shared")
 	if !strings.Contains(file, "&_pragma=busy_timeout(5000)") {
 		t.Fatalf("file dsn 应用 & 追加参数, got %q", file)
 	}

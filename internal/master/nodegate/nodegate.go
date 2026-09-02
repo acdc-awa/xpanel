@@ -71,6 +71,11 @@ func (c *Conn) closeSafe() {
 	}
 }
 
+type pendingReq struct {
+	serverID uint64
+	ch       chan *protocol.ResultPayload
+}
+
 // Hub 节点连接注册表。
 type Hub struct {
 	DB       *gorm.DB
@@ -81,8 +86,8 @@ type Hub struct {
 	CertPusher func(serverID uint64)
 
 	mu      sync.RWMutex
-	conns   map[uint64]*Conn                        // by server_id
-	pending map[string]chan *protocol.ResultPayload // 请求 id → 回执通道
+	conns   map[uint64]*Conn               // by server_id
+	pending map[string]*pendingReq         // 请求 id → 回执请求
 	wg      sync.WaitGroup
 	quit    chan struct{}
 
@@ -113,7 +118,7 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 			},
 		},
 		conns:   make(map[uint64]*Conn),
-		pending: make(map[string]chan *protocol.ResultPayload),
+		pending: make(map[string]*pendingReq),
 		quit:    make(chan struct{}),
 	}
 	h.enforcedAt = make(map[uint64]time.Time)
@@ -234,6 +239,20 @@ func (h *Hub) unregister(conn *Conn) {
 		delete(h.conns, conn.ServerID)
 	}
 	_, hasReplacement := h.conns[conn.ServerID]
+
+	// 当节点连接断开时，若该节点有等待回执的 Ask 指令，立即以错误唤醒，
+	// 避免调用方（如自升级等待 5 分钟、配置推送等待 30 秒）在连接断开后死等满超时
+	if !hasReplacement {
+		for id, req := range h.pending {
+			if req.serverID == conn.ServerID {
+				select {
+				case req.ch <- &protocol.ResultPayload{OK: false, Error: "节点连接已断开"}:
+				default:
+				}
+				delete(h.pending, id)
+			}
+		}
+	}
 	h.mu.Unlock()
 	conn.closeSafe() // 幂等；只关闭 done/WS，不关闭 Send 通道（避免与并发 Send 竞态 panic）
 
@@ -262,6 +281,7 @@ func (h *Hub) readPump(conn *Conn) {
 		if err != nil {
 			return
 		}
+		_ = conn.WS.SetReadDeadline(time.Now().Add(PongWait)) // 每次收到有效数据帧均续期
 		msg, err := protocol.Decode(data)
 		if err != nil {
 			continue
@@ -403,16 +423,26 @@ func (h *Hub) handleResult(msg *protocol.Message) {
 	var res protocol.ResultPayload
 	_ = msg.PayloadTo(&res)
 	h.mu.Lock()
-	ch, ok := h.pending[msg.ID]
+	req, ok := h.pending[msg.ID]
 	if ok {
 		delete(h.pending, msg.ID)
 	}
 	h.mu.Unlock()
-	if ok && ch != nil {
+	if ok && req != nil && req.ch != nil {
 		select {
-		case ch <- &res:
+		case req.ch <- &res:
 		default:
 		}
+	}
+}
+
+// Disconnect 主动断开指定服务器的 WebSocket 连接（如删除服务器或重置密钥时调用）。
+func (h *Hub) Disconnect(serverID uint64) {
+	h.mu.Lock()
+	conn, ok := h.conns[serverID]
+	h.mu.Unlock()
+	if ok && conn != nil {
+		conn.closeSafe()
 	}
 }
 
@@ -482,8 +512,9 @@ func (h *Hub) Send(serverID uint64, msg []byte) error {
 func (h *Hub) Ask(serverID uint64, typ string, payload any, timeout time.Duration) (*protocol.ResultPayload, error) {
 	id := util.RandomID(8)
 	ch := make(chan *protocol.ResultPayload, 1)
+	req := &pendingReq{serverID: serverID, ch: ch}
 	h.mu.Lock()
-	h.pending[id] = ch
+	h.pending[id] = req
 	h.mu.Unlock()
 	defer func() {
 		h.mu.Lock()

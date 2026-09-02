@@ -280,6 +280,10 @@ func (d *Deps) AdminResetSecret(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
+	// 旧密钥已被替换，主动断开当前在网长连接促使其重新使用新密钥握手（若使用旧密钥则握手失败）
+	if d.Hub != nil {
+		d.Hub.Disconnect(id)
+	}
 	util.OK(c, gin.H{
 		"node_id":     srv.NodeID,
 		"secret":      secret, // 仅此一次返回明文
@@ -346,6 +350,10 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 	}); err != nil {
 		util.ServerError(c, "删除失败")
 		return
+	}
+	// 服务器已从数据库删除，主动断开现有长连接并熔断指令等待
+	if d.Hub != nil {
+		d.Hub.Disconnect(id)
 	}
 	util.OK(c, gin.H{"deleted": id})
 }

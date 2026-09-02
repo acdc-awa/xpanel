@@ -117,15 +117,25 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				PeriodStart: periodStart,
 				PeriodEnd:   periodEnd,
 			}
+			var doUpdates clause.Set
+			if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+				doUpdates = clause.Assignments(map[string]any{
+					"up_bytes":   gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
+					"down_bytes": gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
+					"period_end": gorm.Expr("VALUES(period_end)"),
+				})
+			} else {
+				doUpdates = clause.Assignments(map[string]any{
+					"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
+					"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
+					"period_end": gorm.Expr("excluded.period_end"),
+				})
+			}
 			if err := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{
 					{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"},
 				},
-				DoUpdates: clause.Assignments(map[string]any{
-					"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
-					"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
-					"period_end": gorm.Expr("excluded.period_end"),
-				}),
+				DoUpdates: doUpdates,
 			}).Create(&log).Error; err != nil {
 				return err
 			}
@@ -297,35 +307,45 @@ func (s *TrafficService) StartDailyAgg(ctx context.Context) {
 }
 
 // AggDaily 按 用户×日期 汇总流量到 traffic_daily（upsert）。
-// ISSUE-09：只扫描最近 aggWindowDays 天的 logs，避免全表读入内存重算全部历史。
+// 优化：采用 SQL 聚合 GROUP BY user_id, date(period_start) 直接输出天汇总，
+// 避免将 7 天上千万条 logs 逐条实例化到 Go 内存中导致 OOM。
 func (s *TrafficService) AggDaily() {
-	var logs []models.TrafficLog
 	windowStart := s.nowOrReal().AddDate(0, 0, -aggWindowDays)
-	if err := s.DB.Where("period_start >= ?", windowStart).Find(&logs).Error; err != nil {
+
+	type aggRow struct {
+		UserID    uint64 `gorm:"column:user_id"`
+		Date      string `gorm:"column:date"`
+		UpBytes   int64  `gorm:"column:up_bytes"`
+		DownBytes int64  `gorm:"column:down_bytes"`
+	}
+	var rows []aggRow
+
+	// SQLite 与 MySQL 均原生支持 date(period_start)
+	if err := s.DB.Model(&models.TrafficLog{}).
+		Select("user_id, date(period_start) AS date, SUM(up_bytes) AS up_bytes, SUM(down_bytes) AS down_bytes").
+		Where("period_start >= ?", windowStart).
+		Group("user_id, date(period_start)").
+		Scan(&rows).Error; err != nil {
 		return
 	}
-	type key struct {
-		userID uint64
-		date   string
-	}
-	sum := make(map[key]*models.TrafficDaily)
-	for _, l := range logs {
-		k := key{l.UserID, l.PeriodStart.Format("2006-01-02")}
-		if sum[k] == nil {
-			sum[k] = &models.TrafficDaily{UserID: l.UserID, Date: k.date}
+
+	for _, r := range rows {
+		if r.Date == "" {
+			continue
 		}
-		sum[k].UpBytes += l.UpBytes
-		sum[k].DownBytes += l.DownBytes
-	}
-	for _, d := range sum {
 		var existing models.TrafficDaily
-		err := s.DB.Where("user_id = ? AND date = ?", d.UserID, d.Date).First(&existing).Error
+		err := s.DB.Where("user_id = ? AND date = ?", r.UserID, r.Date).First(&existing).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			_ = s.DB.Create(d)
+			_ = s.DB.Create(&models.TrafficDaily{
+				UserID:    r.UserID,
+				Date:      r.Date,
+				UpBytes:   r.UpBytes,
+				DownBytes: r.DownBytes,
+			})
 		} else if err == nil {
 			_ = s.DB.Model(&existing).Updates(map[string]any{
-				"up_bytes":   d.UpBytes,
-				"down_bytes": d.DownBytes,
+				"up_bytes":   r.UpBytes,
+				"down_bytes": r.DownBytes,
 			})
 		}
 	}

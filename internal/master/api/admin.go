@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -236,8 +235,10 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		return
 	}
 
-	// 用户变更 → 全量重推所有有入站的服务器的配置
-	d.enqueueForAllWithInbounds()
+	// 用户变更 → 纯 gRPC 内存热更新在线节点（不重启 Xray 进程，秒级对齐）
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
 
 	util.OK(c, gin.H{
 		"id":       user.ID,
@@ -368,7 +369,6 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			return
 		}
 	}
-	d.enqueueForAllWithInbounds()
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
 	}
@@ -411,7 +411,9 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 		util.ServerError(c, "更新失败")
 		return
 	}
-	d.enqueueForAllWithInbounds()
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
 	util.OK(c, gin.H{"id": id, "status": newStatus})
 }
 
@@ -431,7 +433,6 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	d.enqueueForAllWithInbounds()
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
 	}
@@ -469,40 +470,18 @@ func (d *Deps) AdminDeleteUser(c *gin.Context) {
 		util.ServerError(c, "删除失败")
 		return
 	}
-	d.enqueueForAllWithInbounds()
+	if d.Hub != nil {
+		d.Hub.SyncUsersToAll()
+	}
 	util.OK(c, gin.H{"deleted": id})
 }
 
 // TriggerUserChange 用户/权限相关变更统一出口（J17）：
-// 热更新在线节点用户列表（SyncUsersToAll，秒级）+ 全量重推所有有入站的服务器配置（拉取型兜底）。
+// 热更新在线节点用户列表（SyncUsersToAll，秒级，不重启 Xray 进程）。
 // 权限组节点集合/套餐绑定等变更后必须调用，消除「在线用户失效窗口不可控」。
 func (d *Deps) TriggerUserChange() {
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
-	}
-	d.enqueueForAllWithInbounds()
-}
-
-// enqueueForAllWithInbounds 对所有有启用入站的服务器触发配置重推。
-func (d *Deps) enqueueForAllWithInbounds() {
-	if d.Config == nil || d.Hub == nil {
-		return
-	}
-	var serverIDs []uint64
-	if err := d.DB.Model(&models.Inbound{}).Where("enabled = ?", true).
-		Distinct("server_id").Pluck("server_id", &serverIDs).Error; err != nil {
-		log.Printf("admin: 查询入站服务器失败: %v", err)
-		return
-	}
-	for _, sid := range serverIDs {
-		cfg, err := d.Config.Generate(sid)
-		if err != nil {
-			continue
-		}
-		if err := d.Config.SavePending(sid, cfg); err != nil {
-			continue
-		}
-		go d.Hub.PushPending(sid)
 	}
 }
 

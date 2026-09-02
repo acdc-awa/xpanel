@@ -77,8 +77,8 @@ func (s *Service) snapshotLocked() (BackupInfo, error) {
 	name := ts.Format("panel-20060102-150405.db")
 	dst := filepath.Join(s.dir, name)
 
-	// 独立连接执行 VACUUM INTO（在线一致性快照，WAL 数据也包含）
-	src, err := sql.Open("sqlite", s.dsn)
+	// 独立连接执行 VACUUM INTO（在线一致性快照，WAL 数据也包含，带 busy_timeout 等待避免与主写事务冲突）
+	src, err := sql.Open("sqlite", pkgdb.SqliteDSN(s.dsn))
 	if err != nil {
 		s.log("backup.create", "failed", fmt.Sprintf("打开源库失败: %v", err))
 		return BackupInfo{}, err

@@ -110,7 +110,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			user.GET("/servers", d.UserServers)
 			user.GET("/orders", d.UserOrders)
 			user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
-			user.POST("/gift-cards/redeem", d.UserRedeemGiftCard)
+			user.POST("/gift-cards/redeem", middleware.RateLimit(10, time.Minute), d.UserRedeemGiftCard)
 			user.GET("/balance-logs", d.UserBalanceLogs)
 			user.POST("/password", d.UserChangePassword)
 			user.POST("/2fa/setup", d.UserOTPSetup)

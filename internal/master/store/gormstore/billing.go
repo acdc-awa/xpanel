@@ -62,14 +62,12 @@ func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, pl
 		"plan_id":             plan.ID,
 		"expire_at":           expireAt,
 		"traffic_cycle_start": cycleStart,
+		"permission_group_id": permGroupID,
 	}
 	// 套餐快照（2026-09-01 Xboard 式隔离：购买/续费即按当前套餐值重新快照，
 	// 此后套餐编辑不影响该用户直至下次分配/续费/勾选同步）
 	for k, v := range models.PlanSnapshotColumns(plan) {
 		updates[k] = v
-	}
-	if permGroupID > 0 {
-		updates["permission_group_id"] = permGroupID
 	}
 	return s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error
 }
