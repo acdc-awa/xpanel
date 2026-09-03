@@ -7,7 +7,7 @@
 #    挂载的宿主 data 目录，与本地开发（cwd=仓库根）行为一致。
 app:
   name: xray-panel
-  env: dev            # dev | prod（prod 关闭 gin debug 日志）
+  env: dev            # dev | prod（prod 静默：不打印 gin 访问/调试日志）
   port: 18080         # 面板端口（SPA 前端 + 后端 HTTP API，含 /healthz /readyz）
   ws_port: 18082      # 节点 WebSocket 网关端口
   sub_port: 6000      # 订阅独立端口（0=禁用订阅服务）

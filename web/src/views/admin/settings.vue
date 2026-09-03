@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Check, Download, Refresh, Upload, Delete, Picture, Scissor, CopyDocument } from '@element-plus/icons-vue'
+import { Check, Close, Download, Loading, Refresh, Upload, Delete, Picture, Scissor, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
@@ -11,12 +11,14 @@ import {
   getSystemStatus,
   checkUpdate,
   applyUpdate,
+  getUpdateStatus,
   type SiteGroup,
   type CaptchaGroup,
   type AgentGroup,
   type BackupItem,
   type SystemStatus,
   type UpdateCheckResult,
+  type UpdateProgress,
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
@@ -290,10 +292,144 @@ async function loadSystem() {
   }
 }
 
-// ---- 面板内更新（容器形态：下载校验替换后容器自重启，失败自动回滚） ----
+// ---- 面板内更新（容器形态：后台执行 + phase 进度轮询，替换后容器自重启，失败自动回滚） ----
 const updateInfo = ref<UpdateCheckResult | null>(null)
 const updateChecking = ref(false)
 const updateApplying = ref(false)
+
+// 进度监控（对齐 agent 升级监控交互：apply 立即返回，轮询 update/status 驱动步骤条；
+// 容器重启导致轮询失败属预期，进入「等待恢复」宽限，面板回来后按版本比对判定成败）
+const updateModalOpen = ref(false)
+const updateStatus = ref<UpdateProgress | null>(null)
+const updateTargetVer = ref('')
+const updateWaitingRestart = ref(false)
+const updateEverRunning = ref(false)
+let updateTimer: any = null
+let updateDowntimeAt = 0 // 首次轮询失败时刻（0=未进入离线窗口）
+let updateLastPhase = '' // 失败时步骤条错误图标落点=最后经历的有效阶段
+
+const updateActiveStep = computed(() => {
+  const p = updateStatus.value?.phase === 'failed' ? updateLastPhase : updateStatus.value?.phase
+  switch (p) {
+    case 'downloading':
+      return 0
+    case 'verifying':
+      return 1
+    case 'replacing':
+      return 2
+    case 'restarting':
+    case 'success':
+      return 3
+    default:
+      return 0
+  }
+})
+
+const updateBoxClass = computed(() => {
+  const phase = updateStatus.value?.phase
+  if (phase === 'success') return 'is-success'
+  if (phase === 'failed') return 'is-failed'
+  return 'is-running'
+})
+
+function stopUpdatePolling() {
+  if (updateTimer) {
+    clearInterval(updateTimer)
+    updateTimer = null
+  }
+}
+
+onUnmounted(stopUpdatePolling)
+
+// 挂载时恢复进行中的更新监控（覆盖用户在更新期间刷新页面的场景）
+onMounted(async () => {
+  try {
+    const { data } = await getUpdateStatus()
+    if (data.code === 0 && data.data?.progress?.running) {
+      resumeUpdateWatch(data.data.progress)
+    }
+  } catch {
+    /* 静默：无进行中更新属常态 */
+  }
+})
+
+function resumeUpdateWatch(progress: UpdateProgress) {
+  updateTargetVer.value = progress.target_version || updateTargetVer.value
+  updateStatus.value = progress
+  updateEverRunning.value = true
+  updateModalOpen.value = true
+  stopUpdatePolling()
+  updateTimer = setInterval(pollUpdateStatus, 1500)
+}
+
+async function pollUpdateStatus() {
+  let currentVersion = ''
+  let progress: UpdateProgress | undefined
+  try {
+    const { data } = await getUpdateStatus()
+    if (data.code !== 0) throw new Error(data.message)
+    currentVersion = data.data.current_version
+    progress = data.data.progress
+    updateDowntimeAt = 0
+    updateWaitingRestart.value = false
+  } catch {
+    // 轮询失败 = 容器重启中（status 探测不到才会失败）：宽限 5 分钟等面板恢复
+    if (updateEverRunning.value) updateWaitingRestart.value = true
+    if (!updateDowntimeAt) updateDowntimeAt = Date.now()
+    if (Date.now() - updateDowntimeAt > 5 * 60 * 1000) {
+      stopUpdatePolling()
+      updateWaitingRestart.value = false
+      updateStatus.value = {
+        running: false,
+        phase: 'failed',
+        target_version: updateTargetVer.value,
+        message: '等待容器恢复超时',
+        error: '5 分钟内面板未恢复，请到宿主机执行 docker logs <容器> 排查（新版本启动失败会自动回滚上一版本）。',
+      }
+    }
+    return
+  }
+
+  if (progress && progress.phase && progress.phase !== 'failed') updateLastPhase = progress.phase
+  if (progress?.running) {
+    updateStatus.value = progress
+    if (progress.phase === 'restarting') updateWaitingRestart.value = true
+    return
+  }
+
+  // 不在运行：失败 → 展示错误；否则进程已重启（内存状态清零）→ 按版本比对判定成败
+  if (progress?.phase === 'failed') {
+    stopUpdatePolling()
+    updateStatus.value = progress
+    return
+  }
+  if (updateTargetVer.value && currentVersion === updateTargetVer.value) {
+    stopUpdatePolling()
+    updateWaitingRestart.value = false
+    updateStatus.value = { running: false, phase: 'success', target_version: currentVersion, message: `已更新到 ${currentVersion}，面板已恢复` }
+    ElMessage.success(`面板已更新到 ${currentVersion}，即将刷新页面加载新前端`)
+    setTimeout(() => window.location.reload(), 1800)
+    return
+  }
+  if (currentVersion !== updateTargetVer.value && updateDowntimeAt) {
+    // 经历过离线但版本没变 → 新版本启动失败已被 entrypoint 回滚
+    stopUpdatePolling()
+    updateWaitingRestart.value = false
+    updateStatus.value = {
+      running: false,
+      phase: 'failed',
+      target_version: updateTargetVer.value,
+      message: `面板已恢复，但版本仍为 ${currentVersion}`,
+      error: `新版本（${updateTargetVer.value}）启动失败已被自动回滚，请查看容器日志排查后重试。`,
+    }
+  }
+  // 其余（未离线且状态为空）= 流程尚未推进到重启，继续轮询
+}
+
+const updateDisplayMessage = computed(() => {
+  if (updateWaitingRestart.value) return '容器重启中，等待面板恢复（通常 10~40 秒，请勿关闭页面）...'
+  return updateStatus.value?.message || '正在准备更新...'
+})
 
 async function onCheckUpdate() {
   updateChecking.value = true
@@ -321,14 +457,26 @@ async function confirmApply() {
   }
   updateApplying.value = true
   try {
-    const { data } = await applyUpdate()
-    if (data.code === 0) ElMessage.success(data.message)
-    else ElMessage.error(data.message)
+    // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
+    const { data } = await applyUpdate(updateInfo.value.latest_version || '')
+    if (data.code !== 0) {
+      ElMessage.error(data.message)
+      return
+    }
+    if (data.data?.started === false && !data.data.progress?.running) {
+      // 「已是最新版本」等无需进入监控弹窗的情形
+      ElMessage.success(data.data.message || data.message)
+      return
+    }
+    updateTargetVer.value = data.data?.version || updateInfo.value.latest_version || ''
+    updateDowntimeAt = 0
+    resumeUpdateWatch(
+      data.data?.progress?.running
+        ? data.data.progress
+        : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
+    )
   } catch (e: any) {
-    // 服务端返回了 4xx/5xx（下载失败/校验不过/自检不过等）→ 展示真实原因；
-    // 仅连接中断（旧进程被杀、套餐失败前已开始替换）才算「已触发」。
-    if (e?.response?.data?.message) ElMessage.error(e.response.data.message)
-    else ElMessage.info('更新已触发，等待容器重启…')
+    ElMessage.error(e?.response?.data?.message || errMsg(e, '触发更新失败'))
   } finally {
     updateApplying.value = false
   }
@@ -746,7 +894,7 @@ async function save() {
                   <el-button
                     type="primary"
                     :icon="Download"
-                    :disabled="!updateInfo?.available"
+                    :disabled="!updateInfo?.available || !!updateStatus?.running"
                     :loading="updateApplying"
                     @click="confirmApply"
                   >
@@ -789,6 +937,37 @@ async function save() {
       :target-size="cropperTargetSize"
       @crop="onCropFinished"
     />
+
+    <!-- 面板更新进度弹窗（交互对齐节点 Agent 升级监控：phase 驱动步骤条 + 轮询状态） -->
+    <el-dialog v-model="updateModalOpen" title="面板更新进度" width="560px" :close-on-click-modal="false">
+      <el-steps
+        :active="updateActiveStep"
+        finish-status="success"
+        :process-status="updateStatus?.phase === 'failed' ? 'error' : 'process'"
+        align-center
+        style="margin: 20px 0 8px"
+      >
+        <el-step title="下载更新包" description="GitHub Release" />
+        <el-step title="校验与自检" description="sha256 / self-test" />
+        <el-step title="替换文件" description="备份并原子替换" />
+        <el-step title="重启容器" description="unless-stopped 拉起" />
+      </el-steps>
+
+      <div class="update-status-box" :class="updateBoxClass">
+        <div class="status-icon">
+          <el-icon v-if="updateStatus?.phase === 'success'" class="icon-success"><Check /></el-icon>
+          <el-icon v-else-if="updateStatus?.phase === 'failed'" class="icon-error"><Close /></el-icon>
+          <el-icon v-else class="is-loading icon-process"><Loading /></el-icon>
+        </div>
+        <div class="status-texts">
+          <div class="status-msg">{{ updateDisplayMessage }}</div>
+          <div v-if="updateStatus?.error" class="status-err cell-mono">{{ updateStatus.error }}</div>
+          <div v-else-if="updateStatus?.phase !== 'success' && updateStatus?.phase !== 'failed'" class="status-hint">
+            更新在服务端后台执行，刷新页面后重新打开本页可继续查看进度。
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -1060,6 +1239,73 @@ async function save() {
   :deep(.el-tabs__item) {
     padding: 0 10px !important;
     font-size: 13px !important;
+  }
+}
+
+/* 面板更新进度状态盒（样式与节点 Agent 升级监控一致） */
+.update-status-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--x-bg, #f9fafb);
+  border: 1px solid var(--x-border, #e5e7eb);
+  margin-top: 12px;
+
+  &.is-running {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    .icon-process {
+      font-size: 22px;
+      color: #2563eb;
+    }
+  }
+  &.is-success {
+    border-color: #86efac;
+    background: #f0fdf4;
+    .icon-success {
+      font-size: 22px;
+      color: #16a34a;
+      font-weight: bold;
+    }
+  }
+  &.is-failed {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    .icon-error {
+      font-size: 22px;
+      color: #dc2626;
+      font-weight: bold;
+    }
+  }
+
+  .status-icon {
+    line-height: 1.2;
+  }
+  .status-texts {
+    flex: 1;
+    .status-msg {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text);
+      line-height: 1.5;
+    }
+    .status-err {
+      margin-top: 6px;
+      color: #b91c1c;
+      font-size: 11.5px;
+      line-height: 1.4;
+      word-break: break-all;
+      background: rgba(254, 226, 226, 0.7);
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    .status-hint {
+      margin-top: 4px;
+      color: var(--x-text-3);
+      font-size: 11.5px;
+    }
   }
 }
 </style>

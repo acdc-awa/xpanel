@@ -49,8 +49,13 @@ func accessLogFormatter(param gin.LogFormatterParams) string {
 func NewWebRouter(d *Deps) *gin.Engine {
 	r := gin.New()
 	// ISSUE-12：访问日志对订阅 token 路径脱敏，避免完整 token 进入日志。
+	// env=prod 静默运行（2026-09-03）：gin.SetMode(ReleaseMode) 只关 gin 自身 debug 输出，
+	// Logger 中间件不受模式影响——按 env 决定是否挂载，否则 prod 仍会刷每请求 [GIN] 日志。
+	if d.Cfg == nil || d.Cfg.App.Env != "prod" {
+		r.Use(gin.LoggerWithFormatter(accessLogFormatter))
+	}
 	// P2-2：全局请求体上限 10MB（配置 JSON/拓扑布局/审计均远小于该值）。
-	r.Use(gin.LoggerWithFormatter(accessLogFormatter), gin.Recovery(), middleware.BodyLimit(10<<20))
+	r.Use(gin.Recovery(), middleware.BodyLimit(10<<20))
 
 	registerAPI(r, d)
 	registerSPA(r, d)
@@ -135,6 +140,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.GET("/dashboard", d.AdminDashboard)
 			admin.GET("/system/status", d.AdminSystemStatus)
 			admin.GET("/update/check", d.AdminUpdateCheck)
+			admin.GET("/update/status", d.AdminUpdateStatus)
 			admin.POST("/update/apply", d.AdminUpdateApply)
 			admin.GET("/settings", d.AdminSettings)
 			admin.PUT("/settings", d.AdminUpdateSettings)

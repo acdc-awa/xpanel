@@ -101,10 +101,36 @@ export function checkUpdate() {
   return http.get<ApiResp<UpdateCheckResult>>('/admin/update/check')
 }
 
+// 更新进度快照（phase 语义与 agent UpgradeProgressPayload 对齐，见后端 update.go）
+export interface UpdateProgress {
+  running: boolean
+  phase: string // checking | downloading | verifying | replacing | restarting | failed | success
+  from_version?: string
+  target_version?: string
+  message?: string
+  error?: string
+  started_at?: string
+  updated_at?: string
+}
+
+export interface UpdateStatusResult {
+  enabled: boolean
+  current_version: string
+  progress: UpdateProgress
+}
+
+export function getUpdateStatus() {
+  return http.get<ApiResp<UpdateStatusResult>>('/admin/update/status')
+}
+
 export function applyUpdate(version = '') {
-  // 应用更新在服务端完成下载+校验+替换，耗时远超实例默认 10s，必须单独放宽超时
-  // （2026-08-31 实机：10s 掐断导致前端永远只看到「已触发」而版本不涨）。
-  return http.post<ApiResp<{ ok: boolean; version: string; message: string }>>('/admin/update/apply', { version }, { timeout: 300000 })
+  // 显式携带目标版本：审计日志记录的是请求体，之前传空串导致日志里只见 {"version":""}（2026-09-03）。
+  // 服务端解析更新源后立即返回（下载/替换转后台执行），进度经 getUpdateStatus 轮询获取。
+  return http.post<ApiResp<{ ok: boolean; started: boolean; version: string; message: string; progress?: UpdateProgress }>>(
+    '/admin/update/apply',
+    { version },
+    { timeout: 30000 },
+  )
 }
 
 export function getServerMetrics(id: number, range = '1h') {
