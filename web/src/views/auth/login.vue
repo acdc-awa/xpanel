@@ -131,7 +131,14 @@ function gotoHome() {
     </div>
 
     <!-- 2FA 二次验证 -->
-    <el-dialog v-model="twofaOpen" title="两步验证" width="360px" :close-on-click-modal="false" append-to-body>
+    <el-dialog
+      v-model="twofaOpen"
+      title="两步验证"
+      width="360px"
+      class="twofa-dialog"
+      :close-on-click-modal="false"
+      append-to-body
+    >
       <p style="font-size: 13px; color: var(--x-text-2); margin-bottom: 14px">
         该账号已开启两步验证，请输入 Google Authenticator 动态验证码或恢复码
       </p>
@@ -213,4 +220,10 @@ function gotoHome() {
 .auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
 .auth-foot { margin-top: 20px; text-align: center; font-size: 13px; color: var(--x-text-2); }
 .auth-link { color: var(--x-primary); font-weight: 600; }
+
+:deep(.twofa-dialog) {
+  width: min(380px, 90vw) !important;
+  max-width: 90vw !important;
+  border-radius: 16px !important;
+}
 </style>

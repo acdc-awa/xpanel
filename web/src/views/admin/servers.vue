@@ -13,11 +13,13 @@ import {
   resetServerSecret,
   serverCommand,
   upgradeAgent,
+  getAgentLatestVersion,
   type CommandResult,
   type ServerItem,
   updateServer,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { compareVersion } from '@/utils/version'
 
 const router = useRouter()
 
@@ -68,6 +70,34 @@ const filtered = computed(() => {
   )
 })
 
+// ---- 官方 Agent 最新版本感知与比对 ----
+const latestAgentVersion = ref('')
+const fetchingLatestAgent = ref(false)
+
+async function loadLatestAgentVersion(refresh = false) {
+  fetchingLatestAgent.value = true
+  try {
+    const { data } = await getAgentLatestVersion(refresh)
+    if (data.code === 0 && data.data?.latest_version) {
+      latestAgentVersion.value = data.data.latest_version
+    }
+  } catch {
+    // 静默降级
+  } finally {
+    fetchingLatestAgent.value = false
+  }
+}
+
+function getAgentVersionStatus(currentVer: string) {
+  if (!currentVer) return { type: 'unknown', label: '未知' }
+  if (!latestAgentVersion.value) return { type: 'normal', label: '' }
+  const cmp = compareVersion(currentVer, latestAgentVersion.value)
+  if (cmp < 0) {
+    return { type: 'outdated', label: `有新版 ${latestAgentVersion.value}` }
+  }
+  return { type: 'latest', label: '最新' }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -80,6 +110,7 @@ async function load() {
     loading.value = false
   }
   loadInboundCounts()
+  loadLatestAgentVersion()
 }
 onMounted(load)
 
@@ -184,18 +215,43 @@ async function restartXray(row: any) {
 const upgradingId = ref(0)
 
 async function upgradeNodeAgent(row: any) {
+  const currentVer = row.agent_version || ''
+  const latest = latestAgentVersion.value
+  let msg = ''
+  let isAlreadyLatest = false
+
+  if (latest && currentVer) {
+    const cmp = compareVersion(currentVer, latest)
+    if (cmp >= 0) {
+      isAlreadyLatest = true
+      msg = `节点「${row.name}」当前 Agent 版本（${currentVer}）已是官方最新版本（${latest}）。\n\n是否仍要重新拉取并覆盖安装？`
+    } else {
+      msg = `检测到官方最新版本 Agent：\n- 当前节点版本：${currentVer}\n- 官方最新版本：${latest}\n\n确认将节点「${row.name}」升级至最新版？（sha256 校验，完成后节点自动重启，期间短暂离线）`
+    }
+  } else {
+    msg = `将从 GitHub Releases 下载最新版 Agent 并在节点「${row.name}」上升级（sha256 校验），完成后节点自动重启，期间短暂离线。当前版本：${currentVer || '未知'}`
+  }
+
   try {
     await ElMessageBox.confirm(
-      `将从 GitHub Releases 下载最新版 Agent 并在节点「${row.name}」上升级（sha256 校验），完成后节点自动重启，期间短暂离线。当前版本：${row.agent_version || '未知'}`,
-      '升级 Agent',
-      { type: 'warning' },
+      msg,
+      isAlreadyLatest ? '重新安装 Agent' : '升级 Agent',
+      {
+        type: isAlreadyLatest ? 'info' : 'warning',
+        confirmButtonText: isAlreadyLatest ? '重新安装' : '立即升级',
+        cancelButtonText: '取消',
+      },
     )
   } catch {
     return
   }
+
   upgradingId.value = row.id
   try {
-    const { data } = await upgradeAgent(row.id)
+    const { data } = await upgradeAgent(row.id, {
+      target: latest || undefined,
+      force: isAlreadyLatest,
+    })
     if (data.code === 0 && data.data.ok) {
       ElMessage.success((data.data.data as string) || '已触发升级')
       load()
@@ -344,6 +400,17 @@ async function removeServer(row: any) {
       <div class="x-toolbar-left">
         <el-input v-model="keyword" placeholder="搜索名称 / 地址 / 地区" :prefix-icon="Search" clearable style="width: 240px" />
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        <el-tag
+          v-if="latestAgentVersion"
+          size="default"
+          type="info"
+          class="cell-mono"
+          style="cursor: pointer; height: 32px; display: inline-flex; align-items: center"
+          title="官方最新 Agent 版本，点击刷新最新版本检测"
+          @click="loadLatestAgentVersion(true)"
+        >
+          官方最新: {{ latestAgentVersion }}
+        </el-tag>
       </div>
       <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
     </div>
@@ -403,16 +470,29 @@ async function removeServer(row: any) {
             </div>
             <div class="grid-item">
               <span class="item-label">Agent 版本</span>
-              <div class="item-value" style="display: flex; align-items: center; gap: 4px">
+              <div class="item-value" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap">
                 <span class="cell-mono muted font-12">{{ row.agent_version || 'v—' }}</span>
+                <span
+                  v-if="getAgentVersionStatus(row.agent_version).type === 'latest'"
+                  class="x-chip green"
+                  style="font-size: 9.5px; padding: 0 4px"
+                >最新</span>
+                <span
+                  v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
+                  class="x-chip orange"
+                  style="font-size: 9.5px; padding: 0 4px"
+                  :title="`官方最新版本 ${latestAgentVersion}`"
+                >有新版</span>
                 <el-link
                   v-if="row.status === 1"
-                  type="primary"
+                  :type="getAgentVersionStatus(row.agent_version).type === 'outdated' ? 'warning' : 'primary'"
                   :underline="false"
                   :disabled="upgradingId === row.id"
-                  style="font-size: 11px"
+                  style="font-size: 11px; font-weight: 600"
                   @click="upgradeNodeAgent(row)"
-                >升级</el-link>
+                >
+                  {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重装' : '升级') }}
+                </el-link>
               </div>
             </div>
             <div class="grid-item full-width">
@@ -442,7 +522,10 @@ async function removeServer(row: any) {
                 <el-dropdown-menu>
                   <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
                   <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
-                  <el-dropdown-item command="upgrade"><el-icon><Upload /></el-icon>升级 Agent</el-dropdown-item>
+                  <el-dropdown-item command="upgrade">
+                    <el-icon><Upload /></el-icon>
+                    {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级 Agent' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装 Agent' : '升级 Agent') }}
+                  </el-dropdown-item>
                   <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
                   <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
                   <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)">

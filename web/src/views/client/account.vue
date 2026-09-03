@@ -10,6 +10,7 @@ import {
   RefreshRight,
   Ticket,
   List,
+  CopyDocument,
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
@@ -188,6 +189,17 @@ async function submitTwofaConfirm() {
     ElMessage.error(errMsg(e, '绑定失败'))
   } finally {
     twofaLoading.value = false
+  }
+}
+
+async function copyBackupCodes() {
+  if (!backupCodes.value.length) return
+  const text = backupCodes.value.join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('恢复码已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败，请手动选择复制')
   }
 }
 
@@ -472,6 +484,7 @@ async function onLogout() {
       v-model="twofaOpen"
       :title="twofaStep === 'disable' ? '关闭两步验证' : '开启两步验证'"
       width="400px"
+      class="twofa-dialog"
       :close-on-click-modal="false"
       append-to-body
     >
@@ -509,9 +522,14 @@ async function onLogout() {
         <div class="backup-codes">
           <code v-for="c in backupCodes" :key="c" class="cell-mono">{{ c }}</code>
         </div>
-        <el-button type="primary" style="width: 100%; margin-top: 14px" @click="twofaOpen = false">
-          我已保存
-        </el-button>
+        <div style="display: flex; gap: 10px; margin-top: 14px">
+          <el-button style="flex: 1" @click="copyBackupCodes">
+            <el-icon><CopyDocument /></el-icon>&nbsp;复制全部
+          </el-button>
+          <el-button type="primary" style="flex: 1" @click="twofaOpen = false">
+            我已保存
+          </el-button>
+        </div>
       </template>
 
       <!-- 关闭：验证 -->

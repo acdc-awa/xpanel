@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -41,6 +42,17 @@ func (d *Deps) UserOTPConfirm(c *gin.Context) {
 		return
 	}
 	d.Audit.Log("user", uid, "otp.enable", "开启两步验证", util.ClientIPFromContext(c))
+
+	// 重新读取自增后的 token_version 并重新下发带 2FA 认证的会话 cookie，防止当前页面因会话失效立即被登出
+	var user models.User
+	if err := d.DB.First(&user, uid).Error; err == nil {
+		access, errA := d.JWT.GenerateVerified(user.ID, user.Role, user.TokenVersion)
+		refresh, errR := d.JWT.Generate(user.ID, user.Role, contracts.TokenRefresh, user.TokenVersion)
+		if errA == nil && errR == nil {
+			d.setAuthCookies(c, access, refresh)
+		}
+	}
+
 	util.OK(c, gin.H{"backup_codes": codes})
 }
 
@@ -83,6 +95,16 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 		return
 	}
 	d.Audit.Log("user", uid, "otp.disable", "关闭两步验证", util.ClientIPFromContext(c))
+
+	// 重新读取自增后的 token_version 并重新下发普通会话 cookie
+	if err := d.DB.First(&user, uid).Error; err == nil {
+		access, errA := d.JWT.Generate(user.ID, user.Role, contracts.TokenAccess, user.TokenVersion)
+		refresh, errR := d.JWT.Generate(user.ID, user.Role, contracts.TokenRefresh, user.TokenVersion)
+		if errA == nil && errR == nil {
+			d.setAuthCookies(c, access, refresh)
+		}
+	}
+
 	util.OK(c, gin.H{"ok": true})
 }
 

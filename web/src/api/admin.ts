@@ -283,10 +283,27 @@ export function serverCommand(
   })
 }
 
+export interface AgentVersionInfo {
+  latest_version: string
+  repo: string
+  checked_at: string
+}
+
+// 查询官方最新的 Agent 发布版本
+export function getAgentLatestVersion(refresh = false) {
+  return http.get<ApiResp<AgentVersionInfo>>('/admin/servers/agent-version', {
+    params: refresh ? { refresh: 1 } : undefined,
+  })
+}
+
 // 升级节点 Agent：节点侧要从 GitHub Releases 下载二进制（主控侧等待回执最长 5 分钟），
 // 全局 axios 超时仅 10s，必须单独放宽（略大于主控的 UpgradeAskTimeout）
-export function upgradeAgent(id: number) {
-  return http.post<ApiResp<CommandResult>>(`/admin/servers/${id}/command`, { type: 'upgrade_agent' }, { timeout: 320000 })
+export function upgradeAgent(id: number, payload?: { target?: string; force?: boolean }) {
+  return http.post<ApiResp<CommandResult>>(
+    `/admin/servers/${id}/command`,
+    { type: 'upgrade_agent', ...(payload || {}) },
+    { timeout: 320000 },
+  )
 }
 
 // ===== P3 入站管理 + 配置生成 =====

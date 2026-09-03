@@ -370,6 +370,8 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		Type       string `json:"type" binding:"required"`
 		ConfigJSON string `json:"config_json"`
 		Lines      int    `json:"lines"`
+		Target     string `json:"target"`
+		Force      bool   `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -391,7 +393,25 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 	case protocol.MsgGetLogs:
 		payload = protocol.GetLogsPayload{Lines: req.Lines}
 	case protocol.MsgUpgradeAgent:
-		payload = protocol.UpgradeAgentPayload{}
+		target := strings.TrimSpace(req.Target)
+		if target == "" {
+			if latest, _, err := d.GetCachedAgentLatestVersion(c.Request.Context(), false); err == nil && latest != "" {
+				target = latest
+			}
+		}
+
+		// 对比节点当前版本与目标版本：未指定 force 时若当前已是最新或更高，直接返回
+		var srv models.Server
+		if err := d.DB.First(&srv, id).Error; err == nil {
+			if !req.Force && srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
+				util.OK(c, gin.H{
+					"ok":   true,
+					"data": fmt.Sprintf("节点当前已是最新版本 %s（目标 %s），无需升级", srv.AgentVersion, target),
+				})
+				return
+			}
+		}
+		payload = protocol.UpgradeAgentPayload{Target: target}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
 		return
