@@ -95,6 +95,9 @@ type Hub struct {
 	wg      sync.WaitGroup
 	quit    chan struct{}
 
+	upgradeMu     sync.RWMutex
+	upgradeStatus map[uint64]*protocol.UpgradeProgressPayload // server_id → 最新升级进度
+
 	enforcedMu sync.Mutex
 	enforcedAt map[uint64]time.Time // 事件驱动处置节流：userID → 上次触发时刻（watchdog 定期清理）
 }
@@ -126,6 +129,7 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 		quit:    make(chan struct{}),
 	}
 	h.enforcedAt = make(map[uint64]time.Time)
+	h.upgradeStatus = make(map[uint64]*protocol.UpgradeProgressPayload)
 	h.wg.Add(1)
 	go h.watchdog()
 	return h
@@ -300,8 +304,37 @@ func (h *Hub) readPump(conn *Conn) {
 			h.handleTrafficReport(conn, msg)
 		case protocol.MsgInternalUUIDReport:
 			h.handleInternalUUIDReport(conn, msg)
+		case protocol.MsgUpgradeProgress:
+			h.handleUpgradeProgress(conn, msg)
 		}
 	}
+}
+
+// SetUpgradeStatus 记录或更新指定节点的升级进度。
+func (h *Hub) SetUpgradeStatus(serverID uint64, p *protocol.UpgradeProgressPayload) {
+	h.upgradeMu.Lock()
+	defer h.upgradeMu.Unlock()
+	h.upgradeStatus[serverID] = p
+}
+
+// GetUpgradeStatus 获取指定节点的最新升级进度（空表示未在升级）。
+func (h *Hub) GetUpgradeStatus(serverID uint64) *protocol.UpgradeProgressPayload {
+	h.upgradeMu.RLock()
+	defer h.upgradeMu.RUnlock()
+	if st, ok := h.upgradeStatus[serverID]; ok {
+		cp := *st
+		return &cp
+	}
+	return nil
+}
+
+// handleUpgradeProgress 接收节点升级进度上报并缓存。
+func (h *Hub) handleUpgradeProgress(conn *Conn, msg *protocol.Message) {
+	var p protocol.UpgradeProgressPayload
+	if err := msg.PayloadTo(&p); err != nil {
+		return
+	}
+	h.SetUpgradeStatus(conn.ServerID, &p)
 }
 
 // handleInternalUUIDReport 节点侧内部 UUID 变更主动上报（如 CLI 轮换）：

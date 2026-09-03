@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled, Loading, Check, Close } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
@@ -13,6 +13,8 @@ import {
   resetServerSecret,
   serverCommand,
   upgradeAgent,
+  getAgentUpgradeStatus,
+  type AgentUpgradeStatus,
   getAgentLatestVersion,
   type CommandResult,
   type ServerItem,
@@ -211,8 +213,61 @@ async function restartXray(row: any) {
   }
 }
 
-// ---- Agent 升级（面板触发节点自升级，节点从 GitHub Releases 拉取） ----
+// ---- Agent 升级监控 ----
 const upgradingId = ref(0)
+const upgradeModalOpen = ref(false)
+const upgradeTarget = ref<ServerItem | null>(null)
+const upgradeStatus = ref<AgentUpgradeStatus | null>(null)
+
+const upgradeActiveStep = computed(() => {
+  if (!upgradeStatus.value) return 0
+  switch (upgradeStatus.value.phase) {
+    case 'starting':
+    case 'checking':
+      return 0
+    case 'downloading':
+      return 1
+    case 'verifying':
+      return 2
+    case 'replacing':
+    case 'restarting':
+      return 3
+    case 'success':
+      return 4
+    case 'failed':
+      return 1
+    default:
+      return 0
+  }
+})
+
+let upgradeTimer: any = null
+
+function stopUpgradePolling() {
+  if (upgradeTimer) {
+    clearInterval(upgradeTimer)
+    upgradeTimer = null
+  }
+}
+
+onUnmounted(stopUpgradePolling)
+
+async function pollUpgradeStatus(serverId: number) {
+  try {
+    const { data } = await getAgentUpgradeStatus(serverId)
+    if (data?.data?.status) {
+      upgradeStatus.value = data.data.status
+      if (data.data.status.phase === 'success') {
+        stopUpgradePolling()
+        load()
+      } else if (data.data.status.phase === 'failed') {
+        stopUpgradePolling()
+      }
+    }
+  } catch {
+    // 忽略轮询抖动
+  }
+}
 
 async function upgradeNodeAgent(row: any) {
   const currentVer = row.agent_version || ''
@@ -246,22 +301,55 @@ async function upgradeNodeAgent(row: any) {
     return
   }
 
+  upgradeTarget.value = row
+  upgradeStatus.value = {
+    phase: 'starting',
+    target: latest || undefined,
+    message: '正在向节点下发自升级指令...',
+    ts: Math.floor(Date.now() / 1000),
+  }
+  upgradeModalOpen.value = true
   upgradingId.value = row.id
+
+  stopUpgradePolling()
+  upgradeTimer = setInterval(() => {
+    pollUpgradeStatus(row.id)
+  }, 1500)
+
   try {
     const { data } = await upgradeAgent(row.id, {
       target: latest || undefined,
       force: isAlreadyLatest,
     })
     if (data.code === 0 && data.data.ok) {
-      ElMessage.success((data.data.data as string) || '已触发升级')
+      upgradeStatus.value = {
+        phase: 'success',
+        target: latest || undefined,
+        message: (data.data.data as string) || '已升级完成，节点已重新加载新版本',
+        ts: Math.floor(Date.now() / 1000),
+      }
+      stopUpgradePolling()
       load()
-      // 新版本号要等节点重启后的首次心跳（约 30s）才回填，延迟再刷一次
-      setTimeout(load, 35000)
+      setTimeout(load, 15000)
     } else {
-      ElMessage.error(data.data?.error || data.message || '升级失败')
+      upgradeStatus.value = {
+        phase: 'failed',
+        target: latest || undefined,
+        message: '升级失败',
+        error: data.data?.error || data.message || '升级失败',
+        ts: Math.floor(Date.now() / 1000),
+      }
+      stopUpgradePolling()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '升级失败（节点可能仍在下载，可稍后刷新查看版本；若节点 Agent 过旧不支持远程升级，请在节点重跑安装命令）'))
+    upgradeStatus.value = {
+      phase: 'failed',
+      target: latest || undefined,
+      message: '升级请求超时或网络异常',
+      error: errMsg(e, '升级失败（节点可能仍在后台下载，可稍后刷新查看版本）'),
+      ts: Math.floor(Date.now() / 1000),
+    }
+    stopUpgradePolling()
   } finally {
     upgradingId.value = 0
   }
@@ -272,20 +360,50 @@ const logOpen = ref(false)
 const logContent = ref('')
 const logLoading = ref(false)
 const logTarget = ref<ServerItem | null>(null)
+const logLines = ref(50)
+const logReverse = ref(false)
+const logPreRef = ref<HTMLPreElement | null>(null)
 
-async function openLogs(row: any) {
-  logTarget.value = row
-  logOpen.value = true
-  logContent.value = ''
+const displayedLogContent = computed(() => {
+  if (!logContent.value) return '（空）'
+  if (!logReverse.value) return logContent.value
+  const lines = logContent.value.split('\n')
+  return lines.slice().reverse().join('\n')
+})
+
+async function scrollLogToBottom() {
+  await nextTick()
+  if (logPreRef.value && !logReverse.value) {
+    logPreRef.value.scrollTop = logPreRef.value.scrollHeight
+  }
+}
+
+async function fetchLogs() {
+  if (!logTarget.value) return
   logLoading.value = true
   try {
-    const { data } = await serverCommand(row.id, 'get_logs', { lines: 200 })
-    logContent.value = (data.data.data as string) || '（空）'
+    const { data } = await serverCommand(logTarget.value.id, 'get_logs', { lines: logLines.value })
+    logContent.value = (data.data.data as string) || ''
+    await scrollLogToBottom()
   } catch (e) {
     logContent.value = `读取失败：${errMsg(e)}`
   } finally {
     logLoading.value = false
   }
+}
+
+async function openLogs(row: any) {
+  logTarget.value = row
+  logOpen.value = true
+  logContent.value = ''
+  await fetchLogs()
+}
+
+function copyLogs() {
+  if (!logContent.value) return
+  navigator.clipboard.writeText(displayedLogContent.value)
+    .then(() => ElMessage.success('日志已复制到剪贴板'))
+    .catch(() => ElMessage.error('复制失败'))
 }
 
 // ---- 编辑服务器 ----
@@ -596,8 +714,109 @@ async function removeServer(row: any) {
     </el-dialog>
 
     <!-- 日志 -->
-    <el-dialog v-model="logOpen" :title="`最近日志 · ${logTarget?.name ?? ''}`" width="620px">
-      <pre v-loading="logLoading" class="log-view">{{ logContent }}</pre>
+    <el-dialog v-model="logOpen" :title="`最近日志 · ${logTarget?.name ?? ''}`" width="760px">
+      <div class="log-toolbar">
+        <div class="toolbar-left">
+          <span class="toolbar-label">行数:</span>
+          <el-radio-group v-model="logLines" size="small" @change="fetchLogs">
+            <el-radio-button :value="50">50</el-radio-button>
+            <el-radio-button :value="100">100</el-radio-button>
+            <el-radio-button :value="200">200</el-radio-button>
+            <el-radio-button :value="500">500</el-radio-button>
+          </el-radio-group>
+          <el-switch v-model="logReverse" size="small" active-text="最新在最前" @change="scrollLogToBottom" />
+        </div>
+        <div class="toolbar-right">
+          <el-button size="small" :loading="logLoading" @click="fetchLogs">
+            <el-icon><Refresh /></el-icon>&nbsp;刷新
+          </el-button>
+          <el-button size="small" @click="copyLogs">
+            <el-icon><CopyDocument /></el-icon>&nbsp;复制
+          </el-button>
+        </div>
+      </div>
+      <pre ref="logPreRef" v-loading="logLoading" class="log-view">{{ displayedLogContent }}</pre>
+    </el-dialog>
+
+    <!-- Agent 升级监控弹窗 -->
+    <el-dialog
+      v-model="upgradeModalOpen"
+      :title="`Agent 升级监控 · ${upgradeTarget?.name ?? ''}`"
+      width="640px"
+      :close-on-click-modal="false"
+      @close="stopUpgradePolling"
+    >
+      <div class="upgrade-modal-content">
+        <div class="upgrade-header">
+          <div class="upgrade-node-info">
+            <span class="node-name">{{ upgradeTarget?.name }}</span>
+            <code class="cell-mono muted font-11">节点 ID: {{ upgradeTarget?.node_id }}</code>
+          </div>
+          <div class="upgrade-ver-info">
+            <span class="ver-label">版本流转:</span>
+            <el-tag size="small" type="info">{{ upgradeTarget?.agent_version || '未知' }}</el-tag>
+            <span class="ver-arrow">→</span>
+            <el-tag size="small" type="success">{{ latestAgentVersion || '最新版' }}</el-tag>
+          </div>
+        </div>
+
+        <!-- 升级步骤条 -->
+        <el-steps
+          :active="upgradeActiveStep"
+          finish-status="success"
+          :process-status="upgradeStatus?.phase === 'failed' ? 'error' : 'process'"
+          align-center
+          style="margin: 28px 0 20px"
+        >
+          <el-step title="版本解析" description="检查远端版本" />
+          <el-step title="下载资源" description="GitHub Releases" />
+          <el-step title="完整性校验" description="SHA256 校验" />
+          <el-step title="重启生效" description="服务重载就绪" />
+        </el-steps>
+
+        <!-- 当前状态卡片 -->
+        <div
+          class="upgrade-status-box"
+          :class="{
+            'is-failed': upgradeStatus?.phase === 'failed',
+            'is-success': upgradeStatus?.phase === 'success',
+            'is-running': upgradeStatus && upgradeStatus.phase !== 'failed' && upgradeStatus.phase !== 'success'
+          }"
+        >
+          <div class="status-icon">
+            <el-icon v-if="upgradeStatus?.phase === 'success'" class="icon-success"><Check /></el-icon>
+            <el-icon v-else-if="upgradeStatus?.phase === 'failed'" class="icon-error"><Close /></el-icon>
+            <el-icon v-else class="is-loading icon-process"><Loading /></el-icon>
+          </div>
+          <div class="status-texts">
+            <div class="status-msg">{{ upgradeStatus?.message || '等待节点响应...' }}</div>
+            <div v-if="upgradeStatus?.error" class="status-err cell-mono">
+              {{ upgradeStatus.error }}
+            </div>
+            <div v-else-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'" class="status-hint">
+              节点正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10~60 秒）
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px">
+          <el-button
+            v-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'"
+            @click="upgradeModalOpen = false"
+          >
+            后台运行
+          </el-button>
+          <el-button
+            v-else
+            type="primary"
+            @click="upgradeModalOpen = false"
+          >
+            完成并关闭
+          </el-button>
+        </div>
+      </template>
     </el-dialog>
 
     <!-- 编辑服务器 -->
@@ -677,6 +896,24 @@ async function removeServer(row: any) {
 .status-rows .row { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--x-border); font-size: 13.5px; }
 .status-rows .k { color: var(--x-text-2); }
 .status-rows .v { font-weight: 500; }
+.log-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+
+  .toolbar-left, .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .toolbar-label {
+    font-size: 12px;
+    color: var(--x-text-2);
+  }
+}
 .log-view {
   background: #171b2e;
   color: #c7d2fe;
@@ -685,10 +922,99 @@ async function removeServer(row: any) {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
-  max-height: 420px;
+  max-height: 460px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* ================= Agent 升级监控弹窗 ================= */
+.upgrade-modal-content {
+  padding: 4px 6px;
+}
+.upgrade-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--x-fill-2, #f8fafc);
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--x-border-light, #f1f5f9);
+
+  .upgrade-node-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    .node-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--x-text);
+    }
+  }
+  .upgrade-ver-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    .ver-label {
+      color: var(--x-text-3);
+    }
+    .ver-arrow {
+      color: var(--x-text-3);
+      font-weight: bold;
+    }
+  }
+}
+.upgrade-status-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--x-bg, #f9fafb);
+  border: 1px solid var(--x-border, #e5e7eb);
+  margin-top: 16px;
+
+  &.is-running {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    .icon-process { font-size: 22px; color: #2563eb; }
+  }
+  &.is-success {
+    border-color: #86efac;
+    background: #f0fdf4;
+    .icon-success { font-size: 22px; color: #16a34a; font-weight: bold; }
+  }
+  &.is-failed {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    .icon-error { font-size: 22px; color: #dc2626; font-weight: bold; }
+  }
+
+  .status-texts {
+    flex: 1;
+    .status-msg {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--x-text);
+      line-height: 1.5;
+    }
+    .status-err {
+      margin-top: 6px;
+      color: #b91c1c;
+      font-size: 11.5px;
+      line-height: 1.4;
+      word-break: break-all;
+      background: rgba(254, 226, 226, 0.7);
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    .status-hint {
+      margin-top: 4px;
+      color: var(--x-text-3);
+      font-size: 11.5px;
+    }
+  }
 }
 
 /* ================= 全局统一服务器卡片网格流 ================= */

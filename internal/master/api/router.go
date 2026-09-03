@@ -151,6 +151,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/servers/:id", d.AdminDeleteServer)
 			admin.POST("/servers/:id/reset-secret", d.AdminResetSecret)
 			admin.POST("/servers/:id/command", d.AdminServerCommand)
+			admin.GET("/servers/:id/upgrade-status", d.AdminGetServerUpgradeStatus)
 			admin.POST("/servers/:id/generate-config", d.AdminGenerateConfig)
 			admin.GET("/servers/:id/config-preview", d.AdminGetServerConfigPreview)
 			admin.GET("/servers/:id/outbounds", d.AdminGetServerOutbounds)

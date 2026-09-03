@@ -306,6 +306,18 @@ export function upgradeAgent(id: number, payload?: { target?: string; force?: bo
   )
 }
 
+export interface AgentUpgradeStatus {
+  phase: 'starting' | 'checking' | 'downloading' | 'verifying' | 'replacing' | 'restarting' | 'failed' | 'success'
+  target?: string
+  message: string
+  error?: string
+  ts: number
+}
+
+export function getAgentUpgradeStatus(id: number) {
+  return http.get<ApiResp<{ status: AgentUpgradeStatus | null }>>(`/admin/servers/${id}/upgrade-status`)
+}
+
 // ===== P3 入站管理 + 配置生成 =====
 
 export interface InboundPayload {
@@ -611,10 +623,18 @@ export function getOrders(page = 1, size = 20, status?: string) {
   )
 }
 
-export function getAuditLogs(page = 1, size = 20, action?: string) {
+export interface AuditLogQueryParams {
+  action?: string
+  category?: string
+  keyword?: string
+  operator_id?: number
+}
+
+export function getAuditLogs(page = 1, size = 20, params?: AuditLogQueryParams | string) {
+  const queryParams = typeof params === 'string' ? { action: params } : (params || {})
   return http.get<ApiResp<{ total: number; page: number; size: number; items: AuditLog[] }>>(
     '/admin/audit-logs',
-    { params: { page, size, action } },
+    { params: { page, size, ...queryParams } },
   )
 }
 

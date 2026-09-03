@@ -411,6 +411,14 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 				return
 			}
 		}
+		if d.Hub != nil {
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "starting",
+				Target:  target,
+				Message: "正在向节点下发自升级指令...",
+				TS:      time.Now().Unix(),
+			})
+		}
 		payload = protocol.UpgradeAgentPayload{Target: target}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
@@ -424,10 +432,54 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 	}
 	res, err := d.Hub.Ask(id, req.Type, payload, askTimeout)
 	if err != nil {
+		if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "failed",
+				Message: "升级指令超时或失败",
+				Error:   err.Error(),
+				TS:      time.Now().Unix(),
+			})
+		}
 		util.Fail(c, 502, "指令失败: "+err.Error())
 		return
 	}
+	if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
+		if !res.OK {
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "failed",
+				Message: "升级失败",
+				Error:   res.Error,
+				TS:      time.Now().Unix(),
+			})
+		} else {
+			msg := "升级完成"
+			if s, ok := res.Data.(string); ok && s != "" {
+				msg = s
+			}
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "success",
+				Message: msg,
+				TS:      time.Now().Unix(),
+			})
+		}
+	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
+}
+
+// AdminGetServerUpgradeStatus GET /api/v1/admin/servers/:id/upgrade-status
+// 查询节点当前的 Agent 升级进度与状态。
+func (d *Deps) AdminGetServerUpgradeStatus(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	if d.Hub == nil {
+		util.OK(c, gin.H{"status": nil})
+		return
+	}
+	st := d.Hub.GetUpgradeStatus(id)
+	util.OK(c, gin.H{"status": st})
 }
 
 // AdminGetServerConfigPreview GET /api/v1/admin/servers/:id/config-preview

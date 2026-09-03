@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,8 +21,54 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		size = 20
 	}
 	q := d.DB.Model(&models.AuditLog{})
-	if act := c.Query("action"); act != "" {
+
+	// 1. 精确 action 筛选
+	if act := strings.TrimSpace(c.Query("action")); act != "" {
 		q = q.Where("action = ?", act)
+	}
+
+	// 2. 模块分类筛选（按 action 前缀划分）
+	switch strings.TrimSpace(c.Query("category")) {
+	case "servers":
+		q = q.Where("action LIKE 'servers.%' OR action = 'servers'")
+	case "users":
+		q = q.Where("action LIKE 'users.%' OR action = 'users' OR action LIKE 'invitations.%' OR action = 'invitations'")
+	case "billing":
+		q = q.Where("action LIKE 'plans.%' OR action = 'plans' OR action LIKE 'orders.%' OR action = 'orders' OR action LIKE 'gift-cards.%' OR action = 'gift-cards'")
+	case "inbounds":
+		q = q.Where("action LIKE 'inbounds.%' OR action = 'inbounds' OR action LIKE 'certs.%' OR action = 'certs' OR action LIKE 'access-points.%' OR action = 'access-points' OR action LIKE 'permission-groups.%' OR action = 'permission-groups'")
+	case "settings":
+		q = q.Where("action LIKE 'settings.%' OR action = 'settings' OR action LIKE 'notices.%' OR action = 'notices' OR action LIKE 'backup.%' OR action = 'backup' OR action LIKE 'topology.%' OR action LIKE 'topology-layout.%'")
+	case "auth":
+		q = q.Where("action LIKE 'auth.%' OR action = 'auth'")
+	}
+
+	// 3. 关键词跨字段模糊搜索 (action / detail / ip)
+	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
+		pat := "%" + kw + "%"
+		q = q.Where("action LIKE ? OR detail LIKE ? OR ip LIKE ?", pat, pat, pat)
+	}
+
+	// 4. 操作人筛选
+	if op := strings.TrimSpace(c.Query("operator_id")); op != "" {
+		if opID := atoiDefault(op, 0); opID > 0 {
+			q = q.Where("operator_id = ?", opID)
+		}
+	}
+	if ot := strings.TrimSpace(c.Query("operator_type")); ot != "" {
+		q = q.Where("operator_type = ?", ot)
+	}
+
+	// 5. 时间范围筛选
+	if st := strings.TrimSpace(c.Query("start_time")); st != "" {
+		if t, err := time.Parse(time.RFC3339, st); err == nil {
+			q = q.Where("created_at >= ?", t)
+		}
+	}
+	if et := strings.TrimSpace(c.Query("end_time")); et != "" {
+		if t, err := time.Parse(time.RFC3339, et); err == nil {
+			q = q.Where("created_at <= ?", t)
+		}
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

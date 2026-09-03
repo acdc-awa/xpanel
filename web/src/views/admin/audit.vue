@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh, Loading, DocumentCopy } from '@element-plus/icons-vue'
+import { Refresh, Loading, DocumentCopy, Search } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -11,10 +11,16 @@ const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
 
+const category = ref('')
+const keyword = ref('')
+
 async function load() {
   loading.value = true
   try {
-    const { data } = await getAuditLogs(page.value, size.value)
+    const { data } = await getAuditLogs(page.value, size.value, {
+      category: category.value || undefined,
+      keyword: keyword.value.trim() || undefined,
+    })
     if (data.code === 0) {
       list.value = data.data.items
       total.value = data.data.total
@@ -27,17 +33,142 @@ async function load() {
     loading.value = false
   }
 }
+
+function onFilterChange() {
+  page.value = 1
+  load()
+}
+
+function resetFilters() {
+  category.value = ''
+  keyword.value = ''
+  page.value = 1
+  load()
+}
+
 onMounted(load)
 
 function fmtTime(t: string) {
-  return t.replace('T', ' ').slice(0, 19)
+  return t ? t.replace('T', ' ').slice(0, 19) : ''
 }
 
-const actionText: Record<string, string> = {
-  'auth.login': '登录',
-  'order.create': '下单',
-  'order.confirm': '确认订单',
-  'order.cancel': '取消订单',
+interface ActionMeta {
+  categoryName: string
+  categoryColor: 'primary' | 'success' | 'warning' | 'danger' | 'info'
+  title: string
+}
+
+function getActionMeta(action: string, detail = ''): ActionMeta {
+  const act = action || ''
+  const d = detail || ''
+
+  // 1. 节点管理
+  if (act.startsWith('servers')) {
+    let title = '节点管理'
+    if (act === 'servers') {
+      title = '创建节点'
+    } else if (act.endsWith('.command')) {
+      if (d.includes('push_config')) title = '推送节点配置'
+      else if (d.includes('restart_xray')) title = '重启节点 Xray'
+      else if (d.includes('upgrade_agent')) title = '升级节点 Agent'
+      else if (d.includes('get_status')) title = '查询节点状态'
+      else if (d.includes('get_logs')) title = '查看节点日志'
+      else title = '执行节点指令'
+    } else if (act.endsWith('.reset-secret')) {
+      title = '重置节点密钥'
+    } else if (act.endsWith('.generate-config')) {
+      title = '重新生成节点配置'
+    } else if (act.includes('.outbounds')) {
+      title = d.includes('DELETE') ? '删除节点出站' : '配置节点出站'
+    } else if (act.includes('.routing')) {
+      title = d.includes('DELETE') ? '删除节点分流' : '配置节点分流'
+    } else if (act.includes('.layers')) {
+      title = d.includes('DELETE') ? '删除分层规则' : '配置分层规则'
+    } else if (d.includes('DELETE')) {
+      title = '删除节点'
+    } else {
+      title = '修改节点信息'
+    }
+    return { categoryName: '节点', categoryColor: 'primary', title }
+  }
+
+  // 2. 用户管理
+  if (act.startsWith('users') || act.startsWith('invitations')) {
+    let title = '用户管理'
+    if (act === 'users') {
+      title = '创建新用户'
+    } else if (act.endsWith('.toggle')) {
+      title = '启停用户账号'
+    } else if (act.endsWith('.2fa.disable')) {
+      title = '关闭双重验证(2FA)'
+    } else if (act.endsWith('.reset-traffic')) {
+      title = '重置用户流量'
+    } else if (act.endsWith('.balance')) {
+      title = '调整用户余额'
+    } else if (act.startsWith('invitations')) {
+      title = d.includes('DELETE') ? '作废邀请码' : '批量生成邀请码'
+    } else if (d.includes('DELETE')) {
+      title = '删除用户账号'
+    } else {
+      title = '修改用户信息'
+    }
+    return { categoryName: '用户', categoryColor: 'success', title }
+  }
+
+  // 3. 财务与套餐
+  if (act.startsWith('plans') || act.startsWith('orders') || act.startsWith('gift-cards') || act.startsWith('billing')) {
+    let title = '财务套餐'
+    if (act.startsWith('plans')) {
+      title = act === 'plans' ? '创建套餐' : (d.includes('DELETE') ? '删除套餐' : '修改套餐')
+    } else if (act.startsWith('orders')) {
+      if (d.includes('confirm') || act.includes('confirm')) title = '确认订单'
+      else if (d.includes('cancel') || act.includes('cancel')) title = '取消订单'
+      else title = '订单处理'
+    } else if (act.startsWith('gift-cards')) {
+      title = d.includes('DELETE') ? '删除礼品卡' : '批量生成礼品卡'
+    }
+    return { categoryName: '财务', categoryColor: 'warning', title }
+  }
+
+  // 4. 入站与证书
+  if (act.startsWith('inbounds') || act.startsWith('certs') || act.startsWith('access-points') || act.startsWith('permission-groups')) {
+    let title = '入站证书'
+    if (act.startsWith('inbounds')) {
+      if (act.endsWith('.toggle')) title = '启停入站端口'
+      else if (act.includes('setup-internal') || act.includes('rotate-internal')) title = '轮转内部中继账户'
+      else if (d.includes('DELETE')) title = '删除入站端口'
+      else title = act === 'inbounds' ? '新建入站端口' : '修改入站端口'
+    } else if (act.startsWith('certs')) {
+      if (act.includes('self-signed')) title = '签发自签名证书'
+      else title = d.includes('DELETE') ? '删除 TLS 证书' : '上传/配置 TLS 证书'
+    } else if (act.startsWith('access-points')) {
+      title = d.includes('DELETE') ? '删除接入点' : '配置自定义接入点'
+    } else if (act.startsWith('permission-groups')) {
+      title = d.includes('DELETE') ? '删除权限组' : '配置用户权限组'
+    }
+    return { categoryName: '协议证书', categoryColor: 'info', title }
+  }
+
+  // 5. 系统设置与运维
+  if (act.startsWith('settings') || act.startsWith('notices') || act.startsWith('backup') || act.startsWith('topology')) {
+    let title = '系统设置'
+    if (act.startsWith('settings')) title = '修改全局系统设置'
+    else if (act.startsWith('notices')) title = d.includes('DELETE') ? '删除系统公告' : '发布/编辑系统公告'
+    else if (act.startsWith('backup')) title = '创建系统数据备份'
+    else if (act.startsWith('topology')) title = '保存拓扑结构布局'
+    return { categoryName: '系统', categoryColor: 'danger', title }
+  }
+
+  // 6. 认证登录
+  if (act.startsWith('auth')) {
+    return {
+      categoryName: '认证',
+      categoryColor: 'info',
+      title: act === 'auth.login' ? '账号登录' : '身份认证操作',
+    }
+  }
+
+  return { categoryName: '操作', categoryColor: 'info', title: act }
 }
 
 const detailModalOpen = ref(false)
@@ -52,7 +183,28 @@ function viewDetail(detail: string) {
 <template>
   <div class="x-page">
     <div class="x-toolbar">
-      <div class="x-toolbar-left">
+      <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <el-select v-model="category" placeholder="全部分类" clearable style="width: 130px" @change="onFilterChange">
+          <el-option label="全部分类" value="" />
+          <el-option label="节点管理" value="servers" />
+          <el-option label="用户管理" value="users" />
+          <el-option label="财务套餐" value="billing" />
+          <el-option label="入站证书" value="inbounds" />
+          <el-option label="系统设置" value="settings" />
+          <el-option label="身份认证" value="auth" />
+        </el-select>
+        <el-input
+          v-model="keyword"
+          placeholder="搜索操作内容、IP、路由..."
+          clearable
+          style="width: 240px"
+          @keyup.enter="onFilterChange"
+          @clear="onFilterChange"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-button type="primary" @click="onFilterChange"><el-icon><Search /></el-icon>&nbsp;查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
     </div>
@@ -76,9 +228,17 @@ function viewDetail(detail: string) {
               <span class="x-chip" :class="row.operator_type === 'admin' ? 'orange' : 'blue'" style="font-size: 10px; padding: 1px 5px">
                 {{ row.operator_type === 'admin' ? '管理员' : '用户' }} #{{ row.operator_id }}
               </span>
-              <span class="action-name">{{ actionText[row.action] ?? row.action }}</span>
+              <el-tag :type="getActionMeta(row.action, row.detail).categoryColor" size="small" effect="plain" style="font-size: 11px">
+                {{ getActionMeta(row.action, row.detail).categoryName }}
+              </el-tag>
+              <span class="action-name">{{ getActionMeta(row.action, row.detail).title }}</span>
             </div>
             <code class="cell-mono muted" style="font-size: 11px">{{ row.ip || '—' }}</code>
+          </div>
+
+          <!-- 动作原始技术标识 -->
+          <div class="action-code-bar">
+            <span class="action-code cell-mono" :title="row.action">{{ row.action }}</span>
           </div>
 
           <!-- 属性网格与日志详情 -->
@@ -177,6 +337,18 @@ function viewDetail(detail: string) {
       font-weight: 600;
       font-size: 13px;
       color: var(--x-text, #111827);
+    }
+  }
+
+  .action-code-bar {
+    padding: 6px 0 2px;
+    .action-code {
+      font-size: 11px;
+      color: var(--x-text-3);
+      background: var(--x-fill-2, #f8fafc);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--x-border-light, #f1f5f9);
     }
   }
 
