@@ -9,6 +9,7 @@
 # 选项：
 #   --dir <path>      安装目录（默认当前目录；不存在则创建）
 #   --version <v>     钉版本安装（如 v0.1.0；缺省自动取最新 release）
+#   --file <path>     本地 release 压缩包（xpanel-master-*.tar.gz，完全离线部署场景）
 #   --mirror <url>    github.com 的替代基址/代理前缀（如 https://ghproxy.net/https://github.com）
 #   --url <url>       完全自定义 release 包下载地址（优先于 version/mirror 推导；此时建议配 --digest）
 #   --digest <sha>    release 包期望 sha256（提供则强制校验；缺省用 release 的 .sha256 自动校验）
@@ -16,6 +17,7 @@
 #   --fresh           全新覆盖（默认：检测到已有 configs/config.yaml 或 data/panel.db 时保持配置与数据）
 #   --dry-run         只打印将执行的步骤，不实际执行
 #
+# 说明：若直连 GitHub 超时，脚本将自动切换内置镜像加速源。
 # 产物：master 二进制 / web/dist / configs/config.yaml / docker-compose.yml / .env /
 #       Caddyfile.reference / Dockerfile.runtime，数据挂载到当前目录 ./data（SQLite + JWT + 备份）。
 #
@@ -25,6 +27,7 @@ VERSION=""
 MIRROR=""
 URL=""
 DIGEST=""
+LOCAL_FILE=""
 NO_VERIFY=0
 FRESH=0
 DRY_RUN=0
@@ -33,7 +36,7 @@ TARGET="$(pwd)"
 GH_REPO="acdc-awa/xpanel"
 
 usage() {
-  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) TARGET="$2"; shift 2;;
     --version) VERSION="$2"; shift 2;;
+    --file) LOCAL_FILE="$2"; shift 2;;
     --mirror) MIRROR="$2"; shift 2;;
     --url) URL="$2"; shift 2;;
     --digest) DIGEST="$2"; shift 2;;
@@ -80,21 +84,96 @@ if [[ $FRESH -eq 0 && ( -f configs/config.yaml || -f data/panel.db ) ]]; then
   echo "    （如需全新覆盖请加 --fresh）"
 fi
 
-# ---------- 1. 解析 release 包下载地址 ----------
-TARBALL="xpanel-master-${VERSION:-latest}-linux-${ARCH}.tar.gz"
-GH_BASE="${MIRROR:-https://github.com}"
-GH_BASE="${GH_BASE%/}"
+# 内置 GitHub 代理候选列表（留空/直连优先，超时 6 秒自动平滑切换备选镜像）
+DEFAULT_MIRRORS=(
+  "https://github.com"
+  "https://ghproxy.net/https://github.com"
+  "https://gh-proxy.com/https://github.com"
+  "https://github.moeyy.xyz/https://github.com"
+)
 
-if [[ -z "$URL" ]]; then
+# 带镜像故障切换与连接超时的下载函数：$1=目标文件 $2=源URL
+download_with_fallback() {
+  local out="$1" url="$2"
+  if [[ "$url" != https://github.com/* ]]; then
+    run curl -fsSL -o "$out" "$url"
+    return $?
+  fi
+
+  local path="${url#https://github.com/}"
+  local candidates=()
+
+  # 若用户指定了 --mirror，优先置顶尝试
+  if [[ -n "${MIRROR:-}" ]]; then
+    local m="${MIRROR%/}"
+    if [[ "$m" == *github.com ]]; then
+      candidates+=("$m")
+    else
+      candidates+=("${m}/https://github.com")
+    fi
+  fi
+
+  for m in "${DEFAULT_MIRRORS[@]}"; do
+    candidates+=("$m")
+  done
+
+  local tried=()
+  for c in "${candidates[@]}"; do
+    c="${c%/}"
+    local target_url="${c}/${path}"
+    if [[ " ${tried[*]:-} " =~ " ${target_url} " ]]; then
+      continue
+    fi
+    tried+=("$target_url")
+
+    echo "==> 尝试下载: $target_url"
+    if [[ $DRY_RUN -eq 1 ]]; then
+      return 0
+    fi
+    if curl -fSL --connect-timeout 6 -o "$out" "$target_url" 2>/dev/null; then
+      echo "    下载成功"
+      return 0
+    else
+      echo "    连接超时或失败，尝试下一个候选镜像..."
+    fi
+  done
+
+  echo "错误: 所有源均下载失败 ($url)"
+  return 1
+}
+
+# ---------- 1. 解析 release 包下载地址 ----------
+if [[ -n "$LOCAL_FILE" ]]; then
+  echo "==> 使用本地 release 压缩包: $LOCAL_FILE"
+  if [[ ! -f "$LOCAL_FILE" ]]; then
+    echo "本地 release 文件不存在: $LOCAL_FILE"; exit 1
+  fi
+  TARBALL="$(basename "$LOCAL_FILE")"
+  URL="file://$LOCAL_FILE"
+  SHA_URL=""
+elif [[ -z "$URL" ]]; then
   if [[ -n "$VERSION" ]]; then
-    URL="${GH_BASE}/${GH_REPO}/releases/download/${VERSION}/xpanel-master-${VERSION}-linux-${ARCH}.tar.gz"
+    URL="https://github.com/${GH_REPO}/releases/download/${VERSION}/xpanel-master-${VERSION}-linux-${ARCH}.tar.gz"
   else
-    # 自动取最新 release：先用 GitHub API 拿资产名（镜像通常只代理下载，不走 API）
     echo "==> 查询最新 release"
-    API_URL="https://api.github.com/repos/${GH_REPO}/releases/latest"
-    RELEASE_JSON=""
-    if command -v python3 >/dev/null 2>&1; then
-      RELEASE_JSON="$(curl -fsSL "$API_URL" 2>/dev/null || true)"
+    LATEST_TAG=""
+    # 策略 1：通过候选镜像探测 /releases/latest 的 HTTP 302 重定向 Location
+    candidate_bases=()
+    [[ -n "${MIRROR:-}" ]] && candidate_bases+=("${MIRROR%/}")
+    candidate_bases+=("https://github.com" "https://ghproxy.net/https://github.com" "https://gh-proxy.com/https://github.com")
+    for b in "${candidate_bases[@]}"; do
+      b="${b%/}"
+      loc="$(curl -sI --connect-timeout 5 "${b}/${GH_REPO}/releases/latest" 2>/dev/null | grep -i '^Location:' | tr -d '\r\n' | awk '{print $2}')"
+      if [[ -n "$loc" && "$loc" == *"/tag/"* ]]; then
+        LATEST_TAG="${loc##*/}"
+        break
+      fi
+    done
+
+    # 策略 2：若 302 失败，回退到 GitHub API 查 releases/latest
+    if [[ -z "$LATEST_TAG" && $(command -v python3) ]]; then
+      API_URL="https://api.github.com/repos/${GH_REPO}/releases/latest"
+      RELEASE_JSON="$(curl -fsSL --connect-timeout 5 "$API_URL" 2>/dev/null || true)"
       ASSET="$(echo "$RELEASE_JSON" | python3 -c "
 import sys, json
 try:
@@ -107,20 +186,30 @@ try:
 except Exception:
     pass
 " 2>/dev/null || true)"
+      if [[ -n "$ASSET" ]]; then
+        URL="$ASSET"
+      fi
     fi
-    if [[ -z "$ASSET" ]]; then
-      echo "无法自动获取最新 release（GitHub API 不可达或未安装 python3），请显式指定 --version 或 --url"
+
+    if [[ -n "$LATEST_TAG" ]]; then
+      URL="https://github.com/${GH_REPO}/releases/download/${LATEST_TAG}/xpanel-master-${LATEST_TAG}-linux-${ARCH}.tar.gz"
+    fi
+
+    if [[ -z "$URL" ]]; then
+      echo "无法自动获取最新 release（GitHub API 与镜像跳转均不可达），请显式指定 --version、--url 或 --file"
       exit 1
     fi
-    [[ -n "$MIRROR" ]] && ASSET="${ASSET/https:\/\/github.com/$GH_BASE}"
-    URL="$ASSET"
   fi
+  TARBALL="$(basename "$URL")"
+  SHA_URL="${URL%.tar.gz}.tar.gz.sha256"
+else
+  TARBALL="$(basename "$URL")"
+  SHA_URL="${URL%.tar.gz}.tar.gz.sha256"
 fi
-SHA_URL="${URL%.tar.gz}.tar.gz.sha256"
 
 echo "==> 参数"
 echo "    目录     : $TARGET"
-echo "    下载地址 : $URL"
+echo "    下载地址 : ${LOCAL_FILE:-$URL}"
 echo "    校验     : $([ $NO_VERIFY -eq 1 ] && echo '跳过（--no-verify）' || echo 'release .sha256 强制校验')"
 [[ $DRY_RUN -eq 1 ]] && echo "    [DRY-RUN] 仅打印步骤"
 
@@ -128,33 +217,56 @@ echo "    校验     : $([ $NO_VERIFY -eq 1 ] && echo '跳过（--no-verify）' 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
-echo "==> 下载 release 包"
-run curl -fSL -o "${STAGE}/${TARBALL}" "$URL"
-if [[ $NO_VERIFY -eq 0 ]]; then
-  if [[ -n "$DIGEST" ]]; then
-    EXPECT="$DIGEST"
-    echo "    （使用显式 --digest 校验）"
-  else
-    echo "==> 下载校验和"
-    run curl -fsSL -o "${STAGE}/${TARBALL}.sha256" "$SHA_URL"
+if [[ -n "$LOCAL_FILE" ]]; then
+  echo "==> 载入本地 release 包"
+  run cp "$LOCAL_FILE" "${STAGE}/${TARBALL}"
+  if [[ $NO_VERIFY -eq 0 ]]; then
+    if [[ -n "$DIGEST" ]]; then
+      EXPECT="$DIGEST"
+      echo "    （使用显式 --digest 校验）"
+    elif [[ -f "${LOCAL_FILE}.sha256" ]]; then
+      EXPECT="$(awk '{print $1}' "${LOCAL_FILE}.sha256" | head -1)"
+      echo "    （使用本地 .sha256 文件校验）"
+    fi
+    if [[ $DRY_RUN -eq 0 && -n "${EXPECT:-}" ]]; then
+      ACTUAL="$(sha256sum "${STAGE}/${TARBALL}" | awk '{print $1}')"
+      if [[ "$ACTUAL" != "$EXPECT" ]]; then
+        echo "release 校验失败: 期望 $EXPECT 实际 $ACTUAL（拒绝安装）"; exit 1
+      fi
+      echo "    sha256 校验通过"
+    fi
   fi
-  if [[ $DRY_RUN -eq 0 ]]; then
-    if [[ -z "${EXPECT:-}" ]]; then
-      EXPECT="$(awk '{print $1}' "${STAGE}/${TARBALL}.sha256" | head -1)"
-      [[ -z "$EXPECT" ]] && { echo "校验和文件为空（拒绝安装）"; exit 1; }
+else
+  echo "==> 获取 release 包"
+  download_with_fallback "${STAGE}/${TARBALL}" "$URL"
+  if [[ $NO_VERIFY -eq 0 ]]; then
+    if [[ -n "$DIGEST" ]]; then
+      EXPECT="$DIGEST"
+      echo "    （使用显式 --digest 校验）"
+    else
+      echo "==> 获取校验和"
+      download_with_fallback "${STAGE}/${TARBALL}.sha256" "$SHA_URL"
     fi
-    ACTUAL="$(sha256sum "${STAGE}/${TARBALL}" | awk '{print $1}')"
-    if [[ "$ACTUAL" != "$EXPECT" ]]; then
-      echo "release 校验失败: 期望 $EXPECT 实际 $ACTUAL（拒绝安装）"; exit 1
+    if [[ $DRY_RUN -eq 0 ]]; then
+      if [[ -z "${EXPECT:-}" ]]; then
+        EXPECT="$(awk '{print $1}' "${STAGE}/${TARBALL}.sha256" | head -1)"
+        [[ -z "$EXPECT" ]] && { echo "校验和文件为空（拒绝安装）"; exit 1; }
+      fi
+      ACTUAL="$(sha256sum "${STAGE}/${TARBALL}" | awk '{print $1}')"
+      if [[ "$ACTUAL" != "$EXPECT" ]]; then
+        echo "release 校验失败: 期望 $EXPECT 实际 $ACTUAL（拒绝安装）"; exit 1
+      fi
+      echo "    sha256 校验通过"
+    else
+      echo "    [DRY-RUN] 校验: sha256(${TARBALL}) 与 release .sha256 比对"
     fi
-    echo "    sha256 校验通过"
-  else
-    echo "    [DRY-RUN] 校验: sha256(${TARBALL}) 与 release .sha256 比对"
   fi
 fi
 
 echo "==> 解压到临时目录"
-run tar -xzf "${STAGE}/${TARBALL}" -C "$STAGE"
+if [[ $DRY_RUN -eq 0 ]]; then
+  run tar -xzf "${STAGE}/${TARBALL}" -C "$STAGE"
+fi
 
 echo "==> 安装到 $TARGET"
 # 二进制/前端/编排模板始终覆盖（升级语义）；config.yaml 保留已有（幂等，不覆盖用户配置）
