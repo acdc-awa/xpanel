@@ -30,6 +30,10 @@ const (
 	HeartbeatTimeout = 90 * time.Second // 超过此时长无心跳视为失联
 	WriteTimeout     = 10 * time.Second
 	AskTimeout       = 30 * time.Second // 指令等待回执超时（需 > testTimeout + stopGracePeriod + RTT）
+	// SetupInternalAskTimeout setup-internal 指令等待回执超时：节点侧仅幂等读文件或原子写盘，
+	// 刻意短于 AskTimeout 以免管理端保存/创建入站被慢节点拖住；超时由主控生成 UUID 兜底，
+	// 配置以主控 DB 为准，晚到的节点回执被忽略无实际影响。rotate 走管理端显式端点仍用 AskTimeout。
+	SetupInternalAskTimeout = 3 * time.Second
 	// UpgradeAskTimeout 自升级指令等待回执超时：节点需从 GitHub Releases 拉取二进制
 	//（网络慢时可达数分钟），且成功回执在二进制替换完成后才发出。
 	UpgradeAskTimeout = 5 * time.Minute

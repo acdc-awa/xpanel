@@ -716,6 +716,7 @@ function quotaOf(row: any): string {
         :key="editing ? `edit-${editing.id}` : 'create'"
         :model-value="editorModelValue()"
         :inbound-type="formType"
+        :saved-inbound-type="editing?.type || ''"
         :listen="editing?.listen || '0.0.0.0'"
         :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"

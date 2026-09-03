@@ -481,8 +481,19 @@ func (d *Deps) ensureRelayMark(targetInboundID uint64) {
 	if err := d.DB.First(&inb, targetInboundID).Error; err != nil {
 		return
 	}
+	updates := map[string]any{}
 	if inb.Type != models.InboundTypeRelay {
-		d.DB.Model(&inb).Updates(map[string]any{"previous_type": inb.Type, "type": models.InboundTypeRelay})
+		updates["previous_type"] = inb.Type
+		updates["type"] = models.InboundTypeRelay
+		inb.Type = models.InboundTypeRelay
+	}
+	if inb.InternalUUID == "" {
+		if err := d.ensureInternalUUID(&inb); err == nil && inb.InternalUUID != "" {
+			updates["internal_uuid"] = inb.InternalUUID
+		}
+	}
+	if len(updates) > 0 {
+		d.DB.Model(&inb).Updates(updates)
 	}
 }
 

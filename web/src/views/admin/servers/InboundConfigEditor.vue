@@ -56,6 +56,8 @@ const props = withDefaults(
     listen?: string
     showBaseFields?: boolean
     inboundType?: string
+    /** 已保存的入站类型（编辑态由父组件从行数据传入）；未传时回退 inboundType */
+    savedInboundType?: string
     internalUUID?: string
     inboundId?: number
     certId?: number
@@ -72,6 +74,7 @@ const props = withDefaults(
     listen: '0.0.0.0',
     showBaseFields: true,
     inboundType: 'user',
+    savedInboundType: '',
     internalUUID: '',
     inboundId: 0,
     certId: 0,
@@ -366,6 +369,12 @@ async function fetchRealityKeys() {
 async function rotateInternal() {
   if (!props.inboundId) {
     ElMessage.warning('请先保存入站')
+    return
+  }
+  // 拦截依据是已保存类型：编辑器里切到 relay 但尚未保存时，后端仍会拒绝，需前置提示
+  const savedType = props.savedInboundType || props.inboundType
+  if (savedType !== 'relay') {
+    ElMessage.warning('请先保存入站为转发模式后再执行内部 UUID 轮换')
     return
   }
   try {
@@ -677,6 +686,7 @@ watch(
     if (newVal !== rawJsonText.value) {
       rawJsonText.value = newVal || '{}'
       parseJsonToForm(rawJsonText.value)
+      syncFormToJson()
     }
   },
   { immediate: true },
@@ -701,6 +711,7 @@ watch(
     localSharePath,
     localShareAllowInsecure,
     localLayerId,
+    localInboundType,
     fallbacks,
     xhttpForm,
     tcpForm,
@@ -736,6 +747,7 @@ onMounted(() => {
     genShortId()
   }
   loadCerts()
+  syncFormToJson()
 })
 
 watch(
@@ -758,6 +770,7 @@ watch(
 function onTypeChange(v: any) {
   localInboundType.value = String(v || 'user')
   emit('update:inboundType', localInboundType.value)
+  syncFormToJson()
 }
 
 async function copyText(text: string, label: string) {

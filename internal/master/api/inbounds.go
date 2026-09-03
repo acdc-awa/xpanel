@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -232,6 +234,15 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
 		return
 	}
+	// 创建请求不映射 internal_uuid 字段，relay 入站在此必然为空，交给 ensure 补齐。
+	// Ask 成功后若 DB.Create 失败，节点账户文件会残留 tag→uuid 条目：幂等设计下
+	// 同 tag 重建时节点复用该条目，无害，不做清理。
+	if inb.Type == models.InboundTypeRelay {
+		if err := d.ensureInternalUUID(&inb); err != nil {
+			util.ServerError(c, "初始化内部 UUID 失败: "+err.Error())
+			return
+		}
+	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
 		return
@@ -424,13 +435,25 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
+	// 先应用显式 internal_uuid（节点回执路径），再判空补齐——保证 relay + 空 UUID 的终态不存在
+	if req.InternalUUID != nil {
+		updates["internal_uuid"] = *req.InternalUUID
+		inb.InternalUUID = *req.InternalUUID
+	}
 	if req.Type != nil {
 		updates["type"] = *req.Type
 		// 手动修改 type：清除自动标 relay 的历史（PreviousType），避免后续解绑引用错误回退
 		updates["previous_type"] = ""
-	}
-	if req.InternalUUID != nil {
-		updates["internal_uuid"] = *req.InternalUUID
+		if *req.Type == models.InboundTypeRelay && inb.InternalUUID == "" {
+			temp := inb
+			temp.Type = models.InboundTypeRelay
+			if err := d.ensureInternalUUID(&temp); err != nil {
+				util.ServerError(c, "初始化内部 UUID 失败: "+err.Error())
+				return
+			}
+			updates["internal_uuid"] = temp.InternalUUID
+			inb.InternalUUID = temp.InternalUUID
+		}
 	}
 	if req.CertID != nil {
 		if *req.CertID == 0 {
@@ -641,8 +664,46 @@ func pushFail(c *gin.Context, serverID uint64, err error) {
 	util.ServerError(c, "变更已保存，但配置生成失败: "+err.Error())
 }
 
+// ensureInternalUUID 确保 relay 入站拥有内部 UUID。
+// 优先通过 Ask 向在线节点请求 setup-internal（保持节点本地文件存储权威）；
+// 若节点离线、超时或网关未就绪，则由主控生成 UUID 兜底，避免配置生成死锁。
+func (d *Deps) ensureInternalUUID(inb *models.Inbound) error {
+	if inb.Type != models.InboundTypeRelay || inb.InternalUUID != "" {
+		return nil
+	}
+	if d.Hub != nil && d.Hub.IsOnline(inb.ServerID) {
+		res, err := d.Hub.Ask(inb.ServerID, protocol.MsgSetupInternalAccount,
+			protocol.SetupInternalAccountPayload{Tag: inb.Tag}, nodegate.SetupInternalAskTimeout)
+		if err == nil && res.OK {
+			if data, ok := res.Data.(map[string]any); ok {
+				if u, ok := data["uuid"].(string); ok && u != "" {
+					inb.InternalUUID = u
+					return nil
+				}
+			}
+		}
+	}
+	u, err := util.NewUUID()
+	if err != nil {
+		return fmt.Errorf("生成内部 UUID 失败: %w", err)
+	}
+	inb.InternalUUID = u
+	return nil
+}
+
 // enqueueConfig 入站变更后自动生成配置并待推送。
 func (d *Deps) enqueueConfig(serverID uint64) error {
+	// 自愈保护：若存在历史或异常遗留的缺少 internal_uuid 的 relay 入站，自动补齐以避免配置生成死锁
+	if d.DB != nil {
+		var broken []models.Inbound
+		if err := d.DB.Where("server_id = ? AND type = ? AND (internal_uuid IS NULL OR internal_uuid = '')", serverID, models.InboundTypeRelay).Find(&broken).Error; err == nil {
+			for _, inb := range broken {
+				if err := d.ensureInternalUUID(&inb); err == nil && inb.InternalUUID != "" {
+					_ = d.DB.Model(&inb).Update("internal_uuid", inb.InternalUUID).Error
+				}
+			}
+		}
+	}
 	if d.Config == nil || d.Hub == nil {
 		return nil
 	}
