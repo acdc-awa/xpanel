@@ -226,6 +226,7 @@ function clearNewUserExpire() {
 const detailOpen = ref(false)
 const current = ref<AdminUser | null>(null)
 const userEditForm = reactive({
+  email: '',
   role: 'user' as 'admin' | 'user',
   plan_id: 0,
   permission_group_id: 0,
@@ -249,6 +250,7 @@ const inheritedGroupName = computed(() => {
 
 function openDetail(row: any) {
   current.value = row
+  userEditForm.email = row.email || ''
   userEditForm.role = row.role || 'user'
   userEditForm.plan_id = row.plan_id || 0
   userEditForm.permission_group_id = row.permission_group_id || 0
@@ -260,9 +262,20 @@ function openDetail(row: any) {
 
 async function saveUserConfig() {
   if (!current.value) return
+  const trimmedEmail = userEditForm.email.trim()
+  if (!trimmedEmail) {
+    ElMessage.warning('用户邮箱不能为空')
+    return
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(trimmedEmail)) {
+    ElMessage.warning('请输入有效的邮箱地址')
+    return
+  }
   userSaving.value = true
   try {
     const payload = {
+      email: trimmedEmail,
       role: userEditForm.role,
       plan_id: userEditForm.plan_id,
       permission_group_id: userEditForm.permission_group_id,
@@ -748,6 +761,13 @@ function handleCardAction(cmd: string, row: AdminUser) {
         </p>
 
         <el-form label-position="top">
+          <el-form-item label="登录邮箱（用户名）">
+            <el-input v-model="userEditForm.email" placeholder="user@example.com" clearable />
+            <span class="muted tip" style="font-size: 12px; margin-top: 4px; display: block">
+              修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。
+            </span>
+          </el-form-item>
+
           <el-form-item label="用户身份与角色">
             <el-radio-group v-model="userEditForm.role">
               <el-radio-button value="user">普通用户</el-radio-button>

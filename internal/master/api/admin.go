@@ -278,16 +278,26 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
+	var emailChanged bool
+	var oldEmail, newEmail string
 	if req.Email != nil && *req.Email != "" {
 		email := strings.ToLower(strings.TrimSpace(*req.Email))
-		var cnt int64
-		d.DB.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", email, email, id).Count(&cnt)
-		if cnt > 0 {
-			util.BadRequest(c, "邮箱已被使用")
-			return
+		// 仅实际变更才处理：前端每次保存都携带 email，同值重复提交不应吊销会话/刷审计
+		if email != strings.ToLower(strings.TrimSpace(user.Email)) {
+			var cnt int64
+			d.DB.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", email, email, id).Count(&cnt)
+			if cnt > 0 {
+				util.BadRequest(c, "邮箱已被使用")
+				return
+			}
+			updates["email"] = email
+			updates["username"] = email // 用户名=邮箱同值
+			// 换登录名即换凭据：吊销该用户全部旧会话（token_version 每请求对 DB 校验，
+			// 下一个请求立即踢出），用户需用新邮箱重新登录；与改密同级别安全动作
+			updates["token_version"] = gorm.Expr("token_version + 1")
+			emailChanged = true
+			oldEmail, newEmail = user.Email, email
 		}
-		updates["email"] = email
-		updates["username"] = email // 用户名=邮箱同值
 	}
 	if req.Role != nil {
 		role := strings.ToLower(strings.TrimSpace(*req.Role))
@@ -368,6 +378,13 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			util.ServerError(c, "更新失败")
 			return
 		}
+	}
+	if emailChanged {
+		detail := "设置用户 #" + strconv.FormatUint(id, 10) + " 邮箱 " + newEmail
+		if oldEmail != "" {
+			detail = "修改用户 #" + strconv.FormatUint(id, 10) + " 邮箱 " + oldEmail + " → " + newEmail
+		}
+		d.Audit.Log("admin", middleware.CurrentUser(c), "user.update_email", detail, util.ClientIPFromContext(c))
 	}
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
