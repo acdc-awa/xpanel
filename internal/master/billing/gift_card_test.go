@@ -106,7 +106,8 @@ func TestOrder_PayWithBalance(t *testing.T) {
 		PriceCents:   2500,
 		TrafficGB:    100,
 		DurationDays: 30,
-		Enabled:      true,
+		Purchasable:  true,
+		Renewable:    true,
 	}
 	if err := db.Create(&plan).Error; err != nil {
 		t.Fatalf("create plan failed: %v", err)
@@ -240,7 +241,7 @@ func TestOrder_PayWithBalance_PublishesEvent(t *testing.T) {
 	orderSvc := NewOrderService(gormstore.NewBillingStore(db))
 	orderSvc.Events = pub
 
-	plan := models.Plan{Name: "事件套餐", PriceCents: 2500, TrafficGB: 100, DurationDays: 30, Enabled: true}
+	plan := models.Plan{Name: "事件套餐", PriceCents: 2500, TrafficGB: 100, DurationDays: 30, Purchasable: true, Renewable: true}
 	if err := db.Create(&plan).Error; err != nil {
 		t.Fatalf("create plan failed: %v", err)
 	}

@@ -46,6 +46,8 @@ const form = reactive({
   permission_group_id: 0,
   sort_order: 0,
   is_featured: false,
+  purchasable: true, // 可新购：商店展示并允许非持有者购买
+  renewable: true, // 可续费：持有者余额直付顺延
   sync_users: false, // 编辑保存时是否把新套餐值同步到存量用户（默认关：只影响新购/续费）
 })
 const saving = ref(false)
@@ -98,6 +100,8 @@ function openCreate() {
     permission_group_id: 0,
     sort_order: 0,
     is_featured: false,
+    purchasable: true,
+    renewable: true,
     sync_users: false,
   })
   formOpen.value = true
@@ -116,6 +120,8 @@ function openEdit(row: any) {
     permission_group_id: row.permission_group_id || 0,
     sort_order: row.sort_order || 0,
     is_featured: !!row.is_featured,
+    purchasable: !!row.purchasable,
+    renewable: !!row.renewable,
     sync_users: false, // 每次打开默认不勾，避免误触发批量同步
   })
   formOpen.value = true
@@ -138,6 +144,8 @@ async function save() {
       permission_group_id: form.permission_group_id || undefined,
       sort_order: form.sort_order,
       is_featured: form.is_featured,
+      purchasable: form.purchasable,
+      renewable: form.renewable,
     }
     if (editing.value) payload.sync_users = form.sync_users
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
@@ -155,9 +163,10 @@ async function save() {
   }
 }
 
-async function togglePlan(row: any) {
+// 卡片徽标快捷切换（可新购/可续费）
+async function toggleFlag(row: any, flag: 'purchasable' | 'renewable') {
   try {
-    const { data } = await updatePlan(row.id, { enabled: !row.enabled })
+    const { data } = await updatePlan(row.id, { [flag]: !row[flag] })
     if (data.code === 0) load()
   } catch (e) {
     ElMessage.error(errMsg(e, '操作失败'))
@@ -203,20 +212,28 @@ async function remove(row: any) {
 
       <!-- 全局统一套餐卡片网格流 (自适应 1~4 列) -->
       <div v-else class="plan-card-grid">
-        <div v-for="row in list" :key="row.id" class="plan-card" :class="{ disabled: !row.enabled }">
+        <div v-for="row in list" :key="row.id" class="plan-card" :class="{ disabled: !row.purchasable && !row.renewable }">
           <!-- 头部 -->
           <div class="card-head">
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
               <span class="plan-name" title="点击编辑套餐" @click="openEdit(row)">{{ row.name }}</span>
-              <span class="x-chip" :class="row.enabled ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
-                {{ row.enabled ? '已上架' : '已下架' }}
-              </span>
+              <span
+                class="x-chip"
+                :class="row.purchasable ? 'green' : 'gray'"
+                style="font-size: 10px; padding: 1px 5px; cursor: pointer"
+                title="可新购：商店展示并允许非持有者购买，点击切换"
+                @click="toggleFlag(row, 'purchasable')"
+              >{{ row.purchasable ? '可新购' : '停售' }}</span>
+              <span
+                class="x-chip"
+                :class="row.renewable ? 'blue' : 'gray'"
+                style="font-size: 10px; padding: 1px 5px; cursor: pointer"
+                title="可续费：持有者余额直付顺延，点击切换"
+                @click="toggleFlag(row, 'renewable')"
+              >{{ row.renewable ? '可续费' : '停续' }}</span>
               <span v-if="row.is_featured" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">热门推荐</span>
             </div>
-            <el-tooltip :content="row.enabled ? '已上架（用户可见），点击下架' : '已下架（隐藏），点击上架'" placement="top">
-              <el-switch :model-value="row.enabled" size="small" @change="togglePlan(row)" />
-            </el-tooltip>
           </div>
 
           <div v-if="row.description" class="card-desc-box">
@@ -330,6 +347,24 @@ async function remove(row: any) {
             </div>
           </el-form-item>
         </div>
+        <el-form-item label="上架状态">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <el-switch v-model="form.purchasable" />
+              <span style="font-size: 12.5px">可新购</span>
+              <span class="muted" style="font-size: 11.5px">商店展示并允许非持有者购买</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <el-switch v-model="form.renewable" />
+              <span style="font-size: 12.5px">可续费</span>
+              <span class="muted" style="font-size: 11.5px">持有者余额直付顺延</span>
+            </div>
+          </div>
+          <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
+            商店按身份过滤：非持有者只见「可新购」套餐；持有者额外可见自己「可续费」的当前套餐（用于续费）。
+            停售老套餐保留续费 = 关「可新购」留「可续费」。
+          </div>
+        </el-form-item>
         <el-form-item label="权限组（选填，购买后自动授权组内入站）">
           <el-select v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
             <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />

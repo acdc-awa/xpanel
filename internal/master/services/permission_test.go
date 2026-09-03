@@ -161,3 +161,71 @@ func TestProtoUsersFor_APDerived(t *testing.T) {
 		t.Fatalf("接入点禁用后应返回 0 个用户，got %d", len(got))
 	}
 }
+
+// 权限组内接入点优先级（2026-09-03）：
+// ① 组侧 SetGroupAccessPointOrder 全量重排（sort_order=下标）；
+// ② 接入点侧同步保留既有排序、新绑定追加到组内末尾。
+func TestGroupAccessPointOrderAndSyncPreserve(t *testing.T) {
+	db := testDB(t)
+	g := models.PermissionGroup{Name: "g"}
+	if err := db.Create(&g).Error; err != nil {
+		t.Fatal(err)
+	}
+	group2 := models.PermissionGroup{Name: "g2"}
+	if err := db.Create(&group2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// ① 组视角：有序列表 [7,3,9] → sort_order = 下标
+	if err := SetGroupAccessPointOrder(db, g.ID, []uint64{7, 3, 9}); err != nil {
+		t.Fatalf("SetGroupAccessPointOrder: %v", err)
+	}
+	var links []models.PermissionGroupAccessPoint
+	if err := db.Where("permission_group_id = ?", g.ID).Order("sort_order ASC, access_point_id ASC").Find(&links).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := []uint64{7, 3, 9}
+	if len(links) != 3 {
+		t.Fatalf("期望 3 条绑定，实际 %d", len(links))
+	}
+	for i, l := range links {
+		if l.AccessPointID != want[i] || l.SortOrder != i {
+			t.Fatalf("第 %d 项期望 ap=%d so=%d，实际 ap=%d so=%d", i, want[i], i, l.AccessPointID, l.SortOrder)
+		}
+	}
+
+	// ② 接入点侧新增绑定：加入已排序组 → 追加到末尾（so=3）；加入空组 → so=0
+	apID := uint64(11)
+	if err := SyncAccessPointPermissionGroups(db, apID, []uint64{g.ID, group2.ID}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	// 注意：Model(空结构) 避免 GORM 按非零模型主键注入复合主键条件
+	var l models.PermissionGroupAccessPoint
+	if err := db.Model(&models.PermissionGroupAccessPoint{}).Where("permission_group_id = ? AND access_point_id = ?", g.ID, apID).First(&l).Error; err != nil {
+		t.Fatal(err)
+	}
+	if l.SortOrder != 3 {
+		t.Fatalf("新绑定应追加到组内末尾 so=3，实际 %d", l.SortOrder)
+	}
+	l = models.PermissionGroupAccessPoint{} // 清空，防 GORM First 按目标主键注入条件
+	if err := db.Model(&models.PermissionGroupAccessPoint{}).Where("permission_group_id = ? AND access_point_id = ?", group2.ID, apID).First(&l).Error; err != nil {
+		t.Fatal(err)
+	}
+	if l.SortOrder != 0 {
+		t.Fatalf("空组新绑定应 so=0，实际 %d", l.SortOrder)
+	}
+	l = models.PermissionGroupAccessPoint{} // 清空，防 GORM First 按目标主键注入条件
+
+	// ③ 接入点侧移除后重挂：组内既有排序（7,3,9）不被删除/改动
+	l = models.PermissionGroupAccessPoint{}
+	apOld := uint64(3)
+	if err := SyncAccessPointPermissionGroups(db, 3, []uint64{g.ID, group2.ID}); err != nil {
+		t.Fatalf("Sync old ap: %v", err)
+	}
+	if err := db.Model(&models.PermissionGroupAccessPoint{}).Where("permission_group_id = ? AND access_point_id = ?", g.ID, apOld).First(&l).Error; err != nil {
+		t.Fatal(err)
+	}
+	if l.SortOrder != 1 {
+		t.Fatalf("既有绑定重申应保留原排序 so=1，实际 %d", l.SortOrder)
+	}
+}

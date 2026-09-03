@@ -43,7 +43,17 @@ func BatchAccessPointPermissionGroupIDs(db *gorm.DB, apIDs []uint64) map[uint64]
 }
 
 // SyncAccessPointPermissionGroups 同步用户接入点的开放权限组（原子替换；空列表 = 全部不可见）。
+// 2026-09-03 组内排序保留式同步：该 AP 既有绑定保留原 sort_order（不冲掉各权限组内已排好的
+// 优先级）；新增绑定取目标组当前 max(sort_order)+1 追加到组内末尾。
 func SyncAccessPointPermissionGroups(tx *gorm.DB, apID uint64, groupIDs []uint64) error {
+	var existing []models.PermissionGroupAccessPoint
+	if err := tx.Where("access_point_id = ?", apID).Find(&existing).Error; err != nil {
+		return err
+	}
+	oldOrder := make(map[uint64]int, len(existing))
+	for _, l := range existing {
+		oldOrder[l.PermissionGroupID] = l.SortOrder
+	}
 	if err := tx.Where("access_point_id = ?", apID).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {
 		return err
 	}
@@ -52,9 +62,45 @@ func SyncAccessPointPermissionGroups(tx *gorm.DB, apID uint64, groupIDs []uint64
 	}
 	rows := make([]models.PermissionGroupAccessPoint, 0, len(groupIDs))
 	for _, gid := range groupIDs {
-		if gid > 0 {
-			rows = append(rows, models.PermissionGroupAccessPoint{PermissionGroupID: gid, AccessPointID: apID})
+		if gid == 0 {
+			continue
 		}
+		so, ok := oldOrder[gid]
+		if !ok {
+			// 新绑定：追加到该组已有排序末尾（无绑定时 -1+1=0）
+			var maxSO int
+			if err := tx.Model(&models.PermissionGroupAccessPoint{}).
+				Where("permission_group_id = ?", gid).
+				Select("COALESCE(MAX(sort_order), -1)").
+				Scan(&maxSO).Error; err != nil {
+				return err
+			}
+			so = maxSO + 1
+		}
+		rows = append(rows, models.PermissionGroupAccessPoint{PermissionGroupID: gid, AccessPointID: apID, SortOrder: so})
+	}
+	if len(rows) > 0 {
+		return tx.Create(&rows).Error
+	}
+	return nil
+}
+
+// SetGroupAccessPointOrder 组视角原子重排（2026-09-03）：权限组编辑器提交**有序**接入点 ID 列表，
+// 组内绑定全量替换、sort_order = 数组下标。校验由调用方完成（AP 必须存在）。
+func SetGroupAccessPointOrder(tx *gorm.DB, groupID uint64, orderedAPIDs []uint64) error {
+	if err := tx.Where("permission_group_id = ?", groupID).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {
+		return err
+	}
+	rows := make([]models.PermissionGroupAccessPoint, 0, len(orderedAPIDs))
+	for i, apID := range orderedAPIDs {
+		if apID == 0 {
+			continue
+		}
+		rows = append(rows, models.PermissionGroupAccessPoint{
+			PermissionGroupID: groupID,
+			AccessPointID:     apID,
+			SortOrder:         i,
+		})
 	}
 	if len(rows) > 0 {
 		return tx.Create(&rows).Error

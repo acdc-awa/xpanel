@@ -77,7 +77,40 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := backfillPlanSnapshots(db); err != nil {
 		return err
 	}
+	if err := migratePlanSaleFlags(db); err != nil {
+		return err
+	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// migratePlanSaleFlags 套餐销售两属性一次性迁移（2026-09-03 enabled → purchasable/renewable）：
+// 旧库按 enabled 原值映射（1 → 双 true，0 → 双 false，语义无损），随后删除遗留 enabled 列。
+// settings 标记保证映射只跑一次（AutoMigrate 已先补出两列，默认 false）。幂等。
+func migratePlanSaleFlags(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "plan_sale_flags_backfilled").First(&mark).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if db.Migrator().HasTable(&Plan{}) && db.Migrator().HasColumn(&Plan{}, "enabled") {
+			if err := db.Exec("UPDATE plans SET purchasable = 1, renewable = 1 WHERE enabled = 1").Error; err != nil {
+				return fmt.Errorf("回填套餐销售两属性失败: %w", err)
+			}
+		}
+		if err := db.Create(&Setting{Key: "plan_sale_flags_backfilled", Value: "1"}).Error; err != nil {
+			return err
+		}
+	}
+	m := db.Migrator()
+	if !m.HasTable(&Plan{}) || !m.HasColumn(&Plan{}, "enabled") {
+		return nil
+	}
+	// DROP COLUMN 写法同 migrateDefaultOutboundDSColumn（glebarez Migrator().DropColumn 对裸列名静默失效）
+	if err := db.Exec("ALTER TABLE plans DROP COLUMN enabled").Error; err != nil {
+		return fmt.Errorf("删除 plans 遗留列 enabled 失败: %w", err)
+	}
+	return nil
 }
 
 // backfillPlanSnapshots 套餐快照一次性回填（2026-09-01 Xboard 式隔离）：

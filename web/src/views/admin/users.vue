@@ -68,11 +68,10 @@ function userGroupDisplay(u: any) {
   if (u.permission_group_id && u.permission_group_id > 0) {
     return { name: `${groupName(u.permission_group_id)} (自定义)`, type: 'primary', custom: true }
   }
-  if (u.plan_id && u.plan_id > 0) {
-    const p = plans.value.find((x) => x.id === u.plan_id)
-    if (p && p.permission_group_id) {
-      return { name: `${groupName(p.permission_group_id)} (套餐继承)`, type: 'success', custom: false }
-    }
+  // 套餐继承读用户行快照推导的 effective_group_id（后端已下发），不读实时套餐——
+  // 「改套餐权限组未勾同步」时存量用户实际生效组不变，显示不得漂移
+  if (u.effective_group_id && u.effective_group_id > 0) {
+    return { name: `${groupName(u.effective_group_id)} (套餐继承)`, type: 'success', custom: false }
   }
   return { name: '未分配权限组', type: 'info', custom: false }
 }

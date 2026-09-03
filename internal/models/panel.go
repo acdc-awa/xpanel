@@ -84,19 +84,24 @@ type Inbound struct {
 
 // Plan 套餐。
 type Plan struct {
-	ID                uint64    `gorm:"primaryKey" json:"id"`
-	Name              string    `gorm:"size:64;not null" json:"name"`
-	Description       string    `gorm:"type:text" json:"description"` // 自定义文案/套餐特性说明
-	PriceCents        int64     `gorm:"not null" json:"price_cents"`  // 价格（分）
-	TrafficGB         int64     `gorm:"not null" json:"traffic_gb"`
-	DurationDays      int       `gorm:"not null" json:"duration_days"`
-	DeviceLimit       int       `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
-	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
-	SortOrder         int       `gorm:"default:0" json:"sort_order"`                // 商城展示排序（越小越靠前；同值按价格升序）
-	IsFeatured        bool      `gorm:"default:false" json:"is_featured"`           // 商城「热门推荐」标记（多选时仅排最前的生效）
-	Enabled           bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                uint64 `gorm:"primaryKey" json:"id"`
+	Name              string `gorm:"size:64;not null" json:"name"`
+	Description       string `gorm:"type:text" json:"description"` // 自定义文案/套餐特性说明
+	PriceCents        int64  `gorm:"not null" json:"price_cents"`  // 价格（分）
+	TrafficGB         int64  `gorm:"not null" json:"traffic_gb"`
+	DurationDays      int    `gorm:"not null" json:"duration_days"`
+	DeviceLimit       int    `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
+	PermissionGroupID uint64 `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
+	SortOrder         int    `gorm:"default:0" json:"sort_order"`                // 商城展示排序（越小越靠前；同值按价格升序）
+	IsFeatured        bool   `gorm:"default:false" json:"is_featured"`           // 商城「热门推荐」标记（多选时仅排最前的生效）
+	// 销售两属性（2026-09-03 替代 enabled，Xboard show/sell/renew 收敛式）：
+	// purchasable=商店展示并允许新购（非持有者）；renewable=持有者续费顺延。
+	// 商店身份感知过滤：非持有者只见 purchasable，持有者额外见自己可续费的套餐；
+	// 支付接口按同一矩阵兜底（持有查 renewable，非持有查 purchasable）。
+	Purchasable bool      `gorm:"default:false" json:"purchasable"`
+	Renewable   bool      `gorm:"default:false" json:"renewable"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Order 订单（余额直付即时生效：paid）。人工确认收款已去除（2026-08-14 方向④）。

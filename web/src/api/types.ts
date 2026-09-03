@@ -236,7 +236,8 @@ export interface Plan {
   traffic_gb: number
   duration_days: number
   device_limit: number
-  enabled: boolean
+  purchasable: boolean // 可新购（商店展示并允许非持有者购买）
+  renewable: boolean // 可续费（持有者余额直付顺延）
   permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
   sort_order?: number // 商城展示排序（越小越靠前）
   is_featured?: boolean // 商城「热门推荐」标记
@@ -450,6 +451,7 @@ export interface PermissionGroup {
   remark: string
   clash_template?: string // 自定义 Clash/Mihomo 模板
   access_point_count?: number
+  access_point_ids?: number[] // 组内优先级序（订阅输出同序）
   access_point_names?: string[]
   created_at: string
   updated_at: string

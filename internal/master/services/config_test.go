@@ -170,7 +170,7 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	if err := db.Create(&g2).Error; err != nil {
 		t.Fatal(err)
 	}
-	planA := models.Plan{Name: "planA", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: g2.ID, Enabled: true}
+	planA := models.Plan{Name: "planA", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: g2.ID, Purchasable: true, Renewable: true}
 	if err := db.Create(&planA).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -394,7 +394,7 @@ func TestPlanSnapshotBackfill(t *testing.T) {
 		t.Fatalf("create tables: %v", err)
 	}
 
-	plan := Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: 5, Enabled: true}
+	plan := Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: 5, Purchasable: true, Renewable: true}
 	if err := db.Create(&plan).Error; err != nil {
 		t.Fatalf("create plan: %v", err)
 	}

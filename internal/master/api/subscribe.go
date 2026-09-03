@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -83,34 +84,36 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 
 	// 2. 用户接入点（订阅的唯一入口；严格白名单：未绑定权限组 = 全员不可见）
+	// 2026-09-03 组内排序：沿用户生效组在绑定表（permission_group_access_points）的
+	// sort_order 遍历——同一接入点绑定多组时可在各组内排不同顺位；同序值回退绑定 ID 稳定序。
 	dtos := make([]contracts.ProxyNodeDTO, 0)
-	var userAPs []models.UserAccessPoint
-	_ = d.DB.Where("enabled = ?", true).Order("id ASC").Find(&userAPs).Error
-	if len(userAPs) > 0 && permGroupID > 0 {
-		apIDs := make([]uint64, 0, len(userAPs))
-		for _, ap := range userAPs {
-			apIDs = append(apIDs, ap.ID)
-		}
-		apGroupMap := services.BatchAccessPointPermissionGroupIDs(d.DB, apIDs)
-		for _, ap := range userAPs {
-			// 严格白名单：AP 开放组未命中用户生效组 → 不可见
-			matched := false
-			for _, gid := range apGroupMap[ap.ID] {
-				if gid == permGroupID {
-					matched = true
-					break
+	if permGroupID > 0 {
+		var links []models.PermissionGroupAccessPoint
+		_ = d.DB.Where("permission_group_id = ?", permGroupID).
+			Order("sort_order ASC, access_point_id ASC").Find(&links).Error
+		if len(links) > 0 {
+			ids := make([]uint64, 0, len(links))
+			for _, l := range links {
+				ids = append(ids, l.AccessPointID)
+			}
+			var aps []models.UserAccessPoint
+			_ = d.DB.Where("enabled = ? AND id IN ?", true, ids).Find(&aps).Error
+			apMap := make(map[uint64]models.UserAccessPoint, len(aps))
+			for _, ap := range aps {
+				apMap[ap.ID] = ap
+			}
+			for _, link := range links {
+				ap, ok := apMap[link.AccessPointID]
+				if !ok {
+					continue // 已禁用/已删除的接入点不产出节点
 				}
+				// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址/挂层端点）→ AP 消费（命名/可选覆写）
+				dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, layerMap, user.UUID)
+				if dto == nil {
+					continue
+				}
+				dtos = append(dtos, *dto)
 			}
-			if !matched {
-				continue
-			}
-
-			// 订阅管道（与画布预览同源）：目标入站 DTO（节点自有地址/挂层端点）→ AP 消费（命名/可选覆写）
-			dto := subscribe.ResolveAPSubscription(&ap, srvMap, inbMap, layerMap, user.UUID)
-			if dto == nil {
-				continue
-			}
-			dtos = append(dtos, *dto)
 		}
 	}
 	if len(dtos) == 0 {
@@ -161,8 +164,20 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	c.Header("Content-Type", contentType)
 	if strings.Contains(contentType, "yaml") {
 		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 文件名 / 配置文件网页地址
+		// 文件名 = 站点名称（app_name，客户端据此显示配置名）；空缺省回退 xray。
+		// 剥离引号/反斜杠/换行防头部破坏；UTF-8 原样输出（Clash Verge Rev 等按 UTF-8 解析）。
+		profileName := strings.Map(func(r rune) rune {
+			switch r {
+			case '"', '\\', '\r', '\n':
+				return -1
+			}
+			return r
+		}, strings.TrimSpace(services.GetSetting(d.DB, services.SettingAppName)))
+		if profileName == "" {
+			profileName = "xray"
+		}
 		c.Header("Profile-Update-Interval", "24")
-		c.Header("Content-Disposition", `attachment; filename="xray.yaml"`)
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, profileName))
 		webPage := "http://" + c.Request.Host
 		if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {
 			webPage = scheme + "://" + c.Request.Host

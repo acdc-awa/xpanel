@@ -46,15 +46,23 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			}
 			return err
 		}
-		if !plan.Enabled {
-			return errors.New("套餐未上架")
-		}
 
 		// 先锁用户行：序列化同一用户的并发支付。
 		// 方言差异在 pkg/db.LockForUpdate 收口：SQLite 由单连接池串行兜底，MySQL 真实行锁。
 		user, err := tx.LockUser(ctx, userID)
 		if err != nil {
 			return errors.New("用户不存在")
+		}
+
+		// 销售两属性兜底门控（2026-09-03 替代 enabled；商店列表已按身份过滤，此处防手搓请求）：
+		// 持有该套餐（user.PlanID 相同）= 续费 → 查 renewable；未持有 = 新购 → 查 purchasable。
+		// 与 PublicPlans 身份感知过滤同一矩阵。
+		if user.PlanID > 0 && user.PlanID == planID {
+			if !plan.Renewable {
+				return errors.New("该套餐已停止续费")
+			}
+		} else if !plan.Purchasable {
+			return errors.New("该套餐已停售")
 		}
 
 		// 幂等：窗口内已支付同套餐 → 直接复用。

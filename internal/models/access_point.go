@@ -20,10 +20,13 @@ func (UserAccessPoint) TableName() string {
 	return "user_access_points"
 }
 
-// PermissionGroupAccessPoint 权限组与用户接入点的多对多关联（显式白名单权限模型）
+// PermissionGroupAccessPoint 权限组与用户接入点的多对多关联（显式白名单权限模型）。
+// SortOrder 为组内展示优先级（2026-09-03）：订阅按「用户生效组」的绑定序输出节点，
+// 同一接入点绑定多组时可在各组内排不同顺位；值小的在前，同值回退绑定 ID 稳定序。
 type PermissionGroupAccessPoint struct {
 	PermissionGroupID uint64 `gorm:"primaryKey;autoIncrement:false" json:"permission_group_id"`
 	AccessPointID     uint64 `gorm:"primaryKey;autoIncrement:false;index" json:"access_point_id"`
+	SortOrder         int    `gorm:"not null;default:0" json:"sort_order"`
 }
 
 func (PermissionGroupAccessPoint) TableName() string {

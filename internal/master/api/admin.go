@@ -327,7 +327,10 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		}
 		updates["role"] = role
 	}
-	if req.PlanID != nil {
+	// 2026-09-03 快照守卫：仅当 plan_id 真的变更才重写/清空快照——前端编辑表单每次保存都携带
+	// plan_id（哪怕没改），若无此守卫，「改套餐权限组未勾同步」之后对用户的任何一次编辑
+	// 都会把套餐新值重新快照进该用户（快照隔离语义失效、权限组漂移）。
+	if req.PlanID != nil && *req.PlanID != user.PlanID {
 		if *req.PlanID > 0 {
 			if msg := d.validateUserRefs(*req.PlanID, 0); msg != "" {
 				util.BadRequest(c, msg)

@@ -14,6 +14,40 @@ import (
 
 const CtxClaimsKey = "claims"
 
+// AuthOptional 可选鉴权（2026-09-03，公开接口身份感知使用，如商店 /plans）：
+// 携带有效 access token 且通过与 AuthRequired 相同的 DB 校验（存在/激活/token_version/角色/2FA）
+// 则注入 claims；任何一步失败一律匿名放行（绝不 abort），下游用 CurrentUser(c)==0 识别匿名。
+func AuthOptional(jwtMgr contracts.JWTManager, db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenStr, err := c.Cookie("access_token")
+		if err != nil || tokenStr == "" {
+			c.Next()
+			return
+		}
+		claims, err := jwtMgr.Parse(tokenStr)
+		if err != nil || claims.Type != contracts.TokenAccess || claims.Pending {
+			c.Next()
+			return
+		}
+		var user models.User
+		if err := db.First(&user, claims.UserID).Error; err != nil {
+			c.Next()
+			return
+		}
+		if user.Status != models.StatusActive ||
+			user.TokenVersion != claims.Version ||
+			user.Role != claims.Role ||
+			(user.TotpEnabled && !claims.TwoFA) {
+			c.Next()
+			return
+		}
+		claims.Role = user.Role
+		claims.Version = user.TokenVersion
+		c.Set(CtxClaimsKey, claims)
+		c.Next()
+	}
+}
+
 // AuthRequired 解析 Cookie access token、拒绝 2FA pending token，并按 DB 实时校验
 // 用户存在、账号状态、token_version 与角色（ISSUE-03：封禁/改密/角色变更立即吊销旧 access）。
 func AuthRequired(jwtMgr contracts.JWTManager, db *gorm.DB) gin.HandlerFunc {

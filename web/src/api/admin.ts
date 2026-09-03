@@ -447,6 +447,13 @@ export function updatePermissionGroup(id: number, payload: Partial<PermissionGro
   return http.put<ApiResp<{ group: PermissionGroup }>>(`/admin/permission-groups/${id}`, payload)
 }
 
+// 组视角原子重排：access_point_ids 数组顺序 = 组内优先级（订阅节点输出同序）
+export function setPermissionGroupAccessPoints(id: number, accessPointIds: number[]) {
+  return http.put<ApiResp<{ access_point_ids: number[] }>>(`/admin/permission-groups/${id}/access-points`, {
+    access_point_ids: accessPointIds,
+  })
+}
+
 export interface TemplatePreviewResult {
   rendered: string
   proxy_count: number

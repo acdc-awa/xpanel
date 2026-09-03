@@ -125,8 +125,9 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			user.GET("/notices", d.UserListNotices)
 		}
 
-		// 公开：上架套餐（公告仅登录用户可见）
-		v1.GET("/plans", d.PublicPlans)
+		// 商店套餐：公开可读，但挂可选鉴权——登录身份用于「可新购/可续费」感知过滤
+		// （非持有者只见可新购；持有者额外见自己可续费的当前套餐）
+		v1.GET("/plans", middleware.AuthOptional(d.JWT, d.DB), d.PublicPlans)
 
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin",
@@ -209,6 +210,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.GET("/permission-groups", d.AdminPermissionGroups)
 			admin.POST("/permission-groups", d.AdminCreatePermissionGroup)
 			admin.PUT("/permission-groups/:id", d.AdminUpdatePermissionGroup)
+			admin.PUT("/permission-groups/:id/access-points", d.AdminSetPermissionGroupAccessPoints)
 			admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
 			admin.POST("/permission-groups/:id/preview-template", d.AdminPreviewPermissionGroupTemplate)
 			admin.GET("/access-points", d.AdminGetAccessPoints)

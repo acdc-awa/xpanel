@@ -37,6 +37,10 @@ const quickRedeemCode = ref('')
 const quickRedeeming = ref(false)
 
 const userBalanceCents = computed(() => auth.user?.balance_cents ?? 0)
+
+// 当前持有套餐：商店列表由后端按身份过滤（非持有者只见可新购套餐；持有者额外可见
+// 自己可续费的当前套餐），故出现即可下单——持有者按钮显示「续费」（同套餐直付=顺延）
+const currentPlanId = computed(() => auth.user?.plan_id ?? 0)
 const balanceYuan = computed(() => (userBalanceCents.value / 100).toFixed(2))
 
 const isBalanceSufficient = computed(() => {
@@ -214,7 +218,7 @@ async function confirmPay() {
             :class="{ 'glow-btn': idx === 0 }"
             @click="openCheckout(p)"
           >
-            立即订购
+            {{ p.id === currentPlanId ? '续费' : '立即订购' }}
           </el-button>
         </div>
       </div>

@@ -85,6 +85,7 @@ func (d *Deps) AdminRotateInternal(c *gin.Context) {
 type permissionGroupView struct {
 	models.PermissionGroup
 	AccessPointCount int      `json:"access_point_count"`
+	AccessPointIDs   []uint64 `json:"access_point_ids"` // 组内优先级序（sort_order ASC, 绑定 ID ASC）
 	AccessPointNames []string `json:"access_point_names"`
 }
 
@@ -96,8 +97,9 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		return
 	}
 
+	// 绑定按组内优先级排序（2026-09-03 组内排序）：订阅输出与管理端编辑器同序
 	var apLinks []models.PermissionGroupAccessPoint
-	_ = d.DB.Find(&apLinks)
+	_ = d.DB.Order("sort_order ASC, access_point_id ASC").Find(&apLinks)
 	groupAPMap := make(map[uint64][]uint64)
 	allAPIDs := make([]uint64, 0, len(apLinks))
 	for _, l := range apLinks {
@@ -115,8 +117,10 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 
 	items := make([]permissionGroupView, 0, len(list))
 	for _, g := range list {
+		apIDs := make([]uint64, 0)
 		apNames := make([]string, 0)
 		for _, apID := range groupAPMap[g.ID] {
+			apIDs = append(apIDs, apID)
 			if name, ok := apNameMap[apID]; ok && name != "" {
 				apNames = append(apNames, name)
 			}
@@ -124,10 +128,51 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		items = append(items, permissionGroupView{
 			PermissionGroup:  g,
 			AccessPointCount: len(groupAPMap[g.ID]),
+			AccessPointIDs:   apIDs,
 			AccessPointNames: apNames,
 		})
 	}
 	util.OK(c, gin.H{"items": items})
+}
+
+// AdminSetPermissionGroupAccessPoints PUT /api/v1/admin/permission-groups/:id/access-points
+// —— 组视角原子重排（2026-09-03 组内优先级编辑器）：body.access_point_ids 为**有序**接入点
+// ID 列表（数组下标 = 组内 sort_order），全量替换该组绑定；接入点存在性逐一校验。
+func (d *Deps) AdminSetPermissionGroupAccessPoints(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var g models.PermissionGroup
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.Fail(c, 404, "权限组不存在")
+		return
+	}
+	var req struct {
+		AccessPointIDs []uint64 `json:"access_point_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if len(req.AccessPointIDs) > 0 {
+		var cnt int64
+		d.DB.Model(&models.UserAccessPoint{}).Where("id IN ?", req.AccessPointIDs).Count(&cnt)
+		if cnt != int64(len(req.AccessPointIDs)) {
+			util.BadRequest(c, "存在无效的接入点 ID")
+			return
+		}
+	}
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		return services.SetGroupAccessPointOrder(tx, g.ID, req.AccessPointIDs)
+	}); err != nil {
+		util.ServerError(c, "保存接入点优先级失败")
+		return
+	}
+	// 组绑定即订阅可见性/排序变化，触发热更对齐节点用户面
+	d.TriggerUserChange()
+	util.OK(c, gin.H{"access_point_ids": req.AccessPointIDs})
 }
 
 // AdminCreatePermissionGroup POST /api/v1/admin/permission-groups
