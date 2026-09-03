@@ -22,6 +22,7 @@ type User struct {
 	BalanceCents        int64      `gorm:"default:0;not null" json:"balance_cents"`     // 账户余额（分）
 	DeviceLimit         int        `gorm:"default:0" json:"device_limit"`              // 自定义设备数限制（0=继承套餐）
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
+	Remark              string     `gorm:"size:255" json:"remark"`                     // 管理员备注（仅管理端可见；用户侧 userView 与节点同步均不带）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后）
 	// 套餐快照三列（2026-09-01 Xboard 式隔离）：购买/续费/管理员分配套餐时从 Plan 复制，
 	// 判定链（filterValidUsers/订阅/展示/超额处置）只读快照、不实时 join plans——

@@ -31,7 +31,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 	base := d.DB.Model(&models.User{})
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		base = base.Where("username LIKE ? OR email LIKE ? OR uuid LIKE ?", like, like, like)
+		base = base.Where("username LIKE ? OR email LIKE ? OR uuid LIKE ? OR remark LIKE ?", like, like, like, like)
 	}
 
 	var total int64
@@ -57,7 +57,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		isCustomLimit := u.DeviceLimit > 0
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
-			"uuid": u.UUID,
+			"uuid": u.UUID, "remark": u.Remark,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
 			"permission_group_id":    u.PermissionGroupID,
 			"effective_group_id":     effectiveGroupID,
@@ -178,9 +178,14 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		PermissionGroupID uint64     `json:"permission_group_id"`
 		DeviceLimit       int        `json:"device_limit"`
 		ExpireAt          *time.Time `json:"expire_at"`
+		Remark            string     `json:"remark"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if len([]rune(strings.TrimSpace(req.Remark))) > 255 {
+		util.BadRequest(c, "备注最多 255 字")
 		return
 	}
 	// P1-5：套餐/权限组存在性校验——不存在则明确拒绝，避免"配额检查被跳过→无上限用量"
@@ -218,6 +223,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		PermissionGroupID: req.PermissionGroupID,
 		DeviceLimit:       req.DeviceLimit,
 		ExpireAt:          req.ExpireAt,
+		Remark:            strings.TrimSpace(req.Remark),
 	}
 	// 分配套餐即按当前套餐值快照（2026-09-01 Xboard 式隔离；validateUserRefs 已保证存在）
 	if req.PlanID > 0 {
@@ -272,9 +278,14 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		ExpireAt          *time.Time `json:"expire_at"`
 		Status            *int       `json:"status"`
 		Password          *string    `json:"password"`
+		Remark            *string    `json:"remark"` // 管理员备注；空串=清空
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if req.Remark != nil && len([]rune(strings.TrimSpace(*req.Remark))) > 255 {
+		util.BadRequest(c, "备注最多 255 字")
 		return
 	}
 	updates := map[string]any{}
@@ -348,6 +359,9 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	}
 	if req.DeviceLimit != nil {
 		updates["device_limit"] = *req.DeviceLimit
+	}
+	if req.Remark != nil {
+		updates["remark"] = strings.TrimSpace(*req.Remark)
 	}
 	if req.ExpireAt != nil {
 		updates["expire_at"] = req.ExpireAt

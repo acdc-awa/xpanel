@@ -212,6 +212,7 @@ export function updateUser(
     expire_at?: string | null
     status?: number
     password?: string
+    remark?: string
   },
 ) {
   return http.put<ApiResp<{ user: AdminUser }>>(`/admin/users/${id}`, payload)
@@ -682,6 +683,7 @@ export function createUser(payload: {
   permission_group_id?: number
   device_limit?: number
   expire_at?: string | null
+  remark?: string
 }) {
   return http.post<ApiResp<CreateUserResult>>('/admin/users', payload)
 }

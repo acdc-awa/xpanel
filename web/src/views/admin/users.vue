@@ -233,6 +233,7 @@ const userEditForm = reactive({
   device_limit: 0,
   expire_at: '',
   password: '',
+  remark: '',
 })
 const userSaving = ref(false)
 
@@ -257,6 +258,7 @@ function openDetail(row: any) {
   userEditForm.device_limit = row.device_limit || 0
   userEditForm.expire_at = row.expire_at || ''
   userEditForm.password = ''
+  userEditForm.remark = row.remark || ''
   detailOpen.value = true
 }
 
@@ -282,6 +284,7 @@ async function saveUserConfig() {
       device_limit: userEditForm.device_limit,
       expire_at: userEditForm.expire_at || null,
       password: userEditForm.password.trim() || undefined,
+      remark: userEditForm.remark,
     }
     const { data } = await updateUser(current.value.id, payload)
     if (data.code === 0) {
@@ -307,6 +310,7 @@ const newUserForm = reactive({
   permission_group_id: 0,
   device_limit: 0,
   expire_at: '',
+  remark: '',
 })
 const newUserCreating = ref(false)
 const newUserResult = ref<{ uuid: string; email: string } | null>(null)
@@ -325,6 +329,7 @@ async function submitNewUser() {
       permission_group_id: newUserForm.permission_group_id || undefined,
       device_limit: newUserForm.device_limit || undefined,
       expire_at: newUserForm.expire_at || undefined,
+      remark: newUserForm.remark.trim() || undefined,
     }
     const { data } = await createUser(payload)
     if (data.code === 0) {
@@ -335,6 +340,7 @@ async function submitNewUser() {
       newUserForm.permission_group_id = 0
       newUserForm.device_limit = 0
       newUserForm.expire_at = ''
+      newUserForm.remark = ''
       load()
     } else {
       ElMessage.error(data.message)
@@ -428,7 +434,7 @@ function exportCSV() {
     ElMessage.warning('没有可导出的用户')
     return
   }
-  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '设备限制', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间']
+  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '设备限制', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
   const lines = rows.map((u: any) =>
     [
       u.id,
@@ -445,6 +451,7 @@ function exportCSV() {
       u.total_bytes || 0,
       u.expire_at ? String(u.expire_at).replace('T', ' ').slice(0, 19) : '',
       u.created_at ? String(u.created_at).replace('T', ' ').slice(0, 19) : '',
+      u.remark || '',
     ].map(csvCell).join(','),
   )
   const csv = '\ufeff' + [header.map(csvCell).join(','), ...lines].join('\n')
@@ -553,7 +560,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
       <div class="x-toolbar-left">
         <el-input
           v-model="keyword"
-          placeholder="搜索用户名 / 邮箱 / UUID"
+          placeholder="搜索用户名 / 邮箱 / UUID / 备注"
           clearable
           style="width: 280px"
           @keyup.enter="onSearch"
@@ -618,6 +625,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
                   </span>
                 </div>
                 <div class="user-email cell-mono">{{ row.email || '—' }}</div>
+                <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
               </div>
             </div>
             <div class="head-right">
@@ -840,6 +848,18 @@ function handleCardAction(cmd: string, row: AdminUser) {
             </div>
           </el-form-item>
 
+          <el-form-item label="备注">
+            <el-input
+              v-model="userEditForm.remark"
+              type="textarea"
+              :rows="2"
+              :autosize="{ minRows: 2, maxRows: 5 }"
+              maxlength="255"
+              show-word-limit
+              placeholder="仅管理员可见的用户备注，如渠道来源、联系信息等"
+            />
+          </el-form-item>
+
           <el-form-item label="重置密码（留空不修改）">
             <el-input v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
           </el-form-item>
@@ -911,6 +931,16 @@ function handleCardAction(cmd: string, row: AdminUser) {
               <el-button size="small" text bg @click="addNewUserQuickExpire(365)">+1年</el-button>
               <el-button size="small" text bg type="danger" @click="clearNewUserExpire">清空</el-button>
             </div>
+          </el-form-item>
+          <el-form-item label="备注（选填）">
+            <el-input
+              v-model="newUserForm.remark"
+              type="textarea"
+              :rows="2"
+              maxlength="255"
+              show-word-limit
+              placeholder="仅管理员可见，如渠道来源、联系信息等"
+            />
           </el-form-item>
         </el-form>
       </template>
@@ -1174,6 +1204,16 @@ function handleCardAction(cmd: string, row: AdminUser) {
       color: var(--x-text-2, #6b7280);
       margin-top: 2px;
       word-break: break-all;
+    }
+
+    .user-remark {
+      font-size: 11px;
+      color: #b45309;
+      margin-top: 3px;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .head-right {

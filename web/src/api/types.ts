@@ -160,6 +160,7 @@ export interface AdminUser {
   username: string
   email: string
   uuid: string
+  remark?: string
   role: Role
   status: number
   plan_id: number
