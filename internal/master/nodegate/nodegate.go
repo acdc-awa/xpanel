@@ -51,10 +51,13 @@ type Conn struct {
 	NodeID   string
 	WS       *websocket.Conn
 	Send     chan []byte
-	done     chan struct{} // 关闭信号：通知 writePump 退出（代替关闭 Send，避免与并发 Send 竞态）
+	done     chan struct{} // 关闭信号：通知 writePump 退出（代替关闭 Send，避免与并发 Send/Ask 竞态）
 	LastSeen atomic.Int64  // unix 秒：readPump/pong 写，IsOnline/watchdog 读，必须原子
-	mu       sync.Mutex
-	closed   bool
+	// settingsSynced 运行时设置（上报/心跳周期）是否已成功下发至当前连接：建连为 false，
+	// PushAgentSettings 成功置 true；watchdog 2 分钟补推循环据此决定是否重试（失败不置位）。
+	settingsSynced atomic.Bool
+	mu             sync.Mutex
+	closed         bool
 }
 
 // touch 更新最近活跃时间。
@@ -90,8 +93,8 @@ type Hub struct {
 	CertPusher func(serverID uint64)
 
 	mu      sync.RWMutex
-	conns   map[uint64]*Conn               // by server_id
-	pending map[string]*pendingReq         // 请求 id → 回执请求
+	conns   map[uint64]*Conn       // by server_id
+	pending map[string]*pendingReq // 请求 id → 回执请求
 	wg      sync.WaitGroup
 	quit    chan struct{}
 
@@ -678,7 +681,8 @@ func (h *Hub) SyncUsersToAll() {
 }
 
 // PushAgentSettings 向单个节点下发运行时设置（上报/心跳周期，设置页「节点上报」可调）。
-// 节点连接建立与设置保存时调用；离线报错仅记日志（重连时 ServeWS 会重新下发）。
+// 节点连接建立与设置保存时调用；失败仅记日志，由 watchdog 2 分钟补推循环重试
+// （settingsSynced 未置位即补推，成功或重连重发后停止）。
 func (h *Hub) PushAgentSettings(serverID uint64) {
 	payload := protocol.AgentSettingsPayload{
 		ReportIntervalSec:    services.AgentReportIntervalSec(h.DB),
@@ -691,7 +695,14 @@ func (h *Hub) PushAgentSettings(serverID uint64) {
 	}
 	if res != nil && !res.OK {
 		log.Printf("nodegate: 节点 %d 拒绝运行时设置: %s", serverID, res.Error)
+		return
 	}
+	// 成功下发：标记当前连接已同步（连接重建时新 Conn 零值自动回到未同步）
+	h.mu.RLock()
+	if c, ok := h.conns[serverID]; ok {
+		c.settingsSynced.Store(true)
+	}
+	h.mu.RUnlock()
 }
 
 // BroadcastAgentSettings 向所有在线节点下发运行时设置（设置保存后调用，非阻塞）。
@@ -724,13 +735,17 @@ func (h *Hub) watchdog() {
 			// 1 小时校准兜底。推的是已保存的 config_json（不重新 Generate），绕开 Generate
 			// 失败导致的重推死锁；离线节点由上线时 ServeWS 自动补推覆盖，故只遍历注册表。
 			h.mu.RLock()
-			var serverIDs []uint64
-			for id := range h.conns {
-				serverIDs = append(serverIDs, id)
+			online := make([]*Conn, 0, len(h.conns))
+			for _, c := range h.conns {
+				online = append(online, c)
 			}
 			h.mu.RUnlock()
-			for _, id := range serverIDs {
-				go h.PushPending(id)
+			for _, c := range online {
+				go h.PushPending(c.ServerID)
+				// 运行时设置建连下发失败的节点同样补推，直至节点确认（settingsSynced 置位）
+				if !c.settingsSynced.Load() {
+					go h.PushAgentSettings(c.ServerID)
+				}
 			}
 		case <-ticker.C:
 			h.pruneEnforced()
