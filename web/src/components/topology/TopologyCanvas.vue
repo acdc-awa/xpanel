@@ -13,7 +13,6 @@ import {
   type NodeMouseEvent,
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -1466,7 +1465,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       @node-drag-stop="onNodeDragStop"
     >
       <Background pattern-color="#334155" :gap="18" />
-      <Controls position="bottom-left" />
 
       <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线 -->
       <template #edge-boxrule="e">
@@ -2792,14 +2790,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
 :deep(.vue-flow__edge-path) {
   stroke-width: 2;
-}
-:deep(.vue-flow__controls button) {
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-  color: #cbd5e1;
-  &:hover {
-    background: #273449;
-  }
 }
 :deep(.vue-flow__minimap) {
   background: #0f172a;
