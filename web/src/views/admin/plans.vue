@@ -44,6 +44,8 @@ const form = reactive({
   duration_days: 30,
   device_limit: 0,
   permission_group_id: 0,
+  sort_order: 0,
+  is_featured: false,
   sync_users: false, // 编辑保存时是否把新套餐值同步到存量用户（默认关：只影响新购/续费）
 })
 const saving = ref(false)
@@ -94,6 +96,8 @@ function openCreate() {
     duration_days: 30,
     device_limit: 0,
     permission_group_id: 0,
+    sort_order: 0,
+    is_featured: false,
     sync_users: false,
   })
   formOpen.value = true
@@ -110,6 +114,8 @@ function openEdit(row: any) {
     duration_days: row.duration_days,
     device_limit: row.device_limit || 0,
     permission_group_id: row.permission_group_id || 0,
+    sort_order: row.sort_order || 0,
+    is_featured: !!row.is_featured,
     sync_users: false, // 每次打开默认不勾，避免误触发批量同步
   })
   formOpen.value = true
@@ -130,6 +136,8 @@ async function save() {
       duration_days: form.duration_days,
       device_limit: form.device_limit,
       permission_group_id: form.permission_group_id || undefined,
+      sort_order: form.sort_order,
+      is_featured: form.is_featured,
     }
     if (editing.value) payload.sync_users = form.sync_users
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
@@ -204,6 +212,7 @@ async function remove(row: any) {
               <span class="x-chip" :class="row.enabled ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
                 {{ row.enabled ? '已上架' : '已下架' }}
               </span>
+              <span v-if="row.is_featured" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">热门推荐</span>
             </div>
             <el-tooltip :content="row.enabled ? '已上架（用户可见），点击下架' : '已下架（隐藏），点击上架'" placement="top">
               <el-switch :model-value="row.enabled" size="small" @change="togglePlan(row)" />
@@ -239,6 +248,10 @@ async function remove(row: any) {
                   {{ row.device_limit ? `${row.device_limit} 台` : '不限设备' }}
                 </span>
               </div>
+            </div>
+            <div class="grid-item">
+              <span class="item-label">展示排序</span>
+              <div class="item-value cell-mono">#{{ row.sort_order ?? 0 }}</div>
             </div>
           </div>
 
@@ -306,6 +319,15 @@ async function remove(row: any) {
           </el-form-item>
           <el-form-item label="并发设备上限（台，0 为不限）">
             <el-input-number v-model="form.device_limit" :min="0" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="展示排序（越小越靠前）">
+            <el-input-number v-model="form.sort_order" :min="0" :step="10" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="热门推荐">
+            <div style="display: flex; align-items: center; gap: 8px; width: 100%">
+              <el-switch v-model="form.is_featured" />
+              <span class="muted" style="font-size: 12px">商城挂「热门推荐」徽标并高亮（多个标记时仅排最前的生效）</span>
+            </div>
           </el-form-item>
         </div>
         <el-form-item label="权限组（选填，购买后自动授权组内入站）">

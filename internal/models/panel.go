@@ -92,6 +92,8 @@ type Plan struct {
 	DurationDays      int       `gorm:"not null" json:"duration_days"`
 	DeviceLimit       int       `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
 	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
+	SortOrder         int       `gorm:"default:0" json:"sort_order"`                // 商城展示排序（越小越靠前；同值按价格升序）
+	IsFeatured        bool      `gorm:"default:false" json:"is_featured"`           // 商城「热门推荐」标记（多选时仅排最前的生效）
 	Enabled           bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`

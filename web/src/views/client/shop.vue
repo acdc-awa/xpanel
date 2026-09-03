@@ -20,6 +20,12 @@ const plans = ref<Plan[]>([])
 const orders = ref<Order[]>([])
 const loading = ref(false)
 
+// 「热门推荐」徽标与高亮卡片：管理端标记 is_featured 的第一个套餐；一个都没标时回退列表第一项
+const featuredIdx = computed(() => {
+  const i = plans.value.findIndex((p) => p.is_featured)
+  return i === -1 ? 0 : i
+})
+
 // 结账收银台
 const checkoutOpen = ref(false)
 const selectedPlan = ref<Plan | null>(null)
@@ -176,9 +182,9 @@ async function confirmPay() {
         v-for="(p, idx) in plans"
         :key="p.id"
         class="pricing-card"
-        :class="{ featured: idx === 0 }"
+        :class="{ featured: idx === featuredIdx }"
       >
-        <span v-if="idx === 0" class="featured-badge">热门推荐</span>
+        <span v-if="idx === featuredIdx" class="featured-badge">热门推荐</span>
 
         <div class="card-top">
           <div class="plan-title">{{ p.name }}</div>

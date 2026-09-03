@@ -20,6 +20,8 @@ type planView struct {
 	DurationDays      int       `json:"duration_days"`
 	DeviceLimit       int       `json:"device_limit"`        // 0=不限
 	PermissionGroupID uint64    `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
+	SortOrder         int       `json:"sort_order"`          // 商城展示排序（越小越靠前）
+	IsFeatured        bool      `json:"is_featured"`         // 商城「热门推荐」标记
 	Enabled           bool      `json:"enabled"`
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -30,6 +32,7 @@ func toPlanView(p *models.Plan) planView {
 		DurationDays: p.DurationDays,
 		DeviceLimit: p.DeviceLimit,
 		PermissionGroupID: p.PermissionGroupID,
+		SortOrder: p.SortOrder, IsFeatured: p.IsFeatured,
 		Enabled: p.Enabled, CreatedAt: p.CreatedAt,
 	}
 }
@@ -43,6 +46,7 @@ type publicPlanView struct {
 	TrafficGB    int64     `json:"traffic_gb"`
 	DurationDays int       `json:"duration_days"`
 	DeviceLimit  int       `json:"device_limit"` // 0=不限
+	IsFeatured   bool      `json:"is_featured"`  // 商城「热门推荐」标记（前端据此挂徽标）
 	Enabled      bool      `json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
@@ -52,6 +56,7 @@ func toPublicPlanView(p *models.Plan) publicPlanView {
 		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays: p.DurationDays,
 		DeviceLimit: p.DeviceLimit,
+		IsFeatured: p.IsFeatured,
 		Enabled: p.Enabled, CreatedAt: p.CreatedAt,
 	}
 }
@@ -59,7 +64,8 @@ func toPublicPlanView(p *models.Plan) publicPlanView {
 // AdminPlans GET /api/v1/admin/plans
 func (d *Deps) AdminPlans(c *gin.Context) {
 	var list []models.Plan
-	if err := d.DB.Order("id ASC").Find(&list).Error; err != nil {
+	// 与商城同序（sort_order 优先），管理端所见即用户端展示顺序
+	if err := d.DB.Order("sort_order ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -80,6 +86,8 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
 		DeviceLimit       int    `json:"device_limit"`
 		PermissionGroupID uint64 `json:"permission_group_id"` // 0=不绑定
+		SortOrder         int    `json:"sort_order"`          // 展示排序（越小越靠前）
+		IsFeatured        bool   `json:"is_featured"`         // 「热门推荐」标记
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -97,7 +105,8 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		Name: req.Name, Description: req.Description, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
 		DurationDays: req.DurationDays,
 		DeviceLimit: req.DeviceLimit,
-		PermissionGroupID: req.PermissionGroupID, Enabled: true,
+		PermissionGroupID: req.PermissionGroupID, SortOrder: req.SortOrder, IsFeatured: req.IsFeatured,
+		Enabled: true,
 	}
 	if err := d.DB.Create(&plan).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -127,6 +136,8 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		DurationDays      *int    `json:"duration_days"`
 		DeviceLimit       *int    `json:"device_limit"`
 		PermissionGroupID *uint64 `json:"permission_group_id"` // 显式 0 解绑
+		SortOrder         *int    `json:"sort_order"`
+		IsFeatured        *bool   `json:"is_featured"`
 		Enabled           *bool   `json:"enabled"`
 		// SyncUsers「同步存量用户」（2026-09-01 快照化）：默认 false——套餐编辑只影响新购/续费
 		// （存量用户按快照用到自己到期为止）；勾选后把新的额度/设备限制/权限组快照批量覆盖到
@@ -169,6 +180,10 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		util.BadRequest(c, "设备限制不能为负数（0=不限）")
 		return
 	}
+	if req.SortOrder != nil && *req.SortOrder < 0 {
+		util.BadRequest(c, "排序值不能为负数")
+		return
+	}
 	updates := map[string]any{}
 	if req.Name != nil {
 		updates["name"] = strings.TrimSpace(*req.Name)
@@ -190,6 +205,12 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	}
 	if req.PermissionGroupID != nil {
 		updates["permission_group_id"] = *req.PermissionGroupID
+	}
+	if req.SortOrder != nil {
+		updates["sort_order"] = *req.SortOrder
+	}
+	if req.IsFeatured != nil {
+		updates["is_featured"] = *req.IsFeatured
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -245,7 +266,8 @@ func (d *Deps) AdminDeletePlan(c *gin.Context) {
 // PublicPlans GET /api/v1/plans —— 公开上架套餐（未登录可见；隐藏内部 permission_group_id）。
 func (d *Deps) PublicPlans(c *gin.Context) {
 	var list []models.Plan
-	if err := d.DB.Where("enabled = ?", true).Order("price_cents ASC").Find(&list).Error; err != nil {
+	// 展示顺序：sort_order 优先（管理端可控），同序值回退价格升序、再按 id 稳定
+	if err := d.DB.Where("enabled = ?", true).Order("sort_order ASC, price_cents ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}

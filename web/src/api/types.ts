@@ -238,6 +238,8 @@ export interface Plan {
   device_limit: number
   enabled: boolean
   permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
+  sort_order?: number // 商城展示排序（越小越靠前）
+  is_featured?: boolean // 商城「热门推荐」标记
   created_at: string
 }
 
