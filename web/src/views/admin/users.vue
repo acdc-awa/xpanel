@@ -23,6 +23,7 @@ import type { AdminUser } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 import { buildSubscribeUrl } from '@/config/site'
 import { useSiteStore } from '@/stores/site'
+import { useAuthStore } from '@/stores/auth'
 
 const list = ref<AdminUser[]>([])
 const total = ref(0)
@@ -430,6 +431,12 @@ function copyText(text: string, label: string) {
 
 // ---- 订阅信息查看/重置（2026-09-04：管理员轮换用户订阅凭据） ----
 const siteStore = useSiteStore()
+// ---- 自我守卫（2026-09-04）：管理员不能封禁自己，前端直接禁用封禁触点 ----
+const authStore = useAuthStore()
+const currentUserId = computed(() => authStore.user?.id ?? 0)
+function isSelf(row: { id: number }) {
+  return row.id === currentUserId.value
+}
 const subInfoOpen = ref(false)
 const subInfoRow = ref<AdminUser | null>(null)
 const subInfoToken = ref('')
@@ -536,16 +543,19 @@ function exportCSV() {
 }
 
 async function batchToggle(targetStatus: 0 | 1) {
-  const rows = selected.value.filter((u) => u.status !== targetStatus)
+  let rows = selected.value.filter((u) => u.status !== targetStatus)
+  // 自我守卫：批量封禁自动剔除当前登录账号（后端同样拒绝，前端提前跳过并提示）
+  const skippedSelf = targetStatus === 0 ? rows.filter((u) => isSelf(u)).length : 0
+  rows = rows.filter((u) => !isSelf(u))
   if (!rows.length) {
-    ElMessage.warning(targetStatus === 1 ? '所选用户均已启用' : '所选用户均已禁用')
+    ElMessage.warning(skippedSelf > 0 ? '所选用户中仅剩当前登录账号，不能封禁自己' : targetStatus === 1 ? '所选用户均已启用' : '所选用户均已禁用')
     return
   }
   try {
     await ElMessageBox.confirm(
       targetStatus === 1
         ? `确认启用所选 ${rows.length} 位用户？`
-        : `确认封禁所选 ${rows.length} 位用户？封禁后其会话与订阅立即失效。`,
+        : `确认封禁所选 ${rows.length} 位用户？封禁后其会话与订阅立即失效。${skippedSelf > 0 ? '（当前登录账号已自动跳过）' : ''}`,
       targetStatus === 1 ? '批量启用' : '批量封禁',
       { type: 'warning' },
     )
@@ -702,8 +712,8 @@ function handleCardAction(cmd: string, row: AdminUser) {
               </div>
             </div>
             <div class="head-right">
-              <el-tooltip :content="row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
-                <el-switch :model-value="row.status === 1" size="small" @change="doToggle(row)" />
+              <el-tooltip :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
+                <el-switch :model-value="row.status === 1" size="small" :disabled="isSelf(row)" @change="doToggle(row)" />
               </el-tooltip>
             </div>
           </div>
@@ -784,7 +794,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
                   <el-dropdown-item command="reset_traffic">
                     <el-icon><RefreshRight /></el-icon>重置流量
                   </el-dropdown-item>
-                  <el-dropdown-item command="toggle">
+                  <el-dropdown-item command="toggle" :disabled="isSelf(row)">
                     <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>
                     {{ row.status === 1 ? '封禁用户' : '解封用户' }}
                   </el-dropdown-item>
@@ -965,7 +975,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
         </el-form>
 
         <div class="detail-actions" style="margin-top: 24px; border-top: 1px dashed var(--x-border); padding-top: 16px">
-          <el-button size="small" :type="current.status === 1 ? 'warning' : 'success'" @click="doToggle(current); detailOpen = false">
+          <el-button size="small" :type="current.status === 1 ? 'warning' : 'success'" :disabled="isSelf(current)" @click="doToggle(current); detailOpen = false">
             {{ current.status === 1 ? '封禁该用户' : '解封该用户' }}
           </el-button>
           <el-button v-if="current.role !== 'admin'" size="small" type="danger" plain @click="doDelete(current); detailOpen = false">

@@ -379,6 +379,11 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	}
 	if req.Status != nil {
 		status := *req.Status
+		// 自我守卫：管理员不能封禁自己（与 AdminToggleUser 同口径，不因存在其他管理员而放行）
+		if status != models.StatusActive && user.ID == middleware.CurrentUser(c) {
+			util.BadRequest(c, "不能封禁自己的账号")
+			return
+		}
 		// 防死锁：如果试图禁用管理员，必须确保系统中至少保留 1 名激活状态管理员
 		if user.Role == models.RoleAdmin && status != models.StatusActive {
 			var activeAdminCount int64
@@ -434,6 +439,12 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 	if user.Status == models.StatusDisabled {
 		newStatus = models.StatusActive
 	} else {
+		// 自我守卫：管理员不能封禁自己——封禁即吊销会话，操作者立刻被踹下线，无任何收益；
+		// 不因存在其他管理员而放行（2026-09-04 实机反馈：双管理员下 A 封禁自己被放行后遭吊销下线）
+		if user.ID == middleware.CurrentUser(c) {
+			util.BadRequest(c, "不能封禁自己的账号")
+			return
+		}
 		// 防死锁：如果试图禁用管理员，必须确保系统中至少保留 1 名激活状态管理员
 		if user.Role == models.RoleAdmin {
 			var activeAdminCount int64
