@@ -70,6 +70,8 @@ func (d *Deps) userView(user *models.User) gin.H {
 		"total_bytes":            totalBytes,
 		"must_change_pwd":        user.MustChangePwd,
 		"totp_enabled":           user.TotpEnabled,
+		"auto_renew_expire":      user.AutoRenewExpire,
+		"auto_renew_exhaust":     user.AutoRenewExhaust,
 		"device_limit":           user.DeviceLimit,
 		"effective_device_limit": effectiveLimit,
 		"is_custom_device_limit": isCustomLimit,
@@ -95,6 +97,49 @@ func (d *Deps) UserChangePassword(c *gin.Context) {
 	}
 	d.Audit.Log("user", uid, "auth.change_password", "修改密码", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"ok": true})
+}
+
+// UserAutoRenew POST /api/v1/user/auto-renew —— 设置自动续费双开关（到期 / 流量耗尽）。
+// 触发即按当前持有套餐走 PayWithBalance（购买语义：作废重算+流量重置）；开关仅影响 cron 扫描。
+func (d *Deps) UserAutoRenew(c *gin.Context) {
+	uid := middleware.CurrentUser(c)
+	var req struct {
+		AutoRenewExpire  *bool `json:"auto_renew_expire"`
+		AutoRenewExhaust *bool `json:"auto_renew_exhaust"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	updates := map[string]any{}
+	if req.AutoRenewExpire != nil {
+		updates["auto_renew_expire"] = *req.AutoRenewExpire
+	}
+	if req.AutoRenewExhaust != nil {
+		updates["auto_renew_exhaust"] = *req.AutoRenewExhaust
+	}
+	if len(updates) == 0 {
+		util.BadRequest(c, "未提供任何开关")
+		return
+	}
+	if err := d.DB.Model(&models.User{}).Where("id = ?", uid).Updates(updates).Error; err != nil {
+		util.ServerError(c, "更新失败")
+		return
+	}
+	d.Audit.Log("user", uid, "user.auto_renew",
+		"更新自动续费设置：到期="+fmtBool(updates["auto_renew_expire"])+" 耗尽="+fmtBool(updates["auto_renew_exhaust"]),
+		util.ClientIPFromContext(c))
+	util.OK(c, gin.H{"ok": true})
+}
+
+func fmtBool(v any) string {
+	if b, ok := v.(bool); ok {
+		if b {
+			return "开"
+		}
+		return "关"
+	}
+	return "未变更"
 }
 
 // UserServers GET /api/v1/user/servers —— 用户可见节点可用性（J15：替换前端 mock）。

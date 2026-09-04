@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, MoreFilled, Loading, User } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, MoreFilled, Loading, User, Link } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -12,6 +12,8 @@ import {
   updateUser,
   getPlans,
   getPermissionGroups,
+  getUserSubscribeToken,
+  resetUserSubscribeToken,
   type PermissionGroup,
   type Plan,
 } from '@/api/admin'
@@ -19,6 +21,8 @@ import { adjustUserBalance } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { AdminUser } from '@/api/types'
 import { formatBytes } from '@/utils/format'
+import { buildSubscribeUrl } from '@/config/site'
+import { useSiteStore } from '@/stores/site'
 
 const list = ref<AdminUser[]>([])
 const total = ref(0)
@@ -233,6 +237,8 @@ const userEditForm = reactive({
   expire_at: '',
   password: '',
   remark: '',
+  auto_renew_expire: false,
+  auto_renew_exhaust: false,
 })
 const userSaving = ref(false)
 
@@ -258,6 +264,8 @@ function openDetail(row: any) {
   userEditForm.expire_at = row.expire_at || ''
   userEditForm.password = ''
   userEditForm.remark = row.remark || ''
+  userEditForm.auto_renew_expire = !!row.auto_renew_expire
+  userEditForm.auto_renew_exhaust = !!row.auto_renew_exhaust
   detailOpen.value = true
 }
 
@@ -284,6 +292,8 @@ async function saveUserConfig() {
       expire_at: userEditForm.expire_at || null,
       password: userEditForm.password.trim() || undefined,
       remark: userEditForm.remark,
+      auto_renew_expire: userEditForm.auto_renew_expire,
+      auto_renew_exhaust: userEditForm.auto_renew_exhaust,
     }
     const { data } = await updateUser(current.value.id, payload)
     if (data.code === 0) {
@@ -418,6 +428,67 @@ function copyText(text: string, label: string) {
   ElMessage.success(`${label}已复制到剪贴板`)
 }
 
+// ---- 订阅信息查看/重置（2026-09-04：管理员轮换用户订阅凭据） ----
+const siteStore = useSiteStore()
+const subInfoOpen = ref(false)
+const subInfoRow = ref<AdminUser | null>(null)
+const subInfoToken = ref('')
+const subInfoLoading = ref(false)
+const subInfoResetting = ref(false)
+
+const subInfoUrl = computed(() =>
+  subInfoToken.value ? buildSubscribeUrl(subInfoToken.value, siteStore.subscribeUrl, siteStore.subscribePath) : '',
+)
+
+async function openSubscribeInfo(row: AdminUser) {
+  subInfoRow.value = row
+  subInfoToken.value = ''
+  subInfoOpen.value = true
+  subInfoLoading.value = true
+  try {
+    const { data } = await getUserSubscribeToken(row.id)
+    if (data.code === 0) {
+      subInfoToken.value = data.data.subscribe_token
+    } else {
+      ElMessage.error(data.message)
+      subInfoOpen.value = false
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '获取订阅信息失败'))
+    subInfoOpen.value = false
+  } finally {
+    subInfoLoading.value = false
+  }
+}
+
+async function doResetSubscribeToken() {
+  const row = subInfoRow.value
+  if (!row) return
+  try {
+    await ElMessageBox.confirm(
+      '重置后该用户原有的订阅链接将立即失效，用户需重新添加订阅。确定重置？',
+      '重置订阅链接',
+      { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  subInfoResetting.value = true
+  try {
+    const { data } = await resetUserSubscribeToken(row.id)
+    if (data.code === 0) {
+      subInfoToken.value = data.data.subscribe_token
+      ElMessage.success('订阅链接已重置，旧链接已失效')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重置订阅链接失败'))
+  } finally {
+    subInfoResetting.value = false
+  }
+}
+
 // ---- 批量操作与 CSV 导出（ISSUE-17 用户管理增强） ----
 const selected = ref<AdminUser[]>([])
 const batchBusy = ref(false)
@@ -539,6 +610,9 @@ function handleCardAction(cmd: string, row: AdminUser) {
   switch (cmd) {
     case 'adjust':
       openAdjust(row)
+      break
+    case 'subscribe':
+      openSubscribeInfo(row)
       break
     case 'reset_traffic':
       doResetTraffic(row)
@@ -704,6 +778,9 @@ function handleCardAction(cmd: string, row: AdminUser) {
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item command="subscribe">
+                    <el-icon><Link /></el-icon>订阅信息
+                  </el-dropdown-item>
                   <el-dropdown-item command="reset_traffic">
                     <el-icon><RefreshRight /></el-icon>重置流量
                   </el-dropdown-item>
@@ -859,6 +936,25 @@ function handleCardAction(cmd: string, row: AdminUser) {
             />
           </el-form-item>
 
+          <el-form-item label="自动续费">
+            <div class="autorenew-admin-box">
+              <div class="autorenew-admin-row">
+                <div>
+                  <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
+                  <div class="muted" style="font-size: 11.5px">到期前 1 小时内用余额续购当前套餐</div>
+                </div>
+                <el-switch v-model="userEditForm.auto_renew_expire" />
+              </div>
+              <div class="autorenew-admin-row">
+                <div>
+                  <div style="font-size: 13px; font-weight: 600">流量耗尽自动续费</div>
+                  <div class="muted" style="font-size: 11.5px">流量用尽后用余额续购（重新计时+清零流量）</div>
+                </div>
+                <el-switch v-model="userEditForm.auto_renew_exhaust" />
+              </div>
+            </div>
+          </el-form-item>
+
           <el-form-item label="重置密码（留空不修改）">
             <el-input v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
           </el-form-item>
@@ -1003,6 +1099,33 @@ function handleCardAction(cmd: string, row: AdminUser) {
         <el-button type="primary" :loading="adjusting" @click="submitAdjust">确认调账</el-button>
       </template>
     </el-dialog>
+
+    <!-- 订阅信息查看/重置弹窗 -->
+    <el-dialog v-model="subInfoOpen" title="订阅信息" width="560px">
+      <div v-loading="subInfoLoading" class="sub-info-body">
+        <div class="user-meta" style="margin-bottom: 12px">
+          <span class="k">用户:</span>
+          <span class="v" style="font-weight: 600">{{ subInfoRow?.email }}</span>
+        </div>
+        <el-form-item label="订阅链接（发给用户，客户端添加订阅用）">
+          <div class="sub-url-row">
+            <el-input :model-value="subInfoUrl" readonly class="cell-mono" size="default" />
+            <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅链接')">
+              <el-icon><CopyDocument /></el-icon>&nbsp;复制
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-alert type="warning" :closable="false" show-icon>
+          <p>重置订阅链接后，该用户原有订阅地址立即失效，用户需重新添加订阅；节点凭据（UUID）不受影响，已配置的节点无需改动。</p>
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="subInfoOpen = false">关闭</el-button>
+        <el-button type="danger" plain :loading="subInfoResetting" :disabled="subInfoLoading" @click="doResetSubscribeToken">
+          重置订阅链接
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1082,6 +1205,37 @@ function handleCardAction(cmd: string, row: AdminUser) {
 .adjust-header .user-meta {
   display: flex;
   justify-content: space-between;
+}
+
+.sub-info-body .user-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  .k {
+    color: var(--x-text-3, #909399);
+    flex: none;
+  }
+}
+.sub-url-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.autorenew-admin-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--x-border, #e4e7ed);
+  border-radius: 8px;
+
+  .autorenew-admin-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
 }
 
 .quick-expire-bar {

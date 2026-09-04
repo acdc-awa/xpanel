@@ -279,6 +279,8 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		Status            *int       `json:"status"`
 		Password          *string    `json:"password"`
 		Remark            *string    `json:"remark"` // 管理员备注；空串=清空
+		AutoRenewExpire   *bool      `json:"auto_renew_expire"`
+		AutoRenewExhaust  *bool      `json:"auto_renew_exhaust"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -365,6 +367,12 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = strings.TrimSpace(*req.Remark)
+	}
+	if req.AutoRenewExpire != nil {
+		updates["auto_renew_expire"] = *req.AutoRenewExpire
+	}
+	if req.AutoRenewExhaust != nil {
+		updates["auto_renew_exhaust"] = *req.AutoRenewExhaust
 	}
 	if req.ExpireAt != nil {
 		updates["expire_at"] = req.ExpireAt
@@ -471,6 +479,51 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 		d.Hub.SyncUsersToAll()
 	}
 	util.OK(c, gin.H{"ok": true})
+}
+
+// AdminGetUserSubscribeToken GET /api/v1/admin/users/:id/subscribe-token —— 查看用户订阅 token。
+// token 属敏感凭据，用户列表/编辑接口一律不下发，仅此端点按需拉取；
+// 订阅链接由前端按站点设置（subscribe_url/subscribe_path）拼接，与用户侧订阅页同源。
+func (d *Deps) AdminGetUserSubscribeToken(c *gin.Context) {
+	id, err := parseUint(c.Param("id"))
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var user models.User
+	if err := d.DB.First(&user, id).Error; err != nil {
+		util.Fail(c, 404, "用户不存在")
+		return
+	}
+	util.OK(c, gin.H{"id": user.ID, "subscribe_token": user.SubscribeToken})
+}
+
+// AdminResetUserSubscribeToken POST /api/v1/admin/users/:id/subscribe-token/reset —— 轮换用户订阅 token。
+// 旧订阅链接立即失效（订阅端点按 token 查用户，查不到走统一拒绝码）；节点凭据（UUID）不变，
+// xray 侧无需任何同步动作。重置记审计。
+func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
+	id, err := parseUint(c.Param("id"))
+	if err != nil {
+		util.BadRequest(c, "非法 ID")
+		return
+	}
+	var user models.User
+	if err := d.DB.First(&user, id).Error; err != nil {
+		util.Fail(c, 404, "用户不存在")
+		return
+	}
+	token, err := util.NewSubscribeToken()
+	if err != nil {
+		util.ServerError(c, "生成订阅 token 失败")
+		return
+	}
+	if err := d.DB.Model(&user).Update("subscribe_token", token).Error; err != nil {
+		util.ServerError(c, "重置失败")
+		return
+	}
+	d.Audit.Log("admin", middleware.CurrentUser(c), "user.reset_subscribe_token",
+		"重置用户 #"+strconv.FormatUint(id, 10)+" ("+user.Email+") 的订阅 token", util.ClientIPFromContext(c))
+	util.OK(c, gin.H{"id": user.ID, "subscribe_token": token})
 }
 
 // AdminDeleteUser DELETE /api/v1/admin/users/:id —— 硬删除用户（清理授权后移除记录）。

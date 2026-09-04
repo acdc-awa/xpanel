@@ -32,6 +32,8 @@ export interface UserInfo {
   total_bytes: number
   must_change_pwd?: boolean
   totp_enabled?: boolean
+  auto_renew_expire?: boolean
+  auto_renew_exhaust?: boolean
 }
 
 export interface LoginResult {
@@ -176,6 +178,8 @@ export interface AdminUser {
   down_bytes: number
   used_bytes: number
   total_bytes: number
+  auto_renew_expire?: boolean
+  auto_renew_exhaust?: boolean
 }
 
 export interface AdminUserPage {

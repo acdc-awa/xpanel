@@ -30,6 +30,10 @@ type User struct {
 	PlanTrafficBytes int64  `gorm:"default:0" json:"plan_traffic_bytes"` // 流量额度快照（字节，0=不限）
 	PlanDeviceLimit  int    `gorm:"default:0" json:"plan_device_limit"`  // 设备限制快照（0=不限）
 	PlanGroupID      uint64 `gorm:"default:0" json:"plan_group_id"`      // 权限组快照（0=不绑定）
+	// 自动续费双开关（2026-09-04）：到期前 1 小时窗口 / 流量耗尽时分别触发，
+	// 触发即按当前持有套餐调用 PayWithBalance（同现有购买语义：作废重算+流量重置）。
+	AutoRenewExpire  bool `gorm:"default:false" json:"auto_renew_expire"`
+	AutoRenewExhaust bool `gorm:"default:false" json:"auto_renew_exhaust"`
 	MustChangePwd    bool   `gorm:"default:false" json:"must_change_pwd"`
 	// 会话吊销版本号（改密/重置密码/封禁后 bump；JWT claims 携带，refresh 时校验）
 	TokenVersion uint32 `gorm:"default:0" json:"-"`

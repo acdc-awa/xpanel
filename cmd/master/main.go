@@ -108,6 +108,8 @@ func main() {
 	trafficSvc.StartTrafficResetCron(context.Background())
 	trafficSvc.StartRetentionCron(context.Background())
 	orderSvc := billing.NewOrderService(billingStore)
+	// 自动续费（2026-09-04）：到期前 1h 窗口 / 流量耗尽双触发，复用 PayWithBalance 全语义
+	billing.NewAutoRenewService(database, orderSvc).StartCron(context.Background())
 	auditSvc := &services.AuditService{DB: database}
 
 	// Stage 5：进程内同步事件总线（订阅者在 Publish 调用栈内执行，失败仅记日志）。

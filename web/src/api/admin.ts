@@ -222,6 +222,14 @@ export function getInvitations() {
   return http.get<ApiResp<{ items: Invitation[] }>>('/admin/invitations')
 }
 
+export function getUserSubscribeToken(id: number) {
+  return http.get<ApiResp<{ id: number; subscribe_token: string }>>(`/admin/users/${id}/subscribe-token`)
+}
+
+export function resetUserSubscribeToken(id: number) {
+  return http.post<ApiResp<{ id: number; subscribe_token: string }>>(`/admin/users/${id}/subscribe-token/reset`)
+}
+
 export function createInvitations(count: number, expires?: string) {
   return http.post<ApiResp<CreateInvitationResult>>('/admin/invitations', {
     count,

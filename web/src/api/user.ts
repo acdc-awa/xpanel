@@ -5,6 +5,11 @@ export function getMe() {
   return http.get<ApiResp<UserInfo>>('/user/me')
 }
 
+// 自动续费双开关（到期 / 流量耗尽；触发即按现有购买语义扣费重购）
+export function setAutoRenew(payload: { auto_renew_expire?: boolean; auto_renew_exhaust?: boolean }) {
+  return http.post<ApiResp<{ ok: boolean }>>('/user/auto-renew', payload)
+}
+
 export function changePassword(oldPassword: string, newPassword: string) {
   return http.post<ApiResp<{ ok: boolean }>>('/user/password', {
     old_password: oldPassword,

@@ -14,15 +14,39 @@ import {
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
-import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken } from '@/api/user'
+import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, setAutoRenew } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { BalanceLog } from '@/api/types'
+import { ElMessage } from 'element-plus'
 
 const auth = useAuthStore()
 const router = useRouter()
 
 const createdText = ref('—')
+
+// 自动续费双开关（到期 / 流量耗尽；触发即按现有购买语义扣费重购）
+const autoRenewSaving = ref(false)
+const autoRenewExpire = computed(() => !!auth.user?.auto_renew_expire)
+const autoRenewExhaust = computed(() => !!auth.user?.auto_renew_exhaust)
+
+async function toggleAutoRenew(kind: 'expire' | 'exhaust', val: boolean) {
+  autoRenewSaving.value = true
+  try {
+    const payload = kind === 'expire' ? { auto_renew_expire: val } : { auto_renew_exhaust: val }
+    const { data } = await setAutoRenew(payload)
+    if (data.code === 0) {
+      ElMessage.success('自动续费设置已保存')
+      await auth.fetchMe()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '保存失败'))
+  } finally {
+    autoRenewSaving.value = false
+  }
+}
 
 // 余额 & 卡密兑换
 const redeemCode = ref('')
@@ -312,6 +336,43 @@ async function onLogout() {
           </div>
         </div>
 
+        <!-- 自动续费设置 -->
+        <div class="x-card">
+          <div class="x-card-head">
+            <span><el-icon><RefreshRight /></el-icon>&nbsp;自动续费</span>
+          </div>
+          <div class="x-card-body">
+            <div class="autorenew-row">
+              <div class="autorenew-info">
+                <div class="autorenew-title">到期自动续费</div>
+                <div class="muted" style="font-size: 12px">套餐到期前 1 小时内自动使用余额续购当前套餐</div>
+              </div>
+              <el-switch
+                :model-value="autoRenewExpire"
+                :loading="autoRenewSaving"
+                @change="(v: any) => toggleAutoRenew('expire', !!v)"
+              />
+            </div>
+            <div class="autorenew-row" style="margin-top: 12px">
+              <div class="autorenew-info">
+                <div class="autorenew-title">流量耗尽自动续费</div>
+                <div class="muted" style="font-size: 12px">流量用尽后自动使用余额续购当前套餐（重新计时+清零流量）</div>
+              </div>
+              <el-switch
+                :model-value="autoRenewExhaust"
+                :loading="autoRenewSaving"
+                @change="(v: any) => toggleAutoRenew('exhaust', !!v)"
+              />
+            </div>
+            <el-alert type="info" :closable="false" show-icon style="margin-top: 12px">
+              <p style="font-size: 12px; line-height: 1.6">
+                续购按购买规则执行：现有剩余时长作废、自购买时刻重新计时、流量周期重置。余额不足时不扣费，
+                充值后下一轮自动补续；余额充足是前提，请保持账户余额充裕。
+              </p>
+            </el-alert>
+          </div>
+        </div>
+
         <!-- 最近收支记录 -->
         <div class="x-card">
           <div class="x-card-head">
@@ -583,6 +644,19 @@ async function onLogout() {
     font-size: 24px;
     font-weight: 800;
     color: var(--x-text);
+  }
+}
+
+.autorenew-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+
+  .autorenew-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    margin-bottom: 2px;
   }
 }
 

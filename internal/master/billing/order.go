@@ -57,7 +57,8 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		// 销售两属性兜底门控（2026-09-03 替代 enabled；商店列表已按身份过滤，此处防手搓请求）：
 		// 持有该套餐（user.PlanID 相同）= 续费 → 查 renewable；未持有 = 新购 → 查 purchasable。
 		// 与 PublicPlans 身份感知过滤同一矩阵。
-		if user.PlanID > 0 && user.PlanID == planID {
+		isRenewal := user.PlanID > 0 && user.PlanID == planID
+		if isRenewal {
 			if !plan.Renewable {
 				return errors.New("该套餐已停止续费")
 			}
@@ -115,11 +116,9 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			return err
 		}
 
-		// 顺延套餐有效期与重置周期
+		// 时长计算（2026-09-04 拍板，二改统一）：购买一律作废现有剩余时长，自购买时刻重新起算；
+		// 流量周期同步重置（cycleStart=now）。isRenewal 仅用于销售门控（renewable/purchasable）。
 		base := now
-		if user.ExpireAt != nil && user.ExpireAt.After(now) {
-			base = *user.ExpireAt
-		}
 		newExpire := base.AddDate(0, 0, plan.DurationDays)
 		if err := tx.UpdateSubscription(ctx, userID, plan, newExpire, now, plan.PermissionGroupID); err != nil {
 			return err
