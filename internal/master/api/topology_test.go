@@ -11,8 +11,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 func apiTestDB(t *testing.T) *gorm.DB {
@@ -249,5 +249,59 @@ func TestTopologyLayoutAPI(t *testing.T) {
 		if !strings.Contains(r2.Body.String(), `"hash":"h2"`) || !strings.Contains(r2.Body.String(), `"x":9`) || strings.Contains(r2.Body.String(), `"y":456`) {
 			t.Fatalf("overwrite mismatch: %s", r2.Body.String())
 		}
+	}
+}
+
+// TestTopologyLayoutTagOrders：tag_orders 往返 + 旧格式载荷（缺字段）保留旧值 +
+// 显式空对象清空 + 软上限 400
+func TestTopologyLayoutTagOrders(t *testing.T) {
+	db := apiTestDB(t)
+	db.AutoMigrate(&models.Setting{})
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+
+	call := func(method, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(r)
+		c.Request = httptest.NewRequest(method, "/admin/topology-layout", strings.NewReader(body))
+		if body != "" {
+			c.Request.Header.Set("Content-Type", "application/json")
+		}
+		if method == http.MethodPut {
+			d.AdminSaveTopologyLayout(c)
+		} else {
+			d.AdminGetTopologyLayout(c)
+		}
+		return r
+	}
+
+	// 带 tag_orders 保存 → GET 往返
+	if r := call(http.MethodPut, `{"hash":"h1","positions":{},"widths":{},"tag_orders":{"server-4":{"inbounds":[3,1,2],"outbounds":["7","5"]}}}`); r.Code != 200 {
+		t.Fatalf("save failed: %d %s", r.Code, r.Body.String())
+	}
+	if body := call(http.MethodGet, "").Body.String(); !strings.Contains(body, `"tag_orders":{"server-4":{"inbounds":[3,1,2],"outbounds":["7","5"]}}`) {
+		t.Fatalf("tag_orders roundtrip mismatch: %s", body)
+	}
+
+	// 旧格式载荷（缺 tag_orders 字段）→ 保留云端旧值，hash 正常更新
+	if r := call(http.MethodPut, `{"hash":"h2","positions":{},"widths":{}}`); r.Code != 200 {
+		t.Fatalf("legacy save failed: %d %s", r.Code, r.Body.String())
+	}
+	if body := call(http.MethodGet, "").Body.String(); !strings.Contains(body, `"hash":"h2"`) || !strings.Contains(body, `"inbounds":[3,1,2]`) {
+		t.Fatalf("legacy PUT should preserve tag_orders: %s", body)
+	}
+
+	// 显式 {} → 清空
+	if r := call(http.MethodPut, `{"hash":"h3","positions":{},"widths":{},"tag_orders":{}}`); r.Code != 200 {
+		t.Fatalf("clear failed: %d %s", r.Code, r.Body.String())
+	}
+	if body := call(http.MethodGet, "").Body.String(); strings.Contains(body, `"inbounds"`) {
+		t.Fatalf("explicit empty should clear tag_orders: %s", body)
+	}
+
+	// 软上限：单盒入站数组超限 → 400
+	big := `{"hash":"h4","positions":{},"widths":{},"tag_orders":{"server-4":{"inbounds":[` + strings.Repeat("1,", topoTagOrderMaxPerBox) + `1],"outbounds":[]}}}`
+	if r := call(http.MethodPut, big); r.Code != http.StatusBadRequest {
+		t.Fatalf("over-limit should 400, got %d %s", r.Code, r.Body.String())
 	}
 }

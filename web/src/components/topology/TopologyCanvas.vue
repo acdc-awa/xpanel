@@ -56,7 +56,7 @@ const emit = defineEmits<{
 
 // ---- 节点/边构建 ----
 interface BoxOutbound {
-  id: string // DB 出站 = 数字字符串；虚拟 direct = `direct-<serverId>`
+  id: string // 一律为 DB 出站 id 的数字字符串（含虚拟 direct 行）
   tag: string
   protocol: string
   inbound_ref?: number | null
@@ -229,7 +229,7 @@ function getBoxWidth(serverId: number | string): number {
   return boxWidths.get(id) ?? DEFAULT_BOX_W
 }
 
-// 盒高估算（对齐 CSS 渲染附近；仅用于绕行阻挡与自动排版间距）：
+// 盒高估算（对齐 CSS 渲染附近；仅用于自动排版间距）：
 // 标准盒 = max(入站列高含层胶囊, 出站列高)。
 function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, outCount: number) {
   const inbCol = inboundColumnRows(srv.id).colH
@@ -368,7 +368,9 @@ function boxRulePath(sx: number, sy: number, tx: number, ty: number) {
   return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`
 }
 
-// 跨盒引用线：平滑 S 形贝塞尔走线（水平引出，避免急坠与折角）
+// 跨盒引用线：平滑 S 形贝塞尔走线（水平引出，避免急坠与折角）。
+// 有意不做阻挡检测：原「规避绕行」算法（52a7c38）已移除，多盒同列堆叠时跨盒连线
+// 允许直穿中间盒子，属视觉取舍；如需防穿盒参考该历史实现。
 function refEdgePath(sx: number, sy: number, tx: number, ty: number) {
   const dx = tx - sx
   const dy = ty - sy
@@ -376,7 +378,8 @@ function refEdgePath(sx: number, sy: number, tx: number, ty: number) {
     const seg = Math.min(24, dx * 0.15)
     const ax = sx + seg
     const bx = tx - seg
-    const arc = Math.max(40, (bx - ax) * 0.35)
+    // arc 钳制在半距内，防止横向轻微错位（dx≈40~130）时控制点交叉打出小回环
+    const arc = Math.min(Math.max(40, (bx - ax) * 0.35), (bx - ax) / 2)
     return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc} ${sy}, ${bx - arc} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
   }
   // 反向/同列特殊走线：右侧引出 -> 绕背 S 弧度 -> 左侧接入
@@ -396,13 +399,20 @@ function getOrderedOutbounds(serverId: number, rawList: BoxOutbound[]): BoxOutbo
   })
 }
 
+// 该服务器全部入站 id（原生 + 挂层），顺序 = 后端返回序（显示排序的回退基准）
+function allInboundsOf(serverId: number): number[] {
+  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId).map((i) => i.id)
+}
+
 // 更新并持久化卡片内出入站自定义顺序
 function setServerTagOrder(serverId: number, patch: { inbounds?: number[]; outbounds?: string[] }) {
   const key = `server-${serverId}`
   const existing = boxTagOrders.get(key) ?? {}
   const nodeData = (nodes.value as any[]).find((n) => n.id === key)?.data as BoxData | undefined
   const next: ServerTagOrder = {
-    inbounds: patch.inbounds ?? (existing.inbounds ? [...existing.inbounds] : nativeInboundsOf(serverId).map((i) => i.id)),
+    // 播种必须含全部入站（原生 + 挂层）：只播种单组会让另一组成员后续被当作
+    // 「不在序内」走兜底分支，交替微调时互相清零自定义顺序
+    inbounds: patch.inbounds ?? (existing.inbounds ? [...existing.inbounds] : allInboundsOf(serverId)),
     outbounds:
       patch.outbounds ??
       (existing.outbounds
@@ -447,7 +457,7 @@ function moveInboundOrder(serverId: number, inboundId: number, direction: 'up' |
   list[idx] = list[targetIdx]
   list[targetIdx] = tmp
 
-  const existingOrder = boxTagOrders.get(`server-${serverId}`)?.inbounds ?? props.topology.inbounds.filter((i) => i.server_id === serverId).map((i) => i.id)
+  const existingOrder = boxTagOrders.get(`server-${serverId}`)?.inbounds ?? allInboundsOf(serverId)
   const nextOrder = [...existingOrder]
   const posA = nextOrder.indexOf(inboundId)
   const posB = nextOrder.indexOf(swapped)
@@ -457,7 +467,13 @@ function moveInboundOrder(serverId: number, inboundId: number, direction: 'up' |
     nextOrder[posB] = t
     setServerTagOrder(serverId, { inbounds: nextOrder })
   } else {
-    setServerTagOrder(serverId, { inbounds: list })
+    // 兜底：existingOrder 缺本组成员（旧数据只播种过部分入站）时按占位合并而非整组替换，
+    // 他组成员保留原相对序，避免抹掉另一组的自定义顺序
+    const groupSet = new Set(list)
+    const queue = [...list]
+    const merged = existingOrder.map((id) => (groupSet.has(id) ? (queue.shift() ?? id) : id))
+    while (queue.length > 0) merged.push(queue.shift()!)
+    setServerTagOrder(serverId, { inbounds: merged })
   }
 }
 
@@ -1682,9 +1698,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             <div class="sb-head-right">
               <button
                 v-if="editable"
-                class="sb-detail-btn"
+                class="sb-detail-btn nodrag"
                 title="根据内部路由规则自动对齐出入站顺序，减少连线交叉"
                 @click.stop="autoAlignServerTags(nodeProps.data.server.id)"
+                @dblclick.stop
               >
                 <el-icon><MagicStick /></el-icon>&nbsp;理顺
               </button>
@@ -1804,16 +1821,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       </button>
                       <div v-if="editable && g.inbounds.length > 1" class="tag-order-actions">
                         <button
-                          class="order-btn"
+                          class="order-btn nodrag"
                           :disabled="inbIdx === 0"
                           title="上移入站"
                           @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
+                          @dblclick.stop
                         >▲</button>
                         <button
-                          class="order-btn"
+                          class="order-btn nodrag"
                           :disabled="inbIdx === g.inbounds.length - 1"
                           title="下移入站"
                           @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
+                          @dblclick.stop
                         >▼</button>
                       </div>
                       <Handle
@@ -1862,16 +1881,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
                   <div v-if="editable && nativeInboundsOf(nodeProps.data.server.id).length > 1" class="tag-order-actions">
                     <button
-                      class="order-btn"
+                      class="order-btn nodrag"
                       :disabled="inbIdx === 0"
                       title="上移入站"
                       @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
+                      @dblclick.stop
                     >▲</button>
                     <button
-                      class="order-btn"
+                      class="order-btn nodrag"
                       :disabled="inbIdx === nativeInboundsOf(nodeProps.data.server.id).length - 1"
                       title="下移入站"
                       @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
+                      @dblclick.stop
                     >▼</button>
                   </div>
 
@@ -1931,16 +1952,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
                   <div v-if="editable && nodeProps.data.outbounds.length > 1" class="tag-order-actions">
                     <button
-                      class="order-btn"
+                      class="order-btn nodrag"
                       :disabled="outIdx === 0"
                       title="上移出站"
                       @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'up')"
+                      @dblclick.stop
                     >▲</button>
                     <button
-                      class="order-btn"
+                      class="order-btn nodrag"
                       :disabled="outIdx === nodeProps.data.outbounds.length - 1"
                       title="下移出站"
                       @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'down')"
+                      @dblclick.stop
                     >▼</button>
                   </div>
 
@@ -2800,7 +2823,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         }
       }
     }
-    &:hover .tag-order-actions {
+    &:hover .tag-order-actions,
+    .tag-order-actions:focus-within {
       opacity: 1;
     }
   }

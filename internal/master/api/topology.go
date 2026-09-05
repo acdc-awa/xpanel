@@ -452,15 +452,23 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 
 const settingTopologyLayout = "topology_layout"
 
-// topoLayout 云端布局载荷（hash = 客户端对内容算的内容哈希，用于跨浏览器版本去重）
+// tag_orders 软上限：防异常载荷把 settings 单行撑大（全局 BodyLimit 之外的业务级护栏）
+const (
+	topoTagOrderMaxBoxes  = 512
+	topoTagOrderMaxPerBox = 512
+)
+
+// topoLayout 云端布局载荷（hash = 客户端对内容算的内容哈希，用于跨浏览器版本去重）。
+// TagOrders 用指针区分「载荷缺字段」与「显式清空 {}」：旧版前端保存不带该字段，
+// 缺失时保留云端旧值，避免整包覆盖把 tag_orders 抹掉。
 type topoLayout struct {
 	Hash      string `json:"hash"`
 	Positions map[string]struct {
 		X float64 `json:"x"`
 		Y float64 `json:"y"`
 	} `json:"positions"`
-	Widths map[string]float64 `json:"widths"`
-	TagOrders map[string]struct {
+	Widths    map[string]float64 `json:"widths"`
+	TagOrders *map[string]struct {
 		Inbounds  []uint64 `json:"inbounds"`
 		Outbounds []string `json:"outbounds"`
 	} `json:"tag_orders,omitempty"`
@@ -488,9 +496,9 @@ func (d *Deps) AdminGetTopologyLayout(c *gin.Context) {
 				}
 				resp["widths"] = w
 			}
-			if raw.TagOrders != nil {
+			if raw.TagOrders != nil && *raw.TagOrders != nil {
 				orders := gin.H{}
-				for k, v := range raw.TagOrders {
+				for k, v := range *raw.TagOrders {
 					orders[k] = gin.H{"inbounds": v.Inbounds, "outbounds": v.Outbounds}
 				}
 				resp["tag_orders"] = orders
@@ -506,6 +514,27 @@ func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
 		return
+	}
+	if req.TagOrders != nil {
+		if len(*req.TagOrders) > topoTagOrderMaxBoxes {
+			util.BadRequest(c, "tag_orders 条目过多")
+			return
+		}
+		for _, v := range *req.TagOrders {
+			if len(v.Inbounds) > topoTagOrderMaxPerBox || len(v.Outbounds) > topoTagOrderMaxPerBox {
+				util.BadRequest(c, "tag_orders 超出上限")
+				return
+			}
+		}
+	} else {
+		// 旧版前端载荷不带 tag_orders 字段 → 保留云端旧值，避免整包覆盖抹掉
+		var prev models.Setting
+		if err := d.DB.Where("key = ?", settingTopologyLayout).First(&prev).Error; err == nil && prev.Value != "" {
+			var old topoLayout
+			if json.Unmarshal([]byte(prev.Value), &old) == nil && old.TagOrders != nil {
+				req.TagOrders = old.TagOrders
+			}
+		}
 	}
 	val, err := json.Marshal(req)
 	if err != nil {
