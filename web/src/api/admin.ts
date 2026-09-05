@@ -656,6 +656,7 @@ export interface TopologyLayout {
   hash?: string
   positions: Record<string, { x: number; y: number }>
   widths: Record<string, number>
+  tag_orders?: Record<string, { inbounds?: number[]; outbounds?: string[] }>
 }
 
 export function getTopologyLayout() {

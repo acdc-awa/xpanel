@@ -460,6 +460,10 @@ type topoLayout struct {
 		Y float64 `json:"y"`
 	} `json:"positions"`
 	Widths map[string]float64 `json:"widths"`
+	TagOrders map[string]struct {
+		Inbounds  []uint64 `json:"inbounds"`
+		Outbounds []string `json:"outbounds"`
+	} `json:"tag_orders,omitempty"`
 }
 
 // AdminGetTopologyLayout GET /api/v1/admin/topology-layout —— 拉取画布布局（跨浏览器/设备统一）
@@ -483,6 +487,13 @@ func (d *Deps) AdminGetTopologyLayout(c *gin.Context) {
 					w[k] = v
 				}
 				resp["widths"] = w
+			}
+			if raw.TagOrders != nil {
+				orders := gin.H{}
+				for k, v := range raw.TagOrders {
+					orders[k] = gin.H{"inbounds": v.Inbounds, "outbounds": v.Outbounds}
+				}
+				resp["tag_orders"] = orders
 			}
 		}
 	}

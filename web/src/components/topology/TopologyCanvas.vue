@@ -79,10 +79,16 @@ const isFullscreen = ref(false)
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
 const LAYOUT_KEY = 'topology-layout'
 
+interface ServerTagOrder {
+  inbounds?: number[]
+  outbounds?: string[]
+}
+
 interface LayoutData {
   hash: string
   positions: Record<string, { x: number; y: number }>
   widths: Record<string, number>
+  tag_orders?: Record<string, ServerTagOrder>
 }
 
 function loadLayoutLocal(): LayoutData {
@@ -100,7 +106,7 @@ function loadLayoutLocal(): LayoutData {
     const oldPos = localStorage.getItem('topology-box-positions')
     const oldWidths = localStorage.getItem('topology-box-widths')
     if (oldPos || oldWidths) {
-      const d: LayoutData = { hash: '', positions: {}, widths: {} }
+      const d: LayoutData = { hash: '', positions: {}, widths: {}, tag_orders: {} }
       if (oldPos) d.positions = Object.fromEntries(JSON.parse(oldPos) as [string, { x: number; y: number }][])
       if (oldWidths) d.widths = Object.fromEntries(JSON.parse(oldWidths) as [string, number][])
       localStorage.removeItem('topology-box-positions')
@@ -111,7 +117,7 @@ function loadLayoutLocal(): LayoutData {
   } catch {
     /* 迁移失败忽略 */
   }
-  return { hash: '', positions: {}, widths: {} }
+  return { hash: '', positions: {}, widths: {}, tag_orders: {} }
 }
 
 function saveLayoutLocal(d: LayoutData) {
@@ -133,8 +139,16 @@ function sortKeys(o: unknown): unknown {
   return o
 }
 
-function contentHash(positions: Record<string, unknown>, widths: Record<string, unknown>): string {
-  const s = JSON.stringify({ positions: sortKeys(positions), widths: sortKeys(widths) })
+function contentHash(
+  positions: Record<string, unknown>,
+  widths: Record<string, unknown>,
+  tagOrders?: Record<string, unknown>,
+): string {
+  const s = JSON.stringify({
+    positions: sortKeys(positions),
+    widths: sortKeys(widths),
+    tag_orders: sortKeys(tagOrders ?? {}),
+  })
   let h = 5381
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
   return h.toString(36)
@@ -143,6 +157,12 @@ function contentHash(positions: Record<string, unknown>, widths: Record<string, 
 const localLayout = loadLayoutLocal()
 const boxPositions = new Map<string, { x: number; y: number }>(Object.entries(localLayout.positions))
 const boxWidths = new Map<string, number>(Object.entries(localLayout.widths))
+const boxTagOrders = reactive(new Map<string, ServerTagOrder>())
+if (localLayout.tag_orders) {
+  for (const [k, v] of Object.entries(localLayout.tag_orders)) {
+    if (v) boxTagOrders.set(k, { inbounds: v.inbounds ? [...v.inbounds] : undefined, outbounds: v.outbounds ? [...v.outbounds] : undefined })
+  }
+}
 const layoutDirty = ref(false)
 
 // 云端同步：打开时拉取，hash 不一致 → 下载覆盖本地；一致 → 复用本地
@@ -154,15 +174,20 @@ onMounted(async () => {
     if (srv.hash === localLayout.hash) return // 版本一致 → 复用本地布局
     boxPositions.clear()
     boxWidths.clear()
+    boxTagOrders.clear()
     for (const [k, v] of Object.entries(srv.positions ?? {})) {
       if (v && typeof v.x === 'number' && typeof v.y === 'number') boxPositions.set(k, { x: v.x, y: v.y })
     }
     for (const [k, v] of Object.entries(srv.widths ?? {})) {
       if (typeof v === 'number') boxWidths.set(k, v)
     }
+    for (const [k, v] of Object.entries(srv.tag_orders ?? {})) {
+      if (v) boxTagOrders.set(k, { inbounds: v.inbounds ? [...v.inbounds] : undefined, outbounds: v.outbounds ? [...v.outbounds] : undefined })
+    }
     localLayout.hash = srv.hash ?? ''
     localLayout.positions = Object.fromEntries(boxPositions)
     localLayout.widths = Object.fromEntries(boxWidths)
+    localLayout.tag_orders = Object.fromEntries(boxTagOrders)
     saveLayoutLocal(localLayout)
     layoutDirty.value = false
     if (props.topology) buildGraph(props.topology)
@@ -175,13 +200,15 @@ onMounted(async () => {
 async function saveLayoutToCloud() {
   const positions = Object.fromEntries(boxPositions)
   const widths = Object.fromEntries(boxWidths)
-  const hash = contentHash(positions, widths)
+  const tag_orders = Object.fromEntries(boxTagOrders)
+  const hash = contentHash(positions, widths, tag_orders)
   try {
-    const { data } = await saveTopologyLayout({ hash, positions, widths })
+    const { data } = await saveTopologyLayout({ hash, positions, widths, tag_orders })
     if (data.code === 0) {
       localLayout.hash = hash
       localLayout.positions = positions
       localLayout.widths = widths
+      localLayout.tag_orders = tag_orders
       saveLayoutLocal(localLayout)
       layoutDirty.value = false
       ElMessage.success('布局已保存到云端')
@@ -267,9 +294,15 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
   const data = props.topology
   if (!data) return []
   const groups: { layer: AccessLayer; inbounds: TopologyData['inbounds'] }[] = []
+  const order = boxTagOrders.get(`server-${serverId}`)?.inbounds
+  const rank = order && order.length > 0 ? new Map(order.map((id, idx) => [id, idx])) : null
   for (const l of data.layers ?? []) {
     if (l.server_id !== serverId) continue
-    groups.push({ layer: l, inbounds: data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id) })
+    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id)
+    const inbounds = rank
+      ? [...rawInbs].sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 9999) - (rank.has(b.id) ? rank.get(b.id)! : 9999))
+      : rawInbs
+    groups.push({ layer: l, inbounds })
   }
   return groups
 }
@@ -277,7 +310,15 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
 function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
   const data = props.topology
   if (!data) return []
-  return data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id)
+  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id)
+  const order = boxTagOrders.get(`server-${serverId}`)?.inbounds
+  if (!order || order.length === 0) return list
+  const rank = new Map(order.map((id, idx) => [id, idx]))
+  return [...list].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : 9999
+    const rb = rank.has(b.id) ? rank.get(b.id)! : 9999
+    return ra - rb
+  })
 }
 
 // 入站列显示布局：返回每行中心 Y（相对盒顶，含 HEADER_H）与列总高（顶到底含底部内边距）。
@@ -327,90 +368,143 @@ function boxRulePath(sx: number, sy: number, tx: number, ty: number) {
   return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`
 }
 
-// 跨盒引用线：方案④「先直再弯曲」——水平直出/直入 ≤30px + 贝塞尔弧过渡（遇中间盒子阻挡自动下垂 U 形绕行，同样带直段）
-function refEdgePath(sx: number, sy: number, tx: number, ty: number, detour: boolean, drop: number) {
-  const dir = tx >= sx ? 1 : -1
-  const span = Math.abs(tx - sx)
-  const seg = Math.min(30, span * 0.15)
-  const ax = sx + seg * dir
-  const bx = tx - seg * dir
-
-  if (detour && drop > 0) {
-    // 绕行分支同样保持「先直再弯曲」：直出后以更宽缓的弧过渡到绕行高度，避免急坠成抛物线
-    const pull = Math.max(50, span * 0.25)
-    const c1x = ax + pull
-    const c2x = bx - pull
-    const midX = (sx + tx) / 2
-    return `M ${sx} ${sy} L ${ax} ${sy} C ${c1x} ${sy}, ${c1x} ${drop}, ${midX} ${drop} C ${c2x} ${drop}, ${c2x} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
+// 跨盒引用线：平滑 S 形贝塞尔走线（水平引出，避免急坠与折角）
+function refEdgePath(sx: number, sy: number, tx: number, ty: number) {
+  const dx = tx - sx
+  const dy = ty - sy
+  if (dx >= 40) {
+    const seg = Math.min(24, dx * 0.15)
+    const ax = sx + seg
+    const bx = tx - seg
+    const arc = Math.max(40, (bx - ax) * 0.35)
+    return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc} ${sy}, ${bx - arc} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
   }
-
-  const arc = Math.abs(bx - ax) * 0.25
-  return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc * dir} ${sy}, ${bx - arc * dir} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
+  // 反向/同列特殊走线：右侧引出 -> 绕背 S 弧度 -> 左侧接入
+  const offset = Math.max(60, Math.abs(dy) * 0.4, Math.abs(dx) * 0.3)
+  return `M ${sx} ${sy} C ${sx + offset} ${sy}, ${tx - offset} ${ty}, ${tx} ${ty}`
 }
 
-// 动态重算所有跨盒引用边的阻挡与绕行高度（支持动态 boxWidth）
-function recalcDetours() {
+// 按 tag_orders 排序列出服务器出站项
+function getOrderedOutbounds(serverId: number, rawList: BoxOutbound[]): BoxOutbound[] {
+  const order = boxTagOrders.get(`server-${serverId}`)?.outbounds
+  if (!order || order.length === 0) return rawList
+  const rank = new Map(order.map((id, idx) => [id, idx]))
+  return [...rawList].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : 9999
+    const rb = rank.has(b.id) ? rank.get(b.id)! : 9999
+    return ra - rb
+  })
+}
+
+// 更新并持久化卡片内出入站自定义顺序
+function setServerTagOrder(serverId: number, patch: { inbounds?: number[]; outbounds?: string[] }) {
+  const key = `server-${serverId}`
+  const existing = boxTagOrders.get(key) ?? {}
+  const nodeData = (nodes.value as any[]).find((n) => n.id === key)?.data as BoxData | undefined
+  const next: ServerTagOrder = {
+    inbounds: patch.inbounds ?? (existing.inbounds ? [...existing.inbounds] : nativeInboundsOf(serverId).map((i) => i.id)),
+    outbounds:
+      patch.outbounds ??
+      (existing.outbounds
+        ? [...existing.outbounds]
+        : (nodeData?.outbounds ?? []).map((o) => o.id)),
+  }
+  boxTagOrders.set(key, next)
+  localLayout.tag_orders = Object.fromEntries(boxTagOrders)
+  saveLayoutLocal(localLayout)
+  layoutDirty.value = true
+
+  // 刷新 node.data.outbounds
+  const srvNode = (nodes.value as any[]).find((n) => n.id === key)
+  if (srvNode && srvNode.data) {
+    const data = srvNode.data as BoxData
+    if (props.topology) {
+      const rawOut = (props.topology.outbounds || []).filter((o) => o.server_id === serverId && o.protocol !== 'blackhole')
+      const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref
+      const list: BoxOutbound[] = rawOut.map((o) => ({ ...o, id: String(o.id), virtual: isDirect(o) }))
+      data.outbounds = getOrderedOutbounds(serverId, list)
+    }
+  }
+
+  nextTick(() => {
+    flowRef.value?.updateNodeInternals?.(key)
+  })
+}
+
+function moveInboundOrder(serverId: number, inboundId: number, direction: 'up' | 'down') {
   if (!props.topology) return
-  const data = props.topology
-  const idxByServer = new Map(data.servers.map((s, i) => [s.id, i]))
-  const inbByServer = new Map<number, TopologyData['inbounds']>()
-  for (const inb of data.inbounds) {
-    if (!inbByServer.has(inb.server_id)) inbByServer.set(inb.server_id, [])
-    inbByServer.get(inb.server_id)!.push(inb)
+  const inb = props.topology.inbounds.find((i) => i.id === inboundId)
+  if (!inb) return
+  const list = inb.layer_id
+    ? (layerGroupsOf(serverId).find((g) => g.layer.id === inb.layer_id)?.inbounds ?? []).map((i) => i.id)
+    : nativeInboundsOf(serverId).map((i) => i.id)
+  const idx = list.indexOf(inboundId)
+  if (idx === -1) return
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (targetIdx < 0 || targetIdx >= list.length) return
+  const swapped = list[targetIdx]
+  const tmp = list[idx]
+  list[idx] = list[targetIdx]
+  list[targetIdx] = tmp
+
+  const existingOrder = boxTagOrders.get(`server-${serverId}`)?.inbounds ?? props.topology.inbounds.filter((i) => i.server_id === serverId).map((i) => i.id)
+  const nextOrder = [...existingOrder]
+  const posA = nextOrder.indexOf(inboundId)
+  const posB = nextOrder.indexOf(swapped)
+  if (posA !== -1 && posB !== -1) {
+    const t = nextOrder[posA]
+    nextOrder[posA] = nextOrder[posB]
+    nextOrder[posB] = t
+    setServerTagOrder(serverId, { inbounds: nextOrder })
+  } else {
+    setServerTagOrder(serverId, { inbounds: list })
   }
-  const outByServer = new Map<number, BoxOutbound[]>()
-  for (const out of data.outbounds) {
-    if (out.protocol === 'blackhole') continue
-    if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
-    outByServer.get(out.server_id)!.push({ ...out, id: String(out.id) })
-  }
+}
 
-  const rawEdges = edges.value as unknown as Edge[]
-  for (const edge of rawEdges) {
-    if (!edge.id.startsWith('ref-')) continue
-    const outboundId = Number(edge.id.slice(4))
-    const out = data.outbounds.find((o) => o.id === outboundId)
-    if (!out || !out.inbound_ref) continue
-    const inb = data.inbounds.find((i) => i.id === out.inbound_ref)
-    if (!inb) continue
+function moveOutboundOrder(serverId: number, outboundId: string, direction: 'up' | 'down') {
+  const srvNode = (nodes.value as any[]).find((n) => n.id === `server-${serverId}`)
+  const currentOutbounds: BoxOutbound[] = (srvNode?.data as BoxData)?.outbounds ?? []
+  const currentList = currentOutbounds.map((o) => o.id)
+  const idx = currentList.indexOf(outboundId)
+  if (idx === -1) return
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (targetIdx < 0 || targetIdx >= currentList.length) return
+  const tmp = currentList[idx]
+  currentList[idx] = currentList[targetIdx]
+  currentList[targetIdx] = tmp
+  setServerTagOrder(serverId, { outbounds: currentList })
+}
 
-    const srcSrv = data.servers.find((s) => s.id === out.server_id)
-    const tgtSrv = data.servers.find((s) => s.id === inb.server_id)
-    if (!srcSrv || !tgtSrv) continue
+// 根据当前入站顺序与路由规则，自动重排出站顺序，消除盒内走线交叉
+function autoAlignServerTags(serverId: number) {
+  if (!props.topology) return
+  const inbs = nativeInboundsOf(serverId)
+  const rules = (props.topology.routing_rules || []).filter((r) => r.server_id === serverId && r.enabled)
+  const srvNode = (nodes.value as any[]).find((n) => n.id === `server-${serverId}`)
+  const outbounds: BoxOutbound[] = (srvNode?.data as BoxData)?.outbounds ?? []
+  if (inbs.length === 0 || outbounds.length === 0) return
 
-    const srcPos = nodePosOf(srcSrv, idxByServer.get(out.server_id) ?? 0)
-    const tgtPos = nodePosOf(tgtSrv, idxByServer.get(inb.server_id) ?? 0)
-    const srcW = getBoxWidth(srcSrv.id)
+  const matchedOutboundIds: string[] = []
+  const usedOutboundIds = new Set<string>()
 
-    const outList = outByServer.get(out.server_id) ?? []
-    const srcRow = outList.findIndex((o) => o.id === String(out.id))
-    const sx = srcPos.x + srcW
-    const sy = srcPos.y + HEADER_H + COL_HED + srcRow * ROW_H + ROW_H / 2
-
-    const tgtRow = inboundColumnRows(inb.server_id).rows.find((r) => r.id === inb.id)
-    const tx = tgtPos.x
-    const ty = tgtPos.y + (tgtRow?.centerY ?? HEADER_H + COL_HED + ROW_H / 2)
-
-    let detour = false
-    let blockBottom = 0
-    for (const s2 of data.servers) {
-      if (s2.id === out.server_id || s2.id === inb.server_id) continue
-      const p2 = nodePosOf(s2, idxByServer.get(s2.id) ?? 0)
-      const w2 = getBoxWidth(s2.id)
-      const h2 = estBoxHeight(s2, inbByServer.get(s2.id)?.length ?? 0, outByServer.get(s2.id)?.length ?? 0)
-      if (
-        p2.x < Math.max(sx, tx) &&
-        p2.x + w2 > Math.min(sx, tx) &&
-        p2.y < Math.max(sy, ty) &&
-        p2.y + h2 > Math.min(sy, ty)
-      ) {
-        detour = true
-        blockBottom = Math.max(blockBottom, p2.y + h2)
+  for (const inb of inbs) {
+    const rule = rules.find((r) => r.inbound_tag === inb.tag)
+    if (rule) {
+      const targetOut = outbounds.find((o) => o.tag === rule.outbound_tag && !usedOutboundIds.has(o.id))
+      if (targetOut) {
+        matchedOutboundIds.push(targetOut.id)
+        usedOutboundIds.add(targetOut.id)
       }
     }
-    const drop = detour ? Math.max(blockBottom + 50, Math.max(sy, ty) + 140) : 0
-    edge.data = { detour, drop }
   }
+  for (const out of outbounds) {
+    if (!usedOutboundIds.has(out.id)) {
+      matchedOutboundIds.push(out.id)
+    }
+  }
+
+  setServerTagOrder(serverId, { outbounds: matchedOutboundIds })
+  ElMessage.success('已自动理顺出入站对应走线')
 }
 
 function buildGraph(data: TopologyData) {
@@ -439,7 +533,7 @@ function buildGraph(data: TopologyData) {
     data: {
       server: s,
       inbounds: inbByServer.get(s.id) || [],
-      outbounds: outByServer.get(s.id) || [],
+      outbounds: getOrderedOutbounds(s.id, outByServer.get(s.id) || []),
       layers: (data.layers ?? []).filter((l) => l.server_id === s.id),
       boxWidth: getBoxWidth(s.id),
     } as BoxData,
@@ -480,7 +574,7 @@ function buildGraph(data: TopologyData) {
           type: 'refedge',
           animated: true,
           markerEnd: { type: MarkerType.ArrowClosed },
-          data: { detour: false, drop: 0, isAP: true },
+          data: { isAP: true },
         })
       }
     }
@@ -501,7 +595,7 @@ function buildGraph(data: TopologyData) {
       type: 'refedge',
       animated: true,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { detour: false, drop: 0 },
+      data: {},
     })
   }
 
@@ -523,7 +617,6 @@ function buildGraph(data: TopologyData) {
     })
   }
   edges.value = es
-  recalcDetours()
 }
 
 watch(
@@ -1283,7 +1376,6 @@ function startBoxResize(e: MouseEvent, data: BoxData) {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
     layoutDirty.value = true
-    recalcDetours()
   }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
@@ -1295,7 +1387,7 @@ function handleNodeDblClick(evt: NodeMouseEvent) {
   if (box?.server?.id) emit('open-server', box.server.id)
 }
 
-// 盒子拖动结束：更新本地布局 + 动态重算绕行
+// 盒子拖动结束：更新本地布局
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
   if (node.position) {
@@ -1303,7 +1395,6 @@ function onNodeDragStop(evt: NodeDragEvent) {
     localLayout.positions = Object.fromEntries(boxPositions)
     saveLayoutLocal(localLayout)
     layoutDirty.value = true
-    recalcDetours()
   }
 }
 
@@ -1315,65 +1406,72 @@ function autoLayout() {
   const upstream = new Map<number, Set<number>>()
   for (const id of srvIds) upstream.set(id, new Set())
 
-  const inbServerMap = new Map<number, number>()
-  for (const inb of data.inbounds) inbServerMap.set(inb.id, inb.server_id)
-
+  // InboundRef: out (src) -> inb (tgt)；流量方向 src -> tgt，故 tgt 依赖 src
   for (const out of data.outbounds) {
-    if (out.inbound_ref && inbServerMap.has(out.inbound_ref)) {
-      const targetServerId = inbServerMap.get(out.inbound_ref)!
-      if (targetServerId !== out.server_id) {
-        upstream.get(targetServerId)?.add(out.server_id)
-      }
+    if (!out.inbound_ref) continue
+    const targetInb = data.inbounds.find((i) => i.id === out.inbound_ref)
+    if (!targetInb) continue
+    if (out.server_id !== targetInb.server_id && upstream.has(targetInb.server_id)) {
+      upstream.get(targetInb.server_id)!.add(out.server_id)
     }
   }
 
-  const layers = new Map<number, number>()
-  function getLayer(id: number, visited = new Set<number>()): number {
-    if (layers.has(id)) return layers.get(id)!
+  // 最长路径层级计算（拓扑分层）
+  const depth = new Map<number, number>()
+  function getDepth(id: number, visited = new Set<number>()): number {
     if (visited.has(id)) return 0
+    if (depth.has(id)) return depth.get(id)!
     visited.add(id)
-    const ups = Array.from(upstream.get(id) ?? [])
-    if (ups.length === 0) {
-      layers.set(id, 0)
-      return 0
+    const ups = upstream.get(id) || new Set()
+    let d = 0
+    for (const upId of ups) {
+      d = Math.max(d, getDepth(upId, new Set(visited)) + 1)
     }
-    const maxUpLayer = Math.max(...ups.map((u) => getLayer(u, new Set(visited))))
-    const layer = maxUpLayer + 1
-    layers.set(id, layer)
-    return layer
+    depth.set(id, d)
+    return d
+  }
+  for (const id of srvIds) getDepth(id)
+
+  const layers = new Map<number, number[]>()
+  for (const [id, d] of depth) {
+    if (!layers.has(d)) layers.set(d, [])
+    layers.get(d)!.push(id)
   }
 
-  for (const id of srvIds) getLayer(id)
-
-  const layerBuckets = new Map<number, number[]>()
-  for (const id of srvIds) {
-    const l = layers.get(id) ?? 0
-    if (!layerBuckets.has(l)) layerBuckets.set(l, [])
-    layerBuckets.get(l)!.push(id)
-  }
-
-  const sortedLayers = Array.from(layerBuckets.keys()).sort((a, b) => a - b)
-  // 接入点小盒固定最左列，自上而下排布
+  // AP 节点固定排在最左侧（第 0 列），占宽 280px + 间距 80px
   const aps = data.access_points || []
-  aps.forEach((ap, i) => boxPositions.set(`ap-${ap.id}`, { x: 40, y: 30 + i * 170 }))
-  let curX = 40 + (aps.length > 0 ? 280 + 100 : 0)
-  const GAP_X = 100
-  const GAP_Y = 32
+  aps.forEach((ap, i) => {
+    boxPositions.set(`ap-${ap.id}`, { x: 40, y: 24 + i * 170 })
+  })
 
-  for (const l of sortedLayers) {
-    const srvsInLayer = layerBuckets.get(l)!
-    let curY = 30
-    let maxColW = DEFAULT_BOX_W
+  // 各层 X 起点沿用该层最宽盒子尺寸累计推进，杜绝硬编码 520px 导致拉宽盒子时互相压叠穿模
+  const GAP_X = 80
+  const GAP_Y = 32
+  let curX = 40 + (aps.length > 0 ? 280 + GAP_X : 0)
+
+  const inbCounts = new Map<number, number>()
+  for (const inb of data.inbounds) inbCounts.set(inb.server_id, (inbCounts.get(inb.server_id) || 0) + 1)
+  const outCounts = new Map<number, number>()
+  for (const out of data.outbounds) {
+    if (out.protocol !== 'blackhole') outCounts.set(out.server_id, (outCounts.get(out.server_id) || 0) + 1)
+  }
+
+  const sortedDepths = Array.from(layers.keys()).sort((a, b) => a - b)
+  for (const d of sortedDepths) {
+    const srvsInLayer = layers.get(d)!
+    let curY = 24
+    let maxColWidth = DEFAULT_BOX_W
     for (const sid of srvsInLayer) {
+      const srv = data.servers.find((s) => s.id === sid)
+      if (!srv) continue
       const w = getBoxWidth(sid)
-      maxColW = Math.max(maxColW, w)
+      maxColWidth = Math.max(maxColWidth, w)
       boxPositions.set(`server-${sid}`, { x: curX, y: curY })
-      const srv = data.servers.find((s) => s.id === sid)!
-      const inbCount = data.inbounds.filter((i) => i.server_id === sid).length
-      const outCount = data.outbounds.filter((o) => o.server_id === sid && o.protocol !== 'blackhole').length
+      const inbCount = inbCounts.get(sid) || 0
+      const outCount = outCounts.get(sid) || 0
       curY += estBoxHeight(srv, inbCount, outCount) + GAP_Y
     }
-    curX += maxColW + GAP_X
+    curX += maxColWidth + GAP_X
   }
 
   localLayout.positions = Object.fromEntries(boxPositions)
@@ -1384,7 +1482,6 @@ function autoLayout() {
     const p = boxPositions.get(node.id)
     if (p) node.position = { ...p }
   }
-  recalcDetours()
   ElMessage.success('已完成拓扑分层排版（接入点 → 中转 → 落地）')
 }
 
@@ -1398,17 +1495,26 @@ function resetLayout() {
     boxPositions.set(`server-${s.id}`, { x: offsetX + idx * 520, y: 24 })
     boxWidths.set(`server-${s.id}`, DEFAULT_BOX_W)
   })
+  boxTagOrders.clear()
   localLayout.positions = Object.fromEntries(boxPositions)
   localLayout.widths = Object.fromEntries(boxWidths)
+  localLayout.tag_orders = {}
   saveLayoutLocal(localLayout)
   layoutDirty.value = true
 
   for (const node of nodes.value) {
     const p = boxPositions.get(node.id)
     if (p) node.position = { ...p }
-    if (node.data) (node.data as BoxData).boxWidth = DEFAULT_BOX_W
+    if (node.data) {
+      const b = node.data as BoxData
+      b.boxWidth = DEFAULT_BOX_W
+      if (props.topology && b.server?.id) {
+        const rawOut = (props.topology.outbounds || []).filter((o) => o.server_id === b.server.id && o.protocol !== 'blackhole')
+        const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref
+        b.outbounds = rawOut.map((o) => ({ ...o, id: String(o.id), virtual: isDirect(o) }))
+      }
+    }
   }
-  recalcDetours()
   ElMessage.success('已重置为默认排列')
 }
 
@@ -1476,21 +1582,21 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
       </template>
 
-      <!-- 跨盒引用线：直-弧-直（阻挡 U 形绕行）-->
+      <!-- 跨盒引用线：平滑 S 形贝塞尔 -->
       <template #edge-refedge="e">
         <path
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit ref-hit"
-          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
+          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
           class="refedge-glow"
           :class="{ 'is-ap': e.data?.isAP }"
-          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
+          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
           class="refedge-path"
           :class="{ 'is-ap': e.data?.isAP }"
-          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY, !!e.data?.detour, e.data?.drop ?? 0)"
+          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
           :marker-end="e.markerEnd"
         />
       </template>
@@ -1574,6 +1680,14 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
               <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
             </div>
             <div class="sb-head-right">
+              <button
+                v-if="editable"
+                class="sb-detail-btn"
+                title="根据内部路由规则自动对齐出入站顺序，减少连线交叉"
+                @click.stop="autoAlignServerTags(nodeProps.data.server.id)"
+              >
+                <el-icon><MagicStick /></el-icon>&nbsp;理顺
+              </button>
               <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', nodeProps.data.server.id)">
                 <el-icon><Setting /></el-icon>&nbsp;详情
               </button>
@@ -1652,7 +1766,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   </div>
                   <div class="layer-capsule-body">
                     <div v-if="g.inbounds.length === 0" class="sb-empty layer-empty">暂无挂载入站</div>
-                    <div v-for="inb in g.inbounds" :key="inb.id" class="sb-row layer-subrow">
+                    <div v-for="(inb, inbIdx) in g.inbounds" :key="inb.id" class="sb-row layer-subrow">
                       <Handle
                         type="target"
                         :id="`inb-tgt-${inb.id}`"
@@ -1688,6 +1802,20 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       >
                         ×
                       </button>
+                      <div v-if="editable && g.inbounds.length > 1" class="tag-order-actions">
+                        <button
+                          class="order-btn"
+                          :disabled="inbIdx === 0"
+                          title="上移入站"
+                          @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
+                        >▲</button>
+                        <button
+                          class="order-btn"
+                          :disabled="inbIdx === g.inbounds.length - 1"
+                          title="下移入站"
+                          @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
+                        >▼</button>
+                      </div>
                       <Handle
                         type="source"
                         :id="`inb-src-${inb.id}`"
@@ -1701,7 +1829,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
                 <!-- 2. 未挂层原生入站行（直连端点，ShareAddrStrategy 决定对外地址） -->
                 <div
-                  v-for="inb in nativeInboundsOf(nodeProps.data.server.id)"
+                  v-for="(inb, inbIdx) in nativeInboundsOf(nodeProps.data.server.id)"
                   :key="inb.id"
                   class="sb-row"
                 >
@@ -1732,6 +1860,21 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
                   <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
 
+                  <div v-if="editable && nativeInboundsOf(nodeProps.data.server.id).length > 1" class="tag-order-actions">
+                    <button
+                      class="order-btn"
+                      :disabled="inbIdx === 0"
+                      title="上移入站"
+                      @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
+                    >▲</button>
+                    <button
+                      class="order-btn"
+                      :disabled="inbIdx === nativeInboundsOf(nodeProps.data.server.id).length - 1"
+                      title="下移入站"
+                      @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
+                    >▼</button>
+                  </div>
+
                   <Handle
                     type="source"
                     :id="`inb-src-${inb.id}`"
@@ -1760,7 +1903,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
               <template v-if="nodeProps.data.outbounds.length > 0">
                 <div
-                  v-for="out in nodeProps.data.outbounds"
+                  v-for="(out, outIdx) in nodeProps.data.outbounds"
                   :key="out.id"
                   class="sb-row"
                   :class="{ 'direct-row': out.virtual }"
@@ -1785,6 +1928,22 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
                   <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
+
+                  <div v-if="editable && nodeProps.data.outbounds.length > 1" class="tag-order-actions">
+                    <button
+                      class="order-btn"
+                      :disabled="outIdx === 0"
+                      title="上移出站"
+                      @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'up')"
+                    >▲</button>
+                    <button
+                      class="order-btn"
+                      :disabled="outIdx === nodeProps.data.outbounds.length - 1"
+                      title="下移出站"
+                      @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'down')"
+                    >▼</button>
+                  </div>
+
                   <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
                   <Handle
                     v-if="!out.virtual"
@@ -2604,6 +2763,45 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
       }
+    }
+
+    .tag-order-actions {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 1px;
+      opacity: 0;
+      transition: opacity 0.15s;
+      flex: none;
+      margin-left: auto;
+      z-index: 4;
+      .order-btn {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #94a3b8;
+        font-size: 7px;
+        line-height: 8px;
+        padding: 0 3px;
+        height: 10px;
+        cursor: pointer;
+        border-radius: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        &:hover:not(:disabled) {
+          color: #38bdf8;
+          border-color: #38bdf8;
+          background: rgba(56, 189, 248, 0.15);
+        }
+        &:disabled {
+          opacity: 0.15;
+          cursor: not-allowed;
+          border-color: transparent;
+          background: transparent;
+        }
+      }
+    }
+    &:hover .tag-order-actions {
+      opacity: 1;
     }
   }
 
