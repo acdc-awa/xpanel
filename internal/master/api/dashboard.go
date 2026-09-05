@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -162,8 +161,14 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	d.DB.Model(&models.Order{}).Count(&data.Summary.TotalOrders)
 	d.DB.Model(&models.Order{}).Where("created_at >= ?", todayStart).Count(&data.Summary.TodayOrders)
 
-	// 3. 流量汇总与趋势（近 30 天）
+	// 3. 流量汇总与趋势（天粒度，范围可调 3/7/30 天，默认 30）
 	trendDays := 30
+	switch c.Query("days") {
+	case "3":
+		trendDays = 3
+	case "7":
+		trendDays = 7
+	}
 	startTime := todayStart.AddDate(0, 0, -(trendDays - 1))
 	var dailies []models.TrafficDaily
 	d.DB.Where("date >= ?", startTime.Format("2006-01-02")).Find(&dailies)
@@ -179,10 +184,17 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			pt.DownBytes += td.DownBytes
 			pt.TotalBytes += (td.UpBytes + td.DownBytes)
 		}
-		if strings.HasPrefix(td.Date, monthPrefix) {
-			data.Summary.MonthTrafficTotal += (td.UpBytes + td.DownBytes)
-		}
 	}
+
+	// 本月流量合计独立统计（与趋势范围解耦：days=3/7 时不能借趋势切片计算）
+	var monthAgg struct {
+		Total int64
+	}
+	d.DB.Model(&models.TrafficDaily{}).
+		Select("COALESCE(SUM(up_bytes + down_bytes), 0) AS total").
+		Where("date LIKE ?", monthPrefix+"%").
+		Scan(&monthAgg)
+	data.Summary.MonthTrafficTotal = monthAgg.Total
 
 	// ISSUE-06：traffic_dailies 已包含今日（每 5 分钟聚合），不能再与 traffic_logs 相加。
 	// 只取 max(daily, 实时 logs) 修正最近 5 分钟未聚合窗口，保持单一数据源、无重复计数。
@@ -289,6 +301,10 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		}
 		data.ServerBreakdown = append(data.ServerBreakdown, *item)
 	}
+	// 按 ServerID 排序固定顺序：Go map 遍历随机，否则前端饼图按索引着色会每次刷新变颜色
+	sort.Slice(data.ServerBreakdown, func(i, j int) bool {
+		return data.ServerBreakdown[i].ServerID < data.ServerBreakdown[j].ServerID
+	})
 
 	// 6. 用户流量消耗排行榜 Top 10（ISSUE-10：单条 SQL 聚合替代逐用户 UserUsed）
 	var users []models.User

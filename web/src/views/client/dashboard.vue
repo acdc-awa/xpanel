@@ -33,7 +33,12 @@ const deviceLimitText = computed(() => {
   return lim > 0 ? `${lim} 台设备` : '不限设备'
 })
 
-const planLabel = computed(() => (auth.user?.plan_id ? `已购套餐 #${auth.user.plan_id}` : '暂无生效套餐'))
+// plan_name 由 /user/me 等接口返回；套餐已删时为空，回退显示编号
+const planLabel = computed(() => {
+  if (auth.user?.plan_name) return `已购套餐 ${auth.user.plan_name}`
+  if (auth.user?.plan_id) return `已购套餐 #${auth.user.plan_id}`
+  return '暂无生效套餐'
+})
 const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
 const totalBytes = computed(() => auth.user?.total_bytes ?? 0)
 const remainBytes = computed(() => Math.max(0, totalBytes.value - usedBytes.value))

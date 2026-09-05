@@ -81,19 +81,42 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
+
+	// 批量补操作人用户名（admin/user 共用 users 表；system 类型 ID=0 跳过）。
+	// 查询失败静默降级为裸编号（部分测试库未建 users 表），不影响审计列表本身。
+	operatorIDs := make([]uint64, 0, len(list))
+	seenOp := make(map[uint64]bool, len(list))
+	for _, l := range list {
+		if l.OperatorID != 0 && !seenOp[l.OperatorID] {
+			seenOp[l.OperatorID] = true
+			operatorIDs = append(operatorIDs, l.OperatorID)
+		}
+	}
+	usernameByOp := make(map[uint64]string, len(operatorIDs))
+	if len(operatorIDs) > 0 {
+		var operators []models.User
+		if err := d.DB.Select("id", "username").Where("id IN ?", operatorIDs).Find(&operators).Error; err == nil {
+			for _, u := range operators {
+				usernameByOp[u.ID] = u.Username
+			}
+		}
+	}
+
 	type view struct {
-		ID           uint64    `json:"id"`
-		OperatorType string    `json:"operator_type"`
-		OperatorID   uint64    `json:"operator_id"`
-		Action       string    `json:"action"`
-		Detail       string    `json:"detail"`
-		IP           string    `json:"ip"`
-		CreatedAt    time.Time `json:"created_at"`
+		ID               uint64    `json:"id"`
+		OperatorType     string    `json:"operator_type"`
+		OperatorID       uint64    `json:"operator_id"`
+		OperatorUsername string    `json:"operator_username"`
+		Action           string    `json:"action"`
+		Detail           string    `json:"detail"`
+		IP               string    `json:"ip"`
+		CreatedAt        time.Time `json:"created_at"`
 	}
 	items := make([]view, 0, len(list))
 	for _, l := range list {
 		items = append(items, view{
 			ID: l.ID, OperatorType: l.OperatorType, OperatorID: l.OperatorID,
+			OperatorUsername: usernameByOp[l.OperatorID],
 			Action: l.Action, Detail: l.Detail, IP: l.IP, CreatedAt: l.CreatedAt,
 		})
 	}

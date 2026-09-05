@@ -43,6 +43,7 @@ func All() []any {
 		&AccessLayer{},
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
+		&SubTemplate{},
 	}
 }
 

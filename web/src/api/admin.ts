@@ -39,8 +39,8 @@ export type {
   AccessLayer,
 } from './types'
 
-export function getDashboard() {
-  return http.get<ApiResp<DashboardData>>('/admin/dashboard')
+export function getDashboard(days?: 3 | 7 | 30) {
+  return http.get<ApiResp<DashboardData>>('/admin/dashboard', { params: days ? { days } : {} })
 }
 
 export interface BackupItem {
@@ -477,6 +477,32 @@ export function previewPermissionGroupTemplate(id: number, template: string) {
 
 export function deletePermissionGroup(id: number) {
   return http.delete<ApiResp<{ ok: boolean }>>(`/admin/permission-groups/${id}`)
+}
+
+// ===== 命名订阅模板库（保存多份模板，权限组编辑器快速载入） =====
+
+export interface SubTemplate {
+  id: number
+  name: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export function getSubTemplates() {
+  return http.get<ApiResp<SubTemplate[]>>('/admin/sub-templates')
+}
+
+export function createSubTemplate(payload: { name: string; content: string }) {
+  return http.post<ApiResp<SubTemplate>>('/admin/sub-templates', payload)
+}
+
+export function updateSubTemplate(id: number, payload: { name: string; content: string }) {
+  return http.put<ApiResp<SubTemplate>>(`/admin/sub-templates/${id}`, payload)
+}
+
+export function deleteSubTemplate(id: number) {
+  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/sub-templates/${id}`)
 }
 
 export function getXrayKeys() {

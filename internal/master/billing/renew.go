@@ -86,10 +86,20 @@ func (s *AutoRenewService) RunOnce(ctx context.Context) {
 			continue
 		}
 		log.Printf("billing: 自动续费完成 user=%d plan=%d order=%s", t.userID, t.planID, order.OrderNo)
+		planName := ""
+		var plan models.Plan
+		if err := s.DB.Select("name").First(&plan, t.planID).Error; err == nil {
+			planName = plan.Name
+		}
+		detail := "自动续费触发（" + renewReasonText(t.reason) + "）：用户 #" + strconv.FormatUint(t.userID, 10) + " 套餐"
+		if planName != "" {
+			detail += "「" + planName + "」"
+		}
+		detail += " #" + strconv.FormatUint(t.planID, 10) + " 订单 " + order.OrderNo
 		s.DB.Create(&models.AuditLog{
 			OperatorType: "system",
 			Action:       "auto_renew",
-			Detail:       "自动续费触发（" + renewReasonText(t.reason) + "）：用户 #" + strconv.FormatUint(t.userID, 10) + " 套餐 #" + strconv.FormatUint(t.planID, 10) + " 订单 " + order.OrderNo,
+			Detail:       detail,
 		})
 	}
 }

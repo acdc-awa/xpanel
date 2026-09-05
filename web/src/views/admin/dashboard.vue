@@ -17,6 +17,7 @@ import type { DashboardData, ServerMatrixItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 import { useThemeStore } from '@/stores/theme'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
+import OnlineUsersPanel from './servers/OnlineUsersPanel.vue'
 
 const theme = useThemeStore()
 const loading = ref(false)
@@ -27,6 +28,18 @@ const lastUpdatedTime = ref('')
 // 抽屉监控
 const metricsOpen = ref(false)
 const selectedServer = ref<ServerMatrixItem | null>(null)
+
+// 在线用户弹窗（复用服务器抽屉的 OnlineUsersPanel）
+const onlineDialogOpen = ref(false)
+const onlineServer = ref<ServerMatrixItem | null>(null)
+
+function openOnlineUsers(s: ServerMatrixItem) {
+  onlineServer.value = s
+  onlineDialogOpen.value = true
+}
+
+// 吞吐趋势范围档位（3/7/30 天，天粒度）
+const trendRange = ref<3 | 7 | 30>(30)
 
 // ECharts
 const trendChartRef = ref<HTMLDivElement | null>(null)
@@ -269,7 +282,7 @@ watch(
 async function load() {
   loading.value = true
   try {
-    const { data } = await getDashboard()
+    const { data } = await getDashboard(trendRange.value)
     if (data.code === 0) {
       dashData.value = data.data
       lastUpdatedTime.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -285,6 +298,9 @@ async function load() {
     loading.value = false
   }
 }
+
+// 档位切换即重拉（30s 轮询沿用当前档位）
+watch(trendRange, () => load())
 
 function openServerMetrics(s: ServerMatrixItem) {
   selectedServer.value = s
@@ -399,12 +415,21 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 中部图表：30 天吞吐趋势 + 节点流量占比 -->
+    <!-- 中部图表：吞吐趋势（3/7/30 天可切换） + 节点流量占比 -->
     <div class="charts-row">
       <div class="chart-panel trend-panel">
         <div class="panel-head">
-          <div class="title">吞吐趋势 (近 30 天)</div>
-          <div class="sub">每日上行 / 下行流量吞吐分布汇总 (GB)</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap">
+            <div>
+              <div class="title">吞吐趋势 (近 {{ trendRange }} 天)</div>
+              <div class="sub">每日上行 / 下行流量吞吐分布汇总 (GB)</div>
+            </div>
+            <el-radio-group v-model="trendRange" size="small">
+              <el-radio-button :value="3">3 天</el-radio-button>
+              <el-radio-button :value="7">7 天</el-radio-button>
+              <el-radio-button :value="30">30 天</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
         <div ref="trendChartRef" class="echart-container"></div>
       </div>
@@ -487,7 +512,7 @@ onUnmounted(() => {
                   <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
                 </div>
                 <div class="muted cell-mono" style="font-size: 10.5px; margin-top: 2px">
-                  在线: <b style="color: var(--x-text)">{{ row.online_users || 0 }}</b> 台
+                  在线: <b class="online-link" @click="openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 台
                 </div>
               </template>
             </el-table-column>
@@ -563,7 +588,9 @@ onUnmounted(() => {
                 </div>
                 <div class="grid-item">
                   <span class="item-label">在线设备数</span>
-                  <div class="item-value cell-mono" style="font-weight: 600">{{ row.online_users || 0 }} 台</div>
+                  <div class="item-value cell-mono online-link" style="font-weight: 600" @click="openOnlineUsers(row as ServerMatrixItem)">
+                    {{ row.online_users || 0 }} 台
+                  </div>
                 </div>
                 <div class="grid-item full-width">
                   <span class="item-label">最后心跳</span>
@@ -743,6 +770,19 @@ onUnmounted(() => {
       :server-id="selectedServer?.id || 0"
       :server-name="selectedServer?.name || ''"
     />
+
+    <!-- 在线设备 → 在线用户名单弹窗（复用服务器详情抽屉的在线用户面板） -->
+    <el-dialog
+      v-model="onlineDialogOpen"
+      :title="onlineServer ? `在线用户 · ${onlineServer.name}` : '在线用户'"
+      width="560px"
+      :append-to-body="true"
+    >
+      <OnlineUsersPanel v-if="onlineServer" :server-id="onlineServer.id" />
+      <template #footer>
+        <el-button type="primary" @click="onlineDialogOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -975,5 +1015,15 @@ onUnmounted(() => {
 
 .muted {
   color: var(--x-text-3);
+}
+
+.online-link {
+  color: var(--x-text);
+  cursor: pointer;
+  border-bottom: 1px dashed var(--x-border);
+  &:hover {
+    color: var(--x-primary);
+    border-bottom-color: var(--x-primary);
+  }
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { CopyDocument, Refresh, Ticket, Link, Delete } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
@@ -21,6 +21,48 @@ async function load() {
   }
 }
 onMounted(load)
+
+// ---- 状态筛选（含隐性「已过期」：status=0 且已过有效期，过期不落库注册时才拒）----
+type InvStatusFilter = '' | 'unused' | 'used' | 'disabled' | 'expired'
+const statusFilter = ref<InvStatusFilter>('')
+
+function isExpired(row: Invitation): boolean {
+  return row.status === 0 && !!row.expires_at && new Date(row.expires_at).getTime() < Date.now()
+}
+
+const filtered = computed(() => {
+  switch (statusFilter.value) {
+    case 'unused':
+      return list.value.filter((r) => r.status === 0 && !isExpired(r))
+    case 'used':
+      return list.value.filter((r) => r.status === 1)
+    case 'disabled':
+      return list.value.filter((r) => r.status === 2)
+    case 'expired':
+      return list.value.filter(isExpired)
+    default:
+      return list.value
+  }
+})
+
+// 卡片状态角标：过期优先于未使用显示，避免管理员误认为可用
+function chipOf(row: Invitation): { cls: string; text: string } {
+  if (row.status === 1) return { cls: 'green', text: '已使用' }
+  if (row.status === 2) return { cls: 'red', text: '已禁用' }
+  if (isExpired(row)) return { cls: 'gray', text: '已过期' }
+  return { cls: 'blue', text: '未使用' }
+}
+
+// ---- 本地分页（列表后端 Limit(200) 全量返回）----
+const PAGE_SIZE = 12
+const page = ref(1)
+const paged = computed(() =>
+  filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
+)
+
+watch(statusFilter, () => {
+  page.value = 1
+})
 
 const genOpen = ref(false)
 const invForm = reactive({ count: 5, expires: '' })
@@ -109,12 +151,6 @@ async function revoke(row: any) {
   }
 }
 
-const statusMap: Record<number, { type: 'success' | 'info' | 'danger'; text: string }> = {
-  0: { type: 'success', text: '未使用' },
-  1: { type: 'info', text: '已使用' },
-  2: { type: 'danger', text: '已禁用' },
-}
-
 function fmtTime(t: string | null) {
   if (!t) return '—'
   return t.replace('T', ' ').slice(0, 16)
@@ -125,6 +161,12 @@ function fmtTime(t: string | null) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
+        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
+          <el-option label="未使用" value="unused" />
+          <el-option label="已使用" value="used" />
+          <el-option label="已过期" value="expired" />
+          <el-option label="已禁用" value="disabled" />
+        </el-select>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
       <el-button type="primary" @click="genOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
@@ -135,14 +177,14 @@ function fmtTime(t: string | null) {
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+      <div v-else-if="filtered.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
-        <p style="margin-top: 8px">暂无邀请码，点击右上角「生成邀请码」</p>
+        <p style="margin-top: 8px">{{ list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码' }}</p>
       </div>
 
       <!-- 全局统一邀请码卡片网格流 (自适应 1~4 列) -->
       <div v-else class="inv-card-grid">
-        <div v-for="row in list" :key="row.id" class="inv-card" :class="{ disabled: row.status !== 0 }">
+        <div v-for="row in paged" :key="row.id" class="inv-card" :class="{ disabled: row.status !== 0 }">
           <!-- 头部 -->
           <div class="card-head">
             <div class="head-title">
@@ -156,10 +198,10 @@ function fmtTime(t: string | null) {
             </div>
             <span
               class="x-chip"
-              :class="row.status === 0 ? 'blue' : (row.status === 1 ? 'green' : 'red')"
+              :class="chipOf(row).cls"
               style="font-size: 10.5px"
             >
-              {{ statusMap[row.status]?.text ?? row.status }}
+              {{ chipOf(row).text }}
             </span>
           </div>
 
@@ -189,7 +231,7 @@ function fmtTime(t: string | null) {
 
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
-            <template v-if="row.status === 0">
+            <template v-if="row.status === 0 && !isExpired(row)">
               <el-button size="small" type="primary" plain @click="copyRegisterLink(row.code)">
                 <el-icon><Link /></el-icon>&nbsp;复制链接
               </el-button>
@@ -201,10 +243,21 @@ function fmtTime(t: string | null) {
               </el-button>
             </template>
             <span v-else class="muted font-11" style="line-height: 30px">
-              {{ row.status === 1 ? '该邀请码已被成功核销' : '该邀请码已被作废禁用' }}
+              {{ row.status === 1 ? '该邀请码已被成功核销' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
             </span>
           </div>
         </div>
+      </div>
+
+      <!-- 本地分页 -->
+      <div v-if="filtered.length > PAGE_SIZE" style="display: flex; justify-content: center; margin-top: 16px">
+        <el-pagination
+          v-model:current-page="page"
+          :total="filtered.length"
+          :page-size="PAGE_SIZE"
+          layout="prev, pager, next"
+          background
+        />
       </div>
     </BaseCard>
 

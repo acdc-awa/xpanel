@@ -33,6 +33,12 @@ const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
+const typeFilter = ref<'' | 'user' | 'relay'>('')
+
+// 本地类型过滤（列表数据已全量在本地；历史行 type 为空按用户入站口径处理）
+const filteredInbounds = computed(() =>
+  typeFilter.value ? list.value.filter((r) => (r.type || 'user') === typeFilter.value) : list.value,
+)
 
 function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
@@ -440,6 +446,10 @@ function quotaOf(row: any): string {
             <el-select v-model="serverFilter" placeholder="全部 Xray 服务器" clearable style="width: 200px">
               <el-option v-for="s in servers" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
+            <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px">
+              <el-option label="用户入站" value="user" />
+              <el-option label="转发入站" value="relay" />
+            </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
           </div>
           <div style="display: flex; gap: 10px">
@@ -460,14 +470,14 @@ function quotaOf(row: any): string {
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
+      <div v-else-if="filteredInbounds.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><Connection /></el-icon>
-        <p style="margin-top: 8px">尚未为任何服务器添加物理入站。点击右上角「新增入站」开始配置。</p>
+        <p style="margin-top: 8px">{{ list.length === 0 ? '尚未为任何服务器添加物理入站。点击右上角「新增入站」开始配置。' : '未找到匹配当前筛选的入站' }}</p>
       </div>
 
       <!-- 全局统一物理入站卡片网格流 (自适应 1~4 列) -->
       <div v-else class="node-card-grid">
-        <div v-for="row in list" :key="row.id" class="node-card" :class="{ disabled: !row.enabled }">
+        <div v-for="row in filteredInbounds" :key="row.id" class="node-card" :class="{ disabled: !row.enabled }">
           <!-- 头部 -->
           <div class="card-head">
             <div class="head-title">

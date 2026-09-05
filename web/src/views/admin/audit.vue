@@ -128,8 +128,9 @@ function fmtTime(t: string) {
           <!-- 头部 -->
           <div class="card-head">
             <div class="head-title">
-              <span class="x-chip" :class="rv.row.operator_type === 'admin' ? 'orange' : 'blue'" style="font-size: 10px; padding: 1px 5px">
-                {{ rv.row.operator_type === 'admin' ? '管理员' : '用户' }} #{{ rv.row.operator_id }}
+              <span class="x-chip" :class="rv.row.operator_type === 'admin' ? 'orange' : rv.row.operator_type === 'system' ? 'gray' : 'blue'" style="font-size: 10px; padding: 1px 5px">
+                {{ rv.row.operator_type === 'admin' ? '管理员' : rv.row.operator_type === 'system' ? '系统' : '用户' }}
+                {{ rv.row.operator_type === 'system' ? '' : rv.row.operator_username ? rv.row.operator_username : `#${rv.row.operator_id}` }}
               </span>
               <el-tag :type="rv.categoryColor" size="small" effect="plain" style="font-size: 11px">
                 {{ rv.categoryName }}

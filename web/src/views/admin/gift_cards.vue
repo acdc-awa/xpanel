@@ -221,7 +221,7 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
             <div class="grid-item">
               <span class="item-label">兑换用户</span>
               <div class="item-value cell-mono">
-                {{ row.used_by ? `用户 #${row.used_by}` : '待兑换' }}
+                {{ row.used_by ? (row.used_by_username || `用户 #${row.used_by}`) : '待兑换' }}
               </div>
             </div>
             <div class="grid-item">

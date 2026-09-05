@@ -213,6 +213,7 @@ export interface GiftCard {
   face_value_cents: number
   status: 'unused' | 'used' | 'disabled'
   used_by: number
+  used_by_username?: string // 后端批量补齐（未兑换为空）
   used_at: string | null
   expires_at: string | null
   created_by: number
@@ -268,6 +269,7 @@ export interface AuditLog {
   id: number
   operator_type: string
   operator_id: number
+  operator_username?: string // 后端批量补齐；system 类型为空
   action: string
   detail: string
   ip: string

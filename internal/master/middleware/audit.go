@@ -172,6 +172,7 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/plans/:id":                       {model: &models.Plan{}, field: "name"},
 	"/api/v1/admin/certs/:id":                       {model: &models.Cert{}, field: "domain"},
 	"/api/v1/admin/permission-groups/:id":           {model: &models.PermissionGroup{}, field: "name"},
+	"/api/v1/admin/sub-templates/:id":               {model: &models.SubTemplate{}, field: "name"},
 	"/api/v1/admin/access-points/:id":               {model: &models.UserAccessPoint{}, field: "name"},
 	"/api/v1/admin/invitations/:id":                 {model: &models.InvitationCode{}, field: "code"},
 }

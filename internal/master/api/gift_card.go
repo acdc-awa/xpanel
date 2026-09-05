@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
@@ -55,9 +56,14 @@ func (d *Deps) UserPayOrderByBalance(c *gin.Context) {
 	// 用户热更新已由 Stage 5 事件驱动（billing 发布 OrderPaidEvent → 订阅方 SyncUsersToAll），
 	// 此处不再直调 Hub——任何新增支付路径自动获得同步能力。
 
-	d.Audit.Log("user", uid, "order.pay_balance", "余额直付购买套餐 #"+strconv.FormatUint(req.PlanID, 10)+" (订单 #"+order.OrderNo+")", util.ClientIPFromContext(c))
+	ov := d.toOrderView(order)
+	detail := "余额直付购买套餐"
+	if ov.PlanName != "" {
+		detail += "「" + ov.PlanName + "」"
+	}
+	d.Audit.Log("user", uid, "order.pay_balance", detail+" #"+strconv.FormatUint(req.PlanID, 10)+" (订单 #"+order.OrderNo+")", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{
-		"order": d.toOrderView(order),
+		"order": ov,
 	})
 }
 
@@ -92,8 +98,35 @@ func (d *Deps) AdminGiftCards(c *gin.Context) {
 		util.ServerError(c, "查询礼品卡失败")
 		return
 	}
+
+	// 批量补兑换人用户名，前端不再显示裸编号；查询失败静默降级
+	usedIDs := make([]uint64, 0, len(list))
+	seenUsed := make(map[uint64]bool, len(list))
+	for _, card := range list {
+		if card.UsedBy != 0 && !seenUsed[card.UsedBy] {
+			seenUsed[card.UsedBy] = true
+			usedIDs = append(usedIDs, card.UsedBy)
+		}
+	}
+	nameByUsed := make(map[uint64]string, len(usedIDs))
+	if len(usedIDs) > 0 {
+		var users []models.User
+		if err := d.DB.Select("id", "username").Where("id IN ?", usedIDs).Find(&users).Error; err == nil {
+			for _, u := range users {
+				nameByUsed[u.ID] = u.Username
+			}
+		}
+	}
+	type cardView struct {
+		models.GiftCard
+		UsedByUsername string `json:"used_by_username"`
+	}
+	items := make([]cardView, 0, len(list))
+	for i := range list {
+		items = append(items, cardView{GiftCard: list[i], UsedByUsername: nameByUsed[list[i].UsedBy]})
+	}
 	util.OK(c, gin.H{
-		"items": list,
+		"items": items,
 		"total": total,
 		"page":  page,
 		"size":  size,
