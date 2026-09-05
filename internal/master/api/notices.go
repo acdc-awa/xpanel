@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acdc-awa/xpanel/internal/master/middleware"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -69,8 +68,7 @@ func (d *Deps) AdminCreateNotice(c *gin.Context) {
 		return
 	}
 
-	uid := middleware.CurrentUser(c)
-	d.Audit.Log("admin", uid, "notice.create", "创建公告 #"+strconv.FormatUint(notice.ID, 10)+"「"+notice.Title+"」", util.ClientIPFromContext(c))
+	// 审计由中间件统一落库（envelope body 含标题，不再手动打点）
 	util.OK(c, notice)
 }
 
@@ -108,8 +106,6 @@ func (d *Deps) AdminUpdateNotice(c *gin.Context) {
 		return
 	}
 
-	uid := middleware.CurrentUser(c)
-	d.Audit.Log("admin", uid, "notice.update", "更新公告 #"+strconv.FormatUint(notice.ID, 10)+"「"+notice.Title+"」", util.ClientIPFromContext(c))
 	util.OK(c, notice)
 }
 
@@ -132,8 +128,6 @@ func (d *Deps) AdminDeleteNotice(c *gin.Context) {
 		return
 	}
 
-	uid := middleware.CurrentUser(c)
-	d.Audit.Log("admin", uid, "notice.delete", "删除公告 #"+strconv.FormatUint(id, 10)+"「"+notice.Title+"」", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"deleted": true})
 }
 
@@ -182,8 +176,6 @@ func (d *Deps) AdminToggleNotice(c *gin.Context) {
 		return
 	}
 
-	uid := middleware.CurrentUser(c)
-	d.Audit.Log("admin", uid, "notice.toggle", "快捷切换公告 #"+strconv.FormatUint(id, 10)+" 字段 "+req.Field, util.ClientIPFromContext(c))
 	d.DB.First(&notice, id)
 	util.OK(c, notice)
 }

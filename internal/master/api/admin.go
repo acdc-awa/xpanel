@@ -291,11 +291,9 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
-	var emailChanged bool
-	var oldEmail, newEmail string
 	if req.Email != nil && *req.Email != "" {
 		email := strings.ToLower(strings.TrimSpace(*req.Email))
-		// 仅实际变更才处理：前端每次保存都携带 email，同值重复提交不应吊销会话/刷审计
+		// 仅实际变更才处理：前端每次保存都携带 email，同值重复提交不应吊销会话
 		if email != strings.ToLower(strings.TrimSpace(user.Email)) {
 			var cnt int64
 			d.DB.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", email, email, id).Count(&cnt)
@@ -306,10 +304,9 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			updates["email"] = email
 			updates["username"] = email // 用户名=邮箱同值
 			// 换登录名即换凭据：吊销该用户全部旧会话（token_version 每请求对 DB 校验，
-			// 下一个请求立即踢出），用户需用新邮箱重新登录；与改密同级别安全动作
+			// 下一个请求立即踢出），用户需用新邮箱重新登录；与改密同级别安全动作。
+			// 留痕走中间件审计 envelope（body 带新邮箱；旧→新对比待二期 diff）
 			updates["token_version"] = gorm.Expr("token_version + 1")
-			emailChanged = true
-			oldEmail, newEmail = user.Email, email
 		}
 	}
 	if req.Role != nil {
@@ -409,13 +406,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			return
 		}
 	}
-	if emailChanged {
-		detail := "设置用户 #" + strconv.FormatUint(id, 10) + " 邮箱 " + newEmail
-		if oldEmail != "" {
-			detail = "修改用户 #" + strconv.FormatUint(id, 10) + " 邮箱 " + oldEmail + " → " + newEmail
-		}
-		d.Audit.Log("admin", middleware.CurrentUser(c), "user.update_email", detail, util.ClientIPFromContext(c))
-	}
+	// 邮箱变更审计由中间件统一落库（envelope body 带新邮箱；旧→新对比待二期 diff）
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
 	}
@@ -511,7 +502,7 @@ func (d *Deps) AdminGetUserSubscribeToken(c *gin.Context) {
 
 // AdminResetUserSubscribeToken POST /api/v1/admin/users/:id/subscribe-token/reset —— 轮换用户订阅 token。
 // 旧订阅链接立即失效（订阅端点按 token 查用户，查不到走统一拒绝码）；节点凭据（UUID）不变，
-// xray 侧无需任何同步动作。重置记审计。
+// xray 侧无需任何同步动作。重置记审计（中间件统一落库，注册表补目标用户邮箱）。
 func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
@@ -532,8 +523,6 @@ func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	d.Audit.Log("admin", middleware.CurrentUser(c), "user.reset_subscribe_token",
-		"重置用户 #"+strconv.FormatUint(id, 10)+" ("+user.Email+") 的订阅 token", util.ClientIPFromContext(c))
 	util.OK(c, gin.H{"id": user.ID, "subscribe_token": token})
 }
 

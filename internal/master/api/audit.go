@@ -38,7 +38,8 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 	case "inbounds":
 		q = q.Where("action LIKE 'inbounds.%' OR action = 'inbounds' OR action LIKE 'certs.%' OR action = 'certs' OR action LIKE 'access-points.%' OR action = 'access-points' OR action LIKE 'permission-groups.%' OR action = 'permission-groups'")
 	case "settings":
-		q = q.Where("action LIKE 'settings.%' OR action = 'settings' OR action LIKE 'notices.%' OR action = 'notices' OR action LIKE 'backup.%' OR action = 'backup' OR action LIKE 'topology.%' OR action LIKE 'topology-layout.%'")
+		// notice.%（单数）为 2026-09-04 手动打点退役前的存量 action，保留可筛
+		q = q.Where("action LIKE 'settings.%' OR action = 'settings' OR action LIKE 'notices.%' OR action = 'notices' OR action LIKE 'notice.%' OR action LIKE 'backup.%' OR action = 'backup' OR action LIKE 'topology.%' OR action LIKE 'topology-layout.%'")
 	case "auth":
 		q = q.Where("action LIKE 'auth.%' OR action = 'auth'")
 	}
