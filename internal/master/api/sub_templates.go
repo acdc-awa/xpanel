@@ -14,6 +14,18 @@ import (
 // subTemplateMaxBytes 模板正文大小上限（与权限组模板使用场景一致，防误传超大内容）。
 const subTemplateMaxBytes = 64 * 1024
 
+// subTemplateMaxNameLen 模板名上限（binding:required 只挡空串，空格名/超长名在此兜底）。
+const subTemplateMaxNameLen = 64
+
+// validateSubTemplateName TrimSpace 后复查：空名/超长名统一 400。
+func validateSubTemplateName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > subTemplateMaxNameLen {
+		return "模板名不能为空且不超过 64 字符"
+	}
+	return ""
+}
+
 type subTemplateForm struct {
 	Name    string `json:"name" binding:"required"`
 	Content string `json:"content" binding:"required"`
@@ -34,6 +46,10 @@ func (d *Deps) AdminCreateSubTemplate(c *gin.Context) {
 	var form subTemplateForm
 	if err := c.ShouldBindJSON(&form); err != nil {
 		util.BadRequest(c, "请填写模板名与内容")
+		return
+	}
+	if msg := validateSubTemplateName(form.Name); msg != "" {
+		util.BadRequest(c, msg)
 		return
 	}
 	if len(form.Content) > subTemplateMaxBytes {
@@ -69,6 +85,10 @@ func (d *Deps) AdminUpdateSubTemplate(c *gin.Context) {
 	var form subTemplateForm
 	if err := c.ShouldBindJSON(&form); err != nil {
 		util.BadRequest(c, "请填写模板名与内容")
+		return
+	}
+	if msg := validateSubTemplateName(form.Name); msg != "" {
+		util.BadRequest(c, msg)
 		return
 	}
 	if len(form.Content) > subTemplateMaxBytes {

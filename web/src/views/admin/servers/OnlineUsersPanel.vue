@@ -31,6 +31,9 @@ watch(
   },
   { immediate: true },
 )
+
+// 供宿主在 Tab 重新激活/弹窗重开时强制重拉（serverId 未变时 watch 不触发）
+defineExpose({ reload: loadOnlineUsers })
 </script>
 
 <template>

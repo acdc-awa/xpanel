@@ -34,6 +34,7 @@ const visible = computed({
 })
 
 const activeTab = ref('overview')
+const onlinePanelRef = ref<InstanceType<typeof OnlineUsersPanel> | null>(null)
 
 function fmtTime(t: string | null) {
   if (!t) return '—'
@@ -162,6 +163,9 @@ watch(
         loadInbounds()
       } else if (activeTab.value === 'config' && !cfgText.value) {
         loadConfigPreview()
+      } else if (activeTab.value === 'online') {
+        // 首次激活由面板自身 immediate 加载（lazy 挂载）；再次激活重拉保证快照新鲜
+        onlinePanelRef.value?.reload()
       }
     }
   },
@@ -278,9 +282,9 @@ watch(
         <el-empty v-else description="未选择节点" />
       </el-tab-pane>
 
-      <!-- 在线用户（连接级实时快照） -->
-      <el-tab-pane label="在线用户" name="online">
-        <OnlineUsersPanel v-if="server" :server-id="server.id" />
+      <!-- 在线用户（连接级实时快照）：lazy 避免抽屉首开即打一次 online-ips -->
+      <el-tab-pane label="在线用户" name="online" lazy>
+        <OnlineUsersPanel v-if="server" ref="onlinePanelRef" :server-id="server.id" />
         <el-empty v-else description="未选择节点" />
       </el-tab-pane>
 

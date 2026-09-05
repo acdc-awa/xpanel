@@ -772,11 +772,13 @@ onUnmounted(() => {
     />
 
     <!-- 在线设备 → 在线用户名单弹窗（复用服务器详情抽屉的在线用户面板） -->
+    <!-- 关闭后清掉 onlineServer：同一服务器重开时 v-if 重挂载，面板 immediate 重拉而非展示旧快照 -->
     <el-dialog
       v-model="onlineDialogOpen"
       :title="onlineServer ? `在线用户 · ${onlineServer.name}` : '在线用户'"
       width="560px"
       :append-to-body="true"
+      @closed="onlineServer = null"
     >
       <OnlineUsersPanel v-if="onlineServer" :server-id="onlineServer.id" />
       <template #footer>

@@ -64,6 +64,15 @@ watch(statusFilter, () => {
   page.value = 1
 })
 
+// 条目减少后页码回夹：停在被清空的页时网格空白且分页器消失（12≤PAGE_SIZE 不渲染）
+watch(
+  () => filtered.value.length,
+  (len) => {
+    const max = Math.max(1, Math.ceil(len / PAGE_SIZE))
+    if (page.value > max) page.value = max
+  },
+)
+
 const genOpen = ref(false)
 const invForm = reactive({ count: 5, expires: '' })
 const creating = ref(false)
