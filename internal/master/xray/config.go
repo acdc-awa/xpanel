@@ -196,7 +196,11 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 	}
 
 	// 1. 出站：模板基础出站 + 节点自定义出站叠加，然后按默认出口排序
-	cfg["outbounds"] = mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
+	obs, err := mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
+	if err != nil {
+		return nil, err
+	}
+	cfg["outbounds"] = obs
 	// 默认出口（freedom）出站解析策略注入：AsIs/UseIP/UseIPv4/UseIPv6（作用于出站连接阶段，
 	// 与 routing.domainStrategy 语义不同；模板/DB 已显式配置非 AsIs 时不覆盖）
 	if len(defaultOutboundDS) > 0 && defaultOutboundDS[0] != "" && defaultOutboundDS[0] != "AsIs" {
@@ -254,7 +258,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 // 节点 ServerOutbound 叠加在模板之上。同 tag 时节点覆盖模板（允许管理员自定义基础策略）。
 // InboundRef 出站忽略手填 settings/streamSettings，vnext 由生成器按目标入站自动构造。
 // defaultTag 非空时将该标签的出站移至数组首位（xray 将数组首个出站作为路由默认出口）。
-func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext, defaultTag string) []any {
+func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext, defaultTag string) ([]any, error) {
 	seen := make(map[string]int) // tag → index in list
 	list := make([]any, 0)
 	if arr, ok := tmpl.([]any); ok {
@@ -279,7 +283,9 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if ob.InboundRef != nil && ctx != nil {
 			// InboundRef 出站：vnext / streamSettings 全自动构造（不手填）
 			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
-				buildRefOutbound(item, target)
+				if err := buildRefOutbound(item, target); err != nil {
+					return nil, err
+				}
 			}
 		} else if ob.SettingsJSON != "" {
 			var parsed map[string]any
@@ -343,7 +349,7 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		}
 	}
 
-	return list
+	return list, nil
 }
 
 // ctxTarget 从 GenerateContext 取引用目标（nil ctx 安全）。
@@ -357,19 +363,32 @@ func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
 
 // buildRefOutbound 按目标入站自动构造中转出站（vless）：vnext address/port/uuid/flow
 // 与 streamSettings（reality 公钥/SNI/shortId 派生、tls serverName）全部由生成器填充。
-func buildRefOutbound(item map[string]any, target RefTarget) {
+// 目标入站启用 vlessenc（settings_json.decryption 非空）时，出站 encryption 派生为
+// 0rtt+公钥串，flow 条件同步放行（无安全层时 vlessenc 撑起 vision）。
+func buildRefOutbound(item map[string]any, target RefTarget) error {
 	inb := target.Inbound
 	spec := contracts.DecodeInbound(&inb)
 	net := spec.Network
 	sec := spec.Security
 
+	encryption := "none"
+	dec, err := VlessDecryptionFromSettings(inb.SettingsJSON)
+	if err != nil {
+		return fmt.Errorf("出站 %s 目标入站 %s settings 解析失败: %w", item["tag"], inb.Tag, err)
+	}
+	if VlessEncEnabled(dec) {
+		if encryption, err = VlessEncClientFromDecryption(dec); err != nil {
+			return fmt.Errorf("出站 %s 目标入站 %s VLESS Encryption 派生失败: %w", item["tag"], inb.Tag, err)
+		}
+	}
+
 	flow := ""
-	if net == "tcp" && (sec == "reality" || sec == "tls") {
+	if net == "tcp" && (sec == "reality" || sec == "tls" || VlessEncEnabled(dec)) {
 		flow = "xtls-rprx-vision"
 	}
 	user := map[string]any{
 		"id":         inb.InternalUUID,
-		"encryption": "none",
+		"encryption": encryption,
 	}
 	if flow != "" {
 		user["flow"] = flow
@@ -429,6 +448,7 @@ func buildRefOutbound(item map[string]any, target RefTarget) {
 		ss["tlsSettings"] = tlsSettings
 	}
 	item["streamSettings"] = ss
+	return nil
 }
 
 // normalizeVlessOutbound 对 vless 出站的 settings.vnext[].users[] 兜底注入
@@ -605,10 +625,19 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			return nil, fmt.Errorf("入站 %s settings 解析失败: %w", inb.Tag, err)
 		}
 	}
-	// VLESS: xray 拒绝入站级别的 encryption 字段（运行时固定为 "none"）
+	// VLESS: xray 拒绝入站级别的 encryption 字段（运行时固定为 "none"）；
+	// decryption 为安全层 vlessenc 的载体（settings_json 透传），缺省补 "none"。
+	vlessDecryption := ""
 	if inb.Protocol == "vless" {
 		delete(settings, "encryption")
-		settings["decryption"] = "none"
+		if d, _ := settings["decryption"].(string); VlessEncEnabled(d) {
+			if err := ValidateVlessEncDecryption(d); err != nil {
+				return nil, fmt.Errorf("入站 %s VLESS Encryption decryption 非法: %w", inb.Tag, err)
+			}
+			vlessDecryption = d
+		} else {
+			settings["decryption"] = "none"
+		}
 	}
 
 	// Phase T：入站三态分流
@@ -619,8 +648,10 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
 		}
 		flow := ""
+		// vision 门槛（v26.6.27）：TCP+TLS/REALITY 可用；无安全层时 VLESS Encryption 是
+		// 唯一能撑起 vision 的组合（裸 VLESS+vision 运行时报错），vlessenc+裸 TCP+native 下 Splice 保持
 		if spec.Network == "tcp" &&
-			(spec.Security == "reality" || spec.Security == "tls") {
+			(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
 			flow = "xtls-rprx-vision"
 		}
 		c := map[string]any{
@@ -679,4 +710,3 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	}
 	return item, nil
 }
-

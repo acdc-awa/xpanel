@@ -509,6 +509,11 @@ export function getXrayKeys() {
   return http.get<ApiResp<{ private_key: string; public_key: string }>>('/admin/xray/keys')
 }
 
+// VLESS Encryption（vlessenc 安全层）decryption/encryption 配对一键生成（ML-KEM-768）
+export function getXrayVlessEnc() {
+  return http.get<ApiResp<{ decryption: string; encryption: string }>>('/admin/xray/vlessenc')
+}
+
 export function getServerConfigPreview(serverId: number) {
   return http.get<ApiResp<{ config: string }>>(`/admin/servers/${serverId}/config-preview`)
 }

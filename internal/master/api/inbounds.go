@@ -140,6 +140,15 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	// VLESS Encryption（vlessenc 安全层）保存期校验（一期仅转发入站）
+	effType := req.Type
+	if effType == "" {
+		effType = models.InboundTypeUser
+	}
+	if err := checkVlessDecryption(req.Protocol, effType, req.SettingsJSON); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
 		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（暂仅支持 vless，vmess/trojan/ss 订阅导出未实现）")
@@ -267,30 +276,30 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Tag                *string    `json:"tag"`
-		Protocol           *string    `json:"protocol"`
-		Port               *int       `json:"port"`
-		Listen             *string    `json:"listen"`
-		SettingsJSON       *string    `json:"settings_json"`
-		StreamSettings     *string    `json:"stream_settings"`
-		Sniffing           *string    `json:"sniffing"`
-		Ratio              *float64   `json:"ratio"`
+		Tag                *string         `json:"tag"`
+		Protocol           *string         `json:"protocol"`
+		Port               *int            `json:"port"`
+		Listen             *string         `json:"listen"`
+		SettingsJSON       *string         `json:"settings_json"`
+		StreamSettings     *string         `json:"stream_settings"`
+		Sniffing           *string         `json:"sniffing"`
+		Ratio              *float64        `json:"ratio"`
 		TotalGB            *int64          `json:"total_gb"`
 		ExpiryTime         json.RawMessage `json:"expiry_time"` // 三元：字段缺省=不动 / null=清空 / 字符串=设置
-		Enabled            *bool      `json:"enabled"`
-		Type               *string    `json:"type"`
-		InternalUUID       *string    `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
-		CertID             *uint64    `json:"cert_id"`             // nil 不更新；显式传 0 解绑
-		Flow               *string    `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
-		ShareAddrStrategy  *string    `json:"share_addr_strategy"` //
-		ShareAddr          *string    `json:"share_addr"`          //
-		SharePort          *int       `json:"share_port"`          // 0 = 使用入站端口
-		ShareSecurity      *string    `json:"share_security"`      // auto / tls / none
-		ShareSNI           *string    `json:"share_sni"`
-		ShareHost          *string    `json:"share_host"`
-		SharePath          *string    `json:"share_path"`
-		ShareAllowInsecure *bool      `json:"share_allow_insecure"`
-		LayerID            *uint64    `json:"layer_id"` // nil 不更新；显式传 0 解绑回原生
+		Enabled            *bool           `json:"enabled"`
+		Type               *string         `json:"type"`
+		InternalUUID       *string         `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
+		CertID             *uint64         `json:"cert_id"`             // nil 不更新；显式传 0 解绑
+		Flow               *string         `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
+		ShareAddrStrategy  *string         `json:"share_addr_strategy"` //
+		ShareAddr          *string         `json:"share_addr"`          //
+		SharePort          *int            `json:"share_port"`          // 0 = 使用入站端口
+		ShareSecurity      *string         `json:"share_security"`      // auto / tls / none
+		ShareSNI           *string         `json:"share_sni"`
+		ShareHost          *string         `json:"share_host"`
+		SharePath          *string         `json:"share_path"`
+		ShareAllowInsecure *bool           `json:"share_allow_insecure"`
+		LayerID            *uint64         `json:"layer_id"` // nil 不更新；显式传 0 解绑回原生
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.BadRequest(c, "参数错误: "+err.Error())
@@ -310,6 +319,20 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		sn = *req.Sniffing
 	}
 	if err := xray.ValidateInbound(sj, ss, sn); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
+	// VLESS Encryption（vlessenc 安全层）保存期校验：按本次请求生效的 protocol/type 判定
+	//（一期仅转发入站；user→relay 切换放行、relay→user 携带 encryption 则拒绝）
+	effType := inb.Type
+	if req.Type != nil {
+		effType = *req.Type
+	}
+	effProto := inb.Protocol
+	if req.Protocol != nil {
+		effProto = *req.Protocol
+	}
+	if err := checkVlessDecryption(effProto, effType, sj); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
@@ -621,6 +644,37 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 		"public_key":  pub,
 		"short_id":    xray.GenerateShortID(),
 	})
+}
+
+// AdminXrayVlessEnc GET /api/v1/admin/xray/vlessenc —— VLESS Encryption（ML-KEM-768）
+// decryption/encryption 配对一键生成。
+func (d *Deps) AdminXrayVlessEnc(c *gin.Context) {
+	decryption, encryption, err := xray.GenerateVlessEnc()
+	if err != nil {
+		util.ServerError(c, err.Error())
+		return
+	}
+	util.OK(c, gin.H{"decryption": decryption, "encryption": encryption})
+}
+
+// checkVlessDecryption VLESS Encryption（vlessenc 安全层）保存期校验：
+// settings_json.decryption 启用时，一期仅转发入站放行（用户入站加密=二期规划），并预检
+// 完整点格式，避免配置推送后 agent 端 xray -test 才暴露。
+func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
+	if protocol != "vless" {
+		return nil
+	}
+	dec, err := xray.VlessDecryptionFromSettings(settingsJSON)
+	if err != nil {
+		return err
+	}
+	if !xray.VlessEncEnabled(dec) {
+		return nil
+	}
+	if inboundType != models.InboundTypeRelay {
+		return fmt.Errorf("VLESS Encryption 一期仅开放转发入站（用户入站加密为二期规划），请切回 REALITY/TLS/none 或改用转发入站")
+	}
+	return xray.ValidateVlessEncDecryption(dec)
 }
 
 // validInboundProtocol 入站协议白名单（仅 VLESS 全功能可用；vmess/trojan/ss 订阅导出未实现，

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
 func asObject(t *testing.T, v any, what string) map[string]any {
@@ -337,7 +337,7 @@ func TestGenerateConfig_RelayInbound(t *testing.T) {
 func TestGenerateConfig_RelayMissingUUID(t *testing.T) {
 	inb := models.Inbound{
 		ID: 1, ServerID: 1, Tag: "in-relay", Protocol: "vless", Port: 8443,
-		Type: models.InboundTypeRelay, // InternalUUID 空
+		Type:    models.InboundTypeRelay, // InternalUUID 空
 		Enabled: true,
 	}
 	_, err := xray.Generate([]models.Inbound{inb}, nil, nil, nil, nil, "", "")
@@ -724,8 +724,6 @@ func TestGenerateShortID(t *testing.T) {
 	}
 }
 
-
-
 // TestGenerate_DefaultOutboundDS：默认出口（freedom）出站解析策略注入——
 // Server 配 UseIP → direct 出站 settings.domainStrategy=UseIP；AsIs → 模板默认不动；
 // DB 出站显式 UseIPv4 → 不被覆盖；routing.domainStrategy 独立不受影响。
@@ -818,6 +816,105 @@ func clientFlowOf(t *testing.T, streamJSON, userFlow string) (string, bool) {
 // TestGenerate_ClientFlowPassthrough 用户 Flow 线格式透传：
 // 有值 → clients[0].flow 输出；空 → 不输出 flow 字段。
 // （入站级流控三态：空=自动 / xtls-rprx-vision=全开 / none=禁自动——的计算与测试在服务层）
+// TestGenerateConfig_VLESSInboundVlessEnc vlessenc 安全层：relay 入站 settings_json.decryption
+// 保留（不再强制 none），stream 层 security none + tcp → 客户端自动 vision。
+func TestGenerateConfig_VLESSInboundVlessEnc(t *testing.T) {
+	dec := "mlkem768x25519plus.native.600s." + goldenMlkemSeed
+	inb := models.Inbound{
+		ID: 1, ServerID: 1, Tag: "in-relay-ve", Protocol: "vless", Port: 8443,
+		Type: models.InboundTypeRelay, InternalUUID: "22222222-2222-2222-2222-222222222222",
+		SettingsJSON:   `{"decryption":"` + dec + `"}`,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	raw, err := xray.Generate([]models.Inbound{inb}, nil, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	json.Unmarshal(raw, &parsed)
+	inbounds := asArray(t, parsed["inbounds"], "inbounds")
+	relayIn := asObject(t, inbounds[0], "inbounds[0]")
+	settings := asObject(t, relayIn["settings"], "settings")
+	if settings["decryption"] != dec {
+		t.Errorf("decryption 应原样保留: %v", settings["decryption"])
+	}
+	clients := asArray(t, settings["clients"], "clients")
+	c0 := asObject(t, clients[0], "clients[0]")
+	if c0["flow"] != "xtls-rprx-vision" {
+		t.Errorf("vlessenc + tcp + security none 应自动 vision: %v", c0["flow"])
+	}
+}
+
+func TestGenerateConfig_VLESSInboundVlessEncInvalid(t *testing.T) {
+	// 裸密钥写法（v26.6.27 infra/conf 拒绝）→ 生成期报错，不让坏配置推送后 agent 端才暴露
+	inb := models.Inbound{
+		ID: 1, ServerID: 1, Tag: "in-relay-bad", Protocol: "vless", Port: 8443,
+		Type: models.InboundTypeRelay, InternalUUID: "22222222-2222-2222-2222-222222222222",
+		SettingsJSON:   `{"decryption":"cNUvTuN33QybBBHanFzy8LFC0wyvAsa__HSc0-KRRWo"}`,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	_, err := xray.Generate([]models.Inbound{inb}, nil, nil, nil, nil, "", "")
+	if err == nil {
+		t.Error("非法 decryption 应在生成期报错")
+	}
+}
+
+func TestGenerateConfig_InboundRefVlessEnc(t *testing.T) {
+	// 中转出站按目标入站 decryption 自动派生 encryption（0rtt + 公钥），
+	// stream 层保持目标 security（none），flow 自动 vision。
+	dec := "mlkem768x25519plus.native.600s." + goldenMlkemSeed
+	target := models.Inbound{
+		ID: 99, ServerID: 2, Tag: "landing-ve", Protocol: "vless", Port: 443,
+		Type: models.InboundTypeRelay, InternalUUID: "33333333-3333-3333-3333-333333333333",
+		SettingsJSON:   `{"decryption":"` + dec + `"}`,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	ref := target.ID
+	ctx := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{
+			target.ID: {Inbound: target, ServerHost: "10.0.0.5"},
+		},
+	}
+	outbounds := []models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "to-landing-ve", Protocol: "vless", InboundRef: &ref, Enabled: true},
+	}
+	raw, err := xray.Generate([]models.Inbound{{ID: 1, Tag: "in", Protocol: "vless", Port: 443, Type: models.InboundTypeUser, Enabled: true}},
+		outbounds, nil, vlessUsers("in"), ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	json.Unmarshal(raw, &parsed)
+	obs := asArray(t, parsed["outbounds"], "outbounds")
+	var ob map[string]any
+	for _, o := range obs {
+		if om, _ := o.(map[string]any); om["tag"] == "to-landing-ve" {
+			ob = om
+		}
+	}
+	if ob == nil {
+		t.Fatal("to-landing-ve outbound not found")
+	}
+	settings := asObject(t, ob["settings"], "settings")
+	vnext := asArray(t, settings["vnext"], "vnext")
+	users := asArray(t, asObject(t, vnext[0], "vnext[0]")["users"], "users")
+	u0 := asObject(t, users[0], "users[0]")
+	wantEnc := "mlkem768x25519plus.native.0rtt." + goldenMlkemEK
+	if u0["encryption"] != wantEnc {
+		t.Errorf("encryption 派生失败:\n got %v\nwant %s", u0["encryption"], wantEnc)
+	}
+	if u0["flow"] != "xtls-rprx-vision" {
+		t.Errorf("vlessenc 目标 + tcp 应自动 vision: %v", u0["flow"])
+	}
+	stream := asObject(t, ob["streamSettings"], "streamSettings")
+	if stream["security"] != "none" {
+		t.Errorf("vlessenc 目标 stream security 应为 none: %v", stream["security"])
+	}
+}
+
 // TestGenerateConfig_VLESSInboundDecryptionForced ISSUE-14 回归：
 // API 允许空 settings_json 创建 VLESS 入站，生成器必须强制注入 decryption:"none" 并移除 encryption。
 func TestGenerateConfig_VLESSInboundDecryptionForced(t *testing.T) {
@@ -879,20 +976,20 @@ func TestGenerate_BlockCN(t *testing.T) {
 	}
 	outbounds := []models.ServerOutbound{
 		{
-			ID:           1,
-			ServerID:     1,
-			Tag:          "direct",
-			Protocol:     "freedom",
+			ID:       1,
+			ServerID: 1,
+			Tag:      "direct",
+			Protocol: "freedom",
 			// block_cn 为面板专用开关：DB 存原文，生成时拆分为 finalRules，面板键不透传
 			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true,"finalRules":[{"action":"block","ip":["geoip:private"]},{"action":"allow"}]}`,
 			Enabled:      true,
 		},
 		{
-			ID:           2,
-			ServerID:     1,
-			Tag:          "blocked",
-			Protocol:     "blackhole",
-			Enabled:      true,
+			ID:       2,
+			ServerID: 1,
+			Tag:      "blocked",
+			Protocol: "blackhole",
+			Enabled:  true,
 		},
 	}
 
@@ -903,7 +1000,7 @@ func TestGenerate_BlockCN(t *testing.T) {
 
 	var root struct {
 		Outbounds []struct {
-			Tag      string `json:"tag"`
+			Tag      string         `json:"tag"`
 			Settings map[string]any `json:"settings"`
 		} `json:"outbounds"`
 		Routing struct {
@@ -1006,7 +1103,6 @@ func TestGenerate_PrivateRoutedToBlocked(t *testing.T) {
 	}
 	t.Errorf("缺少内网防护注入规则: %+v", root.Routing.Rules)
 }
-
 
 // TestTemplateCacheNotPolluted 回归：默认出口 domainStrategy 注入不得污染共享模板。
 // 修复前 cloneMap 仅浅拷贝顶层，Generate 原地改写嵌套 settings（config.go 默认出口

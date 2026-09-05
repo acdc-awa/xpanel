@@ -13,7 +13,7 @@ import {
   QuestionFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCerts, getXrayKeys, rotateInternalInbound, getLayers, createLayer, deleteLayer, type CertItem } from '@/api/admin'
+import { getCerts, getXrayKeys, getXrayVlessEnc, rotateInternalInbound, getLayers, createLayer, deleteLayer, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings, AccessLayer } from '@/api/types'
 
@@ -258,6 +258,12 @@ const tlsMaxVersion = ref('')
 const tlsCipherSuites = ref('')
 const tlsAllowInsecure = ref(false)
 
+// VLESS Encryption（vlessenc 安全层，一期仅转发入站）：面板伪安全层——
+// stream 层写 security:"none"，settings_json 写 decryption；上游中转出站的加密参数
+// 由后端按目标入站自动派生并随配置下发。认证固定 ML-KEM-768、外观固定 native。
+const vlessencKey = ref('')
+const veGenLoading = ref(false)
+
 // Sniffing 参数
 const sniffingForm = reactive({
   enabled: false,
@@ -366,6 +372,43 @@ async function fetchRealityKeys() {
   }
 }
 
+async function fetchVlessEncKey() {
+  veGenLoading.value = true
+  try {
+    const { data } = await getXrayVlessEnc()
+    if (data.code === 0) {
+      vlessencKey.value = data.data.decryption
+      ElMessage.success('已生成 VLESS Encryption 密钥（ML-KEM-768）')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '生成密钥失败'))
+  } finally {
+    veGenLoading.value = false
+  }
+}
+
+// 切到 vlessenc 安全层且尚无密钥时自动生成一次（幂等，可手动重新生成轮换）
+watch(
+  localTlsType,
+  (v) => {
+    if (v === 'vlessenc' && !vlessencKey.value) fetchVlessEncKey()
+  },
+)
+
+// vlessenc 一期仅转发入站：类型切回 user 时若安全层停留在 vlessenc，回退 REALITY
+//（后端保存校验也会拒绝 user 入站携带 decryption，这里前置避免脏数据）
+watch(
+  localInboundType,
+  (v) => {
+    if (v !== 'relay' && localTlsType.value === 'vlessenc') {
+      localTlsType.value = 'reality'
+      ElMessage.info('VLESS Encryption 一期仅支持转发入站，安全层已回退 REALITY')
+    }
+  },
+)
+
 async function rotateInternal() {
   if (!props.inboundId) {
     ElMessage.warning('请先保存入站')
@@ -413,7 +456,10 @@ function moveFallback(index: number, direction: -1 | 1) {
 }
 
 function buildSettingsJSON(): string {
-  const s: Record<string, any> = { decryption: 'none' }
+  // vlessenc 安全层：decryption 载入 settings_json（未生成密钥时回退 none，卡片有警示）
+  const s: Record<string, any> = {
+    decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
+  }
   if (fallbacks.value.length > 0) {
     s.fallbacks = fallbacks.value.map((f) => ({
       name: f.name || undefined,
@@ -427,9 +473,11 @@ function buildSettingsJSON(): string {
 }
 
 function buildStreamSettingsJSON(): string {
+  // vlessenc 是面板抽象的伪安全层：stream 层固定 security:"none"（加密挂在协议 settings）
+  const streamSecurity = localTlsType.value === 'vlessenc' ? 'none' : localTlsType.value
   const s: Record<string, any> = {
     network: localNetwork.value,
-    security: localTlsType.value,
+    security: streamSecurity,
     fingerprint: fingerprint.value,
   }
   if (acceptProxyProtocol.value) s.acceptProxyProtocol = true
@@ -565,6 +613,14 @@ function parseJsonToForm(str: string) {
     if (parsed.tls_type && typeof parsed.tls_type === 'string') localTlsType.value = parsed.tls_type
     else if (parsed.streamSettings?.security) localTlsType.value = parsed.streamSettings.security
     else if (streamObj.security) localTlsType.value = streamObj.security
+    // vlessenc 回显：stream 层为 none 且 settings_json.decryption 启用 → 判定为 vlessenc 安全层
+    const decRaw = (s && typeof s === 'object' ? (s as Record<string, any>).decryption : '') as string
+    if (localTlsType.value === 'none' && typeof decRaw === 'string' && decRaw && decRaw !== 'none') {
+      localTlsType.value = 'vlessenc'
+      vlessencKey.value = decRaw
+    } else if (localTlsType.value === 'vlessenc') {
+      vlessencKey.value = decRaw || ''
+    }
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
     if (typeof parsed.listen === 'string') localListen.value = parsed.listen
@@ -726,6 +782,7 @@ watch(
     tlsMaxVersion,
     tlsCipherSuites,
     tlsAllowInsecure,
+    vlessencKey,
     fingerprint,
     sniffingForm,
   ],
@@ -912,6 +969,7 @@ async function copyText(text: string, label: string) {
                 <el-select v-model="localTlsType" style="width: 100%">
                   <el-option label="REALITY" value="reality" />
                   <el-option label="TLS" value="tls" />
+                  <el-option v-if="localInboundType === 'relay'" label="VLESS Encryption" value="vlessenc" />
                   <el-option label="none (明文)" value="none" />
                 </el-select>
               </el-form-item>
@@ -1145,6 +1203,37 @@ async function copyText(text: string, label: string) {
               show-icon
               title="当前为明文传输 (none)"
               description="无 TLS / REALITY 加密的流量极易被识别与阻断，建议在生产环境选用 REALITY 或 TLS。"
+            />
+          </div>
+
+          <!-- VLESS Encryption（vlessenc 安全层）：协议层加密替代 TLS，节点间链路专用 -->
+          <div v-if="localTlsType === 'vlessenc'" class="form-card">
+            <div class="card-title">VLESS Encryption 密钥（ML-KEM-768 后量子认证）</div>
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px"
+              title="协议层加密（替代 TLS）：TCP + 自动 Vision 流控 + 内核 Splice 保持可用，转发性能优于 TLS/REALITY 链路；无需证书与借壳站点。"
+              description="保存后引用该落地入站的中转出站会自动派生加密参数并随配置同步下发（自动开启 Vision 流控）。密钥只存本入站：轮换 = 重新生成后保存，上游配置自动更新。"
+            />
+            <el-form-item label="服务端密钥 (decryption)">
+              <div style="display: flex; gap: 8px; width: 100%">
+                <el-input :model-value="vlessencKey" readonly placeholder="点击「生成密钥」自动生成" />
+                <el-button v-if="vlessencKey" @click="copyText(vlessencKey, 'VLESS Encryption 密钥')">
+                  <el-icon><CopyDocument /></el-icon>
+                </el-button>
+                <el-button type="primary" plain :loading="veGenLoading" @click="fetchVlessEncKey">
+                  <el-icon><Refresh /></el-icon>&nbsp;{{ vlessencKey ? '重新生成' : '生成密钥' }}
+                </el-button>
+              </div>
+            </el-form-item>
+            <el-alert
+              v-if="!vlessencKey"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="尚未生成密钥：此时保存将以明文 (none) 生效。"
             />
           </div>
         </div>
