@@ -45,7 +45,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 	if quota := user.EffectiveTrafficBytes(); quota > 0 {
-		up, down, _ := d.Traffic.UserUsed(user.ID)
+		// 计费口径（2026-09-06 倍率计费）：与节点摘除判定同源，读 billed 两列
+		up, down, _ := d.Traffic.UserBilled(user.ID)
 		if up+down >= quota {
 			util.Fail(c, 403, "流量已用尽，请购买新套餐")
 			return
@@ -185,10 +186,10 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		c.Header("Profile-Web-Page-Url", webPage)
 	}
 
-	// subscription-userinfo
+	// subscription-userinfo（计费口径：与配额判定同源，用户客户端展示的已用/总量对得上摘除阈值）
 	var up, down int64
 	if d.Traffic != nil {
-		up, down, _ = d.Traffic.UserUsed(user.ID)
+		up, down, _ = d.Traffic.UserBilled(user.ID)
 	}
 	totalBytes := user.EffectiveTrafficBytes() // 快照（0=不限）
 	expire := int64(0)

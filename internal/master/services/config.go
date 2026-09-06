@@ -163,7 +163,7 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 		}
 		protoUsers = append(protoUsers, protocol.User{
 			UUID:  u.UUID,
-			Email: xray.UserEmail(&u),
+			Email: xray.UserEmailFor(&u, inb.ID), // 按 (用户, 入站) 注入统计键，流量回收可精确归账入站与倍率
 			Flow:  userFlow,
 			Level: 0,
 			Limit: vu.DeviceLimit,
@@ -197,6 +197,7 @@ func (s *ConfigService) filterValidUsers() []validUser {
 	}
 
 	// 单条 SQL 计算每个有效用户在其计费周期内的已用流量。
+	// 计费口径：读 billed 两列（落库时按生效入站倍率折算），与 FindViolators/续费触发一致。
 	type usedRow struct {
 		UserID    uint64
 		UsedBytes int64
@@ -204,7 +205,7 @@ func (s *ConfigService) filterValidUsers() []validUser {
 	var usedRows []usedRow
 	s.DB.Raw(`
 		SELECT u.id AS user_id,
-		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.up_bytes + l.down_bytes ELSE 0 END), 0) AS used_bytes
+		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.billed_up + l.billed_down ELSE 0 END), 0) AS used_bytes
 		FROM users u
 		LEFT JOIN traffic_logs l ON l.user_id = u.id
 		WHERE u.status = ?

@@ -23,8 +23,11 @@ type stubTraffic struct{}
 func (stubTraffic) Save(tr protocol.TrafficReportPayload, serverID uint64) ([]uint64, error) {
 	return nil, nil
 }
-func (stubTraffic) FindViolators(userIDs []uint64) ([]uint64, error)   { return nil, nil }
-func (stubTraffic) UserUsed(userID uint64) (up, down int64, err error) { return 0, 0, nil }
+func (stubTraffic) FindViolators(userIDs []uint64) ([]uint64, error) { return nil, nil }
+func (stubTraffic) UserUsed(userID uint64) (up, down int64, err error) {
+	return 0, 0, nil
+}
+func (stubTraffic) UserBilled(userID uint64) (up, down int64, err error) { return 0, 0, nil }
 
 func TestAdminUsersKeywordSearch(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
@@ -14,13 +16,83 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// UserEmail 用户在 Xray 中的 email（2026-08-14 方向①：同步用户真实邮箱，stats 上报按此回查 user_id；
-// 空邮箱回退固定格式 user-<id>@panel.local 兼容存量）。注册起 username=email 且必填，新用户均为真邮箱。
-func UserEmail(u *models.User) string {
-	if u.Email != "" {
-		return u.Email
+// UserEmailFor 用户在指定入站的 Xray 统计键 email：u<uid>.i<iid>@panel.local（UUID 不变，
+// 仅是统计键）。xray 用户级计数器（user>>>email）与在线地图均无入站维度，这里把入站
+// 维度直接注入统计键，流量回收即可精确归账 (用户, 入站) 并按该入站倍率计费（2026-09-06）。
+// 约束与保障：
+//   - xray 仅要求 email 在单个入站内唯一（vless validator 按 ToLower 建键，跨入站可重复），
+//     同一用户多入站多键、不同用户不同键天然满足；
+//   - 全小写数字格式，不受 xray 大小写折叠影响（旧方案注入真实邮箱时会被 ToLower，
+//     回收端大小写敏感查库导致静默丢流量）；
+//   - 不含 ">"（counter 名裸拼接 user>>>email>>>traffic>>>uplink，email 不得含分隔符）。
+//
+// 撞名豁免：若用户注册了形如 u1.i2@panel.local 的真实邮箱，其流量会按键解析归到
+// 用户 1——与旧 fallback 格式 user-<id>@panel.local 同类既有怪癖，解析优先于查库。
+func UserEmailFor(u *models.User, inboundID uint64) string {
+	return fmt.Sprintf("u%d.i%d@panel.local", u.ID, inboundID)
+}
+
+var (
+	userEmailForRe    = regexp.MustCompile(`^u(\d+)\.i(\d+)@panel\.local$`)
+	userEmailLegacyRe = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
+)
+
+// ParseUserEmailFor 反解 UserEmailFor 格式 → (用户ID, 入站ID)；非该格式返回 false。
+// 先小写化：xray validator 按 ToLower 建键，防手改配置注入大写后对不上。
+func ParseUserEmailFor(email string) (userID, inboundID uint64, ok bool) {
+	uid, iid, ok := ParseUserEmailAny(email)
+	if !ok || iid == 0 {
+		return 0, 0, false
 	}
-	return fmt.Sprintf("user-%d@panel.local", u.ID)
+	return uid, iid, true
+}
+
+// ParseUserEmailAny 兼容解析面板生成的用户统计键：新格式 u<uid>.i<iid>@panel.local →
+// (uid, iid, true)；旧格式 user-<uid>@panel.local → (uid, 0, true)——存量节点在配置
+// 重生成前仍按旧键上报，回收端必须继续认得。其余（真实邮箱/relay/自定义/数字溢出）→ false。
+func ParseUserEmailAny(email string) (userID, inboundID uint64, ok bool) {
+	e := strings.ToLower(email)
+	if m := userEmailForRe.FindStringSubmatch(e); m != nil {
+		uid, err := strconv.ParseUint(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		iid, err := strconv.ParseUint(m[2], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return uid, iid, true
+	}
+	if m := userEmailLegacyRe.FindStringSubmatch(e); m != nil {
+		uid, err := strconv.ParseUint(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return uid, 0, true
+	}
+	return 0, 0, false
+}
+
+// CountDistinctOnlineUsers 按去重用户口径统计在线快照人数：面板用户按统计键反解去重
+// （按入站区分统计键后，同一用户会以每入站一个 email 出现在快照里，直接数条目会重复
+// 计人）；relay 内部账户与自定义 email 各计一（与 agent 侧旧计数口径一致）。
+func CountDistinctOnlineUsers(users []protocol.OnlineUserIPs) int {
+	if len(users) == 0 {
+		return 0
+	}
+	seen := make(map[uint64]struct{}, len(users))
+	n := 0
+	for _, u := range users {
+		if uid, _, ok := ParseUserEmailAny(u.Email); ok {
+			if _, dup := seen[uid]; !dup {
+				seen[uid] = struct{}{}
+				n++
+			}
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 // RelayEmail relay 入站在 Xray 中的 email（不入用户体系，仅 stats 标识）。

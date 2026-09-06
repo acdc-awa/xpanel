@@ -1226,3 +1226,61 @@ func TestGenerateConfig_InboundRefPinnedCert(t *testing.T) {
 		t.Error("无 pin 证书不应注入 pinnedPeerCertSha256")
 	}
 }
+
+// TestUserEmailForRoundtrip 统计键按 (用户, 入站) 注入与反解：xray 仅要求 email 入站内
+// 唯一（validator 按 ToLower 建键），格式须全小写、不含 ">"；旧格式仅保留解析兼容
+// （升级过渡期存量节点仍按旧键上报，回收端必须认得）。
+func TestUserEmailForRoundtrip(t *testing.T) {
+	u := &models.User{ID: 42}
+	if got := xray.UserEmailFor(u, 7); got != "u42.i7@panel.local" {
+		t.Fatalf("UserEmailFor = %q, want u42.i7@panel.local", got)
+	}
+	if uid, iid, ok := xray.ParseUserEmailFor("u42.i7@panel.local"); !ok || uid != 42 || iid != 7 {
+		t.Fatalf("ParseUserEmailFor = %d/%d/%v, want 42/7/true", uid, iid, ok)
+	}
+	// xray validator 会折叠大小写，解析端同样先小写化再匹配
+	if uid, iid, ok := xray.ParseUserEmailFor("U42.I7@PANEL.LOCAL"); !ok || uid != 42 || iid != 7 {
+		t.Fatalf("ParseUserEmailFor(大写) = %d/%d/%v, want 42/7/true", uid, iid, ok)
+	}
+	// 旧格式 → 仅回用户 ID（入站维度 0）
+	if uid, iid, ok := xray.ParseUserEmailAny("user-5@panel.local"); !ok || uid != 5 || iid != 0 {
+		t.Fatalf("ParseUserEmailAny(旧格式) = %d/%d/%v, want 5/0/true", uid, iid, ok)
+	}
+	if uid, iid, ok := xray.ParseUserEmailAny("USER-5@PANEL.LOCAL"); !ok || uid != 5 || iid != 0 {
+		t.Fatalf("ParseUserEmailAny(旧格式大写) = %d/%d/%v, want 5/0/true", uid, iid, ok)
+	}
+	// 非面板键（真实邮箱/relay/其他域名/杂项）不误判
+	for _, em := range []string{"", "a@b.com", "relay-in-relay@panel.local", "xu5.i7@panel.local", "u42.i7@example.com", "u42@panel.local", "u.i7@panel.local"} {
+		if _, _, ok := xray.ParseUserEmailAny(em); ok {
+			t.Errorf("ParseUserEmailAny(%q) 不应解析成功", em)
+		}
+	}
+}
+
+// TestCountDistinctOnlineUsers 在线快照去重计数：同一用户跨入站多键只计一人，
+// relay 内部账户与自定义 email 各计一。
+func TestCountDistinctOnlineUsers(t *testing.T) {
+	users := []protocol.OnlineUserIPs{
+		{Email: "u1.i7@panel.local", IPs: []string{"1.1.1.1"}},
+		{Email: "u1.i9@panel.local", IPs: []string{"1.1.1.1", "2.2.2.2"}},
+		{Email: "user-2@panel.local", IPs: []string{"3.3.3.3"}},
+		{Email: "relay-in-relay@panel.local", IPs: []string{"4.4.4.4"}},
+		{Email: "custom@x.com", IPs: []string{"5.5.5.5"}},
+	}
+	if got := xray.CountDistinctOnlineUsers(users); got != 4 {
+		t.Fatalf("CountDistinctOnlineUsers = %d, want 4（用户1 两键去重 + 用户2 + relay + 自定义）", got)
+	}
+	if got := xray.CountDistinctOnlineUsers(nil); got != 0 {
+		t.Fatalf("empty = %d, want 0", got)
+	}
+}
+
+// 溢出数字不得被误解析为 uid=0 的合法键
+func TestParseUserEmailAnyOverflow(t *testing.T) {
+	if _, _, ok := xray.ParseUserEmailAny("u99999999999999999999999.i1@panel.local"); ok {
+		t.Fatal("溢出 uid 不应解析成功")
+	}
+	if _, _, ok := xray.ParseUserEmailAny("user-99999999999999999999999@panel.local"); ok {
+		t.Fatal("溢出 uid（旧格式）不应解析成功")
+	}
+}

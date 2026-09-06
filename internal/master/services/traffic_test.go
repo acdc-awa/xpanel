@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
@@ -149,7 +151,7 @@ func TestSaveDuplicateDeliveryMergesAndBumpsInbound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
@@ -196,7 +198,7 @@ func TestSaveInboundDimensionEntryOnlyBumpsInbound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
@@ -237,7 +239,7 @@ func TestSaveConcurrentDuplicateDeliveryMerges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
@@ -311,10 +313,11 @@ func TestFindViolators(t *testing.T) {
 		t.Fatal(err)
 	}
 	// over 用 2GB（跨阈值）；under 用 0.5GB（未跨）；unlimited 用 100GB 但无额度快照=不限
+	// （判定读计费口径 billed 两列，2026-09-06 倍率计费）
 	logs := []models.TrafficLog{
-		{UserID: users[0].ID, UpBytes: 2 * gb, DownBytes: 0, PeriodStart: time.Now()},
-		{UserID: users[1].ID, UpBytes: gb / 2, DownBytes: 0, PeriodStart: time.Now()},
-		{UserID: users[3].ID, UpBytes: 100 * gb, DownBytes: 0, PeriodStart: time.Now()},
+		{UserID: users[0].ID, UpBytes: 2 * gb, BilledUp: 2 * gb, DownBytes: 0, PeriodStart: time.Now()},
+		{UserID: users[1].ID, UpBytes: gb / 2, BilledUp: gb / 2, DownBytes: 0, PeriodStart: time.Now()},
+		{UserID: users[3].ID, UpBytes: 100 * gb, BilledUp: 100 * gb, DownBytes: 0, PeriodStart: time.Now()},
 	}
 	if err := db.Create(&logs).Error; err != nil {
 		t.Fatal(err)
@@ -343,7 +346,7 @@ func TestSaveReturnsReportedUserIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}); err != nil {
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
@@ -375,5 +378,285 @@ func TestSaveReturnsReportedUserIDs(t *testing.T) {
 	}
 	if !seen[7] || !seen[8] {
 		t.Fatalf("reported ids = %v, want 含 7 与 8", ids)
+	}
+}
+
+// TestSaveBillingRatioAppliesInboundRatio 倍率计费（2026-09-06）：
+// 用户维度条目落库时按 (用户生效组, 服务器) 生效入站倍率折算计费口径 billed 两列，
+// 原始字节恒不变；xray 用户计数器无入站维度（user>>>email 节点级汇总），
+// 同服务器多入站倍率不一致取最高（对运营保守）；ratio=0 = 免费（billed=0）；
+// 无命中（组未被任何入站授权）回退 1；重复投递合并时 billed 同步累加；
+// 入站维度条目与 inbounds.up/down 冗余计数恒为原始字节（展示/容量口径，不乘倍率）。
+func TestSaveBillingRatioAppliesInboundRatio(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	mkInbound := func(serverID uint64, tag string, ratio float64) models.Inbound {
+		inb := models.Inbound{ServerID: serverID, Tag: tag, Protocol: "vless", Port: 443, Ratio: ratio, Type: models.InboundTypeUser}
+		if err := db.Create(&inb).Error; err != nil {
+			t.Fatalf("inbound %s: %v", tag, err)
+		}
+		return inb
+	}
+	mkAP := func(inbID uint64, groups ...uint64) {
+		ap := models.UserAccessPoint{Name: "ap", TargetType: "inbound", TargetInboundID: &inbID, Enabled: true}
+		if err := db.Create(&ap).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range groups {
+			if err := db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g, AccessPointID: ap.ID}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// 服务器 1：入站 A 倍率 1.5 + 入站 B 倍率 1.0（均授权组 2）→ 混合倍率取最高 1.5
+	inbA := mkInbound(1, "in-a", 1.5)
+	inbB := mkInbound(1, "in-b", 1.0)
+	mkAP(inbA.ID, 2)
+	mkAP(inbB.ID, 2)
+	// 服务器 2：入站 F 免费倍率 0（授权组 2）→ billed = 0
+	// （Ratio:0 走 Create 会被 default:1 零值陷阱吞成 1——与创建端点同样的坑，测试改走显式 Update）
+	inbF := mkInbound(2, "in-free", 0)
+	if err := db.Model(&models.Inbound{}).Where("id = ?", inbF.ID).Update("ratio", 0).Error; err != nil {
+		t.Fatal(err)
+	}
+	mkAP(inbF.ID, 2)
+
+	mkUser := func(email string, group uint64) models.User {
+		u := models.User{Username: email, Email: email, UUID: "uuid-" + email, SubscribeToken: email, Status: models.StatusActive, PermissionGroupID: group}
+		if err := db.Create(&u).Error; err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	uMixed := mkUser("mixed@t.com", 2)   // 命中 1.5/1.0 双入站 → 1.5
+	uNoAuth := mkUser("noauth@t.com", 9) // 组 9 无任何入站授权 → 回退 1
+	// BeforeCreate 把周期起点设为创建时刻（晚于固定上报周期），拨早使周期过滤放行
+	if err := db.Model(&models.User{}).Where("1 = 1").Update("traffic_cycle_start", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	// 同帧双投（重复投递合并）：混合用户 ×1.5，无授权用户 ×1
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-09-06T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{UserID: uMixed.ID, Inbound: "in-a", UpBytes: 100, DownBytes: 200},
+			{UserID: uNoAuth.ID, Inbound: "in-a", UpBytes: 100, DownBytes: 200},
+			{Inbound: "in-a", UpBytes: 999, DownBytes: 0}, // 入站维度：不落流水、不乘倍率
+		},
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := svc.Save(payload, 1); err != nil {
+			t.Fatalf("Save #%d: %v", i+1, err)
+		}
+	}
+
+	var logs []models.TrafficLog
+	if err := db.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("TrafficLog 行数 = %d, want 2（入站维度不落流水）", len(logs))
+	}
+	for _, l := range logs {
+		switch l.UserID {
+		case uMixed.ID:
+			// 原始口径不变（2 投合并 200/400）；计费口径 ×1.5（300/600）
+			if l.UpBytes != 200 || l.DownBytes != 400 {
+				t.Fatalf("mixed 原始字节 up=%d down=%d, want 200/400", l.UpBytes, l.DownBytes)
+			}
+			if l.BilledUp != 300 || l.BilledDown != 600 {
+				t.Fatalf("mixed 计费字节 billed up=%d down=%d, want 300/600（倍率 1.5）", l.BilledUp, l.BilledDown)
+			}
+		case uNoAuth.ID:
+			if l.BilledUp != 200 || l.BilledDown != 400 {
+				t.Fatalf("noauth 计费字节 billed up=%d down=%d, want 200/400（无命中回退 1）", l.BilledUp, l.BilledDown)
+			}
+		default:
+			t.Fatalf("意外用户 %d", l.UserID)
+		}
+	}
+
+	// 免费入站（ratio=0）：billed = 0，原始照记
+	if _, err := svc.Save(protocol.TrafficReportPayload{
+		Period:  "2026-09-06T00:00:00Z",
+		Entries: []protocol.TrafficEntry{{UserID: uMixed.ID, Inbound: "in-free", UpBytes: 500, DownBytes: 0}},
+	}, 2); err != nil {
+		t.Fatalf("Save free: %v", err)
+	}
+	var freeLog models.TrafficLog
+	if err := db.Where("user_id = ? AND inbound_id = ?", uMixed.ID, inbF.ID).First(&freeLog).Error; err != nil {
+		t.Fatal(err)
+	}
+	if freeLog.UpBytes != 500 || freeLog.BilledUp != 0 {
+		t.Fatalf("免费入站 raw=%d billed=%d, want raw 500 / billed 0", freeLog.UpBytes, freeLog.BilledUp)
+	}
+
+	// 入站冗余计数恒为原始字节（不乘倍率）
+	var inbAAfter models.Inbound
+	if err := db.First(&inbAAfter, inbA.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inbAAfter.Up != 2398 || inbAAfter.Down != 800 {
+		t.Fatalf("inbA.up/down = %d/%d, want 原始 2398/800（每用户条目各补计一次×2 投 + 入站维度）", inbAAfter.Up, inbAAfter.Down)
+	}
+
+	// 展示口径 UserUsed vs 计费口径 UserBilled
+	rawUp, rawDown, err := svc.UserUsed(uMixed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawUp != 200+500 || rawDown != 400 {
+		t.Fatalf("UserUsed = %d/%d, want 700/400（原始口径含免费入站）", rawUp, rawDown)
+	}
+	billUp, billDown, err := svc.UserBilled(uMixed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if billUp != 300 || billDown != 600 {
+		t.Fatalf("UserBilled = %d/%d, want 300/600（计费口径，免费入站不贡献）", billUp, billDown)
+	}
+}
+
+// period1AsTime 上报周期字符串 → time.Time（与落库存储口径一致）。
+func period1AsTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// TestSaveStatsKeyInboundAttribution 统计键注入入站维度（2026-09-06）：
+// 新格式 u<uid>.i<iid>@panel.local 条目反解出入站后，流水挂真实 inbound_id、
+// 按该入站精确倍率计费（混合倍率服务器不再一律取 max）；iid 未命中本服务器入站
+// （已删/跨服异常）回退 inbound_id=0 + 组内 max 兜底；旧格式 user-<id>@panel.local
+// 同兜底；统计键条目不补计入站冗余计数（inbound>>> 计数器已记账，防双计）。
+func TestSaveStatsKeyInboundAttribution(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	mkInbound := func(serverID uint64, tag string, ratio float64) models.Inbound {
+		inb := models.Inbound{ServerID: serverID, Tag: tag, Protocol: "vless", Port: 443, Ratio: ratio, Type: models.InboundTypeUser}
+		if err := db.Create(&inb).Error; err != nil {
+			t.Fatalf("inbound %s: %v", tag, err)
+		}
+		return inb
+	}
+	mkAP := func(inbID uint64, groups ...uint64) {
+		ap := models.UserAccessPoint{Name: "ap", TargetType: "inbound", TargetInboundID: &inbID, Enabled: true}
+		if err := db.Create(&ap).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range groups {
+			if err := db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g, AccessPointID: ap.ID}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// 同服务器混合倍率：in-a 1.5 + in-b 1.0（均授权组 2）
+	inbA := mkInbound(1, "in-a", 1.5)
+	inbB := mkInbound(1, "in-b", 1.0)
+	mkAP(inbA.ID, 2)
+	mkAP(inbB.ID, 2)
+
+	user := models.User{Username: "mix@t.com", Email: "mix@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: 2}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.User{}).Where("1 = 1").Update("traffic_cycle_start", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	// T1：经 in-a（×1.5）与 in-b（×1.0）各 100/200，另带一条 in-a 入站维度条目
+	period1 := "2026-09-06T00:00:00Z"
+	payload := protocol.TrafficReportPayload{
+		Period: period1,
+		Entries: []protocol.TrafficEntry{
+			{Email: xray.UserEmailFor(&user, inbA.ID), UpBytes: 100, DownBytes: 200},
+			{Email: xray.UserEmailFor(&user, inbB.ID), UpBytes: 100, DownBytes: 200},
+			{Inbound: "in-a", UpBytes: 999},
+		},
+	}
+	if _, err := svc.Save(payload, 1); err != nil {
+		t.Fatalf("Save T1: %v", err)
+	}
+
+	var logs []models.TrafficLog
+	if err := db.Where("period_start = ?", period1AsTime(t, period1)).Order("inbound_id").Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("TrafficLog 行数 = %d, want 2（同用户按入站拆行）", len(logs))
+	}
+	for _, l := range logs {
+		switch l.InboundID {
+		case inbA.ID: // 精确倍率 1.5
+			if l.BilledUp != 150 || l.BilledDown != 300 {
+				t.Fatalf("in-a billed = %d/%d, want 150/300（精确倍率 1.5，非组内 max 混同）", l.BilledUp, l.BilledDown)
+			}
+		case inbB.ID: // 精确倍率 1.0
+			if l.BilledUp != 100 || l.BilledDown != 200 {
+				t.Fatalf("in-b billed = %d/%d, want 100/200（精确倍率 1.0）", l.BilledUp, l.BilledDown)
+			}
+		default:
+			t.Fatalf("意外 inbound_id %d", l.InboundID)
+		}
+	}
+
+	// T2：iid 未命中（入站已删/跨服异常）→ inbound_id=0、组内 max 兜底 ×1.5
+	if _, err := svc.Save(protocol.TrafficReportPayload{
+		Period:  "2026-09-06T01:00:00Z",
+		Entries: []protocol.TrafficEntry{{Email: xray.UserEmailFor(&user, 99999), UpBytes: 10}},
+	}, 1); err != nil {
+		t.Fatalf("Save T2: %v", err)
+	}
+	// T3：旧格式（升级过渡期存量节点）→ inbound_id=0、组内 max 兜底 ×1.5
+	if _, err := svc.Save(protocol.TrafficReportPayload{
+		Period:  "2026-09-06T02:00:00Z",
+		Entries: []protocol.TrafficEntry{{Email: "user-" + strconv.FormatUint(user.ID, 10) + "@panel.local", UpBytes: 10}},
+	}, 1); err != nil {
+		t.Fatalf("Save T3: %v", err)
+	}
+	var fb []models.TrafficLog
+	if err := db.Where("user_id = ? AND inbound_id = 0", user.ID).Order("period_start").Find(&fb).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(fb) != 2 {
+		t.Fatalf("兜底行数 = %d, want 2（T2/T3 各一行）", len(fb))
+	}
+	for _, l := range fb {
+		if l.BilledUp != 15 {
+			t.Fatalf("兜底行 billed_up = %d, want 15（max 兜底 1.5）", l.BilledUp)
+		}
+	}
+
+	// 入站冗余计数：仅入站维度条目补计 999；统计键条目不补计（防与 inbound>>> 双计）
+	var inbAAfter models.Inbound
+	if err := db.First(&inbAAfter, inbA.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inbAAfter.Up != 999 || inbAAfter.Down != 0 {
+		t.Fatalf("in-a.up/down = %d/%d, want 999/0（统计键条目不得补计入站计数）", inbAAfter.Up, inbAAfter.Down)
+	}
+	var inbBAfter models.Inbound
+	if err := db.First(&inbBAfter, inbB.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inbBAfter.Up != 0 {
+		t.Fatalf("in-b.up = %d, want 0", inbBAfter.Up)
 	}
 }

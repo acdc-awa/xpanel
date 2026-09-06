@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // Token 类型
@@ -76,7 +76,11 @@ type TrafficService interface {
 	Save(tr protocol.TrafficReportPayload, serverID uint64) (reportedUserIDs []uint64, err error)
 	// FindViolators 判定给定用户中已违规的（过期或流量超额），口径与 filterValidUsers 快照语义一致。
 	FindViolators(userIDs []uint64) ([]uint64, error)
+	// UserUsed 已用总流量（原始口径）：管理端展示/dashboard 消费。
 	UserUsed(userID uint64) (up, down int64, err error)
+	// UserBilled 已用流量（计费口径，原始字节 × 落库时入站倍率）：
+	// 套餐配额判定与用户侧用量展示消费，与节点摘除/续费触发口径一致。
+	UserBilled(userID uint64) (up, down int64, err error)
 }
 
 // OrderService 订单/余额支付服务接口。

@@ -78,10 +78,32 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := backfillPlanSnapshots(db); err != nil {
 		return err
 	}
+	if err := backfillTrafficBilled(db); err != nil {
+		return err
+	}
 	if err := migratePlanSaleFlags(db); err != nil {
 		return err
 	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// backfillTrafficBilled 流量计费两列一次性回填（2026-09-06 倍率计费）：
+// 存量行按 1:1 回填（billed = 原始字节，等价倍率 1）——历史消费不追溯倍率。
+// settings 标记保证只跑一次：新版本落库路径恒写两列（含 ratio=0 的免费行 billed=0），
+// 重跑会把免费行错误抬回原值。幂等。
+func backfillTrafficBilled(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "traffic_billed_backfilled").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if err := db.Exec("UPDATE traffic_logs SET billed_up = up_bytes, billed_down = down_bytes").Error; err != nil {
+		return fmt.Errorf("回填流量计费两列失败: %w", err)
+	}
+	return db.Create(&Setting{Key: "traffic_billed_backfilled", Value: "1"}).Error
 }
 
 // migratePlanSaleFlags 套餐销售两属性一次性迁移（2026-09-03 enabled → purchasable/renewable）：

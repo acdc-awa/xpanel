@@ -39,7 +39,9 @@ func (d *Deps) userView(user *models.User) gin.H {
 	}
 	var up, down int64
 	if d.Traffic != nil {
-		up, down, _ = d.Traffic.UserUsed(user.ID)
+		// 计费口径（2026-09-06 倍率计费）：用户侧已用/总量的展示口径与配额判定一致，
+		// 保证「显示用尽」与「节点摘除」同刻发生；管理端/dashboard 仍读原始口径。
+		up, down, _ = d.Traffic.UserBilled(user.ID)
 	}
 	effectiveGroupID := user.EffectiveGroupID()
 	effectiveLimit := user.EffectiveDeviceLimit()

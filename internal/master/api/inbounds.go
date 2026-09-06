@@ -255,6 +255,15 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	// GORM 零值陷阱：Ratio 带 default:1，Create 时显式 0（免费入站）会被当零值
+	// 跳过而落成列默认 1，需补一次显式写（更新路径走 map 赋值无此问题）。
+	if req.Ratio == 0 {
+		if err := d.DB.Model(&models.Inbound{}).Where("id = ?", inb.ID).UpdateColumn("ratio", 0).Error; err != nil {
+			util.ServerError(c, "创建失败")
+			return
+		}
+		inb.Ratio = 0
+	}
 	if err := d.enqueueConfig(req.ServerID); err != nil {
 		pushFail(c, req.ServerID, err)
 		return

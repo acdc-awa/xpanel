@@ -115,6 +115,7 @@ func (s *AutoRenewService) expiryCandidates(ctx context.Context) []uint64 {
 }
 
 // exhaustCandidates 当前周期流量耗尽的开关用户（额度 0=不限，永不触发）。
+// 用量读计费口径 billed 两列（原始字节 × 落库时入站倍率），与节点摘除判定一致。
 // 耗尽用户已被节点摘除停止上报，used 冻结在阈值附近，判定稳定。
 func (s *AutoRenewService) exhaustCandidates(ctx context.Context) map[uint64]uint64 {
 	type row struct {
@@ -127,7 +128,7 @@ func (s *AutoRenewService) exhaustCandidates(ctx context.Context) map[uint64]uin
 		FROM users u
 		WHERE u.status = ? AND u.auto_renew_exhaust = ? AND u.plan_id > 0 AND u.plan_traffic_bytes > 0
 		  AND (
-		    SELECT COALESCE(SUM(l.up_bytes + l.down_bytes), 0)
+		    SELECT COALESCE(SUM(l.billed_up + l.billed_down), 0)
 		    FROM traffic_logs l
 		    WHERE l.user_id = u.id AND l.period_start >= u.traffic_cycle_start
 		  ) >= u.plan_traffic_bytes`,

@@ -21,6 +21,7 @@ import (
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/services"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -439,7 +440,12 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		updates["online_ips"] = string(b)
 	}
 	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
-	// node_reports 落库（供仪表盘趋势）
+	// node_reports 落库（供仪表盘趋势）。在线数按去重用户口径重算：统计键按入站区分后
+	// 同一用户每入站一个 email 条目，agent 直接计数会重复计人；快照为空（旧 agent）沿用其计数。
+	onlineUsers := hb.OnlineUsers
+	if len(hb.OnlineIPs) > 0 {
+		onlineUsers = xray.CountDistinctOnlineUsers(hb.OnlineIPs)
+	}
 	_ = h.DB.Create(&models.NodeReport{
 		ServerID:    conn.ServerID,
 		CPU:         hb.CPU,
@@ -447,7 +453,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		MemTotal:    uint64(hb.MemTotal),
 		Disk:        hb.Disk,
 		DiskTotal:   uint64(hb.DiskTotal),
-		OnlineUsers: hb.OnlineUsers,
+		OnlineUsers: onlineUsers,
 		RxRate:      hb.RxRate,
 		TxRate:      hb.TxRate,
 		RxBytes:     hb.RxBytes,

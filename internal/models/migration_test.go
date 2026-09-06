@@ -442,3 +442,46 @@ func TestPlanSnapshotBackfill(t *testing.T) {
 		t.Fatalf("重复迁移冲掉了存量快照: %d → %d（隔离语义失效）", wantBytes, again.PlanTrafficBytes)
 	}
 }
+
+// TestTrafficBilledBackfill 流量计费两列一次性回填（2026-09-06 倍率计费）：
+// 存量行按 1:1 回填（billed = 原始字节，等价倍率 1）；settings 标记只跑一次——
+// 回填后新语义落库的免费行（ratio=0：raw>0、billed=0）不得被重启重跑错误抬回原值。
+func TestTrafficBilledBackfill(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&TrafficLog{}, &Setting{}); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+	if err := db.Create(&TrafficLog{UserID: 1, InboundID: 1, UpBytes: 100, DownBytes: 200, PeriodStart: time.Now()}).Error; err != nil {
+		t.Fatalf("create legacy log: %v", err)
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate should backfill billed: %v", err)
+	}
+	var got TrafficLog
+	if err := db.First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.BilledUp != 100 || got.BilledDown != 200 {
+		t.Fatalf("回填 billed = %d/%d, want 100/200", got.BilledUp, got.BilledDown)
+	}
+
+	// 模拟新版本落库的免费入站行（ratio=0：raw>0、billed=0），重启重跑不得抬回原值
+	if err := db.Create(&TrafficLog{UserID: 2, InboundID: 1, UpBytes: 500, DownBytes: 0, PeriodStart: time.Now()}).Error; err != nil {
+		t.Fatalf("create free log: %v", err)
+	}
+	// 人工清零 billed 模拟免费行（上面 Create 默认 billed=0，无需额外处理）
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate should be idempotent: %v", err)
+	}
+	var free TrafficLog
+	if err := db.Where("user_id = ?", 2).First(&free).Error; err != nil {
+		t.Fatal(err)
+	}
+	if free.BilledUp != 0 || free.BilledDown != 0 {
+		t.Fatalf("重跑回填污染了免费行 billed = %d/%d, want 0/0", free.BilledUp, free.BilledDown)
+	}
+}

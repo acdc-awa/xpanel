@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -729,10 +729,8 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	})
 }
 
-// onlineUserEmailRe 匹配面板生成的用户 email（xray.UserEmail：user-{id}@panel.local）。
-var onlineUserEmailRe = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
-
-// onlineIPEntry 在线用户条目（email 已归类：user=面板用户 / relay=中转内部账户 / other=自定义 email）。
+// onlineIPEntry 在线用户条目（email 已归类：user=面板用户（已按用户合并去重、
+// 回填真实邮箱）/ relay=中转内部账户 / other=自定义 email）。
 type onlineIPEntry struct {
 	Email  string   `json:"email"`
 	Kind   string   `json:"kind"`
@@ -741,8 +739,29 @@ type onlineIPEntry struct {
 	IPs    []string `json:"ips"`
 }
 
+// mergeIPs 把 add 并入 dst（按 IP 去重，保序）。
+func mergeIPs(dst, add []string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(add))
+	for _, ip := range dst {
+		seen[ip] = struct{}{}
+	}
+	for _, ip := range add {
+		if ip == "" {
+			continue
+		}
+		if _, dup := seen[ip]; dup {
+			continue
+		}
+		seen[ip] = struct{}{}
+		dst = append(dst, ip)
+	}
+	return dst
+}
+
 // AdminServerOnlineIPs GET /api/v1/admin/servers/:id/online-ips —— 节点当前在线用户
 // 与连接源 IP（agent 心跳的最新快照；users 为空 = 无人在线或 agent 版本过旧未上报）。
+// 面板用户按统计键反解归类并合并：按入站区分统计键后同一用户每入站一个 email 条目，
+// 合并为一行（IP 取并集）；email 回填用户真实邮箱，便于管理员辨认。
 func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -755,45 +774,51 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 		return
 	}
 
-	type rawEntry struct {
-		Email string   `json:"email"`
-		IPs   []string `json:"ips"`
-	}
-	var raw []rawEntry
+	var raw []protocol.OnlineUserIPs
 	if srv.OnlineIPs != "" && srv.OnlineIPs != "null" {
 		_ = json.Unmarshal([]byte(srv.OnlineIPs), &raw)
 	}
 
 	entries := make([]onlineIPEntry, 0, len(raw))
-	userIDs := make(map[uint64]bool)
+	userIdx := make(map[uint64]int, len(raw))
 	for _, e := range raw {
-		entry := onlineIPEntry{Email: e.Email, Kind: "other", IPs: e.IPs}
-		if m := onlineUserEmailRe.FindStringSubmatch(e.Email); m != nil {
-			if uid, perr := strconv.ParseUint(m[1], 10, 64); perr == nil {
-				entry.Kind = "user"
-				entry.UserID = uid
-				userIDs[uid] = true
+		if uid, _, ok := xray.ParseUserEmailAny(e.Email); ok {
+			// 同一用户跨入站的多条快照合并为一行（IP 并集去重）
+			if idx, dup := userIdx[uid]; dup {
+				entries[idx].IPs = mergeIPs(entries[idx].IPs, e.IPs)
+				continue
 			}
-		} else if strings.HasPrefix(e.Email, "relay-") && strings.HasSuffix(e.Email, "@panel.local") {
+			userIdx[uid] = len(entries)
+			entries = append(entries, onlineIPEntry{Email: e.Email, Kind: "user", UserID: uid, IPs: e.IPs})
+			continue
+		}
+		entry := onlineIPEntry{Email: e.Email, Kind: "other", IPs: e.IPs}
+		if strings.HasPrefix(e.Email, "relay-") && strings.HasSuffix(e.Email, "@panel.local") {
 			entry.Kind = "relay" // 中转内部账户（xray.RelayEmail），非面板用户
 		}
 		entries = append(entries, entry)
 	}
 
-	if len(userIDs) > 0 {
-		ids := make([]uint64, 0, len(userIDs))
-		for uid := range userIDs {
+	if len(userIdx) > 0 {
+		ids := make([]uint64, 0, len(userIdx))
+		for uid := range userIdx {
 			ids = append(ids, uid)
 		}
 		var users []models.User
-		d.DB.Select("id, username").Where("id IN ?", ids).Find(&users)
-		names := make(map[uint64]string, len(users))
+		d.DB.Select("id, username, email").Where("id IN ?", ids).Find(&users)
+		byID := make(map[uint64]models.User, len(users))
 		for _, u := range users {
-			names[u.ID] = u.Username
+			byID[u.ID] = u
 		}
 		for i := range entries {
-			if entries[i].Kind == "user" {
-				entries[i].Name = names[entries[i].UserID]
+			if entries[i].Kind != "user" {
+				continue
+			}
+			if u, ok := byID[entries[i].UserID]; ok {
+				entries[i].Name = u.Username
+				if u.Email != "" {
+					entries[i].Email = u.Email // 统计键是合成格式，展示回填真实邮箱
+				}
 			}
 		}
 	}

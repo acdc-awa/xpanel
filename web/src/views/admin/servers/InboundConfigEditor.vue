@@ -922,11 +922,11 @@ async function copyText(text: string, label: string) {
               <el-form-item>
                 <template #label>
                   <span>流量计费倍率</span>
-                  <el-tooltip content="扣费倍率：1.00 为正常计费，如填 1.5，每消耗 1 GB 扣减 1.5 GB 配额。" placement="top">
+                  <el-tooltip content="扣费倍率：1.00 为正常计费，如填 1.5，每消耗 1 GB 扣减 1.5 GB 配额；0 = 免费（不扣配额）。仪表盘与节点流量始终按真实流量统计。" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </template>
-                <el-input-number v-model="localRatio" :min="0.1" :step="0.1" :precision="2" style="width: 100%" />
+                <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" />
               </el-form-item>
 
               <el-form-item>

@@ -120,12 +120,17 @@ type Order struct {
 // TrafficLog 节点上报的流量明细（按 用户×入站×周期）。
 // (user_id, inbound_id, period_start) 三列唯一：同一上报周期重复投递时覆盖合并（补报幂等）。
 // 2026-08-14 U1 修复：原仅 period_start 单列唯一索引 → 多用户共周期上报时互相冲突丢数据。
+// up/down 恒为原始字节（展示口径：dashboard/管理端/入站计数）；
+// billed_* 为计费口径（套餐配额判定/自动续费触发/订阅用量展示），落库时按
+// (用户生效组, 服务器) 生效入站倍率折算；历史行由一次性迁移按 1:1 回填。
 type TrafficLog struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`
 	UserID      uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:1;not null" json:"user_id"`
 	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:2;index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`
+	BilledUp    int64     `gorm:"default:0" json:"billed_up"`
+	BilledDown  int64     `gorm:"default:0" json:"billed_down"`
 	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:3;index:idx_traffic_period_start" json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	CreatedAt   time.Time `json:"created_at"`

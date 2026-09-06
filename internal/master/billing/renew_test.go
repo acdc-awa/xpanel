@@ -108,7 +108,8 @@ func TestAutoRenewService(t *testing.T) {
 	uid5 := mkRenewUser(t, db, "exhausted", plan.ID, ptrTime(time.Now().Add(10*day)), 10_000, false, true)
 	db.Model(&models.User{}).Where("id = ?", uid5).Update("plan_traffic_bytes", 1024) // 额度 1KB 便于触发
 	// 周期起点=用户创建时刻（BeforeCreate），上报周期落在起点之后才计入当期用量
-	if err := db.Create(&models.TrafficLog{UserID: uid5, InboundID: 1, UpBytes: 2048, DownBytes: 0, PeriodStart: time.Now(), PeriodEnd: time.Now()}).Error; err != nil {
+	// （耗尽判定读计费口径 billed 两列，2026-09-06 倍率计费）
+	if err := db.Create(&models.TrafficLog{UserID: uid5, InboundID: 1, UpBytes: 2048, BilledUp: 2048, DownBytes: 0, PeriodStart: time.Now(), PeriodEnd: time.Now()}).Error; err != nil {
 		t.Fatalf("create traffic log: %v", err)
 	}
 	svc.RunOnce(ctx)
