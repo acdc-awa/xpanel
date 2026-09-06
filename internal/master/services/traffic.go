@@ -357,33 +357,12 @@ func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
 	return out, nil
 }
 
-// UserUsed 用户当前计费周期内已用总流量（字节，原始口径）。
-// 从 user.traffic_cycle_start 开始计算；若为零值（旧数据）则回溯全部。
-// 管理端展示/dashboard 消费；用户侧展示与配额判定走 UserBilled（计费口径）。
-func (s *TrafficService) UserUsed(userID uint64) (up, down int64, err error) {
-	var user models.User
-	if err := s.DB.First(&user, userID).Error; err != nil {
-		return 0, 0, err
-	}
-	q := s.DB.Model(&models.TrafficLog{}).Where("user_id = ?", userID)
-	if !user.TrafficCycleStart.IsZero() {
-		q = q.Where("period_start >= ?", user.TrafficCycleStart)
-	}
-	var row struct {
-		Up   int64
-		Down int64
-	}
-	err = q.Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").Scan(&row).Error
-	if err != nil {
-		return 0, 0, err
-	}
-	return row.Up, row.Down, nil
-}
-
 // UserBilled 用户当前计费周期内已按倍率折算的用量（字节，计费口径）。
-// 与 UserUsed 同周期口径，读 billed 两列（落库时按生效入站倍率折算）：
-// 套餐配额判定（订阅 403 门）与用户侧用量展示（Subscription-Userinfo / 用户主页）消费，
-// 与节点摘除/续费触发的判定口径严格一致。
+// 从 user.traffic_cycle_start 开始计算；若为零值（旧数据）则回溯全部。
+// 读 billed 两列（落库时按生效入站倍率折算）：全部「已用/剩余额度」展示
+// （管理端用户列表 / 用户主页 / Subscription-Userinfo）与配额判定
+// （订阅 403 门 / 节点摘除 / 自动续费触发）唯一口径；
+// 真实流量统计走 dashboard/入站计数的 SQL 聚合（原始口径），不经过本方法。
 func (s *TrafficService) UserBilled(userID uint64) (up, down int64, err error) {
 	var user models.User
 	if err := s.DB.First(&user, userID).Error; err != nil {

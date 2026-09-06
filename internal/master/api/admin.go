@@ -47,7 +47,10 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
-		up, down, _ := d.Traffic.UserUsed(u.ID)
+		// 额度口径（2026-09-07）：读 billed 两列，与管理端本页展示的「已用/剩余/进度条」
+		// 和用户侧主页、Subscription-Userinfo、节点摘除/403 判定严格同源——倍率只作用于
+		// 套餐内用量扣减，不代表真实流量；真实流量统计在 dashboard/入站计数（原始口径）。
+		up, down, _ := d.Traffic.UserBilled(u.ID)
 		used := up + down
 		// 快照化（2026-09-01）：total/生效组/生效设备限制读用户行快照列（用户自定义优先），
 		// 不再实时 join plans——与生成/订阅/用户侧同口径。

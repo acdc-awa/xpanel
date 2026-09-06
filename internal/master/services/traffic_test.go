@@ -507,13 +507,16 @@ func TestSaveBillingRatioAppliesInboundRatio(t *testing.T) {
 		t.Fatalf("inbA.up/down = %d/%d, want 原始 2398/800（每用户条目各补计一次×2 投 + 入站维度）", inbAAfter.Up, inbAAfter.Down)
 	}
 
-	// 展示口径 UserUsed vs 计费口径 UserBilled
-	rawUp, rawDown, err := svc.UserUsed(uMixed.ID)
-	if err != nil {
+	// 原始口径恒不变（直接 SQL 聚合 up/down 两列验证）vs 计费口径 UserBilled
+	var rawRow struct {
+		Up, Down int64
+	}
+	if err := db.Model(&models.TrafficLog{}).Where("user_id = ?", uMixed.ID).
+		Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").Scan(&rawRow).Error; err != nil {
 		t.Fatal(err)
 	}
-	if rawUp != 200+500 || rawDown != 400 {
-		t.Fatalf("UserUsed = %d/%d, want 700/400（原始口径含免费入站）", rawUp, rawDown)
+	if rawRow.Up != 200+500 || rawRow.Down != 400 {
+		t.Fatalf("原始口径 = %d/%d, want 700/400（含免费入站，不乘倍率）", rawRow.Up, rawRow.Down)
 	}
 	billUp, billDown, err := svc.UserBilled(uMixed.ID)
 	if err != nil {

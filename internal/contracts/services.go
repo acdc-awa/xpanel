@@ -76,10 +76,10 @@ type TrafficService interface {
 	Save(tr protocol.TrafficReportPayload, serverID uint64) (reportedUserIDs []uint64, err error)
 	// FindViolators 判定给定用户中已违规的（过期或流量超额），口径与 filterValidUsers 快照语义一致。
 	FindViolators(userIDs []uint64) ([]uint64, error)
-	// UserUsed 已用总流量（原始口径）：管理端展示/dashboard 消费。
-	UserUsed(userID uint64) (up, down int64, err error)
 	// UserBilled 已用流量（计费口径，原始字节 × 落库时入站倍率）：
-	// 套餐配额判定与用户侧用量展示消费，与节点摘除/续费触发口径一致。
+	// 全部「已用/剩余额度」展示（管理端用户列表 + 用户侧主页 + Subscription-Userinfo）
+	// 与配额判定（节点摘除/403 门/自动续费触发）唯一口径；真实流量统计走
+	// dashboard/入站计数的 SQL 聚合（原始口径），不经过本方法。
 	UserBilled(userID uint64) (up, down int64, err error)
 }
 
