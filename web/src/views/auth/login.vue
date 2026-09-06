@@ -30,7 +30,7 @@ async function onSubmit() {
     return
   }
   if (site.captchaEnable && !form.turnstile_token) {
-    ElMessage.warning('请完成人机验证')
+    ElMessage.warning('请先完成人机验证')
     return
   }
   loading.value = true
@@ -91,7 +91,7 @@ function gotoHome() {
       </div>
 
       <el-form label-position="top" size="large" @submit.prevent="onSubmit">
-        <el-form-item label="邮箱（用户名）">
+        <el-form-item label="邮箱">
           <el-input v-model="form.username" placeholder="you@example.com" :prefix-icon="User" autofocus />
         </el-form-item>
         <el-form-item label="密码">
@@ -116,7 +116,7 @@ function gotoHome() {
           :loading="loading"
           native-type="submit"
         >
-          登 录
+          登录
         </el-button>
       </el-form>
 
@@ -140,7 +140,7 @@ function gotoHome() {
       append-to-body
     >
       <p style="font-size: 13px; color: var(--x-text-2); margin-bottom: 14px">
-        该账号已开启两步验证，请输入 Google Authenticator 动态验证码或恢复码
+        该账号已开启两步验证，请输入验证器动态码或恢复码
       </p>
       <el-input
         v-model="twofaCode"
@@ -153,7 +153,7 @@ function gotoHome() {
       />
       <template #footer>
         <el-button type="primary" style="width: 100%" :loading="twofaLoading" @click="confirm2fa">
-          验 证
+          验证
         </el-button>
       </template>
     </el-dialog>

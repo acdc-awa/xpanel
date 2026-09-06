@@ -18,7 +18,7 @@ BACKUP="${1:?用法: bash restore_drill.sh <backup.db> [--sanity]}"
 SANITY=0
 [[ "${2:-}" == "--sanity" ]] && SANITY=1
 
-[[ -f "$BACKUP" ]] || { echo "备份文件不存在: $BACKUP"; exit 1; }
+[[ -f "$BACKUP" ]] || { echo "错误：备份文件不存在 $BACKUP"; exit 1; }
 command -v sqlite3 >/dev/null 2>&1 || { echo "缺少 sqlite3 命令行工具（恢复演练依赖）"; exit 1; }
 
 TMP_DIR=$(mktemp -d)
@@ -30,7 +30,7 @@ cp "$BACKUP" "$RESTORED"
 
 echo "==> 2/3 完整性校验（integrity_check + foreign_key_check）"
 RES=$(sqlite3 "$RESTORED" 'PRAGMA integrity_check;')
-[[ "$RES" == "ok" ]] || { echo "integrity_check 失败: $RES"; exit 1; }
+[[ "$RES" == "ok" ]] || { echo "错误：integrity_check 失败（$RES）"; exit 1; }
 FK=$(sqlite3 "$RESTORED" 'PRAGMA foreign_key_check;')
 [[ -z "$FK" ]] || { echo "外键损坏: $FK"; exit 1; }
 echo "    integrity_check=ok, foreign_key_check 无异常"

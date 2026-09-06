@@ -132,7 +132,7 @@ func TestDemoteKeepsManualRelay(t *testing.T) {
 func TestCertNotAfter(t *testing.T) {
 	// 用 agent certs 测试同款自签证书逻辑不便引入；这里校验 tlscert.NotAfter 对坏输入报错
 	if _, err := tlscert.NotAfter("not-a-pem"); err == nil {
-		t.Error("非法 PEM 应报错")
+		t.Error("无效的 PEM 应报错")
 	}
 }
 

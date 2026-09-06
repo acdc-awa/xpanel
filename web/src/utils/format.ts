@@ -1,5 +1,5 @@
 export function formatMoney(n: number): string {
-  return `¥ ${n.toFixed(2)}`
+  return `¥${n.toFixed(2)}`
 }
 
 export function formatTraffic(gb: number): string {

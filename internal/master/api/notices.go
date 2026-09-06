@@ -149,8 +149,7 @@ func (d *Deps) AdminToggleNotice(c *gin.Context) {
 		Field string `json:"field" binding:"required"` // status, is_pinned, is_popup
 		Value any    `json:"value"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 

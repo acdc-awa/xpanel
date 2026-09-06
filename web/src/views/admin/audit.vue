@@ -89,7 +89,7 @@ function fmtTime(t: string) {
       <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <el-select v-model="category" placeholder="全部分类" clearable style="width: 130px" @change="onFilterChange">
           <el-option label="全部分类" value="" />
-          <el-option label="节点管理" value="servers" />
+          <el-option label="服务器管理" value="servers" />
           <el-option label="用户管理" value="users" />
           <el-option label="财务套餐" value="billing" />
           <el-option label="入站证书" value="inbounds" />
@@ -224,7 +224,7 @@ function fmtTime(t: string) {
         </el-tab-pane>
       </el-tabs>
       <template #footer>
-        <el-button @click="detailModalOpen = false">关 闭</el-button>
+        <el-button @click="detailModalOpen = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>

@@ -141,8 +141,7 @@ func (d *Deps) AdminGetAccessPoints(c *gin.Context) {
 // AdminCreateAccessPoint POST /api/v1/admin/access-points —— 创建用户接入点
 func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 	var req accessPointForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -193,7 +192,7 @@ func (d *Deps) AdminCreateAccessPoint(c *gin.Context) {
 func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法接入点 ID")
+		util.BadRequest(c, "无效的接入点 ID")
 		return
 	}
 	var ap models.UserAccessPoint
@@ -203,8 +202,7 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 	}
 
 	var req accessPointForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID) {
@@ -253,7 +251,7 @@ func (d *Deps) AdminUpdateAccessPoint(c *gin.Context) {
 func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法接入点 ID")
+		util.BadRequest(c, "无效的接入点 ID")
 		return
 	}
 	var ap models.UserAccessPoint
@@ -266,8 +264,7 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 		TargetType      string  `json:"target_type"` // "inbound" | ""
 		TargetInboundID *uint64 `json:"target_inbound_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if !d.validateAccessPointTarget(c, req.TargetType, req.TargetInboundID) {
@@ -297,7 +294,7 @@ func (d *Deps) AdminSetAccessPointTarget(c *gin.Context) {
 func (d *Deps) AdminDeleteAccessPoint(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法接入点 ID")
+		util.BadRequest(c, "无效的接入点 ID")
 		return
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {

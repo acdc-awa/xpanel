@@ -87,8 +87,7 @@ func (d *Deps) UserChangePassword(c *gin.Context) {
 		OldPassword string `json:"old_password" binding:"required"`
 		NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if err := d.Auth.ChangePassword(c.Request.Context(), uid, req.OldPassword, req.NewPassword); err != nil {
@@ -107,8 +106,7 @@ func (d *Deps) UserAutoRenew(c *gin.Context) {
 		AutoRenewExpire  *bool `json:"auto_renew_expire"`
 		AutoRenewExhaust *bool `json:"auto_renew_exhaust"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	updates := map[string]any{}
@@ -119,11 +117,11 @@ func (d *Deps) UserAutoRenew(c *gin.Context) {
 		updates["auto_renew_exhaust"] = *req.AutoRenewExhaust
 	}
 	if len(updates) == 0 {
-		util.BadRequest(c, "未提供任何开关")
+		util.BadRequest(c, "未提供任何自动续费开关")
 		return
 	}
 	if err := d.DB.Model(&models.User{}).Where("id = ?", uid).Updates(updates).Error; err != nil {
-		util.ServerError(c, "更新失败")
+		util.ServerError(c, "自动续费设置更新失败")
 		return
 	}
 	d.Audit.Log("user", uid, "user.auto_renew",

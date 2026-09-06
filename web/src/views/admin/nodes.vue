@@ -363,7 +363,7 @@ async function save() {
     if (editing.value) {
       const { data } = await updateInbound(editing.value.id, payload)
       if (data.code === 0) {
-        ElMessage.success('已保存')
+        ElMessage.success('入站已保存')
         editorOpen.value = false
         load()
       } else {
@@ -372,7 +372,7 @@ async function save() {
     } else {
       const { data } = await createInbound(payload)
       if (data.code === 0) {
-        ElMessage.success('已创建')
+        ElMessage.success('入站已创建')
         editorOpen.value = false
         load()
       } else {
@@ -461,18 +461,18 @@ function quotaOf(row: any): string {
       type="info"
       :closable="false"
       show-icon
-      title="在此为 Xray 服务器配置物理入站：用户入站承载用户真实流量，转发入站作为内部链式落地节点。新增/编辑/停用后自动生成配置推送到节点（离线保存，上线补推）。"
+      title="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，转发入站作为内部链式落地服务器。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
       style="margin-bottom: 14px"
     />
 
-    <BaseCard title="服务器物理入站列表">
+    <BaseCard title="入站列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
 
       <div v-else-if="filteredInbounds.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><Connection /></el-icon>
-        <p style="margin-top: 8px">{{ list.length === 0 ? '尚未为任何服务器添加物理入站。点击右上角「新增入站」开始配置。' : '未找到匹配当前筛选的入站' }}</p>
+        <p style="margin-top: 8px">{{ list.length === 0 ? '尚未为任何服务器添加入站。点击右上角「新增入站」开始配置。' : '未找到匹配当前筛选的入站' }}</p>
       </div>
 
       <!-- 全局统一物理入站卡片网格流 (自适应 1~4 列) -->
@@ -530,10 +530,10 @@ function quotaOf(row: any): string {
       </el-tab-pane>
 
       <!-- Tab 2: 用户接入点 (Access Points) -->
-      <el-tab-pane label="用户接入点 (Access Points)" name="access_points">
+      <el-tab-pane label="接入点" name="access_points">
         <div class="x-toolbar">
           <div class="x-toolbar-left">
-            <span class="muted" style="font-size: 13.5px">面向订阅分发的用户接入点定义</span>
+            <span class="muted" style="font-size: 13.5px">面向订阅分发的接入点定义</span>
             <el-button @click="loadAccessPoints"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
           </div>
           <div style="display: flex; gap: 10px">
@@ -545,18 +545,18 @@ function quotaOf(row: any): string {
           type="info"
           :closable="false"
           show-icon
-          title="用户接入点是用户订阅中实际看到的“节点”，通过白名单权限组控制哪些用户组可见。接入点可直接绑定物理入站，亦可在拓扑中参与链式转发中转。"
+          title="接入点是用户订阅中实际看到的“节点”，通过白名单权限组控制哪些权限组可见。接入点可直接绑定入站，亦可在拓扑中参与链式转发中转。"
           style="margin-bottom: 14px"
         />
 
-        <BaseCard title="用户接入点分发列表">
+        <BaseCard title="接入点分发列表">
           <div v-if="apLoading" style="padding: 48px 0; text-align: center">
             <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
           </div>
 
           <div v-else-if="apList.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
             <el-icon style="font-size: 32px; color: var(--x-text-3)"><Promotion /></el-icon>
-            <p style="margin-top: 8px">尚未创建任何用户接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。</p>
+            <p style="margin-top: 8px">尚未创建任何接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。</p>
           </div>
 
           <!-- 全局统一用户接入点卡片网格流 (自适应 1~4 列) -->
@@ -621,7 +621,7 @@ function quotaOf(row: any): string {
         <!-- 新建/编辑用户接入点 -->
         <el-dialog
           v-model="apDialogOpen"
-          :title="apEditingId ? '编辑用户接入点 (Access Point)' : '新建用户接入点 (Access Point)'"
+          :title="apEditingId ? '编辑接入点' : '新建接入点'"
           width="580px"
           append-to-body
         >
@@ -635,7 +635,7 @@ function quotaOf(row: any): string {
               </el-form-item>
             </div>
 
-            <el-form-item label="开放权限组（显式白名单，勾选可见的用户组）">
+            <el-form-item label="开放权限组（显式白名单，勾选可见的权限组）">
               <el-select
                 v-model="apForm.permission_group_ids"
                 multiple
@@ -673,7 +673,7 @@ function quotaOf(row: any): string {
 
             <div style="background: var(--x-card-soft); border: 1px solid var(--x-border); border-radius: 8px; padding: 12px; margin-bottom: 16px">
               <div style="font-size: 12px; font-weight: 600; color: var(--x-text-3); margin-bottom: 8px">
-                订阅地址覆写（选填；留空沿管道继承：直连→入站分享地址 / 接入层端点）
+                订阅地址覆写（选填；留空沿链路继承：直连→入站分享地址 / 接入层端点）
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
                 <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
@@ -709,7 +709,7 @@ function quotaOf(row: any): string {
     <!-- 新增/编辑入站 -->
     <el-dialog
       v-model="editorOpen"
-      :title="editing ? `编辑入站 · ${editing.tag}` : '新增节点入站'"
+      :title="editing ? `编辑入站 · ${editing.tag}` : '新建入站'"
       width="640px"
       :append-to-body="true"
       @closed="editing = null"

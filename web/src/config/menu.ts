@@ -41,11 +41,11 @@ export const adminMenuGroups: MenuGroup[] = [
     icon: Odometer,
   },
   {
-    title: '节点管理',
+    title: '服务器与接入点',
     icon: Connection,
     children: [
       { title: '服务器管理', path: '/admin/servers', icon: Monitor },
-      { title: '节点接入点', path: '/admin/nodes', icon: Share },
+      { title: '接入点', path: '/admin/nodes', icon: Share },
       { title: '权限组管理', path: '/admin/permission-groups', icon: UserFilled },
       { title: '路由管理', path: '/admin/routing', icon: Connection },
       { title: '证书管理', path: '/admin/certs', icon: Lock },

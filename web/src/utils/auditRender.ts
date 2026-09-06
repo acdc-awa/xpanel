@@ -337,7 +337,7 @@ const usersDict: Dict = {
 
 function renderUsers(ctx: Ctx) {
   const a = ctx.action
-  if (a.endsWith('.toggle')) ctx.view.summary = buildSummary(ctx, '切换用户启停状态', nameOf(ctx))
+  if (a.endsWith('.toggle')) ctx.view.summary = buildSummary(ctx, '封禁/解封用户', nameOf(ctx))
   else if (a.endsWith('.2fa.disable')) ctx.view.summary = buildSummary(ctx, '关闭用户两步验证', nameOf(ctx))
   else if (a.endsWith('.reset-traffic')) ctx.view.summary = buildSummary(ctx, '重置用户流量', nameOf(ctx))
   else if (a.endsWith('.balance')) {
@@ -358,11 +358,11 @@ function renderUsers(ctx: Ctx) {
 }
 
 const COMMAND_LABELS: Record<string, string> = {
-  push_config: '推送节点配置',
+  push_config: '推送服务器配置',
   restart_xray: '重启 Xray',
   upgrade_agent: '升级 Agent',
-  get_status: '查询节点状态',
-  get_logs: '查看节点日志',
+  get_status: '查询服务器状态',
+  get_logs: '查看服务器日志',
 }
 
 const serversDict: Dict = {
@@ -391,30 +391,30 @@ function renderServers(ctx: Ctx) {
   const a = ctx.action
   if (a.endsWith('.command')) {
     const type = String(ctx.body['type'] ?? '')
-    ctx.view.summary = buildSummary(ctx, `节点指令：${(COMMAND_LABELS[type] ?? type) || '未知'}`, nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, `服务器指令：${(COMMAND_LABELS[type] ?? type) || '未知'}`, nameOf(ctx))
     return
   }
   if (a.endsWith('.reset-secret')) {
-    ctx.view.summary = buildSummary(ctx, '重置节点密钥')
+    ctx.view.summary = buildSummary(ctx, '重置服务器密钥')
     return
   }
   if (a.endsWith('.generate-config')) {
-    ctx.view.summary = buildSummary(ctx, '重新生成节点配置')
+    ctx.view.summary = buildSummary(ctx, '重新生成服务器配置')
     return
   }
   const del = ctx.method === 'DELETE'
   if (a.includes('.outbounds')) {
-    ctx.view.summary = buildSummary(ctx, (del ? '删除' : '配置') + '节点出站')
+    ctx.view.summary = buildSummary(ctx, (del ? '删除' : '配置') + '服务器出站')
   } else if (a.includes('.routing')) {
-    ctx.view.summary = buildSummary(ctx, (del ? '删除' : '配置') + '节点分流规则')
+    ctx.view.summary = buildSummary(ctx, (del ? '删除' : '配置') + '服务器路由规则')
   } else if (a.includes('.layers')) {
     ctx.view.summary = buildSummary(ctx, (del ? '删除' : '配置') + '分层规则')
   } else if (del) {
-    ctx.view.summary = buildSummary(ctx, '删除节点', nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, '删除服务器', nameOf(ctx))
   } else if (ctx.method === 'POST') {
-    ctx.view.summary = buildSummary(ctx, '创建节点', nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, '创建服务器', nameOf(ctx))
   } else {
-    ctx.view.summary = buildSummary(ctx, '修改节点', nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, '修改服务器', nameOf(ctx))
   }
   if (del) return
   if (a.includes('.routing')) {
@@ -431,7 +431,7 @@ const inboundsDict: Dict = {
   protocol: { label: '协议', fmt: enumLabel },
   port: { label: '端口' },
   listen: { label: '监听', mono: true },
-  server_id: { label: '节点', fmt: hashRef },
+  server_id: { label: '服务器', fmt: hashRef },
   network: { label: '传输', path: 'stream_settings.network', fmt: enumLabel },
   security: { label: '安全', path: 'stream_settings.security', fmt: enumLabel },
   fingerprint: { label: '指纹', path: 'stream_settings.fingerprint' },
@@ -442,11 +442,11 @@ const inboundsDict: Dict = {
 function renderInbounds(ctx: Ctx) {
   const a = ctx.action
   if (a.endsWith('.toggle')) {
-    ctx.view.summary = buildSummary(ctx, '启停入站端口', nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, '启停入站', nameOf(ctx))
     return
   }
   if (a.endsWith('.setup-internal') || a.endsWith('.rotate-internal')) {
-    ctx.view.summary = buildSummary(ctx, '轮转内部中继账户', nameOf(ctx))
+    ctx.view.summary = buildSummary(ctx, '轮换内部中继账户', nameOf(ctx))
     return
   }
   const del = ctx.method === 'DELETE'
@@ -578,7 +578,7 @@ function renderSettings(ctx: Ctx) {
   const groups: Array<[string, string, Dict]> = [
     ['site', '站点', siteDict],
     ['captcha', '人机验证', captchaDict],
-    ['agent', '节点上报', agentDict],
+    ['agent', '服务器上报', agentDict],
   ]
   const present = groups.filter(([g]) => isObj(ctx.body[g]))
   const names = present.map(([, label]) => label).join(' / ')
@@ -728,32 +728,32 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
 
   // 1. 节点管理
   if (act.startsWith('servers')) {
-    let title = '节点管理'
+    let title = '服务器管理'
     if (act === 'servers') {
-      title = '创建节点'
+      title = '创建服务器'
     } else if (act.endsWith('.command')) {
-      if (d.includes('push_config')) title = '推送节点配置'
-      else if (d.includes('restart_xray')) title = '重启节点 Xray'
-      else if (d.includes('upgrade_agent')) title = '升级节点 Agent'
-      else if (d.includes('get_status')) title = '查询节点状态'
-      else if (d.includes('get_logs')) title = '查看节点日志'
-      else title = '执行节点指令'
+      if (d.includes('push_config')) title = '推送服务器配置'
+      else if (d.includes('restart_xray')) title = '重启 Xray'
+      else if (d.includes('upgrade_agent')) title = '升级 Agent'
+      else if (d.includes('get_status')) title = '查询服务器状态'
+      else if (d.includes('get_logs')) title = '查看服务器日志'
+      else title = '执行服务器指令'
     } else if (act.endsWith('.reset-secret')) {
-      title = '重置节点密钥'
+      title = '重置服务器密钥'
     } else if (act.endsWith('.generate-config')) {
-      title = '重新生成节点配置'
+      title = '重新生成服务器配置'
     } else if (act.includes('.outbounds')) {
-      title = isDel ? '删除节点出站' : '配置节点出站'
+      title = isDel ? '删除服务器出站' : '配置服务器出站'
     } else if (act.includes('.routing')) {
-      title = isDel ? '删除节点分流' : '配置节点分流'
+      title = isDel ? '删除服务器路由' : '配置服务器路由'
     } else if (act.includes('.layers')) {
       title = isDel ? '删除分层规则' : '配置分层规则'
     } else if (isDel) {
-      title = '删除节点'
+      title = '删除服务器'
     } else {
-      title = '修改节点信息'
+      title = '修改服务器信息'
     }
-    return { categoryName: '节点', categoryColor: 'primary', title }
+    return { categoryName: '服务器', categoryColor: 'primary', title }
   }
 
   // 2. 用户管理
@@ -764,7 +764,7 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     } else if (act.endsWith('.toggle')) {
       title = '启停用户账号'
     } else if (act.endsWith('.2fa.disable')) {
-      title = '关闭双重验证(2FA)'
+      title = '关闭两步验证'
     } else if (act.endsWith('.reset-traffic')) {
       title = '重置用户流量'
     } else if (act.endsWith('.balance')) {
@@ -800,19 +800,19 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
   if (act.startsWith('inbounds') || act.startsWith('certs') || act.startsWith('access-points') || act.startsWith('permission-groups')) {
     let title = '入站证书'
     if (act.startsWith('inbounds')) {
-      if (act.endsWith('.toggle')) title = '启停入站端口'
-      else if (act.includes('setup-internal') || act.includes('rotate-internal')) title = '轮转内部中继账户'
-      else if (isDel) title = '删除入站端口'
-      else title = act === 'inbounds' ? '新建入站端口' : '修改入站端口'
+      if (act.endsWith('.toggle')) title = '启停入站'
+      else if (act.includes('setup-internal') || act.includes('rotate-internal')) title = '轮换内部中继账户'
+      else if (isDel) title = '删除入站'
+      else title = act === 'inbounds' ? '新建入站' : '修改入站'
     } else if (act.startsWith('certs')) {
       if (act.includes('self-signed')) title = '签发自签名证书'
-      else title = isDel ? '删除 TLS 证书' : '上传/配置 TLS 证书'
+      else title = isDel ? '删除证书' : method === 'POST' ? '上传证书' : '更新证书'
     } else if (act.startsWith('access-points')) {
       title = isDel ? '删除接入点' : '配置自定义接入点'
     } else if (act.startsWith('permission-groups')) {
-      title = isDel ? '删除权限组' : '配置用户权限组'
+      title = isDel ? '删除权限组' : '配置权限组'
     }
-    return { categoryName: '协议证书', categoryColor: 'info', title }
+    return { categoryName: '入站证书', categoryColor: 'info', title }
   }
 
   // 5. 系统设置与运维
@@ -823,7 +823,7 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
       if (act.endsWith('.toggle')) title = '切换公告状态'
       else title = isDel ? '删除系统公告' : '发布/编辑系统公告'
     } else if (act.startsWith('backup')) title = '创建系统数据备份'
-    else if (act.startsWith('topology')) title = '保存拓扑结构布局'
+    else if (act.startsWith('topology')) title = '保存拓扑布局'
     else if (act.startsWith('update')) title = '面板自更新'
     return { categoryName: '系统', categoryColor: 'danger', title }
   }

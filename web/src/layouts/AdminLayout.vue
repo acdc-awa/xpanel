@@ -216,7 +216,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="sidebar-toggle-btn"
-          :title="isCollapsed ? '固定侧边栏 (Ctrl+B)' : '折叠侧边栏 (靠近可自动展开) (Ctrl+B)'"
+          :title="isCollapsed ? '固定侧边栏 (Ctrl+B)' : '折叠侧边栏，靠近可自动展开 (Ctrl+B)'"
           @click.stop="toggleCollapse"
         >
           <svg
@@ -405,7 +405,7 @@ onUnmounted(() => {
             title="切换至用户端视图"
             @click="router.push('/dashboard')"
           >
-            <el-icon :size="14"><User /></el-icon><span class="switch-view-text">&nbsp;用户端视图</span>
+            <el-icon :size="14"><User /></el-icon><span class="switch-view-text">&nbsp;切换至用户端视图</span>
           </el-button>
 
           <!-- 用户头像下拉菜单（统一组件） -->

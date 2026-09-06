@@ -341,14 +341,14 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 func printAdminInitCard(username, password string, isRandom bool) {
 	fmt.Println()
 	fmt.Println("==========================================================================")
-	fmt.Println("                   XrayPanel 主控系统首次初始化成功！                     ")
+	fmt.Println("                   XrayPanel 主控系统首次初始化成功                     ")
 	fmt.Println("==========================================================================")
 	fmt.Printf("   管理后台:       http://127.0.0.1:18080 (或您的反代域名)\n")
 	fmt.Printf("   管理员账号:     %s\n", username)
 	fmt.Printf("   初始管理员密码: %s\n", password)
 	fmt.Println("--------------------------------------------------------------------------")
 	if isRandom {
-		fmt.Println("   [安全提示] 初始随机密码仅在控制台显示一次，请妥善保存！")
+		fmt.Println("   [安全提示] 初始随机密码仅在控制台显示一次，请妥善保存")
 	}
 	fmt.Println("   [安全提示] 首次登录后系统将强制要求修改密码。")
 	fmt.Println("==========================================================================")

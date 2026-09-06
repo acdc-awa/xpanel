@@ -72,7 +72,7 @@ async function resetSecret() {
   if (!props.server) return
   try {
     await ElMessageBox.confirm(
-      `确认重置节点「${props.server.name}」的密钥？旧密钥立即失效，需在节点 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
+      `确认重置服务器「${props.server.name}」的密钥？旧密钥立即失效，需在服务器 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
       '重置密钥',
       { type: 'warning' },
     )
@@ -197,11 +197,11 @@ watch(
       <el-tab-pane label="基本信息" name="overview">
         <template v-if="server">
           <div class="desc-grid">
-            <div class="desc-row"><span class="k">节点名称</span><span class="v">{{ server.name }}</span></div>
+            <div class="desc-row"><span class="k">服务器名称</span><span class="v">{{ server.name }}</span></div>
             <div class="desc-row">
               <span class="k">服务器类型</span>
               <span class="v">
-                <span class="x-chip blue">Xray 托管计算节点</span>
+                <span class="x-chip blue">Xray 服务器</span>
               </span>
             </div>
             <div class="desc-row"><span class="k">主机地址</span><span class="v"><code class="cell-mono">{{ server.host }}</code></span></div>
@@ -251,7 +251,7 @@ watch(
               <span class="v">
                 <template v-if="inboundsLoading">…</template>
                 <template v-else>{{ inbounds.length }} 个入站</template>
-                <el-button size="small" text type="primary" @click="goInbounds">去管理</el-button>
+                <el-button size="small" text type="primary" @click="goInbounds">管理入站</el-button>
               </span>
             </div>
           </div>
@@ -279,13 +279,13 @@ watch(
             </el-button>
           </div>
         </template>
-        <el-empty v-else description="未选择节点" />
+        <el-empty v-else description="未选择服务器" />
       </el-tab-pane>
 
       <!-- 在线用户（连接级实时快照）：lazy 避免抽屉首开即打一次 online-ips -->
       <el-tab-pane label="在线用户" name="online" lazy>
         <OnlineUsersPanel v-if="server" ref="onlinePanelRef" :server-id="server.id" />
-        <el-empty v-else description="未选择节点" />
+        <el-empty v-else description="未选择服务器" />
       </el-tab-pane>
 
       <!-- 配置预览 -->
@@ -304,7 +304,7 @@ watch(
           </el-button>
         </div>
         <p class="muted tip" style="margin: 0 0 10px; font-size: 12.5px">
-          此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送节点）。展示内容已对用户 UUID 脱敏，复制时保留原文。
+          此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送至服务器）。展示内容已对用户 UUID 脱敏，复制时保留原文。
         </p>
         <pre v-loading="cfgLoading" class="cfg-view">{{ maskUUIDs(cfgText) || '正在计算并加载配置预览…' }}</pre>
       </el-tab-pane>

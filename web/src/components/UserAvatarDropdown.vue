@@ -12,7 +12,7 @@ const router = useRouter()
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('确定退出当前登录账号？', '提示', {
+    await ElMessageBox.confirm('确定退出登录？', '退出登录', {
       confirmButtonText: '退出登录',
       cancelButtonText: '取消',
       type: 'warning',
@@ -42,7 +42,7 @@ async function handleLogout() {
         </div>
 
         <el-dropdown-item divided @click="router.push('/account')">
-          <el-icon><User /></el-icon>账户与安全中心
+          <el-icon><User /></el-icon>我的账户
         </el-dropdown-item>
 
         <el-dropdown-item
@@ -56,7 +56,7 @@ async function handleLogout() {
           v-if="props.currentPortal === 'admin'"
           @click="router.push('/dashboard')"
         >
-          <el-icon><User /></el-icon>返回用户端
+          <el-icon><User /></el-icon>返回用户中心
         </el-dropdown-item>
 
         <el-dropdown-item divided @click="handleLogout">

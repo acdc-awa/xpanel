@@ -16,8 +16,7 @@ import (
 // Register POST /api/v1/auth/register
 func (d *Deps) Register(c *gin.Context) {
 	var req contracts.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	// 人机验证（方向②：captcha_enable 开启时校验）
@@ -49,8 +48,7 @@ func (d *Deps) Login(c *gin.Context) {
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	// 人机验证（方向②：登录也校验）
@@ -88,8 +86,7 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 	var req struct {
 		Code string `json:"code" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	var user models.User
@@ -154,8 +151,7 @@ func (d *Deps) ForgotPassword(c *gin.Context) {
 		Email          string `json:"email" binding:"required,email"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "forgot"); err != nil {
@@ -178,8 +174,7 @@ func (d *Deps) ResetPassword(c *gin.Context) {
 		Password       string `json:"password" binding:"required,min=8,max=72"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if err := services.VerifyCaptcha(d.DB, req.TurnstileToken, util.ClientIPFromContext(c), c.Request.Host, "reset"); err != nil {

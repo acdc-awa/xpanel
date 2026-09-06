@@ -132,7 +132,7 @@ func (d *Deps) AdminUpdateCheck(c *gin.Context) {
 // 进度经 GET /admin/update/status 轮询。已有更新在执行时幂等返回当前进度（不报错，防手抖多击）。
 func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	if d.Cfg == nil || !d.Cfg.Update.Enabled {
-		util.BadRequest(c, "面板内更新已禁用（config update.enabled=false）")
+		util.BadRequest(c, "面板内更新已在配置文件中禁用")
 		return
 	}
 	if !updateActive.CompareAndSwap(false, true) {
@@ -146,7 +146,7 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	masterPath := filepath.Join(appRoot, "master")
 	if _, err := os.Stat(masterPath); err != nil {
 		updateActive.Store(false)
-		util.BadRequest(c, "未检测到容器挂载形态（/app/master 不存在），面板内更新仅在 compose 部署下可用")
+		util.BadRequest(c, "面板内更新仅在 compose 容器部署下可用（未检测到挂载形态）")
 		return
 	}
 
@@ -529,7 +529,7 @@ func extractTarGz(tarball, dest string) error {
 			continue
 		}
 		if strings.Contains(name, "..") {
-			return fmt.Errorf("非法路径 %q", hdr.Name)
+			return fmt.Errorf("无效的路径 %q", hdr.Name)
 		}
 		target := filepath.Join(dest, name)
 		switch hdr.Typeflag {

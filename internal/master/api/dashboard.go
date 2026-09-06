@@ -317,11 +317,11 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	}
 
 	type userTrafficRow struct {
-		UserID   uint64
-		Username string
-		Email    string
-		PlanID   uint64
-		UpBytes  int64
+		UserID    uint64
+		Username  string
+		Email     string
+		PlanID    uint64
+		UpBytes   int64
 		DownBytes int64
 	}
 	var trafficRows []userTrafficRow
@@ -390,7 +390,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	for _, ord := range recentOrders {
 		pName := planMap[ord.PlanID]
 		if pName == "" {
-			pName = fmt.Sprintf("套餐#%d", ord.PlanID)
+			pName = fmt.Sprintf("套餐 #%d", ord.PlanID)
 		}
 		data.RecentOrders = append(data.RecentOrders, RecentOrderItem{
 			ID:            ord.ID,

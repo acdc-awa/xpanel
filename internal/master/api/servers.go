@@ -116,8 +116,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		RoutingDomainStrategy string `json:"routing_domain_strategy"`
 		DefaultOutboundDS     string `json:"default_outbound_domain_strategy"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if req.DefaultOutboundTag == "" {
@@ -194,7 +193,7 @@ func installCmd(publicURL, wsPublicURL, reqHost, nodeID, secret string) string {
 func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server
@@ -212,8 +211,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		RoutingDomainStrategy *string `json:"routing_domain_strategy"`
 		DefaultOutboundDS     *string `json:"default_outbound_domain_strategy"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	updates := map[string]any{}
@@ -229,7 +227,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.Host != nil {
 		if *req.Host == "" {
-			util.BadRequest(c, "地址不能为空")
+			util.BadRequest(c, "服务器地址不能为空")
 			return
 		}
 		updates["host"] = *req.Host
@@ -263,7 +261,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 func (d *Deps) AdminResetSecret(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server
@@ -295,7 +293,7 @@ func (d *Deps) AdminResetSecret(c *gin.Context) {
 func (d *Deps) AdminDeleteServer(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	// U4：检查其他服务器出站是否引用本服务器入站（落地链路）——删除会使引用方配置生成死锁
@@ -363,7 +361,7 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 func (d *Deps) AdminServerCommand(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var req struct {
@@ -373,8 +371,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		Target     string `json:"target"`
 		Force      bool   `json:"force"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -406,7 +403,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 			if !req.Force && srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
 				util.OK(c, gin.H{
 					"ok":   true,
-					"data": fmt.Sprintf("节点当前已是最新版本 %s（目标 %s），无需升级", srv.AgentVersion, target),
+					"data": fmt.Sprintf("服务器当前已是最新版本 %s（目标 %s），无需升级", srv.AgentVersion, target),
 				})
 				return
 			}
@@ -415,7 +412,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
 				Phase:   "starting",
 				Target:  target,
-				Message: "正在向节点下发自升级指令...",
+				Message: "正在向服务器下发自升级指令…",
 				TS:      time.Now().Unix(),
 			})
 		}
@@ -471,7 +468,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 func (d *Deps) AdminGetServerUpgradeStatus(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	if d.Hub == nil {
@@ -487,7 +484,7 @@ func (d *Deps) AdminGetServerUpgradeStatus(c *gin.Context) {
 func (d *Deps) AdminGetServerConfigPreview(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server
@@ -515,7 +512,7 @@ func (d *Deps) AdminGetServerConfigPreview(c *gin.Context) {
 func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server
@@ -546,7 +543,7 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 			"ok":      true,
 			"pushed":  false,
 			"queued":  true,
-			"message": "节点离线，配置已保存，节点上线后自动推送",
+			"message": "服务器离线，配置已保存，上线后自动推送",
 			"config":  cfgStr,
 		})
 		return
@@ -559,7 +556,7 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 		"ok":      true,
 		"pushed":  false,
 		"queued":  true,
-		"message": "配置已保存，正在后台推送到节点",
+		"message": "配置已保存，正在推送到服务器",
 		"config":  cfgStr,
 	})
 }
@@ -568,7 +565,7 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server
@@ -749,7 +746,7 @@ type onlineIPEntry struct {
 func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var srv models.Server

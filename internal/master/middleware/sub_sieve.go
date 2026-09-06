@@ -48,7 +48,7 @@ func SubSieveMiddleware(db *gorm.DB) gin.HandlerFunc {
 
 		// 1. 若开启智能清洗：空 UA 立即拒绝
 		if cleanUA && ua == "" {
-			util.Fail(c, http.StatusForbidden, "Access Denied: Empty User-Agent")
+			util.Fail(c, http.StatusForbidden, "订阅链接无效")
 			c.Abort()
 			return
 		}
@@ -58,7 +58,7 @@ func SubSieveMiddleware(db *gorm.DB) gin.HandlerFunc {
 			for _, kw := range strings.Split(customBlocked, ",") {
 				kw = strings.TrimSpace(strings.ToLower(kw))
 				if kw != "" && strings.Contains(ua, kw) {
-					util.Fail(c, http.StatusForbidden, "Access Denied: Blocked User-Agent")
+					util.Fail(c, http.StatusForbidden, "订阅链接无效")
 					c.Abort()
 					return
 				}
@@ -69,7 +69,7 @@ func SubSieveMiddleware(db *gorm.DB) gin.HandlerFunc {
 		if cleanUA && ua != "" {
 			for _, pattern := range defaultBlockedUAPatterns {
 				if strings.Contains(ua, pattern) {
-					util.Fail(c, http.StatusForbidden, "Access Denied: Automated Client Prohibited")
+					util.Fail(c, http.StatusForbidden, "订阅链接无效")
 					c.Abort()
 					return
 				}
@@ -86,7 +86,7 @@ func SubSieveMiddleware(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 			if !matched {
-				util.Fail(c, http.StatusForbidden, "Access Denied: Unrecognized Proxy Client")
+				util.Fail(c, http.StatusForbidden, "订阅链接无效")
 				c.Abort()
 				return
 			}

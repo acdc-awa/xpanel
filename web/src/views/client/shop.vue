@@ -61,7 +61,7 @@ const orderStatusMap: Record<string, { type: 'warning' | 'success' | 'info'; tex
 }
 
 function fmtMoney(cents: number) {
-  return `¥ ${(cents / 100).toFixed(2)}`
+  return `¥${(cents / 100).toFixed(2)}`
 }
 
 function fmtGb(gb: number) {
@@ -69,8 +69,8 @@ function fmtGb(gb: number) {
 }
 
 function getPlanFeatures(plan: Plan): string[] {
-  const defaultTemplate = `包含 $TRAFFIC$ 周期高速流量
-有效服务周期 $DURATION$ 天
+  const defaultTemplate = `包含 $TRAFFIC$ 高速流量
+有效期 $DURATION$ 天
 $DEVICE_LIMIT$
 全量优质节点与中转链路
 全面兼容 Mihomo / Clash 生态`
@@ -78,7 +78,7 @@ $DEVICE_LIMIT$
   const rawText = plan.description?.trim() ? plan.description : defaultTemplate
   const trafficStr = fmtGb(plan.traffic_gb)
   const durationStr = `${plan.duration_days} 天`
-  const deviceStr = plan.device_limit > 0 ? `同时在线上限 ${plan.device_limit} 台设备` : '不限制同时在线设备数'
+  const deviceStr = plan.device_limit > 0 ? `同时在线 ${plan.device_limit} 台设备` : '不限同时在线设备数'
 
   return rawText
     .split('\n')
@@ -116,14 +116,14 @@ function openCheckout(plan: Plan) {
 async function handleQuickRedeem() {
   const code = quickRedeemCode.value.trim()
   if (!code) {
-    ElMessage.warning('请输入充值卡密')
+    ElMessage.warning('请输入卡密')
     return
   }
   quickRedeeming.value = true
   try {
     const { data } = await redeemGiftCard(code)
     if (data.code === 0) {
-      ElMessage.success(`充值成功！已到账 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
+      ElMessage.success(`充值成功，已到账 ¥${(data.data.face_value_cents / 100).toFixed(2)}`)
       quickRedeemCode.value = ''
       topupModalOpen.value = false
       await auth.fetchMe()
@@ -131,7 +131,7 @@ async function handleQuickRedeem() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '核销充值卡失败'))
+    ElMessage.error(errMsg(e, '卡密核销失败'))
   } finally {
     quickRedeeming.value = false
   }
@@ -144,7 +144,7 @@ async function confirmPay() {
   try {
     const { data } = await payOrderByBalance(selectedPlan.value.id)
     if (data.code === 0) {
-      ElMessage.success('订购成功！服务计划已即时开通下发')
+      ElMessage.success('订购成功，套餐已即时生效')
       checkoutOpen.value = false
       await Promise.all([load(), auth.fetchMe()])
     } else {
@@ -163,8 +163,8 @@ async function confirmPay() {
     <!-- 头部横幅与用户余额卡 -->
     <div class="shop-header-row">
       <div class="shop-hero">
-        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅方案与服务计划</div>
-        <h1 class="shop-title">服务计划 (Plans & Pricing)</h1>
+        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅与套餐</div>
+        <h1 class="shop-title">套餐</h1>
         <p class="shop-desc">高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。</p>
       </div>
 
@@ -172,7 +172,7 @@ async function confirmPay() {
         <div class="wallet-icon"><el-icon><Wallet /></el-icon></div>
         <div class="wallet-text">
           <span class="wallet-lbl">账户可用余额</span>
-          <span class="wallet-val cell-mono">¥ {{ balanceYuan }}</span>
+          <span class="wallet-val cell-mono">¥{{ balanceYuan }}</span>
         </div>
         <el-button size="small" type="primary" plain style="margin-left: 8px" @click="quickRedeemCode = ''; topupModalOpen = true">
           卡密充值
@@ -225,7 +225,7 @@ async function confirmPay() {
 
       <div v-if="!plans.length" class="empty-plan-box">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><InfoFilled /></el-icon>
-        <p class="muted" style="margin-top: 8px">暂无在售服务计划，请稍后查看</p>
+        <p class="muted" style="margin-top: 8px">暂无在售套餐</p>
       </div>
     </div>
 
@@ -242,7 +242,7 @@ async function confirmPay() {
             <div class="x-order-sub">
               <code class="cell-mono">{{ o.order_no }}</code> · {{ String(o.created_at).replace('T', ' ').slice(0, 16) }}
               <span class="x-chip green" style="margin-left: 6px; font-size: 10.5px">
-                余额直付
+                余额支付
               </span>
             </div>
           </div>
@@ -262,17 +262,17 @@ async function confirmPay() {
     <!-- 原地充值卡密弹窗 -->
     <el-dialog
       v-model="topupModalOpen"
-      title="充值卡核销"
+      title="卡密核销"
       width="400px"
       append-to-body
     >
       <div style="display: flex; flex-direction: column; gap: 12px;">
         <p class="muted" style="font-size: 12.5px;">
-          输入 16 位充值卡密（格式如 <code>GIFT-XXXX-XXXX-XXXX-XXXX</code>），核销后余额即时到账。
+          输入 16 位卡密，核销后余额即时到账。
         </p>
         <el-input
           v-model="quickRedeemCode"
-          placeholder="请输入充值卡密"
+          placeholder="请输入 16 位卡密"
           class="cell-mono"
           size="large"
           @keyup.enter="handleQuickRedeem"
@@ -283,7 +283,7 @@ async function confirmPay() {
           :loading="quickRedeeming"
           @click="handleQuickRedeem"
         >
-          立即核销充值
+          立即核销
         </el-button>
       </div>
     </el-dialog>
@@ -323,7 +323,7 @@ async function confirmPay() {
                 <el-tag size="small" type="success" effect="dark" style="margin-left: 6px; font-size: 10px">即时生效</el-tag>
               </div>
               <div class="opt-desc cell-mono">
-                当前可用余额: <b>¥ {{ balanceYuan }}</b>
+                当前可用余额：<b>¥{{ balanceYuan }}</b>
               </div>
             </div>
           </div>
@@ -332,12 +332,12 @@ async function confirmPay() {
           <div v-if="!isBalanceSufficient" class="deficit-topup-box">
             <div class="deficit-msg">
               <el-icon color="#f59e0b"><InfoFilled /></el-icon>
-              <span>余额不足，还需 <b>¥ {{ balanceDeficitYuan }}</b>。可直接输入充值卡密：</span>
+              <span>余额不足，还需 <b>¥{{ balanceDeficitYuan }}</b>。可直接输入卡密：</span>
             </div>
             <div class="topup-input-row">
               <el-input
                 v-model="quickRedeemCode"
-                placeholder="输入充值卡密 GIFT-..."
+                placeholder="输入 16 位卡密"
                 class="cell-mono"
                 size="small"
                 @keyup.enter="handleQuickRedeem"
@@ -358,8 +358,8 @@ async function confirmPay() {
       <template #footer>
         <div class="checkout-footer">
           <div class="total-bar">
-            <span>实付金额:</span>
-            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥ 0.00' }}</span>
+            <span>实付金额：</span>
+            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥0.00' }}</span>
           </div>
           <div class="footer-btn-group">
             <el-button @click="checkoutOpen = false">取消</el-button>

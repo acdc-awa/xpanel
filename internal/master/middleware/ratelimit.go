@@ -65,7 +65,7 @@ func RateLimit(limit int, window time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := util.ClientIPFromContext(c) + "|" + c.FullPath()
 		if !rl.allow(key) {
-			util.Fail(c, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+			util.Fail(c, http.StatusTooManyRequests, "操作过于频繁，请稍后再试")
 			c.Abort()
 			return
 		}

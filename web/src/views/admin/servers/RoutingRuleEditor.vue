@@ -151,14 +151,14 @@ onMounted(() => {
 async function save() {
   jsonError.value = ''
   if (!form.outbound_tag?.trim()) {
-    ElMessage.warning('请选择 OutboundTag（出站标签）')
+    ElMessage.warning('请选择出站标签（OutboundTag）')
     return
   }
   if (form.rule_json?.trim()) {
     try {
       JSON.parse(form.rule_json)
     } catch {
-      jsonError.value = 'Rule JSON 不是合法 JSON'
+      jsonError.value = 'Rule JSON 格式不合法'
       return
     }
   }
@@ -215,7 +215,7 @@ function onClosed() {
 <template>
   <el-dialog
     :model-value="visible"
-    :title="rule ? `编辑路由分流规则 · ${rule.outbound_tag}` : '新增路由分流规则'"
+    :title="rule ? `编辑路由规则 · ${rule.outbound_tag}` : '新增路由规则'"
     width="760px"
     @closed="onClosed"
   >
@@ -331,11 +331,11 @@ function onClosed() {
           </el-form-item>
 
           <el-form-item label="规则备注">
-            <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽BT下载" />
+            <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
           </el-form-item>
 
           <div class="info-tip-box" style="margin-top: 10px">
-            规则将按优先级升序生成到节点 Xray <code>routing.rules</code> 中，优先命中先执行。
+            规则将按优先级升序生成到服务器 Xray <code>routing.rules</code> 中，优先命中先执行。
           </div>
         </div>
       </div>
@@ -364,7 +364,7 @@ function onClosed() {
 
     <template #footer>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span class="muted" style="font-size: 12px">保存后主控自动编译并推送到节点</span>
+        <span class="muted" style="font-size: 12px">保存后主控自动编译并推送到服务器</span>
         <div style="display: flex; gap: 10px">
           <el-button @click="visible = false">取消</el-button>
           <el-button type="primary" :loading="saving" @click="save">

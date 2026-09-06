@@ -43,7 +43,7 @@ async function saveSelfSigned() {
   try {
     const { data } = await generateSelfSignedCert({ domain: ssForm.domain.trim(), remark: ssForm.remark })
     if (data.code === 0) {
-      ElMessage.success('自签证书已生成并推送引用节点；中转链路将自动 pin 该证书')
+      ElMessage.success('自签证书已生成并推送引用服务器；中转链路将自动 pin 该证书')
       ssOpen.value = false
       load()
     } else {
@@ -91,7 +91,7 @@ async function save() {
       ? await updateCert(editing.value.id, { remark: form.remark })
       : await createCert({ domain: form.domain.trim(), cert_pem: form.cert_pem, key_pem: form.key_pem, remark: form.remark })
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '证书已更新' : '证书已上传并推送引用节点')
+      ElMessage.success(editing.value ? '证书已更新' : '证书已上传并推送引用服务器')
       formOpen.value = false
       load()
     } else {
@@ -142,7 +142,7 @@ function expireTag(row: any) {
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;上传证书</el-button>
         <el-button type="success" plain @click="openSelfSigned"><el-icon><MagicStick /></el-icon>&nbsp;生成自签证书</el-button>
-        <span class="muted" style="font-size: 12px">证书由主控下发（push_cert）到引用它的节点，落盘 /etc/xray/certs/&lt;domain&gt;/，xray 每小时热重载不重启；自签证书用于链式代理 TLS，中转出站自动 pin 防 MITM</span>
+        <span class="muted" style="font-size: 12px">证书由主控下发（push_cert）到引用它的服务器，落盘 /etc/xray/certs/&lt;domain&gt;/，xray 每小时热重载不重启；自签证书用于链式代理 TLS，中转出站自动 pin 防 MITM</span>
       </div>
     </div>
 
@@ -183,7 +183,7 @@ function expireTag(row: any) {
               <div class="item-value cell-mono font-12">{{ row.not_after || '—' }}</div>
             </div>
             <div class="grid-item full-width">
-              <span class="item-label">引用接入节点</span>
+              <span class="item-label">引用服务器</span>
               <div class="item-value">
                 <template v-if="row.refs && row.refs.length > 0">
                   <span v-for="r in row.refs" :key="r.inbound_id" class="x-chip purple" style="margin: 1px 4px 1px 0; font-size: 10.5px">
@@ -210,11 +210,11 @@ function expireTag(row: any) {
 
     <el-dialog v-model="ssOpen" title="生成自签证书（链式代理 TLS 专用）" width="520px" :append-to-body="true">
       <el-alert type="success" :closable="false" show-icon style="margin-bottom: 14px">
-        <p>生成 ECDSA P-256 十年期自签证书，主控自动计算 pin（SHA-256）并下发落地节点。</p>
+        <p>生成 ECDSA P-256 十年期自签证书，主控自动计算 pin（SHA-256）并下发落地服务器。</p>
         <p>拓扑中引用该证书入站的中转出站将<b>自动注入 pinnedPeerCertSha256</b>——pin 命中即验证通过，自签亦可防 MITM；换证时两端配置自动联动重推。</p>
       </el-alert>
       <el-form label-position="top">
-        <el-form-item label="域名 / 节点标识（唯一）">
+        <el-form-item label="域名 / 服务器标识（唯一）">
           <el-input v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
         </el-form-item>
         <el-form-item label="备注">

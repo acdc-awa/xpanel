@@ -198,7 +198,7 @@ async function openStatus(row: any) {
 // ---- 重启 ----
 async function restartXray(row: any) {
   try {
-    await ElMessageBox.confirm(`确认重启节点「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
+    await ElMessageBox.confirm(`确认重启服务器「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
       type: 'warning',
     })
   } catch {
@@ -279,12 +279,12 @@ async function upgradeNodeAgent(row: any) {
     const cmp = compareVersion(currentVer, latest)
     if (cmp >= 0) {
       isAlreadyLatest = true
-      msg = `节点「${row.name}」当前 Agent 版本（${currentVer}）已是官方最新版本（${latest}）。\n\n是否仍要重新拉取并覆盖安装？`
+      msg = `服务器「${row.name}」当前 Agent 版本（${currentVer}）已是官方最新版本（${latest}）。\n\n是否仍要重新拉取并覆盖安装？`
     } else {
-      msg = `检测到官方最新版本 Agent：\n- 当前节点版本：${currentVer}\n- 官方最新版本：${latest}\n\n确认将节点「${row.name}」升级至最新版？（sha256 校验，完成后节点自动重启，期间短暂离线）`
+      msg = `检测到官方最新版本 Agent：\n- 当前服务器版本：${currentVer}\n- 官方最新版本：${latest}\n\n确认将服务器「${row.name}」升级至最新版？（sha256 校验，完成后服务器自动重启，期间短暂离线）`
     }
   } else {
-    msg = `将从 GitHub Releases 下载最新版 Agent 并在节点「${row.name}」上升级（sha256 校验），完成后节点自动重启，期间短暂离线。当前版本：${currentVer || '未知'}`
+    msg = `将从 GitHub Releases 下载最新版 Agent 并在服务器「${row.name}」上升级（sha256 校验），完成后服务器自动重启，期间短暂离线。当前版本：${currentVer || '未知'}`
   }
 
   try {
@@ -305,7 +305,7 @@ async function upgradeNodeAgent(row: any) {
   upgradeStatus.value = {
     phase: 'starting',
     target: latest || undefined,
-    message: '正在向节点下发自升级指令...',
+    message: '正在向服务器下发自升级指令...',
     ts: Math.floor(Date.now() / 1000),
   }
   upgradeModalOpen.value = true
@@ -325,7 +325,7 @@ async function upgradeNodeAgent(row: any) {
       upgradeStatus.value = {
         phase: 'success',
         target: latest || undefined,
-        message: (data.data.data as string) || '已升级完成，节点已重新加载新版本',
+        message: (data.data.data as string) || '已升级完成，服务器已重新加载新版本',
         ts: Math.floor(Date.now() / 1000),
       }
       stopUpgradePolling()
@@ -346,7 +346,7 @@ async function upgradeNodeAgent(row: any) {
       phase: 'failed',
       target: latest || undefined,
       message: '升级请求超时或网络异常',
-      error: errMsg(e, '升级失败（节点可能仍在后台下载，可稍后刷新查看版本）'),
+      error: errMsg(e, '升级失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
       ts: Math.floor(Date.now() / 1000),
     }
     stopUpgradePolling()
@@ -458,7 +458,7 @@ const secretInfo = ref<{ node_id: string; secret: string; install_cmd?: string }
 async function resetSecret(row: any) {
   try {
     await ElMessageBox.confirm(
-      `确认重置节点「${row.name}」的密钥？旧密钥立即失效，需在节点 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
+      `确认重置服务器「${row.name}」的密钥？旧密钥立即失效，需在服务器 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
       '重置密钥',
       { type: 'warning' },
     )
@@ -492,7 +492,7 @@ function onMore(cmd: string, row: any) {
 // ---- 删除 ----
 async function removeServer(row: any) {
   try {
-    await ElMessageBox.confirm(`确认删除节点「${row.name}」？关联的入站、待推送配置与节点上报将一并删除，该节点 Agent 将无法再连接。`, '删除服务器', {
+    await ElMessageBox.confirm(`确认删除服务器「${row.name}」？其关联的入站、待推送配置与上报数据将一并删除，该服务器的 Agent 将无法再连接。`, '删除服务器', {
       type: 'error',
     })
   } catch {
@@ -533,7 +533,7 @@ async function removeServer(row: any) {
       <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
     </div>
 
-    <BaseCard title="服务器节点列表">
+    <BaseCard title="服务器列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
@@ -571,9 +571,9 @@ async function removeServer(row: any) {
           <!-- 属性网格 -->
           <div class="card-grid">
             <div class="grid-item full-width">
-              <span class="item-label">节点地址</span>
+              <span class="item-label">服务器地址</span>
               <div class="item-value">
-                <code class="cell-mono font-12" style="cursor: pointer; color: var(--x-primary); font-weight: 600" title="点击复制" @click="copyText(row.host, '节点地址')">
+                <code class="cell-mono font-12" style="cursor: pointer; color: var(--x-primary); font-weight: 600" title="点击复制" @click="copyText(row.host, '服务器地址')">
                   {{ row.host }}
                 </code>
               </div>
@@ -609,7 +609,7 @@ async function removeServer(row: any) {
                   style="font-size: 11px; font-weight: 600"
                   @click="upgradeNodeAgent(row)"
                 >
-                  {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重装' : '升级') }}
+                  {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装' : '升级') }}
                 </el-link>
               </div>
             </div>
@@ -639,7 +639,7 @@ async function removeServer(row: any) {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
-                  <el-dropdown-item command="logs"><el-icon><Document /></el-icon>节点日志</el-dropdown-item>
+                  <el-dropdown-item command="logs"><el-icon><Document /></el-icon>服务器日志</el-dropdown-item>
                   <el-dropdown-item command="upgrade">
                     <el-icon><Upload /></el-icon>
                     {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级 Agent' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装 Agent' : '升级 Agent') }}
@@ -668,7 +668,7 @@ async function removeServer(row: any) {
         </el-form>
       </template>
       <template v-else>
-        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在节点上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
+        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在服务器上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
           <div class="secret-box">
             <div class="secret-row install-row">
               <span class="k">安装</span>
@@ -685,7 +685,7 @@ async function removeServer(row: any) {
               <code>{{ createdResult.secret }}</code>
               <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
             </div>
-            <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装后回到「服务器」页可查看节点在线状态并「生成」下发配置。</p>
+            <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装完成后回到本页查看在线状态，在服务器详情中生成并下发配置。</p>
           </div>
       </template>
       <template #footer>
@@ -700,7 +700,7 @@ async function removeServer(row: any) {
     </el-dialog>
 
     <!-- 状态详情 -->
-    <el-dialog v-model="statusOpen" title="节点状态" width="420px">
+    <el-dialog v-model="statusOpen" title="服务器状态" width="420px">
       <div v-loading="statusLoading" class="status-rows">
         <template v-if="statusData">
           <div class="row"><span class="k">Xray 运行</span><span class="v">{{ statusData.data?.xray_running ? '运行中' : '已停止' }}</span></div>
@@ -750,7 +750,7 @@ async function removeServer(row: any) {
         <div class="upgrade-header">
           <div class="upgrade-node-info">
             <span class="node-name">{{ upgradeTarget?.name }}</span>
-            <code class="cell-mono muted font-11">节点 ID: {{ upgradeTarget?.node_id }}</code>
+            <code class="cell-mono muted font-11">服务器 ID: {{ upgradeTarget?.node_id }}</code>
           </div>
           <div class="upgrade-ver-info">
             <span class="ver-label">版本流转:</span>
@@ -789,12 +789,12 @@ async function removeServer(row: any) {
             <el-icon v-else class="is-loading icon-process"><Loading /></el-icon>
           </div>
           <div class="status-texts">
-            <div class="status-msg">{{ upgradeStatus?.message || '等待节点响应...' }}</div>
+            <div class="status-msg">{{ upgradeStatus?.message || '等待服务器响应...' }}</div>
             <div v-if="upgradeStatus?.error" class="status-err cell-mono">
               {{ upgradeStatus.error }}
             </div>
             <div v-else-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'" class="status-hint">
-              节点正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10~60 秒）
+              服务器正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10~60 秒）
             </div>
           </div>
         </div>
@@ -835,7 +835,7 @@ async function removeServer(row: any) {
 
     <!-- 重置密钥 -->
     <el-dialog v-model="secretOpen" title="重置密钥" width="600px">
-      <el-alert type="warning" :closable="false" show-icon title="新密钥已生成（仅显示这一次）" description="请更新节点 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务；或重新执行下方安装命令" style="margin-bottom: 12px" />
+      <el-alert type="warning" :closable="false" show-icon title="新密钥已生成（仅显示这一次）" description="请更新服务器 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务；或重新执行下方安装命令" style="margin-bottom: 12px" />
       <div v-if="secretInfo" class="secret-box">
         <div class="secret-row">
           <span class="k">node_id</span>

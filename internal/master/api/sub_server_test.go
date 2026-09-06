@@ -30,7 +30,7 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 		t.Fatalf("failed to migrate db: %v", err)
 	}
 
-	// 有效 token 用户（无接入点时订阅返回 404「暂无可用的节点」，可据此区分「token 校验通过」）
+	// 有效 token 用户（无接入点时订阅返回 404「暂无可用节点」，可据此区分「token 校验通过」）
 	user := models.User{Username: "u@x.com", Email: "u@x.com", UUID: "uuid-1", PasswordHash: "h", SubscribeToken: "tok-valid", Status: models.StatusActive}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -51,14 +51,14 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	// 缺省入口 /sub：有效 token 走 Subscribe（无 AP → 404 暂无可用的节点）
+	// 缺省入口 /sub：有效 token 走 Subscribe（无 AP → 404 暂无可用节点）
 	status, body := getBody(t, "http://127.0.0.1:15001/sub/tok-valid")
-	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用的节点") {
-		t.Errorf("GET /sub/tok-valid = %d %q, want 404 暂无可用的节点", status, body)
+	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用节点") {
+		t.Errorf("GET /sub/tok-valid = %d %q, want 404 暂无可用节点", status, body)
 	}
 	status, body = getBody(t, "http://127.0.0.1:15001/sub?token=tok-valid")
-	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用的节点") {
-		t.Errorf("GET /sub?token= = %d %q, want 404 暂无可用的节点", status, body)
+	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用节点") {
+		t.Errorf("GET /sub?token= = %d %q, want 404 暂无可用节点", status, body)
 	}
 	// 无效 token：统一拒绝码 404（缺省），文案与 NoRoute 不同
 	status, body = getBody(t, "http://127.0.0.1:15001/sub/tok-bad")
@@ -85,10 +85,10 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	// 新入口生效：有效 token 仍走 Subscribe（404 暂无可用的节点）
+	// 新入口生效：有效 token 仍走 Subscribe（404 暂无可用节点）
 	status, body = getBody(t, "http://127.0.0.1:15001/ehisnodn/tok-valid")
-	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用的节点") {
-		t.Errorf("GET /ehisnodn/tok-valid = %d %q, want 404 暂无可用的节点", status, body)
+	if status != http.StatusNotFound || !strings.Contains(body, "暂无可用节点") {
+		t.Errorf("GET /ehisnodn/tok-valid = %d %q, want 404 暂无可用节点", status, body)
 	}
 	// 无效 token：按 sub_deny_code=401 拒绝
 	status, body = getBody(t, "http://127.0.0.1:15001/ehisnodn/tok-bad")

@@ -357,7 +357,7 @@ onMounted(async () => {
           <div class="canvas-badge">
             <span class="x-status-dot online" />
             <span style="font-weight: 600; font-size: 13.5px">全局可视化拓扑画布</span>
-            <span class="muted" style="font-size: 12px; margin-left: 4px">（共 {{ topology?.servers?.length || 0 }} 个节点）</span>
+            <span class="muted" style="font-size: 12px; margin-left: 4px">（共 {{ topology?.servers?.length || 0 }} 个服务器）</span>
           </div>
           <el-button size="small" @click="loadTopology">
             <el-icon><Refresh /></el-icon>&nbsp;刷新拓扑
@@ -451,7 +451,7 @@ onMounted(async () => {
               <el-icon><Check /></el-icon>&nbsp;保存策略
             </el-button>
             <div class="muted" style="font-size: 11.5px; text-align: center; margin-top: 6px">
-              修改后自动重编节点配置
+              修改后自动重新编译并推送配置
             </div>
           </div>
         </div>
@@ -503,7 +503,7 @@ onMounted(async () => {
                       <span v-if="row.inbound_ref" class="x-chip orange" style="font-size: 10.5px">
                         引用入站 #{{ row.inbound_ref }}
                       </span>
-                      <span v-else-if="row.tag === 'direct'" class="muted font-11">节点直连互联网</span>
+                      <span v-else-if="row.tag === 'direct'" class="muted font-11">服务器直连互联网</span>
                       <span v-else-if="row.tag === 'blocked'" class="muted font-11">黑洞丢弃阻断</span>
                       <span v-else class="muted font-11">自主直连</span>
                     </div>
@@ -538,7 +538,7 @@ onMounted(async () => {
           </el-tab-pane>
 
           <!-- 路由规则管理 -->
-          <el-tab-pane :label="isMobile ? '分流规则' : '分流规则 (Routing Rules)'">
+          <el-tab-pane label="路由规则">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
@@ -549,7 +549,7 @@ onMounted(async () => {
             </div>
 
             <div v-else-if="routingRules.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
-              该服务器暂无分流规则，点击右上角「新增规则」
+              该服务器暂无路由规则，点击右上角「新增规则」
             </div>
 
             <!-- 全局统一分流规则卡片网格流 (自适应 1~4 列) -->
@@ -651,7 +651,7 @@ onMounted(async () => {
         <div class="canvas-tip">
           <span class="tip-pill"><span class="legend-solid" /> 实线 InboundRef 引用</span>
           <span class="tip-pill"><span class="legend-dash" /> 虚线 路由规则</span>
-          <span class="muted" style="font-size: 12px; margin-left: 6px">点击连线可删除；拖拽把手可建线；双击卡片管理节点</span>
+          <span class="muted" style="font-size: 12px; margin-left: 6px">点击连线可删除；拖拽把手可建线；双击卡片管理服务器</span>
         </div>
         <div style="display: flex; gap: 10px; align-items: center">
           <span style="font-size: 13px; color: var(--x-text-2)">编辑模式</span>

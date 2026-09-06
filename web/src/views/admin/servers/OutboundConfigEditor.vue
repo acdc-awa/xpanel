@@ -323,7 +323,7 @@ async function save() {
     return
   }
   if (form.protocol === 'vless' && !refMode.value && (!form.vless_address || !form.vless_uuid)) {
-    ElMessage.warning('手动模式需填写远端地址和 UUID，或切换为「引用落地入站 / 画布拖线」')
+    ElMessage.warning('手动模式需填写远端地址和 UUID，或切换为「引用落地入站」（也可在画布中拖线连接）')
     return
   }
   saving.value = true
@@ -393,7 +393,7 @@ const activeTab = ref('basic')
               <template #label>
                 <div class="field-label">
                   <span>协议 Protocol</span>
-                  <el-tooltip content="freedom 用于节点自主连接外部互联网；blackhole 用于黑洞阻断；vless 用于跨节点中转代理链。" placement="top">
+                  <el-tooltip content="freedom 用于服务器自主连接外部互联网；blackhole 用于黑洞阻断；vless 用于跨服务器中转代理链。" placement="top">
                     <span class="help-icon">?</span>
                   </el-tooltip>
                 </div>
@@ -449,7 +449,7 @@ const activeTab = ref('basic')
           <div class="toggle-card" style="margin-top: 4px">
             <div class="toggle-info">
               <span class="toggle-title">启用此出站规则</span>
-              <span class="toggle-sub">开启后写入节点 Xray 配置中；停用则不参与流量转发</span>
+              <span class="toggle-sub">开启后写入服务器 Xray 配置中；停用则不参与流量转发</span>
             </div>
             <el-switch v-model="form.enabled" />
           </div>
@@ -481,8 +481,8 @@ const activeTab = ref('basic')
               <!-- 阻止回国流量 Toggle -->
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
-                  <span class="toggle-title">阻止回国流量 (block_cn)</span>
-                  <span class="toggle-sub">自动注入规则阻断访问大陆域名与 IP (geosite:cn / geoip:cn)，防止海外节点被滥用回国</span>
+                  <span class="toggle-title">阻断回国流量 (block_cn)</span>
+                  <span class="toggle-sub">自动注入规则阻断访问大陆域名与 IP (geosite:cn / geoip:cn)，防止海外服务器被滥用回国</span>
                 </div>
                 <el-switch v-model="form.block_cn" />
               </div>
@@ -542,7 +542,7 @@ const activeTab = ref('basic')
           <!-- 手动配置模式 -->
           <template v-else>
             <div class="card-box">
-              <div class="box-title">远端节点凭据</div>
+              <div class="box-title">远端服务器凭据</div>
               <div class="form-grid">
                 <el-form-item label="远端地址 Address">
                   <el-input v-model="form.vless_address" placeholder="如 proxy.example.com 或 1.2.3.4" />
@@ -654,7 +654,7 @@ const activeTab = ref('basic')
 
     <template #footer>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span class="muted" style="font-size: 12px">保存后主控自动编译配置并推送到节点</span>
+        <span class="muted" style="font-size: 12px">保存后主控自动编译配置并推送到服务器</span>
         <div style="display: flex; gap: 10px">
           <el-button @click="visible = false">取消</el-button>
           <el-button type="primary" :loading="saving" @click="save">

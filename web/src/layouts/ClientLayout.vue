@@ -14,7 +14,7 @@ const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 
-const pageTitle = computed(() => (route.meta.title as string) || '控制中心')
+const pageTitle = computed(() => (route.meta.title as string) || '用户中心')
 
 // 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
 // Pad 平板屏幕（< 1024px）默认折叠为 mini dock；宽屏可读取用户缓存
@@ -95,7 +95,7 @@ onUnmounted(() => {
           <span v-else class="client-logo-mark">X</span>
           <div v-if="isEffectiveExpanded" class="client-brand-info">
             <div class="client-brand-title">{{ site.appName || 'XrayPanel' }}</div>
-            <div class="client-brand-sub">Client Portal</div>
+            <div class="client-brand-sub">用户中心</div>
           </div>
         </div>
 
@@ -104,7 +104,7 @@ onUnmounted(() => {
           v-if="isEffectiveExpanded"
           type="button"
           class="sidebar-pin-btn"
-          :title="isCollapsed ? '固定展开侧栏 (Ctrl+B)' : '折叠收起侧栏 (Ctrl+B)'"
+          :title="isCollapsed ? '展开侧栏 (Ctrl+B)' : '收起侧栏 (Ctrl+B)'"
           @click.stop="toggleCollapse"
         >
           <el-icon :size="15"><Fold v-if="!isCollapsed" /><Expand v-else /></el-icon>
@@ -131,7 +131,7 @@ onUnmounted(() => {
 
       <!-- 侧边栏底部简明状态 -->
       <div class="client-aside-foot" :class="{ 'is-mini': !isEffectiveExpanded }">
-        <div class="status-dot-wrap" :title="`${auth.username} · 在线`">
+        <div class="status-dot-wrap" :title="auth.username">
           <span class="status-pulse-dot" />
         </div>
         <span v-if="isEffectiveExpanded" class="foot-text">{{ site.appName || 'XrayPanel' }}</span>

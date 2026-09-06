@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { getServerMetrics } from '@/api/admin'
+import { errMsg } from '@/api/http'
 import type { ServerMetricsData } from '@/api/types'
 
 import { useThemeStore } from '@/stores/theme'
@@ -216,7 +217,7 @@ function updateCharts() {
     yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
     series: [
       {
-        name: '在线设备数',
+        name: '在线用户数',
         type: 'line',
         step: 'start',
         showSymbol: false,
@@ -256,7 +257,7 @@ async function loadData() {
       ElMessage.error(data.message)
     }
   } catch (e: any) {
-    ElMessage.error(e?.message || '加载监控数据失败')
+    ElMessage.error(errMsg(e, '加载监控数据失败'))
   } finally {
     loading.value = false
   }
@@ -352,7 +353,7 @@ onUnmounted(() => {
         <div class="chart-card">
           <div class="chart-header">
             <div class="title">当前在线连接数 (Active Clients)</div>
-            <div class="sub">节点实时心跳活跃连接设备统计</div>
+            <div class="sub">服务器实时心跳活跃连接设备统计</div>
           </div>
           <div ref="userChartRef" class="echart-box"></div>
         </div>

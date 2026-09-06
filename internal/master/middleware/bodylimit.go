@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,7 +14,7 @@ import (
 func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.ContentLength > maxBytes {
-			util.Fail(c, http.StatusRequestEntityTooLarge, "请求体过大")
+			util.Fail(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("请求体过大（上限 %d MB）", maxBytes/1024/1024))
 			c.Abort()
 			return
 		}

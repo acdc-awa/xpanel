@@ -69,7 +69,7 @@ func TestAdminUpdatePlanRejectsNegativeValues(t *testing.T) {
 	var after models.Plan
 	db.First(&after, plan.ID)
 	if after.PriceCents != 100 || after.TrafficGB != 10 || after.DurationDays != 30 {
-		t.Fatalf("非法值不应入库: %+v", after)
+		t.Fatalf("无效的值不应入库: %+v", after)
 	}
 }
 

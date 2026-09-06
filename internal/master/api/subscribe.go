@@ -117,7 +117,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		}
 	}
 	if len(dtos) == 0 {
-		util.Fail(c, 404, "暂无可用的节点")
+		util.Fail(c, 404, "暂无可用节点")
 		return
 	}
 
@@ -158,7 +158,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			PanelHost: panelHost,
 		})
 	if err != nil {
-		util.ServerError(c, "生成订阅失败")
+		util.ServerError(c, "生成订阅失败，请稍后重试")
 		return
 	}
 	c.Header("Content-Type", contentType)

@@ -88,8 +88,7 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 		Count   int    `json:"count" binding:"required,min=1,max=100"`
 		Expires string `json:"expires"` // RFC3339 可选；空 = 永不过期
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	adminID := middleware.CurrentUser(c)
@@ -131,7 +130,7 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 func (d *Deps) AdminRevokeInvitation(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法邀请码 ID")
+		util.BadRequest(c, "无效的邀请码 ID")
 		return
 	}
 	var inv models.InvitationCode
@@ -158,7 +157,7 @@ func (d *Deps) validateUserRefs(planID, permGroupID uint64) string {
 	if planID > 0 {
 		var n int64
 		if err := d.DB.Model(&models.Plan{}).Where("id = ?", planID).Count(&n).Error; err != nil || n == 0 {
-			return fmt.Sprintf("套餐不存在: %d", planID)
+			return "套餐不存在"
 		}
 	}
 	if permGroupID > 0 {
@@ -180,8 +179,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		ExpireAt          *time.Time `json:"expire_at"`
 		Remark            string     `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if len([]rune(strings.TrimSpace(req.Remark))) > 255 {
@@ -207,7 +205,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 	token, err := util.NewSubscribeToken()
 	if err != nil {
-		util.ServerError(c, "生成订阅 Token 失败")
+		util.ServerError(c, "生成订阅 token 失败")
 		return
 	}
 
@@ -234,7 +232,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 	if err := d.DB.Create(&user).Error; err != nil {
 		if db.IsUniqueViolation(err, "users.username") {
-			util.BadRequest(c, "该邮箱已用作用户名")
+			util.BadRequest(c, "邮箱已被使用")
 		} else {
 			util.ServerError(c, "创建失败")
 		}
@@ -261,7 +259,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -282,8 +280,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		AutoRenewExpire   *bool      `json:"auto_renew_expire"`
 		AutoRenewExhaust  *bool      `json:"auto_renew_exhaust"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if req.Remark != nil && len([]rune(strings.TrimSpace(*req.Remark))) > 255 {
@@ -312,7 +309,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 	if req.Role != nil {
 		role := strings.ToLower(strings.TrimSpace(*req.Role))
 		if role != models.RoleAdmin && role != models.RoleUser {
-			util.BadRequest(c, "非法角色（仅支持 admin 或 user）")
+			util.BadRequest(c, "无效的角色（仅支持 admin 或 user）")
 			return
 		}
 		// 防死锁：如果试图将管理员降级为普通用户，必须确保系统中至少保留 1 名激活状态管理员
@@ -418,7 +415,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 func (d *Deps) AdminToggleUser(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -465,7 +462,7 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -489,7 +486,7 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 func (d *Deps) AdminGetUserSubscribeToken(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -506,7 +503,7 @@ func (d *Deps) AdminGetUserSubscribeToken(c *gin.Context) {
 func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -530,7 +527,7 @@ func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 func (d *Deps) AdminDeleteUser(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var user models.User
@@ -539,7 +536,7 @@ func (d *Deps) AdminDeleteUser(c *gin.Context) {
 		return
 	}
 	if user.ID == middleware.CurrentUser(c) {
-		util.BadRequest(c, "不能删除自己")
+		util.BadRequest(c, "不能删除自己的账号")
 		return
 	}
 	// 防死锁：如果试图删除管理员，必须确保系统中至少保留 1 名激活状态管理员

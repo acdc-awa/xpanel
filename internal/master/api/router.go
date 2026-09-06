@@ -246,7 +246,7 @@ func registerSPA(r *gin.Engine, d *Deps) {
 	dist := "web/dist"
 	if _, err := os.Stat(dist); err != nil {
 		r.NoRoute(func(c *gin.Context) {
-			util.Fail(c, http.StatusNotFound, "前端未构建（开发请用 vite dev server）")
+			util.Fail(c, http.StatusNotFound, "前端资源未构建，请先构建前端后重新部署")
 		})
 		return
 	}
@@ -262,7 +262,7 @@ func registerSPA(r *gin.Engine, d *Deps) {
 			return
 		}
 		if len(indexHTML) == 0 {
-			util.Fail(c, http.StatusNotFound, "前端未构建")
+			util.Fail(c, http.StatusNotFound, "前端资源未构建")
 			return
 		}
 		// 站点设置注入（17 号 P0 ②）：app_name 替换静态 <title>（DB 优先，静态兜底）；

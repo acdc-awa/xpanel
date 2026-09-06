@@ -43,11 +43,11 @@ onMounted(async () => {
 
 async function onSubmit() {
   if (!form.email || !EMAIL_RE.test(form.email)) {
-    ElMessage.warning('请输入正确的邮箱（用户名即邮箱）')
+    ElMessage.warning('请输入正确的邮箱地址')
     return
   }
   if (!form.invite_code) {
-    ElMessage.warning('请填写邀请码（注册需要邀请码）')
+    ElMessage.warning('请填写邀请码')
     return
   }
   if (form.password.length < 8) {
@@ -59,7 +59,7 @@ async function onSubmit() {
     return
   }
   if (site.captchaEnable && !form.turnstile_token) {
-    ElMessage.warning('请完成人机验证')
+    ElMessage.warning('请先完成人机验证')
     return
   }
   loading.value = true
@@ -93,7 +93,7 @@ async function onSubmit() {
       </div>
 
       <el-form label-position="top" size="large" @submit.prevent="onSubmit">
-        <el-form-item label="邮箱（用户名）">
+        <el-form-item label="邮箱">
           <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="Message" autofocus />
         </el-form-item>
         <el-form-item label="邀请码">
@@ -106,7 +106,7 @@ async function onSubmit() {
           />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位" :prefix-icon="Lock" />
+          <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位字符" :prefix-icon="Lock" />
         </el-form-item>
         <el-form-item
           label="确认密码"
@@ -127,7 +127,7 @@ async function onSubmit() {
           @token="(t) => (form.turnstile_token = t)"
         />
         <el-button type="primary" size="large" class="auth-submit" :loading="loading" native-type="submit">
-          注 册
+          注册
         </el-button>
       </el-form>
 

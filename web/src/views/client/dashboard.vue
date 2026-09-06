@@ -30,7 +30,7 @@ const balanceYuan = computed(() => {
 
 const deviceLimitText = computed(() => {
   const lim = auth.user?.device_limit || auth.user?.effective_device_limit || 0
-  return lim > 0 ? `${lim} 台设备` : '不限设备'
+  return lim > 0 ? `同时在线 ${lim} 台设备` : '不限同时在线设备数'
 })
 
 // plan_name 由 /user/me 等接口返回；套餐已删时为空，回退显示编号
@@ -53,7 +53,7 @@ const usedText = computed(() => formatBytes(usedBytes.value))
 const expireText = computed(() => {
   const t = auth.user?.expire_at
   if (!t) return auth.user?.plan_id ? '永久有效' : '未开通套餐'
-  return String(t).replace('T', ' ').slice(0, 16)
+  return formatDate(t)
 })
 
 // U23：到期/未开通判定（用于横幅 CTA，不再让无套餐用户看到误导性的「永久有效」）
@@ -95,7 +95,7 @@ function copySub() {
   }
   navigator.clipboard?.writeText(subscribeUrl.value).then(
     () => ElMessage.success('Mihomo 订阅地址已复制到剪贴板'),
-    () => ElMessage.warning('复制失败，请前往订阅中心手动复制'),
+    () => ElMessage.warning('复制失败，请手动复制'),
   )
 }
 
@@ -106,7 +106,7 @@ function importMihomo() {
   }
   const url = `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=XrayPanel`
   window.location.href = url
-  ElMessage.info('正在唤醒 Mihomo / Clash 客户端…')
+  ElMessage.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
 }
 
 const servers = ref<MyServerItem[]>([])
@@ -183,16 +183,16 @@ onMounted(() => {
         <!-- 到期/未开通 CTA 横幅 -->
         <div v-if="isExpired" class="dash-alert danger">
           <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>当前服务计划已到期，节点转发已暂停，请及时续费</span>
+          <span>当前套餐已到期，节点转发已暂停，请及时续费</span>
           <router-link to="/shop">
-            <el-button size="small" type="primary" round>立即续订</el-button>
+            <el-button size="small" type="primary" round>立即续费</el-button>
           </router-link>
         </div>
         <div v-else-if="!auth.user?.plan_id" class="dash-alert">
           <el-icon><InfoFilled /></el-icon>&nbsp;
-          <span>尚未订购服务计划，订购后即可获取节点订阅</span>
+          <span>尚未订购套餐，订购后即可获取节点订阅</span>
           <router-link to="/shop">
-            <el-button size="small" type="primary" round>选购计划</el-button>
+            <el-button size="small" type="primary" round>选购套餐</el-button>
           </router-link>
         </div>
 
@@ -204,7 +204,7 @@ onMounted(() => {
               <span>{{ planLabel }}</span>
             </div>
             <div class="hero-top-right">
-              <span class="x-chip gray cell-mono">余额 ¥ {{ balanceYuan }}</span>
+              <span class="x-chip gray cell-mono">余额 ¥{{ balanceYuan }}</span>
               <span class="x-chip gray">{{ deviceLimitText }}</span>
               <span v-if="daysLeft !== null" class="x-chip gray">剩余 {{ daysLeft }} 天</span>
             </div>
@@ -240,8 +240,8 @@ onMounted(() => {
               />
             </div>
             <div class="progress-meta">
-              <span>用量占比: {{ usagePercent }}%</span>
-              <span class="cell-mono">服务期限: {{ expireText }}</span>
+              <span>用量占比：{{ usagePercent }}%</span>
+              <span class="cell-mono">有效期：{{ expireText }}</span>
             </div>
           </div>
 
@@ -255,7 +255,7 @@ onMounted(() => {
             </el-button>
             <router-link to="/shop" style="flex: 1 1 110px;">
               <el-button class="hero-btn-glass" style="width: 100%;">
-                <el-icon><ShoppingBag /></el-icon>&nbsp;选购/续订
+                <el-icon><ShoppingBag /></el-icon>&nbsp;选购/续费
               </el-button>
             </router-link>
           </div>
@@ -273,8 +273,8 @@ onMounted(() => {
           <router-link to="/shop" class="dash-tile">
             <div class="tile-icon green"><el-icon><ShoppingBag /></el-icon></div>
             <div class="tile-info">
-              <div class="tile-title">服务计划商店</div>
-              <div class="tile-desc">高速节点方案与配额选购</div>
+              <div class="tile-title">套餐商店</div>
+              <div class="tile-desc">套餐与流量配额</div>
             </div>
           </router-link>
         </div>
@@ -286,18 +286,18 @@ onMounted(() => {
         <div class="x-card">
           <div class="x-card-head">
             <span><el-icon><Connection /></el-icon>&nbsp;节点可用性</span>
-            <span class="muted" style="font-size: 12px">心跳 90s 内为在线</span>
+            <span class="muted" style="font-size: 12px">在线状态每分钟自动刷新</span>
           </div>
           <div style="padding: 8px 16px">
             <div v-for="s in servers" :key="s.id" class="x-row-line">
               <span class="k">
                 <span class="x-status-dot" :class="s.online ? 'online' : 'offline'" />
-                {{ s.location || '优质节点' }} · {{ s.name }}
+                {{ s.location || '未命名节点' }} · {{ s.name }}
               </span>
               <span class="v muted" style="font-size: 12px">{{ s.online ? '在线' : '离线' }}</span>
             </div>
             <p v-if="!servers.length" class="muted" style="font-size: 12px; padding: 4px 0">
-              暂无可用节点（订购服务计划后自动下发）
+              暂无可用节点（购买套餐后自动开通）
             </p>
           </div>
         </div>
@@ -308,10 +308,10 @@ onMounted(() => {
             <span><el-icon><Bell /></el-icon>&nbsp;系统公告</span>
           </div>
           <div v-if="noticeLoading" style="padding: 16px; text-align: center" class="muted">
-            加载公告中...
+            加载公告中…
           </div>
           <div v-else-if="!notices.length" style="padding: 16px; text-align: center" class="muted">
-            暂无最新系统公告
+            暂无系统公告
           </div>
           <div
             v-for="n in notices"
@@ -379,7 +379,7 @@ onMounted(() => {
         <div class="notice-body popup-emphasis markdown-content" v-html="renderMarkdown(popupNotice.content)" />
       </div>
       <template #footer>
-        <el-button type="primary" @click="handleClosePopup">已了解并关闭</el-button>
+        <el-button type="primary" @click="handleClosePopup">我知道了</el-button>
       </template>
     </el-dialog>
   </div>

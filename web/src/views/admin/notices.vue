@@ -248,7 +248,7 @@ async function remove(row: NoticeItem) {
                 置顶
               </span>
               <span v-if="(row as NoticeItem).is_popup" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">
-                强弹窗
+                强制弹窗
               </span>
               <span class="notice-name" title="点击编辑公告" @click="openEdit(row as NoticeItem)">{{ (row as NoticeItem).title }}</span>
             </div>
@@ -279,7 +279,7 @@ async function remove(row: NoticeItem) {
               </div>
             </div>
             <div class="grid-item">
-              <span class="item-label">登录强弹窗</span>
+              <span class="item-label">登录强制弹窗</span>
               <div class="item-value">
                 <el-switch
                   :model-value="(row as NoticeItem).is_popup"
@@ -420,7 +420,7 @@ async function remove(row: NoticeItem) {
             </div>
           </el-form-item>
 
-          <el-form-item label="首页强弹窗提醒">
+          <el-form-item label="首页强制弹窗提醒">
             <div class="switch-field">
               <el-switch v-model="form.is_popup" />
               <span class="switch-hint">用户登录后将自动弹出该公告</span>
@@ -431,8 +431,8 @@ async function remove(row: NoticeItem) {
         <div class="form-row-grid">
           <el-form-item label="发布状态">
             <el-radio-group v-model="form.status">
-              <el-radio :value="1">立即启用发布</el-radio>
-              <el-radio :value="0">隐藏暂不显示</el-radio>
+              <el-radio :value="1">立即发布</el-radio>
+              <el-radio :value="0">暂不发布</el-radio>
             </el-radio-group>
           </el-form-item>
 

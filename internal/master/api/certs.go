@@ -7,11 +7,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/db"
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
-	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
@@ -105,12 +105,11 @@ func (d *Deps) AdminCerts(c *gin.Context) {
 // 保存后推送到引用该证书的节点（push_cert）。
 func (d *Deps) AdminCreateCert(c *gin.Context) {
 	var req certForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if !tlscert.DomainRe.MatchString(req.Domain) {
-		util.BadRequest(c, "非法 domain（仅允许字母数字 . -）")
+		util.BadRequest(c, "域名格式无效（仅允许字母数字 . -）")
 		return
 	}
 	notAfter, err := tlscert.NotAfter(req.CertPEM)
@@ -147,8 +146,7 @@ func (d *Deps) AdminGenerateSelfSignedCert(c *gin.Context) {
 		Domain string `json:"domain" binding:"required,max=128"`
 		Remark string `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	certPEM, keyPEM, err := tlscert.GenerateSelfSigned(req.Domain)
@@ -178,7 +176,7 @@ func (d *Deps) AdminGenerateSelfSignedCert(c *gin.Context) {
 func (d *Deps) AdminUpdateCert(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var cert models.Cert
@@ -191,8 +189,7 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 		KeyPEM  *string `json:"key_pem"`
 		Remark  *string `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	updates := map[string]any{}
@@ -268,7 +265,7 @@ func (d *Deps) reenqueueRelayConfigsForCert(certID uint64) {
 func (d *Deps) AdminDeleteCert(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var cnt int64

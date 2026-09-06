@@ -520,7 +520,7 @@ function autoAlignServerTags(serverId: number) {
   }
 
   setServerTagOrder(serverId, { outbounds: matchedOutboundIds })
-  ElMessage.success('已自动理顺出入站对应走线')
+  ElMessage.success('已自动整理出入站对应走线')
 }
 
 function buildGraph(data: TopologyData) {
@@ -928,7 +928,7 @@ async function handleSaveAccessPoint() {
 
 async function handleDeleteAccessPoint(id: number) {
   try {
-    await ElMessageBox.confirm('确定删除该用户接入点？', '删除接入点', {
+    await ElMessageBox.confirm('确定删除该接入点？', '删除接入点', {
       type: 'warning',
       confirmButtonText: '确定删除',
       cancelButtonText: '取消',
@@ -1023,7 +1023,7 @@ async function saveLayer() {
 
 async function handleDeleteLayer(layer: AccessLayer) {
   try {
-    await ElMessageBox.confirm(`删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅端点改为入站自身分享地址。`, '删除对外层', {
+    await ElMessageBox.confirm(`删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅地址改为入站自身分享地址。`, '删除对外层', {
       type: 'warning',
       confirmButtonText: '确定删除',
       cancelButtonText: '取消',
@@ -1351,7 +1351,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     if (!ap) return
     try {
       await ElMessageBox.confirm(
-        `解除用户接入点「${ap.name}」的目标连线？`,
+        `解除接入点「${ap.name}」的目标连线？`,
         '解除接入点连接',
         { type: 'warning' },
       )
@@ -1554,7 +1554,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             <el-icon><RefreshRight /></el-icon>&nbsp;重置网格
           </el-button>
         </el-button-group>
-        <el-button v-if="editable" size="small" type="primary" plain @click="openCreateAccessPoint" title="新建用户接入点（订阅入口）">
+        <el-button v-if="editable" size="small" type="primary" plain @click="openCreateAccessPoint" title="新建接入点（订阅入口）">
           <el-icon><Plus /></el-icon>&nbsp;接入点
         </el-button>
         <el-button size="small" class="fs-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏查看'">
@@ -1703,7 +1703,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                 @click.stop="autoAlignServerTags(nodeProps.data.server.id)"
                 @dblclick.stop
               >
-                <el-icon><MagicStick /></el-icon>&nbsp;理顺
+                <el-icon><MagicStick /></el-icon>&nbsp;整理
               </button>
               <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', nodeProps.data.server.id)">
                 <el-icon><Setting /></el-icon>&nbsp;详情
@@ -1720,7 +1720,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <button
                     v-if="editable"
                     class="sb-add-btn layer-add-btn"
-                    title="新建对外接入层（订阅端点分组：内部实现对外不可见）"
+                    title="新建对外接入层（订阅地址分组：内部实现对外不可见）"
                     @click.stop="openCreateLayer(nodeProps.data.server.id)"
                   >
                     <el-icon><Plus /></el-icon>&nbsp;层
@@ -1990,7 +1990,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       </template>
     </VueFlow>
     <div v-else class="topology-empty">
-      <el-empty description="暂无服务器。先到「服务器」页添加节点，再回来拖线接线。" />
+      <el-empty description="暂无服务器。先到「服务器管理」页新增服务器，再回来拖线连接。" />
     </div>
 
     <!-- 出站新建/编辑弹窗 -->
@@ -2005,13 +2005,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     <!-- 用户接入点新建/编辑弹窗 (Consumer Pipeline Model) -->
     <el-dialog
       v-model="apDialogOpen"
-      :title="apEditingId ? '编辑用户接入点 (Endpoint)' : '新建用户接入点 (Endpoint)'"
+      :title="apEditingId ? '编辑接入点' : '新建接入点'"
       width="580px"
       append-to-body
     >
       <el-form label-position="top">
         <el-alert
-          title="用户接入点是面向客户端订阅与分发的入口端点。定义 Tag 名称与开放权限组即可，连接配置沿拓扑管道自适应继承（亦可在下方进行高级覆写）。"
+          title="接入点是面向客户端订阅与分发的入口。定义 Tag 名称与开放权限组即可，连接配置沿拓扑链路自动继承（亦可在下方进行高级覆写）。"
           type="info"
           :closable="false"
           style="margin-bottom: 16px"
@@ -2026,7 +2026,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           </el-form-item>
         </div>
 
-        <el-form-item label="开放权限组（显式白名单权限控制，勾选可见的用户组）">
+        <el-form-item label="开放权限组（显式白名单权限控制，勾选可见的权限组）">
           <el-select
             v-model="apForm.permission_group_ids"
             multiple
@@ -2064,7 +2064,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <!-- 高级覆写（可选） -->
         <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
           <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
-            订阅地址覆写（选填；留空沿管道继承：入站分享地址 / 接入层端点。自定义 Host/Port 常用于表达中转或入口端点）
+            订阅地址覆写（选填；留空沿链路继承：入站分享地址 / 接入层端点。自定义 Host/Port 常用于表达中转或入口端点）
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
             <el-form-item label="自定义连接 Host" style="margin-bottom: 0">

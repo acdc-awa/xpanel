@@ -157,7 +157,7 @@ async function deleteLayerFromEditor() {
   const count = l.inbound_count ?? 1
   try {
     await ElMessageBox.confirm(
-      `删除对外层「${l.name}」？该层当前挂载 ${count} 个入站（含本入站在内），删除后全部回退为直连端点（订阅端点改为各自分享地址）。`,
+      `删除对外层「${l.name}」？该层当前挂载 ${count} 个入站（含本入站在内），删除后全部回退为直连端点（订阅地址改为各自分享地址）。`,
       '删除对外层',
       { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
     )
@@ -284,7 +284,7 @@ const REALITY_PRESETS = [
 function applyRealityPreset(preset: { dest: string; sni: string }) {
   realityForm.dest = preset.dest
   realityForm.server_name = preset.sni
-  ElMessage.success(`已应用借壳预设: ${preset.sni}`)
+  ElMessage.success(`已应用伪装站点预设：${preset.sni}`)
 }
 
 // Caddyfile 反代配置片段生成（挂载对外层时用层 Host，否则用分享地址覆写）
@@ -404,7 +404,7 @@ watch(
   (v) => {
     if (v !== 'relay' && localTlsType.value === 'vlessenc') {
       localTlsType.value = 'reality'
-      ElMessage.info('VLESS Encryption 一期仅支持转发入站，安全层已回退 REALITY')
+      ElMessage.info('VLESS Encryption 暂仅支持转发入站，安全层已回退 REALITY')
     }
   },
 )
@@ -871,7 +871,7 @@ async function copyText(text: string, label: string) {
         <!-- ==================== 1. 基础配置 Tab ==================== -->
         <div v-show="activeTab === 'basic'" class="tab-pane">
           <div class="form-card">
-            <div class="card-title">接入点模式</div>
+            <div class="card-title">入站类型</div>
             <el-radio-group v-model="localInboundType" class="type-radios" @change="onTypeChange">
               <el-radio value="user">
                 <span>用户入站</span>
@@ -879,14 +879,14 @@ async function copyText(text: string, label: string) {
               </el-radio>
               <el-radio value="relay">
                 <span>转发入站</span>
-                <span class="type-sub">供上游节点链式代理连接落地</span>
+                <span class="type-sub">供上游服务器链式代理连接落地</span>
               </el-radio>
             </el-radio-group>
 
             <div v-if="localInboundType === 'relay'" class="relay-box">
               <el-form-item label="内部 UUID">
                 <div style="display: flex; gap: 8px; width: 100%">
-                  <el-input :model-value="localInternalUUID" placeholder="保存并下发后由节点回填" disabled />
+                  <el-input :model-value="localInternalUUID" placeholder="保存并下发后由服务器回填" disabled />
                   <el-button v-if="localInternalUUID" @click="copyText(localInternalUUID, '内部 UUID')">
                     <el-icon><CopyDocument /></el-icon>
                   </el-button>
@@ -922,7 +922,7 @@ async function copyText(text: string, label: string) {
               <el-form-item>
                 <template #label>
                   <span>流量计费倍率</span>
-                  <el-tooltip content="扣费倍率：1.00 为正常计费，1.50 表示消耗 1GB 扣减 1.5GB 配额。" placement="top">
+                  <el-tooltip content="扣费倍率：1.00 为正常计费，如填 1.5，每消耗 1 GB 扣减 1.5 GB 配额。" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </template>
@@ -932,7 +932,7 @@ async function copyText(text: string, label: string) {
               <el-form-item>
                 <template #label>
                   <span>流量上限 (GB)</span>
-                  <el-tooltip content="该入站所有用户合计流量上限，0 = 不限；跑满后自动停用（临时节点按量租用场景）。" placement="top">
+                  <el-tooltip content="该入站所有用户合计流量上限，0 = 不限；用尽后自动停用（临时服务器按量租用场景）。" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </template>
@@ -1259,7 +1259,7 @@ async function copyText(text: string, label: string) {
               <el-form-item label="对外接入层">
                 <div style="display: flex; gap: 10px; width: 100%; align-items: center; flex-wrap: wrap">
                   <el-select v-model="localLayerId" style="flex: 1; min-width: 240px" :disabled="!props.serverId" placeholder="选择对外层（或新建）">
-                    <el-option :value="0" label="不使用（直连端点，自持分享地址）" />
+                    <el-option :value="0" label="不使用（直连端点，自带分享地址）" />
                     <el-option
                       v-for="l in layers"
                       :key="l.id"
@@ -1299,7 +1299,7 @@ async function copyText(text: string, label: string) {
                 </el-form-item>
 
                 <div style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
-                  节点自有 IP/端口（兜底层）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
+                  节点自有 IP/端口（兜底）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
                 </div>
 
                 <el-form-item label="订阅安全层 (TLS)">
@@ -1321,7 +1321,7 @@ async function copyText(text: string, label: string) {
               </template>
 
               <el-form-item label="分享 SNI">
-                <el-input v-model="localShareSni" placeholder="留空默认跟随节点配置（挂层时回落层 Host）" />
+                <el-input v-model="localShareSni" placeholder="留空默认跟随服务器配置（挂层时回落层 Host）" />
               </el-form-item>
 
               <el-form-item label="分享 Host">

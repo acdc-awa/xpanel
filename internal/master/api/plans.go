@@ -96,8 +96,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		Purchasable *bool `json:"purchasable"`
 		Renewable   *bool `json:"renewable"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if req.PermissionGroupID != 0 {
@@ -134,7 +133,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var plan models.Plan
@@ -159,8 +158,7 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		// 该套餐全部用户，并触发热更同步（立即踢除超量用户）。
 		SyncUsers *bool `json:"sync_users"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if req.PermissionGroupID != nil && *req.PermissionGroupID != 0 {
@@ -243,7 +241,7 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		if req.SyncUsers != nil && *req.SyncUsers {
 			snapUpdates := models.PlanSnapshotColumns(&plan)
 			if err := d.DB.Model(&models.User{}).Where("plan_id = ?", plan.ID).Updates(snapUpdates).Error; err != nil {
-				util.ServerError(c, "同步存量用户快照失败")
+				util.ServerError(c, "同步存量用户套餐数据失败")
 				return
 			}
 			d.TriggerUserChange()
@@ -258,7 +256,7 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 func (d *Deps) AdminDeletePlan(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var userCnt int64

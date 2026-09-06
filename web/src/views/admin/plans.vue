@@ -52,8 +52,8 @@ const form = reactive({
 })
 const saving = ref(false)
 
-const defaultPlanDesc = `包含 $TRAFFIC$ 周期高速流量
-有效服务周期 $DURATION$ 天
+const defaultPlanDesc = `包含 $TRAFFIC$ 高速流量
+有效期 $DURATION$ 天
 $DEVICE_LIMIT$
 全量优质节点与中转链路授权
 全面兼容 Mihomo / Clash 生态`
@@ -200,7 +200,7 @@ async function remove(row: any) {
       <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增套餐</el-button>
     </div>
 
-    <BaseCard title="服务计划套餐列表">
+    <BaseCard title="套餐列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
@@ -255,7 +255,7 @@ async function remove(row: any) {
               </div>
             </div>
             <div class="grid-item">
-              <span class="item-label">有效周期</span>
+              <span class="item-label">有效期</span>
               <div class="item-value cell-mono">{{ row.duration_days }} 天</div>
             </div>
             <div class="grid-item">
@@ -321,14 +321,14 @@ async function remove(row: any) {
             v-model="form.description"
             type="textarea"
             :rows="5"
-            placeholder="如：&#10;包含 $TRAFFIC$ 周期高速流量&#10;有效服务周期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
+            placeholder="如：&#10;包含 $TRAFFIC$ 高速流量&#10;有效期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
           />
         </el-form-item>
         <div class="form-grid-2">
           <el-form-item label="价格（元）">
             <el-input-number v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="有效周期（天）">
+          <el-form-item label="有效期（天）">
             <el-input-number v-model="form.duration_days" :min="1" style="width: 100%" />
           </el-form-item>
           <el-form-item label="流量配额（GB）">
@@ -343,7 +343,7 @@ async function remove(row: any) {
           <el-form-item label="热门推荐">
             <div style="display: flex; align-items: center; gap: 8px; width: 100%">
               <el-switch v-model="form.is_featured" />
-              <span class="muted" style="font-size: 12px">商城挂「热门推荐」徽标并高亮（多个标记时仅排最前的生效）</span>
+              <span class="muted" style="font-size: 12px">商城展示「热门推荐」徽标并高亮（多个标记时仅排最前的生效）</span>
             </div>
           </el-form-item>
         </div>
@@ -362,7 +362,7 @@ async function remove(row: any) {
           </div>
           <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
             商店按身份过滤：非持有者只见「可新购」套餐；持有者额外可见自己「可续费」的当前套餐（用于续费）。
-            停售老套餐保留续费 = 关「可新购」留「可续费」。
+            停售老套餐但保留续费：关闭「可新购」，保留「可续费」。
           </div>
         </el-form-item>
         <el-form-item label="权限组（选填，购买后自动授权组内入站）">
@@ -371,10 +371,10 @@ async function remove(row: any) {
           </el-select>
         </el-form-item>
         <el-form-item v-if="editing">
-          <el-checkbox v-model="form.sync_users">同步到存量用户</el-checkbox>
+          <el-checkbox v-model="form.sync_users">同步存量用户</el-checkbox>
           <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
             默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。
-            勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步节点（超量用户会被即时踢除）。
+            勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。
           </div>
         </el-form-item>
       </el-form>

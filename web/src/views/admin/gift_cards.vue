@@ -55,7 +55,7 @@ const createOpen = ref(false)
 const creating = ref(false)
 const createForm = reactive({
   count: 10,
-  name: '通用充值卡',
+  name: '通用礼品卡',
   face_value_yuan: 50,
   expires_at: '',
 })
@@ -66,7 +66,7 @@ const createdCards = ref<GiftCard[]>([])
 function openCreate() {
   Object.assign(createForm, {
     count: 10,
-    name: '通用充值卡',
+    name: '通用礼品卡',
     face_value_yuan: 50,
     expires_at: '',
   })
@@ -170,12 +170,12 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
       <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>&nbsp;批量生成充值卡
+        <el-icon><Plus /></el-icon>&nbsp;批量生成礼品卡
       </el-button>
     </div>
 
     <!-- 数据表格 -->
-    <BaseCard title="充值卡密列表">
+    <BaseCard title="卡密列表">
       <!-- 桌面端表格视图 (双行紧凑聚合自适应展示) -->
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
@@ -183,7 +183,7 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
-        <p style="margin-top: 8px">暂无充值卡记录，点击右上角「批量生成充值卡」</p>
+        <p style="margin-top: 8px">暂无礼品卡记录，点击右上角「批量生成礼品卡」</p>
       </div>
 
       <!-- 全局统一礼品卡卡片网格流 (自适应 1~4 列) -->
@@ -193,7 +193,7 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
           <div class="card-head">
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span class="card-name">{{ row.name || '通用充值卡' }}</span>
+              <span class="card-name">{{ row.name || '通用礼品卡' }}</span>
               <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
                 {{ statusMap[row.status]?.text || row.status }}
               </el-tag>
@@ -268,10 +268,10 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
     </BaseCard>
 
     <!-- 批量生成弹窗 -->
-    <el-dialog v-model="createOpen" title="批量生成充值卡" width="460px">
+    <el-dialog v-model="createOpen" title="批量生成礼品卡" width="460px">
       <el-form label-position="top">
         <el-form-item label="批次名称 / 备注">
-          <el-input v-model="createForm.name" placeholder="如 新年促销50元充值卡" />
+          <el-input v-model="createForm.name" placeholder="如 新年促销50元礼品卡" />
         </el-form-item>
         <div class="form-grid-2">
           <el-form-item label="生成数量（张）">
@@ -297,12 +297,12 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
     </el-dialog>
 
     <!-- 生成结果弹窗 -->
-    <el-dialog v-model="resultOpen" title="卡密生成成功" width="520px">
+    <el-dialog v-model="resultOpen" title="礼品卡生成成功" width="520px">
       <el-alert
         type="success"
         :closable="false"
         show-icon
-        :title="`本次已成功生成 ${createdCards.length} 张面值为 ¥ ${createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0'} 的充值卡密：`"
+        :title="`本次已成功生成 ${createdCards.length} 张面值为 ¥ ${createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0'} 的卡密：`"
         style="margin-bottom: 14px"
       />
       <el-input

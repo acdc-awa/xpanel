@@ -23,7 +23,7 @@ import (
 func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var inb models.Inbound
@@ -36,17 +36,17 @@ func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 		return
 	}
 	if d.Hub == nil {
-		util.ServerError(c, "节点网关未初始化")
+		util.ServerError(c, "服务器网关未初始化")
 		return
 	}
 	res, err := d.Hub.Ask(inb.ServerID, typ,
 		protocol.SetupInternalAccountPayload{Tag: inb.Tag}, nodegate.AskTimeout)
 	if err != nil {
-		util.BadRequest(c, "指令失败（节点离线或超时）："+err.Error())
+		util.BadRequest(c, "指令发送失败（服务器离线或超时）")
 		return
 	}
 	if !res.OK {
-		util.BadRequest(c, "节点处理失败: "+res.Error)
+		util.BadRequest(c, "服务器处理失败: "+res.Error)
 		return
 	}
 	var out protocol.SetupInternalResult
@@ -141,7 +141,7 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 func (d *Deps) AdminSetPermissionGroupAccessPoints(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var g models.PermissionGroup
@@ -152,8 +152,7 @@ func (d *Deps) AdminSetPermissionGroupAccessPoints(c *gin.Context) {
 	var req struct {
 		AccessPointIDs []uint64 `json:"access_point_ids"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if len(req.AccessPointIDs) > 0 {
@@ -181,8 +180,7 @@ func (d *Deps) AdminCreatePermissionGroup(c *gin.Context) {
 		Name   string `json:"name" binding:"required,max=64"`
 		Remark string `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	g := models.PermissionGroup{Name: req.Name, Remark: req.Remark}
@@ -198,7 +196,7 @@ func (d *Deps) AdminCreatePermissionGroup(c *gin.Context) {
 func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var g models.PermissionGroup
@@ -211,8 +209,7 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 		Remark        *string `json:"remark"`
 		ClashTemplate *string `json:"clash_template"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	updates := map[string]any{}
@@ -239,7 +236,7 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var g models.PermissionGroup
@@ -284,7 +281,7 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var cnt int64
@@ -511,8 +508,7 @@ func (d *Deps) AdminGetTopologyLayout(c *gin.Context) {
 // AdminSaveTopologyLayout PUT /api/v1/admin/topology-layout —— 保存画布布局（upsert settings，原样透传 hash）
 func (d *Deps) AdminSaveTopologyLayout(c *gin.Context) {
 	var req topoLayout
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if req.TagOrders != nil {

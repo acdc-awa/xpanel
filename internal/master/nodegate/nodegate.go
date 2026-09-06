@@ -223,13 +223,13 @@ func (h *Hub) authenticate(a protocol.AuthPayload) (*models.Server, error) {
 	var server models.Server
 	if err := h.DB.Where("node_id = ?", a.NodeID).First(&server).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("节点不存在")
+			return nil, errors.New("服务器不存在")
 		}
 		return nil, errors.New("数据库错误")
 	}
 	// 无认证端点上的密钥比较必须恒定时间，防按字节猜解的时序侧信道。
 	if subtle.ConstantTimeCompare([]byte(util.HashSecret(a.Secret)), []byte(server.Secret)) != 1 {
-		return nil, errors.New("节点密钥错误")
+		return nil, errors.New("服务器密钥错误")
 	}
 	return &server, nil
 }
@@ -257,7 +257,7 @@ func (h *Hub) unregister(conn *Conn) {
 		for id, req := range h.pending {
 			if req.serverID == conn.ServerID {
 				select {
-				case req.ch <- &protocol.ResultPayload{OK: false, Error: "节点连接已断开"}:
+				case req.ch <- &protocol.ResultPayload{OK: false, Error: "服务器连接已断开"}:
 				default:
 				}
 				delete(h.pending, id)
@@ -538,13 +538,13 @@ func (h *Hub) Send(serverID uint64, msg []byte) error {
 	conn, ok := h.conns[serverID]
 	h.mu.RUnlock()
 	if !ok {
-		return errors.New("节点离线")
+		return errors.New("服务器离线")
 	}
 	select {
 	case conn.Send <- msg:
 		return nil
 	case <-time.After(WriteTimeout):
-		return errors.New("节点发送超时")
+		return errors.New("服务器发送超时")
 	}
 }
 
@@ -573,7 +573,7 @@ func (h *Hub) Ask(serverID uint64, typ string, payload any, timeout time.Duratio
 	case res := <-ch:
 		return res, nil
 	case <-time.After(timeout):
-		return nil, errors.New("等待节点回执超时")
+		return nil, errors.New("等待服务器回执超时")
 	}
 }
 
@@ -593,7 +593,7 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 	if !h.IsOnline(serverID) {
 		log.Printf("nodegate: 节点 %d 离线，配置待推送（上线时由 ServeWS 自动补推）", serverID)
-		h.recordPushFailure(p.ID, "节点离线，等待上线自动补推")
+		h.recordPushFailure(p.ID, "服务器离线，等待上线自动补推")
 		return
 	}
 	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
@@ -608,7 +608,7 @@ func (h *Hub) PushPending(serverID uint64) {
 			msg = res.Error
 		}
 		log.Printf("nodegate: 节点 %d 拒绝推送的配置: %s（保留待推送）", serverID, msg)
-		h.recordPushFailure(p.ID, "节点拒绝: "+msg)
+		h.recordPushFailure(p.ID, "服务器拒绝: "+msg)
 		return
 	}
 	marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
@@ -643,7 +643,7 @@ func (h *Hub) recordPushFailure(pendingID uint64, reason string) {
 // SyncUsers 计算指定节点最新有效用户并发送 MsgSyncUsers。
 func (h *Hub) SyncUsers(serverID uint64) error {
 	if h.Config == nil {
-		return errors.New("config service not initialized")
+		return errors.New("配置服务未初始化")
 	}
 	usersMap, err := h.Config.GetValidUsers(serverID)
 	if err != nil {

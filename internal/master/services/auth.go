@@ -20,6 +20,7 @@ var (
 	ErrUserExists     = errors.New("用户名或邮箱已存在")
 	ErrInviteInvalid  = errors.New("邀请码无效或已使用")
 	ErrInvalidCreds   = errors.New("用户名或密码错误")
+	ErrResetInvalid   = errors.New("邮箱或验证码错误")
 	ErrUserDisabled   = errors.New("账号已被禁用")
 	ErrInvalidRefresh = errors.New("无效的刷新令牌")
 	ErrRegisterClosed = errors.New("注册已关闭")
@@ -300,7 +301,7 @@ func (s *OTPService) ResetPassword(ctx context.Context, email, code, newPwd stri
 	email = strings.ToLower(strings.TrimSpace(email))
 	var user models.User
 	if err := s.DB.WithContext(ctx).Where("email = ? OR username = ?", email, email).First(&user).Error; err != nil {
-		return ErrInvalidCreds
+		return ErrResetInvalid
 	}
 	if !user.TotpEnabled {
 		return ErrTOTPNotEnabled // 未绑定 TOTP 无法自助重置（走管理员）

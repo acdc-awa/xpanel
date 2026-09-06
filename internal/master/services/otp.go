@@ -26,20 +26,21 @@ import (
 //   - 校验窗口 ±1 步（30s×3 窗口，容忍时钟偏移）
 
 const (
-	totpIssuer            = "XrayPanel"
-	totpMaxFailed         = 5
-	totpLockDuration      = 30 * time.Minute
-	totpBackupCodeCount   = 8
-	totpBackupCodeLen     = 10
+	totpIssuer          = "XrayPanel"
+	totpMaxFailed       = 5
+	totpLockDuration    = 30 * time.Minute
+	totpBackupCodeCount = 8
+	totpBackupCodeLen   = 10
 )
 
 // TOTPError 业务错误。
 var (
-	ErrTOTPNotEnabled = errors.New("未开启两步验证")
-	ErrTOTPAlreadyOn  = errors.New("已开启两步验证，请先解绑")
+	ErrTOTPNotEnabled  = errors.New("未开启两步验证")
+	ErrTOTPAlreadyOn   = errors.New("已开启两步验证，请先解绑")
 	ErrTOTPCodeInvalid = errors.New("验证码错误")
-	ErrTOTPLocked     = errors.New("验证码错误次数过多，请 30 分钟后再试")
-	ErrBackupInvalid  = errors.New("恢复码无效或已使用")
+	ErrTOTPLocked      = errors.New("验证码错误次数过多，请 30 分钟后再试")
+	ErrBackupInvalid   = errors.New("恢复码无效或已使用")
+	ErrSecretInvalid   = errors.New("验证信息无效，请联系管理员")
 )
 
 // OTPService TOTP 2FA 服务。
@@ -112,13 +113,13 @@ func (s *OTPService) Confirm(userID uint64, secret, code string) (backupCodes []
 	}
 	raw, _ := json.Marshal(hashes)
 	if err := s.DB.Model(&user).Updates(map[string]any{
-		"totp_secret":      enc,
-		"totp_enabled":     true,
+		"totp_secret":       enc,
+		"totp_enabled":      true,
 		"totp_failed_count": 0,
 		"totp_locked_until": nil,
 		"backup_codes":      string(raw),
 		// ISSUE-02 收尾：开启 TOTP 后立即吊销开启前的旧 access/refresh（重新登录换取 TwoFA 令牌）。
-		"token_version":    gorm.Expr("token_version + 1"),
+		"token_version": gorm.Expr("token_version + 1"),
 	}).Error; err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (s *OTPService) Disable(userID uint64) error {
 		"totp_locked_until": nil,
 		"backup_codes":      "",
 		// 解绑 TOTP 同样吊销旧会话，防止关闭 TOTP 后旧的非 2FA access 重新可用。
-		"token_version":     gorm.Expr("token_version + 1"),
+		"token_version": gorm.Expr("token_version + 1"),
 	}).Error
 }
 
@@ -223,23 +224,23 @@ func (s *OTPService) encrypt(plain string) (string, error) {
 func (s *OTPService) decrypt(enc string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(enc)
 	if err != nil {
-		return "", err
+		return "", ErrSecretInvalid
 	}
 	block, err := aes.NewCipher(s.Encrypt)
 	if err != nil {
-		return "", err
+		return "", ErrSecretInvalid
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return "", ErrSecretInvalid
 	}
 	if len(raw) < gcm.NonceSize() {
-		return "", errors.New("bad ciphertext")
+		return "", ErrSecretInvalid
 	}
 	nonce, sealed := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
 	plain, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
-		return "", err
+		return "", ErrSecretInvalid
 	}
 	return string(plain), nil
 }

@@ -59,7 +59,7 @@ function copyText(text: string, label: string) {
 function importToMihomo() {
   if (!mihomoSchemeUrl.value) return
   window.location.href = mihomoSchemeUrl.value
-  ElMessage.info('正在尝试唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址')
+  ElMessage.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
 }
 
 interface ClientApp {
@@ -75,7 +75,7 @@ const clashApps: ClientApp[] = [
     name: 'Clash Verge Rev',
     tag: '首选推荐',
     platforms: ['Windows', 'macOS', 'Linux'],
-    desc: '基于 Mihomo 核心，现代极简 UI，性能卓越，全协议完美兼容与流媒体策略组分流。',
+    desc: '基于 Mihomo 核心，现代极简 UI，全协议兼容，支持流媒体策略组分流。',
     url: 'https://github.com/clash-verge-rev/clash-verge-rev',
   },
   {
@@ -86,17 +86,17 @@ const clashApps: ClientApp[] = [
     url: 'https://github.com/mihomo-party-org/mihomo-party',
   },
   {
-    name: 'Flclash',
+    name: 'FlClash',
     tag: '全平台',
     platforms: ['Android', 'iOS', 'Windows', 'macOS'],
-    desc: '基于 Flutter 的跨平台客户端，轻量美观，内存占用低，移动端体验极佳。',
+    desc: '基于 Flutter 的跨平台客户端，轻量美观，内存占用低，适配移动端。',
     url: 'https://github.com/chen08209/FlClash',
   },
   {
     name: 'Stash',
     tag: 'iOS 推荐',
     platforms: ['iOS', 'iPadOS', 'macOS'],
-    desc: '苹果生态顶级的规则分流代理客户端，全面支持按需连接与自动化策略。',
+    desc: '适配苹果生态的规则分流代理客户端，全面支持按需连接与自动化策略。',
     url: 'https://stash.ws/',
   },
 ]
@@ -108,7 +108,7 @@ const clashApps: ClientApp[] = [
     <div class="sub-hero">
       <div class="sub-badge"><el-icon><Promotion /></el-icon>&nbsp;Mihomo 核心托管</div>
       <h1 class="sub-title">Mihomo 订阅中心</h1>
-      <p class="sub-desc">专为 Mihomo / Clash 核心深度优化，包含策略分流、自动故障转移与 VLESS REALITY 落地链路。</p>
+      <p class="sub-desc">适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。</p>
     </div>
 
     <!-- 核心一键导入卡片 -->
@@ -118,8 +118,8 @@ const clashApps: ClientApp[] = [
           <!-- 左侧：一键唤醒与快捷复制 -->
           <div class="sub-left">
             <div class="sub-url-box">
-              <span class="sub-url-label">Mihomo 订阅端点地址</span>
-              <code class="sub-url-code cell-mono">{{ subscribeUrl || '正在生成订阅凭据…' }}</code>
+              <span class="sub-url-label">Mihomo 订阅地址</span>
+              <code class="sub-url-code cell-mono">{{ subscribeUrl || '正在生成订阅地址…' }}</code>
             </div>
 
             <div class="sub-action-buttons">
@@ -152,7 +152,7 @@ const clashApps: ClientApp[] = [
 
     <!-- 推荐客户端生态 -->
     <div class="section-title">
-      <span>推荐客户端（Mihomo 核心生态）</span>
+      <span>推荐客户端（Mihomo 生态）</span>
     </div>
 
     <div class="client-grid">
@@ -187,21 +187,21 @@ const clashApps: ClientApp[] = [
           <span class="step-num">1</span>
           <div class="step-info">
             <div class="step-title">获取客户端</div>
-            <div class="step-desc">Windows / macOS 推荐使用 <b>Clash Verge Rev</b> 或 <b>Mihomo Party</b>；Android 推荐 <b>Flclash</b>；iOS 推荐 <b>Stash</b>。</div>
+            <div class="step-desc">Windows / macOS 推荐使用 <b>Clash Verge Rev</b> 或 <b>Mihomo Party</b>；Android 推荐 <b>FlClash</b>；iOS 推荐 <b>Stash</b>。</div>
           </div>
         </div>
         <div class="sub-step">
           <span class="step-num">2</span>
           <div class="step-info">
             <div class="step-title">同步订阅配置</div>
-            <div class="step-desc">点击上方「一键导入 Mihomo 客户端」，或复制订阅端点地址至客户端配置管理中粘贴保存并更新。</div>
+            <div class="step-desc">点击上方「一键导入 Mihomo 客户端」，或复制订阅地址至客户端配置管理中粘贴保存并更新。</div>
           </div>
         </div>
         <div class="sub-step">
           <span class="step-num">3</span>
           <div class="step-info">
             <div class="step-title">启用系统代理</div>
-            <div class="step-desc">在客户端代理分组中选择节点或开启「自动故障转移 (Fallback)」，打开「系统代理 (System Proxy)」开关即可顺畅连接。</div>
+            <div class="step-desc">在客户端代理分组中选择节点或开启「自动故障转移」，打开「系统代理」开关即可顺畅连接。</div>
           </div>
         </div>
       </div>
@@ -212,7 +212,7 @@ const clashApps: ClientApp[] = [
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" style="width: 220px; height: 220px; border-radius: 8px; border: 1px solid var(--x-border)" />
         <p class="muted" style="font-size: 12px; text-align: center">
-          使用手机端 Mihomo 客户端（如 Stash、Flclash）扫码即可自动添加配置。
+          使用手机端 Mihomo 客户端（如 Stash、FlClash）扫码即可自动添加配置。
         </p>
       </div>
     </el-dialog>

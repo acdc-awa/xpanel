@@ -634,7 +634,7 @@ async function save() {
                     <span v-else class="p-auth-logo">X</span>
                     <div>
                       <div class="p-auth-title">{{ form.site.app_name || 'Xray 面板' }}</div>
-                      <div class="p-auth-sub">{{ form.site.app_description || '主控 · 节点 · 用户 一体化代理分发系统' }}</div>
+                      <div class="p-auth-sub">{{ form.site.app_description || '订阅与节点管理平台' }}</div>
                     </div>
                   </div>
                 </div>
@@ -677,8 +677,8 @@ async function save() {
             >
               <template #default>
                 <div style="font-size: 13px; line-height: 1.6">
-                  将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 节点长连接</b>物理分离。
-                  独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或节点网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
+                  将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 服务器长连接</b>物理分离。
+                  独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或服务器网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
                 </div>
               </template>
             </el-alert>
@@ -694,7 +694,7 @@ async function save() {
               </el-form-item>
 
               <el-form-item label="订阅入口路径 (subscribe_path)">
-                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /ehisnodn（默认 /sub）" clearable />
+                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
                   订阅端口<b>唯一入口</b>：只认该路径（支持 /path/:token 与 ?token=xxx），
                   其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。
@@ -711,7 +711,7 @@ async function save() {
                 </span>
               </el-form-item>
 
-              <el-form-item label="多域名分发（预留）">
+              <el-form-item label="多域名分发（暂未开放）">
                 <el-input v-model="form.site.subscribe_domain" placeholder="sub1.com,sub2.com（逗号分隔）" clearable />
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
                   用于轮询或备份的多订阅分发域名。
@@ -805,20 +805,20 @@ async function save() {
         </el-tab-pane>
 
         <!-- ==================== TAB 3.5: 节点上报 ==================== -->
-        <el-tab-pane :label="isMobile ? '上报' : '节点上报'" name="agent">
+        <el-tab-pane :label="isMobile ? '上报' : '服务器上报'" name="agent">
           <el-form label-position="top" style="max-width: 640px">
             <el-form-item label="流量上报周期（秒）">
               <el-input-number v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
-              <span class="muted tip" style="margin-left: 12px">节点每隔多久把 xray 流量增量上报给面板</span>
+              <span class="muted tip" style="margin-left: 12px">服务器每隔多久把 xray 流量增量上报给面板</span>
             </el-form-item>
             <el-form-item label="状态心跳周期（秒）">
               <el-input-number v-model="agentHeartbeatSec" :min="5" :max="1800" :step="5" style="width: 220px" />
               <span class="muted tip" style="margin-left: 12px">CPU / 内存 / 磁盘 / 在线用户等状态的上报频率</span>
             </el-form-item>
             <p class="muted tip">
-              保存后立即下发到所有在线节点（离线节点重连后自动生效）；agent.yaml 的本地配置作为兜底。
-              缩短流量上报周期可加快超额 / 到期用户的踢除时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；
-              周期过小会增大节点与面板的负载，建议 15–120 秒。
+              保存后立即下发到所有在线服务器（离线服务器重连后自动生效）；agent.yaml 的本地配置作为兜底。
+              缩短流量上报周期可加快超额 / 到期用户的踢下线时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；
+              周期过小会增大服务器与面板的负载，建议 15–120 秒。
             </p>
           </el-form>
         </el-tab-pane>

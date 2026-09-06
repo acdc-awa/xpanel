@@ -39,14 +39,14 @@ func validRuleJSON(raw string) bool {
 
 // outboundForm 出站创建/修改表单
 type outboundForm struct {
-	Tag                string `json:"tag" binding:"required,max=64"`
-	Protocol           string `json:"protocol" binding:"required,max=32"`
-	SettingsJSON       string `json:"settings_json"`
-	StreamSettingsJSON string `json:"stream_settings_json"`
-	SendThrough        string `json:"send_through"`
-	Enabled            *bool  `json:"enabled"`
-	Priority           *int   `json:"priority"`
-	Remark             string `json:"remark"`
+	Tag                string  `json:"tag" binding:"required,max=64"`
+	Protocol           string  `json:"protocol" binding:"required,max=32"`
+	SettingsJSON       string  `json:"settings_json"`
+	StreamSettingsJSON string  `json:"stream_settings_json"`
+	SendThrough        string  `json:"send_through"`
+	Enabled            *bool   `json:"enabled"`
+	Priority           *int    `json:"priority"`
+	Remark             string  `json:"remark"`
 	InboundRef         *uint64 `json:"inbound_ref"` // Phase T：引用落地入站（vnext 自动构造）
 }
 
@@ -131,7 +131,7 @@ func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 func (d *Deps) AdminGetServerOutbounds(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	EnsureDefaultServerOutbounds(d.DB, id)
@@ -147,7 +147,7 @@ func (d *Deps) AdminGetServerOutbounds(c *gin.Context) {
 func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	var srv models.Server
@@ -157,8 +157,7 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	}
 
 	var req outboundForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
@@ -235,12 +234,12 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	outboundID, err := strconv.ParseUint(c.Param("outbound_id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法出站 ID")
+		util.BadRequest(c, "无效的出站 ID")
 		return
 	}
 
@@ -261,8 +260,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		Remark             *string `json:"remark"`
 		InboundRef         *uint64 `json:"inbound_ref"` // nil=不变；0=解除引用；>0=设置引用
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -284,7 +282,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	if req.Tag != nil {
 		tag := strings.TrimSpace(*req.Tag)
 		if tag == "" {
-			util.BadRequest(c, "Tag 不能为空")
+			util.BadRequest(c, "出站 Tag 不能为空")
 			return
 		}
 		// 若当前记录是系统内置出站，禁止修改 Tag
@@ -382,12 +380,12 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	outboundID, err := strconv.ParseUint(c.Param("outbound_id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法出站 ID")
+		util.BadRequest(c, "无效的出站 ID")
 		return
 	}
 
@@ -518,7 +516,7 @@ func (d *Deps) demoteIfUnreferenced(targetInboundID uint64) {
 func (d *Deps) AdminGetServerRoutingRules(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	var list []models.ServerRoutingRule
@@ -533,7 +531,7 @@ func (d *Deps) AdminGetServerRoutingRules(c *gin.Context) {
 func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	var srv models.Server
@@ -543,8 +541,7 @@ func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 	}
 
 	var req routingRuleForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -598,12 +595,12 @@ func (d *Deps) AdminCreateServerRoutingRule(c *gin.Context) {
 func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	ruleID, err := strconv.ParseUint(c.Param("rule_id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法规则 ID")
+		util.BadRequest(c, "无效的规则 ID")
 		return
 	}
 
@@ -626,8 +623,7 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 		Priority    *int    `json:"priority"`
 		Remark      *string `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -697,12 +693,12 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 func (d *Deps) AdminDeleteServerRoutingRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法服务器 ID")
+		util.BadRequest(c, "无效的服务器 ID")
 		return
 	}
 	ruleID, err := strconv.ParseUint(c.Param("rule_id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法规则 ID")
+		util.BadRequest(c, "无效的规则 ID")
 		return
 	}
 

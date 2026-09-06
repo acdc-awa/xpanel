@@ -42,8 +42,7 @@ func (d *Deps) UserPayOrderByBalance(c *gin.Context) {
 	var req struct {
 		PlanID uint64 `json:"plan_id" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -141,8 +140,7 @@ func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
 		FaceValueCents int64  `json:"face_value_cents" binding:"required,min=1"`
 		ExpiresAt      string `json:"expires_at"` // RFC3339 可选
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 
@@ -171,7 +169,7 @@ func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
 func (d *Deps) AdminDeleteGiftCard(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	if err := d.GiftCard.DisableOrDelete(id); err != nil {
@@ -185,15 +183,14 @@ func (d *Deps) AdminDeleteGiftCard(c *gin.Context) {
 func (d *Deps) AdminAdjustUserBalance(c *gin.Context) {
 	targetUID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法用户 ID")
+		util.BadRequest(c, "无效的用户 ID")
 		return
 	}
 	var req struct {
 		AmountCents int64  `json:"amount_cents" binding:"required"`
 		Remark      string `json:"remark"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 

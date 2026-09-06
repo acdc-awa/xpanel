@@ -55,6 +55,17 @@ const balanceLogsOpen = ref(false)
 const balanceLogs = ref<BalanceLog[]>([])
 const loadingLogs = ref(false)
 
+// 余额流水类型中文名（与后端 models.BalanceLog 常量对应；remark 为空时兜底显示）
+const BALANCE_TYPE_LABEL: Record<string, string> = {
+  recharge_gift_card: '充值',
+  order_payment: '购买套餐',
+  admin_adjust: '管理员调整',
+  refund: '退款',
+}
+function balanceLogTitle(type?: string): string {
+  return BALANCE_TYPE_LABEL[type ?? ''] ?? '余额变动'
+}
+
 const balanceYuan = computed(() => {
   const cents = auth.user?.balance_cents ?? 0
   return (cents / 100).toFixed(2)
@@ -86,21 +97,21 @@ async function loadRecentLogs() {
 async function submitRedeem() {
   const code = redeemCode.value.trim()
   if (!code) {
-    ElMessage.warning('请输入充值卡密')
+    ElMessage.warning('请输入卡密')
     return
   }
   redeeming.value = true
   try {
     const { data } = await redeemGiftCard(code)
     if (data.code === 0) {
-      ElMessage.success(`充值成功！已到账 ¥ ${(data.data.face_value_cents / 100).toFixed(2)}`)
+      ElMessage.success(`充值成功，已到账 ¥${(data.data.face_value_cents / 100).toFixed(2)}`)
       redeemCode.value = ''
       await refresh()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '充值核销失败'))
+    ElMessage.error(errMsg(e, '卡密核销失败'))
   } finally {
     redeeming.value = false
   }
@@ -210,7 +221,7 @@ async function submitTwofaConfirm() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '绑定失败'))
+    ElMessage.error(errMsg(e, '开启失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -223,7 +234,7 @@ async function copyBackupCodes() {
     await navigator.clipboard.writeText(text)
     ElMessage.success('恢复码已复制到剪贴板')
   } catch {
-    ElMessage.error('复制失败，请手动选择复制')
+    ElMessage.error('复制失败，请手动复制')
   }
 }
 
@@ -248,7 +259,7 @@ async function submitTwofaDisable() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '解绑失败'))
+    ElMessage.error(errMsg(e, '关闭失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -259,8 +270,8 @@ const resettingSub = ref(false)
 async function onResetSubscribe() {
   try {
     await ElMessageBox.confirm(
-      '重置后旧订阅链接与已下发的节点密钥将立即失效，所有 Mihomo 客户端需重新同步新链接。确认重置？',
-      '重置订阅凭据',
+      '重置后原订阅地址将立即失效，已添加的客户端需重新同步新的订阅地址。确认重置？',
+      '重置订阅地址',
       { type: 'warning' },
     )
   } catch {
@@ -270,7 +281,7 @@ async function onResetSubscribe() {
   try {
     const { data } = await resetSubscribeToken()
     if (data.code === 0) {
-      ElMessage.success('订阅凭据已重置，请在控制台重新同步至 Mihomo 客户端')
+      ElMessage.success('订阅地址已重置，请重新同步至 Mihomo 客户端')
       await auth.fetchMe()
     } else {
       ElMessage.error(data.message)
@@ -305,25 +316,25 @@ async function onLogout() {
             <div class="balance-overview-box">
               <div class="bal-col">
                 <span class="bal-label">可用余额</span>
-                <span class="bal-value cell-mono">¥ {{ balanceYuan }}</span>
+                <span class="bal-value cell-mono">¥{{ balanceYuan }}</span>
               </div>
               <router-link to="/shop">
-                <el-button type="primary" size="default">选购服务计划</el-button>
+                <el-button type="primary" size="default">选购套餐</el-button>
               </router-link>
             </div>
 
             <!-- 卡密充值区域 -->
             <div class="topup-form-section">
               <div class="section-label">
-                <el-icon><Ticket /></el-icon>&nbsp;充值卡核销
+                <el-icon><Ticket /></el-icon>&nbsp;卡密核销
               </div>
               <p class="muted" style="font-size: 12px; margin-bottom: 10px">
-                输入充值卡密（格式如 <code>GIFT-XXXX-XXXX-XXXX-XXXX</code>），核销后余额即时到账。
+                输入卡密（见卡面说明），核销后余额即时到账。
               </p>
               <div class="redeem-box">
                 <el-input
                   v-model="redeemCode"
-                  placeholder="请输入 16 位充值卡密"
+                  placeholder="请输入 16 位卡密"
                   clearable
                   class="cell-mono"
                   @keyup.enter="submitRedeem"
@@ -345,7 +356,7 @@ async function onLogout() {
             <div class="autorenew-row">
               <div class="autorenew-info">
                 <div class="autorenew-title">到期自动续费</div>
-                <div class="muted" style="font-size: 12px">套餐到期前 1 小时内自动使用余额续购当前套餐</div>
+                <div class="muted" style="font-size: 12px">套餐到期前 1 小时内自动使用余额续费当前套餐</div>
               </div>
               <el-switch
                 :model-value="autoRenewExpire"
@@ -356,7 +367,7 @@ async function onLogout() {
             <div class="autorenew-row" style="margin-top: 12px">
               <div class="autorenew-info">
                 <div class="autorenew-title">流量耗尽自动续费</div>
-                <div class="muted" style="font-size: 12px">流量用尽后自动使用余额续购当前套餐（重新计时+清零流量）</div>
+                <div class="muted" style="font-size: 12px">流量用尽后自动使用余额续费当前套餐（有效期重新计算，流量重置）</div>
               </div>
               <el-switch
                 :model-value="autoRenewExhaust"
@@ -366,8 +377,7 @@ async function onLogout() {
             </div>
             <el-alert type="info" :closable="false" show-icon style="margin-top: 12px">
               <p style="font-size: 12px; line-height: 1.6">
-                续购按购买规则执行：现有剩余时长作废、自购买时刻重新计时、流量周期重置。余额不足时不扣费，
-                充值后下一轮自动补续；余额充足是前提，请保持账户余额充裕。
+                续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算；余额不足时不会扣费。
               </p>
             </el-alert>
           </div>
@@ -376,21 +386,21 @@ async function onLogout() {
         <!-- 最近收支记录 -->
         <div class="x-card">
           <div class="x-card-head">
-            <span>最近变动记录</span>
-            <span class="muted" style="font-size: 12px">显示近 5 条记录</span>
+            <span>最近变动</span>
+            <span class="muted" style="font-size: 12px">仅显示最近 5 条</span>
           </div>
           <div class="x-card-body" style="padding: 12px 16px;">
             <div v-if="balanceLogs.length" class="log-list">
               <div v-for="log in balanceLogs.slice(0, 5)" :key="log.id" class="log-item">
                 <div class="log-left">
-                  <div class="log-title">{{ log.remark || log.type }}</div>
+                  <div class="log-title">{{ log.remark || balanceLogTitle(log.type) }}</div>
                   <div class="log-time cell-mono">{{ String(log.created_at).replace('T', ' ').slice(0, 16) }}</div>
                 </div>
                 <div class="log-right">
                   <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
-                    {{ log.amount_cents > 0 ? '+' : '' }}¥ {{ (log.amount_cents / 100).toFixed(2) }}
+                    {{ log.amount_cents > 0 ? '+' : '' }}¥{{ (log.amount_cents / 100).toFixed(2) }}
                   </div>
-                  <div class="log-balance cell-mono">结余: ¥ {{ (log.balance_after / 100).toFixed(2) }}</div>
+                  <div class="log-balance cell-mono">结余：¥{{ (log.balance_after / 100).toFixed(2) }}</div>
                 </div>
               </div>
             </div>
@@ -418,7 +428,7 @@ async function onLogout() {
                 <span class="p-label">权限级别</span>
                 <span class="p-val">
                   <span class="x-chip" :class="auth.role === 'admin' ? 'purple' : 'gray'">
-                    {{ auth.role === 'admin' ? '管理员' : '普通订阅用户' }}
+                    {{ auth.role === 'admin' ? '管理员' : '普通用户' }}
                   </span>
                 </span>
               </div>
@@ -449,7 +459,7 @@ async function onLogout() {
                 </el-form-item>
               </div>
               <el-button type="primary" :loading="savingPwd" style="margin-top: 4px" @click="savePwd">
-                更新登录密码
+                保存修改
               </el-button>
             </el-form>
           </div>
@@ -464,7 +474,7 @@ async function onLogout() {
             <!-- 2FA -->
             <div class="x-toggle-card">
               <div class="toggle-info">
-                <div class="toggle-title">双因素身份验证 (2FA / TOTP)</div>
+                <div class="toggle-title">两步验证</div>
                 <div class="toggle-desc">使用 Google Authenticator 或 1Password 等身份验证器生成动态 6 位验证码。</div>
               </div>
               <div>
@@ -476,7 +486,7 @@ async function onLogout() {
                   :loading="twofaLoading"
                   @click="startTwofaSetup"
                 >
-                  <el-icon><Unlock /></el-icon>&nbsp;开启验证
+                  <el-icon><Unlock /></el-icon>&nbsp;开启两步验证
                 </el-button>
                 <el-button
                   v-else
@@ -485,7 +495,7 @@ async function onLogout() {
                   size="small"
                   @click="twofaStep = 'disable'; disableForm.code = ''; disableForm.password = ''; twofaOpen = true"
                 >
-                  <el-icon><Key /></el-icon>&nbsp;关闭验证
+                  <el-icon><Key /></el-icon>&nbsp;关闭两步验证
                 </el-button>
               </div>
             </div>
@@ -493,8 +503,8 @@ async function onLogout() {
             <!-- 重置订阅 Token -->
             <div class="x-toggle-card">
               <div class="toggle-info">
-                <div class="toggle-title">Mihomo 订阅访问凭据</div>
-                <div class="toggle-desc">若怀疑订阅地址外泄，可重置凭据。重置后旧链接失效，需重新导入客户端。</div>
+                <div class="toggle-title">Mihomo 订阅地址</div>
+                <div class="toggle-desc">若怀疑订阅地址外泄，可在此重置。重置后原订阅地址失效，需重新导入客户端。</div>
               </div>
               <div>
                 <el-button
@@ -504,7 +514,7 @@ async function onLogout() {
                   :loading="resettingSub"
                   @click="onResetSubscribe"
                 >
-                  <el-icon><RefreshRight /></el-icon>&nbsp;重置凭据
+                  <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅地址
                 </el-button>
               </div>
             </div>
@@ -512,7 +522,7 @@ async function onLogout() {
         </div>
 
         <el-button type="danger" plain style="width: 100%; margin-bottom: 24px" @click="onLogout">
-          退出当前登录账号
+          退出登录
         </el-button>
       </div>
     </div>
@@ -523,14 +533,14 @@ async function onLogout() {
         <div v-if="balanceLogs.length" class="log-list">
           <div v-for="log in balanceLogs" :key="log.id" class="log-item">
             <div class="log-left">
-              <div class="log-title">{{ log.remark || log.type }}</div>
+              <div class="log-title">{{ log.remark || balanceLogTitle(log.type) }}</div>
               <div class="log-time cell-mono">{{ String(log.created_at).replace('T', ' ').slice(0, 16) }}</div>
             </div>
             <div class="log-right">
               <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
-                {{ log.amount_cents > 0 ? '+' : '' }}¥ {{ (log.amount_cents / 100).toFixed(2) }}
+                {{ log.amount_cents > 0 ? '+' : '' }}¥{{ (log.amount_cents / 100).toFixed(2) }}
               </div>
-              <div class="log-balance cell-mono">结余: ¥ {{ (log.balance_after / 100).toFixed(2) }}</div>
+              <div class="log-balance cell-mono">结余：¥{{ (log.balance_after / 100).toFixed(2) }}</div>
             </div>
           </div>
         </div>
@@ -555,7 +565,7 @@ async function onLogout() {
           <img
             v-if="twofaQrUrl"
             :src="twofaQrUrl"
-            alt="TOTP 二维码"
+            alt="两步验证二维码"
             style="width: 200px; height: 200px; border-radius: 10px; border: 1px solid var(--x-border)"
           />
           <p class="muted" style="font-size: 12px; text-align: center">

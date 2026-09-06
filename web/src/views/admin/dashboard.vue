@@ -196,7 +196,7 @@ function updateCharts() {
   const pieData = breakdown
     .filter((b) => b.total_bytes > 0)
     .map((b) => ({
-      name: b.name || `节点#${b.server_id}`,
+      name: b.name || `服务器#${b.server_id}`,
       value: Number((b.total_bytes / (1024 * 1024 * 1024)).toFixed(2)),
     }))
 
@@ -246,7 +246,7 @@ function updateCharts() {
         },
     series: [
       {
-        name: '节点流量',
+        name: '服务器流量',
         type: 'pie',
         radius: isNarrow ? ['38%', '60%'] : ['40%', '68%'],
         center: isNarrow ? ['50%', '38%'] : ['28%', '50%'],
@@ -347,7 +347,7 @@ onUnmounted(() => {
         <div class="kpi-content">
           <div class="kpi-label">今日营收</div>
           <div class="kpi-val cell-mono">¥ {{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
-          <div class="kpi-sub">卡密激活 {{ dashData?.summary.today_used_cards_count || 0 }} 张</div>
+          <div class="kpi-sub">礼品卡核销 {{ dashData?.summary.today_used_cards_count || 0 }} 张</div>
         </div>
       </div>
 
@@ -389,7 +389,7 @@ onUnmounted(() => {
       <div class="kpi-card card-indigo">
         <div class="kpi-icon-box"><el-icon><Connection /></el-icon></div>
         <div class="kpi-content">
-          <div class="kpi-label">节点状态</div>
+          <div class="kpi-label">服务器状态</div>
           <div class="kpi-val cell-mono">
             {{ dashData?.summary.online_servers || 0 }} / {{ dashData?.summary.total_servers || 0 }}
             <span style="font-size: 13px; font-weight: 500; color: var(--x-text-3)">在线</span>
@@ -436,8 +436,8 @@ onUnmounted(() => {
 
       <div class="chart-panel donut-panel">
         <div class="panel-head">
-          <div class="title">节点流量分布</div>
-          <div class="sub">各节点累计承载流量占比</div>
+          <div class="title">服务器流量分布</div>
+          <div class="sub">各服务器累计承载流量占比</div>
         </div>
         <div ref="donutChartRef" class="echart-container"></div>
       </div>
@@ -448,7 +448,7 @@ onUnmounted(() => {
       <!-- 左侧：服务器健康度与系统负载矩阵 -->
       <div class="matrix-card">
         <div class="panel-head" style="margin-bottom: 14px">
-          <div class="title">节点监控矩阵</div>
+          <div class="title">服务器监控矩阵</div>
           <div class="sub">心跳、CPU、内存与实时带宽监控</div>
         </div>
 
@@ -456,7 +456,7 @@ onUnmounted(() => {
         <div class="desktop-table-view">
           <el-table :data="dashData?.server_matrix || []" size="small" style="width: 100%">
             <!-- 1. 节点与地址 -->
-            <el-table-column label="节点" min-width="110">
+            <el-table-column label="服务器" min-width="110">
               <template #default="{ row }">
                 <div style="font-weight: 600; color: var(--x-text); font-size: 13px">{{ row.name }}</div>
                 <div class="muted cell-mono" style="font-size: 11px">{{ row.host }}</div>
@@ -512,7 +512,7 @@ onUnmounted(() => {
                   <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
                 </div>
                 <div class="muted cell-mono" style="font-size: 10.5px; margin-top: 2px">
-                  在线: <b class="online-link" @click="openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 台
+                  在线：<b class="online-link" @click="openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
                 </div>
               </template>
             </el-table-column>
@@ -531,7 +531,7 @@ onUnmounted(() => {
         <!-- 移动端卡片流视图 -->
         <div class="mobile-cards-view">
           <div v-if="!dashData?.server_matrix || dashData.server_matrix.length === 0" style="text-align: center; padding: 24px 0; color: var(--x-text-3); font-size: 13px">
-            暂无节点监控数据
+            暂无服务器监控数据
           </div>
           <div v-else class="mobile-data-card-list">
             <div v-for="row in dashData.server_matrix" :key="row.id" class="mobile-data-card">
@@ -550,7 +550,7 @@ onUnmounted(() => {
 
               <div class="card-grid">
                 <div class="grid-item full-width">
-                  <span class="item-label">节点地址</span>
+                  <span class="item-label">服务器地址</span>
                   <div class="item-value cell-mono" style="font-size: 12px">{{ row.host }}</div>
                 </div>
                 <div class="grid-item">
@@ -587,9 +587,9 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="grid-item">
-                  <span class="item-label">在线设备数</span>
+                  <span class="item-label">在线用户数</span>
                   <div class="item-value cell-mono online-link" style="font-weight: 600" @click="openOnlineUsers(row as ServerMatrixItem)">
-                    {{ row.online_users || 0 }} 台
+                    {{ row.online_users || 0 }} 人
                   </div>
                 </div>
                 <div class="grid-item full-width">
@@ -664,7 +664,7 @@ onUnmounted(() => {
           </el-tab-pane>
 
           <!-- 2. 最近卡密激活流水 -->
-          <el-tab-pane label="卡密流水" name="cards">
+          <el-tab-pane label="礼品卡流水" name="cards">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">
               <el-table :data="dashData?.recent_gift_cards || []" size="small">
@@ -694,7 +694,7 @@ onUnmounted(() => {
             <!-- 移动端流式卡片 -->
             <div class="mobile-cards-view">
               <div v-if="!dashData?.recent_gift_cards || dashData.recent_gift_cards.length === 0" style="text-align: center; padding: 20px 0; color: var(--x-text-3); font-size: 13px">
-                暂无卡密激活记录
+                暂无礼品卡核销记录
               </div>
               <div v-else class="mobile-data-card-list">
                 <div v-for="row in dashData.recent_gift_cards" :key="row.code_masked" class="mobile-data-card" style="padding: 10px 12px">

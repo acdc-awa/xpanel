@@ -32,8 +32,7 @@ func (d *Deps) UserOTPConfirm(c *gin.Context) {
 		Secret string `json:"secret" binding:"required"`
 		Code   string `json:"code" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	codes, err := d.OTP.Confirm(uid, req.Secret, req.Code)
@@ -63,8 +62,7 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 		Code     string `json:"code"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	var user models.User
@@ -112,7 +110,7 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 func (d *Deps) AdminDisableOTP(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	if err := d.OTP.Disable(id); err != nil {

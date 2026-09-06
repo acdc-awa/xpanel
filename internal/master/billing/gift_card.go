@@ -167,10 +167,10 @@ func (s *GiftCardService) DisableOrDelete(cardID uint64) error {
 	ctx := context.Background()
 	card, err := s.store.GetGiftCard(ctx, cardID)
 	if err != nil {
-		return errors.New("卡密不存在")
+		return errors.New("礼品卡不存在")
 	}
 	if card.Status == models.GiftCardUsed {
-		return errors.New("已使用的卡密不可删除或作废")
+		return errors.New("已使用的礼品卡不可删除或作废")
 	}
 	return s.store.DeleteGiftCard(ctx, cardID)
 }

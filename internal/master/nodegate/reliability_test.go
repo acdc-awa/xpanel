@@ -113,7 +113,7 @@ func TestAskAbortedOnUnregister(t *testing.T) {
 
 	select {
 	case res := <-resCh:
-		if res == nil || res.OK || res.Error != "节点连接已断开" {
+		if res == nil || res.OK || res.Error != "服务器连接已断开" {
 			t.Fatalf("预期收到节点断开回执, 实际: %+v", res)
 		}
 	case <-time.After(500 * time.Millisecond):

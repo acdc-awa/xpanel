@@ -139,7 +139,7 @@ async function copyAllLinks() {
 
 async function revoke(row: any) {
   try {
-    await ElMessageBox.confirm(`确认作废邀请码 ${row.code}？作废后无法注册。`, '作废邀请码', {
+    await ElMessageBox.confirm(`确认作废邀请码 ${row.code}？作废后该邀请码将无法用于注册。`, '作废邀请码', {
       type: 'warning',
       confirmButtonText: '作废',
       cancelButtonText: '取消',
@@ -181,7 +181,7 @@ function fmtTime(t: string | null) {
       <el-button type="primary" @click="genOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
     </div>
 
-    <BaseCard title="邀请注册码列表">
+    <BaseCard title="邀请码列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
@@ -231,9 +231,9 @@ function fmtTime(t: string | null) {
               <div class="item-value cell-mono muted font-11">{{ fmtTime(row.created_at) }}</div>
             </div>
             <div class="grid-item">
-              <span class="item-label">核销时间</span>
+              <span class="item-label">使用时间</span>
               <div class="item-value cell-mono font-11" :style="{ color: row.used_at ? '#10b981' : 'var(--x-text-3)' }">
-                {{ row.used_at ? fmtTime(row.used_at) : '待核销' }}
+                {{ row.used_at ? fmtTime(row.used_at) : '未使用' }}
               </div>
             </div>
           </div>
@@ -252,7 +252,7 @@ function fmtTime(t: string | null) {
               </el-button>
             </template>
             <span v-else class="muted font-11" style="line-height: 30px">
-              {{ row.status === 1 ? '该邀请码已被成功核销' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
+              {{ row.status === 1 ? '该邀请码已被成功使用' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
             </span>
           </div>
         </div>

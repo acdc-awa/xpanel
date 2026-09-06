@@ -26,7 +26,7 @@ onMounted(async () => {
 
 async function submitEmail() {
   if (!email.value || !EMAIL_RE.test(email.value)) {
-    ElMessage.warning('请输入正确的邮箱')
+    ElMessage.warning('请输入正确的邮箱地址')
     return
   }
   if (site.captchaEnable && !turnstileToken.value) {
@@ -43,7 +43,7 @@ async function submitEmail() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '提交失败'))
+    ElMessage.error(errMsg(e, '提交失败，请稍后重试'))
   } finally {
     loading.value = false
   }
@@ -81,7 +81,7 @@ async function submitReset() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置失败'))
+    ElMessage.error(errMsg(e, '重置失败，请稍后重试'))
   } finally {
     submitting.value = false
   }
@@ -96,7 +96,7 @@ async function submitReset() {
         <span v-else class="auth-logo">X</span>
         <div>
           <div class="auth-title">{{ site.appName }} · 重置密码</div>
-          <div class="auth-sub">邮箱 + 两步验证码（未开启两步验证的账号请联系管理员）</div>
+          <div class="auth-sub">需邮箱和两步验证动态码（未开启两步验证的账号请联系管理员）</div>
         </div>
       </div>
 
@@ -118,17 +118,17 @@ async function submitReset() {
       <!-- 第二步：验证码 + 新密码 -->
       <el-form v-else label-position="top" size="large" @submit.prevent="submitReset">
         <p class="hint">{{ hint }}</p>
-        <el-form-item label="动态验证码 / 恢复码">
+        <el-form-item label="两步验证动态码 / 恢复码">
           <el-input
             v-model="form.code"
-            placeholder="Google Authenticator 6 位码或恢复码"
+            placeholder="验证器动态码或恢复码"
             :prefix-icon="Key"
             maxlength="16"
             style="font-family: var(--x-font-mono)"
           />
         </el-form-item>
         <el-form-item label="新密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位" :prefix-icon="Lock" />
+          <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位字符" :prefix-icon="Lock" />
         </el-form-item>
         <el-form-item label="确认新密码">
           <el-input

@@ -31,8 +31,7 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		Captcha *map[string]string `json:"captcha"`
 		Agent   *map[string]string `json:"agent"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	if d.Site == nil {

@@ -227,11 +227,11 @@ function applySelectedTemplate() {
   const tpl = selectedTemplate.value
   if (!tpl) return
   templateCode.value = tpl.content
-  ElMessage.success(`已载入「${tpl.name}」`)
+  ElMessage.success(`已加载「${tpl.name}」`)
 }
 
 async function saveAsTemplate() {
-  const name = (await ElMessageBox.prompt('为当前编辑器中的模板起个名字', '另存为模板', {
+  const name = (await ElMessageBox.prompt('请输入模板名称', '另存为模板', {
     confirmButtonText: '保存',
     cancelButtonText: '取消',
     inputPattern: /\S+/,
@@ -308,7 +308,7 @@ function openTemplateEditor(row: any) {
 function loadPreset(type: 'basic' | 'clear') {
   if (type === 'basic') {
     templateCode.value = BASIC_TEMPLATE
-    ElMessage.success('已载入「极简基础模板」')
+    ElMessage.success('已加载「极简基础模板」')
   } else {
     templateCode.value = ''
     ElMessage.info('已清空模板（将使用系统内置默认模板）')
@@ -406,7 +406,7 @@ async function copyPreview() {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增权限组</el-button>
-        <span class="muted" style="font-size: 12px">权限组用于组织与分发用户接入点；每个权限组可自由定制专属 Clash / Mihomo 订阅模板与分流策略。</span>
+        <span class="muted" style="font-size: 12px">权限组用于组织与分发接入点；每个权限组可自由定制专属 Clash / Mihomo 订阅模板与分流策略。</span>
       </div>
     </div>
 
@@ -444,7 +444,7 @@ async function copyPreview() {
               <div class="item-value">{{ row.remark || '—' }}</div>
             </div>
             <div class="grid-item full-width">
-              <span class="item-label">包含接入点 (Endpoints)</span>
+              <span class="item-label">包含接入点</span>
               <div class="item-value">
                 <template v-if="row.access_point_names && row.access_point_names.length">
                   <span
@@ -561,14 +561,14 @@ async function copyPreview() {
           >
             <el-option v-for="t in subTemplates" :key="t.id" :label="t.name" :value="t.id" />
           </el-select>
-          <el-button size="small" type="primary" plain :disabled="!selectedTemplate" @click="applySelectedTemplate">载入</el-button>
+          <el-button size="small" type="primary" plain :disabled="!selectedTemplate" @click="applySelectedTemplate">加载</el-button>
           <el-button size="small" plain :disabled="!selectedTemplate" @click="overwriteSelectedTemplate">覆盖保存</el-button>
           <el-button size="small" type="danger" plain :disabled="!selectedTemplate" @click="removeSelectedTemplate">删除</el-button>
           <el-button size="small" @click="saveAsTemplate">另存为…</el-button>
         </div>
 
         <div class="preset-row" style="margin-top: 8px">
-          <span class="preset-label">快捷载入：</span>
+          <span class="preset-label">快捷加载：</span>
           <div class="preset-chips">
             <button type="button" class="preset-chip primary" @click="loadPreset('basic')">
               极简基础模板
@@ -610,7 +610,7 @@ async function copyPreview() {
             placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
           />
           <div class="tip-banner" style="margin-top: 10px">
-            占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时自动兜底）。
+            占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。
           </div>
         </el-tab-pane>
 
@@ -623,7 +623,7 @@ async function copyPreview() {
                   注入节点数：<strong>{{ previewData.proxy_count }}</strong>
                 </span>
                 <span v-if="previewData.is_sample_nodes" class="stat-badge warning">
-                  该组暂无入站节点，已使用样例节点模拟编译
+                  该权限组暂无可用接入点，以下为样例模拟结果
                 </span>
               </div>
               <div style="display: flex; gap: 8px">

@@ -67,7 +67,7 @@ func (d *Deps) AdminGetLayers(c *gin.Context) {
 
 	var layers []models.AccessLayer
 	if err := d.DB.Where("server_id = ?", serverID).Order("id ASC").Find(&layers).Error; err != nil {
-		util.ServerError(c, "查询失败: "+err.Error())
+		util.ServerError(c, "查询分层失败")
 		return
 	}
 
@@ -106,8 +106,7 @@ func (d *Deps) AdminCreateLayer(c *gin.Context) {
 		return
 	}
 	var req layerForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -150,8 +149,7 @@ func (d *Deps) AdminUpdateLayer(c *gin.Context) {
 		return
 	}
 	var req layerForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)

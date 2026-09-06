@@ -28,7 +28,7 @@ export const adminRoutes: RouteRecordRaw[] = [
         path: 'nodes',
         name: 'admin.nodes',
         component: () => import('@/views/admin/nodes.vue'),
-        meta: { title: '节点接入' },
+        meta: { title: '接入点' },
       },
       {
         path: 'routing',

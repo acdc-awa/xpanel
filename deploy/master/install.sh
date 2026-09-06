@@ -63,7 +63,7 @@ run() {
 }
 
 for tool in curl tar sha256sum; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "缺少必需工具: $tool"; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { echo "错误：缺少必需工具 $tool"; exit 1; }
 done
 
 # 架构探测（发布流水线提供 linux/amd64 与 linux/arm64）
@@ -71,7 +71,7 @@ ARCH=""
 case "$(uname -m)" in
   x86_64|amd64)  ARCH="amd64" ;;
   aarch64|arm64) ARCH="arm64" ;;
-  *) echo "不支持的架构: $(uname -m)（发布仅提供 linux/amd64 与 linux/arm64）"; exit 1 ;;
+  *) echo "错误：不支持的架构 $(uname -m)（发布仅提供 linux/amd64 与 linux/arm64）"; exit 1 ;;
 esac
 
 # 解压目标目录（默认当前目录）
@@ -134,11 +134,11 @@ download_with_fallback() {
       echo "    下载成功"
       return 0
     else
-      echo "    连接超时或失败，尝试下一个候选镜像..."
+      echo "    下载失败（HTTP 错误或校验不通过），尝试下一个候选镜像…"
     fi
   done
 
-  echo "错误: 所有源均下载失败 ($url)"
+  echo "错误：所有源均下载失败（$url）"
   return 1
 }
 
@@ -146,7 +146,7 @@ download_with_fallback() {
 if [[ -n "$LOCAL_FILE" ]]; then
   echo "==> 使用本地 release 压缩包: $LOCAL_FILE"
   if [[ ! -f "$LOCAL_FILE" ]]; then
-    echo "本地 release 文件不存在: $LOCAL_FILE"; exit 1
+    echo "错误：本地 release 文件不存在 $LOCAL_FILE"; exit 1
   fi
   TARBALL="$(basename "$LOCAL_FILE")"
   URL="file://$LOCAL_FILE"
@@ -196,7 +196,7 @@ except Exception:
     fi
 
     if [[ -z "$URL" ]]; then
-      echo "无法自动获取最新 release（GitHub API 与镜像跳转均不可达），请显式指定 --version、--url 或 --file"
+      echo "错误：无法自动获取最新 release（GitHub API 与镜像跳转均不可达），请显式指定 --version、--url 或 --file"
       exit 1
     fi
   fi
@@ -231,7 +231,7 @@ if [[ -n "$LOCAL_FILE" ]]; then
     if [[ $DRY_RUN -eq 0 && -n "${EXPECT:-}" ]]; then
       ACTUAL="$(sha256sum "${STAGE}/${TARBALL}" | awk '{print $1}')"
       if [[ "$ACTUAL" != "$EXPECT" ]]; then
-        echo "release 校验失败: 期望 $EXPECT 实际 $ACTUAL（拒绝安装）"; exit 1
+        echo "错误：release 校验失败（期望 $EXPECT，实际 $ACTUAL，拒绝安装）"; exit 1
       fi
       echo "    sha256 校验通过"
     fi
@@ -250,11 +250,11 @@ else
     if [[ $DRY_RUN -eq 0 ]]; then
       if [[ -z "${EXPECT:-}" ]]; then
         EXPECT="$(awk '{print $1}' "${STAGE}/${TARBALL}.sha256" | head -1)"
-        [[ -z "$EXPECT" ]] && { echo "校验和文件为空（拒绝安装）"; exit 1; }
+        [[ -z "$EXPECT" ]] && { echo "错误：校验和文件为空（拒绝安装）"; exit 1; }
       fi
       ACTUAL="$(sha256sum "${STAGE}/${TARBALL}" | awk '{print $1}')"
       if [[ "$ACTUAL" != "$EXPECT" ]]; then
-        echo "release 校验失败: 期望 $EXPECT 实际 $ACTUAL（拒绝安装）"; exit 1
+        echo "错误：release 校验失败（期望 $EXPECT，实际 $ACTUAL，拒绝安装）"; exit 1
       fi
       echo "    sha256 校验通过"
     else

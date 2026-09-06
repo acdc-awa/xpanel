@@ -121,7 +121,7 @@ async function submitAdjust() {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '调账失败'))
+    ElMessage.error(errMsg(e, '调整余额失败'))
   } finally {
     adjusting.value = false
   }
@@ -657,7 +657,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
         <el-button :size="isMobile ? 'small' : 'default'" :icon="Download" @click="exportCSV">导出 CSV</el-button>
         <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="warning" @click="batchToggle(0)">批量封禁</el-button>
         <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="success" @click="batchToggle(1)">批量启用</el-button>
-        <el-button :size="isMobile ? 'small' : 'default'" type="primary" :icon="Plus" @click="newUserOpen = true">添加用户</el-button>
+        <el-button :size="isMobile ? 'small' : 'default'" type="primary" :icon="Plus" @click="newUserOpen = true">新增用户</el-button>
       </div>
     </div>
 
@@ -721,7 +721,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <!-- 关键指标 2x2 网格 -->
           <div class="card-body-grid">
             <div class="grid-item">
-              <span class="grid-label">套餐计划</span>
+              <span class="grid-label">套餐</span>
               <span class="grid-value">
                 <span class="x-chip purple" style="font-size: 11px">
                   {{ planName(row.plan_id) }}
@@ -780,7 +780,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
               <el-icon><Setting /></el-icon>&nbsp;编辑配置
             </el-button>
             <el-button size="small" type="success" plain @click="openAdjust(row)">
-              <el-icon><Wallet /></el-icon>&nbsp;调账
+              <el-icon><Wallet /></el-icon>&nbsp;调整余额
             </el-button>
             <el-dropdown trigger="click" @command="(cmd: string) => handleCardAction(cmd, row)">
               <el-button size="small" plain style="flex: none; padding: 0 8px">
@@ -986,7 +986,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
     </el-drawer>
 
     <!-- 手动创建用户弹窗 -->
-    <el-dialog v-model="newUserOpen" title="添加用户" width="520px" @close="closeNewUser">
+    <el-dialog v-model="newUserOpen" title="新建用户" width="520px" @close="closeNewUser">
       <template v-if="!newUserResult">
         <el-form label-position="top">
           <el-form-item label="邮箱">
@@ -1076,7 +1076,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
     </el-dialog>
 
     <!-- 独立余额调账弹窗 -->
-    <el-dialog v-model="adjustOpen" title="用户余额调账" width="420px">
+    <el-dialog v-model="adjustOpen" title="调整用户余额" width="420px">
       <el-form label-position="top">
         <div class="adjust-header">
           <div class="user-meta">
@@ -1100,13 +1100,13 @@ function handleCardAction(cmd: string, row: AdminUser) {
             style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="调账备注（选填）">
+        <el-form-item label="调整备注（选填）">
           <el-input v-model="adjustForm.remark" placeholder="如：活动赠送、售后退款、误充扣除" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="adjustOpen = false">取消</el-button>
-        <el-button type="primary" :loading="adjusting" @click="submitAdjust">确认调账</el-button>
+        <el-button type="primary" :loading="adjusting" @click="submitAdjust">确认调整</el-button>
       </template>
     </el-dialog>
 

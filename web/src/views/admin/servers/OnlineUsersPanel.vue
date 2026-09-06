@@ -44,7 +44,7 @@ defineExpose({ reload: loadOnlineUsers })
       </el-button>
     </div>
     <p class="muted tip" style="margin: 0 0 10px; font-size: 12.5px">
-      当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。空列表 = 无人在线，或节点 Agent 版本过旧未上报。
+      当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。列表为空表示当前无人在线，或服务器 Agent 版本过旧未上报。
     </p>
     <div v-loading="onlineLoading">
       <el-empty v-if="!onlineLoading && onlineUsers.length === 0" description="当前没有在线用户" :image-size="72" />

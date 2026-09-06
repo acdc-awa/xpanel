@@ -127,8 +127,7 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 // AdminCreateInbound POST /api/v1/admin/inbounds
 func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	var req inboundForm
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	var srv models.Server
@@ -248,7 +247,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	// 同 tag 重建时节点复用该条目，无害，不做清理。
 	if inb.Type == models.InboundTypeRelay {
 		if err := d.ensureInternalUUID(&inb); err != nil {
-			util.ServerError(c, "初始化内部 UUID 失败: "+err.Error())
+			util.ServerError(c, "初始化内部转发账户失败: "+err.Error())
 			return
 		}
 	}
@@ -267,7 +266,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var inb models.Inbound
@@ -301,8 +300,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ShareAllowInsecure *bool           `json:"share_allow_insecure"`
 		LayerID            *uint64         `json:"layer_id"` // nil 不更新；显式传 0 解绑回原生
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	// 校验 JSON 有效性
@@ -471,7 +469,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			temp := inb
 			temp.Type = models.InboundTypeRelay
 			if err := d.ensureInternalUUID(&temp); err != nil {
-				util.ServerError(c, "初始化内部 UUID 失败: "+err.Error())
+				util.ServerError(c, "初始化内部转发账户失败: "+err.Error())
 				return
 			}
 			updates["internal_uuid"] = temp.InternalUUID
@@ -542,7 +540,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var inb models.Inbound
@@ -597,7 +595,7 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 func (d *Deps) AdminToggleInbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "非法 ID")
+		util.BadRequest(c, "无效的 ID")
 		return
 	}
 	var inb models.Inbound
@@ -672,7 +670,7 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 		return nil
 	}
 	if inboundType != models.InboundTypeRelay {
-		return fmt.Errorf("VLESS Encryption 一期仅开放转发入站（用户入站加密为二期规划），请切回 REALITY/TLS/none 或改用转发入站")
+		return fmt.Errorf("VLESS Encryption 暂仅支持转发入站，请切回 REALITY/TLS/none 或改用转发入站")
 	}
 	return xray.ValidateVlessEncDecryption(dec)
 }
@@ -794,8 +792,7 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		ServerID uint64       `json:"server_id" binding:"required"`
 		Form     *inboundForm `json:"form"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.BadRequest(c, "参数错误: "+err.Error())
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	var srv models.Server

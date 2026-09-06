@@ -8,11 +8,11 @@ cd "$(dirname "$0")"
 trap 'rc=$?; if [ $rc -ne 0 ]; then echo "恢复失败：master 可能处于停止状态，可执行 docker compose start master 恢复服务" >&2; fi; exit $rc' ERR
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "错误: 未找到 docker" >&2; exit 1
+  echo "错误：未找到 docker" >&2; exit 1
 fi
 
 if ! docker compose ps --status running 2>/dev/null | grep -q master; then
-  echo "错误: master 容器未在运行（请先 docker compose up -d）" >&2; exit 1
+  echo "错误：master 容器未在运行（请先 docker compose up -d）" >&2; exit 1
 fi
 
 DATA_DIR="$(pwd)/data"
@@ -24,15 +24,15 @@ ls -lh "$DATA_DIR"/backups/panel-*.db 2>/dev/null || { echo "无备份文件"; e
 TARGET="${1:-}"
 if [[ -z "$TARGET" ]]; then
   if ! read -rp "输入要恢复的备份文件名: " TARGET; then
-    echo "错误: 未提供备份文件名（用法: bash restore.sh <panel-YYYYMMDD-HHMMSS.db>）" >&2
+    echo "错误：未提供备份文件名（用法: bash restore.sh <panel-YYYYMMDD-HHMMSS.db>）" >&2
     exit 1
   fi
 fi
 if [[ ! "$TARGET" =~ ^panel-[0-9]{8}-[0-9]{6}\.db$ ]]; then
-  echo "错误: 备份文件名格式不符: $TARGET" >&2; exit 1
+  echo "错误：备份文件名格式不符: $TARGET" >&2; exit 1
 fi
 BACKUP_FILE="$DATA_DIR/backups/$TARGET"
-[[ -f "$BACKUP_FILE" ]] || { echo "错误: 备份文件不存在: $BACKUP_FILE" >&2; exit 1; }
+[[ -f "$BACKUP_FILE" ]] || { echo "错误：备份文件不存在: $BACKUP_FILE" >&2; exit 1; }
 
 echo "==> 停止服务（快照需在停止后进行：WAL 模式下运行中只拷主文件会不一致）"
 docker compose stop master
@@ -53,7 +53,7 @@ chown 1000:1000 "$DATA_DIR/panel.db" 2>/dev/null || true
 
 echo "==> 验证可写性（exec 以容器 USER=app 运行，test -w 真实反映 app 可写）"
 if ! docker compose exec -T master sh -c 'test -w /app/data/panel.db'; then
-  echo "错误: /app/data/panel.db 对 app 不可写（data 目录属主可能非 1000）" >&2
+  echo "错误：/app/data/panel.db 对 app 不可写（data 目录属主可能非 1000）" >&2
   exit 1
 fi
 
@@ -66,7 +66,7 @@ for i in 1 2 3 4 5; do
   sleep 2
 done
 if [[ -z "$OK" ]]; then
-  echo "healthz 未通过，请检查日志: docker compose logs master" >&2
+  echo "错误：healthz 未通过，请检查日志（docker compose logs master）" >&2
   exit 1
 fi
 

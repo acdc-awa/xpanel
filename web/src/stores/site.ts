@@ -4,7 +4,7 @@ import { getPublicConfig, type PublicConfig } from '@/api/config'
 export const useSiteStore = defineStore('site', {
   state: () => ({
     appName: window.__PANEL_SETTINGS__?.app_name || 'XrayPanel',
-    appDescription: window.__PANEL_SETTINGS__?.app_description || '主控 · 节点 · 用户 一体化代理分发系统',
+    appDescription: window.__PANEL_SETTINGS__?.app_description || '订阅与节点管理平台',
     logo: window.__PANEL_SETTINGS__?.logo || '',
     favicon: window.__PANEL_SETTINGS__?.favicon || '',
     stopRegister: window.__PANEL_SETTINGS__?.stop_register === '1',
@@ -42,7 +42,7 @@ export const useSiteStore = defineStore('site', {
 
     applyConfig(cfg: Partial<PublicConfig>) {
       if (cfg.app_name !== undefined) this.appName = cfg.app_name || 'XrayPanel'
-      if (cfg.app_description !== undefined) this.appDescription = cfg.app_description || '主控 · 节点 · 用户 一体化代理分发系统'
+      if (cfg.app_description !== undefined) this.appDescription = cfg.app_description || '订阅与节点管理平台'
       if (cfg.logo !== undefined) this.logo = cfg.logo || ''
       if (cfg.favicon !== undefined) this.favicon = cfg.favicon || ''
       if (cfg.stop_register !== undefined) this.stopRegister = !!cfg.stop_register
