@@ -332,6 +332,25 @@ func (h *Hub) GetUpgradeStatus(serverID uint64) *protocol.UpgradeProgressPayload
 	return nil
 }
 
+// GetUpgradeStatuses 批量获取升级进度快照（ids 为空 = 全部有记录的节点），供批量升级总览轮询。
+func (h *Hub) GetUpgradeStatuses(ids []uint64) map[uint64]*protocol.UpgradeProgressPayload {
+	h.upgradeMu.RLock()
+	defer h.upgradeMu.RUnlock()
+	want := make(map[uint64]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	out := make(map[uint64]*protocol.UpgradeProgressPayload, len(h.upgradeStatus))
+	for id, st := range h.upgradeStatus {
+		if len(want) > 0 && !want[id] {
+			continue
+		}
+		cp := *st
+		out[id] = &cp
+	}
+	return out
+}
+
 // handleUpgradeProgress 接收节点升级进度上报并缓存。
 func (h *Hub) handleUpgradeProgress(conn *Conn, msg *protocol.Message) {
 	var p protocol.UpgradeProgressPayload

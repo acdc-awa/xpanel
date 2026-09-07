@@ -14,6 +14,8 @@ import {
   serverCommand,
   upgradeAgent,
   getAgentUpgradeStatus,
+  batchUpgradeServers,
+  getBatchUpgradeStatus,
   type AgentUpgradeStatus,
   getAgentLatestVersion,
   type CommandResult,
@@ -355,6 +357,164 @@ async function upgradeNodeAgent(row: any) {
   }
 }
 
+// ---- 批量升级 Agent ----
+const selectedIds = ref<number[]>([])
+const allSelected = computed(
+  () => filtered.value.length > 0 && filtered.value.every((s) => selectedIds.value.includes(s.id)),
+)
+
+function toggleSelect(id: number, val: boolean) {
+  if (val) {
+    if (!selectedIds.value.includes(id)) selectedIds.value = [...selectedIds.value, id]
+  } else {
+    selectedIds.value = selectedIds.value.filter((i) => i !== id)
+  }
+}
+
+function toggleSelectAll(val: boolean) {
+  selectedIds.value = val ? filtered.value.map((s) => s.id) : []
+}
+
+// phase → 展示文案 / 进度百分比（批量总览行内进度条）
+const phaseMeta: Record<string, { label: string; percent: number }> = {
+  starting: { label: '排队中', percent: 5 },
+  checking: { label: '检查版本', percent: 15 },
+  downloading: { label: '下载资源', percent: 50 },
+  verifying: { label: '校验完整性', percent: 70 },
+  replacing: { label: '替换二进制', percent: 85 },
+  restarting: { label: '重启生效', percent: 95 },
+  success: { label: '升级成功', percent: 100 },
+  failed: { label: '升级失败', percent: 100 },
+}
+
+interface BatchRow {
+  id: number
+  name: string
+  version: string
+  skipped: boolean
+  reason?: string
+  status: AgentUpgradeStatus | null
+}
+const batchOpen = ref(false)
+const batchRunning = ref(false)
+const batchRows = ref<BatchRow[]>([])
+let batchTimer: any = null
+
+function stopBatchPolling() {
+  if (batchTimer) {
+    clearInterval(batchTimer)
+    batchTimer = null
+  }
+}
+
+onUnmounted(stopBatchPolling)
+
+function progressStatus(phase?: string) {
+  if (phase === 'success') return 'success' as const
+  if (phase === 'failed') return 'exception' as const
+  return undefined
+}
+
+async function pollBatch() {
+  const activeIds = batchRows.value.filter((r) => !r.skipped).map((r) => r.id)
+  if (!activeIds.length) {
+    stopBatchPolling()
+    batchRunning.value = false
+    return
+  }
+  try {
+    const { data } = await getBatchUpgradeStatus(activeIds)
+    if (data.code === 0) {
+      const statuses = data.data.statuses || {}
+      for (const row of batchRows.value) {
+        if (row.skipped) continue
+        const st = statuses[String(row.id)]
+        if (st) row.status = st
+      }
+      const allDone = batchRows.value
+        .filter((r) => !r.skipped)
+        .every((r) => r.status && (r.status.phase === 'success' || r.status.phase === 'failed'))
+      if (allDone) {
+        stopBatchPolling()
+        batchRunning.value = false
+        load()
+        setTimeout(load, 15000)
+      }
+    }
+  } catch {
+    // 忽略轮询抖动
+  }
+}
+
+async function batchUpgradeSelected() {
+  const selected = list.value.filter((s) => selectedIds.value.includes(s.id))
+  if (!selected.length) return
+  const latest = latestAgentVersion.value
+  const outdated = selected.filter((s) => latest && s.agent_version && compareVersion(s.agent_version, latest) < 0)
+  const unknown = selected.filter((s) => !s.agent_version)
+  const upToDate = selected.length - outdated.length - unknown.length
+  const lines = [
+    `已选 ${selected.length} 台服务器，目标版本：${latest || '官方最新（提交时在线获取）'}。`,
+    `可升级 ${outdated.length + unknown.length} 台（${outdated.length} 台有新版${unknown.length ? `、${unknown.length} 台版本未知` : ''}）${upToDate ? `；已是最新 ${upToDate} 台将自动跳过` : ''}。`,
+    '离线服务器将自动跳过；升级并行执行（sha256 校验，完成后自动重启，期间短暂离线）。',
+  ]
+  try {
+    await ElMessageBox.confirm(lines.join('\n'), '批量升级 Agent', {
+      type: 'warning',
+      confirmButtonText: '开始升级',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  batchRows.value = selected.map((s) => ({
+    id: s.id,
+    name: s.name,
+    version: s.agent_version || '未知',
+    skipped: false,
+    status: { phase: 'starting', message: '提交中…', ts: Math.floor(Date.now() / 1000) } as AgentUpgradeStatus,
+  }))
+  batchOpen.value = true
+  batchRunning.value = true
+  stopBatchPolling()
+  batchTimer = setInterval(pollBatch, 1500)
+
+  try {
+    const { data } = await batchUpgradeServers({
+      ids: selected.map((s) => s.id),
+      target: latest || undefined,
+      force: false,
+    })
+    if (data.code !== 0) {
+      ElMessage.error(data.message)
+      stopBatchPolling()
+      batchRunning.value = false
+      batchOpen.value = false
+      return
+    }
+    const skippedMap = new Map(data.data.skipped.map((s) => [s.id, s.reason]))
+    const dispatchedSet = new Set(data.data.dispatched.map((d) => d.id))
+    for (const row of batchRows.value) {
+      if (skippedMap.has(row.id)) {
+        row.skipped = true
+        row.reason = skippedMap.get(row.id)
+        row.status = null
+      } else if (!dispatchedSet.has(row.id)) {
+        row.skipped = true
+        row.reason = '未派发'
+        row.status = null
+      }
+    }
+    pollBatch()
+  } catch (e) {
+    stopBatchPolling()
+    batchRunning.value = false
+    batchOpen.value = false
+    ElMessage.error(errMsg(e, '批量升级提交失败'))
+  }
+}
+
 // ---- 日志 ----
 const logOpen = ref(false)
 const logContent = ref('')
@@ -518,6 +678,18 @@ async function removeServer(row: any) {
       <div class="x-toolbar-left">
         <el-input v-model="keyword" placeholder="搜索名称 / 地址 / 地区" :prefix-icon="Search" clearable style="width: 240px" />
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        <el-checkbox
+          :model-value="allSelected"
+          :disabled="filtered.length === 0"
+          @change="(v: any) => toggleSelectAll(!!v)"
+        >全选</el-checkbox>
+        <template v-if="selectedIds.length">
+          <span class="x-chip blue" style="font-size: 11px">已选 {{ selectedIds.length }} 台</span>
+          <el-button type="warning" plain @click="batchUpgradeSelected">
+            <el-icon><Upload /></el-icon>&nbsp;批量升级
+          </el-button>
+          <el-button link @click="selectedIds = []">取消选择</el-button>
+        </template>
         <el-tag
           v-if="latestAgentVersion"
           size="default"
@@ -549,6 +721,12 @@ async function removeServer(row: any) {
           <!-- 头部 -->
           <div class="card-head">
             <div class="head-title">
+              <el-checkbox
+                :model-value="selectedIds.includes(row.id)"
+                style="height: auto; margin-right: 2px"
+                @change="(v: any) => toggleSelect(row.id, !!v)"
+                @click.stop
+              />
               <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
               <span class="server-name" title="点击查看详情" @click="openDrawer(row)">{{ row.name }}</span>
               <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
@@ -816,6 +994,61 @@ async function removeServer(row: any) {
             完成并关闭
           </el-button>
         </div>
+      </template>
+    </el-dialog>
+
+    <!-- 批量升级总览弹窗 -->
+    <el-dialog
+      v-model="batchOpen"
+      title="批量升级 Agent"
+      width="680px"
+      :close-on-click-modal="false"
+      @close="stopBatchPolling"
+    >
+      <el-table :data="batchRows" size="small" max-height="420">
+        <el-table-column prop="name" label="服务器" min-width="140" show-overflow-tooltip />
+        <el-table-column label="当前版本" width="110">
+          <template #default="{ row }"><span class="cell-mono font-12">{{ row.version }}</span></template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.skipped" size="small" type="info">已跳过</el-tag>
+            <el-tag
+              v-else-if="row.status"
+              size="small"
+              :type="row.status.phase === 'success' ? 'success' : row.status.phase === 'failed' ? 'danger' : 'primary'"
+            >
+              {{ phaseMeta[row.status.phase]?.label || row.status.phase }}
+            </el-tag>
+            <el-tag v-else size="small" type="info">等待</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" min-width="200">
+          <template #default="{ row }">
+            <span v-if="row.skipped" class="muted" style="font-size: 12px">{{ row.reason }}</span>
+            <template v-else-if="row.status">
+              <el-progress
+                :percentage="phaseMeta[row.status.phase]?.percent ?? 0"
+                :status="progressStatus(row.status.phase)"
+                :stroke-width="8"
+              />
+              <div v-if="row.status.error" class="cell-mono" style="font-size: 11px; color: var(--el-color-danger); margin-top: 2px; word-break: break-all">
+                {{ row.status.error }}
+              </div>
+              <div v-else-if="row.status.message" class="muted" style="font-size: 11px; margin-top: 2px">
+                {{ row.status.message }}
+              </div>
+            </template>
+            <span v-else class="muted" style="font-size: 12px">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div style="margin-top: 10px; font-size: 12px; color: var(--x-text-3)">
+        <template v-if="batchRunning">正在升级，进度实时更新…升级完成的服务器将在下一轮心跳后刷新版本号。</template>
+        <template v-else>全部服务器已处理完成；升级完成的服务器版本号将在下一轮心跳后刷新。</template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="batchOpen = false">关闭</el-button>
       </template>
     </el-dialog>
 

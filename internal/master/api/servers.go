@@ -479,6 +479,120 @@ func (d *Deps) AdminGetServerUpgradeStatus(c *gin.Context) {
 	util.OK(c, gin.H{"status": st})
 }
 
+// AdminGetUpgradeStatuses GET /api/v1/admin/servers/upgrade-status?ids=1,2
+// 批量查询升级进度快照（ids 省略 = 全部有记录的节点），供批量升级总览轮询。
+func (d *Deps) AdminGetUpgradeStatuses(c *gin.Context) {
+	var ids []uint64
+	if v := c.Query("ids"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			if id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64); err == nil {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if d.Hub == nil {
+		util.OK(c, gin.H{"statuses": map[uint64]*protocol.UpgradeProgressPayload{}})
+		return
+	}
+	util.OK(c, gin.H{"statuses": d.Hub.GetUpgradeStatuses(ids)})
+}
+
+// AdminBatchUpgradeServers POST /api/v1/admin/servers/batch-upgrade
+// body: {"ids":[...], "target":"v0.1.x", "force":false}
+// 预检（不存在/离线/已最新直接跳过并说明原因）后立即返回，逐节点 goroutine 异步执行升级指令；
+// 节点自行下载二进制并上报 MsgUpgradeProgress，进度经 GET /servers/upgrade-status 聚合轮询。
+func (d *Deps) AdminBatchUpgradeServers(c *gin.Context) {
+	var req struct {
+		IDs    []uint64 `json:"ids" binding:"required,min=1,max=100"`
+		Target string   `json:"target"`
+		Force  bool     `json:"force"`
+	}
+	if !util.BindJSON(c, &req) {
+		return
+	}
+	if d.Hub == nil {
+		util.ServerError(c, "节点网关未初始化")
+		return
+	}
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		if latest, _, err := d.GetCachedAgentLatestVersion(c.Request.Context(), false); err == nil && latest != "" {
+			target = latest
+		}
+	}
+	if target == "" {
+		util.ServerError(c, "无法确定目标版本（官方最新版本查询失败，可稍后重试）")
+		return
+	}
+
+	type batchItem struct {
+		ID   uint64 `json:"id"`
+		Name string `json:"name"`
+	}
+	type batchSkip struct {
+		ID     uint64 `json:"id"`
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	}
+	var dispatch []batchItem
+	var skipped []batchSkip
+	seen := make(map[uint64]bool, len(req.IDs))
+	for _, id := range req.IDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var srv models.Server
+		if err := d.DB.First(&srv, id).Error; err != nil {
+			skipped = append(skipped, batchSkip{ID: id, Reason: "服务器不存在"})
+			continue
+		}
+		if !d.Hub.IsOnline(id) {
+			skipped = append(skipped, batchSkip{ID: id, Name: srv.Name, Reason: "服务器离线"})
+			continue
+		}
+		if !req.Force && srv.AgentVersion != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
+			skipped = append(skipped, batchSkip{ID: id, Name: srv.Name, Reason: "已是最新版本 " + srv.AgentVersion})
+			continue
+		}
+		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+			Phase:   "starting",
+			Target:  target,
+			Message: "已加入批量升级队列，等待下发自升级指令…",
+			TS:      time.Now().Unix(),
+		})
+		dispatch = append(dispatch, batchItem{ID: id, Name: srv.Name})
+	}
+
+	for _, it := range dispatch {
+		go func(id uint64) {
+			// 回执要等节点从 GitHub 拉完二进制才发（同单台升级的专用长超时）
+			res, err := d.Hub.Ask(id, protocol.MsgUpgradeAgent, protocol.UpgradeAgentPayload{Target: target}, nodegate.UpgradeAskTimeout)
+			if err != nil {
+				d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+					Phase: "failed", Target: target, Message: "升级指令超时或失败", Error: err.Error(), TS: time.Now().Unix(),
+				})
+				return
+			}
+			if !res.OK {
+				d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+					Phase: "failed", Target: target, Message: "升级失败", Error: res.Error, TS: time.Now().Unix(),
+				})
+				return
+			}
+			msg := "升级完成"
+			if s, ok := res.Data.(string); ok && s != "" {
+				msg = s
+			}
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase: "success", Target: target, Message: msg, TS: time.Now().Unix(),
+			})
+		}(it.ID)
+	}
+
+	util.OK(c, gin.H{"target": target, "dispatched": dispatch, "skipped": skipped})
+}
+
 // AdminGetServerConfigPreview GET /api/v1/admin/servers/:id/config-preview
 // 实时渲染该服务器按当前数据库预期应该推送到节点的完整 Xray 配置（只读预览，无网络副作用）。
 func (d *Deps) AdminGetServerConfigPreview(c *gin.Context) {
