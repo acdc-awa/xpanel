@@ -10,7 +10,7 @@
 [![Xray-core](https://img.shields.io/badge/Xray--core-v26.6.27-red?style=flat)](https://github.com/XTLS/Xray-core)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://docker.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 </div>
 
@@ -343,4 +343,8 @@ npm run build        # 生产构建（含类型检查）
 
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) 开源，Copyright (C) 2026 acdc-awa。
+
+- 任何人都可以自由使用、修改和再分发本项目，但无论以二进制还是网络服务形式向他人提供，都必须以相同协议开放完整源代码。
+- 捆绑/运行时下载的 [Xray-core](https://github.com/XTLS/Xray-core) 官方二进制遵循 [MPL-2.0](https://github.com/XTLS/Xray-core/blob/main/LICENSE)，不受本协议约束。
+- 如需商业授权（闭源、豁免 AGPL 义务），请联系作者单独洽谈。
