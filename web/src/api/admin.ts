@@ -57,6 +57,52 @@ export function createBackup() {
   return http.post<ApiResp<BackupItem>>('/admin/backup')
 }
 
+export function deleteBackup(file: string) {
+  return http.delete<ApiResp<{ file: string }>>(`/admin/backup/${encodeURIComponent(file)}`)
+}
+
+// ---- 数据管理（日志可视化 / 按日期清理 / 空间回收） ----
+
+export interface LogDayStat {
+  date: string
+  traffic_logs: number
+  node_reports: number
+  audit_logs: number
+}
+
+export interface LogStats {
+  days: LogDayStat[]
+  totals: { traffic_logs: number; node_reports: number; audit_logs: number }
+  traffic_min_delete: string
+  retention: Record<string, string>
+  sqlite_avail: boolean
+  db_size?: number
+  wal_size?: number
+}
+
+export function getLogStats(days: number) {
+  return http.get<ApiResp<LogStats>>('/admin/data/log-stats', { params: { days } })
+}
+
+export function cleanupLogs(table: string, before: string) {
+  return http.post<ApiResp<{ table: string; before: string; deleted: number }>>('/admin/data/logs/cleanup', {
+    table,
+    before,
+  })
+}
+
+export interface VacuumResult {
+  db_size_before: number
+  wal_size_before: number
+  db_size_after: number
+  wal_size_after: number
+  reclaimed: number
+}
+
+export function vacuumDatabase() {
+  return http.post<ApiResp<VacuumResult>>('/admin/data/vacuum')
+}
+
 export interface SystemStatus {
   app_name: string
   app_env: string
@@ -187,6 +233,7 @@ export interface SiteSettings {
   site: SiteGroup
   captcha: CaptchaGroup
   agent: AgentGroup
+  retention?: Record<string, string>
 }
 
 export function getSettings() {
@@ -351,6 +398,29 @@ export interface AgentUpgradeStatus {
 
 export function getAgentUpgradeStatus(id: number) {
   return http.get<ApiResp<{ status: AgentUpgradeStatus | null }>>(`/admin/servers/${id}/upgrade-status`)
+}
+
+// ---- 批量升级 Agent ----
+
+export interface BatchUpgradeSkip {
+  id: number
+  name?: string
+  reason: string
+}
+
+// 批量升级：预检（离线/已最新直接跳过）后立即返回派发结果，升级在后台异步执行，
+// 进度经 getBatchUpgradeStatus 轮询（无需放宽超时）。
+export function batchUpgradeServers(payload: { ids: number[]; target?: string; force?: boolean }) {
+  return http.post<ApiResp<{ target: string; dispatched: { id: number; name: string }[]; skipped: BatchUpgradeSkip[] }>>(
+    '/admin/servers/batch-upgrade',
+    payload,
+  )
+}
+
+export function getBatchUpgradeStatus(ids?: number[]) {
+  return http.get<ApiResp<{ statuses: Record<string, AgentUpgradeStatus> }>>('/admin/servers/upgrade-status', {
+    params: ids?.length ? { ids: ids.join(',') } : undefined,
+  })
 }
 
 // ===== P3 入站管理 + 配置生成 =====

@@ -8,6 +8,7 @@ import {
   updateSettings,
   getBackups,
   createBackup,
+  deleteBackup,
   getSystemStatus,
   checkUpdate,
   applyUpdate,
@@ -228,6 +229,7 @@ onMounted(() => {
 const backups = ref<BackupItem[]>([])
 const backupLoading = ref(false)
 const backupCreating = ref(false)
+const backupTotalSize = computed(() => backups.value.reduce((sum, b) => sum + (b.size || 0), 0))
 
 async function loadBackups() {
   backupLoading.value = true
@@ -261,6 +263,30 @@ async function createBackupNow() {
 
 function downloadBackup(file: string) {
   window.open(`${apiBase}/admin/backup/${encodeURIComponent(file)}`, '_blank')
+}
+
+async function removeBackup(row: any) {
+  const file = String(row.file)
+  try {
+    await ElMessageBox.confirm(
+      `确认删除备份「${file}」？删除后不可恢复，不影响数据库与自动轮转。`,
+      '删除备份',
+      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data } = await deleteBackup(file)
+    if (data.code === 0) {
+      ElMessage.success('备份已删除')
+      loadBackups()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除备份失败'))
+  }
 }
 
 function fmtSize(n: number) {
@@ -829,6 +855,7 @@ async function save() {
             <div class="x-toolbar" style="margin-bottom: 12px">
               <div class="x-toolbar-left">
                 <el-button :loading="backupLoading" :icon="Refresh" @click="loadBackups">刷新列表</el-button>
+                <span class="muted" style="font-size: 12.5px">共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}</span>
               </div>
               <el-button type="primary" :loading="backupCreating" @click="createBackupNow">立即备份</el-button>
             </div>
@@ -842,9 +869,10 @@ async function save() {
               <el-table-column label="创建时间" width="170">
                 <template #default="{ row }">{{ String(row.created_at).replace('T', ' ').slice(0, 19) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="100" fixed="right">
+              <el-table-column label="操作" width="130" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="primary" :icon="Download" @click="downloadBackup(row.file)">下载</el-button>
+                  <el-button link type="danger" :icon="Delete" @click="removeBackup(row)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>

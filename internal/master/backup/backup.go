@@ -204,6 +204,21 @@ func (s *Service) OpenFile(name string) (string, error) {
 	return p, nil
 }
 
+// Delete 校验文件名后删除单份备份（自动轮转之外的显式清理入口）。
+// 审计由 admin 路由组的 Audit 中间件覆盖，此处不再重复打点。
+func (s *Service) Delete(name string) error {
+	if !tsRe.MatchString(name) {
+		return fmt.Errorf("非法备份文件名: %q", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := filepath.Join(s.dir, name)
+	if _, err := os.Stat(p); err != nil {
+		return fmt.Errorf("备份不存在: %s", name)
+	}
+	return os.Remove(p)
+}
+
 // log 写审计日志（audit 可为 nil）。
 func (s *Service) log(action, result, detail string) {
 	if s.audit == nil {

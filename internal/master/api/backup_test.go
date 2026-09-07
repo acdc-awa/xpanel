@@ -43,6 +43,7 @@ func newBackupTestEnv(t *testing.T) (*gin.Engine, *backup.Service) {
 	r.POST("/api/v1/admin/backup", deps.AdminCreateBackup)
 	r.GET("/api/v1/admin/backup", deps.AdminListBackups)
 	r.GET("/api/v1/admin/backup/:file", deps.AdminDownloadBackup)
+	r.DELETE("/api/v1/admin/backup/:file", deps.AdminDeleteBackup)
 	return r, svc
 }
 
@@ -126,5 +127,45 @@ func TestAdminDownloadBackupTraversal(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAdminDeleteBackup(t *testing.T) {
+	r, svc := newBackupTestEnv(t)
+	info, err := svc.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/backup/"+info.File, nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	items, _ := svc.List()
+	if len(items) != 0 {
+		t.Fatalf("删除后备份数 = %d", len(items))
+	}
+}
+
+// TestAdminDeleteBackupValidation 非法文件名（穿越）与不存在的文件都应 400 且不落盘。
+func TestAdminDeleteBackupValidation(t *testing.T) {
+	r, svc := newBackupTestEnv(t)
+	if _, err := svc.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/backup/..%2f..%2fpanel.db", // 路径穿越
+		"/api/v1/admin/backup/panel-20990101-000000.db", // 不存在
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, path, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", path, w.Code)
+		}
+	}
+	items, _ := svc.List()
+	if len(items) != 1 {
+		t.Fatalf("校验失败不应删掉存量备份, got %d", len(items))
 	}
 }

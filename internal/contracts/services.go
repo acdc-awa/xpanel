@@ -129,4 +129,5 @@ type BackupService interface {
 	Snapshot() (BackupInfo, error)
 	List() ([]BackupInfo, error)
 	OpenFile(name string) (string, error)
+	Delete(name string) error
 }

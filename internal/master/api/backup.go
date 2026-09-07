@@ -38,3 +38,12 @@ func (d *Deps) AdminDownloadBackup(c *gin.Context) {
 	}
 	c.FileAttachment(path, name)
 }
+
+// AdminDeleteBackup DELETE /api/v1/admin/backup/:file —— 删除单份备份（自动轮转之外的显式清理）。
+func (d *Deps) AdminDeleteBackup(c *gin.Context) {
+	if err := d.Backup.Delete(c.Param("file")); err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.OK(c, gin.H{"file": c.Param("file")})
+}
