@@ -525,24 +525,28 @@ func (s *TrafficService) StartRetentionCron(ctx context.Context) {
 
 func (s *TrafficService) runRetention() {
 	now := s.nowOrReal()
-	cutLogs := now.AddDate(0, 0, -trafficLogRetentionDays)
-	cutReports := now.AddDate(0, 0, -nodeReportRetentionDays)
-	cutAudit := now.AddDate(0, 0, -auditLogRetentionDays)
+	// 保留天数可在数据管理页调整（settings 表），硬编码常量仅作缺省值。
+	daysLogs := RetentionTrafficDays(s.DB)
+	daysReports := RetentionNodeReportDays(s.DB)
+	daysAudit := RetentionAuditDays(s.DB)
+	cutLogs := now.AddDate(0, 0, -daysLogs)
+	cutReports := now.AddDate(0, 0, -daysReports)
+	cutAudit := now.AddDate(0, 0, -daysAudit)
 
 	if res := s.DB.Where("period_start < ?", cutLogs).Delete(&models.TrafficLog{}); res.Error != nil {
 		log.Printf("traffic: 清理 traffic_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
-		log.Printf("traffic: 清理 %d 条过期 traffic_logs（保留 %d 天）", res.RowsAffected, trafficLogRetentionDays)
+		log.Printf("traffic: 清理 %d 条过期 traffic_logs（保留 %d 天）", res.RowsAffected, daysLogs)
 	}
 	if res := s.DB.Where("reported_at < ?", cutReports).Delete(&models.NodeReport{}); res.Error != nil {
 		log.Printf("traffic: 清理 node_reports 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
-		log.Printf("traffic: 清理 %d 条过期 node_reports（保留 %d 天）", res.RowsAffected, nodeReportRetentionDays)
+		log.Printf("traffic: 清理 %d 条过期 node_reports（保留 %d 天）", res.RowsAffected, daysReports)
 	}
 	if res := s.DB.Where("created_at < ?", cutAudit).Delete(&models.AuditLog{}); res.Error != nil {
 		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
-		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, auditLogRetentionDays)
+		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, daysAudit)
 	}
 }
 

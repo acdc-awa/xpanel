@@ -8,7 +8,8 @@ import (
 )
 
 // AdminSettings GET /api/v1/admin/settings —— 站点设置读取（分组式，17 号 P0 ①）。
-// 返回三组：site（站点）/ captcha（人机验证，管理端专属，含 secret）/ agent（节点上报周期）。
+// 返回分组：site（站点）/ captcha（人机验证，管理端专属，含 secret）/ agent（节点上报周期）/
+// retention（数据保留天数，数据管理页）。
 // 2026-08-24 四端口拆分：web_base 与订阅端口退役（端口走 env/配置，web_base 由域名分流取代）。
 func (d *Deps) AdminSettings(c *gin.Context) {
 	site := map[string]string{}
@@ -16,9 +17,10 @@ func (d *Deps) AdminSettings(c *gin.Context) {
 		site = d.Site.SiteGroup()
 	}
 	util.OK(c, gin.H{
-		"site":    site,
-		"captcha": services.CaptchaSettings(d.DB),
-		"agent":   services.AgentSettingsGroup(d.DB),
+		"site":      site,
+		"captcha":   services.CaptchaSettings(d.DB),
+		"agent":     services.AgentSettingsGroup(d.DB),
+		"retention": services.RetentionSettingsGroup(d.DB),
 	})
 }
 
@@ -27,9 +29,10 @@ func (d *Deps) AdminSettings(c *gin.Context) {
 // agent 组保存后即时下发所有在线节点（离线节点由重连时 ServeWS 下发兜底）。
 func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 	var req struct {
-		Site    *map[string]string `json:"site"`
-		Captcha *map[string]string `json:"captcha"`
-		Agent   *map[string]string `json:"agent"`
+		Site      *map[string]string `json:"site"`
+		Captcha   *map[string]string `json:"captcha"`
+		Agent     *map[string]string `json:"agent"`
+		Retention *map[string]string `json:"retention"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -71,6 +74,13 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		changed = true
 		agentChanged = true
 	}
+	if req.Retention != nil {
+		if err := services.SaveRetentionSettingsGroup(d.DB, *req.Retention); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
+		changed = true
+	}
 	if !changed {
 		util.BadRequest(c, "没有需要保存的内容")
 		return
@@ -79,8 +89,9 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		d.Hub.BroadcastAgentSettings()
 	}
 	util.OK(c, gin.H{
-		"site":    d.Site.SiteGroup(),
-		"captcha": services.CaptchaSettings(d.DB),
-		"agent":   services.AgentSettingsGroup(d.DB),
+		"site":      d.Site.SiteGroup(),
+		"captcha":   services.CaptchaSettings(d.DB),
+		"agent":     services.AgentSettingsGroup(d.DB),
+		"retention": services.RetentionSettingsGroup(d.DB),
 	})
 }

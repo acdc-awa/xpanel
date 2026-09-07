@@ -96,6 +96,12 @@ export const adminRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/settings.vue'),
         meta: { title: '设置' },
       },
+      {
+        path: 'data-management',
+        name: 'admin.data-management',
+        component: () => import('@/views/admin/data_management.vue'),
+        meta: { title: '数据管理' },
+      },
     ],
   },
 ]

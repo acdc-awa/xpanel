@@ -16,6 +16,7 @@ import {
   Setting,
   Connection,
   Bell,
+  Histogram,
 } from '@element-plus/icons-vue'
 
 export interface SubMenuItem {
@@ -75,6 +76,7 @@ export const adminMenuGroups: MenuGroup[] = [
     icon: Setting,
     children: [
       { title: '系统配置', path: '/admin/settings', icon: Setting },
+      { title: '数据管理', path: '/admin/data-management', icon: Histogram },
     ],
   },
 ]
