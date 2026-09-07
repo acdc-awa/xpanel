@@ -5,6 +5,7 @@ package gormstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -145,8 +146,14 @@ func (s *BillingStore) ListGiftCards(ctx context.Context, query contracts.GiftCa
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+	// 未使用且未过期的排最前（过期不算未使用，服务端分页下必须 SQL 层排序），
+	// 组内按 id 倒序。时间字面量由 Go 生成（无用户输入）；GORM Order 不支持绑定参数，
+	// SQLite 侧驱动按统一格式存文本，同部署同时区下字典序即时序；MySQL 侧原生解析该字面量。
+	orderExpr := fmt.Sprintf(
+		"CASE WHEN status = '%s' AND (expires_at IS NULL OR expires_at > '%s') THEN 0 ELSE 1 END, id DESC",
+		models.GiftCardUnused, time.Now().Format("2006-01-02 15:04:05"))
 	var list []models.GiftCard
-	if err := q.Order("id DESC").Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&list).Error; err != nil {
+	if err := q.Order(orderExpr).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	return list, total, nil

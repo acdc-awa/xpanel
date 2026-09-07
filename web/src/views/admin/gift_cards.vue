@@ -146,6 +146,11 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
   used: { type: 'info', text: '已使用' },
   disabled: { type: 'danger', text: '已作废' },
 }
+
+// 过期不落库，现场推导；过期的未使用卡不可兑换，排序上也排在使用可用项之后
+function isExpired(row: GiftCard) {
+  return !!row.expires_at && new Date(row.expires_at).getTime() < Date.now()
+}
 </script>
 
 <template>
@@ -194,7 +199,8 @@ const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: str
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
               <span class="card-name">{{ row.name || '通用礼品卡' }}</span>
-              <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
+              <el-tag v-if="row.status === 'unused' && isExpired(row)" type="warning" size="small">已过期</el-tag>
+              <el-tag v-else :type="statusMap[row.status]?.type || 'info'" size="small">
                 {{ statusMap[row.status]?.text || row.status }}
               </el-tag>
             </div>

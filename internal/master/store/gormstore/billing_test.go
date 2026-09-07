@@ -27,7 +27,7 @@ func setupTestStore(t *testing.T) *BillingStore {
 }
 
 // TestBillingStore_GiftCardListAndDelete 覆盖列表过滤/分页与删除路径
-//（服务层测试已覆盖兑换/支付事务，这里直测仓储的查询语义）。
+// （服务层测试已覆盖兑换/支付事务，这里直测仓储的查询语义）。
 func TestBillingStore_GiftCardListAndDelete(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
@@ -73,6 +73,43 @@ func TestBillingStore_GiftCardListAndDelete(t *testing.T) {
 	}
 	if _, err := store.GetGiftCard(ctx, card.ID); err == nil {
 		t.Fatal("删除后 GetGiftCard 应报错")
+	}
+}
+
+// TestBillingStore_GiftCardListOrder 覆盖默认排序：未使用且未过期在前，
+// 过期/已使用/已作废随后，组内均按 id 倒序。
+func TestBillingStore_GiftCardListOrder(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(24 * time.Hour)
+	mk := func(code, status string, expires *time.Time) {
+		card := models.GiftCard{Code: code, Name: "批次", FaceValueCents: 1000, Status: status, ExpiresAt: expires}
+		if err := store.CreateGiftCard(ctx, &card); err != nil {
+			t.Fatalf("CreateGiftCard: %v", err)
+		}
+	}
+	// 依次创建（id 递增）：已使用 / 未使用已过期 / 已作废 / 未使用未过期 / 未使用永久
+	mk("C1-USED", "used", nil)
+	mk("C2-EXPIRED", "unused", &past)
+	mk("C3-DISABLED", "disabled", nil)
+	mk("C4-ACTIVE", "unused", &future)
+	mk("C5-ACTIVE", "unused", nil)
+
+	list, total, err := store.ListGiftCards(ctx, contracts.GiftCardQuery{Page: 1, Size: 20})
+	if err != nil || total != 5 {
+		t.Fatalf("total=%d len=%d err=%v", total, len(list), err)
+	}
+	want := []string{"C5-ACTIVE", "C4-ACTIVE", "C3-DISABLED", "C2-EXPIRED", "C1-USED"}
+	got := make([]string, 0, len(list))
+	for _, c := range list {
+		got = append(got, c.Code)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("顺序不符:\n got  %v\n want %v", got, want)
+		}
 	}
 }
 
