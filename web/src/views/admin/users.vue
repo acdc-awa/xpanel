@@ -1117,14 +1117,17 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <span class="k">用户:</span>
           <span class="v" style="font-weight: 600">{{ subInfoRow?.email }}</span>
         </div>
-        <el-form-item label="订阅链接（发给用户，客户端添加订阅用）">
-          <div class="sub-url-row">
-            <el-input :model-value="subInfoUrl" readonly class="cell-mono" size="default" />
-            <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅链接')">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制
-            </el-button>
-          </div>
-        </el-form-item>
+        <!-- label 置顶独立成行：避免长 label 横向占宽挤压输入框（桌面），并消除窄屏下的行内溢出（移动） -->
+        <el-form label-position="top" @submit.prevent>
+          <el-form-item label="订阅链接（发给用户，客户端添加订阅用）">
+            <div class="sub-url-row">
+              <el-input :model-value="subInfoUrl" readonly class="cell-mono" size="default" />
+              <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅链接')">
+                <el-icon><CopyDocument /></el-icon>&nbsp;复制
+              </el-button>
+            </div>
+          </el-form-item>
+        </el-form>
         <el-alert type="warning" :closable="false" show-icon>
           <p>重置订阅链接后，该用户原有订阅地址立即失效，用户需重新添加订阅；节点凭据（UUID）不受影响，已配置的节点无需改动。</p>
         </el-alert>
@@ -1225,11 +1228,20 @@ function handleCardAction(cmd: string, row: AdminUser) {
     color: var(--x-text-3, #909399);
     flex: none;
   }
+  .v {
+    flex: 1;
+    min-width: 0;
+    word-break: break-all; // 长邮箱/长 URL 换行，防止溢出弹窗被裁切
+  }
 }
 .sub-url-row {
   display: flex;
   gap: 8px;
   width: 100%;
+  .el-input {
+    flex: 1;
+    min-width: 0; // 弹性收缩，保证复制按钮在窄屏下不被挤出弹窗
+  }
 }
 .autorenew-admin-box {
   width: 100%;
