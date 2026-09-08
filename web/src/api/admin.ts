@@ -210,6 +210,8 @@ export interface SiteGroup {
   sub_clean_ua: string
   sub_strict_ua: string
   sub_blocked_ua: string
+  sub_profile_title: string
+  sub_update_interval: string
   tos_url: string
   stop_register: string
   currency: string

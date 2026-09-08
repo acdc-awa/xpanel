@@ -13,21 +13,23 @@ import (
 // 站点设置键（2026-08-14 批7 设置域，17 号 P0 ①——分组式站点设置；
 // 2026-08-24 四端口拆分：web_base 与 subscribe_port 退役——端口全部走 env/配置，web_base 由域名分流取代）。
 const (
-	SettingAppName         = "app_name"          // 系统标题（注入 <title> + 订阅文件名）
-	SettingAppDesc         = "app_description"   // 站点描述
-	SettingLogo            = "logo"              // LOGO URL（注入 window.__PANEL_SETTINGS__）
-	SettingFavicon         = "favicon"           // favicon URL（注入 <link rel="icon">）
-	SettingSubscribeDomain = "subscribe_domain"  // 订阅域名（预留：多域名分发 P2）
-	SettingSubscribeURL    = "subscribe_url"     // 订阅对外根 URL（如 https://sub.example.com）
-	SettingSubscribePath   = "subscribe_path"    // 订阅路径前缀（如 /sub，/ehisnodn）
-	SettingSubDenyCode     = "sub_deny_code"     // 订阅端口非订阅路径/无效 token 的统一错误码（404|401，空=404）
-	SettingSubCleanUA      = "sub_clean_ua"      // 订阅爬虫清洗（1=开启，阻断 curl/python/空UA）
-	SettingSubStrictUA     = "sub_strict_ua"     // 严格客户端模式（1=仅放行知名代理客户端）
-	SettingSubBlockedUA    = "sub_blocked_ua"    // 自定义封禁 UA 关键词（逗号分隔）
-	SettingTOSURL          = "tos_url"           // 服务条款 URL
-	SettingStopRegister    = "stop_register"     // 关闭注册（1=关闭，注册接口拒绝）
-	SettingCurrency        = "currency"          // 货币代码（CNY/USD）
-	SettingCurrencySymbol  = "currency_symbol"   // 货币符号（¥/$）
+	SettingAppName           = "app_name"            // 系统标题（注入 <title> + 订阅文件名）
+	SettingAppDesc           = "app_description"     // 站点描述
+	SettingLogo              = "logo"                // LOGO URL（注入 window.__PANEL_SETTINGS__）
+	SettingFavicon           = "favicon"             // favicon URL（注入 <link rel="icon">）
+	SettingSubscribeDomain   = "subscribe_domain"    // 订阅域名（预留：多域名分发 P2）
+	SettingSubscribeURL      = "subscribe_url"       // 订阅对外根 URL（如 https://sub.example.com）
+	SettingSubscribePath     = "subscribe_path"      // 订阅路径前缀（如 /sub，/ehisnodn）
+	SettingSubDenyCode       = "sub_deny_code"       // 订阅端口非订阅路径/无效 token 的统一错误码（404|401，空=404）
+	SettingSubCleanUA        = "sub_clean_ua"        // 订阅爬虫清洗（1=开启，阻断 curl/python/空UA）
+	SettingSubStrictUA       = "sub_strict_ua"       // 严格客户端模式（1=仅放行知名代理客户端）
+	SettingSubBlockedUA      = "sub_blocked_ua"      // 自定义封禁 UA 关键词（逗号分隔）
+	SettingSubProfileTitle   = "sub_profile_title"   // Clash 订阅标题（Content-Disposition filename；空=回退站点名称）
+	SettingSubUpdateInterval = "sub_update_interval" // Clash Profile-Update-Interval（小时；空=默认 24）
+	SettingTOSURL            = "tos_url"             // 服务条款 URL
+	SettingStopRegister      = "stop_register"       // 关闭注册（1=关闭，注册接口拒绝）
+	SettingCurrency          = "currency"            // 货币代码（CNY/USD）
+	SettingCurrencySymbol    = "currency_symbol"     // 货币符号（¥/$）
 
 	// 节点上报周期（2026-09-01，设置页「节点上报」；agent_settings 消息下发到节点）。
 	// 缩短上报周期可加快超额/到期用户的踢除时效（配合事件驱动处置，最坏延迟≈上报周期）。
@@ -40,6 +42,7 @@ var SiteKeys = []string{
 	SettingAppName, SettingAppDesc, SettingLogo, SettingFavicon,
 	SettingSubscribeDomain, SettingSubscribeURL, SettingSubscribePath, SettingSubDenyCode,
 	SettingSubCleanUA, SettingSubStrictUA, SettingSubBlockedUA,
+	SettingSubProfileTitle, SettingSubUpdateInterval,
 	SettingTOSURL, SettingStopRegister, SettingCurrency, SettingCurrencySymbol,
 }
 
@@ -61,6 +64,33 @@ func SubscribePath(db *gorm.DB) string {
 		return "/sub"
 	}
 	return p
+}
+
+// SubProfileTitle Clash 订阅标题（2026-09-08 管理端可自定义；设置页 sub_profile_title，
+// 空=回退站点名称 app_name。调用方仍需做头部安全字符剥离与最终空值兜底）。
+func SubProfileTitle(db *gorm.DB) string {
+	if t := strings.TrimSpace(GetSetting(db, SettingSubProfileTitle)); t != "" {
+		return t
+	}
+	return strings.TrimSpace(GetSetting(db, SettingAppName))
+}
+
+// SubUpdateIntervalHours Clash Profile-Update-Interval（小时；设置页 sub_update_interval，
+// 缺省 24，clamp 1–168——过短徒增拉取压力，过长客户端配置漂移周期不可控）。
+func SubUpdateIntervalHours(db *gorm.DB) int {
+	n := 24
+	if v := strings.TrimSpace(GetSetting(db, SettingSubUpdateInterval)); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			n = p
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	if n > 168 {
+		n = 168
+	}
+	return n
 }
 
 // GetSetting 读取单个设置（DB 直读；不存在返回空串）。设置写入极少，无需缓存。
@@ -198,6 +228,16 @@ func (s *SiteService) SetSiteGroup(vals map[string]string) error {
 		case SettingSubBlockedUA:
 			if len(v) > 500 {
 				return errors.New("封禁 UA 列表过长（最多 500 字符）")
+			}
+		case SettingSubProfileTitle:
+			if len(v) > 64 {
+				return errors.New("订阅标题过长（最多 64 字符）")
+			}
+		case SettingSubUpdateInterval:
+			if v != "" {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < 1 || n > 168 {
+					return errors.New("订阅更新间隔需为 1–168 小时的整数（留空=默认 24）")
+				}
 			}
 		}
 	}

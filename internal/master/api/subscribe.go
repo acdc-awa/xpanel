@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,7 +166,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	c.Header("Content-Type", contentType)
 	if strings.Contains(contentType, "yaml") {
 		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 文件名 / 配置文件网页地址
-		// 文件名 = 站点名称（app_name，客户端据此显示配置名）；空缺省回退 xray。
+		// 文件名 = 订阅标题（sub_profile_title，2026-09-08 管理端可自定义；空回退站点名称）；缺省兜底 xray。
 		// 剥离引号/反斜杠/换行防头部破坏；UTF-8 原样输出（Clash Verge Rev 等按 UTF-8 解析）。
 		profileName := strings.Map(func(r rune) rune {
 			switch r {
@@ -173,11 +174,14 @@ func (d *Deps) Subscribe(c *gin.Context) {
 				return -1
 			}
 			return r
-		}, strings.TrimSpace(services.GetSetting(d.DB, services.SettingAppName)))
+		}, services.SubProfileTitle(d.DB))
 		if profileName == "" {
 			profileName = "xray"
 		}
-		c.Header("Profile-Update-Interval", "24")
+		c.Header("Profile-Update-Interval", strconv.Itoa(services.SubUpdateIntervalHours(d.DB)))
+		// Profile-Title（marzban 风格）：V2Box/Streisand 等客户端按该头显示订阅名；
+		// 与 Content-Disposition 同源（不含 .yaml 后缀），UTF-8 原样输出与文件名口径一致。
+		c.Header("Profile-Title", profileName)
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, profileName))
 		webPage := "http://" + c.Request.Host
 		if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {

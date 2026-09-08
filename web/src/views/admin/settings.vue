@@ -63,6 +63,8 @@ const emptySite = (): SiteGroup => ({
   sub_clean_ua: '1',
   sub_strict_ua: '0',
   sub_blocked_ua: '',
+  sub_profile_title: '',
+  sub_update_interval: '24',
   tos_url: '',
   stop_register: '0',
   currency: 'CNY',
@@ -90,6 +92,13 @@ const agentReportSec = computed<number>({
   get: () => Number(form.agent.agent_report_interval) || 60,
   set: (v) => {
     form.agent.agent_report_interval = String(v ?? 60)
+  },
+})
+// 订阅更新间隔（小时）：同上桥接，缺省 24
+const subUpdateHours = computed<number>({
+  get: () => Number(form.site.sub_update_interval) || 24,
+  set: (v) => {
+    form.site.sub_update_interval = String(v ?? 24)
   },
 })
 const agentHeartbeatSec = computed<number>({
@@ -734,6 +743,21 @@ async function save() {
                 </el-select>
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
                   订阅端口上非订阅路径的请求与<b>无效订阅 token</b> 统一返回该错误码。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="订阅标题 (sub_profile_title)">
+                <el-input v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable maxlength="64" />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  Clash 客户端显示的订阅名称（Content-Disposition filename 响应头，客户端据此命名配置）。
+                  留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。
+                </span>
+              </el-form-item>
+
+              <el-form-item label="订阅更新间隔 (sub_update_interval)">
+                <el-input-number v-model="subUpdateHours" :min="1" :max="168" style="width: 220px" />
+                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
+                  Profile-Update-Interval 响应头（小时）：客户端按该周期自动重新拉取订阅。默认 24，范围 1–168。
                 </span>
               </el-form-item>
 
