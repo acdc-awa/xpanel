@@ -12,6 +12,7 @@ import {
   getSystemStatus,
   checkUpdate,
   applyUpdate,
+  listReleases,
   getUpdateStatus,
   type SiteGroup,
   type CaptchaGroup,
@@ -20,6 +21,7 @@ import {
   type SystemStatus,
   type UpdateCheckResult,
   type UpdateProgress,
+  type ReleaseItem,
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
@@ -343,6 +345,11 @@ let updateTimer: any = null
 let updateDowntimeAt = 0 // 首次轮询失败时刻（0=未进入离线窗口）
 let updateLastPhase = '' // 失败时步骤条错误图标落点=最后经历的有效阶段
 
+// 版本列表（安装历史版本 / 回滚）
+const releases = ref<ReleaseItem[]>([])
+const releasesLoading = ref(false)
+const selectedRelease = ref('')
+
 const updateActiveStep = computed(() => {
   const p = updateStatus.value?.phase === 'failed' ? updateLastPhase : updateStatus.value?.phase
   switch (p) {
@@ -512,6 +519,73 @@ async function confirmApply() {
     )
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || errMsg(e, '触发更新失败'))
+  } finally {
+    updateApplying.value = false
+  }
+}
+
+// 拉取版本列表（安装历史版本 / 回滚）：来自 GitHub Release API，安装复用更新链路。
+async function onLoadReleases() {
+  releasesLoading.value = true
+  try {
+    const { data } = await listReleases()
+    if (data.code === 0) {
+      releases.value = data.data.releases || []
+      const first = releases.value.find((r) => r.installable && !r.current)
+      selectedRelease.value = first?.version || ''
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '查询版本列表失败'))
+  } finally {
+    releasesLoading.value = false
+  }
+}
+
+// 安装所选历史版本（回滚）：与「应用更新」同一条 下载 → sha256 → 自检 → 原子替换 → 重启 链路。
+async function confirmInstallRelease() {
+  const v = selectedRelease.value
+  if (!v) {
+    ElMessage.warning('请选择要安装的版本')
+    return
+  }
+  const rel = releases.value.find((r) => r.version === v)
+  if (rel && !rel.installable) {
+    ElMessage.warning('该版本没有当前架构的安装包')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将下载并安装 ${v}（当前 ${updateInfo.value?.current_version || '—'}）。
+流程同应用更新：下载 → sha256 校验 → 自检 → 原子替换 → 容器重启。
+期间面板短暂不可用；降级/回滚前请先手动备份数据库。`,
+      '安装所选版本',
+      { type: 'error', confirmButtonText: '下载并安装', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  updateApplying.value = true
+  try {
+    const { data } = await applyUpdate(v)
+    if (data.code !== 0) {
+      ElMessage.error(data.message)
+      return
+    }
+    if (data.data?.started === false && !data.data.progress?.running) {
+      ElMessage.success(data.data.message || data.message)
+      return
+    }
+    updateTargetVer.value = data.data?.version || v
+    updateDowntimeAt = 0
+    resumeUpdateWatch(
+      data.data?.progress?.running
+        ? data.data.progress
+        : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
+    )
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || errMsg(e, '触发安装失败'))
   } finally {
     updateApplying.value = false
   }
@@ -919,6 +993,10 @@ async function save() {
                   <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
                 </el-descriptions-item>
                 <el-descriptions-item label="备份调度">{{ system.backup_enabled ? '已启用' : '未启用' }}</el-descriptions-item>
+                <el-descriptions-item label="数据库版本">
+                  <code class="cell-mono">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</code>
+                  <span v-if="system.schema_min_compatible" class="muted" style="margin-left: 6px">最低兼容 v{{ system.schema_min_compatible }}</span>
+                </el-descriptions-item>
                 <el-descriptions-item label="内存占用">{{ system.mem_alloc_mb }} MB</el-descriptions-item>
                 <el-descriptions-item label="服务时间">{{ system.server_time }}</el-descriptions-item>
               </el-descriptions>
@@ -941,7 +1019,7 @@ async function save() {
                   <el-tag v-if="updateInfo?.available" type="success" size="small" style="margin-left: 8px">有可用更新</el-tag>
                   <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small" style="margin-left: 8px">更新已禁用</el-tag>
                 </div>
-                <div class="x-toolbar" style="margin-top: 10px">
+                <div class="x-toolbar" style="margin-top: 10px; flex-wrap: wrap">
                   <el-button :icon="Refresh" :loading="updateChecking" @click="onCheckUpdate">检查更新</el-button>
                   <el-button
                     type="primary"
@@ -953,9 +1031,38 @@ async function save() {
                     应用更新
                   </el-button>
                 </div>
+                <div class="x-toolbar" style="margin-top: 10px; flex-wrap: wrap; align-items: center">
+                  <el-select
+                    v-model="selectedRelease"
+                    :loading="releasesLoading"
+                    placeholder="选择历史版本"
+                    style="width: 220px"
+                    :disabled="!!updateStatus?.running"
+                  >
+                    <el-option
+                      v-for="r in releases"
+                      :key="r.version"
+                      :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
+                      :value="r.version"
+                      :disabled="!r.installable || r.current"
+                    />
+                  </el-select>
+                  <el-button :icon="Refresh" :loading="releasesLoading" @click="onLoadReleases">加载版本列表</el-button>
+                  <el-button
+                    type="danger"
+                    plain
+                    :disabled="!selectedRelease || !!updateStatus?.running"
+                    :loading="updateApplying"
+                    @click="confirmInstallRelease"
+                  >
+                    安装所选版本
+                  </el-button>
+                </div>
                 <p class="muted tip">
                   应用更新将下载最新 release 包并强制校验 sha256，替换后进程主动退出，由容器
-                  <code>restart: unless-stopped</code> 自动拉起新版本；新版本启动失败时自动回滚上一版本。应用更新前请先手动备份。
+                  <code>restart: unless-stopped</code> 自动拉起新版本；新版本启动失败时自动回滚上一版本。
+                  「安装所选版本」可从 Release 历史列表选择任意版本（含降级/回滚），走同一条
+                  下载 → 校验 → 自检 → 原子替换 → 重启 链路。降级/回滚前请先手动备份数据库。
                 </p>
               </div>
 
@@ -1015,7 +1122,7 @@ async function save() {
           <div class="status-msg">{{ updateDisplayMessage }}</div>
           <div v-if="updateStatus?.error" class="status-err cell-mono">{{ updateStatus.error }}</div>
           <div v-else-if="updateStatus?.phase !== 'success' && updateStatus?.phase !== 'failed'" class="status-hint">
-            更新在服务端后台执行，刷新页面后重新打开本页可继续查看进度。
+            操作在服务端后台执行，刷新页面后重新打开本页可继续查看进度。
           </div>
         </div>
       </div>

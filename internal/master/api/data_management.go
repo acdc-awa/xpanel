@@ -3,6 +3,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -217,4 +218,53 @@ func sqliteFileSizes(path string) (dbSize, walSize int64) {
 		walSize = st.Size()
 	}
 	return
+}
+
+// AdminCompact POST /api/v1/admin/data/compact —— 压缩历史明细（在线迁移）。
+// 把存量 traffic_logs 归并到小时桶、node_reports 抽稀到分钟并清理超期行，口径不变、幂等；
+// SQLite 下随后 VACUUM 回收磁盘（既有库 auto_vacuum 多为 NONE，仅 incremental_vacuum 不生效，
+// 全量 VACUUM 才会真正缩小文件并转换为增量回收模式）。与「回收空间」共用 vacuumMu 串行化。
+func (d *Deps) AdminCompact(c *gin.Context) {
+	if !vacuumMu.TryLock() {
+		util.BadRequest(c, "数据维护正在进行中，请稍候")
+		return
+	}
+	defer vacuumMu.Unlock()
+
+	isSQLite := d.Cfg != nil && d.Cfg.DB.Driver == "sqlite"
+	var path string
+	var dbBefore, walBefore int64
+	if isSQLite {
+		path = strings.SplitN(d.Cfg.DB.DSN, "?", 2)[0]
+		dbBefore, walBefore = sqliteFileSizes(path)
+	}
+
+	st, err := services.CompactAll(d.DB, time.Now())
+	if err != nil {
+		log.Printf("data: 历史数据压缩失败: %v", err)
+		util.ServerError(c, "压缩失败，请查看服务端日志")
+		return
+	}
+
+	resp := gin.H{"stats": st}
+	if !isSQLite {
+		util.OK(c, resp)
+		return
+	}
+
+	d.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	if err := d.DB.Exec("VACUUM").Error; err != nil {
+		// 明细已压缩完成，仅空间回收失败：如实返回压缩统计并提示重试回收。
+		log.Printf("data: 压缩后空间回收失败: %v", err)
+		resp["vacuum_error"] = "空间回收失败，请稍后重试"
+	} else {
+		d.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	}
+	dbAfter, walAfter := sqliteFileSizes(path)
+	resp["db_size_before"] = dbBefore
+	resp["wal_size_before"] = walBefore
+	resp["db_size_after"] = dbAfter
+	resp["wal_size_after"] = walAfter
+	resp["reclaimed"] = (dbBefore + walBefore) - (dbAfter + walAfter)
+	util.OK(c, resp)
 }

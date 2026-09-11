@@ -103,6 +103,29 @@ export function vacuumDatabase() {
   return http.post<ApiResp<VacuumResult>>('/admin/data/vacuum')
 }
 
+export interface CompactStats {
+  traffic_rows_before: number
+  traffic_rows_after: number
+  traffic_rows_removed: number
+  node_rows_before: number
+  node_rows_after: number
+  node_rows_removed: number
+}
+
+export interface CompactResult {
+  stats: CompactStats
+  db_size_before?: number
+  wal_size_before?: number
+  db_size_after?: number
+  wal_size_after?: number
+  reclaimed?: number
+  vacuum_error?: string
+}
+
+export function compactHistory() {
+  return http.post<ApiResp<CompactResult>>('/admin/data/compact')
+}
+
 export interface SystemStatus {
   app_name: string
   app_env: string
@@ -118,6 +141,11 @@ export interface SystemStatus {
   mem_alloc_mb: number
   mem_sys_mb: number
   backup_enabled: boolean
+  /** 数据库协议版本（schema versioning）：库记录值 / 面板期望值 */
+  schema_version?: string
+  schema_min_compatible?: string
+  schema_migrated_by?: string
+  schema_expected?: number
   counts: {
     users: number
     servers: number
@@ -177,6 +205,27 @@ export function applyUpdate(version = '') {
     { version },
     { timeout: 30000 },
   )
+}
+
+// 版本列表（安装历史版本 / 回滚）：来自 GitHub Release API，安装仍走 applyUpdate(version)。
+export interface ReleaseItem {
+  version: string
+  name?: string
+  published_at?: string
+  prerelease?: boolean
+  installable: boolean // 当前架构是否有可用资产
+  current: boolean // 是否为当前运行版本
+  asset_url?: string
+}
+
+export interface ReleasesResult {
+  enabled: boolean
+  current_version: string
+  releases: ReleaseItem[]
+}
+
+export function listReleases() {
+  return http.get<ApiResp<ReleasesResult>>('/admin/update/releases', { timeout: 20000 })
 }
 
 export function getServerMetrics(id: number, range = '1h') {

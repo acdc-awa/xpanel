@@ -70,8 +70,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
+	// 数据库协议版本护栏：库由更新版本面板迁移过（最低兼容版本高于本面板）时拒绝启动，
+	// 防止「回滚到旧面板 + 新库」组合读错/写坏数据；全新库与版本号引入前的老库放行。
+	if err := models.CheckSchemaCompat(database); err != nil {
+		log.Fatalf("数据库兼容性检查失败: %v", err)
+	}
 	if err := models.AutoMigrate(database); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
+	}
+	if err := models.RecordSchemaVersion(database, Version); err != nil {
+		log.Printf("记录数据库 schema 版本失败: %v", err)
 	}
 
 	// 启动清零节点在线标记：进程崩溃/被杀退出时 unregister 不执行，DB 里的 status=1

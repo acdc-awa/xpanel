@@ -17,13 +17,16 @@ import (
 // SqliteDSN 追加生产化 pragma：
 //   - busy_timeout（ISSUE-15）：并发写冲突时等待而不是立刻返回 database is locked；
 //   - journal_mode(WAL)：读写不互斥，崩溃恢复粒度更优，备份（VACUUM INTO）自动包含 WAL 数据；
-//   - synchronous(NORMAL)：WAL 下安全（不损原子性），仅断电可能丢最后一批已提交事务。
+//   - synchronous(NORMAL)：WAL 下安全（不损原子性），仅断电可能丢最后一批已提交事务；
+//   - auto_vacuum(INCREMENTAL)：保留策略 DELETE 只把页还给 freelist、文件不缩，开启增量回收后
+//     可在清理后 PRAGMA incremental_vacuum 归还磁盘（对既有库需执行一次 VACUUM 才生效，
+//     见数据管理页「空间回收」/「压缩历史数据」）。
 func SqliteDSN(dsn string) string {
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	return dsn + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=auto_vacuum(INCREMENTAL)"
 }
 
 // Open 按配置打开数据库连接，返回 *gorm.DB。

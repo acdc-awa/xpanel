@@ -21,6 +21,11 @@ const (
 	trafficLogRetentionDays = 90  // traffic_logs 保留天数
 	nodeReportRetentionDays = 30  // node_reports 保留天数
 	auditLogRetentionDays   = 180 // audit_logs 保留天数
+	// trafficPeriodBucket 流量明细写入分桶：agent 上报的 Period 是发送时刻（每次不同），
+	// 原样落库会让唯一索引 (user_id, inbound_id, period_start) 的 upsert 永不合并，
+	// 形成每个活跃「用户×入站」每分钟一行。归一到整点后同一小时的多次上报累加到一行，
+	// 行数降到 1/60。计费/排名/每日汇总均为周期内 SUM，小时桶细于计费周期起点，口径不变。
+	trafficPeriodBucket = time.Hour
 )
 
 // TrafficService 处理节点流量上报与聚合。
@@ -52,6 +57,8 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 	if err != nil {
 		return nil, err
 	}
+	// 归一到整点再落库（见 trafficPeriodBucket 注释）：同小时多次上报经 upsert 累加为一行。
+	periodStart = periodStart.Truncate(trafficPeriodBucket)
 	periodEnd := time.Now()
 
 	// 该节点入站 tag → ID 与 ID → 行映射（一次查询，循环复用；含停用入站——
@@ -547,6 +554,13 @@ func (s *TrafficService) runRetention() {
 		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
 		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, daysAudit)
+	}
+
+	// DELETE 只把页还给 freelist、文件不缩；SQLite 下顺手落盘 WAL 并做增量回收，
+	// 否则 -wal 会持续增长、磁盘占用长期不降（增量回收依赖 auto_vacuum=INCREMENTAL，见 db.SqliteDSN）。
+	if s.DB.Dialector != nil && s.DB.Dialector.Name() == "sqlite" {
+		s.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		s.DB.Exec("PRAGMA incremental_vacuum")
 	}
 }
 

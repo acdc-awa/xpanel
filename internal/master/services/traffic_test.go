@@ -663,3 +663,53 @@ func TestSaveStatsKeyInboundAttribution(t *testing.T) {
 		t.Fatalf("in-b.up = %d, want 0", inbBAfter.Up)
 	}
 }
+
+// TestSaveBucketsTrafficByHour 写入侧按小时分桶（trafficPeriodBucket）：
+// agent 的 Period 是发送时刻，同小时内多次上报必须合并为一行并求和，跨小时分属不同行；
+// 计费口径（billed_*）随合并不变。这是抑制 traffic_logs 膨胀的核心行为。
+func TestSaveBucketsTrafficByHour(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Ratio: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &TrafficService{DB: db}
+	send := func(period string, up, down int64) {
+		t.Helper()
+		if _, err := svc.Save(protocol.TrafficReportPayload{
+			Period:  period,
+			Entries: []protocol.TrafficEntry{{UserID: 42, Inbound: "vless-in", UpBytes: up, DownBytes: down}},
+		}, 1); err != nil {
+			t.Fatalf("Save(%s): %v", period, err)
+		}
+	}
+	send("2026-08-24T00:05:00Z", 100, 200) // 同小时
+	send("2026-08-24T00:55:00Z", 100, 200) // 同小时
+	send("2026-08-24T01:10:00Z", 7, 9)     // 下一小时
+
+	var logs []models.TrafficLog
+	if err := db.Order("period_start ASC").Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("TrafficLog 行数 = %d, want 2（同小时合并、跨小时分开）", len(logs))
+	}
+	hour0 := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	if !logs[0].PeriodStart.UTC().Equal(hour0) {
+		t.Fatalf("首行 period_start = %s, want %s（应归一到整点）", logs[0].PeriodStart, hour0)
+	}
+	if logs[0].UpBytes != 200 || logs[0].DownBytes != 400 {
+		t.Fatalf("同小时合并 up=%d down=%d, want 200/400", logs[0].UpBytes, logs[0].DownBytes)
+	}
+	if logs[0].BilledUp != 200 || logs[0].BilledDown != 400 {
+		t.Fatalf("计费口径 billed_up=%d billed_down=%d, want 200/400", logs[0].BilledUp, logs[0].BilledDown)
+	}
+	if logs[1].UpBytes != 7 || logs[1].DownBytes != 9 {
+		t.Fatalf("次小时 up=%d down=%d, want 7/9", logs[1].UpBytes, logs[1].DownBytes)
+	}
+}

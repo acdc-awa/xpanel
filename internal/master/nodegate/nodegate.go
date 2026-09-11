@@ -44,6 +44,13 @@ const (
 	// enforcedThrottle 事件驱动超额/到期处置的节流窗口：同一用户命中后 3 分钟内不重复
 	// 触发全节点同步（用户被移除后不再产生上报，正常只触发一次；此为重试/多节点并发兜底）。
 	enforcedThrottle = 3 * time.Minute
+
+	// nodeReportSampleInterval node_reports 落库采样间隔。心跳仍按 heartbeat_interval（默认 30s）
+	// 保活并即时更新 servers.last_seen_at/status，但监控指标行按此间隔抽稀落库——30s 一行会让
+	// 每个节点每天产生 2880 行（含索引约 0.4MB/天/节点），是 node_reports 膨胀的主因。
+	// 取 1 分钟：节点监控曲线最长回看 7 天、读取时再按 1m/3m/10m/1h 二次分桶，
+	// 1 分钟采样对全部区间都不降分辨率。
+	nodeReportSampleInterval = time.Minute
 )
 
 // Conn 一条节点连接。
@@ -57,8 +64,11 @@ type Conn struct {
 	// settingsSynced 运行时设置（上报/心跳周期）是否已成功下发至当前连接：建连为 false，
 	// PushAgentSettings 成功置 true；watchdog 2 分钟补推循环据此决定是否重试（失败不置位）。
 	settingsSynced atomic.Bool
-	mu             sync.Mutex
-	closed         bool
+	// lastReportAt 上次 node_reports 落库时刻（采样节流）。仅 readPump 所在 goroutine
+	// 读写，无需加锁；重连新建 Conn 时为零值，首帧心跳立即落库。
+	lastReportAt time.Time
+	mu           sync.Mutex
+	closed       bool
 }
 
 // touch 更新最近活跃时间。
@@ -444,9 +454,10 @@ func (h *Hub) pruneEnforced() {
 func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	var hb protocol.HeartbeatPayload
 	_ = msg.PayloadTo(&hb)
+	now := time.Now()
 	updates := map[string]any{
 		"status":       1,
-		"last_seen_at": time.Now(),
+		"last_seen_at": now,
 		"xray_running": hb.XrayRunning,
 	}
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
@@ -459,8 +470,14 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		updates["online_ips"] = string(b)
 	}
 	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
-	// node_reports 落库（供仪表盘趋势）。在线数按去重用户口径重算：统计键按入站区分后
-	// 同一用户每入站一个 email 条目，agent 直接计数会重复计人；快照为空（旧 agent）沿用其计数。
+	// node_reports 采样落库（见 nodeReportSampleInterval）：保活/状态每帧即时更新，
+	// 监控指标行按固定间隔抽稀，避免心跳频率直接决定存储增长。
+	if now.Sub(conn.lastReportAt) < nodeReportSampleInterval {
+		return
+	}
+	conn.lastReportAt = now
+	// 在线数按去重用户口径重算：统计键按入站区分后同一用户每入站一个 email 条目，
+	// agent 直接计数会重复计人；快照为空（旧 agent）沿用其计数。
 	onlineUsers := hb.OnlineUsers
 	if len(hb.OnlineIPs) > 0 {
 		onlineUsers = xray.CountDistinctOnlineUsers(hb.OnlineIPs)
@@ -477,7 +494,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		TxRate:      hb.TxRate,
 		RxBytes:     hb.RxBytes,
 		TxBytes:     hb.TxBytes,
-		ReportedAt:  time.Now(),
+		ReportedAt:  now,
 	}).Error
 }
 

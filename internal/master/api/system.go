@@ -38,6 +38,16 @@ func (d *Deps) AdminSystemStatus(c *gin.Context) {
 		data["backup_enabled"] = false
 	}
 
+	// 数据库协议版本（schema versioning）：展示当前库记录与面板期望版本，
+	// 供回滚/降级时判断兼容性（库最低兼容版本 > 面板版本 = 需升级面板）。
+	if d.DB != nil {
+		si := models.ReadSchemaInfo(d.DB)
+		data["schema_version"] = si.Version
+		data["schema_min_compatible"] = si.MinCompatible
+		data["schema_migrated_by"] = si.MigratedBy
+		data["schema_expected"] = si.Expected
+	}
+
 	// 内存使用概况
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)

@@ -127,6 +127,96 @@ func (d *Deps) AdminUpdateCheck(c *gin.Context) {
 	})
 }
 
+// releaseAsset GitHub release 资产。
+type releaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// releaseItem GitHub releases 列表项（仅取回滚/安装历史版本所需字段）。
+type releaseItem struct {
+	TagName     string         `json:"tag_name"`
+	Name        string         `json:"name"`
+	PublishedAt string         `json:"published_at"`
+	Prerelease  bool           `json:"prerelease"`
+	Draft       bool           `json:"draft"`
+	Assets      []releaseAsset `json:"assets"`
+}
+
+// AdminUpdateReleases GET /api/v1/admin/update/releases —— 列出版本（供安装历史版本/回滚）。
+// 返回最近 N 个 release 及当前架构资产是否可用；安装仍走 POST /admin/update/apply {version}，
+// 与「应用更新」同一条下载→sha256→自检→原子替换→重启链路。
+func (d *Deps) AdminUpdateReleases(c *gin.Context) {
+	if d.Cfg == nil || !d.Cfg.Update.Enabled {
+		util.OK(c, gin.H{"enabled": false, "current_version": PanelVersion, "releases": []any{}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	items, err := d.fetchReleases(ctx)
+	if err != nil {
+		util.Fail(c, 502, "查询版本列表失败: "+err.Error())
+		return
+	}
+	prefix := "https://github.com"
+	if d.Cfg.Update.Mirror != "" {
+		prefix = strings.TrimSuffix(d.Cfg.Update.Mirror, "/")
+	}
+	out := make([]gin.H, 0, len(items))
+	for _, r := range items {
+		if r.Draft || r.TagName == "" {
+			continue
+		}
+		assetURL := assetURLForRelease(r, runtime.GOARCH, prefix)
+		out = append(out, gin.H{
+			"version":      r.TagName,
+			"name":         r.Name,
+			"published_at": r.PublishedAt,
+			"prerelease":   r.Prerelease,
+			"installable":  assetURL != "",
+			"current":      r.TagName == PanelVersion,
+			"asset_url":    assetURL,
+		})
+	}
+	util.OK(c, gin.H{"enabled": true, "current_version": PanelVersion, "releases": out})
+}
+
+// assetURLForRelease 匹配当前架构的 release 资产名 xpanel-master-<tag>-linux-<arch>.tar.gz，
+// 命中则返回（镜像前缀重写后的）下载直链，否则空串（视为该版本不可安装）。
+func assetURLForRelease(r releaseItem, arch, githubPrefix string) string {
+	want := fmt.Sprintf("xpanel-master-%s-linux-%s.tar.gz", r.TagName, arch)
+	for _, a := range r.Assets {
+		if a.Name == want {
+			return strings.Replace(a.BrowserDownloadURL, "https://github.com", githubPrefix, 1)
+		}
+	}
+	return ""
+}
+
+// fetchReleases 拉取 GitHub releases 列表（最近 30 个，足够回滚选取）。
+func (d *Deps) fetchReleases(ctx context.Context) ([]releaseItem, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=30", d.repo())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API 返回 %d", resp.StatusCode)
+	}
+	var items []releaseItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // AdminUpdateApply POST /api/v1/admin/update/apply
 // body: {"version": "vX.Y.Z"}（空 = 最新 release）。解析更新源后立即返回，剩余流程后台执行；
 // 进度经 GET /admin/update/status 轮询。已有更新在执行时幂等返回当前进度（不报错，防手抖多击）。

@@ -5,9 +5,9 @@ import { Delete, Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { useThemeStore } from '@/stores/theme'
-import { getLogStats, cleanupLogs, vacuumDatabase, updateSettings } from '@/api/admin'
+import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import type { LogStats } from '@/api/admin'
+import type { LogStats, CompactResult } from '@/api/admin'
 
 const theme = useThemeStore()
 const loading = ref(false)
@@ -27,7 +27,7 @@ interface LogTableMeta {
   color: string
 }
 const logTables: LogTableMeta[] = [
-  { key: 'traffic_logs', label: '流量明细', desc: '每用户每分钟一行的计费明细，受计费周期与每日聚合保护', color: '#38bdf8' },
+  { key: 'traffic_logs', label: '流量明细', desc: '每用户每小时的计费明细（历史分钟级数据可压缩归并），受计费周期与每日聚合保护', color: '#38bdf8' },
   { key: 'node_reports', label: '节点心跳', desc: '服务器心跳状态上报，仅用于节点监控曲线回看', color: '#a78bfa' },
   { key: 'audit_logs', label: '审计日志', desc: '操作与登录审计记录，清理后不可再追溯', color: '#f59e0b' },
 ]
@@ -200,7 +200,6 @@ async function runCleanup() {
 // ---- 空间回收 ----
 const vacuumRunning = ref(false)
 const vacuumResult = ref<{ reclaimed: number } | null>(null)
-
 async function runVacuum() {
   try {
     await ElMessageBox.confirm(
@@ -225,6 +224,37 @@ async function runVacuum() {
     ElMessage.error(errMsg(e, '空间回收失败'))
   } finally {
     vacuumRunning.value = false
+  }
+}
+
+// ---- 历史数据压缩 ----
+const compactRunning = ref(false)
+const compactResult = ref<CompactResult | null>(null)
+
+async function runCompact() {
+  try {
+    await ElMessageBox.confirm(
+      '将存量流量明细按小时归并、节点心跳按分钟抽稀，并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。期间数据库写入会短暂阻塞，建议低峰执行。',
+      '压缩历史数据',
+      { type: 'warning', confirmButtonText: '开始压缩', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  compactRunning.value = true
+  try {
+    const { data } = await compactHistory()
+    if (data.code === 0) {
+      compactResult.value = data.data
+      ElMessage.success('历史数据压缩完成')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '压缩失败'))
+  } finally {
+    compactRunning.value = false
   }
 }
 
@@ -384,6 +414,38 @@ onUnmounted(() => {
           <template v-else>审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。</template>
         </p>
       </div>
+    </BaseCard>
+
+    <!-- 历史数据压缩 -->
+    <BaseCard title="历史数据压缩" style="margin-bottom: 16px">
+      <div class="cleanup-row" style="align-items: center">
+        <span class="muted" style="font-size: 12.5px">
+          把存量流量明细归并到小时桶、节点心跳抽稀到每分钟，并清理超出保留期的数据，随后回收磁盘空间。
+          归并只做求和/抽样，计费与用量口径不变，可重复执行。
+        </span>
+        <el-button type="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</el-button>
+      </div>
+      <div v-if="compactResult" class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.9">
+        <div>
+          流量明细：{{ fmtCount(compactResult.stats.traffic_rows_before) }} →
+          {{ fmtCount(compactResult.stats.traffic_rows_after) }} 行（减少
+          {{ fmtCount(compactResult.stats.traffic_rows_removed) }}）
+        </div>
+        <div>
+          节点心跳：{{ fmtCount(compactResult.stats.node_rows_before) }} →
+          {{ fmtCount(compactResult.stats.node_rows_after) }} 行（减少
+          {{ fmtCount(compactResult.stats.node_rows_removed) }}）
+        </div>
+        <div v-if="compactResult.reclaimed !== undefined">
+          释放空间 <b class="cell-mono">{{ fmtSize(Math.max(0, compactResult.reclaimed || 0)) }}</b>
+        </div>
+        <div v-if="compactResult.vacuum_error" style="color: var(--el-color-warning)">
+          {{ compactResult.vacuum_error }}
+        </div>
+      </div>
+      <p class="muted" style="font-size: 12.5px; margin-top: 10px">
+        压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分钟的数据不会重复压缩。
+      </p>
     </BaseCard>
 
     <!-- 空间回收 -->
