@@ -60,7 +60,8 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		q = q.Where("operator_type = ?", ot)
 	}
 
-	// 5. 时间范围筛选（统一转 UTC 绑定：SQLite 以带偏移文本存储并按字面量比较）
+	// 5. 时间范围筛选（入库与查询统一为 UTC：进程本地时区已在 main 固定为 UTC，
+	//    存量非 UTC 时间戳由 models.NormalizeTimesToUTC 在启动迁移时归一）
 	if st := strings.TrimSpace(c.Query("start_time")); st != "" {
 		if t, err := time.Parse(time.RFC3339, st); err == nil {
 			q = q.Where("created_at >= ?", t.UTC())

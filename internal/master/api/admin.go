@@ -77,12 +77,13 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 
 // AdminInvitations GET /api/v1/admin/invitations —— 邀请码列表。
 // 未使用且未过期的排最前（过期不落库，需按 expires_at 现场推导），组内按 id 倒序。
-// 时间字面量由 Go 生成（无用户输入）；GORM Order 不支持绑定参数，只能内联。
+// 时间字面量由 Go 生成（无用户输入）；须与库内实际存储格式一致（models.FormatDBTime），
+// 否则 SQLite 按文本字面量比较会恒真/恒假（如空格分隔 vs 'T' 分隔）。
 func (d *Deps) AdminInvitations(c *gin.Context) {
 	var list []models.InvitationCode
 	orderExpr := fmt.Sprintf(
 		"CASE WHEN status = %d AND (expires_at IS NULL OR expires_at > '%s') THEN 0 ELSE 1 END, id DESC",
-		models.InviteUnused, time.Now().Format("2006-01-02 15:04:05"))
+		models.InviteUnused, models.FormatDBTime(time.Now()))
 	if err := d.DB.Order(orderExpr).Limit(200).Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return

@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"encoding/json"
@@ -117,5 +117,44 @@ func TestAdminAuditLogsFilters(t *testing.T) {
 		}
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, 1, resp.Data.Total)
+	}
+
+	// 5. Filter by operator_type=system
+	{
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/audit-logs?operator_type=system", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Data struct {
+				Total int `json:"total"`
+				Items []struct {
+					Action string `json:"action"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 1, resp.Data.Total)
+		assert.Equal(t, "auth.login", resp.Data.Items[0].Action)
+	}
+
+	// 6. Filter by start_time and end_time (browser sends ISO string with Z)
+	{
+		now := time.Now().UTC()
+		start := now.Add(-6 * time.Minute).Format(time.RFC3339)
+		end := now.Add(1 * time.Minute).Format(time.RFC3339)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/audit-logs?start_time="+start+"&end_time="+end, nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Data struct {
+				Total int `json:"total"`
+			} `json:"data"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 3, resp.Data.Total)
 	}
 }

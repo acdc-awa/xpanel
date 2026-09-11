@@ -84,6 +84,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migratePlanSaleFlags(db); err != nil {
 		return err
 	}
+	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
+	if err := NormalizeTimesToUTC(db); err != nil {
+		return err
+	}
 	return migrateUserSubscribeTokens(db)
 }
 

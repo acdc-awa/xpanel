@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -68,6 +69,15 @@ func (d *Deps) AdminOrders(c *gin.Context) {
 	q := d.DB.Model(&models.Order{})
 	if st := c.Query("status"); st != "" {
 		q = q.Where("status = ?", st)
+	}
+	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
+		// 用子查询匹配用户名/邮箱，避免把命中的用户 ID 全量拉回再拼 IN：
+		// 关键词命中大量用户时会生成超长占位符列表（SQLite 变量上限）且多一次往返。
+		pat := "%" + kw + "%"
+		q = q.Where(
+			"(order_no LIKE ? OR user_id IN (SELECT id FROM users WHERE (username LIKE ? OR email LIKE ?) AND deleted_at IS NULL))",
+			pat, pat, pat,
+		)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
