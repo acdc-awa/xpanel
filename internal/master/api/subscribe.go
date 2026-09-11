@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -165,9 +166,9 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 	c.Header("Content-Type", contentType)
 	if strings.Contains(contentType, "yaml") {
-		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 文件名 / 配置文件网页地址
-		// 文件名 = 订阅标题（sub_profile_title，2026-09-08 管理端可自定义；空回退站点名称）；缺省兜底 xray。
-		// 剥离引号/反斜杠/换行防头部破坏；UTF-8 原样输出（Clash Verge Rev 等按 UTF-8 解析）。
+		// Clash 响应头三件套（17 号 P0 ⑨）：更新间隔 / 订阅名 / 配置文件网页地址
+		// 订阅名 = 订阅标题（sub_profile_title，2026-09-08 管理端可自定义；空回退站点名称）；缺省兜底 xray。
+		// 剥离引号/反斜杠/换行防头部破坏；不加 .yaml 后缀，客户端显示的就是设置里配置的文字本身。
 		profileName := strings.Map(func(r rune) rune {
 			switch r {
 			case '"', '\\', '\r', '\n':
@@ -179,10 +180,15 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			profileName = "xray"
 		}
 		c.Header("Profile-Update-Interval", strconv.Itoa(services.SubUpdateIntervalHours(d.DB)))
-		// Profile-Title（marzban 风格）：V2Box/Streisand 等客户端按该头显示订阅名；
-		// 与 Content-Disposition 同源（不含 .yaml 后缀），UTF-8 原样输出与文件名口径一致。
+		// Profile-Title（marzban 风格）：V2Box/Streisand 等客户端按该头显示订阅名；UTF-8 原样输出。
 		c.Header("Profile-Title", profileName)
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, profileName))
+		// Content-Disposition 双写：filename* 优先（RFC 5987，UTF-8 百分号编码）——
+		// 2026-09-12 实测：只给带引号的 filename 时，部分客户端会把引号一起当成名字（显示成 \"名字\"）；
+		// filename 作为老客户端兜底。名字原样使用订阅标题，不追加 .yaml。
+		c.Header("Content-Disposition", fmt.Sprintf(
+			`attachment; filename="%s"; filename*=UTF-8''%s`,
+			profileName, url.PathEscape(profileName),
+		))
 		webPage := "http://" + c.Request.Host
 		if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {
 			webPage = scheme + "://" + c.Request.Host
