@@ -99,16 +99,6 @@ func SaveRetentionSettingsGroup(db *gorm.DB, vals map[string]string) error {
 //
 // 查询失败返回空串（调用方应拒绝清理）。
 func TrafficSafeDeleteBefore(db *gorm.DB, now time.Time) string {
-	var starts []sql.NullTime
-	if err := db.Model(&models.User{}).Pluck("traffic_cycle_start", &starts).Error; err != nil {
-		return ""
-	}
-	var minCycle time.Time
-	for _, s := range starts {
-		if s.Valid && !s.Time.IsZero() && (minCycle.IsZero() || s.Time.Before(minCycle)) {
-			minCycle = s.Time
-		}
-	}
 	// 按业务时区切天，与仪表盘/每日汇总口径一致（返回值是业务日期字符串）。
 	loc := BusinessLocation(db)
 	toDate := func(t time.Time) time.Time {
@@ -116,6 +106,21 @@ func TrafficSafeDeleteBefore(db *gorm.DB, now time.Time) string {
 		return time.Date(y, m, d, 0, 0, 0, 0, loc)
 	}
 	agg := toDate(now.AddDate(0, 0, -aggWindowDays))
+
+	// users 表不存在（全新库/仅迁移了部分表）时不存在任何计费周期，仅受每日聚合窗口约束。
+	if !db.Migrator().HasTable(&models.User{}) {
+		return agg.Format("2006-01-02")
+	}
+	var starts []sql.NullTime
+	if err := db.Model(&models.User{}).Pluck("traffic_cycle_start", &starts).Error; err != nil {
+		return "" // 查询失败：无法校验，调用方应拒绝清理
+	}
+	var minCycle time.Time
+	for _, s := range starts {
+		if s.Valid && !s.Time.IsZero() && (minCycle.IsZero() || s.Time.Before(minCycle)) {
+			minCycle = s.Time
+		}
+	}
 	if !minCycle.IsZero() {
 		if c := toDate(minCycle); c.Before(agg) {
 			agg = c

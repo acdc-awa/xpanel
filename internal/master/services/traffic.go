@@ -616,11 +616,15 @@ func (s *TrafficService) runRetention() {
 	daysLogs := RetentionTrafficDays(s.DB)
 	daysReports := RetentionNodeReportDays(s.DB)
 	daysAudit := RetentionAuditDays(s.DB)
-	cutLogs := now.AddDate(0, 0, -daysLogs)
 	cutReports := now.AddDate(0, 0, -daysReports)
 	cutAudit := now.AddDate(0, 0, -daysAudit)
 
-	if res := s.DB.Where("period_start < ?", cutLogs).Delete(&models.TrafficLog{}); res.Error != nil {
+	// traffic_logs 删除上界须同时受「保留天数」与「安全线」（计费周期 + 每日聚合窗口）约束：
+	// 保留天数小于某用户计费周期时会删掉仍在计费期内的明细，导致用量/配额少算。
+	// 安全线无法校验时跳过删除（宁可不删，不可误删）。
+	if cutLogs, ok := trafficDeleteCutoff(s.DB, now, daysLogs); !ok {
+		log.Printf("traffic: 跳过 traffic_logs 清理（无法校验安全上界）")
+	} else if res := s.DB.Where("period_start < ?", cutLogs).Delete(&models.TrafficLog{}); res.Error != nil {
 		log.Printf("traffic: 清理 traffic_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
 		log.Printf("traffic: 清理 %d 条过期 traffic_logs（保留 %d 天）", res.RowsAffected, daysLogs)
@@ -634,6 +638,18 @@ func (s *TrafficService) runRetention() {
 		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
 		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, daysAudit)
+	}
+
+	// 流量明细兜底压缩：正常写入已按小时分桶，仅在探测到非整点明细
+	//（旧版本面板写入/回滚到旧面板/迁移中断）时才执行，避免每日全表扫描。
+	if need, nerr := NeedsTrafficCompaction(s.DB); nerr != nil {
+		log.Printf("traffic: 流量明细压缩探测失败: %v", nerr)
+	} else if need {
+		if b, a, cerr := CompactTrafficLogs(s.DB, now); cerr != nil {
+			log.Printf("traffic: traffic_logs 兜底压缩失败: %v", cerr)
+		} else if b != a {
+			log.Printf("traffic: traffic_logs 兜底压缩 %d → %d 行", b, a)
+		}
 	}
 
 	// 节点曲线分级降采样（近 6h 保 1 分钟 / 6–24h 保 10 分钟 / 24h 以上保 1 小时），
@@ -650,6 +666,25 @@ func (s *TrafficService) runRetention() {
 		s.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		s.DB.Exec("PRAGMA incremental_vacuum")
 	}
+}
+
+// trafficDeleteCutoff 计算 traffic_logs 自动清理的删除上界：取「保留天数上界」与
+// 「安全线上界」（见 TrafficSafeDeleteBefore：计费周期 + 每日聚合窗口）的较早者。
+// 安全线无法校验（查询失败）时返回 ok=false，调用方应跳过删除。
+func trafficDeleteCutoff(db *gorm.DB, now time.Time, days int) (time.Time, bool) {
+	cut := now.AddDate(0, 0, -days)
+	safe := TrafficSafeDeleteBefore(db, now)
+	if safe == "" {
+		return time.Time{}, false
+	}
+	safeT, err := time.ParseInLocation("2006-01-02", safe, BusinessLocation(db))
+	if err != nil {
+		return time.Time{}, false
+	}
+	if cut.After(safeT) {
+		cut = safeT
+	}
+	return cut, true
 }
 
 // checkInboundLifecycle 每 5 分钟检查入站生命周期（J9 激活）：

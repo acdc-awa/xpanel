@@ -93,6 +93,12 @@ func main() {
 	if err := models.AutoMigrate(database); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
+	// 老库存量日志一次性压缩迁移：节点 WS/cron/HTTP 均未启动，此处为独占写窗口，
+	// 无并发写者竞态；幂等且可断点续跑（完成标记见 services.SettingLogsCompacted）。
+	// 失败中止启动（合并 sum 守恒，重试安全），避免带病运行。
+	if err := services.MigrateLegacyLogs(database, Version); err != nil {
+		log.Fatalf("存量日志压缩迁移失败: %v", err)
+	}
 	if err := models.RecordSchemaVersion(database, Version); err != nil {
 		log.Printf("记录数据库 schema 版本失败: %v", err)
 	}

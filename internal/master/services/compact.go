@@ -15,11 +15,31 @@
 package services
 
 import (
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
+)
+
+// 存量日志一次性压缩迁移（启动期执行）的 settings 键与版本。
+const (
+	// SettingLogsCompacted 存量日志压缩迁移完成标记，值 = logsCompactionVersion。
+	SettingLogsCompacted = "logs_compacted_version"
+	// SettingLogsCompactedAt 迁移完成时刻（RFC3339，排障用）。
+	SettingLogsCompactedAt = "logs_compacted_at"
+	// SettingLogsCompactedResult 迁移前后行数摘要（排障用）。
+	SettingLogsCompactedResult = "logs_compacted_result"
+	// settingTrafficCompactCursor 流量压缩断点（已完成到的小时起点，RFC3339）。
+	settingTrafficCompactCursor = "traffic_compact_cursor"
+
+	// logsCompactionVersion 压缩迁移自身版本，与 DBSchemaVersion 解耦：
+	// 本迁移 sum 守恒、旧面板仍可安全读写，故不提升 schema 版本、不阻断回滚。
+	logsCompactionVersion = 1
 )
 
 // nodeReportBucket 最细心跳压缩粒度，与 nodegate.nodeReportSampleInterval 保持一致。
@@ -82,6 +102,71 @@ func CompactTrafficLogs(db *gorm.DB, now time.Time) (before, after int64, err er
 	// 当前小时尚未结束，跳过；只处理 lastHour 及更早的完整小时。
 	lastHour := now.UTC().Truncate(trafficPeriodBucket).Add(-trafficPeriodBucket)
 
+	protect, perr := loadCycleStartProtection(db)
+	if perr != nil {
+		return before, before, perr
+	}
+	for h := startHour; !h.After(lastHour); h = h.Add(trafficPeriodBucket) {
+		if err = compactTrafficHour(db, h, protect[hourBucketKey(h)]); err != nil {
+			return before, before, err
+		}
+	}
+
+	if err = db.Model(&models.TrafficLog{}).Count(&after).Error; err != nil {
+		return before, before, err
+	}
+	return before, after, nil
+}
+
+// hourBucketKey 小时桶的整数键（Unix 秒），用作保护表的 map 键（time.Time 含时区/单调时钟不宜直接比较）。
+func hourBucketKey(h time.Time) int64 {
+	return h.UTC().Truncate(trafficPeriodBucket).Unix()
+}
+
+// loadCycleStartProtection 构建「周期起点落在某小时桶内」的用户集合。
+//
+// 背景：计费/配额按 `period_start >= user.traffic_cycle_start` 统计，而压缩会把同一小时的多行
+// 合并到整点。若某用户的 cycle_start 落在这个小时中间，合并行的 period_start（整点）
+// 会早于 cycle_start，导致该小时整段被排除，最多漏计 1 小时流量。
+// 因此这些用户在该小时桶内的行不参与合并（原样保留），合计与计费口径逐字节不变。
+//
+// users 表不存在（部分测试仅迁移子集）时返回空集合，不阻断压缩。
+func loadCycleStartProtection(db *gorm.DB) (map[int64]map[uint64]bool, error) {
+	out := map[int64]map[uint64]bool{}
+	if !db.Migrator().HasTable(&models.User{}) {
+		return out, nil
+	}
+	var users []models.User
+	if err := db.Select("id", "traffic_cycle_start").Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for i := range users {
+		if users[i].TrafficCycleStart.IsZero() {
+			continue // 零值起点 = 全量统计，无边界问题
+		}
+		k := hourBucketKey(users[i].TrafficCycleStart)
+		if out[k] == nil {
+			out[k] = map[uint64]bool{}
+		}
+		out[k][users[i].ID] = true
+	}
+	return out, nil
+}
+
+// compactTrafficHour 合并单个小时桶 [h, h+1) 内的 traffic_logs 明细：
+// 同一 (user_id, inbound_id) 归并为一行（sum 各字节列、保留最早 created_at / 最晚 period_end）；
+// protect 中的用户在该小时的行不参与合并，原样保留（见 loadCycleStartProtection）。
+// 已是「一桶一行且全在整点」时跳过，幂等可反复执行。
+func compactTrafficHour(db *gorm.DB, h time.Time, protect map[uint64]bool) error {
+	var rows []models.TrafficLog
+	if err := db.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
 	type groupKey struct {
 		userID    uint64
 		inboundID uint64
@@ -93,84 +178,226 @@ func CompactTrafficLogs(db *gorm.DB, now time.Time) (before, after int64, err er
 		periodEnd       time.Time
 	}
 
-	for h := startHour; !h.After(lastHour); h = h.Add(trafficPeriodBucket) {
-		var rows []models.TrafficLog
-		if err = db.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
-			Find(&rows).Error; err != nil {
-			return before, before, err
-		}
-		if len(rows) == 0 {
+	groups := make(map[groupKey]*agg, len(rows))
+	mergeCount := 0
+	for i := range rows {
+		if protect[rows[i].UserID] {
 			continue
 		}
+		mergeCount++
+		k := groupKey{rows[i].UserID, rows[i].InboundID}
+		g := groups[k]
+		if g == nil {
+			g = &agg{}
+			groups[k] = g
+		}
+		g.up += rows[i].UpBytes
+		g.down += rows[i].DownBytes
+		g.billedUp += rows[i].BilledUp
+		g.down2 += rows[i].BilledDown
+		if g.createdAt.IsZero() || rows[i].CreatedAt.Before(g.createdAt) {
+			g.createdAt = rows[i].CreatedAt
+		}
+		if rows[i].PeriodEnd.After(g.periodEnd) {
+			g.periodEnd = rows[i].PeriodEnd
+		}
+	}
+	if mergeCount == 0 {
+		return nil // 该小时全为受保护行，无可合并
+	}
 
-		groups := make(map[groupKey]*agg, len(rows))
+	// 已是「一桶一行且全在整点」（且无受保护行）则跳过，避免无谓重写。
+	if mergeCount == len(rows) && len(rows) == len(groups) {
+		compacted := true
 		for i := range rows {
-			k := groupKey{rows[i].UserID, rows[i].InboundID}
-			g := groups[k]
-			if g == nil {
-				g = &agg{}
-				groups[k] = g
-			}
-			g.up += rows[i].UpBytes
-			g.down += rows[i].DownBytes
-			g.billedUp += rows[i].BilledUp
-			g.down2 += rows[i].BilledDown
-			if g.createdAt.IsZero() || rows[i].CreatedAt.Before(g.createdAt) {
-				g.createdAt = rows[i].CreatedAt
-			}
-			if rows[i].PeriodEnd.After(g.periodEnd) {
-				g.periodEnd = rows[i].PeriodEnd
+			if !rows[i].PeriodStart.Equal(h) {
+				compacted = false
+				break
 			}
 		}
-
-		// 已是「一桶一行」则跳过，避免无谓重写（幂等、可反复执行）。
-		if len(rows) == len(groups) {
-			compacted := true
-			for i := range rows {
-				if !rows[i].PeriodStart.Equal(h) {
-					compacted = false
-					break
-				}
-			}
-			if compacted {
-				continue
-			}
-		}
-
-		merged := make([]models.TrafficLog, 0, len(groups))
-		for k, g := range groups {
-			merged = append(merged, models.TrafficLog{
-				UserID:      k.userID,
-				InboundID:   k.inboundID,
-				UpBytes:     g.up,
-				DownBytes:   g.down,
-				BilledUp:    g.billedUp,
-				BilledDown:  g.down2,
-				PeriodStart: h,
-				PeriodEnd:   g.periodEnd,
-				CreatedAt:   g.createdAt,
-			})
-		}
-
-		err = db.Transaction(func(tx *gorm.DB) error {
-			if e := tx.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
-				Delete(&models.TrafficLog{}).Error; e != nil {
-				return e
-			}
-			if len(merged) > 0 {
-				return tx.CreateInBatches(&merged, 200).Error
-			}
+		if compacted {
 			return nil
-		})
-		if err != nil {
-			return before, before, err
 		}
 	}
 
-	if err = db.Model(&models.TrafficLog{}).Count(&after).Error; err != nil {
-		return before, before, err
+	merged := make([]models.TrafficLog, 0, len(groups)+len(rows)-mergeCount)
+	for k, g := range groups {
+		merged = append(merged, models.TrafficLog{
+			UserID:      k.userID,
+			InboundID:   k.inboundID,
+			UpBytes:     g.up,
+			DownBytes:   g.down,
+			BilledUp:    g.billedUp,
+			BilledDown:  g.down2,
+			PeriodStart: h,
+			PeriodEnd:   g.periodEnd,
+			CreatedAt:   g.createdAt,
+		})
 	}
-	return before, after, nil
+	// 受保护用户的行原样回抄（ID 归零由库重分配，无外部引用；created_at/period_end 保留）。
+	for i := range rows {
+		if protect[rows[i].UserID] {
+			r := rows[i]
+			r.ID = 0
+			merged = append(merged, r)
+		}
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
+			Delete(&models.TrafficLog{}).Error; e != nil {
+			return e
+		}
+		return tx.CreateInBatches(&merged, 200).Error
+	})
+}
+
+// NeedsTrafficCompaction 廉价探测是否存在「真正待合并」的明细（旧版本面板写入/回滚/迁移中断）。
+// 已按小时分桶的库恒为 false，供每日维护跳过全量压缩扫描。
+//
+// 周期起点落在桶内的受保护行（见 loadCycleStartProtection）本就不参与合并，须排除在外，
+// 否则这些历史行会让探测永远为真、每日触发全量扫描。
+func NeedsTrafficCompaction(db *gorm.DB) (bool, error) {
+	isMySQL := db.Dialector != nil && db.Dialector.Name() == "mysql"
+	q := db.Model(&models.TrafficLog{}).Select("1")
+	if isMySQL {
+		q = q.Where("MINUTE(period_start) <> 0 OR SECOND(period_start) <> 0")
+	} else {
+		// SQLite 时间文本格式 "2006-01-02 15:04:05.999999999-07:00"，第 15–19 位即 "MM:SS"。
+		q = q.Where("substr(period_start, 15, 5) <> '00:00'")
+	}
+	if db.Migrator().HasTable(&models.User{}) {
+		if isMySQL {
+			q = q.Joins("LEFT JOIN users u ON u.id = traffic_logs.user_id").
+				Where("u.traffic_cycle_start IS NULL OR DATE_FORMAT(traffic_logs.period_start, '%Y-%m-%d %H') <> DATE_FORMAT(u.traffic_cycle_start, '%Y-%m-%d %H')")
+		} else {
+			q = q.Joins("LEFT JOIN users u ON u.id = traffic_logs.user_id").
+				Where("u.traffic_cycle_start IS NULL OR substr(traffic_logs.period_start, 1, 13) <> substr(u.traffic_cycle_start, 1, 13)")
+		}
+	}
+	var one int
+	if err := q.Limit(1).Scan(&one).Error; err != nil {
+		return false, err
+	}
+	return one == 1, nil
+}
+
+// compactTrafficLogsResumable 存量流量明细的可续跑压缩：逐小时合并并持久化断点，
+// 进程中断后下次启动从断点续跑（而非从头）。当前小时不处理（未结束）。
+func compactTrafficLogsResumable(db *gorm.DB, now time.Time) error {
+	var oldest models.TrafficLog
+	if err := db.Order("period_start ASC").Limit(1).Find(&oldest).Error; err != nil {
+		return err
+	}
+	if oldest.ID == 0 {
+		return nil // 无明细
+	}
+	startHour := oldest.PeriodStart.UTC().Truncate(trafficPeriodBucket)
+	lastHour := now.UTC().Truncate(trafficPeriodBucket).Add(-trafficPeriodBucket)
+	if cur := strings.TrimSpace(GetSetting(db, settingTrafficCompactCursor)); cur != "" {
+		if t, perr := time.Parse(time.RFC3339, cur); perr == nil {
+			if next := t.UTC().Truncate(trafficPeriodBucket).Add(trafficPeriodBucket); next.After(startHour) {
+				startHour = next
+			}
+		}
+	}
+	if startHour.After(lastHour) {
+		return nil
+	}
+	protect, err := loadCycleStartProtection(db)
+	if err != nil {
+		return err
+	}
+	for h := startHour; !h.After(lastHour); h = h.Add(trafficPeriodBucket) {
+		if err := compactTrafficHour(db, h, protect[hourBucketKey(h)]); err != nil {
+			return fmt.Errorf("压缩流量小时桶 %s 失败: %w", h.Format(time.RFC3339), err)
+		}
+		if err := SetSetting(db, settingTrafficCompactCursor, h.Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MigrateLegacyLogs 老库存量日志一次性压缩迁移：启动期（节点未接入、cron 未启动）独占写窗口内调用。
+//   - 幂等：settings 标记 logs_compacted_version ≥ logsCompactionVersion 时整体跳过；
+//   - 可续跑：流量按小时持久化断点，中断后从断点继续；
+//   - 口径不变：合并仅做同键 SUM，且周期起点落在桶内的用户行不合并（见 loadCycleStartProtection）；
+//   - 空间回收：SQLite 下压缩后 VACUUM（老库 auto_vacuum=NONE，DELETE 不缩盘），失败仅告警不中断。
+//
+// 失败返回错误，调用方应中止启动（迁移 sum 守恒且幂等，重试安全）。
+func MigrateLegacyLogs(db *gorm.DB, appVersion string) error {
+	if !db.Migrator().HasTable(&models.TrafficLog{}) {
+		return nil
+	}
+	if v, _ := strconv.Atoi(strings.TrimSpace(GetSetting(db, SettingLogsCompacted))); v >= logsCompactionVersion {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var trafficBefore, nodeBefore int64
+	if err := db.Model(&models.TrafficLog{}).Count(&trafficBefore).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&models.NodeReport{}).Count(&nodeBefore).Error; err != nil {
+		return err
+	}
+	log.Printf("compact: 开始存量日志一次性压缩迁移（traffic_logs %d 行 / node_reports %d 行）…", trafficBefore, nodeBefore)
+	startedAt := time.Now()
+
+	if err := compactTrafficLogsResumable(db, now); err != nil {
+		return err
+	}
+	if _, _, err := CompactNodeReports(db, now); err != nil {
+		return err
+	}
+
+	var trafficAfter, nodeAfter int64
+	if err := db.Model(&models.TrafficLog{}).Count(&trafficAfter).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&models.NodeReport{}).Count(&nodeAfter).Error; err != nil {
+		return err
+	}
+	removed := (trafficBefore - trafficAfter) + (nodeBefore - nodeAfter)
+	if removed > 0 {
+		reclaimSpaceAfterCompaction(db)
+	}
+
+	result := fmt.Sprintf("traffic %d->%d, node %d->%d, removed %d, took %s, by %s",
+		trafficBefore, trafficAfter, nodeBefore, nodeAfter, removed, time.Since(startedAt).Round(time.Millisecond), appVersion)
+	for k, v := range map[string]string{
+		SettingLogsCompacted:       strconv.Itoa(logsCompactionVersion),
+		SettingLogsCompactedAt:     now.Format(time.RFC3339),
+		SettingLogsCompactedResult: result,
+	} {
+		if err := SetSetting(db, k, v); err != nil {
+			return fmt.Errorf("写入迁移标记 %s 失败: %w", k, err)
+		}
+	}
+	deleteSetting(db, settingTrafficCompactCursor)
+	log.Printf("compact: 存量日志一次性压缩迁移完成（%s）", result)
+	return nil
+}
+
+// reclaimSpaceAfterCompaction SQLite 在线回收：DELETE 只把页还给 freelist、文件不缩，
+// 老库 auto_vacuum=NONE 时增量回收亦无效，需全量 VACUUM（同时把库转为增量回收模式）。
+// 启动期无并发写者，且 VACUUM 有事务保护，失败仅告警（数据已压缩，可稍后手动重试）。
+func reclaimSpaceAfterCompaction(db *gorm.DB) {
+	if db.Dialector == nil || db.Dialector.Name() != "sqlite" {
+		return
+	}
+	db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	if err := db.Exec("VACUUM").Error; err != nil {
+		log.Printf("compact: 迁移后空间回收失败（明细已压缩，可稍后在数据管理页重试回收）: %v", err)
+		return
+	}
+	db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+}
+
+// deleteSetting 删除一个 settings 键（键不存在时静默）。
+func deleteSetting(db *gorm.DB, key string) {
+	db.Where("key = ?", key).Delete(&models.Setting{})
 }
 
 // CompactNodeReports 分级压缩存量 node_reports：

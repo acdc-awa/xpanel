@@ -223,3 +223,183 @@ func TestCompactNodeReportsTieredDownsample(t *testing.T) {
 		t.Fatalf("tier3 hour bucket = %d, want 1", n)
 	}
 }
+
+// 周期起点落在小时桶内的用户：该小时不合并，计费口径（period_start >= cycle_start）逐行不变。
+func TestCompactTrafficHourProtectsCycleStartHour(t *testing.T) {
+	db := newCompactTestDB(t)
+	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)
+	cycle := h.Add(30 * time.Minute) // 用户 1 的计费周期起点落在 03:30
+
+	rows := []models.TrafficLog{
+		// 受保护用户 1：三行，周期起点 03:30 在其中
+		{UserID: 1, InboundID: 7, UpBytes: 100, DownBytes: 200, BilledUp: 100, BilledDown: 200, PeriodStart: h.Add(10 * time.Minute)},
+		{UserID: 1, InboundID: 7, UpBytes: 300, DownBytes: 400, BilledUp: 300, BilledDown: 400, PeriodStart: h.Add(35 * time.Minute)},
+		{UserID: 1, InboundID: 7, UpBytes: 500, DownBytes: 600, BilledUp: 500, BilledDown: 600, PeriodStart: h.Add(50 * time.Minute)},
+		// 普通用户 2：三行 → 合并为一行
+		{UserID: 2, InboundID: 7, UpBytes: 1, DownBytes: 2, BilledUp: 1, BilledDown: 2, PeriodStart: h.Add(5 * time.Minute)},
+		{UserID: 2, InboundID: 7, UpBytes: 3, DownBytes: 4, BilledUp: 3, BilledDown: 4, PeriodStart: h.Add(25 * time.Minute)},
+		{UserID: 2, InboundID: 7, UpBytes: 5, DownBytes: 6, BilledUp: 5, BilledDown: 6, PeriodStart: h.Add(55 * time.Minute)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 计费口径基线：用户 1 从 cycle 起的合计（仅 35/50 分钟两行）
+	billedSince := func() (int64, int64) {
+		var r struct{ Up, Down int64 }
+		if err := db.Model(&models.TrafficLog{}).
+			Where("user_id = ? AND period_start >= ?", 1, cycle).
+			Select("COALESCE(SUM(billed_up),0) AS up, COALESCE(SUM(billed_down),0) AS down").
+			Scan(&r).Error; err != nil {
+			t.Fatalf("billed sum: %v", err)
+		}
+		return r.Up, r.Down
+	}
+	up0, down0 := billedSince()
+
+	if err := compactTrafficHour(db, h, map[uint64]bool{1: true}); err != nil {
+		t.Fatalf("compact hour: %v", err)
+	}
+
+	var u1 []models.TrafficLog
+	if err := db.Where("user_id = ?", 1).Order("period_start ASC").Find(&u1).Error; err != nil {
+		t.Fatalf("query u1: %v", err)
+	}
+	if len(u1) != 3 {
+		t.Fatalf("protected user rows = %d, want 3", len(u1))
+	}
+	var u2 []models.TrafficLog
+	if err := db.Where("user_id = ?", 2).Find(&u2).Error; err != nil {
+		t.Fatalf("query u2: %v", err)
+	}
+	if len(u2) != 1 || u2[0].UpBytes != 9 || u2[0].DownBytes != 12 || !u2[0].PeriodStart.Equal(h) {
+		t.Fatalf("unprotected merge wrong: %+v", u2)
+	}
+	if up1, down1 := billedSince(); up1 != up0 || down1 != down0 {
+		t.Fatalf("billing sum changed: (%d,%d) → (%d,%d)", up0, down0, up1, down1)
+	}
+
+	// 全表合计不变（逐字节守恒）
+	var agg struct{ Up, Down, BU, BD int64 }
+	if err := db.Model(&models.TrafficLog{}).
+		Select("COALESCE(SUM(up_bytes),0) up, COALESCE(SUM(down_bytes),0) down, COALESCE(SUM(billed_up),0) bu, COALESCE(SUM(billed_down),0) bd").
+		Scan(&agg).Error; err != nil {
+		t.Fatalf("agg: %v", err)
+	}
+	wantUp := int64(100 + 300 + 500 + 1 + 3 + 5)
+	if agg.Up != wantUp {
+		t.Fatalf("total up = %d, want %d", agg.Up, wantUp)
+	}
+
+	// 幂等：再跑一次行数不变
+	if err := compactTrafficHour(db, h, map[uint64]bool{1: true}); err != nil {
+		t.Fatalf("compact #2: %v", err)
+	}
+	var n int64
+	if err := db.Model(&models.TrafficLog{}).Count(&n).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 4 {
+		t.Fatalf("rows after second run = %d, want 4", n)
+	}
+}
+
+// 非整点探测：空库/整点桶 → false；存在非整点明细 → true。
+func TestNeedsTrafficCompaction(t *testing.T) {
+	db := newCompactTestDB(t)
+	if need, err := NeedsTrafficCompaction(db); err != nil || need {
+		t.Fatalf("empty: need=%v err=%v", need, err)
+	}
+	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)
+	if err := db.Create(&models.TrafficLog{UserID: 1, InboundID: 7, UpBytes: 1, PeriodStart: h}).Error; err != nil {
+		t.Fatalf("seed bucketed: %v", err)
+	}
+	if need, err := NeedsTrafficCompaction(db); err != nil || need {
+		t.Fatalf("bucketed: need=%v err=%v", need, err)
+	}
+	if err := db.Create(&models.TrafficLog{UserID: 1, InboundID: 7, UpBytes: 1, PeriodStart: h.Add(5 * time.Minute)}).Error; err != nil {
+		t.Fatalf("seed raw: %v", err)
+	}
+	if need, err := NeedsTrafficCompaction(db); err != nil || !need {
+		t.Fatalf("raw: need=%v err=%v", need, err)
+	}
+}
+
+// 受保护（周期起点落在桶内）的非整点行不算「待压缩」，避免每日探测与全量扫描空转。
+func TestNeedsTrafficCompactionIgnoresProtectedRows(t *testing.T) {
+	db := newCompactTestDB(t)
+	if err := db.AutoMigrate(&models.User{}); err != nil {
+		t.Fatalf("migrate user: %v", err)
+	}
+	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)
+	cycle := h.Add(30 * time.Minute)
+	if err := db.Create(&models.User{Username: "u1", PasswordHash: "x", TrafficCycleStart: cycle}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	// 非整点行且其小时 == 用户周期起点小时 → 受保护，不算待压缩
+	if err := db.Create(&models.TrafficLog{UserID: 1, InboundID: 7, UpBytes: 1, PeriodStart: h.Add(40 * time.Minute)}).Error; err != nil {
+		t.Fatalf("seed protected: %v", err)
+	}
+	if need, err := NeedsTrafficCompaction(db); err != nil || need {
+		t.Fatalf("protected row should not need compaction: need=%v err=%v", need, err)
+	}
+	// 另一小时的原始行 → 算待压缩
+	if err := db.Create(&models.TrafficLog{UserID: 1, InboundID: 7, UpBytes: 1, PeriodStart: h.Add(2 * time.Hour).Add(5 * time.Minute)}).Error; err != nil {
+		t.Fatalf("seed raw: %v", err)
+	}
+	if need, err := NeedsTrafficCompaction(db); err != nil || !need {
+		t.Fatalf("raw row should need compaction: need=%v err=%v", need, err)
+	}
+}
+
+// 一次性迁移：压缩存量明细并落标记；标记存在后重复调用为 no-op（不再压缩新写入的原始行）。
+func TestMigrateLegacyLogsOneTimeAndIdempotent(t *testing.T) {
+	db := newCompactTestDB(t)
+	now := time.Now().UTC()
+	h := now.Add(-2 * time.Hour).Truncate(time.Hour)
+
+	raw := []models.TrafficLog{
+		{UserID: 1, InboundID: 7, UpBytes: 10, PeriodStart: h.Add(1 * time.Minute)},
+		{UserID: 1, InboundID: 7, UpBytes: 20, PeriodStart: h.Add(30 * time.Minute)},
+	}
+	if err := db.Create(&raw).Error; err != nil {
+		t.Fatalf("seed traffic: %v", err)
+	}
+	var reports []models.NodeReport
+	base := now.Truncate(time.Minute).Add(-time.Hour) // 锚定整分钟，避免跨分钟桶
+	for i := 0; i < 6; i++ {
+		reports = append(reports, models.NodeReport{ServerID: 1, ReportedAt: base.Add(time.Duration(i) * 10 * time.Second)})
+	}
+	if err := db.Create(&reports).Error; err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	if err := MigrateLegacyLogs(db, "test"); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if got := GetSetting(db, SettingLogsCompacted); got != "1" {
+		t.Fatalf("marker = %q, want 1", got)
+	}
+	var tl, nrc int64
+	db.Model(&models.TrafficLog{}).Count(&tl)
+	db.Model(&models.NodeReport{}).Count(&nrc)
+	if tl != 1 {
+		t.Fatalf("traffic rows = %d, want 1", tl)
+	}
+	if nrc != 1 {
+		t.Fatalf("node rows = %d, want 1 (同一分钟抽稀)", nrc)
+	}
+
+	// 标记存在后，第二次调用应整体跳过：新写入的原始行不被压缩。
+	if err := db.Create(&models.TrafficLog{UserID: 2, InboundID: 7, UpBytes: 5, PeriodStart: h.Add(2 * time.Minute)}).Error; err != nil {
+		t.Fatalf("seed after: %v", err)
+	}
+	if err := MigrateLegacyLogs(db, "test"); err != nil {
+		t.Fatalf("migrate #2: %v", err)
+	}
+	var tl2 int64
+	db.Model(&models.TrafficLog{}).Count(&tl2)
+	if tl2 != 2 {
+		t.Fatalf("second migrate should be no-op, rows = %d want 2", tl2)
+	}
+}
