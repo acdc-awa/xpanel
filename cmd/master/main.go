@@ -38,6 +38,11 @@ import (
 var Version = "dev"
 
 func main() {
+	// 时间统一：进程本地时区固定为 UTC，使 time.Now()/GORM 自动时间戳全部以 UTC 落库，
+	// 跨地域部署写出的绝对时刻一致；「今日/每日汇总/清理边界」等按天口径改由
+	// services.BusinessLocation 依据设置里的业务时区计算，不依赖进程本地时区。
+	time.Local = time.UTC
+
 	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径")
 	// 冒烟自检标志（面板内更新用）：update.go 以「-self-test」形态调用新下载二进制，
 	// 这里必须注册为布尔标志，否则 flag 解析直接报「flag provided but not defined」退出 2，
@@ -63,6 +68,16 @@ func main() {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				log.Fatalf("创建数据目录失败: %v", err)
 			}
+		}
+	}
+
+	// 应用待处理的数据库恢复：面板内「恢复」会先落 <dsn>.restore-pending 标记并优雅退出，
+	// 本进程在打开数据库之前完成文件替换，确保 SQLite 没有并发读者/写者。
+	if cfg.DB.Driver == "sqlite" {
+		if restored, rerr := backup.ApplyPendingRestore(cfg.DB.DSN); rerr != nil {
+			log.Printf("待处理数据库恢复未应用（保留当前数据库）: %v", rerr)
+		} else if restored {
+			log.Printf("已应用待处理的数据库恢复（%s）", cfg.DB.DSN)
 		}
 	}
 

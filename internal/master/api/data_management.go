@@ -3,6 +3,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,17 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
+
+// shiftedDayExpr 把存储的 UTC 时间按业务时区偏移后取日期（YYYY-MM-DD），用于日志量按天分桶。
+// 与「按业务时区切天」的标签口径保持一致，避免 UTC 天与业务天错位。
+// field 取自 logTables 白名单常量，driver 为 Dialector 名。
+func shiftedDayExpr(driver, field string, offMin int) string {
+	if driver == "mysql" {
+		return fmt.Sprintf("DATE(DATE_ADD(%s, INTERVAL %d MINUTE))", field, offMin)
+	}
+	// SQLite：datetime() 可解析 'YYYY-MM-DD HH:MM:SS+00:00' 并按修饰符换算
+	return fmt.Sprintf("substr(datetime(%s, '%+d minutes'), 1, 10)", field, offMin)
+}
 
 // logTables 可清理的日志表 → 时间字段（白名单，表名/字段名不进任何用户输入）。
 // traffic_logs 按 period_start（与计费周期、每日聚合同源）；本地日期分桶与删除边界一致。
@@ -53,9 +65,13 @@ func (d *Deps) AdminLogStats(c *gin.Context) {
 		days = 90
 	}
 
+	loc := services.BusinessLocation(d.DB)
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := services.DayStart(now, loc)
 	start := today.AddDate(0, 0, -(days - 1))
+	// 业务时区相对 UTC 的分钟偏移（用于把存储的 UTC 时间换算成业务日期）
+	_, offSec := now.In(loc).Zone()
+	offMin := offSec / 60
 
 	type dayCount struct {
 		D string `gorm:"column:d"`
@@ -70,8 +86,8 @@ func (d *Deps) AdminLogStats(c *gin.Context) {
 	for table, field := range logTables {
 		var rows []dayCount
 		q := d.DB.Table(table).
-			Select("substr("+field+",1,10) AS d, COUNT(*) AS n").
-			Where(field+" >= ?", start).
+			Select(shiftedDayExpr(d.DB.Dialector.Name(), field, offMin)+" AS d, COUNT(*) AS n").
+			Where(field+" >= ?", start.UTC()).
 			Group("d")
 		if err := q.Scan(&rows).Error; err != nil {
 			util.ServerError(c, "统计失败")
@@ -136,7 +152,7 @@ func (d *Deps) AdminCleanupLogs(c *gin.Context) {
 		util.BadRequest(c, "无效的日志类型")
 		return
 	}
-	before, err := time.ParseInLocation("2006-01-02", req.Before, time.Local)
+	before, err := time.ParseInLocation("2006-01-02", req.Before, services.BusinessLocation(d.DB))
 	if err != nil {
 		util.BadRequest(c, "无效的日期格式，需为 YYYY-MM-DD")
 		return
@@ -167,7 +183,7 @@ func (d *Deps) AdminCleanupLogs(c *gin.Context) {
 	default:
 		model = &models.AuditLog{}
 	}
-	res := d.DB.Where(field+" < ?", before).Delete(model)
+	res := d.DB.Where(field+" < ?", before.UTC()).Delete(model)
 	if res.Error != nil {
 		util.ServerError(c, "清理失败")
 		return

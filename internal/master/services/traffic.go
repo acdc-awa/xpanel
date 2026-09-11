@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -26,7 +27,13 @@ const (
 	// 形成每个活跃「用户×入站」每分钟一行。归一到整点后同一小时的多次上报累加到一行，
 	// 行数降到 1/60。计费/排名/每日汇总均为周期内 SUM，小时桶细于计费周期起点，口径不变。
 	trafficPeriodBucket = time.Hour
+
+	// dailyBackfillDays 每日汇总按业务时区的一次性回填天数：覆盖仪表盘最大趋势窗口（30 天）。
+	dailyBackfillDays = 31
 )
+
+// SettingTrafficDailyTZBackfilled 每日汇总时区回填完成标记（settings 键，一次性）。
+const SettingTrafficDailyTZBackfilled = "traffic_daily_tz_backfilled"
 
 // TrafficService 处理节点流量上报与聚合。
 type TrafficService struct {
@@ -58,8 +65,9 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		return nil, err
 	}
 	// 归一到整点再落库（见 trafficPeriodBucket 注释）：同小时多次上报经 upsert 累加为一行。
-	periodStart = periodStart.Truncate(trafficPeriodBucket)
-	periodEnd := time.Now()
+	// 先转 UTC：统一偏移后存储文本才可比较（agent 通常发 Z，仍显式归一以防自定义偏移）。
+	periodStart = periodStart.UTC().Truncate(trafficPeriodBucket)
+	periodEnd := time.Now().UTC()
 
 	// 该节点入站 tag → ID 与 ID → 行映射（一次查询，循环复用；含停用入站——
 	// 节点残留旧配置仍在计流量，按现行倍率归账）
@@ -408,15 +416,17 @@ func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
 }
 
 // resetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
-func resetPeriodKey(now time.Time, policy string) string {
+// 以业务时区切分日/周/月，避免按 UTC 天重置导致与运营预期错位。
+func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
+	t := now.In(loc)
 	switch policy {
 	case "daily":
-		return now.Format("2006-01-02")
+		return t.Format("2006-01-02")
 	case "weekly":
-		daysFromMonday := (int(now.Weekday()) + 6) % 7 // Monday=0 ... Sunday=6
-		return now.AddDate(0, 0, -daysFromMonday).Format("2006-01-02")
+		daysFromMonday := (int(t.Weekday()) + 6) % 7 // Monday=0 ... Sunday=6
+		return t.AddDate(0, 0, -daysFromMonday).Format("2006-01-02")
 	case "monthly":
-		return now.Format("2006-01") + "-01"
+		return t.Format("2006-01") + "-01"
 	default:
 		return ""
 	}
@@ -428,8 +438,9 @@ func (s *TrafficService) resetInboundTraffic() {
 		return
 	}
 	now := s.nowOrReal()
+	loc := BusinessLocation(s.DB)
 	for _, inb := range inbounds {
-		key := resetPeriodKey(now, inb.TrafficReset)
+		key := resetPeriodKey(now, inb.TrafficReset, loc)
 		if key == "" {
 			continue
 		}
@@ -451,7 +462,14 @@ func (s *TrafficService) resetInboundTraffic() {
 }
 
 // StartDailyAgg 启动每日汇总定时任务（每 5 分钟把 traffic_logs 累加到 traffic_daily）。
+// 首次启动前执行一次性回填：历史 traffic_daily 是按 UTC 天写入的，需按业务时区重算最近
+// 若干天，否则 8 天滚动窗口之外的旧行日期会长期与业务日界错位（30 天趋势可见）。
 func (s *TrafficService) StartDailyAgg(ctx context.Context) {
+	if done, err := BackfillDailyBusinessDate(s.DB, s.nowOrReal(), dailyBackfillDays); err != nil {
+		log.Printf("traffic: 每日汇总时区回填失败: %v", err)
+	} else if done {
+		log.Printf("traffic: 已完成每日汇总时区回填（按业务时区重算最近 %d 天）", dailyBackfillDays)
+	}
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
 		s.AggDaily()
@@ -467,39 +485,50 @@ func (s *TrafficService) StartDailyAgg(ctx context.Context) {
 	}()
 }
 
-// AggDaily 按 用户×日期 汇总流量到 traffic_daily（upsert）。
-// 优化：采用 SQL 聚合 GROUP BY user_id, date(period_start) 直接输出天汇总，
-// 避免将 7 天上千万条 logs 逐条实例化到 Go 内存中导致 OOM。
+// AggDaily 按 用户×业务日 汇总流量到 traffic_daily（upsert）。
+// 逐日把「业务时区（services.BusinessLocation）天边界」换算为 UTC 区间后 SQL 聚合：
+// 既避免 date(period_start) 落到 UTC 天（与仪表盘「今日」错位），也不依赖各驱动的时区函数，
+// 且不在 Go 里逐条实例化明细（防 OOM）。
 func (s *TrafficService) AggDaily() {
-	windowStart := s.nowOrReal().AddDate(0, 0, -aggWindowDays)
+	loc := BusinessLocation(s.DB)
+	now := s.nowOrReal()
+	today := DayStart(now, loc)
+	// 多覆盖一天，兜住跨日补报的迟到明细。
+	startDay := today.AddDate(0, 0, -aggWindowDays)
+
+	for d := startDay; !d.After(today); d = d.AddDate(0, 0, 1) {
+		s.aggregateBusinessDay(d)
+	}
+}
+
+// aggregateBusinessDay 把某个业务日的流量从 traffic_logs 聚合写入 traffic_daily（upsert）。
+// 该日无明细时不置零（跳过），避免误清已被清理过明细的历史行（对应口径不可再算）。
+func (s *TrafficService) aggregateBusinessDay(d time.Time) {
+	dayStartUTC := d.UTC()
+	dayEndUTC := d.AddDate(0, 0, 1).UTC()
 
 	type aggRow struct {
 		UserID    uint64 `gorm:"column:user_id"`
-		Date      string `gorm:"column:date"`
 		UpBytes   int64  `gorm:"column:up_bytes"`
 		DownBytes int64  `gorm:"column:down_bytes"`
 	}
 	var rows []aggRow
-
-	// SQLite 与 MySQL 均原生支持 date(period_start)
 	if err := s.DB.Model(&models.TrafficLog{}).
-		Select("user_id, date(period_start) AS date, SUM(up_bytes) AS up_bytes, SUM(down_bytes) AS down_bytes").
-		Where("period_start >= ?", windowStart).
-		Group("user_id, date(period_start)").
+		Select("user_id, SUM(up_bytes) AS up_bytes, SUM(down_bytes) AS down_bytes").
+		Where("period_start >= ? AND period_start < ?", dayStartUTC, dayEndUTC).
+		Group("user_id").
 		Scan(&rows).Error; err != nil {
 		return
 	}
 
+	dateStr := d.Format("2006-01-02")
 	for _, r := range rows {
-		if r.Date == "" {
-			continue
-		}
 		var existing models.TrafficDaily
-		err := s.DB.Where("user_id = ? AND date = ?", r.UserID, r.Date).First(&existing).Error
+		err := s.DB.Where("user_id = ? AND date = ?", r.UserID, dateStr).First(&existing).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			_ = s.DB.Create(&models.TrafficDaily{
 				UserID:    r.UserID,
-				Date:      r.Date,
+				Date:      dateStr,
 				UpBytes:   r.UpBytes,
 				DownBytes: r.DownBytes,
 			})
@@ -510,6 +539,57 @@ func (s *TrafficService) AggDaily() {
 			})
 		}
 	}
+}
+
+// BackfillDailyBusinessDate 一次性把最近 days 个业务日的 traffic_daily 按业务时区重算，
+// 修正历史上按 UTC 天写入的日期（跨时区部署的日界错位）。完成后落标记，重复调用为 no-op。
+//
+// 只重建「有明细可依据」的区间：以 traffic_logs 最早一条的业务日为下界，删除该区间内的旧行后
+// 从明细重算；明细已被清理的更早日期保持原样（无法重算，避免清空历史）。
+func BackfillDailyBusinessDate(db *gorm.DB, now time.Time, days int) (bool, error) {
+	if strings.TrimSpace(GetSetting(db, SettingTrafficDailyTZBackfilled)) != "" {
+		return false, nil
+	}
+	if days < 1 {
+		days = 1
+	}
+	loc := BusinessLocation(db)
+	today := DayStart(now, loc)
+	start := today.AddDate(0, 0, -days)
+
+	// 取最早一条明细（聚合函数扫描不回 time.Time，用 Limit(1) 让 GORM 正常解码）。
+	var oldest models.TrafficLog
+	if err := db.Order("period_start ASC").Limit(1).Find(&oldest).Error; err != nil {
+		return false, err
+	}
+	if oldest.ID == 0 {
+		// 无任何流量明细，无法重算；落标记避免每次启动重试。
+		if err := SetSetting(db, SettingTrafficDailyTZBackfilled, "1"); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	// 只重建「有明细可依据」的区间：以最早一条明细的业务日为下界，更早的旧行保持原样
+	// （明细已被清理，无法重算，避免清空历史）。
+	rebuildStart := start
+	if bs := DayStart(oldest.PeriodStart, loc); bs.After(rebuildStart) {
+		rebuildStart = bs
+	}
+
+	// 删除待重建区间内的旧行——含前一天的错位标签：按 UTC 天分组时，一个业务日的数据
+	// 会散落在其相邻的两个 UTC 日期上（正负偏移方向不同），故从 rebuildStart 前一天起删。
+	deleteFrom := rebuildStart.AddDate(0, 0, -1).Format("2006-01-02")
+	if err := db.Where("date >= ?", deleteFrom).Delete(&models.TrafficDaily{}).Error; err != nil {
+		return false, err
+	}
+	svc := &TrafficService{DB: db}
+	for d := rebuildStart; !d.After(today); d = d.AddDate(0, 0, 1) {
+		svc.aggregateBusinessDay(d)
+	}
+	if err := SetSetting(db, SettingTrafficDailyTZBackfilled, "1"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StartRetentionCron 每天 04:00 清理过期明细数据（ISSUE-09 保留策略）。
@@ -554,6 +634,14 @@ func (s *TrafficService) runRetention() {
 		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
 		log.Printf("traffic: 清理 %d 条过期 audit_logs（保留 %d 天）", res.RowsAffected, daysAudit)
+	}
+
+	// 节点曲线分级降采样（近 6h 保 1 分钟 / 6–24h 保 10 分钟 / 24h 以上保 1 小时），
+	// 与监控接口读取端的最细分桶对齐：可回看区间内不降分辨率，同时压掉 7–30 天永不展示的细粒度行。
+	if _, after, cerr := CompactNodeReports(s.DB, now); cerr != nil {
+		log.Printf("traffic: 节点曲线分级降采样失败: %v", cerr)
+	} else {
+		log.Printf("traffic: 节点曲线分级降采样完成（node_reports 保留 %d 行）", after)
 	}
 
 	// DELETE 只把页还给 freelist、文件不缩；SQLite 下顺手落盘 WAL 并做增量回收，

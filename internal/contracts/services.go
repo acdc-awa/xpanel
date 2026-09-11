@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
@@ -130,4 +131,8 @@ type BackupService interface {
 	List() ([]BackupInfo, error)
 	OpenFile(name string) (string, error)
 	Delete(name string) error
+	// Upload 校验上传的 .db 备份文件并落入备份目录。
+	Upload(r io.Reader, size int64) (BackupInfo, error)
+	// ScheduleRestore 安排一次数据库恢复，返回恢复前自动生成的安全快照。
+	ScheduleRestore(name string) (BackupInfo, error)
 }

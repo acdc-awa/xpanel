@@ -23,6 +23,7 @@ import {
   type UserAccessPoint,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatDateOnly } from '@/utils/timezone'
 
 const route = useRoute()
 const router = useRouter()
@@ -432,7 +433,7 @@ function transportOf(row: any): string {
 // 流量/到期摘要：如 "100 GB · 09-30 到期" / "不限 · 永久" / "100 GB · 永久"
 function quotaOf(row: any): string {
   const gb = typeof row.total_gb === 'number' && row.total_gb > 0 ? `${row.total_gb} GB` : '不限'
-  const exp = row.expiry_time ? new Date(row.expiry_time).toLocaleDateString('zh-CN') + ' 到期' : '永久'
+  const exp = row.expiry_time ? formatDateOnly(row.expiry_time) + ' 到期' : '永久'
   return `${gb} · ${exp}`
 }
 </script>

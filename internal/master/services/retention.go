@@ -109,9 +109,10 @@ func TrafficSafeDeleteBefore(db *gorm.DB, now time.Time) string {
 			minCycle = s.Time
 		}
 	}
-	loc := now.Location()
+	// 按业务时区切天，与仪表盘/每日汇总口径一致（返回值是业务日期字符串）。
+	loc := BusinessLocation(db)
 	toDate := func(t time.Time) time.Time {
-		y, m, d := t.Date()
+		y, m, d := t.In(loc).Date()
 		return time.Date(y, m, d, 0, 0, 0, 0, loc)
 	}
 	agg := toDate(now.AddDate(0, 0, -aggWindowDays))

@@ -234,7 +234,7 @@ const compactResult = ref<CompactResult | null>(null)
 async function runCompact() {
   try {
     await ElMessageBox.confirm(
-      '将存量流量明细按小时归并、节点心跳按分钟抽稀，并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。期间数据库写入会短暂阻塞，建议低峰执行。',
+      '将存量流量明细按小时归并、节点心跳按行龄分级抽稀（近 6 小时保 1 分钟、6–24 小时保 10 分钟、更早保 1 小时），并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。期间数据库写入会短暂阻塞，建议低峰执行。',
       '压缩历史数据',
       { type: 'warning', confirmButtonText: '开始压缩', cancelButtonText: '取消' },
     )
@@ -420,8 +420,8 @@ onUnmounted(() => {
     <BaseCard title="历史数据压缩" style="margin-bottom: 16px">
       <div class="cleanup-row" style="align-items: center">
         <span class="muted" style="font-size: 12.5px">
-          把存量流量明细归并到小时桶、节点心跳抽稀到每分钟，并清理超出保留期的数据，随后回收磁盘空间。
-          归并只做求和/抽样，计费与用量口径不变，可重复执行。
+          把存量流量明细归并到小时桶、节点心跳按行龄分级抽稀（近 6 小时 1 分钟 / 6–24 小时 10 分钟 / 更早 1 小时），
+          并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。
         </span>
         <el-button type="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</el-button>
       </div>
@@ -444,7 +444,7 @@ onUnmounted(() => {
         </div>
       </div>
       <p class="muted" style="font-size: 12.5px; margin-top: 10px">
-        压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分钟的数据不会重复压缩。
+        压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。
       </p>
     </BaseCard>
 

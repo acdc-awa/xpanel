@@ -219,7 +219,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		Port: req.Port, Listen: req.Listen,
 		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
 		Sniffing: req.Sniffing, Ratio: req.Ratio,
-		Total: req.TotalGB, ExpiryTime: req.ExpiryTime, Enabled: true,
+		Total: req.TotalGB, ExpiryTime: utcPtr(req.ExpiryTime), Enabled: true,
 		Type:   req.Type,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
@@ -458,7 +458,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			util.BadRequest(c, "到期时间格式错误（需 RFC3339，如 2026-12-31T23:59:59Z）")
 			return
 		}
-		updates["expiry_time"] = t
+		updates["expiry_time"] = t.UTC()
 	} else if req.ExpiryTime != nil && len(req.ExpiryTime) > 0 {
 		updates["expiry_time"] = nil // 显式 null = 清空到期时间
 	}

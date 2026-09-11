@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -115,10 +116,16 @@ type RecentOrderItem struct {
 // AdminDashboard GET /api/v1/admin/dashboard
 func (d *Deps) AdminDashboard(c *gin.Context) {
 	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	todayStr := now.Format("2006-01-02")
-	monthPrefix := now.Format("2006-01")
+	// 按天口径以业务时区切分（跨地域部署的「今日/本月」一致）；绑定查询统一转 UTC——
+	// SQLite 以带偏移文本存储并按字面量比较，混入非 UTC 偏移会得到错误的区间结果。
+	loc := services.BusinessLocation(d.DB)
+	bizNow := now.In(loc)
+	todayStart := services.DayStart(now, loc)
+	monthStart := time.Date(bizNow.Year(), bizNow.Month(), 1, 0, 0, 0, 0, loc)
+	todayStartUTC := todayStart.UTC()
+	monthStartUTC := monthStart.UTC()
+	todayStr := bizNow.Format("2006-01-02")
+	monthPrefix := bizNow.Format("2006-01")
 
 	var data DashboardData
 
@@ -130,7 +137,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	}
 	d.DB.Model(&models.GiftCard{}).
 		Select("COALESCE(SUM(face_value_cents), 0) as total, COUNT(id) as count").
-		Where("status = ? AND used_at >= ?", models.GiftCardUsed, todayStart).
+		Where("status = ? AND used_at >= ?", models.GiftCardUsed, todayStartUTC).
 		Scan(&todayRev)
 	data.Summary.TodayRevenueCents = todayRev.Total
 	data.Summary.TodayUsedCardsCount = todayRev.Count
@@ -139,7 +146,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	var monthRev int64
 	d.DB.Model(&models.GiftCard{}).
 		Select("COALESCE(SUM(face_value_cents), 0)").
-		Where("status = ? AND used_at >= ?", models.GiftCardUsed, monthStart).
+		Where("status = ? AND used_at >= ?", models.GiftCardUsed, monthStartUTC).
 		Scan(&monthRev)
 	data.Summary.MonthRevenueCents = monthRev
 
@@ -159,7 +166,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	d.DB.Model(&models.User{}).Where("status = 1").Count(&data.Summary.ActiveUsers)
 
 	d.DB.Model(&models.Order{}).Count(&data.Summary.TotalOrders)
-	d.DB.Model(&models.Order{}).Where("created_at >= ?", todayStart).Count(&data.Summary.TodayOrders)
+	d.DB.Model(&models.Order{}).Where("created_at >= ?", todayStartUTC).Count(&data.Summary.TodayOrders)
 
 	// 3. 流量汇总与趋势（天粒度，范围可调 3/7/30 天，默认 30）
 	trendDays := 30
@@ -203,7 +210,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		Down int64
 	}
 	d.DB.Model(&models.TrafficLog{}).
-		Where("period_start >= ?", todayStart).
+		Where("period_start >= ?", todayStartUTC).
 		Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").
 		Scan(&todayLog)
 	if pt, ok := dailyMap[todayStr]; ok {

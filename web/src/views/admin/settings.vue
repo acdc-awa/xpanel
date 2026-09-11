@@ -9,6 +9,8 @@ import {
   getBackups,
   createBackup,
   deleteBackup,
+  uploadBackup,
+  restoreBackup,
   getSystemStatus,
   checkUpdate,
   applyUpdate,
@@ -17,6 +19,7 @@ import {
   type SiteGroup,
   type CaptchaGroup,
   type AgentGroup,
+  type TimezoneGroup,
   type BackupItem,
   type SystemStatus,
   type UpdateCheckResult,
@@ -25,6 +28,7 @@ import {
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
+import { setDisplayTimezone, effectiveTimezoneLabel, formatDateTime } from '@/utils/timezone'
 import { useSiteStore } from '@/stores/site'
 
 const isMobile = ref(false)
@@ -82,11 +86,32 @@ const emptyAgent = (): AgentGroup => ({
   agent_report_interval: '60',
   agent_heartbeat_interval: '30',
 })
+const emptyTimezone = (): TimezoneGroup => ({
+  business_timezone: 'Asia/Shanghai',
+  display_timezone: 'browser',
+})
 
 const form = reactive({
   site: emptySite(),
   captcha: emptyCaptcha(),
   agent: emptyAgent(),
+  timezone: emptyTimezone(),
+})
+
+// 时区候选：优先浏览器支持的完整 IANA 列表，缺失时回退常用清单（select 支持过滤/自定义输入）。
+const timezoneOptions = computed<string[]>(() => {
+  try {
+    const all = (Intl as any).supportedValuesOf?.('timeZone')
+    if (Array.isArray(all) && all.length) return all as string[]
+  } catch {
+    /* 旧浏览器忽略 */
+  }
+  return [
+    'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul',
+    'Asia/Singapore', 'Asia/Bangkok', 'Asia/Dubai', 'Asia/Kolkata',
+    'Europe/London', 'Europe/Paris', 'Europe/Moscow',
+    'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'UTC',
+  ]
 })
 
 // 节点上报周期：表单存字符串（与 settings 表一致），输入控件要数字——computed 桥接
@@ -221,6 +246,11 @@ async function load() {
       Object.assign(form.site, emptySite(), data.data.site)
       Object.assign(form.captcha, emptyCaptcha(), data.data.captcha)
       Object.assign(form.agent, emptyAgent(), data.data.agent)
+      if (data.data.timezone) {
+        Object.assign(form.timezone, emptyTimezone(), data.data.timezone)
+        // 载入即应用展示时区，使本页与其它管理页时间渲染口径一致。
+        setDisplayTimezone(form.timezone.display_timezone)
+      }
     } else {
       ElMessage.error(data.message)
     }
@@ -297,6 +327,81 @@ async function removeBackup(row: any) {
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '删除备份失败'))
+  }
+}
+
+// ---- 备份上传与恢复 ----
+const backupUploading = ref(false)
+const backupRestoring = ref(false)
+
+/** el-upload 自定义上传：走后端 multipart 接口，由后端校验后落入备份目录。 */
+async function onUploadBackup(options: any) {
+  const file = options?.file as File | undefined
+  if (!file) return
+  backupUploading.value = true
+  try {
+    const { data } = await uploadBackup(file)
+    if (data.code === 0) {
+      ElMessage.success(`已上传并校验通过：${data.data.file}`)
+      loadBackups()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '上传备份失败'))
+  } finally {
+    backupUploading.value = false
+  }
+}
+
+/** 面板恢复后重启，轮询 /healthz 待其重新上线再刷新（会话可能随库失效，刷新后回登录页）。 */
+async function waitRestartThenReload() {
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    try {
+      const res = await fetch('/healthz', { cache: 'no-store' })
+      if (res.ok) {
+        window.location.href = '/'
+        return
+      }
+    } catch {
+      /* 面板重启中，继续等待 */
+    }
+  }
+  window.location.reload()
+}
+
+async function restoreFromBackup(row: any) {
+  const file = String(row.file)
+  try {
+    await ElMessageBox.confirm(
+      `确认用备份「${file}」覆盖当前数据库？<br/><br/>` +
+        `<b>恢复前会自动为当前库生成一份安全快照</b>，恢复后面板将自动重启并短暂离线；` +
+        `管理员登录凭据以该备份库为准，会话可能失效需重新登录。`,
+      '恢复数据库',
+      {
+        type: 'error',
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+  backupRestoring.value = true
+  try {
+    const { data } = await restoreBackup(file)
+    if (data.code !== 0) {
+      ElMessage.error(data.message)
+      backupRestoring.value = false
+      return
+    }
+    ElMessage.warning(`恢复已安排（安全快照：${data.data.safety_backup.file}），面板即将重启...`)
+    waitRestartThenReload()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '恢复失败'))
+    backupRestoring.value = false
   }
 }
 
@@ -598,9 +703,11 @@ async function save() {
       site: { ...form.site },
       captcha: { ...form.captcha },
       agent: { ...form.agent },
+      timezone: { ...form.timezone },
     })
     if (data.code === 0) {
       ElMessage.success('设置已保存并立即全站生效')
+      setDisplayTimezone(form.timezone.display_timezone)
       siteStore.applyConfig({
         ...form.site,
         stop_register: form.site.stop_register === '1',
@@ -947,6 +1054,31 @@ async function save() {
           </el-form>
         </el-tab-pane>
 
+        <!-- ==================== TAB 3.6: 时间与时区 ==================== -->
+        <el-tab-pane :label="isMobile ? '时区' : '时间与时区'" name="timezone">
+          <el-form label-position="top" style="max-width: 680px">
+            <el-form-item label="业务时区（按天口径）">
+              <el-select v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
+                <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+              </el-select>
+              <span class="muted tip" style="margin-left: 12px">
+                决定「今日/本月流量」「每日汇总」「清理边界」「入站日/周/月重置」的切天方式
+              </span>
+            </el-form-item>
+            <el-form-item label="展示时区">
+              <el-select v-model="form.timezone.display_timezone" style="width: 300px">
+                <el-option label="跟随浏览器" value="browser" />
+                <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+              </el-select>
+              <span class="muted tip" style="margin-left: 12px">当前：{{ effectiveTimezoneLabel() }}</span>
+            </el-form-item>
+            <p class="muted tip">
+              数据库统一以 UTC 存储，跨地域部署的绝对时刻一致；按天统计口径由「业务时区」决定，
+              避免不同机器上的「今日流量」对不上。修改业务时区会改变日界，切换当日统计会有一个周期的波动。
+            </p>
+          </el-form>
+        </el-tab-pane>
+
         <!-- ==================== TAB 4: 备份 ==================== -->
         <el-tab-pane :label="isMobile ? '备份' : '数据备份'" name="backup">
           <div style="max-width: 720px">
@@ -955,7 +1087,16 @@ async function save() {
                 <el-button :loading="backupLoading" :icon="Refresh" @click="loadBackups">刷新列表</el-button>
                 <span class="muted" style="font-size: 12.5px">共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}</span>
               </div>
-              <el-button type="primary" :loading="backupCreating" @click="createBackupNow">立即备份</el-button>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <el-upload
+                  :show-file-list="false"
+                  :http-request="onUploadBackup"
+                  accept=".db,.sqlite,.db3"
+                >
+                  <el-button :icon="Upload" :loading="backupUploading">上传备份</el-button>
+                </el-upload>
+                <el-button type="primary" :loading="backupCreating" @click="createBackupNow">立即备份</el-button>
+              </div>
             </div>
             <el-table v-loading="backupLoading" :data="backups" size="small">
               <el-table-column prop="file" label="备份文件" min-width="220">
@@ -965,16 +1106,21 @@ async function save() {
                 <template #default="{ row }">{{ fmtSize(row.size) }}</template>
               </el-table-column>
               <el-table-column label="创建时间" width="170">
-                <template #default="{ row }">{{ String(row.created_at).replace('T', ' ').slice(0, 19) }}</template>
+                <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="130" fixed="right">
+              <el-table-column label="操作" width="190" fixed="right">
                 <template #default="{ row }">
+                  <el-button link type="warning" :disabled="backupRestoring" @click="restoreFromBackup(row)">恢复</el-button>
                   <el-button link type="primary" :icon="Download" @click="downloadBackup(row.file)">下载</el-button>
                   <el-button link type="danger" :icon="Delete" @click="removeBackup(row)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
-            <p class="muted tip">备份文件保存在主控备份目录，按配置定期轮转；建议每月下载一份离线保存。</p>
+            <p class="muted tip">
+              备份文件保存在主控备份目录，按配置定期轮转；建议每月下载一份离线保存。
+              「上传备份」会先校验完整性与数据库版本再入库；「恢复」会用该备份覆盖当前数据库，
+              恢复前自动生成安全快照，恢复后面板重启并需重新登录（登录凭据以备份库为准）。
+            </p>
           </div>
         </el-tab-pane>
 
@@ -998,7 +1144,7 @@ async function save() {
                   <span v-if="system.schema_min_compatible" class="muted" style="margin-left: 6px">最低兼容 v{{ system.schema_min_compatible }}</span>
                 </el-descriptions-item>
                 <el-descriptions-item label="内存占用">{{ system.mem_alloc_mb }} MB</el-descriptions-item>
-                <el-descriptions-item label="服务时间">{{ system.server_time }}</el-descriptions-item>
+                <el-descriptions-item label="服务时间">{{ formatDateTime(system.server_time) }}</el-descriptions-item>
               </el-descriptions>
               <div class="status-count-grid">
                 <div v-for="(v, k) in system.counts" :key="k" class="status-count">

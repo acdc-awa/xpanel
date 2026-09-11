@@ -1,3 +1,5 @@
+import { formatDateTime } from './timezone'
+
 export function formatMoney(n: number): string {
   return `¥${n.toFixed(2)}`
 }
@@ -20,15 +22,7 @@ export function formatBytes(bytes: number): string {
   return `${v.toFixed(i === 0 || v >= 100 ? 0 : 1)} ${units[i]}`
 }
 
-/** 格式化 ISO 日期时间字符串（如 2026-08-18 10:00:00） */
+/** 格式化 ISO 日期时间字符串（如 2026-08-18 10:00:00），按设置里的展示时区渲染。 */
 export function formatDate(isoStr?: string | null): string {
-  if (!isoStr) return '-'
-  try {
-    const d = new Date(isoStr)
-    if (isNaN(d.getTime())) return isoStr
-    const pad = (n: number) => (n < 10 ? '0' + n : String(n))
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  } catch {
-    return isoStr
-  }
+  return formatDateTime(isoStr, '-')
 }

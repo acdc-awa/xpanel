@@ -60,15 +60,15 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		q = q.Where("operator_type = ?", ot)
 	}
 
-	// 5. 时间范围筛选
+	// 5. 时间范围筛选（统一转 UTC 绑定：SQLite 以带偏移文本存储并按字面量比较）
 	if st := strings.TrimSpace(c.Query("start_time")); st != "" {
 		if t, err := time.Parse(time.RFC3339, st); err == nil {
-			q = q.Where("created_at >= ?", t)
+			q = q.Where("created_at >= ?", t.UTC())
 		}
 	}
 	if et := strings.TrimSpace(c.Query("end_time")); et != "" {
 		if t, err := time.Parse(time.RFC3339, et); err == nil {
-			q = q.Where("created_at <= ?", t)
+			q = q.Where("created_at <= ?", t.UTC())
 		}
 	}
 	var total int64
@@ -117,7 +117,7 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		items = append(items, view{
 			ID: l.ID, OperatorType: l.OperatorType, OperatorID: l.OperatorID,
 			OperatorUsername: usernameByOp[l.OperatorID],
-			Action: l.Action, Detail: l.Detail, IP: l.IP, CreatedAt: l.CreatedAt,
+			Action:           l.Action, Detail: l.Detail, IP: l.IP, CreatedAt: l.CreatedAt,
 		})
 	}
 	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": items})

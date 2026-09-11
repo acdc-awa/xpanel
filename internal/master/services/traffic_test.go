@@ -32,9 +32,25 @@ func TestResetPeriodKey(t *testing.T) {
 		{thursday, "never", ""},
 	}
 	for _, c := range cases {
-		if got := resetPeriodKey(c.now, c.policy); got != c.want {
+		if got := resetPeriodKey(c.now, c.policy, time.UTC); got != c.want {
 			t.Errorf("resetPeriodKey(%v, %q) = %q, want %q", c.now, c.policy, got, c.want)
 		}
+	}
+}
+
+// resetPeriodKey 按业务时区切天：同一绝对时刻在不同时区可能落在不同日期。
+func TestResetPeriodKeyBusinessTimezone(t *testing.T) {
+	sh, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026-08-13T20:00Z = 2026-08-14 04:00 (+08)
+	at := time.Date(2026, 8, 13, 20, 0, 0, 0, time.UTC)
+	if got := resetPeriodKey(at, "daily", time.UTC); got != "2026-08-13" {
+		t.Errorf("UTC daily = %q, want 2026-08-13", got)
+	}
+	if got := resetPeriodKey(at, "daily", sh); got != "2026-08-14" {
+		t.Errorf("+08 daily = %q, want 2026-08-14", got)
 	}
 }
 

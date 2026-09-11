@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel/internal/master/backup"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -54,8 +55,9 @@ func NewWebRouter(d *Deps) *gin.Engine {
 	if d.Cfg == nil || d.Cfg.App.Env != "prod" {
 		r.Use(gin.LoggerWithFormatter(accessLogFormatter))
 	}
-	// P2-2：全局请求体上限 10MB（配置 JSON/拓扑布局/审计均远小于该值）。
-	r.Use(gin.Recovery(), middleware.BodyLimit(10<<20))
+	// 全局只挂 Recovery；请求体上限按分组施加（v1 = 10MB，备份上传单独放宽），
+	// 否则无法为单个路由放宽已在全局设置的 MaxBytesReader。
+	r.Use(gin.Recovery())
 
 	registerAPI(r, d)
 	registerSPA(r, d)
@@ -90,7 +92,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"status": "ready", "db_latency_ms": latency})
 	})
 
-	v1 := r.Group("/api/v1")
+	v1 := r.Group("/api/v1", middleware.BodyLimit(10<<20))
 	{
 		// 公开配置（captcha site key 等）
 		v1.GET("/config", d.PublicConfig)
@@ -131,13 +133,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		v1.GET("/plans", middleware.AuthOptional(d.JWT, d.DB), d.PublicPlans)
 
 		// 管理端（需 admin 角色）
-		admin := v1.Group("/admin",
-			middleware.AuthRequired(d.JWT, d.DB),
-			middleware.RequireRole("admin"),
-			middleware.Audit(d.DB),
-			middleware.RequirePwdChanged(d.DB),
-			middleware.RateLimitWrite(120, time.Minute),
-		)
+		admin := v1.Group("/admin", adminMiddleware(d)...)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
 			admin.GET("/system/status", d.AdminSystemStatus)
@@ -193,6 +189,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.GET("/audit-logs", d.AdminAuditLogs)
 			admin.POST("/backup", d.AdminCreateBackup)
 			admin.GET("/backup", d.AdminListBackups)
+			admin.POST("/backup/restore", d.AdminRestoreBackup)
 			admin.GET("/backup/:file", d.AdminDownloadBackup)
 			admin.DELETE("/backup/:file", d.AdminDeleteBackup)
 			admin.GET("/data/log-stats", d.AdminLogStats)
@@ -245,7 +242,25 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		}
 	}
 
+	// 备份上传：体积上限远高于 v1 的 10MB（备份可达数十 MB），故不挂在 v1 分组下，
+	// 单独用同一套 admin 鉴权链 + 放大的 BodyLimit 注册（路径 /api/v1/admin/backup/upload）。
+	upload := r.Group("/api/v1/admin/backup",
+		append(adminMiddleware(d), middleware.BodyLimit(backup.MaxUploadBytes))...)
+	upload.POST("/upload", d.AdminUploadBackup)
+
 	// registerAPI 不设 NoRoute：未匹配路径统一由 registerSPA 的 fallback 处理（守卫拒绝 API/WS 路径）
+}
+
+// adminMiddleware 管理端统一鉴权/审计链（含写限流）。抽成函数以便备份上传分组（放宽 body 上限）
+// 与常规 admin 分组复用同一套语义。
+func adminMiddleware(d *Deps) []gin.HandlerFunc {
+	return []gin.HandlerFunc{
+		middleware.AuthRequired(d.JWT, d.DB),
+		middleware.RequireRole("admin"),
+		middleware.Audit(d.DB),
+		middleware.RequirePwdChanged(d.DB),
+		middleware.RateLimitWrite(120, time.Minute),
+	}
 }
 
 // registerSPA 注册前端 SPA 静态托管与 history 路由 fallback。

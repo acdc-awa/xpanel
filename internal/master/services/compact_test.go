@@ -166,3 +166,60 @@ func TestCompactNodeReportsDownsamplesAndTrims(t *testing.T) {
 		t.Fatalf("second compact changed rows: %d → %d", after, after2)
 	}
 }
+
+// 分级降采样：近 6h 按分钟、6–24h 按 10 分钟、24h 以上按小时各留最早一行。
+func TestCompactNodeReportsTieredDownsample(t *testing.T) {
+	db := newCompactTestDB(t)
+	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+
+	tier1 := now.Add(-2 * time.Hour)  // 龄 2h → 1 分钟桶
+	tier2 := now.Add(-8 * time.Hour)  // 龄 8h → 10 分钟桶
+	tier3 := now.Add(-72 * time.Hour) // 龄 72h → 1 小时桶
+
+	rows := []models.NodeReport{
+		// tier1：同分钟两行 → 1
+		{ServerID: 3, ReportedAt: tier1},
+		{ServerID: 3, ReportedAt: tier1.Add(30 * time.Second)},
+		// tier2：同 10 分钟桶三行 → 1；下一桶一行 → 保留
+		{ServerID: 3, ReportedAt: tier2.Add(1 * time.Minute)},
+		{ServerID: 3, ReportedAt: tier2.Add(2 * time.Minute)},
+		{ServerID: 3, ReportedAt: tier2.Add(9 * time.Minute)},
+		{ServerID: 3, ReportedAt: tier2.Add(11 * time.Minute)},
+		// tier3：同小时桶两行 → 1；下一小时一行 → 保留
+		{ServerID: 3, ReportedAt: tier3.Add(1 * time.Minute)},
+		{ServerID: 3, ReportedAt: tier3.Add(59 * time.Minute)},
+		{ServerID: 3, ReportedAt: tier3.Add(65 * time.Minute)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, after, err := CompactNodeReports(db, now)
+	if err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	// 2(tier1→1) + 4(tier2→2) + 3(tier3→2) = 5
+	if after != 5 {
+		t.Fatalf("after = %d, want 5", after)
+	}
+
+	countIn := func(lo, hi time.Time) int64 {
+		t.Helper()
+		var n int64
+		if err := db.Model(&models.NodeReport{}).
+			Where("server_id = ? AND reported_at >= ? AND reported_at < ?", 3, lo, hi).
+			Count(&n).Error; err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if n := countIn(tier1.Truncate(time.Minute), tier1.Truncate(time.Minute).Add(time.Minute)); n != 1 {
+		t.Fatalf("tier1 minute bucket = %d, want 1", n)
+	}
+	if n := countIn(tier2.Truncate(10*time.Minute), tier2.Truncate(10*time.Minute).Add(10*time.Minute)); n != 1 {
+		t.Fatalf("tier2 10min bucket = %d, want 1", n)
+	}
+	if n := countIn(tier3.Truncate(time.Hour), tier3.Truncate(time.Hour).Add(time.Hour)); n != 1 {
+		t.Fatalf("tier3 hour bucket = %d, want 1", n)
+	}
+}

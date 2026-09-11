@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -46,6 +47,10 @@ func (d *Deps) AdminSystemStatus(c *gin.Context) {
 		data["schema_min_compatible"] = si.MinCompatible
 		data["schema_migrated_by"] = si.MigratedBy
 		data["schema_expected"] = si.Expected
+		// 时区口径：存储为 UTC；按天口径用业务时区，展示时区由前端设置决定。
+		tz := services.TimezoneSettingsGroup(d.DB)
+		data["business_timezone"] = tz[services.SettingBusinessTimezone]
+		data["display_timezone"] = tz[services.SettingDisplayTimezone]
 	}
 
 	// 内存使用概况

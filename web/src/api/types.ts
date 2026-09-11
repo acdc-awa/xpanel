@@ -146,6 +146,8 @@ export interface ServerMetricsData {
   location: string
   range: string
   timestamps: string[]
+  /** 各桶原始 UTC 时间戳（RFC3339），供前端按显示时区渲染坐标轴。 */
+  timestamps_iso?: string[]
   cpu: number[]
   mem_percent: number[]
   mem_used: number[]

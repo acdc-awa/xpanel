@@ -13,6 +13,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getDashboard } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatDateTime } from '@/utils/timezone'
 import type { DashboardData, ServerMatrixItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 import { useThemeStore } from '@/stores/theme'
@@ -68,7 +69,7 @@ function formatCompactRate(bytesPerSec: number): string {
 
 function fmtTime(t: string | null) {
   if (!t) return '—'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(t, '—')
 }
 
 function initCharts() {

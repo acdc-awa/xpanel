@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/glebarez/sqlite" // 注册 sqlite driver
 	"github.com/acdc-awa/xpanel/internal/config"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	pkgdb "github.com/acdc-awa/xpanel/internal/pkg/db"
+	_ "github.com/glebarez/sqlite" // 注册 sqlite driver
 )
 
 // tsRe 备份文件名格式：panel-20060102-150405.db（捕获时间戳段）。
@@ -115,14 +115,7 @@ func verify(path string) error {
 		return err
 	}
 	defer db.Close()
-	var res string
-	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&res); err != nil {
-		return err
-	}
-	if res != "ok" {
-		return fmt.Errorf("integrity_check = %q", res)
-	}
-	return nil
+	return checkIntegrity(db)
 }
 
 // tsFromName 从备份文件名解析时间戳（文件名是权威时间；mtime 在同秒创建或

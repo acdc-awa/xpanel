@@ -148,7 +148,7 @@ func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
 	if req.ExpiresAt != "" {
 		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
 		if err == nil {
-			exp = &t
+			exp = utcPtr(&t)
 		}
 	}
 

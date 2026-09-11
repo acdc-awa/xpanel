@@ -22,8 +22,33 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// nodeReportBucket 存量心跳压缩粒度，与 nodegate.nodeReportSampleInterval 保持一致。
+// nodeReportBucket 最细心跳压缩粒度，与 nodegate.nodeReportSampleInterval 保持一致。
 const nodeReportBucket = time.Minute
+
+// 节点曲线分级降采样档位：与读取端（api/servers.go AdminServerMetrics）二次分桶的最细粒度对齐，
+// 使降采样对任何可回看区间都不降分辨率：
+//   - 近 6h  → 1 分钟（1h 视图@1m、6h 视图@3m）
+//   - 6–24h → 10 分钟（24h 视图@10m）
+//   - 24h 以上 → 1 小时（7d 视图@1h；7d 之外已不展示，仅留粗历史）
+const (
+	nodeTier1Window = 6 * time.Hour
+	nodeTier2Window = 24 * time.Hour
+	nodeTier2Bucket = 10 * time.Minute
+	nodeTier3Bucket = time.Hour
+)
+
+// nodeBucketFor 返回某行按「行龄」应归入的降采样桶起点（桶边界按绝对时间对齐）。
+func nodeBucketFor(reportedAt, now time.Time) time.Time {
+	age := now.Sub(reportedAt)
+	switch {
+	case age <= nodeTier1Window:
+		return reportedAt.Truncate(nodeReportBucket)
+	case age <= nodeTier2Window:
+		return reportedAt.Truncate(nodeTier2Bucket)
+	default:
+		return reportedAt.Truncate(nodeTier3Bucket)
+	}
+}
 
 // deleteIDBatch 单条 DELETE ... IN 的 id 数量上限，规避 SQLite 变量数限制。
 const deleteIDBatch = 500
@@ -148,11 +173,12 @@ func CompactTrafficLogs(db *gorm.DB, now time.Time) (before, after int64, err er
 	return before, after, nil
 }
 
-// CompactNodeReports 压缩存量 node_reports：
+// CompactNodeReports 分级压缩存量 node_reports：
 //  1. 删除超出 RetentionNodeReportDays 的行（与保留策略一致，回收最长历史）；
-//  2. 保留期内按 (server_id, 分钟) 抽稀，每个分钟桶只留最早一行。
+//  2. 保留期内按行龄分级降采样（见 nodeTier* 常量）：桶内每服务器保留最早一行，删除其余。
+//     近 6h 保 1 分钟、6–24h 保 10 分钟、24h 以上保 1 小时。
 //
-// 心跳 reported_at 以服务器本地时间写入，故桶边界与保留截止均沿用 now 的时区。
+// 心跳 reported_at 以 UTC 写入（main 固定 time.Local=UTC），桶边界按绝对时间对齐。
 func CompactNodeReports(db *gorm.DB, now time.Time) (before, after int64, err error) {
 	if err = db.Model(&models.NodeReport{}).Count(&before).Error; err != nil {
 		return 0, 0, err
@@ -197,7 +223,7 @@ func CompactNodeReports(db *gorm.DB, now time.Time) (before, after int64, err er
 				if !ra.Before(currentMinute) {
 					continue
 				}
-				b := ra.Truncate(nodeReportBucket).Unix()
+				b := nodeBucketFor(ra, now).Unix()
 				if _, ok := seen[b]; ok {
 					delIDs = append(delIDs, rows[i].ID)
 					continue

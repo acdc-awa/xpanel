@@ -24,6 +24,7 @@ import {
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { compareVersion } from '@/utils/version'
+import { formatDateTime } from '@/utils/timezone'
 
 const router = useRouter()
 
@@ -120,8 +121,7 @@ onMounted(load)
 
 function fmtTime(t: string | null) {
   if (!t) return '—'
-  const d = new Date(t)
-  return d.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(t, '—')
 }
 
 // ---- 新增服务器 ----

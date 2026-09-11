@@ -13,6 +13,7 @@ import {
   } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { maskUUIDs } from '@/utils/mask'
+import { formatDateTime } from '@/utils/timezone'
 import OnlineUsersPanel from './OnlineUsersPanel.vue'
 
 const props = defineProps<{
@@ -38,7 +39,7 @@ const onlinePanelRef = ref<InstanceType<typeof OnlineUsersPanel> | null>(null)
 
 function fmtTime(t: string | null) {
   if (!t) return '—'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(t, '—')
 }
 
 // ---- 概览：接入点摘要 ----

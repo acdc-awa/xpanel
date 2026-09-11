@@ -21,6 +21,7 @@ func (d *Deps) AdminSettings(c *gin.Context) {
 		"captcha":   services.CaptchaSettings(d.DB),
 		"agent":     services.AgentSettingsGroup(d.DB),
 		"retention": services.RetentionSettingsGroup(d.DB),
+		"timezone":  services.TimezoneSettingsGroup(d.DB),
 	})
 }
 
@@ -33,6 +34,7 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		Captcha   *map[string]string `json:"captcha"`
 		Agent     *map[string]string `json:"agent"`
 		Retention *map[string]string `json:"retention"`
+		Timezone  *map[string]string `json:"timezone"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -81,6 +83,13 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		}
 		changed = true
 	}
+	if req.Timezone != nil {
+		if err := services.SaveTimezoneSettingsGroup(d.DB, *req.Timezone); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
+		changed = true
+	}
 	if !changed {
 		util.BadRequest(c, "没有需要保存的内容")
 		return
@@ -93,5 +102,6 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		"captcha":   services.CaptchaSettings(d.DB),
 		"agent":     services.AgentSettingsGroup(d.DB),
 		"retention": services.RetentionSettingsGroup(d.DB),
+		"timezone":  services.TimezoneSettingsGroup(d.DB),
 	})
 }

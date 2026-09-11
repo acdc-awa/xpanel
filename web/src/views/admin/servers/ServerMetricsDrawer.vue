@@ -5,6 +5,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
 
 import { useThemeStore } from '@/stores/theme'
@@ -97,7 +98,10 @@ function disposeCharts() {
 function updateCharts() {
   if (!metricsData.value) return
   const data = metricsData.value
-  const ts = data.timestamps || []
+  // 优先用后端返回的原始 UTC 时间戳，按「显示时区」渲染坐标轴；旧后端无该字段时回退服务端格式化串。
+  const spanHours = range.value === '7d' ? 168 : range.value === '24h' ? 24 : range.value === '6h' ? 6 : 1
+  const raw = data.timestamps_iso || []
+  const ts = raw.length ? raw.map((t) => formatAxisTime(t, spanHours)) : data.timestamps || []
   const isDark = theme.isDark
 
   const textColor = isDark ? '#94a3b8' : '#64748b'

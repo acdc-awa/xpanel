@@ -108,7 +108,7 @@ func (d *Deps) AdminCreateInvitations(c *gin.Context) {
 			util.BadRequest(c, "expires 需为 RFC3339 格式")
 			return
 		}
-		expires = &t
+		expires = utcPtr(&t)
 	}
 
 	codes := make([]models.InvitationCode, 0, req.Count)
@@ -228,7 +228,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		PlanID:            req.PlanID,
 		PermissionGroupID: req.PermissionGroupID,
 		DeviceLimit:       req.DeviceLimit,
-		ExpireAt:          req.ExpireAt,
+		ExpireAt:          utcPtr(req.ExpireAt),
 		Remark:            strings.TrimSpace(req.Remark),
 	}
 	// 分配套餐即按当前套餐值快照（2026-09-01 Xboard 式隔离；validateUserRefs 已保证存在）
@@ -377,7 +377,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		updates["auto_renew_exhaust"] = *req.AutoRenewExhaust
 	}
 	if req.ExpireAt != nil {
-		updates["expire_at"] = req.ExpireAt
+		updates["expire_at"] = utcPtr(req.ExpireAt)
 	}
 	if req.Status != nil {
 		status := *req.Status

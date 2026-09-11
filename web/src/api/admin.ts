@@ -61,6 +61,25 @@ export function deleteBackup(file: string) {
   return http.delete<ApiResp<{ file: string }>>(`/admin/backup/${encodeURIComponent(file)}`)
 }
 
+/** 上传本地 .db 备份（multipart 字段 file）；后端会先校验再入库。 */
+export function uploadBackup(file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  // 备份可达数十 MB，放宽超时；body 上限由后端上传专用分组放开。
+  return http.post<ApiResp<BackupItem>>('/admin/backup/upload', fd, { timeout: 300000 })
+}
+
+export interface RestoreResult {
+  file: string
+  safety_backup: BackupItem
+  restarting: boolean
+}
+
+/** 用指定备份替换当前数据库并触发面板重启（重启后需重新登录）。 */
+export function restoreBackup(file: string) {
+  return http.post<ApiResp<RestoreResult>>('/admin/backup/restore', { file })
+}
+
 // ---- 数据管理（日志可视化 / 按日期清理 / 空间回收） ----
 
 export interface LogDayStat {
@@ -280,11 +299,18 @@ export interface AgentGroup {
   agent_heartbeat_interval: string
 }
 
+// 时区：business_timezone 决定按天口径（今日/每日汇总），display_timezone 决定前端展示（browser=跟随浏览器）
+export interface TimezoneGroup {
+  business_timezone: string
+  display_timezone: string
+}
+
 export interface SiteSettings {
   site: SiteGroup
   captcha: CaptchaGroup
   agent: AgentGroup
   retention?: Record<string, string>
+  timezone?: TimezoneGroup
 }
 
 export function getSettings() {

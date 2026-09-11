@@ -740,9 +740,12 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	}
 
 	buckets := make([]bucketAgg, numBuckets)
+	timestampsISO := make([]string, numBuckets)
 	for i := 0; i < numBuckets; i++ {
 		bTime := startTime.Add(time.Duration(i) * bucketDuration)
 		buckets[i].timeStr = bTime.Format(timeFmt)
+		// 原始 UTC 时间戳：供前端按「显示时区」渲染坐标轴，避免坐标轴被服务器时区决定。
+		timestampsISO[i] = bTime.UTC().Format(time.RFC3339)
 	}
 
 	for _, r := range reports {
@@ -825,21 +828,22 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	}
 
 	util.OK(c, gin.H{
-		"server_id":    id,
-		"server_name":  srv.Name,
-		"host":         srv.Host,
-		"location":     srv.Location,
-		"range":        timeRange,
-		"timestamps":   timestamps,
-		"cpu":          cpuList,
-		"mem_percent":  memPercentList,
-		"mem_used":     memUsedList,
-		"mem_total":    lastMemTotal,
-		"disk_percent": diskPercentList,
-		"disk_total":   lastDiskTotal,
-		"rx_mbps":      rxMbpsList,
-		"tx_mbps":      txMbpsList,
-		"online_users": usersList,
+		"server_id":      id,
+		"server_name":    srv.Name,
+		"host":           srv.Host,
+		"location":       srv.Location,
+		"range":          timeRange,
+		"timestamps":     timestamps,
+		"timestamps_iso": timestampsISO,
+		"cpu":            cpuList,
+		"mem_percent":    memPercentList,
+		"mem_used":       memUsedList,
+		"mem_total":      lastMemTotal,
+		"disk_percent":   diskPercentList,
+		"disk_total":     lastDiskTotal,
+		"rx_mbps":        rxMbpsList,
+		"tx_mbps":        txMbpsList,
+		"online_users":   usersList,
 	})
 }
 
