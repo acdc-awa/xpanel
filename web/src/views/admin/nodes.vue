@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, Loading, Connection, Promotion } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
+import AccessPointDialog from './servers/AccessPointDialog.vue'
 import {
   createInbound,
   deleteInbound,
@@ -12,7 +13,6 @@ import {
   getServers,
   toggleInbound,
   updateInbound,
-  createAccessPoint,
   updateAccessPoint,
   deleteAccessPoint,
   getAccessPoints,
@@ -121,90 +121,16 @@ async function loadAccessPoints() {
 }
 
 const apDialogOpen = ref(false)
-const apEditingId = ref<number | null>(null)
-const apSaving = ref(false)
-const apForm = reactive({
-  name: '',
-  enabled: true,
-  permission_group_ids: [] as number[],
-  remark: '',
-  custom_host: '',
-  custom_port: 0,
-  target_type: '' as '' | 'inbound',
-  target_inbound_id: undefined as number | undefined,
-})
-const apTargetServerId = ref(0)
-
-const apAvailableInbounds = computed(() =>
-  allInbounds.value.filter((i) => i.server_id === apTargetServerId.value && i.enabled && i.type === 'user'),
-)
+const apEditingItem = ref<UserAccessPoint | null>(null)
 
 function openCreateAccessPoint() {
-  apEditingId.value = null
-  apForm.name = ''
-  apForm.enabled = true
-  apForm.permission_group_ids = []
-  apForm.remark = ''
-  apForm.custom_host = ''
-  apForm.custom_port = 0
-  apForm.target_type = ''
-  apForm.target_inbound_id = undefined
-  apTargetServerId.value = servers.value[0]?.id || 0
+  apEditingItem.value = null
   apDialogOpen.value = true
 }
 
-function openEditAccessPoint(ap: any) {
-  apEditingId.value = ap.id
-  apForm.name = ap.name
-  apForm.enabled = ap.enabled
-  apForm.permission_group_ids = [...(ap.permission_group_ids || [])]
-  apForm.remark = ap.remark || ''
-  apForm.custom_host = ap.custom_host || ''
-  apForm.custom_port = ap.custom_port || 0
-  apForm.target_type = ap.target_type
-  apForm.target_inbound_id = ap.target_inbound_id
-  const inb = allInbounds.value.find((i) => i.id === ap.target_inbound_id)
-  apTargetServerId.value = inb?.server_id || servers.value[0]?.id || 0
+function openEditAccessPoint(ap: UserAccessPoint) {
+  apEditingItem.value = ap
   apDialogOpen.value = true
-}
-
-async function saveAccessPoint() {
-  const name = apForm.name.trim()
-  if (!name) {
-    ElMessage.warning('请输入接入点名称')
-    return
-  }
-  if (apForm.target_type === 'inbound' && !apForm.target_inbound_id) {
-    ElMessage.warning('请选择直连落地入站')
-    return
-  }
-  apSaving.value = true
-  try {
-    const payload = {
-      name,
-      enabled: apForm.enabled,
-      permission_group_ids: apForm.permission_group_ids,
-      remark: apForm.remark,
-      custom_host: apForm.custom_host || undefined,
-      custom_port: apForm.custom_port || undefined,
-      target_type: apForm.target_type,
-      target_inbound_id: apForm.target_type === 'inbound' ? apForm.target_inbound_id : undefined,
-    }
-    const { data } = apEditingId.value
-      ? await updateAccessPoint(apEditingId.value, payload)
-      : await createAccessPoint(payload)
-    if (data.code === 0) {
-      ElMessage.success(apEditingId.value ? '接入点已更新' : '接入点已创建')
-      apDialogOpen.value = false
-      loadAccessPoints()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存接入点失败'))
-  } finally {
-    apSaving.value = false
-  }
 }
 
 async function removeAccessPoint(ap: any) {
@@ -620,90 +546,15 @@ function quotaOf(row: any): string {
         </BaseCard>
 
         <!-- 新建/编辑用户接入点 -->
-        <el-dialog
+        <AccessPointDialog
           v-model="apDialogOpen"
-          :title="apEditingId ? '编辑接入点' : '新建接入点'"
-          width="580px"
-          append-to-body
-        >
-          <el-form label-position="top">
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px; align-items: start">
-              <el-form-item label="接入点 Tag 名称" required>
-                <el-input v-model="apForm.name" placeholder="如 香港直连 01, 广州移动 BGP" />
-              </el-form-item>
-              <el-form-item label="启用状态">
-                <el-switch v-model="apForm.enabled" active-text="启用" inactive-text="禁用" style="margin-top: 4px" />
-              </el-form-item>
-            </div>
-
-            <el-form-item label="开放权限组（显式白名单，勾选可见的权限组）">
-              <el-select
-                v-model="apForm.permission_group_ids"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                placeholder="请勾选可见的权限组"
-                style="width: 100%"
-              >
-                <el-option v-for="g in apGroups" :key="g.id" :label="g.name" :value="g.id" />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="目标绑定方式（亦可在拓扑画布上拖拽连线）">
-              <el-radio-group v-model="apForm.target_type" style="width: 100%">
-                <el-radio-button value="">待连线 / 未绑定</el-radio-button>
-                <el-radio-button value="inbound">直连落地入站</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
-            <div
-              v-if="apForm.target_type === 'inbound'"
-              style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; background: var(--x-card-soft); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed var(--x-border)"
-            >
-              <el-form-item label="目标落地服务器" style="margin-bottom: 0">
-                <el-select v-model="apTargetServerId" placeholder="选择 Xray 服务器" style="width: 100%" @change="apForm.target_inbound_id = undefined">
-                  <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="目标用户入站 (Target Inbound)" style="margin-bottom: 0">
-                <el-select v-model="apForm.target_inbound_id" placeholder="选择用户入站" style="width: 100%">
-                  <el-option v-for="inb in apAvailableInbounds" :key="inb.id" :label="`${inb.tag} (:${inb.port})`" :value="inb.id" />
-                </el-select>
-              </el-form-item>
-            </div>
-
-            <div style="background: var(--x-card-soft); border: 1px solid var(--x-border); border-radius: 8px; padding: 12px; margin-bottom: 16px">
-              <div style="font-size: 12px; font-weight: 600; color: var(--x-text-3); margin-bottom: 8px">
-                订阅地址覆写（选填；留空沿链路继承：直连→入站分享地址 / 接入层端点）
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-                <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
-                  <el-input v-model="apForm.custom_host" placeholder="留空自动继承" />
-                </el-form-item>
-                <el-form-item label="自定义连接 Port" style="margin-bottom: 0">
-                  <el-input-number v-model="apForm.custom_port" :min="0" :max="65535" placeholder="0 自动继承" style="width: 100%" />
-                </el-form-item>
-              </div>
-            </div>
-
-            <el-form-item label="备注说明" style="margin-bottom: 0">
-              <el-input v-model="apForm.remark" placeholder="选填，如 VIP 专享中转" />
-            </el-form-item>
-          </el-form>
-          <template #footer>
-            <div style="display: flex; justify-content: space-between; align-items: center">
-              <div>
-                <el-button v-if="apEditingId" type="danger" plain @click="removeAccessPoint(apList.find((a) => a.id === apEditingId)!)">
-                  删除接入点
-                </el-button>
-              </div>
-              <div>
-                <el-button @click="apDialogOpen = false">取消</el-button>
-                <el-button type="primary" :loading="apSaving" @click="saveAccessPoint">保存接入点</el-button>
-              </div>
-            </div>
-          </template>
-        </el-dialog>
+          :access-point="apEditingItem"
+          :servers="servers"
+          :inbounds="allInbounds"
+          :permission-groups="apGroups"
+          @saved="loadAccessPoints"
+          @deleted="loadAccessPoints"
+        />
       </el-tab-pane>
     </el-tabs>
 

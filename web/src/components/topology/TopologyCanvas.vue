@@ -27,10 +27,7 @@ import {
   updateInbound,
   createInbound,
   updateServerOutbound,
-  createAccessPoint,
-  updateAccessPoint,
   setAccessPointTarget,
-  deleteAccessPoint,
   getPermissionGroups,
   createLayer,
   updateLayer,
@@ -41,6 +38,7 @@ import type { InboundItem, ServerOutbound, PermissionGroup, UserAccessPoint, Acc
 import { errMsg } from '@/api/http'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from '@/views/admin/servers/InboundConfigEditor.vue'
+import AccessPointDialog from '@/views/admin/servers/AccessPointDialog.vue'
 
 const props = defineProps<{
   topology: TopologyData | null
@@ -167,6 +165,7 @@ const layoutDirty = ref(false)
 
 // 云端同步：打开时拉取，hash 不一致 → 下载覆盖本地；一致 → 复用本地
 onMounted(async () => {
+  loadPermissionGroups()
   try {
     const { data } = await getTopologyLayout()
     if (data.code !== 0) return
@@ -821,136 +820,31 @@ async function createRef(outboundId: number, inboundId: number) {
 
 // ---- 用户接入点 (User Access Points) 管理弹窗 ----
 const apDialogOpen = ref(false)
-const apEditingId = ref(0)
-const apSaving = ref(false)
-const apTargetServerId = ref(0)
+const apEditingItem = ref<UserAccessPoint | null>(null)
+const permissionGroups = ref<PermissionGroup[]>([])
 
-const apForm = reactive({
-  name: '',
-  custom_host: '',
-  custom_port: 0,
-  target_type: '' as 'inbound' | '',
-  target_inbound_id: undefined as number | undefined,
-  permission_group_ids: [] as number[],
-  enabled: true,
-  remark: '',
-})
+async function loadPermissionGroups() {
+  try {
+    const { data } = await getPermissionGroups()
+    if (data.code === 0) permissionGroups.value = data.data.items
+  } catch {}
+}
+
+function openCreateAccessPoint() {
+  apEditingItem.value = null
+  loadPermissionGroups()
+  apDialogOpen.value = true
+}
+
+function openEditAccessPoint(ap: UserAccessPoint) {
+  apEditingItem.value = ap
+  loadPermissionGroups()
+  apDialogOpen.value = true
+}
 
 function groupName(id: number) {
   return permissionGroups.value.find((g) => g.id === id)?.name ?? `组#${id}`
 }
-
-
-const apAvailableInbounds = computed(() => {
-  if (!apTargetServerId.value) return []
-  return (props.topology?.inbounds || []).filter(
-    (i) => i.server_id === apTargetServerId.value && i.enabled && i.type === 'user',
-  )
-})
-
-
-async function openCreateAccessPoint() {
-  apEditingId.value = 0
-  apForm.name = ''
-  apForm.custom_host = ''
-  apForm.custom_port = 0
-  apForm.target_type = ''
-  apForm.target_inbound_id = undefined
-  apTargetServerId.value = availableXrayServers.value[0]?.id || 0
-  apForm.permission_group_ids = []
-  apForm.enabled = true
-  apForm.remark = ''
-  try {
-    const { data } = await getPermissionGroups()
-    if (data.code === 0) permissionGroups.value = data.data.items
-  } catch {}
-  apDialogOpen.value = true
-}
-
-async function openEditAccessPoint(ap: UserAccessPoint) {
-  apEditingId.value = ap.id
-  apForm.name = ap.name
-  apForm.custom_host = ap.custom_host || ''
-  apForm.custom_port = ap.custom_port || 0
-  apForm.target_type = (ap.target_type || '') as 'inbound' | ''
-  apForm.target_inbound_id = ap.target_inbound_id
-
-  if (ap.target_type === 'inbound' && ap.target_inbound_id) {
-    const inb = props.topology?.inbounds.find((i) => i.id === ap.target_inbound_id)
-    if (inb) apTargetServerId.value = inb.server_id
-  } else {
-    apTargetServerId.value = availableXrayServers.value[0]?.id || 0
-  }
-
-  apForm.permission_group_ids = ap.permission_group_ids || []
-  apForm.enabled = ap.enabled
-  apForm.remark = ap.remark || ''
-  try {
-    const { data } = await getPermissionGroups()
-    if (data.code === 0) permissionGroups.value = data.data.items
-  } catch {}
-  apDialogOpen.value = true
-}
-
-async function handleSaveAccessPoint() {
-  if (!apForm.name.trim()) {
-    ElMessage.warning('请填写接入点 Tag 名称')
-    return
-  }
-  apSaving.value = true
-  try {
-    const payload = {
-      name: apForm.name.trim(),
-      custom_host: apForm.custom_host.trim(),
-      custom_port: apForm.custom_port || 0,
-      target_type: apForm.target_type,
-      target_inbound_id: apForm.target_type === 'inbound' ? (apForm.target_inbound_id || undefined) : undefined,
-      permission_group_ids: apForm.permission_group_ids,
-      enabled: apForm.enabled,
-      remark: apForm.remark,
-    }
-    const { data } = apEditingId.value
-      ? await updateAccessPoint(apEditingId.value, payload)
-      : await createAccessPoint(payload)
-    if (data.code === 0) {
-      ElMessage.success(apEditingId.value ? '接入点已更新' : '接入点已创建')
-      apDialogOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存接入点失败'))
-  } finally {
-    apSaving.value = false
-  }
-}
-
-async function handleDeleteAccessPoint(id: number) {
-  try {
-    await ElMessageBox.confirm('确定删除该接入点？', '删除接入点', {
-      type: 'warning',
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-    })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteAccessPoint(id)
-    if (data.code === 0) {
-      ElMessage.success('接入点已删除')
-      apDialogOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-const permissionGroups = ref<PermissionGroup[]>([])
 
 // 目标落地服务器候选（全部 Xray 托管节点；l4_relay 已于 2026-08-24 退役）
 const availableXrayServers = computed(() => props.topology?.servers || [])
@@ -2003,99 +1897,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     />
 
     <!-- 用户接入点新建/编辑弹窗 (Consumer Pipeline Model) -->
-    <el-dialog
+    <AccessPointDialog
       v-model="apDialogOpen"
-      :title="apEditingId ? '编辑接入点' : '新建接入点'"
-      width="580px"
-      append-to-body
-    >
-      <el-form label-position="top">
-        <el-alert
-          title="接入点是面向客户端订阅与分发的入口。定义 Tag 名称与开放权限组即可，连接配置沿拓扑链路自动继承（亦可在下方进行高级覆写）。"
-          type="info"
-          :closable="false"
-          style="margin-bottom: 16px"
-        />
-
-        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px; align-items: start">
-          <el-form-item label="接入点 Tag 名称" required>
-            <el-input v-model="apForm.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
-          </el-form-item>
-          <el-form-item label="启用状态">
-            <el-switch v-model="apForm.enabled" active-text="启用" inactive-text="禁用" style="margin-top: 4px" />
-          </el-form-item>
-        </div>
-
-        <el-form-item label="开放权限组（显式白名单权限控制，勾选可见的权限组）">
-          <el-select
-            v-model="apForm.permission_group_ids"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="请勾选可见的权限组"
-            style="width: 100%"
-          >
-            <el-option v-for="g in permissionGroups" :key="g.id" :label="g.name" :value="g.id" />
-          </el-select>
-        </el-form-item>
-
-        <!-- 目标绑定 (手动选择 / 拓扑连线) -->
-        <el-form-item label="目标绑定方式（亦可在画布上拖拽连线）">
-          <el-radio-group v-model="apForm.target_type" style="width: 100%">
-            <el-radio-button value="">待连线 / 未绑定</el-radio-button>
-            <el-radio-button value="inbound">直连落地入站</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <!-- 当选择直连落地入站 -->
-        <div v-if="apForm.target_type === 'inbound'" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; background: rgba(56, 189, 248, 0.05); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed rgba(56, 189, 248, 0.2)">
-          <el-form-item label="目标落地服务器" style="margin-bottom: 0">
-            <el-select v-model="apTargetServerId" placeholder="选择 Xray 服务器" style="width: 100%" @change="apForm.target_inbound_id = undefined">
-              <el-option v-for="s in availableXrayServers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="目标用户入站 (Target Inbound)" style="margin-bottom: 0">
-            <el-select v-model="apForm.target_inbound_id" placeholder="选择用户入站" style="width: 100%">
-              <el-option v-for="inb in apAvailableInbounds" :key="inb.id" :label="`${inb.tag} (:${inb.port})`" :value="inb.id" />
-            </el-select>
-          </el-form-item>
-        </div>
-
-        <!-- 高级覆写（可选） -->
-        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px">
-          <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px">
-            订阅地址覆写（选填；留空沿链路继承：入站分享地址 / 接入层端点。自定义 Host/Port 常用于表达中转或入口端点）
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-            <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
-              <el-input v-model="apForm.custom_host" placeholder="留空自动继承" />
-            </el-form-item>
-            <el-form-item label="自定义连接 Port" style="margin-bottom: 0">
-              <el-input-number v-model="apForm.custom_port" :min="0" :max="65535" placeholder="0 自动继承" style="width: 100%" />
-            </el-form-item>
-          </div>
-        </div>
-
-        <el-form-item label="备注说明" style="margin-bottom: 0">
-          <el-input v-model="apForm.remark" placeholder="选填，如 VIP 专享入口" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <div>
-            <el-button v-if="apEditingId" type="danger" plain @click="handleDeleteAccessPoint(apEditingId)">
-              删除接入点
-            </el-button>
-          </div>
-          <div>
-            <el-button @click="apDialogOpen = false">取消</el-button>
-            <el-button type="primary" :loading="apSaving" @click="handleSaveAccessPoint">
-              保存接入点
-            </el-button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
+      :access-point="apEditingItem"
+      :servers="availableXrayServers"
+      :inbounds="props.topology?.inbounds"
+      :permission-groups="permissionGroups"
+      @saved="emit('changed')"
+      @deleted="emit('changed')"
+    />
 
     <!-- 入站新建弹窗（直接在拓扑画布中呼出） -->
     <el-dialog

@@ -75,8 +75,15 @@ const subscribeUrl = computed(() => {
   return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
+const isPlanActive = computed(() => {
+  if (!auth.user?.plan_id) return false
+  if (isExpired.value) return false
+  return true
+})
+
 onMounted(async () => {
   loadServers()
+  loadNotices()
   // ISSUE-16：登录响应可能只是浅层摘要，首页挂载始终拉取 /user/me，保证首屏数据与刷新后一致。
   loading.value = true
   try {
@@ -168,11 +175,6 @@ function viewNotice(n: NoticeItem) {
   selectedNotice.value = n
   noticeModalOpen.value = true
 }
-
-onMounted(() => {
-  loadServers()
-  loadNotices()
-})
 </script>
 
 <template>
@@ -200,7 +202,7 @@ onMounted(() => {
         <div class="dash-hero">
           <div class="hero-top">
             <div class="hero-plan-badge">
-              <span class="x-status-dot online" />
+              <span class="x-status-dot" :class="isPlanActive ? 'online' : 'offline'" />
               <span>{{ planLabel }}</span>
             </div>
             <div class="hero-top-right">

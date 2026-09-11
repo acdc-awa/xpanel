@@ -212,10 +212,10 @@ async function confirmPay() {
 
         <div class="card-action">
           <el-button
-            :type="idx === 0 ? 'primary' : 'default'"
+            :type="idx === featuredIdx ? 'primary' : 'default'"
             size="large"
             class="buy-btn"
-            :class="{ 'glow-btn': idx === 0 }"
+            :class="{ 'glow-btn': idx === featuredIdx }"
             @click="openCheckout(p)"
           >
             {{ p.id === currentPlanId ? '续费' : '立即订购' }}

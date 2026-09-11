@@ -426,6 +426,11 @@ a { color: inherit; text-decoration: none; }
   box-shadow: -12px 0 48px rgba(0, 0, 0, 0.22) !important;
   border-left: 1px solid var(--x-border) !important;
 
+  @media (max-width: 640px) {
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+
   .el-drawer__header {
     padding: 16px 22px 14px !important;
     margin-bottom: 0 !important;

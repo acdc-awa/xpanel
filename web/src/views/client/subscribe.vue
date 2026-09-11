@@ -6,10 +6,14 @@ import {
   Cellphone,
   Promotion,
   View,
+  RefreshRight,
+  ShoppingBag,
 } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
+import { resetSubscribeToken } from '@/api/user'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 
@@ -18,6 +22,13 @@ const site = useSiteStore()
 const qrDataUrl = ref('')
 const loading = ref(false)
 const qrModalOpen = ref(false)
+const resettingSub = ref(false)
+
+const hasPlan = computed(() => {
+  if (!auth.user?.plan_id) return false
+  const exp = auth.user?.expire_at
+  return !(exp && new Date(exp).getTime() < Date.now())
+})
 
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
@@ -30,26 +41,39 @@ const mihomoSchemeUrl = computed(() => {
   return `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=${encodeURIComponent('XrayPanel')}`
 })
 
-onMounted(async () => {
-  loading.value = true
-  try {
-    if (!auth.user) await auth.fetchMe()
-    if (subscribeUrl.value) {
+async function refreshQr() {
+  if (subscribeUrl.value) {
+    try {
       qrDataUrl.value = await QRCode.toDataURL(subscribeUrl.value, {
         width: 260,
         margin: 2,
         color: { dark: '#171b2e', light: '#ffffff' },
       })
+    } catch {
+      qrDataUrl.value = ''
     }
+  } else {
+    qrDataUrl.value = ''
+  }
+}
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    if (!auth.user) await auth.fetchMe()
+    await refreshQr()
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成二维码失败'))
+    ElMessage.error(errMsg(e, '加载订阅信息失败'))
   } finally {
     loading.value = false
   }
 })
 
 function copyText(text: string, label: string) {
-  if (!text) return
+  if (!text) {
+    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    return
+  }
   navigator.clipboard?.writeText(text).then(
     () => ElMessage.success(`${label}已复制到剪贴板`),
     () => ElMessage.warning('复制失败，请手动复制'),
@@ -57,9 +81,47 @@ function copyText(text: string, label: string) {
 }
 
 function importToMihomo() {
-  if (!mihomoSchemeUrl.value) return
+  if (!mihomoSchemeUrl.value) {
+    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    return
+  }
   window.location.href = mihomoSchemeUrl.value
   ElMessage.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
+}
+
+function openQrModal() {
+  if (!subscribeUrl.value) {
+    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    return
+  }
+  qrModalOpen.value = true
+}
+
+async function onResetSubscribe() {
+  try {
+    await ElMessageBox.confirm(
+      '重置后原订阅地址将立即失效，已添加的客户端需重新同步新的订阅地址。确认重置？',
+      '重置订阅链接',
+      { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  resettingSub.value = true
+  try {
+    const { data } = await resetSubscribeToken()
+    if (data.code === 0) {
+      ElMessage.success('订阅链接已重置，旧链接已失效')
+      await auth.fetchMe()
+      await refreshQr()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重置订阅链接失败'))
+  } finally {
+    resettingSub.value = false
+  }
 }
 
 interface ClientApp {
@@ -111,6 +173,20 @@ const clashApps: ClientApp[] = [
       <p class="sub-desc">适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。</p>
     </div>
 
+    <!-- 无套餐空状态友好引导 -->
+    <div v-if="!hasPlan" class="x-card empty-sub-card">
+      <el-icon class="empty-sub-icon"><ShoppingBag /></el-icon>
+      <h3 class="empty-sub-title">当前无有效套餐</h3>
+      <p class="empty-sub-desc">
+        您当前未订购套餐或套餐已到期，开通/续费后系统将自动为您下发订阅地址并分配全球节点线路。
+      </p>
+      <router-link to="/shop">
+        <el-button type="primary" size="large" round class="glow-btn">
+          <el-icon><ShoppingBag /></el-icon>&nbsp;前往选购套餐
+        </el-button>
+      </router-link>
+    </div>
+
     <!-- 核心一键导入卡片 -->
     <div class="x-card primary-card">
       <div class="x-card-body">
@@ -119,7 +195,7 @@ const clashApps: ClientApp[] = [
           <div class="sub-left">
             <div class="sub-url-box">
               <span class="sub-url-label">Mihomo 订阅地址</span>
-              <code class="sub-url-code cell-mono">{{ subscribeUrl || '正在生成订阅地址…' }}</code>
+              <code class="sub-url-code cell-mono">{{ subscribeUrl || (hasPlan ? '正在生成订阅地址…' : '暂无有效订阅（请先订购套餐）') }}</code>
             </div>
 
             <div class="sub-action-buttons">
@@ -132,14 +208,17 @@ const clashApps: ClientApp[] = [
             </div>
 
             <div class="sub-minor-actions">
-              <el-button text size="small" @click="qrModalOpen = true">
+              <el-button text size="small" @click="openQrModal">
                 <el-icon><Cellphone /></el-icon>&nbsp;手机扫码导入
+              </el-button>
+              <el-button text size="small" type="danger" :loading="resettingSub" @click="onResetSubscribe">
+                <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅链接
               </el-button>
             </div>
           </div>
 
           <!-- 右侧：二维码微缩卡片 -->
-          <div class="sub-right" @click="qrModalOpen = true">
+          <div class="sub-right" @click="openQrModal">
             <div class="qr-wrap" title="点击放大查看">
               <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="sub-qr" />
               <div v-else class="sub-qr-empty">—</div>
@@ -211,8 +290,12 @@ const clashApps: ClientApp[] = [
     <el-dialog v-model="qrModalOpen" title="手机扫码导入订阅" width="340px" append-to-body center>
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" style="width: 220px; height: 220px; border-radius: 8px; border: 1px solid var(--x-border)" />
+        <div v-else style="width: 220px; height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--x-card-soft); border-radius: 8px; border: 1px dashed var(--x-border); color: var(--x-text-3); font-size: 13px">
+          <el-icon style="font-size: 28px; margin-bottom: 8px"><ShoppingBag /></el-icon>
+          <span>暂无可用订阅二维码</span>
+        </div>
         <p class="muted" style="font-size: 12px; text-align: center">
-          使用手机端 Mihomo 客户端（如 Stash、FlClash）扫码即可自动添加配置。
+          {{ qrDataUrl ? '使用手机端 Mihomo 客户端（如 Stash、FlClash）扫码即可自动添加配置。' : '请先订购有效套餐以下发订阅地址。' }}
         </p>
       </div>
     </el-dialog>
@@ -473,6 +556,42 @@ const clashApps: ClientApp[] = [
     color: var(--x-text-2);
     margin-top: 2px;
     line-height: 1.5;
+  }
+}
+
+.empty-sub-card {
+  margin-bottom: 20px;
+  text-align: center;
+  padding: 36px 20px;
+  background: var(--x-card);
+  border: 1px dashed var(--x-border);
+  border-radius: var(--x-radius);
+
+  .empty-sub-icon {
+    font-size: 42px;
+    color: var(--x-primary);
+    margin-bottom: 12px;
+  }
+
+  .empty-sub-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--x-text);
+    margin-bottom: 8px;
+  }
+
+  .empty-sub-desc {
+    color: var(--x-text-2);
+    font-size: 13px;
+    max-width: 460px;
+    margin: 0 auto 18px;
+    line-height: 1.6;
+  }
+}
+
+@media (max-width: 640px) {
+  .sub-right {
+    display: none !important;
   }
 }
 </style>

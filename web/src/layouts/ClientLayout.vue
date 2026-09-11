@@ -653,6 +653,13 @@ onUnmounted(() => {
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(99, 102, 241, 0.25);
   }
+
+  .switch-view-btn {
+    padding: 0 8px;
+    .switch-view-text {
+      display: none !important;
+    }
+  }
 }
 
 /* 主内容容器 (Fluid 自适应流式容器) */

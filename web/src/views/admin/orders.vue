@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh, Tickets, Loading } from '@element-plus/icons-vue'
+import { Refresh, Tickets, Loading, Search } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -10,11 +11,18 @@ const total = ref(0)
 const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
+const filterStatus = ref('')
+const keyword = ref('')
 
 async function load() {
   loading.value = true
   try {
-    const { data } = await getOrders(page.value, size.value)
+    const { data } = await getOrders(
+      page.value,
+      size.value,
+      filterStatus.value || undefined,
+      keyword.value.trim() || undefined,
+    )
     if (data.code === 0) {
       list.value = data.data.items
       total.value = data.data.total
@@ -27,6 +35,19 @@ async function load() {
     loading.value = false
   }
 }
+
+function onFilterChange() {
+  page.value = 1
+  load()
+}
+
+function resetFilters() {
+  filterStatus.value = ''
+  keyword.value = ''
+  page.value = 1
+  load()
+}
+
 onMounted(load)
 
 function fmtTime(t: string | null) {
@@ -38,7 +59,31 @@ function fmtTime(t: string | null) {
 <template>
   <div class="x-page">
     <div class="x-toolbar">
-      <div class="x-toolbar-left">
+      <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+        <el-select
+          v-model="filterStatus"
+          placeholder="全部状态"
+          clearable
+          style="width: 140px"
+          @change="onFilterChange"
+        >
+          <el-option label="全部状态" value="" />
+          <el-option label="已生效 (paid)" value="paid" />
+          <el-option label="待支付 (pending)" value="pending" />
+          <el-option label="已取消 (cancelled)" value="cancelled" />
+        </el-select>
+        <el-input
+          v-model="keyword"
+          placeholder="搜索流水号 / 用户名..."
+          clearable
+          style="width: 220px"
+          @keyup.enter="onFilterChange"
+          @clear="onFilterChange"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-button type="primary" @click="onFilterChange"><el-icon><Search /></el-icon>&nbsp;查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
     </div>
@@ -50,7 +95,7 @@ function fmtTime(t: string | null) {
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
         <el-icon style="font-size: 32px; color: var(--x-text-3)"><Tickets /></el-icon>
-        <p style="margin-top: 8px">暂无订购记录</p>
+        <p style="margin-top: 8px">{{ filterStatus || keyword ? '未找到符合条件的订单记录' : '暂无订购记录' }}</p>
       </div>
 
       <!-- 全局统一订单卡片网格流 (自适应 1~4 列) -->
@@ -60,7 +105,7 @@ function fmtTime(t: string | null) {
           <div class="card-head">
             <div class="head-title">
               <span class="plan-name">{{ row.plan_name }}</span>
-              <span class="x-chip" :class="row.status === 'paid' ? 'green' : 'orange'" style="font-size: 10.5px">
+              <span class="x-chip" :class="row.status === 'paid' ? 'green' : (row.status === 'pending' ? 'orange' : 'gray')" style="font-size: 10.5px">
                 {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
               </span>
             </div>
@@ -112,7 +157,7 @@ function fmtTime(t: string | null) {
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
           @current-change="load"
-          @size-change="load"
+          @size-change="() => { page = 1; load() }"
         />
       </div>
     </BaseCard>

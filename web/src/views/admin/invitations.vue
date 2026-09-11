@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { CopyDocument, Refresh, Ticket, Link, Delete } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, Ticket, Link, Delete, Loading } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -77,6 +77,13 @@ const genOpen = ref(false)
 const invForm = reactive({ count: 5, expires: '' })
 const creating = ref(false)
 const generated = ref<string[]>([])
+
+function openGen() {
+  generated.value = []
+  invForm.expires = ''
+  invForm.count = 5
+  genOpen.value = true
+}
 
 async function create() {
   creating.value = true
@@ -178,7 +185,7 @@ function fmtTime(t: string | null) {
         </el-select>
         <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
       </div>
-      <el-button type="primary" @click="genOpen = true"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
+      <el-button type="primary" @click="openGen"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
     </div>
 
     <BaseCard title="邀请码列表">
@@ -276,18 +283,34 @@ function fmtTime(t: string | null) {
           <el-form-item label="生成数量">
             <el-input-number v-model="invForm.count" :min="1" :max="100" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="过期时间（选填，如 2026-12-31T23:59:59+08:00）">
-            <el-input v-model="invForm.expires" placeholder="留空 = 永不过期" />
+          <el-form-item label="过期时间">
+            <el-date-picker
+              v-model="invForm.expires"
+              type="datetime"
+              placeholder="留空表示永不过期"
+              value-format="YYYY-MM-DDTHH:mm:ssZ"
+              style="width: 100%"
+            />
           </el-form-item>
         </el-form>
       </template>
       <template v-else>
         <p class="muted" style="margin: 0 0 8px">已生成 {{ generated.length }} 个（一次性使用）：</p>
-        <div class="inv-codes">
+        <div class="inv-codes" style="max-height: 160px; overflow-y: auto">
           <div v-for="c in generated" :key="c" class="inv-code-row">
             <code class="inv-code">{{ c }}</code>
             <el-button link type="primary" size="small" @click="copyRegisterLink(c)">复制链接</el-button>
           </div>
+        </div>
+        <div style="margin-top: 12px">
+          <div class="muted" style="font-size: 12px; margin-bottom: 4px">只读备用文本（便于全选复制）：</div>
+          <el-input
+            type="textarea"
+            :rows="4"
+            readonly
+            :value="generated.join('\n')"
+            placeholder="邀请码列表"
+          />
         </div>
       </template>
       <template #footer>

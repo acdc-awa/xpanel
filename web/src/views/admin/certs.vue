@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Delete, MagicStick, Edit } from '@element-plus/icons-vue'
+import { Plus, Delete, MagicStick, Edit, Loading, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { createCert, deleteCert, generateSelfSignedCert, getCerts, updateCert, type CertItem } from '@/api/admin'
@@ -81,9 +81,16 @@ function openEdit(row: any) {
 }
 
 async function save() {
-  if (!form.domain.trim() || !form.cert_pem.trim() || !form.key_pem.trim()) {
-    ElMessage.warning('请填写域名与 PEM 内容（编辑时可仅改备注）')
-    return
+  // 编辑态仅提交备注（见下方 updateCert 调用），不校验域名与 PEM。
+  if (!editing.value) {
+    if (!form.domain.trim()) {
+      ElMessage.warning('请填写域名')
+      return
+    }
+    if (!form.cert_pem.trim() || !form.key_pem.trim()) {
+      ElMessage.warning('请填写 PEM 证书链与私钥内容')
+      return
+    }
   }
   saving.value = true
   try {

@@ -45,6 +45,7 @@ onUnmounted(() => mq?.removeEventListener('change', onMq))
 
 const siteStore = useSiteStore()
 const activeTab = ref('site')
+const isConfigTab = computed(() => ['site', 'subscribe', 'captcha', 'agent', 'timezone'].includes(activeTab.value))
 const loading = ref(false)
 const saving = ref(false)
 const logoInputRef = ref<HTMLInputElement | null>(null)
@@ -731,7 +732,7 @@ async function save() {
         <span style="font-weight: 600">站点设置</span>
         <span class="muted" style="font-size: 12px">站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。</span>
       </div>
-      <el-button type="primary" :loading="saving" :icon="Check" @click="save">保存全部</el-button>
+      <el-button v-if="isConfigTab" type="primary" :loading="saving" :icon="Check" @click="save">保存配置</el-button>
     </div>
 
     <BaseCard v-loading="loading" style="max-width: 860px">
@@ -942,10 +943,18 @@ async function save() {
                 </span>
               </el-form-item>
 
-              <el-form-item label="多域名分发（暂未开放）">
-                <el-input v-model="form.site.subscribe_domain" placeholder="sub1.com,sub2.com（逗号分隔）" clearable />
+              <el-form-item>
+                <template #label>
+                  <span>多域名分发</span>
+                  <el-tooltip content="预留功能，下个版本上线" placement="top">
+                    <span class="x-chip gray" style="margin-left: 6px; font-size: 10px; padding: 1px 5px; cursor: help">预留功能</span>
+                  </el-tooltip>
+                </template>
+                <el-tooltip content="预留功能，下个版本上线" placement="top">
+                  <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（预留功能，下个版本上线）" />
+                </el-tooltip>
                 <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  用于轮询或备份的多订阅分发域名。
+                  预留功能，下个版本上线。用于轮询或主备容灾的多订阅分发域名。
                 </span>
               </el-form-item>
             </div>

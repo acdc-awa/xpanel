@@ -1298,7 +1298,7 @@ async function copyText(text: string, label: string) {
                   </el-select>
                 </el-form-item>
 
-                <div style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
+                <div style="grid-column: 1 / -1; font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
                   节点自有 IP/端口（兜底）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
                 </div>
 
@@ -1615,26 +1615,33 @@ async function copyText(text: string, label: string) {
 
 .fallback-item {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
   background: var(--x-card);
   padding: 10px 14px;
   border-radius: 8px;
   border: 1px solid var(--x-border);
+  flex-wrap: wrap;
 }
 
 .fb-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-  gap: 0 10px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px 10px;
   flex: 1;
-  :deep(.el-form-item) { margin-bottom: 0; }
+  min-width: 0;
+  :deep(.el-form-item) {
+    margin-bottom: 0;
+    min-width: 0;
+  }
 }
 
 .fb-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  align-self: flex-end;
+  padding-bottom: 2px;
 }
 
 .json-body {
@@ -1700,8 +1707,17 @@ async function copyText(text: string, label: string) {
   .key-row {
     grid-template-columns: 1fr;
   }
+  .fallback-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
   .fb-grid {
     grid-template-columns: 1fr;
+    gap: 8px 0;
+  }
+  .fb-actions {
+    justify-content: flex-end;
   }
 }
 </style>

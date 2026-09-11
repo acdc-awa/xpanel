@@ -395,6 +395,11 @@ async function doResetTraffic(row: any) {
     const { data } = await resetUserTraffic(row.id)
     if (data.code === 0) {
       ElMessage.success('流量已重置')
+      if (current.value && current.value.id === row.id) {
+        current.value.used_bytes = 0
+        current.value.up_bytes = 0
+        current.value.down_bytes = 0
+      }
       load()
     } else {
       ElMessage.error(data.message)
@@ -842,8 +847,20 @@ function handleCardAction(cmd: string, row: AdminUser) {
           </div>
           <div class="row">
             <span class="k">账户余额</span>
-            <span class="v cell-mono" style="font-weight: 700; color: #059669">
-              ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
+            <span class="v" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px">
+              <span class="cell-mono" style="font-weight: 700; color: #059669">
+                ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
+              </span>
+              <el-button size="small" type="primary" link @click="openAdjust(current)">调整余额</el-button>
+            </span>
+          </div>
+          <div class="row">
+            <span class="k">套餐用量</span>
+            <span class="v" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px">
+              <span class="cell-mono" style="font-size: 12px">
+                {{ formatBytes(current.used_bytes) }} / {{ current.total_bytes ? formatBytes(current.total_bytes) : '不限' }}
+              </span>
+              <el-button size="small" type="warning" link @click="doResetTraffic(current)">重置流量</el-button>
             </span>
           </div>
           <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>

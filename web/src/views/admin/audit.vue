@@ -5,6 +5,7 @@ import BaseCard from '@/components/base/BaseCard.vue'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
 import { errMsg } from '@/api/http'
+import { ElMessage } from 'element-plus'
 
 const list = ref<AuditLog[]>([])
 const total = ref(0)
@@ -14,13 +15,19 @@ const size = ref(20)
 
 const category = ref('')
 const keyword = ref('')
+const operatorType = ref('')
+const dateRange = ref<[Date, Date] | null>(null)
 
 async function load() {
   loading.value = true
   try {
+    const [start, end] = dateRange.value || []
     const { data } = await getAuditLogs(page.value, size.value, {
       category: category.value || undefined,
       keyword: keyword.value.trim() || undefined,
+      operator_type: operatorType.value || undefined,
+      start_time: start ? new Date(start).toISOString() : undefined,
+      end_time: end ? new Date(end).toISOString() : undefined,
     })
     if (data.code === 0) {
       list.value = data.data.items
@@ -43,6 +50,8 @@ function onFilterChange() {
 function resetFilters() {
   category.value = ''
   keyword.value = ''
+  operatorType.value = ''
+  dateRange.value = null
   page.value = 1
   load()
 }
@@ -96,11 +105,26 @@ function fmtTime(t: string) {
           <el-option label="系统设置" value="settings" />
           <el-option label="身份认证" value="auth" />
         </el-select>
+        <el-select v-model="operatorType" placeholder="操作人类型" clearable style="width: 130px" @change="onFilterChange">
+          <el-option label="全部类型" value="" />
+          <el-option label="管理员" value="admin" />
+          <el-option label="普通用户" value="user" />
+          <el-option label="系统任务" value="system" />
+        </el-select>
+        <el-date-picker
+          v-model="dateRange"
+          type="datetimerange"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          style="width: 330px"
+          @change="onFilterChange"
+        />
         <el-input
           v-model="keyword"
           placeholder="搜索操作内容、IP、路由..."
           clearable
-          style="width: 240px"
+          style="width: 200px"
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
         >
@@ -193,7 +217,7 @@ function fmtTime(t: string) {
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
           @current-change="load"
-          @size-change="load"
+          @size-change="() => { page = 1; load() }"
         />
       </div>
     </BaseCard>

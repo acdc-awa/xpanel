@@ -837,10 +837,10 @@ export function deletePlan(id: number) {
   return http.delete<ApiResp<{ deleted: number }>>(`/admin/plans/${id}`)
 }
 
-export function getOrders(page = 1, size = 20, status?: string) {
+export function getOrders(page = 1, size = 20, status?: string, keyword?: string) {
   return http.get<ApiResp<{ total: number; page: number; size: number; items: Order[] }>>(
     '/admin/orders',
-    { params: { page, size, status } },
+    { params: { page, size, status: status || undefined, keyword: keyword || undefined } },
   )
 }
 
@@ -849,6 +849,9 @@ export interface AuditLogQueryParams {
   category?: string
   keyword?: string
   operator_id?: number
+  operator_type?: string
+  start_time?: string
+  end_time?: string
 }
 
 export function getAuditLogs(page = 1, size = 20, params?: AuditLogQueryParams | string) {

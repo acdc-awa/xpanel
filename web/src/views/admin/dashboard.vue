@@ -733,8 +733,13 @@ onUnmounted(() => {
                   </template>
                 </el-table-column>
                 <el-table-column label="状态" width="80">
-                  <template #default>
-                    <el-tag type="success" size="small">已生效</el-tag>
+                  <template #default="{ row }">
+                    <el-tag
+                      :type="row.status === 'paid' ? 'success' : (row.status === 'pending' ? 'warning' : 'info')"
+                      size="small"
+                    >
+                      {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
+                    </el-tag>
                   </template>
                 </el-table-column>
               </el-table>
@@ -750,7 +755,13 @@ onUnmounted(() => {
                   <div class="card-head" style="padding-bottom: 6px">
                     <div class="head-title">
                       <code class="cell-mono" style="font-size: 11.5px">{{ row.order_no }}</code>
-                      <el-tag type="success" size="small" effect="light">已生效</el-tag>
+                      <el-tag
+                        :type="row.status === 'paid' ? 'success' : (row.status === 'pending' ? 'warning' : 'info')"
+                        size="small"
+                        effect="light"
+                      >
+                        {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
+                      </el-tag>
                     </div>
                     <span class="cell-mono" style="font-weight: 700; color: #059669; font-size: 13px">
                       ¥ {{ (row.amount_cents / 100).toFixed(2) }}
