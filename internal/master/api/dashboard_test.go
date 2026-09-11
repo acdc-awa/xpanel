@@ -23,6 +23,11 @@ func TestAdminDashboardNoDoubleCountToday(t *testing.T) {
 	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// 测试进程 time.Local=UTC（见 TestMain），按天口径默认取 business_timezone（Asia/Shanghai）；
+	// 显式对齐为 UTC，避免 UTC 16:00–24:00 窗口内「今日」日期错位一天。
+	if err := db.Create(&models.Setting{Key: "business_timezone", Value: "UTC"}).Error; err != nil {
+		t.Fatalf("seed timezone: %v", err)
+	}
 
 	now := time.Now()
 	today := now.Format("2006-01-02")

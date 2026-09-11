@@ -30,6 +30,11 @@ func newDataTestEnv(t *testing.T) (*gin.Engine, *Deps, time.Time) {
 	if err := models.AutoMigrate(db); err != nil {
 		t.Fatal(err)
 	}
+	// 测试进程 time.Local=UTC（见 TestMain），而按天口径默认取 business_timezone（Asia/Shanghai）：
+	// 显式对齐为 UTC，避免 UTC 16:00–24:00 窗口内测试期望与 handler 结果错位一天。
+	if err := db.Create(&models.Setting{Key: "business_timezone", Value: "UTC"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	deps := &Deps{
 		DB:  db,
 		Cfg: &config.Config{DB: config.DB{Driver: "sqlite", DSN: filepath.Join(dir, "panel.db")}},
