@@ -2,6 +2,7 @@ package models
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -30,7 +31,8 @@ func TestSchemaCompatFreshAndRecorded(t *testing.T) {
 		t.Fatalf("record: %v", err)
 	}
 	si := ReadSchemaInfo(db)
-	if si.Version != "1" || si.MinCompatible != "1" || si.MigratedBy != "v1.0.0" || si.Expected != DBSchemaVersion {
+	if si.Version != strconv.Itoa(DBSchemaVersion) || si.MinCompatible != strconv.Itoa(DBMinCompatibleVersion) ||
+		si.MigratedBy != "v1.0.0" || si.Expected != DBSchemaVersion {
 		t.Fatalf("schema info = %+v", si)
 	}
 	if err := CheckSchemaCompat(db); err != nil {
@@ -63,6 +65,31 @@ func TestSchemaCompatRejectsNewerDB(t *testing.T) {
 	}
 	if err := CheckSchemaCompat(db); err == nil {
 		t.Fatalf("库由更新版本迁移时应拒绝启动")
+	}
+}
+
+// v2 起护栏首次实际生效：v2 面板迁移并记录的库，用 v1 面板（模拟 checkSchemaCompat(db, 1)）读必须被
+// 拒绝，且文案要给出出路。这是「删列 + 一次性语义回填」不可回滚的唯一防线。
+func TestSchemaCompatRejectsRollbackToV1(t *testing.T) {
+	db := newSchemaTestDB(t)
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := RecordSchemaVersion(db, "v2.0.0"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := CheckSchemaCompat(db); err != nil {
+		t.Fatalf("当前面板读自己迁移的库应放行: %v", err)
+	}
+	if DBMinCompatibleVersion <= 1 {
+		t.Fatalf("DBMinCompatibleVersion = %d：未排除 v1 面板，回滚护栏形同虚设", DBMinCompatibleVersion)
+	}
+	err := checkSchemaCompat(db, 1)
+	if err == nil {
+		t.Fatal("v1 面板读 v2 库应被拒绝启动")
+	}
+	if !strings.Contains(err.Error(), "备份") {
+		t.Fatalf("拒绝文案未给出恢复出路: %v", err)
 	}
 }
 

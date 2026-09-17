@@ -22,13 +22,32 @@ import (
 //     才提升到 DBSchemaVersion；纯增量（加列/加表/回填、且老代码能容忍）保持不变，
 //     从而仍允许回滚到旧面板。
 //
+// 首次实际提升发生在 v2（2026-09-17，删列 + 两处一次性语义回填）；v1 时期的迁移（删表/删列）
+// 都发生在版本号引入之前，当时无记录可写，故历史上的库与面板一律记为 v1。
+//
 // 启动顺序：CheckSchemaCompat（迁移前，拒绝旧面板跑新库）→ AutoMigrate → RecordSchemaVersion。
 const (
 	// DBSchemaVersion 当前面板写入的数据库 schema 版本。变更表结构/数据语义时 +1。
-	DBSchemaVersion = 1
+	//
+	// v2（2026-09-17）：servers.default_outbound_domain_strategy 退役（存量非 AsIs 值并入目标
+	// freedom 出站的 settings.domainStrategy 后删列），并新增两处一次性数据语义回填——
+	// freedom 出站 finalRules 归一（migrateFreedomFinalRules）、users.permission_group_id
+	// 假自定义归位（backfillUserFollowPlanGroup）。
+	DBSchemaVersion = 2
+
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。
-	DBMinCompatibleVersion = 1
+	//
+	// v2 与 DBSchemaVersion 同步提升，依据是「回滚后无法自愈」而非「v1 读不了」：v1 面板实测
+	// 仍能启动并读写该库（GORM 会把被删的列补回来），但一次回滚会留下两处再无人修的分叉——
+	//  ① v1 购买路径重新写入 permission_group_id 假自定义，而归位迁移的 settings 标记已消费，
+	//     再升级不会重跑；
+	//  ② 回滚期间写入的服务器级解析策略，会在下次升级时被「出站自有值优先」跳过，随后列被删除，
+	//     该值静默消失（出站卡片不展示生效值，界面无从察觉）。
+	// 按取舍从严：宁可拒绝回滚，也不接受静默分叉。代价是「在面板里安装历史版本」降到 v1 时会被
+	// 本护栏拒绝启动；出路是前进到 v2，或从升级前备份恢复（备份恢复路径同样比对本版本号，
+	// 见 backup/restore.go）。
+	DBMinCompatibleVersion = 2
 )
 
 // settings 键（复用既有 settings 键值表，避免新表）。
@@ -50,6 +69,11 @@ type SchemaInfo struct {
 // 仅当「库记录的最低兼容版本 > 当前面板 schema 版本」时拒绝启动——这正是「用新库回滚到旧面板」
 // 的场景。全新库、以及引入版本号之前的老库（无记录）一律放行，交由 AutoMigrate 向前迁移。
 func CheckSchemaCompat(db *gorm.DB) error {
+	return checkSchemaCompat(db, DBSchemaVersion)
+}
+
+// checkSchemaCompat 按指定的面板 schema 版本执行校验，供测试模拟「旧面板读新库」。
+func checkSchemaCompat(db *gorm.DB, panelVersion int) error {
 	if !db.Migrator().HasTable(&Setting{}) {
 		return nil // 全新库：尚无任何记录
 	}
@@ -61,11 +85,11 @@ func CheckSchemaCompat(db *gorm.DB) error {
 	if err != nil {
 		return nil // 记录损坏：放行
 	}
-	if min > DBSchemaVersion {
+	if min > panelVersion {
 		return fmt.Errorf(
 			"数据库 schema 版本不兼容：该库由更新版本的面板迁移过（最低兼容 schema v%d），当前面板 schema v%d 过旧，"+
 				"继续运行可能读错或写坏数据。请升级面板至不低于该版本，或从升级前的数据库备份恢复后再启动",
-			min, DBSchemaVersion)
+			min, panelVersion)
 	}
 	return nil
 }

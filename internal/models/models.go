@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"gorm.io/gorm"
@@ -273,6 +274,9 @@ func moveServerDSIntoOutbound(db *gorm.DB, r legacyServerDSRow) error {
 		return fmt.Errorf("查询服务器 %d 的默认出口出站失败: %w", r.ID, err)
 	}
 	if len(obs) == 0 {
+		// 该值本就未生效（旧生成器同样跳过），但列删除后这份存量偏好再无痕迹，留一行日志备查。
+		log.Printf("[migrate] 服务器 %d 的服务器级解析策略 %s 无可用 freedom 出口出站（tag=%s），随列删除丢弃",
+			r.ID, r.DS, tag)
 		return nil
 	}
 	ob := obs[0]
@@ -284,7 +288,11 @@ func moveServerDSIntoOutbound(db *gorm.DB, r legacyServerDSRow) error {
 		return nil // 非法 JSON：旧生成器同样不会写入，交由出站编辑器修正
 	}
 	if cur, _ := settings["domainStrategy"].(string); cur != "" && cur != "AsIs" {
-		return nil // 出站自有非 AsIs 值优先，旧生成器亦不覆盖
+		// 出站自有非 AsIs 值优先，旧生成器亦不覆盖。此处必须记日志：该值随后随列删除消失，
+		// 而出站卡片不展示生效值，界面无从察觉——静默丢弃是这条路径最容易埋下的坑。
+		log.Printf("[migrate] 服务器 %d 的服务器级解析策略 %s 与出站 %d(#%s) 自有值 %s 冲突，按出站优先丢弃",
+			r.ID, r.DS, ob.ID, ob.Tag, cur)
+		return nil
 	}
 	settings["domainStrategy"] = r.DS
 	return updateOutboundSettings(db, ob.ID, settings)
