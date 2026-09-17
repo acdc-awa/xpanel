@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, MagicStick, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createServerOutbound,
   updateServerOutbound,
@@ -484,8 +485,10 @@ const activeTab = ref('basic')
               <!-- 屏蔽内网私有 IP Toggle -->
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
-                  <span class="toggle-title">屏蔽内网私有 IP (block_private)</span>
-                  <span class="toggle-sub">开启后拦截访问 10.x / 172.16.x / 192.168.x 等局域网私有段（命中即断开，不会拨号到目标）。关闭则显式放行私网，同时放弃 freedom 对保留网段的默认拦截。</span>
+                  <span class="toggle-title">
+                    屏蔽内网私有 IP (block_private)
+                    <TipIcon content="开启后拦截访问 10.x / 172.16.x / 192.168.x 等局域网私有段（命中即断开，不会拨号到目标）。关闭则显式放行私网，同时放弃 freedom 对保留网段的默认拦截。" />
+                  </span>
                 </div>
                 <el-switch v-model="form.block_private" />
               </div>
@@ -493,8 +496,10 @@ const activeTab = ref('basic')
               <!-- 阻止回国流量 Toggle -->
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
-                  <span class="toggle-title">阻断回国流量 (block_cn)</span>
-                  <span class="toggle-sub">注入出站级规则阻断走本出站的大陆 IP 段 (geoip:cn)，防止海外服务器被滥用回国。仅作用于本出站，不影响其他出口的合法回国链路；命中后按官方默认黑洞延迟 30-90 秒关闭连接。</span>
+                  <span class="toggle-title">
+                    阻断回国流量 (block_cn)
+                    <TipIcon content="注入出站级规则阻断走本出站的大陆 IP 段 (geoip:cn)，防止海外服务器被滥用回国。仅作用于本出站，不影响其他出口的合法回国链路；命中后按官方默认黑洞延迟 30-90 秒关闭连接。" />
+                  </span>
                 </div>
                 <el-switch v-model="form.block_cn" />
               </div>
@@ -624,8 +629,10 @@ const activeTab = ref('basic')
                 </el-form-item>
                 <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
                   <div class="toggle-info">
-                    <span class="toggle-title">跳过证书校验 (allowInsecure)</span>
-                    <span class="toggle-sub">允许使用自签名或域名不匹配的证书（生产环境慎用）</span>
+                    <span class="toggle-title">
+                      跳过证书校验 (allowInsecure)
+                      <TipIcon type="warn" content="允许使用自签名或域名不匹配的证书（生产环境慎用）。" />
+                    </span>
                   </div>
                   <el-switch v-model="form.tls_allow_insecure" />
                 </div>
@@ -743,6 +750,9 @@ const activeTab = ref('basic')
   font-size: 13px;
   font-weight: 500;
   color: var(--x-text-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .toggle-sub {
   font-size: 11.5px;

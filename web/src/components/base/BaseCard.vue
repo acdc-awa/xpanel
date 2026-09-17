@@ -1,11 +1,21 @@
 <script setup lang="ts">
-defineProps<{ title?: string }>()
+import TipIcon from './TipIcon.vue'
+
+defineProps<{
+  title?: string
+  /** 标题旁的说明文案，悬停展示（替代常驻小字） */
+  titleTip?: string
+  titleTipType?: 'info' | 'warn'
+}>()
 </script>
 
 <template>
   <section class="base-card">
     <header v-if="title || $slots.extra" class="base-card__head">
-      <h3 class="base-card__title">{{ title }}</h3>
+      <h3 class="base-card__title">
+        {{ title }}
+        <TipIcon v-if="titleTip" :content="titleTip" :type="titleTipType ?? 'info'" />
+      </h3>
       <div class="base-card__extra"><slot name="extra" /></div>
     </header>
     <div class="base-card__body"><slot /></div>

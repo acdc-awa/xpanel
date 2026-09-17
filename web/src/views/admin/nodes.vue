@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, Loading, Connection, Promotion } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
 import AccessPointDialog from './servers/AccessPointDialog.vue'
 import {
@@ -378,21 +379,16 @@ function quotaOf(row: any): string {
               <el-option label="转发入站" value="relay" />
             </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+            <TipIcon
+              content="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，转发入站作为内部链式落地服务器。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
+            />
           </div>
           <div style="display: flex; gap: 10px">
             <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增入站</el-button>
           </div>
         </div>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，转发入站作为内部链式落地服务器。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
-      style="margin-bottom: 14px"
-    />
-
-    <BaseCard title="入站列表">
+        <BaseCard title="入站列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
       </div>
@@ -460,21 +456,15 @@ function quotaOf(row: any): string {
       <el-tab-pane label="接入点" name="access_points">
         <div class="x-toolbar">
           <div class="x-toolbar-left">
-            <span class="muted" style="font-size: 13.5px">面向订阅分发的接入点定义</span>
             <el-button @click="loadAccessPoints"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+            <TipIcon
+              content="接入点是用户订阅中实际看到的「节点」，通过白名单权限组控制哪些权限组可见。接入点可直接绑定入站，亦可在拓扑中参与链式转发中转。"
+            />
           </div>
           <div style="display: flex; gap: 10px">
             <el-button type="primary" @click="openCreateAccessPoint"><el-icon><Plus /></el-icon>&nbsp;新建接入点</el-button>
           </div>
         </div>
-
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="接入点是用户订阅中实际看到的“节点”，通过白名单权限组控制哪些权限组可见。接入点可直接绑定入站，亦可在拓扑中参与链式转发中转。"
-          style="margin-bottom: 14px"
-        />
 
         <BaseCard title="接入点分发列表">
           <div v-if="apLoading" style="padding: 48px 0; text-align: center">

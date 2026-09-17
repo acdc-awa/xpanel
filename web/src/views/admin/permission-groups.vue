@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Plus, Document, Edit, Delete, Loading, FolderChecked, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createPermissionGroup,
   deletePermissionGroup,
@@ -176,7 +177,7 @@ async function remove(row: any) {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增权限组</el-button>
-        <span class="muted" style="font-size: 12px">权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。</span>
+        <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。" />
       </div>
     </div>
 

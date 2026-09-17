@@ -16,6 +16,11 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
+// 说明性 Tooltip 统一限宽：文案收进图标后往往较长，不限宽会单行拉满视口
+.el-popper.is-dark {
+  max-width: 340px;
+}
+
 // 页面容器（内边距一律由 layout 单独提供，此处只负责最大宽度与居中；
 // 曾经这里在 900/768 两档也加 padding，与 .admin-content 叠加后正文左右边距
 // 变成 24 → 38 → 22px，缩放窗口时整页内容会左右跳）

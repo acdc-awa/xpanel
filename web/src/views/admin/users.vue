@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, MoreFilled, Loading, User, Link } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   getUsers,
   createUser,
@@ -866,27 +867,32 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>
         </div>
 
-        <div class="sec-title" style="margin-top: 20px; font-weight: 600; font-size: 14px">套餐与权限设置</div>
-        <p class="muted tip" style="font-size: 12px; margin-top: 4px; margin-bottom: 14px">
-          用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。
-        </p>
+        <div class="sec-title" style="margin-top: 20px; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px">
+          套餐与权限设置
+          <TipIcon content="用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。" />
+        </div>
 
-        <el-form label-position="top">
-          <el-form-item label="登录邮箱（用户名）">
+        <el-form label-position="top" style="margin-top: 12px">
+          <el-form-item>
+            <template #label>
+              登录邮箱（用户名）
+              <TipIcon
+                type="warn"
+                content="修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。"
+              />
+            </template>
             <el-input v-model="userEditForm.email" placeholder="user@example.com" clearable />
-            <span class="muted tip" style="font-size: 12px; margin-top: 4px; display: block">
-              修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。
-            </span>
           </el-form-item>
 
-          <el-form-item label="用户身份与角色">
+          <el-form-item>
+            <template #label>
+              用户身份与角色
+              <TipIcon content="管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。" />
+            </template>
             <el-radio-group v-model="userEditForm.role">
               <el-radio-button value="user">普通用户</el-radio-button>
               <el-radio-button value="admin">管理员</el-radio-button>
             </el-radio-group>
-            <span class="muted tip" style="font-size: 12px; margin-top: 4px; display: block">
-              管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。
-            </span>
           </el-form-item>
 
           <el-form-item label="绑定套餐">
@@ -1145,15 +1151,16 @@ function handleCardAction(cmd: string, row: AdminUser) {
             </div>
           </el-form-item>
         </el-form>
-        <el-alert type="warning" :closable="false" show-icon>
-          <p>重置订阅链接后，该用户原有订阅地址立即失效，用户需重新添加订阅；节点凭据（UUID）不受影响，已配置的节点无需改动。</p>
-        </el-alert>
       </div>
       <template #footer>
         <el-button @click="subInfoOpen = false">关闭</el-button>
         <el-button type="danger" plain :loading="subInfoResetting" :disabled="subInfoLoading" @click="doResetSubscribeToken">
           重置订阅链接
         </el-button>
+        <TipIcon
+          type="warn"
+          content="重置后该用户原有订阅地址立即失效，用户需重新添加订阅；节点凭据（UUID）不受影响，已配置的节点无需改动。"
+        />
       </template>
     </el-dialog>
   </div>

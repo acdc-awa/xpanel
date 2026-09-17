@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, setAutoRenew } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
+import TipIcon from '@/components/base/TipIcon.vue'
 import type { BalanceLog } from '@/api/types'
 import { ElMessage } from 'element-plus'
 
@@ -350,7 +351,10 @@ async function onLogout() {
         <!-- 自动续费设置 -->
         <div class="x-card">
           <div class="x-card-head">
-            <span><el-icon><RefreshRight /></el-icon>&nbsp;自动续费</span>
+            <span style="display: inline-flex; align-items: center; gap: 6px">
+              <el-icon><RefreshRight /></el-icon>&nbsp;自动续费
+              <TipIcon content="续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算；余额不足时不会扣费。" />
+            </span>
           </div>
           <div class="x-card-body">
             <div class="autorenew-row">
@@ -367,7 +371,7 @@ async function onLogout() {
             <div class="autorenew-row" style="margin-top: 12px">
               <div class="autorenew-info">
                 <div class="autorenew-title">流量耗尽自动续费</div>
-                <div class="muted" style="font-size: 12px">流量用尽后自动使用余额续费当前套餐（有效期重新计算，流量重置）</div>
+                <div class="muted" style="font-size: 12px">流量用尽后自动使用余额续费当前套餐</div>
               </div>
               <el-switch
                 :model-value="autoRenewExhaust"
@@ -375,11 +379,6 @@ async function onLogout() {
                 @change="(v: any) => toggleAutoRenew('exhaust', !!v)"
               />
             </div>
-            <el-alert type="info" :closable="false" show-icon style="margin-top: 12px">
-              <p style="font-size: 12px; line-height: 1.6">
-                续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算；余额不足时不会扣费。
-              </p>
-            </el-alert>
           </div>
         </div>
 
@@ -474,8 +473,10 @@ async function onLogout() {
             <!-- 2FA -->
             <div class="x-toggle-card">
               <div class="toggle-info">
-                <div class="toggle-title">两步验证</div>
-                <div class="toggle-desc">使用 Google Authenticator 或 1Password 等身份验证器生成动态 6 位验证码。</div>
+                <div class="toggle-title">
+                  两步验证
+                  <TipIcon content="使用 Google Authenticator 或 1Password 等身份验证器生成动态 6 位验证码。" />
+                </div>
               </div>
               <div>
                 <el-button
@@ -503,8 +504,10 @@ async function onLogout() {
             <!-- 重置订阅 Token -->
             <div class="x-toggle-card">
               <div class="toggle-info">
-                <div class="toggle-title">Mihomo 订阅地址</div>
-                <div class="toggle-desc">若怀疑订阅地址外泄，可在此重置。重置后原订阅地址失效，需重新导入客户端。</div>
+                <div class="toggle-title">
+                  Mihomo 订阅地址
+                  <TipIcon content="若怀疑订阅地址外泄，可在此重置。重置后原订阅地址失效，需重新导入客户端。" />
+                </div>
               </div>
               <div>
                 <el-button
@@ -668,6 +671,13 @@ async function onLogout() {
     font-weight: 600;
     margin-bottom: 2px;
   }
+}
+
+// 说明已收进图标，标题与图标同行居中
+.toggle-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .topup-form-section {

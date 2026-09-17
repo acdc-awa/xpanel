@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { Plus, Delete, MagicStick, Edit, Loading, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import { createCert, deleteCert, generateSelfSignedCert, getCerts, updateCert, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -149,7 +150,7 @@ function expireTag(row: any) {
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;上传证书</el-button>
         <el-button type="success" plain @click="openSelfSigned"><el-icon><MagicStick /></el-icon>&nbsp;生成自签证书</el-button>
-        <span class="muted" style="font-size: 12px">证书由主控下发（push_cert）到引用它的服务器，落盘 /etc/xray/certs/&lt;domain&gt;/，xray 每小时热重载不重启；自签证书用于链式代理 TLS，中转出站自动 pin 防 MITM</span>
+        <TipIcon content="证书由主控下发（push_cert）到引用它的服务器，落盘 /etc/xray/certs/域名/，xray 每小时热重载不重启；自签证书用于链式代理 TLS，中转出站自动 pin 防 MITM。" />
       </div>
     </div>
 
@@ -216,10 +217,12 @@ function expireTag(row: any) {
     </BaseCard>
 
     <el-dialog v-model="ssOpen" title="生成自签证书（链式代理 TLS 专用）" width="520px" :append-to-body="true">
-      <el-alert type="success" :closable="false" show-icon style="margin-bottom: 14px">
-        <p>生成 ECDSA P-256 十年期自签证书，主控自动计算 pin（SHA-256）并下发落地服务器。</p>
-        <p>拓扑中引用该证书入站的中转出站将<b>自动注入 pinnedPeerCertSha256</b>——pin 命中即验证通过，自签亦可防 MITM；换证时两端配置自动联动重推。</p>
-      </el-alert>
+      <div class="ss-note">
+        生成 ECDSA P-256 十年期自签证书，主控自动计算 pin（SHA-256）并下发落地服务器。
+        <TipIcon
+          content="拓扑中引用该证书入站的中转出站将自动注入 pinnedPeerCertSha256——pin 命中即验证通过，自签亦可防 MITM；换证时两端配置自动联动重推。"
+        />
+      </div>
       <el-form label-position="top">
         <el-form-item label="域名 / 服务器标识（唯一）">
           <el-input v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
@@ -262,6 +265,17 @@ function expireTag(row: any) {
 <style scoped lang="scss">
 .muted { color: var(--x-text-3); }
 .cell-mono { font-family: var(--x-mono); font-size: 12px; }
+
+// 自签说明：一行摘要 + 图标承载 pin 机制细节
+.ss-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--x-text-2);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
 
 /* ================= 全局统一证书卡片网格流 ================= */
 .cert-card-grid {

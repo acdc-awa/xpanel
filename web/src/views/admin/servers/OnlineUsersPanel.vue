@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { getServerOnlineIPs, type OnlineUserIPItem } from '@/api/admin'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 // 节点在线用户面板（agent 心跳的连接级实时快照）：
 // 服务器详情抽屉与仪表盘在线设备弹窗共用；serverId 变化即自动加载。
@@ -42,10 +43,10 @@ defineExpose({ reload: loadOnlineUsers })
       <el-button size="small" :loading="onlineLoading" @click="loadOnlineUsers">
         <el-icon><Refresh /></el-icon>&nbsp;刷新
       </el-button>
+      <TipIcon
+        content="当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。列表为空表示当前无人在线，或服务器 Agent 版本过旧未上报。"
+      />
     </div>
-    <p class="muted tip" style="margin: 0 0 10px; font-size: 12.5px">
-      当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。列表为空表示当前无人在线，或服务器 Agent 版本过旧未上报。
-    </p>
     <div v-loading="onlineLoading">
       <el-empty v-if="!onlineLoading && onlineUsers.length === 0" description="当前没有在线用户" :image-size="72" />
       <div v-else class="online-list">
@@ -71,6 +72,7 @@ defineExpose({ reload: loadOnlineUsers })
 .tab-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin-bottom: 10px;
 }

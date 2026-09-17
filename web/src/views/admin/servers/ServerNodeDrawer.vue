@@ -15,6 +15,7 @@ import { errMsg } from '@/api/http'
 import { maskUUIDs } from '@/utils/mask'
 import { formatDateTime } from '@/utils/timezone'
 import OnlineUsersPanel from './OnlineUsersPanel.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -303,10 +304,10 @@ watch(
           >
             <el-icon><CopyDocument /></el-icon>&nbsp;复制配置
           </el-button>
+          <TipIcon
+            content="此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送至服务器）。展示内容已对用户 UUID 脱敏，复制时保留原文。"
+          />
         </div>
-        <p class="muted tip" style="margin: 0 0 10px; font-size: 12.5px">
-          此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送至服务器）。展示内容已对用户 UUID 脱敏，复制时保留原文。
-        </p>
         <pre v-loading="cfgLoading" class="cfg-view">{{ maskUUIDs(cfgText) || '正在计算并加载配置预览…' }}</pre>
       </el-tab-pane>
     </el-tabs>
@@ -324,6 +325,7 @@ watch(
 .tab-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin-bottom: 10px;
 }

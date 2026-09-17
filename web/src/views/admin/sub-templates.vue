@@ -25,6 +25,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createSubTemplate,
   deleteSubTemplate,
@@ -456,10 +457,11 @@ async function saveAsFromEditor() {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <div>
-          <div class="page-title">订阅模板</div>
-          <div class="muted" style="font-size: 12px; margin-top: 2px">
-            模板决定权限组用户在 Clash / Mihomo 客户端看到的配置骨架。模板库是可复用素材，
-            只有保存到具体权限组后才会对该组用户的订阅生效。
+          <div class="page-title">
+            订阅模板
+            <TipIcon
+              content="模板决定权限组用户在 Clash / Mihomo 客户端看到的配置骨架。模板库是可复用素材，只有保存到具体权限组后才会对该组用户的订阅生效。"
+            />
           </div>
         </div>
       </div>
@@ -553,6 +555,9 @@ async function saveAsFromEditor() {
 
                 <div class="preset-row" style="margin-top: 8px">
                   <span class="preset-label">常用占位符：</span>
+                  <TipIcon
+                    content="$PROXIES$ 自动展开为当前权限组所有可用 VLESS 节点；$ALL_PROXIES$ 展开为全部节点名称；$FILTER_PROXIES(关键词)$ 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。占位符按后端支持的写法校验，不会被误判为语法错误。"
+                  />
                   <div class="preset-chips">
                     <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PROXIES$')">
                       + $PROXIES$（节点池）
@@ -584,9 +589,6 @@ async function saveAsFromEditor() {
                       YAML 校验：{{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
                       错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
                     </span>
-                  </div>
-                  <div class="tip-banner" style="margin-top: 10px">
-                    占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。占位符按后端支持的写法校验，不会被误判为语法错误。
                   </div>
                 </el-tab-pane>
 
@@ -648,16 +650,12 @@ async function saveAsFromEditor() {
       <el-tab-pane label="我的模板库" name="library">
         <div class="tpl-layout">
           <!-- 左：模板列表 -->
-          <BaseCard title="模板库">
+          <BaseCard title="模板库" title-tip="这里的改动不会影响任何用户的订阅：它只是素材，要生效需加载到某个权限组。">
             <template #extra>
               <el-button type="primary" size="small" @click="startNewLibrary">
                 <el-icon><Plus /></el-icon>&nbsp;新建模板
               </el-button>
             </template>
-
-            <div class="tip-banner" style="margin-bottom: 10px">
-              这里的改动<strong>不会影响任何用户的订阅</strong>：它只是素材，要生效需加载到某个权限组。
-            </div>
 
             <div v-if="libraryLoading" class="list-hint">正在加载…</div>
             <div v-else-if="subTemplates.length === 0" class="list-hint">
@@ -684,7 +682,10 @@ async function saveAsFromEditor() {
           </BaseCard>
 
           <!-- 右：模板编辑器（与组级页共用同一套骨架，不再用弹窗） -->
-          <BaseCard :title="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'">
+          <BaseCard
+            :title="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'"
+            title-tip="与组级模板语法一致：$PROXIES$（节点池）、$ALL_PROXIES$（全部节点名称）、$FILTER_PROXIES(关键词)$（按地区过滤）、$PANEL_HOST$（面板域名）。"
+          >
             <template #extra>
               <span v-if="libPaneOpen && libDirty" class="dirty-mark">未保存</span>
             </template>
@@ -721,9 +722,6 @@ async function saveAsFromEditor() {
                   错误行已在编辑器中标红，悬停可看原因。
                 </span>
               </div>
-              <div class="tip-banner" style="margin-top: 10px">
-                与组级模板语法一致：<code>$PROXIES$</code>（节点池）、<code>$ALL_PROXIES$</code>（全部节点名称）、<code>$FILTER_PROXIES(关键词)$</code>（按地区过滤）、<code>$PANEL_HOST$</code>（面板域名）。
-              </div>
 
               <div class="save-bar">
                 <span class="muted" style="font-size: 12px">
@@ -756,6 +754,9 @@ async function saveAsFromEditor() {
   font-size: 16px;
   font-weight: 600;
   color: var(--x-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ===== 两栏骨架：两个标签页共用（左列表 + 右编辑器） ===== */
@@ -912,15 +913,6 @@ async function saveAsFromEditor() {
   color: var(--x-warning);
   background: var(--x-code-warn-bg);
   border-left: 3px solid var(--x-warning);
-}
-.tip-banner {
-  font-size: 11.5px;
-  color: var(--x-text-2);
-  line-height: 1.5;
-  background: rgba(99, 102, 241, 0.06);
-  border-left: 3px solid var(--x-primary);
-  padding: 6px 10px;
-  border-radius: 0 4px 4px 0;
 }
 .preview-header {
   display: flex;

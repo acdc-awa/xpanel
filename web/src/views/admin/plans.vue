@@ -2,6 +2,7 @@
 import { nextTick, onMounted, reactive, ref } from 'vue'
 import { Plus, Edit, Delete, Refresh, Loading, ShoppingBag } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import { createPlan, deletePlan, getPermissionGroups, getPlans, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -343,11 +344,17 @@ async function remove(row: any) {
           <el-form-item label="热门推荐">
             <div style="display: flex; align-items: center; gap: 8px; width: 100%">
               <el-switch v-model="form.is_featured" />
-              <span class="muted" style="font-size: 12px">商城展示「热门推荐」徽标并高亮（多个标记时仅排最前的生效）</span>
+              <TipIcon content="商城展示「热门推荐」徽标并高亮（多个标记时仅排最前的生效）" />
             </div>
           </el-form-item>
         </div>
-        <el-form-item label="上架状态">
+        <el-form-item>
+          <template #label>
+            上架状态
+            <TipIcon
+              content="商店按身份过滤：非持有者只见「可新购」套餐；持有者额外可见自己「可续费」的当前套餐（用于续费）。停售老套餐但保留续费：关闭「可新购」，保留「可续费」。"
+            />
+          </template>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%">
             <div style="display: flex; align-items: center; gap: 8px">
               <el-switch v-model="form.purchasable" />
@@ -360,10 +367,6 @@ async function remove(row: any) {
               <span class="muted" style="font-size: 11.5px">持有者余额直付顺延</span>
             </div>
           </div>
-          <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
-            商店按身份过滤：非持有者只见「可新购」套餐；持有者额外可见自己「可续费」的当前套餐（用于续费）。
-            停售老套餐但保留续费：关闭「可新购」，保留「可续费」。
-          </div>
         </el-form-item>
         <el-form-item label="权限组（选填，购买后自动授权组内入站）">
           <el-select v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
@@ -371,10 +374,12 @@ async function remove(row: any) {
           </el-select>
         </el-form-item>
         <el-form-item v-if="editing">
-          <el-checkbox v-model="form.sync_users">同步存量用户</el-checkbox>
-          <div class="muted" style="font-size: 12px; line-height: 1.5; margin-top: 4px">
-            默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。
-            勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。
+          <div style="display: flex; align-items: center; gap: 6px">
+            <el-checkbox v-model="form.sync_users">同步存量用户</el-checkbox>
+            <TipIcon
+              type="warn"
+              content="默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。"
+            />
           </div>
         </el-form-item>
       </el-form>

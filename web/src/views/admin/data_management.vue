@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import { useThemeStore } from '@/stores/theme'
 import { useContainerResize } from '@/composables/useContainerResize'
 import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
@@ -238,7 +239,7 @@ const compactResult = ref<CompactResult | null>(null)
 async function runCompact() {
   try {
     await ElMessageBox.confirm(
-      '将存量流量明细按小时归并、节点心跳按行龄分级抽稀（近 6 小时保 1 分钟、6–24 小时保 10 分钟、更早保 1 小时），并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。期间数据库写入会短暂阻塞，建议低峰执行。',
+      '将归并存量流量明细、清理超出保留期的数据并回收磁盘空间。期间数据库写入会短暂阻塞，计费与用量口径不变。',
       '压缩历史数据',
       { type: 'warning', confirmButtonText: '开始压缩', cancelButtonText: '取消' },
     )
@@ -415,22 +416,29 @@ onUnmounted(() => {
         </div>
         <p class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.7">
           {{ tableMeta.desc }}。<template v-if="cleanupTable === 'traffic_logs'">
-            流量明细是配额判定与用量统计的数据源，仅可清理 <b>{{ maxDeleteDate || '—' }}</b> 及更早的日期（受计费周期与每日聚合窗口保护）。
+            仅可清理 <b>{{ maxDeleteDate || '—' }}</b> 及更早的日期（受计费周期与每日聚合窗口保护）。
           </template>
-          <template v-else-if="cleanupTable === 'node_reports'">清理只缩短节点监控曲线的可回看窗口，不影响服务器状态。</template>
-          <template v-else>审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。</template>
+          <TipIcon
+            v-if="cleanupTable === 'audit_logs'"
+            type="warn"
+            content="审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。"
+          />
         </p>
       </div>
     </BaseCard>
 
     <!-- 历史数据压缩 -->
-    <BaseCard title="历史数据压缩" style="margin-bottom: 16px">
+    <BaseCard
+      title="历史数据压缩"
+      style="margin-bottom: 16px"
+      title-tip="把存量流量明细归并到小时桶、节点心跳按行龄分级抽稀（近 6 小时 1 分钟 / 6–24 小时 10 分钟 / 更早 1 小时），并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。"
+    >
       <div class="cleanup-row" style="align-items: center">
-        <span class="muted" style="font-size: 12.5px">
-          把存量流量明细归并到小时桶、节点心跳按行龄分级抽稀（近 6 小时 1 分钟 / 6–24 小时 10 分钟 / 更早 1 小时），
-          并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。
-        </span>
         <el-button type="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</el-button>
+        <TipIcon
+          type="warn"
+          content="压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。"
+        />
       </div>
       <div v-if="compactResult" class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.9">
         <div>
@@ -450,16 +458,17 @@ onUnmounted(() => {
           {{ compactResult.vacuum_error }}
         </div>
       </div>
-      <p class="muted" style="font-size: 12.5px; margin-top: 10px">
-        压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。
-      </p>
     </BaseCard>
 
     <!-- 空间回收 -->
-    <BaseCard title="空间回收（VACUUM）" style="margin-bottom: 16px">
+    <BaseCard
+      title="空间回收（VACUUM）"
+      style="margin-bottom: 16px"
+      title-tip="SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。"
+    >
       <div class="cleanup-row" style="align-items: center">
         <span class="muted" style="font-size: 12.5px">
-          SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。当前占用：
+          当前占用：
           <template v-if="stats?.sqlite_avail">
             主库 <b class="cell-mono">{{ fmtSize(stats?.db_size) }}</b> + WAL
             <span class="cell-mono">{{ fmtSize(stats?.wal_size) }}</span> = 共
@@ -470,21 +479,22 @@ onUnmounted(() => {
         <el-button type="primary" :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
           回收空间
         </el-button>
+        <TipIcon type="warn" content="回收期间数据库写入会短暂阻塞，建议在低峰时段执行；日常无需频繁回收。" />
       </div>
       <p v-if="vacuumResult" class="muted" style="font-size: 12.5px; margin-top: 10px">
         上次回收释放了 <b class="cell-mono">{{ fmtSize(Math.max(0, vacuumResult.reclaimed)) }}</b>
       </p>
-      <p class="muted" style="font-size: 12.5px; margin-top: 10px">回收期间数据库写入会短暂阻塞，建议在低峰时段执行；日常无需频繁回收。</p>
     </BaseCard>
 
     <!-- 自动保留天数 -->
-    <BaseCard title="自动保留天数">
-      <p class="muted" style="font-size: 12.5px; margin-bottom: 12px">
-        每日凌晨 4 点自动清理超过保留期的日志数据；保存后次日生效。手动清理请使用上方「按日期清理」。
-      </p>
+    <BaseCard
+      title="自动保留天数"
+      title-tip="每日凌晨 4 点自动清理超过保留期的日志数据；保存后次日生效。手动清理请使用上方「按日期清理」。"
+    >
       <div class="retention-row">
         <div class="retention-item">
           <span class="stat-label">流量明细</span>
+          <TipIcon type="warn" content="建议 ≥ 在售套餐最长计费周期（如年付套餐建议 ≥ 366 天），否则自动清理会提前抹掉部分用户的已用流量。" />
           <el-input-number v-model="retentionForm.retention_traffic_days" :min="1" :max="3650" size="small" />
           <span class="muted" style="font-size: 12px">天</span>
         </div>
@@ -500,9 +510,6 @@ onUnmounted(() => {
         </div>
         <el-button type="primary" size="small" :loading="retentionSaving" @click="saveRetention">保存</el-button>
       </div>
-      <p class="muted" style="font-size: 12px; margin-top: 10px">
-        流量明细建议 ≥ 在售套餐最长计费周期（如年付套餐建议 ≥ 366 天），否则自动清理会提前抹掉部分用户的已用流量。
-      </p>
     </BaseCard>
   </div>
 </template>

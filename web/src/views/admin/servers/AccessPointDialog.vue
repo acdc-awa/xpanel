@@ -14,6 +14,7 @@ import {
   type UserAccessPoint,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -300,7 +301,8 @@ async function handleDelete() {
 
       <div class="override-box">
         <div class="override-title">
-          订阅地址覆写（选填；留空沿链路继承：入站分享地址 / 接入层端点）
+          订阅地址覆写
+          <TipIcon content="选填；留空沿链路继承：入站分享地址 / 接入层端点。" />
         </div>
         <div class="override-grid">
           <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
@@ -371,6 +373,9 @@ async function handleDelete() {
     font-weight: 600;
     color: var(--x-text-3);
     margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
   }
 
   .override-grid {

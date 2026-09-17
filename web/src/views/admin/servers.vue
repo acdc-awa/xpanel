@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled, Loading, Check, Close, Platform } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 import {
@@ -862,8 +863,11 @@ async function removeServer(row: any) {
               <span class="k">secret</span>
               <code>{{ createdResult.secret }}</code>
               <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+              <TipIcon
+                type="warn"
+                content="secret 仅显示这一次；安装完成后回到本页查看在线状态，在服务器详情中生成并下发配置。"
+              />
             </div>
-            <p class="muted tip" style="margin: 0">secret 仅显示这一次；安装完成后回到本页查看在线状态，在服务器详情中生成并下发配置。</p>
           </div>
       </template>
       <template #footer>
@@ -972,7 +976,7 @@ async function removeServer(row: any) {
               {{ upgradeStatus.error }}
             </div>
             <div v-else-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'" class="status-hint">
-              服务器正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10~60 秒）
+              服务器正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10-60 秒）
             </div>
           </div>
         </div>
