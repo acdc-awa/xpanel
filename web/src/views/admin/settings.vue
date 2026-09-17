@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Check, Close, Download, Loading, Refresh, Upload, Delete, Picture, Scissor, CopyDocument } from '@element-plus/icons-vue'
+import { Check, Close, Download, Loading, Refresh, Upload, Delete, Picture, Scissor, CopyDocument, ArrowRight, InfoFilled, Right, Warning, WarningFilled } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
@@ -455,6 +455,7 @@ let updateLastPhase = '' // 失败时步骤条错误图标落点=最后经历的
 const releases = ref<ReleaseItem[]>([])
 const releasesLoading = ref(false)
 const selectedRelease = ref('')
+const showHistoryReleases = ref(false)
 
 const updateActiveStep = computed(() => {
   const p = updateStatus.value?.phase === 'failed' ? updateLastPhase : updateStatus.value?.phase
@@ -1206,83 +1207,169 @@ async function save() {
 
               <!-- 面板内更新（容器形态自更新）：进入本页签自动检查更新 + 拉取版本列表，
                    有新版才出现「应用更新」，不再常驻「检查更新 / 加载版本列表」两个按钮 -->
+              <!-- 面板内更新卡片 -->
               <div class="update-card">
-                <div class="update-head">
-                  <p class="ip-hdr-title">面板更新</p>
-                  <el-button
-                    text
-                    size="small"
-                    class="update-refresh"
-                    :icon="Refresh"
-                    :loading="updateChecking || releasesLoading"
-                    @click="refreshUpdate(false)"
-                  >
-                    重新检查
-                  </el-button>
+                <!-- 头部：图标 + 标题 + 状态 Pill + 操作区 -->
+                <div class="update-header">
+                  <div class="update-header-left">
+                    <div class="update-badge-icon">
+                      <el-icon><Refresh /></el-icon>
+                    </div>
+                    <div class="update-header-meta">
+                      <div class="update-title-line">
+                        <span class="update-title">面板更新</span>
+                        <span v-if="updateChecking" class="x-chip blue">
+                          <el-icon class="is-loading"><Loading /></el-icon> 检查中...
+                        </span>
+                        <span v-else-if="updateInfo?.available" class="x-chip green">
+                          <span class="x-status-dot online"></span> 发现新版本
+                        </span>
+                        <span v-else-if="updateInfo && !updateInfo.enabled" class="x-chip gray">
+                          更新已禁用
+                        </span>
+                        <span v-else-if="updateInfo" class="x-chip gray">
+                          已是最新
+                        </span>
+                      </div>
+                      <span class="update-subtitle">保持系统运行在最新稳定状态以获取性能与安全性改进</span>
+                    </div>
+                  </div>
+
+                  <div class="update-header-right">
+                    <el-tooltip
+                      placement="top"
+                      :show-after="200"
+                      content="更新机制：下载官方 Release 并校验 sha256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
+                    >
+                      <el-button text circle size="small" class="update-help-btn" :icon="InfoFilled" />
+                    </el-tooltip>
+                    <el-button
+                      size="small"
+                      class="update-refresh-btn"
+                      :icon="Refresh"
+                      :loading="updateChecking || releasesLoading"
+                      @click="refreshUpdate(false)"
+                    >
+                      检查更新
+                    </el-button>
+                  </div>
                 </div>
 
-                <div class="update-ver">
-                  <code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
-                  <span class="update-arrow">→</span>
-                  <code class="cell-mono">{{ updateInfo?.latest_version || '—' }}</code>
-                  <el-tag v-if="updateInfo?.available" type="success" size="small">有可用更新</el-tag>
-                  <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small">更新已禁用</el-tag>
-                  <el-tag v-else-if="updateInfo" type="info" size="small">已是最新</el-tag>
-                  <span v-if="updateChecking" class="update-hint">检查中…</span>
-                </div>
+                <!-- 场景 1：有可用更新 -> 升级对比舱 -->
+                <div v-if="updateInfo?.available" class="update-action-banner">
+                  <div class="update-route-box">
+                    <div class="ver-pill current">
+                      <span class="ver-tag">当前版本</span>
+                      <code class="ver-code">{{ updateInfo?.current_version || system.panel_version }}</code>
+                    </div>
+                    <div class="route-arrow">
+                      <el-icon><Right /></el-icon>
+                    </div>
+                    <div class="ver-pill target">
+                      <span class="ver-tag">目标版本</span>
+                      <code class="ver-code">{{ updateInfo?.latest_version }}</code>
+                    </div>
+                  </div>
 
-                <el-button
-                  v-if="updateInfo?.available"
-                  class="update-apply"
-                  type="primary"
-                  :icon="Download"
-                  :disabled="!!updateStatus?.running"
-                  :loading="updateApplying"
-                  @click="confirmApply"
-                >
-                  应用更新到 {{ updateInfo?.latest_version }}
-                </el-button>
-
-                <div v-if="updateInfo?.enabled" class="update-hist">
-                  <span class="update-hist-label">历史版本</span>
-                  <el-select
-                    v-model="selectedRelease"
-                    :loading="releasesLoading"
-                    :placeholder="releases.length ? '选择要安装的版本' : '暂无可安装版本'"
-                    :disabled="!!updateStatus?.running || !releases.length"
-                  >
-                    <el-option
-                      v-for="r in releases"
-                      :key="r.version"
-                      :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
-                      :value="r.version"
-                      :disabled="!r.installable || r.current"
-                    />
-                  </el-select>
                   <el-button
-                    v-if="selectedRelease"
-                    type="danger"
-                    plain
+                    class="update-apply-btn"
+                    type="primary"
+                    :icon="Download"
                     :disabled="!!updateStatus?.running"
                     :loading="updateApplying"
-                    @click="confirmInstallRelease"
+                    @click="confirmApply"
                   >
-                    安装 {{ selectedRelease }}
+                    立即更新到 {{ updateInfo?.latest_version }}
                   </el-button>
                 </div>
 
-                <p v-if="updateError" class="update-hint is-error">检查更新失败：{{ updateError }}</p>
-                <p v-if="releasesError" class="update-hint is-error">版本列表获取失败：{{ releasesError }}</p>
-                <p v-else-if="updateInfo && !updateInfo.enabled" class="update-hint">
-                  当前部署未启用面板内更新（由部署方式决定），可在宿主机手动替换版本。
-                </p>
+                <!-- 场景 2：已是最新或检查完毕无需更新 -->
+                <div v-else-if="updateInfo && updateInfo.enabled" class="update-status-row">
+                  <div class="uptodate-box">
+                    <div class="status-check-circle">
+                      <el-icon><Check /></el-icon>
+                    </div>
+                    <div class="uptodate-info">
+                      <span class="cur-ver-text">
+                        当前运行版本：<code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                      </span>
+                      <span class="uptodate-hint">系统已安装最新版本，各项组件运行正常。</span>
+                    </div>
+                  </div>
+                </div>
 
-                <p class="muted tip">
-                  应用更新会下载 release 包并强制校验 sha256，替换后进程主动退出，由容器
-                  <code>restart: unless-stopped</code> 自动拉起新版本；启动失败自动回滚上一版本。
-                  历史版本走同一条 下载 → 校验 → 自检 → 原子替换 → 重启 链路（含降级/回滚），
-                  降级前请先手动备份数据库。
-                </p>
+                <!-- 场景 3：未启用自更新 -->
+                <div v-else-if="updateInfo && !updateInfo.enabled" class="update-status-row">
+                  <div class="disabled-box">
+                    <span class="cur-ver-text">
+                      当前运行版本：<code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                    </span>
+                    <span class="disabled-hint">当前部署形态未启用面板内在线更新（由环境设定），可在宿主机手动替换镜像或二进制版本。</span>
+                  </div>
+                </div>
+
+                <!-- 错误提示（若接口报错） -->
+                <div v-if="updateError || releasesError" class="update-error-banner">
+                  <el-icon><WarningFilled /></el-icon>
+                  <span>{{ updateError || releasesError }}</span>
+                </div>
+
+                <!-- 历史版本与回退区（可折叠高级选项，默认收起） -->
+                <div v-if="updateInfo?.enabled" class="update-hist-section">
+                  <button
+                    type="button"
+                    class="hist-collapse-trigger"
+                    :class="{ 'is-expanded': showHistoryReleases }"
+                    @click="showHistoryReleases = !showHistoryReleases"
+                  >
+                    <div class="trigger-label">
+                      <el-icon class="trigger-chevron"><ArrowRight /></el-icon>
+                      <span>历史版本与安全回退</span>
+                    </div>
+                    <span class="trigger-action-text">{{ showHistoryReleases ? '收起选项' : '展开选项' }}</span>
+                  </button>
+
+                  <div v-if="showHistoryReleases" class="hist-collapse-panel">
+                    <div class="hist-form-row">
+                      <span class="hist-label">指定版本</span>
+                      <el-select
+                        v-model="selectedRelease"
+                        :loading="releasesLoading"
+                        :placeholder="releases.length ? '选择要安装或回滚的历史版本' : '暂无可安装版本'"
+                        :disabled="!!updateStatus?.running || !releases.length"
+                        class="hist-select"
+                      >
+                        <el-option
+                          v-for="r in releases"
+                          :key="r.version"
+                          :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
+                          :value="r.version"
+                          :disabled="!r.installable || r.current"
+                        />
+                      </el-select>
+                      <el-button
+                        v-if="selectedRelease"
+                        type="danger"
+                        plain
+                        :disabled="!!updateStatus?.running"
+                        :loading="updateApplying"
+                        @click="confirmInstallRelease"
+                      >
+                        安装 {{ selectedRelease }}
+                      </el-button>
+                    </div>
+                    <p class="hist-warning-note">
+                      <el-icon><Warning /></el-icon>
+                      <span>降级/回滚走相同更新链路。若跨越数据库结构变更，降级前请务必先备份数据库。</span>
+                    </p>
+                  </div>
+                </div>
+
+                <!-- 底部精炼提示条：1 句话核心提示，不再大段平铺 -->
+                <div class="update-footer-tip">
+                  <el-icon class="tip-icon"><InfoFilled /></el-icon>
+                  <span>更新期间面板将短暂离线重启；若新版本启动失败，系统将自动安全回滚至上一版本。</span>
+                </div>
               </div>
 
               <!-- 客户端 IP 来源说明（与 util.GetRealIP 语义对应） -->
@@ -1374,79 +1461,339 @@ async function save() {
   }
 }
 .ip-hdr-title { font-size: 12.5px; font-weight: 600; color: var(--x-text-2); margin-bottom: 4px; }
+/* 面板更新卡片 */
 .update-card {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border: 1px dashed var(--x-border);
-  border-radius: 8px;
-  background: var(--x-bg);
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-card);
+  box-shadow: var(--x-shadow);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    border-color: rgba(99, 102, 241, 0.25);
+  }
 }
-/* 标题与「重新检查」同一行：检查动作降级为文字按钮，不再和更新按钮抢视觉权重 */
-.update-head {
+
+.update-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+}
 
-  .ip-hdr-title {
-    margin-bottom: 0;
-  }
-}
-.update-refresh {
-  flex: none;
-}
-.update-ver {
+.update-header-left {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.update-badge-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--x-radius-sm);
+  background: var(--x-primary-soft);
+  color: var(--x-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex: none;
+}
+
+.update-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.update-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-  font-size: 13px;
 }
-.update-arrow {
-  color: var(--x-text-3);
-}
-.update-apply {
-  margin-top: 10px;
-}
-/* 历史版本：选版本 + 装所选版本放同一行，只有选了版本才出现安装按钮 */
-.update-hist {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--x-border);
 
-  .el-select {
-    width: 220px;
-  }
+.update-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--x-text);
 }
-.update-hist-label {
-  flex: none;
-  font-size: 12.5px;
-  color: var(--x-text-2);
-}
-.update-hint {
-  margin: 6px 0 0;
+
+.update-subtitle {
   font-size: 12px;
   color: var(--x-text-3);
+  line-height: 1.4;
+}
 
-  &.is-error {
-    color: var(--x-danger);
+.update-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.update-help-btn {
+  color: var(--x-text-3);
+  font-size: 16px;
+  &:hover {
+    color: var(--x-primary);
   }
 }
+
+/* 升级对比舱（有可用新版本） */
+.update-action-banner {
+  margin-top: 14px;
+  padding: 14px 18px;
+  border-radius: var(--x-radius-sm);
+  background: linear-gradient(135deg, var(--x-primary-soft) 0%, var(--x-card-soft) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.update-route-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ver-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  .ver-tag {
+    font-size: 11px;
+    color: var(--x-text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .ver-code {
+    font-family: var(--x-font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--x-text);
+  }
+  &.target .ver-code {
+    color: var(--x-primary);
+  }
+}
+
+.route-arrow {
+  color: var(--x-text-3);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.update-apply-btn {
+  font-weight: 600;
+}
+
+/* 状态展示行（最新 / 禁用） */
+.update-status-row {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: var(--x-card-soft);
+  border: 1px solid var(--x-border-soft);
+  border-radius: var(--x-radius-sm);
+}
+
+.uptodate-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-check-circle {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--x-success-soft);
+  color: var(--x-success);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  flex: none;
+}
+
+.uptodate-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cur-ver-text {
+  font-size: 12.5px;
+  color: var(--x-text);
+  code {
+    font-family: var(--x-font-mono);
+    color: var(--x-primary);
+    font-weight: 600;
+  }
+}
+
+.uptodate-hint {
+  font-size: 11.5px;
+  color: var(--x-text-3);
+}
+
+.disabled-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  .disabled-hint {
+    font-size: 11.5px;
+    color: var(--x-text-3);
+  }
+}
+
+/* 错误提示条 */
+.update-error-banner {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: var(--x-radius-xs);
+  background: var(--x-danger-soft);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--x-danger);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 历史版本与安全回退 */
+.update-hist-section {
+  margin-top: 12px;
+  border-top: 1px solid var(--x-border-soft);
+  padding-top: 10px;
+}
+
+.hist-collapse-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--x-text-2);
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--x-primary);
+  }
+
+  .trigger-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+
+  .trigger-chevron {
+    font-size: 11px;
+    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  &.is-expanded .trigger-chevron {
+    transform: rotate(90deg);
+  }
+
+  .trigger-action-text {
+    font-size: 11.5px;
+    color: var(--x-text-3);
+  }
+}
+
+.hist-collapse-panel {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--x-card-soft);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+}
+
+.hist-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+
+  .hist-label {
+    font-size: 12px;
+    color: var(--x-text-2);
+    flex: none;
+  }
+  .hist-select {
+    flex: 1;
+    min-width: 200px;
+    max-width: 320px;
+  }
+}
+
+.hist-warning-note {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--x-warning);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.4;
+}
+
+/* 底部精炼提示条 */
+.update-footer-tip {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--x-text-3);
+  line-height: 1.4;
+
+  .tip-icon {
+    font-size: 13px;
+    color: var(--x-text-3);
+    flex: none;
+  }
+}
+
 @media (max-width: 640px) {
-  /* 窄屏不再出现「一排等宽按钮」：主操作占满一行，历史版本行折成 标题 / 下拉 / 安装 */
-  .update-apply {
+  .update-card {
+    padding: 14px;
+  }
+  .update-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .update-header-right {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 6px;
+  }
+  .update-action-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .update-apply-btn {
     width: 100%;
   }
-  .update-hist {
-    flex-wrap: wrap;
-
-    .el-select,
-    .el-button {
-      width: 100%;
+  .hist-form-row {
+    flex-direction: column;
+    align-items: stretch;
+    .hist-select {
+      max-width: 100%;
     }
   }
 }
