@@ -120,7 +120,8 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		// 流量周期同步重置（cycleStart=now）。isRenewal 仅用于销售门控（renewable/purchasable）。
 		base := now
 		newExpire := base.AddDate(0, 0, plan.DurationDays)
-		if err := tx.UpdateSubscription(ctx, userID, plan, newExpire, now, plan.PermissionGroupID); err != nil {
+		// 不再传 plan.PermissionGroupID：权限组跟随套餐由快照列承担（2026-09-17 拍板）。
+		if err := tx.UpdateSubscription(ctx, userID, plan, newExpire, now); err != nil {
 			return err
 		}
 

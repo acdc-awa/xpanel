@@ -78,6 +78,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := backfillPlanSnapshots(db); err != nil {
 		return err
 	}
+	// 必须紧跟 backfillPlanSnapshots：归位判定要读快照列 plan_group_id，快照未回填时无从比较。
+	if err := backfillUserFollowPlanGroup(db); err != nil {
+		return err
+	}
 	if err := backfillTrafficBilled(db); err != nil {
 		return err
 	}
@@ -165,6 +169,34 @@ func backfillPlanSnapshots(db *gorm.DB) error {
 		}
 	}
 	return db.Create(&Setting{Key: "plan_snapshot_backfilled", Value: "1"}).Error
+}
+
+// backfillUserFollowPlanGroup 权限组跟随套餐一次性归位（2026-09-17）：
+// 旧购买路径把 plan.PermissionGroupID 直接写入用户的 permission_group_id（自定义列），
+// 于是「套餐绑组」的用户被写成了与套餐同值的「假自定义」——生效组当时正确，但此后管理员
+// 改套餐权限组时，该用户因 EffectiveGroupID 的「自定义优先」不再跟随（面板恒显示「(自定义)」）。
+// 归位条件严格限定 permission_group_id = plan_group_id（套餐快照）：归零后生效组由快照回落，
+// 权限完全不变，仅显示语义回到「(套餐继承)」；两值不同者为管理员真实自定义分组，保持不动。
+// settings 标记保证只跑一次；幂等。
+func backfillUserFollowPlanGroup(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "user_follow_plan_group_backfilled").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	m := db.Migrator()
+	// 空库/仅迁移了部分表时无用户列可比，直接落标记。
+	if m.HasTable(&User{}) && m.HasColumn(&User{}, "permission_group_id") && m.HasColumn(&User{}, "plan_group_id") {
+		if err := db.Model(&User{}).
+			Where("permission_group_id > 0 AND permission_group_id = plan_group_id").
+			Update("permission_group_id", 0).Error; err != nil {
+			return fmt.Errorf("权限组跟随套餐归位失败: %w", err)
+		}
+	}
+	return db.Create(&Setting{Key: "user_follow_plan_group_backfilled", Value: "1"}).Error
 }
 
 // migrateDefaultOutboundDSColumn 默认出口出站解析策略列名修正（2026-08-31）：

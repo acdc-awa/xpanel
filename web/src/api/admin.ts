@@ -39,8 +39,14 @@ export type {
   AccessLayer,
 } from './types'
 
-export function getDashboard(days?: 3 | 7 | 30) {
-  return http.get<ApiResp<DashboardData>>('/admin/dashboard', { params: days ? { days } : {} })
+/** 仪表盘流量口径：今日 / 近 7 天 / 本月（驱动排行榜与服务器流量分布，三者同源）。 */
+export type RankPeriod = 'today' | '7d' | 'month'
+
+export function getDashboard(days?: 3 | 7 | 30, rankPeriod?: RankPeriod) {
+  const params: Record<string, string | number> = {}
+  if (days) params.days = days
+  if (rankPeriod) params.rank_period = rankPeriod
+  return http.get<ApiResp<DashboardData>>('/admin/dashboard', { params })
 }
 
 export interface BackupItem {

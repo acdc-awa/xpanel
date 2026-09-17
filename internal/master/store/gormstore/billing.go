@@ -58,12 +58,15 @@ func (s *BillingStore) UpdateBalance(ctx context.Context, userID uint64, newBala
 		Update("balance_cents", newBalanceCents).Error
 }
 
-func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time, permGroupID uint64) error {
+func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error {
 	updates := map[string]any{
 		"plan_id":             plan.ID,
 		"expire_at":           expireAt,
 		"traffic_cycle_start": cycleStart,
-		"permission_group_id": permGroupID,
+		// 购买即跟随套餐权限组（2026-09-17 拍板）：清空用户自定义分组，生效组由下面的
+		// 快照列 plan_group_id 回落提供。此处写 plan.PermissionGroupID 会固化「假自定义」，
+		// 使该用户此后不再跟随套餐权限组变更（面板显示「(自定义)」而非「(套餐继承)」）。
+		"permission_group_id": 0,
 	}
 	// 套餐快照（2026-09-01 Xboard 式隔离：购买/续费即按当前套餐值重新快照，
 	// 此后套餐编辑不影响该用户直至下次分配/续费/勾选同步）

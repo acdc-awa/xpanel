@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   TrendCharts,
   Money,
@@ -12,6 +12,7 @@ import {
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getDashboard } from '@/api/admin'
+import type { RankPeriod } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
 import type { DashboardData, ServerMatrixItem } from '@/api/types'
@@ -43,6 +44,13 @@ function openOnlineUsers(s: ServerMatrixItem) {
 
 // 吞吐趋势范围档位（3/7/30 天，天粒度）
 const trendRange = ref<3 | 7 | 30>(30)
+
+// 流量口径档位（今日 / 近 7 天 / 本月）：驱动用户排行、节点排行与服务器流量分布，
+// 三者后端同源同期，切换一次全部联动——避免「占比/累计」这类无时间基准的表述。
+const rankPeriod = ref<RankPeriod>('today')
+const RANK_PERIOD_LABELS: Record<RankPeriod, string> = { today: '今日', '7d': '近 7 天', month: '本月' }
+// 后端回显的中文口径标签；未加载时按档位兜底，避免副标题闪烁空白。
+const rankLabel = computed(() => dashData.value?.rank_label || RANK_PERIOD_LABELS[rankPeriod.value])
 
 // ECharts
 const trendChartRef = ref<HTMLDivElement | null>(null)
@@ -227,7 +235,7 @@ function updateCharts() {
         return `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params.name}</div>
         <div style="display:flex;align-items:center;gap:6px">
           ${params.marker}
-          <span style="color:#cbd5e1">承载流量:</span>
+          <span style="color:#cbd5e1">${rankLabel.value}流量:</span>
           <b style="color:#38bdf8">${params.value} GB</b>
           <span style="color:#94a3b8">(${params.percent}%)</span>
         </div>`
@@ -295,7 +303,7 @@ async function load(opts: { silent?: boolean } = {}) {
   // 轮询不占用按钮 loading 态，否则刷新按钮每 30 秒闪一次「加载中」。
   if (!opts.silent) loading.value = true
   try {
-    const { data } = await getDashboard(trendRange.value)
+    const { data } = await getDashboard(trendRange.value, rankPeriod.value)
     if (data.code === 0) {
       dashData.value = data.data
       lastUpdatedTime.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -323,6 +331,8 @@ async function load(opts: { silent?: boolean } = {}) {
 
 // 档位切换即重拉（轮询沿用当前档位）
 watch(trendRange, () => load())
+// 流量口径切换同样即时重拉：用户排行/节点排行/流量分布三者由后端同源返回
+watch(rankPeriod, () => load())
 
 function startPolling() {
   stopPolling()
@@ -486,8 +496,22 @@ onUnmounted(() => {
 
       <div class="chart-panel donut-panel">
         <div class="panel-head">
-          <div class="title">服务器流量分布</div>
-          <div class="sub">各服务器累计承载流量占比</div>
+          <!-- 口径显式化（2026-09-17）：原副标题「各服务器累计承载流量占比」未说明时间段，
+               且后端取的是会被 traffic_reset 周期清零的入站累计计数器，语义自相矛盾。
+               现与排行榜同源（traffic_logs 按时间窗聚合），并把区间写进标题。 -->
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap">
+            <div>
+              <div class="title">服务器流量分布 ({{ rankLabel }})</div>
+              <div class="sub" :title="`统计区间内各服务器承载的用户流量占比（起点 ${dashData?.rank_since || '—'}）`">
+                统计区间内各服务器承载的用户流量占比
+              </div>
+            </div>
+            <el-radio-group v-model="rankPeriod" size="small">
+              <el-radio-button value="today">今日</el-radio-button>
+              <el-radio-button value="7d">7 天</el-radio-button>
+              <el-radio-button value="month">本月</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
         <div ref="donutChartRef" class="echart-container"></div>
       </div>
@@ -655,8 +679,8 @@ onUnmounted(() => {
       <!-- 右侧：榜单与流水切换 Tabs -->
       <div class="ledger-card">
         <el-tabs v-model="activeTab" class="ledger-tabs">
-          <!-- 1. 用户流量排行 -->
-          <el-tab-pane label="流量排行" name="users">
+          <!-- 1. 用户流量排行（口径由上方「服务器流量分布」的区间切换器统一驱动） -->
+          <el-tab-pane :label="`用户排行 · ${rankLabel}`" name="users">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">
               <el-table :data="dashData?.user_rank || []" size="small">
@@ -678,7 +702,7 @@ onUnmounted(() => {
                     <el-tag size="small" type="info" effect="plain">{{ row.plan_name }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="已用总流量" width="95">
+                <el-table-column :label="`${rankLabel}用量`" width="95">
                   <template #default="{ row }">
                     <span class="cell-mono" style="font-weight: 700; color: var(--x-primary)">
                       {{ formatBytes(row.total_bytes) }}
@@ -713,7 +737,67 @@ onUnmounted(() => {
             </div>
           </el-tab-pane>
 
-          <!-- 2. 最近卡密激活流水 -->
+          <!-- 2. 节点流量排行（与用户排行同口径同源） -->
+          <el-tab-pane :label="`节点排行 · ${rankLabel}`" name="nodes">
+            <!-- 桌面端表格 -->
+            <div class="desktop-table-view">
+              <el-table :data="dashData?.server_rank || []" size="small">
+                <el-table-column label="#" width="38">
+                  <template #default="{ $index }">
+                    <span class="cell-mono" :style="{ fontWeight: $index < 3 ? '700' : '400', color: $index === 0 ? '#f59e0b' : $index === 1 ? '#64748b' : $index === 2 ? '#b45309' : 'inherit' }">
+                      {{ $index + 1 }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="节点" min-width="100">
+                  <template #default="{ row }">
+                    <span style="font-weight: 600; color: var(--x-text)">{{ row.name || `服务器#${row.server_id}` }}</span>
+                    <div class="muted cell-mono" style="font-size: 11px">{{ row.location || '—' }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="占比" width="70">
+                  <template #default="{ row }">
+                    <span class="cell-mono muted" style="font-size: 11.5px">{{ (row.percent || 0).toFixed(1) }}%</span>
+                  </template>
+                </el-table-column>
+                <el-table-column :label="`${rankLabel}用量`" width="95">
+                  <template #default="{ row }">
+                    <span class="cell-mono" style="font-weight: 700; color: var(--x-primary)">
+                      {{ formatBytes(row.total_bytes) }}
+                    </span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 移动端流式卡片 -->
+            <div class="mobile-cards-view">
+              <div v-if="!dashData?.server_rank || dashData.server_rank.length === 0" style="text-align: center; padding: 20px 0; color: var(--x-text-3); font-size: 13px">
+                暂无节点流量数据
+              </div>
+              <div v-else class="mobile-data-card-list">
+                <div v-for="(row, idx) in dashData.server_rank" :key="row.server_id" class="mobile-data-card" style="padding: 10px 12px">
+                  <div class="card-head" style="padding-bottom: 6px">
+                    <div class="head-title">
+                      <span class="cell-mono" :style="{ fontWeight: idx < 3 ? '700' : '400', color: idx === 0 ? '#f59e0b' : idx === 1 ? '#64748b' : idx === 2 ? '#b45309' : 'inherit', fontSize: '12px' }">
+                        #{{ idx + 1 }}
+                      </span>
+                      <span style="font-weight: 700">{{ row.name || `服务器#${row.server_id}` }}</span>
+                    </div>
+                    <span class="cell-mono" style="font-weight: 700; color: var(--x-primary); font-size: 13px">
+                      {{ formatBytes(row.total_bytes) }}
+                    </span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px">
+                    <span class="muted cell-mono" style="font-size: 11px">{{ row.location || '—' }}</span>
+                    <span class="muted cell-mono" style="font-size: 11px">占 {{ (row.percent || 0).toFixed(1) }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- 3. 最近卡密激活流水 -->
           <el-tab-pane label="礼品卡流水" name="cards">
             <!-- 桌面端表格 -->
             <div class="desktop-table-view">

@@ -443,6 +443,69 @@ func TestPlanSnapshotBackfill(t *testing.T) {
 	}
 }
 
+// TestUserFollowPlanGroupBackfill 权限组跟随套餐一次性归位（2026-09-17）：
+// 旧购买路径把套餐权限组写进用户自定义列，形成「与套餐同值的假自定义」。
+// 归位只清 permission_group_id == plan_group_id 的行（生效组由快照回落，权限不变）；
+// 取值不同的行是管理员真实自定义分组，必须保持原样。
+func TestUserFollowPlanGroupBackfill(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&User{}, &Plan{}, &Setting{}); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+
+	plan := Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, PermissionGroupID: 5, Purchasable: true, Renewable: true}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	// dirty：旧购买路径写下的假自定义（自定义列 == 套餐快照）
+	dirty := User{Username: "dirty@x.com", Email: "dirty@x.com", UUID: "uuid-d", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-d", PlanID: plan.ID, PermissionGroupID: 5, PlanGroupID: 5}
+	// custom：管理员显式设的自定义分组（与套餐快照不同值）——必须保持
+	custom := User{Username: "custom@x.com", Email: "custom@x.com", UUID: "uuid-c", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-c", PlanID: plan.ID, PermissionGroupID: 9, PlanGroupID: 5}
+	if err := db.Create(&dirty).Error; err != nil {
+		t.Fatalf("create dirty user: %v", err)
+	}
+	if err := db.Create(&custom).Error; err != nil {
+		t.Fatalf("create custom user: %v", err)
+	}
+
+	if err := backfillUserFollowPlanGroup(db); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	var gotDirty User
+	if err := db.First(&gotDirty, dirty.ID).Error; err != nil {
+		t.Fatalf("load dirty: %v", err)
+	}
+	if gotDirty.PermissionGroupID != 0 {
+		t.Fatalf("假自定义应归位为 0，实际 %d", gotDirty.PermissionGroupID)
+	}
+	if got := gotDirty.EffectiveGroupID(); got != 5 {
+		t.Fatalf("归位后生效组须仍为快照 5（权限不变），实际 %d", got)
+	}
+
+	var gotCustom User
+	if err := db.First(&gotCustom, custom.ID).Error; err != nil {
+		t.Fatalf("load custom: %v", err)
+	}
+	if gotCustom.PermissionGroupID != 9 {
+		t.Fatalf("真实自定义分组不得被归位，实际 %d", gotCustom.PermissionGroupID)
+	}
+
+	// 幂等：重复执行不改动已归位的行（且标记存在时直接短路）
+	if err := backfillUserFollowPlanGroup(db); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	if err := db.First(&gotCustom, custom.ID).Error; err != nil {
+		t.Fatalf("reload custom: %v", err)
+	}
+	if gotCustom.PermissionGroupID != 9 {
+		t.Fatalf("重复归位改动了自定义分组，实际 %d", gotCustom.PermissionGroupID)
+	}
+}
+
 // TestTrafficBilledBackfill 流量计费两列一次性回填（2026-09-06 倍率计费）：
 // 存量行按 1:1 回填（billed = 原始字节，等价倍率 1）；settings 标记只跑一次——
 // 回填后新语义落库的免费行（ratio=0：raw>0、billed=0）不得被重启重跑错误抬回原值。

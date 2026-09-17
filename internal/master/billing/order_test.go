@@ -173,3 +173,67 @@ func TestPayWithBalanceDurationSemantics(t *testing.T) {
 	}
 	approx(u4.ExpireAt, time.Now().Add(30*24*time.Hour), "无套餐购买应自当前时刻起算")
 }
+
+// TestPayWithBalanceFollowsPlanPermissionGroup 购买即跟随套餐权限组（2026-09-17 拍板）：
+// 支付须清空用户自定义分组列 permission_group_id，使生效组回落套餐快照 plan_group_id。
+// 回归点：旧实现写入 plan.PermissionGroupID，固化「与套餐同值的假自定义」——此后
+// 管理员改套餐权限组，该用户因「自定义优先」不再跟随（面板恒显示「(自定义)」）。
+func TestPayWithBalanceFollowsPlanPermissionGroup(t *testing.T) {
+	db := orderTestDB(t)
+	svc := NewOrderService(gormstore.NewBillingStore(db))
+
+	// 两个套餐绑不同权限组，模拟管理员后续调整套餐权限组
+	planV1 := models.Plan{Name: "订阅套餐", PriceCents: 1, TrafficGB: 10, DurationDays: 30, PermissionGroupID: 5, Purchasable: true, Renewable: true}
+	if err := db.Create(&planV1).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	// 用户「已带一个自定义分组」，购买后应被清空（购买即跟随套餐，不再保留自定义）
+	uid := func() uint64 {
+		u := models.User{
+			Username: "buyer", Email: "buyer@x.com", UUID: "uuid-buyer", SubscribeToken: "tok-buyer",
+			BalanceCents: 1_000_000, PermissionGroupID: 9,
+		}
+		if err := db.Create(&u).Error; err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+		return u.ID
+	}()
+
+	if _, err := svc.PayWithBalance(uid, planV1.ID); err != nil {
+		t.Fatalf("购买应通过: %v", err)
+	}
+
+	var u models.User
+	if err := db.First(&u, uid).Error; err != nil {
+		t.Fatalf("load user: %v", err)
+	}
+	if u.PermissionGroupID != 0 {
+		t.Fatalf("购买后自定义权限组应清空，实际 permission_group_id=%d", u.PermissionGroupID)
+	}
+	if u.PlanGroupID != 5 {
+		t.Fatalf("套餐权限组快照应为 5，实际 plan_group_id=%d", u.PlanGroupID)
+	}
+	if got := u.EffectiveGroupID(); got != 5 {
+		t.Fatalf("生效权限组应跟随套餐快照 5，实际 %d", got)
+	}
+
+	// 管理员把套餐权限组从 5 改到 7 并「同步存量用户」：快照刷新后生效组须跟着走
+	if err := db.Model(&models.Plan{}).Where("id = ?", planV1.ID).
+		Update("permission_group_id", 7).Error; err != nil {
+		t.Fatalf("改套餐权限组: %v", err)
+	}
+	planV2 := planV1
+	planV2.PermissionGroupID = 7
+	for k, v := range models.PlanSnapshotColumns(&planV2) {
+		if err := db.Model(&models.User{}).Where("id = ?", uid).Update(k, v).Error; err != nil {
+			t.Fatalf("同步快照: %v", err)
+		}
+	}
+	if err := db.First(&u, uid).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if got := u.EffectiveGroupID(); got != 7 {
+		t.Fatalf("改套餐权限组后生效组应跟随为 7（真跟随），实际 %d", got)
+	}
+}

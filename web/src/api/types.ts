@@ -132,8 +132,15 @@ export interface RecentOrderItem {
 export interface DashboardData {
   summary: DashboardSummary
   traffic_trend: TrafficTrendPoint[]
+  /** 流量口径（server_breakdown / user_rank / server_rank 同源同期） */
+  rank_period: 'today' | '7d' | 'month'
+  /** 口径中文标签，直接用于图表副标题/表头，避免各处自行复述走样 */
+  rank_label: string
+  /** 口径起点（业务日期，含） */
+  rank_since: string
   server_breakdown: ServerTrafficItem[]
   user_rank: UserTrafficRankItem[]
+  server_rank: ServerTrafficItem[]
   server_matrix: ServerMatrixItem[]
   recent_gift_cards: RecentGiftCardItem[]
   recent_orders: RecentOrderItem[]
