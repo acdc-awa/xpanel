@@ -18,13 +18,25 @@ const pageTitle = computed(() => (route.meta.title as string) || '用户中心')
 
 // 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
 // Pad 平板屏幕（< 1024px）默认折叠为 mini dock；宽屏可读取用户缓存
-const defaultCollapsed = typeof window !== 'undefined' ? window.innerWidth < 1024 : false
+const collapseMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
 const storedCollapsed = typeof localStorage !== 'undefined' ? localStorage.getItem('client_sidebar_collapsed') : null
-const isCollapsed = ref(storedCollapsed !== null ? storedCollapsed === '1' : defaultCollapsed)
+const isCollapsed = ref(storedCollapsed !== null ? storedCollapsed === '1' : collapseMq?.matches ?? false)
 
 // 悬停展开状态（靠近展开，远离收起）
 const isHovered = ref(false)
 let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
+
+// 用户是否手动定过折叠状态。手动定过之后断点变化不再覆盖他的选择；
+// 没定过则折叠态完全跟随断点 —— 这样「拖窗口到某宽度」和「在该宽度刷新」
+// 必然得到同一种布局（原实现只在 setup 里读一次 window.innerWidth，
+// 拖窄得展开、在窄屏刷新得折叠，同一宽度两种结果）。
+const userChoseCollapse = ref(storedCollapsed !== null)
+
+function onCollapseMq(e: MediaQueryListEvent) {
+  if (userChoseCollapse.value) return
+  isCollapsed.value = e.matches
+  isHovered.value = false
+}
 
 // 是否当前处于视觉展开状态（固定展开 OR 悬停展开）
 const isEffectiveExpanded = computed(() => !isCollapsed.value || isHovered.value)
@@ -32,6 +44,7 @@ const isEffectiveExpanded = computed(() => !isCollapsed.value || isHovered.value
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
   isHovered.value = false
+  userChoseCollapse.value = true
   localStorage.setItem('client_sidebar_collapsed', isCollapsed.value ? '1' : '0')
 }
 
@@ -66,11 +79,13 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  collapseMq?.addEventListener('change', onCollapseMq)
 })
 
 onUnmounted(() => {
   if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  collapseMq?.removeEventListener('change', onCollapseMq)
 })
 </script>
 
@@ -263,7 +278,7 @@ onUnmounted(() => {
 
 /* ===== 左侧固定侧边栏 (>= 768px 平板与桌面端) ===== */
 .client-aside {
-  width: 236px;
+  width: var(--x-sidebar-w, 236px);
   height: 100vh;
   position: fixed;
   top: 0;
@@ -272,23 +287,23 @@ onUnmounted(() => {
   border-right: 1px solid var(--x-border);
   display: flex;
   flex-direction: column;
-  z-index: 90;
+  z-index: var(--x-z-sidebar, 80);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  transition: width 0.22s cubic-bezier(0.2, 0, 0, 1), background-color 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
+  transition: width var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1)), background-color 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
 
   @media (max-width: 767.98px) {
     display: none;
   }
 
-  /* 折叠收起模式 (Mini Dock 58px) */
+  /* 折叠收起模式 (Mini Dock) */
   &.collapsed {
-    width: 58px;
+    width: var(--x-sidebar-w-mini, 58px);
 
     /* 悬停浮层模式（靠近展开，远离收起） */
     &.is-hovered {
-      width: 236px;
-      z-index: 1000;
-      box-shadow: var(--x-shadow-xl, 0 20px 25px -5px rgba(0, 0, 0, 0.1));
+      width: var(--x-sidebar-w, 236px);
+      z-index: var(--x-z-sidebar-hover, 200);
+      box-shadow: var(--x-shadow-xl);
     }
   }
 }
@@ -316,7 +331,7 @@ onUnmounted(() => {
   height: 30px;
   min-width: 30px;
   min-height: 30px;
-  border-radius: 6px;
+  border-radius: var(--x-radius-sm, 8px);
   overflow: hidden;
   display: inline-flex;
   align-items: center;
@@ -336,7 +351,7 @@ onUnmounted(() => {
   width: 30px;
   height: 30px;
   min-width: 30px;
-  border-radius: 6px;
+  border-radius: var(--x-radius-sm, 8px);
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: #fff;
   display: inline-flex;
@@ -373,7 +388,7 @@ onUnmounted(() => {
 .sidebar-pin-btn {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--x-radius-xs, 6px);
   border: 1px solid var(--x-border);
   background: var(--x-card-soft);
   color: var(--x-text-2);
@@ -407,7 +422,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--x-radius-sm, 8px);
   color: var(--x-text-2);
   font-size: 13.5px;
   font-weight: 500;
@@ -472,7 +487,7 @@ onUnmounted(() => {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #10b981;
+    background: var(--x-success, #10b981);
     box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
   }
 
@@ -492,21 +507,23 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  transition: margin-left 0.22s cubic-bezier(0.2, 0, 0, 1);
+  // 与侧栏宽度过渡同一时长同一曲线，消除折叠过程中交界处的露缝/重叠闪烁
+  transition: margin-left var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
 
   @media (min-width: 768px) {
-    margin-left: 236px;
+    margin-left: var(--x-sidebar-w, 236px);
   }
 
   @media (max-width: 767.98px) {
     margin-left: 0;
-    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    // 与 .client-tabbar 的 height 同源，原来写死 60px 而 tabbar 实际 54px，多留 6px 空白
+    padding-bottom: calc(var(--x-tabbar-h, 54px) + env(safe-area-inset-bottom, 0px));
   }
 }
 
 .client-layout.is-collapsed .client-main {
   @media (min-width: 768px) {
-    margin-left: 58px;
+    margin-left: var(--x-sidebar-w-mini, 58px);
   }
 }
 
@@ -521,7 +538,7 @@ onUnmounted(() => {
   padding: 0 24px;
   position: sticky;
   top: 0;
-  z-index: 80;
+  z-index: var(--x-z-sidebar, 80);
   transition: background-color 0.24s ease, border-color 0.24s ease;
 
   @media (max-width: 767.98px) {
@@ -536,7 +553,7 @@ onUnmounted(() => {
     .topbar-expand-btn {
       width: 30px;
       height: 30px;
-      border-radius: 6px;
+      border-radius: var(--x-radius-xs, 6px);
       border: 1px solid var(--x-border);
       background: var(--x-card-soft);
       color: var(--x-text-2);
@@ -608,7 +625,7 @@ onUnmounted(() => {
   justify-content: space-between;
   position: sticky;
   top: 0;
-  z-index: 80;
+  z-index: var(--x-z-sidebar, 80);
 
   @media (min-width: 768px) {
     display: none;
@@ -619,7 +636,8 @@ onUnmounted(() => {
     align-items: center;
     gap: 8px;
     min-width: 0;
-    max-width: calc(100vw - 150px);
+    // 100% 而非 100vw：100vw 把经典滚动条宽度也算进去，会多出约 15px
+    max-width: calc(100% - 150px);
     overflow: hidden;
 
     .client-title {
@@ -674,7 +692,7 @@ onUnmounted(() => {
 
 .client-content-inner {
   width: 100%;
-  max-width: 1440px;
+  max-width: var(--x-content-max, 1320px);
   margin: 0 auto;
 }
 
@@ -685,11 +703,11 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   width: 100%;
-  height: 54px;
+  height: var(--x-tabbar-h, 54px);
   background: var(--x-card);
   border-top: 1px solid var(--x-border);
   display: flex;
-  z-index: 100;
+  z-index: var(--x-z-sidebar, 80);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   transition: background-color 0.24s ease, border-color 0.24s ease;

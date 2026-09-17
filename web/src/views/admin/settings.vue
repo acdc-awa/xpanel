@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Check, Close, Download, Loading, Refresh, Upload, Delete, Picture, Scissor, CopyDocument } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
@@ -579,18 +579,49 @@ const updateDisplayMessage = computed(() => {
   return updateStatus.value?.message || '正在准备更新...'
 })
 
-async function onCheckUpdate() {
+// 检查更新 / 版本列表的失败在这两处只显示一次：手动点「重新检查」弹 toast，
+// 进入页签自动跑的那一路静默失败，落到卡片内的提示行（GitHub 不通时不再每次进页签都弹窗）
+const updateError = ref('')
+const releasesError = ref('')
+
+async function onCheckUpdate(silent = false) {
   updateChecking.value = true
+  updateError.value = ''
   try {
     const { data } = await checkUpdate()
-    if (data.code === 0) updateInfo.value = data.data
-    else ElMessage.error(data.message)
+    if (data.code === 0) {
+      updateInfo.value = data.data
+    } else {
+      updateError.value = data.message || '检查更新失败'
+      if (!silent) ElMessage.error(updateError.value)
+    }
   } catch (e) {
-    ElMessage.error(errMsg(e, '检查更新失败'))
+    updateError.value = errMsg(e, '检查更新失败')
+    if (!silent) ElMessage.error(updateError.value)
   } finally {
     updateChecking.value = false
   }
 }
+
+// 进入「系统状态」页签即自动完成原先的「检查更新 + 加载版本列表」两次点击。
+// 有新版时卡片里会出现「应用更新」按钮（见模板 v-if），无需先手动检查。
+let lastUpdateRefreshAt = 0
+
+async function refreshUpdate(silent = false) {
+  // 更新流程进行中（监控弹窗在轮询）不打扰；已有请求在跑时不重复发起
+  if (updateStatus.value?.running) return
+  if (updateChecking.value || releasesLoading.value) return
+  // 自动那一路加一分钟节流：update/check 与 list/releases 都是未认证直连 GitHub API
+  // （60 次/小时/IP），来回切页签不该把配额打光；手点「重新检查」不受此限
+  if (silent && Date.now() - lastUpdateRefreshAt < 60_000) return
+  lastUpdateRefreshAt = Date.now()
+  await onCheckUpdate(silent)
+  if (updateInfo.value?.enabled !== false) await onLoadReleases(silent)
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'system') void refreshUpdate(true)
+})
 
 async function confirmApply() {
   if (!updateInfo.value?.available) return
@@ -631,19 +662,26 @@ async function confirmApply() {
 }
 
 // 拉取版本列表（安装历史版本 / 回滚）：来自 GitHub Release API，安装复用更新链路。
-async function onLoadReleases() {
+async function onLoadReleases(silent = false) {
   releasesLoading.value = true
+  releasesError.value = ''
   try {
     const { data } = await listReleases()
     if (data.code === 0) {
       releases.value = data.data.releases || []
-      const first = releases.value.find((r) => r.installable && !r.current)
-      selectedRelease.value = first?.version || ''
+      // 不再自动预选第一个可安装版本：预选会让「安装」按钮一进页面就是可点状态，
+      // 与「有新版才出现更新按钮」的按需风格冲突；降级/回滚也该由人明确挑一个版本。
+      // 已经选过的版本若仍在列表里则保留，避免自动刷新把人的选择清掉
+      if (selectedRelease.value && !releases.value.some((r) => r.version === selectedRelease.value)) {
+        selectedRelease.value = ''
+      }
     } else {
-      ElMessage.error(data.message)
+      releasesError.value = data.message || '查询版本列表失败'
+      if (!silent) ElMessage.error(releasesError.value)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '查询版本列表失败'))
+    releasesError.value = errMsg(e, '查询版本列表失败')
+    if (!silent) ElMessage.error(releasesError.value)
   } finally {
     releasesLoading.value = false
   }
@@ -1137,7 +1175,10 @@ async function save() {
         <el-tab-pane :label="isMobile ? '状态' : '系统状态'" name="system">
           <div v-loading="systemLoading" style="max-width: 720px; min-height: 200px">
             <template v-if="system">
-              <el-descriptions :column="2" border size="small">
+              <!-- 窄屏必须降到 1 列：2 列时每格只剩 ~100px，「数据库版本」这类标签会被
+                   折成「数据库版 / 本」、「schema v2 / 期望 v2 / 最低兼容 v2」折成三行，
+                   整张表看起来像被裁掉了一半，也读不出标签与值的对应关系 -->
+              <el-descriptions :column="isMobile ? 1 : 2" border size="small">
                 <el-descriptions-item label="应用">{{ system.app_name }}（{{ system.app_env }}）</el-descriptions-item>
                 <el-descriptions-item label="面板版本"><code class="cell-mono">{{ system.panel_version }}</code></el-descriptions-item>
                 <el-descriptions-item label="Go 版本">{{ system.go_version }}</el-descriptions-item>
@@ -1163,36 +1204,52 @@ async function save() {
               </div>
               <p v-if="!system.db_ok" class="muted tip">数据库异常：{{ system.db_error }}</p>
 
-              <!-- 面板内更新（容器形态自更新） -->
+              <!-- 面板内更新（容器形态自更新）：进入本页签自动检查更新 + 拉取版本列表，
+                   有新版才出现「应用更新」，不再常驻「检查更新 / 加载版本列表」两个按钮 -->
               <div class="update-card">
-                <p class="ip-hdr-title">面板更新</p>
-                <div class="update-row">
-                  <span class="muted">当前</span>
-                  <code class="cell-mono">{{ system.panel_version }}</code>
-                  <span class="muted">最新</span>
-                  <code class="cell-mono">{{ updateInfo?.latest_version || '—' }}</code>
-                  <el-tag v-if="updateInfo?.available" type="success" size="small" style="margin-left: 8px">有可用更新</el-tag>
-                  <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small" style="margin-left: 8px">更新已禁用</el-tag>
-                </div>
-                <div class="x-toolbar" style="margin-top: 10px; flex-wrap: wrap">
-                  <el-button :icon="Refresh" :loading="updateChecking" @click="onCheckUpdate">检查更新</el-button>
+                <div class="update-head">
+                  <p class="ip-hdr-title">面板更新</p>
                   <el-button
-                    type="primary"
-                    :icon="Download"
-                    :disabled="!updateInfo?.available || !!updateStatus?.running"
-                    :loading="updateApplying"
-                    @click="confirmApply"
+                    text
+                    size="small"
+                    class="update-refresh"
+                    :icon="Refresh"
+                    :loading="updateChecking || releasesLoading"
+                    @click="refreshUpdate(false)"
                   >
-                    应用更新
+                    重新检查
                   </el-button>
                 </div>
-                <div class="x-toolbar" style="margin-top: 10px; flex-wrap: wrap; align-items: center">
+
+                <div class="update-ver">
+                  <code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                  <span class="update-arrow">→</span>
+                  <code class="cell-mono">{{ updateInfo?.latest_version || '—' }}</code>
+                  <el-tag v-if="updateInfo?.available" type="success" size="small">有可用更新</el-tag>
+                  <el-tag v-else-if="updateInfo && !updateInfo.enabled" type="info" size="small">更新已禁用</el-tag>
+                  <el-tag v-else-if="updateInfo" type="info" size="small">已是最新</el-tag>
+                  <span v-if="updateChecking" class="update-hint">检查中…</span>
+                </div>
+
+                <el-button
+                  v-if="updateInfo?.available"
+                  class="update-apply"
+                  type="primary"
+                  :icon="Download"
+                  :disabled="!!updateStatus?.running"
+                  :loading="updateApplying"
+                  @click="confirmApply"
+                >
+                  应用更新到 {{ updateInfo?.latest_version }}
+                </el-button>
+
+                <div v-if="updateInfo?.enabled" class="update-hist">
+                  <span class="update-hist-label">历史版本</span>
                   <el-select
                     v-model="selectedRelease"
                     :loading="releasesLoading"
-                    placeholder="选择历史版本"
-                    style="width: 220px"
-                    :disabled="!!updateStatus?.running"
+                    :placeholder="releases.length ? '选择要安装的版本' : '暂无可安装版本'"
+                    :disabled="!!updateStatus?.running || !releases.length"
                   >
                     <el-option
                       v-for="r in releases"
@@ -1202,22 +1259,29 @@ async function save() {
                       :disabled="!r.installable || r.current"
                     />
                   </el-select>
-                  <el-button :icon="Refresh" :loading="releasesLoading" @click="onLoadReleases">加载版本列表</el-button>
                   <el-button
+                    v-if="selectedRelease"
                     type="danger"
                     plain
-                    :disabled="!selectedRelease || !!updateStatus?.running"
+                    :disabled="!!updateStatus?.running"
                     :loading="updateApplying"
                     @click="confirmInstallRelease"
                   >
-                    安装所选版本
+                    安装 {{ selectedRelease }}
                   </el-button>
                 </div>
+
+                <p v-if="updateError" class="update-hint is-error">检查更新失败：{{ updateError }}</p>
+                <p v-if="releasesError" class="update-hint is-error">版本列表获取失败：{{ releasesError }}</p>
+                <p v-else-if="updateInfo && !updateInfo.enabled" class="update-hint">
+                  当前部署未启用面板内更新（由部署方式决定），可在宿主机手动替换版本。
+                </p>
+
                 <p class="muted tip">
-                  应用更新将下载最新 release 包并强制校验 sha256，替换后进程主动退出，由容器
-                  <code>restart: unless-stopped</code> 自动拉起新版本；新版本启动失败时自动回滚上一版本。
-                  「安装所选版本」可从 Release 历史列表选择任意版本（含降级/回滚），走同一条
-                  下载 → 校验 → 自检 → 原子替换 → 重启 链路。降级/回滚前请先手动备份数据库。
+                  应用更新会下载 release 包并强制校验 sha256，替换后进程主动退出，由容器
+                  <code>restart: unless-stopped</code> 自动拉起新版本；启动失败自动回滚上一版本。
+                  历史版本走同一条 下载 → 校验 → 自检 → 原子替换 → 重启 链路（含降级/回滚），
+                  降级前请先手动备份数据库。
                 </p>
               </div>
 
@@ -1312,17 +1376,79 @@ async function save() {
 .ip-hdr-title { font-size: 12.5px; font-weight: 600; color: var(--x-text-2); margin-bottom: 4px; }
 .update-card {
   margin-top: 14px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px dashed var(--x-border);
   border-radius: 8px;
   background: var(--x-bg);
 }
-.update-row {
+/* 标题与「重新检查」同一行：检查动作降级为文字按钮，不再和更新按钮抢视觉权重 */
+.update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  .ip-hdr-title {
+    margin-bottom: 0;
+  }
+}
+.update-refresh {
+  flex: none;
+}
+.update-ver {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.update-arrow {
+  color: var(--x-text-3);
+}
+.update-apply {
+  margin-top: 10px;
+}
+/* 历史版本：选版本 + 装所选版本放同一行，只有选了版本才出现安装按钮 */
+.update-hist {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  font-size: 13px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--x-border);
+
+  .el-select {
+    width: 220px;
+  }
+}
+.update-hist-label {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--x-text-2);
+}
+.update-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--x-text-3);
+
+  &.is-error {
+    color: var(--x-danger);
+  }
+}
+@media (max-width: 640px) {
+  /* 窄屏不再出现「一排等宽按钮」：主操作占满一行，历史版本行折成 标题 / 下拉 / 安装 */
+  .update-apply {
+    width: 100%;
+  }
+  .update-hist {
+    flex-wrap: wrap;
+
+    .el-select,
+    .el-button {
+      width: 100%;
+    }
+  }
 }
 
 .upload-row {
@@ -1480,6 +1606,12 @@ async function save() {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-top: 14px;
+
+  /* 与 base.scss 的 .x-stat-grid 同口径：窄屏 3 列时每格只剩 ~97px（375px 实测），
+     降到 2 列给标签留出换行余量 */
+  @media (max-width: 480px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .status-count {
   display: flex;
@@ -1523,7 +1655,7 @@ async function save() {
   .snippet-code {
     margin: 0;
     padding: 12px 14px;
-    font-family: var(--x-font-mono, 'JetBrains Mono', Consolas, monospace);
+    font-family: var(--x-font-mono, ui-monospace, Consolas, monospace);
     font-size: 12px;
     line-height: 1.5;
     color: #38bdf8;
@@ -1567,29 +1699,31 @@ async function save() {
   border: 1px solid var(--x-border, #e5e7eb);
   margin-top: 12px;
 
+  // 结果面板的状态色统一走语义 token：原来写死亮色底/亮色描边，
+  // 深色模式下这几块会变成刺眼的浅色块（本文件里没有任何 html.dark 覆盖）
   &.is-running {
-    border-color: #93c5fd;
-    background: #eff6ff;
+    border-color: var(--x-info);
+    background: var(--x-info-soft);
     .icon-process {
       font-size: 22px;
-      color: #2563eb;
+      color: var(--x-info);
     }
   }
   &.is-success {
-    border-color: #86efac;
-    background: #f0fdf4;
+    border-color: var(--x-success);
+    background: var(--x-success-soft);
     .icon-success {
       font-size: 22px;
-      color: #16a34a;
+      color: var(--x-success);
       font-weight: bold;
     }
   }
   &.is-failed {
-    border-color: #fca5a5;
-    background: #fef2f2;
+    border-color: var(--x-danger);
+    background: var(--x-danger-soft);
     .icon-error {
       font-size: 22px;
-      color: #dc2626;
+      color: var(--x-danger);
       font-weight: bold;
     }
   }
@@ -1607,7 +1741,7 @@ async function save() {
     }
     .status-err {
       margin-top: 6px;
-      color: #b91c1c;
+      color: var(--x-danger);
       font-size: 11.5px;
       line-height: 1.4;
       word-break: break-all;

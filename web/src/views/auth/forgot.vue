@@ -230,7 +230,9 @@ async function submitReset() {
 }
 .auth-title { font-size: 19px; font-weight: 700; }
 .auth-sub { font-size: 12.5px; color: var(--x-text-3); margin-top: 3px; }
-.hint { font-size: 12.5px; color: var(--x-text-2); margin: -6px 0 12px; line-height: 1.6; }
+// 原来是 margin-top: -6px（为了抵消表单行的默认间距反推出来的值），
+// 校验错误文案出现/消失时它会和上一行文字重叠；改为正向间距
+.hint { font-size: 12.5px; color: var(--x-text-2); margin: 0 0 12px; line-height: 1.6; }
 .auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
 .auth-foot { margin-top: 18px; text-align: center; font-size: 13px; color: var(--x-text-2); }
 .auth-link { color: var(--x-primary); font-weight: 600; }

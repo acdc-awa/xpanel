@@ -140,11 +140,14 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 }
 
 // 响应式分级：<768px 手机端进入抽屉；768px~1024px (Pad端) 自动折叠侧栏为 Mini Dock
-const isMobile = ref(false)
-const isTablet = ref(false)
+// 媒体查询对象与初值都在 setup 阶段同步建立：原实现把赋值放在 onMounted，
+// 手机端首帧 isMobile 仍是 false，会先画一帧 236px 固定侧栏再消失（首屏位置跳一次）
+const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 767.98px)') : null
+const tabletMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
+
+const isMobile = ref(mobileMq?.matches ?? false)
+const isTablet = ref(tabletMq?.matches ?? false)
 const drawerOpen = ref(false)
-let mobileMq: MediaQueryList | null = null
-let tabletMq: MediaQueryList | null = null
 
 const onMobileMq = (e: MediaQueryListEvent | MediaQueryList) => {
   isMobile.value = e.matches
@@ -162,12 +165,10 @@ const onTabletMq = (e: MediaQueryListEvent | MediaQueryList) => {
 // 页脚版本号：取后端 ldflags 注入的真实 panel_version（原写死 v1.0.0 与发布版本脱节）
 const panelVersion = ref('')
 onMounted(async () => {
-  mobileMq = window.matchMedia('(max-width: 767.98px)')
-  tabletMq = window.matchMedia('(max-width: 1023.98px)')
-  onMobileMq(mobileMq)
-  onTabletMq(tabletMq)
-  mobileMq.addEventListener('change', onMobileMq)
-  tabletMq.addEventListener('change', onTabletMq)
+  // 初值已同步求值过，这里只订阅变化并补一次 Pad 端默认折叠策略
+  if (tabletMq) onTabletMq(tabletMq)
+  mobileMq?.addEventListener('change', onMobileMq)
+  tabletMq?.addEventListener('change', onTabletMq)
   window.addEventListener('keydown', handleGlobalKeydown)
   try {
     const { data } = await getSystemStatus()
@@ -185,7 +186,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="admin-layout" :class="{ 'is-collapsed': isCollapsed && !isMobile }">
+  <div class="admin-layout">
     <!-- 桌面端侧栏 (Cloudflare 风格：支持固定展开、靠近自动展开、远离自动收起) -->
     <aside
       v-if="!isMobile"
@@ -428,7 +429,9 @@ onUnmounted(() => {
 
 /* 侧边栏主体 (Cloudflare 丝滑贝塞尔过渡与悬停浮层模式) */
 .admin-aside {
-  width: 236px;
+  // 宽度只从 token 取：以前 236 / 58 在本文件出现 6 处、ClientLayout 4 处，
+  // 改一处就整体错位（折叠/展开切换时图标横向漂移）
+  width: var(--x-sidebar-w, 236px);
   background: var(--x-card);
   border-right: 1px solid var(--x-border);
   position: fixed;
@@ -438,18 +441,18 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  z-index: 100;
-  transition: width 0.24s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.24s ease;
+  z-index: var(--x-z-sidebar, 80);
+  transition: width var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1)), box-shadow 0.24s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 
   /* 折叠模式（默认 58px Dock，悬停时浮出展开） */
   &.collapsed {
-    width: 58px;
+    width: var(--x-sidebar-w-mini, 58px);
 
     /* 悬停靠近自动浮层展开 */
     &.is-hovered {
-      width: 236px;
-      z-index: 200;
+      width: var(--x-sidebar-w, 236px);
+      z-index: var(--x-z-sidebar-hover, 200);
       box-shadow: 8px 0 32px rgba(0, 0, 0, 0.12);
 
       .admin-aside-header {
@@ -496,7 +499,7 @@ onUnmounted(() => {
         .sidebar-toggle-btn {
           width: 38px;
           height: 38px;
-          border-radius: 8px;
+          border-radius: var(--x-radius-sm, 8px);
           margin: 0 auto;
         }
       }
@@ -585,7 +588,7 @@ onUnmounted(() => {
 .admin-logo-mark {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--x-radius-sm, 8px);
   background: linear-gradient(135deg, #6366f1, #a855f7);
   color: #fff;
   display: flex;
@@ -599,7 +602,7 @@ onUnmounted(() => {
 .admin-logo-img {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--x-radius-sm, 8px);
   object-fit: contain;
   background: rgba(0, 0, 0, 0.03);
 }
@@ -620,7 +623,7 @@ onUnmounted(() => {
 .sidebar-toggle-btn {
   width: 30px;
   height: 30px;
-  border-radius: 6px;
+  border-radius: var(--x-radius-xs, 6px);
   border: none;
   background: transparent;
   color: var(--x-text-3);
@@ -663,7 +666,7 @@ onUnmounted(() => {
   align-items: center;
   background: var(--x-card-soft);
   border: 1px solid var(--x-border);
-  border-radius: 6px;
+  border-radius: var(--x-radius-xs, 6px);
   height: 32px;
   padding: 0 8px;
   transition: all 0.18s cubic-bezier(0.2, 0, 0, 1);
@@ -707,7 +710,7 @@ onUnmounted(() => {
     color: var(--x-text-3);
     background: var(--x-card);
     border: 1px solid var(--x-border);
-    border-radius: 4px;
+    border-radius: var(--x-radius-2xs, 4px);
     padding: 1px 4px;
     line-height: 1.2;
     user-select: none;
@@ -731,7 +734,7 @@ onUnmounted(() => {
 .sidebar-search-collapsed-btn {
   width: 38px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: var(--x-radius-sm, 8px);
   border: 1px solid transparent;
   background: transparent;
   color: var(--x-text-3);
@@ -761,13 +764,17 @@ onUnmounted(() => {
 
   scrollbar-width: thin;
   scrollbar-color: var(--x-border) transparent;
+  // 常驻预留滚动条槽位 + 与 Firefox thin 接近的宽度：
+  // 原来 Chromium 4px / Firefox thin ≈11px，同一段菜单文字右边缘相差 4~7px，
+  // 省略号位置因此在两个引擎里不一样
+  scrollbar-gutter: stable;
 
   &::-webkit-scrollbar {
-    width: 4px;
+    width: 8px;
   }
   &::-webkit-scrollbar-thumb {
     background: var(--x-border);
-    border-radius: 4px;
+    border-radius: var(--x-radius-2xs, 4px);
   }
 
   /* 展开状态下的菜单项 */
@@ -776,7 +783,7 @@ onUnmounted(() => {
     :deep(.el-sub-menu__title) {
       height: 38px;
       line-height: 38px;
-      border-radius: 6px;
+      border-radius: var(--x-radius-xs, 6px);
       margin-bottom: 2px;
       font-size: 13.5px;
       font-weight: 500;
@@ -874,7 +881,7 @@ onUnmounted(() => {
 
   /* 折叠状态下的像素级居中与无缝收缩 */
   &.el-menu--collapse {
-    width: 58px !important;
+    width: var(--x-sidebar-w-mini, 58px) !important;
     padding: 6px 0 !important;
 
     :deep(.el-sub-menu__icon-arrow) {
@@ -890,9 +897,12 @@ onUnmounted(() => {
       width: 40px !important;
       height: 38px !important;
       line-height: 38px !important;
-      margin: 3px auto !important;
+      // 展开态图标中心 = 菜单 padding 8 + 菜单项 padding 10 + 图标半宽 10 = 28px。
+      // 折叠态若用 margin:auto 居中，40px 盒在 58px 里必然落在 29px（恒定的 29），
+      // 与展开态差 1px；改成显式左外边距 8px 后中心 = 8 + 20 = 28px，两态对齐。
+      margin: 3px 0 3px 8px !important;
       padding: 0 !important;
-      border-radius: 8px;
+      border-radius: var(--x-radius-sm, 8px);
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
@@ -969,7 +979,7 @@ onUnmounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--x-success, #10b981);
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
   flex: none;
 }
@@ -984,17 +994,18 @@ onUnmounted(() => {
   transition: opacity 0.2s cubic-bezier(0.2, 0, 0, 1) 0.04s, transform 0.2s cubic-bezier(0.2, 0, 0, 1) 0.04s, max-width 0.24s cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* 主内容区自适应过渡（折叠模式下固定为 58px margin，不因悬停抖动页面布局） */
+/* 主内容区自适应过渡（折叠模式下固定为 Mini Dock 宽度 margin，不因悬停抖动页面布局） */
 .admin-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  transition: margin-left 0.22s cubic-bezier(0.2, 0, 0, 1);
+  // 与侧栏宽度过渡同一时长同一曲线，否则折叠过程中两者不同步、交界处露缝
+  transition: margin-left var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
 
   @media (min-width: 768px) {
-    margin-left: 236px;
+    margin-left: var(--x-sidebar-w, 236px);
   }
 
   @media (max-width: 767.98px) {
@@ -1003,14 +1014,8 @@ onUnmounted(() => {
 
   &.collapsed {
     @media (min-width: 768px) {
-      margin-left: 58px;
+      margin-left: var(--x-sidebar-w-mini, 58px);
     }
-  }
-}
-
-.admin-layout.is-collapsed .admin-main {
-  @media (min-width: 768px) {
-    margin-left: 58px;
   }
 }
 
@@ -1024,7 +1029,7 @@ onUnmounted(() => {
   padding: 0 24px;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--x-z-sticky, 10);
   transition: background-color 0.24s ease, border-color 0.24s ease;
 
   @media (max-width: 767.98px) {
@@ -1093,7 +1098,13 @@ onUnmounted(() => {
 }
 .admin-content {
   flex: 1;
+  // 正文内边距的唯一来源：.x-page 已不再叠加 padding。
+  // 三档单调递减，拖拽窗口跨断点时不出现「左右跳」
   padding: 20px 24px 32px;
+
+  @media (max-width: 900px) {
+    padding: 18px 20px 28px;
+  }
 
   @media (max-width: 767.98px) {
     padding: 14px 12px 24px;
@@ -1101,7 +1112,7 @@ onUnmounted(() => {
 }
 
 :deep(.admin-drawer) {
-  width: 236px !important;
+  width: var(--x-sidebar-w, 236px) !important;
   max-width: 75vw !important;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15) !important;
 
@@ -1120,9 +1131,6 @@ onUnmounted(() => {
     padding: 0 12px;
     height: 52px;
   }
-  .admin-content {
-    padding: 12px 10px;
-  }
   .switch-view-btn {
     padding: 0 8px;
     .switch-view-text {
@@ -1135,7 +1143,7 @@ onUnmounted(() => {
 <!-- 全局浮动 Popper 样式（Mini 折叠模式下的悬停子菜单） -->
 <style lang="scss">
 .el-popper.admin-menu-popper {
-  border-radius: 8px !important;
+  border-radius: var(--x-radius-sm, 8px) !important;
   border: 1px solid var(--x-border) !important;
   box-shadow: var(--x-shadow-lg) !important;
   padding: 5px !important;
@@ -1149,7 +1157,7 @@ onUnmounted(() => {
     .el-menu-item {
       height: 34px;
       line-height: 34px;
-      border-radius: 6px;
+      border-radius: var(--x-radius-xs, 6px);
       font-size: 13px;
       color: var(--x-text-2);
       margin-bottom: 2px;

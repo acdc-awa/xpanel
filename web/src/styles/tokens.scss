@@ -34,8 +34,30 @@
   /* ===== 尺寸与圆角 ===== */
   --x-radius: 12px;
   --x-radius-sm: 8px;
+  --x-radius-xs: 6px;
+  --x-radius-2xs: 4px;
+  --x-radius-lg: 14px;
   --el-border-radius-base: 8px;
-  --x-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  /* 只声明各端真实存在的等宽字体。'JetBrains Mono' / 'Fira Code' 从未加载，
+     留着只会让 Windows 落 Consolas、macOS 落 SF Mono，同串数字宽度不同。 */
+  --x-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* ===== 布局常量（单源：组件里不要再手写 px，否则折叠/展开必然错位） ===== */
+  --x-sidebar-w: 236px;
+  --x-sidebar-w-mini: 58px;
+  --x-topbar-h: 56px;
+  --x-tabbar-h: 54px;
+  --x-content-max: 1320px;
+  /* 侧栏宽度与内容 margin-left 的过渡必须同时长同曲线，否则交界处露缝 */
+  --x-collapse-dur: 0.24s;
+  --x-collapse-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ===== 层级阶梯（新组件从这里取值，不要写裸数字） ===== */
+  --x-z-sticky: 10;
+  --x-z-sidebar: 80;
+  --x-z-sidebar-hover: 200;
+  --x-z-chart-tip: 1200;
+  --x-z-fullscreen: 1500;
 
   /* ===== 代码编辑器配色（YAML 语法高亮 / 错误标记） ===== */
   --x-code-bg: #f8fafc;
@@ -52,10 +74,16 @@
   --x-code-active-line: rgba(99, 102, 241, 0.06);
   --x-code-selection: rgba(99, 102, 241, 0.18);
 
+  /* Markdown 围栏代码块：两套主题都用深底浅字。此前用 --x-fill-1 当底色而文字写死
+     #e2e8f0，亮色下变成浅底浅字（对比度 ≈1.05:1），肉眼近似空白。 */
+  --x-code-block-bg: #0f172a;
+  --x-code-block-text: #e2e8f0;
+
   /* ===== 阴影系统 ===== */
   --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
   --x-shadow-md: 0 4px 12px rgba(23, 27, 46, 0.08);
   --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
+  --x-shadow-xl: 0 20px 25px -5px rgba(23, 27, 46, 0.16);
 
   /* Element Plus 亮色变量 */
   --el-color-primary: #6366f1;
@@ -65,7 +93,10 @@
   --el-color-primary-light-8: #e1e1fc;
   --el-color-primary-light-9: #f2f2fe;
   --el-color-primary-dark-2: #4f52c9;
-  --el-font-family: 'Inter', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* 只声明随系统存在的字体。'Inter' 全项目未加载（无 @font-face / 无 webfont），
+     留着会让 Windows 落 Segoe UI、macOS 落 SF Pro，字宽差 5%~8%。 */
+  --el-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
 html.dark {
@@ -105,6 +136,10 @@ html.dark {
   --x-code-active-line: rgba(129, 140, 248, 0.1);
   --x-code-selection: rgba(129, 140, 248, 0.24);
 
+  /* Markdown 围栏代码块（暗色下用比卡片更深的底，和亮色保持同一观感层次） */
+  --x-code-block-bg: #0b1120;
+  --x-code-block-text: #e2e8f0;
+
   /* ===== 语义状态色 (Semantic Status in Dark) ===== */
   --x-success: #34d399;
   --x-success-soft: rgba(16, 185, 129, 0.16);
@@ -119,6 +154,7 @@ html.dark {
   --x-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   --x-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
   --x-shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.6);
+  --x-shadow-xl: 0 20px 28px -6px rgba(0, 0, 0, 0.7);
 
   /* Element Plus 深色变量覆盖 */
   --el-bg-color: #131b2e;

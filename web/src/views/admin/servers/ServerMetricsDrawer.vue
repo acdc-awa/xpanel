@@ -9,6 +9,7 @@ import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
 
 import { useThemeStore } from '@/stores/theme'
+import { useContainerResize } from '@/composables/useContainerResize'
 
 const theme = useThemeStore()
 
@@ -80,6 +81,11 @@ function resizeCharts() {
   memChart?.resize()
   userChart?.resize()
 }
+
+// 弹窗带入场动画、且 destroy-on-close 会销毁重建内部 DOM：
+// 只在打开瞬间 echarts.init 会把 canvas 固定在当时（可能还是小尺寸）的容器上，
+// 表现为四张图空白或被压扁，所以这里持续跟随容器尺寸变化。
+useContainerResize([netChartRef, cpuChartRef, memChartRef, userChartRef], resizeCharts)
 
 // destroy-on-close 会在关闭动画结束后销毁弹窗内 DOM，
 // 实例必须跟着释放并置空，否则下次打开时 initCharts 会因实例非空跳过初始化，
@@ -274,6 +280,8 @@ watch(
       updateMobileState()
       await nextTick()
       initCharts()
+      // 初始化后立刻按当前容器尺寸校正一次，避免首帧按动画期间的尺寸绘制
+      resizeCharts()
       window.addEventListener('resize', resizeCharts)
       loadData()
       refreshTimer = setInterval(loadData, 15000)
@@ -368,8 +376,8 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 :deep(.el-dialog__body) {
-  max-height: 76vh;
-  overflow-y: auto;
+  // 高度上限统一由全局 .el-dialog 的 max-height:85vh + body 弹性滚动控制。
+  // 这里以前写 76vh、移动端又写 calc(85vh - 70px)，同一弹窗不同入口高度不同。
   overflow-x: hidden;
   padding: 14px 18px 20px;
 }
@@ -438,7 +446,6 @@ onUnmounted(() => {
 
 @media (max-width: 768px) {
   :deep(.el-dialog__body) {
-    max-height: calc(85vh - 70px) !important;
     padding: 10px 12px 16px !important;
   }
 

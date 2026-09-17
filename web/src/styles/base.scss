@@ -16,10 +16,12 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
-// 页面容器（外层已由 layout 提供容器内边距，此处专注于最大宽度与对齐）
+// 页面容器（内边距一律由 layout 单独提供，此处只负责最大宽度与居中；
+// 曾经这里在 900/768 两档也加 padding，与 .admin-content 叠加后正文左右边距
+// 变成 24 → 38 → 22px，缩放窗口时整页内容会左右跳）
 .x-page {
   padding: 0;
-  max-width: 1600px;
+  max-width: var(--x-content-max, 1320px);
   margin: 0 auto;
   width: 100%;
 }
@@ -39,11 +41,12 @@ a { color: inherit; text-decoration: none; }
     border-color: rgba(99, 102, 241, 0.25);
   }
 }
-.x-stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; font-size: 20px; }
+.x-stat-icon { width: 40px; height: 40px; border-radius: var(--x-radius-sm, 8px); display: flex; align-items: center; justify-content: center; margin-bottom: 8px; font-size: 20px; }
 .x-stat-icon.purple { background: var(--x-primary-soft); color: var(--x-primary); }
-.x-stat-icon.green { background: #e7f9f1; color: #059669; }
-.x-stat-icon.blue { background: #e8f1fe; color: #2563eb; }
-.x-stat-icon.orange { background: #fef6e7; color: #d97706; }
+// 这三个此前写死亮色底/亮色字，暗色主题下是刺眼的浅色块；改用语义 token 后随主题切换
+.x-stat-icon.green { background: var(--x-success-soft); color: var(--x-success); }
+.x-stat-icon.blue { background: var(--x-info-soft); color: var(--x-info); }
+.x-stat-icon.orange { background: var(--x-warning-soft); color: var(--x-warning); }
 .x-stat-value { font-size: 26px; font-weight: 700; line-height: 1.2; font-family: var(--x-font-mono); }
 .x-stat-label { color: var(--x-text-2); font-size: 12.5px; margin-top: 2px; }
 
@@ -107,7 +110,7 @@ a { color: inherit; text-decoration: none; }
 
 // 条形图（占位）
 .x-bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 140px; padding: 10px 4px 0; }
-.x-bar { flex: 1; background: linear-gradient(180deg, #818cf8, #6366f1); border-radius: 4px 4px 0 0; min-width: 14px; opacity: 0.9; }
+.x-bar { flex: 1; background: linear-gradient(180deg, #818cf8, #6366f1); border-radius: var(--x-radius-2xs, 4px) var(--x-radius-2xs, 4px) 0 0; min-width: 14px; opacity: 0.9; }
 .x-bar:nth-child(odd) { opacity: 0.6; }
 .x-chart-x { display: flex; gap: 8px; color: var(--x-text-3); font-size: 11px; padding-top: 6px; }
 .x-chart-x span { flex: 1; text-align: center; }
@@ -131,7 +134,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--x-radius-xs, 6px);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -214,7 +217,7 @@ a { color: inherit; text-decoration: none; }
 // 客户端共用 (Fluid 响应式容器)
 .x-client-body {
   width: 100%;
-  max-width: 1440px;
+  max-width: var(--x-content-max, 1320px);
   margin: 0 auto;
   padding: 0;
 }
@@ -247,12 +250,17 @@ a { color: inherit; text-decoration: none; }
 
 // 响应式
 @media (max-width: 900px) {
-  .x-page { padding: 14px; }
-  .x-stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  // 注意：这里不再给 .x-page 加 padding —— 内边距只由 layout 提供，避免两处叠加
+  .x-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .x-stat-value { font-size: 20px; }
-  .x-toolbar { flex-direction: column; align-items: stretch; }
-  .x-toolbar-left { width: 100%; }
 }
+@media (max-width: 480px) {
+  // 375px 下两列统计卡每列仅约 170px，收紧内边距与字号避免数值被挤压换行
+  .x-stat-grid { gap: 8px; }
+  .x-stat-card { padding: 14px; }
+  .x-stat-value { font-size: 18px; }
+}
+
 @media (min-width: 768px) {
   .x-dash-grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
   .x-acct-grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
@@ -272,10 +280,13 @@ a { color: inherit; text-decoration: none; }
 
 // 1. 全局遮罩层 (Overlay)
 .el-overlay {
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  // 模糊半径从 5px 收到 3px：全屏 backdrop-filter 是弹窗打开掉帧的主要来源
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   background-color: rgba(15, 23, 42, 0.45) !important;
-  overflow: auto;
+  // 滚动交给下面这层 .el-overlay-dialog（EP 自带 position:fixed;inset:0;overflow:auto），
+  // 两层都 overflow:auto 时滚轮落点不确定，还可能看到两条相邻滚动条
+  overflow: hidden !important;
 }
 
 // 严禁对 display 进行 !important 覆盖，确保 style="display: none;" 能够正确隐藏
@@ -291,6 +302,7 @@ a { color: inherit; text-decoration: none; }
   justify-content: center;
   min-height: 100%;
   padding: 24px 16px;
+  overflow: auto;
   box-sizing: border-box;
 }
 
@@ -298,7 +310,7 @@ a { color: inherit; text-decoration: none; }
 .el-message-box {
   width: 440px !important;
   max-width: calc(100vw - 32px) !important;
-  border-radius: 14px !important;
+  border-radius: var(--x-radius-lg, 14px) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   border: 1px solid var(--x-border) !important;
   padding: 24px 24px 20px !important;
@@ -322,7 +334,9 @@ a { color: inherit; text-decoration: none; }
   }
 
   .el-message-box__headerbtn {
-    top: 18px !important;
+    // EP 原生按钮盒是 40×40 且图标居中，标题中心在 24 + 24/2 = 36px 处，
+    // 所以 top 必须是 36 - 40/2 = 16px 才对齐（原来写 18px，偏低 2px）
+    top: 16px !important;
     right: 20px !important;
     .el-message-box__close {
       color: var(--x-text-3) !important;
@@ -370,17 +384,24 @@ a { color: inherit; text-decoration: none; }
 
 // 3. ElDialog 通用对话框（紧凑自适应，高宽根据内容自然包裹）
 .el-dialog {
-  border-radius: 14px !important;
+  // 纵向弹性布局：标题/footer 固定，只有 body 滚动
+  display: flex !important;
+  flex-direction: column !important;
+  border-radius: var(--x-radius-lg, 14px) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   border: 1px solid var(--x-border) !important;
   background: var(--x-card) !important;
   max-width: calc(100vw - 32px) !important;
+  // 高度上限移到弹窗整体：原先把上限写成 body 的 calc(85vh - 120px)，120px 是按
+  // 「单行标题 + 单行 footer」估的，标题一换行总高就突破 85vh、底部按钮被顶出视口
+  max-height: 85vh !important;
   box-sizing: border-box !important;
   height: auto !important;
   margin: auto !important;
   overflow: hidden !important;
 
   .el-dialog__header {
+    flex: none;
     padding: 16px 22px 14px !important;
     margin-right: 0 !important;
     border-bottom: 1px solid var(--x-border);
@@ -393,8 +414,17 @@ a { color: inherit; text-decoration: none; }
   }
 
   .el-dialog__headerbtn {
-    top: 16px !important;
+    // EP 原生的按钮盒是 48×48 且图标在盒内居中。只改 top/right 会让图标中心落在
+    // 16 + 48/2 = 40px，而标题中心在 16 + 24/2 = 28px → 低约 12px，且盒底追出 header 底边。
+    // 这里把盒子显式收成 40×40、top 收到 8px，中心 = 8 + 20 = 28px，与标题齐平。
+    top: 8px !important;
     right: 20px !important;
+    width: 40px !important;
+    height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
     .el-dialog__close {
       color: var(--x-text-3) !important;
       font-size: 16px !important;
@@ -406,17 +436,24 @@ a { color: inherit; text-decoration: none; }
   }
 
   .el-dialog__body {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 20px 22px !important;
-    max-height: calc(85vh - 120px) !important;
     overflow-y: auto !important;
   }
 
   .el-dialog__footer {
+    flex: none;
     padding: 14px 22px 18px !important;
     border-top: 1px solid var(--x-border);
     display: flex !important;
     justify-content: flex-end !important;
     gap: 10px !important;
+  }
+
+  // 全屏弹窗由 EP 自己接管高度（height:100%），不要把 85vh 上限套上去
+  &.is-fullscreen {
+    max-height: none !important;
   }
 }
 
@@ -425,10 +462,14 @@ a { color: inherit; text-decoration: none; }
   background: var(--x-card) !important;
   box-shadow: -12px 0 48px rgba(0, 0, 0, 0.22) !important;
   border-left: 1px solid var(--x-border) !important;
+  // 贴边抽屉不做圆角（显式声明，避免以后误以为是漏写）
+  border-radius: 0 !important;
 
   @media (max-width: 640px) {
-    width: 100vw !important;
-    max-width: 100vw !important;
+    // 用 100% 而不是 100vw：.el-drawer 是 .el-overlay（position:fixed）内的
+    // position:absolute，100% 天然不含经典滚动条宽度，100vw 会宽出约 15px
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   .el-drawer__header {
@@ -460,6 +501,11 @@ a { color: inherit; text-decoration: none; }
 
     .el-dialog__header {
       padding: 14px 18px 12px !important;
+    }
+    .el-dialog__headerbtn {
+      // 窄屏 header 变矮（14 + 24 + 12 = 50px），标题中心 26px → 6 + 20 = 26px
+      top: 6px !important;
+      right: 14px !important;
     }
     .el-dialog__body {
       padding: 16px 18px !important;
@@ -520,7 +566,7 @@ a { color: inherit; text-decoration: none; }
     padding: 6px 12px;
     background: var(--x-fill-2, rgba(0, 0, 0, 0.03));
     border-left: 3.5px solid var(--x-primary, #6366f1);
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--x-radius-xs, 6px) var(--x-radius-xs, 6px) 0;
     color: var(--x-text-2);
     font-size: 13.5px;
     p { margin: 0; }
@@ -531,16 +577,18 @@ a { color: inherit; text-decoration: none; }
     font-size: 12.5px;
     padding: 2px 6px;
     background: var(--x-fill-2, rgba(0, 0, 0, 0.05));
-    border-radius: 4px;
+    border-radius: var(--x-radius-2xs, 4px);
     color: var(--x-primary);
   }
 
   pre {
     margin: 8px 0;
     padding: 10px 12px;
-    background: var(--x-fill-1, #1e293b);
-    color: #e2e8f0;
-    border-radius: 6px;
+    // 底色与文字必须成对走 token：原来底色用 --x-fill-1（亮色 = #f8fafc）而文字
+    // 写死 #e2e8f0，亮色下是浅底浅字（对比度 ≈1.05:1），公告里的代码块近乎空白
+    background: var(--x-code-block-bg, #0f172a);
+    color: var(--x-code-block-text, #e2e8f0);
+    border-radius: var(--x-radius-xs, 6px);
     overflow-x: auto;
     code {
       padding: 0;
@@ -596,10 +644,6 @@ a { color: inherit; text-decoration: none; }
     display: block !important;
   }
 
-  .x-page {
-    padding: 14px 12px;
-  }
-
   .x-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -636,7 +680,7 @@ a { color: inherit; text-decoration: none; }
   .mobile-data-card {
     background: var(--x-card, #ffffff);
     border: 1px solid var(--x-border, #e5e7eb);
-    border-radius: var(--x-radius, 10px);
+    border-radius: var(--x-radius, 12px);
     padding: 14px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     transition: all 0.2s ease;
@@ -712,7 +756,7 @@ a { color: inherit; text-decoration: none; }
     min-width: min(320px, 94vw);
     max-width: 94vw !important;
     margin: 16px auto !important;
-    border-radius: 12px !important;
+    border-radius: var(--x-radius, 12px) !important;
 
     // 紧凑型弹窗（如 2FA、确认框）不被过度拉伸
     &.twofa-dialog,
@@ -731,9 +775,16 @@ a { color: inherit; text-decoration: none; }
       }
     }
 
+    .el-dialog__headerbtn {
+      // 窄屏 header 高 14 + 24 + 10 = 48px，标题中心 26px → 6 + 20 = 26px
+      top: 6px !important;
+      right: 12px !important;
+    }
+
     .el-dialog__body {
       padding: 12px 16px !important;
-      max-height: calc(85vh - 110px) !important;
+      // 高度上限已由 .el-dialog 的 max-height + body 弹性滚动接管
+      max-height: none !important;
       overflow-y: auto !important;
     }
 
@@ -744,8 +795,8 @@ a { color: inherit; text-decoration: none; }
 
   // 全局 Drawer 移动端安全适配
   .el-drawer {
-    width: 100vw !important;
-    max-width: 100vw !important;
+    width: 100% !important;
+    max-width: 100% !important;
 
     .el-drawer__header {
       padding: 14px 16px 10px !important;
@@ -760,6 +811,27 @@ a { color: inherit; text-decoration: none; }
     .el-drawer__body {
       padding: 14px 14px !important;
     }
+  }
+}
+
+// ==========================================
+// 无障碍：尊重系统「减少动态效果」
+// 管理面板常开时，状态点呼吸脉冲 / 卡片 hover 位移 / 侧栏过渡会持续合成重绘，
+// 低端机上表现为耗电与卡顿；系统开启该偏好后应当全部停下。
+// ==========================================
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .x-status-dot.online {
+    animation: none !important;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
   }
 }
 

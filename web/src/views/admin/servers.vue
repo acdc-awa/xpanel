@@ -1208,20 +1208,21 @@ async function removeServer(row: any) {
   border: 1px solid var(--x-border, #e5e7eb);
   margin-top: 16px;
 
+  // 与管理端「面板更新结果」同款：状态色走语义 token，深色模式下不再出现亮色块
   &.is-running {
-    border-color: #93c5fd;
-    background: #eff6ff;
-    .icon-process { font-size: 22px; color: #2563eb; }
+    border-color: var(--x-info);
+    background: var(--x-info-soft);
+    .icon-process { font-size: 22px; color: var(--x-info); }
   }
   &.is-success {
-    border-color: #86efac;
-    background: #f0fdf4;
-    .icon-success { font-size: 22px; color: #16a34a; font-weight: bold; }
+    border-color: var(--x-success);
+    background: var(--x-success-soft);
+    .icon-success { font-size: 22px; color: var(--x-success); font-weight: bold; }
   }
   &.is-failed {
-    border-color: #fca5a5;
-    background: #fef2f2;
-    .icon-error { font-size: 22px; color: #dc2626; font-weight: bold; }
+    border-color: var(--x-danger);
+    background: var(--x-danger-soft);
+    .icon-error { font-size: 22px; color: var(--x-danger); font-weight: bold; }
   }
 
   .status-texts {
@@ -1234,7 +1235,7 @@ async function removeServer(row: any) {
     }
     .status-err {
       margin-top: 6px;
-      color: #b91c1c;
+      color: var(--x-danger);
       font-size: 11.5px;
       line-height: 1.4;
       word-break: break-all;

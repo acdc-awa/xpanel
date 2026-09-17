@@ -18,6 +18,7 @@ import { formatDateTime } from '@/utils/timezone'
 import type { DashboardData, ServerMatrixItem } from '@/api/types'
 import { formatBytes } from '@/utils/format'
 import { useThemeStore } from '@/stores/theme'
+import { useContainerResize } from '@/composables/useContainerResize'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 import OnlineUsersPanel from './servers/OnlineUsersPanel.vue'
 
@@ -103,6 +104,10 @@ function resizeCharts() {
   donutChart?.resize()
 }
 
+// 容器自身尺寸变化即重算：折叠侧栏改的是 margin-left，不触发 window resize，
+// 只靠 window.resize 会让图表停在旧宽度上、右侧留白（环形图例横竖排也依赖容器宽度）
+useContainerResize([trendChartRef, donutChartRef], resizeCharts)
+
 function updateCharts() {
   if (!dashData.value) return
   const isMob = typeof window !== 'undefined' ? window.innerWidth <= 768 : false
@@ -136,7 +141,7 @@ function updateCharts() {
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: 99;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: var(--x-z-chart-tip, 1200);',
       formatter: (params: any) => {
         let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
         let total = 0
@@ -230,7 +235,7 @@ function updateCharts() {
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: 99;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: var(--x-z-chart-tip, 1200);',
       formatter: (params: any) => {
         return `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params.name}</div>
         <div style="display:flex;align-items:center;gap:6px">

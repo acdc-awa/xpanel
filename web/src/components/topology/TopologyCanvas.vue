@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   VueFlow,
   Handle,
@@ -71,7 +71,10 @@ interface BoxData {
 
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
-const flowRef = ref<{ updateNodeInternals?: (id: string) => void } | null>(null)
+const flowRef = ref<{
+  updateNodeInternals?: (id: string) => void
+  fitView?: (options?: Record<string, unknown>) => void
+} | null>(null)
 const isFullscreen = ref(false)
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
@@ -1430,7 +1433,18 @@ function resetLayout() {
 
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value
+  // 全屏时锁住背后页面的滚动，否则滚轮会滚动被遮住的页面
+  document.body.style.overflow = isFullscreen.value ? 'hidden' : ''
+  // 进出全屏后容器尺寸变了（640px ↔ 100vh），把视口重新适配一次：
+  // 只有模板上的 :fit-view-on-init，调过缩放/拖动后点全屏会停在旧的 pan/zoom，图偏到一角
+  nextTick(() => {
+    setTimeout(() => flowRef.value?.fitView?.({ padding: 0.15 }), 260)
+  })
 }
+
+onUnmounted(() => {
+  document.body.style.overflow = ''
+})
 
 const hasData = computed(() => !!props.topology && props.topology.servers.length > 0)
 </script>
@@ -2042,7 +2056,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 .topology-wrap {
   height: 640px;
   border: 1px solid var(--x-border);
-  border-radius: 10px;
+  border-radius: var(--x-radius-sm, 8px);
   overflow: hidden;
   background: #0f172a;
   position: relative;
@@ -2050,10 +2064,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
   &.is-fullscreen {
     position: fixed;
+    // inset:0 已经把盒子钉在包含块（视口）上，再写 width:100vw 反而按「视口含
+    // 滚动条」的宽度计算，Windows/Linux 传统滚动条下右侧会被裁掉约 15px 并出现横向滚动条
     inset: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 1500;
+    width: 100%;
+    height: 100%;
+    // 移动端地址栏收缩时 100vh 不会跟着变，底部工具栏会被压住；dvh 跟随动态视口。
+    // 不支持 dvh 的浏览器沿用上一行的 100%
+    height: 100dvh;
+    z-index: var(--x-z-fullscreen, 1500);
     border-radius: 0;
     border: none;
   }
@@ -2611,12 +2630,16 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(255, 255, 255, 0.1);
         color: #94a3b8;
-        font-size: 7px;
-        line-height: 8px;
-        padding: 0 3px;
-        height: 10px;
+        // 原来 7px / 8px 行高 / 10px 高：低于不少环境的最小字号下限
+        // （部分 Android WebView 与国产套壳浏览器强制 12px），会被撑破按钮；
+        // 提到 10px 后即使被强制放大到 12px 也仍在 14px 盒内
+        font-size: 10px;
+        line-height: 12px;
+        padding: 0 4px;
+        min-width: 14px;
+        height: 14px;
         cursor: pointer;
-        border-radius: 2px;
+        border-radius: var(--x-radius-2xs, 4px);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2829,6 +2852,15 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 </style>
 
 <style>
+/* 连线层必须压在节点层之上，这不是笔误：
+   1) type:'boxrule' 的边两端都在同一个节点上（source=server-N/inb-src-X，
+      target=server-N/out-tgt-Y），画的就是服务器卡片内部的「入站行 → 出站行」路由虚线。
+      一旦把 edges 压到 nodes 之下，这些盒内走线会被卡片背景整片盖住、完全不可见。
+   2) 跨盒 refedge 允许直穿中间盒子（见 refEdgePath 上方的取舍说明），
+      也是靠这一层实现的。
+   因此两者关系保持 edges(100) > nodes(10) 不变；
+   真正错的是「选中态」与普通节点同为 10 —— 选中/拖拽不再置顶，重叠卡片顺序错乱。
+   把选中态提到 50：高于其它节点、仍低于连线层，选中卡片自己的盒内走线照常可见。 */
 .topology-wrap .vue-flow__edges {
   z-index: 100 !important;
   pointer-events: none !important;
@@ -2838,9 +2870,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   z-index: 10 !important;
 }
 
-.topology-wrap .vue-flow__node,
-.topology-wrap .vue-flow__node.selected {
+.topology-wrap .vue-flow__node {
   z-index: 10 !important;
+}
+
+.topology-wrap .vue-flow__node.selected,
+.topology-wrap .vue-flow__node.dragging {
+  z-index: 50 !important;
 }
 
 .boxrule-glow {
@@ -2959,9 +2995,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
 .custom-resizer-right {
   position: absolute;
+  /* 原来是 top: 38px + translateY(-50%)：这个 38px 与抓手自身 36px 高、与 .sb-head 的
+     48px 高都没有对应关系（纯反推值），标题栏高度一变抓手就跑到卡片外。
+     改成上下贴边 + margin:auto，抓手恒在卡片垂直居中处，与任何高度常量解耦。 */
+  top: 0;
+  bottom: 0;
   right: -3px;
-  top: 38px;
-  transform: translateY(-50%);
+  margin: auto 0;
   width: 6px;
   height: 36px;
   border-radius: 3px;

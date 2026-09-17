@@ -5,6 +5,7 @@ import { Delete, Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { useThemeStore } from '@/stores/theme'
+import { useContainerResize } from '@/composables/useContainerResize'
 import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { LogStats, CompactResult } from '@/api/admin'
@@ -112,7 +113,7 @@ function updateChart() {
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: 99;',
+      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: var(--x-z-chart-tip, 1200);',
       formatter: (params: any) => {
         let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
         let total = 0
@@ -162,6 +163,9 @@ function updateChart() {
 function resizeChart() {
   chart?.resize()
 }
+
+// 容器宽度变化即重算（侧栏折叠不会触发 window resize）
+useContainerResize([chartRef], resizeChart)
 
 // ---- 清理动作 ----
 async function runCleanup() {
