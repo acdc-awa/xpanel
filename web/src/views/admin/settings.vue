@@ -795,16 +795,40 @@ async function save() {
 
           <el-form label-position="top" style="max-width: 680px">
             <div class="form-grid">
-              <el-form-item label="站点名称（浏览器标题 / 订阅文件名）">
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    站点名称
+                    <el-tooltip placement="top" :show-after="150" content="用于浏览器页面标题、系统邮件及订阅默认文件名前缀">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
                 <el-input v-model="form.site.app_name" placeholder="例如：星云机场" maxlength="64" />
               </el-form-item>
-              <el-form-item label="站点描述">
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    站点描述
+                    <el-tooltip placement="top" :show-after="150" content="站点的副标题或一句话描述，展示在登录认证页与页脚">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
                 <el-input v-model="form.site.app_description" placeholder="一句话描述站点" maxlength="200" />
               </el-form-item>
             </div>
 
             <!-- LOGO 上传与自定义 -->
-            <el-form-item label="站点 LOGO（管理端侧栏 / 用户端顶栏 / 登录页品牌）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  站点 LOGO
+                  <el-tooltip placement="top" :show-after="150" content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪并转为轻量 Base64 存储。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <div class="upload-row">
                 <el-input
                   v-model="form.site.logo"
@@ -826,13 +850,18 @@ async function save() {
                   恢复默认
                 </el-button>
               </div>
-              <div class="form-item-tip">
-                支持 <code>.png</code>, <code>.jpg</code>, <code>.ico</code>, <code>.svg</code>, <code>.webp</code> 等格式，内置 1:1 智能裁剪与平滑缩放，生成轻量 Base64 格式安全存储。
-              </div>
             </el-form-item>
 
             <!-- Favicon 上传与自定义 -->
-            <el-form-item label="Favicon（浏览器标签页图标）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  Favicon
+                  <el-tooltip placement="top" :show-after="150" content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <div class="upload-row">
                 <el-input
                   v-model="form.site.favicon"
@@ -909,12 +938,20 @@ async function save() {
               </el-form-item>
             </div>
 
-            <el-form-item label="关闭注册">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  用户注册准入
+                  <el-tooltip placement="top" :show-after="150" content="关闭后，新用户无法通过前端注册页开户；开放注册状态下仍可受邀请码机制限制。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-switch
                 v-model="form.site.stop_register"
                 active-value="1"
                 inactive-value="0"
-                active-text="已关闭（新用户无法注册）"
+                active-text="已关闭（禁止新用户注册）"
                 inactive-text="开放注册（需邀请码）"
               />
             </el-form-item>
@@ -939,89 +976,138 @@ async function save() {
               </template>
             </el-alert>
 
-            <div class="section-subtitle">订阅入口与错误码</div>
+            <div class="section-subtitle">订阅入口与行为参数</div>
             <div class="form-grid">
-              <el-form-item label="对外订阅根地址 (subscribe_url)">
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    对外订阅根地址
+                    <el-tooltip placement="top" :show-after="150" content="用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），不设置则默认使用当前面板域名 + 订阅路径。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
                 <el-input v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），
-                  不设置则默认使用当前面板域名 + 订阅路径。
-                </span>
-              </el-form-item>
-
-              <el-form-item label="订阅入口路径 (subscribe_path)">
-                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  订阅端口<b>唯一入口</b>：只认该路径（支持 /path/:token 与 ?token=xxx），
-                  其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。
-                </span>
-              </el-form-item>
-
-              <el-form-item label="非订阅路径拒绝码 (sub_deny_code)">
-                <el-select v-model="form.site.sub_deny_code" style="width: 100%">
-                  <el-option label="404 Not Found（推荐，防探测）" value="404" />
-                  <el-option label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
-                </el-select>
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  订阅端口上非订阅路径的请求与<b>无效订阅 token</b> 统一返回该错误码。
-                </span>
-              </el-form-item>
-
-              <el-form-item label="订阅标题 (sub_profile_title)">
-                <el-input v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable maxlength="64" />
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  Clash 客户端显示的订阅名称（Content-Disposition filename 响应头，客户端据此命名配置）。
-                  留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。
-                </span>
-              </el-form-item>
-
-              <el-form-item label="订阅更新间隔 (sub_update_interval)">
-                <el-input-number v-model="subUpdateHours" :min="1" :max="168" style="width: 220px" />
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  Profile-Update-Interval 响应头（小时）：客户端按该周期自动重新拉取订阅。默认 24，范围 1–168。
-                </span>
               </el-form-item>
 
               <el-form-item>
                 <template #label>
-                  <span>多域名分发</span>
-                  <el-tooltip content="预留功能，下个版本上线" placement="top">
-                    <span class="x-chip gray" style="margin-left: 6px; font-size: 10px; padding: 1px 5px; cursor: help">预留功能</span>
-                  </el-tooltip>
+                  <span class="form-label-with-tip">
+                    订阅入口路径
+                    <el-tooltip placement="top" :show-after="150" content="订阅端口唯一入口路径（支持 /path/:token 与 ?token=xxx），其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
                 </template>
-                <el-tooltip content="预留功能，下个版本上线" placement="top">
-                  <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（预留功能，下个版本上线）" />
-                </el-tooltip>
-                <span class="muted" style="font-size: 12px; margin-top: 4px; display: block">
-                  预留功能，下个版本上线。用于轮询或主备容灾的多订阅分发域名。
-                </span>
+                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    非订阅路径拒绝码
+                    <el-tooltip placement="top" :show-after="150" content="订阅端口上访问非订阅路径的请求或无效订阅 Token 统一返回该 HTTP 状态码。404 可有效迷惑自动化扫描器。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
+                <el-select v-model="form.site.sub_deny_code" style="width: 100%">
+                  <el-option label="404 Not Found（推荐，防探测）" value="404" />
+                  <el-option label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    订阅配置标题
+                    <el-tooltip placement="top" :show-after="150" content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
+                <el-input v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable maxlength="64" />
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    客户端更新间隔（小时）
+                    <el-tooltip placement="top" :show-after="150" content="Profile-Update-Interval 响应头：客户端按该周期自动重新拉取订阅，默认 24 小时（范围 1–168 小时）。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
+                <el-input-number v-model="subUpdateHours" :min="1" :max="168" style="width: 100%" />
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    多域名分发
+                    <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">预留</span>
+                    <el-tooltip placement="top" :show-after="150" content="预留功能，用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。下个版本上线。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
+                <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（预留功能）" />
               </el-form-item>
             </div>
 
-            <div class="section-subtitle" style="margin-top: 24px">原生订阅清洗防探测网关 (Subscribe Sieve)</div>
+            <div class="section-subtitle" style="margin-top: 24px">
+              <span>原生订阅清洗防探测网关 (Subscribe Sieve)</span>
+              <el-tooltip placement="top" :show-after="150" content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。">
+                <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
             <div class="form-grid">
-              <el-form-item label="智能 UA 过滤与爬虫拦截">
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    智能 UA 过滤与爬虫拦截
+                    <el-tooltip placement="top" :show-after="150" content="自动识别并阻断 curl、python-requests、空 User-Agent 及已知自动化扫描脚本。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
                 <el-switch
                   v-model="form.site.sub_clean_ua"
                   active-value="1"
                   inactive-value="0"
-                  active-text="已开启（阻断 curl/python/空UA/扫描器）"
-                  inactive-text="已关闭（放行所有请求）"
+                  active-text="开启（阻断空 UA / 常见脚本）"
+                  inactive-text="放行所有"
                 />
               </el-form-item>
 
-              <el-form-item label="严格客户端白名单模式">
+              <el-form-item>
+                <template #label>
+                  <span class="form-label-with-tip">
+                    严格客户端白名单模式
+                    <el-tooltip placement="top" :show-after="150" content="仅放行知名代理客户端（如 Clash、Sing-box、Shadowrocket、Surge、V2rayN 等），其余均直接阻断。">
+                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
                 <el-switch
                   v-model="form.site.sub_strict_ua"
                   active-value="1"
                   inactive-value="0"
-                  active-text="已开启（仅放行知名代理客户端）"
-                  inactive-text="已关闭（宽松模式）"
+                  active-text="严格白名单"
+                  inactive-text="宽松模式"
                 />
               </el-form-item>
             </div>
 
-            <el-form-item label="自定义封禁 UA 关键词 (sub_blocked_ua)">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  自定义封禁 UA 关键词
+                  <el-tooltip placement="top" :show-after="150" content="匹配 User-Agent 包含指定关键词时直接拦截并返回拒绝码，英文逗号分隔，如 scan,exploit,badbot。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-input
                 v-model="form.site.sub_blocked_ua"
                 placeholder="如 scan,exploit,badbot（英文逗号分隔，命中即拦截）"
@@ -1056,74 +1142,134 @@ async function save() {
         <!-- ==================== TAB 3: 安全（人机验证） ==================== -->
         <el-tab-pane :label="isMobile ? '安全' : '安全设置'" name="captcha">
           <el-form label-position="top" style="max-width: 640px">
-            <el-form-item label="Cloudflare Turnstile 人机验证（登录 / 注册）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  人机验证保护
+                  <el-tooltip placement="top" :show-after="150" content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-switch
                 v-model="form.captcha.captcha_enable"
                 active-value="1"
                 inactive-value="0"
-                active-text="已开启（登录与注册需通过验证）"
-                inactive-text="已关闭（内网 / 开发环境可关）"
+                active-text="已开启（登录与注册保护）"
+                inactive-text="已关闭（开发/内网环境）"
               />
             </el-form-item>
-            <el-form-item label="验证类型">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  验证提供商
+                  <el-tooltip placement="top" :show-after="150" content="当前支持 Cloudflare Turnstile 智能无感验证。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-select v-model="form.captcha.captcha_type" style="width: 100%">
-                <el-option label="Turnstile（Cloudflare）" value="turnstile" />
+                <el-option label="Cloudflare Turnstile（智能无感验证）" value="turnstile" />
               </el-select>
             </el-form-item>
-            <el-form-item label="Turnstile Site Key（前端公开）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  Turnstile Site Key
+                  <el-tooltip placement="top" :show-after="150" content="从 Cloudflare 控制台 Turnstile 站点获取的公开前端密钥。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-input v-model="form.captcha.turnstile_site_key" placeholder="0x4A...（Cloudflare 控制台获取）" />
             </el-form-item>
-            <el-form-item label="Turnstile Secret Key（后端校验，仅管理端可见）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  Turnstile Secret Key
+                  <el-tooltip placement="top" :show-after="150" content="服务端与 Cloudflare 校验使用的通信私钥，请妥善保管，仅管理员可见。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-input v-model="form.captcha.turnstile_secret_key" type="password" show-password placeholder="0x4B...（请勿泄露）" />
             </el-form-item>
-            <p class="muted tip">
-              在 Cloudflare 控制台创建站点并添加 Turnstile 小部件后，将 Site Key / Secret Key 填入此处并开启开关即可。
-              未配置密钥时即使开启也会拒绝所有请求（fail-closed）。
-            </p>
+            <div class="settings-footer-tip">
+              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <span>在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。</span>
+            </div>
           </el-form>
         </el-tab-pane>
 
         <!-- ==================== TAB 3.5: 节点上报 ==================== -->
         <el-tab-pane :label="isMobile ? '上报' : '服务器上报'" name="agent">
           <el-form label-position="top" style="max-width: 640px">
-            <el-form-item label="流量上报周期（秒）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  流量增量上报周期（秒）
+                  <el-tooltip placement="top" :show-after="150" content="服务器节点向面板同步 xray 流量增量的频率。周期越短越能即时掐断超额用户，推荐值 15–60 秒。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-input-number v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
-              <span class="muted tip" style="margin-left: 12px">服务器每隔多久把 xray 流量增量上报给面板</span>
             </el-form-item>
-            <el-form-item label="状态心跳周期（秒）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  状态心跳周期（秒）
+                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等健康状态的频率，推荐值 5–15 秒。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-input-number v-model="agentHeartbeatSec" :min="5" :max="1800" :step="5" style="width: 220px" />
-              <span class="muted tip" style="margin-left: 12px">CPU / 内存 / 磁盘 / 在线用户等状态的上报频率</span>
             </el-form-item>
-            <p class="muted tip">
-              保存后立即下发到所有在线服务器（离线服务器重连后自动生效）；agent.yaml 的本地配置作为兜底。
-              缩短流量上报周期可加快超额 / 到期用户的踢下线时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；
-              周期过小会增大服务器与面板的负载，建议 15–120 秒。
-            </p>
+            <div class="settings-footer-tip">
+              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <span>配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）。</span>
+            </div>
           </el-form>
         </el-tab-pane>
 
         <!-- ==================== TAB 3.6: 时间与时区 ==================== -->
         <el-tab-pane :label="isMobile ? '时区' : '时间与时区'" name="timezone">
           <el-form label-position="top" style="max-width: 680px">
-            <el-form-item label="业务时区（按天口径）">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  业务时区（统计切天口径）
+                  <el-tooltip placement="top" :show-after="150" content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
               <el-select v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
                 <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
               </el-select>
-              <span class="muted tip" style="margin-left: 12px">
-                决定「今日/本月流量」「每日汇总」「清理边界」「入站日/周/月重置」的切天方式
-              </span>
             </el-form-item>
-            <el-form-item label="展示时区">
-              <el-select v-model="form.timezone.display_timezone" style="width: 300px">
-                <el-option label="跟随浏览器" value="browser" />
-                <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
-              </el-select>
-              <span class="muted tip" style="margin-left: 12px">当前：{{ effectiveTimezoneLabel() }}</span>
+            <el-form-item>
+              <template #label>
+                <span class="form-label-with-tip">
+                  展示时区
+                  <el-tooltip placement="top" :show-after="150" content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。">
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+                <el-select v-model="form.timezone.display_timezone" style="width: 300px">
+                  <el-option label="跟随浏览器" value="browser" />
+                  <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+                </el-select>
+                <span class="x-chip purple" style="font-size: 11px">当前识别：{{ effectiveTimezoneLabel() }}</span>
+              </div>
             </el-form-item>
-            <p class="muted tip">
-              数据库统一以 UTC 存储，跨地域部署的绝对时刻一致；按天统计口径由「业务时区」决定，
-              避免不同机器上的「今日流量」对不上。修改业务时区会改变日界，切换当日统计会有一个周期的波动。
-            </p>
+            <div class="settings-footer-tip">
+              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <span>底层数据统一以 UTC 存储绝对时间戳。修改业务时区将调整每日 0 点的计算基准，切换当日历史聚合数据可能会有短暂平滑窗口。</span>
+            </div>
           </el-form>
         </el-tab-pane>
 
@@ -1164,11 +1310,10 @@ async function save() {
                 </template>
               </el-table-column>
             </el-table>
-            <p class="muted tip">
-              备份文件保存在主控备份目录，按配置定期轮转；建议每月下载一份离线保存。
-              「上传备份」会先校验完整性与数据库版本再入库；「恢复」会用该备份覆盖当前数据库，
-              恢复前自动生成安全快照，恢复后面板重启并需重新登录（登录凭据以备份库为准）。
-            </p>
+            <div class="settings-footer-tip">
+              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <span>备份文件定期轮转保存。恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。建议定期下载重要备份离线保存。</span>
+            </div>
           </div>
         </el-tab-pane>
 
@@ -1372,16 +1517,21 @@ async function save() {
                 </div>
               </div>
 
-              <!-- 客户端 IP 来源说明（与 util.GetRealIP 语义对应） -->
+              <!-- 客户端 IP 来源说明 -->
               <div class="ip-hdr-note">
-                <p class="ip-hdr-title">客户端 IP 识别</p>
-                <p class="muted tip">
-                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
-                  <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
-                  请保持「面板端口仅绑定 127.0.0.1 + 由反向代理（Caddy/Nginx）前置」的部署形态：
-                  反代会覆盖/追加可信的 IP 头，限流与审计才能按真实 IP 生效。
-                  切勿将面板端口直接暴露公网（否则攻击者可伪造 IP 头绕过按 IP 的限流）。
-                </p>
+                <div class="ip-hdr-header">
+                  <span>客户端真实 IP 识别架构</span>
+                  <el-tooltip
+                    placement="top"
+                    :show-after="150"
+                    content="识别优先级：CF-Connecting-IP → X-Real-IP → X-Forwarded-For → RemoteAddr。请将面板仅绑定 127.0.0.1 由反代前置，切勿直接公网暴露，避免攻击者伪造 IP 头绕过限流。"
+                  >
+                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+                <div class="ip-hdr-content">
+                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> → <code>RemoteAddr</code> 优先级识别真实客户端 IP。请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态，确保审计日志与限流准确生效。
+                </div>
               </div>
 
               <div class="x-toolbar" style="margin-top: 12px">
@@ -1448,14 +1598,86 @@ async function save() {
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .form-item-tip { font-size: 11.5px; color: var(--x-text-3); margin-top: 4px; line-height: 1.5; }
+
+/* 统一表单 Label 提示图标 */
+.form-label-with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--x-text);
+  font-weight: 500;
+  line-height: 1.4;
+
+  .form-tip-icon {
+    font-size: 13.5px;
+    color: var(--x-text-3);
+    cursor: help;
+    transition: color 0.15s ease, transform 0.15s ease;
+    vertical-align: middle;
+
+    &:hover {
+      color: var(--x-primary);
+      transform: scale(1.15);
+    }
+  }
+}
+
+/* 统一精致底部提示条 */
+.settings-footer-tip {
+  margin-top: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--x-radius-sm);
+  background: var(--x-card-soft);
+  border: 1px solid var(--x-border);
+  font-size: 12px;
+  color: var(--x-text-2);
+  line-height: 1.5;
+
+  .tip-icon {
+    font-size: 14px;
+    color: var(--x-primary);
+    flex: none;
+    margin-top: 2px;
+  }
+}
+
 .ip-hdr-note {
   margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px dashed var(--x-border);
-  border-radius: 8px;
-  background: var(--x-bg);
+  padding: 12px 14px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-card);
+  box-shadow: var(--x-shadow);
+
+  .ip-hdr-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--x-text);
+    margin-bottom: 6px;
+
+    .form-tip-icon {
+      font-size: 13.5px;
+      color: var(--x-text-3);
+      cursor: help;
+      &:hover { color: var(--x-primary); }
+    }
+  }
+
+  .ip-hdr-content {
+    font-size: 12px;
+    color: var(--x-text-2);
+    line-height: 1.6;
+  }
+
   code {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-family: var(--x-font-mono);
     font-size: 11.5px;
     color: var(--x-primary);
   }
