@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,7 +73,11 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(All()...); err != nil {
 		return err
 	}
-	if err := migrateDefaultOutboundDSColumn(db); err != nil {
+	if err := migrateDefaultOutboundDSIntoOutbounds(db); err != nil {
+		return err
+	}
+	// 必须紧跟上一行：种子形态判定要看到并退后的最终 domainStrategy。
+	if err := migrateFreedomFinalRules(db); err != nil {
 		return err
 	}
 	if err := backfillPlanSnapshots(db); err != nil {
@@ -137,7 +142,7 @@ func migratePlanSaleFlags(db *gorm.DB) error {
 	if !m.HasTable(&Plan{}) || !m.HasColumn(&Plan{}, "enabled") {
 		return nil
 	}
-	// DROP COLUMN 写法同 migrateDefaultOutboundDSColumn（glebarez Migrator().DropColumn 对裸列名静默失效）
+	// DROP COLUMN 写法同 migrateDefaultOutboundDSIntoOutbounds（glebarez Migrator().DropColumn 对裸列名静默失效）
 	if err := db.Exec("ALTER TABLE plans DROP COLUMN enabled").Error; err != nil {
 		return fmt.Errorf("删除 plans 遗留列 enabled 失败: %w", err)
 	}
@@ -199,23 +204,181 @@ func backfillUserFollowPlanGroup(db *gorm.DB) error {
 	return db.Create(&Setting{Key: "user_follow_plan_group_backfilled", Value: "1"}).Error
 }
 
-// migrateDefaultOutboundDSColumn 默认出口出站解析策略列名修正（2026-08-31）：
-// 模型字段 DefaultOutboundDS 被 GORM 命名策略推导为 default_outbound_ds（缩写不展开），
-// 而更新接口手写 UPDATE 用 JSON 名 default_outbound_domain_strategy → 列不存在，
-// PUT /admin/servers/:id 恒 500「no such column」（路由页默认出口/解析策略从未保存成功过）。
-// 模型列名已显式统一为 API 同名，AutoMigrate 补出新列后：旧列存量值（仅创建路径写入过）
-// 搬入新列，再删除旧列。幂等（无旧列即跳过）。DROP COLUMN 写法同 dropLegacyAccessPointHostPort
-// （glebarez Migrator().DropColumn 对裸列名静默失效，须原生 ALTER）。
-func migrateDefaultOutboundDSColumn(db *gorm.DB) error {
+// legacyServerDSRow 迁移读取结构：服务器级出站解析策略列已从模型移除，用裸表结构读存量值。
+type legacyServerDSRow struct {
+	ID                 uint64
+	DefaultOutboundTag string
+	DS                 string
+}
+
+// migrateDefaultOutboundDSIntoOutbounds 服务器级出站解析策略并退出站（2026-09-17 唯一入口收口）：
+// 出站域名解析策略（freedom settings.domainStrategy）是出站级属性，唯一入口已收口到出站编辑器，
+// servers.default_outbound_domain_strategy 列移除。迁移按「行为等价」原则处理存量：
+//   - 旧生成器只在该列非空且非 AsIs 时，才把值注入 default_outbound_tag 指向的 freedom 出站，
+//     且仅当该出站自己的 domainStrategy 为空或 AsIs（出站自有值优先）。此处用同一优先级写入，
+//     保证升级前后的下发配置逐字节一致——直接删列会让这些服务器的域名解析行为静默退回 AsIs。
+//   - default_outbound_tag 指向的出站非 freedom（如 vless 中转）、或为停用（旧生成器不合并停用出站）、
+//     或 settings_json 为空/无 settings（旧注入同样跳过）时，该值本就未生效，迁移不动数据。
+//   - 该列非 AsIs 只可能由 PUT /admin/servers/:id 写入，而路由页加载即建默认出站行（EnsureDefaultServerOutbounds），
+//     故目标出站行必然存在；确无匹配行则跳过（该服务器此前也读不到该列的值）。
+//
+// 两个历史列名都要处理：default_outbound_domain_strategy（现行）与 default_outbound_ds（2026-08-31 前的
+// GORM 缩写推导列）。优先读现行列，回填完成后两列一并删除。幂等（列不存在即跳过，不重复注入）。
+func migrateDefaultOutboundDSIntoOutbounds(db *gorm.DB) error {
 	m := db.Migrator()
-	if !m.HasTable(&Server{}) || !m.HasColumn(&Server{}, "default_outbound_ds") {
+	if !m.HasTable(&Server{}) {
 		return nil
 	}
-	if err := db.Exec("UPDATE servers SET default_outbound_domain_strategy = default_outbound_ds WHERE default_outbound_ds != ''").Error; err != nil {
-		return fmt.Errorf("搬迁 servers.default_outbound_ds 存量值失败: %w", err)
+	// 取值列：现行列优先，退化为 2026-08-31 前的遗留列
+	dsCol := ""
+	for _, col := range []string{"default_outbound_domain_strategy", "default_outbound_ds"} {
+		if m.HasColumn(&Server{}, col) {
+			dsCol = col
+			break
+		}
 	}
-	if err := db.Exec("ALTER TABLE servers DROP COLUMN default_outbound_ds").Error; err != nil {
-		return fmt.Errorf("删除 servers 遗留列 default_outbound_ds 失败: %w", err)
+	if dsCol != "" {
+		var rows []legacyServerDSRow
+		q := "SELECT id, default_outbound_tag, " + dsCol + " AS ds FROM servers WHERE " + dsCol + " IS NOT NULL AND " + dsCol + " != '' AND " + dsCol + " != 'AsIs'"
+		if err := db.Raw(q).Scan(&rows).Error; err != nil {
+			return fmt.Errorf("读取 servers.%s 存量值失败: %w", dsCol, err)
+		}
+		for _, r := range rows {
+			if err := moveServerDSIntoOutbound(db, r); err != nil {
+				return err
+			}
+		}
+	}
+	// 删列：glebarez Migrator().DropColumn 对裸列名静默失效，须原生 ALTER（同 migratePlanSaleFlags）
+	for _, col := range []string{"default_outbound_domain_strategy", "default_outbound_ds"} {
+		if !m.HasColumn(&Server{}, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE servers DROP COLUMN " + col).Error; err != nil {
+			return fmt.Errorf("删除 servers 遗留列 %s 失败: %w", col, err)
+		}
+	}
+	return nil
+}
+
+// moveServerDSIntoOutbound 把单台服务器的存量服务器级解析策略并入其默认出口出站。
+func moveServerDSIntoOutbound(db *gorm.DB, r legacyServerDSRow) error {
+	tag := r.DefaultOutboundTag
+	if tag == "" {
+		tag = "direct"
+	}
+	var obs []ServerOutbound
+	if err := db.Where("server_id = ? AND tag = ? AND protocol = ? AND enabled = ?", r.ID, tag, "freedom", true).
+		Order("id ASC").Find(&obs).Error; err != nil {
+		return fmt.Errorf("查询服务器 %d 的默认出口出站失败: %w", r.ID, err)
+	}
+	if len(obs) == 0 {
+		return nil
+	}
+	ob := obs[0]
+	if strings.TrimSpace(ob.SettingsJSON) == "" {
+		return nil
+	}
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(ob.SettingsJSON), &settings); err != nil {
+		return nil // 非法 JSON：旧生成器同样不会写入，交由出站编辑器修正
+	}
+	if cur, _ := settings["domainStrategy"].(string); cur != "" && cur != "AsIs" {
+		return nil // 出站自有非 AsIs 值优先，旧生成器亦不覆盖
+	}
+	settings["domainStrategy"] = r.DS
+	return updateOutboundSettings(db, ob.ID, settings)
+}
+
+// migrateFreedomFinalRules freedom 出站私网拦截下沉 + blockDelay 归一（2026-09-17 路由层私网规则移除）：
+// 路由层不再注入 {"ip":["geoip:private"],"outboundTag":"blocked"}——路由规则自上而下首个命中生效，
+// 该规则不带 inbound/outbound 维度限定，会抢在管理员「入站 → 其他出站」的规则之前拦掉目标为私网的
+// 连接（且注入规则在 UI 中不可见，管理员无从排查）。私网拦截改由 freedom 出站 finalRules 承担，故：
+//  1. finalRules 已含 block geoip:private 但未指定 blockDelay 的行 → 补 "0"。原先路由层丢给 blocked
+//     出站是立即断开，不补会退化为官方默认 30-90s 黑洞挂起（CN 规则有意不补，保抗探测延迟）。
+//  2. settings 只有 domainStrategy 一个键的 freedom 出站（从未通过出站编辑器保存过面板开关的种子形态）
+//     → 回填 canonical 默认：私网拦截 + allow 兜底，与面板开关默认值（开）及种子行一致。
+//     歧义提示：该形状既可能是没编辑过的种子行，也可能是管理员显式关掉「屏蔽内网私有 IP」后保存的结果，
+//     二者字节相同、无法区分。此处按「不放宽」取舍——这批服务器此前同样拦私网（路由层规则 + freedom
+//     内建安全策略），回填只把拦截位置显式化，不会放宽；确需放行私网的管理员在出站编辑器关掉开关
+//     即可（关闭会写入无条件 allow 规则）。
+//
+// 幂等：已有 finalRules 的非种子行不再改动（第 1 条除外，补齐后再次运行无匹配项）。
+func migrateFreedomFinalRules(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ServerOutbound{}) {
+		return nil
+	}
+	var obs []ServerOutbound
+	if err := db.Where("protocol = ?", "freedom").Find(&obs).Error; err != nil {
+		return fmt.Errorf("查询 freedom 出站失败: %w", err)
+	}
+	for i := range obs {
+		ob := obs[i]
+		if strings.TrimSpace(ob.SettingsJSON) == "" {
+			continue
+		}
+		var settings map[string]any
+		if err := json.Unmarshal([]byte(ob.SettingsJSON), &settings); err != nil {
+			continue // 非法 JSON：交由出站编辑器修正
+		}
+		rules, hasRules := settings["finalRules"].([]any)
+		if !hasRules {
+			// 种子形态：仅 domainStrategy 一个键 → 回填 canonical（保留其 domainStrategy）
+			if len(settings) != 1 {
+				continue
+			}
+			ds, ok := settings["domainStrategy"].(string)
+			if !ok {
+				continue
+			}
+			var canon map[string]any
+			if err := json.Unmarshal([]byte(DefaultFreedomDirectSettingsJSON), &canon); err != nil {
+				return fmt.Errorf("解析 canonical freedom 默认 settings 失败: %w", err)
+			}
+			canon["domainStrategy"] = ds
+			if err := updateOutboundSettings(db, ob.ID, canon); err != nil {
+				return err
+			}
+			continue
+		}
+		// 补齐私网拦截规则的 blockDelay
+		changed := false
+		for _, r := range rules {
+			m, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			if action, _ := m["action"].(string); action != "block" {
+				continue
+			}
+			if _, has := m["blockDelay"]; has {
+				continue
+			}
+			if ips, ok := m["ip"].([]any); !ok || len(ips) == 0 || ips[0] != "geoip:private" {
+				continue
+			}
+			m["blockDelay"] = "0"
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		settings["finalRules"] = rules
+		if err := updateOutboundSettings(db, ob.ID, settings); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// updateOutboundSettings 序列化并写回出站 settings_json。
+func updateOutboundSettings(db *gorm.DB, id uint64, settings map[string]any) error {
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("序列化出站 %d settings 失败: %w", id, err)
+	}
+	if err := db.Model(&ServerOutbound{}).Where("id = ?", id).Update("settings_json", string(raw)).Error; err != nil {
+		return fmt.Errorf("回填出站 %d settings 失败: %w", id, err)
 	}
 	return nil
 }

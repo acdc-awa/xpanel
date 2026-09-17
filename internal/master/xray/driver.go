@@ -32,12 +32,8 @@ func (d *Driver) Generate(_ context.Context, in *contracts.GenerateInput) ([]byt
 	if in == nil {
 		return nil, fmt.Errorf("生成输入为空")
 	}
-	var ds []string
-	if in.DefaultOutboundDS != "" {
-		ds = append(ds, in.DefaultOutboundDS)
-	}
 	return Generate(in.Inbounds, in.Outbounds, in.RoutingRules, in.UsersByTag, in.Topology,
-		in.DefaultOutboundTag, in.RoutingDomainStrategy, ds...)
+		in.DefaultOutboundTag, in.RoutingDomainStrategy)
 }
 
 // ValidateConfig 实现 contracts.CoreDriver：写入临时文件后执行 `xray -test -config`。

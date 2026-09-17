@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -269,56 +270,230 @@ func TestL4RuleAccessPointMigration(t *testing.T) {
 	}
 }
 
-// TestDefaultOutboundDSColumnMigration 默认出口出站解析策略列名修正迁移（2026-08-31）：
-// 旧库列名 default_outbound_ds（GORM 对字段名缩写 DS 不展开）与更新接口手写的
-// default_outbound_domain_strategy 不一致 → PUT /admin/servers/:id 恒 500「no such column」。
-// 模型列名显式统一为 API 同名后，旧列存量值必须搬入新列再删除旧列（回归：路由页保存 500）。
-func TestDefaultOutboundDSColumnMigration(t *testing.T) {
+// TestDefaultOutboundDSIntoOutboundsMigration 服务器级出站解析策略并退出站迁移（2026-09-17 唯一入口收口）：
+// servers.default_outbound_domain_strategy（及 2026-08-31 前的遗留列 default_outbound_ds）已从模型移除，
+// 出站域名解析策略唯一入口收口到出站编辑器。存量迁移必须「行为等价」——旧生成器只在该列非 AsIs 且
+// 目标出站自有值为空/AsIs 时注入，故迁移须按同一优先级写入出站 settings_json，否则升级后这些
+// 服务器的域名解析行为会静默退回 AsIs。列在读完后删除；幂等（重跑不改动已写入的值）。
+func TestDefaultOutboundDSIntoOutboundsMigration(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-
-	// 新模型建表（只有新列 default_outbound_domain_strategy），再手工补旧库遗留列并写入存量值（模拟升级前状态）
-	if err := db.AutoMigrate(&Server{}); err != nil {
-		t.Fatalf("create servers table: %v", err)
+	if err := db.AutoMigrate(&Server{}, &ServerOutbound{}); err != nil {
+		t.Fatalf("create tables: %v", err)
 	}
-	if err := db.Exec("ALTER TABLE servers ADD COLUMN default_outbound_ds varchar(16) DEFAULT 'AsIs'").Error; err != nil {
+	// 模拟升级前状态：补出服务器级策略列
+	if err := db.Exec("ALTER TABLE servers ADD COLUMN default_outbound_domain_strategy varchar(16) DEFAULT 'AsIs'").Error; err != nil {
 		t.Fatalf("add legacy column: %v", err)
 	}
-	legacy := Server{ServerType: ServerTypeXray, Name: "香港01", Host: "hk.node.com", NodeID: "node-hk", Secret: "s"}
-	if err := db.Create(&legacy).Error; err != nil {
-		t.Fatalf("create server: %v", err)
+
+	// 服务器 A：存量 UseIP，direct 出站自有 AsIs → 应被写入 UseIP
+	a := Server{ServerType: ServerTypeXray, Name: "香港01", Host: "hk.node.com", NodeID: "node-hk", Secret: "s", DefaultOutboundTag: "direct"}
+	if err := db.Create(&a).Error; err != nil {
+		t.Fatalf("create server A: %v", err)
 	}
-	if err := db.Exec("UPDATE servers SET default_outbound_ds = 'UseIP' WHERE id = ?", legacy.ID).Error; err != nil {
-		t.Fatalf("seed legacy value: %v", err)
+	obA := ServerOutbound{ServerID: a.ID, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"AsIs"}`, Enabled: true}
+	if err := db.Create(&obA).Error; err != nil {
+		t.Fatalf("create outbound A: %v", err)
+	}
+	if err := db.Exec("UPDATE servers SET default_outbound_domain_strategy = 'UseIP' WHERE id = ?", a.ID).Error; err != nil {
+		t.Fatalf("seed legacy value A: %v", err)
+	}
+
+	// 服务器 B：存量 UseIP，direct 出站自有 UseIPv4（非 AsIs）→ 出站自有值优先，不被覆盖
+	b := Server{ServerType: ServerTypeXray, Name: "日本01", Host: "jp.node.com", NodeID: "node-jp", Secret: "s", DefaultOutboundTag: "direct"}
+	if err := db.Create(&b).Error; err != nil {
+		t.Fatalf("create server B: %v", err)
+	}
+	obB := ServerOutbound{ServerID: b.ID, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true}
+	if err := db.Create(&obB).Error; err != nil {
+		t.Fatalf("create outbound B: %v", err)
+	}
+	if err := db.Exec("UPDATE servers SET default_outbound_domain_strategy = 'UseIP' WHERE id = ?", b.ID).Error; err != nil {
+		t.Fatalf("seed legacy value B: %v", err)
+	}
+
+	// 服务器 C：存量 UseIP，默认出口指向 vless 中转出站（非 freedom）→ 旧注入同样不生效，不动数据
+	c := Server{ServerType: ServerTypeXray, Name: "美国01", Host: "us.node.com", NodeID: "node-us", Secret: "s", DefaultOutboundTag: "relay"}
+	if err := db.Create(&c).Error; err != nil {
+		t.Fatalf("create server C: %v", err)
+	}
+	obC := ServerOutbound{ServerID: c.ID, Tag: "relay", Protocol: "vless", SettingsJSON: `{"vnext":[]}`, Enabled: true}
+	if err := db.Create(&obC).Error; err != nil {
+		t.Fatalf("create outbound C: %v", err)
+	}
+	if err := db.Exec("UPDATE servers SET default_outbound_domain_strategy = 'UseIP' WHERE id = ?", c.ID).Error; err != nil {
+		t.Fatalf("seed legacy value C: %v", err)
+	}
+
+	// 服务器 D：存量为 AsIs（默认）→ 不注入，出站保持原样
+	d := Server{ServerType: ServerTypeXray, Name: "新加坡01", Host: "sg.node.com", NodeID: "node-sg", Secret: "s", DefaultOutboundTag: "direct"}
+	if err := db.Create(&d).Error; err != nil {
+		t.Fatalf("create server D: %v", err)
+	}
+	obD := ServerOutbound{ServerID: d.ID, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"AsIs"}`, Enabled: true}
+	if err := db.Create(&obD).Error; err != nil {
+		t.Fatalf("create outbound D: %v", err)
 	}
 
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 
-	if db.Migrator().HasColumn(&Server{}, "default_outbound_ds") {
-		t.Fatal("遗留列 default_outbound_ds 应被删除")
+	// 列已删除（含遗留别名）
+	for _, col := range []string{"default_outbound_domain_strategy", "default_outbound_ds"} {
+		if db.Migrator().HasColumn(&Server{}, col) {
+			t.Fatalf("服务器级解析策略列 %s 应被删除", col)
+		}
 	}
-	var got Server
-	if err := db.First(&got, legacy.ID).Error; err != nil {
-		t.Fatalf("load server: %v", err)
+
+	dsOf := func(id uint64) string {
+		t.Helper()
+		var ob ServerOutbound
+		if err := db.First(&ob, id).Error; err != nil {
+			t.Fatalf("load outbound %d: %v", id, err)
+		}
+		var settings map[string]any
+		if err := json.Unmarshal([]byte(ob.SettingsJSON), &settings); err != nil {
+			t.Fatalf("unmarshal outbound %d settings: %v", id, err)
+		}
+		ds, _ := settings["domainStrategy"].(string)
+		return ds
 	}
-	if got.DefaultOutboundDS != "UseIP" {
-		t.Fatalf("旧列存量值应搬入新列 default_outbound_domain_strategy，got %q", got.DefaultOutboundDS)
+	if got := dsOf(obA.ID); got != "UseIP" {
+		t.Fatalf("存量 UseIP 应并入 direct 出站，got %q", got)
+	}
+	if got := dsOf(obB.ID); got != "UseIPv4" {
+		t.Fatalf("出站自有非 AsIs 值不得被覆盖，got %q", got)
+	}
+	// 非 freedom 目标出站不带 domainStrategy 字段（旧注入同样跳过），迁移不改动其 settings
+	if got := dsOf(obC.ID); got != "" {
+		t.Fatalf("非 freedom 目标出站不应被写入 domainStrategy，got %q", got)
+	}
+	if got := dsOf(obD.ID); got != "AsIs" {
+		t.Fatalf("存量 AsIs 不应改动出站，got %q", got)
 	}
 
 	// 幂等：再次迁移不报错、值不变
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("second migrate should be idempotent: %v", err)
 	}
-	var again Server
-	if err := db.First(&again, legacy.ID).Error; err != nil {
-		t.Fatalf("reload server: %v", err)
+	if got := dsOf(obA.ID); got != "UseIP" {
+		t.Fatalf("重复迁移改动存量值: UseIP → %q", got)
 	}
-	if again.DefaultOutboundDS != "UseIP" {
-		t.Fatalf("重复迁移改动存量值: UseIP → %q", again.DefaultOutboundDS)
+	if got := dsOf(obB.ID); got != "UseIPv4" {
+		t.Fatalf("重复迁移改动出站自有值: UseIPv4 → %q", got)
+	}
+}
+
+// TestFreedomFinalRulesMigration 私网拦截下沉迁移（2026-09-17 路由层私网规则移除）：
+//   - 种子形态（settings 仅 domainStrategy 一个键）→ 回填 canonical（私网 block + allow 兜底），
+//     并保留其 domainStrategy（含被上一迁移改成非 AsIs 的行）；
+//   - 已有 finalRules 且私网 block 缺 blockDelay → 补 "0"（维持原先路由层「立即断开」的快速失败）；
+//   - 已有 blockDelay 的规则、非 freedom 出站、设置了面板开关（finalRules 已存在）的行 → 不动。
+func TestFreedomFinalRulesMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&Server{}, &ServerOutbound{}); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+	mk := func(tag, proto, settings string) ServerOutbound {
+		ob := ServerOutbound{ServerID: 1, Tag: tag, Protocol: proto, SettingsJSON: settings, Enabled: true}
+		if err := db.Create(&ob).Error; err != nil {
+			t.Fatalf("create outbound %s: %v", tag, err)
+		}
+		return ob
+	}
+	// 种子形态（RouterDomainStrategy 已被上一迁移改成 UseIP 的场景同样属种子形态）
+	stub := mk("direct", "freedom", `{"domainStrategy":"AsIs"}`)
+	stubMigrated := mk("direct2", "freedom", `{"domainStrategy":"UseIP"}`)
+	// 缺 blockDelay 的私网拦截规则 → 补 0
+	noDelay := mk("legacy-panel", "freedom", `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"]},{"action":"allow"}]}`)
+	// 已显式指定 blockDelay → 不动
+	hasDelay := mk("explicit", "freedom", `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"],"blockDelay":"30-90"},{"action":"allow"}]}`)
+	// 非 freedom 出站 → 不动
+	relay := mk("relay", "vless", `{"vnext":[]}`)
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	settingsOf := func(id uint64) map[string]any {
+		t.Helper()
+		var ob ServerOutbound
+		if err := db.First(&ob, id).Error; err != nil {
+			t.Fatalf("load outbound %d: %v", id, err)
+		}
+		var s map[string]any
+		if err := json.Unmarshal([]byte(ob.SettingsJSON), &s); err != nil {
+			t.Fatalf("unmarshal outbound %d: %v", id, err)
+		}
+		return s
+	}
+	privateBlockDelay := func(s map[string]any) (string, bool) {
+		rules, _ := s["finalRules"].([]any)
+		for _, r := range rules {
+			m, _ := r.(map[string]any)
+			if action, _ := m["action"].(string); action != "block" {
+				continue
+			}
+			if ips, _ := m["ip"].([]any); len(ips) > 0 && ips[0] == "geoip:private" {
+				d, _ := m["blockDelay"].(string)
+				return d, true
+			}
+		}
+		return "", false
+	}
+
+	// 种子行：回填 canonical 且保留 domainStrategy
+	s := settingsOf(stub.ID)
+	if ds, _ := s["domainStrategy"].(string); ds != "AsIs" {
+		t.Errorf("种子行 domainStrategy 被改动: %q", ds)
+	}
+	if d, ok := privateBlockDelay(s); !ok || d != "0" {
+		t.Errorf("种子行应回填私网 block 且 blockDelay=0, got (%q,%v): %v", d, ok, s)
+	}
+	rules, _ := s["finalRules"].([]any)
+	if len(rules) != 2 {
+		t.Errorf("种子行 finalRules 应为 block + allow 两条: %v", rules)
+	} else if action, _ := rules[1].(map[string]any)["action"].(string); action != "allow" {
+		t.Errorf("种子行 finalRules 末位应为 allow: %v", rules)
+	}
+
+	// 上一迁移改成 UseIP 的种子行：回填时须保留 UseIP
+	s2 := settingsOf(stubMigrated.ID)
+	if ds, _ := s2["domainStrategy"].(string); ds != "UseIP" {
+		t.Errorf("种子行回填丢失 domainStrategy: %q", ds)
+	}
+	if d, ok := privateBlockDelay(s2); !ok || d != "0" {
+		t.Errorf("种子行应回填私网 block: (%q,%v)", d, ok)
+	}
+
+	// 缺 blockDelay → 补 0
+	if d, ok := privateBlockDelay(settingsOf(noDelay.ID)); !ok || d != "0" {
+		t.Errorf("缺 blockDelay 的私网规则应补 0, got (%q,%v)", d, ok)
+	}
+	// 已显式指定 → 不覆盖
+	if d, _ := privateBlockDelay(settingsOf(hasDelay.ID)); d != "30-90" {
+		t.Errorf("显式 blockDelay 不应被覆盖, got %q", d)
+	}
+	// 非 freedom → 不动
+	if _, ok := privateBlockDelay(settingsOf(relay.ID)); ok {
+		t.Error("非 freedom 出站不应被写入 finalRules")
+	}
+
+	// 幂等
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second migrate should be idempotent: %v", err)
+	}
+	if d, _ := privateBlockDelay(settingsOf(stub.ID)); d != "0" {
+		t.Errorf("重复迁移改动种子行: %q", d)
+	}
+	if d, _ := privateBlockDelay(settingsOf(hasDelay.ID)); d != "30-90" {
+		t.Errorf("重复迁移覆盖显式 blockDelay: %q", d)
 	}
 }
 

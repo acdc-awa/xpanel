@@ -175,12 +175,16 @@ function buildSettingsJSON(): string {
       const s: Record<string, any> = { domainStrategy: form.domain_strategy }
       if (form.redirect) s.redirect = form.redirect
       if (form.block_cn) s.block_cn = true
+      // finalRules 必须始终写入（哪怕只放行）：freedom 内建安全策略只在「无显式规则命中」时生效，
+      // 它会对来自 VLESS/VMess/Trojan/SS 入站的流量默认阻断私网与保留网段。关掉开关时若直接省略
+      // finalRules，私网仍会被内建策略拦住 —— 开关就成了假的。写一条无条件 allow 才是真正的「放行」。
+      const rules: Record<string, any>[] = []
       if (form.block_private) {
-        s.finalRules = [
-          { action: 'block', ip: ['geoip:private'] },
-          { action: 'allow' },
-        ]
+        // blockDelay 显式 0：路由层原先用 blocked 出站立即断开，官方默认的 30-90s 黑洞会造成挂起
+        rules.push({ action: 'block', ip: ['geoip:private'], blockDelay: '0' })
       }
+      rules.push({ action: 'allow' })
+      s.finalRules = rules
       return JSON.stringify(s)
     }
     case 'blackhole':
@@ -459,7 +463,15 @@ const activeTab = ref('basic')
             <div class="card-box" style="margin-top: 14px">
               <div class="box-title">Freedom 直连参数</div>
               <div class="form-grid">
-                <el-form-item label="域名解析策略 domainStrategy">
+                <el-form-item>
+                  <template #label>
+                    <div class="field-label">
+                      <span>域名解析策略 domainStrategy</span>
+                      <el-tooltip content="该 freedom 出站在连接阶段对目标域名的解析方式，仅对本出站生效。AsIs=按原域名连接；UseIP=解析为 IP 后连接；UseIPv4/UseIPv6=仅解析对应族。这是本策略的唯一设置入口。" placement="top">
+                        <span class="help-icon">?</span>
+                      </el-tooltip>
+                    </div>
+                  </template>
                   <el-select v-model="form.domain_strategy" style="width: 100%">
                     <el-option v-for="opt in DOMAIN_STRATEGY_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
                   </el-select>
@@ -473,7 +485,7 @@ const activeTab = ref('basic')
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
                   <span class="toggle-title">屏蔽内网私有 IP (block_private)</span>
-                  <span class="toggle-sub">自动注入规则禁止访问 10.x / 172.16.x / 192.168.x 等局域网私有段</span>
+                  <span class="toggle-sub">开启后拦截访问 10.x / 172.16.x / 192.168.x 等局域网私有段（命中即断开，不会拨号到目标）。关闭则显式放行私网，同时放弃 freedom 对保留网段的默认拦截。</span>
                 </div>
                 <el-switch v-model="form.block_private" />
               </div>
@@ -482,7 +494,7 @@ const activeTab = ref('basic')
               <div class="toggle-card inner-toggle" style="margin-top: 8px">
                 <div class="toggle-info">
                   <span class="toggle-title">阻断回国流量 (block_cn)</span>
-                  <span class="toggle-sub">自动注入规则阻断访问大陆域名与 IP (geosite:cn / geoip:cn)，防止海外服务器被滥用回国</span>
+                  <span class="toggle-sub">注入出站级规则阻断走本出站的大陆 IP 段 (geoip:cn)，防止海外服务器被滥用回国。仅作用于本出站，不影响其他出口的合法回国链路；命中后按官方默认黑洞延迟 30-90 秒关闭连接。</span>
                 </div>
                 <el-switch v-model="form.block_cn" />
               </div>

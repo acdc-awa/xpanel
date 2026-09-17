@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Refresh, Edit, Delete, Check, Aim, Compass, Connection, Grid, Share, Loading } from '@element-plus/icons-vue'
+import { Plus, Refresh, Edit, Delete, Check, Aim, Connection, Grid, Share, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import OutboundConfigEditor from './servers/OutboundConfigEditor.vue'
@@ -68,16 +68,16 @@ async function loadServers() {
   }
 }
 
-// ---- 默认出口 & 出站/路由策略（随服务器切换） ----
+// ---- 默认出口 & 路由匹配策略（随服务器切换） ----
+// 出站域名解析策略（freedom settings.domainStrategy）不在此处：它是出站级属性，
+// 唯一入口是下方各出站卡片的编辑面板，卡片正面只读展示。
 const defaultOutboundTag = ref('direct')
-const defaultOutboundDS = ref('AsIs')
 const routingDomainStrategy = ref('AsIs')
 const defaultSaving = ref(false)
 
 watch(currentServer, (s) => {
   if (s) {
     defaultOutboundTag.value = s.default_outbound_tag || 'direct'
-    defaultOutboundDS.value = s.default_outbound_domain_strategy || 'AsIs'
     routingDomainStrategy.value = s.routing_domain_strategy || 'AsIs'
   }
 })
@@ -90,15 +90,13 @@ async function saveDefaultOutbound() {
   try {
     const { data } = await updateServer(currentServer.value.id, {
       default_outbound_tag: defaultOutboundTag.value,
-      default_outbound_domain_strategy: defaultOutboundDS.value,
       routing_domain_strategy: routingDomainStrategy.value,
     })
     if (data.code === 0) {
-      ElMessage.success('默认出口与策略已更新，下次配置推送生效')
+      ElMessage.success('默认出口与路由匹配策略已更新，下次配置推送生效')
       const s = currentServer.value
       if (s) {
         s.default_outbound_tag = defaultOutboundTag.value
-        s.default_outbound_domain_strategy = defaultOutboundDS.value
         s.routing_domain_strategy = routingDomainStrategy.value
       }
     } else {
@@ -181,6 +179,17 @@ function isBlockCN(row: any): boolean {
     return !!s.block_cn
   } catch {
     return false
+  }
+}
+
+// 出站域名解析策略（freedom settings.domainStrategy）：唯一入口在出站编辑器，卡片正面只读展示实际生效值
+function freedomDS(row: any): string {
+  if (row.protocol !== 'freedom') return ''
+  try {
+    const s = JSON.parse(row.settings_json || '{}')
+    return s.domainStrategy || 'AsIs'
+  } catch {
+    return 'AsIs'
   }
 }
 
@@ -383,14 +392,14 @@ onMounted(async () => {
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <!-- 默认出口与策略 Hero Grid -->
+      <!-- 默认出口与路由匹配策略 Hero Grid -->
       <BaseCard v-if="currentServer" style="margin-bottom: 16px">
         <div class="hero-strategy-wrap">
           <div class="hero-card">
             <div class="hero-head">
               <span class="hero-icon"><el-icon><Aim /></el-icon></span>
               <span class="hero-title">默认出口 Outbound</span>
-              <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。" placement="top">
+              <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 首位。" placement="top">
                 <span class="help-q">?</span>
               </el-tooltip>
             </div>
@@ -407,30 +416,9 @@ onMounted(async () => {
 
           <div class="hero-card">
             <div class="hero-head">
-              <span class="hero-icon"><el-icon><Compass /></el-icon></span>
-              <span class="hero-title">出站域名解析 (Freedom DNS)</span>
-              <el-tooltip content="默认出口（freedom）对目标域名的解析方式。AsIs=直连原域名，UseIP=主控/系统解析为 IP 后连接。" placement="top">
-                <span class="help-q">?</span>
-              </el-tooltip>
-            </div>
-            <div class="hero-body">
-              <el-select v-model="defaultOutboundDS" style="width: 100%">
-                <el-option label="AsIs（保持域名直连）" value="AsIs" />
-                <el-option label="UseIP（解析为 IP 连接）" value="UseIP" />
-                <el-option label="UseIPv4（仅解析 IPv4）" value="UseIPv4" />
-                <el-option label="UseIPv6（仅解析 IPv6）" value="UseIPv6" />
-              </el-select>
-              <div class="hero-sub">
-                <span class="muted">出站连接阶段生效</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="hero-card">
-            <div class="hero-head">
               <span class="hero-icon"><el-icon><Connection /></el-icon></span>
               <span class="hero-title">路由匹配策略 (DomainStrategy)</span>
-              <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
+              <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
                 <span class="help-q">?</span>
               </el-tooltip>
             </div>
@@ -441,7 +429,7 @@ onMounted(async () => {
                 <el-option label="IPOnDemand（按需解析 IP）" value="IPOnDemand" />
               </el-select>
               <div class="hero-sub">
-                <span class="muted">规则分流阶段生效</span>
+                <span class="muted">全局生效；出站域名解析策略在各出站卡片内设置</span>
               </div>
             </div>
           </div>
@@ -511,6 +499,15 @@ onMounted(async () => {
                   <div v-if="row.send_through" class="grid-item">
                     <span class="item-label">发送出口 IP</span>
                     <div class="item-value cell-mono font-11">{{ row.send_through }}</div>
+                  </div>
+                  <div v-if="row.protocol === 'freedom'" class="grid-item">
+                    <span class="item-label">域名解析策略</span>
+                    <div class="item-value">
+                      <span class="cell-mono font-11">{{ freedomDS(row) }}</span>
+                      <el-tooltip content="该 freedom 出站在连接阶段对目标域名的解析方式。在此出站的「编辑出站」面板内修改。" placement="top">
+                        <span class="help-q" style="margin-left: 4px">?</span>
+                      </el-tooltip>
+                    </div>
                   </div>
                   <div class="grid-item">
                     <span class="item-label">优先级</span>
@@ -776,7 +773,7 @@ onMounted(async () => {
 // Hero Strategy Grid
 .hero-strategy-wrap {
   display: grid;
-  grid-template-columns: repeat(3, 1fr) 140px;
+  grid-template-columns: repeat(2, 1fr) 140px;
   gap: 16px;
   align-items: center;
 }

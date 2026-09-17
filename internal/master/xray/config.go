@@ -242,8 +242,10 @@ type GenerateContext = contracts.TopologyContext
 // usersByTag 为「入站 tag → 已按权限组过滤的用户列表」（服务层 GetValidUsers 计算结果，
 // 与热更新 SyncUsers 同一数据源；12 号文档：订阅/热更新/配置生成消费同一组计算结果）。
 // defaultOutboundTag 为空时使用 outbounds 第一个；routingDomainStrategy 为空时使用模板默认值。
+// defaultOutboundTag 只决定 outbounds[0]（Xray 路由未命中时的兜底出口），不携带解析策略：
+// freedom 出站的 settings.domainStrategy 一律取自该出站在库内的自有配置（唯一入口 = 出站编辑器）。
 // 2026-08-14 方向①/批2：UserInbound 冻结删除，per-user 覆盖不再存在（仅入站级 Flow 三态）。
-func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, usersByTag map[string][]protocol.User, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string, defaultOutboundDS ...string) ([]byte, error) {
+func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, routingRules []models.ServerRoutingRule, usersByTag map[string][]protocol.User, ctx *GenerateContext, defaultOutboundTag string, routingDomainStrategy string) ([]byte, error) {
 	cfg := LoadTemplate()
 
 	// 旧数据/测试夹具可能无 Type（DB 默认 user）——归一化避免"未知类型"
@@ -273,23 +275,6 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		return nil, err
 	}
 	cfg["outbounds"] = obs
-	// 默认出口（freedom）出站解析策略注入：AsIs/UseIP/UseIPv4/UseIPv6（作用于出站连接阶段，
-	// 与 routing.domainStrategy 语义不同；模板/DB 已显式配置非 AsIs 时不覆盖）
-	if len(defaultOutboundDS) > 0 && defaultOutboundDS[0] != "" && defaultOutboundDS[0] != "AsIs" {
-		if list, ok := cfg["outbounds"].([]any); ok {
-			for _, item := range list {
-				m, ok := item.(map[string]any)
-				if !ok || m["tag"] != defaultOutboundTag {
-					continue
-				}
-				if settings, ok := m["settings"].(map[string]any); ok {
-					if cur, _ := settings["domainStrategy"].(string); cur == "" || cur == "AsIs" {
-						settings["domainStrategy"] = defaultOutboundDS[0]
-					}
-				}
-			}
-		}
-	}
 
 	// 2. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加
 	routing := map[string]any{}
@@ -559,6 +544,9 @@ func normalizeVlessOutbound(item map[string]any) {
 // 路由层规则是全局分发（会误伤中转等其他出口的合法回国链路），finalRules 只拦走该出站的
 // 流量，且在解析出最终 IP 后、拨号前匹配，域名会被强制解析，比 geosite 更彻底；
 // 域名级拦截无此字段，故仅支持 IP 级。
+// blockDelay 有意不设置（保留官方默认 30-90s 黑洞）：回国拦截历史上一直是出站级 finalRules，
+// 黑洞延迟起到抗探测作用；而私网拦截原先由路由层的 blocked 出站「立即断开」承担，改用
+// finalRules 后必须显式 blockDelay:"0" 才能维持同样的快速失败（见 models 的 canonical 默认值）。
 func translateFreedomPanelKeys(item map[string]any) {
 	proto, _ := item["protocol"].(string)
 	if proto != "freedom" {
@@ -600,7 +588,8 @@ func translateFreedomPanelKeys(item map[string]any) {
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）→ 默认规则（BT 屏蔽 / 内网阻断）→ 节点规则（按 Priority ASC, id ASC 排序）。
+// 顺序：api 保护规则（最前）→ BT 屏蔽规则 → 节点规则（按 Priority ASC, id ASC 排序）。
+// 私网阻断不在路由层（改由 freedom 出站 finalRules 承担，见函数内注释）。
 func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 	list := []any{
 		map[string]any{
@@ -610,20 +599,13 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 		},
 	}
 
-	// 默认内置规则：BT 流量屏蔽、内网 IP 阻断。
-	// 内网走 blocked 而非 direct：direct 出站 finalRules 兜底也拦 private（出站级第二道防线），
-	// 路由层显式 blocked 保证立即断开（否则流量被送进 direct 后经历 30-90s 黑洞才关闭）。
+	// 默认内置规则：BT 流量屏蔽。BT 属服务器级滥用防护（P2P 分发不因出站不同而改变性质，
+	// freedom 的 finalRules 也无对应能力），故仍在路由层注入、优先级高于全部节点规则。
 	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）
 	hasBT := false
-	hasPrivate := false
 	for _, rule := range rules {
-		if rule.Enabled {
-			if rule.Protocol == "bittorrent" {
-				hasBT = true
-			}
-			if rule.IP == "geoip:private" {
-				hasPrivate = true
-			}
+		if rule.Enabled && rule.Protocol == "bittorrent" {
+			hasBT = true
 		}
 	}
 	if !hasBT {
@@ -633,13 +615,13 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 			"outboundTag": "blocked",
 		})
 	}
-	if !hasPrivate {
-		list = append(list, map[string]any{
-			"type":        "field",
-			"ip":          []string{"geoip:private"},
-			"outboundTag": "blocked",
-		})
-	}
+
+	// 私网阻断不再在路由层注入（2026-09-17）：路由规则自上而下首个命中生效，且该规则不带
+	// inboundTag/outbound 维度限定，会抢在管理员「入站 → 其他出站」的规则之前把目标为私网的
+	// 连接全部丢给 blocked——即使那条链路本来需要访问私网（且注入规则在 UI 中不可见，管理员
+	// 无从排查）。私网拦截改由各 freedom 出站的 finalRules 承担：作用域限于真正走该出站的流量，
+	// 且在最终 IP 解析后、拨号前匹配（目标根本不会被拨号），UDP 还逐包匹配，比路由层更严。
+	// 详见 translateFreedomPanelKeys / models.DefaultFreedomDirectSettingsJSON。
 
 	for _, rule := range rules {
 		if !rule.Enabled {

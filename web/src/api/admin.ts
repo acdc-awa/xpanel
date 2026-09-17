@@ -389,7 +389,6 @@ export interface ServerItem {
   xray_running: boolean // 节点心跳上报的 xray 进程运行状态
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
-  default_outbound_domain_strategy: string // 默认出口出站解析策略（freedom: AsIs/UseIP/UseIPv4/UseIPv6）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）
   last_seen_at: string | null
   created_at: string
@@ -428,7 +427,7 @@ export function deleteServer(id: number) {
 
 export function updateServer(
   id: number,
-  payload: { server_type?: 'xray'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string; default_outbound_domain_strategy?: string },
+  payload: { server_type?: 'xray'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
 }

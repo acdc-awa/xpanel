@@ -77,6 +77,29 @@ func TestEnsureDefaultServerOutbounds(t *testing.T) {
 	for _, o := range list {
 		if o.Tag == "direct" && o.Protocol == "freedom" {
 			hasDirect = true
+			// 种子 direct 必须带模板同款 finalRules：同 tag 出站在生成时整体覆盖模板，
+			// 只写 domainStrategy 会让模板的内网段出站级兜底规则消失，
+			// 且出站编辑器从 finalRules 反推「屏蔽内网私有 IP」开关，会误显示为关闭。
+			var settings map[string]any
+			if err := json.Unmarshal([]byte(o.SettingsJSON), &settings); err != nil {
+				t.Fatalf("解析种子 direct settings 失败: %v", err)
+			}
+			if ds, _ := settings["domainStrategy"].(string); ds != "AsIs" {
+				t.Errorf("种子 direct domainStrategy = %q, 期望 AsIs", ds)
+			}
+			rules, _ := settings["finalRules"].([]any)
+			if len(rules) == 0 {
+				t.Error("种子 direct 缺少 finalRules：模板的私网拦截规则会丢失")
+			}
+			// 私网 block 必须显式 blockDelay=0：路由层已不再注入私网规则，
+			// 缺省会退化为官方默认的 30-90s 黑洞挂起（原先由路由层 blocked 出站立即断开）
+			first, _ := rules[0].(map[string]any)
+			if action, _ := first["action"].(string); action != "block" {
+				t.Errorf("种子 direct finalRules[0] 应为 block: %+v", first)
+			}
+			if delay, _ := first["blockDelay"].(string); delay != "0" {
+				t.Errorf("种子 direct 私网 block 应显式 blockDelay=0, got %+v", first)
+			}
 		}
 		if o.Tag == "blocked" && o.Protocol == "blackhole" {
 			hasBlocked = true

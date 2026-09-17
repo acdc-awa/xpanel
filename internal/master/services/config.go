@@ -293,7 +293,6 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 		Topology:              topo,
 		DefaultOutboundTag:    srv.DefaultOutboundTag,
 		RoutingDomainStrategy: srv.RoutingDomainStrategy,
-		DefaultOutboundDS:     srv.DefaultOutboundDS,
 	})
 	if err != nil {
 		return "", err

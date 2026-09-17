@@ -18,13 +18,11 @@ type Server struct {
 	Status                int    `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
 	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
-	// 默认出口（freedom）的出站域名解析策略：AsIs/UseIP/UseIPv4/UseIPv6——作用于出站连接阶段
-	// （与 routing_domain_strategy 语义不同：前者路由匹配阶段，后者出站解析阶段）。
-	// 列名必须显式指定为 API 同名：字段名 DefaultOutboundDS 会被 GORM 命名策略推导为
-	// default_outbound_ds（缩写不展开），与手写 UPDATE/前端 JSON 名漂移 → 500 no such column（2026-08-31 修复）
-	DefaultOutboundDS string `gorm:"column:default_outbound_domain_strategy;size:16;default:AsIs" json:"default_outbound_domain_strategy"`
-	AgentVersion      string `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayRunning       bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
+	// 出站域名解析策略（freedom settings.domainStrategy）不在此建模：它是出站级属性，唯一入口是
+	// 出站编辑器（ServerOutbound.SettingsJSON.domainStrategy）。历史上的服务器级
+	// default_outbound_domain_strategy 列已移除，存量值由 migrateDefaultOutboundDSIntoOutbounds 并入出站。
+	AgentVersion string `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning  bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
 	// 当前在线用户 IP 快照：agent 心跳每次覆写的 JSON（[]{email,ips}，源自 xray GetUsersStats，
 	// refcount 语义=当前活跃连接的去重源 IP）。不直接 JSON 透出，经 GET /admin/servers/:id/online-ips
 	// 解析归类后返回。
@@ -225,6 +223,18 @@ type ServerOutbound struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// DefaultFreedomDirectSettingsJSON freedom 出站的面板默认 settings（canonical 形状，唯一真源）。
+// 三处必须一致：嵌入式模板 config.template.json 的 direct 段、EnsureDefaultServerOutbounds 的种子行、
+// 以及存量迁移的回填值；xray 包有测试断言模板与本体一致，勿单独改其中一处。
+//
+// 语义（对照 xray freedom 的 finalRules）：
+//   - {block, ip:geoip:private, blockDelay:"0"}：私网目标在「最终 IP 解析后、拨号前」被拦，
+//     目标不会被拨号；blockDelay 显式设 0 → 立即关闭连接，而非官方默认的 30-90s 黑洞挂起。
+//   - {allow}：无条件的兜底放行规则。freedom 内建安全策略（对来自 VLESS/VMess/Trojan/SS 入站的
+//     流量默认阻断私网与保留网段）只在「无显式规则命中」时生效，这条 allow 会取代它——即除私网外
+//     一律放行，同时也不再拦保留网段（官方文档提示需自行评估安全影响）。
+const DefaultFreedomDirectSettingsJSON = `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"],"blockDelay":"0"},{"action":"allow"}]}`
 
 // ServerRoutingRule 服务器独立路由规则（§多节点 3x-ui 架构）。
 type ServerRoutingRule struct {

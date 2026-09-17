@@ -497,8 +497,8 @@ func TestGenerateConfig_RichRoutingRules(t *testing.T) {
 
 	rt := asObject(t, parsed["routing"], "routing")
 	rules := asArray(t, rt["rules"], "routing.rules")
-	if len(rules) != 6 {
-		t.Fatalf("expected 6 rules (1 API + 2 defaults + 3 DB), got %d", len(rules))
+	if len(rules) != 5 {
+		t.Fatalf("expected 5 rules (1 API + 1 default BT + 3 DB), got %d", len(rules))
 	}
 }
 
@@ -673,8 +673,9 @@ func TestGenerateConfig_RoutingInboundTag(t *testing.T) {
 	rt := asObject(t, parsed["routing"], "routing")
 	rules := asArray(t, rt["rules"], "routing.rules")
 
-	r1 := asObject(t, rules[3], "rules[3]")
-	inbTags1 := asArray(t, r1["inboundTag"], "rules[3].inboundTag")
+	// 顺序：0=api 保护，1=内置 BT 屏蔽，2 起为节点规则
+	r1 := asObject(t, rules[2], "rules[2]")
+	inbTags1 := asArray(t, r1["inboundTag"], "rules[2].inboundTag")
 	if len(inbTags1) != 2 || inbTags1[0] != "vless-in" || inbTags1[1] != "api" {
 		t.Errorf("inboundTag = %v", inbTags1)
 	}
@@ -724,13 +725,16 @@ func TestGenerateShortID(t *testing.T) {
 	}
 }
 
-// TestGenerate_DefaultOutboundDS：默认出口（freedom）出站解析策略注入——
-// Server 配 UseIP → direct 出站 settings.domainStrategy=UseIP；AsIs → 模板默认不动；
-// DB 出站显式 UseIPv4 → 不被覆盖；routing.domainStrategy 独立不受影响。
-func TestGenerate_DefaultOutboundDS(t *testing.T) {
-	gen := func(ds string) map[string]any {
-		inbounds := []models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}
-		raw, err := xray.Generate(inbounds, nil, nil, vlessUsers("in"), nil, "direct", "IPIfNonMatch", ds)
+// TestGenerate_OutboundDomainStrategySingleSource：出站域名解析策略唯一入口——
+// freedom 出站的 settings.domainStrategy 一律取自该出站在库内的自有值（原样落到生成配置），
+// 不存在任何服务器级默认值/兜底注入可覆盖它；defaultOutboundTag 只决定 outbounds[0]；
+// routing.domainStrategy 独立不受影响。
+func TestGenerate_OutboundDomainStrategySingleSource(t *testing.T) {
+	inbounds := []models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}
+
+	gen := func(outs []models.ServerOutbound, defaultTag string) map[string]any {
+		t.Helper()
+		raw, err := xray.Generate(inbounds, outs, nil, vlessUsers("in"), nil, defaultTag, "IPIfNonMatch")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -741,48 +745,57 @@ func TestGenerate_DefaultOutboundDS(t *testing.T) {
 		return parsed
 	}
 
-	findDirectDS := func(parsed map[string]any) string {
+	findDS := func(parsed map[string]any, tag string) string {
+		t.Helper()
 		for _, o := range asArray(t, parsed["outbounds"], "outbounds") {
 			m := asObject(t, o, "outbound")
-			if m["tag"] == "direct" {
-				settings := asObject(t, m["settings"], "direct settings")
+			if m["tag"] == tag {
+				settings := asObject(t, m["settings"], tag+" settings")
 				ds, _ := settings["domainStrategy"].(string)
 				return ds
 			}
 		}
-		t.Fatal("direct outbound not found")
+		t.Fatalf("outbound %s not found", tag)
 		return ""
 	}
 
-	// UseIP 注入
-	if got := findDirectDS(gen("UseIP")); got != "UseIP" {
-		t.Fatalf("UseIP injection failed: %s", got)
-	}
-	// AsIs 不动模板默认
-	if got := findDirectDS(gen("AsIs")); got != "AsIs" {
-		t.Fatalf("AsIs should keep template default: %s", got)
-	}
-	// routing.domainStrategy 独立（IPIfNonMatch 生效）
-	parsed := gen("UseIP")
-	routing := asObject(t, parsed["routing"], "routing")
-	if got, _ := routing["domainStrategy"].(string); got != "IPIfNonMatch" {
-		t.Fatalf("routing domainStrategy should be IPIfNonMatch: %s", got)
+	// DB 出站自有 UseIPv4 → 原样落到生成配置
+	if got := findDS(gen([]models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
+	}, "direct"), "direct"); got != "UseIPv4" {
+		t.Fatalf("出站自有 domainStrategy 应原样生成，got %q", got)
 	}
 
-	// DB 出站显式 UseIPv4（tag=direct 被 DB 出站覆盖场景）→ 不覆盖
-	outbounds := []models.ServerOutbound{
-		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
+	// 出站显式 AsIs 同样原样生效（无服务器级兜底可改写它）
+	if got := findDS(gen([]models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"AsIs"}`, Enabled: true},
+	}, "direct"), "direct"); got != "AsIs" {
+		t.Fatalf("显式 AsIs 应原样生效，got %q", got)
 	}
-	raw, err := xray.Generate([]models.Inbound{{ID: 1, ServerID: 1, Tag: "in", Protocol: "vless", Port: 443, Enabled: true}}, outbounds, nil, vlessUsers("in"), nil, "direct", "", "UseIP")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+
+	// 无 DB 出站 → 回落模板默认 AsIs
+	if got := findDS(gen(nil, "direct"), "direct"); got != "AsIs" {
+		t.Fatalf("模板默认应为 AsIs，got %q", got)
 	}
-	var parsed2 map[string]any
-	if err := json.Unmarshal(raw, &parsed2); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
+
+	// defaultOutboundTag 只决定 outbounds[0]（Xray 未命中规则的兜底出口）
+	proxyOut := []models.ServerOutbound{
+		{ID: 2, ServerID: 1, Tag: "proxy-out", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIP"}`, Enabled: true, Priority: 5},
 	}
-	if got := findDirectDS(parsed2); got != "UseIPv4" {
-		t.Fatalf("explicit UseIPv4 should not be overwritten: %s", got)
+	parsedDef := gen(proxyOut, "proxy-out")
+	first := asObject(t, asArray(t, parsedDef["outbounds"], "outbounds")[0], "outbounds[0]")
+	if first["tag"] != "proxy-out" {
+		t.Fatalf("默认出口应置于 outbounds[0]，got %v", first["tag"])
+	}
+	// 默认出口的解析策略仍取自出站自有值
+	if got := findDS(parsedDef, "proxy-out"); got != "UseIP" {
+		t.Fatalf("默认出口出站自有 domainStrategy 应原样生成，got %q", got)
+	}
+
+	// routing.domainStrategy 独立（IPIfNonMatch 生效，与出站解析策略互不影响）
+	routing := asObject(t, gen(nil, "direct")["routing"], "routing")
+	if got, _ := routing["domainStrategy"].(string); got != "IPIfNonMatch" {
+		t.Fatalf("routing domainStrategy should be IPIfNonMatch: %s", got)
 	}
 }
 
@@ -981,7 +994,7 @@ func TestGenerate_BlockCN(t *testing.T) {
 			Tag:      "direct",
 			Protocol: "freedom",
 			// block_cn 为面板专用开关：DB 存原文，生成时拆分为 finalRules，面板键不透传
-			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true,"finalRules":[{"action":"block","ip":["geoip:private"]},{"action":"allow"}]}`,
+			SettingsJSON: `{"domainStrategy":"AsIs","block_cn":true,"finalRules":[{"action":"block","ip":["geoip:private"],"blockDelay":"0"},{"action":"allow"}]}`,
 			Enabled:      true,
 		},
 		{
@@ -1076,11 +1089,24 @@ func TestGenerate_BlockCN(t *testing.T) {
 	}
 }
 
-func TestGenerate_PrivateRoutedToBlocked(t *testing.T) {
+// TestGenerate_PrivateBlockScopedToOutbound：私网阻断不在路由层注入（2026-09-17 收口）——
+// 路由规则自上而下首个命中生效且不带 inbound/outbound 维度限定，注入的全局私网规则会抢在管理员
+// 「入站 → 其他出站」规则之前把私网目标丢给 blocked（注入规则在 UI 中不可见，无从排查），
+// 使需要访问私网的链路（如中转落地）无法工作。私网拦截改由 freedom 出站 finalRules 承担。
+// BT 屏蔽仍为服务器级（滥用防护与出站无关，freedom finalRules 亦无对应能力）。
+func TestGenerate_PrivateBlockScopedToOutbound(t *testing.T) {
 	inbounds := []models.Inbound{
 		{ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443, Enabled: true},
 	}
-	cfgBytes, err := xray.Generate(inbounds, nil, nil, vlessUsers("vless-in"), nil, "", "")
+	// 管理员规则：该入站全部流量走 relay（catch-all），其中的私网目标必须能到达 relay
+	rules := []models.ServerRoutingRule{
+		{ID: 1, ServerID: 1, OutboundTag: "relay", InboundTag: "vless-in", Enabled: true},
+	}
+	outbounds := []models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom",
+			SettingsJSON: models.DefaultFreedomDirectSettingsJSON, Enabled: true},
+	}
+	cfgBytes, err := xray.Generate(inbounds, outbounds, rules, vlessUsers("vless-in"), nil, "direct", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1088,27 +1114,103 @@ func TestGenerate_PrivateRoutedToBlocked(t *testing.T) {
 		Routing struct {
 			Rules []map[string]any `json:"rules"`
 		} `json:"routing"`
+		Outbounds []map[string]any `json:"outbounds"`
 	}
 	if err := json.Unmarshal(cfgBytes, &root); err != nil {
 		t.Fatalf("Unmarshal config failed: %v", err)
 	}
+
+	// 1. 路由层不得再出现私网规则（否则会抢在管理员规则之前命中）
+	hasBT := false
 	for _, rule := range root.Routing.Rules {
 		ips, _ := rule["ip"].([]any)
 		if len(ips) > 0 && ips[0] == "geoip:private" {
+			t.Errorf("路由层不应注入私网规则（会抢在管理员「入站→出站」规则之前，且 UI 不可见）: %+v", rule)
+		}
+		if protos, _ := rule["protocol"].([]any); len(protos) > 0 && protos[0] == "bittorrent" {
+			hasBT = true
 			if rule["outboundTag"] != "blocked" {
-				t.Errorf("geoip:private 应路由至 blocked（direct 出站 finalRules 会拦 private，路由 direct 会造成 30-90s 黑洞）: %+v", rule)
+				t.Errorf("BT 屏蔽应路由至 blocked: %+v", rule)
 			}
-			return
 		}
 	}
-	t.Errorf("缺少内网防护注入规则: %+v", root.Routing.Rules)
+	if !hasBT {
+		t.Errorf("BT 屏蔽仍应在路由层注入（服务器级滥用防护）: %+v", root.Routing.Rules)
+	}
+
+	// 2. 管理员 catch-all 规则应存在且未被私网规则抢占（顺序上私网规则已不存在）
+	foundRelayRule := false
+	for _, rule := range root.Routing.Rules {
+		if rule["outboundTag"] == "relay" {
+			foundRelayRule = true
+		}
+	}
+	if !foundRelayRule {
+		t.Errorf("管理员 relay 规则丢失: %+v", root.Routing.Rules)
+	}
+
+	// 3. 私网拦截落在 direct 出站的 finalRules 上，且 blockDelay=0（立即断开，非官方默认 30-90s 黑洞）
+	var directSettings map[string]any
+	for _, o := range root.Outbounds {
+		if o["tag"] == "direct" {
+			directSettings, _ = o["settings"].(map[string]any)
+		}
+	}
+	if directSettings == nil {
+		t.Fatal("direct 出站缺失")
+	}
+	finalRules, _ := directSettings["finalRules"].([]any)
+	if len(finalRules) == 0 {
+		t.Fatalf("direct 缺 finalRules：私网拦截会整体失效: %+v", directSettings)
+	}
+	firstRule, _ := finalRules[0].(map[string]any)
+	if action, _ := firstRule["action"].(string); action != "block" {
+		t.Errorf("finalRules[0] 应为 block: %+v", firstRule)
+	}
+	if ips, _ := firstRule["ip"].([]any); len(ips) == 0 || ips[0] != "geoip:private" {
+		t.Errorf("finalRules[0] 应拦 geoip:private: %+v", firstRule)
+	}
+	if delay, _ := firstRule["blockDelay"].(string); delay != "0" {
+		t.Errorf("私网 block 应显式 blockDelay=0（否则退化为 30-90s 黑洞挂起）: %+v", firstRule)
+	}
+	lastRule, _ := finalRules[len(finalRules)-1].(map[string]any)
+	if action, _ := lastRule["action"].(string); action != "allow" {
+		t.Errorf("finalRules 末位应为 allow 兜底（freedom 内建安全策略只在无显式规则命中时生效）: %+v", finalRules)
+	}
 }
 
-// TestTemplateCacheNotPolluted 回归：默认出口 domainStrategy 注入不得污染共享模板。
+// TestTemplateDirectMatchesCanonicalDefault 漂移守卫：嵌入式模板的 direct 段必须与
+// models.DefaultFreedomDirectSettingsJSON 语义一致。模板的 direct 会被 DB 同 tag 出站整体覆盖，
+// 两处一旦不一致，新装（读模板）与存量/种子行（读 DB）的行为就会分叉，而分叉点只在生成结果里可见。
+func TestTemplateDirectMatchesCanonicalDefault(t *testing.T) {
+	var canon map[string]any
+	if err := json.Unmarshal([]byte(models.DefaultFreedomDirectSettingsJSON), &canon); err != nil {
+		t.Fatalf("解析 canonical 默认值失败: %v", err)
+	}
+	tmpl := xray.LoadTemplate()
+	var tmplSettings map[string]any
+	for _, item := range asArray(t, tmpl["outbounds"], "outbounds") {
+		m := asObject(t, item, "outbound")
+		if m["tag"] == "direct" {
+			tmplSettings = asObject(t, m["settings"], "template direct settings")
+		}
+	}
+	if tmplSettings == nil {
+		t.Fatal("模板缺少 direct 出站")
+	}
+	canonJSON, _ := json.Marshal(canon)
+	tmplJSON, _ := json.Marshal(tmplSettings)
+	if string(canonJSON) != string(tmplJSON) {
+		t.Fatalf("模板 direct settings 与 canonical 默认值不一致：\n  模板:      %s\n  canonical: %s", tmplJSON, canonJSON)
+	}
+}
+
+// TestTemplateCacheNotPolluted 回归：节点出站/策略不得污染共享模板。
 // 修复前 cloneMap 仅浅拷贝顶层，Generate 原地改写嵌套 settings（config.go 默认出口
-// DS 注入段），会导致：①服务器 A（DS=UseIPv4）生成后，服务器 B（DS 空）继承 A 的
-// 值——配置跨服务器串扰；②并发 Generate 对共享 map 读写构成数据竞争（race 必报）。
-// 模板现为只读内嵌默认（无 DB 覆盖入口），隔离要求不变：每次 Generate 领独立深拷贝。
+// DS 注入段，已于 2026-09-17 随该特性移除），会导致配置跨服务器串扰，
+// 且并发 Generate 对共享 map 读写构成数据竞争（race 必报）。
+// 注入段移除后隔离要求不变：模板现为只读内嵌默认，每次 Generate 领独立深拷贝，
+// 节点 DB 出站只在本次生成的副本上覆盖同 tag 出站（mergeOutbounds）。
 func TestTemplateCacheNotPolluted(t *testing.T) {
 	inbounds := []models.Inbound{{
 		ID: 1, ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443,
@@ -1133,8 +1235,10 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		return ""
 	}
 
-	// 服务器 A：DS=UseIPv4 → 注入生效（默认模板 direct.domainStrategy=AsIs 允许覆盖）
-	rawA, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "", "UseIPv4")
+	// 服务器 A：DB 出站自有 UseIPv4 → 本次生成生效
+	rawA, err := xray.Generate(inbounds, []models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
+	}, nil, users, nil, "direct", "")
 	if err != nil {
 		t.Fatalf("Generate A failed: %v", err)
 	}
@@ -1142,7 +1246,7 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		t.Fatalf("服务器 A 的 direct.domainStrategy = %q, 期望 UseIPv4", ds)
 	}
 
-	// 模板本体不得被 A 的注入污染（默认值仍为 AsIs）
+	// 模板本体不得被 A 的节点配置污染（默认值仍为 AsIs）
 	cached := xray.LoadTemplate()
 	for _, item := range asArray(t, cached["outbounds"], "cached.outbounds") {
 		m := asObject(t, item, "cached.outbound")
@@ -1154,13 +1258,13 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		}
 	}
 
-	// 服务器 B：DS 为空 → 不得继承 A 注入的 UseIPv4（回落模板默认）
+	// 服务器 B：无 DB 出站 → 不得继承 A 的 UseIPv4（回落模板默认 AsIs）
 	rawB, err := xray.Generate(inbounds, nil, nil, users, nil, "direct", "")
 	if err != nil {
 		t.Fatalf("Generate B failed: %v", err)
 	}
-	if ds := directDS(rawB); ds == "UseIPv4" {
-		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q", ds)
+	if ds := directDS(rawB); ds != "AsIs" {
+		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q, 期望模板默认 AsIs", ds)
 	}
 }
 

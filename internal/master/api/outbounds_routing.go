@@ -78,6 +78,9 @@ func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 	}
 
 	// 1. 确保并清理重复的 direct 出站
+	// settings 须与模板 direct 段 / 迁移回填值一致（canonical 形状，见 models.DefaultFreedomDirectSettingsJSON）：
+	// 同 tag 出站在生成时是整体覆盖模板而非深合并，只写 domainStrategy 会让模板的私网拦截
+	// finalRules 凭空消失，且出站编辑器从 finalRules 反推「屏蔽内网私有 IP」开关，会把它显示成关闭。
 	var directs []models.ServerOutbound
 	db.Where("server_id = ? AND tag = ?", serverID, "direct").Order("id ASC").Find(&directs)
 	if len(directs) == 0 {
@@ -85,7 +88,7 @@ func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 			ServerID:     serverID,
 			Tag:          "direct",
 			Protocol:     "freedom",
-			SettingsJSON: `{"domainStrategy":"AsIs"}`,
+			SettingsJSON: models.DefaultFreedomDirectSettingsJSON,
 			Remark:       "默认直连出站",
 			Priority:     0,
 			Enabled:      true,

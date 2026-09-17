@@ -31,11 +31,10 @@ type serverView struct {
 	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
 	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
 	PushLastTryAt         *time.Time `json:"push_last_try_at,omitempty"`
-	DefaultOutboundTag    string     `json:"default_outbound_tag"`             // 路由默认出口
-	RoutingDomainStrategy string     `json:"routing_domain_strategy"`          // 路由域名策略（路由匹配阶段）
-	DefaultOutboundDS     string     `json:"default_outbound_domain_strategy"` // 默认出口出站解析策略（freedom: AsIs/UseIP/UseIPv4/UseIPv6）
-	AgentVersion          string     `json:"agent_version"`                    // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayRunning           bool       `json:"xray_running"`                     // 节点心跳上报的 xray 进程运行状态
+	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
+	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
+	AgentVersion          string     `json:"agent_version"`           // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning           bool       `json:"xray_running"`            // 节点心跳上报的 xray 进程运行状态
 	LastSeenAt            *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 }
@@ -50,7 +49,6 @@ func toServerView(s *models.Server) serverView {
 		Location: s.Location, Remark: s.Remark, Status: s.Status,
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
-		DefaultOutboundDS:     s.DefaultOutboundDS,
 		AgentVersion:          s.AgentVersion,
 		XrayRunning:           s.XrayRunning,
 		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
@@ -114,7 +112,6 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Remark                string `json:"remark" binding:"max=255"`
 		DefaultOutboundTag    string `json:"default_outbound_tag"`
 		RoutingDomainStrategy string `json:"routing_domain_strategy"`
-		DefaultOutboundDS     string `json:"default_outbound_domain_strategy"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -143,7 +140,6 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Status:                0,
 		DefaultOutboundTag:    req.DefaultOutboundTag,
 		RoutingDomainStrategy: req.RoutingDomainStrategy,
-		DefaultOutboundDS:     req.DefaultOutboundDS,
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
 		return tx.Create(&server).Error
@@ -209,7 +205,6 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		Remark                *string `json:"remark"`
 		DefaultOutboundTag    *string `json:"default_outbound_tag"`
 		RoutingDomainStrategy *string `json:"routing_domain_strategy"`
-		DefaultOutboundDS     *string `json:"default_outbound_domain_strategy"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -243,9 +238,6 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.RoutingDomainStrategy != nil {
 		updates["routing_domain_strategy"] = *req.RoutingDomainStrategy
-	}
-	if req.DefaultOutboundDS != nil {
-		updates["default_outbound_domain_strategy"] = *req.DefaultOutboundDS
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&srv).Updates(updates).Error; err != nil {

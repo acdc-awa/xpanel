@@ -26,14 +26,13 @@ type TopologyContext struct {
 // GenerateInput 核心生成输入（中立结构）：由 provision 领域取数装配，
 // driver 只消费输入、不感知 DB。字段与 xray.Generate 参数一一对应。
 type GenerateInput struct {
-	Inbounds               []models.Inbound
-	Outbounds              []models.ServerOutbound
-	RoutingRules           []models.ServerRoutingRule
-	UsersByTag             map[string][]protocol.User // 入站 tag → 已过滤用户（GetValidUsers 同源）
-	Topology               *TopologyContext           // nil = 无跨服务器引用/证书注入
-	DefaultOutboundTag     string                     // 空 = outbounds 第一个
-	RoutingDomainStrategy  string                     // 空 = 模板默认
-	DefaultOutboundDS      string                     // 默认出口出站解析策略（空/AsIs = 不注入）
+	Inbounds              []models.Inbound
+	Outbounds             []models.ServerOutbound
+	RoutingRules          []models.ServerRoutingRule
+	UsersByTag            map[string][]protocol.User // 入站 tag → 已过滤用户（GetValidUsers 同源）
+	Topology              *TopologyContext           // nil = 无跨服务器引用/证书注入
+	DefaultOutboundTag    string                     // 空 = outbounds 第一个
+	RoutingDomainStrategy string                     // 空 = 模板默认
 }
 
 // CoreDriver 代理核心配置驱动接口（xray / 未来 sing-box）。
