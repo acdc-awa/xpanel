@@ -1,17 +1,24 @@
 <script setup lang="ts">
-// 订阅模板：从权限组页面独立出来的专门页面（2026-09-15）。
+// 订阅模板：从权限组页面独立出来的专门页面（2026-09-15，2026-09-17 重构交互）。
 //
 // 分层语义（页面内已显式呈现，避免误用）：
 //   - 订阅生成只读 PermissionGroup.ClashTemplate 一个字段，因此「组级订阅模板」才是生效位置；
 //   - 「我的模板库」是可复用的素材，改动它不会影响任何用户的订阅，必须载入并保存到某个权限组才生效。
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+//
+// 交互结构：两个标签页共用同一套「左列表 + 右编辑器」骨架——组级页是权限组列表 + 组模板编辑器，
+// 模板库页是模板列表 + 模板编辑器。此前模板库用「整宽列表 + 弹窗编辑」，与组级页两套范式并存，
+// 且列表行的「载入到编辑器」实际会切走标签页、写入另一个编辑器的缓冲，目标不可见，故一并收掉。
+// 跨层动作只保留方向明确的两个入口：组级页「从模板库载入」（库 → 组，取副本写入缓冲）、
+// 「将当前内容另存为模板」（组 → 库）。
+//
+// 全页不自动保存：切换到别的权限组/模板、新建、清空、离开页面之前都会先确认，绝不静默丢弃修改。
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import {
+  ArrowDown,
   Check,
   CopyDocument,
   Delete,
-  Document,
-  Edit,
   Plus,
   Refresh,
   Search,
@@ -36,34 +43,43 @@ import CodeEditor from '@/components/CodeEditor.vue'
 
 const route = useRoute()
 
-// 基础预设模板（系统推荐起点）
-const BASIC_TEMPLATE = `mixed-port: 7890
-allow-lan: true
-mode: rule
-log-level: info
-ipv6: false
-
-dns:
-  enable: true
-  listen: 0.0.0.0:1053
-  enhanced-mode: fake-ip
-  nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-
-proxies:
-$PROXIES$
-
-proxy-groups:
-  - { name: 节点选择, type: select, proxies: [DIRECT, $ALL_PROXIES$] }
-  - { name: 自动选择, type: url-test, url: http://cp.cloudflare.com/generate_204, interval: 300, proxies: [$ALL_PROXIES$] }
-
-rules:
-  - 'DOMAIN,$PANEL_HOST$,DIRECT'
-  - 'MATCH,节点选择'
-`
-
 const activeTab = ref<'groups' | 'library'>('groups')
+
+// ==================== 未保存修改闸门 ====================
+// 所有会覆盖编辑缓冲的动作都先过这里：不自动保存，但也不静默丢弃。
+async function allowDiscard(dirty: boolean, message: string): Promise<boolean> {
+  if (!dirty) return true
+  try {
+    await ElMessageBox.confirm(message, '有未保存的修改', {
+      type: 'warning',
+      confirmButtonText: '放弃修改',
+      cancelButtonText: '返回编辑',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ==================== 组级模板编辑器状态 ====================
+const templateCode = ref('')
+const templateSaving = ref(false)
+const editorTab = ref('edit')
+const previewLoading = ref(false)
+const previewData = ref<TemplatePreviewResult | null>(null)
+const groupEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
+// 编辑器实时校验结果：保存前据此提示，避免把语法错误的模板下发给客户端
+const groupLint = reactive({ errors: 0, warnings: 0 })
+const previewLint = reactive({ errors: 0, warnings: 0 })
+
+const hasCustomTemplate = computed(() => !!templateCode.value.trim())
+
+function clearLint() {
+  groupLint.errors = 0
+  groupLint.warnings = 0
+  previewLint.errors = 0
+  previewLint.warnings = 0
+}
 
 // ==================== 权限组（组级模板的归属目标） ====================
 const groups = ref<PermissionGroup[]>([])
@@ -72,6 +88,11 @@ const groupKeyword = ref('')
 const selectedGroupId = ref<number | undefined>(undefined)
 
 const selectedGroup = computed(() => groups.value.find((g) => g.id === selectedGroupId.value))
+
+// 编辑缓冲与权限组已存模板不一致 = 有未保存修改（保存成功后 loadGroups 会刷新已存值，标记随之消失）
+const groupDirty = computed(
+  () => !!selectedGroup.value && templateCode.value !== (selectedGroup.value.clash_template || '')
+)
 
 const filteredGroups = computed(() => {
   const kw = groupKeyword.value.trim().toLowerCase()
@@ -90,9 +111,9 @@ async function loadGroups() {
       // 深链 ?group=id（权限组卡片徽标跳转过来）；否则默认选中第一个
       const want = Number(route.query.group)
       if (want && groups.value.some((g) => g.id === want)) {
-        selectGroup(want)
+        await selectGroup(want)
       } else if (!selectedGroupId.value && groups.value.length) {
-        selectGroup(groups.value[0].id)
+        await selectGroup(groups.value[0].id)
       }
     } else {
       ElMessage.error(data.message)
@@ -104,50 +125,64 @@ async function loadGroups() {
   }
 }
 
-function selectGroup(id: number) {
+// 选中权限组 = 把该组已存模板读进编辑器。再次点击当前组则从服务端重新载入（放弃修改的退路）。
+async function selectGroup(id: number) {
+  if (id === selectedGroupId.value && !groupDirty.value) return
+  const message =
+    id === selectedGroupId.value
+      ? '重新载入会丢弃当前编辑器中未保存的修改，回到服务端已存的模板。'
+      : '切换权限组后，当前编辑器中未保存的模板修改会丢失。'
+  if (!(await allowDiscard(groupDirty.value, message))) return
   selectedGroupId.value = id
-  const g = groups.value.find((x) => x.id === id)
-  templateCode.value = g?.clash_template || ''
+  templateCode.value = groups.value.find((x) => x.id === id)?.clash_template || ''
   editorTab.value = 'edit'
   previewData.value = null
-  groupLint.errors = 0
-  groupLint.warnings = 0
-  previewLint.errors = 0
-  previewLint.warnings = 0
-  selectedLibraryId.value = undefined
+  clearLint()
 }
 
 onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
   loadGroups()
   loadLibrary()
 })
 
-// ==================== 组级模板编辑 ====================
-const templateCode = ref('')
-const templateSaving = ref(false)
-const editorTab = ref('edit')
-const previewLoading = ref(false)
-const previewData = ref<TemplatePreviewResult | null>(null)
-const groupEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
-// 编辑器实时校验结果：保存前据此提示，避免把语法错误的模板下发给客户端
-const groupLint = reactive({ errors: 0, warnings: 0 })
-const previewLint = reactive({ errors: 0, warnings: 0 })
-
-const hasCustomTemplate = computed(() => !!templateCode.value.trim())
-
-function loadPreset(type: 'basic' | 'clear') {
-  if (type === 'basic') {
-    templateCode.value = BASIC_TEMPLATE
-    ElMessage.success('已加载「极简基础模板」')
-  } else {
-    templateCode.value = ''
-    ElMessage.info('已清空模板（将使用系统内置默认模板）')
+// 离开页面 / 刷新：有未保存修改时拦一道（内容不会自动保存）
+onBeforeRouteLeave(async () => {
+  if (!unsaved.value) return true
+  try {
+    await ElMessageBox.confirm(
+      '本页有未保存的模板修改，离开后将丢失（模板编辑不会自动保存）。',
+      '有未保存的修改',
+      { type: 'warning', confirmButtonText: '放弃并离开', cancelButtonText: '留在本页' }
+    )
+    return true
+  } catch {
+    return false
   }
+})
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!unsaved.value) return
+  e.preventDefault()
+  e.returnValue = ''
 }
 
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
+// ==================== 组模板编辑动作 ====================
 function insertPlaceholder(placeholder: string) {
   // 交给编辑器在光标处插入（替换选中内容），不再从 DOM 反查 textarea 选区
   groupEditorRef.value?.insertAtCursor(placeholder)
+}
+
+// 清空 = 把该组退回「未自定义」，订阅时走系统内置默认模板
+async function clearTemplate() {
+  if (!(await allowDiscard(groupDirty.value, '清空会丢弃当前编辑器中未保存的修改。'))) return
+  templateCode.value = ''
+  previewData.value = null
+  editorTab.value = 'edit'
+  clearLint()
+  ElMessage.info('已清空模板（将使用系统内置默认模板），保存到权限组后生效')
 }
 
 async function fetchPreview() {
@@ -229,13 +264,29 @@ async function copyPreview() {
 // ==================== 我的模板库（素材库，不直接生效） ====================
 const subTemplates = ref<SubTemplate[]>([])
 const libraryLoading = ref(false)
-const selectedLibraryId = ref<number | undefined>(undefined)
-const libraryDialogOpen = ref(false)
-const libraryEditing = ref<SubTemplate | null>(null)
 const librarySaving = ref(false)
-const libraryForm = reactive({ name: '', content: '' })
+const libEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
+const libLint = reactive({ errors: 0, warnings: 0 })
+// 右栏是否打开（选中了某条或正在新建）；模板内容本身放在 libForm
+const libPaneOpen = ref(false)
+const libForm = reactive<{ id?: number; name: string; content: string }>({
+  id: undefined,
+  name: '',
+  content: '',
+})
 
-const selectedLibrary = computed(() => subTemplates.value.find((t) => t.id === selectedLibraryId.value))
+const libIsNew = computed(() => libForm.id === undefined)
+const libOrigin = computed(() => subTemplates.value.find((t) => t.id === libForm.id))
+
+const libDirty = computed(() => {
+  if (libForm.id === undefined) return libForm.name.trim() !== '' || libForm.content !== ''
+  const o = libOrigin.value
+  if (!o) return false
+  return libForm.name !== o.name || libForm.content !== o.content
+})
+
+// 整页是否有未保存修改（离开页面时用；页内切换按各自作用域分别判定）
+const unsaved = computed(() => groupDirty.value || libDirty.value)
 
 async function loadLibrary() {
   libraryLoading.value = true
@@ -250,52 +301,75 @@ async function loadLibrary() {
   }
 }
 
-// 把模板库内容载入组级编辑器（载入不等于生效，仍需保存到目标权限组）
-function applyToEditor(tpl: SubTemplate) {
-  if (!selectedGroup.value) {
-    ElMessage.warning('请先在「组级订阅模板」中选择目标权限组')
-    activeTab.value = 'groups'
-    return
-  }
-  templateCode.value = tpl.content
-  previewData.value = null
-  selectedLibraryId.value = tpl.id
-  activeTab.value = 'groups'
-  editorTab.value = 'edit'
-  ElMessage.success(`已载入「${tpl.name}」，保存后对权限组「${selectedGroup.value.name}」生效`)
+function openLibForm(tpl?: SubTemplate) {
+  libPaneOpen.value = true
+  libForm.id = tpl?.id
+  libForm.name = tpl?.name ?? ''
+  libForm.content = tpl?.content ?? ''
+  libLint.errors = 0
+  libLint.warnings = 0
 }
 
-function openLibraryCreate() {
-  libraryEditing.value = null
-  libraryForm.name = ''
-  // 新建时以当前编辑器内容为初值：最常见的用法就是「把正在编的这份存下来」
-  libraryForm.content = templateCode.value
-  libraryDialogOpen.value = true
+// 回到「未选择」状态（右栏显示空态提示）
+function closeLibForm() {
+  libPaneOpen.value = false
+  libForm.id = undefined
+  libForm.name = ''
+  libForm.content = ''
+  libLint.errors = 0
+  libLint.warnings = 0
 }
 
-function openLibraryEdit(tpl: SubTemplate) {
-  libraryEditing.value = tpl
-  libraryForm.name = tpl.name
-  libraryForm.content = tpl.content
-  libraryDialogOpen.value = true
+// 点选库条目 = 载入右侧编辑器（同页内，不存在「载入到哪个编辑器」的歧义）
+async function selectLibrary(tpl: SubTemplate) {
+  if (libForm.id === tpl.id && !libDirty.value) return
+  const message =
+    libForm.id === tpl.id
+      ? '重新载入会丢弃当前模板编辑器中未保存的修改。'
+      : '切换模板后，当前模板编辑器中未保存的修改会丢失。'
+  if (!(await allowDiscard(libDirty.value, message))) return
+  openLibForm(tpl)
+}
+
+async function startNewLibrary() {
+  if (!(await allowDiscard(libDirty.value, '新建模板后，当前模板编辑器中未保存的修改会丢失。'))) return
+  openLibForm()
 }
 
 async function saveLibrary() {
-  const name = libraryForm.name.trim()
+  const name = libForm.name.trim()
   if (!name) {
     ElMessage.warning('请填写模板名称')
     return
   }
+  // 与组级模板同因：素材里留着语法错误，载入到权限组时会一路带下去
+  const lintNow = libEditorRef.value?.validate()
+  const errCount = lintNow ? lintNow.errors : libLint.errors
+  if (errCount > 0) {
+    const detail = lintNow?.messages.length ? `\n首条：${lintNow.messages[0]}` : ''
+    try {
+      await ElMessageBox.confirm(
+        `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。载入到权限组后会原样下发给客户端，确认保存？${detail}`,
+        '模板存在语法错误',
+        { type: 'error', confirmButtonText: '仍然保存', cancelButtonText: '返回修改' }
+      )
+    } catch {
+      return
+    }
+  }
+  const isNew = libIsNew.value
   librarySaving.value = true
   try {
-    const { data } = libraryEditing.value
-      ? await updateSubTemplate(libraryEditing.value.id, { name, content: libraryForm.content })
-      : await createSubTemplate({ name, content: libraryForm.content })
+    const { data } = isNew
+      ? await createSubTemplate({ name, content: libForm.content })
+      : await updateSubTemplate(libForm.id as number, { name, content: libForm.content })
     if (data.code === 0) {
-      ElMessage.success(libraryEditing.value ? '模板已更新' : '已保存到模板库')
-      libraryDialogOpen.value = false
+      ElMessage.success(isNew ? '已保存到模板库' : '模板已更新')
+      // 以服务端返回值回填：新建后 id 生效，脏标记随之消失
+      libForm.id = data.data.id
+      libForm.name = data.data.name
+      libForm.content = data.data.content
       await loadLibrary()
-      selectedLibraryId.value = data.data.id
     } else {
       ElMessage.error(data.message)
     }
@@ -306,12 +380,15 @@ async function saveLibrary() {
   }
 }
 
-async function removeLibrary(tpl: SubTemplate) {
+// 删除：删的是模板库素材，已保存到权限组的 clash_template 是副本，不受影响
+async function removeLibrary() {
+  const tpl = libOrigin.value
+  if (!tpl) return
   try {
     await ElMessageBox.confirm(
-      `删除模板库中的「${tpl.name}」？已保存到权限组的模板不受影响。`,
+      `删除模板库中的「${tpl.name}」？已保存到权限组的模板不受影响，此操作不可撤销。`,
       '删除模板',
-      { type: 'error' }
+      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' }
     )
   } catch {
     return
@@ -320,8 +397,9 @@ async function removeLibrary(tpl: SubTemplate) {
     const { data } = await deleteSubTemplate(tpl.id)
     if (data.code === 0) {
       ElMessage.success('模板已删除')
-      if (selectedLibraryId.value === tpl.id) selectedLibraryId.value = undefined
-      loadLibrary()
+      await loadLibrary()
+      // 回到「未选择」而不是自动跳到下一条：避免看起来像内容被替换
+      closeLibForm()
     } else {
       ElMessage.error(data.message)
     }
@@ -330,8 +408,26 @@ async function removeLibrary(tpl: SubTemplate) {
   }
 }
 
-// 把编辑器当前内容另存为模板库条目（沿用原有快捷用法）
+// 从模板库取一份副本写入组编辑器（库 → 组）。载入只是填缓冲，保存到权限组才对用户生效。
+async function loadFromLibrary(id: number) {
+  const tpl = subTemplates.value.find((t) => t.id === id)
+  if (!tpl) return
+  if (!(await allowDiscard(groupDirty.value, '载入模板会覆盖当前编辑器中未保存的修改。'))) return
+  templateCode.value = tpl.content
+  previewData.value = null
+  editorTab.value = 'edit'
+  clearLint()
+  ElMessage.success(
+    `已载入「${tpl.name}」，保存后对权限组「${selectedGroup.value?.name ?? ''}」生效`
+  )
+}
+
+// 把组编辑器当前内容沉淀为模板库条目（组 → 库）。纯写入：不切标签页、不动模板编辑器。
 async function saveAsFromEditor() {
+  if (!templateCode.value.trim()) {
+    ElMessage.warning('当前编辑器内容为空，无需另存')
+    return
+  }
   const name = await ElMessageBox.prompt('请输入模板名称', '另存为模板', {
     confirmButtonText: '保存',
     cancelButtonText: '取消',
@@ -344,9 +440,8 @@ async function saveAsFromEditor() {
   try {
     const { data } = await createSubTemplate({ name: name.trim(), content: templateCode.value })
     if (data.code === 0) {
-      ElMessage.success('已保存到模板库')
       await loadLibrary()
-      selectedLibraryId.value = data.data.id
+      ElMessage.success(`已另存为模板库条目「${data.data.name}」，可在「我的模板库」中查看`)
     } else {
       ElMessage.error(data.message)
     }
@@ -392,12 +487,12 @@ async function saveAsFromEditor() {
               尚无权限组，请先在「订阅与财务 · 权限组管理」中创建
             </div>
             <div v-else-if="filteredGroups.length === 0" class="list-hint">没有匹配的权限组</div>
-            <div v-else class="group-pick-list">
+            <div v-else class="pick-list">
               <button
                 v-for="g in filteredGroups"
                 :key="g.id"
                 type="button"
-                class="group-pick-row"
+                class="pick-row"
                 :class="{ active: g.id === selectedGroupId }"
                 @click="selectGroup(g.id)"
               >
@@ -405,6 +500,7 @@ async function saveAsFromEditor() {
                   <span class="pick-name">{{ g.name }}</span>
                   <span class="pick-remark">{{ g.remark || '—' }}</span>
                 </span>
+                <span v-if="g.id === selectedGroupId && groupDirty" class="dirty-mark">未保存</span>
                 <span
                   class="x-chip"
                   :class="g.clash_template && g.clash_template.trim() ? 'purple' : 'gray'"
@@ -414,11 +510,13 @@ async function saveAsFromEditor() {
                 </span>
               </button>
             </div>
+            <div class="list-foot">再次点击已选中的权限组可放弃修改、重新载入服务端已存的模板。</div>
           </BaseCard>
 
           <!-- 右：模板编辑器 -->
           <BaseCard :title="selectedGroup ? `配置订阅模板 · ${selectedGroup.name}` : '配置订阅模板'">
             <template #extra>
+              <span v-if="groupDirty" class="dirty-mark">未保存</span>
               <span class="x-chip" :class="hasCustomTemplate ? 'purple' : 'gray'" style="font-size: 10.5px">
                 {{ hasCustomTemplate ? '自定义模板' : '系统默认模板' }}
               </span>
@@ -432,37 +530,25 @@ async function saveAsFromEditor() {
               <div class="preset-section">
                 <div class="preset-row">
                   <span class="preset-label">模板库：</span>
-                  <el-select
-                    v-model="selectedLibraryId"
-                    placeholder="选择已保存的模板"
-                    style="width: 200px"
-                    size="small"
-                    clearable
-                  >
-                    <el-option v-for="t in subTemplates" :key="t.id" :label="t.name" :value="t.id" />
-                  </el-select>
-                  <el-button
-                    size="small"
-                    type="primary"
-                    plain
-                    :disabled="!selectedLibrary"
-                    @click="selectedLibrary && (templateCode = selectedLibrary.content)"
-                  >
-                    载入到编辑器
-                  </el-button>
+                  <el-dropdown trigger="click" @command="loadFromLibrary">
+                    <el-button size="small" plain>
+                      从模板库载入<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-for="t in subTemplates" :key="t.id" :command="t.id">
+                          {{ t.name }}
+                        </el-dropdown-item>
+                        <el-dropdown-item v-if="subTemplates.length === 0" disabled>
+                          模板库为空
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                   <el-button size="small" @click="saveAsFromEditor">将当前内容另存为模板</el-button>
-                </div>
-
-                <div class="preset-row" style="margin-top: 8px">
-                  <span class="preset-label">快捷加载：</span>
-                  <div class="preset-chips">
-                    <button type="button" class="preset-chip primary" @click="loadPreset('basic')">
-                      极简基础模板
-                    </button>
-                    <button type="button" class="preset-chip danger" @click="loadPreset('clear')">
-                      清空（恢复系统默认）
-                    </button>
-                  </div>
+                  <el-button size="small" type="danger" plain @click="clearTemplate">
+                    清空（恢复系统默认）
+                  </el-button>
                 </div>
 
                 <div class="preset-row" style="margin-top: 8px">
@@ -558,64 +644,105 @@ async function saveAsFromEditor() {
         </div>
       </el-tab-pane>
 
-      <!-- ==================== TAB 2：我的模板库（素材库） ==================== -->
+      <!-- ==================== TAB 2：我的模板库（素材库，与 TAB 1 同一套双列骨架） ==================== -->
       <el-tab-pane label="我的模板库" name="library">
-        <BaseCard title="模板库">
-          <template #extra>
-            <el-button type="primary" size="small" @click="openLibraryCreate">
-              <el-icon><Plus /></el-icon>&nbsp;新建模板
-            </el-button>
-          </template>
+        <div class="tpl-layout">
+          <!-- 左：模板列表 -->
+          <BaseCard title="模板库">
+            <template #extra>
+              <el-button type="primary" size="small" @click="startNewLibrary">
+                <el-icon><Plus /></el-icon>&nbsp;新建模板
+              </el-button>
+            </template>
 
-          <div class="tip-banner" style="margin-bottom: 12px">
-            模板库只是可复用素材：在这里新增、改名或修改内容<strong>不会影响任何用户的订阅</strong>。
-            需要生效时，请把模板载入到「组级订阅模板」并保存到目标权限组。
-          </div>
+            <div class="tip-banner" style="margin-bottom: 10px">
+              这里的改动<strong>不会影响任何用户的订阅</strong>：它只是素材，要生效需载入到某个权限组。
+            </div>
 
-          <div v-if="libraryLoading" style="padding: 40px 0; text-align: center" class="muted">正在加载…</div>
-          <div v-else-if="subTemplates.length === 0" class="list-hint" style="padding: 40px 0">
-            模板库还是空的。可在「组级订阅模板」里点「将当前内容另存为模板」，或在此新建。
-          </div>
-          <div v-else class="library-list">
-            <div v-for="tpl in subTemplates" :key="tpl.id" class="library-row">
-              <el-icon class="library-icon"><Document /></el-icon>
-              <div class="library-main">
-                <div class="library-name">{{ tpl.name }}</div>
-                <div class="library-meta">
-                  {{ (tpl.content || '').length }} 字符 · 更新于 {{ formatDateTime(tpl.updated_at) }}
+            <div v-if="libraryLoading" class="list-hint">正在加载…</div>
+            <div v-else-if="subTemplates.length === 0" class="list-hint">
+              模板库还是空的。点「新建模板」，或在「组级订阅模板」里把当前内容另存为模板。
+            </div>
+            <div v-else class="pick-list">
+              <button
+                v-for="tpl in subTemplates"
+                :key="tpl.id"
+                type="button"
+                class="pick-row"
+                :class="{ active: tpl.id === libForm.id }"
+                @click="selectLibrary(tpl)"
+              >
+                <span class="pick-main">
+                  <span class="pick-name">{{ tpl.name }}</span>
+                  <span class="pick-remark">
+                    {{ (tpl.content || '').length }} 字符 · 更新于 {{ formatDateTime(tpl.updated_at) }}
+                  </span>
+                </span>
+                <span v-if="tpl.id === libForm.id && libDirty" class="dirty-mark">未保存</span>
+              </button>
+            </div>
+          </BaseCard>
+
+          <!-- 右：模板编辑器（与组级页共用同一套骨架，不再用弹窗） -->
+          <BaseCard :title="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'">
+            <template #extra>
+              <span v-if="libPaneOpen && libDirty" class="dirty-mark">未保存</span>
+            </template>
+
+            <div v-if="!libPaneOpen" class="list-hint" style="padding: 60px 0">
+              请在左侧选择要编辑的模板，或点「新建模板」
+            </div>
+
+            <template v-else>
+              <div class="preset-section">
+                <div class="preset-row">
+                  <span class="preset-label">模板名称：</span>
+                  <el-input
+                    v-model="libForm.name"
+                    size="small"
+                    maxlength="64"
+                    show-word-limit
+                    placeholder="如 通用精简模板 / 流媒体分流模板"
+                    style="width: 280px"
+                  />
                 </div>
               </div>
-              <div class="library-actions">
-                <el-button size="small" text type="primary" @click="applyToEditor(tpl)">载入到编辑器</el-button>
-                <el-button size="small" text :icon="Edit" @click="openLibraryEdit(tpl)">编辑</el-button>
-                <el-button size="small" text type="danger" :icon="Delete" @click="removeLibrary(tpl)" />
+
+              <CodeEditor
+                ref="libEditorRef"
+                v-model="libForm.content"
+                height="330px"
+                placeholder="留空则使用系统内置默认模板"
+                @lint="(e, w) => { libLint.errors = e; libLint.warnings = w }"
+              />
+              <div v-if="libLint.errors > 0 || libLint.warnings > 0" class="lint-banner" :class="libLint.errors ? 'error' : 'warn'">
+                <span>
+                  YAML 校验：{{ libLint.errors }} 处错误<span v-if="libLint.warnings">、{{ libLint.warnings }} 处警告</span>。
+                  错误行已在编辑器中标红，悬停可看原因。
+                </span>
               </div>
-            </div>
-          </div>
-        </BaseCard>
+              <div class="tip-banner" style="margin-top: 10px">
+                与组级模板语法一致：<code>$PROXIES$</code>（节点池）、<code>$ALL_PROXIES$</code>（全部节点名称）、<code>$FILTER_PROXIES(关键词)$</code>（按地区过滤）、<code>$PANEL_HOST$</code>（面板域名）。
+              </div>
+
+              <div class="save-bar">
+                <span class="muted" style="font-size: 12px">
+                  保存只更新这条素材，不会改变任何权限组当前使用的订阅模板
+                </span>
+                <div style="display: flex; gap: 8px">
+                  <el-button v-if="!libIsNew" type="danger" plain @click="removeLibrary">
+                    <el-icon><Delete /></el-icon>&nbsp;删除
+                  </el-button>
+                  <el-button type="primary" :loading="librarySaving" @click="saveLibrary">
+                    <el-icon><Check /></el-icon>&nbsp;{{ libIsNew ? '保存到模板库' : '保存修改' }}
+                  </el-button>
+                </div>
+              </div>
+            </template>
+          </BaseCard>
+        </div>
       </el-tab-pane>
     </el-tabs>
-
-    <!-- ===== 模板库条目编辑弹窗 ===== -->
-    <el-dialog
-      v-model="libraryDialogOpen"
-      :title="libraryEditing ? '编辑模板' : '新建模板'"
-      width="720px"
-      :append-to-body="true"
-    >
-      <el-form label-position="top">
-        <el-form-item label="模板名称">
-          <el-input v-model="libraryForm.name" placeholder="如 通用精简模板 / 流媒体分流模板" maxlength="64" show-word-limit />
-        </el-form-item>
-        <el-form-item label="模板内容 (YAML)">
-          <CodeEditor v-model="libraryForm.content" height="300px" placeholder="留空则使用系统内置默认模板" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="libraryDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="librarySaving" @click="saveLibrary">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -631,21 +758,21 @@ async function saveAsFromEditor() {
   color: var(--x-text);
 }
 
-/* ===== 左右两栏：权限组选择 + 模板编辑 ===== */
+/* ===== 两栏骨架：两个标签页共用（左列表 + 右编辑器） ===== */
 .tpl-layout {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
-.group-pick-list {
+.pick-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   max-height: 620px;
   overflow-y: auto;
 }
-.group-pick-row {
+.pick-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -688,11 +815,28 @@ async function saveAsFromEditor() {
     white-space: nowrap;
   }
 }
+/* 有未保存修改的标记：列表行与卡片标题栏共用（与 x-chip.orange 同色系） */
+.dirty-mark {
+  flex: none;
+  font-size: 10.5px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--x-warning-soft);
+  color: var(--x-warning);
+  white-space: nowrap;
+}
 .list-hint {
   padding: 24px 0;
   text-align: center;
   color: var(--x-text-3);
   font-size: 13px;
+}
+.list-foot {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--x-text-3);
 }
 .save-bar {
   display: flex;
@@ -705,48 +849,7 @@ async function saveAsFromEditor() {
   padding-top: 12px;
 }
 
-/* ===== 模板库列表 ===== */
-.library-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.library-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.library-icon {
-  font-size: 18px;
-  color: var(--x-primary);
-  flex: none;
-}
-.library-main {
-  flex: 1;
-  min-width: 0;
-}
-.library-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--x-text);
-}
-.library-meta {
-  font-size: 11.5px;
-  color: var(--x-text-3);
-  margin-top: 2px;
-}
-.library-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-}
-
-/* ===== 编辑器与预览（自权限组页迁移） ===== */
+/* ===== 编辑器工具条 ===== */
 .preset-section {
   background: var(--x-bg);
   border: 1px solid var(--x-border);
@@ -786,18 +889,6 @@ async function saveAsFromEditor() {
     border-color: var(--x-primary);
     color: var(--x-primary);
     background: rgba(99, 102, 241, 0.06);
-  }
-  &.primary {
-    border-color: var(--x-primary);
-    color: var(--x-primary);
-    background: var(--x-primary-soft);
-  }
-  &.danger {
-    color: var(--x-danger);
-    &:hover {
-      border-color: var(--x-danger);
-      background: var(--x-danger-soft);
-    }
   }
   &.code {
     font-family: var(--x-font-mono, monospace);
@@ -885,15 +976,8 @@ async function saveAsFromEditor() {
   .tpl-layout {
     grid-template-columns: 1fr;
   }
-  .group-pick-list {
+  .pick-list {
     max-height: 300px;
-  }
-  .library-row {
-    flex-wrap: wrap;
-  }
-  .library-actions {
-    width: 100%;
-    justify-content: flex-end;
   }
 }
 </style>

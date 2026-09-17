@@ -28,6 +28,7 @@ import (
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/store/gormstore"
+	"github.com/acdc-awa/xpanel/internal/master/subscribe"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/db"
@@ -92,6 +93,12 @@ func main() {
 	}
 	if err := models.AutoMigrate(database); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
+	}
+	// 模板库首次初始化：播种一份「极简基础模板」（settings 标记保证只跑一次，
+	// 播种行与用户自建模板同权，可改名/删除且删除后不会重启复活）。失败不中止启动——
+	// 模板库为空只影响管理端的新建起点，不影响订阅生成。
+	if err := subscribe.SeedBuiltinSubTemplate(database); err != nil {
+		log.Printf("播种模板库内置模板失败: %v", err)
 	}
 	// 老库存量日志一次性压缩迁移：节点 WS/cron/HTTP 均未启动，此处为独占写窗口，
 	// 无并发写者竞态；幂等且可断点续跑（完成标记见 services.SettingLogsCompacted）。

@@ -18,8 +18,10 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// BuiltinDefaultClashTemplate 系统内置基础默认模板
-const BuiltinDefaultClashTemplate = `mixed-port: 7890
+// builtinTemplateBody 内置模板共用主体：BuiltinDefaultClashTemplate 与 BuiltinSeedSubTemplate
+// 仅 rules 段不同，正文合到一处，避免两份近似全文各自演化。
+// （此前前端 BASIC_TEMPLATE 与后端常量就是两份全文副本，rules 段已出现漂移。）
+const builtinTemplateBody = `mixed-port: 7890
 allow-lan: true
 mode: rule
 log-level: info
@@ -41,8 +43,22 @@ proxy-groups:
   - { name: 自动选择, type: url-test, url: http://cp.cloudflare.com/generate_204, interval: 300, proxies: [$ALL_PROXIES$] }
 
 rules:
-  - MATCH,节点选择
 `
+
+// BuiltinDefaultClashTemplate 系统内置基础默认模板：权限组未自定义模板（clash_template 为空）时回落使用。
+const BuiltinDefaultClashTemplate = builtinTemplateBody + `  - MATCH,节点选择
+`
+
+// BuiltinSeedSubTemplate 模板库首次初始化时播种的「极简基础模板」正文。
+// 比回落用的默认模板多一条面板域名直连规则（$PANEL_HOST$ 由 BuildClashWithTemplate 替换为面板域名），
+// 避免客户端把面板自身流量也送进代理形成回环——库里的模板是给管理员当起点用的，防回环属常态需求；
+// 而「未自定义模板」的回落路径保持原样，不改动存量权限组的订阅输出。
+const BuiltinSeedSubTemplate = builtinTemplateBody + `  - 'DOMAIN,$PANEL_HOST$,DIRECT'
+  - 'MATCH,节点选择'
+`
+
+// BuiltinSeedSubTemplateName 播种条目的默认名（用户可改名/删除，与自建模板完全同权）。
+const BuiltinSeedSubTemplateName = "极简基础模板"
 
 var filterRegex = regexp.MustCompile(`(?i)(?:-\s*)?\$FILTER_PROXIES\(([^)]+)\)\$?`)
 var filterBraceRegex = regexp.MustCompile(`(?i)(?:-\s*)?\{filter_proxies\(([^)]+)\)\}`)
