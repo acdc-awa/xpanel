@@ -58,11 +58,20 @@ func (s *BillingStore) UpdateBalance(ctx context.Context, userID uint64, newBala
 		Update("balance_cents", newBalanceCents).Error
 }
 
+// UpdateSubscription 顺延套餐并重置流量周期。
+//
+// 周期起点对齐整点（models.TrafficCycleAlign），使计费口径与 traffic_logs 的小时分桶同轴；
+// 同时清零该整点桶已累计的计费字节——该桶内「整点到本次购买/续费时刻」的部分属于切换前
+// （旧周期或未购套餐期），对齐后会被算进新周期，表现为购买后已用量不为 0。切换之后的上报
+// 会继续 upsert 累加进同一行，故新周期的用量自切换时刻起精确起算；原始字节列不动，
+// 仪表盘与每日汇总口径不受影响。两条写在同一事务内（调用方经 Transaction 绑定），
+// 不存在「已切周期但未清零」的中间态。
 func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error {
+	aligned := models.TrafficCycleAlign(cycleStart)
 	updates := map[string]any{
 		"plan_id":             plan.ID,
 		"expire_at":           expireAt,
-		"traffic_cycle_start": cycleStart,
+		"traffic_cycle_start": aligned,
 		// 购买即跟随套餐权限组（2026-09-17 拍板）：清空用户自定义分组，生效组由下面的
 		// 快照列 plan_group_id 回落提供。此处写 plan.PermissionGroupID 会固化「假自定义」，
 		// 使该用户此后不再跟随套餐权限组变更（面板显示「(自定义)」而非「(套餐继承)」）。
@@ -73,7 +82,10 @@ func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, pl
 	for k, v := range models.PlanSnapshotColumns(plan) {
 		updates[k] = v
 	}
-	return s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error
+	if err := s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		return err
+	}
+	return models.ZeroBilledInCycleBucket(s.with(ctx), userID, aligned)
 }
 
 func (s *BillingStore) FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) {

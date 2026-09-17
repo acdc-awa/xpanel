@@ -107,7 +107,7 @@ func TestAutoRenewService(t *testing.T) {
 	// ⑤ 流量耗尽触发：本周期用量 >= 额度 → 自动续购（流量周期重置即退出耗尽条件）
 	uid5 := mkRenewUser(t, db, "exhausted", plan.ID, ptrTime(time.Now().Add(10*day)), 10_000, false, true)
 	db.Model(&models.User{}).Where("id = ?", uid5).Update("plan_traffic_bytes", 1024) // 额度 1KB 便于触发
-	// 周期起点=用户创建时刻（BeforeCreate），上报周期落在起点之后才计入当期用量
+	// 周期起点=用户创建时刻的整点（BeforeCreate 对齐整点），上报周期落在起点之后才计入当期用量
 	// （耗尽判定读计费口径 billed 两列，2026-09-06 倍率计费）
 	if err := db.Create(&models.TrafficLog{UserID: uid5, InboundID: 1, UpBytes: 2048, BilledUp: 2048, DownBytes: 0, PeriodStart: time.Now(), PeriodEnd: time.Now()}).Error; err != nil {
 		t.Fatalf("create traffic log: %v", err)
@@ -116,8 +116,15 @@ func TestAutoRenewService(t *testing.T) {
 	approx(expireOf(uid5), time.Now().Add(30*day), "流量耗尽应自动续期重算")
 	var u5 models.User
 	db.First(&u5, uid5)
-	if u5.TrafficCycleStart.Before(time.Now().Add(-time.Minute)) {
-		t.Fatalf("耗尽续费应重置流量周期起点")
+	// 重置后的周期起点为「当前整点」（写入侧不变量，见 models.TrafficCycleAlign）：
+	// 对齐是计费口径与明细小时分桶同轴的前提，故这里断言对齐 + 落在最近一小时内，
+	// 而非「距今不超过 1 分钟」——后者是修复前的非整点语义。
+	now := time.Now()
+	if !u5.TrafficCycleStart.Equal(models.TrafficCycleAlign(u5.TrafficCycleStart)) {
+		t.Fatalf("流量周期起点未对齐整点: %v", u5.TrafficCycleStart)
+	}
+	if u5.TrafficCycleStart.Before(now.Add(-time.Hour)) || u5.TrafficCycleStart.After(now) {
+		t.Fatalf("流量周期起点应重置到当前整点（now=%v），实际 %v", now, u5.TrafficCycleStart)
 	}
 
 	// ⑥ 幂等：再次扫描，已续期用户不重复扣费

@@ -468,6 +468,10 @@ func (d *Deps) AdminToggleUser(c *gin.Context) {
 }
 
 // AdminResetUserTraffic POST /api/v1/admin/users/:id/reset-traffic —— 重置用户流量周期起点（J12）。
+//
+// 周期起点对齐整点并清零该整点桶已累计的计费字节（见 models/traffic_cycle.go 的不变量）：
+// 只改起点会把「整点到重置时刻」的字节带进新周期，表现为重置后已用量不为 0。
+// 两条写在同一事务内，不存在「已重置但未清零」的中间态。
 func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
@@ -479,7 +483,13 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 		util.Fail(c, 404, "用户不存在")
 		return
 	}
-	if err := d.DB.Model(&user).Update("traffic_cycle_start", time.Now()).Error; err != nil {
+	aligned := models.TrafficCycleAlign(time.Now())
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&user).Update("traffic_cycle_start", aligned).Error; err != nil {
+			return err
+		}
+		return models.ZeroBilledInCycleBucket(tx, user.ID, aligned)
+	}); err != nil {
 		util.ServerError(c, "重置失败")
 		return
 	}

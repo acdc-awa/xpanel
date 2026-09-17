@@ -357,7 +357,7 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		Status:            models.StatusActive,
 		SubscribeToken:    token,
 		UUID:              uuid,
-		TrafficCycleStart: time.Now(),
+		TrafficCycleStart: models.TrafficCycleAlign(time.Now()),
 		MustChangePwd:     true, // 首次必须改密
 	}
 	if err := database.Create(admin).Error; err != nil {

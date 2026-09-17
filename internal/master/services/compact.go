@@ -126,9 +126,13 @@ func hourBucketKey(h time.Time) int64 {
 // loadCycleStartProtection 构建「周期起点落在某小时桶内」的用户集合。
 //
 // 背景：计费/配额按 `period_start >= user.traffic_cycle_start` 统计，而压缩会把同一小时的多行
-// 合并到整点。若某用户的 cycle_start 落在这个小时中间，合并行的 period_start（整点）
-// 会早于 cycle_start，导致该小时整段被排除，最多漏计 1 小时流量。
+// 合并到整点，合并行取桶内最早的 period_start。若某用户的 cycle_start 落在这个小时中间，
+// 合并行的 period_start（整点）会早于 cycle_start，导致该小时整段被排除，最多漏计 1 小时流量。
 // 因此这些用户在该小时桶内的行不参与合并（原样保留），合计与计费口径逐字节不变。
+//
+// 该隐患的根源（周期起点与分桶不同轴）已由写入侧修复：models.TrafficCycleAlign 使
+// traffic_cycle_start 恒为整点，故合并行的 period_start 必然等于或晚于 cycle_start。
+// 本保护保留为兜底，覆盖存量库中尚未归一的历史值（见 deploy/master/repair-billing-bucket.sh）。
 //
 // users 表不存在（部分测试仅迁移子集）时返回空集合，不阻断压缩。
 func loadCycleStartProtection(db *gorm.DB) (map[int64]map[uint64]bool, error) {
