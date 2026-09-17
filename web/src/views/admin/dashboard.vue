@@ -25,6 +25,8 @@ const loading = ref(false)
 const dashData = ref<DashboardData | null>(null)
 const activeTab = ref('users')
 const lastUpdatedTime = ref('')
+// 轮询失败标记：仅静默提示，不弹 toast（避免断网时每 30 秒刷屏）。
+const pollFailed = ref(false)
 
 // 抽屉监控
 const metricsOpen = ref(false)
@@ -48,6 +50,12 @@ const donutChartRef = ref<HTMLDivElement | null>(null)
 let trendChart: echarts.ECharts | null = null
 let donutChart: echarts.ECharts | null = null
 let autoRefreshTimer: any = null
+let inFlight = false
+
+// 拉取间隔。注意它不等于数据新鲜度：节点指标随心跳上报（30-60 秒），
+// 今日/本月流量按 5 分钟聚合，因此部分指标的真实滞后大于该间隔。
+const POLL_INTERVAL_MS = 30000
+const POLL_HINT = '面板每 30 秒拉取一次。节点指标随心跳上报（30-60 秒），流量统计按 5 分钟聚合，部分指标滞后大于该间隔。'
 
 function formatBandwidth(bytesPerSec: number): string {
   if (!bytesPerSec || bytesPerSec <= 0) return '0.00 Mbps'
@@ -280,28 +288,64 @@ watch(
   }
 )
 
-async function load() {
-  loading.value = true
+async function load(opts: { silent?: boolean } = {}) {
+  // 防重入：上一轮请求未回来时不再叠加（慢请求下轮询会堆积并发）。
+  if (inFlight) return
+  inFlight = true
+  // 轮询不占用按钮 loading 态，否则刷新按钮每 30 秒闪一次「加载中」。
+  if (!opts.silent) loading.value = true
   try {
     const { data } = await getDashboard(trendRange.value)
     if (data.code === 0) {
       dashData.value = data.data
       lastUpdatedTime.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+      pollFailed.value = false
       await nextTick()
       initCharts()
       updateCharts()
+    } else if (opts.silent) {
+      // 轮询失败只做静默标记：每 30 秒弹一次错误提示会在后端重启/断网时刷屏。
+      pollFailed.value = true
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载仪表盘失败'))
+    if (opts.silent) {
+      pollFailed.value = true
+    } else {
+      ElMessage.error(errMsg(e, '加载仪表盘失败'))
+    }
   } finally {
-    loading.value = false
+    inFlight = false
+    if (!opts.silent) loading.value = false
   }
 }
 
-// 档位切换即重拉（30s 轮询沿用当前档位）
+// 档位切换即重拉（轮询沿用当前档位）
 watch(trendRange, () => load())
+
+function startPolling() {
+  stopPolling()
+  autoRefreshTimer = setInterval(() => load({ silent: true }), POLL_INTERVAL_MS)
+}
+
+function stopPolling() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+// 浏览器会大幅节流隐藏标签页里的 setInterval，隐藏期间停表、切回前台立即补拉一次，
+// 否则「30s 轮询」在切回来时看到的可能是几分钟前的数据。
+function onVisibilityChange() {
+  if (document.hidden) {
+    stopPolling()
+    return
+  }
+  load({ silent: true })
+  startPolling()
+}
 
 function openServerMetrics(s: ServerMatrixItem) {
   selectedServer.value = s
@@ -311,12 +355,14 @@ function openServerMetrics(s: ServerMatrixItem) {
 onMounted(() => {
   load()
   window.addEventListener('resize', resizeCharts)
-  autoRefreshTimer = setInterval(load, 30000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  startPolling()
 })
 
 onUnmounted(() => {
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer)
+  stopPolling()
   window.removeEventListener('resize', resizeCharts)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   trendChart?.dispose()
   donutChart?.dispose()
 })
@@ -333,8 +379,11 @@ onUnmounted(() => {
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 12px">
-        <span class="muted cell-mono" style="font-size: 12px">最后更新: {{ lastUpdatedTime || '—' }} (30s 轮询)</span>
-        <el-button :loading="loading" @click="load">
+        <span class="muted cell-mono" style="font-size: 12px" :title="POLL_HINT">
+          最后更新: {{ lastUpdatedTime || '—' }} · 每 30 秒拉取
+          <template v-if="pollFailed"> · 上次拉取失败</template>
+        </span>
+        <el-button :loading="loading" @click="load()">
           <el-icon><Refresh /></el-icon>&nbsp;刷新
         </el-button>
       </div>

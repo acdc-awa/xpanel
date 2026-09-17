@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { Plus, Check, Refresh, CopyDocument, Document, Edit, Delete, Loading, FolderChecked, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { Plus, Document, Edit, Delete, Loading, FolderChecked, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BaseCard from '@/components/base/BaseCard.vue'
 import {
@@ -10,17 +11,12 @@ import {
   getAccessPoints,
   setPermissionGroupAccessPoints,
   updatePermissionGroup,
-  previewPermissionGroupTemplate,
-  getSubTemplates,
-  createSubTemplate,
-  updateSubTemplate,
-  deleteSubTemplate,
   type PermissionGroup,
-  type TemplatePreviewResult,
-  type SubTemplate,
 } from '@/api/admin'
 import type { UserAccessPoint } from '@/api/types'
 import { errMsg } from '@/api/http'
+
+const router = useRouter()
 
 const list = ref<PermissionGroup[]>([])
 const loading = ref(false)
@@ -150,6 +146,11 @@ async function saveOrdering() {
   }
 }
 
+// 订阅模板已独立成页；这里只做带目标组的跳转，编辑入口集中在「订阅与财务 · 订阅模板」
+function openTemplates(row: PermissionGroup) {
+  router.push({ path: '/admin/sub-templates', query: { group: String(row.id) } })
+}
+
 async function remove(row: any) {
   try {
     await ElMessageBox.confirm(`确认删除权限组「${row.name}」？关联的套餐和节点权限引用将一并解除。`, '删除权限组', { type: 'error' })
@@ -168,237 +169,6 @@ async function remove(row: any) {
     ElMessage.error(errMsg(e, '删除失败'))
   }
 }
-
-// ===== 订阅模板编辑器 =====
-const templateDialogOpen = ref(false)
-const templateTarget = ref<PermissionGroup | null>(null)
-const templateCode = ref('')
-const templateSaving = ref(false)
-const activeTab = ref('edit')
-
-// 预览状态
-const previewLoading = ref(false)
-const previewData = ref<TemplatePreviewResult | null>(null)
-
-// 基础预设模板（系统推荐起点；高级模板已删，复杂配置请存入「我的模板」）
-const BASIC_TEMPLATE = `mixed-port: 7890
-allow-lan: true
-mode: rule
-log-level: info
-ipv6: false
-
-dns:
-  enable: true
-  listen: 0.0.0.0:1053
-  enhanced-mode: fake-ip
-  nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-
-proxies:
-$PROXIES$
-
-proxy-groups:
-  - { name: 节点选择, type: select, proxies: [DIRECT, $ALL_PROXIES$] }
-  - { name: 自动选择, type: url-test, url: http://cp.cloudflare.com/generate_204, interval: 300, proxies: [$ALL_PROXIES$] }
-
-rules:
-  - 'DOMAIN,$PANEL_HOST$,DIRECT'
-  - 'MATCH,节点选择'
-`
-
-// ---- 我的模板库（命名模板：跨权限组保存与快速载入）----
-const subTemplates = ref<SubTemplate[]>([])
-const selectedTemplateId = ref<number | undefined>(undefined)
-
-async function loadSubTemplates() {
-  try {
-    const { data } = await getSubTemplates()
-    if (data.code === 0) subTemplates.value = data.data || []
-    else ElMessage.error(data.message)
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载模板库失败'))
-  }
-}
-
-const selectedTemplate = computed(() => subTemplates.value.find((t) => t.id === selectedTemplateId.value))
-
-function applySelectedTemplate() {
-  const tpl = selectedTemplate.value
-  if (!tpl) return
-  templateCode.value = tpl.content
-  ElMessage.success(`已加载「${tpl.name}」`)
-}
-
-async function saveAsTemplate() {
-  const name = (await ElMessageBox.prompt('请输入模板名称', '另存为模板', {
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
-    inputPattern: /\S+/,
-    inputErrorMessage: '模板名不能为空',
-  }).then((r) => r.value as string).catch(() => null))
-  if (name === null) return
-  try {
-    const { data } = await createSubTemplate({ name: name.trim(), content: templateCode.value })
-    if (data.code === 0) {
-      ElMessage.success('已保存到模板库')
-      await loadSubTemplates()
-      selectedTemplateId.value = data.data.id
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存模板失败'))
-  }
-}
-
-async function overwriteSelectedTemplate() {
-  const tpl = selectedTemplate.value
-  if (!tpl) return
-  try {
-    await ElMessageBox.confirm(`用编辑器当前内容覆盖模板库中的「${tpl.name}」？`, '更新模板', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await updateSubTemplate(tpl.id, { name: tpl.name, content: templateCode.value })
-    if (data.code === 0) {
-      ElMessage.success('模板已更新')
-      loadSubTemplates()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '更新模板失败'))
-  }
-}
-
-async function removeSelectedTemplate() {
-  const tpl = selectedTemplate.value
-  if (!tpl) return
-  try {
-    await ElMessageBox.confirm(`删除模板库中的「${tpl.name}」？（已应用到权限组的模板不受影响）`, '删除模板', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteSubTemplate(tpl.id)
-    if (data.code === 0) {
-      ElMessage.success('模板已删除')
-      selectedTemplateId.value = undefined
-      loadSubTemplates()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除模板失败'))
-  }
-}
-
-function openTemplateEditor(row: any) {
-  templateTarget.value = row
-  templateCode.value = row.clash_template || ''
-  activeTab.value = 'edit'
-  previewData.value = null
-  selectedTemplateId.value = undefined
-  templateDialogOpen.value = true
-  if (subTemplates.value.length === 0) loadSubTemplates()
-}
-
-function loadPreset(type: 'basic' | 'clear') {
-  if (type === 'basic') {
-    templateCode.value = BASIC_TEMPLATE
-    ElMessage.success('已加载「极简基础模板」')
-  } else {
-    templateCode.value = ''
-    ElMessage.info('已清空模板（将使用系统内置默认模板）')
-  }
-}
-
-const editorTextareaRef = ref<any>(null)
-
-function insertPlaceholder(placeholder: string) {
-  const el = (editorTextareaRef.value?.textarea ||
-    editorTextareaRef.value?.$el?.querySelector('textarea')) as HTMLTextAreaElement | undefined
-
-  if (!el) {
-    // 降级：未获取到 textarea 元素时追加到末尾
-    templateCode.value += (templateCode.value.endsWith('\n') ? '' : '\n') + placeholder + '\n'
-    ElMessage.success(`已插入占位符 ${placeholder}`)
-    return
-  }
-
-  const start = el.selectionStart ?? templateCode.value.length
-  const end = el.selectionEnd ?? templateCode.value.length
-  const text = templateCode.value
-
-  const before = text.substring(0, start)
-  const after = text.substring(end)
-  templateCode.value = before + placeholder + after
-
-  ElMessage.success(`已在光标处插入 ${placeholder}`)
-
-  // 恢复光标至插入内容之后并保持聚焦
-  nextTick(() => {
-    el.focus()
-    const newPos = start + placeholder.length
-    el.setSelectionRange(newPos, newPos)
-  })
-}
-
-async function fetchPreview() {
-  if (!templateTarget.value) return
-  previewLoading.value = true
-  try {
-    const { data } = await previewPermissionGroupTemplate(templateTarget.value.id, templateCode.value)
-    if (data.code === 0) {
-      previewData.value = data.data
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '编译预览失败'))
-  } finally {
-    previewLoading.value = false
-  }
-}
-
-function onTabChange(tab: any) {
-  if (tab === 'preview') {
-    fetchPreview()
-  }
-}
-
-async function saveTemplate() {
-  if (!templateTarget.value) return
-  templateSaving.value = true
-  try {
-    const { data } = await updatePermissionGroup(templateTarget.value.id, {
-      clash_template: templateCode.value,
-    })
-    if (data.code === 0) {
-      ElMessage.success('订阅模板已保存')
-      templateDialogOpen.value = false
-      load()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存模板失败'))
-  } finally {
-    templateSaving.value = false
-  }
-}
-
-async function copyPreview() {
-  if (!previewData.value?.rendered) return
-  try {
-    await navigator.clipboard.writeText(previewData.value.rendered)
-    ElMessage.success('预览 YAML 配置已复制到剪贴板')
-  } catch {
-    ElMessage.warning('复制失败')
-  }
-}
 </script>
 
 <template>
@@ -406,7 +176,7 @@ async function copyPreview() {
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增权限组</el-button>
-        <span class="muted" style="font-size: 12px">权限组用于组织与分发接入点；每个权限组可自由定制专属 Clash / Mihomo 订阅模板与分流策略。</span>
+        <span class="muted" style="font-size: 12px">权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。</span>
       </div>
     </div>
 
@@ -429,11 +199,14 @@ async function copyPreview() {
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
               <span class="group-name" title="点击编辑权限组" @click="openEdit(row)">{{ row.name }}</span>
             </div>
-            <span v-if="row.clash_template && row.clash_template.trim()" class="x-chip purple" style="font-size: 10.5px">
-              自定义模板
-            </span>
-            <span v-else class="x-chip gray" style="font-size: 10.5px">
-              系统默认
+            <span
+              class="x-chip"
+              :class="row.clash_template && row.clash_template.trim() ? 'purple' : 'gray'"
+              style="font-size: 10.5px; cursor: pointer"
+              title="订阅模板已独立成页，点击前往编辑"
+              @click="openTemplates(row)"
+            >
+              {{ row.clash_template && row.clash_template.trim() ? '自定义模板' : '系统默认' }}
             </span>
           </div>
 
@@ -466,7 +239,7 @@ async function copyPreview() {
 
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
-            <el-button size="small" type="warning" plain @click="openTemplateEditor(row)">
+            <el-button size="small" type="warning" plain @click="openTemplates(row)">
               <el-icon><Document /></el-icon>&nbsp;订阅模板
             </el-button>
             <el-button size="small" type="primary" plain @click="openEdit(row)">
@@ -540,130 +313,6 @@ async function copyPreview() {
         <el-button type="primary" :loading="orderingSaving" @click="saveOrdering">保存顺序</el-button>
       </template>
     </el-dialog>
-
-    <!-- ===== 订阅模板配置与实时预览弹窗 ===== -->
-    <el-dialog
-      v-model="templateDialogOpen"
-      :title="`配置订阅模板 · ${templateTarget?.name || ''}`"
-      width="820px"
-      :append-to-body="true"
-    >
-      <!-- 顶部模板库与占位符栏 -->
-      <div class="preset-section">
-        <div class="preset-row">
-          <span class="preset-label">我的模板：</span>
-          <el-select
-            v-model="selectedTemplateId"
-            placeholder="选择已保存的模板"
-            style="width: 220px"
-            size="small"
-            clearable
-          >
-            <el-option v-for="t in subTemplates" :key="t.id" :label="t.name" :value="t.id" />
-          </el-select>
-          <el-button size="small" type="primary" plain :disabled="!selectedTemplate" @click="applySelectedTemplate">加载</el-button>
-          <el-button size="small" plain :disabled="!selectedTemplate" @click="overwriteSelectedTemplate">覆盖保存</el-button>
-          <el-button size="small" type="danger" plain :disabled="!selectedTemplate" @click="removeSelectedTemplate">删除</el-button>
-          <el-button size="small" @click="saveAsTemplate">另存为…</el-button>
-        </div>
-
-        <div class="preset-row" style="margin-top: 8px">
-          <span class="preset-label">快捷加载：</span>
-          <div class="preset-chips">
-            <button type="button" class="preset-chip primary" @click="loadPreset('basic')">
-              极简基础模板
-            </button>
-            <button type="button" class="preset-chip danger" @click="loadPreset('clear')">
-              清空（恢复系统默认）
-            </button>
-          </div>
-        </div>
-
-        <div class="preset-row" style="margin-top: 8px">
-          <span class="preset-label">常用占位符：</span>
-          <div class="preset-chips">
-            <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PROXIES$')">
-              + $PROXIES$（节点池）
-            </button>
-            <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$ALL_PROXIES$')">
-              + $ALL_PROXIES$（全部节点）
-            </button>
-            <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(关键词)$')">
-              + $FILTER_PROXIES(关键词)$
-            </button>
-            <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PANEL_HOST$')">
-              + $PANEL_HOST$（面板防回环）
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <el-tabs v-model="activeTab" @tab-change="onTabChange">
-        <!-- TAB 1: 模板编辑 -->
-        <el-tab-pane label="模板代码 (YAML)" name="edit">
-          <el-input
-            ref="editorTextareaRef"
-            v-model="templateCode"
-            type="textarea"
-            :rows="15"
-            class="code-textarea"
-            placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
-          />
-          <div class="tip-banner" style="margin-top: 10px">
-            占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。
-          </div>
-        </el-tab-pane>
-
-        <!-- TAB 2: 实时编译预览 -->
-        <el-tab-pane label="实时编译预览 (Preview)" name="preview">
-          <div v-loading="previewLoading">
-            <div v-if="previewData" class="preview-header">
-              <div class="preview-stats">
-                <span class="stat-badge">
-                  注入节点数：<strong>{{ previewData.proxy_count }}</strong>
-                </span>
-                <span v-if="previewData.is_sample_nodes" class="stat-badge warning">
-                  该权限组暂无可用接入点，以下为样例模拟结果
-                </span>
-              </div>
-              <div style="display: flex; gap: 8px">
-                <el-button size="small" :icon="Refresh" @click="fetchPreview">刷新预览</el-button>
-                <el-button size="small" type="primary" plain :icon="CopyDocument" @click="copyPreview">复制预览配置</el-button>
-              </div>
-            </div>
-
-            <!-- 匹配到的节点芯片预览 -->
-            <div v-if="previewData?.proxy_names && previewData.proxy_names.length" class="matched-nodes-box">
-              <span class="box-label">组内可用节点池：</span>
-              <span v-for="name in previewData.proxy_names" :key="name" class="node-chip cell-mono">
-                {{ name }}
-              </span>
-            </div>
-
-            <el-input
-              :model-value="previewData?.rendered || '正在编译渲染...'"
-              type="textarea"
-              :rows="13"
-              readonly
-              class="code-textarea preview-box"
-              style="margin-top: 10px"
-            />
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span class="muted" style="font-size: 12px">保存后该权限组用户请求订阅时将直接返回此定制配置</span>
-          <div style="display: flex; gap: 10px">
-            <el-button @click="templateDialogOpen = false">取消</el-button>
-            <el-button type="primary" :loading="templateSaving" @click="saveTemplate">
-              <el-icon><Check /></el-icon>&nbsp;保存模板
-            </el-button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -675,107 +324,6 @@ async function copyPreview() {
 }
 .table-empty { padding: 30px 0; text-align: center; color: var(--x-text-3); font-size: 13px; }
 
-.preset-section {
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-}
-.preset-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.preset-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--x-primary);
-  white-space: nowrap;
-}
-.preset-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.preset-chip {
-  display: inline-flex;
-  align-items: center;
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  color: var(--x-text);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  &:hover {
-    border-color: var(--x-primary);
-    color: var(--x-primary);
-    background: rgba(99, 102, 241, 0.06);
-  }
-  &.primary {
-    border-color: var(--x-primary);
-    color: var(--x-primary);
-    background: var(--x-primary-soft);
-  }
-  &.danger {
-    color: var(--x-danger);
-    &:hover {
-      border-color: var(--x-danger);
-      background: var(--x-danger-soft);
-    }
-  }
-  &.code {
-    font-family: var(--x-font-mono, monospace);
-    font-size: 11px;
-  }
-}
-.code-textarea {
-  font-family: var(--x-font-mono, 'JetBrains Mono', Consolas, monospace);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.preview-box {
-  background: #1e1e1e;
-  color: #d4d4d4;
-}
-.tip-banner {
-  font-size: 11.5px;
-  color: var(--x-text-2);
-  line-height: 1.5;
-  background: rgba(99, 102, 241, 0.06);
-  border-left: 3px solid var(--x-primary);
-  padding: 6px 10px;
-  border-radius: 0 4px 4px 0;
-}
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.preview-stats {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.stat-badge {
-  font-size: 12px;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  padding: 3px 8px;
-  border-radius: 6px;
-  color: var(--x-text);
-  &.warning {
-    background: var(--x-warning-soft);
-    border-color: #fde68a;
-    color: #92400e;
-  }
-}
 .order-list {
   display: flex;
   flex-direction: column;
@@ -821,28 +369,6 @@ async function copyPreview() {
   gap: 2px;
 }
 
-.matched-nodes-box {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 11.5px;
-}
-.box-label {
-  color: var(--x-text-2);
-  font-weight: 500;
-}
-.node-chip {
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-size: 11px;
-}
 
 /* ================= 全局统一权限组卡片网格流 ================= */
 .group-card-grid {

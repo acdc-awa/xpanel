@@ -22,6 +22,14 @@ const form = reactive({
   turnstile_token: '',
 })
 const loading = ref(false)
+const turnstileRef = ref<{ reset: () => void } | null>(null)
+
+// 人机验证 token 一次性：提交失败后必须换新 token，否则重试会被后端判为重复消费。
+function resetCaptcha() {
+  if (!site.captchaEnable) return
+  form.turnstile_token = ''
+  turnstileRef.value?.reset()
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -74,6 +82,7 @@ async function onSubmit() {
     router.replace(auth.homePath())
   } catch (e) {
     ElMessage.error(errMsg(e, '注册失败'))
+    resetCaptcha()
   } finally {
     loading.value = false
   }
@@ -123,6 +132,7 @@ async function onSubmit() {
         </el-form-item>
         <TurnstileWidget
           v-if="site.captchaEnable && site.turnstileSiteKey"
+          ref="turnstileRef"
           :site-key="site.turnstileSiteKey"
           @token="(t) => (form.turnstile_token = t)"
         />

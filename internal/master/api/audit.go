@@ -36,7 +36,8 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 	case "billing":
 		q = q.Where("action LIKE 'plans.%' OR action = 'plans' OR action LIKE 'orders.%' OR action = 'orders' OR action LIKE 'gift-cards.%' OR action = 'gift-cards'")
 	case "inbounds":
-		q = q.Where("action LIKE 'inbounds.%' OR action = 'inbounds' OR action LIKE 'certs.%' OR action = 'certs' OR action LIKE 'access-points.%' OR action = 'access-points' OR action LIKE 'permission-groups.%' OR action = 'permission-groups'")
+		// 订阅模板（sub-templates）与权限组同域：模板的生效位置就是权限组，归在同一分类便于对照查看。
+		q = q.Where("action LIKE 'inbounds.%' OR action = 'inbounds' OR action LIKE 'certs.%' OR action = 'certs' OR action LIKE 'access-points.%' OR action = 'access-points' OR action LIKE 'permission-groups.%' OR action = 'permission-groups' OR action LIKE 'sub-templates.%' OR action = 'sub-templates'")
 	case "settings":
 		// notice.%（单数）为 2026-09-04 手动打点退役前的存量 action，保留可筛
 		q = q.Where("action LIKE 'settings.%' OR action = 'settings' OR action LIKE 'notices.%' OR action = 'notices' OR action LIKE 'notice.%' OR action LIKE 'backup.%' OR action = 'backup' OR action LIKE 'topology.%' OR action LIKE 'topology-layout.%'")

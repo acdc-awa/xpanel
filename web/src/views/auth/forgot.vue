@@ -17,8 +17,20 @@ const turnstileToken = ref('')
 const loading = ref(false)
 const submitting = ref(false)
 const hint = ref('')
+// 两步各有一个 widget（v-if/v-else 互斥渲染），各自持有重置句柄。
+const turnstileEmailRef = ref<{ reset: () => void } | null>(null)
+const turnstileResetRef = ref<{ reset: () => void } | null>(null)
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// 人机验证 token 一次性：提交失败后必须换新 token，否则重试会被后端判为重复消费。
+// 两步共用同一个 turnstileToken，因此重置当前步骤的 widget 即可。
+function resetCaptcha(current: 'email' | 'reset') {
+  if (!site.captchaEnable) return
+  turnstileToken.value = ''
+  const target = current === 'email' ? turnstileEmailRef.value : turnstileResetRef.value
+  target?.reset()
+}
 
 onMounted(async () => {
   await site.fetchConfig()
@@ -41,9 +53,11 @@ async function submitEmail() {
       step.value = 'reset'
     } else {
       ElMessage.error(data.message)
+      resetCaptcha('email')
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '提交失败，请稍后重试'))
+    resetCaptcha('email')
   } finally {
     loading.value = false
   }
@@ -79,9 +93,11 @@ async function submitReset() {
       router.replace('/login')
     } else {
       ElMessage.error(data.message)
+      resetCaptcha('reset')
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '重置失败，请稍后重试'))
+    resetCaptcha('reset')
   } finally {
     submitting.value = false
   }
@@ -107,6 +123,7 @@ async function submitReset() {
         </el-form-item>
         <TurnstileWidget
           v-if="site.captchaEnable && site.turnstileSiteKey"
+          ref="turnstileEmailRef"
           :site-key="site.turnstileSiteKey"
           @token="(t) => (turnstileToken = t)"
         />
@@ -142,6 +159,7 @@ async function submitReset() {
         </el-form-item>
         <TurnstileWidget
           v-if="site.captchaEnable && site.turnstileSiteKey"
+          ref="turnstileResetRef"
           :site-key="site.turnstileSiteKey"
           @token="(t) => (turnstileToken = t)"
         />

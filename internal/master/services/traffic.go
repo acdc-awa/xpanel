@@ -464,6 +464,8 @@ func (s *TrafficService) resetInboundTraffic() {
 // StartDailyAgg 启动每日汇总定时任务（每 5 分钟把 traffic_logs 累加到 traffic_daily）。
 // 首次启动前执行一次性回填：历史 traffic_daily 是按 UTC 天写入的，需按业务时区重算最近
 // 若干天，否则 8 天滚动窗口之外的旧行日期会长期与业务日界错位（30 天趋势可见）。
+// 每轮聚合后顺带截断 WAL（见 truncateWAL）：聚合是全库写入最集中的时刻，紧随其后是最确定的
+// 低写入窗口，截断后也能让面板「数据管理」页显示的空间占用反映真实有效数据量。
 func (s *TrafficService) StartDailyAgg(ctx context.Context) {
 	if done, err := BackfillDailyBusinessDate(s.DB, s.nowOrReal(), dailyBackfillDays); err != nil {
 		log.Printf("traffic: 每日汇总时区回填失败: %v", err)
@@ -480,9 +482,28 @@ func (s *TrafficService) StartDailyAgg(ctx context.Context) {
 				return
 			case <-ticker.C:
 				s.AggDaily()
+				s.truncateWAL()
 			}
 		}
 	}()
+}
+
+// truncateWAL 把已 checkpoint 的 WAL 帧占用的磁盘归还（SQLite 专用）。
+//
+// 为什么必须主动做：WAL 在 checkpoint 后只被**复用**、文件不缩，默认会长期停在
+// wal_autocheckpoint 水位（1000 页）。本项目页大小 4 KiB，即 1000×4096 = 3.9 MiB，
+// 于是面板「空间回收」卡片常年显示「WAL 3.9 MB」——那是水位线而非有效数据量
+// （2026-09-15 反馈）。db.SqliteDSN 的 journal_size_limit 只给出上限，主动截断才真正归还磁盘。
+//
+// TRUNCATE 需要等待所有读事务结束；连接池已收敛为单连接（db.Open），此处不会拿到 busy。
+// 失败仅告警：WAL 截断是空间优化，不影响任何数据可见性。
+func (s *TrafficService) truncateWAL() {
+	if s.DB.Dialector == nil || s.DB.Dialector.Name() != "sqlite" {
+		return
+	}
+	if err := s.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+		log.Printf("traffic: WAL 截断失败: %v", err)
+	}
 }
 
 // AggDaily 按 用户×业务日 汇总流量到 traffic_daily（upsert）。

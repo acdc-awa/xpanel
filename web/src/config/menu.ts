@@ -17,6 +17,7 @@ import {
   Connection,
   Bell,
   Histogram,
+  Document,
 } from '@element-plus/icons-vue'
 
 export interface SubMenuItem {
@@ -47,16 +48,18 @@ export const adminMenuGroups: MenuGroup[] = [
     children: [
       { title: '服务器管理', path: '/admin/servers', icon: Monitor },
       { title: '接入点', path: '/admin/nodes', icon: Share },
-      { title: '权限组管理', path: '/admin/permission-groups', icon: UserFilled },
       { title: '路由管理', path: '/admin/routing', icon: Connection },
       { title: '证书管理', path: '/admin/certs', icon: Lock },
     ],
   },
   {
+    // 套餐 / 权限组 / 订阅模板 同属「用户能买到什么、看到什么配置」的一条链，放在一组更符合心智。
     title: '订阅与财务',
     icon: Box,
     children: [
       { title: '套餐管理', path: '/admin/plans', icon: Box },
+      { title: '权限组管理', path: '/admin/permission-groups', icon: UserFilled },
+      { title: '订阅模板', path: '/admin/sub-templates', icon: Document },
       { title: '订单记录', path: '/admin/orders', icon: Tickets },
       { title: '礼品卡管理', path: '/admin/gift-cards', icon: Tickets },
       { title: '邀请码管理', path: '/admin/invitations', icon: Key },

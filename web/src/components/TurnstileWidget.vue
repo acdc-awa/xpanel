@@ -63,6 +63,21 @@ onBeforeUnmount(() => {
     }
   }
 })
+
+// reset 供父组件在校验失败后调用。
+// Turnstile token 是一次性的：提交过一次（无论后端判定通过与否）就不能复用，
+// 不重置会让用户「输错一次密码后，带着同一个旧 token 重试」并被后端判为重复消费。
+function reset() {
+  if (!widgetId || !window.turnstile) return
+  try {
+    window.turnstile.reset(widgetId)
+    emit('token', '')
+  } catch {
+    /* noop */
+  }
+}
+
+defineExpose({ reset })
 </script>
 
 <template>

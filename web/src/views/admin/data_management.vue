@@ -327,6 +327,9 @@ function fmtCount(n?: number) {
   return (n || 0).toLocaleString()
 }
 
+// 主库与 WAL 是两个独立文件，占用为两者之和（此前文案写成「含 WAL」，易读成包含关系）。
+const totalDbSize = computed(() => (stats.value?.db_size || 0) + (stats.value?.wal_size || 0))
+
 watch(rangeDays, () => load())
 watch(cleanupTable, () => {
   cleanupDate.value = ''
@@ -377,7 +380,7 @@ onUnmounted(() => {
           <div v-if="stats?.sqlite_avail" class="stat-cell">
             <span class="dot" style="background: #94a3b8" />
             <span class="stat-label">数据库文件</span>
-            <span class="stat-val cell-mono">{{ fmtSize(stats?.db_size) }}（含 WAL {{ fmtSize(stats?.wal_size) }}）</span>
+            <span class="stat-val cell-mono">{{ fmtSize(stats?.db_size) }} + WAL {{ fmtSize(stats?.wal_size) }} = {{ fmtSize(totalDbSize) }}</span>
           </div>
         </div>
 
@@ -454,7 +457,9 @@ onUnmounted(() => {
         <span class="muted" style="font-size: 12.5px">
           SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。当前占用：
           <template v-if="stats?.sqlite_avail">
-            <b class="cell-mono">{{ fmtSize(stats?.db_size) }}</b>（WAL <span class="cell-mono">{{ fmtSize(stats?.wal_size) }}</span>）
+            主库 <b class="cell-mono">{{ fmtSize(stats?.db_size) }}</b> + WAL
+            <span class="cell-mono">{{ fmtSize(stats?.wal_size) }}</span> = 共
+            <b class="cell-mono">{{ fmtSize(totalDbSize) }}</b>
           </template>
           <template v-else>当前数据库类型不支持在线回收</template>
         </span>

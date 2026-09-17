@@ -544,6 +544,24 @@ function renderPermissionGroups(ctx: Ctx) {
   }
 }
 
+// 订阅模板库（素材库 CRUD；content 是大段 YAML，只计数不铺开，避免审计详情被正文淹没）
+const subTemplateDict: Dict = {
+  name: { label: '模板名称' },
+  content: { label: '模板内容', fmt: (v: unknown) => `${(typeof v === 'string' ? v : '').length} 字符`, hidden: true },
+}
+
+function renderSubTemplates(ctx: Ctx) {
+  const del = ctx.method === 'DELETE'
+  const nm = nameOf(ctx)
+  if (del) ctx.view.summary = buildSummary(ctx, '删除订阅模板', nm)
+  else if (ctx.method === 'POST') ctx.view.summary = buildSummary(ctx, '新建订阅模板', nm)
+  else ctx.view.summary = buildSummary(ctx, '修改订阅模板', nm)
+  if (!del) {
+    pushDictFields(ctx.view, ctx.body, subTemplateDict)
+    pushRemaining(ctx, subTemplateDict)
+  }
+}
+
 const siteDict: Dict = {
   app_name: { label: '系统标题' },
   app_description: { label: '站点描述' },
@@ -641,6 +659,7 @@ function dispatch(ctx: Ctx) {
   if (a.startsWith('certs')) return renderCerts(ctx)
   if (a.startsWith('access-points')) return renderAccessPoints(ctx)
   if (a.startsWith('permission-groups')) return renderPermissionGroups(ctx)
+  if (a.startsWith('sub-templates')) return renderSubTemplates(ctx)
   if (a.startsWith('settings')) return renderSettings(ctx)
   if (a.startsWith('notices') || a.startsWith('notice.')) return renderNotices(ctx)
   if (a.startsWith('topology')) return renderTopology(ctx)
@@ -796,8 +815,8 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     return { categoryName: '财务', categoryColor: 'warning', title }
   }
 
-  // 4. 入站与证书
-  if (act.startsWith('inbounds') || act.startsWith('certs') || act.startsWith('access-points') || act.startsWith('permission-groups')) {
+  // 4. 入站与证书（含权限组与订阅模板：订阅模板的生效位置就是权限组，同域归置便于对照查看）
+  if (act.startsWith('inbounds') || act.startsWith('certs') || act.startsWith('access-points') || act.startsWith('permission-groups') || act.startsWith('sub-templates')) {
     let title = '入站证书'
     if (act.startsWith('inbounds')) {
       if (act.endsWith('.toggle')) title = '启停入站'
@@ -811,6 +830,8 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
       title = isDel ? '删除接入点' : '配置自定义接入点'
     } else if (act.startsWith('permission-groups')) {
       title = isDel ? '删除权限组' : '配置权限组'
+    } else if (act.startsWith('sub-templates')) {
+      title = isDel ? '删除订阅模板' : method === 'POST' ? '新建订阅模板' : '修改订阅模板'
     }
     return { categoryName: '入站证书', categoryColor: 'info', title }
   }

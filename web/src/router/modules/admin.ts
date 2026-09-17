@@ -55,6 +55,12 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '权限组' },
       },
       {
+        path: 'sub-templates',
+        name: 'admin.sub-templates',
+        component: () => import('@/views/admin/sub-templates.vue'),
+        meta: { title: '订阅模板' },
+      },
+      {
         path: 'users',
         name: 'admin.users',
         component: () => import('@/views/admin/users.vue'),

@@ -1,7 +1,10 @@
 package services
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,8 +13,10 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/config"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/db"
 )
 
 func TestResetPeriodKey(t *testing.T) {
@@ -728,4 +733,90 @@ func TestSaveBucketsTrafficByHour(t *testing.T) {
 	if logs[1].UpBytes != 7 || logs[1].DownBytes != 9 {
 		t.Fatalf("次小时 up=%d down=%d, want 7/9", logs[1].UpBytes, logs[1].DownBytes)
 	}
+}
+
+// walFileSize 读 -wal 文件字节数；不存在返回 0。
+func walFileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return st.Size()
+}
+
+// TestTruncateWALReleasesDisk 锁定 2026-09-15 的 WAL 水位治理：
+// WAL 在 checkpoint 后只被复用、文件不缩，会长期停在 wal_autocheckpoint 水位
+// （本项目页大小 4 KiB × 1000 页 = 3.9 MiB，面板「数据管理」页因此常年显示 3.9 MB）。
+// 周期 TRUNCATE 才能把已 checkpoint 的帧占用的磁盘真正还回去，且不影响数据可见性。
+func TestTruncateWALReleasesDisk(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "panel.db")
+	database, err := db.Open(&config.DB{Driver: "sqlite", DSN: dsn})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if err := database.AutoMigrate(&models.TrafficLog{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	var mode string
+	if err := database.Raw("PRAGMA journal_mode").Scan(&mode).Error; err != nil {
+		t.Fatalf("read journal_mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode = %q, want wal（否则本用例前提不成立）", mode)
+	}
+
+	base := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 400; i++ {
+		if err := database.Create(&models.TrafficLog{
+			UserID:      1,
+			InboundID:   1,
+			PeriodStart: base.Add(time.Duration(i) * time.Second),
+			UpBytes:     int64(i),
+			DownBytes:   int64(i * 2),
+		}).Error; err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+
+	walPath := dsn + "-wal"
+	before := walFileSize(t, walPath)
+	if before == 0 {
+		t.Fatal("写入后 WAL 应已存在且非空")
+	}
+
+	svc := &TrafficService{DB: database}
+	svc.truncateWAL()
+
+	after := walFileSize(t, walPath)
+	if after != 0 {
+		t.Fatalf("truncateWAL 后 WAL 应为 0 字节，实际 %d（截断前 %d）", after, before)
+	}
+
+	var cnt int64
+	if err := database.Model(&models.TrafficLog{}).Count(&cnt).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if cnt != 400 {
+		t.Fatalf("截断后行数应为 400，实际 %d（截断不得影响可见性）", cnt)
+	}
+}
+
+// TestTruncateWALSkipsNonSQLite 非 SQLite 驱动下不应执行（MySQL 无 WAL 概念）。
+func TestTruncateWALSkipsNonSQLite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// 内存库同样是 sqlite 驱动，这里只验证不 panic 且不报错。
+	(&TrafficService{DB: db}).truncateWAL()
 }

@@ -14,6 +14,7 @@ const route = useRoute()
 
 const form = reactive({ username: '', password: '', turnstile_token: '' })
 const loading = ref(false)
+const turnstileRef = ref<{ reset: () => void } | null>(null)
 
 // 2FA 二次验证
 const twofaOpen = ref(false)
@@ -23,6 +24,14 @@ const twofaLoading = ref(false)
 onMounted(async () => {
   await site.fetchConfig()
 })
+
+// 人机验证 token 一次性：任何一次提交失败后都必须换新 token，
+// 否则用户带旧 token 重试会被后端判为重复消费，看到的是「人机验证未通过」而非真实原因。
+function resetCaptcha() {
+  if (!site.captchaEnable) return
+  form.turnstile_token = ''
+  turnstileRef.value?.reset()
+}
 
 async function onSubmit() {
   if (!form.username || !form.password) {
@@ -44,6 +53,7 @@ async function onSubmit() {
     gotoHome()
   } catch (e) {
     ElMessage.error(errMsg(e, '登录失败'))
+    resetCaptcha()
   } finally {
     loading.value = false
   }
@@ -106,6 +116,7 @@ function gotoHome() {
         </el-form-item>
         <TurnstileWidget
           v-if="site.captchaEnable && site.turnstileSiteKey"
+          ref="turnstileRef"
           :site-key="site.turnstileSiteKey"
           @token="(t) => (form.turnstile_token = t)"
         />

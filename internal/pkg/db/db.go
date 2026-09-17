@@ -20,13 +20,19 @@ import (
 //   - synchronous(NORMAL)：WAL 下安全（不损原子性），仅断电可能丢最后一批已提交事务；
 //   - auto_vacuum(INCREMENTAL)：保留策略 DELETE 只把页还给 freelist、文件不缩，开启增量回收后
 //     可在清理后 PRAGMA incremental_vacuum 归还磁盘（对既有库需执行一次 VACUUM 才生效，
-//     见数据管理页「空间回收」/「压缩历史数据」）。
+//     见数据管理页「空间回收」/「压缩历史数据」）；
+//   - journal_size_limit(1MiB)：checkpoint 后把 WAL 文件截断到该上限。默认值 -1 表示不截断，
+//     于是 WAL 长期停留在历史最高水位——SQLite 默认 wal_autocheckpoint=1000 页、本项目页大小
+//     4KiB，因此面板上常年显示 3.9 MB（= 1000 页），与实际有效数据量无关（2026-09-15 反馈）。
+//     截断本身不改变任何数据可见性，只是把已 checkpoint 的帧占用的磁盘还回去。
+//     注意这些是**连接级** pragma，仅在连接池收敛为单连接（见 Open 的 MaxOpenConns(1)）时稳定生效。
 func SqliteDSN(dsn string) string {
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=auto_vacuum(INCREMENTAL)"
+	return dsn + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)" +
+		"&_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_size_limit(1048576)"
 }
 
 // Open 按配置打开数据库连接，返回 *gorm.DB。
