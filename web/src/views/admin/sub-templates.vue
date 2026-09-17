@@ -3,12 +3,12 @@
 //
 // 分层语义（页面内已显式呈现，避免误用）：
 //   - 订阅生成只读 PermissionGroup.ClashTemplate 一个字段，因此「组级订阅模板」才是生效位置；
-//   - 「我的模板库」是可复用的素材，改动它不会影响任何用户的订阅，必须载入并保存到某个权限组才生效。
+//   - 「我的模板库」是可复用的素材，改动它不会影响任何用户的订阅，必须加载并保存到某个权限组才生效。
 //
 // 交互结构：两个标签页共用同一套「左列表 + 右编辑器」骨架——组级页是权限组列表 + 组模板编辑器，
 // 模板库页是模板列表 + 模板编辑器。此前模板库用「整宽列表 + 弹窗编辑」，与组级页两套范式并存，
 // 且列表行的「载入到编辑器」实际会切走标签页、写入另一个编辑器的缓冲，目标不可见，故一并收掉。
-// 跨层动作只保留方向明确的两个入口：组级页「从模板库载入」（库 → 组，取副本写入缓冲）、
+// 跨层动作只保留方向明确的两个入口：组级页「从模板库加载」（库 → 组，取副本写入缓冲）、
 // 「将当前内容另存为模板」（组 → 库）。
 //
 // 全页不自动保存：切换到别的权限组/模板、新建、清空、离开页面之前都会先确认，绝不静默丢弃修改。
@@ -125,12 +125,12 @@ async function loadGroups() {
   }
 }
 
-// 选中权限组 = 把该组已存模板读进编辑器。再次点击当前组则从服务端重新载入（放弃修改的退路）。
+// 选中权限组 = 把该组已存模板读进编辑器。再次点击当前组则从服务端重新加载（放弃修改的退路）。
 async function selectGroup(id: number) {
   if (id === selectedGroupId.value && !groupDirty.value) return
   const message =
     id === selectedGroupId.value
-      ? '重新载入会丢弃当前编辑器中未保存的修改，回到服务端已存的模板。'
+      ? '重新加载会丢弃当前编辑器中未保存的修改，回到服务端已存的模板。'
       : '切换权限组后，当前编辑器中未保存的模板修改会丢失。'
   if (!(await allowDiscard(groupDirty.value, message))) return
   selectedGroupId.value = id
@@ -320,12 +320,12 @@ function closeLibForm() {
   libLint.warnings = 0
 }
 
-// 点选库条目 = 载入右侧编辑器（同页内，不存在「载入到哪个编辑器」的歧义）
+// 点选库条目 = 加载右侧编辑器（同页内，不存在「加载到哪个编辑器」的歧义）
 async function selectLibrary(tpl: SubTemplate) {
   if (libForm.id === tpl.id && !libDirty.value) return
   const message =
     libForm.id === tpl.id
-      ? '重新载入会丢弃当前模板编辑器中未保存的修改。'
+      ? '重新加载会丢弃当前模板编辑器中未保存的修改。'
       : '切换模板后，当前模板编辑器中未保存的修改会丢失。'
   if (!(await allowDiscard(libDirty.value, message))) return
   openLibForm(tpl)
@@ -342,14 +342,14 @@ async function saveLibrary() {
     ElMessage.warning('请填写模板名称')
     return
   }
-  // 与组级模板同因：素材里留着语法错误，载入到权限组时会一路带下去
+  // 与组级模板同因：素材里留着语法错误，加载到权限组时会一路带下去
   const lintNow = libEditorRef.value?.validate()
   const errCount = lintNow ? lintNow.errors : libLint.errors
   if (errCount > 0) {
     const detail = lintNow?.messages.length ? `\n首条：${lintNow.messages[0]}` : ''
     try {
       await ElMessageBox.confirm(
-        `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。载入到权限组后会原样下发给客户端，确认保存？${detail}`,
+        `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。加载到权限组后会原样下发给客户端，确认保存？${detail}`,
         '模板存在语法错误',
         { type: 'error', confirmButtonText: '仍然保存', cancelButtonText: '返回修改' }
       )
@@ -408,17 +408,17 @@ async function removeLibrary() {
   }
 }
 
-// 从模板库取一份副本写入组编辑器（库 → 组）。载入只是填缓冲，保存到权限组才对用户生效。
+// 从模板库取一份副本写入组编辑器（库 → 组）。加载只是填缓冲，保存到权限组才对用户生效。
 async function loadFromLibrary(id: number) {
   const tpl = subTemplates.value.find((t) => t.id === id)
   if (!tpl) return
-  if (!(await allowDiscard(groupDirty.value, '载入模板会覆盖当前编辑器中未保存的修改。'))) return
+  if (!(await allowDiscard(groupDirty.value, '加载模板会覆盖当前编辑器中未保存的修改。'))) return
   templateCode.value = tpl.content
   previewData.value = null
   editorTab.value = 'edit'
   clearLint()
   ElMessage.success(
-    `已载入「${tpl.name}」，保存后对权限组「${selectedGroup.value?.name ?? ''}」生效`
+    `已加载「${tpl.name}」，保存后对权限组「${selectedGroup.value?.name ?? ''}」生效`
   )
 }
 
@@ -510,7 +510,7 @@ async function saveAsFromEditor() {
                 </span>
               </button>
             </div>
-            <div class="list-foot">再次点击已选中的权限组可放弃修改、重新载入服务端已存的模板。</div>
+            <div class="list-foot">再次点击已选中的权限组可放弃修改、重新加载服务端已存的模板。</div>
           </BaseCard>
 
           <!-- 右：模板编辑器 -->
@@ -532,7 +532,7 @@ async function saveAsFromEditor() {
                   <span class="preset-label">模板库：</span>
                   <el-dropdown trigger="click" @command="loadFromLibrary">
                     <el-button size="small" plain>
-                      从模板库载入<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                      从模板库加载<el-icon class="el-icon--right"><ArrowDown /></el-icon>
                     </el-button>
                     <template #dropdown>
                       <el-dropdown-menu>
@@ -656,7 +656,7 @@ async function saveAsFromEditor() {
             </template>
 
             <div class="tip-banner" style="margin-bottom: 10px">
-              这里的改动<strong>不会影响任何用户的订阅</strong>：它只是素材，要生效需载入到某个权限组。
+              这里的改动<strong>不会影响任何用户的订阅</strong>：它只是素材，要生效需加载到某个权限组。
             </div>
 
             <div v-if="libraryLoading" class="list-hint">正在加载…</div>
