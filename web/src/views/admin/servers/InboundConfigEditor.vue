@@ -15,6 +15,7 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCerts, getXrayKeys, getXrayVlessEnc, rotateInternalInbound, getLayers, createLayer, deleteLayer, type CertItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import CodeEditor from '@/components/CodeEditor.vue'
 import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings, AccessLayer } from '@/api/types'
 
 export interface InboundEditorChangePayload {
@@ -1417,12 +1418,11 @@ async function copyText(text: string, label: string) {
           <el-icon><Warning /></el-icon>&nbsp;{{ jsonError }}
         </el-tag>
       </div>
-      <el-input
+      <CodeEditor
         :model-value="rawJsonText"
-        type="textarea"
-        :rows="16"
-        class="code-textarea"
-        @input="onRawJsonInput"
+        language="json"
+        height="380px"
+        @update:model-value="onRawJsonInput"
       />
     </div>
   </div>
@@ -1653,15 +1653,6 @@ async function copyText(text: string, label: string) {
 .json-status {
   display: flex;
   justify-content: flex-end;
-}
-
-.code-textarea {
-  :deep(textarea) {
-    font-family: var(--x-font-mono, monospace);
-    font-size: 12.5px;
-    background: var(--x-card-soft);
-    color: var(--x-text);
-  }
 }
 
 .caddy-snippet-box {

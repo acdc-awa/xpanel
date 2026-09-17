@@ -19,6 +19,27 @@ export default defineConfig({
       scss: { api: 'modern' },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // CodeMirror + YAML 解析器（订阅模板/入站 JSON/路由 JSON 三处编辑器共用）体积较大且版本稳定，
+        // 单独成 chunk 便于长期缓存，避免改动业务代码就让用户重下整个页面 chunk。
+        manualChunks: {
+          codemirror: [
+            'codemirror',
+            '@codemirror/lang-yaml',
+            '@codemirror/lang-json',
+            '@codemirror/lint',
+            '@codemirror/language',
+            '@codemirror/view',
+            '@codemirror/state',
+            '@lezer/highlight',
+            'yaml',
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     host: '0.0.0.0',

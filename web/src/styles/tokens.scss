@@ -37,6 +37,21 @@
   --el-border-radius-base: 8px;
   --x-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
+  /* ===== 代码编辑器配色（YAML 语法高亮 / 错误标记） ===== */
+  --x-code-bg: #f8fafc;
+  --x-code-gutter: #f1f5f9;
+  --x-code-text: #1e2333;
+  --x-code-key: #4338ca;     /* 键名 */
+  --x-code-string: #0f766e;  /* 字符串 */
+  --x-code-number: #b45309;  /* 数字与布尔 */
+  --x-code-comment: #94a3b8; /* 注释 */
+  --x-code-punct: #64748b;   /* 标点与列表符 */
+  --x-code-invalid: #dc2626; /* 语法错误 */
+  --x-code-error-bg: rgba(239, 68, 68, 0.1);
+  --x-code-warn-bg: rgba(245, 158, 11, 0.12);
+  --x-code-active-line: rgba(99, 102, 241, 0.06);
+  --x-code-selection: rgba(99, 102, 241, 0.18);
+
   /* ===== 阴影系统 ===== */
   --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
   --x-shadow-md: 0 4px 12px rgba(23, 27, 46, 0.08);
@@ -74,6 +89,21 @@ html.dark {
   --x-text: #f8fafc;
   --x-text-2: #94a3b8;
   --x-text-3: #64748b;
+
+  /* ===== 代码编辑器配色（暗色） ===== */
+  --x-code-bg: #0f172a;
+  --x-code-gutter: #131b2e;
+  --x-code-text: #e2e8f0;
+  --x-code-key: #93c5fd;     /* 键名 */
+  --x-code-string: #6ee7b7;  /* 字符串 */
+  --x-code-number: #fcd34d;  /* 数字与布尔 */
+  --x-code-comment: #64748b; /* 注释 */
+  --x-code-punct: #94a3b8;   /* 标点与列表符 */
+  --x-code-invalid: #f87171; /* 语法错误 */
+  --x-code-error-bg: rgba(248, 113, 113, 0.14);
+  --x-code-warn-bg: rgba(251, 191, 36, 0.14);
+  --x-code-active-line: rgba(129, 140, 248, 0.1);
+  --x-code-selection: rgba(129, 140, 248, 0.24);
 
   /* ===== 语义状态色 (Semantic Status in Dark) ===== */
   --x-success: #34d399;

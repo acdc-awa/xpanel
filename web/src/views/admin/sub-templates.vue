@@ -4,7 +4,7 @@
 // 分层语义（页面内已显式呈现，避免误用）：
 //   - 订阅生成只读 PermissionGroup.ClashTemplate 一个字段，因此「组级订阅模板」才是生效位置；
 //   - 「我的模板库」是可复用的素材，改动它不会影响任何用户的订阅，必须载入并保存到某个权限组才生效。
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Check,
@@ -32,6 +32,7 @@ import {
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
+import CodeEditor from '@/components/CodeEditor.vue'
 
 const route = useRoute()
 
@@ -109,6 +110,10 @@ function selectGroup(id: number) {
   templateCode.value = g?.clash_template || ''
   editorTab.value = 'edit'
   previewData.value = null
+  groupLint.errors = 0
+  groupLint.warnings = 0
+  previewLint.errors = 0
+  previewLint.warnings = 0
   selectedLibraryId.value = undefined
 }
 
@@ -123,7 +128,10 @@ const templateSaving = ref(false)
 const editorTab = ref('edit')
 const previewLoading = ref(false)
 const previewData = ref<TemplatePreviewResult | null>(null)
-const editorTextareaRef = ref<any>(null)
+const groupEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
+// 编辑器实时校验结果：保存前据此提示，避免把语法错误的模板下发给客户端
+const groupLint = reactive({ errors: 0, warnings: 0 })
+const previewLint = reactive({ errors: 0, warnings: 0 })
 
 const hasCustomTemplate = computed(() => !!templateCode.value.trim())
 
@@ -138,27 +146,8 @@ function loadPreset(type: 'basic' | 'clear') {
 }
 
 function insertPlaceholder(placeholder: string) {
-  const el = (editorTextareaRef.value?.textarea ||
-    editorTextareaRef.value?.$el?.querySelector('textarea')) as HTMLTextAreaElement | undefined
-
-  if (!el) {
-    // 降级：未获取到 textarea 元素时追加到末尾
-    templateCode.value += (templateCode.value.endsWith('\n') ? '' : '\n') + placeholder + '\n'
-    ElMessage.success(`已插入占位符 ${placeholder}`)
-    return
-  }
-
-  const start = el.selectionStart ?? templateCode.value.length
-  const end = el.selectionEnd ?? templateCode.value.length
-  const text = templateCode.value
-  templateCode.value = text.substring(0, start) + placeholder + text.substring(end)
-  ElMessage.success(`已在光标处插入 ${placeholder}`)
-
-  nextTick(() => {
-    el.focus()
-    const newPos = start + placeholder.length
-    el.setSelectionRange(newPos, newPos)
-  })
+  // 交给编辑器在光标处插入（替换选中内容），不再从 DOM 反查 textarea 选区
+  groupEditorRef.value?.insertAtCursor(placeholder)
 }
 
 async function fetchPreview() {
@@ -185,6 +174,23 @@ async function saveTemplate() {
     return
   }
   const target = selectedGroup.value
+  // 后端下发前只做占位符字符串替换，不校验 YAML：语法错误会静默发给客户端导致其无法解析，
+  // 故保存前先拦一道（确认后仍可保存，兼容「故意写非标准 YAML 由客户端容忍」的用法）。
+  // 同步取一次校验结果，避免依赖防抖后的计数造成漏判。
+  const lintNow = groupEditorRef.value?.validate()
+  const errCount = lintNow ? lintNow.errors : groupLint.errors
+  if (errCount > 0) {
+    const detail = lintNow?.messages.length ? `\n首条：${lintNow.messages[0]}` : ''
+    try {
+      await ElMessageBox.confirm(
+        `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。保存后客户端可能无法解析该订阅，确认保存？${detail}`,
+        '模板存在语法错误',
+        { type: 'error', confirmButtonText: '仍然保存', cancelButtonText: '返回修改' }
+      )
+    } catch {
+      return
+    }
+  }
   try {
     await ElMessageBox.confirm(
       `将当前模板保存到权限组「${target.name}」？保存后该组用户请求订阅时直接返回此配置。`,
@@ -480,20 +486,25 @@ async function saveAsFromEditor() {
 
               <el-tabs v-model="editorTab" @tab-change="onTabChange">
                 <el-tab-pane label="模板代码 (YAML)" name="edit">
-                  <el-input
-                    ref="editorTextareaRef"
+                  <CodeEditor
+                    ref="groupEditorRef"
                     v-model="templateCode"
-                    type="textarea"
-                    :rows="15"
-                    class="code-textarea"
+                    height="330px"
                     placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
+                    @lint="(e, w) => { groupLint.errors = e; groupLint.warnings = w }"
                   />
+                  <div v-if="groupLint.errors > 0 || groupLint.warnings > 0" class="lint-banner" :class="groupLint.errors ? 'error' : 'warn'">
+                    <span>
+                      YAML 校验：{{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
+                      错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
+                    </span>
+                  </div>
                   <div class="tip-banner" style="margin-top: 10px">
-                    占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。
+                    占位符说明：<code>$PROXIES$</code> 自动展开为当前权限组所有可用 VLESS 节点；<code>$ALL_PROXIES$</code> 展开为全部节点名称；<code>$FILTER_PROXIES(关键词)$</code> 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。占位符按后端支持的写法校验，不会被误判为语法错误。
                   </div>
                 </el-tab-pane>
 
-                <el-tab-pane label="实时编译预览 (Preview)" name="preview">
+                <el-tab-pane label="实时编译预览 (Preview)" name="preview" lazy>
                   <div v-loading="previewLoading">
                     <div v-if="previewData" class="preview-header">
                       <div class="preview-stats">
@@ -517,14 +528,19 @@ async function saveAsFromEditor() {
                       </span>
                     </div>
 
-                    <el-input
-                      :model-value="previewData?.rendered || '正在编译渲染...'"
-                      type="textarea"
-                      :rows="13"
+                    <CodeEditor
+                      v-if="previewData"
+                      :model-value="previewData.rendered"
+                      height="300px"
                       readonly
-                      class="code-textarea preview-box"
-                      style="margin-top: 10px"
+                      @lint="(e, w) => { previewLint.errors = e; previewLint.warnings = w }"
                     />
+                    <div v-else class="list-hint" style="padding: 30px 0">正在编译渲染…</div>
+                    <div v-if="previewLint.errors > 0" class="lint-banner error" style="margin-top: 8px">
+                      <span>
+                        编译结果有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
+                      </span>
+                    </div>
                   </div>
                 </el-tab-pane>
               </el-tabs>
@@ -592,13 +608,7 @@ async function saveAsFromEditor() {
           <el-input v-model="libraryForm.name" placeholder="如 通用精简模板 / 流媒体分流模板" maxlength="64" show-word-limit />
         </el-form-item>
         <el-form-item label="模板内容 (YAML)">
-          <el-input
-            v-model="libraryForm.content"
-            type="textarea"
-            :rows="14"
-            class="code-textarea"
-            placeholder="留空则使用系统内置默认模板"
-          />
+          <CodeEditor v-model="libraryForm.content" height="300px" placeholder="留空则使用系统内置默认模板" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -794,14 +804,23 @@ async function saveAsFromEditor() {
     font-size: 11px;
   }
 }
-.code-textarea {
-  font-family: var(--x-font-mono, 'JetBrains Mono', Consolas, monospace);
-  font-size: 12px;
+/* YAML 校验结果提示条（错误红色 / 警告琥珀色，与编辑器行内标记同色系） */
+.lint-banner {
+  margin-top: 8px;
+  font-size: 11.5px;
   line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 0 4px 4px 0;
 }
-.preview-box {
-  background: #1e1e1e;
-  color: #d4d4d4;
+.lint-banner.error {
+  color: var(--x-danger);
+  background: var(--x-code-error-bg);
+  border-left: 3px solid var(--x-danger);
+}
+.lint-banner.warn {
+  color: var(--x-warning);
+  background: var(--x-code-warn-bg);
+  border-left: 3px solid var(--x-warning);
 }
 .tip-banner {
   font-size: 11.5px;

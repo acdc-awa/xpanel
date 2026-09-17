@@ -9,6 +9,10 @@ import {
   type ServerRoutingRule,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import CodeEditor from '@/components/CodeEditor.vue'
+
+// 自定义 Rule JSON 的占位示例（含双引号，用常量避免在模板表达式里写字面量对象）
+const RULE_JSON_PLACEHOLDER = '{"type":"field","inboundTag":["api"],"outboundTag":"direct"}'
 
 const props = defineProps<{
   serverId: number
@@ -346,12 +350,11 @@ function onClosed() {
           <span>高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）</span>
         </summary>
         <div style="margin-top: 10px">
-          <el-input
+          <CodeEditor
             v-model="form.rule_json"
-            type="textarea"
-            :rows="3"
-            class="code-textarea"
-            placeholder='{"type":"field","inboundTag":["api"],"outboundTag":"direct"}'
+            language="json"
+            height="150px"
+            :placeholder="RULE_JSON_PLACEHOLDER"
           />
           <p class="muted" style="font-size: 11.5px; margin: 4px 0 0">
             填写后配置生成器将直接透传此 JSON 对象（自动补全 <code>type:"field"</code> 与 outboundTag）。
