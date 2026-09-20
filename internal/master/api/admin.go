@@ -485,7 +485,13 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 	}
 	aligned := models.TrafficCycleAlign(time.Now())
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&user).Update("traffic_cycle_start", aligned).Error; err != nil {
+		// 与购买/续费同语义（审计 F3）：递增账期 ID 是「新周期从 0 起算」的唯一依据，
+		// 节点据此把重置前的增量留在旧账期；同时清零该整点桶内无账期标记（cycle_id=0）的
+		// 计费字节，兜住旧 agent 行按时间轴回退归属的路径。
+		if err := tx.Model(&user).Updates(map[string]any{
+			"traffic_cycle_start": aligned,
+			"traffic_cycle_id":    gorm.Expr("traffic_cycle_id + 1"),
+		}).Error; err != nil {
 			return err
 		}
 		return models.ZeroBilledInCycleBucket(tx, user.ID, aligned)
@@ -493,6 +499,7 @@ func (d *Deps) AdminResetUserTraffic(c *gin.Context) {
 		util.ServerError(c, "重置失败")
 		return
 	}
+	// 立即推送新账期 ID：节点收到后才会从此刻起按新账期打标
 	if d.Hub != nil {
 		d.Hub.SyncUsersToAll()
 	}

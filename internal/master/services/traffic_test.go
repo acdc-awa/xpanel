@@ -820,3 +820,192 @@ func TestTruncateWALSkipsNonSQLite(t *testing.T) {
 	// 内存库同样是 sqlite 驱动，这里只验证不 panic 且不报错。
 	(&TrafficService{DB: db}).truncateWAL()
 }
+
+// TestSaveRejectsNegativeBytes 审计 F7 回归：任一方向为负的条目整条丢弃。
+// 旧实现只跳过 up<=0 && down<=0，混合正负（up=100, down=-500）会入账使已用量下降甚至为负，
+// 破坏配额判定与自动续费触发；同批合法条目必须照常落库（不因一条坏数据阻断整批上报）。
+func TestSaveRejectsNegativeBytes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+	u := models.User{Username: "neg", Email: "neg@t.com", UUID: "uuid-neg", SubscribeToken: "tok-neg", Status: models.StatusActive}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.User{}).Where("id = ?", u.ID).
+		Update("traffic_cycle_start", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-09-20T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{UserID: u.ID, Inbound: "vless-in", UpBytes: 100, DownBytes: -500}, // 混合正负：整条丢弃
+			{UserID: u.ID, Inbound: "vless-in", UpBytes: -1, DownBytes: 0},     // 单方向为负：整条丢弃
+			{UserID: u.ID, Inbound: "vless-in", UpBytes: 100, DownBytes: 200},  // 合法：照常入账
+		},
+	}
+	if _, err := svc.Save(payload, 1); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	up, down, err := svc.UserBilled(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up != 100 || down != 200 {
+		t.Fatalf("计费用量 up=%d down=%d, want 100/200（负值条目必须被丢弃）", up, down)
+	}
+	var logs []models.TrafficLog
+	if err := db.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("TrafficLog 行数 = %d, want 1", len(logs))
+	}
+	if logs[0].UpBytes != 100 || logs[0].DownBytes != 200 {
+		t.Fatalf("落库原始字节 up=%d down=%d, want 100/200", logs[0].UpBytes, logs[0].DownBytes)
+	}
+	// 入站冗余计数不得被负值污染
+	if err := db.First(&inb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inb.Up != 100 || inb.Down != 200 {
+		t.Fatalf("入站冗余计数 up=%d down=%d, want 100/200", inb.Up, inb.Down)
+	}
+}
+
+// TestSaveRejectsInboundDimensionNegativeBytes 入站维度条目（Email 恒空）同样受负值校验约束，
+// 否则负数会污染 inbounds.up/down（展示/容量口径）与入站生命周期判定。
+func TestSaveRejectsInboundDimensionNegativeBytes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	inb := models.Inbound{ServerID: 1, Tag: "vless-in", Protocol: "vless", Port: 443}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &TrafficService{DB: db}
+	payload := protocol.TrafficReportPayload{
+		Period: "2026-09-20T00:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Inbound: "vless-in", UpBytes: 300, DownBytes: -100}, // 整条丢弃
+			{Inbound: "vless-in", UpBytes: 300, DownBytes: 100},  // 合法
+		},
+	}
+	if _, err := svc.Save(payload, 1); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := db.First(&inb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inb.Up != 300 || inb.Down != 100 {
+		t.Fatalf("入站冗余计数 up=%d down=%d, want 300/100", inb.Up, inb.Down)
+	}
+}
+
+// TestSaveAbortsOnRateQueryFailure 审计 F4 回归：入站/计费倍率/授权组查询失败必须中止本批记账。
+// 旧实现吞掉错误：入站映射为空 ⇒ 统计键无法反解入站 ⇒ 倍率静默回退组内 max/1，
+// 免费入站（ratio=0）被按 1 收费、高倍率入站被少计。修复后 Save 返回错误，不落任何流水。
+func TestSaveAbortsOnRateQueryFailure(t *testing.T) {
+	setup := func(t *testing.T) (*gorm.DB, models.User, uint64) {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.User{},
+			&models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+		inb := models.Inbound{ServerID: 1, Tag: "in-free", Protocol: "vless", Port: 443, Enabled: true, Type: models.InboundTypeUser}
+		if err := db.Create(&inb).Error; err != nil {
+			t.Fatal(err)
+		}
+		// Ratio:0 走 Create 会被 default:1 吞掉，显式 Update
+		if err := db.Model(&models.Inbound{}).Where("id = ?", inb.ID).Update("ratio", 0).Error; err != nil {
+			t.Fatal(err)
+		}
+		inbID := inb.ID
+		ap := models.UserAccessPoint{Name: "ap", TargetType: "inbound", TargetInboundID: &inbID, Enabled: true}
+		if err := db.Create(&ap).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: 2, AccessPointID: ap.ID}).Error; err != nil {
+			t.Fatal(err)
+		}
+		u := models.User{Username: "free", Email: "free@t.com", UUID: "uuid-free", SubscribeToken: "tok-free",
+			Status: models.StatusActive, PermissionGroupID: 2}
+		if err := db.Create(&u).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&models.User{}).Where("id = ?", u.ID).
+			Update("traffic_cycle_start", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+			t.Fatal(err)
+		}
+		return db, u, inb.ID
+	}
+
+	// 新格式统计键：精确指向免费入站，正常路径必须按 ratio=0 计（billed 0）
+	keyFor := func(u models.User, inbID uint64) string {
+		return "u" + strconv.FormatUint(u.ID, 10) + ".i" + strconv.FormatUint(inbID, 10) + "@panel.local"
+	}
+
+	t.Run("入站表不可读", func(t *testing.T) {
+		db, u, inbID := setup(t)
+		svc := &TrafficService{DB: db}
+		key := keyFor(u, inbID)
+		if _, err := svc.Save(protocol.TrafficReportPayload{
+			Period:  "2026-09-20T00:00:00Z",
+			Entries: []protocol.TrafficEntry{{Email: key, UpBytes: 100}},
+		}, 1); err != nil {
+			t.Fatalf("正常路径不应报错: %v", err)
+		}
+		if up, _, _ := svc.UserBilled(u.ID); up != 0 {
+			t.Fatalf("免费入站正常路径应计 0，实际 %d", up)
+		}
+
+		if err := db.Migrator().DropTable(&models.Inbound{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Save(protocol.TrafficReportPayload{
+			Period:  "2026-09-20T01:00:00Z",
+			Entries: []protocol.TrafficEntry{{Email: key, UpBytes: 100}},
+		}, 1); err == nil {
+			t.Fatal("入站读取失败必须中止本批记账，不得静默回退倍率 1（免费流量被计成收费）")
+		}
+		if up, _, _ := svc.UserBilled(u.ID); up != 0 {
+			t.Fatalf("中止后不得新增计费，实际 %d", up)
+		}
+	})
+
+	t.Run("AP授权表不可读", func(t *testing.T) {
+		db, u, inbID := setup(t)
+		svc := &TrafficService{DB: db}
+		if err := db.Migrator().DropTable(&models.UserAccessPoint{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Save(protocol.TrafficReportPayload{
+			Period:  "2026-09-20T00:00:00Z",
+			Entries: []protocol.TrafficEntry{{Email: keyFor(u, inbID), UpBytes: 100}},
+		}, 1); err == nil {
+			t.Fatal("授权组查询失败必须中止本批记账（空授权组会让倍率回退 1）")
+		}
+		if up, _, _ := svc.UserBilled(u.ID); up != 0 {
+			t.Fatalf("中止后不得新增计费，实际 %d", up)
+		}
+	})
+}

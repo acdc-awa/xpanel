@@ -24,6 +24,11 @@ type User struct {
 	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
 	Remark              string     `gorm:"size:255" json:"remark"`                     // 管理员备注（仅管理端可见；用户侧 userView 与节点同步均不带）
 	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后；恒为 UTC 整点，见 TrafficCycleAlign）
+	// TrafficCycleID 当前账期 ID（≥1，审计 F3）：每次切换周期（购买/续费/重置）递增。
+	// 节点按此 ID 给采集到的增量打标（见 protocol.TrafficEntry.CycleID），计费/配额按
+	// 「traffic_logs.cycle_id = 本值」归属——切换后新周期天然从 0 起算（无需清零桶），
+	// 且切换前产生的迟到增量仍留在旧账期，不会被算进新套餐。
+	TrafficCycleID uint64 `gorm:"default:1;not null" json:"traffic_cycle_id"`
 	// 套餐快照三列（2026-09-01 Xboard 式隔离）：购买/续费/管理员分配套餐时从 Plan 复制，
 	// 判定链（filterValidUsers/订阅/展示/超额处置）只读快照、不实时 join plans——
 	// 套餐编辑默认零影响存量用户（仅新购/续费生效），勾选「同步存量用户」才批量重快照。

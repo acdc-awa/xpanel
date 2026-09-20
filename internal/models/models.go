@@ -39,7 +39,7 @@ func All() []any {
 		&Server{}, &Inbound{}, &PendingConfig{}, &PendingCert{},
 		&ServerOutbound{}, &ServerRoutingRule{},
 		&Plan{}, &Order{}, &Cert{},
-		&TrafficLog{}, &TrafficDaily{}, &NodeReport{},
+		&TrafficLog{}, &TrafficDaily{}, &NodeReport{}, &TrafficBatch{},
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{},
 		&AccessLayer{},
@@ -50,13 +50,14 @@ func All() []any {
 }
 
 // AutoMigrate 建表/补列（生产环境由启动时执行，后续可切换为显式迁移）。
-// ISSUE-04：先显式删除旧版 traffic_logs 的单列唯一索引 idx_traffic_period，
-// 再执行 AutoMigrate 建立 (user_id, inbound_id, period_start) 复合唯一索引。
+// 先显式删除 traffic_logs 上的历史唯一索引，再由同一次 AutoMigrate 建出当前口径的复合唯一索引
+// （v1 单列 idx_traffic_period → v2 三列 → v3 含 cycle_id 的四列；GORM 只补建缺失索引，
+// 不改写也不删除已存在的，故每换一次口径都要显式删旧的，见 dropLegacyTrafficUniqueIndexes）。
 // 2026-08-23 访问控制单点化：退役 InboundEndpoint / 入站·L4 权限白名单三表，
 // 授权收口为「用户接入点（UserAccessPoint）权限组白名单」单点，旧表显式删除（GORM 只增不删）。
 // 2026-08-24 L4 建模退役：l4_rule 型接入点折转为「直连目标入站 + 端点覆写」，随后删除 l4_port_rules 表。
 func AutoMigrate(db *gorm.DB) error {
-	if err := dropLegacyTrafficPeriodIndex(db); err != nil {
+	if err := dropLegacyTrafficUniqueIndexes(db); err != nil {
 		return err
 	}
 	if err := dropRetiredAccessControlTables(db); err != nil {
@@ -89,6 +90,9 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	if err := backfillTrafficBilled(db); err != nil {
+		return err
+	}
+	if err := backfillTrafficCycleIDs(db); err != nil {
 		return err
 	}
 	if err := migratePlanSaleFlags(db); err != nil {
@@ -580,17 +584,45 @@ func dropRetiredAccessControlTables(db *gorm.DB) error {
 	return nil
 }
 
-// dropLegacyTrafficPeriodIndex 幂等删除旧库中的单列唯一索引（GORM AutoMigrate 只增不删）。
-func dropLegacyTrafficPeriodIndex(db *gorm.DB) error {
-	const legacy = "idx_traffic_period"
+// legacyTrafficUniqueIndexes traffic_logs 上需幂等删除的历史唯一索引。
+// GORM AutoMigrate 只补建缺失的索引，既不改写也不删除已存在的索引（含同名但列集合不同的）。
+//
+//   - idx_traffic_period：v1 的单列唯一索引；
+//   - idx_traffic_uid_inb_period：v2 的 (user_id, inbound_id, period_start) 三列唯一索引。
+//
+// v3 起唯一键扩为含 cycle_id 的四列（同小时跨账期的两行必须能共存，见 TrafficLog.CycleID）。
+// 不删旧索引的后果是**硬故障**而非静默错误：落库 upsert 以四列为冲突目标，库里若还留着旧索引，
+// SQLite 会报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"，
+// 节点流量全部写不进去。删除后由同一次 AutoMigrate 建出新的四列索引。
+func dropLegacyTrafficUniqueIndexes(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&TrafficLog{}) {
 		return nil
 	}
-	if !db.Migrator().HasIndex(&TrafficLog{}, legacy) {
+	for _, legacy := range []string{"idx_traffic_period", "idx_traffic_uid_inb_period"} {
+		if !db.Migrator().HasIndex(&TrafficLog{}, legacy) {
+			continue
+		}
+		if err := db.Migrator().DropIndex(&TrafficLog{}, legacy); err != nil {
+			return fmt.Errorf("删除旧唯一索引 %s 失败: %w", legacy, err)
+		}
+	}
+	return nil
+}
+
+// backfillTrafficCycleIDs 账期 ID 一次性回填（v3）：存量用户一律置 1。
+//
+// 语义约定：traffic_cycle_id ≥ 1 恒成立，0 只用于 traffic_logs.cycle_id 表示「未知账期」
+// （旧 agent 未打标 / v3 之前的历史行，按 period_start 归属）。用户侧若留 0，则其历史行
+// （cycle_id=0）会同时命中「等于当前账期」分支，把旧账期消费算进新周期。
+// 加列时 DB 默认值已覆盖存量行，此处再显式兜一遍（部分驱动的 ADD COLUMN DEFAULT 不回填旧行）。
+// 幂等。
+func backfillTrafficCycleIDs(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&User{}) {
 		return nil
 	}
-	if err := db.Migrator().DropIndex(&TrafficLog{}, legacy); err != nil {
-		return fmt.Errorf("删除旧唯一索引 %s 失败: %w", legacy, err)
+	if err := db.Model(&User{}).Where("traffic_cycle_id IS NULL OR traffic_cycle_id = 0").
+		Update("traffic_cycle_id", 1).Error; err != nil {
+		return fmt.Errorf("回填用户账期 ID 失败: %w", err)
 	}
 	return nil
 }

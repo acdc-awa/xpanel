@@ -91,11 +91,23 @@ func SaveRetentionSettingsGroup(db *gorm.DB, vals map[string]string) error {
 // TrafficSafeDeleteBefore 返回 traffic_logs 明细可安全清理的最晚「before」日期
 // （YYYY-MM-DD，删除动作删 period_start < before 00:00 的行，before 当日及以后保留）。
 // 两条安全线取较早者：
-//  1. 计费安全线——明细是配额判定/订阅已用展示/仪表盘 Top10 的唯一数据源，但三者均只统计
-//     period_start ≥ 各自用户 traffic_cycle_start 的行，删除早于全员最早周期起点的行不影响任何口径；
+//  1. 计费安全线——明细是配额判定/订阅已用展示/仪表盘 Top10 的唯一数据源，删除早于全员最早
+//     周期起点（min traffic_cycle_start）的行不影响任何口径；
 //  2. 聚合安全线——AggDaily 每 5 分钟重算最近 7 天（滚动窗口）：窗口内某日被部分删除时，
 //     该日汇总会被缩小值覆盖；整日删光则汇总行脱离 GROUP BY、残留旧值不再更新。
 //     两种情况都会造成 daily 与明细口径不一致，故删除上界还须早于 now-7d 的日界。
+//
+// ⚠ 第 1 条的成立依据在 v3 账期口径（2026-09-20）之后**不再是**「period_start ≥ traffic_cycle_start」，
+// 而是下面这条隐式不变量。改动本函数或任何删除 traffic_logs 的逻辑之前，必须先确认它仍然成立：
+//
+//	归属判据是 l.cycle_id = u.traffic_cycle_id（models.CycleMatchSQL），与 period_start 无关；
+//	而带「当前账期」标记的行只可能在主控递增该用户账期**之后**产生——节点经 sync_users 得知新
+//	账期，推送发生在事务提交之后；period_start 取节点的发送时刻（对齐整点），故必然 ≥ cycle_start，
+//	于是必然晚于 min(cycle_start)，落在安全线之内。
+//
+// 这条链依赖节点与主控的时钟一致：节点时钟慢于主控超过 1 小时时，带当前账期的行会落进更旧的
+// 小时桶、跌到安全线之下而被删除——表现为静默少计，且该行连同账期归属一起丢失。要彻底摆脱这个
+// 依赖，安全线须改按账期计算（而非按时间轴），那是一次口径变更，不在本函数范围内。
 //
 // 查询失败返回空串（调用方应拒绝清理）。
 func TrafficSafeDeleteBefore(db *gorm.DB, now time.Time) string {

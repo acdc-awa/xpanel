@@ -123,15 +123,38 @@ type Order struct {
 // (用户生效组, 服务器) 生效入站倍率折算；历史行由一次性迁移按 1:1 回填。
 type TrafficLog struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`
-	UserID      uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:1;not null" json:"user_id"`
-	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:2;index" json:"inbound_id"`
+	UserID      uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:1;not null" json:"user_id"`
+	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:2;index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`
 	BilledUp    int64     `gorm:"default:0" json:"billed_up"`
 	BilledDown  int64     `gorm:"default:0" json:"billed_down"`
-	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period,priority:3;index:idx_traffic_period_start" json:"period_start"`
+	PeriodStart time.Time `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:3;index:idx_traffic_period_start" json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
-	CreatedAt   time.Time `json:"created_at"`
+	// CycleID 账期 ID（审计 F3）：节点在采集时刻打标的本条增量所属计费周期。计费/配额按
+	// 「cycle_id = 用户当前 traffic_cycle_id」归属，不再依赖上报时刻落进哪个小时桶。
+	// 0 = 未知（旧 agent 未打标 / 历史行）：回退按 period_start >= traffic_cycle_start 归属。
+	// 必须进唯一索引：同一小时桶内跨账期的两行不得合并，否则计费口径不可区分。
+	CycleID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:4;default:0" json:"cycle_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TrafficBatch 流量上报批次去重记录（审计 F2）。
+//
+// 为什么必须有：traffic_logs 的小时桶 upsert 是**加法**（同一小时多次上报要累加，不能改覆盖），
+// 因此「同一批数据被重复投递」与「同一小时内两批合法增量」在库内不可区分——去重键必须来自
+// 节点（BatchID 由 agent 生成、重发复用同一 ID）。去重记录与流量写入在同一事务，提交后才回 ACK。
+//
+// 保留期 trafficBatchRetentionDays（见 services）必须 ≥ agent outbox 最大保留时长，
+// 否则「节点长期离线后补报」会在去重记录被清理后重复计量。
+type TrafficBatch struct {
+	ID        uint64    `gorm:"primaryKey" json:"id"`
+	ServerID  uint64    `gorm:"uniqueIndex:idx_traffic_batch,priority:1;not null" json:"server_id"`
+	BatchID   string    `gorm:"size:64;uniqueIndex:idx_traffic_batch,priority:2;not null" json:"batch_id"`
+	Entries   int       `json:"entries"`
+	UpBytes   int64     `json:"up_bytes"`
+	DownBytes int64     `json:"down_bytes"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
 }
 
 // TrafficDaily 每日汇总（仪表盘用）。

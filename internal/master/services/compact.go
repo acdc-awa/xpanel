@@ -24,6 +24,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
+	pkgdb "github.com/acdc-awa/xpanel/internal/pkg/db"
 )
 
 // 存量日志一次性压缩迁移（启动期执行）的 settings 键与版本。
@@ -122,10 +123,14 @@ func hourBucketKey(h time.Time) int64 {
 
 // loadCycleStartProtection 构建「周期起点落在某小时桶内」的用户集合。
 //
-// 背景：计费/配额按 `period_start >= user.traffic_cycle_start` 统计，而压缩会把同一小时的多行
-// 合并到整点，合并行取桶内最早的 period_start。若某用户的 cycle_start 落在这个小时中间，
-// 合并行的 period_start（整点）会早于 cycle_start，导致该小时整段被排除，最多漏计 1 小时流量。
-// 因此这些用户在该小时桶内的行不参与合并（原样保留），合计与计费口径逐字节不变。
+// 背景：压缩把同一小时的多行合并到整点，合并行取桶内最早的 period_start。而 cycle_id = 0 的
+// 存量行 / 旧 agent 行没有账期标记，只能回退按 `period_start >= traffic_cycle_start` 归属：
+// 若某用户的 cycle_start 落在这个小时中间，合并行的 period_start（整点）会早于 cycle_start，
+// 导致该小时整段被排除，最多漏计 1 小时流量。因此这些用户在该小时桶内的行不参与合并
+// （原样保留），合计与计费口径逐字节不变。
+//
+// 带账期标记的行不需要本保护——压缩的分组键含 cycle_id（见 compactTrafficHour），跨账期的行
+// 不会合并；本保护针对的是上面那条没有账期标记的回退路径。
 //
 // 该隐患的根源（周期起点与分桶不同轴）已由写入侧修复：models.TrafficCycleAlign 使
 // traffic_cycle_start 恒为整点，故合并行的 period_start 必然等于或晚于 cycle_start。
@@ -155,96 +160,114 @@ func loadCycleStartProtection(db *gorm.DB) (map[int64]map[uint64]bool, error) {
 }
 
 // compactTrafficHour 合并单个小时桶 [h, h+1) 内的 traffic_logs 明细：
-// 同一 (user_id, inbound_id) 归并为一行（sum 各字节列、保留最早 created_at / 最晚 period_end）；
+// 同一 (user_id, inbound_id, cycle_id) 归并为一行（sum 各字节列、保留最早 created_at / 最晚 period_end）；
 // protect 中的用户在该小时的行不参与合并，原样保留（见 loadCycleStartProtection）。
 // 已是「一桶一行且全在整点」时跳过，幂等可反复执行。
+//
+// cycle_id 必须在分组键里（审计 F3）：账期上线后行身份是
+// (user_id, inbound_id, period_start, cycle_id)，同一小时可以合法存在多账期的行
+// （节点补发积压时 Period 取发送时刻，旧账期批次会落在切换之后的小时里）。若按
+// (user, inbound) 合并，这些行会塌成一行且 cycle_id 丢失（落库为 0），
+// 随后被 CycleUsageSQL 的 `cycle_id = 0 AND period_start >= 周期起点` 回退分支
+// 归到**当前账期**——旧套餐的消费被计到新套餐头上（静默多收），
+// 与 ZeroBilledInCycleBucket 刻意保留旧账期行、口径单源的设计意图相反。
+//
+// 读取、聚合、删除、重建必须在同一事务内（审计 F6）：旧实现先在事务外读取整小时行，
+// 之后才开事务按时间范围删除——两者之间提交的同小时增量不在旧快照里，却会被范围删除
+// 覆盖而永久丢失（少计）。同事务后，SQLite 侧写连接被本事务独占（生产单连接池），
+// 迟到写入只能排在本事务之后提交，因而不会被删；MySQL 侧读加 FOR UPDATE 取范围锁，
+// 并发插入同样只能等本事务结束。任何取锁失败都返回错误（本小时留待下次压缩），不丢数据。
 func compactTrafficHour(db *gorm.DB, h time.Time, protect map[uint64]bool) error {
-	var rows []models.TrafficLog
-	if err := db.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
-		Find(&rows).Error; err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-
-	type groupKey struct {
-		userID    uint64
-		inboundID uint64
-	}
-	type agg struct {
-		up, down        int64
-		billedUp, down2 int64
-		createdAt       time.Time
-		periodEnd       time.Time
-	}
-
-	groups := make(map[groupKey]*agg, len(rows))
-	mergeCount := 0
-	for i := range rows {
-		if protect[rows[i].UserID] {
-			continue
+	return db.Transaction(func(tx *gorm.DB) error {
+		var rows []models.TrafficLog
+		if err := pkgdb.LockForUpdate(tx).
+			Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
+			Find(&rows).Error; err != nil {
+			return err
 		}
-		mergeCount++
-		k := groupKey{rows[i].UserID, rows[i].InboundID}
-		g := groups[k]
-		if g == nil {
-			g = &agg{}
-			groups[k] = g
-		}
-		g.up += rows[i].UpBytes
-		g.down += rows[i].DownBytes
-		g.billedUp += rows[i].BilledUp
-		g.down2 += rows[i].BilledDown
-		if g.createdAt.IsZero() || rows[i].CreatedAt.Before(g.createdAt) {
-			g.createdAt = rows[i].CreatedAt
-		}
-		if rows[i].PeriodEnd.After(g.periodEnd) {
-			g.periodEnd = rows[i].PeriodEnd
-		}
-	}
-	if mergeCount == 0 {
-		return nil // 该小时全为受保护行，无可合并
-	}
-
-	// 已是「一桶一行且全在整点」（且无受保护行）则跳过，避免无谓重写。
-	if mergeCount == len(rows) && len(rows) == len(groups) {
-		compacted := true
-		for i := range rows {
-			if !rows[i].PeriodStart.Equal(h) {
-				compacted = false
-				break
-			}
-		}
-		if compacted {
+		if len(rows) == 0 {
 			return nil
 		}
-	}
 
-	merged := make([]models.TrafficLog, 0, len(groups)+len(rows)-mergeCount)
-	for k, g := range groups {
-		merged = append(merged, models.TrafficLog{
-			UserID:      k.userID,
-			InboundID:   k.inboundID,
-			UpBytes:     g.up,
-			DownBytes:   g.down,
-			BilledUp:    g.billedUp,
-			BilledDown:  g.down2,
-			PeriodStart: h,
-			PeriodEnd:   g.periodEnd,
-			CreatedAt:   g.createdAt,
-		})
-	}
-	// 受保护用户的行原样回抄（ID 归零由库重分配，无外部引用；created_at/period_end 保留）。
-	for i := range rows {
-		if protect[rows[i].UserID] {
-			r := rows[i]
-			r.ID = 0
-			merged = append(merged, r)
+		type groupKey struct {
+			userID    uint64
+			inboundID uint64
+			cycleID   uint64
 		}
-	}
+		type agg struct {
+			up, down        int64
+			billedUp, down2 int64
+			createdAt       time.Time
+			periodEnd       time.Time
+		}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+		groups := make(map[groupKey]*agg, len(rows))
+		mergeCount := 0
+		for i := range rows {
+			if protect[rows[i].UserID] {
+				continue
+			}
+			mergeCount++
+			k := groupKey{rows[i].UserID, rows[i].InboundID, rows[i].CycleID}
+			g := groups[k]
+			if g == nil {
+				g = &agg{}
+				groups[k] = g
+			}
+			g.up += rows[i].UpBytes
+			g.down += rows[i].DownBytes
+			g.billedUp += rows[i].BilledUp
+			g.down2 += rows[i].BilledDown
+			if g.createdAt.IsZero() || rows[i].CreatedAt.Before(g.createdAt) {
+				g.createdAt = rows[i].CreatedAt
+			}
+			if rows[i].PeriodEnd.After(g.periodEnd) {
+				g.periodEnd = rows[i].PeriodEnd
+			}
+		}
+		if mergeCount == 0 {
+			return nil // 该小时全为受保护行，无可合并
+		}
+
+		// 已是「一桶一行且全在整点」（且无受保护行）则跳过，避免无谓重写。
+		if mergeCount == len(rows) && len(rows) == len(groups) {
+			compacted := true
+			for i := range rows {
+				if !rows[i].PeriodStart.Equal(h) {
+					compacted = false
+					break
+				}
+			}
+			if compacted {
+				return nil
+			}
+		}
+
+		merged := make([]models.TrafficLog, 0, len(groups)+len(rows)-mergeCount)
+		for k, g := range groups {
+			merged = append(merged, models.TrafficLog{
+				UserID:      k.userID,
+				InboundID:   k.inboundID,
+				CycleID:     k.cycleID,
+				UpBytes:     g.up,
+				DownBytes:   g.down,
+				BilledUp:    g.billedUp,
+				BilledDown:  g.down2,
+				PeriodStart: h,
+				PeriodEnd:   g.periodEnd,
+				CreatedAt:   g.createdAt,
+			})
+		}
+		// 受保护用户的行原样回抄（ID 归零由库重分配，无外部引用；created_at/period_end 保留）。
+		for i := range rows {
+			if protect[rows[i].UserID] {
+				r := rows[i]
+				r.ID = 0
+				merged = append(merged, r)
+			}
+		}
+
+		// 删除范围与上面的读取范围同事务同边界：范围外的行（含并发迟到写入）不受影响。
 		if e := tx.Where("period_start >= ? AND period_start < ?", h, h.Add(trafficPeriodBucket)).
 			Delete(&models.TrafficLog{}).Error; e != nil {
 			return e

@@ -154,6 +154,8 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	migrateModels := []any{
 		&models.User{}, &models.Plan{}, &models.Inbound{},
 		&models.PermissionGroup{}, &models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{},
+		// traffic_logs：用量聚合查询失败会上抛（审计 F5），本测试需给出完整表结构
+		&models.TrafficLog{},
 	}
 	for _, m := range migrateModels {
 		if err := db.AutoMigrate(m); err != nil {
@@ -272,5 +274,55 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		if u.UUID == users[2].UUID || u.UUID == users[3].UUID {
 			t.Errorf("无组/过期用户不应注入: %s", u.UUID)
 		}
+	}
+}
+
+// TestFilterValidUsersFailsClosedOnUsageQueryError 审计 F5 回归：用量聚合查询失败必须上抛。
+// 旧实现忽略错误 ⇒ usedMap 为空 ⇒ 每个用户已用量读成 0，原本耗尽的用户被重新纳入有效集合
+// 下发到节点（订阅端同理）。修复后查询失败返回 error，调用方中止本次计算并保留节点上次配置。
+func TestFilterValidUsersFailsClosedOnUsageQueryError(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&models.User{}, &models.TrafficLog{}); err != nil {
+		t.Fatal(err)
+	}
+	u := models.User{
+		Username: "exhausted", Email: "e@t.com",
+		UUID: "55555555-5555-5555-5555-555555555555", SubscribeToken: "te",
+		Status: models.StatusActive, PlanTrafficBytes: 1000,
+	}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.User{}).Where("id = ?", u.ID).
+		Update("traffic_cycle_start", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.TrafficLog{
+		UserID: u.ID, UpBytes: 1000, BilledUp: 1000,
+		PeriodStart: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg := &ConfigService{DB: db}
+
+	// 正常路径：已耗尽 → 不在有效集合
+	valid, err := cfg.filterValidUsers()
+	if err != nil {
+		t.Fatalf("正常查询不应报错: %v", err)
+	}
+	if len(valid) != 0 {
+		t.Fatalf("已耗尽用户不应在有效集合，实际 %d 人", len(valid))
+	}
+
+	// 注入用量聚合查询故障：仅 traffic_logs 表不可读
+	if err := db.Migrator().DropTable(&models.TrafficLog{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.filterValidUsers(); err == nil {
+		t.Fatal("用量查询失败必须上抛错误，不得按「已用 0」继续放行")
+	}
+	// 同源链路：GetValidUsers 也必须把错误传出去（否则热更新/全量生成会下发已耗尽用户）
+	if _, err := cfg.GetValidUsers(1); err == nil {
+		t.Fatal("GetValidUsers 必须传播用量查询错误")
 	}
 }

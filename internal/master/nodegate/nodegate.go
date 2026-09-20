@@ -203,7 +203,12 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	}
 	conn.LastSeen.Store(time.Now().Unix())
 	h.register(conn)
-	_ = h.writeRaw(ws, protocol.MsgAuthOK, msg.ID, protocol.ResultPayload{OK: true})
+	// 认证回执携带能力声明：节点据此决定流量批次是「等落库回执才删」还是「发完即删」。
+	// 旧节点忽略 caps；本字段是新节点防重复计量的开关，不能省。
+	_ = h.writeRaw(ws, protocol.MsgAuthOK, msg.ID, protocol.AuthOKPayload{
+		OK:   true,
+		Caps: []string{protocol.CapTrafficAck},
+	})
 	_ = ws.SetReadDeadline(time.Time{})
 
 	// 标记在线
@@ -393,10 +398,15 @@ func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
 	}
 }
 
-// handleTrafficReport 处理节点流量上报（幂等落库）+ 事件驱动超额/到期处置：
+// handleTrafficReport 处理节点流量上报（批次去重 + 落库确认）+ 事件驱动超额/到期处置：
 // 落库后对本帧涉及用户做增量限额判定，命中即热更全节点用户列表（gRPC 秒级移除，
 // 不重启 xray）——「超额后还能跑流量 ~1h」问题的根治路径（2026-09-01），
 // 最坏端到端时延从 1h 校准兜底降为 ≈1 个上报周期。
+//
+// 投递确认（审计 F1）：Save 把「批次去重记录 + 流量写入」放在同一事务，提交成功才回
+// traffic_ack(ok)。节点只有收到 ok 才删本地 outbox 批次——主控写库失败/崩溃/回执丢失时
+// 节点保留并重发，重复投递由 BatchID 去重兜住。失败回 ok=false 仅供节点日志定位原因
+// （节点按自己的节奏重试，不依赖本回执调度）。旧 agent 不带 BatchID：不回执，维持旧行为。
 func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	if h.Traffic == nil {
 		return
@@ -408,8 +418,11 @@ func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	ids, err := h.Traffic.Save(tr, conn.ServerID)
 	if err != nil {
 		log.Printf("nodegate: 流量落库失败 (server=%d): %v", conn.ServerID, err)
+		h.ackTraffic(conn, tr.BatchID, false, "流量落库失败")
 		return
 	}
+	// 落库成功（含「批次重复投递、本次无新增」）→ 确认，节点据此删批
+	h.ackTraffic(conn, tr.BatchID, true, "")
 	if len(ids) == 0 {
 		return
 	}
@@ -437,6 +450,26 @@ func (h *Hub) handleTrafficReport(conn *Conn, msg *protocol.Message) {
 	}
 	log.Printf("nodegate: 流量上报触发违规处置（超额/到期）共 %d 用户，热更全节点用户列表: %v", len(violators), violators)
 	h.SyncUsersToAll()
+}
+
+// ackTraffic 回流量批次落库回执（审计 F1）。batchID 为空（旧 agent 不带批次号）时静默跳过。
+// 走 conn.Send 队列而非直写 WS：本函数在 readPump goroutine 上执行，直写会与 writePump 争用
+// 连接并可能阻塞读循环。带超时与 done 兜底，连接关闭后不空等。
+func (h *Hub) ackTraffic(conn *Conn, batchID string, ok bool, errMsg string) {
+	if batchID == "" {
+		return
+	}
+	data, err := protocol.Encode(protocol.MsgTrafficAck, "",
+		protocol.TrafficAckPayload{BatchID: batchID, OK: ok, Error: errMsg})
+	if err != nil {
+		return
+	}
+	select {
+	case conn.Send <- data:
+	case <-conn.done:
+	case <-time.After(time.Second):
+		log.Printf("nodegate: 流量回执入队超时 (server=%d batch=%s ok=%v)", conn.ServerID, batchID, ok)
+	}
 }
 
 // pruneEnforced 清理过期的处置节流记录，防 map 无界增长（watchdog 15s tick 调用）。

@@ -58,20 +58,30 @@ func (s *BillingStore) UpdateBalance(ctx context.Context, userID uint64, newBala
 		Update("balance_cents", newBalanceCents).Error
 }
 
-// UpdateSubscription 顺延套餐并重置流量周期。
+// UpdateSubscription 顺延套餐并切换流量账期。
 //
-// 周期起点对齐整点（models.TrafficCycleAlign），使计费口径与 traffic_logs 的小时分桶同轴；
-// 同时清零该整点桶已累计的计费字节——该桶内「整点到本次购买/续费时刻」的部分属于切换前
-// （旧周期或未购套餐期），对齐后会被算进新周期，表现为购买后已用量不为 0。切换之后的上报
-// 会继续 upsert 累加进同一行，故新周期的用量自切换时刻起精确起算；原始字节列不动，
-// 仪表盘与每日汇总口径不受影响。两条写在同一事务内（调用方经 Transaction 绑定），
+// 账期归属（审计 F3）：递增 traffic_cycle_id 是「新周期从 0 起算」的**唯一依据**——节点按
+// 该 ID 给采集到的增量打标，计费/配额按 `traffic_logs.cycle_id = 用户当前账期` 归属，因此
+// 切换前产生的迟到增量（含断线补报、跨小时/跨天）留在旧账期，不会被算进新套餐。
+//
+// 周期起点仍对齐整点（models.TrafficCycleAlign）并清零该整点桶内 cycle_id = 0 的计费字节：
+// 那批行没有账期标记（存量行 / 未升级的旧 agent），只能回退按时间轴归属，不清零会把
+// 「整点到本次切换时刻」的旧消费算进新周期。带账期标记的行一律不动，旧账期账本完整留痕。
+//
+// 三条写（套餐/到期/周期起点/账期 ID、清零）在同一事务内（调用方经 Transaction 绑定），
 // 不存在「已切周期但未清零」的中间态。
+//
+// 调用方（购买/续费/自动续费）事务提交后须触发一次用户列表推送（OrderPaidEvent →
+// SyncUsersToAll），节点才会拿到新账期 ID 并从此刻起按新账期打标。
 func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error {
 	aligned := models.TrafficCycleAlign(cycleStart)
 	updates := map[string]any{
 		"plan_id":             plan.ID,
 		"expire_at":           expireAt,
 		"traffic_cycle_start": aligned,
+		// 账期 ID 递增：SQL 表达式在库内自增，避免「读-改-写」竞态丢更新
+		//（同一用户的并发续费被单连接/行锁串行化，但表达式自增更省一次读）。
+		"traffic_cycle_id": gorm.Expr("traffic_cycle_id + 1"),
 		// 购买即跟随套餐权限组（2026-09-17 拍板）：清空用户自定义分组，生效组由下面的
 		// 快照列 plan_group_id 回落提供。此处写 plan.PermissionGroupID 会固化「假自定义」，
 		// 使该用户此后不再跟随套餐权限组变更（面板显示「(自定义)」而非「(套餐继承)」）。

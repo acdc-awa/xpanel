@@ -54,9 +54,19 @@ func (s *AutoRenewService) StartCron(ctx context.Context) {
 }
 
 // RunOnce 执行一轮扫描。单轮内两个触发列表合并去重（同用户只扣一次）。
+//
+// 查询失败必须留痕而不是当作「没有候选」：静默当空集会让自动续费无声停摆——用户到期或
+// 超量后一直不续，面板上没有任何异常可查（审计 F5 同类）。失败源只跳过自己这一路，
+// 另一路照常续费；下一轮（5 分钟）自动重试。
 func (s *AutoRenewService) RunOnce(ctx context.Context) {
-	expireIDs := s.expiryCandidates(ctx)
-	exhaust := s.exhaustCandidates(ctx) // map[userID]struct{}
+	expireIDs, expireErr := s.expiryCandidates(ctx)
+	if expireErr != nil {
+		log.Printf("billing: 读取到期续费候选失败，本轮跳过到期触发: %v", expireErr)
+	}
+	exhaust, exhaustErr := s.exhaustCandidates(ctx)
+	if exhaustErr != nil {
+		log.Printf("billing: 读取超量续费候选失败，本轮跳过超量触发: %v", exhaustErr)
+	}
 
 	type task struct {
 		userID, planID uint64
@@ -105,39 +115,46 @@ func (s *AutoRenewService) RunOnce(ctx context.Context) {
 }
 
 // expiryCandidates 到期窗口内的开关用户（含已过期：过期后持续尝试直至续上或开关关闭）。
-func (s *AutoRenewService) expiryCandidates(ctx context.Context) []uint64 {
+func (s *AutoRenewService) expiryCandidates(ctx context.Context) ([]uint64, error) {
 	var ids []uint64
-	s.DB.WithContext(ctx).Model(&models.User{}).
+	err := s.DB.WithContext(ctx).Model(&models.User{}).
 		Where("status = ? AND auto_renew_expire = ? AND plan_id > 0 AND expire_at IS NOT NULL AND expire_at <= ?",
 			models.StatusActive, true, time.Now().Add(autoRenewWindow)).
-		Pluck("id", &ids)
-	return ids
+		Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // exhaustCandidates 当前周期流量耗尽的开关用户（额度 0=不限，永不触发）。
 // 用量读计费口径 billed 两列（原始字节 × 落库时入站倍率），与节点摘除判定一致。
 // 耗尽用户已被节点摘除停止上报，used 冻结在阈值附近，判定稳定。
-func (s *AutoRenewService) exhaustCandidates(ctx context.Context) map[uint64]uint64 {
+func (s *AutoRenewService) exhaustCandidates(ctx context.Context) (map[uint64]uint64, error) {
 	type row struct {
 		UserID uint64
 		PlanID uint64
 	}
 	var rows []row
-	s.DB.WithContext(ctx).Raw(`
+	// 口径取自 models.CycleUsageSQL（与 services 的配额判定/展示同源，禁止在此另写一份）
+	err := s.DB.WithContext(ctx).Raw(`
 		SELECT u.id AS user_id, u.plan_id
 		FROM users u
 		WHERE u.status = ? AND u.auto_renew_exhaust = ? AND u.plan_id > 0 AND u.plan_traffic_bytes > 0
 		  AND (
-		    SELECT COALESCE(SUM(l.billed_up + l.billed_down), 0)
+		    SELECT COALESCE(SUM(`+models.CycleUsageSQL+`), 0)
 		    FROM traffic_logs l
-		    WHERE l.user_id = u.id AND l.period_start >= u.traffic_cycle_start
+		    WHERE l.user_id = u.id
 		  ) >= u.plan_traffic_bytes`,
-		models.StatusActive, true).Scan(&rows)
+		models.StatusActive, true).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
 	out := make(map[uint64]uint64, len(rows))
 	for _, r := range rows {
 		out[r.UserID] = r.PlanID
 	}
-	return out
+	return out, nil
 }
 
 func exhaustIDs(m map[uint64]uint64) []uint64 {

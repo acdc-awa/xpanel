@@ -65,4 +65,13 @@ require (
 	modernc.org/sqlite v1.23.1 // indirect
 )
 
-require github.com/acdc-awa/xpanel-node v0.1.11
+// 协议包单源在 XPanel-Node 仓库（pkg/protocol + pkg/tlscert）。
+//
+// v0.1.14 起本仓库依赖的协议新增（流量计费审计 F1/F2/F3）：
+//   - TrafficReportPayload.BatchID / Seq / BootID、TrafficAckPayload（MsgTrafficAck）
+//   - AuthOKPayload.Caps（CapTrafficAck）——节点据此决定是否等落库回执
+//   - TrafficEntry.CycleID、User.CycleID（账期归属）
+// 故 require 版本必须 ≥ v0.1.14：低于此版本会在 Docker 构建（上下文无 go.work、
+// 从 GitHub 拉 require 版本）报 "undefined: protocol.AuthOKPayload"。
+// 本地开发由仓库根 go.work 的 use ./agent 解析到工作副本，改这里不影响本地构建。
+require github.com/acdc-awa/xpanel-node v0.1.14

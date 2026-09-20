@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,8 +49,15 @@ func (d *Deps) Subscribe(c *gin.Context) {
 		return
 	}
 	if quota := user.EffectiveTrafficBytes(); quota > 0 {
-		// 计费口径（2026-09-06 倍率计费）：与节点摘除判定同源，读 billed 两列
-		up, down, _ := d.Traffic.UserBilled(user.ID)
+		// 计费口径（2026-09-06 倍率计费）：与节点摘除判定同源，读 billed 两列。
+		// 查询失败不得按「已用 0」放行（审计 F5）：订阅是客户端配置的唯一来源，放行已耗尽
+		// 用户等于把失效配置交出去；返回暂时不可用让客户端重试，而不是伪装成额度充足。
+		up, down, err := d.Traffic.UserBilled(user.ID)
+		if err != nil {
+			log.Printf("subscribe: 用量查询失败 (user=%d): %v", user.ID, err)
+			util.Fail(c, http.StatusServiceUnavailable, "服务暂时不可用，请稍后重试")
+			return
+		}
 		if up+down >= quota {
 			util.Fail(c, 403, "流量已用尽，请购买新套餐")
 			return

@@ -91,6 +91,13 @@ func main() {
 	if err := models.CheckSchemaCompat(database); err != nil {
 		log.Fatalf("数据库兼容性检查失败: %v", err)
 	}
+	// 先落下最低兼容版本标记，再动结构（顺序不可颠倒）：该键是「旧面板读新库」的唯一拦截点，
+	// 而面板内自更新失败时 entrypoint 会自动回滚旧二进制——标记若等到迁移跑完才写，
+	// 回滚上来的旧面板会被放行，其 upsert 在新唯一索引上找不到冲突目标，流量写入全部硬失败。
+	// 失败致命：写不上标记却继续改结构，等于关掉护栏再动手（见 models.DeclareSchemaMinCompatible）。
+	if err := models.DeclareSchemaMinCompatible(database); err != nil {
+		log.Fatalf("声明数据库最低兼容版本失败: %v", err)
+	}
 	if err := models.AutoMigrate(database); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
@@ -107,6 +114,8 @@ func main() {
 		log.Fatalf("存量日志压缩迁移失败: %v", err)
 	}
 	if err := models.RecordSchemaVersion(database, Version); err != nil {
+		// 仅记日志：承重的 min_compatible 已在上方（迁移前）落下且失败致命，此处写的是
+		// 「迁移已跑完」的最终状态与展示信息，失败不会打开护栏缺口。
 		log.Printf("记录数据库 schema 版本失败: %v", err)
 	}
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"strings"
@@ -30,6 +31,14 @@ const (
 
 	// dailyBackfillDays 每日汇总按业务时区的一次性回填天数：覆盖仪表盘最大趋势窗口（30 天）。
 	dailyBackfillDays = 31
+
+	// trafficBatchRetentionDays 流量批次去重记录保留天数。
+	//
+	// 不变量：必须 ≥ agent outbox 的最大保留时长（agent 侧 outboxMaxAge = 7 天）。去重记录
+	// 一旦被清理，节点对同一 BatchID 的重发就会被当作新批次重复计量——节点离线超过 outbox
+	// 保留期后丢弃的那批数据本就不会再送达，故两者取同一量级即可。批次量级：每节点每上报
+	// 周期（默认 60s）一批，约 1440 行/天/节点，7 天 × 50 节点 ≈ 50 万行（小表，SQLite 无压力）。
+	trafficBatchRetentionDays = 7
 )
 
 // SettingTrafficDailyTZBackfilled 每日汇总时区回填完成标记（settings 键，一次性）。
@@ -64,25 +73,47 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 	if err != nil {
 		return nil, err
 	}
+	// 输入校验：任一方向为负即整条丢弃。混合正负（up=100, down=-500）会让已用量下降
+	// 甚至为负，破坏配额判定与自动续费触发；官方 agent 从单调计数器取差值不会产生负值
+	//（见 stats.Collect），出现即异常节点或报文重放。整条丢弃而非拒绝整批：一条坏条目
+	// 不应阻断该节点其余合法上报。tr 为值传递，重写 Entries 不影响调用方。
+	entries := make([]protocol.TrafficEntry, 0, len(tr.Entries))
+	for i := range tr.Entries {
+		e := &tr.Entries[i]
+		if e.UpBytes < 0 || e.DownBytes < 0 {
+			log.Printf("traffic: 丢弃负值流量条目 (server=%d email=%q inbound=%q up=%d down=%d)",
+				serverID, e.Email, e.Inbound, e.UpBytes, e.DownBytes)
+			continue
+		}
+		entries = append(entries, *e)
+	}
+	tr.Entries = entries
 	// 归一到整点再落库（见 trafficPeriodBucket 注释）：同小时多次上报经 upsert 累加为一行。
 	// 先转 UTC：统一偏移后存储文本才可比较（agent 通常发 Z，仍显式归一以防自定义偏移）。
 	periodStart = periodStart.UTC().Truncate(trafficPeriodBucket)
 	periodEnd := time.Now().UTC()
 
 	// 该节点入站 tag → ID 与 ID → 行映射（一次查询，循环复用；含停用入站——
-	// 节点残留旧配置仍在计流量，按现行倍率归账）
+	// 节点残留旧配置仍在计流量，按现行倍率归账）。
+	// 查询失败必须中止本批（审计 F4）：旧实现吞掉错误留下空映射，统计键 u<uid>.i<iid> 无法
+	// 反解入站 ⇒ 计费倍率静默回退组内 max/1，免费入站被按 1 收费、高倍率被少计。
+	//「查无此入站」是正常竞态（按 0 处理），「查询失败」不是——两者必须区分。
 	inboundIDByTag := map[string]uint64{}
 	inboundByID := map[uint64]models.Inbound{}
 	var inbs []models.Inbound
-	if err := s.DB.Where("server_id = ?", serverID).Find(&inbs).Error; err == nil {
-		for _, inb := range inbs {
-			inboundIDByTag[inb.Tag] = inb.ID
-			inboundByID[inb.ID] = inb
-		}
+	if err := s.DB.Where("server_id = ?", serverID).Find(&inbs).Error; err != nil {
+		return nil, fmt.Errorf("读取服务器 %d 的入站失败: %w", serverID, err)
+	}
+	for _, inb := range inbs {
+		inboundIDByTag[inb.Tag] = inb.ID
+		inboundByID[inb.ID] = inb
 	}
 
 	// 计费倍率规则（旧格式条目兜底口径，见 billingRatioFor）。
-	billingRules := s.buildBillingRules(serverID)
+	billingRules, err := s.buildBillingRules(serverID)
+	if err != nil {
+		return nil, fmt.Errorf("读取服务器 %d 的计费倍率失败: %w", serverID, err)
+	}
 
 	// 预解析本帧用户维度涉及的生效组（每帧两次批量查询替代旧版逐条查库；
 	// 解析语义与旧版一致：email 查无此人的条目跳过，仅凭 ID/email 规则解析出的
@@ -103,17 +134,19 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 	}
 	userGroups := map[uint64]uint64{}
+	userCycles := map[uint64]uint64{}
 	if len(idSet) > 0 {
 		ids := make([]uint64, 0, len(idSet))
 		for id := range idSet {
 			ids = append(ids, id)
 		}
 		var rows []models.User
-		if err := s.DB.Select("id, permission_group_id, plan_group_id").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := s.DB.Select("id, permission_group_id, plan_group_id, traffic_cycle_id").Where("id IN ?", ids).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, u := range rows {
 			userGroups[u.ID] = u.EffectiveGroupID()
+			userCycles[u.ID] = u.TrafficCycleID
 		}
 	}
 	emailUsers := map[string]uint64{}
@@ -123,17 +156,47 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 			emails = append(emails, em)
 		}
 		var rows []models.User
-		if err := s.DB.Select("id, email, permission_group_id, plan_group_id").Where("email IN ?", emails).Find(&rows).Error; err != nil {
+		if err := s.DB.Select("id, email, permission_group_id, plan_group_id, traffic_cycle_id").Where("email IN ?", emails).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, u := range rows {
 			userGroups[u.ID] = u.EffectiveGroupID()
+			userCycles[u.ID] = u.TrafficCycleID
 			emailUsers[u.Email] = u.ID
 		}
 	}
 
 	reportedUsers := make(map[uint64]struct{})
+	duplicate := false
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		// 批次去重（审计 F2）：BatchID 由节点生成、重发复用同一 ID。去重记录与流量写入同事务，
+		// 提交后由调用方回 ACK（审计 F1）；重复投递在此被识别并整批跳过——不报错，因为「重发」
+		// 是 ACK 丢失后的正常恢复路径。空 BatchID（旧 agent）不做去重，维持旧行为。
+		// RowsAffected == 0 判重：SQLite 的 ON CONFLICT DO NOTHING 与 MySQL 的
+		// ON DUPLICATE KEY UPDATE 在冲突时都不改变行数（MySQL 对「未改变」记 0）。
+		if tr.BatchID != "" {
+			var up, down int64
+			for i := range tr.Entries {
+				up += tr.Entries[i].UpBytes
+				down += tr.Entries[i].DownBytes
+			}
+			res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.TrafficBatch{
+				ServerID:  serverID,
+				BatchID:   tr.BatchID,
+				Entries:   len(tr.Entries),
+				UpBytes:   up,
+				DownBytes: down,
+			})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				duplicate = true
+				log.Printf("traffic: 批次重复投递，跳过写入 (server=%d batch=%s entries=%d)",
+					serverID, tr.BatchID, len(tr.Entries))
+				return nil
+			}
+		}
 		for i := range tr.Entries {
 			e := &tr.Entries[i]
 			if e.UpBytes <= 0 && e.DownBytes <= 0 {
@@ -198,9 +261,19 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				ratio = inboundRatio
 			}
 
-			// P1-1：upsert 合并——唯一索引 (user_id, inbound_id, period_start) 兜底，
-			// 并发/重复投递自动累加而非撞索引报错丢弃（替代原 select-then-create 竞态路径）
-			log := models.TrafficLog{
+			// 账期归属（审计 F3）：采信节点在采集时刻打标的 cycle_id。若它**大于**该用户当前
+			// 账期（不可能正常发生，防御异常节点）则收敛到当前账期，避免把流量挂到不存在的账期上
+			// 而永久不计费；小于当前账期是正常情况——切换前的增量在切换后抵达，必须留在旧账期。
+			// 查不到用户行（仅凭统计键解析出的 uid）时无从收敛，原样落库。
+			cycleID := e.CycleID
+			if cur := userCycles[userID]; cur > 0 && cycleID > cur {
+				cycleID = cur
+			}
+
+			// P1-1：upsert 合并——唯一索引 (user_id, inbound_id, period_start, cycle_id) 兜底，
+			// 并发/重复投递自动累加而非撞索引报错丢弃（替代原 select-then-create 竞态路径）。
+			// cycle_id 进唯一键：同小时桶内跨账期的两行必须能共存（否则旧账期增量会被并进新账期）。
+			row := models.TrafficLog{
 				UserID:      userID,
 				InboundID:   inboundID, // tag 或统计键反解出的归账入站（未知按 0）
 				UpBytes:     e.UpBytes,
@@ -209,6 +282,7 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				BilledDown:  roundBilled(e.DownBytes, ratio),
 				PeriodStart: periodStart,
 				PeriodEnd:   periodEnd,
+				CycleID:     cycleID,
 			}
 			var doUpdates clause.Set
 			if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
@@ -230,10 +304,10 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 			}
 			if err := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{
-					{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"},
+					{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
 				},
 				DoUpdates: doUpdates,
-			}).Create(&log).Error; err != nil {
+			}).Create(&row).Error; err != nil {
 				return err
 			}
 			// 入站冗余计数只从 agent 携带 tag 的条目补计（入站维度条目已在上方单独处理，
@@ -253,6 +327,11 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 	if err != nil {
 		return nil, err
 	}
+	if duplicate {
+		// 重复投递：本批已处理过（去重记录命中），无新增计费。返回空集不报错——
+		// 调用方据此仍会回 ACK，节点删批后不再重发（审计 F1/F2 的收敛点）。
+		return nil, nil
+	}
 	if len(reportedUsers) == 0 {
 		return nil, nil
 	}
@@ -271,19 +350,24 @@ type billingRule struct {
 }
 
 // buildBillingRules 取该服务器启用用户入站的计费倍率规则（relay 入站不参与用户计费）。
-func (s *TrafficService) buildBillingRules(serverID uint64) []billingRule {
+// 查询失败返回 error（审计 F4）：旧实现返回空规则，使兜底倍率静默变成 1——高倍率入站被
+// 少计、免费入站（ratio=0）反而被收费。调用方须中止本批记账，不得按空规则继续。
+func (s *TrafficService) buildBillingRules(serverID uint64) ([]billingRule, error) {
 	var inbs []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ? AND type = ?", serverID, true, models.InboundTypeUser).Find(&inbs).Error; err != nil {
-		return nil
+		return nil, err
 	}
 	if len(inbs) == 0 {
-		return nil
+		return nil, nil
 	}
 	ids := make([]uint64, 0, len(inbs))
 	for i := range inbs {
 		ids = append(ids, inbs[i].ID)
 	}
-	groupMap := BatchInboundAuthorizedGroupIDs(s.DB, ids)
+	groupMap, err := BatchInboundAuthorizedGroupIDs(s.DB, ids)
+	if err != nil {
+		return nil, err
+	}
 	rules := make([]billingRule, 0, len(inbs))
 	for i := range inbs {
 		groups := groupMap[inbs[i].ID]
@@ -296,7 +380,7 @@ func (s *TrafficService) buildBillingRules(serverID uint64) []billingRule {
 		}
 		rules = append(rules, billingRule{groups: gs, ratio: inbs[i].Ratio})
 	}
-	return rules
+	return rules, nil
 }
 
 // billingRatioFor 用户计费倍率的兜底口径：生效组命中的该服务器入站倍率取最高。
@@ -332,7 +416,7 @@ func roundBilled(b int64, ratio float64) int64 {
 // FindViolators 判定给定用户中已「违规」的（已过期或流量超额），供流量落库后事件驱动处置：
 // 命中即热更节点用户列表将其移除，无需等 1h 校准。口径与 filterValidUsers 快照语义严格一致：
 // 额度读用户行快照列 plan_traffic_bytes，用量读计费口径 billed 两列（原始字节 × 落库时倍率），
-// 周期同口径（period_start >= traffic_cycle_start，零值起点 = 全量）。
+// 周期归属与 UserBilled / filterValidUsers / exhaustCandidates 同一份谓词（models.CycleMatchSQL）。
 // status 非活跃用户不在返回中（其移除由状态变更路径触发）。
 func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
 	if len(userIDs) == 0 {
@@ -347,13 +431,13 @@ func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
 	var rows []violatorRow
 	err := s.DB.Raw(`
 		SELECT u.id AS user_id,
-		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.billed_up + l.billed_down ELSE 0 END), 0) AS used_bytes,
+		       COALESCE(SUM(`+models.CycleUsageSQL+`), 0) AS used_bytes,
 		       u.plan_traffic_bytes AS quota,
 		       u.expire_at AS expire_at
 		FROM users u
 		LEFT JOIN traffic_logs l ON l.user_id = u.id
 		WHERE u.id IN ? AND u.status = ?
-		GROUP BY u.id, u.traffic_cycle_start, u.plan_traffic_bytes, u.expire_at`,
+		GROUP BY u.id, u.traffic_cycle_id, u.traffic_cycle_start, u.plan_traffic_bytes, u.expire_at`,
 		userIDs, models.StatusActive).Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -372,26 +456,28 @@ func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
 	return out, nil
 }
 
-// UserBilled 用户当前计费周期内已按倍率折算的用量（字节，计费口径）。
-// 从 user.traffic_cycle_start 开始计算；若为零值（旧数据）则回溯全部。
+// UserBilled 用户当前账期内已按倍率折算的用量（字节，计费口径）。
+// 归属按账期 ID 判定；cycle_id = 0 的存量行 / 旧 agent 行没有账期标记，回退按
+// `period_start >= traffic_cycle_start` 时间轴归属（见 models.CycleMatchSQL）。
 // 读 billed 两列（落库时按生效入站倍率折算）：全部「已用/剩余额度」展示
 // （管理端用户列表 / 用户主页 / Subscription-Userinfo）与配额判定
 // （订阅 403 门 / 节点摘除 / 自动续费触发）唯一口径；
 // 真实流量统计走 dashboard/入站计数的 SQL 聚合（原始口径），不经过本方法。
+//
+// 归属口径由 models.CycleMatchSQL 单源给出（与 FindViolators / filterValidUsers /
+// exhaustCandidates 同一份谓词）。这里要分列取 billed_up / billed_down，故从谓词派生
+// 两个 CASE，而不是另写一遍判定——就地重写会让四处口径各自漂移。
 func (s *TrafficService) UserBilled(userID uint64) (up, down int64, err error) {
-	var user models.User
-	if err := s.DB.First(&user, userID).Error; err != nil {
-		return 0, 0, err
-	}
-	q := s.DB.Model(&models.TrafficLog{}).Where("user_id = ?", userID)
-	if !user.TrafficCycleStart.IsZero() {
-		q = q.Where("period_start >= ?", user.TrafficCycleStart)
-	}
 	var row struct {
 		Up   int64
 		Down int64
 	}
-	err = q.Select("COALESCE(SUM(billed_up),0) AS up, COALESCE(SUM(billed_down),0) AS down").Scan(&row).Error
+	err = s.DB.Raw(`
+		SELECT COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_up ELSE 0 END), 0) AS up,
+		       COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_down ELSE 0 END), 0) AS down
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		WHERE u.id = ?`, userID).Scan(&row).Error
 	if err != nil {
 		return 0, 0, err
 	}
@@ -654,6 +740,14 @@ func (s *TrafficService) runRetention() {
 		log.Printf("traffic: 清理 node_reports 失败: %v", res.Error)
 	} else if res.RowsAffected > 0 {
 		log.Printf("traffic: 清理 %d 条过期 node_reports（保留 %d 天）", res.RowsAffected, daysReports)
+	}
+	// 批次去重记录：保留期独立于 traffic_logs 的保留设置（它约束的是「节点可能重发多久」，
+	// 与运营想留多久流量明细无关），故用固定常量。清理过早会让节点重发被重复计量。
+	if res := s.DB.Where("created_at < ?", now.AddDate(0, 0, -trafficBatchRetentionDays)).
+		Delete(&models.TrafficBatch{}); res.Error != nil {
+		log.Printf("traffic: 清理 traffic_batches 失败: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Printf("traffic: 清理 %d 条过期流量批次去重记录（保留 %d 天）", res.RowsAffected, trafficBatchRetentionDays)
 	}
 	if res := s.DB.Where("created_at < ?", cutAudit).Delete(&models.AuditLog{}); res.Error != nil {
 		log.Printf("traffic: 清理 audit_logs 失败: %v", res.Error)

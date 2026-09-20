@@ -25,7 +25,8 @@ import (
 // 首次实际提升发生在 v2（2026-09-17，删列 + 两处一次性语义回填）；v1 时期的迁移（删表/删列）
 // 都发生在版本号引入之前，当时无记录可写，故历史上的库与面板一律记为 v1。
 //
-// 启动顺序：CheckSchemaCompat（迁移前，拒绝旧面板跑新库）→ AutoMigrate → RecordSchemaVersion。
+// 启动顺序：CheckSchemaCompat（迁移前，拒绝旧面板跑新库）→ DeclareSchemaMinCompatible（迁移前，
+// 先落下护栏标记，失败致命）→ AutoMigrate → RecordSchemaVersion（补记版本号与写入者，失败仅记日志）。
 const (
 	// DBSchemaVersion 当前面板写入的数据库 schema 版本。变更表结构/数据语义时 +1。
 	//
@@ -33,7 +34,12 @@ const (
 	// freedom 出站的 settings.domainStrategy 后删列），并新增两处一次性数据语义回填——
 	// freedom 出站 finalRules 归一（migrateFreedomFinalRules）、users.permission_group_id
 	// 假自定义归位（backfillUserFollowPlanGroup）。
-	DBSchemaVersion = 2
+	//
+	// v3（2026-09-20，流量计费审计 F1/F2/F3）：traffic_logs 加 cycle_id 列、唯一索引由
+	// (user_id, inbound_id, period_start) 扩为含 cycle_id 的四列，新增 traffic_batches 去重表，
+	// users 加 traffic_cycle_id 并回填为 1。计费口径从「period_start >= traffic_cycle_start」
+	// 改为「cycle_id = 用户当前账期」（cycle_id=0 的存量/旧 agent 行零值回退，见 models.CycleUsageSQL）。
+	DBSchemaVersion = 3
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。
@@ -47,7 +53,13 @@ const (
 	// 按取舍从严：宁可拒绝回滚，也不接受静默分叉。代价是「在面板里安装历史版本」降到 v1 时会被
 	// 本护栏拒绝启动；出路是前进到 v2，或从升级前备份恢复（备份恢复路径同样比对本版本号，
 	// 见 backup/restore.go）。
-	DBMinCompatibleVersion = 2
+	//
+	// v3 与 DBSchemaVersion 同步提升，依据是**硬故障**而非静默分叉：v2 面板的落库 upsert 以
+	// 三列唯一索引为冲突目标，而 v3 迁移把该索引换成了四列——v2 面板回滚上来后每次流量写入都会
+	// 报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"，节点流量
+	// 全部丢弃。同时 v2 面板写入的行不带 cycle_id（恒 0），在 v3 口径下按「未知账期」回退归属，
+	// 会与切换后的新账期混算。故拒绝回滚，出路是前进到 v3 或从升级前备份恢复。
+	DBMinCompatibleVersion = 3
 )
 
 // settings 键（复用既有 settings 键值表，避免新表）。
@@ -94,8 +106,43 @@ func checkSchemaCompat(db *gorm.DB, panelVersion int) error {
 	return nil
 }
 
+// DeclareSchemaMinCompatible 在**执行任何结构迁移之前**落下最低兼容版本标记（= 本面板的
+// DBMinCompatibleVersion）。调用方须在 CheckSchemaCompat 通过之后、AutoMigrate 之前调用，
+// 且**必须把失败当作致命错误**：标记写不上却继续改结构，等于先把护栏关掉再动手。
+//
+// 为什么必须早于迁移：CheckSchemaCompat 读的正是这个键，它是「旧面板读新库」的唯一拦截点。
+// 若沿用「迁移全部跑完才写」的顺序，就存在一个「结构已改成 v3、标记仍是 v2」的窗口，窗口内
+// 启动的旧面板会被护栏放行，而它的三列 upsert 在四列唯一索引上找不到冲突目标，每次流量写入
+// 都硬失败（见 dropLegacyTrafficUniqueIndexes 的说明）。
+//
+// 这个窗口不是理论问题：面板内自更新的 entrypoint 会在新版本启动失败时自动回滚旧二进制
+// （deploy/master/entrypoint.sh），于是「新面板迁移到一半失败 → 自动回滚 → 旧面板带病启动」
+// 是一条真实路径；此外 RecordSchemaVersion 的失败只记日志不中止启动，进程在两步之间被 kill
+// 也会留下同一状态。先声明即 fail-closed：崩溃后留下的库旧面板读不了（拒绝启动并给出出路），
+// 而新面板能幂等续跑完迁移。
+//
+// 代价是「声明已写但迁移未跑完」时旧面板同样被拒——这正是不可逆迁移的应有语义（见 UPGRADE.md
+// §4「跨越 DBMinCompatibleVersion 提升的版本不可回退」），出路是前进到新版或从升级前备份恢复。
+//
+// 幂等。settings 表不存在（全新库）时先建该表：它是与版本无关的键值表，提前建出不参与任何
+// 迁移判定，也不会影响随后 AutoMigrate 的结果。
+func DeclareSchemaMinCompatible(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Setting{}) {
+		if err := db.AutoMigrate(&Setting{}); err != nil {
+			return fmt.Errorf("建 settings 表失败: %w", err)
+		}
+	}
+	if err := upsertSetting(db, settingSchemaMinCompatible, strconv.Itoa(DBMinCompatibleVersion)); err != nil {
+		return fmt.Errorf("声明最低兼容 schema 版本失败: %w", err)
+	}
+	return nil
+}
+
 // RecordSchemaVersion 在 AutoMigrate 成功后写入/更新版本记录（幂等 upsert）。
 // appVersion 记录写入者身份，便于排查「哪次升级改了库」。
+//
+// 承重的 settingSchemaMinCompatible 已由 DeclareSchemaMinCompatible 在迁移前落下（且失败致命），
+// 故本函数写的是「迁移已跑完」的最终状态与展示信息；它的失败只需记日志，不会打开护栏缺口。
 func RecordSchemaVersion(db *gorm.DB, appVersion string) error {
 	for k, v := range map[string]string{
 		settingSchemaVersion:       strconv.Itoa(DBSchemaVersion),

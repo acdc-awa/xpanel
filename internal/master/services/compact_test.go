@@ -1,13 +1,16 @@
 package services
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/db"
 )
 
 func newCompactTestDB(t *testing.T) *gorm.DB {
@@ -427,5 +430,151 @@ func TestMigrateLegacyLogsOneTimeAndIdempotent(t *testing.T) {
 	db.Model(&models.TrafficLog{}).Count(&tl2)
 	if tl2 != 2 {
 		t.Fatalf("second migrate should be no-op, rows = %d want 2", tl2)
+	}
+}
+
+// TestCompactTrafficHourKeepsConcurrentLateReport 审计 F6 回归：压缩读取之后提交的同小时
+// 迟到增量不得被删除覆盖。旧实现先在事务外读取整小时行，之后才开事务按时间范围删除：
+// 两者之间提交的增量不在旧快照里，却落在删除范围内 → 永久少计。
+//
+// 不变量（不依赖具体机制）：无论压缩是「成功」还是「因并发写入冲突而失败留待下次」，
+// 原始字节合计必须守恒为 125。生产 SQLite 单连接池下并发写入无法在本事务中途提交，
+// 压缩直接成功；测试用独立句柄模拟真实并发写入，此时以取锁失败回退为可接受结果。
+//
+// 「迟到增量提交成功」是本用例的前置条件，而非可容忍的偏差：注入没成功，压缩就没遇到并发
+// 写入，守恒断言也就没验证到任何东西——故显式失败，不让它退化成一个看不懂的数字。
+func TestCompactTrafficHourKeepsConcurrentLateReport(t *testing.T) {
+	dir := t.TempDir()
+	dsn := db.SqliteDSN("file:" + filepath.Join(dir, "compact_race.db"))
+
+	main, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open main: %v", err)
+	}
+	if sqlDB, err := main.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1) // 与生产一致（db.Open）
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
+	if err := main.AutoMigrate(&models.TrafficLog{}, &models.User{}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open other: %v", err)
+	}
+	if sqlDB, err := other.DB(); err == nil {
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
+
+	h := time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC)
+	if err := main.Create(&models.TrafficLog{
+		UserID: 1, UpBytes: 100, BilledUp: 100, PeriodStart: h.Add(7 * time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 在压缩事务的删除语句之前，用独立句柄提交同小时的迟到增量 25（见函数注释：这是前置条件）
+	injected := false
+	var injectErr error
+	if err := main.Callback().Delete().Before("gorm:delete").Register("audit:late_write", func(tx *gorm.DB) {
+		if injected || tx.Statement.Table != "traffic_logs" {
+			return
+		}
+		injected = true
+		injectErr = other.Create(&models.TrafficLog{
+			UserID: 1, UpBytes: 25, BilledUp: 25, PeriodStart: h.Add(20 * time.Minute),
+		}).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	_, _, cerr := CompactTrafficLogs(main, now)
+	if !injected {
+		t.Fatal("未触发注入点（压缩未按预期执行删除）")
+	}
+	if injectErr != nil {
+		t.Fatalf("前置条件未满足：迟到增量未能提交，本用例未验证到并发写入，不可据此断言守恒: %v", injectErr)
+	}
+
+	var sum int64
+	if err := main.Model(&models.TrafficLog{}).Select("COALESCE(SUM(up_bytes),0)").Scan(&sum).Error; err != nil {
+		t.Fatal(err)
+	}
+	if sum != 125 {
+		t.Fatalf("原始字节合计 = %d, want 125（压缩不得丢掉读取之后提交的同小时增量，compress err=%v）", sum, cerr)
+	}
+	t.Logf("压缩结果 err=%v，原始字节合计 %d（守恒）", cerr, sum)
+}
+
+// TestCompactTrafficHourKeepsCycleAttribution 压缩必须保留账期归属（审计 F3 回归）。
+//
+// 同一小时桶内跨账期的多行是加宽唯一索引（user_id, inbound_id, period_start, cycle_id）
+// 之后才允许出现的形态：节点补发积压时 Period 取**发送时刻**，旧账期批次会落在切换之后
+// 的小时里，与当前账期的行同处一桶。若按 (user_id, inbound_id) 合并，这些行会塌成一行
+// 且 cycle_id 丢失（落库为 0），随后被 CycleUsageSQL 的
+// `cycle_id = 0 AND period_start >= 周期起点` 回退分支算进当前账期——旧套餐的消费被计到
+// 新套餐头上（静默多收，且用户会被误判超额/误摘除），与 ZeroBilledInCycleBucket 刻意
+// 保留旧账期行的设计意图相反。
+//
+// 行故意落在小时内非整点位置：整点且一桶一行时压缩走快路径直接跳过，测不到合并逻辑。
+func TestCompactTrafficHourKeepsCycleAttribution(t *testing.T) {
+	db := newCompactTestDB(t)
+	if err := db.AutoMigrate(&models.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	cycleStart := time.Date(2026, 8, 16, 2, 0, 0, 0, time.UTC) // 当前账期起点（整点）
+	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)          // 切换之后的小时：不受周期起点保护
+
+	u := models.User{Username: "cycle", Email: "cycle@t.com", UUID: "uuid-cycle",
+		SubscribeToken: "tok-cycle", Status: models.StatusActive}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := db.Model(&models.User{}).Where("id = ?", u.ID).
+		Updates(map[string]any{"traffic_cycle_id": 2, "traffic_cycle_start": cycleStart}).Error; err != nil {
+		t.Fatalf("set cycle: %v", err)
+	}
+
+	rows := []models.TrafficLog{
+		// 旧账期（cycle 1）的迟到增量：切换之后才送达，落在 h 小时
+		{UserID: u.ID, InboundID: 7, CycleID: 1, UpBytes: 5000, BilledUp: 5000, PeriodStart: h.Add(5 * time.Minute)},
+		// 当前账期（cycle 2）的正常增量
+		{UserID: u.ID, InboundID: 7, CycleID: 2, UpBytes: 100, BilledUp: 100, PeriodStart: h.Add(20 * time.Minute)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 直接跑口径单源，断言的是用户可见的计费结果而不只是行数
+	usage := func() int64 {
+		var r struct{ Used int64 }
+		if err := db.Raw(`SELECT COALESCE(SUM(`+models.CycleUsageSQL+`), 0) AS used
+			FROM users u LEFT JOIN traffic_logs l ON l.user_id = u.id
+			WHERE u.id = ?`, u.ID).Scan(&r).Error; err != nil {
+			t.Fatalf("usage: %v", err)
+		}
+		return r.Used
+	}
+	if got := usage(); got != 100 {
+		t.Fatalf("压缩前当前账期用量 = %d, want 100（旧账期行不得计入）", got)
+	}
+
+	if err := compactTrafficHour(db, h, nil); err != nil {
+		t.Fatalf("compact hour: %v", err)
+	}
+
+	if got := usage(); got != 100 {
+		t.Fatalf("压缩后当前账期用量 = %d, want 100——旧账期消费被并进当前账期（多收）", got)
+	}
+	var kept []models.TrafficLog
+	if err := db.Where("user_id = ?", u.ID).Order("cycle_id ASC").Find(&kept).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(kept) != 2 {
+		t.Fatalf("跨账期行数 = %d, want 2（不同账期不得合并）", len(kept))
+	}
+	if kept[0].CycleID != 1 || kept[1].CycleID != 2 {
+		t.Fatalf("账期标记被改写: %d/%d, want 1/2", kept[0].CycleID, kept[1].CycleID)
 	}
 }

@@ -83,13 +83,14 @@ func TestUpdateSubscriptionAlignsCycleAndClearsBoundaryBucket(t *testing.T) {
 	}
 }
 
-// cycleUsed 复刻计费口径（与 services.TrafficService.UserBilled 同语义）：
-// 周期内 SUM(billed_up/billed_down)。
+// cycleUsed 复刻计费口径（与 services.TrafficService.UserBilled 同语义，审计 F3 后为账期口径）：
+// 账期 ID 命中的行计入；cycle_id = 0 的存量行按 period_start >= 周期起点回退。
 func (s *BillingStore) cycleUsed(ctx context.Context, userID uint64, cycleStart time.Time) (int64, int64, error) {
 	var row struct{ Up, Down int64 }
 	q := s.with(ctx).Model(&models.TrafficLog{}).Where("user_id = ?", userID)
 	if !cycleStart.IsZero() {
-		q = q.Where("period_start >= ?", cycleStart)
+		q = q.Where("cycle_id = (SELECT traffic_cycle_id FROM users WHERE id = ?) OR (cycle_id = 0 AND period_start >= ?)",
+			userID, cycleStart)
 	}
 	err := q.Select("COALESCE(SUM(billed_up),0) AS up, COALESCE(SUM(billed_down),0) AS down").Scan(&row).Error
 	return row.Up, row.Down, err
@@ -113,5 +114,84 @@ func TestUserBeforeCreateAlignsCycleStart(t *testing.T) {
 	}
 	if u.TrafficCycleStart.Minute() != 0 || u.TrafficCycleStart.Second() != 0 || u.TrafficCycleStart.Nanosecond() != 0 {
 		t.Fatalf("TrafficCycleStart = %v, 含分/秒/纳秒", u.TrafficCycleStart)
+	}
+}
+
+// TestUpdateSubscriptionBumpsCycleIDAndKeepsTaggedRows 审计 F3：切周期递增账期 ID，
+// 且**不再**清零带账期标记的行（旧账期账本留痕）。
+//
+// 归属改由 cycle_id 决定后，新周期从 0 起算不再依赖「清零边界桶」；清零仅保留给
+// cycle_id = 0 的存量行/旧 agent 行（它们只能按时间轴回退归属）。若连带标记的行一起清零，
+// 旧账期的计费流水就被抹掉了（审计 §5「重置后的可追溯性」）。
+func TestUpdateSubscriptionBumpsCycleIDAndKeepsTaggedRows(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	db := store.db
+
+	user := models.User{
+		Username: "cyc@panel.local", Email: "cyc@panel.local",
+		UUID: "uuid-cyc", PasswordHash: "x", Status: models.StatusActive,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	plan := models.Plan{Name: "P", DurationDays: 30}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	buyAt := time.Date(2026, 9, 20, 10, 30, 0, 0, time.UTC)
+	bucket := models.TrafficCycleAlign(buyAt)
+	// 三行：带旧账期标记（应保留）、无标记（应清零）、周期起点之前的无标记行（不受影响）
+	tagged := models.TrafficLog{UserID: user.ID, InboundID: 1, UpBytes: 300, BilledUp: 300,
+		PeriodStart: bucket, CycleID: 1}
+	legacy := models.TrafficLog{UserID: user.ID, InboundID: 2, UpBytes: 200, BilledUp: 200,
+		PeriodStart: bucket, CycleID: 0}
+	elsewhere := models.TrafficLog{UserID: user.ID, InboundID: 3, UpBytes: 400, BilledUp: 400,
+		PeriodStart: bucket.Add(-2 * time.Hour), CycleID: 0}
+	for _, r := range []*models.TrafficLog{&tagged, &legacy, &elsewhere} {
+		if err := db.Create(r).Error; err != nil {
+			t.Fatalf("seed traffic: %v", err)
+		}
+	}
+
+	if err := store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		return tx.UpdateSubscription(ctx, user.ID, &plan, buyAt.AddDate(0, 0, 30), buyAt)
+	}); err != nil {
+		t.Fatalf("UpdateSubscription: %v", err)
+	}
+
+	var got models.User
+	if err := db.First(&got, user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.TrafficCycleID != 2 {
+		t.Fatalf("账期 ID 应递增到 2，实际 %d", got.TrafficCycleID)
+	}
+	if !got.TrafficCycleStart.Equal(bucket) {
+		t.Fatalf("周期起点应仍对齐整点 %v，实际 %v", bucket, got.TrafficCycleStart)
+	}
+
+	var gotTagged, gotLegacy models.TrafficLog
+	if err := db.First(&gotTagged, tagged.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotTagged.BilledUp != 300 {
+		t.Fatalf("带账期标记的行不得被清零（旧账期账本留痕），实际 billed=%d", gotTagged.BilledUp)
+	}
+	if err := db.First(&gotLegacy, legacy.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotLegacy.BilledUp != 0 {
+		t.Fatalf("无账期标记的边界桶行应清零（按时间轴回退归属的保护），实际 billed=%d", gotLegacy.BilledUp)
+	}
+
+	// 新周期用量 = 0：旧账期行按 cycle_id 排除，无标记行已被清零
+	up, _, err := store.cycleUsed(ctx, user.ID, got.TrafficCycleStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up != 0 {
+		t.Fatalf("切换后新周期用量应为 0，实际 %d", up)
 	}
 }

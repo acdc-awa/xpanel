@@ -1,6 +1,8 @@
 package services
 
 import (
+	"log"
+
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -26,18 +28,30 @@ func AccessPointPermissionGroupIDs(db *gorm.DB, apID uint64) []uint64 {
 	return ids
 }
 
-// BatchAccessPointPermissionGroupIDs 批量查询用户接入点绑定的权限组映射 (apID -> []permissionGroupID)。
-func BatchAccessPointPermissionGroupIDs(db *gorm.DB, apIDs []uint64) map[uint64][]uint64 {
+// batchAccessPointPermissionGroupIDs 批量查询用户接入点绑定的权限组映射 (apID -> []permissionGroupID)。
+// 查询失败返回 error：调用方必须区分「查无绑定」与「查询失败」——按空集合继续会让入站授权组
+// 集合静默变空，进而改变计费倍率（回退组内 max/1）与用户注入结果（审计 F4 同源缺口）。
+func batchAccessPointPermissionGroupIDs(db *gorm.DB, apIDs []uint64) (map[uint64][]uint64, error) {
 	res := make(map[uint64][]uint64)
 	if len(apIDs) == 0 {
-		return res
+		return res, nil
 	}
 	var links []models.PermissionGroupAccessPoint
 	if err := db.Where("access_point_id IN ?", apIDs).Find(&links).Error; err != nil {
-		return res
+		return nil, err
 	}
 	for _, l := range links {
 		res[l.AccessPointID] = append(res[l.AccessPointID], l.PermissionGroupID)
+	}
+	return res, nil
+}
+
+// BatchAccessPointPermissionGroupIDs 展示路径（管理端 API）用：查询失败按空映射返回。
+// 计费/用户注入等权威路径请用 batchAccessPointPermissionGroupIDs 并处理 error。
+func BatchAccessPointPermissionGroupIDs(db *gorm.DB, apIDs []uint64) map[uint64][]uint64 {
+	res, err := batchAccessPointPermissionGroupIDs(db, apIDs)
+	if err != nil {
+		return map[uint64][]uint64{}
 	}
 	return res
 }
@@ -118,29 +132,40 @@ func ResolveAccessPointInboundID(ap *models.UserAccessPoint) uint64 {
 }
 
 // loadEnabledAPs 加载全部启用接入点与其权限组映射（AP 派生计算共用取数段）。
-func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64) {
+// 查询失败返回 error（不得按空集合继续：空集合 = 所有入站无授权组，会让计费倍率静默回退）。
+func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64, error) {
 	var aps []models.UserAccessPoint
-	_ = db.Where("enabled = ?", true).Find(&aps).Error
+	if err := db.Where("enabled = ?", true).Find(&aps).Error; err != nil {
+		return nil, nil, err
+	}
 	apIDs := make([]uint64, 0, len(aps))
 	for _, ap := range aps {
 		apIDs = append(apIDs, ap.ID)
 	}
-	return aps, BatchAccessPointPermissionGroupIDs(db, apIDs)
+	groupMap, err := batchAccessPointPermissionGroupIDs(db, apIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return aps, groupMap, nil
 }
 
 // BatchInboundAuthorizedGroupIDs 批量计算入站的授权权限组映射（inboundID -> []permissionGroupID），
 // 由启用 AP 白名单派生：AP 直连入站，AP 的开放组并入该入站的授权组集。
 // 配置生成（GetValidUsers）与用户注入的唯一权威来源。
-func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) map[uint64][]uint64 {
+// 查询失败返回 error：调用方中止本次计算，不得按「无授权组」继续（审计 F4）。
+func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) (map[uint64][]uint64, error) {
 	res := make(map[uint64][]uint64)
 	if len(inboundIDs) == 0 {
-		return res
+		return res, nil
 	}
 	wanted := make(map[uint64]bool, len(inboundIDs))
 	for _, id := range inboundIDs {
 		wanted[id] = true
 	}
-	aps, apGroupMap := loadEnabledAPs(db)
+	aps, apGroupMap, err := loadEnabledAPs(db)
+	if err != nil {
+		return nil, err
+	}
 	sets := make(map[uint64]map[uint64]bool)
 	for i := range aps {
 		ap := &aps[i]
@@ -162,7 +187,7 @@ func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) map[uint64
 		}
 		res[inbID] = ids
 	}
-	return res
+	return res, nil
 }
 
 // groupHit 判断权限组集合是否命中目标组。
@@ -186,7 +211,12 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 	if groupID == 0 {
 		return set
 	}
-	aps, apGroupMap := loadEnabledAPs(db)
+	// 取数失败按「无可见接入点」处理（失败关闭，用户端只影响节点可用性展示，不会多放行）；
+	// 但必须留痕——静默空集会让用户端节点列表莫名其妙地空掉而无从排查。
+	aps, apGroupMap, err := loadEnabledAPs(db)
+	if err != nil {
+		log.Printf("permission: 读取启用接入点失败（用户 %d 的可见节点按空处理）: %v", user.ID, err)
+	}
 	var inbs []models.Inbound
 	_ = db.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbs).Error
 	inbServer := make(map[uint64]uint64, len(inbs))

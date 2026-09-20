@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -107,13 +108,19 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 		return res, nil
 	}
 
-	validUsers := s.filterValidUsers()
+	validUsers, err := s.filterValidUsers()
+	if err != nil {
+		return nil, err
+	}
 
 	inboundIDs := make([]uint64, 0, len(inbounds))
 	for _, inb := range inbounds {
 		inboundIDs = append(inboundIDs, inb.ID)
 	}
-	inboundGroupMap := BatchInboundAuthorizedGroupIDs(s.DB, inboundIDs)
+	inboundGroupMap, err := BatchInboundAuthorizedGroupIDs(s.DB, inboundIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, inb := range inbounds {
 		res[inb.Tag] = s.protoUsersFor(validUsers, &inb, inboundGroupMap[inb.ID])
@@ -130,6 +137,8 @@ type validUser struct {
 	DeviceLimit      int
 	UsedBytes        int64
 	PlanTrafficBytes int64
+	// CycleID 当前账期 ID（审计 F3）：随用户列表下发到节点，节点据此在采集时刻给增量打标。
+	CycleID uint64
 }
 
 // protoUsersFor 按权限组规则从 validUsers 计算单个入站的用户列表（GetValidUsers 与预览共用）。
@@ -167,6 +176,9 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 			Flow:  userFlow,
 			Level: 0,
 			Limit: vu.DeviceLimit,
+			// 账期 ID（审计 F3）：节点收到与本地记录不同的值即视为发生周期切换，
+			// 立刻采集一次把切换前的增量按旧账期封账。
+			CycleID: vu.CycleID,
 		})
 	}
 	return protoUsers
@@ -179,21 +191,36 @@ func (s *ConfigService) PreviewUsers(inb *models.Inbound) []protocol.User {
 	if inb.Type == models.InboundTypeRelay || inb.ID == 0 {
 		return nil
 	}
-	groupIDs := BatchInboundAuthorizedGroupIDs(s.DB, []uint64{inb.ID})[inb.ID]
-	return s.protoUsersFor(s.filterValidUsers(), inb, groupIDs)
+	validUsers, err := s.filterValidUsers()
+	if err != nil {
+		// 预览是展示路径，签名不含 error：算不出来时返回空列表（fail-closed，不显示未经验证的
+		// 用户），错误只记日志。同源的 GetValidUsers 会把错误上抛，生成/热更新链路不受影响。
+		log.Printf("config: 预览用户列表失败，按空列表返回: %v", err)
+		return nil
+	}
+	groupMap, err := BatchInboundAuthorizedGroupIDs(s.DB, []uint64{inb.ID})
+	if err != nil {
+		log.Printf("config: 预览入站授权组失败，按空列表返回: %v", err)
+		return nil
+	}
+	return s.protoUsersFor(validUsers, inb, groupMap[inb.ID])
 }
 
 // filterValidUsers 返回全部有效的用户（状态正常、有 UUID、未过期、未超流量）。
 // 2026-09-01 套餐快照化：额度/设备限制/权限组 fallback 读用户行快照列（购买/续费/分配时
 // 从 Plan 复制，见 models.User），不再实时 join plans——套餐编辑默认零影响存量用户；
 // plan_id=0 或快照全零 = 无套餐语义（仅用户自定义字段，同旧 else 分支）。
-func (s *ConfigService) filterValidUsers() []validUser {
+//
+// 用量聚合查询失败必须上抛（审计 F5）：旧实现忽略错误，usedMap 为空 ⇒ 每个用户已用量读成 0，
+// 原本已耗尽的用户被重新纳入有效集合下发到节点。查询失败时中止本次计算、保留节点上次成功配置，
+// 宁可不下发也不放开已耗尽用户；不得以「用量视为 0」代替错误处理。
+func (s *ConfigService) filterValidUsers() ([]validUser, error) {
 	var users []models.User
 	if err := s.DB.Where("status = ?", models.StatusActive).Find(&users).Error; err != nil {
-		return nil
+		return nil, err
 	}
 	if len(users) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// 单条 SQL 计算每个有效用户在其计费周期内的已用流量。
@@ -203,13 +230,15 @@ func (s *ConfigService) filterValidUsers() []validUser {
 		UsedBytes int64
 	}
 	var usedRows []usedRow
-	s.DB.Raw(`
+	if err := s.DB.Raw(`
 		SELECT u.id AS user_id,
-		       COALESCE(SUM(CASE WHEN l.period_start >= u.traffic_cycle_start THEN l.billed_up + l.billed_down ELSE 0 END), 0) AS used_bytes
+		       COALESCE(SUM(`+models.CycleUsageSQL+`), 0) AS used_bytes
 		FROM users u
 		LEFT JOIN traffic_logs l ON l.user_id = u.id
 		WHERE u.status = ?
-		GROUP BY u.id, u.traffic_cycle_start`, models.StatusActive).Scan(&usedRows)
+		GROUP BY u.id, u.traffic_cycle_id, u.traffic_cycle_start`, models.StatusActive).Scan(&usedRows).Error; err != nil {
+		return nil, err
+	}
 	usedMap := make(map[uint64]int64, len(usedRows))
 	for _, r := range usedRows {
 		usedMap[r.UserID] = r.UsedBytes
@@ -229,6 +258,7 @@ func (s *ConfigService) filterValidUsers() []validUser {
 		vu.DeviceLimit = u.EffectiveDeviceLimit()
 		vu.GroupID = u.EffectiveGroupID()
 		vu.PlanTrafficBytes = u.EffectiveTrafficBytes()
+		vu.CycleID = u.TrafficCycleID
 		if vu.PlanTrafficBytes > 0 {
 			vu.UsedBytes = usedMap[u.ID]
 			if vu.UsedBytes >= vu.PlanTrafficBytes {
@@ -237,7 +267,7 @@ func (s *ConfigService) filterValidUsers() []validUser {
 		}
 		valid = append(valid, vu)
 	}
-	return valid
+	return valid, nil
 }
 
 // Generate 为服务器生成完整 Xray 配置（启用入站 + 节点出站 + 节点路由 + 按权限组过滤的用户）。

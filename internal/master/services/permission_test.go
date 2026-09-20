@@ -67,7 +67,10 @@ func TestBatchInboundAuthorizedGroupIDs_APDerived(t *testing.T) {
 	}
 
 	// 入站授权组映射（配置注入同源）
-	m := BatchInboundAuthorizedGroupIDs(db, []uint64{101, 102, 103, 104, 105})
+	m, err := BatchInboundAuthorizedGroupIDs(db, []uint64{101, 102, 103, 104, 105})
+	if err != nil {
+		t.Fatalf("BatchInboundAuthorizedGroupIDs: %v", err)
+	}
 	if len(m[101]) != 2 {
 		t.Errorf("入站 101 授权组应为 [g1 g2], got %v", m[101])
 	}

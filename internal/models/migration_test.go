@@ -11,7 +11,7 @@ import (
 )
 
 // TestTrafficLogLegacyIndexMigration 从旧 schema（单列唯一索引 idx_traffic_period）启动迁移：
-// 旧索引必须被删除，并建立 (user_id, inbound_id, period_start) 复合唯一索引；
+// 旧索引必须被删除，并建立 (user_id, inbound_id, period_start, cycle_id) 复合唯一索引；
 // 同一 period 的多个用户流量可同时入库（ISSUE-04 回归）。
 func TestTrafficLogLegacyIndexMigration(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -50,8 +50,8 @@ CREATE UNIQUE INDEX idx_traffic_period ON traffic_logs(period_start);
 	if db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_period") {
 		t.Fatal("旧单列唯一索引 idx_traffic_period 应被删除")
 	}
-	if !db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period") {
-		t.Fatal("复合唯一索引 idx_traffic_uid_inb_period 应已建立")
+	if !db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period_cycle") {
+		t.Fatal("复合唯一索引 idx_traffic_uid_inb_period_cycle 应已建立")
 	}
 
 	period := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
@@ -68,6 +68,73 @@ CREATE UNIQUE INDEX idx_traffic_period ON traffic_logs(period_start);
 	}
 }
 
+// TestTrafficLogV2IndexRebuild 从 v2 schema（三列唯一索引 idx_traffic_uid_inb_period）启动：
+// 旧索引必须被删除并换成含 cycle_id 的四列索引（审计 F3）。
+//
+// 不重建的后果是硬故障而非静默错误：落库 upsert 以四列为冲突目标，库里若仍是三列索引，
+// SQLite 会报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"，
+// 节点流量全部写不进去。
+func TestTrafficLogV2IndexRebuild(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	// v2 schema：与 v2 模型一致的三列唯一索引
+	oldDDL := `
+CREATE TABLE traffic_logs (
+	id integer PRIMARY KEY AUTOINCREMENT,
+	user_id integer NOT NULL,
+	inbound_id integer,
+	up_bytes integer NOT NULL,
+	down_bytes integer NOT NULL,
+	billed_up integer DEFAULT 0,
+	billed_down integer DEFAULT 0,
+	period_start datetime,
+	period_end datetime,
+	created_at datetime
+);
+CREATE UNIQUE INDEX idx_traffic_uid_inb_period ON traffic_logs(user_id, inbound_id, period_start);
+`
+	for _, stmt := range strings.Split(oldDDL, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("create v2 schema: %v", err)
+		}
+	}
+
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate from v2 schema: %v", err)
+	}
+
+	if db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period") {
+		t.Fatal("v2 三列唯一索引 idx_traffic_uid_inb_period 应被删除（否则四列 upsert 找不到冲突目标）")
+	}
+	if !db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period_cycle") {
+		t.Fatal("四列唯一索引 idx_traffic_uid_inb_period_cycle 应已建立")
+	}
+	// 列已补出（默认 0 = 未知账期，走 period_start 回退归属）
+	if !db.Migrator().HasColumn(&TrafficLog{}, "cycle_id") {
+		t.Fatal("cycle_id 列应已建立")
+	}
+
+	period := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	// 同小时同用户同入站、不同账期：必须能共存（旧账期的迟到增量不得并进新账期）
+	if err := db.Create(&TrafficLog{UserID: 1, InboundID: 1, UpBytes: 10, PeriodStart: period, CycleID: 1}).Error; err != nil {
+		t.Fatalf("旧账期行 create: %v", err)
+	}
+	if err := db.Create(&TrafficLog{UserID: 1, InboundID: 1, UpBytes: 20, PeriodStart: period, CycleID: 2}).Error; err != nil {
+		t.Fatalf("新账期行 create 应成功（四列唯一索引）: %v", err)
+	}
+	// 同账期同键仍必须被拒
+	if err := db.Create(&TrafficLog{UserID: 1, InboundID: 1, UpBytes: 5, PeriodStart: period, CycleID: 2}).Error; err == nil {
+		t.Fatal("重复 (user,inbound,period,cycle) 应违反复合唯一索引")
+	}
+}
+
 // TestTrafficLogMigrationIdempotent 全新库与再次启动均幂等。
 func TestTrafficLogMigrationIdempotent(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -80,7 +147,7 @@ func TestTrafficLogMigrationIdempotent(t *testing.T) {
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("second migrate should be idempotent: %v", err)
 	}
-	if !db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period") {
+	if !db.Migrator().HasIndex(&TrafficLog{}, "idx_traffic_uid_inb_period_cycle") {
 		t.Fatal("复合唯一索引应存在")
 	}
 }
