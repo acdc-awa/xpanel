@@ -544,7 +544,7 @@ onUnmounted(() => {
 
 /* 顶部品牌与折叠按钮栏 */
 .admin-aside-header {
-  height: 56px;
+  height: var(--x-topbar-h, 56px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -556,7 +556,7 @@ onUnmounted(() => {
 }
 
 .admin-drawer-header {
-  height: 56px;
+  height: var(--x-topbar-h, 56px);
   display: flex;
   align-items: center;
   padding: 0 14px;
@@ -1020,7 +1020,7 @@ onUnmounted(() => {
 }
 
 .admin-topbar {
-  height: 56px;
+  height: var(--x-topbar-h, 56px);
   background: var(--x-card);
   border-bottom: 1px solid var(--x-border);
   display: flex;

@@ -628,7 +628,7 @@ async function confirmApply() {
   if (!updateInfo.value?.available) return
   try {
     await ElMessageBox.confirm(
-      `将下载 ${updateInfo.value.latest_version} 并替换当前版本（${updateInfo.value.current_version}）。\n流程：下载 → sha256 校验 → 自检 → 替换 → 容器自动重启（restart: unless-stopped）。\n期间面板短暂不可用；新版本启动失败会自动回滚上一版本。`,
+      `将下载 ${updateInfo.value.latest_version} 并替换当前版本（${updateInfo.value.current_version}）。\n流程：下载 → SHA-256 校验 → 自检 → 替换 → 容器自动重启（restart: unless-stopped）。\n期间面板短暂不可用；新版本启动失败会自动回滚上一版本。`,
       '应用更新',
       { type: 'warning', confirmButtonText: '应用更新', cancelButtonText: '取消' },
     )
@@ -688,7 +688,7 @@ async function onLoadReleases(silent = false) {
   }
 }
 
-// 安装所选历史版本（回滚）：与「应用更新」同一条 下载 → sha256 → 自检 → 原子替换 → 重启 链路。
+// 安装所选历史版本（回滚）：与「应用更新」同一条 下载 → SHA-256 → 自检 → 原子替换 → 重启 链路。
 async function confirmInstallRelease() {
   const v = selectedRelease.value
   if (!v) {
@@ -703,7 +703,7 @@ async function confirmInstallRelease() {
   try {
     await ElMessageBox.confirm(
       `将下载并安装 ${v}（当前 ${updateInfo.value?.current_version || '—'}）。
-流程同应用更新：下载 → sha256 校验 → 自检 → 原子替换 → 容器重启。
+流程同应用更新：下载 → SHA-256 校验 → 自检 → 原子替换 → 容器重启。
 期间面板短暂不可用；降级/回滚前请先手动备份数据库。`,
       '安装所选版本',
       { type: 'error', confirmButtonText: '下载并安装', cancelButtonText: '取消' },
@@ -824,7 +824,7 @@ async function save() {
               <template #label>
                 <span class="form-label-with-tip">
                   站点 LOGO
-                  <el-tooltip placement="top" :show-after="150" content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪并转为轻量 Base64 存储。">
+                  <el-tooltip placement="top" :show-after="150" content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。">
                     <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1021,7 +1021,7 @@ async function save() {
                 <template #label>
                   <span class="form-label-with-tip">
                     订阅配置标题
-                    <el-tooltip placement="top" :show-after="150" content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称。">
+                    <el-tooltip placement="top" :show-after="150" content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。">
                       <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                     </el-tooltip>
                   </span>
@@ -1045,13 +1045,13 @@ async function save() {
                 <template #label>
                   <span class="form-label-with-tip">
                     多域名分发
-                    <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">预留</span>
-                    <el-tooltip placement="top" :show-after="150" content="预留功能，用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。下个版本上线。">
+                    <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">暂未开放</span>
+                    <el-tooltip placement="top" :show-after="150" content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。">
                       <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                     </el-tooltip>
                   </span>
                 </template>
-                <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（预留功能）" />
+                <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
               </el-form-item>
             </div>
 
@@ -1208,7 +1208,7 @@ async function save() {
               <template #label>
                 <span class="form-label-with-tip">
                   流量增量上报周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器节点向面板同步 xray 流量增量的频率。周期越短越能即时掐断超额用户，推荐值 15–60 秒。">
+                  <el-tooltip placement="top" :show-after="150" content="服务器向面板同步 xray 流量增量的频率。缩短周期可加快超额/到期用户的踢下线时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；周期过小会增大服务器与面板的负载，建议 15-120 秒。">
                     <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1219,7 +1219,7 @@ async function save() {
               <template #label>
                 <span class="form-label-with-tip">
                   状态心跳周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等健康状态的频率，推荐值 5–15 秒。">
+                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等健康状态的频率。默认 30 秒；调小可更快发现服务器异常，但会增大服务器与面板的负载。">
                     <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1228,7 +1228,7 @@ async function save() {
             </el-form-item>
             <div class="settings-footer-tip">
               <el-icon class="tip-icon"><InfoFilled /></el-icon>
-              <span>配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）。</span>
+              <span>配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。</span>
             </div>
           </el-form>
         </el-tab-pane>
@@ -1312,7 +1312,7 @@ async function save() {
             </el-table>
             <div class="settings-footer-tip">
               <el-icon class="tip-icon"><InfoFilled /></el-icon>
-              <span>备份文件定期轮转保存。恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。建议定期下载重要备份离线保存。</span>
+              <span>备份文件保存在主控备份目录并按配置定期轮转，建议定期下载重要备份离线保存。「上传备份」会先校验完整性与数据库版本再入库；恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。</span>
             </div>
           </div>
         </el-tab-pane>
@@ -1364,7 +1364,7 @@ async function save() {
                       <div class="update-title-line">
                         <span class="update-title">面板更新</span>
                         <span v-if="updateChecking" class="x-chip blue">
-                          <el-icon class="is-loading"><Loading /></el-icon> 检查中...
+                          <el-icon class="is-loading"><Loading /></el-icon> 检查中…
                         </span>
                         <span v-else-if="updateInfo?.available" class="x-chip green">
                           <span class="x-status-dot online"></span> 发现新版本
@@ -1384,7 +1384,7 @@ async function save() {
                     <el-tooltip
                       placement="top"
                       :show-after="200"
-                      content="更新机制：下载官方 Release 并校验 sha256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
+                      content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
                     >
                       <el-button text circle size="small" class="update-help-btn" :icon="InfoFilled" />
                     </el-tooltip>
@@ -1453,10 +1453,14 @@ async function save() {
                   </div>
                 </div>
 
-                <!-- 错误提示（若接口报错） -->
+                <!-- 错误提示（若接口报错）：两个请求各报各的。合并成一条会把「版本列表拉取失败」
+                     伪装成「暂无可安装版本」，而两者直连同一个 GitHub API、往往同时失败。 -->
                 <div v-if="updateError || releasesError" class="update-error-banner">
                   <el-icon><WarningFilled /></el-icon>
-                  <span>{{ updateError || releasesError }}</span>
+                  <div class="update-error-lines">
+                    <span v-if="updateError">检查更新失败：{{ updateError }}</span>
+                    <span v-if="releasesError">版本列表获取失败：{{ releasesError }}</span>
+                  </div>
                 </div>
 
                 <!-- 历史版本与回退区（可折叠高级选项，默认收起） -->
@@ -1524,13 +1528,16 @@ async function save() {
                   <el-tooltip
                     placement="top"
                     :show-after="150"
-                    content="识别优先级：CF-Connecting-IP → X-Real-IP → X-Forwarded-For → RemoteAddr。请将面板仅绑定 127.0.0.1 由反代前置，切勿直接公网暴露，避免攻击者伪造 IP 头绕过限流。"
+                    content="切勿将面板端口直接暴露公网，否则攻击者可伪造 IP 头绕过按 IP 的限流。"
                   >
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
+                    <el-icon class="form-tip-icon"><WarningFilled /></el-icon>
                   </el-tooltip>
                 </div>
                 <div class="ip-hdr-content">
-                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> → <code>RemoteAddr</code> 优先级识别真实客户端 IP。请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态，确保审计日志与限流准确生效。
+                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
+                  <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
+                  请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态：反代会覆盖/追加可信的 IP
+                  头，限流与审计才能按真实 IP 生效。
                 </div>
               </div>
 
@@ -1563,7 +1570,7 @@ async function save() {
         style="margin: 20px 0 8px"
       >
         <el-step title="下载更新包" description="GitHub Release" />
-        <el-step title="校验与自检" description="sha256 / self-test" />
+        <el-step title="校验与自检" description="SHA-256 / self-test" />
         <el-step title="替换文件" description="备份并原子替换" />
         <el-step title="重启容器" description="unless-stopped 拉起" />
       </el-steps>
@@ -1597,7 +1604,6 @@ async function save() {
 }
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
-.form-item-tip { font-size: 11.5px; color: var(--x-text-3); margin-top: 4px; line-height: 1.5; }
 
 /* 统一表单 Label 提示图标 */
 .form-label-with-tip {
@@ -1682,7 +1688,6 @@ async function save() {
     color: var(--x-primary);
   }
 }
-.ip-hdr-title { font-size: 12.5px; font-weight: 600; color: var(--x-text-2); margin-bottom: 4px; }
 /* 面板更新卡片 */
 .update-card {
   margin-top: 16px;
@@ -1887,8 +1892,23 @@ async function save() {
   color: var(--x-danger);
   font-size: 12px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
+
+  .el-icon {
+    flex: none;
+    margin-top: 2px;
+  }
+
+  /* 后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），不折断会横向顶出卡片 */
+  .update-error-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* 历史版本与安全回退 */
@@ -2314,7 +2334,7 @@ async function save() {
       font-size: 11.5px;
       line-height: 1.4;
       word-break: break-all;
-      background: rgba(254, 226, 226, 0.7);
+      background: var(--x-danger-soft);
       padding: 6px 8px;
       border-radius: 4px;
     }

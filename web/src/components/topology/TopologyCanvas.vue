@@ -1528,12 +1528,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         />
         <path
           class="refedge-glow"
-          :class="{ 'is-ap': e.data?.isAP, 'is-ref': !e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
           class="refedge-path"
-          :class="{ 'is-ap': e.data?.isAP, 'is-ref': !e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
           :marker-end="e.markerEnd"
         />
@@ -2949,9 +2949,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   &.is-ap {
     stroke: #38bdf8;
     stroke-dasharray: 6 4;
-  }
-  &.is-ref {
-    stroke: #fbbf24;
   }
 }
 

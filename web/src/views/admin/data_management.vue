@@ -419,6 +419,10 @@ onUnmounted(() => {
             仅可清理 <b>{{ maxDeleteDate || '—' }}</b> 及更早的日期（受计费周期与每日聚合窗口保护）。
           </template>
           <TipIcon
+            v-if="cleanupTable === 'node_reports'"
+            content="清理只缩短节点监控曲线的可回看窗口，不影响服务器状态。"
+          />
+          <TipIcon
             v-if="cleanupTable === 'audit_logs'"
             type="warn"
             content="审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。"
@@ -431,7 +435,7 @@ onUnmounted(() => {
     <BaseCard
       title="历史数据压缩"
       style="margin-bottom: 16px"
-      title-tip="把存量流量明细归并到小时桶、节点心跳按行龄分级抽稀（近 6 小时 1 分钟 / 6–24 小时 10 分钟 / 更早 1 小时），并清理超出保留期的数据，随后回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。"
+      title-tip="把存量流量明细归并到小时桶、节点心跳按行龄抽稀（近 6 小时 1 分钟，更早 10 分钟），并清理超出保留期的数据。归并只做求和/抽样，计费与用量口径不变，可重复执行。"
     >
       <div class="cleanup-row" style="align-items: center">
         <el-button type="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</el-button>

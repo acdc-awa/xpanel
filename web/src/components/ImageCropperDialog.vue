@@ -93,8 +93,13 @@ function syncDpr() {
   const next = Math.min(window.devicePixelRatio || 1, 3)
   if (next === dpr.value) return
   dpr.value = next
-  draw()
-  updatePreview()
+  // 必须等一帧：dpr 是 canvas :width/:height 的绑定源，Vue 在微任务里写这两个属性时
+  // 会清空位图并重置 ctx。同步 draw() 画进的是旧尺寸缓冲，随后即被清掉且无人补画
+  // （窗口拖到不同缩放的显示器且宽度不变时就会命中）。
+  nextTick(() => {
+    draw()
+    updatePreview()
+  })
 }
 
 function onViewportChange() {

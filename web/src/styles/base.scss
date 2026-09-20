@@ -453,6 +453,9 @@ a { color: inherit; text-decoration: none; }
     border-top: 1px solid var(--x-border);
     display: flex !important;
     justify-content: flex-end !important;
+    // 必须显式居中：footer 里除按钮还会放裸 el-icon（如危险操作的后果说明图标），
+    // stretch 下图标盒高仅 1em，会被顶到与按钮顶部齐平、比按钮中心高约 9px
+    align-items: center !important;
     gap: 10px !important;
   }
 

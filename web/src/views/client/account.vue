@@ -353,7 +353,7 @@ async function onLogout() {
           <div class="x-card-head">
             <span style="display: inline-flex; align-items: center; gap: 6px">
               <el-icon><RefreshRight /></el-icon>&nbsp;自动续费
-              <TipIcon content="续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算；余额不足时不会扣费。" />
+              <TipIcon content="续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算，已用流量随之清零重算；余额不足时不会扣费。" />
             </span>
           </div>
           <div class="x-card-body">

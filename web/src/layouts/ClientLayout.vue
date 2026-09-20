@@ -529,7 +529,7 @@ onUnmounted(() => {
 
 /* 桌面端与平板端 Topbar (>= 768px) */
 .client-desktop-topbar {
-  height: 56px;
+  height: var(--x-topbar-h, 56px);
   background: var(--x-card);
   border-bottom: 1px solid var(--x-border);
   display: flex;
