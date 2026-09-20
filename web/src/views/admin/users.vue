@@ -22,6 +22,7 @@ import { adjustUserBalance } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { AdminUser } from '@/api/types'
 import { formatBytes } from '@/utils/format'
+import { formatDateTime } from '@/utils/timezone'
 import { buildSubscribeUrl } from '@/config/site'
 import { useSiteStore } from '@/stores/site'
 import { useAuthStore } from '@/stores/auth'
@@ -165,8 +166,9 @@ function usagePercent(u: any) {
   return Math.min(100, Math.round((u.used_bytes / u.total_bytes) * 100))
 }
 
+// 时间展示统一走展示时区：后端存 UTC，直接截断字符串会把 UTC 墙钟当本地时间显示
 function fmtTime(t: string | null) {
-  return t ? t.replace('T', ' ').slice(0, 16) : '—'
+  return formatDateTime(t, '—')
 }
 
 // ---- 时间快捷设定 ----
@@ -532,8 +534,8 @@ function exportCSV() {
       u.balance_cents || 0,
       u.used_bytes || 0,
       u.total_bytes || 0,
-      u.expire_at ? String(u.expire_at).replace('T', ' ').slice(0, 19) : '',
-      u.created_at ? String(u.created_at).replace('T', ' ').slice(0, 19) : '',
+      formatDateTime(u.expire_at, ''),
+      formatDateTime(u.created_at, ''),
       u.remark || '',
     ].map(csvCell).join(','),
   )
