@@ -341,6 +341,10 @@ onMounted(async () => {
   }
   if (route.query.view === 'table') {
     viewMode.value = 'table'
+  } else if (route.query.view === 'canvas') {
+    viewMode.value = 'canvas'
+  } else if (isMobile.value) {
+    viewMode.value = 'table'
   }
   await loadServers()
   if (viewMode.value === 'canvas') {
@@ -686,6 +690,11 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+
+  .x-status-dot.online {
+    animation: none;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  }
 }
 .canvas-bar {
   display: flex;

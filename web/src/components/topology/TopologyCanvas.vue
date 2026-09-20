@@ -590,7 +590,6 @@ function buildGraph(data: TopologyData) {
           target: inbNode.get(ap.target_inbound_id)!,
           targetHandle: `inb-tgt-${ap.target_inbound_id}`,
           type: 'refedge',
-          animated: true,
           markerEnd: { type: MarkerType.ArrowClosed },
           data: { isAP: true },
         })
@@ -611,7 +610,6 @@ function buildGraph(data: TopologyData) {
       target: inbNode.get(out.inbound_ref)!,
       targetHandle: `inb-tgt-${out.inbound_ref}`,
       type: 'refedge',
-      animated: true,
       markerEnd: { type: MarkerType.ArrowClosed },
       data: {},
     })
@@ -1504,12 +1502,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       :min-zoom="0.15"
       :max-zoom="2"
       :fit-view-on-init="true"
+      :only-render-visible-elements="true"
       @connect="handleConnect"
       @edge-click="handleEdgeClick"
       @node-double-click="handleNodeDblClick"
       @node-drag-stop="onNodeDragStop"
     >
-      <Background pattern-color="#334155" :gap="18" />
+      <Background pattern-color="#334155" :gap="28" />
 
       <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线 -->
       <template #edge-boxrule="e">
@@ -1529,12 +1528,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         />
         <path
           class="refedge-glow"
-          :class="{ 'is-ap': e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP, 'is-ref': !e.data?.isAP }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
           class="refedge-path"
-          :class="{ 'is-ap': e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP, 'is-ref': !e.data?.isAP }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
           :marker-end="e.markerEnd"
         />
@@ -2114,8 +2113,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     gap: 8px;
     align-items: center;
     pointer-events: auto;
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(8px);
+    background: rgba(15, 23, 42, 0.94);
     padding: 4px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2134,8 +2132,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.94);
   border: 1px solid rgba(251, 191, 36, 0.4);
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -2186,22 +2183,22 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   width: 440px;
   min-width: 340px;
   position: relative;
-  background: rgba(30, 41, 59, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(24, 33, 47, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
   font-size: 12px;
   color: #e2e8f0;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   overflow: visible;
   transition: border-color 0.2s, box-shadow 0.2s;
+  contain: paint;
+  transform: translateZ(0);
 
   &.offline {
-    border-color: rgba(239, 68, 68, 0.2);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border-color: rgba(239, 68, 68, 0.25);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
     .sb-head {
-      background: linear-gradient(180deg, rgba(239, 68, 68, 0.08) 0%, transparent 100%);
+      background: linear-gradient(180deg, rgba(239, 68, 68, 0.1) 0%, transparent 100%);
     }
   }
 
@@ -2367,12 +2364,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
   .layer-capsule {
     width: 100%;
-    background: rgba(15, 23, 42, 0.7);
+    background: rgba(15, 23, 42, 0.85);
     border: 1px solid rgba(45, 212, 191, 0.25);
     border-radius: 12px;
     padding: 6px 8px 8px;
     box-sizing: border-box;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -2697,9 +2694,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 .ap-node {
   position: relative;
   width: 280px;
-  background: rgba(30, 41, 59, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(24, 33, 47, 0.95);
   border: 1px solid rgba(56, 189, 248, 0.35);
   border-radius: 14px;
   padding: 12px 14px;
@@ -2708,24 +2703,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   flex-direction: column;
   gap: 8px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.35),
-    0 4px 20px rgba(56, 189, 248, 0.12),
+    0 6px 24px rgba(0, 0, 0, 0.35),
+    0 2px 12px rgba(56, 189, 248, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   transition: border-color 0.2s, box-shadow 0.2s;
+  contain: paint;
+  transform: translateZ(0);
 
   &:hover {
     border-color: rgba(56, 189, 248, 0.6);
     box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.35),
-      0 6px 24px rgba(56, 189, 248, 0.2),
+      0 6px 24px rgba(0, 0, 0, 0.35),
+      0 4px 18px rgba(56, 189, 248, 0.2),
       inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
   &.unlinked {
     border-style: dashed;
     border-color: rgba(251, 191, 36, 0.45);
     box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.35),
-      0 4px 16px rgba(251, 191, 36, 0.1),
+      0 6px 24px rgba(0, 0, 0, 0.35),
+      0 2px 10px rgba(251, 191, 36, 0.1),
       inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
   &.disabled {
@@ -2897,13 +2894,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 .boxrule-glow {
   stroke: #0284c7;
   stroke-width: 6;
-  opacity: 0.18;
+  opacity: 0.22;
   fill: none;
-  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.3));
+  stroke-linecap: round;
   transition:
-    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    opacity 0.2s ease;
   pointer-events: none !important;
 }
 .boxrule-path {
@@ -2913,28 +2910,28 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   fill: none;
   stroke-linecap: round;
   transition:
-    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    opacity 0.2s ease;
   pointer-events: none !important;
-  animation: dash-flow-slow 30s linear infinite;
 }
 
 .refedge-glow {
   stroke: #d97706;
   stroke-width: 8;
-  opacity: 0.2;
+  opacity: 0.25;
   fill: none;
-  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.4));
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition:
-    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    opacity 0.2s ease;
   pointer-events: none !important;
 
   &.is-ap {
     stroke: #0284c7;
-    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
+    opacity: 0.28;
   }
 }
 .refedge-path {
@@ -2943,18 +2940,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   stroke-linejoin: round;
   stroke-linecap: round;
   fill: none;
-  filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
   transition:
-    stroke 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    opacity 0.2s ease;
   pointer-events: none !important;
 
   &.is-ap {
     stroke: #38bdf8;
-    filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.6));
     stroke-dasharray: 6 4;
-    animation: dash-flow-slow 20s linear infinite;
+  }
+  &.is-ref {
+    stroke: #fbbf24;
   }
 }
 
@@ -2986,25 +2983,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 }
 
 .vue-flow__edge:not(.selected):hover .boxrule-glow {
-  opacity: 0.38;
+  opacity: 0.45;
   stroke-width: 7;
 }
 .vue-flow__edge:not(.selected):hover .boxrule-path {
   stroke: #e0f2fe;
-  stroke-width: 3;
+  stroke-width: 2.5;
 }
 .vue-flow__edge:not(.selected):hover .refedge-glow {
-  opacity: 0.42;
+  opacity: 0.5;
   stroke-width: 9;
 }
 .vue-flow__edge:not(.selected):hover .refedge-path {
   stroke: #fef3c7;
-  stroke-width: 3.5;
+  stroke-width: 3;
 }
 
-@keyframes dash-flow-slow {
-  to {
-    stroke-dashoffset: -100;
+@media (max-width: 768px) {
+  .server-box,
+  .ap-node {
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
   }
 }
 
