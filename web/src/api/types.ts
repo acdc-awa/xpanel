@@ -164,6 +164,13 @@ export interface ServerMetricsData {
   rx_mbps: number[]
   tx_mbps: number[]
   online_users: number[]
+  /** 桶内峰值（同单位同口径，与上面的均值一一对应；旧后端无这些字段，故可选）。 */
+  cpu_max?: number[]
+  mem_percent_max?: number[]
+  disk_percent_max?: number[]
+  rx_mbps_max?: number[]
+  tx_mbps_max?: number[]
+  online_users_max?: number[]
 }
 
 export interface AdminUser {

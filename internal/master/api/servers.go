@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -667,7 +668,10 @@ func (d *Deps) AdminGenerateConfig(c *gin.Context) {
 	})
 }
 
-// AdminServerMetrics GET /api/v1/admin/servers/:id/metrics —— 查询节点时序监控数据 (1h/6h/24h/7d)。
+// AdminServerMetrics GET /api/v1/admin/servers/:id/metrics —— 查询节点时序监控数据 (1h/6h/24h/7d/30d)。
+// 每档的读桶不小于存储分辨率（见 services.CompactNodeReports 的分级降采样档位），
+// 否则桶内无真实采样点、只能靠前向填充造曲线。
+// 每档同时给出桶内均值与桶内峰值：均值看趋势，峰值看容量（带宽/CPU 的瞬时尖峰是均值抹掉的）。
 func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -696,7 +700,14 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		bucketDuration = 10 * time.Minute
 		timeFmt = "15:04"
 	case "7d":
+		// 30m 桶（而非 1h）：降采样档位放宽到 10m 后，桶内仍有 3 个真实采样点，
+		// 均值不再是「某一个瞬间的读数」，点数 336 也仍在图表可读范围内。
 		startTime = now.AddDate(0, 0, -7)
+		bucketDuration = 30 * time.Minute
+		timeFmt = "01-02 15:00"
+	case "30d":
+		// 覆盖 node_reports 的完整保留期（默认 30 天）；1h 桶 ≈ 720 点。
+		startTime = now.AddDate(0, 0, -30)
 		bucketDuration = 1 * time.Hour
 		timeFmt = "01-02 15:00"
 	case "1h":
@@ -729,6 +740,14 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		txRateSum float64
 		usersSum  int
 		count     int
+		// 桶内峰值（原始采样点的最大值）。count==0 时无意义，由首个采样点直接初始化，
+		// 不用 0 当哨兵——CPU/速率本就可能为 0，哨兵会让真实 0 值被 max 判成「未初始化」。
+		cpuMax    float64
+		memMax    float64
+		diskMax   float64
+		rxRateMax float64
+		txRateMax float64
+		usersMax  int
 	}
 
 	buckets := make([]bucketAgg, numBuckets)
@@ -744,6 +763,20 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		idx := int(r.ReportedAt.Sub(startTime) / bucketDuration)
 		if idx >= 0 && idx < numBuckets {
 			b := &buckets[idx]
+			if b.count == 0 {
+				b.cpuMax, b.memMax, b.diskMax = r.CPU, r.Mem, r.Disk
+				b.rxRateMax, b.txRateMax = r.RxRate, r.TxRate
+				b.usersMax = r.OnlineUsers
+			} else {
+				b.cpuMax = math.Max(b.cpuMax, r.CPU)
+				b.memMax = math.Max(b.memMax, r.Mem)
+				b.diskMax = math.Max(b.diskMax, r.Disk)
+				b.rxRateMax = math.Max(b.rxRateMax, r.RxRate)
+				b.txRateMax = math.Max(b.txRateMax, r.TxRate)
+				if r.OnlineUsers > b.usersMax {
+					b.usersMax = r.OnlineUsers
+				}
+			}
 			b.cpuSum += r.CPU
 			b.memSum += r.Mem
 			if r.MemTotal > 0 {
@@ -768,6 +801,28 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	rxMbpsList := make([]float64, numBuckets)
 	txMbpsList := make([]float64, numBuckets)
 	usersList := make([]int, numBuckets)
+	cpuMaxList := make([]float64, numBuckets)
+	memPercentMaxList := make([]float64, numBuckets)
+	diskPercentMaxList := make([]float64, numBuckets)
+	rxMbpsMaxList := make([]float64, numBuckets)
+	txMbpsMaxList := make([]float64, numBuckets)
+	usersMaxList := make([]int, numBuckets)
+
+	// 已用字节 / 总量 → 百分比，1 位小数、封顶 100。均值与峰值共用，保证两条线同口径可比。
+	pctOf := func(used float64, total uint64) float64 {
+		if total == 0 {
+			return 0
+		}
+		pct := used / float64(total) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		return float64(int(pct*10)) / 10
+	}
+	// 字节/秒 -> Mbps (8 / 1,000,000)，2 位小数。
+	mbpsOf := func(bytesPerSec float64) float64 {
+		return float64(int(bytesPerSec*8/1_000_000*100)) / 100
+	}
 
 	var lastMemTotal uint64
 	var lastDiskTotal uint64
@@ -788,34 +843,34 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 			dVal := b.diskSum / float64(b.count)
 			cpuList[i] = float64(int(cVal*10)) / 10
 			memUsedList[i] = mVal
-			if lastMemTotal > 0 {
-				memPercentList[i] = float64(int((mVal/float64(lastMemTotal)*100)*10)) / 10
-			}
-			// 磁盘占用率 = 已用字节均值 / 总量 * 100（2026-08-31 修复：此前漏除总量，
-			// 已用字节数被直接当百分数输出，出现 3797404720% 这类值）
-			if lastDiskTotal > 0 {
-				pct := dVal / float64(lastDiskTotal) * 100
-				if pct > 100 {
-					pct = 100
-				}
-				diskPercentList[i] = float64(int(pct*10)) / 10
-			}
-			// 字节/秒 -> Mbps (8 / 1,000,000)
-			rxMbps := (b.rxRateSum / float64(b.count)) * 8 / 1_000_000
-			txMbps := (b.txRateSum / float64(b.count)) * 8 / 1_000_000
-			rxMbpsList[i] = float64(int(rxMbps*100)) / 100
-			txMbpsList[i] = float64(int(txMbps*100)) / 100
+			memPercentList[i] = pctOf(mVal, lastMemTotal)
+			diskPercentList[i] = pctOf(dVal, lastDiskTotal)
+			rxMbpsList[i] = mbpsOf(b.rxRateSum / float64(b.count))
+			txMbpsList[i] = mbpsOf(b.txRateSum / float64(b.count))
 			usersList[i] = b.usersSum / b.count
-		} else {
-			if i > 0 {
-				cpuList[i] = cpuList[i-1]
-				memUsedList[i] = memUsedList[i-1]
-				memPercentList[i] = memPercentList[i-1]
-				diskPercentList[i] = diskPercentList[i-1]
-				rxMbpsList[i] = rxMbpsList[i-1]
-				txMbpsList[i] = txMbpsList[i-1]
-				usersList[i] = usersList[i-1]
-			}
+			// 峰值：桶内原始采样点的最大值，不参与平均。
+			cpuMaxList[i] = float64(int(b.cpuMax*10)) / 10
+			memPercentMaxList[i] = pctOf(b.memMax, lastMemTotal)
+			diskPercentMaxList[i] = pctOf(b.diskMax, lastDiskTotal)
+			rxMbpsMaxList[i] = mbpsOf(b.rxRateMax)
+			txMbpsMaxList[i] = mbpsOf(b.txRateMax)
+			usersMaxList[i] = b.usersMax
+		} else if i > 0 {
+			// 空桶前向填充：保持曲线连续，避免无上报的时段被画成 0（会误读为「无流量/无负载」）。
+			// 峰值同样前向填充——本档位下空桶意味着该区间没有采样点，任何取值都只是占位。
+			cpuList[i] = cpuList[i-1]
+			memUsedList[i] = memUsedList[i-1]
+			memPercentList[i] = memPercentList[i-1]
+			diskPercentList[i] = diskPercentList[i-1]
+			rxMbpsList[i] = rxMbpsList[i-1]
+			txMbpsList[i] = txMbpsList[i-1]
+			usersList[i] = usersList[i-1]
+			cpuMaxList[i] = cpuMaxList[i-1]
+			memPercentMaxList[i] = memPercentMaxList[i-1]
+			diskPercentMaxList[i] = diskPercentMaxList[i-1]
+			rxMbpsMaxList[i] = rxMbpsMaxList[i-1]
+			txMbpsMaxList[i] = txMbpsMaxList[i-1]
+			usersMaxList[i] = usersMaxList[i-1]
 		}
 	}
 
@@ -836,6 +891,13 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		"rx_mbps":        rxMbpsList,
 		"tx_mbps":        txMbpsList,
 		"online_users":   usersList,
+		// 峰值（桶内原始采样点最大值，同单位同口径，与上面的均值一一对应）
+		"cpu_max":          cpuMaxList,
+		"mem_percent_max":  memPercentMaxList,
+		"disk_percent_max": diskPercentMaxList,
+		"rx_mbps_max":      rxMbpsMaxList,
+		"tx_mbps_max":      txMbpsMaxList,
+		"online_users_max": usersMaxList,
 	})
 }
 

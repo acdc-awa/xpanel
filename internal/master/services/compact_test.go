@@ -167,28 +167,32 @@ func TestCompactNodeReportsDownsamplesAndTrims(t *testing.T) {
 	}
 }
 
-// 分级降采样：近 6h 按分钟、6–24h 按 10 分钟、24h 以上按小时各留最早一行。
+// 降采样档位：近 6h 按分钟、6h 以上按 10 分钟各留最早一行。
+// 6h 以上统一 10 分钟（原先 24h 以上降到 1 小时）：7d/30d 视图的桶内均值与峰值都由
+// 这层采样点现算，退化成小时点采样会让均值失真、峰值几乎必然漏采。故此处专门断言
+// 「72h 龄的行仍按 10 分钟分桶、不再按小时合并」。
 func TestCompactNodeReportsTieredDownsample(t *testing.T) {
 	db := newCompactTestDB(t)
 	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
 
-	tier1 := now.Add(-2 * time.Hour)  // 龄 2h → 1 分钟桶
-	tier2 := now.Add(-8 * time.Hour)  // 龄 8h → 10 分钟桶
-	tier3 := now.Add(-72 * time.Hour) // 龄 72h → 1 小时桶
+	recent := now.Add(-2 * time.Hour)  // 龄 2h → 1 分钟桶
+	middle := now.Add(-8 * time.Hour)  // 龄 8h → 10 分钟桶
+	old := now.Add(-72 * time.Hour)    // 龄 72h → 10 分钟桶（不再是 1 小时）
 
 	rows := []models.NodeReport{
-		// tier1：同分钟两行 → 1
-		{ServerID: 3, ReportedAt: tier1},
-		{ServerID: 3, ReportedAt: tier1.Add(30 * time.Second)},
-		// tier2：同 10 分钟桶三行 → 1；下一桶一行 → 保留
-		{ServerID: 3, ReportedAt: tier2.Add(1 * time.Minute)},
-		{ServerID: 3, ReportedAt: tier2.Add(2 * time.Minute)},
-		{ServerID: 3, ReportedAt: tier2.Add(9 * time.Minute)},
-		{ServerID: 3, ReportedAt: tier2.Add(11 * time.Minute)},
-		// tier3：同小时桶两行 → 1；下一小时一行 → 保留
-		{ServerID: 3, ReportedAt: tier3.Add(1 * time.Minute)},
-		{ServerID: 3, ReportedAt: tier3.Add(59 * time.Minute)},
-		{ServerID: 3, ReportedAt: tier3.Add(65 * time.Minute)},
+		// 近 6h：同分钟两行 → 1
+		{ServerID: 3, ReportedAt: recent},
+		{ServerID: 3, ReportedAt: recent.Add(30 * time.Second)},
+		// 6h 以上：同 10 分钟桶三行 → 1；下一桶一行 → 保留
+		{ServerID: 3, ReportedAt: middle.Add(1 * time.Minute)},
+		{ServerID: 3, ReportedAt: middle.Add(2 * time.Minute)},
+		{ServerID: 3, ReportedAt: middle.Add(9 * time.Minute)},
+		{ServerID: 3, ReportedAt: middle.Add(11 * time.Minute)},
+		// 72h 龄同样按 10 分钟：同桶两行 → 1，另两个跨桶行各自保留
+		{ServerID: 3, ReportedAt: old.Add(1 * time.Minute)},
+		{ServerID: 3, ReportedAt: old.Add(9 * time.Minute)},
+		{ServerID: 3, ReportedAt: old.Add(11 * time.Minute)},
+		{ServerID: 3, ReportedAt: old.Add(21 * time.Minute)},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("seed: %v", err)
@@ -198,9 +202,9 @@ func TestCompactNodeReportsTieredDownsample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compact: %v", err)
 	}
-	// 2(tier1→1) + 4(tier2→2) + 3(tier3→2) = 5
-	if after != 5 {
-		t.Fatalf("after = %d, want 5", after)
+	// 2(recent→1) + 4(middle→2) + 4(old→3) = 6
+	if after != 6 {
+		t.Fatalf("after = %d, want 6", after)
 	}
 
 	countIn := func(lo, hi time.Time) int64 {
@@ -213,14 +217,36 @@ func TestCompactNodeReportsTieredDownsample(t *testing.T) {
 		}
 		return n
 	}
-	if n := countIn(tier1.Truncate(time.Minute), tier1.Truncate(time.Minute).Add(time.Minute)); n != 1 {
-		t.Fatalf("tier1 minute bucket = %d, want 1", n)
+	if n := countIn(recent.Truncate(time.Minute), recent.Truncate(time.Minute).Add(time.Minute)); n != 1 {
+		t.Fatalf("近 6h 分钟桶 = %d, want 1", n)
 	}
-	if n := countIn(tier2.Truncate(10*time.Minute), tier2.Truncate(10*time.Minute).Add(10*time.Minute)); n != 1 {
-		t.Fatalf("tier2 10min bucket = %d, want 1", n)
+	if n := countIn(middle.Truncate(10*time.Minute), middle.Truncate(10*time.Minute).Add(10*time.Minute)); n != 1 {
+		t.Fatalf("6h 以上 10 分钟桶 = %d, want 1", n)
 	}
-	if n := countIn(tier3.Truncate(time.Hour), tier3.Truncate(time.Hour).Add(time.Hour)); n != 1 {
-		t.Fatalf("tier3 hour bucket = %d, want 1", n)
+	if n := countIn(old.Truncate(10*time.Minute), old.Truncate(10*time.Minute).Add(10*time.Minute)); n != 1 {
+		t.Fatalf("72h 龄 10 分钟桶 = %d, want 1", n)
+	}
+	// 关键：72h 龄的 4 行分属 3 个 10 分钟桶，小时桶内应保留 3 行。
+	// 若退化成小时粒度（旧行为），此处会是 1。
+	if n := countIn(old.Truncate(time.Hour), old.Truncate(time.Hour).Add(time.Hour)); n != 3 {
+		t.Fatalf("72h 龄小时桶内行数 = %d, want 3（已退化为小时粒度？）", n)
+	}
+}
+
+// nodeBucketFor 档位边界：恰好 6h 仍按分钟，超过即按 10 分钟。
+func TestNodeBucketForTierBoundary(t *testing.T) {
+	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+
+	at6h := now.Add(-nodeTier1Window)
+	if got := nodeBucketFor(at6h, now); !got.Equal(at6h.Truncate(time.Minute)) {
+		t.Fatalf("龄恰 6h 应落在分钟桶，got %s", got)
+	}
+	over6h := now.Add(-nodeTier1Window - time.Second)
+	if got := nodeBucketFor(over6h, now); !got.Equal(over6h.Truncate(nodeTier2Bucket)) {
+		t.Fatalf("龄超 6h 应落在 10 分钟桶，got %s", got)
+	}
+	if nodeTier2Bucket >= time.Hour {
+		t.Fatalf("nodeTier2Bucket = %s，不应粗到小时（7d/30d 视图会失去峰值）", nodeTier2Bucket)
 	}
 }
 

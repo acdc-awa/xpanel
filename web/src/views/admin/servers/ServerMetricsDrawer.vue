@@ -23,10 +23,27 @@ const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
 }>()
 
-const range = ref<'1h' | '6h' | '24h' | '7d'>('1h')
+const range = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('1h')
 const loading = ref(false)
 const metricsData = ref<ServerMetricsData | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
+
+/** 各档时间跨度（小时），用于坐标轴按跨度切换日期/时刻格式。 */
+const RANGE_SPAN_HOURS: Record<string, number> = { '1h': 1, '6h': 6, '24h': 24, '7d': 168, '30d': 720 }
+
+/** 峰值曲线统一样式：同色虚线、不加面积。峰值不平滑——smooth 会在两点间压出
+ *  低于真实峰值的弧线，把「包络线」画成假的。 */
+function peakSeries(name: string, color: string, data?: number[]) {
+  return {
+    name,
+    type: 'line' as const,
+    smooth: false,
+    showSymbol: false,
+    data: data ?? [],
+    itemStyle: { color },
+    lineStyle: { type: 'dashed' as const, width: 1, opacity: 0.55 },
+  }
+}
 
 const netChartRef = ref<HTMLDivElement | null>(null)
 const cpuChartRef = ref<HTMLDivElement | null>(null)
@@ -105,7 +122,7 @@ function updateCharts() {
   if (!metricsData.value) return
   const data = metricsData.value
   // 优先用后端返回的原始 UTC 时间戳，按「显示时区」渲染坐标轴；旧后端无该字段时回退服务端格式化串。
-  const spanHours = range.value === '7d' ? 168 : range.value === '24h' ? 24 : range.value === '6h' ? 6 : 1
+  const spanHours = RANGE_SPAN_HOURS[range.value] ?? 1
   const raw = data.timestamps_iso || []
   const ts = raw.length ? raw.map((t) => formatAxisTime(t, spanHours)) : data.timestamps || []
   const isDark = theme.isDark
@@ -127,13 +144,13 @@ function updateCharts() {
         return res
       },
     },
-    legend: { data: ['下行 / 入口 (Rx)', '上行 / 出口 (Tx)'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    legend: { data: ['下行均值 (Rx)', '下行峰值 (Rx)', '上行均值 (Tx)', '上行峰值 (Tx)'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
     xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', name: 'Mbps', nameTextStyle: { color: textColor }, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
     series: [
       {
-        name: '下行 / 入口 (Rx)',
+        name: '下行均值 (Rx)',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -147,7 +164,7 @@ function updateCharts() {
         },
       },
       {
-        name: '上行 / 出口 (Tx)',
+        name: '上行均值 (Tx)',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -160,18 +177,21 @@ function updateCharts() {
           ]),
         },
       },
+      peakSeries('下行峰值 (Rx)', '#0284c7', data.rx_mbps_max),
+      peakSeries('上行峰值 (Tx)', '#6366f1', data.tx_mbps_max),
     ],
   })
 
   // 2. CPU 使用率
   cpuChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
+    legend: { data: ['CPU 均值', 'CPU 峰值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
     xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
     series: [
       {
-        name: 'CPU 使用率',
+        name: 'CPU 均值',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -189,27 +209,29 @@ function updateCharts() {
           data: [{ yAxis: 80, label: { formatter: '80% 警戒', color: '#ef4444' } }],
         },
       },
+      peakSeries('CPU 峰值', '#10b981', data.cpu_max),
     ],
   })
 
   // 3. 内存 & 磁盘负载
   memChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
-    legend: { data: ['内存占用率', '磁盘占用率'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    legend: { data: ['内存均值', '内存峰值', '磁盘均值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
     xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
     series: [
       {
-        name: '内存占用率',
+        name: '内存均值',
         type: 'line',
         smooth: true,
         showSymbol: false,
         data: data.mem_percent,
         itemStyle: { color: '#3b82f6' },
       },
+      peakSeries('内存峰值', '#3b82f6', data.mem_percent_max),
       {
-        name: '磁盘占用率',
+        name: '磁盘均值',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -222,12 +244,13 @@ function updateCharts() {
   // 4. 在线用户数
   userChart?.setOption({
     tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} 人` },
+    legend: { data: ['在线均值', '在线峰值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
     grid: commonGrid.value,
     xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
     yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
     series: [
       {
-        name: '在线用户数',
+        name: '在线均值',
         type: 'line',
         step: 'start',
         showSymbol: false,
@@ -240,6 +263,7 @@ function updateCharts() {
           ]),
         },
       },
+      peakSeries('在线峰值', '#6366f1', data.online_users_max),
     ],
   })
 }
@@ -323,10 +347,12 @@ onUnmounted(() => {
             <el-radio-button value="1h">1 小时 (1m)</el-radio-button>
             <el-radio-button value="6h">6 小时 (3m)</el-radio-button>
             <el-radio-button value="24h">24 小时 (10m)</el-radio-button>
-            <el-radio-button value="7d">7 天 (1h)</el-radio-button>
+            <el-radio-button value="7d">7 天 (30m)</el-radio-button>
+            <el-radio-button value="30d">30 天 (1h)</el-radio-button>
           </el-radio-group>
         </div>
         <div class="range-actions">
+          <span class="auto-tip">实线均值 · 虚线峰值</span>
           <span class="auto-tip">15s 自动刷新</span>
           <el-button size="small" :icon="Refresh" circle @click="loadData" />
         </div>
@@ -465,9 +491,11 @@ onUnmounted(() => {
       .el-radio-group {
         display: flex;
         width: 100%;
+        // 5 档标签在窄屏一行放不下：允许换行，按钮按自身宽度排布。
+        flex-wrap: wrap;
 
         .el-radio-button {
-          flex: 1;
+          flex: 1 0 auto;
 
           :deep(.el-radio-button__inner) {
             width: 100%;
@@ -480,6 +508,8 @@ onUnmounted(() => {
 
     .range-actions {
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 6px;
     }
   }
 

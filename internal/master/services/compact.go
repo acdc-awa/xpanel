@@ -45,29 +45,26 @@ const (
 // nodeReportBucket 最细心跳压缩粒度，与 nodegate.nodeReportSampleInterval 保持一致。
 const nodeReportBucket = time.Minute
 
-// 节点曲线分级降采样档位：与读取端（api/servers.go AdminServerMetrics）二次分桶的最细粒度对齐，
+// 节点曲线降采样档位：与读取端（api/servers.go AdminServerMetrics）各档的读桶对齐，
 // 使降采样对任何可回看区间都不降分辨率：
-//   - 近 6h  → 1 分钟（1h 视图@1m、6h 视图@3m）
-//   - 6–24h → 10 分钟（24h 视图@10m）
-//   - 24h 以上 → 1 小时（7d 视图@1h；7d 之外已不展示，仅留粗历史）
+//   - 近 6h   → 1 分钟（1h 视图@1m、6h 视图@3m）
+//   - 6h 以上 → 10 分钟（24h 视图@10m、7d 视图@30m、30d 视图@1h）
+//
+// 6h 以上统一 10 分钟（原先 6–24h 保 10 分钟、24h 以上降到 1 小时）：保留期默认 30 天，
+// 10 分钟粒度下每服务器仅约 4600 行（含近 6h 的 1 分钟段），存储代价可忽略；而 1 小时的
+// 点采样会让 7d/30d 曲线的每个点退化成「某个瞬间的读数」——均值失真、峰值几乎必然漏采，
+// 容量判断失去依据。
 const (
 	nodeTier1Window = 6 * time.Hour
-	nodeTier2Window = 24 * time.Hour
 	nodeTier2Bucket = 10 * time.Minute
-	nodeTier3Bucket = time.Hour
 )
 
 // nodeBucketFor 返回某行按「行龄」应归入的降采样桶起点（桶边界按绝对时间对齐）。
 func nodeBucketFor(reportedAt, now time.Time) time.Time {
-	age := now.Sub(reportedAt)
-	switch {
-	case age <= nodeTier1Window:
+	if now.Sub(reportedAt) <= nodeTier1Window {
 		return reportedAt.Truncate(nodeReportBucket)
-	case age <= nodeTier2Window:
-		return reportedAt.Truncate(nodeTier2Bucket)
-	default:
-		return reportedAt.Truncate(nodeTier3Bucket)
 	}
+	return reportedAt.Truncate(nodeTier2Bucket)
 }
 
 // deleteIDBatch 单条 DELETE ... IN 的 id 数量上限，规避 SQLite 变量数限制。
@@ -406,8 +403,12 @@ func deleteSetting(db *gorm.DB, key string) {
 
 // CompactNodeReports 分级压缩存量 node_reports：
 //  1. 删除超出 RetentionNodeReportDays 的行（与保留策略一致，回收最长历史）；
-//  2. 保留期内按行龄分级降采样（见 nodeTier* 常量）：桶内每服务器保留最早一行，删除其余。
-//     近 6h 保 1 分钟、6–24h 保 10 分钟、24h 以上保 1 小时。
+//  2. 保留期内按行龄降采样（见 nodeTier* 常量）：桶内每服务器保留最早一行，删除其余。
+//     近 6h 保 1 分钟、6h 以上保 10 分钟。
+//
+// 保留的是桶内**最早一行**（点采样），不是桶内聚合值——故本函数只做「减少行数」，
+// 不产生均值/峰值。7d、30d 视图的桶内均值与峰值由读取端对保留下来的采样点现算
+// （见 api/servers.go AdminServerMetrics）。
 //
 // 心跳 reported_at 以 UTC 写入（main 固定 time.Local=UTC），桶边界按绝对时间对齐。
 func CompactNodeReports(db *gorm.DB, now time.Time) (before, after int64, err error) {
