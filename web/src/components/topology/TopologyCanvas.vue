@@ -637,20 +637,35 @@ function buildGraph(data: TopologyData) {
   edges.value = es
 }
 
+// 行内 Handle 锚在行盒（.sb-row）的左右边缘，而行盒宽度由内容撑开：行内元素增删都会
+// 让行宽变化、端点 X 跟着平移。节点外框尺寸不变时 VueFlow 的 ResizeObserver 不触发，
+// handleBounds 会停留在旧值，盒内走线就与端点脱节 —— 内容变化后必须手动重算。
+function refreshNodeInternals() {
+  const t = props.topology
+  if (!t) return
+  for (const s of t.servers) flowRef.value?.updateNodeInternals?.(`server-${s.id}`)
+  for (const ap of t.access_points ?? []) flowRef.value?.updateNodeInternals?.(`ap-${ap.id}`)
+}
+
 watch(
   () => props.topology,
   async (t) => {
     if (t) buildGraph(t)
     await nextTick()
-    // 行内 Handle 随行内容变化（出站 draft 连上后行宽变化等），
-    // 通知 VueFlow 重算各节点 handle 锚点，避免盒内连线端点与行位置脱节
-    if (!t) return
-    const ids: string[] = []
-    for (const s of t.servers) ids.push(`server-${s.id}`)
-    for (const ap of t.access_points ?? []) ids.push(`ap-${ap.id}`)
-    for (const id of ids) flowRef.value?.updateNodeInternals?.(id)
+    refreshNodeInternals()
   },
   { immediate: true },
+)
+
+// 编辑模式开关会显隐行内排序按钮（.tag-order-actions，约 26px 宽），
+// 受影响的正是盒内规则线的两个端点：左列行的右缘（inb-src-*）与右列行的左缘
+// （out-tgt-*）。盒子外框尺寸不变 → 不重算就会残留编辑模式下的旧锚点。
+watch(
+  () => props.editable,
+  async () => {
+    await nextTick()
+    refreshNodeInternals()
+  },
 )
 
 // ---- 交互：拖线实时合法性预检 ----
