@@ -434,7 +434,11 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 
 		// 对比节点当前版本与目标版本：未指定 force 时若当前已是最新或更高，直接返回
 		var srv models.Server
+		actionName := "自升级"
 		if err := d.DB.First(&srv, id).Error; err == nil {
+			if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) > 0 {
+				actionName = "回滚"
+			}
 			if !req.Force && srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
 				util.OK(c, gin.H{
 					"ok":   true,
@@ -447,11 +451,11 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
 				Phase:   "starting",
 				Target:  target,
-				Message: "正在向服务器下发自升级指令…",
+				Message: fmt.Sprintf("正在向服务器下发%s指令…", actionName),
 				TS:      time.Now().Unix(),
 			})
 		}
-		payload = protocol.UpgradeAgentPayload{Target: target}
+		payload = protocol.UpgradeAgentPayload{Target: target, Force: req.Force}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
 		return
@@ -602,7 +606,7 @@ func (d *Deps) AdminBatchUpgradeServers(c *gin.Context) {
 	for _, it := range dispatch {
 		go func(id uint64) {
 			// 回执要等节点从 GitHub 拉完二进制才发（同单台升级的专用长超时）
-			res, err := d.Hub.Ask(id, protocol.MsgUpgradeAgent, protocol.UpgradeAgentPayload{Target: target}, nodegate.UpgradeAskTimeout)
+			res, err := d.Hub.Ask(id, protocol.MsgUpgradeAgent, protocol.UpgradeAgentPayload{Target: target, Force: req.Force}, nodegate.UpgradeAskTimeout)
 			if err != nil {
 				d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
 					Phase: "failed", Target: target, Message: "升级指令超时或失败", Error: err.Error(), TS: time.Now().Unix(),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled, Loading, Check, Close, Platform } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, Download, MoreFilled, Loading, Check, Close, Platform } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
@@ -327,7 +327,12 @@ async function pollUpgradeStatus(serverId: number) {
   }
 }
 
+const upgradeIsRollback = ref(false)
+const rollbackTargetVersion = ref('')
+
 async function upgradeNodeAgent(row: any) {
+  upgradeIsRollback.value = false
+  rollbackTargetVersion.value = ''
   const currentVer = row.agent_version || ''
   const latest = latestAgentVersion.value
   let msg = ''
@@ -405,6 +410,97 @@ async function upgradeNodeAgent(row: any) {
       target: latest || undefined,
       message: '升级请求超时或网络异常',
       error: errMsg(e, '升级失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
+      ts: Math.floor(Date.now() / 1000),
+    }
+    stopUpgradePolling()
+  } finally {
+    upgradingId.value = 0
+  }
+}
+
+async function rollbackNodeAgent(row: any) {
+  const currentVer = row.agent_version || ''
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `当前服务器「${row.name}」Agent 版本为：${currentVer || '未知'}\n\n请输入要回滚的目标版本号（如 v0.1.15）：`,
+      '回滚 Agent',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPattern: /^v?\d+(\.\d+)+.*$/,
+        inputErrorMessage: '版本号格式不正确（示例：v0.1.15）',
+      },
+    )
+    let target = (value || '').trim()
+    if (!target) return
+    if (!target.startsWith('v')) target = 'v' + target
+    if (currentVer && (currentVer === target || compareVersion(currentVer, target) === 0)) {
+      ElMessage.info(`服务器当前已是版本 ${target}，无需回滚`)
+      return
+    }
+
+    try {
+      await ElMessageBox.confirm(
+        `确认将服务器「${row.name}」的 Agent 版本从 ${currentVer || '当前版本'} 回滚至 ${target}？\n\n（将下载旧版本并执行 sha256 完整性校验，完成后服务器自动重启，期间短暂离线）`,
+        '确认回滚 Agent',
+        {
+          type: 'warning',
+          confirmButtonText: '立即回滚',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+
+    upgradeIsRollback.value = true
+    rollbackTargetVersion.value = target
+    upgradeTarget.value = row
+    upgradeStatus.value = {
+      phase: 'starting',
+      target,
+      message: '正在向服务器下发回滚指令...',
+      ts: Math.floor(Date.now() / 1000),
+    }
+    upgradeModalOpen.value = true
+    upgradingId.value = row.id
+
+    stopUpgradePolling()
+    upgradeTimer = setInterval(() => {
+      pollUpgradeStatus(row.id)
+    }, 1500)
+
+    const { data } = await upgradeAgent(row.id, {
+      target,
+      force: true,
+    })
+    if (data.code === 0 && data.data.ok) {
+      upgradeStatus.value = {
+        phase: 'success',
+        target,
+        message: (data.data.data as string) || '已回滚完成，服务器已重新加载旧版本',
+        ts: Math.floor(Date.now() / 1000),
+      }
+      stopUpgradePolling()
+      load()
+      setTimeout(load, 15000)
+    } else {
+      upgradeStatus.value = {
+        phase: 'failed',
+        target,
+        message: '回滚失败',
+        error: data.data?.error || data.message || '回滚失败',
+        ts: Math.floor(Date.now() / 1000),
+      }
+      stopUpgradePolling()
+    }
+  } catch (e: any) {
+    if (e === 'cancel' || e?.action === 'cancel') return
+    upgradeStatus.value = {
+      phase: 'failed',
+      target: rollbackTargetVersion.value || undefined,
+      message: '回滚请求超时或网络异常',
+      error: errMsg(e, '回滚失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
       ts: Math.floor(Date.now() / 1000),
     }
     stopUpgradePolling()
@@ -703,6 +799,7 @@ function onMore(cmd: string, row: any) {
   else if (cmd === 'restart') restartXray(row)
   else if (cmd === 'logs') openLogs(row)
   else if (cmd === 'upgrade') upgradeNodeAgent(row)
+  else if (cmd === 'rollback') rollbackNodeAgent(row)
 }
 
 // ---- 删除 ----
@@ -878,6 +975,9 @@ async function removeServer(row: any) {
                     <el-icon><Upload /></el-icon>
                     {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级 Agent' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装 Agent' : '升级 Agent') }}
                   </el-dropdown-item>
+                  <el-dropdown-item command="rollback">
+                    <el-icon><Download /></el-icon>回滚 Agent
+                  </el-dropdown-item>
                   <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
                   <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
                   <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)">
@@ -985,10 +1085,10 @@ async function removeServer(row: any) {
       <pre ref="logPreRef" v-loading="logLoading" class="log-view">{{ displayedLogContent }}</pre>
     </el-dialog>
 
-    <!-- Agent 升级监控弹窗 -->
+    <!-- Agent 升级/回滚监控弹窗 -->
     <el-dialog
       v-model="upgradeModalOpen"
-      :title="`Agent 升级监控 · ${upgradeTarget?.name ?? ''}`"
+      :title="`Agent ${upgradeIsRollback ? '回滚' : '升级'}监控 · ${upgradeTarget?.name ?? ''}`"
       width="640px"
       :close-on-click-modal="false"
       @close="stopUpgradePolling"
@@ -1003,11 +1103,13 @@ async function removeServer(row: any) {
             <span class="ver-label">版本流转:</span>
             <el-tag size="small" type="info">{{ upgradeTarget?.agent_version || '未知' }}</el-tag>
             <span class="ver-arrow">→</span>
-            <el-tag size="small" type="success">{{ latestAgentVersion || '最新版' }}</el-tag>
+            <el-tag size="small" :type="upgradeIsRollback ? 'warning' : 'success'">
+              {{ (upgradeIsRollback ? rollbackTargetVersion : latestAgentVersion) || '目标版本' }}
+            </el-tag>
           </div>
         </div>
 
-        <!-- 升级步骤条 -->
+        <!-- 升级/回滚步骤条 -->
         <el-steps
           :active="upgradeActiveStep"
           finish-status="success"
@@ -1015,7 +1117,7 @@ async function removeServer(row: any) {
           align-center
           style="margin: 28px 0 20px"
         >
-          <el-step title="版本解析" description="检查远端版本" />
+          <el-step title="版本解析" :description="upgradeIsRollback ? '检查指定版本' : '检查远端版本'" />
           <el-step title="下载资源" description="GitHub Releases" />
           <el-step title="完整性校验" description="SHA256 校验" />
           <el-step title="重启生效" description="服务重载就绪" />
@@ -1041,7 +1143,7 @@ async function removeServer(row: any) {
               {{ upgradeStatus.error }}
             </div>
             <div v-else-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'" class="status-hint">
-              服务器正在执行后台升级操作，若网络连通较慢请耐心等待（通常耗时 10-60 秒）
+              服务器正在执行后台{{ upgradeIsRollback ? '回滚' : '升级' }}操作，若网络连通较慢请耐心等待（通常耗时 10-60 秒）
             </div>
           </div>
         </div>
