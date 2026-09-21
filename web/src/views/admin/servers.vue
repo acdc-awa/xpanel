@@ -125,6 +125,40 @@ function fmtTime(t: string | null) {
   return formatDateTime(t, '—')
 }
 
+// xray 状态中文（节点心跳/状态查询回传的 xray_state；旧 agent 为空由调用处跳过该行）
+function xrayStateText(state: string) {
+  switch (state) {
+    case 'running':
+      return '运行中'
+    case 'restarting':
+      return '启动失败，自动重试中'
+    case 'failed':
+      return '启动失败，已停止自动拉起'
+    case 'stopped':
+      return '未启动'
+    default:
+      return state
+  }
+}
+
+// 列表里的 xray 异常徽标：failed/restarting 才显示（正常态不加噪音）。
+// 配色与节点抽屉一致（failed 红、restarting 橙）；节点离线时状态是"离线前最后一次上报"，
+// 显式加「上次」前缀并在提示里说明，避免被当成实时状态。
+function xrayAlertChip(row: any) {
+  const s = row?.xray_state
+  const stale = row?.status !== 1
+  if (s !== 'failed' && s !== 'restarting') return { show: false, cls: '', text: '', tip: '' }
+  const reason = row.xray_last_error || '原因未知'
+  return {
+    show: true,
+    cls: s === 'failed' ? 'red' : 'orange',
+    text: `${stale ? '上次 ' : ''}${s === 'failed' ? 'Xray 启动失败' : 'Xray 重试中'}`,
+    tip: `xray ${s === 'failed' ? '连续启动失败，已停止自动拉起' : '启动失败，自动重试中'}：${reason}${
+      stale ? '（服务器离线，此为离线前最后状态）' : ''
+    }`,
+  }
+}
+
 // ---- 新增服务器 ----
 const createOpen = ref(false)
 const createForm = reactive({ server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
@@ -734,6 +768,11 @@ async function removeServer(row: any) {
                 {{ row.status === 1 ? '在线' : '离线' }}
               </span>
               <span v-if="row.location" class="x-chip blue" style="font-size: 10px; padding: 1px 5px">{{ row.location }}</span>
+              <el-tooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
+                <span class="x-chip" :class="xrayAlertChip(row).cls" style="cursor: help; font-size: 10px; padding: 1px 5px">
+                  {{ xrayAlertChip(row).text }}
+                </span>
+              </el-tooltip>
             </div>
             <el-tooltip
               v-if="row.config_status === 'pending' && row.push_error"
@@ -886,6 +925,16 @@ async function removeServer(row: any) {
       <div v-loading="statusLoading" class="status-rows">
         <template v-if="statusData">
           <div class="row"><span class="k">Xray 运行</span><span class="v">{{ statusData.data?.xray_running ? '运行中' : '已停止' }}</span></div>
+          <div v-if="statusData.data?.xray_state" class="row">
+            <span class="k">Xray 状态</span>
+            <span class="v" :style="statusData.data?.xray_state === 'failed' ? { color: 'var(--el-color-danger, #ef4444)' } : {}">
+              {{ xrayStateText(statusData.data.xray_state) }}<template v-if="statusData.data?.xray_restart_failures">（连续失败 {{ statusData.data.xray_restart_failures }} 次）</template>
+            </span>
+          </div>
+          <div v-if="statusData.data?.xray_last_error" class="row">
+            <span class="k">启动失败原因</span>
+            <span class="v" style="word-break: break-all; font-size: 12px">{{ statusData.data.xray_last_error }}</span>
+          </div>
           <div class="row"><span class="k">进程 PID</span><span class="v">{{ statusData.data?.pid ?? '—' }}</span></div>
           <div class="row"><span class="k">启动时间</span><span class="v">{{ statusData.data?.started_at ? fmtTime(statusData.data.started_at) : '—' }}</span></div>
           <div class="row"><span class="k">运行时长</span><span class="v">{{ statusData.data?.uptime_sec ?? 0 }} 秒</span></div>

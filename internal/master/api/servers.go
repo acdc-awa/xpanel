@@ -32,10 +32,14 @@ type serverView struct {
 	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
 	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
 	PushLastTryAt         *time.Time `json:"push_last_try_at,omitempty"`
-	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
-	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
-	AgentVersion          string     `json:"agent_version"`           // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayRunning           bool       `json:"xray_running"`            // 节点心跳上报的 xray 进程运行状态
+	DefaultOutboundTag    string     `json:"default_outbound_tag"`      // 路由默认出口
+	RoutingDomainStrategy string     `json:"routing_domain_strategy"`   // 路由域名策略（路由匹配阶段）
+	AgentVersion          string     `json:"agent_version"`             // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayRunning           bool       `json:"xray_running"`              // 节点心跳上报的 xray 进程运行状态
+	XrayState             string     `json:"xray_state,omitempty"`      // running / restarting / failed / stopped（旧 agent 为空）
+	XrayLastError         string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
+	XrayErrorAt           *time.Time `json:"xray_error_at,omitempty"`   // 该原因的观测时刻
+	XrayFailures          int        `json:"xray_failures,omitempty"`   // 连续启动失败次数（成功后归零）
 	LastSeenAt            *time.Time `json:"last_seen_at"`
 	CreatedAt             time.Time  `json:"created_at"`
 }
@@ -52,6 +56,10 @@ func toServerView(s *models.Server) serverView {
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		AgentVersion:          s.AgentVersion,
 		XrayRunning:           s.XrayRunning,
+		XrayState:             s.XrayState,
+		XrayLastError:         s.XrayLastError,
+		XrayErrorAt:           s.XrayErrorAt,
+		XrayFailures:          s.XrayFailures,
 		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
 	}
 }

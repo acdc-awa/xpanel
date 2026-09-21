@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -496,6 +497,24 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
 		updates["agent_version"] = hb.Version
 	}
+	// xray 启动失败可观测性（2026-09-21）：新版 agent 心跳带回状态与失败原因；旧 agent 不发，
+	// 此时不动这些列（保持上次值），避免把面板上已有的原因抹掉。
+	// 跃迁判定要读"更新前"的状态，必须在下面的 Updates 之前取
+	prevXrayState := ""
+	if hb.XrayState != "" {
+		var prev models.Server
+		if err := h.DB.Select("xray_state").First(&prev, conn.ServerID).Error; err == nil {
+			prevXrayState = prev.XrayState
+		}
+		updates["xray_state"] = hb.XrayState
+		updates["xray_failures"] = hb.XrayFailures
+		if hb.XrayLastError != "" {
+			updates["xray_last_error"] = truncateRunes(hb.XrayLastError, 500)
+			if hb.XrayErrorAt > 0 {
+				updates["xray_error_at"] = time.Unix(hb.XrayErrorAt, 0)
+			}
+		}
+	}
 	// 在线用户 IP 快照每次覆写：新版 agent 心跳携带；旧 agent 或无人在线为空列表（如实清空）
 	if len(hb.OnlineIPs) == 0 {
 		updates["online_ips"] = "[]"
@@ -503,6 +522,10 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		updates["online_ips"] = string(b)
 	}
 	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
+	// 报警：状态跃迁才记一条系统审计（连续失败→已停止自动拉起 / 失败后恢复），不按心跳刷屏。
+	if hb.XrayState != "" {
+		h.raiseXrayAlarm(conn.ServerID, prevXrayState, hb)
+	}
 	// node_reports 采样落库（见 nodeReportSampleInterval）：保活/状态每帧即时更新，
 	// 监控指标行按固定间隔抽稀，避免心跳频率直接决定存储增长。
 	if now.Sub(conn.lastReportAt) < nodeReportSampleInterval {
@@ -682,8 +705,13 @@ func (h *Hub) PushPending(serverID uint64) {
 		if res != nil && res.Error != "" {
 			msg = res.Error
 		}
-		log.Printf("nodegate: 节点 %d 拒绝推送的配置: %s（保留待推送）", serverID, msg)
-		h.recordPushFailure(p.ID, "服务器拒绝: "+msg)
+		// 同一原因会按补推周期反复出现（如节点对同一份配置的冷却拒绝），原因未变化时不再刷日志；
+		// 面板仍展示原因与累计失败次数。比较前先按列宽截断，否则超长原因会每轮都判为"变了"。
+		failure := truncateRunes("服务器拒绝: "+msg, 500)
+		if failure != p.LastError {
+			log.Printf("nodegate: 节点 %d 拒绝推送的配置: %s（保留待推送）", serverID, msg)
+		}
+		h.recordPushFailure(p.ID, failure)
 		return
 	}
 	marked, merr := h.Config.MarkPushedIfSame(p.ID, p.ConfigJSON)
@@ -699,12 +727,51 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 }
 
+// truncateRunes 按 rune 截断，避免切断多字节字符（模型列宽以字符计）。
+func truncateRunes(s string, n int) string {
+	rs := []rune(s)
+	if len(rs) <= n {
+		return s
+	}
+	return string(rs[:n])
+}
+
+// raiseXrayAlarm xray 状态跃迁报警（2026-09-21）：只在"进入 failed"（连续失败达上限、
+// 节点已停止自动拉起）与"failed → running"（已恢复）两个跃迁上记一条 system 审计 +
+// 主控日志，不按心跳刷屏。面板审计页「服务器」分类可见。
+func (h *Hub) raiseXrayAlarm(serverID uint64, prevState string, hb protocol.HeartbeatPayload) {
+	if prevState == hb.XrayState {
+		return
+	}
+	var srv models.Server
+	if err := h.DB.Select("id", "name").First(&srv, serverID).Error; err != nil {
+		return
+	}
+	var action, detail string
+	switch {
+	case hb.XrayState == "failed":
+		action = "servers.xray_start_failed"
+		detail = fmt.Sprintf("服务器「%s」(#%d) xray 连续 %d 次启动失败，已停止自动拉起：%s",
+			srv.Name, serverID, hb.XrayFailures, hb.XrayLastError)
+	case prevState == "failed" && hb.XrayState == "running":
+		action = "servers.xray_recovered"
+		detail = fmt.Sprintf("服务器「%s」(#%d) xray 已恢复运行", srv.Name, serverID)
+	default:
+		return
+	}
+	log.Printf("nodegate: %s", detail)
+	_ = h.DB.Create(&models.AuditLog{
+		OperatorType: "system",
+		Action:       action,
+		Detail:       detail,
+		CreatedAt:    time.Now(),
+	}).Error
+}
+
 // recordPushFailure 记录一次配置推送失败：last_error/attempts/last_attempt_at 落到
 // PendingConfig 行上，面板"待推送"旁直接展示原因，不必翻主控日志。失败不改变 pending 状态。
 func (h *Hub) recordPushFailure(pendingID uint64, reason string) {
-	if len(reason) > 500 { // 与模型列宽一致，防 agent 回执里的配置报错细节超长；按 rune 截避免切断多字节字符
-		reason = string([]rune(reason)[:500])
-	}
+	reason = truncateRunes(reason, 500) // 与模型列宽一致，防 agent 回执里的配置报错细节超长
 	if err := h.DB.Model(&models.PendingConfig{}).Where("id = ?", pendingID).
 		Updates(map[string]any{
 			"last_error":      reason,

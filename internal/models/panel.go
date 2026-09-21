@@ -23,6 +23,12 @@ type Server struct {
 	// default_outbound_domain_strategy 列已移除，存量值由 migrateDefaultOutboundDSIntoOutbounds 并入出站。
 	AgentVersion string `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
 	XrayRunning  bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
+	// xray 启动失败可观测性（2026-09-21）：节点把"为什么没起来"带回主控，面板直接显示，
+	// 不必再 SSH 翻 journalctl。旧 agent 不发这些字段（空值保持，不覆盖）。
+	XrayState     string     `gorm:"size:16" json:"xray_state"`       // running / restarting / failed / stopped
+	XrayLastError string     `gorm:"size:512" json:"xray_last_error"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
+	XrayErrorAt   *time.Time `json:"xray_error_at"`                   // 该原因的观测时刻
+	XrayFailures  int        `gorm:"default:0" json:"xray_failures"`  // 连续启动失败次数（成功后归零）
 	// 当前在线用户 IP 快照：agent 心跳每次覆写的 JSON（[]{email,ips}，源自 xray GetUsersStats，
 	// refcount 语义=当前活跃连接的去重源 IP）。不直接 JSON 透出，经 GET /admin/servers/:id/online-ips
 	// 解析归类后返回。

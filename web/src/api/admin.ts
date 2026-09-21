@@ -387,6 +387,10 @@ export interface ServerItem {
   push_attempts?: number // 待推送配置累计失败次数
   push_last_try_at?: string | null
   xray_running: boolean // 节点心跳上报的 xray 进程运行状态
+  xray_state?: string // running / restarting / failed / stopped（旧 agent 为空）
+  xray_last_error?: string // 最近一次 xray 启动失败原因（含退出码与 xray 原始报错）
+  xray_error_at?: string | null // 该原因的观测时刻
+  xray_failures?: number // 连续启动失败次数（成功后归零）
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）

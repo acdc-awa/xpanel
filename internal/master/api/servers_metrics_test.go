@@ -76,10 +76,11 @@ func TestAdminServerMetricsBucketAvgAndPeak(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 三个采样点挤在同一分钟内：读桶（1h 档 = 1 分钟）会把它们聚合到一个桶。
-	// 偏移取 +5s/+15s/+25s，使这 20 秒跨度不可能被分钟边界劈开——
-	// 桶边界由 startTime（= handler 的 now - 1h）决定，测试侧无法预知 handler 的 now。
-	base := time.Now().Add(-10 * time.Minute).Truncate(time.Minute).Add(5 * time.Second)
+	// 三个采样点取同一时刻，保证落在同一个桶里（桶边界 = startTime + k*60s，而 startTime 是
+	// handler 自己的 now - 1h，秒数由请求时刻决定，测试侧不可预知）。原实现取 +5/+15/+25 秒，
+	// 边界秒数落在 5~25 区间内时第三个点会被分到下一个桶，用例按钟表秒数时红时绿
+	// （2026-09-21 实测：连续 8 次跑出 2 次失败）。聚合语义（均值/峰值/计数）不受影响。
+	base := time.Now().Add(-10 * time.Minute).Truncate(time.Minute)
 	rows := []models.NodeReport{
 		{
 			ServerID: srv.ID, ReportedAt: base,
@@ -88,13 +89,13 @@ func TestAdminServerMetricsBucketAvgAndPeak(t *testing.T) {
 			RxRate: 125_000, TxRate: 250_000, OnlineUsers: 3,
 		},
 		{
-			ServerID: srv.ID, ReportedAt: base.Add(10 * time.Second),
+			ServerID: srv.ID, ReportedAt: base,
 			CPU: 90, Mem: 400_000_000, MemTotal: 1_000_000_000,
 			Disk: 600_000_000, DiskTotal: 2_000_000_000,
 			RxRate: 500_000, TxRate: 250_000, OnlineUsers: 7,
 		},
 		{
-			ServerID: srv.ID, ReportedAt: base.Add(20 * time.Second),
+			ServerID: srv.ID, ReportedAt: base,
 			CPU: 20, Mem: 300_000_000, MemTotal: 1_000_000_000,
 			Disk: 550_000_000, DiskTotal: 2_000_000_000,
 			RxRate: 250_000, TxRate: 250_000, OnlineUsers: 5,

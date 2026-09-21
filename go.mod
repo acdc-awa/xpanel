@@ -71,7 +71,10 @@ require (
 //   - TrafficReportPayload.BatchID / Seq / BootID、TrafficAckPayload（MsgTrafficAck）
 //   - AuthOKPayload.Caps（CapTrafficAck）——节点据此决定是否等落库回执
 //   - TrafficEntry.CycleID、User.CycleID（账期归属）
-// 故 require 版本必须 ≥ v0.1.14：低于此版本会在 Docker 构建（上下文无 go.work、
-// 从 GitHub 拉 require 版本）报 "undefined: protocol.AuthOKPayload"。
+// v0.1.15 起本仓库依赖的协议新增（xray 启动失败可观测）：
+//   - HeartbeatPayload.XrayState / XrayLastError / XrayErrorAt / XrayFailures
+//   - StatusData.XrayState / XrayLastError / XrayFailures
+// 故 require 版本必须 ≥ v0.1.15：低于此版本会在 Docker 构建（上下文无 go.work、
+// 从 GitHub 拉 require 版本）报 "undefined: protocol.HeartbeatPayload.XrayState"。
 // 本地开发由仓库根 go.work 的 use ./agent 解析到工作副本，改这里不影响本地构建。
-require github.com/acdc-awa/xpanel-node v0.1.14
+require github.com/acdc-awa/xpanel-node v0.1.15

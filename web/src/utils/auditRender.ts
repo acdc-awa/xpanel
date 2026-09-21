@@ -757,6 +757,11 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
       else if (d.includes('get_status')) title = '查询服务器状态'
       else if (d.includes('get_logs')) title = '查看服务器日志'
       else title = '执行服务器指令'
+    } else if (act.endsWith('.xray_start_failed')) {
+      // 节点报警：xray 连续启动失败达上限、已停止自动拉起（system 打点，2026-09-21）
+      return { categoryName: '服务器', categoryColor: 'danger', title: 'Xray 启动失败报警' }
+    } else if (act.endsWith('.xray_recovered')) {
+      return { categoryName: '服务器', categoryColor: 'success', title: 'Xray 已恢复运行' }
     } else if (act.endsWith('.reset-secret')) {
       title = '重置服务器密钥'
     } else if (act.endsWith('.generate-config')) {

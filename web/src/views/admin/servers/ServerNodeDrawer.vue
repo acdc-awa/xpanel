@@ -43,6 +43,20 @@ function fmtTime(t: string | null) {
   return formatDateTime(t, '—')
 }
 
+// Xray 进程状态徽标：优先用 agent 回传的 xray_state（能区分"重试中"与"已停止拉起"），
+// 旧 agent 不带该字段时退回 xray_running 布尔。
+const xrayFailed = computed(() => {
+  const s = props.server?.xray_state
+  return s === 'failed' || s === 'restarting'
+})
+const xrayChip = computed(() => {
+  const s = props.server?.xray_state
+  if (s === 'failed') return { cls: 'red', text: '启动失败（已停止重试）' }
+  if (s === 'restarting') return { cls: 'orange', text: '启动失败，重试中' }
+  if (props.server?.xray_running) return { cls: 'green', text: '运行中' }
+  return { cls: 'red', text: '未运行' }
+})
+
 // ---- 概览：接入点摘要 ----
 const inbounds = ref<InboundItem[]>([])
 const inboundsLoading = ref(false)
@@ -227,9 +241,16 @@ watch(
             <div class="desc-row">
               <span class="k">Xray 进程</span>
               <span class="v">
-                <span class="x-chip" :class="server.xray_running ? 'green' : 'red'">
-                  <span class="x-status-dot" :class="server.xray_running ? 'online' : 'offline'" />{{ server.xray_running ? '运行中' : '未运行' }}
+                <span class="x-chip" :class="xrayChip.cls">
+                  <span class="x-status-dot" :class="server.xray_running ? 'online' : 'offline'" />{{ xrayChip.text }}
                 </span>
+              </span>
+            </div>
+            <div v-if="server.xray_last_error" class="desc-row">
+              <span class="k">{{ xrayFailed ? '启动失败' : '上次启动失败' }}</span>
+              <span class="v" :style="{ color: xrayFailed ? 'var(--el-color-danger, #ef4444)' : 'var(--el-text-color-secondary, #909399)', fontSize: '12px', wordBreak: 'break-all' }">
+                {{ server.xray_last_error }}<template v-if="server.xray_failures">（连续失败 {{ server.xray_failures }} 次，最后尝试 {{ fmtTime(server.xray_error_at ?? null) }}）</template>
+                <template v-if="server.xray_state === 'failed'">已停止自动拉起，修复后点「重启 Xray」或重新下发配置即可恢复。</template>
               </span>
             </div>
             <div class="desc-row">

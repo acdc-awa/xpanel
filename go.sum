@@ -12,6 +12,8 @@ github.com/acdc-awa/xpanel-node v0.1.11 h1:ZdK1fJwmwp8n+0dhwI2LG68h7xuuUC6EA+pqi
 github.com/acdc-awa/xpanel-node v0.1.11/go.mod h1:qsSgLSPZGtLaw8ImHWQDU5vkBjDyMzIL7qPNRnCTpog=
 github.com/acdc-awa/xpanel-node v0.1.14 h1:XTdQnTx2D0Vl9qMwFeH1iVLQT+V5kLS5ax6e1KhCCy0=
 github.com/acdc-awa/xpanel-node v0.1.14/go.mod h1:qsSgLSPZGtLaw8ImHWQDU5vkBjDyMzIL7qPNRnCTpog=
+github.com/acdc-awa/xpanel-node v0.1.15 h1:PPt74aQz9B3kw26PkralvxUJO8bpNkhvKnx6uqIV/SQ=
+github.com/acdc-awa/xpanel-node v0.1.15/go.mod h1:qsSgLSPZGtLaw8ImHWQDU5vkBjDyMzIL7qPNRnCTpog=
 github.com/alexedwards/argon2id v1.0.0 h1:wJzDx66hqWX7siL/SRUmgz3F8YMrd/nfX/xHHcQQP0w=
 github.com/alexedwards/argon2id v1.0.0/go.mod h1:tYKkqIjzXvZdzPvADMWOEZ+l6+BD6CtBXMj5fnJppiw=
 github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc h1:biVzkmvwrH8WK8raXaxBx6fRVTlJILwEwQGL1I/ByEI=
