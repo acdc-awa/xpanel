@@ -159,6 +159,27 @@ function xrayAlertChip(row: any) {
   }
 }
 
+// pushChip 配置同步状态芯片（四态 + 磁盘偏离）。状态由后端 push_state 给出，前端只做呈现。
+function pushChip(row: any) {
+  const st = row?.push_state || (row?.config_status === 'pushed' ? 'synced' : row?.config_status === 'pending' ? 'pending' : 'none')
+  switch (st) {
+    case 'drift':
+      return {
+        cls: 'red',
+        text: '磁盘偏离',
+        tip: `节点磁盘上的配置与主控记录不一致（节点哈希 ${(row.xray_disk_hash || '').slice(0, 12) || '未上报'}…）。可能被手工改过、落盘失败或节点回退过配置，重新生成并推送一次即可对齐。`,
+      }
+    case 'rejected':
+      return { cls: 'red', text: '推送被拒', tip: `节点拒绝该配置：${row.push_error || '原因未知'}（已尝试 ${row.push_attempts || 0} 次）` }
+    case 'synced':
+      return { cls: 'green', text: '已同步', tip: '' }
+    case 'pending':
+      return { cls: 'orange', text: '待推送', tip: row.push_error ? `尚未应用：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）` : '' }
+    default:
+      return { cls: 'gray', text: '未投递', tip: '' }
+  }
+}
+
 // ---- 新增服务器 ----
 const createOpen = ref(false)
 const createForm = reactive({ server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
@@ -774,16 +795,11 @@ async function removeServer(row: any) {
                 </span>
               </el-tooltip>
             </div>
-            <el-tooltip
-              v-if="row.config_status === 'pending' && row.push_error"
-              :content="`最后失败：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）`"
-              placement="top"
-            >
-              <span class="x-chip orange" style="cursor: help; font-size: 10.5px">待推送</span>
+            <!-- 配置同步状态（push_state 由后端推导：none/pending/rejected/synced/drift） -->
+            <el-tooltip v-if="pushChip(row).tip" :content="pushChip(row).tip" placement="top">
+              <span class="x-chip" :class="pushChip(row).cls" style="cursor: help; font-size: 10.5px">{{ pushChip(row).text }}</span>
             </el-tooltip>
-            <span v-else-if="row.config_status === 'pushed'" class="x-chip green" style="font-size: 10.5px">已同步</span>
-            <span v-else-if="row.config_status === 'pending'" class="x-chip orange" style="font-size: 10.5px">待推送</span>
-            <span v-else class="x-chip gray" style="font-size: 10.5px">未生成</span>
+            <span v-else class="x-chip" :class="pushChip(row).cls" style="font-size: 10.5px">{{ pushChip(row).text }}</span>
           </div>
 
           <!-- 属性网格 -->

@@ -40,8 +40,18 @@ type serverView struct {
 	XrayLastError         string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
 	XrayErrorAt           *time.Time `json:"xray_error_at,omitempty"`   // 该原因的观测时刻
 	XrayFailures          int        `json:"xray_failures,omitempty"`   // 连续启动失败次数（成功后归零）
-	LastSeenAt            *time.Time `json:"last_seen_at"`
-	CreatedAt             time.Time  `json:"created_at"`
+	// 配置对账（2026-09-21）：节点上报的两个内容哈希 + 后端推导的面板状态。
+	// XrayDiskHash = 节点磁盘配置的 sha256；XrayRunningHash = 节点当前跑着的那份配置的 sha256
+	// （xray 只在启动时读一次配置，热更落盘只改磁盘、不改它）。两者不等是热更落盘后的正常
+	// 状态，不报警；报警的是 DiskHash 与主控记录的 AppliedHash 对不上（磁盘偏离）。
+	XrayDiskHash    string `json:"xray_disk_hash,omitempty"`
+	XrayRunningHash string `json:"xray_running_hash,omitempty"`
+	ConfigDrift     bool   `json:"config_drift,omitempty"` // 节点磁盘与主控记录不一致
+	// PushState 面板状态（四态 + 磁盘偏离），由后端推导，前端不靠字符串猜：
+	// none 未投递 / pending 待推送 / rejected 节点拒绝（附原因）/ synced 已同步 / drift 磁盘偏离
+	PushState  string     `json:"push_state"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 func toServerView(s *models.Server) serverView {
@@ -60,6 +70,8 @@ func toServerView(s *models.Server) serverView {
 		XrayLastError:         s.XrayLastError,
 		XrayErrorAt:           s.XrayErrorAt,
 		XrayFailures:          s.XrayFailures,
+		XrayDiskHash:          s.XrayDiskHash,
+		XrayRunningHash:       s.XrayRunningHash,
 		LastSeenAt:            s.LastSeenAt, CreatedAt: s.CreatedAt,
 	}
 }
@@ -71,18 +83,19 @@ func (d *Deps) AdminServers(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	// 一次查询所有待推送配置状态（含最近一次失败原因，面板直接展示）
+	// 一次查询所有待推送配置状态（含最近一次失败原因与已应用内容哈希，面板直接展示）
 	type pendRow struct {
 		ServerID      uint64
 		Status        string
 		LastError     string
 		Attempts      int
 		LastAttemptAt *time.Time
+		AppliedHash   string
 	}
 	statusMap := map[uint64]pendRow{}
 	var pends []pendRow
 	if err := d.DB.Model(&models.PendingConfig{}).
-		Select("server_id", "status", "last_error", "attempts", "last_attempt_at").
+		Select("server_id", "status", "last_error", "attempts", "last_attempt_at", "applied_hash").
 		Find(&pends).Error; err == nil {
 		for _, p := range pends {
 			statusMap[p.ServerID] = p
@@ -99,13 +112,34 @@ func (d *Deps) AdminServers(c *gin.Context) {
 				v.Status = 1
 			}
 		}
-		if pend, ok := statusMap[list[i].ID]; ok {
+		pend, hasPend := statusMap[list[i].ID]
+		if hasPend {
 			v.ConfigStatus = pend.Status
 			if pend.Status == "pending" {
 				v.PushError = pend.LastError
 				v.PushAttempts = pend.Attempts
 				v.PushLastTryAt = pend.LastAttemptAt
 			}
+			// 磁盘偏离：节点上报的磁盘内容哈希 ≠ 主控记录的「节点磁盘应有的内容」哈希
+			// （第三方改过节点配置 / 热更落盘静默失败 / 节点回退过配置）。两边都有值才判定，
+			// 避免旧 agent（不上报哈希）或迁移前数据（无 applied_hash）误报。
+			if v.XrayDiskHash != "" && pend.AppliedHash != "" && v.XrayDiskHash != pend.AppliedHash {
+				v.ConfigDrift = true
+			}
+		}
+		// 面板状态由后端推导（前端不靠字符串猜）：四态 + 磁盘偏离
+		switch {
+		case v.ConfigDrift:
+			v.PushState = "drift"
+		case !hasPend:
+			v.PushState = "none"
+		case v.ConfigStatus == "pushed":
+			v.PushState = "synced"
+		case v.PushError != "" && v.Status == 1:
+			// 节点在线却推失败 = 节点拒绝（附原因）；离线导致的重推不算拒绝
+			v.PushState = "rejected"
+		default:
+			v.PushState = "pending"
 		}
 		items = append(items, v)
 	}

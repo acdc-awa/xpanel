@@ -2,6 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -98,11 +101,17 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 // 只遍历 type=user 入站（relay 内部账户不参与 SyncUsers，T4）。
 // 访问控制单点化：入站的授权权限组由「解析到该入站的启用用户接入点（AP）白名单」派生（AP 直连）。
 // 单一数据源：热更新 SyncUsers 与全量配置生成（Generate）共用本函数（批7 修正访问控制缺口）。
+//
+// 入站可用性过滤（2026-09-21）：与 Generate 同源，剔除「总流量跑满 / 已过期」的入站。
+// 否则热更会带着一个运行中 xray 里根本不存在的 tag 下发 → 节点报 handler not found →
+// 整批同步中断（实测 20/20 轮），且已处理部分随 Go map 序随机，收敛极慢。
+// 顺带把「入站跑满即拒绝」的生效时点从下一次冷更（≤1h）提前到下一次热更。
 func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.User, error) {
 	var inbounds []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ? AND type = ?", serverID, true, models.InboundTypeUser).Find(&inbounds).Error; err != nil {
 		return nil, err
 	}
+	inbounds = FilterAvailableInbounds(inbounds)
 	res := make(map[string][]protocol.User)
 	if len(inbounds) == 0 {
 		return res, nil
@@ -461,6 +470,125 @@ func (s *ConfigService) MarkPushedByServerIfSame(serverID uint64, configJSON str
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// SavePendingIfSame 仅当待推送内容仍是 expected 时替换为 fresh，返回是否替换成功。
+// 用途：推送前现场重算用户集（见 nodegate.PushPending）与「重算期间又来了新编辑」会互相
+// 覆盖，用内容比较做一次 CAS——替换失败说明 pending 已被更新的编辑覆盖，调用方应改用最新内容。
+func (s *ConfigService) SavePendingIfSame(serverID uint64, expected, fresh string) (bool, error) {
+	now := time.Now()
+	res := s.DB.Model(&models.PendingConfig{}).
+		Where("server_id = ? AND config_json = ?", serverID, expected).
+		Updates(map[string]any{
+			"config_json":     fresh,
+			"status":          "pending",
+			"pushed_at":       nil,
+			"last_error":      "",
+			"attempts":        0,
+			"last_attempt_at": nil,
+			"updated_at":      now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// AppliedTags 返回「已生效结构 S_a」的入站 tag 集合，ok=false 表示主控不知道 S_a。
+//
+// 来源优先级：applied_json（最后一次确认应用成功的内容）> status=pushed 的行内容。
+// 用 applied_json 而不是 config_json 是关键：SavePending 会用期望结构覆盖 config_json，
+// 而 PENDING 期间恰恰最需要按 S_a 过滤（新结构里的新入站在运行中的 xray 里还不存在）。
+// 取不到时必须返回 ok=false——把期望结构 S_p 当 S_a 用会摘掉运行中入站的用户。
+//
+// 用途（不变量 I3）：热更只按运行中结构的 tag 下发用户，避免 PENDING 期间带着一个
+// xray 里还不存在的新入站 tag 下发 → handler not found → 整批同步中断。
+func (s *ConfigService) AppliedTags(serverID uint64) (map[string]bool, bool) {
+	p, err := s.GetPending(serverID)
+	if err != nil || p == nil {
+		return nil, false
+	}
+	if p.AppliedJSON != "" {
+		return ParseInboundTags(p.AppliedJSON), true
+	}
+	if p.Status == "pushed" {
+		return ParseInboundTags(p.ConfigJSON), true
+	}
+	return nil, false
+}
+
+// SyncedConfig 节点处于 SYNCED（无待生效结构）时返回现场生成的完整配置
+// （= materialize(S_a, U)，因为此时 DB 结构就是已生效结构），供热更顺带落盘（不变量 I2）。
+// 返回 ok=false 时调用方不得附带配置：pending 期间磁盘不能留下未经验证的结构。
+func (s *ConfigService) SyncedConfig(serverID uint64) (string, bool) {
+	p, err := s.GetPending(serverID)
+	if err != nil || p == nil || p.Status != "pushed" {
+		return "", false
+	}
+	cfg, err := s.Generate(serverID)
+	if err != nil {
+		return "", false
+	}
+	return cfg, true
+}
+
+// AppliedConfig 返回主控记录的「节点磁盘上应有的内容」：优先 applied_json（含热更落盘），
+// 退化为 status=pushed 的行内容（迁移前 / 尚未发生热更落盘）。空串表示无记录。
+func (s *ConfigService) AppliedConfig(serverID uint64) string {
+	p, err := s.GetPending(serverID)
+	if err != nil || p == nil {
+		return ""
+	}
+	if p.AppliedJSON != "" {
+		return p.AppliedJSON
+	}
+	if p.Status == "pushed" {
+		return p.ConfigJSON
+	}
+	return ""
+}
+
+// MarkApplied 记下「节点磁盘上现在应有的内容」（冷推成功 = 刚推送的整份配置；
+// 热更落盘成功 = 节点刚写下的那份），同时存内容哈希供面板对账。
+// 不改 config_json/status：那份内容仍是最后一次冷推的结构权威（S_a），与 running_hash 对应。
+func (s *ConfigService) MarkApplied(serverID uint64, configJSON string) error {
+	return s.DB.Model(&models.PendingConfig{}).
+		Where("server_id = ?", serverID).
+		Updates(map[string]any{
+			"applied_json": configJSON,
+			"applied_hash": ContentHash(configJSON),
+		}).Error
+}
+
+// ContentHash 配置内容哈希（与节点上报的 disk_hash / running_hash 同算法：sha256 十六进制）。
+func ContentHash(configJSON string) string {
+	if configJSON == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(configJSON))
+	return hex.EncodeToString(sum[:])
+}
+
+// configTagsDoc 只取重建 tag 集合所需的最小字段子集。
+type configTagsDoc struct {
+	Inbounds []struct {
+		Tag string `json:"tag"`
+	} `json:"inbounds"`
+}
+
+// ParseInboundTags 从配置内容解析出全部入站 tag（结构对账用）。
+func ParseInboundTags(configJSON string) map[string]bool {
+	var doc configTagsDoc
+	if err := json.Unmarshal([]byte(configJSON), &doc); err != nil {
+		return map[string]bool{}
+	}
+	tags := make(map[string]bool, len(doc.Inbounds))
+	for _, inb := range doc.Inbounds {
+		if inb.Tag != "" {
+			tags[inb.Tag] = true
+		}
+	}
+	return tags
 }
 
 // FilterAvailableInbounds 过滤不可用入站（J9 激活，订阅与生成双端同源）：

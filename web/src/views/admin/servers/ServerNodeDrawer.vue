@@ -57,6 +57,16 @@ const xrayChip = computed(() => {
   return { cls: 'red', text: '未运行' }
 })
 
+// 配置同步状态：后端 push_state 优先（四态 + 磁盘偏离），旧后端只有 config_status 时按三态退回
+const pushState = computed(() => {
+  const s = props.server?.push_state
+  if (s) return s
+  const cs = props.server?.config_status
+  if (cs === 'pushed') return 'synced'
+  if (cs === 'pending') return 'pending'
+  return 'none'
+})
+
 // ---- 概览：接入点摘要 ----
 const inbounds = ref<InboundItem[]>([])
 const inboundsLoading = ref(false)
@@ -256,15 +266,31 @@ watch(
             <div class="desc-row">
               <span class="k">配置同步</span>
               <span class="v">
-                <span v-if="server.config_status === 'pushed'" class="x-chip green">已同步</span>
-                <span v-else-if="server.config_status === 'pending'" class="x-chip orange">待推送</span>
-                <span v-else class="x-chip gray">未生成</span>
+                <span v-if="pushState === 'drift'" class="x-chip red">磁盘偏离</span>
+                <span v-else-if="pushState === 'rejected'" class="x-chip red">推送被拒</span>
+                <span v-else-if="pushState === 'synced'" class="x-chip green">已同步</span>
+                <span v-else-if="pushState === 'pending'" class="x-chip orange">待推送</span>
+                <span v-else class="x-chip gray">未投递</span>
+              </span>
+            </div>
+            <div v-if="server.config_drift" class="desc-row">
+              <span class="k">磁盘偏离</span>
+              <span class="v" style="color: var(--el-color-danger, #ef4444); font-size: 12px; word-break: break-all">
+                节点磁盘上的配置与主控记录不一致（可能被手工改过、落盘失败或节点回退过配置）。
+                节点磁盘哈希 {{ (server.xray_disk_hash || '').slice(0, 12) || '未上报' }}…，重新生成并推送一次即可对齐。
               </span>
             </div>
             <div v-if="server.config_status === 'pending' && server.push_error" class="desc-row">
               <span class="k">推送失败</span>
               <span class="v" style="color: var(--el-color-danger, #ef4444); font-size: 12px; word-break: break-all">
                 {{ server.push_error }}（已尝试 {{ server.push_attempts || 0 }} 次，最后尝试 {{ fmtTime(server.push_last_try_at ?? null) }}）
+              </span>
+            </div>
+            <div v-if="server.xray_running_hash" class="desc-row">
+              <span class="k">运行中配置</span>
+              <span class="v mono" style="font-size: 12px">
+                {{ (server.xray_running_hash || '').slice(0, 12) }}…
+                <span style="color: var(--el-text-color-secondary, #909399)">（xray 只在启动时读一次配置，热更落盘只改磁盘、不改这里）</span>
               </span>
             </div>
             <div class="desc-row"><span class="k">Agent 版本</span><span class="v mono">{{ server.agent_version || '—' }}</span></div>

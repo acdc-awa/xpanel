@@ -392,10 +392,44 @@ func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
 		return
 	}
 	if err := h.DB.Model(&inb).Update("internal_uuid", p.UUID).Error; err == nil && h.Config != nil {
-		// UUID 变更 → 重新生成配置（引用该落地出站的服务器配置会随之更新）
-		if _, err := h.Config.Generate(conn.ServerID); err == nil {
-			h.PushPending(conn.ServerID)
-		}
+		// UUID 变更 → 重新生成并**落待推送**再推（旧实现只调 Generate 丢弃返回值就直接
+		// PushPending：有 pending 行时推的是旧内容、没有 pending 行时 PushPending 直接返回，
+		// 整个推送是空操作，要等下一次每小时校准才生效）。
+		h.enqueueConfig(conn.ServerID)
+		// 扇出：引用该落地入站的出站 client id 也随之变了（xray buildRefOutbound 按入站现状
+		// 现场派生 internal_uuid），这些服务器不在上面的重推范围内，必须按 InboundRef 补齐
+		// （与换证联动 reenqueueRelayConfigsForCert 同构）。
+		h.enqueueRefOutboundServers(inb.ID)
+	}
+}
+
+// enqueueConfig 生成 → 落待推送 → 非阻塞推送（与 api.enqueueConfig 同构的网关侧版本）。
+func (h *Hub) enqueueConfig(serverID uint64) {
+	if h.Config == nil || serverID == 0 {
+		return
+	}
+	cfg, err := h.Config.Generate(serverID)
+	if err != nil {
+		log.Printf("nodegate: 生成服务器 %d 配置失败: %v", serverID, err)
+		return
+	}
+	if err := h.Config.SavePending(serverID, cfg); err != nil {
+		log.Printf("nodegate: 保存服务器 %d 待推送配置失败: %v", serverID, err)
+		return
+	}
+	go h.PushPending(serverID)
+}
+
+// enqueueRefOutboundServers 重推所有「出站 InboundRef 指向该入站」的服务器。
+func (h *Hub) enqueueRefOutboundServers(inboundID uint64) {
+	var obs []models.ServerOutbound
+	if err := h.DB.Select("server_id").Distinct("server_id").
+		Where("inbound_ref = ?", inboundID).Find(&obs).Error; err != nil {
+		log.Printf("nodegate: 查询引用入站 %d 的出站失败: %v", inboundID, err)
+		return
+	}
+	for _, ob := range obs {
+		h.enqueueConfig(ob.ServerID)
 	}
 }
 
@@ -514,6 +548,12 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 				updates["xray_error_at"] = time.Unix(hb.XrayErrorAt, 0)
 			}
 		}
+	}
+	// 配置对账哈希（2026-09-21）：新版 agent 上报；旧 agent 两个字段均为空（空值保持，不覆盖）。
+	// 当 DiskHash 非空时，说明对端是支持哈希对账的新 agent，此时 RunningHash 如实写入（含停止时的空串）。
+	if hb.DiskHash != "" {
+		updates["xray_disk_hash"] = hb.DiskHash
+		updates["xray_running_hash"] = hb.RunningHash
 	}
 	// 在线用户 IP 快照每次覆写：新版 agent 心跳携带；旧 agent 或无人在线为空列表（如实清空）
 	if len(hb.OnlineIPs) == 0 {
@@ -694,6 +734,11 @@ func (h *Hub) PushPending(serverID uint64) {
 		h.recordPushFailure(p.ID, "服务器离线，等待上线自动补推")
 		return
 	}
+	// P1b：推送前现场重算待推内容（见 refreshPending）
+	p = h.refreshPending(serverID, p)
+	if p == nil || p.Status == "pushed" {
+		return
+	}
 	res, err := h.Ask(serverID, protocol.MsgPushConfig, protocol.PushConfigPayload{ConfigJSON: p.ConfigJSON}, AskTimeout)
 	if err != nil {
 		log.Printf("nodegate: 推送配置失败 (server=%d): %v（保留待推送）", serverID, err)
@@ -721,10 +766,85 @@ func (h *Hub) PushPending(serverID uint64) {
 	}
 	if marked {
 		log.Printf("nodegate: 已自动推送配置到节点 %d", serverID)
+		// 记账：主控记录的「节点磁盘内容」= 刚推送的这份（面板据此对账 disk_hash）
+		if aerr := h.Config.MarkApplied(serverID, p.ConfigJSON); aerr != nil {
+			log.Printf("nodegate: 记录已应用配置失败 (server=%d): %v", serverID, aerr)
+		}
+		// 冷推把「生成那一刻」的用户集写进了 xray，而推送前后可能已有新的用户变更走热更
+		// 下发过（热更先到、冷推后到 → 旧用户集覆盖了 xray）。补一次热更把最新用户集打回去，
+		// 消灭这个竞态残留窗口。异步执行：它要再走一次 Ask（最长 30s），不能拖住调用方。
+		go func(id uint64) {
+			if err := h.SyncUsers(id); err != nil {
+				log.Printf("nodegate: 冷推成功后补热更失败 (server=%d): %v", id, err)
+			}
+		}(serverID)
 	} else {
 		// 推送期间 pending 已被更新（如用户编辑/每小时校准），保持 pending 待下一轮推送
 		log.Printf("nodegate: 节点 %d 推送成功但 pending 内容已被更新，保留待推送", serverID)
 	}
+}
+
+// refreshPending 推送前现场重算待推内容并返回「本次要推的那一份」。
+//
+// 为什么必须重算（P1b）：待推内容冻结于 SavePending 那一刻，而用户变更只走热更、从不更新它
+// —— 推送被延迟（节点离线 / 冷却拒绝 / 环境故障）期间被删 / 被封 / 超期的用户仍留在里面，
+// 冷推成功就把他们"复活"（能连、照常计费）。Generate 是确定的纯函数，重算即得当前用户集。
+//
+// 写回用内容 CAS（SavePendingIfSame）：重算期间若来了新编辑，替换会失败，此时改用最新内容
+// 推送，绝不覆盖它。任何一步失败都退回已保存的内容——重算失败不该让推送停摆。
+func (h *Hub) refreshPending(serverID uint64, p *models.PendingConfig) *models.PendingConfig {
+	fresh, err := h.Config.Generate(serverID)
+	if err != nil {
+		log.Printf("nodegate: 推送前重算配置失败 (server=%d)，改用已保存内容: %v", serverID, err)
+		return p
+	}
+	if fresh == p.ConfigJSON {
+		return p
+	}
+	ok, serr := h.Config.SavePendingIfSame(serverID, p.ConfigJSON, fresh)
+	switch {
+	case serr != nil:
+		log.Printf("nodegate: 保存重算后的配置失败 (server=%d): %v", serverID, serr)
+	case ok:
+		log.Printf("nodegate: 推送前重算发现待推内容已陈旧（用户集有变更），改用新内容 (server=%d)", serverID)
+		p.ConfigJSON = fresh
+	default:
+		if np, nerr := h.Config.GetPending(serverID); nerr == nil && np != nil {
+			log.Printf("nodegate: 重算期间待推内容被新编辑覆盖，改用最新内容 (server=%d)", serverID)
+			return np
+		}
+	}
+	return p
+}
+
+// buildSyncPayload 组装热更负载：用户集（按已生效结构过滤）+ 可选的整份配置（顺带落盘）。
+// 拆出来是为了让「按 tags(S_a) 过滤」与「何时附带配置」这两条不变量有独立的回归用例
+// （它们一旦退化，表现是整批同步中断或磁盘悄悄滞后，都不是一眼能看出来的）。
+func (h *Hub) buildSyncPayload(serverID uint64) (protocol.SyncUsersPayload, error) {
+	usersMap, err := h.Config.GetValidUsers(serverID)
+	if err != nil {
+		return protocol.SyncUsersPayload{}, err
+	}
+	// 不变量 I3：热更只使用「已生效结构 S_a」里的 tag。SYNCED 期由 GetValidUsers 的入站
+	// 可用性过滤保证与运行中结构同源；PENDING 期新结构里的新入站还不存在于运行中的 xray，
+	// 带着它下发会 handler not found 并整批中断（含末尾的 tag 清理）——恰恰砸在
+	// 「结构变更卡住、用户变更更要紧」的场景上。取不到 S_a（无待推送行）时不过滤。
+	if tags, ok := h.Config.AppliedTags(serverID); ok {
+		for tag := range usersMap {
+			if !tags[tag] {
+				delete(usersMap, tag)
+			}
+		}
+	}
+	payload := protocol.SyncUsersPayload{Users: usersMap}
+	// 不变量 I2：节点处于 SYNCED（无待生效结构）时附带现场生成的整份配置（= materialize(S_a,U)），
+	// 节点在热更成功后把它落盘 —— 磁盘于是恒等于运行中配置的快照，节点重启（自愈/开机/手动）
+	// 不会把用户集回退到上一次冷更。PENDING 期间不附带：磁盘不能留下未经验证的结构。
+	// 内容与「主控记录的磁盘内容」一致时不附带，避免让节点反复写盘 + 跑 -test。
+	if synced, ok := h.Config.SyncedConfig(serverID); ok && synced != h.Config.AppliedConfig(serverID) {
+		payload.ConfigJSON = synced
+	}
+	return payload, nil
 }
 
 // truncateRunes 按 rune 截断，避免切断多字节字符（模型列宽以字符计）。
@@ -787,12 +907,9 @@ func (h *Hub) SyncUsers(serverID uint64) error {
 	if h.Config == nil {
 		return errors.New("配置服务未初始化")
 	}
-	usersMap, err := h.Config.GetValidUsers(serverID)
+	payload, err := h.buildSyncPayload(serverID)
 	if err != nil {
 		return err
-	}
-	payload := protocol.SyncUsersPayload{
-		Users: usersMap,
 	}
 	res, err := h.Ask(serverID, protocol.MsgSyncUsers, payload, AskTimeout)
 	if err != nil {
@@ -800,6 +917,13 @@ func (h *Hub) SyncUsers(serverID uint64) error {
 	}
 	if res != nil && !res.OK {
 		return errors.New(res.Error)
+	}
+	// 落盘成功 → 记账：主控记录的「节点磁盘内容」跟上，面板据此发现磁盘偏离
+	// （第三方改过 / 落盘静默失败）。失败只记日志，不影响本次热更的结论。
+	if payload.ConfigJSON != "" {
+		if err := h.Config.MarkApplied(serverID, payload.ConfigJSON); err != nil {
+			log.Printf("nodegate: 记录热更落盘内容失败 (server=%d): %v", serverID, err)
+		}
 	}
 	return nil
 }
@@ -904,7 +1028,11 @@ func (h *Hub) watchdog() {
 				c.closeSafe()
 			}
 		case <-alignTicker.C:
-			// 定期 1 小时 100% 状态校准全量推送
+			// 定期 1 小时状态校准：按内容对账，只推真正有变化的节点。
+			// 旧实现无条件 SavePending + PushPending，等于每个在线节点每小时无条件断一次
+			// （节点侧 RestartWithConfig 没有内容短路，实测同一份内容连推两次会完整走一遍
+			// Stop+Start）。Generate 是确定的（无时间/随机源，json.MarshalIndent 对 map 键
+			// 排序），所以"内容一字未变"可以直接用逐字节比较判定。
 			h.mu.RLock()
 			var serverIDs []uint64
 			for id := range h.conns {
@@ -913,14 +1041,25 @@ func (h *Hub) watchdog() {
 			h.mu.RUnlock()
 			for _, id := range serverIDs {
 				go func(sid uint64) {
-					log.Printf("nodegate: 执行定期全量状态校准 (server=%d)", sid)
-					if h.Config != nil {
-						cfgStr, err := h.Config.Generate(sid)
-						if err == nil {
-							_ = h.Config.SavePending(sid, cfgStr)
-							h.PushPending(sid)
-						}
+					if h.Config == nil {
+						return
 					}
+					cfgStr, err := h.Config.Generate(sid)
+					if err != nil {
+						log.Printf("nodegate: 定期校准生成配置失败 (server=%d): %v", sid, err)
+						return
+					}
+					applied := h.Config.AppliedConfig(sid)
+					if p, perr := h.Config.GetPending(sid); perr == nil && p != nil &&
+						p.Status == "pushed" && applied == cfgStr {
+						return // 已生效内容（含热更落盘）与现场重算逐字节相同：无事可做，不打扰节点
+					}
+					log.Printf("nodegate: 执行定期全量状态校准 (server=%d)", sid)
+					if serr := h.Config.SavePending(sid, cfgStr); serr != nil {
+						log.Printf("nodegate: 定期校准保存配置失败 (server=%d): %v", sid, serr)
+						return
+					}
+					h.PushPending(sid)
 				}(id)
 			}
 		}

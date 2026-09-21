@@ -391,6 +391,11 @@ export interface ServerItem {
   xray_last_error?: string // 最近一次 xray 启动失败原因（含退出码与 xray 原始报错）
   xray_error_at?: string | null // 该原因的观测时刻
   xray_failures?: number // 连续启动失败次数（成功后归零）
+  xray_disk_hash?: string // 节点磁盘配置内容哈希（sha256；旧 agent 为空）
+  xray_running_hash?: string // 节点当前运行中配置的内容哈希（热更落盘只改磁盘，不改它）
+  config_drift?: boolean // 节点磁盘与主控记录不一致（第三方改动 / 落盘失败 / 回退过）
+  // 面板状态（后端推导）：none 未投递 / pending 待推送 / rejected 节点拒绝 / synced 已同步 / drift 磁盘偏离
+  push_state?: string
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）

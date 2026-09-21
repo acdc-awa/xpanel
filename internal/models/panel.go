@@ -29,6 +29,11 @@ type Server struct {
 	XrayLastError string     `gorm:"size:512" json:"xray_last_error"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
 	XrayErrorAt   *time.Time `json:"xray_error_at"`                   // 该原因的观测时刻
 	XrayFailures  int        `gorm:"default:0" json:"xray_failures"`  // 连续启动失败次数（成功后归零）
+	// 配置对账（2026-09-21）：节点上报的两个内容哈希，主控据此发现"节点跑的不是我以为的配置"
+	// 或"磁盘被改过"（xray 只在启动时读一次配置，热更落盘只改磁盘、不改运行中内容）。
+	// 旧 agent 不上报（空值保持，不覆盖）。
+	XrayDiskHash    string `gorm:"size:64" json:"xray_disk_hash"`
+	XrayRunningHash string `gorm:"size:64" json:"xray_running_hash"`
 	// 当前在线用户 IP 快照：agent 心跳每次覆写的 JSON（[]{email,ips}，源自 xray GetUsersStats，
 	// refcount 语义=当前活跃连接的去重源 IP）。不直接 JSON 透出，经 GET /admin/servers/:id/online-ips
 	// 解析归类后返回。
@@ -207,6 +212,11 @@ type PendingConfig struct {
 	ServerID   uint64 `gorm:"uniqueIndex;not null" json:"server_id"`
 	ConfigJSON string `gorm:"type:text" json:"-"`
 	Status     string `gorm:"size:16;default:pending" json:"status"` // pending / pushed
+	// AppliedJSON 主控记录的「节点磁盘上应有的内容」：冷推成功时 = 刚推送的整份配置；
+	// 热更落盘成功后 = 节点刚写下的那份（含最新用户集）。AppliedHash 是它的内容哈希，
+	// 与节点上报的 disk_hash 对账即可发现磁盘偏离（第三方改动 / 落盘静默失败）。空 = 无记录。
+	AppliedJSON string `gorm:"type:text" json:"-"`
+	AppliedHash string `gorm:"size:64" json:"-"`
 	// 推送可观测性（2026-08-31）：pending 期间最近一次失败原因/累计失败次数/最后尝试时间，
 	// 面板直接展示失败原因；成功推送（MarkPushedIfSame）或重新生成（SavePending）后清零。
 	LastError     string     `gorm:"size:500" json:"last_error"`

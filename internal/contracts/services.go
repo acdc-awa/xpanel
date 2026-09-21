@@ -107,6 +107,19 @@ type ConfigService interface {
 	// PreviewUsers 预览用：入站注入用户列表由启用接入点白名单派生（未落库新入站返回空）。
 	PreviewUsers(inb *models.Inbound) []protocol.User
 	SavePending(serverID uint64, configJSON string) error
+	// SavePendingIfSame 内容 CAS：仅当待推内容仍是 expected 时替换为 fresh
+	// （推送前重算用户集与并发编辑互不覆盖）。
+	SavePendingIfSame(serverID uint64, expected, fresh string) (bool, error)
+	// AppliedTags 已生效结构 S_a 的入站 tag 集合（热更只按它下发，见不变量 I3）；
+	// ok=false 表示主控不知道 S_a（无待推送行 / 仍是 pending），调用方不得据此过滤。
+	AppliedTags(serverID uint64) (map[string]bool, bool)
+	// SyncedConfig 节点处于 SYNCED 时返回现场生成的整份配置（= materialize(S_a,U)），
+	// 供热更顺带落盘（不变量 I2）；ok=false 表示有待生效结构，不得附带配置。
+	SyncedConfig(serverID uint64) (string, bool)
+	// AppliedConfig 主控记录的「节点磁盘上应有的内容」（空 = 无记录）。
+	AppliedConfig(serverID uint64) string
+	// MarkApplied 记下节点磁盘上现在应有的内容（冷推成功 / 热更落盘成功），供面板对账。
+	MarkApplied(serverID uint64, configJSON string) error
 }
 
 // SiteService 站点设置服务接口（四端口拆分后无 web_base）。
