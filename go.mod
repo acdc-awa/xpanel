@@ -6,6 +6,7 @@ require (
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-playground/validator/v10 v10.30.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/pquerna/otp v1.5.0
@@ -31,7 +32,6 @@ require (
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
@@ -74,7 +74,11 @@ require (
 // v0.1.15 起本仓库依赖的协议新增（xray 启动失败可观测）：
 //   - HeartbeatPayload.XrayState / XrayLastError / XrayErrorAt / XrayFailures
 //   - StatusData.XrayState / XrayLastError / XrayFailures
-// 故 require 版本必须 ≥ v0.1.15：低于此版本会在 Docker 构建（上下文无 go.work、
-// 从 GitHub 拉 require 版本）报 "undefined: protocol.HeartbeatPayload.XrayState"。
+// v0.1.17 起本仓库依赖的协议新增（配置双哈希对账 / 在线回滚）：
+//   - HeartbeatPayload.DiskHash / RunningHash（节点上报磁盘与运行中配置的哈希）
+//   - SyncUsersPayload.ConfigJSON（SYNCED 时附带整份配置，节点热更落盘）
+//   - UpgradeAgentPayload.Force（允许向低版本回滚；v0.1.17 以下 agent 忽略该字段）
+// 故 require 版本必须 ≥ v0.1.17：低于此版本会在 Docker 构建（上下文无 go.work、
+// 从 GitHub 拉 require 版本）报 "undefined: protocol.HeartbeatPayload.DiskHash"。
 // 本地开发由仓库根 go.work 的 use ./agent 解析到工作副本，改这里不影响本地构建。
-require github.com/acdc-awa/xpanel-node v0.1.15
+require github.com/acdc-awa/xpanel-node v0.1.17

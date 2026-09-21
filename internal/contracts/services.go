@@ -120,6 +120,8 @@ type ConfigService interface {
 	AppliedConfig(serverID uint64) string
 	// MarkApplied 记下节点磁盘上现在应有的内容（冷推成功 / 热更落盘成功），供面板对账。
 	MarkApplied(serverID uint64, configJSON string) error
+	// MarkAppliedIfSame 带 CAS 校验记下节点磁盘内容，防止并发乱序覆盖较新的磁盘记录。
+	MarkAppliedIfSame(serverID uint64, expected, configJSON string) (bool, error)
 }
 
 // SiteService 站点设置服务接口（四端口拆分后无 web_base）。

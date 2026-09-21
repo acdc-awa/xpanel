@@ -548,6 +548,24 @@ func (s *ConfigService) AppliedConfig(serverID uint64) string {
 	return ""
 }
 
+// MarkAppliedIfSame 带 CAS 校验记下「节点磁盘上现在应有的内容」：
+// 仅当当前记录的 applied_json 与 expected 一致（或 expected 为空时无条件）才更新，
+// 防止并发热更落盘回执乱序覆盖较新的磁盘记录。返回是否成功更新。
+func (s *ConfigService) MarkAppliedIfSame(serverID uint64, expected, configJSON string) (bool, error) {
+	q := s.DB.Model(&models.PendingConfig{}).Where("server_id = ?", serverID)
+	if expected != "" {
+		q = q.Where("applied_json = ? OR (applied_json = '' AND config_json = ?)", expected, expected)
+	}
+	res := q.Updates(map[string]any{
+		"applied_json": configJSON,
+		"applied_hash": ContentHash(configJSON),
+	})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // MarkApplied 记下「节点磁盘上现在应有的内容」（冷推成功 = 刚推送的整份配置；
 // 热更落盘成功 = 节点刚写下的那份），同时存内容哈希供面板对账。
 // 不改 config_json/status：那份内容仍是最后一次冷推的结构权威（S_a），与 running_hash 对应。

@@ -165,13 +165,23 @@ func TestBuildSyncPayloadCarriesConfigWhenSynced(t *testing.T) {
 func TestRefreshPendingRewritesStaleContent(t *testing.T) {
 	h, db := newApplyHub(t)
 	srv := seedServer(t, db, "node-1", "in-a")
+	var u models.User
+	if err := db.Where("username = ?", "u-node-1").First(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	var inb models.Inbound
+	if err := db.Where("server_id = ?", srv.ID).First(&inb).Error; err != nil {
+		t.Fatal(err)
+	}
+	userEmail := fmt.Sprintf("u%d.i%d@panel.local", u.ID, inb.ID)
+
 	// 待推内容生成于「用户还在」的时刻
 	old, err := h.Config.Generate(srv.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !!strings.Contains(old, "u-node-1.i") {
-		t.Fatalf("待推内容应含该用户: %s", old)
+	if !strings.Contains(old, userEmail) {
+		t.Fatalf("待推内容应含该用户 (%s): %s", userEmail, old)
 	}
 	if err := h.Config.SavePending(srv.ID, old); err != nil {
 		t.Fatal(err)
@@ -189,8 +199,8 @@ func TestRefreshPendingRewritesStaleContent(t *testing.T) {
 	if got.ConfigJSON == old {
 		t.Fatal("待推内容已陈旧（被封用户仍在），推送前必须重算")
 	}
-	if strings.Contains(got.ConfigJSON, "u-node-1.i") {
-		t.Fatalf("重算后的内容不得再含被封用户: %s", got.ConfigJSON)
+	if strings.Contains(got.ConfigJSON, userEmail) {
+		t.Fatalf("重算后的内容不得再含被封用户 (%s): %s", userEmail, got.ConfigJSON)
 	}
 	// 写回也要落库（否则 MarkPushedIfSame 会因内容不匹配而拒绝标记）
 	row, err := h.Config.GetPending(srv.ID)

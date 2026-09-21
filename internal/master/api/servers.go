@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,9 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
+
+// agentTagPattern 严格限制版本号格式，防恶意路径穿越。
+var agentTagPattern = regexp.MustCompile(`^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$`)
 
 // serverView 服务器对外结构。
 type serverView struct {
@@ -128,22 +132,29 @@ func (d *Deps) AdminServers(c *gin.Context) {
 			}
 		}
 		// 面板状态由后端推导（前端不靠字符串猜）：四态 + 磁盘偏离
-		switch {
-		case v.ConfigDrift:
-			v.PushState = "drift"
-		case !hasPend:
-			v.PushState = "none"
-		case v.ConfigStatus == "pushed":
-			v.PushState = "synced"
-		case v.PushError != "" && v.Status == 1:
-			// 节点在线却推失败 = 节点拒绝（附原因）；离线导致的重推不算拒绝
-			v.PushState = "rejected"
-		default:
-			v.PushState = "pending"
-		}
+		v.PushState = pushStateOf(v.ConfigDrift, hasPend, v.ConfigStatus, v.PushError, v.Status)
 		items = append(items, v)
 	}
 	util.OK(c, gin.H{"items": items})
+}
+
+// pushStateOf 推导面板的推送状态（五态）：drift > none > synced > rejected > pending。
+// 抽成独立函数供单元测试直接覆盖——面板状态是运维判断"配置到底生效没有"的唯一依据，
+// 之前内联在 AdminServers 里只能靠复制一份逻辑来测，等于没测。
+func pushStateOf(configDrift bool, hasPend bool, configStatus, pushError string, serverStatus int) string {
+	switch {
+	case configDrift:
+		return "drift"
+	case !hasPend:
+		return "none"
+	case configStatus == "pushed":
+		return "synced"
+	case pushError != "" && serverStatus == 1:
+		// 节点在线却推失败 = 节点拒绝（附原因）；离线导致的重推不算拒绝
+		return "rejected"
+	default:
+		return "pending"
+	}
 }
 
 func (d *Deps) AdminCreateServer(c *gin.Context) {
@@ -411,6 +422,7 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 	}
 
 	var payload any
+	var actionName, target string
 	switch req.Type {
 	case protocol.MsgPushConfig:
 		if req.ConfigJSON == "" {
@@ -425,7 +437,11 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 	case protocol.MsgGetLogs:
 		payload = protocol.GetLogsPayload{Lines: req.Lines}
 	case protocol.MsgUpgradeAgent:
-		target := strings.TrimSpace(req.Target)
+		target = strings.TrimSpace(req.Target)
+		if target != "" && !agentTagPattern.MatchString(target) {
+			util.BadRequest(c, "目标版本号格式不正确（示例：v0.1.15）")
+			return
+		}
 		if target == "" {
 			if latest, _, err := d.GetCachedAgentLatestVersion(c.Request.Context(), false); err == nil && latest != "" {
 				target = latest
@@ -434,10 +450,22 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 
 		// 对比节点当前版本与目标版本：未指定 force 时若当前已是最新或更高，直接返回
 		var srv models.Server
-		actionName := "自升级"
+		actionName = "自升级"
 		if err := d.DB.First(&srv, id).Error; err == nil {
 			if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) > 0 {
 				actionName = "回滚"
+			}
+			if req.Force {
+				actionName = "回滚"
+				// <= v0.1.16 的旧 agent 未知 force 字段且硬编码 Compare>=0 拒绝，无法在线执行回滚
+				if srv.AgentVersion != "" && srv.AgentVersion != "dev" && CompareAgentVersion(srv.AgentVersion, "v0.1.17") < 0 {
+					util.Fail(c, 400, fmt.Sprintf("服务器当前 Agent 版本 %s 不支持在线回滚（需 v0.1.17 及以上版本），请在服务器执行 xray-agent rollback 或重新运行安装脚本", srv.AgentVersion))
+					return
+				}
+				if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) == 0 {
+					util.Fail(c, 400, fmt.Sprintf("服务器当前已是版本 %s，无需回滚", srv.AgentVersion))
+					return
+				}
 			}
 			if !req.Force && srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
 				util.OK(c, gin.H{
@@ -471,7 +499,8 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
 			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
 				Phase:   "failed",
-				Message: "升级指令超时或失败",
+				Target:  target,
+				Message: actionName + "指令超时或失败",
 				Error:   err.Error(),
 				TS:      time.Now().Unix(),
 			})
@@ -480,24 +509,34 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		return
 	}
 	if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
-		if !res.OK {
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "failed",
-				Message: "升级失败",
-				Error:   res.Error,
-				TS:      time.Now().Unix(),
-			})
-		} else {
-			msg := "升级完成"
-			if s, ok := res.Data.(string); ok && s != "" {
-				msg = s
+		isRollback := req.Force || actionName == "回滚"
+		msg := actionName + "完成"
+		if s, ok := res.Data.(string); ok && s != "" {
+			msg = s
+		}
+		// 若为回滚，但节点回复"已是最新版本"或"无需操作"，说明节点未实际执行回滚，不得报告成功
+		noOp := isRollback && (strings.Contains(msg, "已是最新版本") || strings.Contains(msg, "无需升级") || strings.Contains(msg, "无需操作"))
+		if !res.OK || noOp {
+			errMsg := res.Error
+			if noOp && errMsg == "" {
+				errMsg = "服务器未执行回滚操作（" + msg + "）"
 			}
 			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "success",
-				Message: msg,
+				Phase:   "failed",
+				Target:  target,
+				Message: actionName + "失败",
+				Error:   errMsg,
 				TS:      time.Now().Unix(),
 			})
+			util.OK(c, gin.H{"ok": false, "error": errMsg, "data": res.Data})
+			return
 		}
+		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+			Phase:   "success",
+			Target:  target,
+			Message: msg,
+			TS:      time.Now().Unix(),
+		})
 	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
 }

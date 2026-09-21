@@ -65,6 +65,10 @@ type Conn struct {
 	// settingsSynced 运行时设置（上报/心跳周期）是否已成功下发至当前连接：建连为 false，
 	// PushAgentSettings 成功置 true；watchdog 2 分钟补推循环据此决定是否重试（失败不置位）。
 	settingsSynced atomic.Bool
+	// usersSynced 用户名单与账期映射是否已成功下发至当前连接：建连为 false，
+	// SyncUsers 成功置 true；watchdog 2 分钟补推循环据此决定是否重试（失败不置位）。
+	// 用户变更 / 账期切换广播（SyncUsersToAll）时重置为 false，确保在线节点必定补推成功。
+	usersSynced atomic.Bool
 	// lastReportAt 上次 node_reports 落库时刻（采样节流）。仅 readPump 所在 goroutine
 	// 读写，无需加锁；重连新建 Conn 时为零值，首帧心跳立即落库。
 	lastReportAt time.Time
@@ -554,6 +558,20 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	if hb.DiskHash != "" {
 		updates["xray_disk_hash"] = hb.DiskHash
 		updates["xray_running_hash"] = hb.RunningHash
+		// 磁盘偏离自愈闭环：若节点上报的磁盘哈希与主控已生效记录不一致，触发热更落盘自动对齐
+		if h.Config != nil {
+			if pend, perr := h.Config.GetPending(conn.ServerID); perr == nil && pend != nil &&
+				pend.Status == "pushed" && pend.AppliedHash != "" && hb.DiskHash != pend.AppliedHash {
+				if conn.usersSynced.Load() {
+					conn.usersSynced.Store(false)
+					go func(sid uint64) {
+						if err := h.SyncUsers(sid); err != nil {
+							log.Printf("nodegate: 节点 %d 磁盘偏离自动修复失败: %v（将由看门狗重试）", sid, err)
+						}
+					}(conn.ServerID)
+				}
+			}
+		}
 	}
 	// 在线用户 IP 快照每次覆写：新版 agent 心跳携带；旧 agent 或无人在线为空列表（如实清空）
 	if len(hb.OnlineIPs) == 0 {
@@ -840,9 +858,22 @@ func (h *Hub) buildSyncPayload(serverID uint64) (protocol.SyncUsersPayload, erro
 	// 不变量 I2：节点处于 SYNCED（无待生效结构）时附带现场生成的整份配置（= materialize(S_a,U)），
 	// 节点在热更成功后把它落盘 —— 磁盘于是恒等于运行中配置的快照，节点重启（自愈/开机/手动）
 	// 不会把用户集回退到上一次冷更。PENDING 期间不附带：磁盘不能留下未经验证的结构。
-	// 内容与「主控记录的磁盘内容」一致时不附带，避免让节点反复写盘 + 跑 -test。
-	if synced, ok := h.Config.SyncedConfig(serverID); ok && synced != h.Config.AppliedConfig(serverID) {
-		payload.ConfigJSON = synced
+	// 内容与「主控记录的磁盘内容」一致且节点磁盘未偏离时不附带，避免让节点反复写盘 + 跑 -test。
+	if synced, ok := h.Config.SyncedConfig(serverID); ok {
+		applied := h.Config.AppliedConfig(serverID)
+		diskHash := ""
+		if h.DB != nil {
+			var srv models.Server
+			if err := h.DB.Select("xray_disk_hash").First(&srv, serverID).Error; err == nil {
+				diskHash = srv.XrayDiskHash
+			}
+		}
+		// 满足任一条件时附带整份配置修复磁盘：
+		// 1. 主控记录的磁盘内容与现场重算不同（用户集有变更）
+		// 2. 节点实际磁盘哈希与期望哈希不符（第三方改盘 / 落盘静默失败 / .good 回退触发磁盘偏离）
+		if synced != applied || (diskHash != "" && diskHash != services.ContentHash(synced)) {
+			payload.ConfigJSON = synced
+		}
 	}
 	return payload, nil
 }
@@ -921,28 +952,38 @@ func (h *Hub) SyncUsers(serverID uint64) error {
 	// 落盘成功 → 记账：主控记录的「节点磁盘内容」跟上，面板据此发现磁盘偏离
 	// （第三方改过 / 落盘静默失败）。失败只记日志，不影响本次热更的结论。
 	if payload.ConfigJSON != "" {
-		if err := h.Config.MarkApplied(serverID, payload.ConfigJSON); err != nil {
+		prevApplied := h.Config.AppliedConfig(serverID)
+		if ok, err := h.Config.MarkAppliedIfSame(serverID, prevApplied, payload.ConfigJSON); err != nil {
 			log.Printf("nodegate: 记录热更落盘内容失败 (server=%d): %v", serverID, err)
+		} else if !ok {
+			log.Printf("nodegate: 热更落盘内容已被较新的变更更新，跳过旧版本记账 (server=%d)", serverID)
 		}
 	}
+	h.mu.RLock()
+	if c, ok := h.conns[serverID]; ok {
+		c.usersSynced.Store(true)
+	}
+	h.mu.RUnlock()
 	return nil
 }
 
 // SyncUsersToAll 广播给所有在线节点增量/全量同步最新用户列表（非阻塞）。
+// 广播前将所有在线连接的 usersSynced 标志置为 false，若异步下发失败将由看门狗 2 分钟重试兜底。
 func (h *Hub) SyncUsersToAll() {
 	h.mu.RLock()
-	var serverIDs []uint64
-	for id := range h.conns {
-		serverIDs = append(serverIDs, id)
+	var conns []*Conn
+	for _, c := range h.conns {
+		c.usersSynced.Store(false)
+		conns = append(conns, c)
 	}
 	h.mu.RUnlock()
 
-	for _, id := range serverIDs {
-		go func(sid uint64) {
-			if err := h.SyncUsers(sid); err != nil {
-				log.Printf("nodegate: 向节点 %d 动态同步用户失败: %v", sid, err)
+	for _, c := range conns {
+		go func(conn *Conn) {
+			if err := h.SyncUsers(conn.ServerID); err != nil {
+				log.Printf("nodegate: 向节点 %d 动态同步用户失败: %v（将由看门狗自动重试）", conn.ServerID, err)
 			}
-		}(id)
+		}(c)
 	}
 }
 
@@ -1012,6 +1053,14 @@ func (h *Hub) watchdog() {
 				if !c.settingsSynced.Load() {
 					go h.PushAgentSettings(c.ServerID)
 				}
+				// 用户名单与账期映射下发失败的节点每 2 分钟自动重试，直至节点确认（usersSynced 置位）
+				if !c.usersSynced.Load() {
+					go func(conn *Conn) {
+						if err := h.SyncUsers(conn.ServerID); err != nil {
+							log.Printf("nodegate: 补推用户名单与账期失败 (server=%d): %v", conn.ServerID, err)
+						}
+					}(c)
+				}
 			}
 		case <-ticker.C:
 			h.pruneEnforced()
@@ -1052,7 +1101,14 @@ func (h *Hub) watchdog() {
 					applied := h.Config.AppliedConfig(sid)
 					if p, perr := h.Config.GetPending(sid); perr == nil && p != nil &&
 						p.Status == "pushed" && applied == cfgStr {
-						return // 已生效内容（含热更落盘）与现场重算逐字节相同：无事可做，不打扰节点
+						// 检查节点磁盘是否偏离：若节点上报了磁盘哈希且与期望哈希不符，触发热更落盘对齐
+						var srv models.Server
+						if herr := h.DB.Select("xray_disk_hash").First(&srv, sid).Error; herr == nil &&
+							srv.XrayDiskHash != "" && p.AppliedHash != "" && srv.XrayDiskHash != p.AppliedHash {
+							log.Printf("nodegate: 定期校准发现节点 %d 磁盘配置偏离，触发热更落盘对齐", sid)
+							_ = h.SyncUsers(sid)
+						}
+						return // 已生效内容与现场重算相同且磁盘未偏离：无事可做，不打扰节点
 					}
 					log.Printf("nodegate: 执行定期全量状态校准 (server=%d)", sid)
 					if serr := h.Config.SavePending(sid, cfgStr); serr != nil {
