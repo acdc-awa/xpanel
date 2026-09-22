@@ -81,4 +81,4 @@ require (
 // 故 require 版本必须 ≥ v0.1.17：低于此版本会在 Docker 构建（上下文无 go.work、
 // 从 GitHub 拉 require 版本）报 "undefined: protocol.HeartbeatPayload.DiskHash"。
 // 本地开发由仓库根 go.work 的 use ./agent 解析到工作副本，改这里不影响本地构建。
-require github.com/acdc-awa/xpanel-node v0.1.17
+require github.com/acdc-awa/xpanel-node v0.1.18
