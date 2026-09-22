@@ -220,10 +220,11 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				}
 			}
 
-			// 入站维度条目（agent 从 inbound>>> 计数器派生，Email 恒空）：仅累计
-			// inbounds.up/down——dashboard 节点流量占比/入站限额/lifecycle 消费；
-			// 不落 traffic_logs（流水严格用户维度，防今日流量 KPI 双计）。
-			// relay 入站与未知用户的节点流量由此入账（此前入站维度整条链空转）。
+			// 入站维度条目（agent 从 inbound>>> 计数器派生，Email 恒空）：
+			// 1. 累计 inbounds.up/down 冗余计数器（供入站限额与 lifecycle 消费）；
+			// 2. 对于内部转发入站（relay），因其由内部账户转发承载、无具体前台用户条目，
+			//    将增量作为 UserID=0 写入 traffic_logs，使仪表盘服务器分布与排行按时间窗口统计该转发服务器承载流量；
+			// 3. 普通用户入站（user）因下方已有具体的用户明细落库，此处不写 traffic_logs，防全站双计。
 			if e.UserID == 0 && e.Email == "" {
 				if inboundID > 0 {
 					if err := tx.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
@@ -231,6 +232,41 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 						"down": gorm.Expr("down + ?", e.DownBytes),
 					}).Error; err != nil {
 						return err
+					}
+					if inb, ok := inboundByID[inboundID]; ok && inb.Type == models.InboundTypeRelay {
+						row := models.TrafficLog{
+							UserID:      0,
+							InboundID:   inboundID,
+							UpBytes:     e.UpBytes,
+							DownBytes:   e.DownBytes,
+							BilledUp:    0,
+							BilledDown:  0,
+							PeriodStart: periodStart,
+							PeriodEnd:   periodEnd,
+							CycleID:     0,
+						}
+						var doUpdates clause.Set
+						if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+							doUpdates = clause.Assignments(map[string]any{
+								"up_bytes":   gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
+								"down_bytes": gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
+								"period_end": gorm.Expr("VALUES(period_end)"),
+							})
+						} else {
+							doUpdates = clause.Assignments(map[string]any{
+								"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
+								"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
+								"period_end": gorm.Expr("excluded.period_end"),
+							})
+						}
+						if err := tx.Clauses(clause.OnConflict{
+							Columns: []clause.Column{
+								{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
+							},
+							DoUpdates: doUpdates,
+						}).Create(&row).Error; err != nil {
+							return err
+						}
 					}
 				}
 				continue
@@ -622,7 +658,7 @@ func (s *TrafficService) aggregateBusinessDay(d time.Time) {
 	var rows []aggRow
 	if err := s.DB.Model(&models.TrafficLog{}).
 		Select("user_id, SUM(up_bytes) AS up_bytes, SUM(down_bytes) AS down_bytes").
-		Where("period_start >= ? AND period_start < ?", dayStartUTC, dayEndUTC).
+		Where("period_start >= ? AND period_start < ? AND user_id > 0", dayStartUTC, dayEndUTC).
 		Group("user_id").
 		Scan(&rows).Error; err != nil {
 		return

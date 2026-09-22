@@ -262,12 +262,13 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 
 	// ISSUE-06：traffic_dailies 已包含今日（每 5 分钟聚合），不能再与 traffic_logs 相加。
 	// 只取 max(daily, 实时 logs) 修正最近 5 分钟未聚合窗口，保持单一数据源、无重复计数。
+	// 仅计真实用户流量（user_id > 0），内部转发流量（user_id = 0）由服务器承载分布统计，不双计全站业务吞吐。
 	var todayLog struct {
 		Up   int64
 		Down int64
 	}
 	d.DB.Model(&models.TrafficLog{}).
-		Where("period_start >= ?", todayStartUTC).
+		Where("period_start >= ? AND user_id > 0", todayStartUTC).
 		Select("COALESCE(SUM(up_bytes),0) AS up, COALESCE(SUM(down_bytes),0) AS down").
 		Scan(&todayLog)
 	if pt, ok := dailyMap[todayStr]; ok {
@@ -344,10 +345,10 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	// 累计值，被周期性清零、且无时间维度，无法回答「哪个时间段用了多少」——原先文案
 	// 只写「累计承载占比」，与重置语义自相矛盾。现与排行榜共用 rank_period 时间窗。
 	//
-	// 归集口径：traffic_logs.inbound_id → inbounds.server_id（用户维度明细，原始字节不乘倍率）。
-	// 已知边界：inbound_id=0 的明细无法归属服务器（agent 未带 tag 且统计键未注入入站维度），
-	// 由 JOIN 排除；relay 入站的纯入站维度流量不落 traffic_logs（只累计 inbounds.up/down），
-	// 故本分布统计的是「按服务器归集的用户流量」，非节点网卡总量。
+	// 归集口径：traffic_logs.inbound_id → inbounds.server_id（原始字节不乘倍率）。
+	// 包含前台用户流量（user_id > 0）与内部链式转发流量（relay 入站，user_id = 0），
+	// 准确反映该服务器承载的中转/落地流量总量。
+	// 已知边界：inbound_id=0 的明细无法归属服务器（agent 未带 tag 且统计键未注入入站维度），由 JOIN 排除。
 	type serverAggRow struct {
 		ServerID  uint64 `gorm:"column:server_id"`
 		UpBytes   int64  `gorm:"column:up_bytes"`
@@ -434,9 +435,9 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	periodRows := scanByUser(d.DB.Model(&models.TrafficDaily{}).
 		Where("date >= ? AND date <= ?", rankWin.StartDate, rankWin.EndDate))
 	// 6.2 今日与实时明细（修正用；三档窗口都含今日，故恒需修正）
-	dailyTodayRows := scanByUser(d.DB.Model(&models.TrafficDaily{}).Where("date = ?", rankWin.EndDate))
+	dailyTodayRows := scanByUser(d.DB.Model(&models.TrafficDaily{}).Where("date = ? AND user_id > 0", rankWin.EndDate))
 	logsTodayRows := scanByUser(d.DB.Model(&models.TrafficLog{}).
-		Where("period_start >= ? AND period_start < ?", todayStartUTC, rankWin.EndUTC))
+		Where("period_start >= ? AND period_start < ? AND user_id > 0", todayStartUTC, rankWin.EndUTC))
 
 	// 上下行分别聚合：修正按方向取 max，保持两个方向互不串味
 	periodUp := make(map[uint64]int64, len(periodRows))

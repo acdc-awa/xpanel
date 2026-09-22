@@ -282,3 +282,114 @@ func TestAdminDashboardRankTodayUsesMaxNotSum(t *testing.T) {
 		t.Fatalf("今日用量应取 max(daily=100, logs=250)=250，实际 %d（350=双计）", got)
 	}
 }
+
+// TestAdminDashboardRelayInboundBreakdown 验证转发服务器（relay 入站）的流量被正确纳入流量分布饼图和排行，
+// 且全站今日吞吐与用户排行不受 relay 内部流量（user_id=0）双计影响。
+func TestAdminDashboardRelayInboundBreakdown(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := models.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&models.Setting{Key: "business_timezone", Value: "UTC"}).Error; err != nil {
+		t.Fatalf("seed timezone: %v", err)
+	}
+
+	now := time.Now()
+	periodStart := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+
+	// 服务器 1：仅转发入口/落地服务器
+	srv1 := models.Server{Name: "转发服务器", Host: "relay.host", Status: 1, NodeID: "node-relay-1"}
+	if err := db.Create(&srv1).Error; err != nil {
+		t.Fatal(err)
+	}
+	relayInb := models.Inbound{
+		ServerID: srv1.ID, Tag: "in-relay-1", Protocol: "vless", Port: 20086,
+		Type: models.InboundTypeRelay, InternalUUID: "relay-uuid-xyz", Enabled: true,
+	}
+	if err := db.Create(&relayInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 服务器 2：常规前台服务器
+	srv2 := models.Server{Name: "常规节点", Host: "user.host", Status: 1, NodeID: "node-user-2"}
+	if err := db.Create(&srv2).Error; err != nil {
+		t.Fatal(err)
+	}
+	userInb := models.Inbound{
+		ServerID: srv2.ID, Tag: "in-user-2", Protocol: "vless", Port: 20087,
+		Type: models.InboundTypeUser, Enabled: true,
+	}
+	if err := db.Create(&userInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 真实用户 1
+	u1 := models.User{Username: "client1", Email: "c1@test.com", UUID: "uuid-c1", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive}
+	if err := db.Create(&u1).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 写入流水：
+	// 1. relay 入站流量（user_id = 0）：上行 4000，下行 6000，总计 10000
+	if err := db.Create(&models.TrafficLog{
+		UserID: 0, InboundID: relayInb.ID, UpBytes: 4000, DownBytes: 6000,
+		PeriodStart: periodStart, PeriodEnd: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. user 入站流量（user_id = u1.ID）：上行 10000，下行 10000，总计 20000
+	if err := db.Create(&models.TrafficLog{
+		UserID: u1.ID, InboundID: userInb.ID, UpBytes: 10000, DownBytes: 10000,
+		PeriodStart: periodStart, PeriodEnd: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	data := dashReq(t, db, "?rank_period=today")
+
+	// 1. 验证 server_breakdown 包含两台服务器
+	var s1Breakdown, s2Breakdown *ServerTrafficItem
+	for i := range data.ServerBreakdown {
+		if data.ServerBreakdown[i].ServerID == srv1.ID {
+			s1Breakdown = &data.ServerBreakdown[i]
+		}
+		if data.ServerBreakdown[i].ServerID == srv2.ID {
+			s2Breakdown = &data.ServerBreakdown[i]
+		}
+	}
+	if s1Breakdown == nil || s2Breakdown == nil {
+		t.Fatalf("server_breakdown must contain both srv1 and srv2, got: %+v", data.ServerBreakdown)
+	}
+	if s1Breakdown.TotalBytes != 10000 {
+		t.Fatalf("srv1 total bytes = %d, want 10000", s1Breakdown.TotalBytes)
+	}
+	if s2Breakdown.TotalBytes != 20000 {
+		t.Fatalf("srv2 total bytes = %d, want 20000", s2Breakdown.TotalBytes)
+	}
+	if s1Breakdown.Percent < 33.3 || s1Breakdown.Percent > 33.4 {
+		t.Fatalf("srv1 percent = %f, want ~33.33%%", s1Breakdown.Percent)
+	}
+
+	// 2. 验证 server_rank 包含两台服务器，且 srv2 排第 1，srv1 排第 2
+	if len(data.ServerRank) != 2 {
+		t.Fatalf("server_rank len = %d, want 2", len(data.ServerRank))
+	}
+	if data.ServerRank[0].ServerID != srv2.ID || data.ServerRank[1].ServerID != srv1.ID {
+		t.Fatalf("server_rank order wrong, got: %+v", data.ServerRank)
+	}
+
+	// 3. 验证全站今日吞吐仅包含真实用户流量（20000），不双计中转流量（10000）
+	if data.Summary.TodayTrafficTotal != 20000 {
+		t.Fatalf("today traffic total = %d, want 20000 (must not double-count relay)", data.Summary.TodayTrafficTotal)
+	}
+
+	// 4. 验证 user_rank 仅包含真实用户 u1，绝不包含 user_id=0
+	if len(data.UserRank) != 1 || data.UserRank[0].UserID != u1.ID {
+		t.Fatalf("user_rank must only contain u1, got: %+v", data.UserRank)
+	}
+}
+

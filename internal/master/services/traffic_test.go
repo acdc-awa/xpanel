@@ -1009,3 +1009,130 @@ func TestSaveAbortsOnRateQueryFailure(t *testing.T) {
 		}
 	})
 }
+
+// TestRelayInboundTrafficTracking 验证转发入站（relay）以 UserID=0 写入 traffic_logs，而普通用户入站不写。
+func TestRelayInboundTrafficTracking(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.TrafficDaily{}, &models.TrafficBatch{},
+		&models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	relayInb := models.Inbound{
+		ServerID: 1, Tag: "in-relay", Protocol: "vless", Port: 10086,
+		Type: models.InboundTypeRelay, InternalUUID: "relay-uuid-1", Enabled: true,
+	}
+	if err := db.Create(&relayInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	userInb := models.Inbound{
+		ServerID: 1, Tag: "in-user", Protocol: "vless", Port: 10087,
+		Type: models.InboundTypeUser, Enabled: true,
+	}
+	if err := db.Create(&userInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+
+	// 1. 上报 relay 入站的 pure inbound 流量
+	_, err = svc.Save(protocol.TrafficReportPayload{
+		Period: "2026-09-22T10:15:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Inbound: "in-relay", UpBytes: 1000, DownBytes: 2000},
+		},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Save relay inbound failed: %v", err)
+	}
+
+	// 验证 inbounds 冗余计数器更新
+	var freshRelay models.Inbound
+	if err := db.First(&freshRelay, relayInb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if freshRelay.Up != 1000 || freshRelay.Down != 2000 {
+		t.Fatalf("relay inbound up/down = %d/%d, want 1000/2000", freshRelay.Up, freshRelay.Down)
+	}
+
+	// 验证 traffic_logs 写入了 UserID=0 的流水
+	var logs []models.TrafficLog
+	if err := db.Where("inbound_id = ?", relayInb.ID).Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 traffic_log for relay inbound, got %d", len(logs))
+	}
+	if logs[0].UserID != 0 || logs[0].UpBytes != 1000 || logs[0].DownBytes != 2000 {
+		t.Fatalf("unexpected relay traffic_log: %+v", logs[0])
+	}
+	if logs[0].BilledUp != 0 || logs[0].BilledDown != 0 {
+		t.Fatalf("relay traffic billed must be 0, got %d/%d", logs[0].BilledUp, logs[0].BilledDown)
+	}
+
+	// 再次上报同一小时内的增量，验证 upsert 累加
+	_, err = svc.Save(protocol.TrafficReportPayload{
+		Period: "2026-09-22T10:30:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Inbound: "in-relay", UpBytes: 500, DownBytes: 500},
+		},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Save second relay report failed: %v", err)
+	}
+
+	var logsAfter []models.TrafficLog
+	if err := db.Where("inbound_id = ?", relayInb.ID).Find(&logsAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logsAfter) != 1 {
+		t.Fatalf("expected 1 traffic_log after upsert, got %d", len(logsAfter))
+	}
+	if logsAfter[0].UpBytes != 1500 || logsAfter[0].DownBytes != 2500 {
+		t.Fatalf("upserted bytes = %d/%d, want 1500/2500", logsAfter[0].UpBytes, logsAfter[0].DownBytes)
+	}
+
+	// 2. 上报 user 入站的 pure inbound 流量
+	_, err = svc.Save(protocol.TrafficReportPayload{
+		Period: "2026-09-22T10:30:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Inbound: "in-user", UpBytes: 300, DownBytes: 400},
+		},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Save user inbound failed: %v", err)
+	}
+
+	// 验证 user 入站更新了冗余计数器
+	var freshUserInb models.Inbound
+	if err := db.First(&freshUserInb, userInb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if freshUserInb.Up != 300 || freshUserInb.Down != 400 {
+		t.Fatalf("user inbound up/down = %d/%d, want 300/400", freshUserInb.Up, freshUserInb.Down)
+	}
+
+	// 验证 user 入站绝不写入 UserID=0 的 traffic_logs
+	var userLogs []models.TrafficLog
+	if err := db.Where("inbound_id = ?", userInb.ID).Find(&userLogs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(userLogs) != 0 {
+		t.Fatalf("user inbound pure entry should NOT write traffic_logs, got %d rows", len(userLogs))
+	}
+
+	// 3. 验证 aggregateBusinessDay 不会把 UserID=0 汇入 traffic_daily
+	svc.aggregateBusinessDay(time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC))
+	var dailies []models.TrafficDaily
+	if err := db.Find(&dailies).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(dailies) != 0 {
+		t.Fatalf("traffic_daily should not contain user_id=0, got %d rows", len(dailies))
+	}
+}
+
