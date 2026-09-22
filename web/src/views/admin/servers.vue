@@ -1463,7 +1463,7 @@ async function removeServer(row: any) {
                 type="date"
                 placeholder="选择到期日期"
                 format="YYYY-MM-DD"
-                value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+                value-format="YYYY-MM-DD"
                 style="width: 100%"
                 clearable
               />
