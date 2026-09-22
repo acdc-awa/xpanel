@@ -11,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
@@ -390,6 +391,109 @@ func TestAdminDashboardRelayInboundBreakdown(t *testing.T) {
 	// 4. 验证 user_rank 仅包含真实用户 u1，绝不包含 user_id=0
 	if len(data.UserRank) != 1 || data.UserRank[0].UserID != u1.ID {
 		t.Fatalf("user_rank must only contain u1, got: %+v", data.UserRank)
+	}
+}
+
+// TestAdminDashboardRealtime 验证轻量实时大盘接口从 Hub 纯内存读取网速与矩阵：
+func TestAdminDashboardRealtime(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := models.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	srv1 := models.Server{ID: 101, Name: "香港-1", Host: "hk1.node", NodeID: "n-hk1", Secret: "s", Status: 1}
+	srv2 := models.Server{ID: 102, Name: "日本-1", Host: "jp1.node", NodeID: "n-jp1", Secret: "s", Status: 0}
+	if err := db.Create(&srv1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&srv2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	h := nodegate.NewHub(db, nil, nil)
+	// 注入 srv1 模拟在线与内存快照
+	now := time.Now()
+	h.SetOnlineForTest(srv1.ID, now)
+	h.SetMetricsForTest(srv1.ID, &nodegate.NodeMetricsSnapshot{
+		ServerID:    srv1.ID,
+		CPU:         25.0,
+		Mem:         1024 * 1024 * 500,
+		MemTotal:    1024 * 1024 * 2000,
+		Disk:        1024 * 1024 * 5000,
+		DiskTotal:   1024 * 1024 * 50000,
+		RxRate:      50 * 1024 * 1024,
+		TxRate:      10 * 1024 * 1024,
+		OnlineUsers: 4,
+		XrayRunning: true,
+		ReportedAt:  now,
+	})
+
+	// 注入 srv2 模拟离线节点在内存中的静态指标快照
+	h.SetMetricsForTest(srv2.ID, &nodegate.NodeMetricsSnapshot{
+		ServerID:    srv2.ID,
+		CPU:         15.0,
+		Mem:         1024 * 1024 * 300,
+		MemTotal:    1024 * 1024 * 1000,
+		Disk:        1024 * 1024 * 2000,
+		DiskTotal:   1024 * 1024 * 20000,
+		RxRate:      80 * 1024 * 1024, // 离线时会被置 0
+		TxRate:      20 * 1024 * 1024,
+		OnlineUsers: 2,
+		XrayRunning: false,
+		ReportedAt:  now.Add(-10 * time.Minute),
+	})
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard/realtime", nil)
+	d := &Deps{DB: db, Hub: h}
+	d.AdminDashboardRealtime(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int                   `json:"code"`
+		Data DashboardRealtimeData `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data.TotalServers != 2 {
+		t.Fatalf("total_servers = %d, want 2", resp.Data.TotalServers)
+	}
+	if resp.Data.OnlineServers != 1 {
+		t.Fatalf("online_servers = %d, want 1", resp.Data.OnlineServers)
+	}
+	if resp.Data.RealtimeRxRate != 50*1024*1024 {
+		t.Fatalf("realtime_rx_rate = %v, want 50MB/s", resp.Data.RealtimeRxRate)
+	}
+	if len(resp.Data.ServerMatrix) != 2 {
+		t.Fatalf("server_matrix len = %d, want 2", len(resp.Data.ServerMatrix))
+	}
+
+	// 验证 srv2 (离线节点) 保留 CPU/Mem 静态硬件负载，但速率与在线人数归零
+	var srv2Item *ServerMatrixItem
+	for i := range resp.Data.ServerMatrix {
+		if resp.Data.ServerMatrix[i].ID == srv2.ID {
+			srv2Item = &resp.Data.ServerMatrix[i]
+		}
+	}
+	if srv2Item == nil {
+		t.Fatal("srv2 not in server_matrix")
+	}
+	if srv2Item.Status != 0 {
+		t.Fatalf("srv2 status = %d, want 0 (offline)", srv2Item.Status)
+	}
+	if srv2Item.CPU != 15.0 || srv2Item.MemTotal != 1024*1024*1000 {
+		t.Fatalf("srv2 CPU/Mem not preserved: CPU=%v, MemTotal=%v", srv2Item.CPU, srv2Item.MemTotal)
+	}
+	if srv2Item.RxRate != 0 || srv2Item.TxRate != 0 || srv2Item.OnlineUsers != 0 {
+		t.Fatalf("srv2 offline rates/users not zeroed: Rx=%v, Users=%v", srv2Item.RxRate, srv2Item.OnlineUsers)
 	}
 }
 

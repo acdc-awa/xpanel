@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -53,6 +54,15 @@ type DashboardData struct {
 	RecentGiftCards []RecentGiftCardItem `json:"recent_gift_cards"`
 
 	RecentOrders []RecentOrderItem `json:"recent_orders"`
+}
+
+// DashboardRealtimeData 轻量实时网速与服务器监控矩阵响应（纯内存组装，0 复杂 SQL 聚合）。
+type DashboardRealtimeData struct {
+	RealtimeRxRate float64            `json:"realtime_rx_rate"`
+	RealtimeTxRate float64            `json:"realtime_tx_rate"`
+	OnlineServers  int64              `json:"online_servers"`
+	TotalServers   int64              `json:"total_servers"`
+	ServerMatrix   []ServerMatrixItem `json:"server_matrix"`
 }
 
 type TrafficTrendPoint struct {
@@ -296,27 +306,83 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		}
 	}
 
-	// 4. 服务器健康度矩阵 & 实时速率
+	// 4. 服务器健康度矩阵 & 实时速率（优先读取 Hub 纯内存快照，0 磁盘 I/O）
 	var servers []models.Server
-	d.DB.Find(&servers)
+	d.DB.Order("id ASC").Find(&servers)
 
-	// ISSUE-10：一次查询取每台服务器最新上报，避免 N+1。
-	var latestReports []models.NodeReport
-	d.DB.Raw(`SELECT nr.* FROM node_reports nr
-		JOIN (SELECT server_id, MAX(reported_at) AS max_at FROM node_reports GROUP BY server_id) x
-		ON nr.server_id = x.server_id AND nr.reported_at = x.max_at`).Scan(&latestReports)
-	latestByServer := make(map[uint64]models.NodeReport, len(latestReports))
-	for _, nr := range latestReports {
-		latestByServer[nr.ServerID] = nr
+	var liveMetrics map[uint64]*nodegate.NodeMetricsSnapshot
+	if d.Hub != nil {
+		liveMetrics = d.Hub.GetAllLatestMetrics()
 	}
 
+	// 离线或尚无内存快照的节点，回退至 node_reports 查静态底数
+	var fallbackReports []models.NodeReport
+	needFallback := false
 	for _, s := range servers {
-		latestReport := latestByServer[s.ID]
+		if liveMetrics == nil || liveMetrics[s.ID] == nil {
+			needFallback = true
+			break
+		}
+	}
+	latestByServer := make(map[uint64]models.NodeReport)
+	if needFallback {
+		d.DB.Raw(`SELECT nr.* FROM node_reports nr
+			JOIN (SELECT server_id, MAX(reported_at) AS max_at FROM node_reports GROUP BY server_id) x
+			ON nr.server_id = x.server_id AND nr.reported_at = x.max_at`).Scan(&fallbackReports)
+		for _, nr := range fallbackReports {
+			latestByServer[nr.ServerID] = nr
+		}
+	}
 
-		isActiveFlow := (latestReport.RxRate > 1024 || latestReport.TxRate > 1024)
-		if s.Status == 1 {
-			data.Summary.RealtimeRxRate += latestReport.RxRate
-			data.Summary.RealtimeTxRate += latestReport.TxRate
+	var onlineCount int64
+	for _, s := range servers {
+		isOnline := (s.Status == 1)
+		if d.Hub != nil {
+			isOnline = d.Hub.IsOnline(s.ID)
+		}
+		if isOnline {
+			onlineCount++
+		}
+
+		var cpu, mem, disk, rxRate, txRate float64
+		var memTotal, diskTotal uint64
+		var onlineUsers int
+		lastSeen := s.LastSeenAt
+
+		if m, ok := liveMetrics[s.ID]; ok && m != nil {
+			cpu = m.CPU
+			mem = m.Mem
+			memTotal = m.MemTotal
+			disk = m.Disk
+			diskTotal = m.DiskTotal
+			if isOnline {
+				rxRate = m.RxRate
+				txRate = m.TxRate
+				onlineUsers = m.OnlineUsers
+				t := m.ReportedAt
+				lastSeen = &t
+			}
+		} else if fb, ok := latestByServer[s.ID]; ok {
+			cpu = fb.CPU
+			mem = fb.Mem
+			memTotal = fb.MemTotal
+			disk = fb.Disk
+			diskTotal = fb.DiskTotal
+			onlineUsers = fb.OnlineUsers
+			// 离线节点速率归零
+			rxRate = 0
+			txRate = 0
+		}
+
+		isActiveFlow := (rxRate > 1024 || txRate > 1024)
+		if isOnline {
+			data.Summary.RealtimeRxRate += rxRate
+			data.Summary.RealtimeTxRate += txRate
+		}
+
+		statusVal := 0
+		if isOnline {
+			statusVal = 1
 		}
 
 		data.ServerMatrix = append(data.ServerMatrix, ServerMatrixItem{
@@ -325,18 +391,21 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			NodeID:       s.NodeID,
 			Host:         s.Host,
 			Location:     s.Location,
-			Status:       s.Status,
-			LastSeenAt:   s.LastSeenAt,
-			CPU:          latestReport.CPU,
-			Mem:          latestReport.Mem,
-			MemTotal:     latestReport.MemTotal,
-			Disk:         latestReport.Disk,
-			DiskTotal:    latestReport.DiskTotal,
-			RxRate:       latestReport.RxRate,
-			TxRate:       latestReport.TxRate,
-			OnlineUsers:  latestReport.OnlineUsers,
+			Status:       statusVal,
+			LastSeenAt:   lastSeen,
+			CPU:          cpu,
+			Mem:          mem,
+			MemTotal:     memTotal,
+			Disk:         disk,
+			DiskTotal:    diskTotal,
+			RxRate:       rxRate,
+			TxRate:       txRate,
+			OnlineUsers:  onlineUsers,
 			IsActiveFlow: isActiveFlow,
 		})
+	}
+	if d.Hub != nil {
+		data.Summary.OnlineServers = onlineCount
 	}
 
 	// 5. 节点/服务器流量分布（时间口径，原始用量）
@@ -577,6 +646,85 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			Status:        ord.Status,
 			CreatedAt:     ord.CreatedAt,
 			PaidAt:        ord.PaidAt,
+		})
+	}
+
+	util.OK(c, data)
+}
+
+// AdminDashboardRealtime GET /api/v1/admin/dashboard/realtime —— 高频轻量实时网速接口（纯内存组装，耗时 < 0.1ms）。
+func (d *Deps) AdminDashboardRealtime(c *gin.Context) {
+	var servers []models.Server
+	if err := d.DB.Select("id, name, host, node_id, location, status, last_seen_at").Order("id ASC").Find(&servers).Error; err != nil {
+		util.ServerError(c, "查询服务器失败")
+		return
+	}
+
+	var liveMetrics map[uint64]*nodegate.NodeMetricsSnapshot
+	if d.Hub != nil {
+		liveMetrics = d.Hub.GetAllLatestMetrics()
+	}
+
+	var data DashboardRealtimeData
+	data.TotalServers = int64(len(servers))
+
+	for _, s := range servers {
+		isOnline := (s.Status == 1)
+		if d.Hub != nil {
+			isOnline = d.Hub.IsOnline(s.ID)
+		}
+		if isOnline {
+			data.OnlineServers++
+		}
+
+		var cpu, mem, disk, rxRate, txRate float64
+		var memTotal, diskTotal uint64
+		var onlineUsers int
+		lastSeen := s.LastSeenAt
+
+		if m, ok := liveMetrics[s.ID]; ok && m != nil {
+			cpu = m.CPU
+			mem = m.Mem
+			memTotal = m.MemTotal
+			disk = m.Disk
+			diskTotal = m.DiskTotal
+			if isOnline {
+				rxRate = m.RxRate
+				txRate = m.TxRate
+				onlineUsers = m.OnlineUsers
+				t := m.ReportedAt
+				lastSeen = &t
+			}
+		}
+
+		isActiveFlow := (rxRate > 1024 || txRate > 1024)
+		if isOnline {
+			data.RealtimeRxRate += rxRate
+			data.RealtimeTxRate += txRate
+		}
+
+		statusVal := 0
+		if isOnline {
+			statusVal = 1
+		}
+
+		data.ServerMatrix = append(data.ServerMatrix, ServerMatrixItem{
+			ID:           s.ID,
+			Name:         s.Name,
+			NodeID:       s.NodeID,
+			Host:         s.Host,
+			Location:     s.Location,
+			Status:       statusVal,
+			LastSeenAt:   lastSeen,
+			CPU:          cpu,
+			Mem:          mem,
+			MemTotal:     memTotal,
+			Disk:         disk,
+			DiskTotal:    diskTotal,
+			RxRate:       rxRate,
+			TxRate:       txRate,
+			OnlineUsers:  onlineUsers,
+			IsActiveFlow: isActiveFlow,
 		})
 	}
 

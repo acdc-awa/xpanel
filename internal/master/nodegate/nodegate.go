@@ -54,6 +54,23 @@ const (
 	nodeReportSampleInterval = time.Minute
 )
 
+// NodeMetricsSnapshot 节点实时指标纯内存快照（供实时大盘毫秒级无锁读取，0 磁盘 I/O）。
+type NodeMetricsSnapshot struct {
+	ServerID    uint64    `json:"server_id"`
+	CPU         float64   `json:"cpu"`
+	Mem         float64   `json:"mem"`
+	MemTotal    uint64    `json:"mem_total"`
+	Disk        float64   `json:"disk"`
+	DiskTotal   uint64    `json:"disk_total"`
+	OnlineUsers int       `json:"online_users"`
+	RxRate      float64   `json:"rx_rate"`
+	TxRate      float64   `json:"tx_rate"`
+	RxBytes     uint64    `json:"rx_bytes"`
+	TxBytes     uint64    `json:"tx_bytes"`
+	XrayRunning bool      `json:"xray_running"`
+	ReportedAt  time.Time `json:"reported_at"`
+}
+
 // Conn 一条节点连接。
 type Conn struct {
 	ServerID uint64
@@ -72,8 +89,28 @@ type Conn struct {
 	// lastReportAt 上次 node_reports 落库时刻（采样节流）。仅 readPump 所在 goroutine
 	// 读写，无需加锁；重连新建 Conn 时为零值，首帧心跳立即落库。
 	lastReportAt time.Time
-	mu           sync.Mutex
-	closed       bool
+	// lastDBUpdate 上次向 SQLite servers 表同步 last_seen_at 的时刻（节流保护，避免高频心跳压满单连接池）。
+	lastDBUpdate time.Time
+	// lastXrayState 上次上报的 xray 运行状态（内存缓存，用于避免高频心跳每帧查库判断跃迁）。
+	lastXrayState string
+	// lastDiskHash 上次上报的磁盘配置哈希（内存缓存，用于避免高频心跳每帧查库判断偏离）。
+	lastDiskHash string
+
+	// 1 分钟落库采样窗口内的聚合指标跟踪（避免单点采样漏采瞬时尖峰）：
+	windowRxRateMax float64
+	windowTxRateMax float64
+	windowCPUSum    float64
+	windowCPUCount  int
+	windowMemLast   float64
+	windowMemTotal  uint64
+	windowDiskLast  float64
+	windowDiskTotal uint64
+	windowUsersMax  int
+	windowRxBytes   uint64
+	windowTxBytes   uint64
+
+	mu     sync.Mutex
+	closed bool
 }
 
 // touch 更新最近活跃时间。
@@ -114,6 +151,9 @@ type Hub struct {
 	wg      sync.WaitGroup
 	quit    chan struct{}
 
+	metricsMu     sync.RWMutex
+	latestMetrics map[uint64]*NodeMetricsSnapshot // server_id → 最新内存指标快照（0 磁盘 I/O）
+
 	upgradeMu     sync.RWMutex
 	upgradeStatus map[uint64]*protocol.UpgradeProgressPayload // server_id → 最新升级进度
 
@@ -147,6 +187,7 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 		pending: make(map[string]*pendingReq),
 		quit:    make(chan struct{}),
 	}
+	h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
 	h.enforcedAt = make(map[uint64]time.Time)
 	h.upgradeStatus = make(map[uint64]*protocol.UpgradeProgressPayload)
 	h.wg.Add(1)
@@ -200,11 +241,13 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	}
 
 	conn := &Conn{
-		ServerID: server.ID,
-		NodeID:   server.NodeID,
-		WS:       ws,
-		Send:     make(chan []byte, 64),
-		done:     make(chan struct{}),
+		ServerID:      server.ID,
+		NodeID:        server.NodeID,
+		WS:            ws,
+		Send:          make(chan []byte, 64),
+		done:          make(chan struct{}),
+		lastXrayState: server.XrayState,
+		lastDiskHash:  server.XrayDiskHash,
 	}
 	conn.LastSeen.Store(time.Now().Unix())
 	h.register(conn)
@@ -291,9 +334,82 @@ func (h *Hub) unregister(conn *Conn) {
 	// P2-10：仅当注册表中已无该节点的新连接时才把 DB 状态置 0，
 	// 避免旧连接退出与新连接注册交错时把在线节点短暂标离线。
 	if !hasReplacement {
-		h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
-			Update("status", 0)
+		if h.DB != nil {
+			h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
+				Update("status", 0)
+		}
+		// 节点彻底离线时，内存快照中的瞬时速率与在线人数归零
+		h.metricsMu.Lock()
+		if h.latestMetrics != nil {
+			if m, ok := h.latestMetrics[conn.ServerID]; ok && m != nil {
+				m.RxRate = 0
+				m.TxRate = 0
+				m.OnlineUsers = 0
+				m.XrayRunning = false
+			}
+		}
+		h.metricsMu.Unlock()
 	}
+}
+
+// GetLatestMetrics 获取单个节点的最新纯内存监控快照。
+func (h *Hub) GetLatestMetrics(serverID uint64) (*NodeMetricsSnapshot, bool) {
+	h.metricsMu.RLock()
+	defer h.metricsMu.RUnlock()
+	if h.latestMetrics == nil {
+		return nil, false
+	}
+	m, ok := h.latestMetrics[serverID]
+	if !ok || m == nil {
+		return nil, false
+	}
+	cp := *m
+	if !h.IsOnline(serverID) {
+		cp.RxRate = 0
+		cp.TxRate = 0
+		cp.OnlineUsers = 0
+		cp.XrayRunning = false
+	}
+	return &cp, true
+}
+
+// GetAllLatestMetrics 获取所有节点的最新纯内存监控快照映射（副本）。
+func (h *Hub) GetAllLatestMetrics() map[uint64]*NodeMetricsSnapshot {
+	h.metricsMu.RLock()
+	defer h.metricsMu.RUnlock()
+	res := make(map[uint64]*NodeMetricsSnapshot, len(h.latestMetrics))
+	for id, m := range h.latestMetrics {
+		if m != nil {
+			cp := *m
+			if !h.IsOnline(id) {
+				cp.RxRate = 0
+				cp.TxRate = 0
+				cp.OnlineUsers = 0
+				cp.XrayRunning = false
+			}
+			res[id] = &cp
+		}
+	}
+	return res
+}
+
+// SetMetricsForTest 供测试注入模拟指标快照。
+func (h *Hub) SetMetricsForTest(serverID uint64, m *NodeMetricsSnapshot) {
+	h.metricsMu.Lock()
+	if h.latestMetrics == nil {
+		h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
+	}
+	h.latestMetrics[serverID] = m
+	h.metricsMu.Unlock()
+}
+
+// SetOnlineForTest 供测试注册模拟在线连接。
+func (h *Hub) SetOnlineForTest(serverID uint64, lastSeen time.Time) {
+	h.mu.Lock()
+	conn := &Conn{ServerID: serverID}
+	conn.LastSeen.Store(lastSeen.Unix())
+	h.conns[serverID] = conn
+	h.mu.Unlock()
 }
 
 // readPump 读取消息循环。
@@ -527,76 +643,17 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	var hb protocol.HeartbeatPayload
 	_ = msg.PayloadTo(&hb)
 	now := time.Now()
-	updates := map[string]any{
-		"status":       1,
-		"last_seen_at": now,
-		"xray_running": hb.XrayRunning,
-	}
-	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
-		updates["agent_version"] = hb.Version
-	}
-	// xray 启动失败可观测性（2026-09-21）：新版 agent 心跳带回状态与失败原因；旧 agent 不发，
-	// 此时不动这些列（保持上次值），避免把面板上已有的原因抹掉。
-	// 跃迁判定要读"更新前"的状态，必须在下面的 Updates 之前取
-	prevXrayState := ""
-	if hb.XrayState != "" {
-		var prev models.Server
-		if err := h.DB.Select("xray_state").First(&prev, conn.ServerID).Error; err == nil {
-			prevXrayState = prev.XrayState
-		}
-		updates["xray_state"] = hb.XrayState
-		updates["xray_failures"] = hb.XrayFailures
-		if hb.XrayLastError != "" {
-			updates["xray_last_error"] = truncateRunes(hb.XrayLastError, 500)
-			if hb.XrayErrorAt > 0 {
-				updates["xray_error_at"] = time.Unix(hb.XrayErrorAt, 0)
-			}
-		}
-	}
-	// 配置对账哈希（2026-09-21）：新版 agent 上报；旧 agent 两个字段均为空（空值保持，不覆盖）。
-	// 当 DiskHash 非空时，说明对端是支持哈希对账的新 agent，此时 RunningHash 如实写入（含停止时的空串）。
-	if hb.DiskHash != "" {
-		updates["xray_disk_hash"] = hb.DiskHash
-		updates["xray_running_hash"] = hb.RunningHash
-		// 磁盘偏离自愈闭环：若节点上报的磁盘哈希与主控已生效记录不一致，触发热更落盘自动对齐
-		if h.Config != nil {
-			if pend, perr := h.Config.GetPending(conn.ServerID); perr == nil && pend != nil &&
-				pend.Status == "pushed" && pend.AppliedHash != "" && hb.DiskHash != pend.AppliedHash {
-				if conn.usersSynced.Load() {
-					conn.usersSynced.Store(false)
-					go func(sid uint64) {
-						if err := h.SyncUsers(sid); err != nil {
-							log.Printf("nodegate: 节点 %d 磁盘偏离自动修复失败: %v（将由看门狗重试）", sid, err)
-						}
-					}(conn.ServerID)
-				}
-			}
-		}
-	}
-	// 在线用户 IP 快照每次覆写：新版 agent 心跳携带；旧 agent 或无人在线为空列表（如实清空）
-	if len(hb.OnlineIPs) == 0 {
-		updates["online_ips"] = "[]"
-	} else if b, err := json.Marshal(hb.OnlineIPs); err == nil {
-		updates["online_ips"] = string(b)
-	}
-	h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
-	// 报警：状态跃迁才记一条系统审计（连续失败→已停止自动拉起 / 失败后恢复），不按心跳刷屏。
-	if hb.XrayState != "" {
-		h.raiseXrayAlarm(conn.ServerID, prevXrayState, hb)
-	}
-	// node_reports 采样落库（见 nodeReportSampleInterval）：保活/状态每帧即时更新，
-	// 监控指标行按固定间隔抽稀，避免心跳频率直接决定存储增长。
-	if now.Sub(conn.lastReportAt) < nodeReportSampleInterval {
-		return
-	}
-	conn.lastReportAt = now
+	conn.touch()
+
 	// 在线数按去重用户口径重算：统计键按入站区分后同一用户每入站一个 email 条目，
 	// agent 直接计数会重复计人；快照为空（旧 agent）沿用其计数。
 	onlineUsers := hb.OnlineUsers
 	if len(hb.OnlineIPs) > 0 {
 		onlineUsers = xray.CountDistinctOnlineUsers(hb.OnlineIPs)
 	}
-	_ = h.DB.Create(&models.NodeReport{
+
+	// 1. 无论是否到达 DB 抽稀落库间隔，每一帧心跳都无条件立即更新纯内存快照（0 磁盘 I/O）
+	snapshot := &NodeMetricsSnapshot{
 		ServerID:    conn.ServerID,
 		CPU:         hb.CPU,
 		Mem:         hb.Mem,
@@ -608,8 +665,147 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		TxRate:      hb.TxRate,
 		RxBytes:     hb.RxBytes,
 		TxBytes:     hb.TxBytes,
+		XrayRunning: hb.XrayRunning,
 		ReportedAt:  now,
-	}).Error
+	}
+	h.metricsMu.Lock()
+	if h.latestMetrics == nil {
+		h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
+	}
+	h.latestMetrics[conn.ServerID] = snapshot
+	h.metricsMu.Unlock()
+
+	// 2. 窗口聚合：累积 1 分钟内的峰值与总量（避免点采样漏采瞬时尖峰）
+	if hb.RxRate > conn.windowRxRateMax {
+		conn.windowRxRateMax = hb.RxRate
+	}
+	if hb.TxRate > conn.windowTxRateMax {
+		conn.windowTxRateMax = hb.TxRate
+	}
+	if onlineUsers > conn.windowUsersMax {
+		conn.windowUsersMax = onlineUsers
+	}
+	conn.windowCPUSum += hb.CPU
+	conn.windowCPUCount++
+	conn.windowMemLast = hb.Mem
+	conn.windowMemTotal = uint64(hb.MemTotal)
+	conn.windowDiskLast = hb.Disk
+	conn.windowDiskTotal = uint64(hb.DiskTotal)
+	conn.windowRxBytes = hb.RxBytes
+	conn.windowTxBytes = hb.TxBytes
+
+	// 3. 构建 servers 表更新字段
+	updates := map[string]any{
+		"status":       1,
+		"last_seen_at": now,
+		"xray_running": hb.XrayRunning,
+	}
+	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
+		updates["agent_version"] = hb.Version
+	}
+	prevXrayState := conn.lastXrayState
+	stateChanged := false
+	if hb.XrayState != "" {
+		if hb.XrayState != conn.lastXrayState {
+			stateChanged = true
+			conn.lastXrayState = hb.XrayState
+		}
+		updates["xray_state"] = hb.XrayState
+		updates["xray_failures"] = hb.XrayFailures
+		if hb.XrayLastError != "" {
+			updates["xray_last_error"] = truncateRunes(hb.XrayLastError, 500)
+			if hb.XrayErrorAt > 0 {
+				updates["xray_error_at"] = time.Unix(hb.XrayErrorAt, 0)
+			}
+		}
+	}
+	if hb.DiskHash != "" {
+		updates["xray_disk_hash"] = hb.DiskHash
+		updates["xray_running_hash"] = hb.RunningHash
+		// 仅当节点上报的磁盘哈希与上次内存记录不一致时才查库判定偏离，避免高频心跳每帧打库
+		if hb.DiskHash != conn.lastDiskHash {
+			conn.lastDiskHash = hb.DiskHash
+			if h.Config != nil {
+				if pend, perr := h.Config.GetPending(conn.ServerID); perr == nil && pend != nil &&
+					pend.Status == "pushed" && pend.AppliedHash != "" && hb.DiskHash != pend.AppliedHash {
+					if conn.usersSynced.Load() {
+						conn.usersSynced.Store(false)
+						go func(sid uint64) {
+							if err := h.SyncUsers(sid); err != nil {
+								log.Printf("nodegate: 节点 %d 磁盘偏离自动修复失败: %v（将由看门狗重试）", sid, err)
+							}
+						}(conn.ServerID)
+					}
+				}
+			}
+		}
+	}
+	if len(hb.OnlineIPs) == 0 {
+		updates["online_ips"] = "[]"
+	} else if b, err := json.Marshal(hb.OnlineIPs); err == nil {
+		updates["online_ips"] = string(b)
+	}
+
+	// 节流写入 SQLite servers 表：首次心跳、状态跃迁立即写库；常规心跳节流至 30s 一次，
+	// 避免高频心跳（3-5s）打爆 SQLite 单连接池。
+	needDBUpdate := conn.lastDBUpdate.IsZero() ||
+		now.Sub(conn.lastDBUpdate) >= 30*time.Second ||
+		stateChanged
+	if needDBUpdate && h.DB != nil {
+		conn.lastDBUpdate = now
+		h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).Updates(updates)
+	}
+
+	// 报警：状态跃迁才记一条系统审计
+	if stateChanged {
+		h.raiseXrayAlarm(conn.ServerID, prevXrayState, hb)
+	}
+
+	// 4. node_reports 采样落库（见 nodeReportSampleInterval）：
+	// 监控指标行按固定间隔（默认 1 分钟）抽稀，写入窗口内的真实峰值与均值，零额外存储增长。
+	if now.Sub(conn.lastReportAt) < nodeReportSampleInterval {
+		return
+	}
+	conn.lastReportAt = now
+	rxRate := hb.RxRate
+	if conn.windowRxRateMax > rxRate {
+		rxRate = conn.windowRxRateMax
+	}
+	txRate := hb.TxRate
+	if conn.windowTxRateMax > txRate {
+		txRate = conn.windowTxRateMax
+	}
+	maxUsers := onlineUsers
+	if conn.windowUsersMax > maxUsers {
+		maxUsers = conn.windowUsersMax
+	}
+	avgCPU := hb.CPU
+	if conn.windowCPUCount > 0 {
+		avgCPU = conn.windowCPUSum / float64(conn.windowCPUCount)
+	}
+	if h.DB != nil {
+		_ = h.DB.Create(&models.NodeReport{
+			ServerID:    conn.ServerID,
+			CPU:         avgCPU,
+			Mem:         hb.Mem,
+			MemTotal:    uint64(hb.MemTotal),
+			Disk:        hb.Disk,
+			DiskTotal:   uint64(hb.DiskTotal),
+			OnlineUsers: maxUsers,
+			RxRate:      rxRate,
+			TxRate:      txRate,
+			RxBytes:     hb.RxBytes,
+			TxBytes:     hb.TxBytes,
+			ReportedAt:  now,
+		}).Error
+	}
+
+	// 重置窗口统计
+	conn.windowRxRateMax = 0
+	conn.windowTxRateMax = 0
+	conn.windowCPUSum = 0
+	conn.windowCPUCount = 0
+	conn.windowUsersMax = 0
 }
 
 func (h *Hub) handleResult(msg *protocol.Message) {

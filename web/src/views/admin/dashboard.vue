@@ -11,7 +11,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
-import { getDashboard } from '@/api/admin'
+import { getDashboard, getDashboardRealtime } from '@/api/admin'
 import type { RankPeriod } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
@@ -59,12 +59,16 @@ const donutChartRef = ref<HTMLDivElement | null>(null)
 let trendChart: echarts.ECharts | null = null
 let donutChart: echarts.ECharts | null = null
 let autoRefreshTimer: any = null
+let realtimeTimer: any = null
 let inFlight = false
+let realtimeInFlight = false
 
-// 拉取间隔。注意它不等于数据新鲜度：节点指标随心跳上报（30-60 秒），
-// 今日/本月流量按 5 分钟聚合，因此部分指标的真实滞后大于该间隔。
+// 双频轮询设计：
+// 1. 实时网速与健康矩阵：每 3 秒拉取轻量接口（纯主控内存组装，0 复杂 SQL 聚合）
+// 2. 报表与统计：每 30 秒拉取完整仪表盘（营收、订单、天级趋势、排行）
+const REALTIME_POLL_INTERVAL_MS = 3000
 const POLL_INTERVAL_MS = 30000
-const POLL_HINT = '面板每 30 秒拉取一次。节点指标随心跳上报（30-60 秒），流量统计按 5 分钟聚合，部分指标滞后大于该间隔。'
+const POLL_HINT = '实时网速与监控矩阵每 3 秒刷新（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。'
 
 function formatBandwidth(bytesPerSec: number): string {
   if (!bytesPerSec || bytesPerSec <= 0) return '0.00 Mbps'
@@ -334,6 +338,40 @@ async function load(opts: { silent?: boolean } = {}) {
   }
 }
 
+async function loadRealtime() {
+  if (realtimeInFlight || !dashData.value) return
+  realtimeInFlight = true
+  try {
+    const { data } = await getDashboardRealtime()
+    if (data.code === 0 && data.data && dashData.value) {
+      dashData.value.summary.realtime_rx_rate = data.data.realtime_rx_rate
+      dashData.value.summary.realtime_tx_rate = data.data.realtime_tx_rate
+      dashData.value.summary.online_servers = data.data.online_servers
+      dashData.value.summary.total_servers = data.data.total_servers
+      // 聚合合并：若节点离线且实时快照无静态指标，保留全量大盘已加载的静态负载，防止进度条归零闪烁
+      const currentList = dashData.value.server_matrix || []
+      dashData.value.server_matrix = data.data.server_matrix.map((newItem) => {
+        const existing = currentList.find((s) => s.id === newItem.id)
+        if (existing && newItem.status === 0 && !newItem.mem_total && existing.mem_total) {
+          return {
+            ...newItem,
+            cpu: existing.cpu,
+            mem: existing.mem,
+            mem_total: existing.mem_total,
+            disk: existing.disk,
+            disk_total: existing.disk_total,
+          }
+        }
+        return newItem
+      })
+    }
+  } catch {
+    // 实时指标轮询静默失败，不打扰用户
+  } finally {
+    realtimeInFlight = false
+  }
+}
+
 // 档位切换即重拉（轮询沿用当前档位）
 watch(trendRange, () => load())
 // 流量口径切换同样即时重拉：用户排行/节点排行/流量分布三者由后端同源返回
@@ -342,12 +380,17 @@ watch(rankPeriod, () => load())
 function startPolling() {
   stopPolling()
   autoRefreshTimer = setInterval(() => load({ silent: true }), POLL_INTERVAL_MS)
+  realtimeTimer = setInterval(() => loadRealtime(), REALTIME_POLL_INTERVAL_MS)
 }
 
 function stopPolling() {
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
+  }
+  if (realtimeTimer) {
+    clearInterval(realtimeTimer)
+    realtimeTimer = null
   }
 }
 
@@ -395,7 +438,7 @@ onUnmounted(() => {
       </div>
       <div style="display: flex; align-items: center; gap: 12px">
         <span class="muted cell-mono" style="font-size: 12px" :title="POLL_HINT">
-          最后更新: {{ lastUpdatedTime || '—' }} · 每 30 秒拉取
+          最后更新: {{ lastUpdatedTime || '—' }} · 实时网速 3 秒 · 报表 30 秒
           <template v-if="pollFailed"> · 上次拉取失败</template>
         </span>
         <el-button :loading="loading" @click="load()">

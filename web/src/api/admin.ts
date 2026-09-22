@@ -1,6 +1,7 @@
 import { http } from './http'
 import type {
   DashboardData,
+  DashboardRealtimeData,
   ServerMetricsData,
   AdminUser,
   AdminUserPage,
@@ -23,6 +24,7 @@ import type {
 
 export type {
   DashboardData,
+  DashboardRealtimeData,
   ServerMetricsData,
   AdminUser,
   AdminUserPage,
@@ -47,6 +49,11 @@ export function getDashboard(days?: 3 | 7 | 30, rankPeriod?: RankPeriod) {
   if (days) params.days = days
   if (rankPeriod) params.rank_period = rankPeriod
   return http.get<ApiResp<DashboardData>>('/admin/dashboard', { params })
+}
+
+/** 仪表盘高频轻量实时指标（纯内存组装，0 复杂 SQL 聚合）。 */
+export function getDashboardRealtime() {
+  return http.get<ApiResp<DashboardRealtimeData>>('/admin/dashboard/realtime')
 }
 
 export interface BackupItem {

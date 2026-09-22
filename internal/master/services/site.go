@@ -34,7 +34,7 @@ const (
 	// 节点上报周期（2026-09-01，设置页「节点上报」；agent_settings 消息下发到节点）。
 	// 缩短上报周期可加快超额/到期用户的踢除时效（配合事件驱动处置，最坏延迟≈上报周期）。
 	SettingAgentReportInterval    = "agent_report_interval"    // 流量上报周期（秒，默认 60）
-	SettingAgentHeartbeatInterval = "agent_heartbeat_interval" // 状态心跳周期（秒，默认 30）
+	SettingAgentHeartbeatInterval = "agent_heartbeat_interval" // 节点状态心跳周期（秒，默认 5）
 )
 
 // SiteKeys 站点分组全部键（设置页「站点」tab；SetSiteGroup 白名单）。
@@ -107,26 +107,31 @@ func AgentReportIntervalSec(db *gorm.DB) int {
 	return clampIntervalSec(GetSetting(db, SettingAgentReportInterval), 60)
 }
 
-// AgentHeartbeatIntervalSec 节点状态心跳周期（秒；缺省 30，clamp 5–1800）。
+// AgentHeartbeatIntervalSec 节点状态心跳周期（秒；缺省 5，clamp 3–1800）。
 func AgentHeartbeatIntervalSec(db *gorm.DB) int {
-	return clampIntervalSec(GetSetting(db, SettingAgentHeartbeatInterval), 30)
+	return clampIntervalSecWithMin(GetSetting(db, SettingAgentHeartbeatInterval), 5, 3)
 }
 
-// clampIntervalSec 解析秒数设置：空/非法回退默认值，并收敛到 agent 端可接受区间。
-func clampIntervalSec(v string, def int) int {
+// clampIntervalSecWithMin 解析秒数设置：空/非法回退默认值，并收敛到 [minVal, 1800] 区间。
+func clampIntervalSecWithMin(v string, def int, minVal int) int {
 	n := def
 	if v != "" {
 		if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p > 0 {
 			n = p
 		}
 	}
-	if n < 5 {
-		n = 5
+	if n < minVal {
+		n = minVal
 	}
 	if n > 1800 {
 		n = 1800
 	}
 	return n
+}
+
+// clampIntervalSec 解析秒数设置：空/非法回退默认值，并收敛到 agent 端可接受区间（下限 5s）。
+func clampIntervalSec(v string, def int) int {
+	return clampIntervalSecWithMin(v, def, 5)
 }
 
 // SetSetting 保存单个设置（upsert）。

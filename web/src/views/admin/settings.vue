@@ -85,7 +85,7 @@ const emptyCaptcha = (): CaptchaGroup => ({
 })
 const emptyAgent = (): AgentGroup => ({
   agent_report_interval: '60',
-  agent_heartbeat_interval: '30',
+  agent_heartbeat_interval: '5',
 })
 const emptyTimezone = (): TimezoneGroup => ({
   business_timezone: 'Asia/Shanghai',
@@ -130,9 +130,9 @@ const subUpdateHours = computed<number>({
   },
 })
 const agentHeartbeatSec = computed<number>({
-  get: () => Number(form.agent.agent_heartbeat_interval) || 30,
+  get: () => Number(form.agent.agent_heartbeat_interval) || 5,
   set: (v) => {
-    form.agent.agent_heartbeat_interval = String(v ?? 30)
+    form.agent.agent_heartbeat_interval = String(v ?? 5)
   },
 })
 
@@ -1208,7 +1208,7 @@ async function save() {
               <template #label>
                 <span class="form-label-with-tip">
                   流量增量上报周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器向面板同步 xray 流量增量的频率。缩短周期可加快超额/到期用户的踢下线时效（配合流量落库后的即时处置，最坏延迟 ≈ 一个上报周期）；周期过小会增大服务器与面板的负载，建议 15-120 秒。">
+                  <el-tooltip placement="top" :show-after="150" content="服务器向面板同步 xray 用户计费流量增量的频率。较长周期（如 60-120 秒）可减少数据库写入压力；超额/到期判定将在落库后即时处置。">
                     <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1219,12 +1219,12 @@ async function save() {
               <template #label>
                 <span class="form-label-with-tip">
                   状态心跳周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等健康状态的频率。默认 30 秒；调小可更快发现服务器异常，但会增大服务器与面板的负载。">
+                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。">
                     <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
               </template>
-              <el-input-number v-model="agentHeartbeatSec" :min="5" :max="1800" :step="5" style="width: 220px" />
+              <el-input-number v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
             </el-form-item>
             <div class="settings-footer-tip">
               <el-icon class="tip-icon"><InfoFilled /></el-icon>

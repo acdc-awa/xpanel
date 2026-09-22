@@ -136,6 +136,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		admin := v1.Group("/admin", adminMiddleware(d)...)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
+			admin.GET("/dashboard/realtime", d.AdminDashboardRealtime)
 			admin.GET("/system/status", d.AdminSystemStatus)
 			admin.GET("/update/check", d.AdminUpdateCheck)
 			admin.GET("/update/status", d.AdminUpdateStatus)

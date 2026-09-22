@@ -146,6 +146,14 @@ export interface DashboardData {
   recent_orders: RecentOrderItem[]
 }
 
+export interface DashboardRealtimeData {
+  realtime_rx_rate: number
+  realtime_tx_rate: number
+  online_servers: number
+  total_servers: number
+  server_matrix: ServerMatrixItem[]
+}
+
 export interface ServerMetricsData {
   server_id: number
   server_name: string
