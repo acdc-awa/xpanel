@@ -57,7 +57,7 @@ type AuthService interface {
 	Login(ctx context.Context, username, password, clientIP string) (*models.User, error)
 	Refresh(ctx context.Context, refreshToken string) (string, error)
 	Register(ctx context.Context, req *RegisterRequest) (*models.User, error)
-	ResetSubscribeToken(ctx context.Context, userID uint64) (string, error)
+	ResetSubscribeToken(ctx context.Context, userID uint64) (token string, newUUID string, err error)
 	VerifyPassword(userID uint64, password string) (bool, error)
 }
 

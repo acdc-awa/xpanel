@@ -1,7 +1,10 @@
 package api
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
@@ -120,14 +123,39 @@ func (d *Deps) AdminDisableOTP(c *gin.Context) {
 	util.OK(c, gin.H{"ok": true})
 }
 
-// UserResetSubscribe POST /api/v1/user/subscribe/reset —— 重置订阅密钥（旧链接即刻失效）。
+// UserResetSubscribe POST /api/v1/user/subscribe/reset —— 重置订阅密钥与连接凭据 UUID（旧订阅与节点连接即刻失效）。
 func (d *Deps) UserResetSubscribe(c *gin.Context) {
 	uid := middleware.CurrentUser(c)
-	token, err := d.Auth.ResetSubscribeToken(c.Request.Context(), uid)
+	var token string
+	var err error
+	if d.Auth != nil {
+		token, _, err = d.Auth.ResetSubscribeToken(c.Request.Context(), uid)
+	} else {
+		var newUUID string
+		token, err = util.NewSubscribeToken()
+		if err == nil {
+			newUUID, err = util.NewUUID()
+		}
+		if err == nil {
+			res := d.DB.Model(&models.User{}).Where("id = ?", uid).Updates(map[string]any{"subscribe_token": token, "uuid": newUUID})
+			if res.Error != nil {
+				err = res.Error
+			} else if res.RowsAffected == 0 {
+				err = gorm.ErrRecordNotFound
+			}
+		}
+	}
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			util.Fail(c, 404, "用户不存在")
+			return
+		}
 		util.ServerError(c, "重置失败")
 		return
 	}
-	d.Audit.Log("user", uid, "subscribe.reset_token", "重置订阅密钥", util.ClientIPFromContext(c))
+	if d.Audit != nil {
+		d.Audit.Log("user", uid, "subscribe.reset_token", "重置订阅地址与连接凭据", util.ClientIPFromContext(c))
+	}
+	d.TriggerUserChange()
 	util.OK(c, gin.H{"subscribe_token": token})
 }

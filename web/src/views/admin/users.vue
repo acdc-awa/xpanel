@@ -481,8 +481,8 @@ async function doResetSubscribeToken() {
   if (!row) return
   try {
     await ElMessageBox.confirm(
-      '重置后该用户原有的订阅链接将立即失效，用户需重新添加订阅。确定重置？',
-      '重置订阅链接',
+      '重置后该用户的原订阅地址及连接密钥（UUID）将立即失效，在线服务器将实时断开旧凭据连接。确定重置？',
+      '重置订阅地址',
       { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
     )
   } catch {
@@ -493,12 +493,15 @@ async function doResetSubscribeToken() {
     const { data } = await resetUserSubscribeToken(row.id)
     if (data.code === 0) {
       subInfoToken.value = data.data.subscribe_token
-      ElMessage.success('订阅链接已重置，旧链接已失效')
+      if (data.data.uuid) {
+        row.uuid = data.data.uuid
+      }
+      ElMessage.success('订阅地址及连接密钥已重置，已向在线服务器同步')
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置订阅链接失败'))
+    ElMessage.error(errMsg(e, '重置订阅地址失败'))
   } finally {
     subInfoResetting.value = false
   }
@@ -1144,10 +1147,10 @@ function handleCardAction(cmd: string, row: AdminUser) {
         </div>
         <!-- label 置顶独立成行：避免长 label 横向占宽挤压输入框（桌面），并消除窄屏下的行内溢出（移动） -->
         <el-form label-position="top" @submit.prevent>
-          <el-form-item label="订阅链接（发给用户，客户端添加订阅用）">
+          <el-form-item label="订阅地址（发给用户，客户端添加订阅用）">
             <div class="sub-url-row">
               <el-input :model-value="subInfoUrl" readonly class="cell-mono" size="default" />
-              <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅链接')">
+              <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅地址')">
                 <el-icon><CopyDocument /></el-icon>&nbsp;复制
               </el-button>
             </div>
@@ -1157,11 +1160,11 @@ function handleCardAction(cmd: string, row: AdminUser) {
       <template #footer>
         <el-button @click="subInfoOpen = false">关闭</el-button>
         <el-button type="danger" plain :loading="subInfoResetting" :disabled="subInfoLoading" @click="doResetSubscribeToken">
-          重置订阅链接
+          重置订阅地址
         </el-button>
         <TipIcon
           type="warn"
-          content="重置后该用户原有订阅地址立即失效，用户需重新添加订阅；节点凭据（UUID）不受影响，已配置的节点无需改动。"
+          content="重置后该用户的原订阅地址及连接密钥（UUID）将立即失效，在线服务器将实时断开旧凭据连接，用户需重新同步订阅。"
         />
       </template>
     </el-dialog>

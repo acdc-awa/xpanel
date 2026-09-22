@@ -523,9 +523,8 @@ func (d *Deps) AdminGetUserSubscribeToken(c *gin.Context) {
 	util.OK(c, gin.H{"id": user.ID, "subscribe_token": user.SubscribeToken})
 }
 
-// AdminResetUserSubscribeToken POST /api/v1/admin/users/:id/subscribe-token/reset —— 轮换用户订阅 token。
-// 旧订阅链接立即失效（订阅端点按 token 查用户，查不到走统一拒绝码）；节点凭据（UUID）不变，
-// xray 侧无需任何同步动作。重置记审计（中间件统一落库，注册表补目标用户邮箱）。
+// AdminResetUserSubscribeToken POST /api/v1/admin/users/:id/subscribe-token/reset —— 轮换用户订阅 token 与连接凭据（UUID）。
+// 旧订阅链接与节点连接凭据立即失效；重置后自动触发在线节点热更新。重置记审计（中间件统一落库，注册表补目标用户邮箱）。
 func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 	id, err := parseUint(c.Param("id"))
 	if err != nil {
@@ -537,16 +536,29 @@ func (d *Deps) AdminResetUserSubscribeToken(c *gin.Context) {
 		util.Fail(c, 404, "用户不存在")
 		return
 	}
-	token, err := util.NewSubscribeToken()
-	if err != nil {
-		util.ServerError(c, "生成订阅 token 失败")
-		return
+	var token, newUUID string
+	if d.Auth != nil {
+		token, newUUID, err = d.Auth.ResetSubscribeToken(c.Request.Context(), user.ID)
+	} else {
+		token, err = util.NewSubscribeToken()
+		if err == nil {
+			newUUID, err = util.NewUUID()
+		}
+		if err == nil {
+			res := d.DB.Model(&user).Updates(map[string]any{"subscribe_token": token, "uuid": newUUID})
+			if res.Error != nil {
+				err = res.Error
+			} else if res.RowsAffected == 0 {
+				err = gorm.ErrRecordNotFound
+			}
+		}
 	}
-	if err := d.DB.Model(&user).Update("subscribe_token", token).Error; err != nil {
+	if err != nil {
 		util.ServerError(c, "重置失败")
 		return
 	}
-	util.OK(c, gin.H{"id": user.ID, "subscribe_token": token})
+	d.TriggerUserChange()
+	util.OK(c, gin.H{"id": user.ID, "subscribe_token": token, "uuid": newUUID})
 }
 
 // AdminDeleteUser DELETE /api/v1/admin/users/:id —— 硬删除用户（清理授权后移除记录）。

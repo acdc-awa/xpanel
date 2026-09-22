@@ -100,8 +100,8 @@ function openQrModal() {
 async function onResetSubscribe() {
   try {
     await ElMessageBox.confirm(
-      '重置后原订阅地址将立即失效，已添加的客户端需重新同步新的订阅地址。确认重置？',
-      '重置订阅链接',
+      '重置后，原订阅地址与已连接的节点凭据将立即失效，所有客户端需重新同步或更新订阅后方可继续使用。确定重置订阅地址？',
+      '重置订阅地址',
       { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' },
     )
   } catch {
@@ -111,14 +111,14 @@ async function onResetSubscribe() {
   try {
     const { data } = await resetSubscribeToken()
     if (data.code === 0) {
-      ElMessage.success('订阅链接已重置，旧链接已失效')
+      ElMessage.success('订阅地址与连接凭据已重置，请在客户端中更新订阅')
       await auth.fetchMe()
       await refreshQr()
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置订阅链接失败'))
+    ElMessage.error(errMsg(e, '重置订阅地址失败'))
   } finally {
     resettingSub.value = false
   }
@@ -212,7 +212,7 @@ const clashApps: ClientApp[] = [
                 <el-icon><Cellphone /></el-icon>&nbsp;手机扫码导入
               </el-button>
               <el-button text size="small" type="danger" :loading="resettingSub" @click="onResetSubscribe">
-                <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅链接
+                <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅地址
               </el-button>
             </div>
           </div>

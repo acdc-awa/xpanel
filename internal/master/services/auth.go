@@ -327,15 +327,26 @@ func (s *OTPService) ResetPassword(ctx context.Context, email, code, newPwd stri
 	}).Error
 }
 
-// ResetSubscribeToken 重置用户订阅密钥（旧订阅链接即刻失效）。
-func (s *AuthService) ResetSubscribeToken(ctx context.Context, userID uint64) (string, error) {
+// ResetSubscribeToken 重置用户订阅密钥与连接凭据 UUID（旧订阅与节点连接凭据即刻失效）。
+func (s *AuthService) ResetSubscribeToken(ctx context.Context, userID uint64) (string, string, error) {
 	token, err := util.NewSubscribeToken()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if err := s.DB.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
-		Update("subscribe_token", token).Error; err != nil {
-		return "", err
+	newUUID, err := util.NewUUID()
+	if err != nil {
+		return "", "", err
 	}
-	return token, nil
+	res := s.DB.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]any{
+			"subscribe_token": token,
+			"uuid":            newUUID,
+		})
+	if res.Error != nil {
+		return "", "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		return "", "", gorm.ErrRecordNotFound
+	}
+	return token, newUUID, nil
 }

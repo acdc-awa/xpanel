@@ -105,3 +105,49 @@ func TestLoginLockExpiry(t *testing.T) {
 		t.Fatalf("过期锁定应自动清除并放行: %v", err)
 	}
 }
+
+// TestResetSubscribeToken 测试重置订阅时同时轮换 token 与 UUID。
+func TestResetSubscribeToken(t *testing.T) {
+	db := newAuthTestDB(t)
+	origUUID := "11111111-1111-1111-1111-111111111111"
+	origToken := "old-token-1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+	u := models.User{
+		Username:       "reset@example.com",
+		Email:          "reset@example.com",
+		UUID:           origUUID,
+		SubscribeToken: origToken,
+		Status:         models.StatusActive,
+	}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &AuthService{DB: db}
+	token, newUUID, err := svc.ResetSubscribeToken(t.Context(), u.ID)
+	if err != nil {
+		t.Fatalf("ResetSubscribeToken 失败: %v", err)
+	}
+
+	if token == "" || token == origToken {
+		t.Fatalf("token 未更新，got: %s", token)
+	}
+	if newUUID == "" || newUUID == origUUID {
+		t.Fatalf("uuid 未更新，got: %s", newUUID)
+	}
+
+	var reloaded models.User
+	if err := db.First(&reloaded, u.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.SubscribeToken != token {
+		t.Fatalf("数据库 SubscribeToken 未更新: got %s, want %s", reloaded.SubscribeToken, token)
+	}
+	if reloaded.UUID != newUUID {
+		t.Fatalf("数据库 UUID 未更新: got %s, want %s", reloaded.UUID, newUUID)
+	}
+
+	// 测试不存在的用户返回错误
+	if _, _, err := svc.ResetSubscribeToken(t.Context(), 999999); err == nil {
+		t.Fatal("不存在的用户重置未返回错误")
+	}
+}

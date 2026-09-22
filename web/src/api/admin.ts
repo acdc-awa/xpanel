@@ -357,7 +357,7 @@ export function getUserSubscribeToken(id: number) {
 }
 
 export function resetUserSubscribeToken(id: number) {
-  return http.post<ApiResp<{ id: number; subscribe_token: string }>>(`/admin/users/${id}/subscribe-token/reset`)
+  return http.post<ApiResp<{ id: number; subscribe_token: string; uuid?: string }>>(`/admin/users/${id}/subscribe-token/reset`)
 }
 
 export function createInvitations(count: number, expires?: string) {
