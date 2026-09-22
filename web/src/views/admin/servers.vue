@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, Download, MoreFilled, Loading, Check, Close, Platform } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, Download, MoreFilled, Loading, Check, Close, Platform, Link } from '@element-plus/icons-vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
@@ -26,12 +26,14 @@ import {
 import { errMsg } from '@/api/http'
 import { compareVersion } from '@/utils/version'
 import { formatDateTime } from '@/utils/timezone'
+import { getExpiryStatus, formatExpireDate, normalizeUrl, isUrl } from '@/utils/vps'
 
 const router = useRouter()
 
 const list = ref<ServerItem[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const filterExpiring = ref(false)
 
 const metricsOpen = ref(false)
 const metricsServer = ref<ServerItem | null>(null)
@@ -65,14 +67,31 @@ function goInbounds(row: any) {
   router.push({ path: '/admin/nodes', query: { server_id: row.id } })
 }
 
+const expiringServers = computed(() => {
+  return list.value.filter((s) => {
+    const st = getExpiryStatus(s.expire_at)
+    return st && st.isUrgent
+  })
+})
+
 const filtered = computed(() => {
+  let res = list.value
+  if (filterExpiring.value) {
+    res = res.filter((s) => {
+      const st = getExpiryStatus(s.expire_at)
+      return st && st.isUrgent
+    })
+  }
   const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return list.value
-  return list.value.filter(
+  if (!kw) return res
+  return res.filter(
     (s) =>
       s.name.toLowerCase().includes(kw) ||
       s.host.toLowerCase().includes(kw) ||
-      (s.location ?? '').toLowerCase().includes(kw),
+      (s.location ?? '').toLowerCase().includes(kw) ||
+      (s.billing_cycle ?? '').toLowerCase().includes(kw) ||
+      (s.price ?? '').toLowerCase().includes(kw) ||
+      (s.idc_address ?? '').toLowerCase().includes(kw),
   )
 })
 
@@ -182,7 +201,17 @@ function pushChip(row: any) {
 
 // ---- 新增服务器 ----
 const createOpen = ref(false)
-const createForm = reactive({ server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
+const createForm = reactive({
+  server_type: 'xray' as 'xray',
+  name: '',
+  host: '',
+  location: '',
+  remark: '',
+  expire_at: '' as string | null,
+  billing_cycle: '',
+  price: '',
+  idc_address: '',
+})
 const creating = ref(false)
 const createdResult = ref<{ node_id: string; secret: string; install_cmd: string } | null>(null)
 
@@ -193,13 +222,27 @@ async function submitCreate() {
   }
   creating.value = true
   try {
-    const { data } = await createServer({ ...createForm })
+    const { data } = await createServer({
+      server_type: createForm.server_type,
+      name: createForm.name,
+      host: createForm.host,
+      location: createForm.location,
+      remark: createForm.remark,
+      expire_at: createForm.expire_at || null,
+      billing_cycle: createForm.billing_cycle,
+      price: createForm.price,
+      idc_address: createForm.idc_address,
+    })
     if (data.code === 0) {
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
       createForm.remark = ''
+      createForm.expire_at = null
+      createForm.billing_cycle = ''
+      createForm.price = ''
+      createForm.idc_address = ''
       load()
     } else {
       ElMessage.error(data.message)
@@ -223,6 +266,14 @@ async function copyText(text: string, label: string) {
 function closeCreate() {
   createOpen.value = false
   createdResult.value = null
+  createForm.name = ''
+  createForm.host = ''
+  createForm.location = ''
+  createForm.remark = ''
+  createForm.expire_at = null
+  createForm.billing_cycle = ''
+  createForm.price = ''
+  createForm.idc_address = ''
 }
 
 // ---- 节点管理抽屉 ----
@@ -720,7 +771,18 @@ function copyLogs() {
 
 // ---- 编辑服务器 ----
 const editOpen = ref(false)
-const editForm = reactive({ id: 0, server_type: 'xray' as 'xray', name: '', host: '', location: '', remark: '' })
+const editForm = reactive({
+  id: 0,
+  server_type: 'xray' as 'xray',
+  name: '',
+  host: '',
+  location: '',
+  remark: '',
+  expire_at: '' as string | null,
+  billing_cycle: '',
+  price: '',
+  idc_address: '',
+})
 const editSaving = ref(false)
 
 function openEdit(row: any) {
@@ -731,6 +793,10 @@ function openEdit(row: any) {
     host: row.host,
     location: row.location ?? '',
     remark: row.remark ?? '',
+    expire_at: row.expire_at || null,
+    billing_cycle: row.billing_cycle ?? '',
+    price: row.price ?? '',
+    idc_address: row.idc_address ?? '',
   })
   editOpen.value = true
 }
@@ -748,6 +814,10 @@ async function submitEdit() {
       host: editForm.host,
       location: editForm.location,
       remark: editForm.remark,
+      expire_at: editForm.expire_at || null,
+      billing_cycle: editForm.billing_cycle,
+      price: editForm.price,
+      idc_address: editForm.idc_address,
     })
     if (data.code === 0) {
       ElMessage.success('已保存')
@@ -790,7 +860,7 @@ async function resetSecret(row: any) {
   }
 }
 
-// ---- 更多操作（编辑/重置密钥/删除/状态/日志/升级/重启） ----
+// ---- 更多操作（编辑/重置密钥/删除/状态/日志/升级/重启/打开 IDC） ----
 function onMore(cmd: string, row: any) {
   if (cmd === 'edit') openEdit(row)
   else if (cmd === 'reset') resetSecret(row)
@@ -800,6 +870,9 @@ function onMore(cmd: string, row: any) {
   else if (cmd === 'logs') openLogs(row)
   else if (cmd === 'upgrade') upgradeNodeAgent(row)
   else if (cmd === 'rollback') rollbackNodeAgent(row)
+  else if (cmd === 'open_idc') {
+    if (row.idc_address) window.open(normalizeUrl(row.idc_address), '_blank')
+  }
 }
 
 // ---- 删除 ----
@@ -858,6 +931,31 @@ async function removeServer(row: any) {
       <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
     </div>
 
+    <!-- 续费提醒横幅 -->
+    <el-alert
+      v-if="expiringServers.length > 0"
+      type="warning"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 14px"
+    >
+      <template #title>
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px">
+          <span>
+            续费提醒：共 <strong>{{ expiringServers.length }}</strong> 台服务器已到期或将在 7 天内到期，请注意及时前往 IDC 控制台续费。
+          </span>
+          <el-button
+            size="small"
+            :type="filterExpiring ? 'warning' : 'default'"
+            round
+            @click="filterExpiring = !filterExpiring"
+          >
+            {{ filterExpiring ? '查看全部服务器' : '仅看待续费服务器' }}
+          </el-button>
+        </div>
+      </template>
+    </el-alert>
+
     <BaseCard title="服务器列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
@@ -886,6 +984,12 @@ async function removeServer(row: any) {
                 {{ row.status === 1 ? '在线' : '离线' }}
               </span>
               <span v-if="row.location" class="x-chip blue" style="font-size: 10px; padding: 1px 5px">{{ row.location }}</span>
+              <!-- 到期预警徽标 -->
+              <el-tooltip v-if="getExpiryStatus(row.expire_at)" :content="getExpiryStatus(row.expire_at)!.tip" placement="top">
+                <span class="x-chip" :class="getExpiryStatus(row.expire_at)!.cls" style="cursor: help; font-size: 10px; padding: 1px 5px">
+                  {{ getExpiryStatus(row.expire_at)!.text }}
+                </span>
+              </el-tooltip>
               <el-tooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
                 <span class="x-chip" :class="xrayAlertChip(row).cls" style="cursor: help; font-size: 10px; padding: 1px 5px">
                   {{ xrayAlertChip(row).text }}
@@ -950,6 +1054,46 @@ async function removeServer(row: any) {
                 {{ row.last_seen_at ? fmtTime(row.last_seen_at) : '未有心跳记录' }}
               </div>
             </div>
+            <!-- VPS 续费与资产信息（若设置了其中任何一项） -->
+            <div v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address" class="grid-item full-width">
+              <span class="item-label">VPS 续费与资产</span>
+              <div class="item-value" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px">
+                  <span
+                    v-if="row.expire_at"
+                    class="cell-mono"
+                    :style="getExpiryStatus(row.expire_at)?.isUrgent ? { color: getExpiryStatus(row.expire_at)!.color, fontWeight: 600 } : {}"
+                    :title="getExpiryStatus(row.expire_at)?.tip || `到期日：${formatExpireDate(row.expire_at)}`"
+                  >
+                    {{ formatExpireDate(row.expire_at) }}
+                  </span>
+                  <span v-if="row.billing_cycle" class="x-chip gray" style="font-size: 9.5px; padding: 0 4px">{{ row.billing_cycle }}</span>
+                  <span v-if="row.price" class="cell-mono" style="font-weight: 600; color: var(--x-primary)">{{ row.price }}</span>
+                </div>
+                <div v-if="row.idc_address" style="display: flex; align-items: center; gap: 4px">
+                  <el-link
+                    v-if="isUrl(row.idc_address)"
+                    type="primary"
+                    :underline="false"
+                    style="font-size: 11px"
+                    :href="normalizeUrl(row.idc_address)"
+                    target="_blank"
+                  >
+                    <el-icon style="margin-right: 2px"><Link /></el-icon>IDC 控制台
+                  </el-link>
+                  <span
+                    v-else
+                    class="muted font-12"
+                    style="cursor: pointer; display: inline-flex; align-items: center; gap: 2px"
+                    title="点击复制 IDC 地址"
+                    @click="copyText(row.idc_address, 'IDC 地址')"
+                  >
+                    {{ row.idc_address }}
+                    <el-icon style="font-size: 11px"><CopyDocument /></el-icon>
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 操作按钮栏 -->
@@ -971,6 +1115,9 @@ async function removeServer(row: any) {
                 <el-dropdown-menu>
                   <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
                   <el-dropdown-item command="logs"><el-icon><Document /></el-icon>服务器日志</el-dropdown-item>
+                  <el-dropdown-item v-if="row.idc_address && isUrl(row.idc_address)" command="open_idc">
+                    <el-icon><Link /></el-icon>打开 IDC 控制台
+                  </el-dropdown-item>
                   <el-dropdown-item command="upgrade">
                     <el-icon><Upload /></el-icon>
                     {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级 Agent' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装 Agent' : '升级 Agent') }}
@@ -995,10 +1142,73 @@ async function removeServer(row: any) {
     <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
       <template v-if="!createdResult">
         <el-form label-position="top">
-          <el-form-item label="名称"><el-input v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" /></el-form-item>
-          <el-form-item label="地址"><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" /></el-form-item>
-          <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" /></el-form-item>
-          <el-form-item label="备注"><el-input v-model="createForm.remark" placeholder="选填" /></el-form-item>
+          <el-row :gutter="14">
+            <el-col :span="12">
+              <el-form-item label="名称" required><el-input v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" /></el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="地址" required><el-input v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" /></el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="14">
+            <el-col :span="12">
+              <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" /></el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="备注"><el-input v-model="createForm.remark" placeholder="选填" /></el-form-item>
+            </el-col>
+          </el-row>
+          <el-divider content-position="left" style="margin: 8px 0 14px">
+            <span style="font-size: 12px; color: var(--x-text-3)">VPS 续费与资产信息（选填）</span>
+          </el-divider>
+          <el-row :gutter="14">
+            <el-col :span="12">
+              <el-form-item label="到期日">
+                <el-date-picker
+                  v-model="createForm.expire_at"
+                  type="date"
+                  placeholder="选择到期日期"
+                  format="YYYY-MM-DD"
+                  value-format="YYYY-MM-DD"
+                  style="width: 100%"
+                  clearable
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="计费周期">
+                <el-select
+                  v-model="createForm.billing_cycle"
+                  filterable
+                  allow-create
+                  default-first-option
+                  placeholder="选择或输入计费周期"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option label="月付" value="月付" />
+                  <el-option label="季付" value="季付" />
+                  <el-option label="半年付" value="半年付" />
+                  <el-option label="年付" value="年付" />
+                  <el-option label="两年付" value="两年付" />
+                  <el-option label="三年付" value="三年付" />
+                  <el-option label="一次性 / 永久" value="一次性" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="14">
+            <el-col :span="12">
+              <el-form-item label="续费价格">
+                <el-input v-model="createForm.price" placeholder="如 ¥35.00 / $24.99 / 120/年" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="IDC 地址">
+                <el-input v-model="createForm.idc_address" placeholder="控制台网址，如 https://..." clearable />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </el-form>
       </template>
       <template v-else>
@@ -1224,12 +1434,75 @@ async function removeServer(row: any) {
     </el-dialog>
 
     <!-- 编辑服务器 -->
-    <el-dialog v-model="editOpen" title="编辑服务器" width="460px">
+    <el-dialog v-model="editOpen" title="编辑服务器" width="640px">
       <el-form label-position="top">
-        <el-form-item label="名称"><el-input v-model="editForm.name" /></el-form-item>
-        <el-form-item label="地址"><el-input v-model="editForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
-        <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="editForm.remark" placeholder="选填" /></el-form-item>
+        <el-row :gutter="14">
+          <el-col :span="12">
+            <el-form-item label="名称" required><el-input v-model="editForm.name" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="地址" required><el-input v-model="editForm.host" placeholder="如 tokyo01.example.com" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="14">
+          <el-col :span="12">
+            <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="备注"><el-input v-model="editForm.remark" placeholder="选填" /></el-form-item>
+          </el-col>
+        </el-row>
+        <el-divider content-position="left" style="margin: 8px 0 14px">
+          <span style="font-size: 12px; color: var(--x-text-3)">VPS 续费与资产信息（选填）</span>
+        </el-divider>
+        <el-row :gutter="14">
+          <el-col :span="12">
+            <el-form-item label="到期日">
+              <el-date-picker
+                v-model="editForm.expire_at"
+                type="date"
+                placeholder="选择到期日期"
+                format="YYYY-MM-DD"
+                value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+                style="width: 100%"
+                clearable
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="计费周期">
+              <el-select
+                v-model="editForm.billing_cycle"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选择或输入计费周期"
+                clearable
+                style="width: 100%"
+              >
+                <el-option label="月付" value="月付" />
+                <el-option label="季付" value="季付" />
+                <el-option label="半年付" value="半年付" />
+                <el-option label="年付" value="年付" />
+                <el-option label="两年付" value="两年付" />
+                <el-option label="三年付" value="三年付" />
+                <el-option label="一次性 / 永久" value="一次性" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="14">
+          <el-col :span="12">
+            <el-form-item label="续费价格">
+              <el-input v-model="editForm.price" placeholder="如 ¥35.00 / $24.99 / 120/年" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="IDC 地址">
+              <el-input v-model="editForm.idc_address" placeholder="控制台网址，如 https://..." clearable />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <el-button @click="editOpen = false">取消</el-button>

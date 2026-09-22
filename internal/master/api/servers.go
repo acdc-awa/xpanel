@@ -31,6 +31,10 @@ type serverView struct {
 	NodeID                string     `json:"node_id"`
 	Location              string     `json:"location"`
 	Remark                string     `json:"remark"`
+	ExpireAt              string     `json:"expire_at"` // 纯日历日 YYYY-MM-DD，空串=未设置
+	BillingCycle          string     `json:"billing_cycle"`
+	Price                 string     `json:"price"`
+	IDCAddress            string     `json:"idc_address"`
 	Status                int        `json:"status"`                  // 0 离线 1 在线
 	ConfigStatus          string     `json:"config_status"`           // pushed / pending / ""（无待推送配置）
 	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
@@ -65,7 +69,9 @@ func toServerView(s *models.Server) serverView {
 	}
 	return serverView{
 		ID: s.ID, ServerType: st, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
-		Location: s.Location, Remark: s.Remark, Status: s.Status,
+		Location: s.Location, Remark: s.Remark,
+		ExpireAt: s.ExpireAt, BillingCycle: s.BillingCycle, Price: s.Price, IDCAddress: s.IDCAddress,
+		Status:                s.Status,
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		AgentVersion:          s.AgentVersion,
@@ -157,18 +163,61 @@ func pushStateOf(configDrift bool, hasPend bool, configStatus, pushError string,
 	}
 }
 
+// parseExpireDate 归一 VPS 到期日为纯日历日 YYYY-MM-DD（返回空串表示未设置）。
+//
+// 到期日是"哪一天"而不是某一瞬，故全程不存时刻、不做时区换算——一旦存成时刻，
+// 同一日期在不同展示时区会漂成前后一天。接受 YYYY-MM-DD（含未补零写法与 / 分隔），
+// 也兼容旧客户端发来的完整时间戳（取其 UTC 日期部分）；非法日期（如 2 月 30 日）报错。
+func parseExpireDate(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", err
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if i := strings.IndexAny(s, "T "); i > 0 { // 完整时间戳：取日期部分
+		s = s[:i]
+	}
+	s = strings.ReplaceAll(s, "/", "-")
+	for _, layout := range []string{"2006-01-02", "2006-1-2"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Format("2006-01-02"), nil
+		}
+	}
+	return "", fmt.Errorf("无法解析到期日期: %s", s)
+}
+
 func (d *Deps) AdminCreateServer(c *gin.Context) {
 	var req struct {
-		ServerType            string `json:"server_type"`
-		Name                  string `json:"name" binding:"required,max=64"`
-		Host                  string `json:"host" binding:"required,max=255"`
-		Location              string `json:"location" binding:"max=64"`
-		Remark                string `json:"remark" binding:"max=255"`
-		DefaultOutboundTag    string `json:"default_outbound_tag"`
-		RoutingDomainStrategy string `json:"routing_domain_strategy"`
+		ServerType            string          `json:"server_type"`
+		Name                  string          `json:"name" binding:"required,max=64"`
+		Host                  string          `json:"host" binding:"required,max=255"`
+		Location              string          `json:"location" binding:"max=64"`
+		Remark                string          `json:"remark" binding:"max=255"`
+		ExpireAt              json.RawMessage `json:"expire_at"`
+		BillingCycle          string          `json:"billing_cycle" binding:"max=32"`
+		Price                 string          `json:"price" binding:"max=64"`
+		IDCAddress            string          `json:"idc_address" binding:"max=255"`
+		IDCURL                string          `json:"idc_url" binding:"max=255"` // 兼容别名
+		DefaultOutboundTag    string          `json:"default_outbound_tag"`
+		RoutingDomainStrategy string          `json:"routing_domain_strategy"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
+	}
+	expireDate, err := parseExpireDate(req.ExpireAt)
+	if err != nil {
+		util.BadRequest(c, "到期日期格式错误（需 YYYY-MM-DD）")
+		return
+	}
+	idcAddr := strings.TrimSpace(req.IDCAddress)
+	if idcAddr == "" && req.IDCURL != "" {
+		idcAddr = strings.TrimSpace(req.IDCURL)
 	}
 	if req.DefaultOutboundTag == "" {
 		req.DefaultOutboundTag = "direct"
@@ -191,6 +240,10 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Secret:                util.HashSecret(secret),
 		Location:              req.Location,
 		Remark:                req.Remark,
+		ExpireAt:              expireDate,
+		BillingCycle:          strings.TrimSpace(req.BillingCycle),
+		Price:                 strings.TrimSpace(req.Price),
+		IDCAddress:            idcAddr,
 		Status:                0,
 		DefaultOutboundTag:    req.DefaultOutboundTag,
 		RoutingDomainStrategy: req.RoutingDomainStrategy,
@@ -252,13 +305,18 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerType            *string `json:"server_type"`
-		Name                  *string `json:"name"`
-		Host                  *string `json:"host"`
-		Location              *string `json:"location"`
-		Remark                *string `json:"remark"`
-		DefaultOutboundTag    *string `json:"default_outbound_tag"`
-		RoutingDomainStrategy *string `json:"routing_domain_strategy"`
+		ServerType            *string         `json:"server_type"`
+		Name                  *string         `json:"name"`
+		Host                  *string         `json:"host"`
+		Location              *string         `json:"location"`
+		Remark                *string         `json:"remark"`
+		ExpireAt              json.RawMessage `json:"expire_at"` // 三元：缺省不更新 / null 或空串清空 / 字符串更新
+		BillingCycle          *string         `json:"billing_cycle"`
+		Price                 *string         `json:"price"`
+		IDCAddress            *string         `json:"idc_address"`
+		IDCURL                *string         `json:"idc_url"`
+		DefaultOutboundTag    *string         `json:"default_outbound_tag"`
+		RoutingDomainStrategy *string         `json:"routing_domain_strategy"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -286,6 +344,26 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
+	}
+	if req.ExpireAt != nil && len(req.ExpireAt) > 0 {
+		// null / 空串都归一为 ""（清空），非空则为 YYYY-MM-DD
+		exp, err := parseExpireDate(req.ExpireAt)
+		if err != nil {
+			util.BadRequest(c, "到期日期格式错误（需 YYYY-MM-DD）")
+			return
+		}
+		updates["expire_at"] = exp
+	}
+	if req.BillingCycle != nil {
+		updates["billing_cycle"] = strings.TrimSpace(*req.BillingCycle)
+	}
+	if req.Price != nil {
+		updates["price"] = strings.TrimSpace(*req.Price)
+	}
+	if req.IDCAddress != nil {
+		updates["idc_address"] = strings.TrimSpace(*req.IDCAddress)
+	} else if req.IDCURL != nil {
+		updates["idc_address"] = strings.TrimSpace(*req.IDCURL)
 	}
 	if req.DefaultOutboundTag != nil {
 		updates["default_outbound_tag"] = *req.DefaultOutboundTag

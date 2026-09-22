@@ -406,6 +406,10 @@ export interface ServerItem {
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）
+  expire_at?: string // VPS 到期日（YYYY-MM-DD，空串=未设置）
+  billing_cycle?: string // 计费周期（月付/季付/年付等）
+  price?: string // 续费价格
+  idc_address?: string // IDC 控制台地址
   last_seen_at: string | null
   created_at: string
 }
@@ -433,6 +437,10 @@ export function createServer(payload: {
   host: string
   location?: string
   remark?: string
+  expire_at?: string | null // YYYY-MM-DD；null/空=不设到期日
+  billing_cycle?: string
+  price?: string
+  idc_address?: string
 }) {
   return http.post<ApiResp<CreateServerResult>>('/admin/servers', payload)
 }
@@ -443,7 +451,19 @@ export function deleteServer(id: number) {
 
 export function updateServer(
   id: number,
-  payload: { server_type?: 'xray'; name?: string; host?: string; location?: string; remark?: string; default_outbound_tag?: string; routing_domain_strategy?: string },
+  payload: {
+    server_type?: 'xray'
+    name?: string
+    host?: string
+    location?: string
+    remark?: string
+    default_outbound_tag?: string
+    routing_domain_strategy?: string
+    expire_at?: string | null // 缺省=不更新；null/空串=清空；否则 YYYY-MM-DD
+    billing_cycle?: string
+    price?: string
+    idc_address?: string
+  },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)
 }

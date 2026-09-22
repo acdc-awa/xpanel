@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Delete, Key, CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { Delete, Key, CopyDocument, Refresh, Link } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   deleteServer,
@@ -14,6 +14,7 @@ import {
 import { errMsg } from '@/api/http'
 import { maskUUIDs } from '@/utils/mask'
 import { formatDateTime } from '@/utils/timezone'
+import { getExpiryStatus, formatExpireDate, normalizeUrl, isUrl } from '@/utils/vps'
 import OnlineUsersPanel from './OnlineUsersPanel.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 
@@ -240,6 +241,46 @@ watch(
             </div>
             <div class="desc-row"><span class="k">所在地区</span><span class="v">{{ server.location || '—' }}</span></div>
             <div class="desc-row"><span class="k">备注说明</span><span class="v">{{ server.remark || '—' }}</span></div>
+            <div class="desc-row">
+              <span class="k">到期日</span>
+              <span class="v">
+                <template v-if="server.expire_at">
+                  <span class="cell-mono">{{ formatExpireDate(server.expire_at) }}</span>
+                  <span
+                    v-if="getExpiryStatus(server.expire_at)"
+                    class="x-chip"
+                    :class="getExpiryStatus(server.expire_at)!.cls"
+                    :title="getExpiryStatus(server.expire_at)!.tip"
+                    style="margin-left: 6px; font-size: 10px; padding: 1px 5px"
+                  >
+                    {{ getExpiryStatus(server.expire_at)!.text }}
+                  </span>
+                </template>
+                <template v-else>—</template>
+              </span>
+            </div>
+            <div class="desc-row"><span class="k">计费周期</span><span class="v">{{ server.billing_cycle || '—' }}</span></div>
+            <div class="desc-row"><span class="k">续费价格</span><span class="v"><code v-if="server.price" class="cell-mono font-12" style="color: var(--x-primary); font-weight: 600">{{ server.price }}</code><template v-else>—</template></span></div>
+            <div class="desc-row">
+              <span class="k">IDC 地址</span>
+              <span class="v">
+                <template v-if="server.idc_address">
+                  <el-link
+                    v-if="isUrl(server.idc_address)"
+                    type="primary"
+                    :underline="false"
+                    :href="normalizeUrl(server.idc_address)"
+                    target="_blank"
+                    style="margin-right: 6px; font-size: 12.5px"
+                  >
+                    <el-icon style="margin-right: 2px"><Link /></el-icon>{{ server.idc_address }}
+                  </el-link>
+                  <span v-else class="cell-mono" style="margin-right: 6px">{{ server.idc_address }}</span>
+                  <el-button size="small" text @click="copyText(server.idc_address, 'IDC 地址')"><el-icon><CopyDocument /></el-icon></el-button>
+                </template>
+                <template v-else>—</template>
+              </span>
+            </div>
             <div class="desc-row">
               <span class="k">运行状态</span>
               <span class="v">

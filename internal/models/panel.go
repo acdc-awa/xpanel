@@ -7,14 +7,20 @@ const ServerTypeXray = "xray"
 
 // Server 节点服务器（对应 §5 servers）。
 type Server struct {
-	ID                    uint64 `gorm:"primaryKey" json:"id"`
-	ServerType            string `gorm:"size:32;default:xray" json:"server_type"` // xray（托管节点；l4_relay 已于 2026-08-24 退役）
-	Name                  string `gorm:"size:64;not null" json:"name"`
-	Host                  string `gorm:"size:255;not null" json:"host"`
-	NodeID                string `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
-	Secret                string `gorm:"size:64;not null" json:"-"`
-	Location              string `gorm:"size:64" json:"location"`
-	Remark                string `gorm:"size:255" json:"remark"`
+	ID         uint64 `gorm:"primaryKey" json:"id"`
+	ServerType string `gorm:"size:32;default:xray" json:"server_type"` // xray（托管节点；l4_relay 已于 2026-08-24 退役）
+	Name       string `gorm:"size:64;not null" json:"name"`
+	Host       string `gorm:"size:255;not null" json:"host"`
+	NodeID     string `gorm:"size:32;uniqueIndex;not null" json:"node_id"`
+	Secret     string `gorm:"size:64;not null" json:"-"`
+	Location   string `gorm:"size:64" json:"location"`
+	Remark     string `gorm:"size:255" json:"remark"`
+	// VPS 到期日（纯日历日 YYYY-MM-DD，空=未设置）。续费日是"哪一天"而不是某一瞬，
+	// 故全程不存时刻、不做时区换算——一旦存成时刻，同一日期在不同展示时区会漂成前后一天。
+	ExpireAt              string `gorm:"size:10" json:"expire_at"`
+	BillingCycle          string `gorm:"size:32" json:"billing_cycle"`                        // 计费周期（月付/季付/年付/一次性 等或自定义）
+	Price                 string `gorm:"size:64" json:"price"`                                // 价格 / 续费金额（如 $5.99 / ¥35 / 120/年）
+	IDCAddress            string `gorm:"column:idc_address;size:255" json:"idc_address"`      // IDC 地址 / 服务商控制台链接
 	Status                int    `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
 	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
