@@ -57,7 +57,13 @@ func TestChannelTrafficTrackingAndLifecycle(t *testing.T) {
 	}
 	db.Create(&ch)
 
-	svc := &TrafficService{DB: db}
+	var notifiedServers []uint64
+	svc := &TrafficService{
+		DB: db,
+		OnInboundLifecycleChanged: func(sid uint64) {
+			notifiedServers = append(notifiedServers, sid)
+		},
+	}
 
 	now := time.Now().Truncate(time.Hour)
 	nowStr := now.Format(time.RFC3339)
@@ -86,11 +92,23 @@ func TestChannelTrafficTrackingAndLifecycle(t *testing.T) {
 		t.Fatalf("Expected used bytes %d, got %d", halfGB, updatedCh.TrafficUsedBytes)
 	}
 
+	// 校验 traffic_logs 写入了 UserID=0 的流水（供大盘服务器承载分布统计）
+	var tLogs []models.TrafficLog
+	if err := db.Where("inbound_id = ?", 10).Find(&tLogs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tLogs) != 1 || tLogs[0].UserID != 0 || tLogs[0].UpBytes != halfGB/2 || tLogs[0].DownBytes != halfGB/2 {
+		t.Fatalf("Expected traffic_logs with UserID=0 and bytes=%d, got: %+v", halfGB/2, tLogs)
+	}
+
 	// 检查 lifecycle：未超额，状态保持 active
 	svc.checkInboundLifecycle()
 	db.First(&updatedCh, 1)
 	if updatedCh.Status != models.ChannelStatusActive {
 		t.Fatalf("Expected status active, got %s", updatedCh.Status)
+	}
+	if len(notifiedServers) != 0 {
+		t.Fatalf("No server should be notified when status not changed")
 	}
 
 	// 2. 再次上报 600 MB 流量（总共 1100 MB > 1 GB 配额）
@@ -115,7 +133,7 @@ func TestChannelTrafficTrackingAndLifecycle(t *testing.T) {
 		t.Fatalf("Expected used bytes %d, got %d", halfGB+overGB, updatedCh.TrafficUsedBytes)
 	}
 
-	// 运行 lifecycle 检查：应触发 quota_exceeded 并停用底层 Inbound
+	// 运行 lifecycle 检查：应触发 quota_exceeded 并停用底层 Inbound，同时触发推送回调
 	svc.checkInboundLifecycle()
 	db.First(&updatedCh, 1)
 	if updatedCh.Status != models.ChannelStatusExceeded {
@@ -126,6 +144,9 @@ func TestChannelTrafficTrackingAndLifecycle(t *testing.T) {
 	db.First(&updatedInb, 10)
 	if updatedInb.Enabled {
 		t.Fatalf("Expected underlying inbound disabled after exceeding quota")
+	}
+	if len(notifiedServers) != 1 || notifiedServers[0] != 1 {
+		t.Fatalf("Expected server 1 notified on exceeding quota, got: %v", notifiedServers)
 	}
 
 	// 3. 测试自动周期重置复原
@@ -141,5 +162,8 @@ func TestChannelTrafficTrackingAndLifecycle(t *testing.T) {
 	db.First(&updatedInb, 10)
 	if !updatedInb.Enabled {
 		t.Fatalf("Expected underlying inbound re-enabled after cycle reset")
+	}
+	if len(notifiedServers) != 2 || notifiedServers[1] != 1 {
+		t.Fatalf("Expected server 1 notified on cycle reset, got: %v", notifiedServers)
 	}
 }

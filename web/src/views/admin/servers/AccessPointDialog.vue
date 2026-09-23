@@ -74,8 +74,12 @@ const form = reactive({
 
 const availableInbounds = computed(() =>
   effectiveInbounds.value.filter(
-    (i) => i.server_id === targetServerId.value && i.enabled && i.type === 'user',
+    (i) => i.server_id === targetServerId.value && i.enabled && (i.type === 'user' || i.type === 'tunnel'),
   ),
+)
+
+const selectedInbound = computed(() =>
+  effectiveInbounds.value.find((i) => i.id === form.target_inbound_id),
 )
 
 async function loadAuxDataIfNeeded() {
@@ -287,16 +291,24 @@ async function handleDelete() {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="目标用户入站 (Target Inbound)" style="margin-bottom: 0">
-          <el-select v-model="form.target_inbound_id" placeholder="选择用户入站" style="width: 100%">
+        <el-form-item label="目标入站 (Target Inbound)" style="margin-bottom: 0">
+          <el-select v-model="form.target_inbound_id" placeholder="选择目标入站" style="width: 100%">
             <el-option
               v-for="inb in availableInbounds"
               :key="inb.id"
-              :label="`${inb.tag} (:${inb.port})`"
+              :label="`${inb.type === 'tunnel' ? '[四层直通] ' : ''}${inb.tag} (:${inb.port} ${inb.protocol})`"
               :value="inb.id"
             />
           </el-select>
         </el-form-item>
+        <div v-if="selectedInbound?.type === 'tunnel'" style="grid-column: 1 / -1; margin-top: 8px">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            title="该接入点连接四层直通管道：订阅将自动穿透下游落地入站的安全参数，并以本前置机的地址与端口对外分发。"
+          />
+        </div>
       </div>
 
       <div class="override-box">

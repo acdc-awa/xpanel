@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -201,3 +202,61 @@ func TestEnqueueConfig_AutoHealsBrokenRelayInbound(t *testing.T) {
 		t.Error("enqueueConfig 应自动修复缺少 InternalUUID 的 relay 入站")
 	}
 }
+
+func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 1, Name: "node-1", Host: "1.2.3.4", NodeID: "n1", Secret: "sec"})
+
+	// 1. 落地入站与指向它的 Tunnel 入站
+	landing := models.Inbound{
+		ServerID: 1, Tag: "landing-vless", Protocol: "vless", Port: 443,
+		Type: models.InboundTypeUser, Enabled: true,
+	}
+	db.Create(&landing)
+
+	tunnel := models.Inbound{
+		ServerID: 1, Tag: "tunnel-in", Protocol: "dokodemo-door", Port: 10001,
+		Type: models.InboundTypeTunnel, TargetInboundID: &landing.ID, Enabled: true,
+	}
+	db.Create(&tunnel)
+
+	// 2. Channel 入站
+	chanInb := models.Inbound{
+		ServerID: 1, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
+		Type: models.InboundTypeChannel, Enabled: true,
+	}
+	db.Create(&chanInb)
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.DELETE("/api/v1/admin/inbounds/:id", d.AdminDeleteInbound)
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 尝试删除被 Tunnel 引用的 landing 入站 -> 应该被 400 拦截
+	req1 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/inbounds/%d", landing.ID), nil)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("删除被 Tunnel 引用的入站应返回 400, 实际: %d, body: %s", w1.Code, w1.Body.String())
+	}
+
+	// 尝试删除 Channel 入站 -> 应该被 400 拦截
+	req2 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/inbounds/%d", chanInb.ID), nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("删除 Channel 入站应返回 400, 实际: %d, body: %s", w2.Code, w2.Body.String())
+	}
+
+	// 尝试通过常规接口更新 Channel 入站 -> 应该被 400 拦截
+	upBody, _ := json.Marshal(map[string]any{"port": 1081})
+	req3 := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", chanInb.ID), bytes.NewReader(upBody))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Fatalf("更新 Channel 入站应返回 400, 实际: %d, body: %s", w3.Code, w3.Body.String())
+	}
+}
+

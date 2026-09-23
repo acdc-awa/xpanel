@@ -46,8 +46,9 @@ const SettingTrafficDailyTZBackfilled = "traffic_daily_tz_backfilled"
 
 // TrafficService 处理节点流量上报与聚合。
 type TrafficService struct {
-	DB  *gorm.DB
-	now func() time.Time // 可注入时钟（测试用）
+	DB                         *gorm.DB
+	now                        func() time.Time // 可注入时钟（测试用）
+	OnInboundLifecycleChanged func(serverID uint64)
 }
 
 // nowOrReal 返回当前时间（未注入时钟时用真实时间）。
@@ -242,7 +243,10 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 								"traffic_used_bytes": gorm.Expr("traffic_used_bytes + ?", totalBytes),
 							})
 						}
-						if inb.Type == models.InboundTypeRelay {
+						// 内部转发入站（relay）、四层直通管道前置机（tunnel）以及独立代理通道（channel）：
+						// 无具体前台用户条目，将增量作为 UserID=0 写入 traffic_logs，使仪表盘服务器分布与排行按时间窗口统计该服务器承载流量。
+						// 普通用户入站（user）因下方已有具体的用户明细落库，此处不写 traffic_logs，防全站双计。
+						if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeTunnel || inb.Type == models.InboundTypeChannel {
 						row := models.TrafficLog{
 							UserID:      0,
 							InboundID:   inboundID,
@@ -571,6 +575,7 @@ func (s *TrafficService) resetInboundTraffic() {
 	}
 	now := s.nowOrReal()
 	loc := BusinessLocation(s.DB)
+	modifiedServers := make(map[uint64]bool)
 	for _, inb := range inbounds {
 		key := resetPeriodKey(now, inb.TrafficReset, loc)
 		if key == "" {
@@ -610,12 +615,19 @@ func (s *TrafficService) resetInboundTraffic() {
 					updates["status"] = models.ChannelStatusActive
 					if ch.Enabled {
 						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", true)
+						modifiedServers[ch.ServerID] = true
 					}
 				}
 				_ = s.DB.Model(&models.ProxyChannel{}).
 					Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", ch.ID, key).
 					Updates(updates).Error
 			}
+		}
+	}
+
+	for sid := range modifiedServers {
+		if s.OnInboundLifecycleChanged != nil {
+			s.OnInboundLifecycleChanged(sid)
 		}
 	}
 }
@@ -885,6 +897,7 @@ func (s *TrafficService) checkInboundLifecycle() {
 		return
 	}
 	now := time.Now()
+	modifiedServers := make(map[uint64]bool)
 	for _, inb := range inbounds {
 		if !inb.Enabled {
 			continue
@@ -893,6 +906,7 @@ func (s *TrafficService) checkInboundLifecycle() {
 			(inb.ExpiryTime != nil && now.After(*inb.ExpiryTime))
 		if expired {
 			_ = s.DB.Model(&inb).Update("enabled", false)
+			modifiedServers[inb.ServerID] = true
 		}
 	}
 
@@ -911,14 +925,22 @@ func (s *TrafficService) checkInboundLifecycle() {
 					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExceeded)
 					if ch.AutoDisable {
 						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
+						modifiedServers[ch.ServerID] = true
 					}
 				} else if expired && ch.Status != models.ChannelStatusExpired {
 					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExpired)
 					if ch.AutoDisable {
 						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
+						modifiedServers[ch.ServerID] = true
 					}
 				}
 			}
+		}
+	}
+
+	for sid := range modifiedServers {
+		if s.OnInboundLifecycleChanged != nil {
+			s.OnInboundLifecycleChanged(sid)
 		}
 	}
 }

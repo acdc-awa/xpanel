@@ -307,6 +307,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
+	if inb.Type == models.InboundTypeChannel {
+		util.BadRequest(c, "该入站由独立通道托管，请前往「转发与独立代理」页面进行配置修改")
+		return
+	}
 	var req struct {
 		Tag                *string         `json:"tag"`
 		Protocol           *string         `json:"protocol"`
@@ -619,6 +623,18 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	var inb models.Inbound
 	if err := d.DB.First(&inb, id).Error; err != nil {
 		util.Fail(c, 404, "入站不存在")
+		return
+	}
+	// 独立通道保护：由 ProxyChannel 托管的入站禁止从底层直接删除，防止产生孤儿通道
+	if inb.Type == models.InboundTypeChannel {
+		util.BadRequest(c, "该入站由独立通道托管，无法直接删除，请前往「转发与独立代理」页面删除对应通道")
+		return
+	}
+	// 四层直通落地保护：被直通管道（tunnel）引用为落地目标的入站禁止删除
+	var tunnelCnt int64
+	d.DB.Model(&models.Inbound{}).Where("type = ? AND target_inbound_id = ?", models.InboundTypeTunnel, id).Count(&tunnelCnt)
+	if tunnelCnt > 0 {
+		util.BadRequest(c, "该入站被 "+strconv.FormatInt(tunnelCnt, 10)+" 个四层直通管道引用为落地目标，无法删除，请先解除直通管道绑定")
 		return
 	}
 	// U4：被出站引用（落地）的入站禁止删除——删除会导致引用方配置生成死锁

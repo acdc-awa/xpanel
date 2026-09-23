@@ -474,7 +474,7 @@ async function handleSave() {
         </div>
 
         <div class="filter-right">
-          <el-button type="primary" :icon="Plus" @click="openCreate">新建独立通道</el-button>
+          <el-button type="primary" :icon="Plus" @click="openCreate">新增通道</el-button>
         </div>
       </div>
     </BaseCard>
@@ -483,7 +483,7 @@ async function handleSave() {
     <div v-loading="loading" class="channel-list">
       <div v-if="filteredChannels.length === 0" class="empty-wrap">
         <el-empty description="暂无符合条件的独立通道">
-          <el-button type="primary" :icon="Plus" @click="openCreate">立即新建通道</el-button>
+          <el-button type="primary" :icon="Plus" @click="openCreate">新增通道</el-button>
         </el-empty>
       </div>
 

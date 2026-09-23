@@ -356,9 +356,9 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		srvName[servers[i].ID] = servers[i].Name
 	}
 
-	// 入站（含服务器名）
+	// 入站（含服务器名，排除独立代理通道）
 	var inbounds []models.Inbound
-	if err := d.DB.Order("server_id ASC, id ASC").Find(&inbounds).Error; err != nil {
+	if err := d.DB.Where("type != ?", models.InboundTypeChannel).Order("server_id ASC, id ASC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}

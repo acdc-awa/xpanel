@@ -325,7 +325,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
   const rank = order && order.length > 0 ? new Map(order.map((id, idx) => [id, idx])) : null
   for (const l of data.layers ?? []) {
     if (l.server_id !== serverId) continue
-    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id && i.type !== 'tunnel')
+    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id && i.type !== 'tunnel' && i.type !== 'channel')
     const inbounds = rank
       ? [...rawInbs].sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 9999) - (rank.has(b.id) ? rank.get(b.id)! : 9999))
       : rawInbs
@@ -337,7 +337,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
 function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
   const data = props.topology
   if (!data) return []
-  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id && i.type !== 'tunnel')
+  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id && i.type !== 'tunnel' && i.type !== 'channel')
   const order = boxTagOrders.get(`server-${serverId}`)?.inbounds
   if (!order || order.length === 0) return list
   const rank = new Map(order.map((id, idx) => [id, idx]))
@@ -428,7 +428,7 @@ function getOrderedOutbounds(serverId: number, rawList: BoxOutbound[]): BoxOutbo
 
 // 该服务器全部入站 id（原生 + 挂层，排除直通管道），顺序 = 后端返回序（显示排序的回退基准）
 function allInboundsOf(serverId: number): number[] {
-  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId && i.type !== 'tunnel').map((i) => i.id)
+  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId && i.type !== 'tunnel' && i.type !== 'channel').map((i) => i.id)
 }
 
 // 更新并持久化卡片内出入站自定义顺序
