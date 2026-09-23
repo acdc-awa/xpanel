@@ -34,8 +34,11 @@ type inboundView struct {
 	TotalGB            int64      `json:"total_gb"`
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
-	Type               string     `json:"type"`                    // user / relay
+	Type               string     `json:"type"`                    // user / relay / tunnel
 	InternalUUID       string     `json:"internal_uuid,omitempty"` // relay 只读（节点上报）
+	TargetInboundID    *uint64    `json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID
+	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
+	TargetPort         int        `json:"target_port,omitempty"`       // 手动指定的外部目标端口
 	CertID             *uint64    `json:"cert_id,omitempty"`       // 绑定的证书
 	Flow               string     `json:"flow"`                    // 入站级流控（空=自动 / xtls-rprx-vision / none）
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`     // node / custom（订阅专用）
@@ -64,7 +67,10 @@ type inboundForm struct {
 	Ratio              float64    `json:"ratio"`
 	TotalGB            int64      `json:"total_gb"`              // J9：入站总流量上限（GB，0=不限）
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
-	Type               string     `json:"type"`                  // user / relay（空 = user）
+	Type               string     `json:"type"`                  // user / relay / tunnel（空 = user）
+	TargetInboundID    *uint64    `json:"target_inbound_id"`     // 四层直通目标落地入站 ID
+	TargetAddress      string     `json:"target_address"`        // 手动指定的外部目标地址
+	TargetPort         int        `json:"target_port"`           // 手动指定的外部目标端口
 	CertID             *uint64    `json:"cert_id"`               // 绑定证书（T5 校验存在性）
 	Flow               string     `json:"flow"`                  // 入站级流控（空=自动 / xtls-rprx-vision / none）
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / custom（订阅专用，listen 已退役）
@@ -90,8 +96,9 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
 		Ratio: i.Ratio, TotalGB: i.Total, ExpiryTime: i.ExpiryTime,
 		Enabled: i.Enabled, CreatedAt: i.CreatedAt,
-		Type: i.Type, InternalUUID: i.InternalUUID, CertID: i.CertID,
-		Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
+		Type: i.Type, InternalUUID: i.InternalUUID,
+		TargetInboundID: i.TargetInboundID, TargetAddress: i.TargetAddress, TargetPort: i.TargetPort,
+		CertID: i.CertID, Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
 		SharePort:     i.SharePort,
 		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
 		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
@@ -144,13 +151,18 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	if effType == "" {
 		effType = models.InboundTypeUser
 	}
-	if err := checkVlessDecryption(req.Protocol, effType, req.SettingsJSON); err != nil {
-		util.BadRequest(c, err.Error())
-		return
+	if effType == models.InboundTypeTunnel {
+		req.Protocol = models.ProtocolDokodemo
+	}
+	if effType != models.InboundTypeTunnel {
+		if err := checkVlessDecryption(req.Protocol, effType, req.SettingsJSON); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（暂仅支持 vless，vmess/trojan/ss 订阅导出未实现）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / dokodemo-door）")
 		return
 	}
 	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
@@ -164,7 +176,18 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != "" && !validInboundType(req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay")
+		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel")
+		return
+	}
+	if req.TargetInboundID != nil && *req.TargetInboundID > 0 {
+		var targetInb models.Inbound
+		if err := d.DB.First(&targetInb, *req.TargetInboundID).Error; err != nil {
+			util.BadRequest(c, "目标落地入站不存在")
+			return
+		}
+	}
+	if req.TargetPort < 0 || req.TargetPort > 65535 {
+		util.BadRequest(c, "目标端口需在 0-65535 之间")
 		return
 	}
 	if req.Flow != "" && !validInboundFlow(req.Flow) {
@@ -221,6 +244,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		Sniffing: req.Sniffing, Ratio: req.Ratio,
 		Total: req.TotalGB, ExpiryTime: utcPtr(req.ExpiryTime), Enabled: true,
 		Type:   req.Type,
+		TargetInboundID: req.TargetInboundID, TargetAddress: req.TargetAddress, TargetPort: req.TargetPort,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
 		SharePort: req.SharePort, ShareSecurity: req.ShareSecurity, ShareSNI: req.ShareSNI,
@@ -297,6 +321,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		Enabled            *bool           `json:"enabled"`
 		Type               *string         `json:"type"`
 		InternalUUID       *string         `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
+		TargetInboundID    *uint64         `json:"target_inbound_id"`   // nil 不更新；显式传 0 解绑
+		TargetAddress      *string         `json:"target_address"`
+		TargetPort         *int            `json:"target_port"`
 		CertID             *uint64         `json:"cert_id"`             // nil 不更新；显式传 0 解绑
 		Flow               *string         `json:"flow"`                // 入站级流控（nil 不更新；空串=自动）
 		ShareAddrStrategy  *string         `json:"share_addr_strategy"` //
@@ -338,10 +365,14 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	effProto := inb.Protocol
 	if req.Protocol != nil {
 		effProto = *req.Protocol
+	} else if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo {
+		effProto = models.ProtocolDokodemo
 	}
-	if err := checkVlessDecryption(effProto, effType, sj); err != nil {
-		util.BadRequest(c, err.Error())
-		return
+	if effType != models.InboundTypeTunnel {
+		if err := checkVlessDecryption(effProto, effType, sj); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
 	}
 	// U15：更新校验闭环——tag 非空/同服务器唯一 / 协议白名单 / CertID 存在性
 	if req.Tag != nil {
@@ -358,7 +389,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（暂仅支持 vless，vmess/trojan/ss 订阅导出未实现）")
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / dokodemo-door）")
 		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
@@ -367,7 +398,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != nil && !validInboundType(*req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay")
+		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel")
 		return
 	}
 	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {
@@ -483,7 +514,40 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			}
 			updates["internal_uuid"] = temp.InternalUUID
 			inb.InternalUUID = temp.InternalUUID
+		} else if *req.Type == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
+			updates["protocol"] = models.ProtocolDokodemo
+			inb.Protocol = models.ProtocolDokodemo
 		}
+	}
+	if req.TargetInboundID != nil {
+		if *req.TargetInboundID == 0 {
+			updates["target_inbound_id"] = nil
+			inb.TargetInboundID = nil
+		} else {
+			if *req.TargetInboundID == inb.ID {
+				util.BadRequest(c, "目标入站不能为自身")
+				return
+			}
+			var targetInb models.Inbound
+			if err := d.DB.First(&targetInb, *req.TargetInboundID).Error; err != nil {
+				util.BadRequest(c, "目标落地入站不存在")
+				return
+			}
+			updates["target_inbound_id"] = *req.TargetInboundID
+			inb.TargetInboundID = req.TargetInboundID
+		}
+	}
+	if req.TargetAddress != nil {
+		updates["target_address"] = *req.TargetAddress
+		inb.TargetAddress = *req.TargetAddress
+	}
+	if req.TargetPort != nil {
+		if *req.TargetPort < 0 || *req.TargetPort > 65535 {
+			util.BadRequest(c, "目标端口需在 0-65535 之间")
+			return
+		}
+		updates["target_port"] = *req.TargetPort
+		inb.TargetPort = *req.TargetPort
 	}
 	if req.CertID != nil {
 		if *req.CertID == 0 {
@@ -684,15 +748,15 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（仅 VLESS 全功能可用；vmess/trojan/ss 订阅导出未实现，
+// validInboundProtocol 入站协议白名单（支持 VLESS 与四层直通 dokodemo-door；vmess/trojan/ss 订阅导出未实现，
 // 创建时拒绝避免"能建但订阅静默丢弃"，同时防拼写错误/未知协议卡出不可能存在的配置）。
 func validInboundProtocol(p string) bool {
-	return p == "vless"
+	return p == "vless" || p == "dokodemo-door"
 }
 
 func validInboundType(t string) bool {
 	switch t {
-	case models.InboundTypeUser, models.InboundTypeRelay:
+	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeTunnel:
 		return true
 	}
 	return false

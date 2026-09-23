@@ -269,30 +269,35 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		}
 	}
 
-	// 1. 出站：模板基础出站 + 节点自定义出站叠加，然后按默认出口排序
-	obs, err := mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
-	if err != nil {
-		return nil, err
-	}
-	cfg["outbounds"] = obs
-
-	// 2. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加
-	routing := map[string]any{}
-	if tmplRouting, ok := cfg["routing"].(map[string]any); ok {
-		for k, v := range tmplRouting {
-			routing[k] = v
-		}
-	}
-	routing["rules"] = mergeRoutingRules(routingRules)
-	if routingDomainStrategy != "" {
-		routing["domainStrategy"] = routingDomainStrategy
-	}
-	cfg["routing"] = routing
-
-	// 3. 入站：全部启用的入站 + api 内建入站
+	// 1. 入站：全部启用的入站 + 收集启用的四层直通管道所派生的 freedom 出站与直通路由规则
+	var tunnelOutbounds []models.ServerOutbound
+	var tunnelRoutingRules []any
 	inboundList := []any{}
 	for _, inb := range inbounds {
 		if !inb.Enabled {
+			continue
+		}
+		if inb.Type == models.InboundTypeTunnel {
+			item, obTag, err := buildTunnelInbound(&inb, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("生成直通管道 %s 失败: %w", inb.Tag, err)
+			}
+			if item == nil {
+				// 未连线或目标缺失，作为草稿跳过注入 Xray
+				continue
+			}
+			inboundList = append(inboundList, item)
+			tunnelOutbounds = append(tunnelOutbounds, models.ServerOutbound{
+				Tag:          obTag,
+				Protocol:     "freedom",
+				SettingsJSON: `{"proxyProtocol":2}`,
+				Enabled:      true,
+			})
+			tunnelRoutingRules = append(tunnelRoutingRules, map[string]any{
+				"type":        "field",
+				"inboundTag":  []string{inb.Tag},
+				"outboundTag": obTag,
+			})
 			continue
 		}
 		item, err := buildInbound(&inb, usersByTag, ctx)
@@ -307,6 +312,27 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
 	})
 	cfg["inbounds"] = inboundList
+
+	// 2. 出站：模板基础出站 + 节点自定义出站 + 直通管道派生出站叠加，然后按默认出口排序
+	allOutbounds := append(append([]models.ServerOutbound{}, outbounds...), tunnelOutbounds...)
+	obs, err := mergeOutbounds(cfg["outbounds"], allOutbounds, ctx, defaultOutboundTag)
+	if err != nil {
+		return nil, err
+	}
+	cfg["outbounds"] = obs
+
+	// 3. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 直通管道规则 + 节点规则叠加
+	routing := map[string]any{}
+	if tmplRouting, ok := cfg["routing"].(map[string]any); ok {
+		for k, v := range tmplRouting {
+			routing[k] = v
+		}
+	}
+	routing["rules"] = mergeRoutingRules(routingRules, tunnelRoutingRules)
+	if routingDomainStrategy != "" {
+		routing["domainStrategy"] = routingDomainStrategy
+	}
+	cfg["routing"] = routing
 
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -588,15 +614,18 @@ func translateFreedomPanelKeys(item map[string]any) {
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）→ BT 屏蔽规则 → 节点规则（按 Priority ASC, id ASC 排序）。
+// 顺序：api 保护规则（最前）→ 四层直通管道规则 → BT 屏蔽规则 → 节点规则（按 Priority ASC, id ASC 排序）。
 // 私网阻断不在路由层（改由 freedom 出站 finalRules 承担，见函数内注释）。
-func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
+func mergeRoutingRules(rules []models.ServerRoutingRule, tunnelRules []any) []any {
 	list := []any{
 		map[string]any{
 			"type":        "field",
 			"inboundTag":  []string{"api"},
 			"outboundTag": "api",
 		},
+	}
+	if len(tunnelRules) > 0 {
+		list = append(list, tunnelRules...)
 	}
 
 	// 默认内置规则：BT 流量屏蔽。BT 属服务器级滥用防护（P2P 分发不因出站不同而改变性质，
@@ -753,6 +782,14 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 				}
 			}
 		}
+		// PROXY Protocol 规范化：若开启了 acceptProxyProtocol，确保注入 tcpSettings
+		if ap, _ := stream["acceptProxyProtocol"].(bool); ap {
+			if tcpS, ok := stream["tcpSettings"].(map[string]any); ok {
+				tcpS["acceptProxyProtocol"] = true
+			} else {
+				stream["tcpSettings"] = map[string]any{"acceptProxyProtocol": true}
+			}
+		}
 		item["streamSettings"] = stream
 	}
 	// 3. 解析 sniffing JSON（完全透传）
@@ -763,4 +800,55 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 	}
 	return item, nil
+}
+
+// buildTunnelInbound 生成四层直通管道入站（dokodemo-door）。
+// 若既无连线目标又无有效手动外部目标，返回 nil, "", nil（草稿状态，跳过注入 Xray，防启动报错）。
+func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]any, string, error) {
+	targetHost := ""
+	targetPort := 0
+	if inb.TargetInboundID != nil && *inb.TargetInboundID > 0 {
+		target, ok := ctxTarget(ctx, *inb.TargetInboundID)
+		if ok {
+			targetHost = target.ServerHost
+			targetPort = target.Inbound.Port
+		}
+	} else if inb.TargetAddress != "" && inb.TargetPort > 0 {
+		targetHost = inb.TargetAddress
+		targetPort = inb.TargetPort
+	}
+
+	if targetHost == "" || targetPort <= 0 {
+		// 目标未配置或未连线，作为草稿状态跳过注入
+		return nil, "", nil
+	}
+
+	network := "tcp,udp"
+	if inb.StreamSettings != "" {
+		var ss map[string]any
+		if err := json.Unmarshal([]byte(inb.StreamSettings), &ss); err == nil {
+			if net, _ := ss["network"].(string); net != "" {
+				network = net
+			}
+		}
+	}
+
+	settings := map[string]any{
+		"address": targetHost,
+		"port":    targetPort,
+		"network": network,
+	}
+
+	outboundTag := "out-" + inb.Tag
+
+	item := map[string]any{
+		"tag":      inb.Tag,
+		"protocol": "dokodemo-door",
+		"port":     inb.Port,
+		"settings": settings,
+	}
+	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
+		item["listen"] = inb.Listen
+	}
+	return item, outboundTag, nil
 }

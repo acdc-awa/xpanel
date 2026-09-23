@@ -82,12 +82,15 @@ type Inbound struct {
 	SharePath          string  `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
 	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
 	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`            // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
-	// 入站物理类型二态：user / relay
-	Type         string  `gorm:"size:16;default:user" json:"type"`       // user（用户入站）/ relay（内部链式转发入站）
-	PreviousType string  `gorm:"size:16" json:"-"`                       // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
-	InternalUUID string  `gorm:"size:36" json:"internal_uuid,omitempty"` // relay 入站 UUID（节点生成上报，主控只读）
-	CertID       *uint64 `gorm:"index" json:"cert_id,omitempty"`         // TLS 入站选择证书（certs 表）
-	Enabled      bool    `gorm:"default:true" json:"enabled"`
+	// 入站物理类型形态：user / relay / tunnel
+	Type            string  `gorm:"size:16;default:user" json:"type"`                 // user（用户入站）/ relay（内部链式转发入站）/ tunnel（四层直通管道）
+	PreviousType    string  `gorm:"size:16" json:"-"`                                 // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
+	InternalUUID    string  `gorm:"size:36" json:"internal_uuid,omitempty"`           // relay 入站 UUID（节点生成上报，主控只读）
+	TargetInboundID *uint64 `gorm:"index" json:"target_inbound_id,omitempty"`       // 四层直通目标落地入站 ID（空=待拓扑连线）
+	TargetAddress   string  `gorm:"size:255" json:"target_address,omitempty"`        // 手动指定的外部目标地址
+	TargetPort      int     `gorm:"default:0" json:"target_port,omitempty"`          // 手动指定的外部目标端口
+	CertID          *uint64 `gorm:"index" json:"cert_id,omitempty"`                   // TLS 入站选择证书（certs 表）
+	Enabled         bool    `gorm:"default:true" json:"enabled"`
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
 	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
 	// xtls-rprx-vision = 为该入站用户全部开启；

@@ -42,11 +42,16 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 		RefTargets:  map[uint64]contracts.RefTarget{},
 		CertDomains: map[uint64]string{},
 	}
-	// 先取引用目标入站（其 CertID 与本地入站合并进同一次证书查询）
-	refIDs := make([]uint64, 0, len(outbounds))
+	// 先取引用目标入站（出站 InboundRef 与直通管道 TargetInboundID，其 CertID 与本地入站合并进同一次证书查询）
+	refIDs := make([]uint64, 0, len(outbounds)+len(inbounds))
 	for i := range outbounds {
 		if outbounds[i].InboundRef != nil {
 			refIDs = append(refIDs, *outbounds[i].InboundRef)
+		}
+	}
+	for i := range inbounds {
+		if inbounds[i].TargetInboundID != nil && *inbounds[i].TargetInboundID > 0 {
+			refIDs = append(refIDs, *inbounds[i].TargetInboundID)
 		}
 	}
 	var targets []models.Inbound

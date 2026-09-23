@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/acdc-awa/xpanel/internal/contracts"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // 构造 DTO 时 flow 已由协议插件决议（生成侧同源），导出器为哑渲染器。
@@ -153,5 +154,104 @@ func TestBuildClash_SkipsBrokenReality(t *testing.T) {
 	raw, _ := base64.StdEncoding.DecodeString(b64)
 	if strings.Contains(string(raw), "u2@") {
 		t.Errorf("broken 节点不应输出链接: %s", raw)
+	}
+}
+
+// TestResolveAPSubscription_TunnelPipeline 验证 AP 指向四层直通管道时自动向后寻路组装落地机 VLESS 参数
+func TestResolveAPSubscription_TunnelPipeline(t *testing.T) {
+	edgeServer := models.Server{ID: 1, Host: "edge.example.com", Name: "国内前置机"}
+	exitServer := models.Server{ID: 2, Host: "exit.example.com", Name: "日本落地机"}
+
+	targetInbID := uint64(201)
+	tunnelInb := models.Inbound{
+		ID:                101,
+		ServerID:          edgeServer.ID,
+		Tag:               "tunnel-10001",
+		Port:              10001,
+		Type:              models.InboundTypeTunnel,
+		Protocol:          models.ProtocolDokodemo,
+		TargetInboundID:   &targetInbID,
+		ShareAddrStrategy: "node",
+		Enabled:           true,
+	}
+
+	exitInb := models.Inbound{
+		ID:                targetInbID,
+		ServerID:          exitServer.ID,
+		Tag:               "vless-in-443",
+		Port:              443,
+		Type:              models.InboundTypeUser,
+		Protocol:          "vless",
+		StreamSettings:    `{"network":"tcp","security":"reality","realitySettings":{"serverName":"www.apple.com","publicKey":"MklFWFDOJqoe6ONT9a5vvOsyp1lKqYzmSOgDgmSV_j8","shortId":"0123456789abcdef"}}`,
+		ShareAddrStrategy: "node",
+		Enabled:           true,
+	}
+
+	apTunnel := models.UserAccessPoint{
+		ID:              1,
+		Name:            "🇯🇵 日本 01 [专线中转]",
+		TargetType:      "inbound",
+		TargetInboundID: &tunnelInb.ID,
+		Enabled:         true,
+	}
+
+	srvMap := map[uint64]models.Server{edgeServer.ID: edgeServer, exitServer.ID: exitServer}
+	inbMap := map[uint64]models.Inbound{tunnelInb.ID: tunnelInb, exitInb.ID: exitInb}
+
+	userUUID := "a6a0e69e-5c62-4b2a-89a7-8f5b82143719"
+	dto := ResolveAPSubscription(&apTunnel, srvMap, inbMap, nil, userUUID)
+	if dto == nil {
+		t.Fatalf("ResolveAPSubscription returned nil")
+	}
+
+	// 1. 连接地址和端口必须取自首跳前置机
+	if dto.ServerHost != "edge.example.com" {
+		t.Errorf("dto.ServerHost = %s, want edge.example.com", dto.ServerHost)
+	}
+	if dto.ServerPort != 10001 {
+		t.Errorf("dto.ServerPort = %d, want 10001", dto.ServerPort)
+	}
+
+	// 2. 协议与安全参数必须取自终结落地机
+	if dto.Protocol != "vless" {
+		t.Errorf("dto.Protocol = %s, want vless", dto.Protocol)
+	}
+	if dto.Security == nil || dto.Security.Type != "reality" {
+		t.Fatalf("dto.Security = %v, want reality", dto.Security)
+	}
+	if dto.Security.SNI != "www.apple.com" {
+		t.Errorf("dto.Security.SNI = %s, want www.apple.com", dto.Security.SNI)
+	}
+	if dto.Security.Reality.PublicKey != "MklFWFDOJqoe6ONT9a5vvOsyp1lKqYzmSOgDgmSV_j8" {
+		t.Errorf("dto.Security.Reality.PublicKey = %s", dto.Security.Reality.PublicKey)
+	}
+
+	// 3. 用户 UUID 与节点名
+	if dto.Auth.UUID != userUUID {
+		t.Errorf("dto.Auth.UUID = %s, want %s", dto.Auth.UUID, userUUID)
+	}
+	if dto.Name != "🇯🇵 日本 01 [专线中转]" {
+		t.Errorf("dto.Name = %s", dto.Name)
+	}
+
+	// 4. 测试管道悬空草稿（TargetInboundID 为 nil）
+	tunnelDraft := models.Inbound{
+		ID:       102,
+		ServerID: edgeServer.ID,
+		Tag:      "tunnel-draft",
+		Port:     10002,
+		Type:     models.InboundTypeTunnel,
+		Protocol: models.ProtocolDokodemo,
+	}
+	apDraft := models.UserAccessPoint{
+		ID:              2,
+		Name:            "草稿节点",
+		TargetType:      "inbound",
+		TargetInboundID: &tunnelDraft.ID,
+		Enabled:         true,
+	}
+	inbMap[tunnelDraft.ID] = tunnelDraft
+	if dtoDraft := ResolveAPSubscription(&apDraft, srvMap, inbMap, nil, userUUID); dtoDraft != nil {
+		t.Errorf("悬空管道 AP 不应产出节点 DTO: %v", dtoDraft)
 	}
 }

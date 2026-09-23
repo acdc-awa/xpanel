@@ -315,10 +315,13 @@ export interface InboundItem {
   ratio: number
   total_gb?: number // 入站总流量上限（GB，0=不限）
   expiry_time?: string | null // 入站到期时间（null/缺失=永久）
-  enabled: boolean
-  type?: string // user / relay（Phase T）
+  type?: string // user / relay / tunnel
   internal_uuid?: string // relay 只读（节点生成上报）
+  target_inbound_id?: number // 四层直通目标落地入站 ID
+  target_address?: string // 手动指定的外部目标地址
+  target_port?: number // 手动指定的外部目标端口
   cert_id?: number // 绑定的证书
+  enabled?: boolean
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址

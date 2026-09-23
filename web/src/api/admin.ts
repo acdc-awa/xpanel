@@ -553,9 +553,12 @@ export interface InboundPayload {
   stream_settings?: string
   sniffing?: string
   ratio?: number
-  total_gb?: number // 入站总流量上限（GB，0=不限）
-  expiry_time?: string | null // 入站到期时间（null=永久；更新时 null 显式清空）
-  type?: string // user / relay
+  total_gb?: number
+  expiry_time?: string | null
+  type?: string // user / relay / tunnel
+  target_inbound_id?: number
+  target_address?: string
+  target_port?: number
   cert_id?: number
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）

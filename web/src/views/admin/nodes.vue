@@ -210,6 +210,9 @@ function editorModelValue(): string {
     total_gb: editing.value.total_gb ?? 0,
     expiry_time: editing.value.expiry_time ?? null,
     type: editing.value.type || 'user',
+    target_inbound_id: editing.value.target_inbound_id,
+    target_address: editing.value.target_address,
+    target_port: editing.value.target_port,
     cert_id: editing.value.cert_id || 0,
     share_addr_strategy: editing.value.share_addr_strategy,
     share_addr: editing.value.share_addr,
@@ -275,6 +278,9 @@ async function save() {
       total_gb: c.total_gb,
       expiry_time: c.expiry_time ?? null,
       type: formType.value,
+      target_inbound_id: c.targetInboundId || undefined,
+      target_address: c.targetAddress || undefined,
+      target_port: c.targetPort || undefined,
       cert_id: formCertId.value || undefined,
       flow: c.flow || undefined,
       share_addr_strategy: c.shareAddrStrategy || undefined,
@@ -406,8 +412,8 @@ function quotaOf(row: any): string {
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
               <span class="node-name" title="点击编辑入站" @click="openEdit(row)">{{ row.tag }}</span>
-              <span class="x-chip" :class="row.type === 'relay' ? 'orange' : 'purple'" style="font-size: 10px; padding: 1px 5px">
-                {{ row.type === 'relay' ? '转发' : '用户' }}
+              <span class="x-chip" :class="row.type === 'relay' ? 'orange' : row.type === 'tunnel' ? 'cyan' : 'purple'" style="font-size: 10px; padding: 1px 5px">
+                {{ row.type === 'relay' ? '转发' : row.type === 'tunnel' ? '直通' : '用户' }}
               </span>
             </div>
             <el-tooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'" placement="top">
@@ -575,6 +581,9 @@ function quotaOf(row: any): string {
         :cert-id="formCertId"
         :server-id="formServerId"
         :layer-id="editing?.layer_id || 0"
+        :target-inbound-id="editing?.target_inbound_id"
+        :target-address="editing?.target_address || ''"
+        :target-port="editing?.target_port || 0"
         @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"

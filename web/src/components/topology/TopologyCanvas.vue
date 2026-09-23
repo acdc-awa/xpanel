@@ -26,6 +26,7 @@ import {
   saveTopologyLayout,
   updateInbound,
   createInbound,
+  deleteInbound,
   updateServerOutbound,
   setAccessPointTarget,
   getPermissionGroups,
@@ -33,6 +34,7 @@ import {
   updateLayer,
   deleteLayer,
   type TopologyData,
+  type InboundPayload,
 } from '@/api/admin'
 import type { InboundItem, ServerOutbound, PermissionGroup, UserAccessPoint, AccessLayer } from '@/api/types'
 import { errMsg } from '@/api/http'
@@ -232,11 +234,13 @@ function getBoxWidth(serverId: number | string): number {
 }
 
 // 盒高估算（对齐 CSS 渲染附近；仅用于自动排版间距）：
-// 标准盒 = max(入站列高含层胶囊, 出站列高)。
+// 标准盒 = max(入站列高含层胶囊, 出站列高) + 直通管道高度。
 function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, outCount: number) {
   const inbCol = inboundColumnRows(srv.id).colH
   const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + 16
-  return Math.max(inbCol, outCol)
+  const tunnelCount = tunnelInboundsOf(srv.id).length
+  const tunnelH = tunnelCount > 0 ? tunnelCount * 48 + 12 : 0
+  return Math.max(inbCol, outCol) + tunnelH
 }
 
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
@@ -245,7 +249,28 @@ function nodePosOf(s: TopologyData['servers'][number], idx: number) {
 
 function typeInfo(t?: string) {
   if (t === 'relay') return { cls: 'relay', text: '转发' }
+  if (t === 'tunnel') return { cls: 'tunnel', text: '直通' }
   return { cls: 'user', text: '用户' }
+}
+
+function tunnelInboundsOf(serverId: number): TopologyData['inbounds'] {
+  const data = props.topology
+  if (!data) return []
+  return data.inbounds.filter((i) => i.server_id === serverId && i.type === 'tunnel')
+}
+
+function tunnelTargetDesc(inb: InboundItem): string {
+  if (inb.target_inbound_id && props.topology) {
+    const tgt = props.topology.inbounds.find((i) => i.id === inb.target_inbound_id)
+    if (tgt) {
+      const srv = props.topology.servers.find((s) => s.id === tgt.server_id)
+      return `➜ ${srv ? srv.name + '/' : ''}${tgt.tag} (:${tgt.port})`
+    }
+  }
+  if (inb.target_address && inb.target_port) {
+    return `➜ ${inb.target_address}:${inb.target_port}`
+  }
+  return ''
 }
 
 // 快速切换入站二态 (user <-> relay)
@@ -300,7 +325,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
   const rank = order && order.length > 0 ? new Map(order.map((id, idx) => [id, idx])) : null
   for (const l of data.layers ?? []) {
     if (l.server_id !== serverId) continue
-    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id)
+    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id && i.type !== 'tunnel')
     const inbounds = rank
       ? [...rawInbs].sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 9999) - (rank.has(b.id) ? rank.get(b.id)! : 9999))
       : rawInbs
@@ -312,7 +337,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
 function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
   const data = props.topology
   if (!data) return []
-  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id)
+  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id && i.type !== 'tunnel')
   const order = boxTagOrders.get(`server-${serverId}`)?.inbounds
   if (!order || order.length === 0) return list
   const rank = new Map(order.map((id, idx) => [id, idx]))
@@ -401,9 +426,9 @@ function getOrderedOutbounds(serverId: number, rawList: BoxOutbound[]): BoxOutbo
   })
 }
 
-// 该服务器全部入站 id（原生 + 挂层），顺序 = 后端返回序（显示排序的回退基准）
+// 该服务器全部入站 id（原生 + 挂层，排除直通管道），顺序 = 后端返回序（显示排序的回退基准）
 function allInboundsOf(serverId: number): number[] {
-  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId).map((i) => i.id)
+  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId && i.type !== 'tunnel').map((i) => i.id)
 }
 
 // 更新并持久化卡片内出入站自定义顺序
@@ -615,6 +640,21 @@ function buildGraph(data: TopologyData) {
     })
   }
 
+  // 四层直通管道跨盒连线（dokodemo-door -> 目标落地机入站）
+  for (const inb of data.inbounds) {
+    if (inb.type !== 'tunnel' || !inb.target_inbound_id || !inbNode.has(inb.target_inbound_id)) continue
+    es.push({
+      id: `tunnel-${inb.id}`,
+      source: `server-${inb.server_id}`,
+      sourceHandle: `tunnel-src-${inb.id}`,
+      target: inbNode.get(inb.target_inbound_id)!,
+      targetHandle: `inb-tgt-${inb.target_inbound_id}`,
+      type: 'refedge',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      data: { isTunnel: true },
+    })
+  }
+
   // 路由规则盒内虚线
   for (const rule of data.routing_rules) {
     if (!rule.inbound_tag || !rule.enabled) continue
@@ -675,14 +715,21 @@ function isValidConnection(conn: Connection): boolean {
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
+  const tunnelSrc = src.match(/^tunnel-src-(\d+)$/)
   const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  // 用户接入点 -> 用户入站（仅限 type=user 物理入站）
+  // 用户接入点 -> 用户入站或四层直通管道
   if (apSrc && inbTgt) {
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbTgt[1]))
-    return !!inb && inb.type === 'user'
+    return !!inb && (inb.type === 'user' || inb.type === 'tunnel')
+  }
+  // 四层直通管道出口 -> 落地机入站
+  if (tunnelSrc && inbAny) {
+    const srcInb = props.topology.inbounds.find((i) => i.id === Number(tunnelSrc[1]))
+    const tgtInb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
+    return !!(srcInb && tgtInb && srcInb.server_id !== tgtInb.server_id && srcInb.id !== tgtInb.id)
   }
   if (outSrc && inbAny) {
     const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
@@ -711,11 +758,12 @@ async function handleConnect(conn: Connection) {
   const outSrc = src.match(/^out-src-(\d+)$/)
   const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
+  const tunnelSrc = src.match(/^tunnel-src-(\d+)$/)
   const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
   const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(\d+)$/)
 
-  // 用户接入点 → 目标（订阅入口指向管道：直连用户入站）
+  // 用户接入点 → 目标（用户入站或四层直通管道）
   if (apSrc) {
     const apId = Number(apSrc[1])
     if (inbTgt) {
@@ -723,7 +771,7 @@ async function handleConnect(conn: Connection) {
       try {
         const { data } = await setAccessPointTarget(apId, { target_type: 'inbound', target_inbound_id: inbId })
         if (data.code === 0) {
-          ElMessage.success('已连接接入点至用户入站')
+          ElMessage.success('已连接接入点至入站/管道')
           emit('changed')
         } else ElMessage.error(data.message)
       } catch (e) {
@@ -731,6 +779,10 @@ async function handleConnect(conn: Connection) {
       }
       return
     }
+    return
+  }
+  if (tunnelSrc && inbAny) {
+    await connectTunnel(Number(tunnelSrc[1]), Number(inbAny[1]))
     return
   }
   if (outSrc && inbAny) {
@@ -742,7 +794,66 @@ async function handleConnect(conn: Connection) {
   } else if (inbSrc && inbAny) {
     ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
   } else {
-    ElMessage.warning('仅支持：接入点右侧端点 -> 用户入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+    ElMessage.warning('仅支持：接入点右侧端点 -> 入站/直通管道、管道右侧端点 -> 落地机入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+  }
+}
+
+async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
+  const data = props.topology!
+  const srcInb = data.inbounds.find((i) => i.id === tunnelInboundId)
+  const tgtInb = data.inbounds.find((i) => i.id === targetInboundId)
+  if (!srcInb || !tgtInb) return
+  if (srcInb.server_id === tgtInb.server_id) {
+    ElMessage.warning('四层直通管道仅支持跨服务器直通落地入站')
+    return
+  }
+  const srcSrv = data.servers.find((s) => s.id === srcInb.server_id)?.name ?? `#${srcInb.server_id}`
+  const tgtSrv = data.servers.find((s) => s.id === tgtInb.server_id)?.name ?? `#${tgtInb.server_id}`
+
+  let targetAcceptsPP = false
+  try {
+    const ss = JSON.parse(tgtInb.stream_settings || '{}')
+    targetAcceptsPP = !!ss.acceptProxyProtocol
+  } catch {}
+
+  let confirmMsg = `将四层直通管道「${srcInb.tag}」（${srcSrv}）连接至落地入站「${tgtInb.tag}」（${tgtSrv}）？\n直通管道将通过 dokodemo-door 发送 ProxyProtocol v2 报文。`
+  if (!targetAcceptsPP) {
+    confirmMsg += `\n\n【提示】落地入站「${tgtInb.tag}」尚未开启「接收 Proxy Protocol」。是否自动为其开启？`
+  }
+
+  try {
+    await ElMessageBox.confirm(confirmMsg, '建立四层直通管道', {
+      type: 'info',
+      confirmButtonText: '确认建立',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  try {
+    if (!targetAcceptsPP) {
+      let ss: Record<string, any> = {}
+      try {
+        ss = JSON.parse(tgtInb.stream_settings || '{}')
+      } catch {}
+      ss.acceptProxyProtocol = true
+      await updateInbound(tgtInb.id, { stream_settings: JSON.stringify(ss) })
+    }
+
+    const { data: res } = await updateInbound(tunnelInboundId, {
+      target_inbound_id: targetInboundId,
+      target_address: '',
+      target_port: 0,
+    })
+    if (res.code === 0) {
+      ElMessage.success('四层直通管道已连接，落地入站已配置 ProxyProtocol')
+      emit('changed')
+    } else {
+      ElMessage.error(res.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '连接直通管道失败'))
   }
 }
 
@@ -1035,16 +1146,68 @@ function handleOutboundSaved() {
   emit('changed')
 }
 
-// ---- 入站新建弹窗（直接在画布中唤起） ----
+// ---- 入站新建/编辑弹窗（直接在画布中唤起） ----
 const inboundCreateOpen = ref(false)
 const inboundCreateServerId = ref(0)
+const inboundEditingItem = ref<InboundItem | null>(null)
+const inboundFormType = ref('user')
 const inboundChangePayload = ref<InboundEditorChangePayload | null>(null)
 const inboundSaving = ref(false)
 
 function openCreateInbound(serverId: number) {
   inboundCreateServerId.value = serverId
+  inboundEditingItem.value = null
+  inboundFormType.value = 'user'
   inboundChangePayload.value = null
   inboundCreateOpen.value = true
+}
+
+function openEditInbound(inb: InboundItem) {
+  inboundCreateServerId.value = inb.server_id
+  inboundEditingItem.value = inb
+  inboundFormType.value = inb.type || 'user'
+  inboundChangePayload.value = null
+  inboundCreateOpen.value = true
+}
+
+function inboundEditorModelValue(): string {
+  if (!inboundEditingItem.value) return '{}'
+  const inb = inboundEditingItem.value
+  let network = 'tcp'
+  let tlsType = 'reality'
+  try {
+    const ss = JSON.parse(inb.stream_settings || '{}')
+    network = ss.network || network
+    tlsType = ss.security || tlsType
+  } catch {}
+  return JSON.stringify({
+    tag: inb.tag,
+    port: inb.port,
+    listen: inb.listen,
+    network,
+    tls_type: tlsType,
+    flow: inb.flow || '',
+    settings_json: inb.settings_json,
+    stream_settings: inb.stream_settings,
+    sniffing: inb.sniffing,
+    ratio: inb.ratio,
+    total_gb: inb.total_gb ?? 0,
+    expiry_time: inb.expiry_time ?? null,
+    type: inb.type || 'user',
+    target_inbound_id: inb.target_inbound_id,
+    target_address: inb.target_address,
+    target_port: inb.target_port,
+    cert_id: inb.cert_id || 0,
+    share_addr_strategy: inb.share_addr_strategy,
+    share_addr: inb.share_addr,
+    share_port: inb.share_port,
+    share_security: inb.share_security,
+    share_sni: inb.share_sni,
+    share_host: inb.share_host,
+    share_path: inb.share_path,
+    share_allow_insecure: inb.share_allow_insecure,
+    layer_id: inb.layer_id || 0,
+  })
 }
 
 function onInboundEditorChange(payload: InboundEditorChangePayload) {
@@ -1063,7 +1226,7 @@ async function handleSaveInbound() {
   }
   inboundSaving.value = true
   try {
-    const { data } = await createInbound({
+    const payload: Partial<InboundPayload> = {
       server_id: inboundCreateServerId.value,
       tag: c.tag,
       protocol: c.protocol,
@@ -1073,7 +1236,12 @@ async function handleSaveInbound() {
       stream_settings: c.streamSettings,
       sniffing: c.sniffing || undefined,
       ratio: c.ratio,
-      type: 'user',
+      total_gb: c.total_gb,
+      expiry_time: c.expiry_time ?? null,
+      type: inboundFormType.value,
+      target_inbound_id: c.targetInboundId || undefined,
+      target_address: c.targetAddress || undefined,
+      target_port: c.targetPort || undefined,
       flow: c.flow || undefined,
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
@@ -1084,18 +1252,40 @@ async function handleSaveInbound() {
       share_path: c.sharePath || undefined,
       share_allow_insecure: c.shareAllowInsecure,
       layer_id: c.layerId || undefined,
-    })
+    }
+    const { data } = inboundEditingItem.value
+      ? await updateInbound(inboundEditingItem.value.id, payload)
+      : await createInbound(payload as InboundPayload)
     if (data.code === 0) {
-      ElMessage.success('入站已创建')
+      ElMessage.success(inboundEditingItem.value ? '入站已保存' : '入站已创建')
       inboundCreateOpen.value = false
       emit('changed')
     } else {
       ElMessage.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建入站失败'))
+    ElMessage.error(errMsg(e, inboundEditingItem.value ? '保存入站失败' : '创建入站失败'))
   } finally {
     inboundSaving.value = false
+  }
+}
+
+async function handleDeleteInbound(inb: InboundItem) {
+  try {
+    await ElMessageBox.confirm(`删除入站「${inb.tag}」？`, '删除入站', { type: 'error' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await deleteInbound(inb.id)
+    if (data.code === 0) {
+      ElMessage.success('入站已删除')
+      emit('changed')
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
   }
 }
 
@@ -1282,6 +1472,33 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       ElMessage.error(errMsg(e, '解除连接失败'))
       deselectEdge(edge.id)
     }
+  } else if (edge.id.startsWith('tunnel-')) {
+    const tunnelInboundId = Number(edge.id.slice(7))
+    const inb = props.topology.inbounds.find((i) => i.id === tunnelInboundId)
+    if (!inb) return
+    try {
+      await ElMessageBox.confirm(
+        `解除四层直通管道「${inb.tag}」与目标入站的连线？解除后管道将恢复为草稿状态。`,
+        '解除直通管道',
+        { type: 'warning' },
+      )
+    } catch {
+      deselectEdge(edge.id)
+      return
+    }
+    try {
+      const { data } = await updateInbound(tunnelInboundId, { target_inbound_id: undefined })
+      if (data.code === 0) {
+        ElMessage.success('已解除直通连线')
+        emit('changed')
+      } else {
+        ElMessage.error(data.message)
+        deselectEdge(edge.id)
+      }
+    } catch (e) {
+      ElMessage.error(errMsg(e, '解除连线失败'))
+      deselectEdge(edge.id)
+    }
   }
 }
 
@@ -1339,6 +1556,16 @@ function autoLayout() {
     if (!targetInb) continue
     if (out.server_id !== targetInb.server_id && upstream.has(targetInb.server_id)) {
       upstream.get(targetInb.server_id)!.add(out.server_id)
+    }
+  }
+
+  // 四层直通管道: tunnel (src) -> inb (tgt)；流量方向 src -> tgt，故 tgt 依赖 src
+  for (const inb of data.inbounds) {
+    if (inb.type !== 'tunnel' || !inb.target_inbound_id) continue
+    const targetInb = data.inbounds.find((i) => i.id === inb.target_inbound_id)
+    if (!targetInb) continue
+    if (inb.server_id !== targetInb.server_id && upstream.has(targetInb.server_id)) {
+      upstream.get(targetInb.server_id)!.add(inb.server_id)
     }
   }
 
@@ -1520,7 +1747,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
       </template>
 
-      <!-- 跨盒引用线：平滑 S 形贝塞尔 -->
+      <!-- 跨盒引用线与四层直通线：平滑 S 形贝塞尔 -->
       <template #edge-refedge="e">
         <path
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit ref-hit"
@@ -1528,12 +1755,12 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         />
         <path
           class="refedge-glow"
-          :class="{ 'is-ap': e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP, 'is-tunnel': e.data?.isTunnel }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
           class="refedge-path"
-          :class="{ 'is-ap': e.data?.isAP }"
+          :class="{ 'is-ap': e.data?.isAP, 'is-tunnel': e.data?.isTunnel }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
           :marker-end="e.markerEnd"
         />
@@ -1630,6 +1857,72 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
               <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', nodeProps.data.server.id)">
                 <el-icon><Setting /></el-icon>&nbsp;详情
               </button>
+            </div>
+          </div>
+
+          <!-- 四层直通管道卡片（横跨整机的通栏卡片 Full-width Tunnel Card） -->
+          <div v-if="tunnelInboundsOf(nodeProps.data.server.id).length > 0" class="sb-tunnels-wrap">
+            <div
+              v-for="inb in tunnelInboundsOf(nodeProps.data.server.id)"
+              :key="inb.id"
+              class="tunnel-card"
+            >
+              <!-- 左侧入口端点：供 AP 拖线接入（inb-tgt） -->
+              <Handle
+                type="target"
+                :id="`inb-tgt-${inb.id}`"
+                :position="Position.Left"
+                :connectable="editable"
+                class="ep ext-tgt tunnel-ep-left"
+                title="供用户接入点连接"
+              />
+
+              <div class="tunnel-card-content">
+                <!-- 左侧入站信息 -->
+                <div class="tunnel-entry">
+                  <span class="tunnel-badge">直通</span>
+                  <span class="tunnel-tag" :title="inb.tag">{{ inb.tag }}</span>
+                  <span class="port-badge">:{{ inb.port }}</span>
+                </div>
+
+                <!-- 中间管道视觉 -->
+                <div class="tunnel-pipe">
+                  <div class="pipe-line" :class="{ 'is-active': inb.target_inbound_id || inb.target_address }">
+                    <span class="pipe-flow-icon">⚡</span>
+                    <span class="pipe-text">dokodemo-door (L4)</span>
+                    <span class="pipe-arrow">➜</span>
+                    <span class="pipe-proto">PPv2</span>
+                  </div>
+                  <div class="pipe-target-info">
+                    <span v-if="tunnelTargetDesc(inb)" class="target-desc" :title="tunnelTargetDesc(inb)">
+                      {{ tunnelTargetDesc(inb) }}
+                    </span>
+                    <span v-else class="target-draft">
+                      ⚠️ 待连线 (从右侧端点拖至目标入站)
+                    </span>
+                  </div>
+                </div>
+
+                <!-- 右侧操作与出口端点 -->
+                <div class="tunnel-actions">
+                  <button v-if="editable" class="tunnel-btn" title="编辑直通管道" @click.stop="openEditInbound(inb)">
+                    <el-icon><Setting /></el-icon>
+                  </button>
+                  <button v-if="editable" class="tunnel-btn danger" title="删除直通管道" @click.stop="handleDeleteInbound(inb)">
+                    <el-icon><Delete /></el-icon>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 右侧出口端点：拖线连至落地机入站 -->
+              <Handle
+                type="source"
+                :id="`tunnel-src-${inb.id}`"
+                :position="Position.Right"
+                :connectable="editable"
+                class="ep ext-src tunnel-ep-right"
+                title="拖线至目标落地机入站"
+              />
             </div>
           </div>
 
@@ -1935,22 +2228,31 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       @deleted="emit('changed')"
     />
 
-    <!-- 入站新建弹窗（直接在拓扑画布中呼出） -->
+    <!-- 入站新建/编辑弹窗（直接在拓扑画布中呼出） -->
     <el-dialog
       v-model="inboundCreateOpen"
-      title="为服务器新建入站"
+      :title="inboundEditingItem ? '编辑入站' : '为服务器新建入站'"
       width="840px"
       append-to-body
       destroy-on-close
     >
       <InboundConfigEditor
+        :key="inboundEditingItem ? `edit-${inboundEditingItem.id}` : `create-${inboundCreateServerId}`"
         :server-id="inboundCreateServerId"
+        :inbound-id="inboundEditingItem?.id || 0"
+        :inbound-type="inboundFormType"
+        :saved-inbound-type="inboundEditingItem?.type || ''"
+        :target-inbound-id="inboundEditingItem?.target_inbound_id"
+        :target-address="inboundEditingItem?.target_address || ''"
+        :target-port="inboundEditingItem?.target_port || 0"
+        :model-value="inboundEditorModelValue()"
         @change="onInboundEditorChange"
+        @update:inbound-type="(v: string) => (inboundFormType = v)"
       />
       <template #footer>
         <el-button @click="inboundCreateOpen = false">取消</el-button>
         <el-button type="primary" :loading="inboundSaving" @click="handleSaveInbound">
-          创建入站
+          {{ inboundEditingItem ? '保存入站' : '创建入站' }}
         </el-button>
       </template>
     </el-dialog>
@@ -2283,6 +2585,146 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       text-overflow: ellipsis;
       white-space: nowrap;
       max-width: 140px;
+    }
+  }
+
+  /* 四层直通管道卡片：横贯整机宽度 (Full-width Tunnel Card) */
+  .sb-tunnels-wrap {
+    padding: 0 16px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .tunnel-card {
+    position: relative;
+    background: linear-gradient(90deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.75) 100%);
+    border: 1px solid rgba(6, 182, 212, 0.35);
+    border-radius: 10px;
+    padding: 6px 10px;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+
+    &:hover {
+      border-color: rgba(6, 182, 212, 0.6);
+      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.2);
+    }
+
+    .tunnel-card-content {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .tunnel-entry {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: none;
+    }
+
+    .tunnel-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: rgba(6, 182, 212, 0.2);
+      color: #22d3ee;
+      border: 1px solid rgba(6, 182, 212, 0.4);
+    }
+
+    .tunnel-tag {
+      font-weight: 600;
+      font-size: 12px;
+      color: #f1f5f9;
+      max-width: 100px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tunnel-pipe {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+
+      .pipe-line {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px dashed rgba(148, 163, 184, 0.3);
+        font-size: 10.5px;
+        color: #94a3b8;
+        &.is-active {
+          border-style: solid;
+          border-color: rgba(6, 182, 212, 0.4);
+          background: rgba(6, 182, 212, 0.1);
+          color: #67e8f9;
+        }
+      }
+
+      .pipe-proto {
+        font-size: 9.5px;
+        font-weight: 700;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: rgba(56, 189, 248, 0.2);
+        color: #38bdf8;
+      }
+
+      .pipe-target-info {
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        .target-desc {
+          color: #38bdf8;
+          font-weight: 500;
+        }
+        .target-draft {
+          color: #fbbf24;
+        }
+      }
+    }
+
+    .tunnel-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: none;
+
+      .tunnel-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #cbd5e1;
+        border-radius: 4px;
+        padding: 2px 5px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s;
+        &:hover {
+          background: rgba(56, 189, 248, 0.2);
+          border-color: #38bdf8;
+          color: #38bdf8;
+        }
+        &.danger:hover {
+          background: rgba(239, 68, 68, 0.2);
+          border-color: #ef4444;
+          color: #ef4444;
+        }
+      }
     }
   }
 
@@ -2853,6 +3295,36 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
     pointer-events: none;
   }
+  &.tunnel-ep-left {
+    left: -6px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    border-color: #22d3ee !important;
+    background: #0f172a !important;
+    opacity: 1 !important;
+    z-index: 5 !important;
+    cursor: crosshair;
+    &:hover {
+      border-color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.3) !important;
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.8) !important;
+    }
+  }
+  &.tunnel-ep-right {
+    right: -6px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    border-color: #22d3ee !important;
+    background: #0f172a !important;
+    opacity: 1 !important;
+    z-index: 5 !important;
+    cursor: crosshair;
+    &:hover {
+      border-color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.3) !important;
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.8) !important;
+    }
+  }
 }
 
 :deep(.vue-flow__edge-path) {
@@ -2933,6 +3405,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     stroke: #0284c7;
     opacity: 0.28;
   }
+  &.is-tunnel {
+    stroke: #0891b2;
+    opacity: 0.35;
+  }
 }
 .refedge-path {
   stroke: #fbbf24;
@@ -2949,6 +3425,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   &.is-ap {
     stroke: #38bdf8;
     stroke-dasharray: 6 4;
+  }
+  &.is-tunnel {
+    stroke: #06b6d4;
+    stroke-dasharray: 8 4;
   }
 }
 
@@ -2991,9 +3471,17 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   opacity: 0.5;
   stroke-width: 9;
 }
+.vue-flow__edge:not(.selected):hover .refedge-glow.is-tunnel {
+  opacity: 0.6;
+  stroke-width: 10;
+}
 .vue-flow__edge:not(.selected):hover .refedge-path {
   stroke: #fef3c7;
   stroke-width: 3;
+}
+.vue-flow__edge:not(.selected):hover .refedge-path.is-tunnel {
+  stroke: #67e8f9;
+  stroke-width: 3.2;
 }
 
 @media (max-width: 768px) {

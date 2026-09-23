@@ -13,10 +13,29 @@ import {
   QuestionFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCerts, getXrayKeys, getXrayVlessEnc, rotateInternalInbound, getLayers, createLayer, deleteLayer, type CertItem } from '@/api/admin'
+import {
+  getCerts,
+  getXrayKeys,
+  getXrayVlessEnc,
+  rotateInternalInbound,
+  getLayers,
+  createLayer,
+  deleteLayer,
+  getInbounds,
+  getServers,
+  type CertItem,
+} from '@/api/admin'
 import { errMsg } from '@/api/http'
 import CodeEditor from '@/components/CodeEditor.vue'
-import type { FallbackItem, InboundSettings, RealitySettings, TLSSettings, XHTTPSettings, AccessLayer } from '@/api/types'
+import type {
+  FallbackItem,
+  InboundSettings,
+  RealitySettings,
+  TLSSettings,
+  XHTTPSettings,
+  AccessLayer,
+  InboundItem,
+} from '@/api/types'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -39,6 +58,9 @@ export interface InboundEditorChangePayload {
   sharePath: string
   shareAllowInsecure: boolean
   layerId: number // 所属对外接入层（0 = 直连）
+  targetInboundId?: number
+  targetAddress?: string
+  targetPort?: number
 }
 
 export interface InboundEditorEmits {
@@ -61,6 +83,9 @@ const props = withDefaults(
     savedInboundType?: string
     internalUUID?: string
     inboundId?: number
+    targetInboundId?: number
+    targetAddress?: string
+    targetPort?: number
     certId?: number
     serverId?: number
     layerId?: number
@@ -78,6 +103,9 @@ const props = withDefaults(
     savedInboundType: '',
     internalUUID: '',
     inboundId: 0,
+    targetInboundId: undefined,
+    targetAddress: '',
+    targetPort: 0,
     certId: 0,
     serverId: 0,
     layerId: 0,
@@ -224,6 +252,71 @@ const localInboundType = ref(props.inboundType || 'user')
 const localInternalUUID = ref(props.internalUUID || '')
 const localCertId = ref<number>(props.certId || 0)
 const certs = ref<CertItem[]>([])
+
+// 四层直通目标（dokodemo-door）
+const localTargetMode = ref<'inbound' | 'manual' | 'draft'>('inbound')
+const localTargetInboundId = ref<number | undefined>(props.targetInboundId)
+const localTargetAddress = ref(props.targetAddress || '')
+const localTargetPort = ref(props.targetPort || 0)
+const candidateInbounds = ref<InboundItem[]>([])
+const serverMap = ref<Record<number, string>>({})
+
+if (props.targetInboundId) {
+  localTargetMode.value = 'inbound'
+} else if (props.targetAddress || props.targetPort) {
+  localTargetMode.value = 'manual'
+} else {
+  localTargetMode.value = 'draft'
+}
+
+async function loadCandidateInbounds() {
+  try {
+    const [inbRes, srvRes] = await Promise.all([getInbounds(), getServers()])
+    if (srvRes.data.code === 0) {
+      const sm: Record<number, string> = {}
+      for (const s of srvRes.data.data.items) {
+        sm[s.id] = s.name
+      }
+      serverMap.value = sm
+    }
+    if (inbRes.data.code === 0) {
+      candidateInbounds.value = inbRes.data.data.items.filter((i) => i.id !== props.inboundId)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function onTargetModeChange(mode: any) {
+  const m = String(mode)
+  if (m === 'inbound') {
+    localTargetAddress.value = ''
+    localTargetPort.value = 0
+  } else if (m === 'manual') {
+    localTargetInboundId.value = undefined
+  } else {
+    localTargetInboundId.value = undefined
+    localTargetAddress.value = ''
+    localTargetPort.value = 0
+  }
+}
+
+function onTargetInboundSelect(_val: any) {
+  localTargetAddress.value = ''
+  localTargetPort.value = 0
+}
+
+const targetNeedsPPWarning = computed(() => {
+  if (localTargetMode.value !== 'inbound' || !localTargetInboundId.value) return false
+  const target = candidateInbounds.value.find((i) => i.id === localTargetInboundId.value)
+  if (!target) return false
+  try {
+    const ss = JSON.parse(target.stream_settings || '{}')
+    return !ss.acceptProxyProtocol
+  } catch {
+    return true
+  }
+})
 
 // Fallbacks 列表
 const fallbacks = ref<FallbackItem[]>([])
@@ -457,6 +550,13 @@ function moveFallback(index: number, direction: -1 | 1) {
 }
 
 function buildSettingsJSON(): string {
+  if (localInboundType.value === 'tunnel') {
+    return JSON.stringify({
+      address: localTargetAddress.value || '',
+      port: localTargetPort.value || 0,
+      network: 'tcp,udp',
+    })
+  }
   // vlessenc 安全层：decryption 载入 settings_json（未生成密钥时回退 none，卡片有警示）
   const s: Record<string, any> = {
     decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
@@ -474,6 +574,12 @@ function buildSettingsJSON(): string {
 }
 
 function buildStreamSettingsJSON(): string {
+  if (localInboundType.value === 'tunnel') {
+    return JSON.stringify({
+      network: 'tcp',
+      security: 'none',
+    })
+  }
   // vlessenc 是面板抽象的伪安全层：stream 层固定 security:"none"（加密挂在协议 settings）
   const streamSecurity = localTlsType.value === 'vlessenc' ? 'none' : localTlsType.value
   const s: Record<string, any> = {
@@ -572,6 +678,9 @@ function syncFormToJson() {
     sharePath: localSharePath.value,
     shareAllowInsecure: localShareAllowInsecure.value,
     layerId: localLayerId.value,
+    targetInboundId: localTargetInboundId.value,
+    targetAddress: localTargetAddress.value,
+    targetPort: localTargetPort.value,
   })
   isInternalUpdating.value = false
 }
@@ -639,6 +748,22 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
     if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
     if (typeof parsed.layer_id === 'number' && parsed.layer_id !== 0) localLayerId.value = parsed.layer_id
+
+    if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door') {
+      localInboundType.value = 'tunnel'
+      localProtocol.value = 'dokodemo-door'
+    }
+    if (typeof parsed.target_inbound_id === 'number') localTargetInboundId.value = parsed.target_inbound_id
+    if (typeof parsed.target_address === 'string') localTargetAddress.value = parsed.target_address
+    if (typeof parsed.target_port === 'number') localTargetPort.value = parsed.target_port
+
+    if (localTargetInboundId.value) {
+      localTargetMode.value = 'inbound'
+    } else if (localTargetAddress.value || localTargetPort.value) {
+      localTargetMode.value = 'manual'
+    } else if (localInboundType.value === 'tunnel') {
+      localTargetMode.value = 'draft'
+    }
 
     if (Array.isArray(s.fallbacks)) {
       fallbacks.value = s.fallbacks.map((f) => ({
@@ -786,6 +911,10 @@ watch(
     vlessencKey,
     fingerprint,
     sniffingForm,
+    localTargetMode,
+    localTargetInboundId,
+    localTargetAddress,
+    localTargetPort,
   ],
   () => {
     syncFormToJson()
@@ -805,6 +934,7 @@ onMounted(() => {
     genShortId()
   }
   loadCerts()
+  loadCandidateInbounds()
   syncFormToJson()
 })
 
@@ -824,9 +954,40 @@ watch(
   () => props.listen,
   (v) => { if (v !== undefined) localListen.value = v || '0.0.0.0' },
 )
+watch(
+  () => props.targetInboundId,
+  (v) => {
+    localTargetInboundId.value = v
+    if (v) localTargetMode.value = 'inbound'
+  },
+)
+watch(
+  () => props.targetAddress,
+  (v) => {
+    localTargetAddress.value = v || ''
+    if (v && !localTargetInboundId.value) localTargetMode.value = 'manual'
+  },
+)
+watch(
+  () => props.targetPort,
+  (v) => {
+    localTargetPort.value = v || 0
+    if (v && !localTargetInboundId.value) localTargetMode.value = 'manual'
+  },
+)
 
 function onTypeChange(v: any) {
   localInboundType.value = String(v || 'user')
+  if (localInboundType.value === 'tunnel') {
+    localProtocol.value = 'dokodemo-door'
+    if (activeTab.value === 'network_security') {
+      activeTab.value = 'basic'
+    }
+  } else {
+    if (localProtocol.value === 'dokodemo-door') {
+      localProtocol.value = 'vless'
+    }
+  }
   emit('update:inboundType', localInboundType.value)
   syncFormToJson()
 }
@@ -847,7 +1008,7 @@ async function copyText(text: string, label: string) {
     <div class="editor-top-nav">
       <el-radio-group v-if="activeView === 'form'" v-model="activeTab" size="small" class="category-tabs">
         <el-radio-button value="basic">基础配置</el-radio-button>
-        <el-radio-button value="network_security">协议与安全</el-radio-button>
+        <el-radio-button v-if="localInboundType !== 'tunnel'" value="network_security">协议与安全</el-radio-button>
         <el-radio-button value="advanced">高级设置</el-radio-button>
       </el-radio-group>
       <div v-else class="json-title">
@@ -882,6 +1043,10 @@ async function copyText(text: string, label: string) {
                 <span>转发入站</span>
                 <span class="type-sub">供上游服务器链式代理连接落地</span>
               </el-radio>
+              <el-radio value="tunnel">
+                <span>四层直通 (Tunnel)</span>
+                <span class="type-sub">通过 dokodemo-door 将流量无损直通落地入站</span>
+              </el-radio>
             </el-radio-group>
 
             <div v-if="localInboundType === 'relay'" class="relay-box">
@@ -896,6 +1061,66 @@ async function copyText(text: string, label: string) {
                   </el-button>
                 </div>
               </el-form-item>
+            </div>
+          </div>
+
+          <!-- 直通目标配置（仅四层直通模式） -->
+          <div v-if="localInboundType === 'tunnel'" class="form-card">
+            <div class="card-title">直通目标配置 (Target Destination)</div>
+            <div style="margin-bottom: 14px">
+              <el-radio-group v-model="localTargetMode" size="small" @change="onTargetModeChange">
+                <el-radio-button value="inbound">指定入站 (推荐)</el-radio-button>
+                <el-radio-button value="manual">手动指定目标</el-radio-button>
+                <el-radio-button value="draft">留空待连线 (草稿)</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <!-- 模式一：指定入站 -->
+            <div v-if="localTargetMode === 'inbound'" class="form-grid">
+              <el-form-item label="目标落地入站" style="grid-column: 1 / -1">
+                <el-select
+                  v-model="localTargetInboundId"
+                  filterable
+                  placeholder="选择要直通的目标服务器入站"
+                  style="width: 100%"
+                  @change="onTargetInboundSelect"
+                >
+                  <el-option
+                    v-for="item in candidateInbounds"
+                    :key="item.id"
+                    :label="`[${serverMap[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`"
+                    :value="item.id"
+                  />
+                </el-select>
+              </el-form-item>
+              <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
+                <el-alert
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  title="注意：所选目标入站尚未开启「接收 Proxy Protocol」，客户端真实 IP 将无法透传并可能导致握手失败。建议在目标入站设置中开启。"
+                />
+              </div>
+            </div>
+
+            <!-- 模式二：手动指定 -->
+            <div v-else-if="localTargetMode === 'manual'" class="form-grid">
+              <el-form-item label="目标地址 (IP 或 域名)">
+                <el-input v-model="localTargetAddress" placeholder="如 1.2.3.4 或 node.example.com" />
+              </el-form-item>
+              <el-form-item label="目标端口">
+                <el-input-number v-model="localTargetPort" :min="1" :max="65535" style="width: 100%" />
+              </el-form-item>
+            </div>
+
+            <!-- 模式三：草稿留空 -->
+            <div v-else class="draft-tip-box">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="草稿状态：目标地址与端口均未指定。可以在拓扑图中拖拽连线至目标入站完成绑定；未连线前 Xray 将跳过此入站以防启动报错。"
+              />
             </div>
           </div>
 

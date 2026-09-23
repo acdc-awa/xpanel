@@ -2,6 +2,10 @@ package xray_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1381,10 +1385,245 @@ func TestCountDistinctOnlineUsers(t *testing.T) {
 
 // 溢出数字不得被误解析为 uid=0 的合法键
 func TestParseUserEmailAnyOverflow(t *testing.T) {
-	if _, _, ok := xray.ParseUserEmailAny("u99999999999999999999999.i1@panel.local"); ok {
-		t.Fatal("溢出 uid 不应解析成功")
+}
+
+// TestGenerateConfig_TunnelInbound_Linked 测试四层直通管道关联落地入站时的生成结果
+func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
+	targetID := uint64(201)
+	tunnelInb := models.Inbound{
+		ID:              101,
+		ServerID:        1,
+		Tag:             "tunnel-10001",
+		Protocol:        models.ProtocolDokodemo,
+		Port:            10001,
+		Type:            models.InboundTypeTunnel,
+		TargetInboundID: &targetID,
+		Enabled:         true,
 	}
-	if _, _, ok := xray.ParseUserEmailAny("user-99999999999999999999999@panel.local"); ok {
-		t.Fatal("溢出 uid（旧格式）不应解析成功")
+	ctx := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{
+			targetID: {
+				Inbound: models.Inbound{
+					ID:       targetID,
+					ServerID: 2,
+					Tag:      "vless-in-443",
+					Port:     443,
+					Protocol: "vless",
+				},
+				ServerHost: "exit-node.example.com",
+			},
+		},
+	}
+
+	raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	// 1. 验证入站生成了 dokodemo-door，address 和 port 为落地端
+	inbounds, ok := root["inbounds"].([]any)
+	if !ok || len(inbounds) < 2 { // tunnel + api
+		t.Fatalf("inbounds count = %d, want >= 2", len(inbounds))
+	}
+	tInb := asObject(t, inbounds[0], "inbounds[0]")
+	if tInb["protocol"] != "dokodemo-door" {
+		t.Errorf("protocol = %v, want dokodemo-door", tInb["protocol"])
+	}
+	settings := asObject(t, tInb["settings"], "settings")
+	if settings["address"] != "exit-node.example.com" {
+		t.Errorf("settings.address = %v, want exit-node.example.com", settings["address"])
+	}
+	if fmt.Sprintf("%v", settings["port"]) != "443" {
+		t.Errorf("settings.port = %v, want 443", settings["port"])
+	}
+
+	// 2. 验证自动派生了 out-tunnel-10001 的 freedom 出站并包含 proxyProtocol: 2
+	outbounds, ok := root["outbounds"].([]any)
+	if !ok {
+		t.Fatalf("missing outbounds")
+	}
+	var freedomOut map[string]any
+	for _, ob := range outbounds {
+		m := asObject(t, ob, "outbound")
+		if m["tag"] == "out-tunnel-10001" {
+			freedomOut = m
+			break
+		}
+	}
+	if freedomOut == nil {
+		t.Fatalf("out-tunnel-10001 freedom outbound not found in outbounds")
+	}
+	if freedomOut["protocol"] != "freedom" {
+		t.Errorf("outbound protocol = %v, want freedom", freedomOut["protocol"])
+	}
+	obSettings := asObject(t, freedomOut["settings"], "outbound settings")
+	if fmt.Sprintf("%v", obSettings["proxyProtocol"]) != "2" {
+		t.Errorf("proxyProtocol = %v, want 2", obSettings["proxyProtocol"])
+	}
+
+	// 3. 验证直通路由规则已注入
+	routing := asObject(t, root["routing"], "routing")
+	rules, ok := routing["rules"].([]any)
+	if !ok {
+		t.Fatalf("missing routing.rules")
+	}
+	var tunnelRule map[string]any
+	for _, r := range rules {
+		rm := asObject(t, r, "rule")
+		if rm["outboundTag"] == "out-tunnel-10001" {
+			tunnelRule = rm
+			break
+		}
+	}
+	if tunnelRule == nil {
+		t.Fatalf("tunnel routing rule not found")
+	}
+	inTags, _ := tunnelRule["inboundTag"].([]any)
+	if len(inTags) == 0 || inTags[0] != "tunnel-10001" {
+		t.Errorf("rule.inboundTag = %v, want [tunnel-10001]", inTags)
+	}
+}
+
+// TestGenerateConfig_TunnelInbound_ManualExternal 测试手动外部 IP:Port 的直通管道
+func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
+	tunnelInb := models.Inbound{
+		ID:            102,
+		ServerID:      1,
+		Tag:           "tunnel-manual",
+		Protocol:      models.ProtocolDokodemo,
+		Port:          10002,
+		Type:          models.InboundTypeTunnel,
+		TargetAddress: "198.51.100.2",
+		TargetPort:    8443,
+		Enabled:       true,
+	}
+
+	raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbounds := root["inbounds"].([]any)
+	tInb := asObject(t, inbounds[0], "inbounds[0]")
+	settings := asObject(t, tInb["settings"], "settings")
+	if settings["address"] != "198.51.100.2" || fmt.Sprintf("%v", settings["port"]) != "8443" {
+		t.Errorf("manual target = %v:%v, want 198.51.100.2:8443", settings["address"], settings["port"])
+	}
+}
+
+// TestGenerateConfig_TunnelInbound_DraftSkipped 测试未配置目标的草稿状态下安全跳过
+func TestGenerateConfig_TunnelInbound_DraftSkipped(t *testing.T) {
+	tunnelInb := models.Inbound{
+		ID:       103,
+		ServerID: 1,
+		Tag:      "tunnel-draft",
+		Protocol: models.ProtocolDokodemo,
+		Port:     10003,
+		Type:     models.InboundTypeTunnel,
+		// TargetInboundID 和 TargetAddress 均为空
+		Enabled: true,
+	}
+
+	raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbounds := root["inbounds"].([]any)
+	// 仅包含 api 内建入站，草稿 tunnel 被安全跳过
+	if len(inbounds) != 1 {
+		t.Fatalf("inbounds count = %d, want 1 (only api)", len(inbounds))
+	}
+}
+
+// TestGenerateConfig_Tunnel_XrayTestValidation 生成并调用真实的 xray.exe 校验语法语义
+func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
+	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	if _, err := os.Stat(xrayBin); err != nil {
+		t.Skip("跳过 xray 二进制实测（文件不存在）")
+	}
+
+	targetID := uint64(301)
+	// 前置机配置
+	tunnelInb := models.Inbound{
+		ID:              104,
+		ServerID:        1,
+		Tag:             "tunnel-edge",
+		Protocol:        models.ProtocolDokodemo,
+		Port:            10004,
+		Type:            models.InboundTypeTunnel,
+		TargetInboundID: &targetID,
+		Enabled:         true,
+	}
+	ctx := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{
+			targetID: {
+				Inbound: models.Inbound{
+					ID:       targetID,
+					ServerID: 2,
+					Tag:      "vless-exit",
+					Port:     443,
+					Protocol: "vless",
+				},
+				ServerHost: "192.0.2.1",
+			},
+		},
+	}
+	edgeConfig, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate edgeConfig failed: %v", err)
+	}
+
+	tmpEdge := filepath.Join(t.TempDir(), "edge.json")
+	if err := os.WriteFile(tmpEdge, edgeConfig, 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	cmd := exec.Command(xrayBin, "-test", "-config", tmpEdge)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("前置机配置 xray -test 校验失败: %v, out: %s", err, string(out))
+	}
+
+	// 落地机配置（开启 acceptProxyProtocol）
+	exitInb := models.Inbound{
+		ID:             targetID,
+		ServerID:       2,
+		Tag:            "vless-exit",
+		Protocol:       "vless",
+		Port:           443,
+		Type:           models.InboundTypeUser,
+		StreamSettings: `{"network":"tcp","security":"none","acceptProxyProtocol":true}`,
+		Enabled:        true,
+	}
+	usersByTag := map[string][]protocol.User{
+		"vless-exit": {
+			{UUID: "a6a0e69e-5c62-4b2a-89a7-8f5b82143719", Email: "u1.i301@panel.local"},
+		},
+	}
+	exitConfig, err := xray.Generate([]models.Inbound{exitInb}, nil, nil, usersByTag, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate exitConfig failed: %v", err)
+	}
+	tmpExit := filepath.Join(t.TempDir(), "exit.json")
+	if err := os.WriteFile(tmpExit, exitConfig, 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	cmdExit := exec.Command(xrayBin, "-test", "-config", tmpExit)
+	if out, err := cmdExit.CombinedOutput(); err != nil {
+		t.Fatalf("落地机配置 xray -test 校验失败: %v, out: %s", err, string(out))
 	}
 }

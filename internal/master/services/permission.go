@@ -149,9 +149,39 @@ func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64,
 	return aps, groupMap, nil
 }
 
+// loadEnabledTunnels 加载启用且配置了有效 target_inbound_id 的 tunnel 入站映射。
+func loadEnabledTunnels(db *gorm.DB) (map[uint64]uint64, error) {
+	var tunnels []models.Inbound
+	if err := db.Where("enabled = ? AND type = ? AND target_inbound_id IS NOT NULL", true, models.InboundTypeTunnel).Find(&tunnels).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[uint64]uint64, len(tunnels))
+	for _, t := range tunnels {
+		if t.TargetInboundID != nil && *t.TargetInboundID > 0 {
+			m[t.ID] = *t.TargetInboundID
+		}
+	}
+	return m, nil
+}
+
+// resolveTerminalInboundID 沿隧道向下追溯直到终结入站（防环）。
+func resolveTerminalInboundID(startInbID uint64, tunnelMap map[uint64]uint64) uint64 {
+	curr := startInbID
+	visited := make(map[uint64]bool)
+	for {
+		next, isTunnel := tunnelMap[curr]
+		if !isTunnel || next == 0 || visited[curr] {
+			break
+		}
+		visited[curr] = true
+		curr = next
+	}
+	return curr
+}
+
 // BatchInboundAuthorizedGroupIDs 批量计算入站的授权权限组映射（inboundID -> []permissionGroupID），
-// 由启用 AP 白名单派生：AP 直连入站，AP 的开放组并入该入站的授权组集。
-// 配置生成（GetValidUsers）与用户注入的唯一权威来源。
+// 由启用 AP 白名单派生：AP 直连入站，AP 的开放组并入该入站的授权组集；若 AP 指向四层直通管道（tunnel），
+// 则授权组自动穿透传递给下游落地入站。配置生成（GetValidUsers）与用户注入的唯一权威来源。
 // 查询失败返回 error：调用方中止本次计算，不得按「无授权组」继续（审计 F4）。
 func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) (map[uint64][]uint64, error) {
 	res := make(map[uint64][]uint64)
@@ -166,18 +196,32 @@ func BatchInboundAuthorizedGroupIDs(db *gorm.DB, inboundIDs []uint64) (map[uint6
 	if err != nil {
 		return nil, err
 	}
+	tunnelMap, err := loadEnabledTunnels(db)
+	if err != nil {
+		return nil, err
+	}
 	sets := make(map[uint64]map[uint64]bool)
 	for i := range aps {
 		ap := &aps[i]
 		inbID := ResolveAccessPointInboundID(ap)
-		if inbID == 0 || !wanted[inbID] {
+		if inbID == 0 {
 			continue
 		}
-		if sets[inbID] == nil {
-			sets[inbID] = make(map[uint64]bool)
+		termID := resolveTerminalInboundID(inbID, tunnelMap)
+		candidates := []uint64{inbID}
+		if termID != inbID {
+			candidates = append(candidates, termID)
 		}
-		for _, gid := range apGroupMap[ap.ID] {
-			sets[inbID][gid] = true
+		for _, targetID := range candidates {
+			if !wanted[targetID] {
+				continue
+			}
+			if sets[targetID] == nil {
+				sets[targetID] = make(map[uint64]bool)
+			}
+			for _, gid := range apGroupMap[ap.ID] {
+				sets[targetID][gid] = true
+			}
 		}
 	}
 	for inbID, gs := range sets {
@@ -218,7 +262,7 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 		log.Printf("permission: 读取启用接入点失败（用户 %d 的可见节点按空处理）: %v", user.ID, err)
 	}
 	var inbs []models.Inbound
-	_ = db.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbs).Error
+	_ = db.Where("enabled = ? AND type IN ?", true, []string{models.InboundTypeUser, models.InboundTypeTunnel}).Find(&inbs).Error
 	inbServer := make(map[uint64]uint64, len(inbs))
 	for _, inb := range inbs {
 		inbServer[inb.ID] = inb.ServerID
