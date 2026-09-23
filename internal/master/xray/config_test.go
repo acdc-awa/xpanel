@@ -1627,3 +1627,85 @@ func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
 		t.Fatalf("落地机配置 xray -test 校验失败: %v, out: %s", err, string(out))
 	}
 }
+
+func TestGenerateConfig_ChannelSocks5AndHTTPAndTunnel(t *testing.T) {
+	inbounds := []models.Inbound{
+		{
+			ID:           101,
+			ServerID:     1,
+			Tag:          "chan-101-1080",
+			Protocol:     "socks",
+			Port:         1080,
+			Type:         models.InboundTypeChannel,
+			SettingsJSON: `{"auth":"password","accounts":[{"user":"testuser","pass":"testpass"}],"udp":true}`,
+			Enabled:      true,
+		},
+		{
+			ID:           102,
+			ServerID:     1,
+			Tag:          "chan-102-8080",
+			Protocol:     "http",
+			Port:         8080,
+			Type:         models.InboundTypeChannel,
+			SettingsJSON: `{"accounts":[{"user":"testuser","pass":"testpass"}]}`,
+			Enabled:      true,
+		},
+		{
+			ID:            103,
+			ServerID:      1,
+			Tag:           "chan-103-3306",
+			Protocol:      "dokodemo-door",
+			Port:          3306,
+			Type:          models.InboundTypeChannel,
+			TargetAddress: "db.remote.com",
+			TargetPort:    3306,
+			Enabled:       true,
+		},
+	}
+
+	raw, err := xray.Generate(inbounds, nil, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbList := parsed["inbounds"].([]any)
+	// 期望有 4 个入站（socks + http + tunnel + api）
+	if len(inbList) != 4 {
+		t.Fatalf("期望 4 个入站，实际 %d", len(inbList))
+	}
+
+	// 验证 socks 入站没有 clients 字段
+	socksInb := inbList[0].(map[string]any)
+	socksSettings := socksInb["settings"].(map[string]any)
+	if _, hasClients := socksSettings["clients"]; hasClients {
+		t.Errorf("socks 入站不应存在 clients: %v", socksSettings)
+	}
+	if socksSettings["auth"] != "password" {
+		t.Errorf("socks auth 不正确: %v", socksSettings["auth"])
+	}
+
+	// 验证 http 入站没有 clients 字段
+	httpInb := inbList[1].(map[string]any)
+	httpSettings := httpInb["settings"].(map[string]any)
+	if _, hasClients := httpSettings["clients"]; hasClients {
+		t.Errorf("http 入站不应存在 clients: %v", httpSettings)
+	}
+
+	// 真实 xray 二进制语义校验
+	xrayBin := filepath.Join("..", "..", "..", "tools", "xray-windows-64", "xray.exe")
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmp := filepath.Join(t.TempDir(), "channel_config.json")
+		if err := os.WriteFile(tmp, raw, 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("xray -test 校验通道配置失败: %v, out: %s", err, string(out))
+		}
+	}
+}

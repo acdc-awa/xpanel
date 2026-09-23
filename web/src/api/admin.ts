@@ -20,6 +20,8 @@ import type {
   ServerOutbound,
   ServerRoutingRule,
   AccessLayer,
+  ProxyChannelItem,
+  ProxyChannelPayload,
 } from './types'
 
 export type {
@@ -39,6 +41,8 @@ export type {
   ServerOutbound,
   ServerRoutingRule,
   AccessLayer,
+  ProxyChannelItem,
+  ProxyChannelPayload,
 } from './types'
 
 /** 仪表盘流量口径：今日 / 近 7 天 / 本月（驱动排行榜与服务器流量分布，三者同源）。 */
@@ -596,6 +600,31 @@ export function toggleInbound(id: number) {
 
 export function rotateInternalInbound(id: number) {
   return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/rotate-internal`)
+}
+
+// 独立通道（端口转发 / SOCKS5 / HTTP 独立代理）
+export function getAdminChannels(params?: { server_id?: number; protocol?: string; status?: string }) {
+  return http.get<ApiResp<{ channels: ProxyChannelItem[] }>>('/admin/channels', { params })
+}
+
+export function createAdminChannel(payload: ProxyChannelPayload) {
+  return http.post<ApiResp<{ channel: ProxyChannelItem }>>('/admin/channels', payload)
+}
+
+export function updateAdminChannel(id: number, payload: Partial<ProxyChannelPayload>) {
+  return http.put<ApiResp<{ channel: ProxyChannelItem }>>(`/admin/channels/${id}`, payload)
+}
+
+export function deleteAdminChannel(id: number) {
+  return http.delete<ApiResp<{ id: number }>>(`/admin/channels/${id}`)
+}
+
+export function toggleAdminChannel(id: number) {
+  return http.post<ApiResp<{ id: number; enabled: boolean; status: string }>>(`/admin/channels/${id}/toggle`)
+}
+
+export function resetAdminChannelTraffic(id: number) {
+  return http.post<ApiResp<{ id: number; traffic_used_bytes: number; status: string }>>(`/admin/channels/${id}/reset-traffic`)
 }
 
 // Phase T：证书管理

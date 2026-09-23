@@ -233,7 +233,16 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 					}).Error; err != nil {
 						return err
 					}
-					if inb, ok := inboundByID[inboundID]; ok && inb.Type == models.InboundTypeRelay {
+					if inb, ok := inboundByID[inboundID]; ok {
+						if inb.Type == models.InboundTypeChannel {
+							totalBytes := e.UpBytes + e.DownBytes
+							_ = tx.Model(&models.ProxyChannel{}).Where("inbound_id = ?", inboundID).Updates(map[string]any{
+								"up_bytes":           gorm.Expr("up_bytes + ?", e.UpBytes),
+								"down_bytes":         gorm.Expr("down_bytes + ?", e.DownBytes),
+								"traffic_used_bytes": gorm.Expr("traffic_used_bytes + ?", totalBytes),
+							})
+						}
+						if inb.Type == models.InboundTypeRelay {
 						row := models.TrafficLog{
 							UserID:      0,
 							InboundID:   inboundID,
@@ -267,6 +276,7 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 						}).Create(&row).Error; err != nil {
 							return err
 						}
+					}
 					}
 				}
 				continue
@@ -581,6 +591,33 @@ func (s *TrafficService) resetInboundTraffic() {
 			continue
 		}
 	}
+
+	if s.DB.Migrator().HasTable(&models.ProxyChannel{}) {
+		var channels []models.ProxyChannel
+		if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&channels).Error; err == nil {
+			for _, ch := range channels {
+				key := resetPeriodKey(now, ch.TrafficReset, loc)
+				if key == "" || ch.LastResetDate == key {
+					continue
+				}
+				updates := map[string]any{
+					"up_bytes":           0,
+					"down_bytes":         0,
+					"traffic_used_bytes": 0,
+					"last_reset_date":    key,
+				}
+				if ch.Status == models.ChannelStatusExceeded {
+					updates["status"] = models.ChannelStatusActive
+					if ch.Enabled {
+						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", true)
+					}
+				}
+				_ = s.DB.Model(&models.ProxyChannel{}).
+					Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", ch.ID, key).
+					Updates(updates).Error
+			}
+		}
+	}
 }
 
 // StartDailyAgg 启动每日汇总定时任务（每 5 分钟把 traffic_logs 累加到 traffic_daily）。
@@ -856,6 +893,32 @@ func (s *TrafficService) checkInboundLifecycle() {
 			(inb.ExpiryTime != nil && now.After(*inb.ExpiryTime))
 		if expired {
 			_ = s.DB.Model(&inb).Update("enabled", false)
+		}
+	}
+
+	if s.DB.Migrator().HasTable(&models.ProxyChannel{}) {
+		var channels []models.ProxyChannel
+		if err := s.DB.Find(&channels).Error; err == nil {
+			for _, ch := range channels {
+				if !ch.Enabled || ch.Status == models.ChannelStatusDisabled {
+					continue
+				}
+				limitBytes := ch.TrafficLimitGB * 1024 * 1024 * 1024
+				exceeded := (ch.TrafficLimitGB > 0 && ch.TrafficUsedBytes >= limitBytes)
+				expired := (ch.ExpiresAt != nil && now.After(*ch.ExpiresAt))
+
+				if exceeded && ch.Status != models.ChannelStatusExceeded {
+					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExceeded)
+					if ch.AutoDisable {
+						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
+					}
+				} else if expired && ch.Status != models.ChannelStatusExpired {
+					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExpired)
+					if ch.AutoDisable {
+						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
+					}
+				}
+			}
 		}
 	}
 }

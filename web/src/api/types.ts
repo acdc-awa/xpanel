@@ -367,7 +367,55 @@ export interface UserAccessPoint {
   remark?: string
   permission_group_ids: number[]
   created_at?: string
-  updated_at?: string
+}
+
+// 独立通道（端口转发 / SOCKS5 / HTTP 独立代理）
+export interface ProxyChannelItem {
+  id: number
+  name: string
+  server_id: number
+  server_name: string
+  server_host: string
+  inbound_id: number
+  port: number
+  listen: string
+  protocol: 'tunnel' | 'socks5' | 'http'
+  target_address?: string
+  target_port?: number
+  proxy_protocol: boolean
+  username?: string
+  password?: string
+  allow_udp: boolean
+  traffic_limit_gb: number
+  traffic_used_bytes: number
+  up_bytes: number
+  down_bytes: number
+  traffic_reset: 'never' | 'daily' | 'weekly' | 'monthly'
+  expires_at?: string
+  auto_disable: boolean
+  status: 'active' | 'quota_exceeded' | 'expired' | 'disabled'
+  enabled: boolean
+  proxy_url?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProxyChannelPayload {
+  name: string
+  server_id: number
+  port: number
+  listen?: string
+  protocol: string
+  target_address?: string
+  target_port?: number
+  proxy_protocol?: boolean
+  username?: string
+  password?: string
+  allow_udp?: boolean
+  traffic_limit_gb?: number
+  traffic_reset?: string
+  expires_at?: string
+  auto_disable?: boolean
 }
 
 

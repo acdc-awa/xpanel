@@ -277,7 +277,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !inb.Enabled {
 			continue
 		}
-		if inb.Type == models.InboundTypeTunnel {
+		if inb.Type == models.InboundTypeTunnel || (inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolDokodemo) {
 			item, obTag, err := buildTunnelInbound(&inb, ctx)
 			if err != nil {
 				return nil, fmt.Errorf("生成直通管道 %s 失败: %w", inb.Tag, err)
@@ -287,10 +287,14 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 				continue
 			}
 			inboundList = append(inboundList, item)
+			ppSettings := `{"proxyProtocol":2}`
+			if strings.Contains(inb.StreamSettings, `"proxy_protocol":false`) || strings.Contains(inb.StreamSettings, `"proxyProtocol":false`) {
+				ppSettings = `{}`
+			}
 			tunnelOutbounds = append(tunnelOutbounds, models.ServerOutbound{
 				Tag:          obTag,
 				Protocol:     "freedom",
-				SettingsJSON: `{"proxyProtocol":2}`,
+				SettingsJSON: ppSettings,
 				Enabled:      true,
 			})
 			tunnelRoutingRules = append(tunnelRoutingRules, map[string]any{
@@ -723,8 +727,7 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 	}
 
-	// Phase T：入站三态分流
-	var clients []any
+	// Phase T：入站分流
 	switch inb.Type {
 	case models.InboundTypeRelay:
 		if inb.InternalUUID == "" {
@@ -744,14 +747,15 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		if flow != "" {
 			c["flow"] = flow
 		}
-		clients = []any{c}
+		settings["clients"] = []any{c}
+	case models.InboundTypeChannel:
+		// 独立通道入站（SOCKS5 / HTTP 等）：直接使用 SettingsJSON 原样配置（accounts / auth），不注入动态 clients
 	default:
 		// user 入站：动态用户列表（已由服务层 GetValidUsers 按接入点白名单派生过滤，无接入点指向返回空列表）；
 		// clients 结构由协议插件生成（未注册协议走最小通用注入）
 		userList := usersByTag[inb.Tag]
-		clients = protocols.ServerClients(inb.Protocol, userList, spec)
+		settings["clients"] = protocols.ServerClients(inb.Protocol, userList, spec)
 	}
-	settings["clients"] = clients
 
 	// 2. 解析 streamSettings JSON（完全透传）
 	item := map[string]any{
