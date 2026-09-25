@@ -63,12 +63,16 @@ type NodeMetricsSnapshot struct {
 	Disk        float64   `json:"disk"`
 	DiskTotal   uint64    `json:"disk_total"`
 	OnlineUsers int       `json:"online_users"`
-	RxRate      float64   `json:"rx_rate"`
-	TxRate      float64   `json:"tx_rate"`
-	RxBytes     uint64    `json:"rx_bytes"`
-	TxBytes     uint64    `json:"tx_bytes"`
-	XrayRunning bool      `json:"xray_running"`
-	ReportedAt  time.Time `json:"reported_at"`
+	// OnlineIPs 每用户在线连接源 IP 快照（心跳 payload 原样引用：每帧新解析、只读共享、
+	// 替换式更新，不就地修改）。在线用户面板优先读本字段（与 dashboard 人数同源同帧），
+	// servers.online_ips 列只作主控重启后的兜底与历史留痕。
+	OnlineIPs   []protocol.OnlineUserIPs `json:"online_ips,omitempty"`
+	RxRate      float64                  `json:"rx_rate"`
+	TxRate      float64                  `json:"tx_rate"`
+	RxBytes     uint64                   `json:"rx_bytes"`
+	TxBytes     uint64                   `json:"tx_bytes"`
+	XrayRunning bool                     `json:"xray_running"`
+	ReportedAt  time.Time                `json:"reported_at"`
 }
 
 // Conn 一条节点连接。
@@ -338,13 +342,14 @@ func (h *Hub) unregister(conn *Conn) {
 			h.DB.Model(&models.Server{}).Where("id = ?", conn.ServerID).
 				Update("status", 0)
 		}
-		// 节点彻底离线时，内存快照中的瞬时速率与在线人数归零
+		// 节点彻底离线时，内存快照中的瞬时速率、在线人数与在线 IP 列表归零
 		h.metricsMu.Lock()
 		if h.latestMetrics != nil {
 			if m, ok := h.latestMetrics[conn.ServerID]; ok && m != nil {
 				m.RxRate = 0
 				m.TxRate = 0
 				m.OnlineUsers = 0
+				m.OnlineIPs = nil
 				m.XrayRunning = false
 			}
 		}
@@ -368,6 +373,7 @@ func (h *Hub) GetLatestMetrics(serverID uint64) (*NodeMetricsSnapshot, bool) {
 		cp.RxRate = 0
 		cp.TxRate = 0
 		cp.OnlineUsers = 0
+		cp.OnlineIPs = nil
 		cp.XrayRunning = false
 	}
 	return &cp, true
@@ -385,6 +391,7 @@ func (h *Hub) GetAllLatestMetrics() map[uint64]*NodeMetricsSnapshot {
 				cp.RxRate = 0
 				cp.TxRate = 0
 				cp.OnlineUsers = 0
+				cp.OnlineIPs = nil
 				cp.XrayRunning = false
 			}
 			res[id] = &cp
@@ -661,6 +668,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		Disk:        hb.Disk,
 		DiskTotal:   uint64(hb.DiskTotal),
 		OnlineUsers: onlineUsers,
+		OnlineIPs:   hb.OnlineIPs,
 		RxRate:      hb.RxRate,
 		TxRate:      hb.TxRate,
 		RxBytes:     hb.RxBytes,
