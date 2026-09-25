@@ -1489,6 +1489,76 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 	}
 }
 
+// TestGenerateConfig_TunnelInbound_AcceptProxyProtocol 链式直通管道的接收侧 PROXY Protocol（2026-09-25）：
+// 存储里被 ensure 写入顶层 acceptProxyProtocol、或通道勾选写私有键 proxy_protocol 的管道入站，
+// 生成的 dokodemo 须带 tcpSettings.acceptProxyProtocol（上游 freedom 注入 → 本层消费 → 重注入，
+// 链式场景否则落地收到双重 PROXY 头）；两键皆缺省的首跳管道不得带 streamSettings
+// （普通用户客户端不发 PROXY 头，接收侧开启会拒绝直连）。
+func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
+	targetID := uint64(211)
+	cases := []struct {
+		name       string
+		stream     string
+		wantAccept bool
+	}{
+		{"无键缺省（首跳）", "", false},
+		{"ensure 写入 acceptProxyProtocol", `{"acceptProxyProtocol":true}`, true},
+		{"通道私有键 proxy_protocol", `{"proxy_protocol":true}`, true},
+		{"显式 false 不开启", `{"proxy_protocol":false}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tunnelInb := models.Inbound{
+				ID:              111,
+				ServerID:        1,
+				Tag:             "tunnel-chain",
+				Protocol:        models.ProtocolDokodemo,
+				Port:            10002,
+				Type:            models.InboundTypeTunnel,
+				TargetInboundID: &targetID,
+				StreamSettings:  tc.stream,
+				Enabled:         true,
+			}
+			ctx := &xray.GenerateContext{
+				RefTargets: map[uint64]xray.RefTarget{
+					targetID: {
+						Inbound:    models.Inbound{ID: targetID, ServerID: 2, Tag: "vless-in-443", Port: 443, Protocol: "vless"},
+						ServerHost: "exit-node.example.com",
+					},
+				},
+			}
+			raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			var root map[string]any
+			if err := json.Unmarshal(raw, &root); err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+			inbounds, ok := root["inbounds"].([]any)
+			if !ok || len(inbounds) < 1 {
+				t.Fatalf("inbounds missing")
+			}
+			tInb := asObject(t, inbounds[0], "inbounds[0]")
+			ss, hasSS := tInb["streamSettings"]
+			if !tc.wantAccept {
+				if hasSS {
+					t.Fatalf("接收侧缺省不应生成 streamSettings, got %v", ss)
+				}
+				return
+			}
+			if !hasSS {
+				t.Fatalf("接收侧开启应生成 streamSettings")
+			}
+			ssMap := asObject(t, ss, "streamSettings")
+			tcp := asObject(t, ssMap["tcpSettings"], "tcpSettings")
+			if tcp["acceptProxyProtocol"] != true {
+				t.Errorf("acceptProxyProtocol = %v, want true", tcp["acceptProxyProtocol"])
+			}
+		})
+	}
+}
+
 // TestGenerateConfig_TunnelInbound_ManualExternal 测试手动外部 IP:Port 的直通管道
 func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
 	tunnelInb := models.Inbound{

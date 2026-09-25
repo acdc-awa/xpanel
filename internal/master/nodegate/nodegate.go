@@ -659,6 +659,14 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		onlineUsers = xray.CountDistinctOnlineUsers(hb.OnlineIPs)
 	}
 
+	// xray 进程不在 = 必然无人在线。旧 agent 在进程死掉后仍会携带冻结的 OnlineIPs
+	// 心跳（本批起的新 agent 发送前已自行清零），收帧侧归零兜底，不给死节点展示残影；
+	// 对新 agent 是幂等空操作。
+	if !hb.XrayRunning {
+		onlineUsers = 0
+		hb.OnlineIPs = nil
+	}
+
 	// 1. 无论是否到达 DB 抽稀落库间隔，每一帧心跳都无条件立即更新纯内存快照（0 磁盘 I/O）
 	snapshot := &NodeMetricsSnapshot{
 		ServerID:    conn.ServerID,

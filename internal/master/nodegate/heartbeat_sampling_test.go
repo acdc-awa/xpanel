@@ -147,3 +147,66 @@ func TestHubLatestMetricsAndPeakWindow(t *testing.T) {
 		t.Fatalf("抽稀落库未保留窗口内峰值: reports[1].RxRate = %v, want 100MB/s", reports[1].RxRate)
 	}
 }
+
+// TestHubHeartbeatZeroesOnlineWhenXrayDown 死节点残影兜底（2026-09-25）：
+// 旧 agent 在 xray 进程死掉后仍携带冻结的 OnlineIPs 心跳，收帧侧须在 !XrayRunning 时
+// 归零在线人数与名单，不给死进程展示残影；对新 agent 是幂等空操作（发送前已自行清零）。
+func TestHubHeartbeatZeroesOnlineWhenXrayDown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test_zero.db")
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.Server{}, &models.NodeReport{}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if err := db.Create(&models.Server{ID: 3, Name: "n3", Host: "10.0.0.3", NodeID: "node-3", Secret: "s"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Hub{
+		DB:            db,
+		conns:         make(map[uint64]*Conn),
+		latestMetrics: make(map[uint64]*NodeMetricsSnapshot),
+	}
+	conn := newTestConn(3)
+	h.conns[3] = conn
+
+	// 旧 agent 假设场景：进程已死但心跳仍带冻结名单
+	raw, _ := json.Marshal(protocol.HeartbeatPayload{
+		OnlineUsers: 5,
+		OnlineIPs:   []protocol.OnlineUserIPs{{Email: "u1.i1@panel.local", IPs: []string{"1.1.1.1"}}},
+		XrayRunning: false,
+	})
+	h.handleHeartbeat(conn, &protocol.Message{Type: protocol.MsgHeartbeat, Payload: raw})
+
+	m, ok := h.GetLatestMetrics(3)
+	if !ok || m == nil {
+		t.Fatal("心跳后应有内存快照")
+	}
+	if m.OnlineUsers != 0 || len(m.OnlineIPs) != 0 {
+		t.Fatalf("xray 未运行时快照应归零, got users=%d ips=%v", m.OnlineUsers, m.OnlineIPs)
+	}
+
+	// 对照：进程存活时名单保留（在线数按去重口径重算 = 1 个用户）
+	raw2, _ := json.Marshal(protocol.HeartbeatPayload{
+		OnlineUsers: 9,
+		OnlineIPs:   []protocol.OnlineUserIPs{{Email: "u1.i1@panel.local", IPs: []string{"1.1.1.1"}}},
+		XrayRunning: true,
+	})
+	h.handleHeartbeat(conn, &protocol.Message{Type: protocol.MsgHeartbeat, Payload: raw2})
+
+	m2, ok := h.GetLatestMetrics(3)
+	if !ok || m2 == nil {
+		t.Fatal("第二帧心跳后应有内存快照")
+	}
+	if m2.OnlineUsers != 1 || len(m2.OnlineIPs) != 1 {
+		t.Fatalf("xray 运行中应保留名单, got users=%d ips=%v", m2.OnlineUsers, m2.OnlineIPs)
+	}
+}

@@ -1111,8 +1111,9 @@ func mergeIPs(dst, add []string) []string {
 // AdminServerOnlineIPs GET /api/v1/admin/servers/:id/online-ips —— 节点当前在线用户
 // 与连接源 IP（users 为空 = 无人在线或 agent 版本过旧未上报）。
 // 数据源优先级：节点在线 → 网关内存快照（与 dashboard 在线人数同源同帧，0 滞后）；
-// 主控刚重启尚无心跳 / 网关不可用 → servers.online_ips 列兜底（最近一次节流落库值）；
-// 节点离线 → 内存快照已在 getter 处归零，不给死节点展示残影。
+// 主控刚重启尚无心跳且节点已回连 → servers.online_ips 列兜底（最近一次节流落库值）；
+// 节点离线 → 内存快照已在 getter 处归零，无快照（主控重启后）也不再回退 DB 列，
+// 否则会漏出重启前的冻结名单。
 // 面板用户按统计键反解归类并合并：按入站区分统计键后同一用户每入站一个 email 条目，
 // 合并为一行（IP 取并集）；email 回填用户真实邮箱，便于管理员辨认。
 func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
@@ -1137,7 +1138,10 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 			haveMemory = true
 		}
 	}
-	if !haveMemory && srv.OnlineIPs != "" && srv.OnlineIPs != "null" {
+	// DB 列兜底仅对在线节点开放：主控重启后节点尚未回连时 DB 列是重启前的冻结名单，
+	// 展示它就是残影；节点在线则列是最近一次节流落库值，兜底有意义。
+	// Hub 为 nil（极端环境）保持旧行为回退，无法判定在线态时不凭空清数据。
+	if !haveMemory && (d.Hub == nil || d.Hub.IsOnline(id)) && srv.OnlineIPs != "" && srv.OnlineIPs != "null" {
 		_ = json.Unmarshal([]byte(srv.OnlineIPs), &raw)
 	}
 

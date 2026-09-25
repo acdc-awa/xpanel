@@ -829,11 +829,27 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 	}
 
 	network := "tcp,udp"
+	wantAcceptPP := false
 	if inb.StreamSettings != "" {
 		var ss map[string]any
 		if err := json.Unmarshal([]byte(inb.StreamSettings), &ss); err == nil {
 			if net, _ := ss["network"].(string); net != "" {
 				network = net
+			}
+			// 接收侧 PROXY Protocol（发送侧见下方 freedom 出站的 proxyProtocol）：
+			// - ensureTargetAcceptProxyProtocol 在上游管道指向本入站时写入顶层 acceptProxyProtocol；
+			// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
+			// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
+			// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
+			// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
+			if ap, _ := ss["acceptProxyProtocol"].(bool); ap {
+				wantAcceptPP = true
+			}
+			if pp, _ := ss["proxy_protocol"].(bool); pp {
+				wantAcceptPP = true
+			}
+			if pp, _ := ss["proxyProtocol"].(bool); pp {
+				wantAcceptPP = true
 			}
 		}
 	}
@@ -851,6 +867,11 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 		"protocol": "dokodemo-door",
 		"port":     inb.Port,
 		"settings": settings,
+	}
+	if wantAcceptPP {
+		item["streamSettings"] = map[string]any{
+			"tcpSettings": map[string]any{"acceptProxyProtocol": true},
+		}
 	}
 	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
 		item["listen"] = inb.Listen

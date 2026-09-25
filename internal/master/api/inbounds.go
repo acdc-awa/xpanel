@@ -179,13 +179,16 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel")
 		return
 	}
+	// 目标存在性校验；acceptProxyProtocol 配对挪到主记录写库成功之后执行，
+	// 避免后续校验失败（400）时落地入站已被改写并重推配置。
+	var ensureTarget *models.Inbound
 	if req.TargetInboundID != nil && *req.TargetInboundID > 0 {
 		var targetInb models.Inbound
 		if err := d.DB.First(&targetInb, *req.TargetInboundID).Error; err != nil {
 			util.BadRequest(c, "目标落地入站不存在")
 			return
 		}
-		d.ensureTargetAcceptProxyProtocol(&targetInb)
+		ensureTarget = &targetInb
 	}
 	if req.TargetPort < 0 || req.TargetPort > 65535 {
 		util.BadRequest(c, "目标端口需在 0-65535 之间")
@@ -279,6 +282,10 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
 		return
+	}
+	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
+	if ensureTarget != nil {
+		d.ensureTargetAcceptProxyProtocol(ensureTarget)
 	}
 	// GORM 零值陷阱：Ratio 带 default:1，Create 时显式 0（免费入站）会被当零值
 	// 跳过而落成列默认 1，需补一次显式写（更新路径走 map 赋值无此问题）。
@@ -529,6 +536,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			inb.Protocol = models.ProtocolDokodemo
 		}
 	}
+	// 目标存在性校验；acceptProxyProtocol 配对挪到主记录写库成功之后执行，
+	// 避免后续校验失败（400）时落地入站已被改写并重推配置。
+	var ensureTarget *models.Inbound
 	if req.TargetInboundID != nil {
 		if *req.TargetInboundID == 0 {
 			updates["target_inbound_id"] = nil
@@ -543,7 +553,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 				util.BadRequest(c, "目标落地入站不存在")
 				return
 			}
-			d.ensureTargetAcceptProxyProtocol(&targetInb)
+			ensureTarget = &targetInb
 			updates["target_inbound_id"] = *req.TargetInboundID
 			inb.TargetInboundID = req.TargetInboundID
 		}
@@ -606,6 +616,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			util.ServerError(c, "更新失败")
 			return
 		}
+	}
+	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
+	if ensureTarget != nil {
+		d.ensureTargetAcceptProxyProtocol(ensureTarget)
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
 		pushFail(c, inb.ServerID, err)
@@ -744,23 +758,36 @@ func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
 }
 
 // ensureTargetAcceptProxyProtocol 确保直通管道的目标落地入站开启 acceptProxyProtocol（P2-8）。
+// 失败只记日志不回滚主操作：落地侧没开 PROXY Protocol 时链路会拒绝连接，日志是唯一排查线索。
 func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
 	if targetInb == nil {
 		return
 	}
 	var ssMap map[string]any
 	if targetInb.StreamSettings != "" {
-		_ = json.Unmarshal([]byte(targetInb.StreamSettings), &ssMap)
+		if err := json.Unmarshal([]byte(targetInb.StreamSettings), &ssMap); err != nil {
+			// 存量数据非法时不能整体覆写（会丢掉原 TLS/REALITY 配置），跳过并留痕
+			log.Printf("ensureTargetAcceptProxyProtocol: 入站 %d(%s) streamSettings 非法 JSON，跳过 PROXY Protocol 配对: %v", targetInb.ID, targetInb.Tag, err)
+			return
+		}
 	}
 	if ssMap == nil {
 		ssMap = make(map[string]any)
 	}
 	if app, _ := ssMap["acceptProxyProtocol"].(bool); !app {
 		ssMap["acceptProxyProtocol"] = true
-		if newSS, err := json.Marshal(ssMap); err == nil {
-			targetInb.StreamSettings = string(newSS)
-			_ = d.DB.Model(targetInb).Update("stream_settings", targetInb.StreamSettings)
-			_ = d.enqueueConfig(targetInb.ServerID)
+		newSS, err := json.Marshal(ssMap)
+		if err != nil {
+			log.Printf("ensureTargetAcceptProxyProtocol: 入站 %d(%s) streamSettings 序列化失败: %v", targetInb.ID, targetInb.Tag, err)
+			return
+		}
+		targetInb.StreamSettings = string(newSS)
+		if err := d.DB.Model(targetInb).Update("stream_settings", targetInb.StreamSettings).Error; err != nil {
+			log.Printf("ensureTargetAcceptProxyProtocol: 落地入站 %d(%s) 写库失败，该落地将拒绝 PROXY Protocol 连接: %v", targetInb.ID, targetInb.Tag, err)
+			return
+		}
+		if err := d.enqueueConfig(targetInb.ServerID); err != nil {
+			log.Printf("ensureTargetAcceptProxyProtocol: 落地入站 %d 所在服务器 %d 配置推送失败，落地侧改动待下次全量推送生效: %v", targetInb.ID, targetInb.ServerID, err)
 		}
 	}
 }
