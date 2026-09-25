@@ -105,8 +105,12 @@ func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inbo
 			util.BadRequest(c, "目标入站不存在")
 			return false
 		}
-		if inb.Type != models.InboundTypeUser {
-			util.BadRequest(c, "接入点只能直连 type=user 的用户入站（relay 为内部落地，不参与订阅）")
+		if inb.Type != models.InboundTypeUser && inb.Type != models.InboundTypeTunnel {
+			util.BadRequest(c, "接入点只能直连用户入站或四层直通入站")
+			return false
+		}
+		if inb.Type == models.InboundTypeTunnel && (inb.TargetInboundID == nil || *inb.TargetInboundID == 0) {
+			util.BadRequest(c, "该四层直通入站尚未配置落地目标入站，请先完成连线")
 			return false
 		}
 		return true

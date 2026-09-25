@@ -321,7 +321,7 @@ export interface InboundItem {
   target_address?: string // 手动指定的外部目标地址
   target_port?: number // 手动指定的外部目标端口
   cert_id?: number // 绑定的证书
-  enabled?: boolean
+  enabled: boolean
   flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址

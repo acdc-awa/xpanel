@@ -573,7 +573,7 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 		srvMap[s.ID] = s
 	}
 	var inbs []models.Inbound
-	_ = d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&inbs).Error
+	_ = d.DB.Where("enabled = ? AND type IN ?", true, []string{models.InboundTypeUser, models.InboundTypeTunnel}).Find(&inbs).Error
 	inbs = services.FilterAvailableInbounds(inbs)
 	inbMap := make(map[uint64]models.Inbound, len(inbs))
 	for _, inb := range inbs {

@@ -181,3 +181,114 @@ func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 	r.ServeHTTP(wDel, reqDel)
 	assert.Equal(t, http.StatusOK, wDel.Code)
 }
+
+func TestUserAccessPoints_TunnelTarget_And_Subscribe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupAccessPointTestDB(t)
+	deps := &Deps{DB: db}
+	r := gin.New()
+	r.POST("/api/v1/admin/access-points", deps.AdminCreateAccessPoint)
+	r.GET("/sub", deps.Subscribe)
+
+	// 1. 准备权限组与用户
+	grp := models.PermissionGroup{Name: "直通管道组"}
+	require.NoError(t, deps.DB.Create(&grp).Error)
+
+	exp := time.Now().Add(24 * time.Hour)
+	user := models.User{
+		Username:          "tunnel_user",
+		Email:             "tunnel@test.com",
+		UUID:              "33333333-3333-3333-3333-333333333333",
+		Role:              models.RoleUser,
+		Status:            models.StatusActive,
+		PermissionGroupID: grp.ID,
+		SubscribeToken:    "sub-token-tunnel",
+		ExpireAt:          &exp,
+	}
+	require.NoError(t, deps.DB.Create(&user).Error)
+
+	// 2. 准备入口服务器与落地服务器
+	edgeSrv := models.Server{ServerType: models.ServerTypeXray, Name: "入口中转", Host: "edge.node.com", NodeID: "n-edge", Secret: util.HashSecret("sec1"), Status: 1}
+	require.NoError(t, deps.DB.Create(&edgeSrv).Error)
+
+	exitSrv := models.Server{ServerType: models.ServerTypeXray, Name: "香港落地", Host: "hk.node.com", NodeID: "n-exit", Secret: util.HashSecret("sec2"), Status: 1}
+	require.NoError(t, deps.DB.Create(&exitSrv).Error)
+
+	// 3. 落地入站 (VLESS)
+	landingInb := models.Inbound{
+		ServerID:       exitSrv.ID,
+		Tag:            "vless-hk",
+		Protocol:       "vless",
+		Port:           443,
+		Type:           models.InboundTypeUser,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	require.NoError(t, deps.DB.Create(&landingInb).Error)
+
+	// 4. 草稿直通管道（未连线 target_inbound_id 为 nil）
+	draftTunnel := models.Inbound{
+		ServerID: edgeSrv.ID,
+		Tag:      "tunnel-draft",
+		Protocol: "dokodemo-door",
+		Port:     10001,
+		Type:     models.InboundTypeTunnel,
+		Enabled:  true,
+	}
+	require.NoError(t, deps.DB.Create(&draftTunnel).Error)
+
+	// 尝试将 AP 绑定到未连线的草稿管道 -> 应返回 400
+	bodyDraft := map[string]any{
+		"name":                 "草稿管道节点",
+		"enabled":              true,
+		"target_type":          "inbound",
+		"target_inbound_id":    draftTunnel.ID,
+		"permission_group_ids": []uint64{grp.ID},
+	}
+	bDraft, _ := json.Marshal(bodyDraft)
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-points", bytes.NewReader(bDraft))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusBadRequest, w1.Code, "未连线的草稿直通管道应拒绝绑定 AP: %s", w1.Body.String())
+
+	// 5. 已连线的直通管道
+	connectedTunnel := models.Inbound{
+		ServerID:        edgeSrv.ID,
+		Tag:             "tunnel-edge",
+		Protocol:        "dokodemo-door",
+		Port:            10002,
+		Type:            models.InboundTypeTunnel,
+		TargetInboundID: &landingInb.ID,
+		Enabled:         true,
+	}
+	require.NoError(t, deps.DB.Create(&connectedTunnel).Error)
+
+	// 将 AP 绑定到已连线的直通管道 -> 应返回 200 (P1-1 修复验证)
+	bodyConn := map[string]any{
+		"name":                 "香港直通节点",
+		"enabled":              true,
+		"target_type":          "inbound",
+		"target_inbound_id":    connectedTunnel.ID,
+		"permission_group_ids": []uint64{grp.ID},
+	}
+	bConn, _ := json.Marshal(bodyConn)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-points", bytes.NewReader(bConn))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code, "已连线的直通管道应允许绑定 AP: %s", w2.Body.String())
+
+	// 6. 订阅解析直通管道节点 -> 应返回 200 且包含入口机器与落地机器信息 (P1-4 修复验证)
+	reqSub := httptest.NewRequest(http.MethodGet, "/sub?token=sub-token-tunnel&format=base64", nil)
+	wSub := httptest.NewRecorder()
+	r.ServeHTTP(wSub, reqSub)
+	assert.Equal(t, http.StatusOK, wSub.Code, "直通管道 AP 应在订阅中正常解析: %s", wSub.Body.String())
+
+	bSub, err := base64.StdEncoding.DecodeString(wSub.Body.String())
+	require.NoError(t, err)
+	subStr := string(bSub)
+	assert.Contains(t, subStr, "edge.node.com", "订阅应包含入口机器地址")
+	assert.Contains(t, subStr, "10002", "订阅应包含入口机器端口")
+	assert.Contains(t, subStr, user.UUID, "订阅应包含用户认证凭据")
+}

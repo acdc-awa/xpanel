@@ -66,6 +66,9 @@ func TestAdminChannels_CRUD(t *testing.T) {
 	if inb.Protocol != "socks" || inb.Type != models.InboundTypeChannel || !inb.Enabled {
 		t.Errorf("Underlying Inbound mismatch: %+v", inb)
 	}
+	if inb.Total != 0 {
+		t.Errorf("Underlying Inbound Total must be 0 for channels to prevent unit mismatch, got: %d", inb.Total)
+	}
 
 	// 2. 测试端口冲突防重
 	reqDup := httptest.NewRequest("POST", "/api/v1/admin/channels", bytes.NewReader(rawSocks))
@@ -114,6 +117,27 @@ func TestAdminChannels_CRUD(t *testing.T) {
 	}
 	if len(listResp.Data.Channels) != 2 {
 		t.Fatalf("Expected 2 channels, got %d", len(listResp.Data.Channels))
+	}
+
+	// 4.1 更新通道 (Update)
+	bodyUp := map[string]any{
+		"name":             "更新后的爬虫代理",
+		"server_id":        1,
+		"protocol":         "socks5",
+		"port":             1080,
+		"traffic_limit_gb": 80,
+	}
+	rawUp, _ := json.Marshal(bodyUp)
+	reqUp := httptest.NewRequest("PUT", "/api/v1/admin/channels/1", bytes.NewReader(rawUp))
+	reqUp.Header.Set("Content-Type", "application/json")
+	wUp := httptest.NewRecorder()
+	r.ServeHTTP(wUp, reqUp)
+	if wUp.Code != http.StatusOK {
+		t.Fatalf("Update channel failed: %d, body: %s", wUp.Code, wUp.Body.String())
+	}
+	db.First(&inb, ch.InboundID)
+	if inb.Total != 0 {
+		t.Errorf("Underlying Inbound Total must remain 0 after update, got: %d", inb.Total)
 	}
 
 	// 5. 切换状态 (Toggle)

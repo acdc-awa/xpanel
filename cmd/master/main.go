@@ -180,11 +180,16 @@ func main() {
 
 	// 入站与通道生命周期变更（超额/到期自动关停、周期复原）→ 重新生成配置并即时下发
 	trafficSvc.OnInboundLifecycleChanged = func(serverID uint64) {
-		if cfg, err := configSvc.Generate(serverID); err == nil {
-			if err := configSvc.SavePending(serverID, cfg); err == nil {
-				go hub.PushPending(serverID)
-			}
+		cfg, err := configSvc.Generate(serverID)
+		if err != nil {
+			log.Printf("[lifecycle] 重新生成服务器 %d 配置失败: %v", serverID, err)
+			return
 		}
+		if err := configSvc.SavePending(serverID, cfg); err != nil {
+			log.Printf("[lifecycle] 保存服务器 %d 待推送配置失败: %v", serverID, err)
+			return
+		}
+		go hub.PushPending(serverID)
 	}
 
 	// Stage 5 事件订阅：订单支付成功 → 热更新用户到所有在线节点（原 api 层直调 Hub 的收口）。

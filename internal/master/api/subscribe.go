@@ -80,7 +80,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	}
 
 	var allInbs []models.Inbound
-	_ = d.DB.Where("enabled = ? AND type = ?", true, models.InboundTypeUser).Find(&allInbs).Error
+	_ = d.DB.Where("enabled = ? AND type IN ?", true, []string{models.InboundTypeUser, models.InboundTypeTunnel}).Find(&allInbs).Error
 	// J9：入站级 Total/ExpiryTime 过滤（与生成端同源）
 	allInbs = services.FilterAvailableInbounds(allInbs)
 	inbMap := make(map[uint64]models.Inbound)

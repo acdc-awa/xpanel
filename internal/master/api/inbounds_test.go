@@ -260,3 +260,120 @@ func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
 	}
 }
 
+func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 2, Name: "node-2", Host: "2.2.2.2", NodeID: "n2", Secret: "sec"})
+
+	// 1. 落地入站与指向它的 Tunnel 入站
+	landing := models.Inbound{
+		ServerID: 2, Tag: "landing-vless", Protocol: "vless", Port: 443,
+		Type: models.InboundTypeUser, Enabled: true,
+	}
+	db.Create(&landing)
+
+	tunnel := models.Inbound{
+		ServerID: 2, Tag: "tunnel-in", Protocol: "dokodemo-door", Port: 10001,
+		Type: models.InboundTypeTunnel, TargetInboundID: &landing.ID, Enabled: true,
+	}
+	db.Create(&tunnel)
+
+	// 2. Channel 入站
+	chanInb := models.Inbound{
+		ServerID: 2, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
+		Type: models.InboundTypeChannel, Enabled: true,
+	}
+	db.Create(&chanInb)
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/inbounds/:id/toggle", d.AdminToggleInbound)
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// A. 尝试通过 Toggle 切换 Channel 入站 -> 应该被 400 拦截 (P2-6)
+	req1 := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", chanInb.ID), nil)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("Toggle Channel 入站应返回 400, 实际: %d, body: %s", w1.Code, w1.Body.String())
+	}
+
+	// B. 尝试 Toggle 停用被启用的 Tunnel 引用的落地入站 -> 应该被 400 拦截 (P2-7)
+	req2 := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", landing.ID), nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("Toggle 停用被 Tunnel 引用的落地入站应返回 400, 实际: %d, body: %s", w2.Code, w2.Body.String())
+	}
+
+	// C. 尝试通过 Update 接口将落地入站 enabled 置为 false -> 应该被 400 拦截 (P2-7)
+	upDis, _ := json.Marshal(map[string]any{"enabled": false})
+	req3 := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", landing.ID), bytes.NewReader(upDis))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Fatalf("Update 停用被 Tunnel 引用的落地入站应返回 400, 实际: %d, body: %s", w3.Code, w3.Body.String())
+	}
+
+	// D. 停用 Tunnel 后，落地入站应允许 Toggle 停用
+	tunnel.Enabled = false
+	db.Save(&tunnel)
+
+	req4 := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", landing.ID), nil)
+	w4 := httptest.NewRecorder()
+	r.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusOK {
+		t.Fatalf("Tunnel 停用后落地入站应可停用, 实际: %d, body: %s", w4.Code, w4.Body.String())
+	}
+}
+
+func TestEnsureTargetAcceptProxyProtocol(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 3, Name: "node-3", Host: "3.3.3.3", NodeID: "n3", Secret: "sec"})
+
+	// 1. 落地入站初始未开启 acceptProxyProtocol
+	landing := models.Inbound{
+		ServerID:       3,
+		Tag:            "landing-target",
+		Protocol:       "vless",
+		Port:           8443,
+		Type:           models.InboundTypeUser,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	db.Create(&landing)
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 2. 创建管道指定 TargetInboundID -> 应自动将落地入站 acceptProxyProtocol 置为 true (P2-8)
+	bodyCreate := map[string]any{
+		"server_id":         3,
+		"tag":               "tunnel-auto-pp",
+		"protocol":          "dokodemo-door",
+		"port":              18443,
+		"type":              "tunnel",
+		"target_inbound_id": landing.ID,
+	}
+	rawCreate, _ := json.Marshal(bodyCreate)
+	req1 := httptest.NewRequest("POST", "/api/v1/admin/inbounds", bytes.NewReader(rawCreate))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("Create tunnel failed: %d, body: %s", w1.Code, w1.Body.String())
+	}
+
+	var updatedLanding models.Inbound
+	db.First(&updatedLanding, landing.ID)
+	var ss map[string]any
+	json.Unmarshal([]byte(updatedLanding.StreamSettings), &ss)
+	if app, _ := ss["acceptProxyProtocol"].(bool); !app {
+		t.Fatalf("Landing inbound acceptProxyProtocol should be set to true automatically, got: %s", updatedLanding.StreamSettings)
+	}
+}
+

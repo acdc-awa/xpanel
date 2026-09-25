@@ -185,6 +185,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 			util.BadRequest(c, "目标落地入站不存在")
 			return
 		}
+		d.ensureTargetAcceptProxyProtocol(&targetInb)
 	}
 	if req.TargetPort < 0 || req.TargetPort > 65535 {
 		util.BadRequest(c, "目标端口需在 0-65535 之间")
@@ -498,6 +499,11 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		updates["expiry_time"] = nil // 显式 null = 清空到期时间
 	}
 	if req.Enabled != nil {
+		if !*req.Enabled && inb.Enabled {
+			if d.refInboundProtected(c, id) || d.tunnelLandingProtected(c, id) {
+				return
+			}
+		}
 		updates["enabled"] = *req.Enabled
 	}
 	// 先应用显式 internal_uuid（节点回执路径），再判空补齐——保证 relay + 空 UUID 的终态不存在
@@ -537,6 +543,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 				util.BadRequest(c, "目标落地入站不存在")
 				return
 			}
+			d.ensureTargetAcceptProxyProtocol(&targetInb)
 			updates["target_inbound_id"] = *req.TargetInboundID
 			inb.TargetInboundID = req.TargetInboundID
 		}
@@ -692,8 +699,14 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
+	// P2-6：通道托管入站禁止通过入站 toggle 直接操作，防止与通道状态机脱节
+	if inb.Type == models.InboundTypeChannel {
+		util.BadRequest(c, "该入站由独立通道托管，无法直接切换状态，请前往「转发与独立代理」页面管理对应通道")
+		return
+	}
 	// U4：停用被引用的落地入站同样禁止（生成器会产出指向不存在入站的 vnext）
-	if inb.Enabled && d.refInboundProtected(c, id) {
+	// P2-7：停用被已启用的四层直通管道引用的入站禁止
+	if inb.Enabled && (d.refInboundProtected(c, id) || d.tunnelLandingProtected(c, id)) {
 		return
 	}
 	inb.Enabled = !inb.Enabled
@@ -717,6 +730,39 @@ func (d *Deps) refInboundProtected(c *gin.Context, inbID uint64) bool {
 		return true
 	}
 	return false
+}
+
+// tunnelLandingProtected 检查入站是否被已启用的四层直通管道引用为落地目标（P2-7：停用保护）。
+func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
+	var cnt int64
+	d.DB.Model(&models.Inbound{}).Where("type = ? AND target_inbound_id = ? AND enabled = ?", models.InboundTypeTunnel, inbID, true).Count(&cnt)
+	if cnt > 0 {
+		util.BadRequest(c, "该入站被 "+strconv.FormatInt(cnt, 10)+" 个已启用的四层直通管道引用为落地目标，无法停用，请先停用或解除管道连线")
+		return true
+	}
+	return false
+}
+
+// ensureTargetAcceptProxyProtocol 确保直通管道的目标落地入站开启 acceptProxyProtocol（P2-8）。
+func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
+	if targetInb == nil {
+		return
+	}
+	var ssMap map[string]any
+	if targetInb.StreamSettings != "" {
+		_ = json.Unmarshal([]byte(targetInb.StreamSettings), &ssMap)
+	}
+	if ssMap == nil {
+		ssMap = make(map[string]any)
+	}
+	if app, _ := ssMap["acceptProxyProtocol"].(bool); !app {
+		ssMap["acceptProxyProtocol"] = true
+		if newSS, err := json.Marshal(ssMap); err == nil {
+			targetInb.StreamSettings = string(newSS)
+			_ = d.DB.Model(targetInb).Update("stream_settings", targetInb.StreamSettings)
+			_ = d.enqueueConfig(targetInb.ServerID)
+		}
+	}
 }
 
 // AdminXrayKeys GET /api/v1/admin/xray/keys —— REALITY x25519 + shortId 一键生成。

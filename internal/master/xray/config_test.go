@@ -1618,6 +1618,27 @@ func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate exitConfig failed: %v", err)
 	}
+
+	var exitParsed struct {
+		Inbounds []struct {
+			Tag            string         `json:"tag"`
+			StreamSettings map[string]any `json:"streamSettings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(exitConfig, &exitParsed); err != nil {
+		t.Fatalf("Unmarshal exitConfig failed: %v", err)
+	}
+	if len(exitParsed.Inbounds) == 0 {
+		t.Fatalf("Expected at least 1 inbound in exitConfig")
+	}
+	ss := exitParsed.Inbounds[0].StreamSettings
+	if ss["acceptProxyProtocol"] != nil {
+		t.Errorf("acceptProxyProtocol 顶层私有键未在输出前清理: %v", ss)
+	}
+	tcpS, ok := ss["tcpSettings"].(map[string]any)
+	if !ok || tcpS["acceptProxyProtocol"] != true {
+		t.Errorf("acceptProxyProtocol 未正确注入 tcpSettings: %v", ss)
+	}
 	tmpExit := filepath.Join(t.TempDir(), "exit.json")
 	if err := os.WriteFile(tmpExit, exitConfig, 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)

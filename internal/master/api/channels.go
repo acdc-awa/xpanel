@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -274,7 +275,7 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 		StreamSettings: streamSettings,
 		TargetAddress:  req.TargetAddress,
 		TargetPort:     req.TargetPort,
-		Total:          req.TrafficLimitGB,
+		Total:          0, // 通道限额由 ProxyChannel 账本统一管理，底层 Inbound.Total 恒为 0 防单位错配误杀
 		ExpiryTime:     req.ExpiresAt,
 		TrafficReset:   resetPolicy,
 		Enabled:        true,
@@ -311,7 +312,8 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
-		util.ServerError(c, "创建独立通道失败: "+err.Error())
+		log.Printf("[channels] 创建独立通道失败: %v", err)
+		util.ServerError(c, "创建独立通道失败")
 		return
 	}
 
@@ -410,7 +412,7 @@ func (d *Deps) AdminUpdateChannel(c *gin.Context) {
 	}
 
 	ch.TrafficLimitGB = req.TrafficLimitGB
-	inb.Total = req.TrafficLimitGB
+	inb.Total = 0 // 通道限额由 ProxyChannel 账本统一管理，底层 Inbound.Total 恒为 0
 	if req.TrafficReset != "" {
 		ch.TrafficReset = req.TrafficReset
 		inb.TrafficReset = req.TrafficReset

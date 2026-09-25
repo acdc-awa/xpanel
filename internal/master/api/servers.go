@@ -440,6 +440,15 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 			util.BadRequest(c, "该服务器入站被 "+strconv.FormatInt(apDirect, 10)+" 个用户接入点直连引用，无法删除，请先解除接入点连线")
 			return
 		}
+		// 四层直通管道引用保护：检查其他服务器上的直通管道是否引用本服务器的入站为落地
+		var tunnelRefCnt int64
+		d.DB.Model(&models.Inbound{}).
+			Where("type = ? AND target_inbound_id IN ? AND server_id != ?", models.InboundTypeTunnel, inboundIDs, id).
+			Count(&tunnelRefCnt)
+		if tunnelRefCnt > 0 {
+			util.BadRequest(c, "该服务器入站被 "+strconv.FormatInt(tunnelRefCnt, 10)+" 个其他服务器的四层直通管道引用为落地目标，无法删除，请先解除直通连线")
+			return
+		}
 	}
 
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
@@ -467,6 +476,12 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		// 悬空引用收口：对外接入层随服务器级联删除（层无宿主后成孤儿）
 		if err := tx.Where("server_id = ?", id).Delete(&models.AccessLayer{}).Error; err != nil {
 			return err
+		}
+		// 独立代理通道随服务器级联删除
+		if tx.Migrator().HasTable(&models.ProxyChannel{}) {
+			if err := tx.Where("server_id = ?", id).Delete(&models.ProxyChannel{}).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Delete(&models.Server{}, id).Error
 	}); err != nil {

@@ -786,13 +786,14 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 				}
 			}
 		}
-		// PROXY Protocol 规范化：若开启了 acceptProxyProtocol，确保注入 tcpSettings
+		// PROXY Protocol 规范化：若开启了 acceptProxyProtocol，确保注入 tcpSettings，并清理顶层私有键
 		if ap, _ := stream["acceptProxyProtocol"].(bool); ap {
 			if tcpS, ok := stream["tcpSettings"].(map[string]any); ok {
 				tcpS["acceptProxyProtocol"] = true
 			} else {
 				stream["tcpSettings"] = map[string]any{"acceptProxyProtocol": true}
 			}
+			delete(stream, "acceptProxyProtocol")
 		}
 		item["streamSettings"] = stream
 	}

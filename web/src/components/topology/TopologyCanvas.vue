@@ -1239,9 +1239,9 @@ async function handleSaveInbound() {
       total_gb: c.total_gb,
       expiry_time: c.expiry_time ?? null,
       type: inboundFormType.value,
-      target_inbound_id: c.targetInboundId || undefined,
-      target_address: c.targetAddress || undefined,
-      target_port: c.targetPort || undefined,
+      target_inbound_id: c.targetInboundId || 0,
+      target_address: c.targetAddress || '',
+      target_port: c.targetPort || 0,
       flow: c.flow || undefined,
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
@@ -1487,7 +1487,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       return
     }
     try {
-      const { data } = await updateInbound(tunnelInboundId, { target_inbound_id: undefined })
+      const { data } = await updateInbound(tunnelInboundId, { target_inbound_id: 0 })
       if (data.code === 0) {
         ElMessage.success('已解除直通连线')
         emit('changed')

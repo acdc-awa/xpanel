@@ -151,12 +151,14 @@ a { color: inherit; text-decoration: none; }
   &.orange { background: var(--x-warning-soft); color: var(--x-warning); }
   &.red    { background: var(--x-danger-soft);  color: var(--x-danger); }
   &.blue   { background: var(--x-info-soft);    color: var(--x-info); }
+  &.cyan   { background: rgba(6, 182, 212, 0.12); color: #0891b2; }
   &.gray   { background: var(--x-fill-2);       color: var(--x-text-2); }
   &.deep-orange { background: rgba(234, 88, 12, 0.12); color: #ea580c; }
   &.yellow      { background: rgba(234, 179, 8, 0.15); color: #ca8a04; }
 }
 
 html.dark .x-chip {
+  &.cyan        { background: rgba(6, 182, 212, 0.2);  color: #22d3ee; }
   &.deep-orange { background: rgba(249, 115, 22, 0.18); color: #fb923c; }
   &.yellow      { background: rgba(250, 204, 21, 0.18); color: #fde047; }
 }
