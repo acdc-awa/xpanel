@@ -23,6 +23,7 @@ import {
   type ServerOutbound,
   type ServerRoutingRule,
   type TopologyData,
+  type InboundItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -74,6 +75,7 @@ async function loadServers() {
 const defaultOutboundTag = ref('direct')
 const routingDomainStrategy = ref('AsIs')
 const defaultSaving = ref(false)
+const activeTab = ref('outbounds')
 
 watch(currentServer, (s) => {
   if (s) {
@@ -82,7 +84,29 @@ watch(currentServer, (s) => {
   }
 })
 
-const outboundTags = computed(() => outbounds.value.map((o) => o.tag))
+export type EffectiveOutbound = Partial<ServerOutbound> & {
+  id: number
+  server_id: number
+  tag: string
+  protocol: string
+  enabled: boolean
+  /** 派生自四层直通（C2 起是库内真行）：目标与生命周期跟随直通，本页只读 */
+  owner_inbound_id?: number
+  ownerInboundTag?: string
+}
+
+export type EffectiveRoutingRule = Partial<ServerRoutingRule> & {
+  id: number
+  server_id: number
+  inbound_tag?: string
+  outbound_tag: string
+  enabled: boolean
+  /** 派生自四层直通：可编辑（改指向/加条件/调优先级），不可删除 */
+  owner_inbound_id?: number
+  ownerInboundTag?: string
+}
+
+const outboundTags = computed(() => displayOutbounds.value.map((o) => o.tag))
 
 async function saveDefaultOutbound() {
   if (!currentServer.value) return
@@ -198,13 +222,37 @@ const routingRules = ref<ServerRoutingRule[]>([])
 const routingLoading = ref(false)
 const ruleEditorOpen = ref(false)
 const ruleEditing = ref<ServerRoutingRule | null>(null)
+const serverInbounds = ref<InboundItem[]>([])
 const inboundTags = ref<string[]>([])
+// owner_inbound_id → 直通入站 tag（派生行在列表里的归属提示；C2 起派生行是库内真行，不再现场合成）
+const ownerTagOf = computed<Record<number, string>>(() => {
+  const m: Record<number, string> = {}
+  for (const i of serverInbounds.value) m[Number(i.id)] = i.tag
+  return m
+})
+
+const displayOutbounds = computed<EffectiveOutbound[]>(() =>
+  outbounds.value.map((o) => ({
+    ...o,
+    ownerInboundTag: o.owner_inbound_id ? ownerTagOf.value[o.owner_inbound_id] || '' : '',
+  })),
+)
+
+const displayRoutingRules = computed<EffectiveRoutingRule[]>(() =>
+  routingRules.value.map((r) => ({
+    ...r,
+    ownerInboundTag: r.owner_inbound_id ? ownerTagOf.value[r.owner_inbound_id] || '' : '',
+  })),
+)
 
 async function loadInboundTags() {
   if (!serverFilter.value) return
   try {
     const { data } = await getInbounds(serverFilter.value)
-    if (data.code === 0) inboundTags.value = data.data.items.map((i) => i.tag)
+    if (data.code === 0) {
+      serverInbounds.value = data.data.items
+      inboundTags.value = data.data.items.map((i) => i.tag)
+    }
   } catch {
     /* 标签加载失败不阻塞 */
   }
@@ -280,6 +328,7 @@ watch(serverFilter, (v) => {
     outbounds.value = []
     routingRules.value = []
     inboundTags.value = []
+    serverInbounds.value = []
     return
   }
   loadOutbounds()
@@ -346,6 +395,9 @@ onMounted(async () => {
   } else if (isMobile.value) {
     viewMode.value = 'table'
   }
+  if (route.query.tab && typeof route.query.tab === 'string') {
+    activeTab.value = route.query.tab
+  }
   await loadServers()
   if (viewMode.value === 'canvas') {
     await loadTopology()
@@ -396,63 +448,10 @@ onMounted(async () => {
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <!-- 默认出口与路由匹配策略 Hero Grid -->
-      <BaseCard v-if="currentServer" style="margin-bottom: 16px">
-        <div class="hero-strategy-wrap">
-          <div class="hero-card">
-            <div class="hero-head">
-              <span class="hero-icon"><el-icon><Aim /></el-icon></span>
-              <span class="hero-title">默认出口 Outbound</span>
-              <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 首位。" placement="top">
-                <span class="help-q">?</span>
-              </el-tooltip>
-            </div>
-            <div class="hero-body">
-              <el-select v-model="defaultOutboundTag" style="width: 100%" :disabled="outboundTags.length === 0">
-                <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
-              </el-select>
-              <div class="hero-sub">
-                <span v-if="outboundTags.length > 0" class="muted">当前选用：<code class="cell-mono">{{ defaultOutboundTag }}</code></span>
-                <span v-else class="text-danger" style="font-size: 12px">暂无可用出站，请先在下方添加出站</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="hero-card">
-            <div class="hero-head">
-              <span class="hero-icon"><el-icon><Connection /></el-icon></span>
-              <span class="hero-title">路由匹配策略 (DomainStrategy)</span>
-              <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
-                <span class="help-q">?</span>
-              </el-tooltip>
-            </div>
-            <div class="hero-body">
-              <el-select v-model="routingDomainStrategy" style="width: 100%">
-                <el-option label="AsIs（保持原样）" value="AsIs" />
-                <el-option label="IPIfNonMatch（先域名后 IP）" value="IPIfNonMatch" />
-                <el-option label="IPOnDemand（按需解析 IP）" value="IPOnDemand" />
-              </el-select>
-              <div class="hero-sub">
-                <span class="muted">全局生效；出站域名解析策略在各出站卡片内设置</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="hero-action">
-            <el-button type="primary" :loading="defaultSaving" style="width: 100%" @click="saveDefaultOutbound">
-              <el-icon><Check /></el-icon>&nbsp;保存策略
-            </el-button>
-            <div class="muted" style="font-size: 11.5px; text-align: center; margin-top: 6px">
-              修改后自动重新编译并推送配置
-            </div>
-          </div>
-        </div>
-      </BaseCard>
-
       <BaseCard>
-        <el-tabs>
-          <!-- 出站管理 -->
-          <el-tab-pane :label="isMobile ? '出站规则' : '出站规则 (Outbounds)'">
+        <el-tabs v-model="activeTab">
+          <!-- Tab 1: 出站通道 -->
+          <el-tab-pane name="outbounds" :label="isMobile ? '出站通道' : '出站通道 (Outbounds)'">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
@@ -462,21 +461,22 @@ onMounted(async () => {
               <el-icon class="is-loading" style="font-size: 24px; color: var(--x-primary)"><Loading /></el-icon>
             </div>
 
-            <div v-else-if="outbounds.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
-              该服务器暂无出站规则，点击右上角「新增出站」
+            <div v-else-if="displayOutbounds.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
+              该服务器暂无出站通道，点击右上角「新增出站」
             </div>
 
             <!-- 全局统一出站卡片网格流 (自适应 1~4 列) -->
             <div v-else class="routing-card-grid">
-              <div v-for="row in outbounds" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
+              <div v-for="row in displayOutbounds" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
                 <div class="card-head">
                   <div class="head-title">
                     <span class="tag-badge">{{ row.tag }}</span>
-                    <span v-if="row.tag === defaultOutboundTag" class="x-chip green" style="font-size: 10px">默认出口</span>
+                    <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10px">系统内置·直通</span>
+                    <span v-else-if="row.tag === defaultOutboundTag" class="x-chip green" style="font-size: 10px">默认出口</span>
                     <span v-if="row.tag === 'direct' || row.tag === 'blocked'" class="x-chip gray" style="font-size: 10px">系统内置</span>
                     <span v-if="isBlockCN(row)" class="x-chip red" style="font-size: 10px">阻断回国</span>
                   </div>
-                  <el-switch :model-value="row.enabled" :disabled="row.tag === 'direct'" size="small" @change="toggleOutbound(row)" />
+                  <el-switch :model-value="row.enabled" :disabled="row.tag === 'direct' || !!row.owner_inbound_id" size="small" @change="toggleOutbound(row)" />
                 </div>
 
                 <div class="card-grid">
@@ -492,7 +492,10 @@ onMounted(async () => {
                   <div class="grid-item">
                     <span class="item-label">连接与引用</span>
                     <div class="item-value">
-                      <span v-if="row.inbound_ref" class="x-chip orange" style="font-size: 10.5px">
+                      <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10.5px">
+                        直通「{{ row.ownerInboundTag || ('#' + row.owner_inbound_id) }}」
+                      </span>
+                      <span v-else-if="row.inbound_ref" class="x-chip orange" style="font-size: 10.5px">
                         引用入站 #{{ row.inbound_ref }}
                       </span>
                       <span v-else-if="row.tag === 'direct'" class="muted font-11">服务器直连互联网</span>
@@ -524,22 +527,29 @@ onMounted(async () => {
                 </div>
 
                 <div class="card-foot-actions">
-                  <el-button size="small" type="primary" plain @click="openOutboundEdit(row)">
-                    <el-icon><Edit /></el-icon>&nbsp;编辑出站
-                  </el-button>
-                  <el-tooltip v-if="row.tag === 'direct' || row.tag === 'blocked'" content="系统内置出站不可删除" placement="top">
-                    <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
-                  </el-tooltip>
-                  <el-button v-else size="small" type="danger" plain @click="removeOutbound(row)">
-                    <el-icon><Delete /></el-icon>&nbsp;删除
-                  </el-button>
+                  <template v-if="row.owner_inbound_id">
+                    <span class="muted font-11" style="flex: 1; text-align: center; line-height: 30px">
+                      随四层直通「{{ row.ownerInboundTag || ('#' + row.owner_inbound_id) }}」自动维护，目标在通道页/入站页修改
+                    </span>
+                  </template>
+                  <template v-else>
+                    <el-button size="small" type="primary" plain @click="openOutboundEdit(row)">
+                      <el-icon><Edit /></el-icon>&nbsp;编辑出站
+                    </el-button>
+                    <el-tooltip v-if="row.tag === 'direct' || row.tag === 'blocked'" content="系统内置出站不可删除" placement="top">
+                      <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
+                    </el-tooltip>
+                    <el-button v-else size="small" type="danger" plain @click="removeOutbound(row)">
+                      <el-icon><Delete /></el-icon>&nbsp;删除
+                    </el-button>
+                  </template>
                 </div>
               </div>
             </div>
           </el-tab-pane>
 
-          <!-- 路由规则管理 -->
-          <el-tab-pane label="路由规则">
+          <!-- Tab 2: 路由规则管理 -->
+          <el-tab-pane name="rules" :label="isMobile ? '分流规则' : '路由分流规则 (Routing Rules)'">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
@@ -549,19 +559,20 @@ onMounted(async () => {
               <el-icon class="is-loading" style="font-size: 24px; color: var(--x-primary)"><Loading /></el-icon>
             </div>
 
-            <div v-else-if="routingRules.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
+            <div v-else-if="displayRoutingRules.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
               该服务器暂无路由规则，点击右上角「新增规则」
             </div>
 
             <!-- 全局统一分流规则卡片网格流 (自适应 1~4 列) -->
             <div v-else class="routing-card-grid">
-              <div v-for="row in routingRules" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
+              <div v-for="row in displayRoutingRules" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
                 <div class="card-head">
                   <div class="head-title">
                     <span style="font-weight: 600; font-size: 12px; color: var(--x-text-3)">目标出站：</span>
                     <span class="x-chip purple" style="font-weight: 700; font-size: 11px">{{ row.outbound_tag }}</span>
+                    <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10px; margin-left: 6px">系统内置·直通</span>
                   </div>
-                  <el-switch :model-value="row.enabled" size="small" @change="toggleRule(row)" />
+                  <el-switch :model-value="row.enabled" :disabled="!!row.owner_inbound_id" size="small" @change="toggleRule(row)" />
                 </div>
 
                 <div class="card-grid">
@@ -593,16 +604,20 @@ onMounted(async () => {
                   </div>
                   <div class="grid-item">
                     <span class="item-label">入站来源</span>
-                    <div class="item-value cell-mono font-11">{{ row.inbound_tag || '全部入站' }}</div>
+                    <div class="item-value cell-mono font-11">
+                      <span>{{ row.inbound_tag || '全部入站' }}</span>
+                    </div>
                   </div>
                   <div class="grid-item">
                     <span class="item-label">端口 / 协议</span>
                     <div class="item-value">
-                      <span v-if="row.port" class="cell-mono font-11">{{ row.port }}</span>
-                      <span v-else class="muted font-11">全部端口</span>
-                      <span v-for="p in parseTagList(row.protocol)" :key="p" class="x-chip blue" style="margin-left: 4px; font-size: 10px">
-                        {{ p }}
-                      </span>
+                      <template>
+                        <span v-if="row.port" class="cell-mono font-11">{{ row.port }}</span>
+                        <span v-else class="muted font-11">全部端口</span>
+                        <span v-for="p in parseTagList(row.protocol)" :key="p" class="x-chip blue" style="margin-left: 4px; font-size: 10px">
+                          {{ p }}
+                        </span>
+                      </template>
                     </div>
                   </div>
                   <div class="grid-item">
@@ -615,10 +630,79 @@ onMounted(async () => {
                   <el-button size="small" type="primary" plain @click="openRuleEdit(row)">
                     <el-icon><Edit /></el-icon>&nbsp;编辑规则
                   </el-button>
-                  <el-button size="small" type="danger" plain @click="removeRule(row)">
+                  <template v-if="row.owner_inbound_id">
+                    <el-tooltip
+                      :content="`随四层直通「${row.ownerInboundTag || ('#' + row.owner_inbound_id)}」自动维护，不可删除；要停用请停用或删除该直通`"
+                      placement="top"
+                    >
+                      <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
+                    </el-tooltip>
+                  </template>
+                  <el-button v-else size="small" type="danger" plain @click="removeRule(row)">
                     <el-icon><Delete /></el-icon>&nbsp;删除
                   </el-button>
                 </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- Tab 3: 全局策略管理 -->
+          <el-tab-pane name="settings" :label="isMobile ? '全局策略' : '全局策略 (Global Settings)'">
+            <div v-if="!currentServer" class="table-empty" style="text-align: center; padding: 40px 0">
+              请在顶部工具栏选择目标服务器
+            </div>
+            <div v-else class="global-settings-container">
+              <div class="settings-intro">
+                <div class="intro-title">服务器全局路由与出口策略</div>
+                <div class="intro-desc">
+                  配置「{{ currentServer.name }}」的默认兜底出口与路由匹配策略。保存后系统将自动重新编译并推送配置到节点。
+                </div>
+              </div>
+
+              <div class="setting-block">
+                <div class="setting-head">
+                  <span class="setting-icon"><el-icon><Aim /></el-icon></span>
+                  <span class="setting-title">默认兜底出口 (Default Outbound)</span>
+                  <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。" placement="top">
+                    <span class="help-q">?</span>
+                  </el-tooltip>
+                </div>
+                <div class="setting-body">
+                  <el-select v-model="defaultOutboundTag" style="width: 100%; max-width: 460px" :disabled="outboundTags.length === 0">
+                    <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
+                  </el-select>
+                  <div class="setting-sub">
+                    <span v-if="outboundTags.length > 0" class="muted">当前选用出站通道：<code class="cell-mono">{{ defaultOutboundTag }}</code></span>
+                    <span v-else class="text-danger" style="font-size: 12px">暂无可用出站通道，请先在「出站通道」Tab 添加出站</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setting-block">
+                <div class="setting-head">
+                  <span class="setting-icon"><el-icon><Connection /></el-icon></span>
+                  <span class="setting-title">路由匹配策略 (DomainStrategy)</span>
+                  <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
+                    <span class="help-q">?</span>
+                  </el-tooltip>
+                </div>
+                <div class="setting-body">
+                  <el-select v-model="routingDomainStrategy" style="width: 100%; max-width: 460px">
+                    <el-option label="AsIs（保持原样，仅按客户端原始请求匹配）" value="AsIs" />
+                    <el-option label="IPIfNonMatch（先域名后 IP，域名未命中则解析 IP 再次匹配）" value="IPIfNonMatch" />
+                    <el-option label="IPOnDemand（按需解析 IP，遇到 IP 规则时立即解析）" value="IPOnDemand" />
+                  </el-select>
+                  <div class="setting-sub">
+                    <span class="muted">注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站卡片内设置。</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setting-actions">
+                <el-button type="primary" :loading="defaultSaving" @click="saveDefaultOutbound">
+                  <el-icon><Check /></el-icon>&nbsp;保存全局策略
+                </el-button>
+                <span class="muted font-11" style="margin-left: 12px">修改后自动重新编译并推送配置</span>
               </div>
             </div>
           </el-tab-pane>
@@ -779,46 +863,47 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-// Hero Strategy Grid
-.hero-strategy-wrap {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr) 140px;
-  gap: 16px;
-  align-items: center;
+// Global Settings Tab
+.global-settings-container {
+  padding: 8px 4px 20px;
 }
-@media (max-width: 1100px) {
-  .hero-strategy-wrap {
-    grid-template-columns: 1fr 1fr;
+.settings-intro {
+  margin-bottom: 20px;
+  .intro-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--x-text-1, #1e293b);
+  }
+  .intro-desc {
+    font-size: 12px;
+    color: var(--x-text-3, #64748b);
+    margin-top: 4px;
+    line-height: 1.5;
   }
 }
-@media (max-width: 680px) {
-  .hero-strategy-wrap {
-    grid-template-columns: 1fr;
-  }
-}
-.hero-card {
+.setting-block {
   background: var(--x-card-soft);
   border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border-radius: var(--x-radius, 8px);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  max-width: 620px;
 }
-.hero-head {
+.setting-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
-.hero-icon {
+.setting-icon {
   display: flex;
   align-items: center;
   color: var(--x-primary);
-  font-size: 15px;
+  font-size: 16px;
 }
-.hero-title {
+.setting-title {
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--x-text-1);
 }
 .help-q {
@@ -834,19 +919,19 @@ onMounted(async () => {
   cursor: help;
   margin-left: auto;
 }
-.hero-body {
+.setting-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
-.hero-sub {
-  font-size: 11px;
-  line-height: 1.3;
+.setting-sub {
+  font-size: 11.5px;
+  line-height: 1.4;
 }
-.hero-action {
+.setting-actions {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  margin-top: 24px;
 }
 
 /* ================= 全局统一出站/分流规则卡片网格流 ================= */

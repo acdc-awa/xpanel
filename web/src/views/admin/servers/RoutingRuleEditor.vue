@@ -152,6 +152,8 @@ onMounted(() => {
   visible.value = true
 })
 
+const isDerived = computed(() => !!props.rule?.owner_inbound_id)
+
 async function save() {
   jsonError.value = ''
   if (!form.outbound_tag?.trim()) {
@@ -176,8 +178,8 @@ async function save() {
       port: form.port?.trim() || '',
       network: form.network || '',
       protocol: form.protocol?.trim() || '',
-      inbound_tag: form.inbound_tag?.trim() || '',
-      enabled: form.enabled ?? true,
+      inbound_tag: isDerived.value ? (props.rule?.inbound_tag || '') : (form.inbound_tag?.trim() || ''),
+      enabled: isDerived.value ? (props.rule?.enabled ?? true) : (form.enabled ?? true),
       priority: form.priority ?? 0,
       remark: form.remark || '',
     }
@@ -223,8 +225,19 @@ function onClosed() {
     width="760px"
     @closed="onClosed"
   >
-    <!-- 顶部常用预设气泡栏 -->
-    <div class="preset-section">
+    <!-- 顶部四层直通派生规则提示 -->
+    <div v-if="isDerived" style="margin-bottom: 16px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="四层直通派生转发规则"
+        description="本规则由四层直通入站自动派生维护。来源入站与启用状态自动跟随直通本身（已锁定）；您可调整优先级（以便在直通前插入过滤规则）或调整目标出口。"
+      />
+    </div>
+
+    <!-- 顶部常用预设气泡栏（仅非直通派生规则展示） -->
+    <div v-else class="preset-section">
       <div class="preset-title">
         <el-icon><MagicStick /></el-icon>&nbsp;常用规则一键预设：
       </div>
@@ -294,6 +307,7 @@ function onClosed() {
             <el-select
               v-model="selectedInboundTags"
               style="width: 100%"
+              :disabled="isDerived"
               multiple
               filterable
               allow-create
@@ -303,6 +317,9 @@ function onClosed() {
             >
               <el-option v-for="t in inboundTags ?? []" :key="t" :label="t" :value="t" />
             </el-select>
+            <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
+              直通派生规则的来源入站由直通入站本身维护，已锁定不可更改
+            </span>
           </el-form-item>
         </div>
 
@@ -331,7 +348,10 @@ function onClosed() {
           </el-form-item>
 
           <el-form-item label="启用规则">
-            <el-switch v-model="form.enabled" active-text="生效此规则" />
+            <el-switch v-model="form.enabled" :disabled="isDerived" active-text="生效此规则" />
+            <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
+              直通派生规则的启用状态跟随直通入站，请在入站管理中开启或关闭
+            </span>
           </el-form-item>
 
           <el-form-item label="规则备注">
