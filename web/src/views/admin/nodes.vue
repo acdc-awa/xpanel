@@ -35,12 +35,26 @@ const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
-const typeFilter = ref<'' | 'user' | 'relay'>('')
+const typeFilter = ref<'' | 'user' | 'relay' | 'tunnel' | 'forward'>('')
 
 // 本地类型过滤（列表数据已全量在本地；历史行 type 为空按用户入站口径处理）
 const filteredInbounds = computed(() =>
   typeFilter.value ? list.value.filter((r) => (r.type || 'user') === typeFilter.value) : list.value,
 )
+
+function inboundChipText(row: InboundItem): string {
+  if (row.type === 'relay') return '内部转发'
+  if (row.type === 'tunnel') return '四层直通'
+  if (row.type === 'forward') return '转发代理'
+  return 'VLESS'
+}
+
+function inboundChipClass(row: InboundItem): string {
+  if (row.type === 'relay') return 'orange'
+  if (row.type === 'tunnel') return 'cyan'
+  if (row.type === 'forward') return 'blue'
+  return 'purple'
+}
 
 function serverName(id: number) {
   return servers.value.find((s) => s.id === id)?.name ?? `#${id}`
@@ -103,7 +117,13 @@ function groupName(id: number) {
 }
 
 function apTargetDesc(ap: any): string {
-  if (ap.target_type === 'inbound' && ap.target_inbound_tag) return `直连 ➜ ${ap.target_inbound_tag}`
+  if (ap.target_type === 'inbound' && ap.target_inbound_tag) {
+    if (ap.is_tunnel) {
+      const landing = ap.tunnel_landing_desc ? ` ➔ ${ap.tunnel_landing_desc}` : ''
+      return `直通 ➜ ${ap.target_inbound_tag}${landing}`
+    }
+    return `直连 ➜ ${ap.target_inbound_tag}`
+  }
   return '待连线'
 }
 
@@ -198,6 +218,9 @@ function editorModelValue(): string {
   }
   return JSON.stringify({
     tag: editing.value.tag,
+    protocol: editing.value.protocol,
+    remark: editing.value.remark || '',
+    traffic_reset: editing.value.traffic_reset || 'never',
     port: editing.value.port,
     listen: editing.value.listen,
     network,
@@ -268,6 +291,8 @@ async function save() {
     const payload: InboundPayload = {
       server_id: formServerId.value,
       tag: c.tag,
+      remark: c.remark || undefined,
+      traffic_reset: c.traffic_reset || undefined,
       protocol: c.protocol,
       port: c.port,
       listen: c.listen,
@@ -276,8 +301,8 @@ async function save() {
       sniffing: c.sniffing || undefined,
       ratio: c.ratio,
       total_gb: c.total_gb,
-      expiry_time: c.expiry_time ?? null,
-      type: formType.value,
+      expiry_time: (c.expiry_time && c.expiry_time.trim()) ? c.expiry_time : null,
+      type: c.type || formType.value,
       target_inbound_id: c.targetInboundId || 0,
       target_address: c.targetAddress || '',
       target_port: c.targetPort || 0,
@@ -363,11 +388,13 @@ function transportOf(row: any): string {
   }
 }
 
-// 流量/到期摘要：如 "100 GB · 09-30 到期" / "不限 · 永久" / "100 GB · 永久"
+// 流量/到期摘要：如 "100 GB · 09-30 到期" / "不限 · 永久" / "100 GB · 永久 · 每天重置"
 function quotaOf(row: any): string {
   const gb = typeof row.total_gb === 'number' && row.total_gb > 0 ? `${row.total_gb} GB` : '不限'
   const exp = row.expiry_time ? formatDateOnly(row.expiry_time) + ' 到期' : '永久'
-  return `${gb} · ${exp}`
+  const resetMap: Record<string, string> = { daily: '每天重置', weekly: '每周重置', monthly: '每月重置' }
+  const rst = row.traffic_reset && resetMap[row.traffic_reset] ? ` · ${resetMap[row.traffic_reset]}` : ''
+  return `${gb} · ${exp}${rst}`
 }
 </script>
 
@@ -382,11 +409,13 @@ function quotaOf(row: any): string {
             </el-select>
             <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px">
               <el-option label="用户入站" value="user" />
-              <el-option label="转发入站" value="relay" />
+              <el-option label="内部转发" value="relay" />
+              <el-option label="转发代理" value="forward" />
+              <el-option label="四层直通" value="tunnel" />
             </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
             <TipIcon
-              content="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，转发入站作为内部链式落地服务器。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
+              content="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，内部转发作为链路节点间落地，转发代理提供标准SOCKS5/HTTP/直通中转，四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
             />
           </div>
           <div style="display: flex; gap: 10px">
@@ -411,9 +440,14 @@ function quotaOf(row: any): string {
           <div class="card-head">
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span class="node-name" title="点击编辑入站" @click="openEdit(row)">{{ row.tag }}</span>
-              <span class="x-chip" :class="row.type === 'relay' ? 'orange' : row.type === 'tunnel' ? 'cyan' : 'purple'" style="font-size: 10px; padding: 1px 5px">
-                {{ row.type === 'relay' ? '转发' : row.type === 'tunnel' ? '直通' : '用户' }}
+              <span
+                class="node-name"
+                title="点击编辑入站"
+                @click="openEdit(row)"
+              >{{ row.tag }}</span>
+              <span v-if="row.remark" class="muted font-11" style="margin-left: 6px">({{ row.remark }})</span>
+              <span class="x-chip" :class="inboundChipClass(row)" style="font-size: 10px; padding: 1px 5px">
+                {{ inboundChipText(row) }}
               </span>
             </div>
             <el-tooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'" placement="top">
@@ -502,6 +536,7 @@ function quotaOf(row: any): string {
                   <span class="item-label">目标绑定</span>
                   <div class="item-value">
                     <span v-if="apTargetDesc(row) === '待连线'" class="x-chip orange" style="font-size: 10.5px">{{ apTargetDesc(row) }}</span>
+                    <span v-else-if="row.is_tunnel" class="x-chip cyan" style="font-size: 10.5px">{{ apTargetDesc(row) }}</span>
                     <span v-else class="x-chip purple" style="font-size: 10.5px">{{ apTargetDesc(row) }}</span>
                   </div>
                 </div>
@@ -573,6 +608,7 @@ function quotaOf(row: any): string {
       <InboundConfigEditor
         :key="editing ? `edit-${editing.id}` : 'create'"
         :model-value="editorModelValue()"
+        :protocol="editing?.protocol || 'vless'"
         :inbound-type="formType"
         :saved-inbound-type="editing?.type || ''"
         :listen="editing?.listen || '0.0.0.0'"

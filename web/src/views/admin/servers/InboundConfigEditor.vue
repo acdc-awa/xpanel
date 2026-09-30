@@ -1,41 +1,43 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import {
-  Plus,
-  Delete,
-  Refresh,
-  MagicStick,
-  Document,
-  Setting,
   Check,
   Warning,
-  CopyDocument,
-  QuestionFilled,
+  MagicStick,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getCerts,
-  getXrayKeys,
-  getXrayVlessEnc,
-  rotateInternalInbound,
   getLayers,
   createLayer,
   deleteLayer,
-  getInbounds,
-  getServers,
-  type CertItem,
+  getXrayKeys,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import CodeEditor from '@/components/CodeEditor.vue'
+import type { AccessLayer } from '@/api/types'
+
+// 子组件与类型导入
 import type {
-  FallbackItem,
-  InboundSettings,
-  RealitySettings,
-  TLSSettings,
-  XHTTPSettings,
-  AccessLayer,
-  InboundItem,
-} from '@/api/types'
+  InboundProtocol,
+  InboundNetwork,
+  InboundSecurity,
+  TcpConfig,
+  XhttpConfig,
+  TlsConfig,
+  RealityConfig,
+  VlessConfig,
+  DokodemoConfig,
+  SocksHttpConfig,
+} from './inbound/types'
+import TcpTransport from './inbound/transports/TcpTransport.vue'
+import XhttpTransport from './inbound/transports/XhttpTransport.vue'
+import RealitySecurity from './inbound/securities/RealitySecurity.vue'
+import TlsSecurity from './inbound/securities/TlsSecurity.vue'
+import VlessencSecurity from './inbound/securities/VlessencSecurity.vue'
+import VlessSettings from './inbound/protocols/VlessSettings.vue'
+import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
+import SocksHttpSettings from './inbound/protocols/SocksHttpSettings.vue'
+import BusinessSettings from './inbound/common/BusinessSettings.vue'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -45,6 +47,9 @@ export interface InboundEditorChangePayload {
   port: number
   tag: string
   listen: string
+  remark?: string
+  traffic_reset?: string
+  type?: string
   flow: string
   ratio: number
   total_gb: number
@@ -57,7 +62,7 @@ export interface InboundEditorChangePayload {
   shareHost: string
   sharePath: string
   shareAllowInsecure: boolean
-  layerId: number // 所属对外接入层（0 = 直连）
+  layerId: number
   targetInboundId?: number
   targetAddress?: string
   targetPort?: number
@@ -77,10 +82,12 @@ const props = withDefaults(
     port?: number
     tag?: string
     listen?: string
+    remark?: string
+    trafficReset?: string
     showBaseFields?: boolean
     inboundType?: string
-    /** 已保存的入站类型（编辑态由父组件从行数据传入）；未传时回退 inboundType */
     savedInboundType?: string
+    permissionGroupId?: number
     internalUUID?: string
     inboundId?: number
     targetInboundId?: number
@@ -89,6 +96,11 @@ const props = withDefaults(
     certId?: number
     serverId?: number
     layerId?: number
+    shareSecurity?: string
+    shareSni?: string
+    shareHost?: string
+    sharePath?: string
+    shareAllowInsecure?: boolean
   }>(),
   {
     modelValue: '{}',
@@ -98,9 +110,12 @@ const props = withDefaults(
     port: 443,
     tag: '',
     listen: '0.0.0.0',
+    remark: '',
+    trafficReset: 'never',
     showBaseFields: true,
     inboundType: 'user',
     savedInboundType: '',
+    permissionGroupId: 0,
     internalUUID: '',
     inboundId: 0,
     targetInboundId: undefined,
@@ -123,71 +138,682 @@ const emit = defineEmits<InboundEditorEmits & {
   (e: 'internal-uuid-changed', value: string): void
 }>()
 
-// 视图模式：form 表单 | json 源码
-const activeView = ref<'form' | 'json'>('form')
-
-// 表单 Tab：basic 基础信息 | network_security 协议与安全 | advanced 高级扩展
+// 视图 Tab
 const activeTab = ref('basic')
 
-// 基础字段
-const localProtocol = ref(props.protocol || 'vless')
-const localNetwork = ref(props.network || 'tcp')
-const localTlsType = ref(props.tlsType || 'reality')
+// 基础物理/业务类型
+const localInboundType = ref(props.inboundType || 'user')
+const localInternalUUID = ref(props.internalUUID || '')
+
+// 核心三维度：协议层、传输层、安全层
+const localProtocol = ref<InboundProtocol>((props.protocol as InboundProtocol) || 'vless')
+const localNetwork = ref<InboundNetwork>((props.network as InboundNetwork) || 'tcp')
+const localTlsType = ref<InboundSecurity>((props.tlsType as InboundSecurity) || 'reality')
+
+// 基础网络字段
 const localPort = ref(props.port || 443)
 const localTag = ref(props.tag || '')
 const localListen = ref(props.listen || '0.0.0.0')
+const localRemark = ref(props.remark || '')
+const localTrafficReset = ref(props.trafficReset || 'never')
 
-// 入站级扩展字段
-const localFlow = ref('')
+// 计费与配额
 const localRatio = ref(1)
 const localTotalGB = ref(0)
 const localExpiryTime = ref<string | null>(null)
+
+// 订阅分享与外部层
 const localShareStrategy = ref('node')
 const localShareAddr = ref('')
 const localSharePort = ref(0)
-const localShareSecurity = ref('auto')
-const localShareSni = ref('')
-const localShareHost = ref('')
-const localSharePath = ref('')
-const localShareAllowInsecure = ref(false)
-
-// 对外接入层（挂载后订阅对外端点由层决议；分享地址组仅直连时生效）
+const localShareSecurity = ref(props.shareSecurity || 'auto')
+const localShareSni = ref(props.shareSni || '')
+const localShareHost = ref(props.shareHost || '')
+const localSharePath = ref(props.sharePath || '')
+const localShareAllowInsecure = ref(props.shareAllowInsecure || false)
 const localLayerId = ref(props.layerId || 0)
+
+// 协议层状态对象（使用 ref 保证双向绑定更新）
+const vlessForm = ref<VlessConfig>({
+  flow: '',
+  fallbacks: [],
+})
+
+const dokodemoForm = ref<DokodemoConfig>({
+  target_mode: props.targetInboundId ? 'inbound' : (props.targetAddress || props.targetPort ? 'manual' : 'draft'),
+  target_inbound_id: props.targetInboundId,
+  target_address: props.targetAddress || '',
+  target_port: props.targetPort || 0,
+  network: 'tcp,udp',
+  proxy_protocol: true,
+})
+
+const socksHttpForm = ref<SocksHttpConfig>({
+  auth: 'password',
+  accounts: [],
+  udp: true,
+})
+
+// 传输层状态对象
+const tcpForm = ref<TcpConfig>({
+  header_type: 'none',
+  request_host: '',
+  request_path: '',
+  acceptProxyProtocol: false,
+})
+
+const xhttpForm = ref<XhttpConfig>({
+  mode: 'auto',
+  path: '/xhttp-stream',
+  host: '',
+  acceptProxyProtocol: false,
+})
+
+// 安全层状态对象
+const realityForm = ref<RealityConfig>({
+  dest: 'www.cloudflare.com:443',
+  server_name: 'www.cloudflare.com',
+  short_id: '',
+  private_key: '',
+  public_key: '',
+  min_client_ver: '',
+  max_client_ver: '',
+  max_time_diff: 0,
+})
+const realityFingerprint = ref('chrome')
+
+const tlsForm = ref<TlsConfig>({
+  cert_id: props.certId || 0,
+  server_name: '',
+  alpn: 'h2,http/1.1',
+  cert_file: '/etc/xray/cert.pem',
+  key_file: '/etc/xray/key.pem',
+  cipher_suites: '',
+  min_version: '1.2',
+  max_version: '1.3',
+  allow_insecure: false,
+})
+
+const vlessencKey = ref('')
+
+// 嗅探状态
+const sniffingForm = reactive({
+  enabled: false,
+  destOverride: ['http', 'tls', 'quic'],
+  metadataOnly: false,
+  routeOnly: false,
+})
+
+// 对外接入层列表
 const layers = ref<AccessLayer[]>([])
-const activeLayer = computed(() => layers.value.find((l) => l.id === localLayerId.value) || null)
-
-watch(
-  () => props.serverId,
-  async (sid) => {
-    if (!sid) {
-      layers.value = []
-      return
-    }
-    try {
-      const { data } = await getLayers(sid)
-      if (data.code === 0) layers.value = data.data.items
-    } catch {
-      layers.value = []
-    }
-  },
-  { immediate: true },
-)
-
-// 快捷新建对外层
+const layerDeleting = ref(false)
 const layerQuickOpen = ref(false)
 const layerQuickSaving = ref(false)
 const layerQuickForm = reactive({ name: '', host: '', port: 443, security: 'tls' })
 
-// 删除选中层（挂载的其它入站一并回退直连端点）
-const layerDeleting = ref(false)
+// JSON 编辑状态
+const rawJsonText = ref('')
+const jsonError = ref('')
+const isInternalUpdating = ref(false)
+
+// -----------------------------------------------------------------------------
+// 能力矩阵联动规则 (Capability Matrix)
+// -----------------------------------------------------------------------------
+const allowedNetworks = computed<InboundNetwork[]>(() => {
+  if (localProtocol.value === 'dokodemo-door') return ['tcp']
+  if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['tcp']
+  return ['tcp', 'xhttp']
+})
+
+const allowedSecurities = computed<InboundSecurity[]>(() => {
+  if (localProtocol.value === 'dokodemo-door') return ['none']
+  if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['none', 'tls']
+  return ['none', 'tls', 'reality', 'vlessenc']
+})
+
+const visibleTabs = computed(() => {
+  const tabs = [
+    { key: 'basic', label: '基础配置' },
+    { key: 'protocol', label: '协议参数' },
+  ]
+  if (localProtocol.value === 'vless') {
+    tabs.push({ key: 'transport', label: '传输层' })
+  }
+  tabs.push(
+    { key: 'security', label: '安全层' },
+    { key: 'sniffing', label: '流量嗅探' },
+  )
+  if (localInboundType.value === 'user') {
+    tabs.push({ key: 'share', label: '订阅与分享' })
+  }
+  tabs.push({ key: 'advanced', label: '高级配置 (JSON)' })
+  return tabs
+})
+
+const allowVisionFlow = computed(() => {
+  return localProtocol.value === 'vless' &&
+    localNetwork.value === 'tcp' &&
+    (localTlsType.value === 'reality' || localTlsType.value === 'tls' || localTlsType.value === 'vlessenc')
+})
+
+function enforceCapabilityMatrix() {
+  if (!allowedNetworks.value.includes(localNetwork.value)) {
+    localNetwork.value = allowedNetworks.value[0]
+  }
+  if (!allowedSecurities.value.includes(localTlsType.value)) {
+    localTlsType.value = allowedSecurities.value[0]
+  }
+  if (!allowVisionFlow.value && vlessForm.value.flow === 'xtls-rprx-vision') {
+    vlessForm.value.flow = ''
+  }
+  // 保证当前激活的 Tab 必须在可见列表中
+  if (!visibleTabs.value.some((t) => t.key === activeTab.value)) {
+    activeTab.value = 'basic'
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 协议 / 模式切换响应
+// -----------------------------------------------------------------------------
+function onTypeChange(type: any) {
+  const t = String(type)
+  localInboundType.value = t
+  emit('update:inboundType', t)
+  if (t === 'tunnel') {
+    localProtocol.value = 'dokodemo-door'
+  } else if (t === 'relay') {
+    localProtocol.value = 'vless'
+    localTlsType.value = 'vlessenc'
+  } else if (t === 'user') {
+    localProtocol.value = 'vless'
+  }
+  enforceCapabilityMatrix()
+  syncFormToJson()
+}
+
+function onProtocolChange(proto: any) {
+  const p = String(proto) as InboundProtocol
+  localProtocol.value = p
+  if (p === 'dokodemo-door') {
+    localInboundType.value = 'tunnel'
+  } else if (p === 'socks' || p === 'http') {
+    localInboundType.value = 'forward'
+  } else if (p === 'vless' && (localInboundType.value === 'tunnel' || localInboundType.value === 'forward')) {
+    localInboundType.value = 'user'
+  }
+  enforceCapabilityMatrix()
+  syncFormToJson()
+}
+
+function onNetworkChange(net: any) {
+  localNetwork.value = String(net || 'tcp') as InboundNetwork
+  enforceCapabilityMatrix()
+  syncFormToJson()
+}
+
+function onSecurityChange(sec: any) {
+  localTlsType.value = String(sec || 'none') as InboundSecurity
+  if (localTlsType.value === 'reality' && !realityForm.value.private_key) {
+    autoGenRealityKey()
+  }
+  enforceCapabilityMatrix()
+  syncFormToJson()
+}
+
+async function autoGenRealityKey() {
+  try {
+    const { data } = await getXrayKeys()
+    if (data.code === 0 && data.data) {
+      realityForm.value.private_key = data.data.private_key
+      realityForm.value.public_key = data.data.public_key
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 序列化与反序列化
+// -----------------------------------------------------------------------------
+function buildSettingsJSON(): string {
+  if (localProtocol.value === 'dokodemo-door') {
+    return JSON.stringify({
+      address: dokodemoForm.value.target_address || '',
+      port: dokodemoForm.value.target_port || 0,
+      network: dokodemoForm.value.network || 'tcp,udp',
+      followRedirect: false,
+    })
+  }
+
+  if (localProtocol.value === 'socks') {
+    const s: Record<string, any> = {
+      auth: 'password',
+      udp: socksHttpForm.value.udp,
+    }
+    return JSON.stringify(s)
+  }
+
+  if (localProtocol.value === 'http') {
+    const s: Record<string, any> = {
+      auth: 'password',
+      allowTransparent: false,
+    }
+    return JSON.stringify(s)
+  }
+
+  // vless
+  const s: Record<string, any> = {
+    decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
+  }
+  if (vlessForm.value.fallbacks.length > 0) {
+    s.fallbacks = vlessForm.value.fallbacks.map((f) => ({
+      name: f.name || undefined,
+      alpn: f.alpn || undefined,
+      dest: f.dest,
+      path: f.path || undefined,
+      xver: f.xver || 0,
+    }))
+  }
+  return JSON.stringify(s)
+}
+
+function buildStreamSettingsJSON(): string {
+  if (localProtocol.value === 'dokodemo-door') {
+    const s: Record<string, any> = {
+      network: dokodemoForm.value.network || 'tcp,udp',
+      security: 'none',
+      proxy_protocol: dokodemoForm.value.proxy_protocol !== false,
+    }
+    if (tcpForm.value.acceptProxyProtocol) {
+      s.acceptProxyProtocol = true
+      s.tcpSettings = { acceptProxyProtocol: true }
+    }
+    return JSON.stringify(s)
+  }
+
+  const streamSecurity = localTlsType.value === 'vlessenc' ? 'none' : localTlsType.value
+  const s: Record<string, any> = {
+    network: localNetwork.value,
+    security: streamSecurity,
+  }
+
+  if (tcpForm.value.acceptProxyProtocol || xhttpForm.value.acceptProxyProtocol) {
+    s.acceptProxyProtocol = true
+  }
+
+  if (localNetwork.value === 'xhttp') {
+    s.xhttpSettings = { mode: xhttpForm.value.mode || 'auto', path: xhttpForm.value.path || '/' }
+    if (xhttpForm.value.host) s.xhttpSettings.host = xhttpForm.value.host
+    if (xhttpForm.value.acceptProxyProtocol) s.xhttpSettings.acceptProxyProtocol = true
+  } else if (localNetwork.value === 'tcp') {
+    const tcpSettings: Record<string, any> = {}
+    if (tcpForm.value.header_type !== 'none') {
+      const hdr: Record<string, any> = { type: tcpForm.value.header_type }
+      if (tcpForm.value.header_type === 'http') {
+        hdr.request = {}
+        if (tcpForm.value.request_host) hdr.request.headers = { Host: tcpForm.value.request_host.split(',').map((x: string) => x.trim()) }
+        if (tcpForm.value.request_path) hdr.request.path = tcpForm.value.request_path.split(',').map((x: string) => x.trim())
+      }
+      tcpSettings.header = hdr
+    }
+    if (tcpForm.value.acceptProxyProtocol) {
+      tcpSettings.acceptProxyProtocol = true
+    }
+    if (Object.keys(tcpSettings).length > 0) {
+      s.tcpSettings = tcpSettings
+    }
+  }
+
+  if (localTlsType.value === 'reality') {
+    s.fingerprint = realityFingerprint.value || 'chrome'
+    s.realitySettings = {
+      show: false,
+      dest: realityForm.value.dest,
+      serverNames: realityForm.value.server_name ? realityForm.value.server_name.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
+      privateKey: realityForm.value.private_key,
+      shortIds: realityForm.value.short_id ? realityForm.value.short_id.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
+    }
+    if (realityForm.value.public_key) s.realitySettings.publicKey = realityForm.value.public_key
+    if (realityForm.value.min_client_ver) s.realitySettings.minClientVer = realityForm.value.min_client_ver
+    if (realityForm.value.max_client_ver) s.realitySettings.maxClientVer = realityForm.value.max_client_ver
+    if (realityForm.value.max_time_diff > 0) s.realitySettings.maxTimeDiff = realityForm.value.max_time_diff
+  } else if (localTlsType.value === 'tls') {
+    const alpnArr = tlsForm.value.alpn ? tlsForm.value.alpn.split(',').map((x: string) => x.trim()).filter(Boolean) : []
+    const t: Record<string, any> = {
+      serverName: tlsForm.value.server_name || undefined,
+      certificates: [{ certificateFile: tlsForm.value.cert_file, keyFile: tlsForm.value.key_file }],
+    }
+    if (alpnArr.length > 0) t.alpn = alpnArr
+    if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
+    if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
+    if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
+    if (tlsForm.value.allow_insecure) t.allowInsecure = true
+    s.tlsSettings = t
+  }
+
+  return JSON.stringify(s)
+}
+
+function buildSniffingJSON(): string {
+  if (!sniffingForm.enabled) return ''
+  return JSON.stringify({
+    enabled: true,
+    destOverride: sniffingForm.destOverride,
+    metadataOnly: sniffingForm.metadataOnly,
+    routeOnly: sniffingForm.routeOnly,
+  })
+}
+
+function syncFormToJson() {
+  if (isInternalUpdating.value) return
+  isInternalUpdating.value = true
+
+  const settingsJson = buildSettingsJSON()
+  const streamJson = buildStreamSettingsJSON()
+  const sniffJson = buildSniffingJSON()
+
+  rawJsonText.value = JSON.stringify({
+    settings_json: JSON.parse(settingsJson),
+    stream_settings: JSON.parse(streamJson),
+    sniffing: sniffJson ? JSON.parse(sniffJson) : null,
+  }, null, 2)
+  jsonError.value = ''
+
+  emit('update:modelValue', rawJsonText.value)
+  emitChange(settingsJson, streamJson, sniffJson)
+  isInternalUpdating.value = false
+}
+
+function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: string) {
+  emit('change', {
+    settingsJson: typeof settingsJson === 'string' ? settingsJson : buildSettingsJSON(),
+    streamSettings: typeof streamJson === 'string' ? streamJson : buildStreamSettingsJSON(),
+    sniffing: typeof sniffJson === 'string' ? sniffJson : buildSniffingJSON(),
+    protocol: localProtocol.value,
+    port: localPort.value,
+    tag: localTag.value,
+    listen: localListen.value || '0.0.0.0',
+    remark: localRemark.value,
+    traffic_reset: localTrafficReset.value,
+    type: localInboundType.value,
+    flow: vlessForm.value.flow,
+    ratio: localRatio.value,
+    total_gb: localTotalGB.value,
+    expiry_time: localExpiryTime.value,
+    shareAddrStrategy: localShareStrategy.value,
+    shareAddr: localShareAddr.value,
+    sharePort: localSharePort.value,
+    shareSecurity: localShareSecurity.value,
+    shareSni: localShareSni.value,
+    shareHost: localShareHost.value,
+    sharePath: localSharePath.value,
+    shareAllowInsecure: localShareAllowInsecure.value,
+    layerId: localLayerId.value,
+    targetInboundId: dokodemoForm.value.target_inbound_id,
+    targetAddress: dokodemoForm.value.target_address,
+    targetPort: dokodemoForm.value.target_port,
+  })
+}
+
+function parseJsonToForm(str: string) {
+  if (!str || !str.trim()) return
+  try {
+    const parsed = JSON.parse(str)
+    jsonError.value = ''
+
+    let s: any = parsed
+    if (parsed.settings_json && typeof parsed.settings_json === 'string') {
+      try {
+        s = JSON.parse(parsed.settings_json)
+      } catch { /* ignore */ }
+    } else if (parsed.settings_json && typeof parsed.settings_json === 'object') {
+      s = parsed.settings_json
+    } else if (parsed.settings && typeof parsed.settings === 'object') {
+      s = parsed.settings
+    }
+
+    let streamObj: Record<string, any> = {}
+    const ssRaw: any = parsed.stream_settings ?? parsed.streamSettings
+    if (typeof ssRaw === 'string') {
+      try {
+        streamObj = JSON.parse(ssRaw)
+      } catch {
+        streamObj = {}
+      }
+    } else if (ssRaw && typeof ssRaw === 'object') {
+      streamObj = ssRaw
+    }
+    const realitySettings: any = streamObj.realitySettings
+    const tlsSettings: any = streamObj.tlsSettings
+    const xhttpSettings: any = streamObj.xhttpSettings
+    const tcpSettings: any = streamObj.tcpSettings
+
+    if (parsed.protocol && typeof parsed.protocol === 'string') {
+      localProtocol.value = parsed.protocol as InboundProtocol
+    } else if (props.protocol) {
+      localProtocol.value = props.protocol as InboundProtocol
+    }
+    if (parsed.network && typeof parsed.network === 'string') {
+      localNetwork.value = parsed.network as InboundNetwork
+    }
+    if (parsed.tls_type && typeof parsed.tls_type === 'string') {
+      localTlsType.value = parsed.tls_type as InboundSecurity
+    } else if (streamObj.security) {
+      localTlsType.value = streamObj.security as InboundSecurity
+    }
+
+    // vlessenc 回显判断
+    const decRaw = (s && typeof s === 'object' ? s.decryption : '') as string
+    if (localTlsType.value === 'none' && typeof decRaw === 'string' && decRaw && decRaw !== 'none') {
+      localTlsType.value = 'vlessenc'
+      vlessencKey.value = decRaw
+    } else if (localTlsType.value === 'vlessenc') {
+      vlessencKey.value = decRaw || ''
+    }
+
+    if (typeof parsed.port === 'number') localPort.value = parsed.port
+    if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
+    if (typeof parsed.listen === 'string') localListen.value = parsed.listen
+    if (typeof parsed.remark === 'string') localRemark.value = parsed.remark
+    if (typeof parsed.traffic_reset === 'string') localTrafficReset.value = parsed.traffic_reset
+
+    if (typeof parsed.flow === 'string') vlessForm.value.flow = parsed.flow
+    if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
+    if (typeof parsed.total_gb === 'number') localTotalGB.value = parsed.total_gb
+    if (typeof parsed.expiry_time === 'string' && parsed.expiry_time) localExpiryTime.value = parsed.expiry_time
+    if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
+    if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
+    if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
+    if (typeof parsed.share_security === 'string') localShareSecurity.value = parsed.share_security
+    if (typeof parsed.share_sni === 'string') localShareSni.value = parsed.share_sni
+    if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
+    if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
+    if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
+    if (typeof parsed.layer_id === 'number') localLayerId.value = parsed.layer_id
+
+    if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
+      localInboundType.value = 'tunnel'
+      localProtocol.value = 'dokodemo-door'
+    } else if (parsed.type === 'forward' || parsed.protocol === 'socks' || parsed.protocol === 'http' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
+      localInboundType.value = 'forward'
+      if (localProtocol.value !== 'socks' && localProtocol.value !== 'http') {
+        localProtocol.value = (parsed.protocol === 'socks' || parsed.protocol === 'http') ? (parsed.protocol as InboundProtocol) : 'http'
+      }
+    } else if (parsed.type === 'relay') {
+      localInboundType.value = 'relay'
+      localProtocol.value = 'vless'
+    } else if (parsed.type === 'user') {
+      localInboundType.value = 'user'
+      localProtocol.value = 'vless'
+    }
+
+    // 协议层回显
+    if (localProtocol.value === 'dokodemo-door') {
+      dokodemoForm.value = {
+        target_mode: parsed.target_inbound_id ? 'inbound' : (s?.address || parsed.target_address || s?.port || parsed.target_port ? 'manual' : 'draft'),
+        target_inbound_id: parsed.target_inbound_id,
+        target_address: s?.address || parsed.target_address || '',
+        target_port: s?.port || parsed.target_port || 0,
+        network: s?.network || 'tcp,udp',
+        proxy_protocol: streamObj.proxy_protocol !== false && streamObj.proxyProtocol !== false,
+      }
+    } else if (localProtocol.value === 'socks' || localProtocol.value === 'http') {
+      socksHttpForm.value = {
+        auth: 'password',
+        udp: s?.udp !== false,
+        accounts: Array.isArray(s?.accounts) ? s.accounts : [],
+      }
+    } else {
+      vlessForm.value = {
+        flow: parsed.flow || '',
+        fallbacks: Array.isArray(s?.fallbacks)
+          ? s.fallbacks.map((f: any) => ({
+              name: f.name || '',
+              alpn: f.alpn || '',
+              path: f.path || '',
+              dest: String(f.dest || '80'),
+              xver: f.xver || 0,
+            }))
+          : [],
+      }
+    }
+
+    // 传输层回显
+    const ap = !!streamObj.acceptProxyProtocol || !!tcpSettings?.acceptProxyProtocol || !!xhttpSettings?.acceptProxyProtocol
+    if (tcpSettings && typeof tcpSettings === 'object') {
+      const req = tcpSettings.header?.request
+      tcpForm.value = {
+        header_type: tcpSettings.header?.type || 'none',
+        request_host: Array.isArray(req?.headers?.Host) ? req.headers.Host.join(',') : '',
+        request_path: Array.isArray(req?.path) ? req.path.join(',') : '/',
+        acceptProxyProtocol: ap,
+      }
+    } else {
+      tcpForm.value.acceptProxyProtocol = ap
+    }
+    if (xhttpSettings && typeof xhttpSettings === 'object') {
+      xhttpForm.value = {
+        mode: xhttpSettings.mode || 'auto',
+        path: xhttpSettings.path || '/',
+        host: xhttpSettings.host || '',
+        acceptProxyProtocol: ap,
+      }
+    } else {
+      xhttpForm.value.acceptProxyProtocol = ap
+    }
+
+    // 安全层回显
+    if (realitySettings && typeof realitySettings === 'object') {
+      realityForm.value = {
+        dest: realitySettings.dest || '',
+        server_name: Array.isArray(realitySettings.serverNames) ? realitySettings.serverNames[0] || '' : realitySettings.serverName || '',
+        private_key: realitySettings.privateKey || '',
+        public_key: realitySettings.publicKey || '',
+        short_id: Array.isArray(realitySettings.shortIds) ? realitySettings.shortIds[0] || '' : realitySettings.shortId || '',
+        min_client_ver: realitySettings.minClientVer || '',
+        max_client_ver: realitySettings.maxClientVer || '',
+        max_time_diff: realitySettings.maxTimeDiff || 0,
+      }
+      realityFingerprint.value = streamObj.fingerprint || 'chrome'
+    }
+
+    if (tlsSettings && typeof tlsSettings === 'object') {
+      const cert = Array.isArray(tlsSettings.certificates) ? tlsSettings.certificates[0] : undefined
+      tlsForm.value = {
+        cert_id: parsed.cert_id || 0,
+        server_name: tlsSettings.serverName || '',
+        alpn: Array.isArray(tlsSettings.alpn) ? tlsSettings.alpn.join(',') : '',
+        cert_file: cert?.certificateFile || '',
+        key_file: cert?.keyFile || '',
+        cipher_suites: Array.isArray(tlsSettings.cipherSuites) ? tlsSettings.cipherSuites.join(',') : '',
+        min_version: tlsSettings.minVersion || '1.2',
+        max_version: tlsSettings.maxVersion || '1.3',
+        allow_insecure: !!tlsSettings.allowInsecure,
+      }
+    }
+
+    // 嗅探回显
+    const sniffRaw: any = parsed.sniffing ?? (s && typeof s === 'object' ? s.sniffing : undefined)
+    let sniffObj: any = null
+    if (typeof sniffRaw === 'string') {
+      try { sniffObj = JSON.parse(sniffRaw) } catch { sniffObj = null }
+    } else if (sniffRaw && typeof sniffRaw === 'object') {
+      sniffObj = sniffRaw
+    }
+    if (sniffObj) {
+      sniffingForm.enabled = !!sniffObj.enabled
+      sniffingForm.destOverride = Array.isArray(sniffObj.destOverride) ? sniffObj.destOverride : ['http', 'tls', 'quic']
+      sniffingForm.metadataOnly = !!sniffObj.metadataOnly
+      sniffingForm.routeOnly = !!sniffObj.routeOnly
+    }
+
+    enforceCapabilityMatrix()
+  } catch (e: any) {
+    jsonError.value = e?.message || 'JSON 语法错误'
+  }
+}
+
+function onRawJsonInput(val: string) {
+  rawJsonText.value = val
+  try {
+    JSON.parse(val)
+    jsonError.value = ''
+    isInternalUpdating.value = true
+    parseJsonToForm(val)
+    isInternalUpdating.value = false
+    emit('update:modelValue', val)
+    emitChange()
+  } catch (e: any) {
+    jsonError.value = e?.message || 'JSON 语法错误'
+  }
+}
+
+function formatRawJson() {
+  try {
+    const obj = JSON.parse(rawJsonText.value)
+    rawJsonText.value = JSON.stringify(obj, null, 2)
+    jsonError.value = ''
+    ElMessage.success('已格式化 JSON')
+  } catch (e: any) {
+    jsonError.value = e?.message || 'JSON 语法错误'
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 对外层与 Caddy 反代
+// -----------------------------------------------------------------------------
+const activeLayer = computed(() => layers.value.find((l) => l.id === localLayerId.value) || null)
+
+const caddySnippet = computed(() => {
+  const domain = activeLayer.value ? activeLayer.value.host : localShareSni.value || localShareAddr.value || 'node.example.com'
+  const path = localSharePath.value || xhttpForm.value.path || '/xhttp-stream'
+  const port = localPort.value || 10086
+  return `${domain} {\n    # 前置 TLS 解密并反代到本地明文 Xray xhttp 入站\n    reverse_proxy ${path} 127.0.0.1:${port}\n}`
+})
+
+async function loadLayers() {
+  if (!props.serverId) {
+    layers.value = []
+    return
+  }
+  try {
+    const { data } = await getLayers(props.serverId)
+    if (data.code === 0) layers.value = data.data.items
+  } catch {
+    layers.value = []
+  }
+}
+
+watch(() => props.serverId, loadLayers, { immediate: true })
+
 async function deleteLayerFromEditor() {
   const l = activeLayer.value
   if (!l || !props.serverId) return
   const count = l.inbound_count ?? 1
   try {
     await ElMessageBox.confirm(
-      `删除对外层「${l.name}」？该层当前挂载 ${count} 个入站（含本入站在内），删除后全部回退为直连端点（订阅地址改为各自分享地址）。`,
-      '删除对外层',
+      `删除对外接入层「${l.name}」？该层当前挂载 ${count} 个入站，删除后均回退为直连端点。`,
+      '删除对外接入层',
       { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
     )
   } catch {
@@ -199,7 +825,7 @@ async function deleteLayerFromEditor() {
     if (data.code === 0) {
       layers.value = layers.value.filter((x) => x.id !== l.id)
       localLayerId.value = 0
-      ElMessage.success('对外层已删除，本入站回退直连端点')
+      ElMessage.success('对外层已删除')
     } else {
       ElMessage.error(data.message)
     }
@@ -236,7 +862,7 @@ async function saveLayerQuick() {
       layers.value = [...layers.value, data.data.layer]
       localLayerId.value = data.data.layer.id
       layerQuickOpen.value = false
-      ElMessage.success('对外层已创建并绑定到当前入站')
+      ElMessage.success('对外层已创建并绑定')
     } else {
       ElMessage.error(data.message)
     }
@@ -245,152 +871,6 @@ async function saveLayerQuick() {
   } finally {
     layerQuickSaving.value = false
   }
-}
-
-// Phase T 入站三态与证书
-const localInboundType = ref(props.inboundType || 'user')
-const localInternalUUID = ref(props.internalUUID || '')
-const localCertId = ref<number>(props.certId || 0)
-const certs = ref<CertItem[]>([])
-
-// 四层直通目标（dokodemo-door）
-const localTargetMode = ref<'inbound' | 'manual' | 'draft'>('inbound')
-const localTargetInboundId = ref<number | undefined>(props.targetInboundId)
-const localTargetAddress = ref(props.targetAddress || '')
-const localTargetPort = ref(props.targetPort || 0)
-const candidateInbounds = ref<InboundItem[]>([])
-const serverMap = ref<Record<number, string>>({})
-
-if (props.targetInboundId) {
-  localTargetMode.value = 'inbound'
-} else if (props.targetAddress || props.targetPort) {
-  localTargetMode.value = 'manual'
-} else {
-  localTargetMode.value = 'draft'
-}
-
-async function loadCandidateInbounds() {
-  try {
-    const [inbRes, srvRes] = await Promise.all([getInbounds(), getServers()])
-    if (srvRes.data.code === 0) {
-      const sm: Record<number, string> = {}
-      for (const s of srvRes.data.data.items) {
-        sm[s.id] = s.name
-      }
-      serverMap.value = sm
-    }
-    if (inbRes.data.code === 0) {
-      candidateInbounds.value = inbRes.data.data.items.filter((i) => i.id !== props.inboundId)
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
-function onTargetModeChange(mode: any) {
-  const m = String(mode)
-  if (m === 'inbound') {
-    localTargetAddress.value = ''
-    localTargetPort.value = 0
-  } else if (m === 'manual') {
-    localTargetInboundId.value = undefined
-  } else {
-    localTargetInboundId.value = undefined
-    localTargetAddress.value = ''
-    localTargetPort.value = 0
-  }
-}
-
-function onTargetInboundSelect(_val: any) {
-  localTargetAddress.value = ''
-  localTargetPort.value = 0
-}
-
-const targetNeedsPPWarning = computed(() => {
-  if (localTargetMode.value !== 'inbound' || !localTargetInboundId.value) return false
-  const target = candidateInbounds.value.find((i) => i.id === localTargetInboundId.value)
-  if (!target) return false
-  try {
-    const ss = JSON.parse(target.stream_settings || '{}')
-    return !ss.acceptProxyProtocol
-  } catch {
-    return true
-  }
-})
-
-// Fallbacks 列表
-const fallbacks = ref<FallbackItem[]>([])
-
-// 传输层参数
-const xhttpForm = reactive<XHTTPSettings>({ mode: 'auto', path: '/xhttp-stream', host: '' })
-const tcpForm = reactive({ header_type: 'none', request_host: '', request_path: '/' })
-const acceptProxyProtocol = ref(false)
-const fingerprint = ref('chrome')
-
-// REALITY 参数
-const realityForm = reactive<RealitySettings>({
-  dest: 'gateway.icloud.com:443',
-  server_name: 'gateway.icloud.com',
-  public_key: '',
-  private_key: '',
-  short_id: 'abcdef0123456789',
-})
-const realityMinClientVer = ref('')
-const realityMaxClientVer = ref('')
-const realityMaxTimeDiff = ref(0)
-
-// TLS 参数
-const tlsForm = reactive<TLSSettings>({
-  server_name: '',
-  cert_file: '/etc/xray/cert.pem',
-  key_file: '/etc/xray/key.pem',
-  alpn: [],
-})
-const tlsAlpnText = ref('h2,http/1.1')
-const tlsMinVersion = ref('')
-const tlsMaxVersion = ref('')
-const tlsCipherSuites = ref('')
-const tlsAllowInsecure = ref(false)
-
-// VLESS Encryption（vlessenc 安全层，一期仅转发入站）：面板伪安全层——
-// stream 层写 security:"none"，settings_json 写 decryption；上游中转出站的加密参数
-// 由后端按目标入站自动派生并随配置下发。认证固定 ML-KEM-768、外观固定 native。
-const vlessencKey = ref('')
-const veGenLoading = ref(false)
-
-// Sniffing 参数
-const sniffingForm = reactive({
-  enabled: false,
-  destOverride: ['http', 'tls', 'quic'] as string[],
-  metadataOnly: false,
-  routeOnly: false,
-})
-
-// REALITY 优质预设
-const REALITY_PRESETS = [
-  { label: 'Apple iCloud (gateway.icloud.com:443)', dest: 'gateway.icloud.com:443', sni: 'gateway.icloud.com' },
-  { label: 'Apple iTunes (itunes.apple.com:443)', dest: 'itunes.apple.com:443', sni: 'itunes.apple.com' },
-  { label: 'Apple (www.apple.com:443)', dest: 'www.apple.com:443', sni: 'www.apple.com' },
-  { label: 'Cloudflare (www.cloudflare.com:443)', dest: 'www.cloudflare.com:443', sni: 'www.cloudflare.com' },
-  { label: 'Amazon AWS (aws.amazon.com:443)', dest: 'aws.amazon.com:443', sni: 'aws.amazon.com' },
-]
-
-function applyRealityPreset(preset: { dest: string; sni: string }) {
-  realityForm.dest = preset.dest
-  realityForm.server_name = preset.sni
-  ElMessage.success(`已应用伪装站点预设：${preset.sni}`)
-}
-
-// Caddyfile 反代配置片段生成（挂载对外层时用层 Host，否则用分享地址覆写）
-const caddySnippet = computed(() => {
-  const domain = activeLayer.value ? activeLayer.value.host : localShareSni.value || localShareAddr.value || 'node.example.com'
-  const path = localSharePath.value || xhttpForm.path || '/xhttp-stream'
-  const port = localPort.value || 10086
-  return `${domain} {\n    # 前置 TLS 解密并反代到本地明文 Xray xhttp 入站\n    reverse_proxy ${path} 127.0.0.1:${port}\n}`
-})
-
-function copyCaddySnippet() {
-  copyText(caddySnippet.value, 'Caddyfile 反代配置')
 }
 
 function applyCaddyOffloadPreset() {
@@ -402,12 +882,13 @@ function applyCaddyOffloadPreset() {
   }
   if (!localSharePath.value) {
     localSharePath.value = '/xhttp-stream'
-    xhttpForm.path = '/xhttp-stream'
+    xhttpForm.value.path = '/xhttp-stream'
   }
-  xhttpForm.mode = 'auto'
-  acceptProxyProtocol.value = false
+  xhttpForm.value.mode = 'auto'
+  tcpForm.value.acceptProxyProtocol = false
+  xhttpForm.value.acceptProxyProtocol = false
+
   if (props.serverId) {
-    // 有服务器上下文 → 一键建层并绑定（对外端点由层决议，share 地址组不再写死）
     const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
     createLayer(props.serverId, { name: '反代层', host: domain, port: 443, security: 'tls' })
       .then(({ data }) => {
@@ -422,458 +903,18 @@ function applyCaddyOffloadPreset() {
       .catch((e) => ElMessage.error(errMsg(e, '创建对外层失败')))
     return
   }
-  // 无服务器上下文（画布预览等）→ 沿用旧版 share 字段反代配置
   localShareStrategy.value = 'custom'
   localSharePort.value = 443
   localShareSecurity.value = 'tls'
   if (!localShareSni.value && !localShareAddr.value) {
     localShareAddr.value = 'node.example.com'
-    localShareSni.value = 'node.example.com'
   }
-  ElMessage.success('已切换为前置反代模式 (Caddy/Nginx TLS 卸载 + xhttp 传输)')
+  ElMessage.success('已应用反代预设')
 }
 
-// JSON 编辑状态
-const rawJsonText = ref('{}')
-const jsonError = ref('')
-const isInternalUpdating = ref(false)
-const genKeyLoading = ref(false)
-
-function genShortId() {
-  const chars = '0123456789abcdef'
-  let result = ''
-  for (let i = 0; i < 16; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  realityForm.short_id = result
-}
-
-async function fetchRealityKeys() {
-  genKeyLoading.value = true
-  try {
-    const { data } = await getXrayKeys()
-    if (data.code === 0) {
-      realityForm.private_key = data.data.private_key
-      realityForm.public_key = data.data.public_key
-      ElMessage.success('已生成 x25519 密钥对')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '生成密钥失败'))
-  } finally {
-    genKeyLoading.value = false
-  }
-}
-
-async function fetchVlessEncKey() {
-  veGenLoading.value = true
-  try {
-    const { data } = await getXrayVlessEnc()
-    if (data.code === 0) {
-      vlessencKey.value = data.data.decryption
-      ElMessage.success('已生成 VLESS Encryption 密钥（ML-KEM-768）')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '生成密钥失败'))
-  } finally {
-    veGenLoading.value = false
-  }
-}
-
-// 切到 vlessenc 安全层且尚无密钥时自动生成一次（幂等，可手动重新生成轮换）
-watch(
-  localTlsType,
-  (v) => {
-    if (v === 'vlessenc' && !vlessencKey.value) fetchVlessEncKey()
-  },
-)
-
-// vlessenc 一期仅转发入站：类型切回 user 时若安全层停留在 vlessenc，回退 REALITY
-//（后端保存校验也会拒绝 user 入站携带 decryption，这里前置避免脏数据）
-watch(
-  localInboundType,
-  (v) => {
-    if (v !== 'relay' && localTlsType.value === 'vlessenc') {
-      localTlsType.value = 'reality'
-      ElMessage.info('VLESS Encryption 暂仅支持转发入站，安全层已回退 REALITY')
-    }
-  },
-)
-
-async function rotateInternal() {
-  if (!props.inboundId) {
-    ElMessage.warning('请先保存入站')
-    return
-  }
-  // 拦截依据是已保存类型：编辑器里切到 relay 但尚未保存时，后端仍会拒绝，需前置提示
-  const savedType = props.savedInboundType || props.inboundType
-  if (savedType !== 'relay') {
-    ElMessage.warning('请先保存入站为转发模式后再执行内部 UUID 轮换')
-    return
-  }
-  try {
-    await ElMessageBox.confirm('将重新生成内部 UUID，引用该落地入站的中转配置会自动更新，确认轮换？', '轮换内部账户', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await rotateInternalInbound(props.inboundId)
-    if (data.code === 0) {
-      localInternalUUID.value = data.data.internal_uuid
-      emit('internal-uuid-changed', data.data.internal_uuid)
-      ElMessage.success('内部 UUID 已轮换，配置已重新生成推送')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '轮换失败'))
-  }
-}
-
-function addFallback() {
-  fallbacks.value.push({ name: '', alpn: '', path: '', dest: '80', xver: 0 })
-}
-
-function removeFallback(index: number) {
-  fallbacks.value.splice(index, 1)
-}
-
-function moveFallback(index: number, direction: -1 | 1) {
-  const target = index + direction
-  if (target < 0 || target >= fallbacks.value.length) return
-  const temp = fallbacks.value[index]
-  fallbacks.value[index] = fallbacks.value[target]
-  fallbacks.value[target] = temp
-}
-
-function buildSettingsJSON(): string {
-  if (localInboundType.value === 'tunnel') {
-    return JSON.stringify({
-      address: localTargetAddress.value || '',
-      port: localTargetPort.value || 0,
-      network: 'tcp,udp',
-    })
-  }
-  // vlessenc 安全层：decryption 载入 settings_json（未生成密钥时回退 none，卡片有警示）
-  const s: Record<string, any> = {
-    decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
-  }
-  if (fallbacks.value.length > 0) {
-    s.fallbacks = fallbacks.value.map((f) => ({
-      name: f.name || undefined,
-      alpn: f.alpn || undefined,
-      dest: f.dest,
-      path: f.path || undefined,
-      xver: f.xver || 0,
-    }))
-  }
-  return JSON.stringify(s)
-}
-
-function buildStreamSettingsJSON(): string {
-  if (localInboundType.value === 'tunnel') {
-    return JSON.stringify({
-      network: 'tcp',
-      security: 'none',
-    })
-  }
-  // vlessenc 是面板抽象的伪安全层：stream 层固定 security:"none"（加密挂在协议 settings）
-  const streamSecurity = localTlsType.value === 'vlessenc' ? 'none' : localTlsType.value
-  const s: Record<string, any> = {
-    network: localNetwork.value,
-    security: streamSecurity,
-    fingerprint: fingerprint.value,
-  }
-  if (acceptProxyProtocol.value) s.acceptProxyProtocol = true
-
-  if (localNetwork.value === 'xhttp') {
-    s.xhttpSettings = { mode: xhttpForm.mode || 'auto', path: xhttpForm.path || '/' }
-    if (xhttpForm.host) s.xhttpSettings.host = xhttpForm.host
-  } else if (localNetwork.value === 'tcp' && tcpForm.header_type !== 'none') {
-    const hdr: Record<string, any> = { type: tcpForm.header_type }
-    if (tcpForm.header_type === 'http') {
-      hdr.request = {}
-      if (tcpForm.request_host) hdr.request.headers = { Host: tcpForm.request_host.split(',') }
-      if (tcpForm.request_path) hdr.request.path = tcpForm.request_path.split(',')
-    }
-    s.tcpSettings = { header: hdr }
-  }
-
-  if (localTlsType.value === 'reality') {
-    s.realitySettings = {
-      show: false,
-      dest: realityForm.dest,
-      serverNames: realityForm.server_name ? realityForm.server_name.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
-      privateKey: realityForm.private_key,
-      shortIds: realityForm.short_id ? realityForm.short_id.split(',').map((x: string) => x.trim()).filter(Boolean) : [],
-    }
-    if (realityForm.public_key) s.realitySettings.publicKey = realityForm.public_key
-    if (realityMinClientVer.value) s.realitySettings.minClientVer = realityMinClientVer.value
-    if (realityMaxClientVer.value) s.realitySettings.maxClientVer = realityMaxClientVer.value
-    if (realityMaxTimeDiff.value > 0) s.realitySettings.maxTimeDiff = realityMaxTimeDiff.value
-  } else if (localTlsType.value === 'tls') {
-    const alpnArr = tlsAlpnText.value ? tlsAlpnText.value.split(',').map((x: string) => x.trim()).filter(Boolean) : []
-    const t: Record<string, any> = {
-      serverName: tlsForm.server_name || undefined,
-      certificates: [{ certificateFile: tlsForm.cert_file, keyFile: tlsForm.key_file }],
-    }
-    if (alpnArr.length > 0) t.alpn = alpnArr
-    if (tlsMinVersion.value) t.minVersion = tlsMinVersion.value
-    if (tlsMaxVersion.value) t.maxVersion = tlsMaxVersion.value
-    if (tlsCipherSuites.value) t.cipherSuites = tlsCipherSuites.value
-    if (tlsAllowInsecure.value) t.allowInsecure = true
-    s.tlsSettings = t
-  }
-
-  return JSON.stringify(s)
-}
-
-function buildSniffingJSON(): string {
-  if (!sniffingForm.enabled) return ''
-  return JSON.stringify({
-    enabled: true,
-    destOverride: sniffingForm.destOverride,
-    metadataOnly: sniffingForm.metadataOnly,
-    routeOnly: sniffingForm.routeOnly,
-  })
-}
-
-function syncFormToJson() {
-  if (isInternalUpdating.value) return
-  isInternalUpdating.value = true
-
-  const settingsJson = buildSettingsJSON()
-  const streamJson = buildStreamSettingsJSON()
-  const sniffJson = buildSniffingJSON()
-
-  rawJsonText.value = JSON.stringify({
-    settings_json: JSON.parse(settingsJson),
-    stream_settings: JSON.parse(streamJson),
-    sniffing: sniffJson ? JSON.parse(sniffJson) : null,
-  }, null, 2)
-  jsonError.value = ''
-
-  emit('update:modelValue', rawJsonText.value)
-  emit('change', {
-    settingsJson,
-    streamSettings: streamJson,
-    sniffing: sniffJson,
-    protocol: localProtocol.value,
-    port: localPort.value,
-    tag: localTag.value,
-    listen: localListen.value || '0.0.0.0',
-    flow: localFlow.value,
-    ratio: localRatio.value,
-    total_gb: localTotalGB.value,
-    expiry_time: localExpiryTime.value,
-    shareAddrStrategy: localShareStrategy.value,
-    shareAddr: localShareAddr.value,
-    sharePort: localSharePort.value,
-    shareSecurity: localShareSecurity.value,
-    shareSni: localShareSni.value,
-    shareHost: localShareHost.value,
-    sharePath: localSharePath.value,
-    shareAllowInsecure: localShareAllowInsecure.value,
-    layerId: localLayerId.value,
-    targetInboundId: localTargetInboundId.value,
-    targetAddress: localTargetAddress.value,
-    targetPort: localTargetPort.value,
-  })
-  isInternalUpdating.value = false
-}
-
-function parseJsonToForm(str: string) {
-  if (!str || !str.trim()) return
-  try {
-    const parsed = JSON.parse(str)
-    jsonError.value = ''
-
-    let s: InboundSettings = parsed
-    if (parsed.settings_json && typeof parsed.settings_json === 'string') {
-      try {
-        s = JSON.parse(parsed.settings_json)
-      } catch { /* ignore */ }
-    } else if (parsed.settings && typeof parsed.settings === 'object') {
-      s = parsed.settings
-    }
-
-    // 传输层参数在顶层 stream_settings（字符串或对象）里，settings_json 只含协议设置——
-    // 历史回填误从 s.reality/s.tls/s.xhttp（settings_json 内）查找，永远取不到（2026-08-31 修复）。
-    let streamObj: Record<string, any> = {}
-    const ssRaw: any = parsed.stream_settings ?? parsed.streamSettings
-    if (typeof ssRaw === 'string') {
-      try {
-        streamObj = JSON.parse(ssRaw)
-      } catch {
-        streamObj = {}
-      }
-    } else if (ssRaw && typeof ssRaw === 'object') {
-      streamObj = ssRaw
-    }
-    const realitySettings: any = streamObj.realitySettings
-    const tlsSettings: any = streamObj.tlsSettings
-    const xhttpSettings: any = streamObj.xhttpSettings
-    const tcpSettings: any = streamObj.tcpSettings
-
-    if (parsed.protocol && typeof parsed.protocol === 'string') localProtocol.value = parsed.protocol
-    if (parsed.network && typeof parsed.network === 'string') localNetwork.value = parsed.network
-    if (parsed.tls_type && typeof parsed.tls_type === 'string') localTlsType.value = parsed.tls_type
-    else if (parsed.streamSettings?.security) localTlsType.value = parsed.streamSettings.security
-    else if (streamObj.security) localTlsType.value = streamObj.security
-    // vlessenc 回显：stream 层为 none 且 settings_json.decryption 启用 → 判定为 vlessenc 安全层
-    const decRaw = (s && typeof s === 'object' ? (s as Record<string, any>).decryption : '') as string
-    if (localTlsType.value === 'none' && typeof decRaw === 'string' && decRaw && decRaw !== 'none') {
-      localTlsType.value = 'vlessenc'
-      vlessencKey.value = decRaw
-    } else if (localTlsType.value === 'vlessenc') {
-      vlessencKey.value = decRaw || ''
-    }
-    if (typeof parsed.port === 'number') localPort.value = parsed.port
-    if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
-    if (typeof parsed.listen === 'string') localListen.value = parsed.listen
-
-    if (typeof parsed.flow === 'string') localFlow.value = parsed.flow
-    if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
-    if (typeof parsed.total_gb === 'number') localTotalGB.value = parsed.total_gb
-    if (typeof parsed.expiry_time === 'string' && parsed.expiry_time) localExpiryTime.value = parsed.expiry_time
-    if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
-    if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
-    if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
-    if (typeof parsed.share_security === 'string') localShareSecurity.value = parsed.share_security
-    if (typeof parsed.share_sni === 'string') localShareSni.value = parsed.share_sni
-    if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
-    if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
-    if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
-    if (typeof parsed.layer_id === 'number' && parsed.layer_id !== 0) localLayerId.value = parsed.layer_id
-
-    if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door') {
-      localInboundType.value = 'tunnel'
-      localProtocol.value = 'dokodemo-door'
-    }
-    if (typeof parsed.target_inbound_id === 'number') localTargetInboundId.value = parsed.target_inbound_id
-    if (typeof parsed.target_address === 'string') localTargetAddress.value = parsed.target_address
-    if (typeof parsed.target_port === 'number') localTargetPort.value = parsed.target_port
-
-    if (localTargetInboundId.value) {
-      localTargetMode.value = 'inbound'
-    } else if (localTargetAddress.value || localTargetPort.value) {
-      localTargetMode.value = 'manual'
-    } else if (localInboundType.value === 'tunnel') {
-      localTargetMode.value = 'draft'
-    }
-
-    if (Array.isArray(s.fallbacks)) {
-      fallbacks.value = s.fallbacks.map((f) => ({
-        name: f.name || '',
-        alpn: f.alpn || '',
-        path: f.path || '',
-        dest: f.dest || '',
-        xver: f.xver || 0,
-      }))
-    }
-
-    if (xhttpSettings && typeof xhttpSettings === 'object') {
-      xhttpForm.mode = xhttpSettings.mode || 'auto'
-      xhttpForm.path = xhttpSettings.path || '/'
-      xhttpForm.host = xhttpSettings.host || ''
-    }
-
-    const sniffRaw: any = parsed.sniffing ?? (s && typeof s === 'object' ? s.sniffing : undefined)
-    let sniffObj: any = null
-    if (typeof sniffRaw === 'string') {
-      try {
-        sniffObj = JSON.parse(sniffRaw)
-      } catch {
-        sniffObj = null
-      }
-    } else if (sniffRaw && typeof sniffRaw === 'object') {
-      sniffObj = sniffRaw
-    }
-    if (sniffObj) {
-      sniffingForm.enabled = !!sniffObj.enabled
-      sniffingForm.destOverride = Array.isArray(sniffObj.destOverride)
-        ? sniffObj.destOverride
-        : Array.isArray(sniffObj.dest_override)
-          ? sniffObj.dest_override
-          : ['http', 'tls', 'quic']
-      sniffingForm.metadataOnly = !!sniffObj.metadataOnly || !!sniffObj.metadata_only
-      sniffingForm.routeOnly = !!sniffObj.routeOnly || !!sniffObj.route_only
-    }
-
-    // REALITY：存储/生成均为 camelCase 规范（dest/serverNames/privateKey/shortIds/min|maxClientVer/maxTimeDiff）；publicKey 为客户端字段仅供订阅消费
-    if (realitySettings && typeof realitySettings === 'object') {
-      realityForm.dest = realitySettings.dest || ''
-      const sn = Array.isArray(realitySettings.serverNames)
-        ? realitySettings.serverNames.filter(Boolean)[0]
-        : realitySettings.serverName || ''
-      realityForm.server_name = sn || ''
-      realityForm.private_key = realitySettings.privateKey || ''
-      realityForm.public_key = realitySettings.publicKey || ''
-      const sid = Array.isArray(realitySettings.shortIds)
-        ? realitySettings.shortIds.filter(Boolean)[0]
-        : realitySettings.shortId || ''
-      realityForm.short_id = sid || ''
-      realityMinClientVer.value = realitySettings.minClientVer ? String(realitySettings.minClientVer) : ''
-      realityMaxClientVer.value = realitySettings.maxClientVer ? String(realitySettings.maxClientVer) : ''
-      realityMaxTimeDiff.value = realitySettings.maxTimeDiff ? Number(realitySettings.maxTimeDiff) : 0
-    }
-
-    if (tlsSettings && typeof tlsSettings === 'object') {
-      tlsForm.server_name = tlsSettings.serverName || ''
-      const cert = Array.isArray(tlsSettings.certificates) ? tlsSettings.certificates[0] : undefined
-      if (cert) {
-        tlsForm.cert_file = cert.certificateFile || ''
-        tlsForm.key_file = cert.keyFile || ''
-      }
-      if (Array.isArray(tlsSettings.alpn)) {
-        tlsAlpnText.value = tlsSettings.alpn.join(',')
-      }
-      tlsMinVersion.value = tlsSettings.minVersion || ''
-      tlsMaxVersion.value = tlsSettings.maxVersion || ''
-      tlsCipherSuites.value = tlsSettings.cipherSuites ? tlsSettings.cipherSuites.join(',') : ''
-      tlsAllowInsecure.value = !!tlsSettings.allowInsecure
-    }
-
-    if (tcpSettings && typeof tcpSettings === 'object' && tcpSettings.header) {
-      tcpForm.header_type = tcpSettings.header.type || 'none'
-      const req = tcpSettings.header.request
-      if (req && typeof req === 'object') {
-        tcpForm.request_host = Array.isArray(req.headers?.Host) ? req.headers.Host.join(',') : ''
-        tcpForm.request_path = Array.isArray(req.path) ? req.path.join(',') : '/'
-      }
-    }
-    fingerprint.value = streamObj.fingerprint || 'chrome'
-    acceptProxyProtocol.value = !!streamObj.acceptProxyProtocol
-  } catch (e: any) {
-    jsonError.value = `JSON 语法错误: ${e?.message || '解析失败'}`
-  }
-}
-
-function onRawJsonInput(val: string) {
-  if (isInternalUpdating.value) return
-  rawJsonText.value = val
-  parseJsonToForm(val)
-  if (!jsonError.value) {
-    syncFormToJson()
-  }
-}
-
-watch(
-  () => props.modelValue,
-  (newVal) => {
-    if (isInternalUpdating.value) return
-    if (newVal !== rawJsonText.value) {
-      rawJsonText.value = newVal || '{}'
-      parseJsonToForm(rawJsonText.value)
-      syncFormToJson()
-    }
-  },
-  { immediate: true },
-)
-
+// -----------------------------------------------------------------------------
+// 深度监听所有表单变动并同步
+// -----------------------------------------------------------------------------
 watch(
   [
     localProtocol,
@@ -882,8 +923,12 @@ watch(
     localPort,
     localTag,
     localListen,
-    localFlow,
+    localRemark,
+    localTrafficReset,
+    localInboundType,
     localRatio,
+    localTotalGB,
+    localExpiryTime,
     localShareStrategy,
     localShareAddr,
     localSharePort,
@@ -893,28 +938,16 @@ watch(
     localSharePath,
     localShareAllowInsecure,
     localLayerId,
-    localInboundType,
-    fallbacks,
-    xhttpForm,
+    vlessForm,
+    dokodemoForm,
+    socksHttpForm,
     tcpForm,
-    acceptProxyProtocol,
+    xhttpForm,
     realityForm,
-    realityMinClientVer,
-    realityMaxClientVer,
-    realityMaxTimeDiff,
+    realityFingerprint,
     tlsForm,
-    tlsAlpnText,
-    tlsMinVersion,
-    tlsMaxVersion,
-    tlsCipherSuites,
-    tlsAllowInsecure,
     vlessencKey,
-    fingerprint,
     sniffingForm,
-    localTargetMode,
-    localTargetInboundId,
-    localTargetAddress,
-    localTargetPort,
   ],
   () => {
     syncFormToJson()
@@ -922,254 +955,114 @@ watch(
   { deep: true },
 )
 
-async function loadCerts() {
-  try {
-    const { data } = await getCerts()
-    if (data.code === 0) certs.value = data.data.items
-  } catch { /* ignore */ }
-}
-
 onMounted(() => {
-  if (!realityForm.private_key && localTlsType.value === 'reality') {
-    genShortId()
+  if (props.modelValue && props.modelValue !== '{}') {
+    parseJsonToForm(props.modelValue)
   }
-  loadCerts()
-  loadCandidateInbounds()
   syncFormToJson()
 })
 
 watch(
-  () => props.inboundType,
-  (v) => { if (v) localInboundType.value = v },
-)
-watch(
-  () => props.internalUUID,
-  (v) => { if (v) localInternalUUID.value = v },
-)
-watch(
-  () => props.certId,
-  (v) => { if (v) localCertId.value = v },
-)
-watch(
-  () => props.listen,
-  (v) => { if (v !== undefined) localListen.value = v || '0.0.0.0' },
-)
-watch(
-  () => props.targetInboundId,
-  (v) => {
-    localTargetInboundId.value = v
-    if (v) localTargetMode.value = 'inbound'
-  },
-)
-watch(
-  () => props.targetAddress,
-  (v) => {
-    localTargetAddress.value = v || ''
-    if (v && !localTargetInboundId.value) localTargetMode.value = 'manual'
-  },
-)
-watch(
-  () => props.targetPort,
-  (v) => {
-    localTargetPort.value = v || 0
-    if (v && !localTargetInboundId.value) localTargetMode.value = 'manual'
+  () => props.modelValue,
+  (newVal) => {
+    if (newVal && newVal !== '{}' && newVal !== rawJsonText.value && !isInternalUpdating.value) {
+      parseJsonToForm(newVal)
+      syncFormToJson()
+    }
   },
 )
 
-function onTypeChange(v: any) {
-  localInboundType.value = String(v || 'user')
-  if (localInboundType.value === 'tunnel') {
-    localProtocol.value = 'dokodemo-door'
-    if (activeTab.value === 'network_security') {
-      activeTab.value = 'basic'
+watch(
+  () => props.protocol,
+  (proto) => {
+    if (proto && proto !== localProtocol.value) {
+      onProtocolChange(proto)
     }
-  } else {
-    if (localProtocol.value === 'dokodemo-door') {
-      localProtocol.value = 'vless'
-    }
-  }
-  emit('update:inboundType', localInboundType.value)
-  syncFormToJson()
-}
-
-async function copyText(text: string, label: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
-  } catch {
-    ElMessage.warning('复制失败，请手动复制')
-  }
-}
+  },
+)
 </script>
 
 <template>
   <div class="inbound-editor">
-    <!-- 顶部功能区：左侧 Tabs，右侧 源码切换 -->
+    <!-- 顶部导航：各层配置 Tab 与 高级配置 (JSON) -->
     <div class="editor-top-nav">
-      <el-radio-group v-if="activeView === 'form'" v-model="activeTab" size="small" class="category-tabs">
-        <el-radio-button value="basic">基础配置</el-radio-button>
-        <el-radio-button v-if="localInboundType !== 'tunnel'" value="network_security">协议与安全</el-radio-button>
-        <el-radio-button value="advanced">高级设置</el-radio-button>
+      <el-radio-group v-model="activeTab" size="small" class="category-tabs">
+        <el-radio-button v-for="t in visibleTabs" :key="t.key" :value="t.key">
+          {{ t.label }}
+        </el-radio-button>
       </el-radio-group>
-      <div v-else class="json-title">
-        <span>原始 JSON 模式</span>
-      </div>
-
-      <div class="view-toggle">
-        <el-radio-group v-model="activeView" size="small">
-          <el-radio-button value="form">
-            <el-icon><Setting /></el-icon>&nbsp;表单
-          </el-radio-button>
-          <el-radio-button value="json">
-            <el-icon><Document /></el-icon>&nbsp;JSON
-          </el-radio-button>
-        </el-radio-group>
-      </div>
     </div>
 
-    <!-- 表单视图 -->
-    <div v-if="activeView === 'form'" class="form-body">
+    <!-- 表单视图容器 -->
+    <div class="form-body">
       <el-form label-position="top">
         <!-- ==================== 1. 基础配置 Tab ==================== -->
         <div v-show="activeTab === 'basic'" class="tab-pane">
           <div class="form-card">
-            <div class="card-title">入站类型</div>
-            <el-radio-group v-model="localInboundType" class="type-radios" @change="onTypeChange">
-              <el-radio value="user">
-                <span>用户入站</span>
-                <span class="type-sub">承载用户真实流量并下发订阅</span>
-              </el-radio>
-              <el-radio value="relay">
-                <span>转发入站</span>
-                <span class="type-sub">供上游服务器链式代理连接落地</span>
-              </el-radio>
-              <el-radio value="tunnel">
-                <span>四层直通 (Tunnel)</span>
-                <span class="type-sub">通过 dokodemo-door 将流量无损直通落地入站</span>
-              </el-radio>
-            </el-radio-group>
-
-            <div v-if="localInboundType === 'relay'" class="relay-box">
-              <el-form-item label="内部 UUID">
-                <div style="display: flex; gap: 8px; width: 100%">
-                  <el-input :model-value="localInternalUUID" placeholder="保存并下发后由服务器回填" disabled />
-                  <el-button v-if="localInternalUUID" @click="copyText(localInternalUUID, '内部 UUID')">
-                    <el-icon><CopyDocument /></el-icon>
-                  </el-button>
-                  <el-button type="primary" plain :disabled="!props.inboundId" @click="rotateInternal">
-                    <el-icon><Refresh /></el-icon>&nbsp;轮换
-                  </el-button>
-                </div>
+            <div class="card-title">网络监听与基础参数</div>
+            <div class="form-grid">
+              <el-form-item label="入站标签 (Tag)">
+                <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
               </el-form-item>
-            </div>
-          </div>
 
-          <!-- 直通目标配置（仅四层直通模式） -->
-          <div v-if="localInboundType === 'tunnel'" class="form-card">
-            <div class="card-title">直通目标配置 (Target Destination)</div>
-            <div style="margin-bottom: 14px">
-              <el-radio-group v-model="localTargetMode" size="small" @change="onTargetModeChange">
-                <el-radio-button value="inbound">指定入站 (推荐)</el-radio-button>
-                <el-radio-button value="manual">手动指定目标</el-radio-button>
-                <el-radio-button value="draft">留空待连线 (草稿)</el-radio-button>
-              </el-radio-group>
-            </div>
+              <el-form-item label="备注 (Remark)">
+                <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
+              </el-form-item>
 
-            <!-- 模式一：指定入站 -->
-            <div v-if="localTargetMode === 'inbound'" class="form-grid">
-              <el-form-item label="目标落地入站" style="grid-column: 1 / -1">
-                <el-select
-                  v-model="localTargetInboundId"
-                  filterable
-                  placeholder="选择要直通的目标服务器入站"
-                  style="width: 100%"
-                  @change="onTargetInboundSelect"
-                >
-                  <el-option
-                    v-for="item in candidateInbounds"
-                    :key="item.id"
-                    :label="`[${serverMap[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`"
-                    :value="item.id"
-                  />
+              <el-form-item label="代理协议">
+                <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
+                  <el-option label="VLESS" value="vless" />
+                  <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
+                  <el-option label="SOCKS5" value="socks" />
+                  <el-option label="HTTP" value="http" />
                 </el-select>
               </el-form-item>
-              <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
-                <el-alert
-                  type="warning"
-                  :closable="false"
-                  show-icon
-                  title="注意：所选目标入站尚未开启「接收 Proxy Protocol」，客户端真实 IP 将无法透传并可能导致握手失败。建议在目标入站设置中开启。"
-                />
-              </div>
-            </div>
 
-            <!-- 模式二：手动指定 -->
-            <div v-else-if="localTargetMode === 'manual'" class="form-grid">
-              <el-form-item label="目标地址 (IP 或 域名)">
-                <el-input v-model="localTargetAddress" placeholder="如 1.2.3.4 或 node.example.com" />
+              <el-form-item v-if="localProtocol === 'vless'" label="入站用途">
+                <el-radio-group v-model="localInboundType" class="type-segmented-group" @change="onTypeChange">
+                  <el-radio-button value="user">用户接入点</el-radio-button>
+                  <el-radio-button value="relay">内部中继链路</el-radio-button>
+                </el-radio-group>
               </el-form-item>
-              <el-form-item label="目标端口">
-                <el-input-number v-model="localTargetPort" :min="1" :max="65535" style="width: 100%" />
+
+              <el-form-item v-else-if="localProtocol === 'dokodemo-door'" label="入站用途">
+                <el-input value="四层直通 (tunnel)" disabled />
               </el-form-item>
-            </div>
 
-            <!-- 模式三：草稿留空 -->
-            <div v-else class="draft-tip-box">
-              <el-alert
-                type="info"
-                :closable="false"
-                show-icon
-                title="草稿状态：目标地址与端口均未指定。可以在拓扑图中拖拽连线至目标入站完成绑定；未连线前 Xray 将跳过此入站以防启动报错。"
-              />
-            </div>
-          </div>
-
-          <div class="form-card">
-            <div class="card-title">网络与计费</div>
-            <div class="form-grid">
-              <el-form-item label="节点标签 (Tag)">
-                <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
+              <el-form-item v-else-if="localProtocol === 'socks' || localProtocol === 'http'" label="入站用途">
+                <el-input value="转发代理 (forward)" disabled />
               </el-form-item>
 
               <el-form-item label="监听端口">
                 <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
               </el-form-item>
 
-              <el-form-item>
-                <template #label>
-                  <span>监听地址 (Listen)</span>
-                  <el-tooltip content="物理监听 IP。默认 0.0.0.0（监听所有网卡）；前置 Caddy/Nginx 本地反代时可填 127.0.0.1。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
-                <el-input v-model="localListen" placeholder="默认 0.0.0.0（本地反代填 127.0.0.1）" />
+              <el-form-item label="监听地址">
+                <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" />
               </el-form-item>
 
-              <el-form-item>
-                <template #label>
-                  <span>流量计费倍率</span>
-                  <el-tooltip content="扣费倍率：1.00 为正常计费，如填 1.5，每消耗 1 GB 扣减 1.5 GB 配额；0 = 免费（不扣配额）。仪表盘与节点流量始终按真实流量统计。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
+              <el-form-item label="流量倍率">
                 <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" />
               </el-form-item>
 
-              <el-form-item>
-                <template #label>
-                  <span>流量上限 (GB)</span>
-                  <el-tooltip content="该入站所有用户合计流量上限，0 = 不限；用尽后自动停用（临时服务器按量租用场景）。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
+              <el-form-item label="流量配额 (GB)">
                 <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" />
+              </el-form-item>
+
+              <el-form-item label="流量重置周期">
+                <el-select v-model="localTrafficReset" style="width: 100%">
+                  <el-option label="不重置 (never)" value="never" />
+                  <el-option label="每日重置 (daily)" value="daily" />
+                  <el-option label="每周重置 (weekly)" value="weekly" />
+                  <el-option label="每月重置 (monthly)" value="monthly" />
+                </el-select>
               </el-form-item>
 
               <el-form-item label="到期时间">
                 <el-date-picker
                   v-model="localExpiryTime"
                   type="datetime"
-                  placeholder="留空 = 永久"
+                  placeholder="留空为永久"
                   style="width: 100%"
                   value-format="YYYY-MM-DDTHH:mm:ssZ"
                 />
@@ -1178,485 +1071,203 @@ async function copyText(text: string, label: string) {
           </div>
         </div>
 
-        <!-- ==================== 2. 协议与安全 Tab ==================== -->
-        <div v-show="activeTab === 'network_security'" class="tab-pane">
-          <!-- 核心协议选择器 -->
+        <!-- ==================== 2. 协议参数 Tab ==================== -->
+        <div v-show="activeTab === 'protocol'" class="tab-pane">
           <div class="form-card">
-            <div class="card-title">核心协议选择</div>
-            <div class="form-grid">
-              <el-form-item label="传输协议 (Network)">
-                <el-select v-model="localNetwork" style="width: 100%">
-                  <el-option label="TCP" value="tcp" />
-                  <el-option label="xhttp" value="xhttp" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="安全层 (Security)">
-                <el-select v-model="localTlsType" style="width: 100%">
-                  <el-option label="REALITY" value="reality" />
-                  <el-option label="TLS" value="tls" />
-                  <el-option v-if="localInboundType === 'relay'" label="VLESS Encryption" value="vlessenc" />
-                  <el-option label="none (明文)" value="none" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item v-if="localInboundType !== 'relay'">
-                <template #label>
-                  <span>用户流控 (Flow)</span>
-                  <el-tooltip content="TCP + REALITY 推荐开启 xtls-rprx-vision 提升传输效率与抗封锁能力。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
-                <el-select v-model="localFlow" style="width: 100%">
-                  <el-option label="自动 (Vision)" value="" />
-                  <el-option label="开启 (Vision)" value="xtls-rprx-vision" />
-                  <el-option label="关闭" value="none" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item v-if="localTlsType === 'reality'">
-                <template #label>
-                  <span>客户端指纹 (uTLS)</span>
-                  <el-tooltip content="模拟主流浏览器 TLS 握手指纹特征。" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </template>
-                <el-select v-model="fingerprint" style="width: 100%">
-                  <el-option label="Chrome" value="chrome" />
-                  <el-option label="Firefox" value="firefox" />
-                  <el-option label="Safari" value="safari" />
-                  <el-option label="Edge" value="edge" />
-                  <el-option label="360" value="360" />
-                  <el-option label="QQ" value="qq" />
-                  <el-option label="Random" value="random" />
-                  <el-option label="Randomized (随机)" value="randomized" />
-                </el-select>
-              </el-form-item>
-            </div>
-          </div>
-
-          <!-- 传输层专属参数 (随 Network 动态切换) -->
-          <div class="form-card">
-            <div class="card-title">传输层参数 ({{ localNetwork.toUpperCase() }})</div>
-
-            <!-- TCP -->
-            <div v-if="localNetwork === 'tcp'" class="form-grid">
-              <el-form-item label="伪装类型 (Header)">
-                <el-select v-model="tcpForm.header_type" style="width: 100%">
-                  <el-option label="none (无)" value="none" />
-                  <el-option label="http" value="http" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
-                </div>
-              </el-form-item>
-
-              <template v-if="tcpForm.header_type === 'http'">
-                <el-form-item label="Request Host">
-                  <el-input v-model="tcpForm.request_host" placeholder="如 example.com" />
-                </el-form-item>
-                <el-form-item label="Request Path">
-                  <el-input v-model="tcpForm.request_path" placeholder="/" />
-                </el-form-item>
-              </template>
-            </div>
-
-            <!-- xhttp -->
-            <div v-if="localNetwork === 'xhttp'" class="form-grid">
-              <el-form-item label="Mode 传输模式">
-                <el-select v-model="xhttpForm.mode" style="width: 100%">
-                  <el-option label="auto (自动)" value="auto" />
-                  <el-option label="packet-up" value="packet-up" />
-                  <el-option label="stream-up" value="stream-up" />
-                  <el-option label="stream-one" value="stream-one" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="Path 路径">
-                <el-input v-model="xhttpForm.path" placeholder="/xhttp-stream" />
-              </el-form-item>
-              <el-form-item label="Host 域名标头 (可选)">
-                <el-input v-model="xhttpForm.host" placeholder="留空默认" />
-              </el-form-item>
-              <el-form-item label="HAProxy 代理协议 (acceptProxyProtocol)">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="acceptProxyProtocol" active-text="接收 Proxy Protocol" />
-                </div>
-              </el-form-item>
-            </div>
-          </div>
-
-          <!-- REALITY 详细配置 -->
-          <div v-if="localTlsType === 'reality'" class="form-card">
-            <div class="card-head-flex">
-              <div class="card-title">REALITY 伪装参数</div>
-              <el-dropdown trigger="click" @command="applyRealityPreset">
-                <el-button size="small" text type="primary">
-                  <span>优质目标预设</span>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-for="p in REALITY_PRESETS" :key="p.dest" :command="p">
-                      {{ p.label }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </div>
-
-            <div class="form-grid">
-              <el-form-item label="借壳目标 (Dest)">
-                <el-input v-model="realityForm.dest" placeholder="如 gateway.icloud.com:443" />
-              </el-form-item>
-
-              <el-form-item label="伪装域名 (SNI / server_name)">
-                <el-input v-model="realityForm.server_name" placeholder="如 gateway.icloud.com" />
-              </el-form-item>
-
-              <el-form-item label="Short ID">
-                <div style="display: flex; gap: 8px">
-                  <el-input v-model="realityForm.short_id" placeholder="16 位十六进制" />
-                  <el-button @click="genShortId"><el-icon><Refresh /></el-icon></el-button>
-                </div>
-              </el-form-item>
-            </div>
-
-            <div class="key-box">
-              <div class="key-row">
-                <el-form-item label="服务端私钥 (Private Key)" style="margin-bottom: 0">
-                  <el-input v-model="realityForm.private_key" placeholder="x25519 私钥" />
-                </el-form-item>
-                <el-form-item label="客户端公钥 (Public Key)" style="margin-bottom: 0">
-                  <el-input v-model="realityForm.public_key" placeholder="x25519 公钥" />
-                </el-form-item>
-              </div>
-              <div class="key-actions">
-                <el-button type="primary" plain size="small" :loading="genKeyLoading" @click="fetchRealityKeys">
-                  <el-icon><MagicStick /></el-icon>&nbsp;一键生成 x25519 密钥对
-                </el-button>
-                <el-button v-if="realityForm.public_key" size="small" text @click="copyText(realityForm.public_key, '公钥')">
-                  <el-icon><CopyDocument /></el-icon>&nbsp;复制公钥
-                </el-button>
-                <el-button v-if="realityForm.private_key" size="small" text @click="copyText(realityForm.private_key, '私钥')">
-                  <el-icon><CopyDocument /></el-icon>&nbsp;复制私钥
-                </el-button>
-              </div>
-            </div>
-
-            <div class="form-grid" style="margin-top: 14px">
-              <el-form-item label="minClientVer (最低客户端版本)">
-                <el-input v-model="realityMinClientVer" placeholder="留空不限，如 1.8.0" />
-              </el-form-item>
-              <el-form-item label="maxClientVer (最高客户端版本)">
-                <el-input v-model="realityMaxClientVer" placeholder="留空不限" />
-              </el-form-item>
-              <el-form-item label="maxTimeDiff (最大时间差 ms)">
-                <el-input-number v-model="realityMaxTimeDiff" :min="0" style="width: 100%" placeholder="0=不限制" />
-              </el-form-item>
-            </div>
-          </div>
-
-          <!-- TLS 详细配置 -->
-          <div v-if="localTlsType === 'tls'" class="form-card">
-            <div class="card-title">TLS 证书设置</div>
-            <div class="form-grid">
-              <el-form-item label="托管证书">
-                <el-select
-                  v-model="localCertId"
-                  style="width: 100%"
-                  clearable
-                  placeholder="不绑定（使用下方本地路径）"
-                  @change="(v: any) => emit('update:certId', Number(v || 0))"
-                >
-                  <el-option v-for="ct in certs" :key="ct.id" :value="ct.id">
-                    <span>{{ ct.domain }}（到期 {{ ct.not_after }}）</span>
-                    <span v-if="ct.self_signed" class="x-chip green" style="margin-left: 6px; font-size: 11px">自签·中转自动Pin</span>
-                  </el-option>
-                </el-select>
-                <div v-if="certs.find(ct => ct.id === localCertId)?.self_signed" class="muted" style="font-size: 12px; margin-top: 4px">
-                  自签证书：引用本入站的中转出站将自动注入 pinnedPeerCertSha256（{{ certs.find(ct => ct.id === localCertId)?.pin_sha256?.slice(0, 16) }}…），链路防 MITM
-                </div>
-              </el-form-item>
-
-              <el-form-item label="SNI (server_name)">
-                <el-input v-model="tlsForm.server_name" placeholder="example.com" />
-              </el-form-item>
-
-              <el-form-item label="ALPN (逗号分隔)">
-                <el-input v-model="tlsAlpnText" placeholder="h2,http/1.1" />
-              </el-form-item>
-
-              <el-form-item label="证书路径 (Cert File)">
-                <el-input v-model="tlsForm.cert_file" placeholder="/etc/xray/cert.pem" />
-              </el-form-item>
-
-              <el-form-item label="私钥路径 (Key File)">
-                <el-input v-model="tlsForm.key_file" placeholder="/etc/xray/key.pem" />
-              </el-form-item>
-
-              <el-form-item label="Cipher Suites (加密套件)">
-                <el-input v-model="tlsCipherSuites" placeholder="留空默认" />
-              </el-form-item>
-
-              <el-form-item label="TLS 版本限制">
-                <div style="display: flex; gap: 8px; width: 100%">
-                  <el-select v-model="tlsMinVersion" placeholder="最低版本" clearable style="width: 50%">
-                    <el-option label="TLS 1.2" value="1.2" />
-                    <el-option label="TLS 1.3" value="1.3" />
-                  </el-select>
-                  <el-select v-model="tlsMaxVersion" placeholder="最高版本" clearable style="width: 50%">
-                    <el-option label="TLS 1.2" value="1.2" />
-                    <el-option label="TLS 1.3" value="1.3" />
-                  </el-select>
-                </div>
-              </el-form-item>
-
-              <el-form-item label="allowInsecure (跳过证书校验)">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="tlsAllowInsecure" active-text="允许不安全证书" />
-                </div>
-              </el-form-item>
-            </div>
-          </div>
-
-          <!-- none 明文提示 -->
-          <div v-if="localTlsType === 'none'" class="form-card">
-            <el-alert
-              type="warning"
-              :closable="false"
-              show-icon
-              title="当前为明文传输 (none)"
-              description="无 TLS / REALITY 加密的流量极易被识别与阻断，建议在生产环境选用 REALITY 或 TLS。"
+            <div class="card-title">{{ localProtocol.toUpperCase() }} 协议参数</div>
+            <VlessSettings
+              v-if="localProtocol === 'vless'"
+              v-model="vlessForm"
+              :inbound-type="localInboundType"
+              :internal-u-u-i-d="localInternalUUID"
+              :inbound-id="props.inboundId"
+              :allow-vision="allowVisionFlow"
+              @internal-uuid-changed="(v) => emit('internal-uuid-changed', v)"
             />
-          </div>
-
-          <!-- VLESS Encryption（vlessenc 安全层）：协议层加密替代 TLS，节点间链路专用 -->
-          <div v-if="localTlsType === 'vlessenc'" class="form-card">
-            <div class="card-title">VLESS Encryption 密钥（ML-KEM-768 后量子认证）</div>
-            <el-alert
-              type="info"
-              :closable="false"
-              show-icon
-              style="margin-bottom: 12px"
-              title="协议层加密（替代 TLS）：TCP + 自动 Vision 流控 + 内核 Splice 保持可用，转发性能优于 TLS/REALITY 链路；无需证书与借壳站点。"
-              description="保存后引用该落地入站的中转出站会自动派生加密参数并随配置同步下发（自动开启 Vision 流控）。密钥只存本入站：轮换 = 重新生成后保存，上游配置自动更新。"
+            <DokodemoSettings
+              v-else-if="localProtocol === 'dokodemo-door'"
+              v-model="dokodemoForm"
+              :current-inbound-id="props.inboundId"
             />
-            <el-form-item label="服务端密钥 (decryption)">
-              <div style="display: flex; gap: 8px; width: 100%">
-                <el-input :model-value="vlessencKey" readonly placeholder="点击「生成密钥」自动生成" />
-                <el-button v-if="vlessencKey" @click="copyText(vlessencKey, 'VLESS Encryption 密钥')">
-                  <el-icon><CopyDocument /></el-icon>
-                </el-button>
-                <el-button type="primary" plain :loading="veGenLoading" @click="fetchVlessEncKey">
-                  <el-icon><Refresh /></el-icon>&nbsp;{{ vlessencKey ? '重新生成' : '生成密钥' }}
-                </el-button>
-              </div>
-            </el-form-item>
-            <el-alert
-              v-if="!vlessencKey"
-              type="warning"
-              :closable="false"
-              show-icon
-              title="尚未生成密钥：此时保存将以明文 (none) 生效。"
+            <SocksHttpSettings
+              v-else-if="localProtocol === 'socks' || localProtocol === 'http'"
+              v-model="socksHttpForm"
+              :protocol="localProtocol"
             />
           </div>
         </div>
 
-        <!-- ==================== 3. 高级设置 Tab ==================== -->
-        <div v-show="activeTab === 'advanced'" class="tab-pane">
-          <!-- 订阅分享与外部反代覆写 -->
-          <div v-if="localInboundType === 'user'" class="form-card">
-            <div class="card-head-flex">
-              <div class="card-title">
-                <span>订阅分享与反代覆写</span>
-                <el-tooltip content="订阅链接中生成的节点对外端点。挂载「对外接入层」时 host/port/安全层由层决议（内部实现——直连 TLS / Caddy 反代 / CDN——对客户端不可见）；未挂层时用本卡片分享地址组（直连端点）。接入点覆写优先，L4 中转取转发端点。" placement="top">
-                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <el-button size="small" type="primary" plain @click="applyCaddyOffloadPreset" :disabled="!props.serverId">
-                <el-icon><MagicStick /></el-icon>&nbsp;一键配置反代模式
-              </el-button>
-            </div>
+        <!-- ==================== 3. 传输层 Tab (仅限 VLESS) ==================== -->
+        <div v-if="localProtocol === 'vless'" v-show="activeTab === 'transport'" class="tab-pane">
+          <div class="form-card">
+            <div class="card-title">底层传输协议 (Transport)</div>
+            <el-form-item label="传输协议类型">
+              <el-radio-group v-model="localNetwork" size="default" @change="onNetworkChange">
+                <el-radio-button value="tcp">TCP (RAW)</el-radio-button>
+                <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
 
-            <!-- 对外接入层：挂载后订阅端点由层决议（分享地址组仅直连生效） -->
-            <div style="margin-bottom: 12px">
-              <el-form-item label="对外接入层">
-                <div style="display: flex; gap: 10px; width: 100%; align-items: center; flex-wrap: wrap">
-                  <el-select v-model="localLayerId" style="flex: 1; min-width: 240px" :disabled="!props.serverId" placeholder="选择对外层（或新建）">
-                    <el-option :value="0" label="不使用（直连端点，自带分享地址）" />
-                    <el-option
-                      v-for="l in layers"
-                      :key="l.id"
-                      :value="l.id"
-                      :label="`${l.name} (${l.host}:${l.port} ${l.security === 'tls' ? 'TLS' : '明文'})`"
-                    />
-                  </el-select>
-                  <el-button :disabled="!props.serverId" :icon="Plus" @click="openLayerQuick">新建对外层</el-button>
-                  <el-button
-                    :disabled="!props.serverId || !localLayerId"
-                    :loading="layerDeleting"
-                    :icon="Delete"
-                    type="danger"
-                    plain
-                    @click="deleteLayerFromEditor"
-                  >
-                    删除该层
-                  </el-button>
-                </div>
-              </el-form-item>
-            </div>
-            <el-alert
-              v-if="localLayerId > 0"
-              type="success"
-              :closable="false"
-              style="margin-bottom: 12px"
-              title="已挂载对外层：订阅对外 host/port/安全层由层决议，下方分享地址组对本入站不再生效（SNI/Path 等覆写仍可用）。"
-            />
-
-            <div class="form-grid">
-              <template v-if="localLayerId === 0">
-                <el-form-item label="分享地址策略">
-                  <el-select v-model="localShareStrategy" style="width: 100%">
-                    <el-option label="跟随服务器" value="node" />
-                    <el-option label="自定义地址" value="custom" />
-                  </el-select>
-                </el-form-item>
-
-                <div style="grid-column: 1 / -1; font-size: 12px; color: #94a3b8; line-height: 1.5; margin: -6px 0 4px 2px">
-                  节点自有 IP/端口（兜底）：仅直连型接入点未覆写地址时生效；经 L4 转发的订阅取转发端点，不读本组。
-                </div>
-
-                <el-form-item label="订阅安全层 (TLS)">
-                  <el-select v-model="localShareSecurity" style="width: 100%">
-                    <el-option label="auto (跟随传输层)" value="auto" />
-                    <el-option label="tls (强制启用)" value="tls" />
-                    <el-option label="none (明文)" value="none" />
-                  </el-select>
-                </el-form-item>
-
-                <template v-if="localShareStrategy === 'custom'">
-                  <el-form-item label="自定义分享地址">
-                    <el-input v-model="localShareAddr" placeholder="如 cdn.example.com 或 node.example.com" />
-                  </el-form-item>
-                  <el-form-item label="自定义分享端口">
-                    <el-input-number v-model="localSharePort" :min="0" :max="65535" placeholder="0 = 默认入站端口 (反代通常 443)" style="width: 100%" />
-                  </el-form-item>
-                </template>
-              </template>
-
-              <el-form-item label="分享 SNI">
-                <el-input v-model="localShareSni" placeholder="留空默认跟随服务器配置（挂层时回落层 Host）" />
-              </el-form-item>
-
-              <el-form-item label="分享 Host">
-                <el-input v-model="localShareHost" placeholder="留空默认跟随传输配置" />
-              </el-form-item>
-
-              <el-form-item label="分享 Path">
-                <el-input v-model="localSharePath" placeholder="留空默认跟随传输路径" />
-              </el-form-item>
-
-              <el-form-item label="客户端允许不安全证书">
-                <div style="padding-top: 6px">
-                  <el-switch v-model="localShareAllowInsecure" active-text="允许不安全证书" />
-                </div>
-              </el-form-item>
-            </div>
-
-            <!-- Caddyfile 片段参考 -->
-            <div v-if="activeLayer ? activeLayer.security === 'tls' : (localShareSecurity === 'tls' || localTlsType === 'none')" class="caddy-snippet-box">
-              <div class="caddy-head">
-                <span class="caddy-title">Caddyfile 反代参考片段</span>
-                <el-button size="small" text type="primary" @click="copyCaddySnippet">
-                  <el-icon><CopyDocument /></el-icon>&nbsp;复制 Caddyfile
-                </el-button>
-              </div>
-              <pre class="caddy-code"><code>{{ caddySnippet }}</code></pre>
+            <div style="margin-top: 16px">
+              <TcpTransport v-if="localNetwork === 'tcp'" v-model="tcpForm" />
+              <XhttpTransport v-else-if="localNetwork === 'xhttp'" v-model="xhttpForm" />
             </div>
           </div>
+        </div>
 
-          <!-- 流量嗅探 -->
+        <!-- ==================== 4. 安全层 Tab ==================== -->
+        <div v-show="activeTab === 'security'" class="tab-pane">
+          <div class="form-card">
+            <div class="card-title">安全加密层 (Security)</div>
+            <el-form-item label="安全协议类型">
+              <el-radio-group v-model="localTlsType" size="default" @change="onSecurityChange">
+                <el-radio-button value="none">无 (none)</el-radio-button>
+                <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">TLS</el-radio-button>
+                <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">Reality</el-radio-button>
+                <el-radio-button v-if="allowedSecurities.includes('vlessenc')" value="vlessenc">VLESS Encryption</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <div style="margin-top: 16px">
+              <TlsSecurity
+                v-if="localTlsType === 'tls'"
+                v-model="tlsForm"
+                @update:cert-id="(id) => emit('update:certId', id)"
+              />
+              <RealitySecurity
+                v-else-if="localTlsType === 'reality'"
+                v-model="realityForm"
+                v-model:fingerprint="realityFingerprint"
+              />
+              <VlessencSecurity
+                v-else-if="localTlsType === 'vlessenc'"
+                v-model="vlessencKey"
+              />
+              <div v-else>
+                <el-alert
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  title="明文传输 (none)"
+                  description="当前未启用传输层加密保护。适用于前置反代（Caddy/Nginx TLS 卸载）或受信任局域网环境。"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 5. 嗅探 Tab ==================== -->
+        <div v-show="activeTab === 'sniffing'" class="tab-pane">
           <div class="form-card">
             <div class="card-title">流量嗅探 (Sniffing)</div>
             <div class="form-grid">
               <el-form-item label="启用嗅探">
-                <el-switch v-model="sniffingForm.enabled" active-text="开启流量嗅探" />
+                <el-switch
+                  v-model="sniffingForm.enabled"
+                  active-text="开启流量嗅探"
+                />
               </el-form-item>
 
-              <el-form-item label="嗅探目标协议 (destOverride)">
-                <el-checkbox-group v-model="sniffingForm.destOverride" :disabled="!sniffingForm.enabled">
+              <el-form-item label="嗅探目标协议">
+                <el-checkbox-group
+                  v-model="sniffingForm.destOverride"
+                  :disabled="!sniffingForm.enabled"
+                >
                   <el-checkbox value="http" label="HTTP" />
                   <el-checkbox value="tls" label="TLS" />
                   <el-checkbox value="quic" label="QUIC" />
                 </el-checkbox-group>
               </el-form-item>
 
-              <el-form-item label="MetadataOnly (仅元数据嗅探)">
-                <el-switch v-model="sniffingForm.metadataOnly" :disabled="!sniffingForm.enabled" active-text="仅元数据" />
+              <el-form-item label="仅提取元数据 (MetadataOnly)">
+                <el-switch
+                  v-model="sniffingForm.metadataOnly"
+                  :disabled="!sniffingForm.enabled"
+                  active-text="开启"
+                />
               </el-form-item>
 
-              <el-form-item label="RouteOnly (仅用于路由，不改写目标)">
-                <el-switch v-model="sniffingForm.routeOnly" :disabled="!sniffingForm.enabled" active-text="仅用于路由" />
+              <el-form-item label="仅用于路由 (RouteOnly)">
+                <el-switch
+                  v-model="sniffingForm.routeOnly"
+                  :disabled="!sniffingForm.enabled"
+                  active-text="开启"
+                />
               </el-form-item>
             </div>
           </div>
+        </div>
 
-          <!-- 回落 Fallbacks -->
-          <div v-if="localInboundType !== 'relay'" class="form-card">
-            <div class="card-head-flex">
-              <div class="card-title">回落设置 (Fallbacks)</div>
-              <el-button size="small" type="primary" plain @click="addFallback">
-                <el-icon><Plus /></el-icon>&nbsp;添加回落
-              </el-button>
-            </div>
-            <div v-if="fallbacks.length === 0" class="empty-tip">未配置回落规则</div>
-            <div v-else class="fallback-list">
-              <div v-for="(item, idx) in fallbacks" :key="idx" class="fallback-item">
-                <div class="fb-grid">
-                  <el-form-item label="SNI 匹配"><el-input v-model="item.name" placeholder="任意" /></el-form-item>
-                  <el-form-item label="ALPN"><el-input v-model="item.alpn" placeholder="如 h2" /></el-form-item>
-                  <el-form-item label="Path 路径"><el-input v-model="item.path" placeholder="如 /" /></el-form-item>
-                  <el-form-item label="目标地址 (Dest)"><el-input v-model="item.dest" placeholder="80 或 127.0.0.1:80" /></el-form-item>
-                  <el-form-item label="PROXY Protocol (xver)"><el-input-number v-model="item.xver" :min="0" :max="2" style="width: 100%" /></el-form-item>
-                </div>
-                <div class="fb-actions">
-                  <el-button size="small" text :disabled="idx === 0" @click="moveFallback(idx, -1)">上移</el-button>
-                  <el-button size="small" text :disabled="idx === fallbacks.length - 1" @click="moveFallback(idx, 1)">下移</el-button>
-                  <el-button size="small" text type="danger" @click="removeFallback(idx)"><el-icon><Delete /></el-icon></el-button>
-                </div>
+        <!-- ==================== 6. 订阅与分享 Tab (仅用户入站) ==================== -->
+        <div v-if="localInboundType === 'user'" v-show="activeTab === 'share'" class="tab-pane">
+          <BusinessSettings
+            :inbound-type="localInboundType"
+            :layer-id="localLayerId"
+            :layers="layers"
+            :server-id="props.serverId"
+            :share-strategy="localShareStrategy"
+            :share-addr="localShareAddr"
+            :share-port="localSharePort"
+            :share-security="localShareSecurity"
+            :share-sni="localShareSni"
+            :share-host="localShareHost"
+            :share-path="localSharePath"
+            :share-allow-insecure="localShareAllowInsecure"
+            :caddy-snippet="caddySnippet"
+            :layer-deleting="layerDeleting"
+            @update:layer-id="(v) => localLayerId = v"
+            @update:share-strategy="(v) => localShareStrategy = v"
+            @update:share-addr="(v) => localShareAddr = v"
+            @update:share-port="(v) => localSharePort = v"
+            @update:share-security="(v) => localShareSecurity = v"
+            @update:share-sni="(v) => localShareSni = v"
+            @update:share-host="(v) => localShareHost = v"
+            @update:share-path="(v) => localSharePath = v"
+            @update:share-allow-insecure="(v) => localShareAllowInsecure = v"
+            @open-layer-quick="openLayerQuick"
+            @delete-layer="deleteLayerFromEditor"
+            @apply-caddy-preset="applyCaddyOffloadPreset"
+          />
+        </div>
+
+        <!-- ==================== 7. 高级配置 Tab (原始 Config JSON 编辑器) ==================== -->
+        <div v-show="activeTab === 'advanced'" class="tab-pane">
+          <div class="form-card">
+            <div class="card-head-flex" style="margin-bottom: 12px">
+              <div class="card-title" style="margin-bottom: 0">
+                <span>入站底层配置 (Config JSON)</span>
               </div>
+              <div style="display: flex; align-items: center; gap: 10px">
+                <el-tag v-if="!jsonError" type="success" size="small">
+                  <el-icon><Check /></el-icon>&nbsp;语法正确
+                </el-tag>
+                <el-tag v-else type="danger" size="small">
+                  <el-icon><Warning /></el-icon>&nbsp;{{ jsonError }}
+                </el-tag>
+                <el-button size="small" plain @click="formatRawJson">
+                  <el-icon><MagicStick /></el-icon>&nbsp;格式化
+                </el-button>
+              </div>
+            </div>
+            <div class="json-editor-wrap">
+              <CodeEditor
+                :model-value="rawJsonText"
+                language="json"
+                height="480px"
+                @update:model-value="onRawJsonInput"
+              />
             </div>
           </div>
         </div>
       </el-form>
     </div>
-
-    <!-- 原始 JSON 视图 -->
-    <div v-else class="json-body">
-      <div class="json-status">
-        <el-tag v-if="!jsonError" type="success" size="small">
-          <el-icon><Check /></el-icon>&nbsp;语法正确
-        </el-tag>
-        <el-tag v-else type="danger" size="small">
-          <el-icon><Warning /></el-icon>&nbsp;{{ jsonError }}
-        </el-tag>
-      </div>
-      <CodeEditor
-        :model-value="rawJsonText"
-        language="json"
-        height="380px"
-        @update:model-value="onRawJsonInput"
-      />
-    </div>
   </div>
 
-  <!-- 快捷新建对外层 -->
+  <!-- 快捷新建对外接入层弹窗 -->
   <el-dialog v-model="layerQuickOpen" title="新建对外接入层" width="480px" append-to-body>
     <el-form label-position="top">
       <el-alert
-        title="对外接入层定义订阅对外 host/port/安全层；创建后即绑定到当前入站（后续可在拓扑画布的层胶囊上管理挂载）。"
+        title="对外接入层定义订阅对外 Host / 端口 / 安全层，创建后将绑定至当前入站。"
         type="info"
         :closable="false"
         style="margin-bottom: 16px"
@@ -1668,14 +1279,14 @@ async function copyText(text: string, label: string) {
         <el-form-item label="对外 Host" required>
           <el-input v-model="layerQuickForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
         </el-form-item>
-        <el-form-item label="对外 Port">
+        <el-form-item label="对外端口">
           <el-input-number v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
       </div>
       <el-form-item label="对外安全层" style="margin-bottom: 0">
         <el-select v-model="layerQuickForm.security" style="width: 100%">
-          <el-option label="TLS（反代/CDN 卸载，默认）" value="tls" />
-          <el-option label="明文 none" value="none" />
+          <el-option label="TLS (默认)" value="tls" />
+          <el-option label="明文 (none)" value="none" />
         </el-select>
       </el-form-item>
     </el-form>
@@ -1705,12 +1316,6 @@ async function copyText(text: string, label: string) {
   :deep(.el-radio-button__inner) {
     font-weight: 500;
   }
-}
-
-.json-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--x-text);
 }
 
 .form-body {
@@ -1746,46 +1351,6 @@ async function copyText(text: string, label: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
-  .card-title { margin-bottom: 0; }
-}
-
-.help-icon {
-  color: var(--x-text-3);
-  font-size: 13px;
-  margin-left: 4px;
-  cursor: help;
-  &:hover { color: var(--x-primary); }
-}
-
-.type-radios {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  :deep(.el-radio) {
-    margin-right: 0;
-    padding: 10px 16px;
-    border: 1px solid var(--x-border);
-    border-radius: var(--x-radius);
-    background: var(--x-card);
-    transition: all 0.15s ease;
-    &.is-checked {
-      border-color: var(--x-primary);
-      background: var(--x-primary-soft);
-    }
-  }
-}
-
-.type-sub {
-  font-size: 11.5px;
-  color: var(--x-text-3);
-  margin-left: 6px;
-}
-
-.relay-box {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--x-border);
 }
 
 .form-grid {
@@ -1798,142 +1363,35 @@ async function copyText(text: string, label: string) {
   }
 }
 
-.opt-remark {
-  color: var(--x-text-3);
-  font-size: 12px;
-  margin-left: 6px;
-}
+.type-segmented-group {
+  width: 100%;
+  display: flex !important;
 
-.key-box {
-  margin-top: 8px;
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 14px 16px;
-}
-
-.key-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 16px;
-}
-
-.key-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.empty-tip {
-  color: var(--x-text-3);
-  font-size: 13px;
-  padding: 10px 0;
-  text-align: center;
-}
-
-.fallback-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.fallback-item {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  background: var(--x-card);
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--x-border);
-  flex-wrap: wrap;
-}
-
-.fb-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px 10px;
-  flex: 1;
-  min-width: 0;
-  :deep(.el-form-item) {
-    margin-bottom: 0;
-    min-width: 0;
-  }
-}
-
-.fb-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-end;
-  padding-bottom: 2px;
-}
-
-.json-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.json-status {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.caddy-snippet-box {
-  margin-top: 14px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-
-  .caddy-head {
+  :deep(.el-radio-button) {
+    flex: 1;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
 
-  .caddy-title {
-    font-size: 12.5px;
-    font-weight: 500;
-    color: var(--x-text);
+    .el-radio-button__inner {
+      width: 100%;
+      padding: 8px 4px;
+      font-size: 13px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   }
+}
 
-  .caddy-code {
-    margin: 0;
-    padding: 10px 12px;
-    background: var(--x-card);
-    border: 1px solid var(--x-border);
-    border-radius: 6px;
-    font-family: var(--x-font-mono, monospace);
-    font-size: 12px;
-    color: var(--x-primary);
-    line-height: 1.5;
-    overflow-x: auto;
-  }
+.json-editor-wrap {
+  border: 1px solid var(--x-border);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 @media (max-width: 640px) {
   .form-grid {
     grid-template-columns: 1fr;
-  }
-  .key-row {
-    grid-template-columns: 1fr;
-  }
-  .fallback-item {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .fb-grid {
-    grid-template-columns: 1fr;
-    gap: 8px 0;
-  }
-  .fb-actions {
-    justify-content: flex-end;
   }
 }
 </style>
