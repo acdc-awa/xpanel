@@ -182,14 +182,6 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.PUT("/inbounds/:id", d.AdminUpdateInbound)
 			admin.DELETE("/inbounds/:id", d.AdminDeleteInbound)
 			admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
-			// 独立通道（端口转发 / SOCKS5 / HTTP 独立代理）
-			admin.GET("/channels", d.AdminChannels)
-			admin.POST("/channels", d.AdminCreateChannel)
-			admin.PUT("/channels/:id", d.AdminUpdateChannel)
-			admin.DELETE("/channels/:id", d.AdminDeleteChannel)
-			admin.POST("/channels/:id/toggle", d.AdminToggleChannel)
-			admin.POST("/channels/:id/reset-traffic", d.AdminResetChannelTraffic)
-
 			// 转发用户管理（Phase 52 独立账密计量）
 			admin.GET("/forward-users", d.AdminListForwardUsers)
 			admin.GET("/forward-users/summary", d.AdminForwardUsersSummary)

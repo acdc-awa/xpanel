@@ -599,9 +599,9 @@ func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
 	}()
 }
 
-// ResetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
+// resetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
 // 以业务时区切分日/周/月，避免按 UTC 天重置导致与运营预期错位。
-func ResetPeriodKey(now time.Time, policy string, loc *time.Location) string {
+func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
 	t := now.In(loc)
 	switch policy {
 	case "daily":
@@ -614,10 +614,6 @@ func ResetPeriodKey(now time.Time, policy string, loc *time.Location) string {
 	default:
 		return ""
 	}
-}
-
-func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
-	return ResetPeriodKey(now, policy, loc)
 }
 
 func (s *TrafficService) resetInboundTraffic() {
