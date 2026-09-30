@@ -74,13 +74,22 @@ const form = reactive({
 
 const availableInbounds = computed(() =>
   effectiveInbounds.value.filter(
-    (i) => i.server_id === targetServerId.value && i.enabled && (i.type === 'user' || i.type === 'tunnel'),
+    (i) => i.server_id === targetServerId.value && i.enabled && i.type !== 'relay',
   ),
 )
 
 const selectedInbound = computed(() =>
   effectiveInbounds.value.find((i) => i.id === form.target_inbound_id),
 )
+
+function inboundOptionLabel(inb: InboundItem): string {
+  if (inb.type === 'tunnel') return `[四层直通] ${inb.tag} (:${inb.port})`
+  if (inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'socks' || inb.protocol === 'http') {
+    return `[转发代理 ${(inb.protocol || 'socks').toUpperCase()}] ${inb.tag} (:${inb.port})`
+  }
+  const proto = (inb.protocol || 'vless').toUpperCase()
+  return `[${proto}] ${inb.tag} (:${inb.port})`
+}
 
 async function loadAuxDataIfNeeded() {
   const tasks: Promise<any>[] = []
@@ -296,7 +305,7 @@ async function handleDelete() {
             <el-option
               v-for="inb in availableInbounds"
               :key="inb.id"
-              :label="`${inb.type === 'tunnel' ? '[四层直通] ' : ''}${inb.tag} (:${inb.port} ${inb.protocol})`"
+              :label="inboundOptionLabel(inb)"
               :value="inb.id"
             />
           </el-select>

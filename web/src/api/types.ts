@@ -315,7 +315,9 @@ export interface InboundItem {
   ratio: number
   total_gb?: number // 入站总流量上限（GB，0=不限）
   expiry_time?: string | null // 入站到期时间（null/缺失=永久）
-  type?: string // user / relay / tunnel
+  traffic_reset?: string // 重置周期 (never / daily / weekly / monthly)
+  remark?: string // 备注/通道名称
+  type?: string // user / relay / tunnel / forward
   internal_uuid?: string // relay 只读（节点生成上报）
   target_inbound_id?: number // 四层直通目标落地入站 ID
   target_address?: string // 手动指定的外部目标地址
@@ -363,61 +365,50 @@ export interface UserAccessPoint {
   resolved_target_desc?: string
   target_server_name?: string
   target_inbound_tag?: string
+  is_tunnel?: boolean
+  tunnel_landing_desc?: string
   enabled: boolean
   remark?: string
   permission_group_ids: number[]
   created_at?: string
 }
 
-// 独立通道（端口转发 / SOCKS5 / HTTP 独立代理）
-export interface ProxyChannelItem {
+// 转发用户（SOCKS5 / HTTP 多账号隔离与计量计费）
+export interface ForwardUserItem {
   id: number
-  name: string
-  server_id: number
-  server_name: string
-  server_host: string
-  inbound_id: number
-  port: number
-  listen: string
-  protocol: 'tunnel' | 'socks5' | 'http'
-  target_address?: string
-  target_port?: number
-  proxy_protocol: boolean
-  username?: string
-  password?: string
-  allow_udp: boolean
+  username: string
+  password: string
+  permission_group_id: number
+  group_name?: string
   traffic_limit_gb: number
   traffic_used_bytes: number
   up_bytes: number
   down_bytes: number
   traffic_reset: 'never' | 'daily' | 'weekly' | 'monthly'
   expires_at?: string
-  auto_disable: boolean
-  status: 'active' | 'quota_exceeded' | 'expired' | 'disabled'
   enabled: boolean
-  proxy_url?: string
+  remark: string
   created_at: string
   updated_at: string
 }
 
-export interface ProxyChannelPayload {
-  name: string
-  server_id: number
-  port: number
-  listen?: string
-  protocol: string
-  target_address?: string
-  target_port?: number
-  proxy_protocol?: boolean
-  username?: string
-  password?: string
-  allow_udp?: boolean
+export interface ForwardUserPayload {
+  username: string
+  password: string
+  permission_group_id: number
   traffic_limit_gb?: number
   traffic_reset?: string
   expires_at?: string
-  auto_disable?: boolean
+  enabled?: boolean
+  remark?: string
 }
 
+export interface ForwardUsersSummary {
+  total_users: number
+  active_users: number
+  total_limit_gb: number
+  total_used_bytes: number
+}
 
 export interface RealitySettings {
   server_name?: string
@@ -502,6 +493,7 @@ export interface ServerOutbound {
   priority: number
   remark: string
   inbound_ref?: number // Phase T：引用落地入站
+  owner_inbound_id?: number // C2：>0 = 由该四层直通入站自动维护（目标只能在通道页/入站页改）
   created_at: string
   updated_at: string
 }
@@ -552,6 +544,7 @@ export interface ServerRoutingRule {
   enabled: boolean
   priority: number
   remark: string
+  owner_inbound_id?: number // C2：>0 = 由该四层直通入站自动维护（可编辑，不可删除）
   created_at: string
   updated_at: string
 }

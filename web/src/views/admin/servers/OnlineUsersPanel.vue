@@ -52,11 +52,11 @@ defineExpose({ reload: loadOnlineUsers })
       <div v-else class="online-list">
         <div v-for="u in onlineUsers" :key="u.email" class="online-row">
           <div class="online-user">
-            <span class="x-chip" :class="u.kind === 'user' ? 'green' : u.kind === 'relay' ? 'blue' : 'gray'">
-              {{ u.kind === 'user' ? '用户' : u.kind === 'relay' ? '中转' : '其他' }}
+            <span class="x-chip" :class="u.kind === 'user' ? 'green' : u.kind === 'forward_user' ? 'purple' : u.kind === 'relay' ? 'blue' : 'gray'">
+              {{ u.kind === 'user' ? '用户' : u.kind === 'forward_user' ? '自用代理' : u.kind === 'relay' ? '中转' : '其他' }}
             </span>
-            <span class="name">{{ u.kind === 'user' && u.name ? u.name : u.email }}</span>
-            <span v-if="u.kind === 'user' && u.name" class="muted email">{{ u.email }}</span>
+            <span class="name">{{ (u.kind === 'user' || u.kind === 'forward_user') && u.name ? u.name : u.email }}</span>
+            <span v-if="(u.kind === 'user' || u.kind === 'forward_user') && u.name" class="muted email">{{ u.email }}</span>
             <span v-if="u.ips.length > 1" class="muted count">× {{ u.ips.length }}</span>
           </div>
           <div class="online-ips">

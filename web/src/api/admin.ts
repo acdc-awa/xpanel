@@ -20,8 +20,9 @@ import type {
   ServerOutbound,
   ServerRoutingRule,
   AccessLayer,
-  ProxyChannelItem,
-  ProxyChannelPayload,
+  ForwardUserItem,
+  ForwardUserPayload,
+  ForwardUsersSummary,
 } from './types'
 
 export type {
@@ -41,8 +42,9 @@ export type {
   ServerOutbound,
   ServerRoutingRule,
   AccessLayer,
-  ProxyChannelItem,
-  ProxyChannelPayload,
+  ForwardUserItem,
+  ForwardUserPayload,
+  ForwardUsersSummary,
 } from './types'
 
 /** 仪表盘流量口径：今日 / 近 7 天 / 本月（驱动排行榜与服务器流量分布，三者同源）。 */
@@ -271,8 +273,8 @@ export function getServerMetrics(id: number, range = '1h') {
 // 节点当前在线用户（agent 心跳携带的 xray OnlineMap 快照，连接级实时数据）
 export interface OnlineUserIPItem {
   email: string
-  kind: 'user' | 'relay' | 'other' // user=面板用户 / relay=中转内部账户 / other=自定义 email
-  name?: string // kind=user 时的面板用户名
+  kind: 'user' | 'forward_user' | 'relay' | 'other' // user=面板用户 / forward_user=自用代理用户 / relay=中转内部账户 / other=自定义 email
+  name?: string // kind=user / forward_user 时的用户名
   user_id?: number
   ips: string[]
 }
@@ -559,7 +561,9 @@ export interface InboundPayload {
   ratio?: number
   total_gb?: number
   expiry_time?: string | null
-  type?: string // user / relay / tunnel
+  traffic_reset?: string
+  remark?: string
+  type?: string // user / relay / tunnel / forward
   target_inbound_id?: number
   target_address?: string
   target_port?: number
@@ -602,29 +606,43 @@ export function rotateInternalInbound(id: number) {
   return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/rotate-internal`)
 }
 
-// 独立通道（端口转发 / SOCKS5 / HTTP 独立代理）
-export function getAdminChannels(params?: { server_id?: number; protocol?: string; status?: string }) {
-  return http.get<ApiResp<{ channels: ProxyChannelItem[] }>>('/admin/channels', { params })
+// 转发用户管理（SOCKS5 / HTTP 多账号隔离与计量计费）
+export function getForwardUsers(params?: {
+  page?: number
+  page_size?: number
+  permission_group_id?: number
+  enabled?: boolean
+  keyword?: string
+}) {
+  return http.get<ApiResp<{ items: ForwardUserItem[]; total: number }>>('/admin/forward-users', { params })
 }
 
-export function createAdminChannel(payload: ProxyChannelPayload) {
-  return http.post<ApiResp<{ channel: ProxyChannelItem }>>('/admin/channels', payload)
+export function getForwardUsersSummary() {
+  return http.get<ApiResp<ForwardUsersSummary>>('/admin/forward-users/summary')
 }
 
-export function updateAdminChannel(id: number, payload: Partial<ProxyChannelPayload>) {
-  return http.put<ApiResp<{ channel: ProxyChannelItem }>>(`/admin/channels/${id}`, payload)
+export function createForwardUser(payload: ForwardUserPayload) {
+  return http.post<ApiResp<ForwardUserItem>>('/admin/forward-users', payload)
 }
 
-export function deleteAdminChannel(id: number) {
-  return http.delete<ApiResp<{ id: number }>>(`/admin/channels/${id}`)
+export function updateForwardUser(id: number, payload: Partial<ForwardUserPayload>) {
+  return http.put<ApiResp<{ updated: boolean }>>(`/admin/forward-users/${id}`, payload)
 }
 
-export function toggleAdminChannel(id: number) {
-  return http.post<ApiResp<{ id: number; enabled: boolean; status: string }>>(`/admin/channels/${id}/toggle`)
+export function toggleForwardUser(id: number) {
+  return http.post<ApiResp<{ enabled: boolean }>>(`/admin/forward-users/${id}/toggle`)
 }
 
-export function resetAdminChannelTraffic(id: number) {
-  return http.post<ApiResp<{ id: number; traffic_used_bytes: number; status: string }>>(`/admin/channels/${id}/reset-traffic`)
+export function resetForwardUserTraffic(id: number) {
+  return http.post<ApiResp<{ reset: boolean }>>(`/admin/forward-users/${id}/reset-traffic`)
+}
+
+export function deleteForwardUser(id: number) {
+  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/forward-users/${id}`)
+}
+
+export function syncForwardUsersConfigs() {
+  return http.post<ApiResp<{ synced_servers: number }>>('/admin/forward-users/sync')
 }
 
 // Phase T：证书管理
@@ -814,6 +832,8 @@ export interface TopologyOutbound {
   tag: string
   protocol: string
   inbound_ref?: number | null // Phase T：引用落地入站
+  owner_inbound_id?: number // C2：直通管道派生出口归属
+  virtual?: boolean // direct 等虚拟出站
   enabled: boolean
   priority: number
 }
