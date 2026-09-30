@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -27,11 +28,12 @@ const (
 
 	OrderPaid = "paid" // 订单状态（余额直付即时生效，无 pending/人工确认）
 
-	// Phase T：入站形态（面向终端用户 / 内部链式代理落地 / 四层直通管道 / 独立通道）
+	// Phase T：入站形态（面向终端用户 / 内部链式代理落地 / 四层直通管道 / 独立通道 / 转发代理）
 	InboundTypeUser    = "user"    // 进订阅、参与用户授权与 SyncUsers（默认）
 	InboundTypeRelay   = "relay"   // 内部转发入站，被出站 InboundRef 引用，clients 固定为 InternalUUID
 	InboundTypeTunnel  = "tunnel"  // 四层直通管道（任意门），流量透明转发到目标入站/外部端点
 	InboundTypeChannel = "channel" // 独立通道入站（端口转发/SOCKS5/HTTP），由 ProxyChannel 托管
+	InboundTypeForward = "forward" // 转发代理入站（SOCKS5/HTTP）
 
 	ProtocolVless    = "vless"
 	ProtocolDokodemo = "dokodemo-door"
@@ -62,7 +64,7 @@ func All() []any {
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 		&SubTemplate{},
-		&ProxyChannel{},
+		&ForwardUser{},
 	}
 }
 
@@ -115,12 +117,214 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migratePlanSaleFlags(db); err != nil {
 		return err
 	}
+	if err := migrateProxyChannelsToForwardInbounds(db); err != nil {
+		return err
+	}
+	if err := migrateDokodemoInboundsToTunnelType(db); err != nil {
+		return err
+	}
+	if err := migrateForwardUsersFromInbounds(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
 	}
 	return migrateUserSubscribeTokens(db)
 }
+
+// migrateForwardUsersFromInbounds 将存量 SOCKS5/HTTP 入站内的静态账密迁移为独立 ForwardUser 实体，
+// 并关联/创建对应的权限组与 Inbound.PermissionGroupID（schema v4，2026-09-29）。幂等执行。
+func migrateForwardUsersFromInbounds(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "forward_users_migrated_from_inbounds").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	var inbounds []Inbound
+	if err := db.Where("protocol IN ?", []string{ProtocolSocks, ProtocolHTTP}).Find(&inbounds).Error; err == nil {
+		for _, inb := range inbounds {
+			if inb.SettingsJSON == "" {
+				continue
+			}
+			var settings map[string]any
+			if err := json.Unmarshal([]byte(inb.SettingsJSON), &settings); err != nil {
+				continue
+			}
+			rawAccs, ok := settings["accounts"].([]any)
+			if !ok || len(rawAccs) == 0 {
+				continue
+			}
+
+			// 寻找可用组或新建专属组
+			var pgID uint64
+			var pg PermissionGroup
+			if err := db.Where("name = ?", "默认转发组").First(&pg).Error; err == nil {
+				pgID = pg.ID
+			} else {
+				newPG := PermissionGroup{
+					Name:   "默认转发组",
+					Remark: "系统自动创建的默认转发代理权限组",
+				}
+				if err := db.Create(&newPG).Error; err == nil {
+					pgID = newPG.ID
+				}
+			}
+
+			// 确保有 UserAccessPoint 指向该入站并关联权限组
+			if pgID > 0 {
+				var ap UserAccessPoint
+				if err := db.Where("target_type = ? AND target_inbound_id = ?", "inbound", inb.ID).First(&ap).Error; err != nil {
+					apName := inb.Remark
+					if apName == "" {
+						apName = inb.Tag
+					}
+					newAP := UserAccessPoint{
+						Name:            apName,
+						TargetType:      "inbound",
+						TargetInboundID: &inb.ID,
+						Enabled:         inb.Enabled,
+					}
+					if err := db.Create(&newAP).Error; err == nil {
+						_ = db.Create(&PermissionGroupAccessPoint{
+							PermissionGroupID: pgID,
+							AccessPointID:     newAP.ID,
+						}).Error
+					}
+				}
+			}
+
+			// 清理 settings_json 中的静态 accounts 字段，物理入站不再持久化账密凭据
+			delete(settings, "accounts")
+			cleanJSON, _ := json.Marshal(settings)
+			_ = db.Model(&Inbound{}).Where("id = ?", inb.ID).Update("settings_json", string(cleanJSON)).Error
+
+			for _, raw := range rawAccs {
+				accMap, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				u, _ := accMap["user"].(string)
+				p, _ := accMap["pass"].(string)
+				if u == "" || p == "" {
+					continue
+				}
+				// 检查是否已有该用户名
+				var cnt int64
+				db.Model(&ForwardUser{}).Where("username = ?", u).Count(&cnt)
+				if cnt > 0 {
+					continue
+				}
+
+				limitGB := inb.Total / (1024 * 1024 * 1024)
+				fu := ForwardUser{
+					Username:          u,
+					Password:          p,
+					PermissionGroupID: pgID,
+					TrafficLimitGB:    limitGB,
+					TrafficUsedBytes:  inb.Up + inb.Down,
+					UpBytes:           inb.Up,
+					DownBytes:         inb.Down,
+					TrafficReset:      inb.TrafficReset,
+					ExpiresAt:         inb.ExpiryTime,
+					Enabled:           inb.Enabled,
+					Remark:            inb.Remark,
+				}
+				_ = db.Create(&fu).Error
+			}
+		}
+	}
+
+	return db.Create(&Setting{
+		Key:       "forward_users_migrated_from_inbounds",
+		Value:     "true",
+		UpdatedAt: time.Now(),
+	}).Error
+}
+
+// migrateProxyChannelsToForwardInbounds 将存量 ProxyChannel 记录平滑整合至底层 Inbound（type='forward'），
+// 统一入口模型与表结构（schema v4，2026-09-29）。幂等执行。
+func migrateProxyChannelsToForwardInbounds(db *gorm.DB) error {
+	var mark Setting
+	err := db.Where("key = ?", "proxy_channels_migrated_to_forward").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	if db.Migrator().HasTable("proxy_channels") {
+		var channels []ProxyChannel
+		if err := db.Find(&channels).Error; err == nil {
+			for _, ch := range channels {
+				var inb Inbound
+				found := false
+				if ch.InboundID > 0 {
+					if err := db.First(&inb, ch.InboundID).Error; err == nil {
+						found = true
+					}
+				}
+				if !found {
+					if err := db.Where("server_id = ? AND port = ?", ch.ServerID, ch.Port).First(&inb).Error; err == nil {
+						found = true
+					}
+				}
+				if found {
+					updates := map[string]any{
+						"type": InboundTypeForward,
+					}
+					if inb.Remark == "" && ch.Name != "" {
+						updates["remark"] = ch.Name
+					}
+					if ch.TrafficLimitGB > 0 && inb.Total == 0 {
+						updates["total"] = ch.TrafficLimitGB * 1024 * 1024 * 1024
+					}
+					if ch.UpBytes > 0 && inb.Up == 0 {
+						updates["up"] = ch.UpBytes
+					}
+					if ch.DownBytes > 0 && inb.Down == 0 {
+						updates["down"] = ch.DownBytes
+					}
+					if ch.ExpiresAt != nil && inb.ExpiryTime == nil {
+						updates["expiry_time"] = ch.ExpiresAt
+					}
+					if ch.TrafficReset != "" && inb.TrafficReset == "never" {
+						updates["traffic_reset"] = ch.TrafficReset
+					}
+					if ch.Status == ChannelStatusExceeded || ch.Status == ChannelStatusExpired || !ch.Enabled {
+						updates["enabled"] = false
+					}
+					_ = db.Model(&inb).Updates(updates).Error
+				}
+			}
+		}
+	}
+
+	// 将所有遗留 type='channel' 的 Inbound 批量修正为 type='forward'
+	_ = db.Model(&Inbound{}).Where("type = ?", InboundTypeChannel).Update("type", InboundTypeForward).Error
+
+	return db.Create(&Setting{
+		Key:       "proxy_channels_migrated_to_forward",
+		Value:     "true",
+		UpdatedAt: time.Now(),
+	}).Error
+}
+
+// migrateDokodemoInboundsToTunnelType 幂等修正：将存量 protocol = 'dokodemo-door' 的入站统一补全 type = 'tunnel'。
+func migrateDokodemoInboundsToTunnelType(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Inbound{}) {
+		return nil
+	}
+	return db.Model(&Inbound{}).
+		Where("protocol = ? AND (type IS NULL OR type = '' OR type != ?)", ProtocolDokodemo, InboundTypeTunnel).
+		Update("type", InboundTypeTunnel).Error
+}
+
 
 // backfillTrafficBilled 流量计费两列一次性回填（2026-09-06 倍率计费）：
 // 存量行按 1:1 回填（billed = 原始字节，等价倍率 1）——历史消费不追溯倍率。

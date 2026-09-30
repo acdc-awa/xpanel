@@ -39,7 +39,17 @@ const (
 	// (user_id, inbound_id, period_start) 扩为含 cycle_id 的四列，新增 traffic_batches 去重表，
 	// users 加 traffic_cycle_id 并回填为 1。计费口径从「period_start >= traffic_cycle_start」
 	// 改为「cycle_id = 用户当前账期」（cycle_id=0 的存量/旧 agent 行零值回退，见 models.CycleUsageSQL）。
-	DBSchemaVersion = 3
+	//
+	// v4（2026-09-29，入站与直通模型统一）：一次升级包含三组结构变更——
+	//  ① 四层直通派生对象落库：server_outbounds 与 server_routing_rules 各加一列 owner_inbound_id
+	//     （0 = 普通行；>0 = 由该四层直通入站自动维护），并把四层直通的派生出站 out-<tag> 与转发规则
+	//     从「生成期现场派生」改为库内真行；
+	//  ② 退役 proxy_channels：Inbound 加 Remark 备注列，存量 ProxyChannel 账本数据
+	//     （配额/重置/账密/状态）平滑迁入底层 Inbound（type='forward'），遗留 type='channel' 归一化为
+	//     'forward'，两套实体与表单合二为一；
+	//  ③ 转发账号独立计量：新增 ForwardUser 实体与 forward_users 表，存量入站内嵌的静态账号迁移为
+	//     独立转发用户，由权限组聚合动态注入 SOCKS5/HTTP 入站。
+	DBSchemaVersion = 4
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。
@@ -59,7 +69,17 @@ const (
 	// 报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"，节点流量
 	// 全部丢弃。同时 v2 面板写入的行不带 cycle_id（恒 0），在 v3 口径下按「未知账期」回退归属，
 	// 会与切换后的新账期混算。故拒绝回滚，出路是前进到 v3 或从升级前备份恢复。
-	DBMinCompatibleVersion = 3
+	//
+	// v4 与 DBSchemaVersion 同步提升，依据有两重，任何一重都指向拒绝回滚：
+	//  ① **安全漏洞防护（Fail-closed）**：旧版（v3）面板不识别 type=forward 与 ForwardUser，
+	//     配置生成器会把未知类型归一化为 user 走 VLESS clients 分支，导致 SOCKS5 / HTTP 入站丢弃
+	//     accounts 认证凭据，沦为公网无认证开放代理；它也不具备转发用户与权限组聚合生成逻辑，
+	//     回滚会造成认证阻断。
+	//  ② **语义静默失效**：v3 面板把直通规则固定注入在全部节点规则之前，于是管理员在 v4 上
+	//     「把某条规则（如按来源封禁）排到直通规则之前」的安全语义在回滚后会静默失效——规则仍在
+	//     库里、界面也照常显示，实际不再命中（与 v2 同类取舍）。
+	// 出路是前进到 v4，或从升级前备份恢复。
+	DBMinCompatibleVersion = 4
 )
 
 // settings 键（复用既有 settings 键值表，避免新表）。

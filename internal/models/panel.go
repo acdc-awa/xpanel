@@ -91,6 +91,7 @@ type Inbound struct {
 	TargetPort      int     `gorm:"default:0" json:"target_port,omitempty"`          // 手动指定的外部目标端口
 	CertID          *uint64 `gorm:"index" json:"cert_id,omitempty"`                   // TLS 入站选择证书（certs 表）
 	Enabled         bool    `gorm:"default:true" json:"enabled"`
+	Remark          string  `gorm:"size:255" json:"remark"`                           // 入站名称/备注说明 (如独立通道名称等)
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
 	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
 	// xtls-rprx-vision = 为该入站用户全部开启；
@@ -98,6 +99,69 @@ type Inbound struct {
 	Flow      string    `gorm:"size:32" json:"flow"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsTunnel 判断入站是否为四层直通管道（端口转发）。
+func (inb *Inbound) IsTunnel() bool {
+	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeTunnel
+}
+
+// IsForwardProxy 判断入站是否为代理转发入口（SOCKS5 / HTTP）。
+func (inb *Inbound) IsForwardProxy() bool {
+	return inb.Protocol == ProtocolSocks || inb.Protocol == ProtocolHTTP || inb.Type == InboundTypeForward
+}
+
+// IsRelay 判断入站是否为内部中转链路（VLESS + relay）。
+func (inb *Inbound) IsRelay() bool {
+	return inb.Protocol == ProtocolVless && inb.Type == InboundTypeRelay
+}
+
+// CanServeAccessPoint 判断入站端口是否具备对外接入属性（可挂载用户接入点）。
+// 任何非内部中转链路（relay）的入站端口（包括用户接入入站、四层直通、转发代理以及后续添加的任何新协议）均具备对外接入属性。
+func (inb *Inbound) CanServeAccessPoint() bool {
+	return inb.Type != InboundTypeRelay
+}
+
+// ForwardUser 独立转发用户（SOCKS5 / HTTP 账密认证与独立计量计费）。
+// 绑定 PermissionGroupID，由该组下所有 SOCKS5/HTTP 入站共享；流量独立归账与限额。
+type ForwardUser struct {
+	ID                uint64     `gorm:"primaryKey" json:"id"`
+	Username          string     `gorm:"size:64;uniqueIndex;not null" json:"username"`
+	Password          string     `gorm:"size:128;not null" json:"password"`
+	PermissionGroupID uint64     `gorm:"index;not null" json:"permission_group_id"` // 所属权限组
+	TrafficLimitGB    int64      `gorm:"default:0" json:"traffic_limit_gb"`         // 流量限额（GB，0=不限）
+	TrafficUsedBytes  int64      `gorm:"default:0" json:"traffic_used_bytes"`       // 本周期已用字节数
+	UpBytes           int64      `gorm:"default:0" json:"up_bytes"`                 // 原始上行累加字节
+	DownBytes         int64      `gorm:"default:0" json:"down_bytes"`               // 原始下行累加字节
+	TrafficReset      string     `gorm:"size:16;default:never" json:"traffic_reset"` // 重置周期 never / daily / weekly / monthly
+	LastResetDate     string     `gorm:"size:10" json:"-"`                          // 上次重置周期键（防止重复清零）
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`                      // 到期时间（空=不过期）
+	Enabled           bool       `gorm:"default:true" json:"enabled"`               // 启用状态
+	Remark            string     `gorm:"size:255" json:"remark"`                    // 备注
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// ForwardUserTrafficUserIDBase 转发代理用户写入 traffic_logs 时的 UserID 基准偏移量。
+// 避免与商业用户（users.id）在计费/风控/账期查询中的 JOIN 冲突（商业用户 ID 递增不会达此量级）。
+const ForwardUserTrafficUserIDBase uint64 = 1_000_000_000_000 // 1 万亿 (1e12)
+
+// ForwardUserTrafficUserID 计算 ForwardUser 对应的 traffic_logs.user_id
+func ForwardUserTrafficUserID(fuid uint64) uint64 {
+	return ForwardUserTrafficUserIDBase + fuid
+}
+
+// IsForwardUserTrafficUserID 判断是否为 ForwardUser 的 traffic_logs.user_id
+func IsForwardUserTrafficUserID(uid uint64) bool {
+	return uid >= ForwardUserTrafficUserIDBase
+}
+
+// ParseForwardUserTrafficUserID 从 traffic_logs.user_id 还原 ForwardUser.ID
+func ParseForwardUserTrafficUserID(uid uint64) uint64 {
+	if uid >= ForwardUserTrafficUserIDBase {
+		return uid - ForwardUserTrafficUserIDBase
+	}
+	return 0
 }
 
 // Plan 套餐。
@@ -254,6 +318,19 @@ type Setting struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// 四层直通派生对象的固定属性（C2，2026-09-28）。
+//
+//   - TunnelOutboundPriority：派生 freedom 出站（out-<tag>）的优先级。历史上它是"生成时追加在
+//     节点出站之后"，取一个足够大的常量即可保持数组顺序与历史逐字节一致；出站优先级只影响
+//     xray 出站数组顺序（数组首个是默认出口，由 servers.default_outbound_tag 置顶），不参与语义。
+//   - TunnelRulePriority：派生转发规则的优先级 = 历史上"直通规则固定注入在全部节点规则之前"的位置。
+//     节点规则默认优先级为 0，故默认行为不变；管理员想让自己的规则越过直通规则（例如按来源封禁），
+//     把该规则的优先级设成小于本值即可——这是给无认证的四层直通做收口的唯一途径。
+const (
+	TunnelOutboundPriority = 1000
+	TunnelRulePriority     = -100
+)
+
 // ServerOutbound 服务器独立出站规则（§多节点 3x-ui 架构）。
 type ServerOutbound struct {
 	ID                 uint64 `gorm:"primaryKey" json:"id"`
@@ -264,12 +341,15 @@ type ServerOutbound struct {
 	StreamSettingsJSON string `gorm:"type:text" json:"stream_settings_json,omitempty"`
 	SendThrough        string `gorm:"size:64" json:"send_through,omitempty"`
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
-	InboundRef *uint64   `gorm:"index" json:"inbound_ref,omitempty"`
-	Enabled    bool      `gorm:"default:true" json:"enabled"`
-	Priority   int       `gorm:"default:0" json:"priority"`
-	Remark     string    `gorm:"size:255" json:"remark"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
+	// OwnerInboundID > 0 = 该行由某个四层直通入站自动维护（C2）：目标改动即本行改动，
+	// 面板不允许手改/删除（唯一入口是通道页或入站页），删除直通时级联删除。
+	OwnerInboundID uint64 `gorm:"index" json:"owner_inbound_id,omitempty"`
+	Enabled        bool   `gorm:"default:true" json:"enabled"`
+	Priority       int    `gorm:"default:0" json:"priority"`
+	Remark         string `gorm:"size:255" json:"remark"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // DefaultFreedomDirectSettingsJSON freedom 出站的面板默认 settings（canonical 形状，唯一真源）。
@@ -296,9 +376,12 @@ type ServerRoutingRule struct {
 	Network     string    `gorm:"size:32" json:"network,omitempty"`
 	Protocol    string    `gorm:"size:64" json:"protocol,omitempty"`      // bittorrent / http / tls / quic，逗号分隔多选
 	InboundTag  string    `gorm:"type:text" json:"inbound_tag,omitempty"` // 逗号/换行分隔或 JSON 数组
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
-	Priority    int       `gorm:"default:0" json:"priority"`
-	Remark      string    `gorm:"size:255" json:"remark"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// OwnerInboundID > 0 = 该规则由某个四层直通入站自动维护（C2）：可编辑（改指向/加条件/调优先级），
+	// 但不可删除——停用或删除直通本身才是唯一入口；删除直通时级联删除。
+	OwnerInboundID uint64    `gorm:"index" json:"owner_inbound_id,omitempty"`
+	Enabled        bool      `gorm:"default:true" json:"enabled"`
+	Priority       int       `gorm:"default:0" json:"priority"`
+	Remark         string    `gorm:"size:255" json:"remark"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
