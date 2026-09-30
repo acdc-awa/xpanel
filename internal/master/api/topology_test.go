@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,11 +23,7 @@ func apiTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.Server{}, &models.Inbound{}, &models.ServerOutbound{},
-		&models.Cert{}, &models.Plan{}, &models.PermissionGroup{},
-		&models.ProxyChannel{},
-	); err != nil {
+	if err := db.AutoMigrate(models.All()...); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	return db
@@ -306,3 +303,45 @@ func TestTopologyLayoutTagOrders(t *testing.T) {
 		t.Fatalf("over-limit should 400, got %d %s", r.Code, r.Body.String())
 	}
 }
+
+// 阶段一防御：权限组删除防护（ForwardUser 与 Inbound 绑定检查）
+func TestAdminDeletePermissionGroup_ProtectionChecks(t *testing.T) {
+	db := apiTestDB(t)
+	d := &Deps{DB: db}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.DELETE("/api/v1/admin/permission-groups/:id", d.AdminDeletePermissionGroup)
+
+	// 1. 被 ForwardUser 绑定的权限组禁止删除
+	pg1 := models.PermissionGroup{Name: "PG-FU"}
+	db.Create(&pg1)
+	fu := models.ForwardUser{
+		Username:          "fu_test_1",
+		Password:          "pass123",
+		PermissionGroupID: pg1.ID,
+		Enabled:           true,
+	}
+	db.Create(&fu)
+
+	req1 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/permission-groups/%d", pg1.ID), nil)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("期望被 ForwardUser 绑定的组删除返回 400，实际: %d, body: %s", w1.Code, w1.Body.String())
+	}
+
+
+
+	// 3. 无任何绑定的权限组允许删除
+	pg3 := models.PermissionGroup{Name: "PG-Empty"}
+	db.Create(&pg3)
+
+	req3 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/permission-groups/%d", pg3.ID), nil)
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("期望未绑定的组删除成功返回 200，实际: %d, body: %s", w3.Code, w3.Body.String())
+	}
+}
+

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -224,6 +226,7 @@ func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
 	chanInb := models.Inbound{
 		ServerID: 1, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
 		Type: models.InboundTypeChannel, Enabled: true,
+		SettingsJSON: `{"auth":"password","accounts":[{"user":"test","pass":"pass123"}],"udp":true}`,
 	}
 	db.Create(&chanInb)
 
@@ -241,22 +244,22 @@ func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
 		t.Fatalf("删除被 Tunnel 引用的入站应返回 400, 实际: %d, body: %s", w1.Code, w1.Body.String())
 	}
 
-	// 尝试删除 Channel 入站 -> 应该被 400 拦截
-	req2 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/inbounds/%d", chanInb.ID), nil)
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusBadRequest {
-		t.Fatalf("删除 Channel 入站应返回 400, 实际: %d, body: %s", w2.Code, w2.Body.String())
-	}
-
-	// 尝试通过常规接口更新 Channel 入站 -> 应该被 400 拦截
-	upBody, _ := json.Marshal(map[string]any{"port": 1081})
+	// 允许通过常规接口更新 Forward/Channel 入站
+	upBody, _ := json.Marshal(map[string]any{"port": 1081, "remark": "更新备注"})
 	req3 := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", chanInb.ID), bytes.NewReader(upBody))
 	req3.Header.Set("Content-Type", "application/json")
 	w3 := httptest.NewRecorder()
 	r.ServeHTTP(w3, req3)
-	if w3.Code != http.StatusBadRequest {
-		t.Fatalf("更新 Channel 入站应返回 400, 实际: %d, body: %s", w3.Code, w3.Body.String())
+	if w3.Code != http.StatusOK {
+		t.Fatalf("更新入站应成功, 实际: %d, body: %s", w3.Code, w3.Body.String())
+	}
+
+	// 允许删除未被引用的 Forward/Channel 入站
+	req2 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/inbounds/%d", chanInb.ID), nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("删除入站应成功, 实际: %d, body: %s", w2.Code, w2.Body.String())
 	}
 }
 
@@ -280,7 +283,7 @@ func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
 	// 2. Channel 入站
 	chanInb := models.Inbound{
 		ServerID: 2, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
-		Type: models.InboundTypeChannel, Enabled: true,
+		Type: models.InboundTypeForward, Enabled: true,
 	}
 	db.Create(&chanInb)
 
@@ -290,12 +293,12 @@ func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
 	r.POST("/api/v1/admin/inbounds/:id/toggle", d.AdminToggleInbound)
 	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
 
-	// A. 尝试通过 Toggle 切换 Channel 入站 -> 应该被 400 拦截 (P2-6)
+	// A. 切换未被引用的入站状态 -> 应该成功
 	req1 := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", chanInb.ID), nil)
 	w1 := httptest.NewRecorder()
 	r.ServeHTTP(w1, req1)
-	if w1.Code != http.StatusBadRequest {
-		t.Fatalf("Toggle Channel 入站应返回 400, 实际: %d, body: %s", w1.Code, w1.Body.String())
+	if w1.Code != http.StatusOK {
+		t.Fatalf("Toggle 入站应成功, 实际: %d, body: %s", w1.Code, w1.Body.String())
 	}
 
 	// B. 尝试 Toggle 停用被启用的 Tunnel 引用的落地入站 -> 应该被 400 拦截 (P2-7)
@@ -376,4 +379,208 @@ func TestEnsureTargetAcceptProxyProtocol(t *testing.T) {
 		t.Fatalf("Landing inbound acceptProxyProtocol should be set to true automatically, got: %s", updatedLanding.StreamSettings)
 	}
 }
+
+// 阶段一防御：入站不再持久化静态 accounts，写入或更新时自动剔除 accounts，防止残留静态账密。
+func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 5, Name: "node-5", Host: "1.2.3.4", NodeID: "n5", Secret: "sec"})
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 1. 创建带静态 accounts 的 SOCKS5 -> 成功创建，但 accounts 必须被清洗剔除
+	bodyAuth := map[string]any{
+		"server_id":     5,
+		"tag":           "socks-test",
+		"protocol":      "socks",
+		"port":          10801,
+		"settings_json": `{"auth":"password","accounts":[{"user":"admin","pass":"secret"}],"udp":true}`,
+	}
+	raw, _ := json.Marshal(bodyAuth)
+	req := httptest.NewRequest("POST", "/api/v1/admin/inbounds", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("创建 SOCKS5 应成功，实际: %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var created models.Inbound
+	db.Where("tag = ?", "socks-test").First(&created)
+	if strings.Contains(created.SettingsJSON, "admin") || strings.Contains(created.SettingsJSON, "secret") {
+		t.Fatalf("入站 settings_json 中不应残留静态 accounts: %s", created.SettingsJSON)
+	}
+
+	// 2. 更新时尝试写入静态 accounts -> 同样被清洗剔除
+	updateRaw := map[string]any{
+		"settings_json": `{"auth":"password","accounts":[{"user":"hacker","pass":"pass"}],"udp":true}`,
+	}
+	raw, _ = json.Marshal(updateRaw)
+	req = httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", created.ID), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("更新 SOCKS5 应成功，实际: %d, body: %s", w.Code, w.Body.String())
+	}
+
+	db.Where("id = ?", created.ID).First(&created)
+	if strings.Contains(created.SettingsJSON, "hacker") {
+		t.Fatalf("更新后入站 settings_json 中不应残留静态 accounts: %s", created.SettingsJSON)
+	}
+}
+
+func TestAdminUpdateInbound_ClearExpiryTime(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 30, Name: "node-30", Host: "1.2.3.4", NodeID: "n30", Secret: "sec"})
+	future := time.Now().Add(24 * time.Hour).UTC()
+	inb := models.Inbound{
+		ServerID:   30,
+		Tag:        "expiry-inbound",
+		Protocol:   "vless",
+		Port:       44310,
+		Type:       models.InboundTypeUser,
+		ExpiryTime: &future,
+		Enabled:    true,
+	}
+	db.Create(&inb)
+	d := &Deps{DB: db}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 传入空字符串 "" 作为 expiry_time（前端重置时传的空字串）
+	body := map[string]any{
+		"expiry_time": "",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", inb.ID), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("清空 expiry_time 失败: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var updated models.Inbound
+	if err := db.First(&updated, inb.ID).Error; err != nil {
+		t.Fatalf("查询更新后入站失败: %v", err)
+	}
+	if updated.ExpiryTime != nil {
+		t.Fatalf("期望 ExpiryTime 为 nil，实际为: %v", updated.ExpiryTime)
+	}
+}
+
+func TestAdminUpdateInbound_TunnelProxyProtocolOption(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 41, Name: "node-landing", Host: "1.2.3.4", NodeID: "n41", Secret: "sec"})
+	db.Create(&models.Server{ID: 42, Name: "node-tunnel", Host: "1.2.3.5", NodeID: "n42", Secret: "sec"})
+
+	// 落地入站，初始无 acceptProxyProtocol
+	landing := models.Inbound{
+		ServerID:       41,
+		Tag:            "landing-vless",
+		Protocol:       "vless",
+		Port:           44320,
+		Type:           models.InboundTypeUser,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled:        true,
+	}
+	db.Create(&landing)
+
+	// 直通管道入站
+	tunnel := models.Inbound{
+		ServerID: 42,
+		Tag:      "tunnel-doko",
+		Protocol: "dokodemo-door",
+		Port:     10080,
+		Type:     models.InboundTypeTunnel,
+		Enabled:  true,
+	}
+	db.Create(&tunnel)
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 1. 连线直通管道，但显式指定 proxy_protocol: false
+	bodyNoPP := map[string]any{
+		"target_inbound_id": landing.ID,
+		"stream_settings":   `{"network":"tcp,udp","proxy_protocol":false}`,
+	}
+	raw, _ := json.Marshal(bodyNoPP)
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", tunnel.ID), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("连接直通管道 (no PP) 失败: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var landingAfterNoPP models.Inbound
+	db.First(&landingAfterNoPP, landing.ID)
+	var ssNoPP map[string]any
+	_ = json.Unmarshal([]byte(landingAfterNoPP.StreamSettings), &ssNoPP)
+	if ssNoPP["acceptProxyProtocol"] == true {
+		t.Fatalf("当直通管道 proxy_protocol: false 时，落地入站不应被强制开启 acceptProxyProtocol")
+	}
+
+	// 2. 更新直通管道为 proxy_protocol: true
+	bodyWithPP := map[string]any{
+		"target_inbound_id": landing.ID,
+		"stream_settings":   `{"network":"tcp,udp","proxy_protocol":true}`,
+	}
+	raw, _ = json.Marshal(bodyWithPP)
+	req = httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", tunnel.ID), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("连接直通管道 (with PP) 失败: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var landingAfterPP models.Inbound
+	db.First(&landingAfterPP, landing.ID)
+	var ssPP map[string]any
+	_ = json.Unmarshal([]byte(landingAfterPP.StreamSettings), &ssPP)
+	if ssPP["acceptProxyProtocol"] != true {
+		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应开启 top-level acceptProxyProtocol")
+	}
+	tcpSettings, _ := ssPP["tcpSettings"].(map[string]any)
+	if tcpSettings == nil || tcpSettings["acceptProxyProtocol"] != true {
+		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应同时开启 tcpSettings.acceptProxyProtocol，以供前端编辑回显")
+	}
+}
+
+func TestFormToInbound_PreservesTargetFields(t *testing.T) {
+	targetID := uint64(12)
+	f := &inboundForm{
+		ID:              99,
+		ServerID:        1,
+		Tag:             "test-http",
+		Protocol:        "http",
+		Port:            8080,
+		TargetInboundID: &targetID,
+		Remark:          "my remark",
+		TrafficReset:    "daily",
+	}
+	inb := formToInbound(f)
+	if inb.TargetInboundID == nil || *inb.TargetInboundID != 12 {
+		t.Errorf("formToInbound 未保留 TargetInboundID: want 12, got %v", inb.TargetInboundID)
+	}
+	if inb.Remark != "my remark" {
+		t.Errorf("formToInbound 未保留 Remark: want 'my remark', got %s", inb.Remark)
+	}
+	if inb.TrafficReset != "daily" {
+		t.Errorf("formToInbound 未保留 TrafficReset: want 'daily', got %s", inb.TrafficReset)
+	}
+}
+
+
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -69,6 +70,51 @@ type routingRuleForm struct {
 func isReservedOutboundTag(tag string) bool {
 	t := strings.ToLower(strings.TrimSpace(tag))
 	return t == "direct" || t == "blocked"
+}
+
+// tunnelOwnerDesc 描述派生行的归属直通（用于拒绝文案）。找不到入站时退化为基础文案。
+func (d *Deps) tunnelOwnerDesc(ownerInboundID uint64) string {
+	if ownerInboundID == 0 {
+		return ""
+	}
+	var inb models.Inbound
+	if err := d.DB.First(&inb, ownerInboundID).Error; err != nil || inb.Tag == "" {
+		return "四层直通"
+	}
+	return "四层直通「" + inb.Tag + "」"
+}
+
+// tunnelOutboundTagConflict 检查新建/改名的四层直通要用的派生出口 tag 是否已被别人的出站占用。
+// 返回错误消息，空串 = 通过。excludeOwner > 0 时忽略该直通自己名下的行（更新场景）。
+// 之所以在写入前查：派生出口由对账函数自动维护，撞名时对账只能报错跳过，不如在这里直接拦住，
+// 让管理员看到"这个 tag 被占了"，而不是事后发现直通连不上。
+func (d *Deps) tunnelOutboundTagConflict(serverID uint64, inboundTag string, excludeOwner uint64) string {
+	if inboundTag == "" {
+		return ""
+	}
+	want := xray.TunnelOutboundTag(inboundTag)
+	q := d.DB.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", serverID, want)
+	if excludeOwner > 0 {
+		q = q.Where("owner_inbound_id = 0 OR owner_inbound_id <> ?", excludeOwner)
+	}
+	var cnt int64
+	if err := q.Count(&cnt).Error; err != nil {
+		return ""
+	}
+	if cnt > 0 {
+		return "出站 tag " + want + " 已被现有出站占用，无法为该直通创建派生出口（请改名或先处理该出站）"
+	}
+	return ""
+}
+
+// ensureTunnelDerived 写入型端点使用：对账直通派生对象，失败时按 fail-closed 报错。
+// 用于创建/更新直通（此时失败多半是 tag 撞名，应当拒绝这次写入而不是留个连不上的直通）。
+func (d *Deps) ensureTunnelDerived(serverID uint64) string {
+	if err := services.EnsureTunnelDerivedObjects(d.DB, serverID); err != nil {
+		log.Printf("[tunnel-derived] 对账失败（server=%d）: %v", serverID, err)
+		return err.Error()
+	}
+	return ""
 }
 
 // EnsureDefaultServerOutbounds 保证该服务器拥有且仅拥有一份默认的 direct (freedom) 与 blocked (blackhole) 内置出站，并保证 default_outbound_tag 为 direct。
@@ -138,6 +184,8 @@ func (d *Deps) AdminGetServerOutbounds(c *gin.Context) {
 		return
 	}
 	EnsureDefaultServerOutbounds(d.DB, id)
+	// C2：打开路由页时顺带让直通的派生行与直通对齐（老库首次加载即完成回填）
+	d.ensureTunnelDerived(id)
 	var list []models.ServerOutbound
 	if err := d.DB.Where("server_id = ?", id).Order("priority ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询出站规则失败")
@@ -249,6 +297,12 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	var ob models.ServerOutbound
 	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).First(&ob).Error; err != nil {
 		util.Fail(c, 404, "出站规则不存在")
+		return
+	}
+	// C2：四层直通的派生出口由直通自动维护（目标只有它一个真源），不允许在这里手改——
+	// 否则会出现"两个地方都能改目标、以谁为准说不清"的局面（唯一入口原则）。
+	if ob.OwnerInboundID > 0 {
+		util.BadRequest(c, d.tunnelOwnerDesc(ob.OwnerInboundID)+"的派生出口由直通自动维护，请在通道页或入站页修改转发目标")
 		return
 	}
 
@@ -400,6 +454,11 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 	// 保护系统预留出站不可被删除
 	if isReservedOutboundTag(ob.Tag) {
 		util.BadRequest(c, "系统内置出站（direct/blocked）不可删除")
+		return
+	}
+	// C2：派生出口随直通的生命周期，删除入口只有一个——停用或删除那条直通
+	if ob.OwnerInboundID > 0 {
+		util.BadRequest(c, d.tunnelOwnerDesc(ob.OwnerInboundID)+"的派生出口不可单独删除，请停用或删除该直通")
 		return
 	}
 
@@ -630,6 +689,17 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 		return
 	}
 
+	if rule.OwnerInboundID > 0 {
+		if req.InboundTag != nil && *req.InboundTag != rule.InboundTag {
+			util.BadRequest(c, "直通派生规则的来源入站由直通入站本身维护，禁止修改")
+			return
+		}
+		if req.Enabled != nil && *req.Enabled != rule.Enabled {
+			util.BadRequest(c, "直通派生规则的启用状态跟随直通入站，请直接在入站管理中启用或停用直通")
+			return
+		}
+	}
+
 	updates := map[string]any{}
 	if req.OutboundTag != nil {
 		if *req.OutboundTag == "" {
@@ -702,6 +772,18 @@ func (d *Deps) AdminDeleteServerRoutingRule(c *gin.Context) {
 	ruleID, err := strconv.ParseUint(c.Param("rule_id"), 10, 64)
 	if err != nil {
 		util.BadRequest(c, "无效的规则 ID")
+		return
+	}
+
+	var rl models.ServerRoutingRule
+	if err := d.DB.Where("id = ? AND server_id = ?", ruleID, id).First(&rl).Error; err != nil {
+		util.Fail(c, 404, "路由规则不存在")
+		return
+	}
+	// C2：派生规则可编辑（改指向、加匹配条件、调优先级都是本批次要开的口子），但不可删除——
+	// 删掉它直通就没有转发规则了（流量落到默认出口，表现为"这条直通连不上"）。要停就停用/删除直通本身。
+	if rl.OwnerInboundID > 0 {
+		util.BadRequest(c, d.tunnelOwnerDesc(rl.OwnerInboundID)+"的转发规则不可删除，请停用或删除该直通（也可以把规则指向 blocked 来停止转发）")
 		return
 	}
 

@@ -553,6 +553,9 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 
 	rankIDs := make([]uint64, 0, len(userUp))
 	for uid := range userUp {
+		if models.IsForwardUserTrafficUserID(uid) {
+			continue // 自用代理用户不参与商业用户套餐排行
+		}
 		if userUp[uid]+userDown[uid] > 0 { // 零用量不进排行
 			rankIDs = append(rankIDs, uid)
 		}

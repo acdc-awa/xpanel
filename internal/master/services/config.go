@@ -99,6 +99,49 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 			ctx.RefTargets[t.ID] = rt
 		}
 	}
+
+	// 批量计算入站授权组映射（统一由启用 AP 白名单派生）
+	allInboundIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		allInboundIDs = append(allInboundIDs, inb.ID)
+	}
+	inboundGroupMap, err := BatchInboundAuthorizedGroupIDs(db, allInboundIDs)
+	if err != nil {
+		return nil, fmt.Errorf("批量计算入站授权组失败: %w", err)
+	}
+	ctx.InboundAuthorizedGroups = inboundGroupMap
+
+	// 转发用户映射：收集 SOCKS5 / HTTP 入站所需的权限组并获取对应的有效 ForwardUser
+	fwdGroupSet := make(map[uint64]struct{})
+	for _, inb := range inbounds {
+		if inb.IsForwardProxy() || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
+			for _, gid := range inboundGroupMap[inb.ID] {
+				fwdGroupSet[gid] = struct{}{}
+			}
+		}
+	}
+
+	ctx.ForwardUsersByGroup = make(map[uint64][]models.ForwardUser)
+	if len(fwdGroupSet) > 0 {
+		fwdGroupIDs := make([]uint64, 0, len(fwdGroupSet))
+		for gid := range fwdGroupSet {
+			fwdGroupIDs = append(fwdGroupIDs, gid)
+		}
+		var fUsers []models.ForwardUser
+		now := time.Now()
+		if err := db.Where("permission_group_id IN ? AND enabled = ?", fwdGroupIDs, true).
+			Where("expires_at IS NULL OR expires_at > ?", now).
+			Find(&fUsers).Error; err == nil {
+			for _, fu := range fUsers {
+				// 流量上限检查（GB 转 Bytes：0 为不限）
+				if fu.TrafficLimitGB > 0 && fu.TrafficUsedBytes >= fu.TrafficLimitGB*1024*1024*1024 {
+					continue
+				}
+				ctx.ForwardUsersByGroup[fu.PermissionGroupID] = append(ctx.ForwardUsersByGroup[fu.PermissionGroupID], fu)
+			}
+		}
+	}
+
 	return ctx, nil
 }
 
@@ -308,6 +351,9 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	if err := s.DB.First(&srv, serverID).Error; err != nil {
 		return "", err
 	}
+	// C2：配置生成是"库内结构 → 节点配置"的唯一入口，先让直通派生对象与直通对齐。
+	// 失败只记日志不阻断（成因是管理员手建了同名 out-<tag> 出站这种库内冲突，不该让整台服务器推不动）。
+	LogTunnelDerivedReconcile(serverID, EnsureTunnelDerivedObjects(s.DB, serverID))
 	var inbounds []models.Inbound
 	if err := s.DB.Where("server_id = ? AND enabled = ?", serverID, true).Find(&inbounds).Error; err != nil {
 		return "", err
@@ -316,6 +362,14 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 	outbounds, routingRules, err := s.loadOutboundsAndRules(serverID)
 	if err != nil {
 		return "", err
+	}
+	// 引用完整性：直通派生规则引用的出站必须真的在启用出站里。
+	// xray 自己的 -test **不校验出站引用**（实测：指向不存在的 outboundTag 仍报 Configuration OK，
+	// 起得来、只有连接被重置 + 一行 non existing outTag 告警，见 t8_missing_outbound.py），
+	// 所以这是唯一能在下发前拦住"直通悄悄连不上"的防线。只查派生规则：管理员自建规则的悬空引用
+	// 由路由页自行暴露，不在这里阻断整台服务器的下发。
+	if msg := danglingTunnelRuleOutbound(outbounds, routingRules); msg != "" {
+		return "", fmt.Errorf("%s", msg)
 	}
 
 	// 用户按入站 tag 分组（与热更新 SyncUsers 同一函数、同一过滤规则）

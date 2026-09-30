@@ -197,3 +197,83 @@ func TestAdminServerOnlineIPs_MemoryFirstAndOfflineZero(t *testing.T) {
 	}
 }
 
+// TestAdminServerOnlineIPs_ForwardUserDeduplicationAndName 验证自用代理用户跨协议去重并正确回显用户名
+func TestAdminServerOnlineIPs_ForwardUserDeduplicationAndName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Server{}, &models.User{}, &models.ForwardUser{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	fu := models.ForwardUser{
+		ID:                50,
+		Username:          "bob_proxy",
+		Password:          "secretpass",
+		PermissionGroupID: 1,
+		Enabled:           true,
+	}
+	if err := db.Create(&fu).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := json.Marshal([]map[string]any{
+		{"email": "fu50.i1@panel.local", "ips": []string{"10.0.0.1"}},
+		{"email": "fu50.i2@panel.local", "ips": []string{"10.0.0.1", "10.0.0.2"}},
+	})
+	srv := models.Server{Name: "node-fwd", Host: "1.2.3.4", OnlineIPs: string(raw)}
+	if err := db.Create(&srv).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	deps := &Deps{DB: db}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatUint(srv.ID, 10)}}
+	deps.AdminServerOnlineIPs(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			OnlineUsers int `json:"online_users"`
+			Users       []struct {
+				Email  string   `json:"email"`
+				Kind   string   `json:"kind"`
+				Name   string   `json:"name"`
+				UserID uint64   `json:"user_id"`
+				IPs    []string `json:"ips"`
+			} `json:"users"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// 验证双协议合并去重为 1 人
+	if resp.Data.OnlineUsers != 1 {
+		t.Fatalf("online_users = %d, want 1（ForwardUser 双协议去重）", resp.Data.OnlineUsers)
+	}
+	if len(resp.Data.Users) != 1 {
+		t.Fatalf("len(users) = %d, want 1", len(resp.Data.Users))
+	}
+	item := resp.Data.Users[0]
+	if item.Kind != "forward_user" {
+		t.Errorf("kind = %q, want forward_user", item.Kind)
+	}
+	if item.UserID != 50 {
+		t.Errorf("user_id = %d, want 50", item.UserID)
+	}
+	if item.Name != "bob_proxy" {
+		t.Errorf("name = %q, want bob_proxy (resolved username)", item.Name)
+	}
+	if len(item.IPs) != 2 {
+		t.Errorf("ips = %+v, want 2 merged IPs [10.0.0.1, 10.0.0.2]", item.IPs)
+	}
+}
+

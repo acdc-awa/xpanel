@@ -232,3 +232,59 @@ func TestGroupAccessPointOrderAndSyncPreserve(t *testing.T) {
 		t.Fatalf("既有绑定重申应保留原排序 so=1，实际 %d", l.SortOrder)
 	}
 }
+
+// 直通判定排雷（阶段一）：即使 type 为空或非 tunnel，只要 protocol 为 dokodemo-door，
+// 授权组仍能正确穿透至下游落地入站，防止落地节点出现 0 用户断流。
+func TestBatchInboundAuthorizedGroupIDs_DokodemoProtocolTunnel(t *testing.T) {
+	db := testDB(t)
+
+	group := models.PermissionGroup{Name: "VIP Tunnel"}
+	db.Create(&group)
+
+	// 落地入站：VLESS 用户入站
+	landingInb := models.Inbound{
+		ID:       302,
+		ServerID: 2,
+		Tag:      "vless-landing",
+		Protocol: models.ProtocolVless,
+		Type:     models.InboundTypeUser,
+		Enabled:  true,
+	}
+	db.Create(&landingInb)
+
+	// 直通入站：物理协议为 dokodemo-door，但 type 字段可能为空或非 tunnel
+	targetID := landingInb.ID
+	tunnelInb := models.Inbound{
+		ID:              301,
+		ServerID:        1,
+		Tag:             "dokodemo-tunnel",
+		Protocol:        models.ProtocolDokodemo,
+		Type:            "", // 故意置空，验证 protocol 识别防御
+		TargetInboundID: &targetID,
+		Enabled:         true,
+	}
+	db.Create(&tunnelInb)
+
+	// 接入点挂在直通入站上
+	ap := models.UserAccessPoint{
+		Name:            "ap-tunnel",
+		Enabled:         true,
+		TargetType:      "inbound",
+		TargetInboundID: &tunnelInb.ID,
+	}
+	db.Create(&ap)
+	if err := SyncAccessPointPermissionGroups(db, ap.ID, []uint64{group.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 批量计算落地入站的授权权限组
+	m, err := BatchInboundAuthorizedGroupIDs(db, []uint64{landingInb.ID})
+	if err != nil {
+		t.Fatalf("BatchInboundAuthorizedGroupIDs: %v", err)
+	}
+	gids := m[landingInb.ID]
+	if len(gids) != 1 || gids[0] != group.ID {
+		t.Fatalf("直通穿透失败：落地入站 302 期望授权组 [%d]，实际为 %v", group.ID, gids)
+	}
+}
+

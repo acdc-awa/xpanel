@@ -35,6 +35,8 @@ type AccessPointView struct {
 	ResolvedPort       int      `json:"resolved_port,omitempty"`
 	ResolvedProtocol   string   `json:"resolved_protocol,omitempty"`
 	ResolvedTargetDesc string   `json:"resolved_target_desc,omitempty"`
+	IsTunnel           bool     `json:"is_tunnel,omitempty"`
+	TunnelLandingDesc  string   `json:"tunnel_landing_desc,omitempty"`
 }
 
 func buildAccessPointView(
@@ -68,6 +70,23 @@ func buildAccessPointView(
 				v.ResolvedPort = inb.Port
 			}
 			v.ResolvedTargetDesc = fmt.Sprintf("%s · %s", srv.Name, inb.Tag)
+
+			if inb.Type == models.InboundTypeTunnel || (inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolDokodemo) {
+				v.IsTunnel = true
+				if inb.TargetInboundID != nil && *inb.TargetInboundID > 0 {
+					if tgtInb, ok := inbMap[*inb.TargetInboundID]; ok {
+						tgtSrv := srvMap[tgtInb.ServerID]
+						v.TunnelLandingDesc = fmt.Sprintf("%s (%s:%d)", tgtSrv.Name, tgtInb.Tag, tgtInb.Port)
+						v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d ➔ %s (%s)", srv.Name, inb.Port, tgtSrv.Name, tgtInb.Tag)
+					}
+				} else if inb.TargetAddress != "" && inb.TargetPort > 0 {
+					v.TunnelLandingDesc = fmt.Sprintf("%s:%d", inb.TargetAddress, inb.TargetPort)
+					v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d ➔ %s:%d", srv.Name, inb.Port, inb.TargetAddress, inb.TargetPort)
+				} else {
+					v.TunnelLandingDesc = "待连线"
+					v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d (待连线)", srv.Name, inb.Port)
+				}
+			}
 		}
 	}
 
@@ -105,12 +124,12 @@ func (d *Deps) validateAccessPointTarget(c *gin.Context, targetType string, inbo
 			util.BadRequest(c, "目标入站不存在")
 			return false
 		}
-		if inb.Type != models.InboundTypeUser && inb.Type != models.InboundTypeTunnel {
-			util.BadRequest(c, "接入点只能直连用户入站或四层直通入站")
+		if !inb.CanServeAccessPoint() {
+			util.BadRequest(c, "接入点只能连接具备对外接入属性的入站端口（不能连接内部中转链路）")
 			return false
 		}
-		if inb.Type == models.InboundTypeTunnel && (inb.TargetInboundID == nil || *inb.TargetInboundID == 0) {
-			util.BadRequest(c, "该四层直通入站尚未配置落地目标入站，请先完成连线")
+		if inb.IsTunnel() && (inb.TargetInboundID == nil || *inb.TargetInboundID == 0) && (inb.TargetAddress == "" || inb.TargetPort == 0) {
+			util.BadRequest(c, "该四层直通入站尚未配置落地目标，请先完成连线或填写目标地址")
 			return false
 		}
 		return true

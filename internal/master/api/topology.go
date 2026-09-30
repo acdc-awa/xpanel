@@ -297,6 +297,14 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 		util.BadRequest(c, "该权限组正被用户绑定，请先在用户管理中解除")
 		return
 	}
+	// 阶段一防御：转发用户绑定检查——防止自用代理账号成为孤儿
+	var fuCnt int64
+	d.DB.Model(&models.ForwardUser{}).Where("permission_group_id = ?", id).Count(&fuCnt)
+	if fuCnt > 0 {
+		util.BadRequest(c, "该权限组正被转发自用用户绑定，请先在转发用户管理中解除")
+		return
+	}
+
 	err = d.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("permission_group_id = ?", id).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {
 			return err
@@ -315,13 +323,14 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 
 // topoOutbound 画布出站轻量视图。
 type topoOutbound struct {
-	ID         uint64  `json:"id"`
-	ServerID   uint64  `json:"server_id"`
-	Tag        string  `json:"tag"`
-	Protocol   string  `json:"protocol"`
-	InboundRef *uint64 `json:"inbound_ref"` // Phase T：引用落地入站
-	Enabled    bool    `json:"enabled"`
-	Priority   int     `json:"priority"`
+	ID             uint64  `json:"id"`
+	ServerID       uint64  `json:"server_id"`
+	Tag            string  `json:"tag"`
+	Protocol       string  `json:"protocol"`
+	InboundRef     *uint64 `json:"inbound_ref"`               // Phase T：引用落地入站
+	OwnerInboundID uint64  `json:"owner_inbound_id,omitempty"` // C2：直通管道派生出口归属
+	Enabled        bool    `json:"enabled"`
+	Priority       int     `json:"priority"`
 }
 
 // topoRule 画布路由规则轻量视图。
@@ -356,9 +365,9 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		srvName[servers[i].ID] = servers[i].Name
 	}
 
-	// 入站（含服务器名，排除独立代理通道）
+	// 入站（含服务器名）
 	var inbounds []models.Inbound
-	if err := d.DB.Where("type != ?", models.InboundTypeChannel).Order("server_id ASC, id ASC").Find(&inbounds).Error; err != nil {
+	if err := d.DB.Order("server_id ASC, id ASC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -378,8 +387,8 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 		outViews = append(outViews, topoOutbound{
 			ID: outbounds[i].ID, ServerID: outbounds[i].ServerID,
 			Tag: outbounds[i].Tag, Protocol: outbounds[i].Protocol,
-			InboundRef: outbounds[i].InboundRef, Enabled: outbounds[i].Enabled,
-			Priority: outbounds[i].Priority,
+			InboundRef: outbounds[i].InboundRef, OwnerInboundID: outbounds[i].OwnerInboundID,
+			Enabled: outbounds[i].Enabled, Priority: outbounds[i].Priority,
 		})
 	}
 
@@ -573,7 +582,7 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 		srvMap[s.ID] = s
 	}
 	var inbs []models.Inbound
-	_ = d.DB.Where("enabled = ? AND type IN ?", true, []string{models.InboundTypeUser, models.InboundTypeTunnel}).Find(&inbs).Error
+	_ = d.DB.Where("enabled = ? AND type != ?", true, models.InboundTypeRelay).Find(&inbs).Error
 	inbs = services.FilterAvailableInbounds(inbs)
 	inbMap := make(map[uint64]models.Inbound, len(inbs))
 	for _, inb := range inbs {

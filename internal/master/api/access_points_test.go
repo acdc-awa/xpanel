@@ -292,3 +292,81 @@ func TestUserAccessPoints_TunnelTarget_And_Subscribe(t *testing.T) {
 	assert.Contains(t, subStr, "10002", "订阅应包含入口机器端口")
 	assert.Contains(t, subStr, user.UUID, "订阅应包含用户认证凭据")
 }
+
+func TestAccessPoint_ConnectForwardAndRelayInbounds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupAccessPointTestDB(t)
+	deps := &Deps{DB: db}
+	r := gin.New()
+	r.POST("/api/v1/admin/access-points", deps.AdminCreateAccessPoint)
+
+	srv := models.Server{ServerType: models.ServerTypeXray, Name: "测试节点", Host: "node.test.com", NodeID: "n-test", Secret: util.HashSecret("sec")}
+	require.NoError(t, deps.DB.Create(&srv).Error)
+
+	socksInb := models.Inbound{
+		ServerID: srv.ID,
+		Tag:      "socks-in",
+		Protocol: "socks",
+		Port:     1080,
+		Type:     models.InboundTypeForward,
+		Enabled:  true,
+	}
+	require.NoError(t, deps.DB.Create(&socksInb).Error)
+
+	httpInb := models.Inbound{
+		ServerID: srv.ID,
+		Tag:      "http-in",
+		Protocol: "http",
+		Port:     8080,
+		Type:     models.InboundTypeForward,
+		Enabled:  true,
+	}
+	require.NoError(t, deps.DB.Create(&httpInb).Error)
+
+	relayInb := models.Inbound{
+		ServerID:     srv.ID,
+		Tag:          "relay-in",
+		Protocol:     "vless",
+		Port:         20000,
+		Type:         models.InboundTypeRelay,
+		InternalUUID: "relay-uuid-test",
+		Enabled:      true,
+	}
+	require.NoError(t, deps.DB.Create(&relayInb).Error)
+
+	// 1. 连接 SOCKS5 入站 -> 200 OK
+	bSocks, _ := json.Marshal(map[string]any{
+		"name":              "SOCKS5 接入点",
+		"target_type":       "inbound",
+		"target_inbound_id": socksInb.ID,
+	})
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-points", bytes.NewReader(bSocks))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code, "AP 应允许连接 SOCKS5 转发入站: %s", w1.Body.String())
+
+	// 2. 连接 HTTP 入站 -> 200 OK
+	bHTTP, _ := json.Marshal(map[string]any{
+		"name":              "HTTP 接入点",
+		"target_type":       "inbound",
+		"target_inbound_id": httpInb.ID,
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-points", bytes.NewReader(bHTTP))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code, "AP 应允许连接 HTTP 转发入站: %s", w2.Body.String())
+
+	// 3. 连接 Relay 内部中继入站 -> 400 Bad Request
+	bRelay, _ := json.Marshal(map[string]any{
+		"name":              "Relay 接入点",
+		"target_type":       "inbound",
+		"target_inbound_id": relayInb.ID,
+	})
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-points", bytes.NewReader(bRelay))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	assert.Equal(t, http.StatusBadRequest, w3.Code, "AP 必须拒绝连接内部中继链路入站: %s", w3.Body.String())
+}

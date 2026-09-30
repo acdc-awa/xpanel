@@ -1365,18 +1365,21 @@ func TestUserEmailForRoundtrip(t *testing.T) {
 	}
 }
 
-// TestCountDistinctOnlineUsers 在线快照去重计数：同一用户跨入站多键只计一人，
+// TestCountDistinctOnlineUsers 在线快照去重计数：同一商业用户或自用代理用户跨入站/双协议多键只计一人，
 // relay 内部账户与自定义 email 各计一。
 func TestCountDistinctOnlineUsers(t *testing.T) {
 	users := []protocol.OnlineUserIPs{
 		{Email: "u1.i7@panel.local", IPs: []string{"1.1.1.1"}},
 		{Email: "u1.i9@panel.local", IPs: []string{"1.1.1.1", "2.2.2.2"}},
 		{Email: "user-2@panel.local", IPs: []string{"3.3.3.3"}},
+		{Email: "fu10.i1@panel.local", IPs: []string{"6.6.6.6"}},
+		{Email: "fu10.i2@panel.local", IPs: []string{"6.6.6.6", "7.7.7.7"}},
+		{Email: "fu11.i1@panel.local", IPs: []string{"8.8.8.8"}},
 		{Email: "relay-in-relay@panel.local", IPs: []string{"4.4.4.4"}},
 		{Email: "custom@x.com", IPs: []string{"5.5.5.5"}},
 	}
-	if got := xray.CountDistinctOnlineUsers(users); got != 4 {
-		t.Fatalf("CountDistinctOnlineUsers = %d, want 4（用户1 两键去重 + 用户2 + relay + 自定义）", got)
+	if got := xray.CountDistinctOnlineUsers(users); got != 6 {
+		t.Fatalf("CountDistinctOnlineUsers = %d, want 6（商业用户1 两键去重 + 商业用户2 + 自用代理10 双协议去重 + 自用代理11 + relay + 自定义）", got)
 	}
 	if got := xray.CountDistinctOnlineUsers(nil); got != 0 {
 		t.Fatalf("empty = %d, want 0", got)
@@ -1415,7 +1418,10 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 		},
 	}
 
-	raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+	// C2：派生出口与转发规则是库内真行（生产里由 services.EnsureTunnelDerivedObjects 落库），
+	// 生成器只消费它们——这里按同源助手构造两行喂给生成器。
+	obs, rules := tunnelLedgerRows(t, tunnelInb, ctx)
+	raw, err := xray.Generate([]models.Inbound{tunnelInb}, obs, rules, nil, ctx, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1425,7 +1431,7 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
-	// 1. 验证入站生成了 dokodemo-door，address 和 port 为落地端
+	// 1. 验证入站生成了 dokodemo-door，只监听（目标不进入站）
 	inbounds, ok := root["inbounds"].([]any)
 	if !ok || len(inbounds) < 2 { // tunnel + api
 		t.Fatalf("inbounds count = %d, want >= 2", len(inbounds))
@@ -1435,11 +1441,15 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 		t.Errorf("protocol = %v, want dokodemo-door", tInb["protocol"])
 	}
 	settings := asObject(t, tInb["settings"], "settings")
-	if settings["address"] != "exit-node.example.com" {
-		t.Errorf("settings.address = %v, want exit-node.example.com", settings["address"])
+	// 入站只监听：目标不写进入站（2026-09-28 起由派生 freedom 出站的 redirect 承担）
+	if _, has := settings["address"]; has {
+		t.Errorf("入站不应再携带 address（目标已挪到出站 redirect）: %v", settings)
 	}
-	if fmt.Sprintf("%v", settings["port"]) != "443" {
-		t.Errorf("settings.port = %v, want 443", settings["port"])
+	if _, has := settings["port"]; has {
+		t.Errorf("入站不应再携带 port（目标已挪到出站 redirect）: %v", settings)
+	}
+	if settings["followRedirect"] != false {
+		t.Errorf("followRedirect = %v, want false", settings["followRedirect"])
 	}
 
 	// 2. 验证自动派生了 out-tunnel-10001 的 freedom 出站并包含 proxyProtocol: 2
@@ -1465,15 +1475,18 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 	if fmt.Sprintf("%v", obSettings["proxyProtocol"]) != "2" {
 		t.Errorf("proxyProtocol = %v, want 2", obSettings["proxyProtocol"])
 	}
+	if obSettings["redirect"] != "exit-node.example.com:443" {
+		t.Errorf("redirect = %v, want exit-node.example.com:443（目标由出站承担）", obSettings["redirect"])
+	}
 
 	// 3. 验证直通路由规则已注入
 	routing := asObject(t, root["routing"], "routing")
-	rules, ok := routing["rules"].([]any)
+	genRules, ok := routing["rules"].([]any)
 	if !ok {
 		t.Fatalf("missing routing.rules")
 	}
 	var tunnelRule map[string]any
-	for _, r := range rules {
+	for _, r := range genRules {
 		rm := asObject(t, r, "rule")
 		if rm["outboundTag"] == "out-tunnel-10001" {
 			tunnelRule = rm
@@ -1573,7 +1586,8 @@ func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
 		Enabled:       true,
 	}
 
-	raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, nil, "", "")
+	obs, rules := tunnelLedgerRows(t, tunnelInb, nil)
+	raw, err := xray.Generate([]models.Inbound{tunnelInb}, obs, rules, nil, nil, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1586,8 +1600,22 @@ func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
 	inbounds := root["inbounds"].([]any)
 	tInb := asObject(t, inbounds[0], "inbounds[0]")
 	settings := asObject(t, tInb["settings"], "settings")
-	if settings["address"] != "198.51.100.2" || fmt.Sprintf("%v", settings["port"]) != "8443" {
-		t.Errorf("manual target = %v:%v, want 198.51.100.2:8443", settings["address"], settings["port"])
+	if _, has := settings["address"]; has {
+		t.Errorf("入站不应再携带 address（手动目标同样由出站 redirect 承担）: %v", settings)
+	}
+	outbounds := root["outbounds"].([]any)
+	var obSettings map[string]any
+	for _, ob := range outbounds {
+		m := asObject(t, ob, "outbound")
+		if m["tag"] == "out-tunnel-manual" {
+			obSettings = asObject(t, m["settings"], "outbound settings")
+		}
+	}
+	if obSettings == nil {
+		t.Fatalf("未找到 out-tunnel-manual 派生出口")
+	}
+	if obSettings["redirect"] != "198.51.100.2:8443" {
+		t.Errorf("redirect = %v, want 198.51.100.2:8443", obSettings["redirect"])
 	}
 }
 
@@ -1654,7 +1682,8 @@ func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
 			},
 		},
 	}
-	edgeConfig, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+	edgeObs, edgeRules := tunnelLedgerRows(t, tunnelInb, ctx)
+	edgeConfig, err := xray.Generate([]models.Inbound{tunnelInb}, edgeObs, edgeRules, nil, ctx, "", "")
 	if err != nil {
 		t.Fatalf("Generate edgeConfig failed: %v", err)
 	}
@@ -1754,7 +1783,28 @@ func TestGenerateConfig_ChannelSocks5AndHTTPAndTunnel(t *testing.T) {
 		},
 	}
 
-	raw, err := xray.Generate(inbounds, nil, nil, nil, nil, "", "")
+	// C2：通道直通（dokodemo-door）的派生出口与转发规则同为库内真行
+	var obs []models.ServerOutbound
+	var rules []models.ServerRoutingRule
+	for _, inb := range inbounds {
+		if inb.Protocol == models.ProtocolDokodemo {
+			o, r := tunnelLedgerRows(t, inb, nil)
+			obs = append(obs, o...)
+			rules = append(rules, r...)
+		}
+	}
+	ctx := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{
+			101: {1},
+			102: {1},
+		},
+		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
+			1: {
+				{ID: 1, Username: "testuser", Password: "testpass"},
+			},
+		},
+	}
+	raw, err := xray.Generate(inbounds, obs, rules, nil, ctx, "", "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1800,3 +1850,222 @@ func TestGenerateConfig_ChannelSocks5AndHTTPAndTunnel(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerate_ForwardUserAccountsInjection(t *testing.T) {
+	inbounds := []models.Inbound{
+		{
+			ID:       10,
+			Tag:      "socks-fwd",
+			Protocol: "socks",
+			Port:     20808,
+			Type:     models.InboundTypeForward,
+			Enabled:  true,
+		},
+		{
+			ID:       11,
+			Tag:      "http-fwd",
+			Protocol: "http",
+			Port:     20809,
+			Type:     models.InboundTypeForward,
+			Enabled:  true,
+		},
+	}
+
+	ctx := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{
+			10: {5},
+			11: {5},
+		},
+		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
+			5: {
+				{ID: 101, Username: "forward_alice", Password: "alice_pass_123"},
+				{ID: 102, Username: "forward_bob", Password: "bob_pass_456"},
+			},
+		},
+	}
+
+	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbList := parsed["inbounds"].([]any)
+	// socks + http + api
+	if len(inbList) != 3 {
+		t.Fatalf("expected 3 inbounds, got %d", len(inbList))
+	}
+
+	// 验证 socks 入站 accounts
+	socksInb := inbList[0].(map[string]any)
+	socksSettings := socksInb["settings"].(map[string]any)
+	if socksSettings["auth"] != "password" {
+		t.Errorf("socks auth want password, got %v", socksSettings["auth"])
+	}
+	accounts := socksSettings["accounts"].([]any)
+	if len(accounts) != 2 {
+		t.Fatalf("expected 2 accounts in socks, got %d", len(accounts))
+	}
+	acc0 := accounts[0].(map[string]any)
+	if acc0["user"] != "forward_alice" || acc0["pass"] != "alice_pass_123" || acc0["email"] != "fu101.i10@panel.local" {
+		t.Errorf("socks account[0] mismatch: %+v", acc0)
+	}
+
+	// 验证 http 入站 accounts
+	httpInb := inbList[1].(map[string]any)
+	httpSettings := httpInb["settings"].(map[string]any)
+	if httpSettings["auth"] != "password" {
+		t.Errorf("http auth want password, got %v", httpSettings["auth"])
+	}
+	httpAccounts := httpSettings["accounts"].([]any)
+	if len(httpAccounts) != 2 {
+		t.Fatalf("expected 2 accounts in http, got %d", len(httpAccounts))
+	}
+	hacc1 := httpAccounts[1].(map[string]any)
+	if hacc1["user"] != "forward_bob" || hacc1["pass"] != "bob_pass_456" || hacc1["email"] != "fu102.i11@panel.local" {
+		t.Errorf("http account[1] mismatch: %+v", hacc1)
+	}
+
+	// 真实 xray -test 校验
+	xrayBin := filepath.Join("..", "..", "..", "tools", "xray-windows-64", "xray.exe")
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmp := filepath.Join(t.TempDir(), "fwd_config.json")
+		if err := os.WriteFile(tmp, raw, 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("xray -test 校验转发配置失败: %v, out: %s", err, string(out))
+		}
+	}
+}
+
+func TestGenerate_ForwardUserAccountsOverwriteStaticAccounts(t *testing.T) {
+	// 验证：即使入站的 SettingsJSON 含有残留静态账密（如 admin/secret123），
+	// 经由接入点派生授权组后，静态账密绝对不可残留。
+	// 同时验证严格物理跳过：无有效转发用户的入站绝不注入 Xray 配置（防止空 accounts 沦为免密开放代理）。
+	inbounds := []models.Inbound{
+		{
+			ID:           20,
+			Tag:          "http-with-dummy",
+			Protocol:     "http",
+			Port:         20810,
+			Type:         models.InboundTypeForward,
+			SettingsJSON: `{"auth":"password","accounts":[{"user":"admin","pass":"secret123"}]}`,
+			Enabled:      true,
+		},
+		{
+			ID:           21,
+			Tag:          "http-empty-group",
+			Protocol:     "http",
+			Port:         20811,
+			Type:         models.InboundTypeForward,
+			SettingsJSON: `{"auth":"password","accounts":[{"user":"admin","pass":"secret123"}]}`,
+			Enabled:      true,
+		},
+	}
+
+	ctx := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{
+			20: {8},
+			21: {9}, // 无有效转发用户的权限组
+		},
+		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
+			8: {
+				{ID: 201, Username: "real_user", Password: "real_password_888"},
+			},
+		},
+	}
+
+	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	rawStr := string(raw)
+	if strings.Contains(rawStr, "admin") || strings.Contains(rawStr, "secret123") {
+		t.Fatalf("生成的 Xray 配置中依然残留默认静态账密 admin/secret123: %s", rawStr)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbList := parsed["inbounds"].([]any)
+	// 只有 http-with-dummy (0) 和 api (1)！
+	// http-empty-group 因有效账号数为 0，必须被严格物理跳过（防止 Xray 监听开放代理端口）
+	if len(inbList) != 2 {
+		t.Fatalf("期望 2 个入站 (包含 api)，实际得到: %d 个入站", len(inbList))
+	}
+	inb0 := inbList[0].(map[string]any)
+	if inb0["tag"] != "http-with-dummy" {
+		t.Errorf("入站 0 tag 期望 http-with-dummy，实际: %v", inb0["tag"])
+	}
+	s0 := inb0["settings"].(map[string]any)
+	acc0 := s0["accounts"].([]any)
+	if len(acc0) != 1 {
+		t.Fatalf("期望 1 个有效转发用户，实际得到: %d", len(acc0))
+	}
+	userMap := acc0[0].(map[string]any)
+	if userMap["user"] != "real_user" || userMap["pass"] != "real_password_888" {
+		t.Errorf("转发用户账密不符合预期: %+v", userMap)
+	}
+
+	// 确认 http-empty-group 确实未注入
+	if strings.Contains(rawStr, "http-empty-group") {
+		t.Fatalf("无有效用户的入站 http-empty-group 绝不应出现在 Xray 配置中: %s", rawStr)
+	}
+}
+
+func TestGenerate_ForwardUserMultipleAccessPointsUnion(t *testing.T) {
+	// 验证：单个入站挂接多个接入点（对应多个权限组），账号能够聚合注入并自动去重
+	inbounds := []models.Inbound{
+		{
+			ID:       30,
+			Tag:      "socks-shared",
+			Protocol: "socks",
+			Port:     20812,
+			Type:     models.InboundTypeForward,
+			Enabled:  true,
+		},
+	}
+
+	ctx := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{
+			30: {10, 11}, // 挂载两个权限组
+		},
+		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
+			10: {
+				{ID: 301, Username: "spider_a", Password: "pass_a"},
+			},
+			11: {
+				{ID: 302, Username: "spider_b", Password: "pass_b"},
+			},
+		},
+	}
+
+	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbList := parsed["inbounds"].([]any)
+	inb0 := inbList[0].(map[string]any)
+	s0 := inb0["settings"].(map[string]any)
+	accounts := s0["accounts"].([]any)
+	if len(accounts) != 2 {
+		t.Fatalf("多权限组聚合期望 2 个账号，实际得到 %d", len(accounts))
+	}
+}
+
+

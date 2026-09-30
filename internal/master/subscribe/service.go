@@ -544,7 +544,7 @@ func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.
 
 	// 四层直通管道寻路：若目标入站为 tunnel，沿 target_inbound_id 递归追溯终结承载协议的入站（VLESS）
 	visited := make(map[uint64]bool)
-	for targetInb.Type == models.InboundTypeTunnel {
+	for targetInb.Type == models.InboundTypeTunnel || (targetInb.Type == models.InboundTypeForward && targetInb.Protocol == models.ProtocolDokodemo) {
 		visited[targetInb.ID] = true
 		if targetInb.TargetInboundID == nil || *targetInb.TargetInboundID == 0 {
 			// 管道草稿/未连线，不产出半成品节点
@@ -576,7 +576,7 @@ func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.
 	}
 
 	// 若经过了四层直通管道，将连接 IP 与端口覆写为【首跳前置机】的对外分享地址与监听端口
-	if firstHopInb.Type == models.InboundTypeTunnel {
+	if firstHopInb.Type == models.InboundTypeTunnel || (firstHopInb.Type == models.InboundTypeForward && firstHopInb.Protocol == models.ProtocolDokodemo) {
 		entryHost, entryPort := ShareAddrOf(&firstHopSrv, &firstHopInb)
 		dto.ServerHost = entryHost
 		dto.ServerPort = entryPort

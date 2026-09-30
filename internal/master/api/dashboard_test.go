@@ -394,6 +394,80 @@ func TestAdminDashboardRelayInboundBreakdown(t *testing.T) {
 	}
 }
 
+// TestAdminDashboardForwardUserTraffic 验证自用代理流量计入今日总流量与服务器承载分布，消除口径不一致，且不混入商业用户套餐排行。
+func TestAdminDashboardForwardUserTraffic(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := models.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&models.Setting{Key: "business_timezone", Value: "UTC"}).Error; err != nil {
+		t.Fatalf("seed timezone: %v", err)
+	}
+
+	now := time.Now()
+	periodStart := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+
+	srv := models.Server{Name: "代理服务器", Host: "proxy.host", Status: 1, NodeID: "node-proxy-1"}
+	if err := db.Create(&srv).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	fwdInb := models.Inbound{
+		ServerID: srv.ID, Tag: "in-socks-1", Protocol: "socks", Port: 1080,
+		Type: models.InboundTypeForward, Enabled: true, Ratio: 1.0,
+	}
+	if err := db.Create(&fwdInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	fu := models.ForwardUser{
+		Username:          "dev_proxy",
+		Password:          "sec",
+		PermissionGroupID: 1,
+		Enabled:           true,
+	}
+	if err := db.Create(&fu).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 写入流水：自用代理流量 (user_id = ForwardUserTrafficUserID(fu.ID))：上行 25000，下行 25000，总计 50000
+	if err := db.Create(&models.TrafficLog{
+		UserID:      models.ForwardUserTrafficUserID(fu.ID),
+		InboundID:   fwdInb.ID,
+		UpBytes:     25000,
+		DownBytes:   25000,
+		BilledUp:    25000,
+		BilledDown:  25000,
+		PeriodStart: periodStart,
+		PeriodEnd:   now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	data := dashReq(t, db, "?rank_period=today")
+
+	// 1. 顶部今日总流量应正确体现 50000，消除 0/5GB vs 50GB 口径矛盾
+	if data.Summary.TodayTrafficTotal != 50000 {
+		t.Fatalf("today traffic total = %d, want 50000 (must count forward user proxy traffic)", data.Summary.TodayTrafficTotal)
+	}
+
+	// 2. 服务器承载分布必须有且为 50000 (100%)
+	if len(data.ServerBreakdown) != 1 || data.ServerBreakdown[0].TotalBytes != 50000 {
+		t.Fatalf("server breakdown = %+v, want srv total 50000", data.ServerBreakdown)
+	}
+	if data.ServerBreakdown[0].Percent < 99.9 {
+		t.Fatalf("srv percent = %f, want 100%%", data.ServerBreakdown[0].Percent)
+	}
+
+	// 3. 商业用户排行榜必须为空（自用代理账号不混入）
+	if len(data.UserRank) != 0 {
+		t.Fatalf("user_rank must be empty for forward users, got: %+v", data.UserRank)
+	}
+}
+
 // TestAdminDashboardRealtime 验证轻量实时大盘接口从 Hub 纯内存读取网速与矩阵：
 func TestAdminDashboardRealtime(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})

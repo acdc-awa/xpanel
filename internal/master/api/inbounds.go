@@ -13,6 +13,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -34,7 +35,7 @@ type inboundView struct {
 	TotalGB            int64      `json:"total_gb"`
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
-	Type               string     `json:"type"`                    // user / relay / tunnel
+	Type               string     `json:"type"`                    // user / relay / tunnel / forward
 	InternalUUID       string     `json:"internal_uuid,omitempty"` // relay 只读（节点上报）
 	TargetInboundID    *uint64    `json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
@@ -50,6 +51,8 @@ type inboundView struct {
 	SharePath          string     `json:"share_path"`              // 订阅 WS/XHTTP Path 覆写
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`    // 订阅跳过证书校验
 	LayerID            *uint64    `json:"layer_id,omitempty"`      // 所属对外接入层（空/0 = 直连自持端点）
+	Remark             string     `json:"remark,omitempty"`        // 入站备注/通道名称
+	TrafficReset       string     `json:"traffic_reset,omitempty"` // 重置周期
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
@@ -61,13 +64,15 @@ type inboundForm struct {
 	Protocol           string     `json:"protocol" binding:"required"`
 	Port               int        `json:"port" binding:"required,min=1,max=65535"`
 	Listen             string     `json:"listen"`
+	Remark             string     `json:"remark"`          // 入站备注/通道名称
+	TrafficReset       string     `json:"traffic_reset"`   // 重置周期 (never / daily / weekly / monthly)
 	SettingsJSON       string     `json:"settings_json"`   // 协议 settings（透传）
 	StreamSettings     string     `json:"stream_settings"` // 传输 streamSettings（透传）
 	Sniffing           string     `json:"sniffing"`        // 嗅探（透传）
 	Ratio              float64    `json:"ratio"`
 	TotalGB            int64      `json:"total_gb"`              // J9：入站总流量上限（GB，0=不限）
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
-	Type               string     `json:"type"`                  // user / relay / tunnel（空 = user）
+	Type               string     `json:"type"`                  // user / relay / tunnel / forward
 	TargetInboundID    *uint64    `json:"target_inbound_id"`     // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address"`        // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port"`           // 手动指定的外部目标端口
@@ -82,6 +87,22 @@ type inboundForm struct {
 	SharePath          string     `json:"share_path"`
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`
 	LayerID            *uint64    `json:"layer_id"` // 所属对外接入层（nil/0 = 直连；仅同一服务器的层有效）
+}
+
+func normalizeInboundType(protocol, currentType string) string {
+	switch protocol {
+	case models.ProtocolDokodemo:
+		return models.InboundTypeTunnel
+	case models.ProtocolSocks, models.ProtocolHTTP:
+		return models.InboundTypeForward
+	case models.ProtocolVless:
+		if currentType == models.InboundTypeRelay {
+			return models.InboundTypeRelay
+		}
+		return models.InboundTypeUser
+	default:
+		return models.InboundTypeUser
+	}
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
@@ -103,6 +124,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
 		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
 		LayerID: i.LayerID,
+		Remark:  i.Remark, TrafficReset: i.TrafficReset,
 	}
 }
 
@@ -114,19 +136,32 @@ func (d *Deps) AdminInbounds(c *gin.Context) {
 			q = q.Where("server_id = ?", id)
 		}
 	}
+	if typ := c.Query("type"); typ != "" {
+		q = q.Where("type = ?", typ)
+	}
 	var list []models.Inbound
 	if err := q.Order("id DESC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
+
+	serverMap := make(map[uint64]string)
+	if len(list) > 0 {
+		var sids []uint64
+		for _, item := range list {
+			sids = append(sids, item.ServerID)
+		}
+		var servers []models.Server
+		d.DB.Where("id IN ?", sids).Find(&servers)
+		for _, s := range servers {
+			serverMap[s.ID] = s.Name
+		}
+	}
+
 	items := make([]inboundView, 0, len(list))
 	for i := range list {
-		serverName := ""
-		var srv models.Server
-		if err := d.DB.First(&srv, list[i].ServerID).Error; err == nil {
-			serverName = srv.Name
-		}
-		items = append(items, toInboundView(&list[i], serverName))
+		v := toInboundView(&list[i], serverMap[list[i].ServerID])
+		items = append(items, v)
 	}
 	util.OK(c, gin.H{"items": items})
 }
@@ -146,11 +181,16 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	// VLESS Encryption（vlessenc 安全层）保存期校验（一期仅转发入站）
-	effType := req.Type
-	if effType == "" {
-		effType = models.InboundTypeUser
+
+
+	if req.Type != "" && !validInboundType(req.Type) {
+		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
+		return
 	}
+
+	// 协议与类型权威归一化
+	req.Type = normalizeInboundType(req.Protocol, req.Type)
+	effType := req.Type
 	if effType == models.InboundTypeTunnel {
 		req.Protocol = models.ProtocolDokodemo
 	}
@@ -162,8 +202,16 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / dokodemo-door）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / dokodemo-door / socks / http）")
 		return
+	}
+	if req.Protocol == models.ProtocolSocks || req.Protocol == models.ProtocolHTTP {
+		var s map[string]any
+		if json.Unmarshal([]byte(req.SettingsJSON), &s) == nil {
+			delete(s, "accounts")
+			clean, _ := json.Marshal(s)
+			req.SettingsJSON = string(clean)
+		}
 	}
 	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
 		util.BadRequest(c, "入站标签需为 1-64 字符")
@@ -173,10 +221,6 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND tag = ?", req.ServerID, req.Tag).Count(&tagCnt)
 	if tagCnt > 0 {
 		util.BadRequest(c, "该服务器上已存在同名入站标签")
-		return
-	}
-	if req.Type != "" && !validInboundType(req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel")
 		return
 	}
 	// 目标存在性校验；acceptProxyProtocol 配对挪到主记录写库成功之后执行，
@@ -241,13 +285,19 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "该服务器上端口已被占用")
 		return
 	}
+	resetPolicy := strings.ToLower(strings.TrimSpace(req.TrafficReset))
+	if resetPolicy == "" {
+		resetPolicy = "never"
+	}
 	inb := models.Inbound{
 		ServerID: req.ServerID, Tag: req.Tag, Protocol: req.Protocol,
 		Port: req.Port, Listen: req.Listen,
+		Remark: strings.TrimSpace(req.Remark),
+		TrafficReset: resetPolicy,
 		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
 		Sniffing: req.Sniffing, Ratio: req.Ratio,
 		Total: req.TotalGB, ExpiryTime: utcPtr(req.ExpiryTime), Enabled: true,
-		Type:   req.Type,
+		Type:              req.Type,
 		TargetInboundID: req.TargetInboundID, TargetAddress: req.TargetAddress, TargetPort: req.TargetPort,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
@@ -283,8 +333,24 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.ServerError(c, "创建失败")
 		return
 	}
+	// C2：直通的派生出口 tag 早查晚截——落库前先拒绝撞名（避免建出一条永远连不上的直通），
+	// 落库后立刻对账把派生出口与转发规则建出来。对账失败即回滚刚建的入站（fail-closed）。
+	if services.IsTunnelInbound(&inb) {
+		if msg := d.tunnelOutboundTagConflict(inb.ServerID, inb.Tag, 0); msg != "" {
+			_ = d.DB.Delete(&models.Inbound{}, inb.ID).Error
+			util.BadRequest(c, msg)
+			return
+		}
+		if msg := d.ensureTunnelDerived(inb.ServerID); msg != "" {
+			_ = d.DB.Delete(&models.Inbound{}, inb.ID).Error
+			_ = services.EnsureTunnelDerivedObjects(d.DB, inb.ServerID)
+			util.BadRequest(c, msg)
+			return
+		}
+	}
 	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
-	if ensureTarget != nil {
+	// 仅当直通出站确实发送 PROXY Protocol（TunnelSendProxyProtocol 为 true）时才确保落地入站开启
+	if ensureTarget != nil && xray.TunnelSendProxyProtocol(&inb) {
 		d.ensureTargetAcceptProxyProtocol(ensureTarget)
 	}
 	// GORM 零值陷阱：Ratio 带 default:1，Create 时显式 0（免费入站）会被当零值
@@ -315,15 +381,13 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
-	if inb.Type == models.InboundTypeChannel {
-		util.BadRequest(c, "该入站由独立通道托管，请前往「转发与独立代理」页面进行配置修改")
-		return
-	}
 	var req struct {
 		Tag                *string         `json:"tag"`
 		Protocol           *string         `json:"protocol"`
 		Port               *int            `json:"port"`
 		Listen             *string         `json:"listen"`
+		Remark             *string         `json:"remark"`
+		TrafficReset       *string         `json:"traffic_reset"`
 		SettingsJSON       *string         `json:"settings_json"`
 		StreamSettings     *string         `json:"stream_settings"`
 		Sniffing           *string         `json:"sniffing"`
@@ -370,20 +434,33 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	// VLESS Encryption（vlessenc 安全层）保存期校验：按本次请求生效的 protocol/type 判定
 	//（一期仅转发入站；user→relay 切换放行、relay→user 携带 encryption 则拒绝）
-	effType := inb.Type
-	if req.Type != nil {
-		effType = *req.Type
-	}
 	effProto := inb.Protocol
 	if req.Protocol != nil {
 		effProto = *req.Protocol
-	} else if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo {
-		effProto = models.ProtocolDokodemo
 	}
+	effType := inb.Type
+	if req.Type != nil {
+		if !validInboundType(*req.Type) {
+			util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
+			return
+		}
+		effType = *req.Type
+	}
+	effType = normalizeInboundType(effProto, effType)
+
 	if effType != models.InboundTypeTunnel {
 		if err := checkVlessDecryption(effProto, effType, sj); err != nil {
 			util.BadRequest(c, err.Error())
 			return
+		}
+	}
+
+	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP {
+		var s map[string]any
+		if json.Unmarshal([]byte(sj), &s) == nil {
+			delete(s, "accounts")
+			clean, _ := json.Marshal(s)
+			sj = string(clean)
 		}
 	}
 	// U15：更新校验闭环——tag 非空/同服务器唯一 / 协议白名单 / CertID 存在性
@@ -401,7 +478,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / dokodemo-door）")
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / dokodemo-door / socks / http）")
 		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
@@ -410,7 +487,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != nil && !validInboundType(*req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel")
+		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
 		return
 	}
 	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {
@@ -481,7 +558,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		updates["listen"] = *req.Listen
 	}
 	if req.SettingsJSON != nil {
-		updates["settings_json"] = *req.SettingsJSON
+		updates["settings_json"] = sj
+		inb.SettingsJSON = sj
 	}
 	if req.StreamSettings != nil {
 		updates["stream_settings"] = *req.StreamSettings
@@ -496,12 +574,17 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		updates["total"] = *req.TotalGB
 	}
 	if req.ExpiryTime != nil && len(req.ExpiryTime) > 0 && string(req.ExpiryTime) != "null" {
-		var t time.Time
-		if err := json.Unmarshal(req.ExpiryTime, &t); err != nil {
-			util.BadRequest(c, "到期时间格式错误（需 RFC3339，如 2026-12-31T23:59:59Z）")
-			return
+		var s string
+		if err := json.Unmarshal(req.ExpiryTime, &s); err == nil && strings.TrimSpace(s) == "" {
+			updates["expiry_time"] = nil
+		} else {
+			var t time.Time
+			if err := json.Unmarshal(req.ExpiryTime, &t); err != nil {
+				util.BadRequest(c, "到期时间格式错误（需 RFC3339，如 2026-12-31T23:59:59Z）")
+				return
+			}
+			updates["expiry_time"] = t.UTC()
 		}
-		updates["expiry_time"] = t.UTC()
 	} else if req.ExpiryTime != nil && len(req.ExpiryTime) > 0 {
 		updates["expiry_time"] = nil // 显式 null = 清空到期时间
 	}
@@ -518,11 +601,12 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		updates["internal_uuid"] = *req.InternalUUID
 		inb.InternalUUID = *req.InternalUUID
 	}
-	if req.Type != nil {
-		updates["type"] = *req.Type
+
+	if req.Type != nil || req.Protocol != nil {
+		updates["type"] = effType
 		// 手动修改 type：清除自动标 relay 的历史（PreviousType），避免后续解绑引用错误回退
 		updates["previous_type"] = ""
-		if *req.Type == models.InboundTypeRelay && inb.InternalUUID == "" {
+		if effType == models.InboundTypeRelay && inb.InternalUUID == "" {
 			temp := inb
 			temp.Type = models.InboundTypeRelay
 			if err := d.ensureInternalUUID(&temp); err != nil {
@@ -531,10 +615,11 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			}
 			updates["internal_uuid"] = temp.InternalUUID
 			inb.InternalUUID = temp.InternalUUID
-		} else if *req.Type == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
+		} else if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
 			updates["protocol"] = models.ProtocolDokodemo
 			inb.Protocol = models.ProtocolDokodemo
 		}
+		inb.Type = effType
 	}
 	// 目标存在性校验；acceptProxyProtocol 配对挪到主记录写库成功之后执行，
 	// 避免后续校验失败（400）时落地入站已被改写并重推配置。
@@ -611,14 +696,35 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			updates["layer_id"] = *req.LayerID
 		}
 	}
+	if req.Remark != nil {
+		updates["remark"] = strings.TrimSpace(*req.Remark)
+		inb.Remark = strings.TrimSpace(*req.Remark)
+	}
+	if req.TrafficReset != nil {
+		resetPolicy := strings.ToLower(strings.TrimSpace(*req.TrafficReset))
+		if resetPolicy == "" {
+			resetPolicy = "never"
+		}
+		updates["traffic_reset"] = resetPolicy
+		inb.TrafficReset = resetPolicy
+	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新失败")
 			return
 		}
 	}
+	// C2：直通的目标变更 / tag 改名 / 启停都会改变它的派生出口与转发规则，这里统一对账
+	// （改名级联的唯一落点：对账按 owner_inbound_id 认出旧行，把 tag 与规则的 inbound_tag 一起改写）。
+	// 对账失败只记日志：入站已经改完了，此时拒绝只会让状态更不一致，下次推送/打开路由页还会再对账。
+	// 先重读一次：上面的 Updates 走 map，内存里的 inb 可能还是旧值（例如本次刚把 type 改成 tunnel）。
+	_ = d.DB.First(&inb, id)
+	if services.IsTunnelInbound(&inb) {
+		d.ensureTunnelDerived(inb.ServerID)
+	}
 	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
-	if ensureTarget != nil {
+	// 仅当直通出站确实发送 PROXY Protocol（TunnelSendProxyProtocol 为 true）时才确保落地入站开启
+	if ensureTarget != nil && xray.TunnelSendProxyProtocol(&inb) {
 		d.ensureTargetAcceptProxyProtocol(ensureTarget)
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
@@ -646,14 +752,9 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
-	// 独立通道保护：由 ProxyChannel 托管的入站禁止从底层直接删除，防止产生孤儿通道
-	if inb.Type == models.InboundTypeChannel {
-		util.BadRequest(c, "该入站由独立通道托管，无法直接删除，请前往「转发与独立代理」页面删除对应通道")
-		return
-	}
 	// 四层直通落地保护：被直通管道（tunnel）引用为落地目标的入站禁止删除
 	var tunnelCnt int64
-	d.DB.Model(&models.Inbound{}).Where("type = ? AND target_inbound_id = ?", models.InboundTypeTunnel, id).Count(&tunnelCnt)
+	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolDokodemo, id).Count(&tunnelCnt)
 	if tunnelCnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(tunnelCnt, 10)+" 个四层直通管道引用为落地目标，无法删除，请先解除直通管道绑定")
 		return
@@ -669,11 +770,18 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(apCnt, 10)+" 个用户接入点直连引用，无法删除，请先解除接入点连线")
 		return
 	}
-	// 盒内路由规则引用保护：规则 InboundTag 为 JSON 数组或逗号/换行/分号分隔，与生成器同源解析精确匹配
+	// 盒内路由规则引用保护：规则 InboundTag 为 JSON 数组或逗号/换行/分号分隔，与生成器同源解析精确匹配。
+	// C2：该入站自己名下的派生直通规则不算"管理员引用"——它是直通的附属物，随直通一起删
+	// （否则每个直通都会被自己派生出来的规则挡住，永远删不掉）。
 	var rules []models.ServerRoutingRule
 	if err := d.DB.Where("server_id = ?", inb.ServerID).Find(&rules).Error; err == nil {
 		ruleCnt := int64(0)
 		for _, r := range rules {
+			// 派生规则（owner > 0）不算"管理员引用"：它是某个直通的附属物，随直通一起清理。
+			// 不排除的话，每个直通都会被自己派生出来的规则挡住，永远删不掉。
+			if r.OwnerInboundID > 0 {
+				continue
+			}
 			for _, tg := range xray.ParseStringList(r.InboundTag) {
 				if tg == inb.Tag {
 					ruleCnt++
@@ -687,6 +795,13 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		}
 	}
 	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		// C2：连带删除该直通名下的派生出口与派生规则（出站删除还会级联规则，这里显式两清）
+		if err := tx.Where("owner_inbound_id = ?", id).Delete(&models.ServerOutbound{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("owner_inbound_id = ?", id).Delete(&models.ServerRoutingRule{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&models.Inbound{}, id).Error
 	}); err != nil {
 		util.ServerError(c, "删除失败")
@@ -713,11 +828,6 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
-	// P2-6：通道托管入站禁止通过入站 toggle 直接操作，防止与通道状态机脱节
-	if inb.Type == models.InboundTypeChannel {
-		util.BadRequest(c, "该入站由独立通道托管，无法直接切换状态，请前往「转发与独立代理」页面管理对应通道")
-		return
-	}
 	// U4：停用被引用的落地入站同样禁止（生成器会产出指向不存在入站的 vnext）
 	// P2-7：停用被已启用的四层直通管道引用的入站禁止
 	if inb.Enabled && (d.refInboundProtected(c, id) || d.tunnelLandingProtected(c, id)) {
@@ -727,6 +837,10 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 	if err := d.DB.Model(&inb).Update("enabled", inb.Enabled).Error; err != nil {
 		util.ServerError(c, "更新失败")
 		return
+	}
+	// C2：直通停用/启用要连带派生出口与转发规则的 enabled（历史上它们只随启用入站生成）
+	if services.IsTunnelInbound(&inb) {
+		d.ensureTunnelDerived(inb.ServerID)
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
 		pushFail(c, inb.ServerID, err)
@@ -749,7 +863,7 @@ func (d *Deps) refInboundProtected(c *gin.Context, inbID uint64) bool {
 // tunnelLandingProtected 检查入站是否被已启用的四层直通管道引用为落地目标（P2-7：停用保护）。
 func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
 	var cnt int64
-	d.DB.Model(&models.Inbound{}).Where("type = ? AND target_inbound_id = ? AND enabled = ?", models.InboundTypeTunnel, inbID, true).Count(&cnt)
+	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolDokodemo, inbID, true).Count(&cnt)
 	if cnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(cnt, 10)+" 个已启用的四层直通管道引用为落地目标，无法停用，请先停用或解除管道连线")
 		return true
@@ -774,8 +888,20 @@ func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
 	if ssMap == nil {
 		ssMap = make(map[string]any)
 	}
-	if app, _ := ssMap["acceptProxyProtocol"].(bool); !app {
+	app, _ := ssMap["acceptProxyProtocol"].(bool)
+	var tcpS map[string]any
+	if t, ok := ssMap["tcpSettings"].(map[string]any); ok {
+		tcpS = t
+	}
+	tcpApp, _ := tcpS["acceptProxyProtocol"].(bool)
+
+	if !app || !tcpApp {
 		ssMap["acceptProxyProtocol"] = true
+		if tcpS == nil {
+			tcpS = make(map[string]any)
+			ssMap["tcpSettings"] = tcpS
+		}
+		tcpS["acceptProxyProtocol"] = true
 		newSS, err := json.Marshal(ssMap)
 		if err != nil {
 			log.Printf("ensureTargetAcceptProxyProtocol: 入站 %d(%s) streamSettings 序列化失败: %v", targetInb.ID, targetInb.Tag, err)
@@ -837,15 +963,15 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持 VLESS 与四层直通 dokodemo-door；vmess/trojan/ss 订阅导出未实现，
-// 创建时拒绝避免"能建但订阅静默丢弃"，同时防拼写错误/未知协议卡出不可能存在的配置）。
+// validInboundProtocol 入站协议白名单（支持 VLESS、四层直通 dokodemo-door、SOCKS5 与 HTTP；
+// vmess/trojan/ss 订阅导出未实现，创建时拒绝避免"能建但订阅静默丢弃"，同时防拼写错误/未知协议卡出不可能存在的配置）。
 func validInboundProtocol(p string) bool {
-	return p == "vless" || p == "dokodemo-door"
+	return p == models.ProtocolVless || p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP
 }
 
 func validInboundType(t string) bool {
 	switch t {
-	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeTunnel:
+	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeTunnel, models.InboundTypeForward:
 		return true
 	}
 	return false
@@ -870,6 +996,8 @@ func validShareSecurity(s string) bool {
 	}
 	return false
 }
+
+
 
 // pushFail 配置生成/待推送失败时向客户端上抛（U19：不再静默打日志返回成功——
 // 变更已入库但节点侧未生效，必须让管理员知道并处理）。
@@ -939,6 +1067,20 @@ func formToInbound(f *inboundForm) models.Inbound {
 		Port: f.Port, Listen: f.Listen,
 		SettingsJSON: f.SettingsJSON, StreamSettings: f.StreamSettings,
 		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
+		Total: f.TotalGB, ExpiryTime: f.ExpiryTime,
+		Remark: f.Remark, TrafficReset: f.TrafficReset,
+		TargetInboundID:   f.TargetInboundID,
+		TargetAddress:     f.TargetAddress,
+		TargetPort:        f.TargetPort,
+		ShareAddrStrategy: f.ShareAddrStrategy,
+		ShareAddr:          f.ShareAddr,
+		SharePort:          f.SharePort,
+		ShareSecurity:      f.ShareSecurity,
+		ShareSNI:           f.ShareSNI,
+		ShareHost:          f.ShareHost,
+		SharePath:          f.SharePath,
+		ShareAllowInsecure: f.ShareAllowInsecure,
+		LayerID:            f.LayerID,
 	}
 	if f.Type != "" {
 		inb.Type = f.Type

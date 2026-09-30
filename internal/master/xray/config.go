@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -33,9 +35,27 @@ func UserEmailFor(u *models.User, inboundID uint64) string {
 }
 
 var (
-	userEmailForRe    = regexp.MustCompile(`^u(\d+)\.i(\d+)@panel\.local$`)
-	userEmailLegacyRe = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
+	userEmailForRe     = regexp.MustCompile(`^u(\d+)\.i(\d+)@panel\.local$`)
+	userEmailLegacyRe  = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
+	forwardUserEmailRe = regexp.MustCompile(`^fu(\d+)\.i(\d+)@panel\.local$`)
 )
+
+// ParseForwardUserEmail 反解 ForwardUser 统计键：fu<fuid>.i<iid>@panel.local → (forwardUserID, inboundID, ok)。
+func ParseForwardUserEmail(email string) (forwardUserID, inboundID uint64, ok bool) {
+	e := strings.ToLower(email)
+	if m := forwardUserEmailRe.FindStringSubmatch(e); m != nil {
+		fuid, err := strconv.ParseUint(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		iid, err := strconv.ParseUint(m[2], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return fuid, iid, true
+	}
+	return 0, 0, false
+}
 
 // ParseUserEmailFor 反解 UserEmailFor 格式 → (用户ID, 入站ID)；非该格式返回 false。
 // 先小写化：xray validator 按 ToLower 建键，防手改配置注入大写后对不上。
@@ -73,19 +93,25 @@ func ParseUserEmailAny(email string) (userID, inboundID uint64, ok bool) {
 	return 0, 0, false
 }
 
-// CountDistinctOnlineUsers 按去重用户口径统计在线快照人数：面板用户按统计键反解去重
-// （按入站区分统计键后，同一用户会以每入站一个 email 出现在快照里，直接数条目会重复
-// 计人）；relay 内部账户与自定义 email 各计一（与 agent 侧旧计数口径一致）。
+// CountDistinctOnlineUsers 按去重用户口径统计在线快照人数：面板用户与自用代理用户按统计键反解去重
+// （按入站区分统计键后，同一商业用户或自用代理用户若跨入站/双协议连接，只计一人）；
+// relay 内部账户与自定义 email 各计一。
 func CountDistinctOnlineUsers(users []protocol.OnlineUserIPs) int {
 	if len(users) == 0 {
 		return 0
 	}
-	seen := make(map[uint64]struct{}, len(users))
+	seenUsers := make(map[uint64]struct{}, len(users))
+	seenForwardUsers := make(map[uint64]struct{}, len(users))
 	n := 0
 	for _, u := range users {
 		if uid, _, ok := ParseUserEmailAny(u.Email); ok {
-			if _, dup := seen[uid]; !dup {
-				seen[uid] = struct{}{}
+			if _, dup := seenUsers[uid]; !dup {
+				seenUsers[uid] = struct{}{}
+				n++
+			}
+		} else if fuid, _, ok := ParseForwardUserEmail(u.Email); ok {
+			if _, dup := seenForwardUsers[fuid]; !dup {
+				seenForwardUsers[fuid] = struct{}{}
 				n++
 			}
 		} else {
@@ -264,21 +290,24 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !ok {
 			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
 		}
-		if target.Inbound.InternalUUID == "" {
+		if ob.Protocol == "vless" && target.Inbound.InternalUUID == "" {
 			return nil, fmt.Errorf("出站 %s 引用的落地入站 %s 未完成内部账户 setup（InternalUUID 为空）", ob.Tag, target.Inbound.Tag)
 		}
 	}
 
-	// 1. 入站：全部启用的入站 + 收集启用的四层直通管道所派生的 freedom 出站与直通路由规则
-	var tunnelOutbounds []models.ServerOutbound
-	var tunnelRoutingRules []any
+	// 1. 入站：全部启用的入站（四层直通只注入监听，派生出站与转发规则是库内真行，见 C2）
 	inboundList := []any{}
 	for _, inb := range inbounds {
 		if !inb.Enabled {
 			continue
 		}
-		if inb.Type == models.InboundTypeTunnel || (inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolDokodemo) {
-			item, obTag, err := buildTunnelInbound(&inb, ctx)
+		if inb.Type == models.InboundTypeTunnel ||
+			(inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolDokodemo) ||
+			(inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolDokodemo) {
+			// C2（2026-09-28）：直通的派生 freedom 出站（`out-<tag>`）与转发规则已落库为真行
+			// （owner_inbound_id = 该入站），本函数不再现场派生——出站随 Outbounds 参数、规则随
+			// RoutingRules 参数进来，顺序由 Priority 决定（见 mergeRoutingRules）。
+			item, err := buildTunnelInbound(&inb, ctx)
 			if err != nil {
 				return nil, fmt.Errorf("生成直通管道 %s 失败: %w", inb.Tag, err)
 			}
@@ -287,26 +316,15 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 				continue
 			}
 			inboundList = append(inboundList, item)
-			ppSettings := `{"proxyProtocol":2}`
-			if strings.Contains(inb.StreamSettings, `"proxy_protocol":false`) || strings.Contains(inb.StreamSettings, `"proxyProtocol":false`) {
-				ppSettings = `{}`
-			}
-			tunnelOutbounds = append(tunnelOutbounds, models.ServerOutbound{
-				Tag:          obTag,
-				Protocol:     "freedom",
-				SettingsJSON: ppSettings,
-				Enabled:      true,
-			})
-			tunnelRoutingRules = append(tunnelRoutingRules, map[string]any{
-				"type":        "field",
-				"inboundTag":  []string{inb.Tag},
-				"outboundTag": obTag,
-			})
 			continue
 		}
 		item, err := buildInbound(&inb, usersByTag, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
+		}
+		if item == nil {
+			// 未连线直通管道或无有效认证账号的 SOCKS/HTTP 入站，物理跳过注入 Xray 防免密开放
+			continue
 		}
 		inboundList = append(inboundList, item)
 	}
@@ -317,22 +335,21 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 	})
 	cfg["inbounds"] = inboundList
 
-	// 2. 出站：模板基础出站 + 节点自定义出站 + 直通管道派生出站叠加，然后按默认出口排序
-	allOutbounds := append(append([]models.ServerOutbound{}, outbounds...), tunnelOutbounds...)
-	obs, err := mergeOutbounds(cfg["outbounds"], allOutbounds, ctx, defaultOutboundTag)
+	// 2. 出站：模板基础出站 + 节点自定义出站（含直通落库的 out-<tag>）叠加，然后按默认出口排序
+	obs, err := mergeOutbounds(cfg["outbounds"], outbounds, ctx, defaultOutboundTag)
 	if err != nil {
 		return nil, err
 	}
 	cfg["outbounds"] = obs
 
-	// 3. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 直通管道规则 + 节点规则叠加
+	// 3. 路由规则：保留模板 routing 顶层字段 + api 保护规则 + 节点规则叠加（含直通落库的转发规则）
 	routing := map[string]any{}
 	if tmplRouting, ok := cfg["routing"].(map[string]any); ok {
 		for k, v := range tmplRouting {
 			routing[k] = v
 		}
 	}
-	routing["rules"] = mergeRoutingRules(routingRules, tunnelRoutingRules)
+	routing["rules"] = mergeRoutingRules(routingRules)
 	if routingDomainStrategy != "" {
 		routing["domainStrategy"] = routingDomainStrategy
 	}
@@ -367,13 +384,26 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 			continue
 		}
 		item := make(map[string]any)
-		if ob.InboundRef != nil && ctx != nil {
-			// InboundRef 出站：vnext / streamSettings 全自动构造（不手填）
+		if ob.InboundRef != nil && ctx != nil && ob.Protocol == "vless" {
+			// InboundRef VLESS 出站：vnext / streamSettings 全自动构造（不手填）
 			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
 				if err := buildRefOutbound(item, target); err != nil {
 					return nil, err
 				}
 			}
+		} else if ob.InboundRef != nil && ctx != nil && ob.Protocol == "freedom" {
+			// InboundRef freedom 出站（四层直通派生链路）：redirect 目标跟随落地入站，保留已配置的 proxyProtocol 等高级项
+			var parsed map[string]any
+			if ob.SettingsJSON != "" {
+				_ = json.Unmarshal([]byte(ob.SettingsJSON), &parsed)
+			}
+			if parsed == nil {
+				parsed = make(map[string]any)
+			}
+			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
+				parsed["redirect"] = fmt.Sprintf("%s:%d", target.ServerHost, target.Inbound.Port)
+			}
+			item["settings"] = parsed
 		} else if ob.SettingsJSON != "" {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(ob.SettingsJSON), &parsed); err == nil {
@@ -618,9 +648,13 @@ func translateFreedomPanelKeys(item map[string]any) {
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。
-// 顺序：api 保护规则（最前）→ 四层直通管道规则 → BT 屏蔽规则 → 节点规则（按 Priority ASC, id ASC 排序）。
+// 顺序：api 保护规则（最前）→ BT 屏蔽规则（等价于「Priority = 0 的第一条」）→ 节点规则（按 Priority ASC, id ASC 排序）。
 // 私网阻断不在路由层（改由 freedom 出站 finalRules 承担，见函数内注释）。
-func mergeRoutingRules(rules []models.ServerRoutingRule, tunnelRules []any) []any {
+//
+// 四层直通规则自 C2（2026-09-28）起也是库内真行（Priority = -100），随 rules 一并排序，
+// 因此默认位置与历史行为一致（全部节点规则之前），而管理员把某条规则的优先级设成 < -100
+// 时就能排到它之前——这正是「给直通做来源限制」的唯一途径。
+func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 	list := []any{
 		map[string]any{
 			"type":        "field",
@@ -628,26 +662,34 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, tunnelRules []any) []an
 			"outboundTag": "api",
 		},
 	}
-	if len(tunnelRules) > 0 {
-		list = append(list, tunnelRules...)
-	}
+
+	// 先按 Priority 稳定排序（同优先级保持调用方给的顺序，生产端是 id ASC）。
+	// 排序放在生成器里而不是只依赖调用方的取数顺序：BT 规则的插入位置是按优先级判定的，
+	// 若规则未经排序，插入点与命中顺序会互相矛盾（顺序 = 谁先命中，必须与优先级一致）。
+	sorted := append([]models.ServerRoutingRule(nil), rules...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
+	rules = sorted
 
 	// 默认内置规则：BT 流量屏蔽。BT 属服务器级滥用防护（P2P 分发不因出站不同而改变性质，
-	// freedom 的 finalRules 也无对应能力），故仍在路由层注入、优先级高于全部节点规则。
-	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）
+	// freedom 的 finalRules 也无对应能力），故仍在路由层注入。
+	// 仅当 DB 中不存在同类型规则时才注入（允许用户自定义覆盖）。
+	//
+	// 位置语义（C2 起显式化）：BT 规则等价于「Priority = 0 的第一条」——优先级为负的规则
+	// （含 Priority = -100 的直通规则）越过它，优先级 >= 0 的规则排在它之后。这与历史行为
+	// 逐字节一致（历史上直通规则固定注入在此处、节点规则全在其后），同时让"想把某条规则
+	// 排到直通之前"变得可表达。
 	hasBT := false
 	for _, rule := range rules {
 		if rule.Enabled && rule.Protocol == "bittorrent" {
 			hasBT = true
 		}
 	}
-	if !hasBT {
-		list = append(list, map[string]any{
-			"type":        "field",
-			"protocol":    []string{"bittorrent"},
-			"outboundTag": "blocked",
-		})
+	btRule := map[string]any{
+		"type":        "field",
+		"protocol":    []string{"bittorrent"},
+		"outboundTag": "blocked",
 	}
+	btEmitted := false
 
 	// 私网阻断不再在路由层注入（2026-09-17）：路由规则自上而下首个命中生效，且该规则不带
 	// inboundTag/outbound 维度限定，会抢在管理员「入站 → 其他出站」的规则之前把目标为私网的
@@ -659,6 +701,10 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, tunnelRules []any) []an
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
+		}
+		if !btEmitted && !hasBT && rule.Priority >= 0 {
+			list = append(list, btRule)
+			btEmitted = true
 		}
 		if rule.RuleJSON != "" {
 			var rmap map[string]any
@@ -697,6 +743,10 @@ func mergeRoutingRules(rules []models.ServerRoutingRule, tunnelRules []any) []an
 		}
 		list = append(list, rmap)
 	}
+	// 全部规则的优先级都为负（或有规则被禁用而没触发上面的插入点）：BT 规则落到末尾
+	if !btEmitted && !hasBT {
+		list = append(list, btRule)
+	}
 	return list
 }
 
@@ -728,8 +778,8 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	}
 
 	// Phase T：入站分流
-	switch inb.Type {
-	case models.InboundTypeRelay:
+	switch {
+	case inb.Type == models.InboundTypeRelay:
 		if inb.InternalUUID == "" {
 			return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
 		}
@@ -748,8 +798,43 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			c["flow"] = flow
 		}
 		settings["clients"] = []any{c}
-	case models.InboundTypeChannel:
-		// 独立通道入站（SOCKS5 / HTTP 等）：直接使用 SettingsJSON 原样配置（accounts / auth），不注入动态 clients
+	case inb.IsForwardProxy():
+		// 独立通道 / 转发代理入站（SOCKS5 / HTTP 等）
+		if inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
+			var allowedGroups []uint64
+			if ctx != nil && ctx.InboundAuthorizedGroups != nil {
+				allowedGroups = ctx.InboundAuthorizedGroups[inb.ID]
+			}
+			accounts := make([]map[string]any, 0)
+			seenUsers := make(map[uint64]bool)
+			if ctx != nil && ctx.ForwardUsersByGroup != nil {
+				for _, gid := range allowedGroups {
+					for _, fu := range ctx.ForwardUsersByGroup[gid] {
+						if !seenUsers[fu.ID] {
+							seenUsers[fu.ID] = true
+							accounts = append(accounts, map[string]any{
+								"user":  fu.Username,
+								"pass":  fu.Password,
+								"email": fmt.Sprintf("fu%d.i%d@panel.local", fu.ID, inb.ID),
+							})
+						}
+					}
+				}
+			}
+			// 严格零信任物理跳过：若无任何有效认证账号（未挂载接入点或权限组内无有效用户），
+			// 绝不注入该入站到 Xray 配置（彻底杜绝 Xray 空 accounts 沦为免密开放代理）
+			if len(accounts) == 0 {
+				log.Printf("[xray-generate] SOCKS/HTTP 入站 %s (id=%d) 无有效认证账号，物理跳过以防免密开放代理", inb.Tag, inb.ID)
+				return nil, nil
+			}
+			settings["auth"] = "password"
+			settings["accounts"] = accounts
+			if inb.Protocol == models.ProtocolSocks {
+				if _, hasUDP := settings["udp"]; !hasUDP {
+					settings["udp"] = true
+				}
+			}
+		}
 	default:
 		// user 入站：动态用户列表（已由服务层 GetValidUsers 按接入点白名单派生过滤，无接入点指向返回空列表）；
 		// clients 结构由协议插件生成（未注册协议走最小通用注入）
@@ -807,25 +892,67 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	return item, nil
 }
 
-// buildTunnelInbound 生成四层直通管道入站（dokodemo-door）。
-// 若既无连线目标又无有效手动外部目标，返回 nil, "", nil（草稿状态，跳过注入 Xray，防启动报错）。
-func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]any, string, error) {
-	targetHost := ""
-	targetPort := 0
-	if inb.TargetInboundID != nil && *inb.TargetInboundID > 0 {
-		target, ok := ctxTarget(ctx, *inb.TargetInboundID)
-		if ok {
-			targetHost = target.ServerHost
-			targetPort = target.Inbound.Port
-		}
-	} else if inb.TargetAddress != "" && inb.TargetPort > 0 {
-		targetHost = inb.TargetAddress
-		targetPort = inb.TargetPort
-	}
+// TunnelOutboundTag 直通派生 freedom 出站的 tag（唯一命名来源，改名级联也用它）。
+func TunnelOutboundTag(inboundTag string) string { return "out-" + inboundTag }
 
-	if targetHost == "" || targetPort <= 0 {
+// TunnelTarget 解析直通入站的目标：连线目标（TargetInboundID → 目标服务器 Host + 目标入站端口）
+// 优先，其次手动外部地址。ok=false = 草稿（既未连线也无有效手动目标）。
+//
+// 唯一实现：生成器的草稿判定与落库 reconcile 都用它，避免"什么算有目标"出现两份口径。
+func TunnelTarget(inb *models.Inbound, ctx *GenerateContext) (host string, port int, ok bool) {
+	if inb.TargetInboundID != nil && *inb.TargetInboundID > 0 {
+		if target, found := ctxTarget(ctx, *inb.TargetInboundID); found {
+			return target.ServerHost, target.Inbound.Port, target.ServerHost != "" && target.Inbound.Port > 0
+		}
+		return "", 0, false
+	}
+	if inb.TargetAddress != "" && inb.TargetPort > 0 {
+		return inb.TargetAddress, inb.TargetPort, true
+	}
+	return "", 0, false
+}
+
+// TunnelSendProxyProtocol 直通出站是否向目标发送 PROXY Protocol v2（发送侧语义）：
+// 沿用领域内的既有约定——**只有显式写 false 才关闭**，其余（缺省 / true）都开启。
+// 私有键两种写法都认（proxy_protocol 为面板通道表单写的键，proxyProtocol 为手写配置）。
+func TunnelSendProxyProtocol(inb *models.Inbound) bool {
+	if inb.StreamSettings == "" {
+		return true
+	}
+	var ss map[string]any
+	if err := json.Unmarshal([]byte(inb.StreamSettings), &ss); err != nil {
+		return true
+	}
+	for _, key := range []string{"proxy_protocol", "proxyProtocol"} {
+		if v, present := ss[key].(bool); present && !v {
+			return false
+		}
+	}
+	return true
+}
+
+// TunnelOutboundSettings 直通派生 freedom 出站的 settings（目标由 redirect 承担）。
+// C1 起目标住在出站，C2 起该字符串落库（server_outbounds.settings_json）。
+func TunnelOutboundSettings(host string, port int, sendProxyProtocol bool) (string, error) {
+	obSettings := map[string]any{"redirect": fmt.Sprintf("%s:%d", host, port)}
+	if sendProxyProtocol {
+		obSettings["proxyProtocol"] = 2
+	}
+	raw, err := json.Marshal(obSettings)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// buildTunnelInbound 生成四层直通管道入站（dokodemo-door，**只监听**）。
+// 目标不写进入站：目标由该直通的 freedom 出站（tag = TunnelOutboundTag(tag)）的 `redirect` 承担
+// （入站 = 哪里听、出站 = 转到哪，两者解耦；该出站自 C2 起是库内真行）。
+// 若既无连线目标又无有效手动外部目标，返回 nil（草稿状态，跳过注入 Xray，防启动报错）。
+func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]any, error) {
+	if _, _, ok := TunnelTarget(inb, ctx); !ok {
 		// 目标未配置或未连线，作为草稿状态跳过注入
-		return nil, "", nil
+		return nil, nil
 	}
 
 	network := "tcp,udp"
@@ -836,7 +963,7 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 			if net, _ := ss["network"].(string); net != "" {
 				network = net
 			}
-			// 接收侧 PROXY Protocol（发送侧见下方 freedom 出站的 proxyProtocol）：
+			// 接收侧 PROXY Protocol（发送侧见 TunnelSendProxyProtocol）：
 			// - ensureTargetAcceptProxyProtocol 在上游管道指向本入站时写入顶层 acceptProxyProtocol；
 			// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
 			// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
@@ -855,12 +982,9 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 	}
 
 	settings := map[string]any{
-		"address": targetHost,
-		"port":    targetPort,
-		"network": network,
+		"network":        network,
+		"followRedirect": false,
 	}
-
-	outboundTag := "out-" + inb.Tag
 
 	item := map[string]any{
 		"tag":      inb.Tag,
@@ -876,5 +1000,5 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
 		item["listen"] = inb.Listen
 	}
-	return item, outboundTag, nil
+	return item, nil
 }

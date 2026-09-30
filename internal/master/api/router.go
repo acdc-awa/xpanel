@@ -189,6 +189,16 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/channels/:id", d.AdminDeleteChannel)
 			admin.POST("/channels/:id/toggle", d.AdminToggleChannel)
 			admin.POST("/channels/:id/reset-traffic", d.AdminResetChannelTraffic)
+
+			// 转发用户管理（Phase 52 独立账密计量）
+			admin.GET("/forward-users", d.AdminListForwardUsers)
+			admin.GET("/forward-users/summary", d.AdminForwardUsersSummary)
+			admin.POST("/forward-users", d.AdminCreateForwardUser)
+			admin.PUT("/forward-users/:id", d.AdminUpdateForwardUser)
+			admin.DELETE("/forward-users/:id", d.AdminDeleteForwardUser)
+			admin.POST("/forward-users/:id/toggle", d.AdminToggleForwardUser)
+			admin.POST("/forward-users/:id/reset-traffic", d.AdminResetForwardUserTraffic)
+			admin.POST("/forward-users/sync", d.AdminSyncForwardUsersConfigs)
 			admin.GET("/plans", d.AdminPlans)
 			admin.POST("/plans", d.AdminCreatePlan)
 			admin.PUT("/plans/:id", d.AdminUpdatePlan)

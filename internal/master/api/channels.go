@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -51,7 +51,40 @@ type channelView struct {
 	ProxyURL string `json:"proxy_url,omitempty"`
 }
 
-func toChannelView(ch *models.ProxyChannel, srv *models.Server) channelView {
+func parseInboundCredentials(inb *models.Inbound) (username, password string, allowUDP bool, proxyProto bool) {
+	allowUDP = true
+	if inb.StreamSettings != "" {
+		var ss map[string]any
+		if err := json.Unmarshal([]byte(inb.StreamSettings), &ss); err == nil {
+			if pp, ok := ss["proxy_protocol"].(bool); ok {
+				proxyProto = pp
+			} else if pp, ok := ss["proxyProtocol"].(bool); ok {
+				proxyProto = pp
+			}
+		}
+	}
+	if inb.SettingsJSON != "" {
+		var set map[string]any
+		if err := json.Unmarshal([]byte(inb.SettingsJSON), &set); err == nil {
+			if u, ok := set["udp"].(bool); ok {
+				allowUDP = u
+			}
+			if accs, ok := set["accounts"].([]any); ok && len(accs) > 0 {
+				if acc, ok := accs[0].(map[string]any); ok {
+					if u, ok := acc["user"].(string); ok {
+						username = u
+					}
+					if p, ok := acc["pass"].(string); ok {
+						password = p
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+func toChannelViewFromInbound(inb *models.Inbound, srv *models.Server) channelView {
 	srvName := ""
 	srvHost := ""
 	if srv != nil {
@@ -59,86 +92,121 @@ func toChannelView(ch *models.ProxyChannel, srv *models.Server) channelView {
 		srvHost = srv.Host
 	}
 
-	proxyURL := ""
+	proto := inb.Protocol
+	switch inb.Protocol {
+	case models.ProtocolDokodemo:
+		proto = models.ChannelTypeTunnel
+	case models.ProtocolSocks:
+		proto = models.ChannelTypeSocks5
+	case models.ProtocolHTTP:
+		proto = models.ChannelTypeHTTP
+	}
+
+	username, password, allowUDP, proxyProto := parseInboundCredentials(inb)
+
 	hostOrIP := srvHost
 	if hostOrIP == "" {
 		hostOrIP = "127.0.0.1"
 	}
-	switch ch.Protocol {
+	proxyURL := ""
+	switch proto {
 	case models.ChannelTypeSocks5:
-		if ch.Username != "" {
-			proxyURL = fmt.Sprintf("socks5://%s:%s@%s:%d", ch.Username, ch.Password, hostOrIP, ch.Port)
+		if username != "" {
+			proxyURL = fmt.Sprintf("socks5://%s:%s@%s:%d", username, password, hostOrIP, inb.Port)
 		} else {
-			proxyURL = fmt.Sprintf("socks5://%s:%d", hostOrIP, ch.Port)
+			proxyURL = fmt.Sprintf("socks5://%s:%d", hostOrIP, inb.Port)
 		}
 	case models.ChannelTypeHTTP:
-		if ch.Username != "" {
-			proxyURL = fmt.Sprintf("http://%s:%s@%s:%d", ch.Username, ch.Password, hostOrIP, ch.Port)
+		if username != "" {
+			proxyURL = fmt.Sprintf("http://%s:%s@%s:%d", username, password, hostOrIP, inb.Port)
 		} else {
-			proxyURL = fmt.Sprintf("http://%s:%d", hostOrIP, ch.Port)
+			proxyURL = fmt.Sprintf("http://%s:%d", hostOrIP, inb.Port)
 		}
 	case models.ChannelTypeTunnel:
-		if ch.TargetAddress != "" && ch.TargetPort > 0 {
-			proxyURL = fmt.Sprintf("tcp://%s:%d -> %s:%d", hostOrIP, ch.Port, ch.TargetAddress, ch.TargetPort)
+		if inb.TargetAddress != "" && inb.TargetPort > 0 {
+			proxyURL = fmt.Sprintf("tcp://%s:%d -> %s:%d", hostOrIP, inb.Port, inb.TargetAddress, inb.TargetPort)
 		}
 	}
 
+	now := time.Now()
+	status := models.ChannelStatusActive
+	if !inb.Enabled {
+		status = models.ChannelStatusDisabled
+	} else if inb.Total > 0 && (inb.Up+inb.Down) >= inb.Total {
+		status = models.ChannelStatusExceeded
+	} else if inb.ExpiryTime != nil && now.After(*inb.ExpiryTime) {
+		status = models.ChannelStatusExpired
+	}
+
+	name := inb.Remark
+	if name == "" {
+		name = inb.Tag
+	}
+
+	limitGB := inb.Total / (1024 * 1024 * 1024)
+
 	return channelView{
-		ID:               ch.ID,
-		Name:             ch.Name,
-		ServerID:         ch.ServerID,
+		ID:               inb.ID,
+		Name:             name,
+		ServerID:         inb.ServerID,
 		ServerName:       srvName,
 		ServerHost:       srvHost,
-		InboundID:        ch.InboundID,
-		Port:             ch.Port,
-		Listen:           ch.Listen,
-		Protocol:         ch.Protocol,
-		TargetAddress:    ch.TargetAddress,
-		TargetPort:       ch.TargetPort,
-		ProxyProtocol:    ch.ProxyProtocol,
-		Username:         ch.Username,
-		Password:         ch.Password,
-		AllowUDP:         ch.AllowUDP,
-		TrafficLimitGB:   ch.TrafficLimitGB,
-		TrafficUsedBytes: ch.TrafficUsedBytes,
-		UpBytes:          ch.UpBytes,
-		DownBytes:        ch.DownBytes,
-		TrafficReset:     ch.TrafficReset,
-		ExpiresAt:        ch.ExpiresAt,
-		AutoDisable:      ch.AutoDisable,
-		Status:           ch.Status,
-		Enabled:          ch.Enabled,
-		CreatedAt:        ch.CreatedAt,
-		UpdatedAt:        ch.UpdatedAt,
+		InboundID:        inb.ID,
+		Port:             inb.Port,
+		Listen:           inb.Listen,
+		Protocol:         proto,
+		TargetAddress:    inb.TargetAddress,
+		TargetPort:       inb.TargetPort,
+		ProxyProtocol:    proxyProto,
+		Username:         username,
+		Password:         password,
+		AllowUDP:         allowUDP,
+		TrafficLimitGB:   limitGB,
+		TrafficUsedBytes: inb.Up + inb.Down,
+		UpBytes:          inb.Up,
+		DownBytes:        inb.Down,
+		TrafficReset:     inb.TrafficReset,
+		ExpiresAt:        inb.ExpiryTime,
+		AutoDisable:      true,
+		Status:           status,
+		Enabled:          inb.Enabled,
+		CreatedAt:        inb.CreatedAt,
+		UpdatedAt:        inb.CreatedAt,
 		ProxyURL:         proxyURL,
 	}
 }
 
 // AdminChannels GET /api/v1/admin/channels
 func (d *Deps) AdminChannels(c *gin.Context) {
-	q := d.DB.Model(&models.ProxyChannel{})
+	q := d.DB.Model(&models.Inbound{}).Where("type IN ?", []string{models.InboundTypeForward, models.InboundTypeChannel, models.InboundTypeTunnel})
 	if sid := c.Query("server_id"); sid != "" {
 		if id, err := strconv.ParseUint(sid, 10, 64); err == nil {
 			q = q.Where("server_id = ?", id)
 		}
 	}
 	if proto := c.Query("protocol"); proto != "" {
-		q = q.Where("protocol = ?", proto)
-	}
-	if status := c.Query("status"); status != "" {
-		q = q.Where("status = ?", status)
+		switch proto {
+		case models.ChannelTypeTunnel:
+			q = q.Where("protocol = ?", models.ProtocolDokodemo)
+		case models.ChannelTypeSocks5:
+			q = q.Where("protocol = ?", models.ProtocolSocks)
+		case models.ChannelTypeHTTP:
+			q = q.Where("protocol = ?", models.ProtocolHTTP)
+		default:
+			q = q.Where("protocol = ?", proto)
+		}
 	}
 
-	var channels []models.ProxyChannel
-	if err := q.Order("id DESC").Find(&channels).Error; err != nil {
+	var inbounds []models.Inbound
+	if err := q.Order("id DESC").Find(&inbounds).Error; err != nil {
 		util.ServerError(c, "查询通道失败")
 		return
 	}
 
 	// 批量拉取服务器信息
-	serverIDs := make([]uint64, 0, len(channels))
-	for _, ch := range channels {
-		serverIDs = append(serverIDs, ch.ServerID)
+	serverIDs := make([]uint64, 0, len(inbounds))
+	for _, inb := range inbounds {
+		serverIDs = append(serverIDs, inb.ServerID)
 	}
 	serverMap := make(map[uint64]*models.Server)
 	if len(serverIDs) > 0 {
@@ -149,9 +217,14 @@ func (d *Deps) AdminChannels(c *gin.Context) {
 		}
 	}
 
-	views := make([]channelView, 0, len(channels))
-	for i := range channels {
-		views = append(views, toChannelView(&channels[i], serverMap[channels[i].ServerID]))
+	wantStatus := c.Query("status")
+	views := make([]channelView, 0, len(inbounds))
+	for i := range inbounds {
+		v := toChannelViewFromInbound(&inbounds[i], serverMap[inbounds[i].ServerID])
+		if wantStatus != "" && v.Status != wantStatus {
+			continue
+		}
+		views = append(views, v)
 	}
 
 	util.OK(c, gin.H{"channels": views})
@@ -175,6 +248,19 @@ type channelForm struct {
 	AutoDisable      *bool      `json:"auto_disable"`
 }
 
+// channelCredentialProblem 独立代理通道的认证判定（禁止免密开放，2026-09-28 拍板）：
+// socks5 留空账号会生成 `auth:"noauth"`、http 留空会生成空 `accounts`，两者都是匿名开放代理，
+// 返回非空字符串即拒绝；tunnel 无认证概念，不受约束。创建与更新共用本判定（唯一入口）。
+func channelCredentialProblem(protocol, username, password string) string {
+	if protocol != models.ChannelTypeSocks5 && protocol != models.ChannelTypeHTTP {
+		return ""
+	}
+	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
+		return "SOCKS5 / HTTP 通道必须填写认证账号与密码（不允许免密无认证开放）"
+	}
+	return ""
+}
+
 // AdminCreateChannel POST /api/v1/admin/channels
 func (d *Deps) AdminCreateChannel(c *gin.Context) {
 	var req channelForm
@@ -182,7 +268,6 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 		return
 	}
 
-	// 协议校验
 	req.Protocol = strings.ToLower(strings.TrimSpace(req.Protocol))
 	if req.Protocol != models.ChannelTypeTunnel && req.Protocol != models.ChannelTypeSocks5 && req.Protocol != models.ChannelTypeHTTP {
 		util.BadRequest(c, "协议类型必须为 tunnel、socks5 或 http")
@@ -194,15 +279,17 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 			return
 		}
 	}
+	if msg := channelCredentialProblem(req.Protocol, req.Username, req.Password); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
 
-	// 服务器存在性校验
 	var srv models.Server
 	if err := d.DB.First(&srv, req.ServerID).Error; err != nil {
 		util.Fail(c, 404, "服务器不存在")
 		return
 	}
 
-	// 端口占用冲突校验（与全站入站共用端口池）
 	var cnt int64
 	d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ?", req.ServerID, req.Port).Count(&cnt)
 	if cnt > 0 {
@@ -218,15 +305,11 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 	if req.AllowUDP != nil {
 		allowUDP = *req.AllowUDP
 	}
-	autoDisable := true
-	if req.AutoDisable != nil {
-		autoDisable = *req.AutoDisable
-	}
 
-	// 构建底层 Inbound 与 ProxyChannel
 	inbProto := ""
 	settingsJSON := "{}"
 	streamSettings := "{}"
+	inbType := models.InboundTypeForward
 
 	switch req.Protocol {
 	case models.ChannelTypeTunnel:
@@ -270,74 +353,47 @@ func (d *Deps) AdminCreateChannel(c *gin.Context) {
 		Protocol:       inbProto,
 		Port:           req.Port,
 		Listen:         req.Listen,
-		Type:           models.InboundTypeChannel,
+		Type:           inbType,
+		Remark:         req.Name,
 		SettingsJSON:   settingsJSON,
 		StreamSettings: streamSettings,
 		TargetAddress:  req.TargetAddress,
 		TargetPort:     req.TargetPort,
-		Total:          0, // 通道限额由 ProxyChannel 账本统一管理，底层 Inbound.Total 恒为 0 防单位错配误杀
+		Total:          req.TrafficLimitGB * 1024 * 1024 * 1024,
 		ExpiryTime:     req.ExpiresAt,
 		TrafficReset:   resetPolicy,
 		Enabled:        true,
 	}
 
-	ch := models.ProxyChannel{
-		Name:             req.Name,
-		ServerID:         req.ServerID,
-		Port:             req.Port,
-		Listen:           req.Listen,
-		Protocol:         req.Protocol,
-		TargetAddress:    req.TargetAddress,
-		TargetPort:       req.TargetPort,
-		ProxyProtocol:    req.ProxyProtocol,
-		Username:         req.Username,
-		Password:         req.Password,
-		AllowUDP:         allowUDP,
-		TrafficLimitGB:   req.TrafficLimitGB,
-		TrafficReset:     resetPolicy,
-		ExpiresAt:        req.ExpiresAt,
-		AutoDisable:      autoDisable,
-		Status:           models.ChannelStatusActive,
-		Enabled:          true,
-	}
-
-	err := d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&inb).Error; err != nil {
-			return err
-		}
-		ch.InboundID = inb.ID
-		if err := tx.Create(&ch).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("[channels] 创建独立通道失败: %v", err)
+	if err := d.DB.Create(&inb).Error; err != nil {
+		log.Printf("[channels] 创建通道入站失败: %v", err)
 		util.ServerError(c, "创建独立通道失败")
 		return
 	}
 
+	if inbProto == models.ProtocolDokodemo {
+		if msg := d.tunnelOutboundTagConflict(req.ServerID, inb.Tag, 0); msg != "" {
+			_ = d.DB.Delete(&inb).Error
+			util.BadRequest(c, msg)
+			return
+		}
+		if msg := d.ensureTunnelDerived(req.ServerID); msg != "" {
+			_ = d.DB.Delete(&inb).Error
+			_ = services.EnsureTunnelDerivedObjects(d.DB, req.ServerID)
+			util.ServerError(c, msg)
+			return
+		}
+	}
+
 	_ = d.enqueueConfig(req.ServerID)
-	util.OK(c, gin.H{"channel": toChannelView(&ch, &srv)})
+	util.OK(c, gin.H{"channel": toChannelViewFromInbound(&inb, &srv)})
 }
 
 // AdminUpdateChannel PUT /api/v1/admin/channels/:id
 func (d *Deps) AdminUpdateChannel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "无效的 ID")
-		return
-	}
-
-	var ch models.ProxyChannel
-	if err := d.DB.First(&ch, id).Error; err != nil {
-		util.Fail(c, 404, "通道不存在")
-		return
-	}
-
-	var inb models.Inbound
-	if err := d.DB.First(&inb, ch.InboundID).Error; err != nil {
-		util.Fail(c, 404, "关联入站不存在")
+		util.BadRequest(c, "无效的通道 ID")
 		return
 	}
 
@@ -346,262 +402,210 @@ func (d *Deps) AdminUpdateChannel(c *gin.Context) {
 		return
 	}
 
-	// 端口若被更改，校验占用
-	if req.Port != ch.Port {
+	req.Protocol = strings.ToLower(strings.TrimSpace(req.Protocol))
+	if req.Protocol != models.ChannelTypeTunnel && req.Protocol != models.ChannelTypeSocks5 && req.Protocol != models.ChannelTypeHTTP {
+		util.BadRequest(c, "协议类型必须为 tunnel、socks5 或 http")
+		return
+	}
+	if req.Protocol == models.ChannelTypeTunnel {
+		if strings.TrimSpace(req.TargetAddress) == "" || req.TargetPort <= 0 || req.TargetPort > 65535 {
+			util.BadRequest(c, "四层直通必须填写有效的目标地址与目标端口 (1-65535)")
+			return
+		}
+	}
+	if msg := channelCredentialProblem(req.Protocol, req.Username, req.Password); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
+
+	var inb models.Inbound
+	if err := d.DB.Where("id = ? AND type IN ?", id, []string{models.InboundTypeForward, models.InboundTypeChannel, models.InboundTypeTunnel}).First(&inb).Error; err != nil {
+		util.Fail(c, 404, "通道不存在")
+		return
+	}
+
+	// 端口变更冲突检查
+	if req.Port != inb.Port {
 		var cnt int64
-		d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ? AND id != ?", ch.ServerID, req.Port, inb.ID).Count(&cnt)
+		d.DB.Model(&models.Inbound{}).Where("server_id = ? AND port = ? AND id != ?", inb.ServerID, req.Port, inb.ID).Count(&cnt)
 		if cnt > 0 {
 			util.BadRequest(c, "该服务器上监听端口已被占用")
 			return
 		}
-		ch.Port = req.Port
-		inb.Port = req.Port
-		inb.Tag = fmt.Sprintf("chan-%s-%d", ch.Protocol, req.Port)
 	}
 
-	ch.Name = req.Name
-	ch.Listen = req.Listen
-	inb.Listen = req.Listen
+	resetPolicy := strings.ToLower(strings.TrimSpace(req.TrafficReset))
+	if resetPolicy == "" {
+		resetPolicy = "never"
+	}
+	allowUDP := true
+	if req.AllowUDP != nil {
+		allowUDP = *req.AllowUDP
+	}
 
-	if ch.Protocol == models.ChannelTypeTunnel {
-		if strings.TrimSpace(req.TargetAddress) == "" || req.TargetPort <= 0 || req.TargetPort > 65535 {
-			util.BadRequest(c, "四层直通必须填写有效的目标地址与目标端口")
-			return
-		}
-		ch.TargetAddress = req.TargetAddress
-		ch.TargetPort = req.TargetPort
-		ch.ProxyProtocol = req.ProxyProtocol
-		inb.TargetAddress = req.TargetAddress
-		inb.TargetPort = req.TargetPort
-		inb.StreamSettings = fmt.Sprintf(`{"proxy_protocol":%t}`, req.ProxyProtocol)
-	} else if ch.Protocol == models.ChannelTypeSocks5 {
-		ch.Username = req.Username
-		ch.Password = req.Password
-		if req.AllowUDP != nil {
-			ch.AllowUDP = *req.AllowUDP
-		}
+	inbProto := ""
+	settingsJSON := "{}"
+	streamSettings := inb.StreamSettings
+
+	switch req.Protocol {
+	case models.ChannelTypeTunnel:
+		inbProto = models.ProtocolDokodemo
+		streamSettings = fmt.Sprintf(`{"proxy_protocol":%t}`, req.ProxyProtocol)
+	case models.ChannelTypeSocks5:
+		inbProto = models.ProtocolSocks
 		auth := "noauth"
 		accounts := []map[string]string{}
-		if strings.TrimSpace(ch.Username) != "" {
+		if strings.TrimSpace(req.Username) != "" {
 			auth = "password"
 			accounts = append(accounts, map[string]string{
-				"user": ch.Username,
-				"pass": ch.Password,
+				"user": req.Username,
+				"pass": req.Password,
 			})
 		}
 		raw, _ := json.Marshal(map[string]any{
 			"auth":     auth,
 			"accounts": accounts,
-			"udp":      ch.AllowUDP,
+			"udp":      allowUDP,
 		})
-		inb.SettingsJSON = string(raw)
-	} else if ch.Protocol == models.ChannelTypeHTTP {
-		ch.Username = req.Username
-		ch.Password = req.Password
+		settingsJSON = string(raw)
+	case models.ChannelTypeHTTP:
+		inbProto = models.ProtocolHTTP
 		accounts := []map[string]string{}
-		if strings.TrimSpace(ch.Username) != "" {
+		if strings.TrimSpace(req.Username) != "" {
 			accounts = append(accounts, map[string]string{
-				"user": ch.Username,
-				"pass": ch.Password,
+				"user": req.Username,
+				"pass": req.Password,
 			})
 		}
 		raw, _ := json.Marshal(map[string]any{
 			"accounts": accounts,
 		})
-		inb.SettingsJSON = string(raw)
+		settingsJSON = string(raw)
 	}
 
-	ch.TrafficLimitGB = req.TrafficLimitGB
-	inb.Total = 0 // 通道限额由 ProxyChannel 账本统一管理，底层 Inbound.Total 恒为 0
-	if req.TrafficReset != "" {
-		ch.TrafficReset = req.TrafficReset
-		inb.TrafficReset = req.TrafficReset
-	}
-	ch.ExpiresAt = req.ExpiresAt
+	inb.Port = req.Port
+	inb.Listen = req.Listen
+	inb.Protocol = inbProto
+	inb.Remark = req.Name
+	inb.SettingsJSON = settingsJSON
+	inb.StreamSettings = streamSettings
+	inb.TargetAddress = req.TargetAddress
+	inb.TargetPort = req.TargetPort
+	inb.Total = req.TrafficLimitGB * 1024 * 1024 * 1024
 	inb.ExpiryTime = req.ExpiresAt
-	if req.AutoDisable != nil {
-		ch.AutoDisable = *req.AutoDisable
-	}
+	inb.TrafficReset = resetPolicy
 
-	// 若之前因超额关停，而新配额提升大于已用，自动恢复为 active
-	limitBytes := ch.TrafficLimitGB * 1024 * 1024 * 1024
-	if ch.Status == models.ChannelStatusExceeded && (ch.TrafficLimitGB == 0 || ch.TrafficUsedBytes < limitBytes) {
-		ch.Status = models.ChannelStatusActive
-		if ch.Enabled {
-			inb.Enabled = true
-		}
-	}
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&inb).Error; err != nil {
-			return err
-		}
-		if err := tx.Save(&ch).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
+	if err := d.DB.Save(&inb).Error; err != nil {
 		util.ServerError(c, "更新通道失败")
 		return
 	}
 
-	_ = d.enqueueConfig(ch.ServerID)
+	if inbProto == models.ProtocolDokodemo {
+		_ = d.ensureTunnelDerived(inb.ServerID)
+	}
+
 	var srv models.Server
-	_ = d.DB.First(&srv, ch.ServerID).Error
-	util.OK(c, gin.H{"channel": toChannelView(&ch, &srv)})
+	_ = d.DB.First(&srv, inb.ServerID).Error
+
+	_ = d.enqueueConfig(inb.ServerID)
+	util.OK(c, gin.H{"channel": toChannelViewFromInbound(&inb, &srv)})
 }
 
 // AdminDeleteChannel DELETE /api/v1/admin/channels/:id
 func (d *Deps) AdminDeleteChannel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "无效的 ID")
+		util.BadRequest(c, "无效的通道 ID")
 		return
 	}
 
-	var ch models.ProxyChannel
-	if err := d.DB.First(&ch, id).Error; err != nil {
+	var inb models.Inbound
+	if err := d.DB.Where("id = ? AND type IN ?", id, []string{models.InboundTypeForward, models.InboundTypeChannel, models.InboundTypeTunnel}).First(&inb).Error; err != nil {
 		util.Fail(c, 404, "通道不存在")
 		return
 	}
 
-	serverID := ch.ServerID
-	inboundID := ch.InboundID
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Delete(&models.ProxyChannel{}, id).Error; err != nil {
-			return err
-		}
-		if inboundID > 0 {
-			if err := tx.Delete(&models.Inbound{}, inboundID).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	serverID := inb.ServerID
+	if err := d.DB.Delete(&inb).Error; err != nil {
 		util.ServerError(c, "删除通道失败")
 		return
 	}
 
+	// 清理派生对象
+	_ = services.EnsureTunnelDerivedObjects(d.DB, serverID)
+
 	_ = d.enqueueConfig(serverID)
-	util.OK(c, gin.H{"id": id})
+	util.OK(c, gin.H{"deleted": true})
 }
 
 // AdminToggleChannel POST /api/v1/admin/channels/:id/toggle
 func (d *Deps) AdminToggleChannel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "无效的 ID")
+		util.BadRequest(c, "无效的通道 ID")
 		return
 	}
 
-	var ch models.ProxyChannel
-	if err := d.DB.First(&ch, id).Error; err != nil {
+	var inb models.Inbound
+	if err := d.DB.Where("id = ? AND type IN ?", id, []string{models.InboundTypeForward, models.InboundTypeChannel, models.InboundTypeTunnel}).First(&inb).Error; err != nil {
 		util.Fail(c, 404, "通道不存在")
 		return
 	}
 
-	ch.Enabled = !ch.Enabled
-	now := time.Now()
-	limitBytes := ch.TrafficLimitGB * 1024 * 1024 * 1024
-
-	inboundEnabled := ch.Enabled
-	if !ch.Enabled {
-		ch.Status = models.ChannelStatusDisabled
-		inboundEnabled = false
-	} else {
-		if ch.TrafficLimitGB > 0 && ch.TrafficUsedBytes >= limitBytes {
-			ch.Status = models.ChannelStatusExceeded
-			if ch.AutoDisable {
-				inboundEnabled = false
-			}
-		} else if ch.ExpiresAt != nil && now.After(*ch.ExpiresAt) {
-			ch.Status = models.ChannelStatusExpired
-			if ch.AutoDisable {
-				inboundEnabled = false
-			}
-		} else {
-			ch.Status = models.ChannelStatusActive
-			inboundEnabled = true
-		}
-	}
-
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.ProxyChannel{}).Where("id = ?", ch.ID).Updates(map[string]any{
-			"enabled": ch.Enabled,
-			"status":  ch.Status,
-		}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", inboundEnabled).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		util.ServerError(c, "切换状态失败")
+	newEnabled := !inb.Enabled
+	inb.Enabled = newEnabled
+	if err := d.DB.Model(&inb).Update("enabled", newEnabled).Error; err != nil {
+		util.ServerError(c, "更新状态失败")
 		return
 	}
 
-	_ = d.enqueueConfig(ch.ServerID)
-	util.OK(c, gin.H{"id": ch.ID, "enabled": ch.Enabled, "status": ch.Status})
+	// 派生对象同步
+	_ = services.EnsureTunnelDerivedObjects(d.DB, inb.ServerID)
+
+	_ = d.enqueueConfig(inb.ServerID)
+
+	var srv models.Server
+	_ = d.DB.First(&srv, inb.ServerID).Error
+	view := toChannelViewFromInbound(&inb, &srv)
+
+	util.OK(c, gin.H{
+		"enabled": newEnabled,
+		"status":  view.Status,
+	})
 }
 
 // AdminResetChannelTraffic POST /api/v1/admin/channels/:id/reset-traffic
 func (d *Deps) AdminResetChannelTraffic(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		util.BadRequest(c, "无效的 ID")
+		util.BadRequest(c, "无效的通道 ID")
 		return
 	}
 
-	var ch models.ProxyChannel
-	if err := d.DB.First(&ch, id).Error; err != nil {
+	var inb models.Inbound
+	if err := d.DB.Where("id = ? AND type IN ?", id, []string{models.InboundTypeForward, models.InboundTypeChannel, models.InboundTypeTunnel}).First(&inb).Error; err != nil {
 		util.Fail(c, 404, "通道不存在")
 		return
 	}
 
+	loc := services.BusinessLocation(d.DB)
+	key := services.ResetPeriodKey(time.Now(), inb.TrafficReset, loc)
+
 	updates := map[string]any{
-		"traffic_used_bytes": 0,
-		"up_bytes":          0,
-		"down_bytes":        0,
+		"up":              0,
+		"down":            0,
+		"last_reset_date": key,
 	}
-	shouldReopen := false
-	if ch.Status == models.ChannelStatusExceeded {
-		updates["status"] = models.ChannelStatusActive
-		ch.Status = models.ChannelStatusActive
-		if ch.Enabled {
-			shouldReopen = true
-		}
+	// 如果超额停用，清零后自动恢复启用
+	if inb.Total > 0 && !inb.Enabled && (inb.Up+inb.Down >= inb.Total) {
+		updates["enabled"] = true
 	}
 
-	err = d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.ProxyChannel{}).Where("id = ?", ch.ID).Updates(updates).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Updates(map[string]any{
-			"up":   0,
-			"down": 0,
-		}).Error; err != nil {
-			return err
-		}
-		if shouldReopen {
-			if err := tx.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", true).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		util.ServerError(c, "重置用量失败")
+	if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
+		util.ServerError(c, "重置流量失败")
 		return
 	}
 
-	if shouldReopen {
-		_ = d.enqueueConfig(ch.ServerID)
-	}
-
-	util.OK(c, gin.H{"id": ch.ID, "traffic_used_bytes": 0, "status": ch.Status})
+	_ = d.enqueueConfig(inb.ServerID)
+	util.OK(c, gin.H{"reset": true})
 }

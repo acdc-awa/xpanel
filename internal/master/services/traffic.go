@@ -128,6 +128,9 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 		if e.UserID > 0 {
 			idSet[e.UserID] = struct{}{}
+		} else if _, _, ok := xray.ParseForwardUserEmail(e.Email); ok {
+			// 转发用户维度，无需加入普通商城用户的 idSet 或 emailSet 查询
+			continue
 		} else if uid, _, ok := xray.ParseUserEmailAny(e.Email); ok {
 			idSet[uid] = struct{}{}
 		} else {
@@ -221,11 +224,64 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				}
 			}
 
+			// 转发用户维度条目（SOCKS5 / HTTP 多账号统计键 fu<fuid>.i<iid>@panel.local）
+			if fuid, iid, ok := xray.ParseForwardUserEmail(e.Email); ok {
+				totalBytes := e.UpBytes + e.DownBytes
+				_ = tx.Model(&models.ForwardUser{}).Where("id = ?", fuid).Updates(map[string]any{
+					"up_bytes":           gorm.Expr("up_bytes + ?", e.UpBytes),
+					"down_bytes":         gorm.Expr("down_bytes + ?", e.DownBytes),
+					"traffic_used_bytes": gorm.Expr("traffic_used_bytes + ?", totalBytes),
+				})
+
+				ratio := 1.0
+				if inb, found := inboundByID[iid]; found && inb.Ratio >= 0 {
+					ratio = inb.Ratio
+				}
+				row := models.TrafficLog{
+					UserID:      models.ForwardUserTrafficUserID(fuid),
+					InboundID:   iid,
+					UpBytes:     e.UpBytes,
+					DownBytes:   e.DownBytes,
+					BilledUp:    roundBilled(e.UpBytes, ratio),
+					BilledDown:  roundBilled(e.DownBytes, ratio),
+					PeriodStart: periodStart,
+					PeriodEnd:   periodEnd,
+					CycleID:     0,
+				}
+				var doUpdates clause.Set
+				if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+					doUpdates = clause.Assignments(map[string]any{
+						"up_bytes":    gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
+						"down_bytes":  gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
+						"billed_up":   gorm.Expr("traffic_logs.billed_up + VALUES(billed_up)"),
+						"billed_down": gorm.Expr("traffic_logs.billed_down + VALUES(billed_down)"),
+						"period_end":  gorm.Expr("VALUES(period_end)"),
+					})
+				} else {
+					doUpdates = clause.Assignments(map[string]any{
+						"up_bytes":    gorm.Expr("up_bytes + excluded.up_bytes"),
+						"down_bytes":  gorm.Expr("down_bytes + excluded.down_bytes"),
+						"billed_up":   gorm.Expr("billed_up + excluded.billed_up"),
+						"billed_down": gorm.Expr("billed_down + excluded.billed_down"),
+						"period_end":  gorm.Expr("excluded.period_end"),
+					})
+				}
+				if err := tx.Clauses(clause.OnConflict{
+					Columns: []clause.Column{
+						{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
+					},
+					DoUpdates: doUpdates,
+				}).Create(&row).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
 			// 入站维度条目（agent 从 inbound>>> 计数器派生，Email 恒空）：
 			// 1. 累计 inbounds.up/down 冗余计数器（供入站限额与 lifecycle 消费）；
 			// 2. 对于内部转发入站（relay），因其由内部账户转发承载、无具体前台用户条目，
 			//    将增量作为 UserID=0 写入 traffic_logs，使仪表盘服务器分布与排行按时间窗口统计该转发服务器承载流量；
-			// 3. 普通用户入站（user）因下方已有具体的用户明细落库，此处不写 traffic_logs，防全站双计。
+			// 3. 普通用户入站（user）与转发代理入站（forward）已有具体用户明细落库，此处不写 traffic_logs，防全站双计。
 			if e.UserID == 0 && e.Email == "" {
 				if inboundID > 0 {
 					if err := tx.Model(&models.Inbound{}).Where("id = ?", inboundID).Updates(map[string]any{
@@ -235,18 +291,10 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 						return err
 					}
 					if inb, ok := inboundByID[inboundID]; ok {
-						if inb.Type == models.InboundTypeChannel {
-							totalBytes := e.UpBytes + e.DownBytes
-							_ = tx.Model(&models.ProxyChannel{}).Where("inbound_id = ?", inboundID).Updates(map[string]any{
-								"up_bytes":           gorm.Expr("up_bytes + ?", e.UpBytes),
-								"down_bytes":         gorm.Expr("down_bytes + ?", e.DownBytes),
-								"traffic_used_bytes": gorm.Expr("traffic_used_bytes + ?", totalBytes),
-							})
-						}
-						// 内部转发入站（relay）、四层直通管道前置机（tunnel）以及独立代理通道（channel）：
+						// 内部转发入站（relay）、四层直通管道前置机（tunnel）：
 						// 无具体前台用户条目，将增量作为 UserID=0 写入 traffic_logs，使仪表盘服务器分布与排行按时间窗口统计该服务器承载流量。
-						// 普通用户入站（user）因下方已有具体的用户明细落库，此处不写 traffic_logs，防全站双计。
-						if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeTunnel || inb.Type == models.InboundTypeChannel {
+						// 普通用户入站（user）与转发代理入站（forward）已有具体用户明细落库，此处不写 traffic_logs，防全站双计。
+						if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeTunnel {
 						row := models.TrafficLog{
 							UserID:      0,
 							InboundID:   inboundID,
@@ -551,9 +599,9 @@ func (s *TrafficService) StartTrafficResetCron(ctx context.Context) {
 	}()
 }
 
-// resetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
+// ResetPeriodKey 计算某个重置策略当前的周期键（同一天/周/月内保持不变）。
 // 以业务时区切分日/周/月，避免按 UTC 天重置导致与运营预期错位。
-func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
+func ResetPeriodKey(now time.Time, policy string, loc *time.Location) string {
 	t := now.In(loc)
 	switch policy {
 	case "daily":
@@ -566,6 +614,10 @@ func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
 	default:
 		return ""
 	}
+}
+
+func resetPeriodKey(now time.Time, policy string, loc *time.Location) string {
+	return ResetPeriodKey(now, policy, loc)
 }
 
 func (s *TrafficService) resetInboundTraffic() {
@@ -584,6 +636,11 @@ func (s *TrafficService) resetInboundTraffic() {
 		if inb.LastResetDate == key {
 			continue
 		}
+		// 如果因超额停用（up+down >= total），重置周期时若未过期则自动复原启用
+		if inb.Total > 0 && !inb.Enabled && (inb.Up+inb.Down >= inb.Total) && (inb.ExpiryTime == nil || now.Before(*inb.ExpiryTime)) {
+			_ = s.DB.Model(&models.Inbound{}).Where("id = ?", inb.ID).Update("enabled", true)
+			modifiedServers[inb.ServerID] = true
+		}
 		// 条件更新：只有仍处于旧周期/首次运行时才清零；并发 tick 只有一个能命中。
 		res := s.DB.Model(&models.Inbound{}).
 			Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", inb.ID, key).
@@ -597,12 +654,13 @@ func (s *TrafficService) resetInboundTraffic() {
 		}
 	}
 
-	if s.DB.Migrator().HasTable(&models.ProxyChannel{}) {
-		var channels []models.ProxyChannel
-		if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&channels).Error; err == nil {
-			for _, ch := range channels {
-				key := resetPeriodKey(now, ch.TrafficReset, loc)
-				if key == "" || ch.LastResetDate == key {
+	if s.DB.Migrator().HasTable(&models.ForwardUser{}) {
+		var fUsers []models.ForwardUser
+		if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&fUsers).Error; err == nil {
+			resetGroups := make(map[uint64]bool)
+			for _, fu := range fUsers {
+				key := resetPeriodKey(now, fu.TrafficReset, loc)
+				if key == "" || fu.LastResetDate == key {
 					continue
 				}
 				updates := map[string]any{
@@ -611,16 +669,25 @@ func (s *TrafficService) resetInboundTraffic() {
 					"traffic_used_bytes": 0,
 					"last_reset_date":    key,
 				}
-				if ch.Status == models.ChannelStatusExceeded {
-					updates["status"] = models.ChannelStatusActive
-					if ch.Enabled {
-						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", true)
-						modifiedServers[ch.ServerID] = true
-					}
+				// 若未过期，自动解除熔断并恢复 enabled
+				if fu.ExpiresAt == nil || now.Before(*fu.ExpiresAt) {
+					updates["enabled"] = true
 				}
-				_ = s.DB.Model(&models.ProxyChannel{}).
-					Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", ch.ID, key).
-					Updates(updates).Error
+				if err := s.DB.Model(&models.ForwardUser{}).
+					Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", fu.ID, key).
+					Updates(updates).Error; err == nil {
+					resetGroups[fu.PermissionGroupID] = true
+				}
+			}
+			if len(resetGroups) > 0 {
+				var gids []uint64
+				for gid := range resetGroups {
+					gids = append(gids, gid)
+				}
+				sids, _ := FindServersByPermissionGroups(s.DB, gids)
+				for _, sid := range sids {
+					modifiedServers[sid] = true
+				}
 			}
 		}
 	}
@@ -910,29 +977,28 @@ func (s *TrafficService) checkInboundLifecycle() {
 		}
 	}
 
-	if s.DB.Migrator().HasTable(&models.ProxyChannel{}) {
-		var channels []models.ProxyChannel
-		if err := s.DB.Find(&channels).Error; err == nil {
-			for _, ch := range channels {
-				if !ch.Enabled || ch.Status == models.ChannelStatusDisabled {
-					continue
+	if s.DB.Migrator().HasTable(&models.ForwardUser{}) {
+		var fUsers []models.ForwardUser
+		if err := s.DB.Where("enabled = ?", true).Find(&fUsers).Error; err == nil {
+			fwdModifiedGroups := make(map[uint64]bool)
+			for _, fu := range fUsers {
+				limitBytes := fu.TrafficLimitGB * 1024 * 1024 * 1024
+				exceeded := (fu.TrafficLimitGB > 0 && fu.TrafficUsedBytes >= limitBytes)
+				expired := (fu.ExpiresAt != nil && now.After(*fu.ExpiresAt))
+				if exceeded || expired {
+					if err := s.DB.Model(&fu).Update("enabled", false).Error; err == nil {
+						fwdModifiedGroups[fu.PermissionGroupID] = true
+					}
 				}
-				limitBytes := ch.TrafficLimitGB * 1024 * 1024 * 1024
-				exceeded := (ch.TrafficLimitGB > 0 && ch.TrafficUsedBytes >= limitBytes)
-				expired := (ch.ExpiresAt != nil && now.After(*ch.ExpiresAt))
-
-				if exceeded && ch.Status != models.ChannelStatusExceeded {
-					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExceeded)
-					if ch.AutoDisable {
-						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
-						modifiedServers[ch.ServerID] = true
-					}
-				} else if expired && ch.Status != models.ChannelStatusExpired {
-					_ = s.DB.Model(&ch).Update("status", models.ChannelStatusExpired)
-					if ch.AutoDisable {
-						_ = s.DB.Model(&models.Inbound{}).Where("id = ?", ch.InboundID).Update("enabled", false)
-						modifiedServers[ch.ServerID] = true
-					}
+			}
+			if len(fwdModifiedGroups) > 0 {
+				var gids []uint64
+				for gid := range fwdModifiedGroups {
+					gids = append(gids, gid)
+				}
+				sids, _ := FindServersByPermissionGroups(s.DB, gids)
+				for _, sid := range sids {
+					modifiedServers[sid] = true
 				}
 			}
 		}
