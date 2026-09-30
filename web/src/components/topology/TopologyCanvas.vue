@@ -18,7 +18,6 @@ import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete } from '@element-plus/icons-vue'
 import {
-  createServerOutbound,
   createServerRoutingRule,
   deleteServerOutbound,
   deleteServerRoutingRule,
@@ -56,11 +55,14 @@ const emit = defineEmits<{
 
 // ---- 节点/边构建 ----
 interface BoxOutbound {
-  id: string // 一律为 DB 出站 id 的数字字符串（含虚拟 direct 行）
+  id: string // 一律为 DB 出站 id 的数字字符串，或者草稿直通: 'draft-tunnel-' + inb.id
   tag: string
   protocol: string
   inbound_ref?: number | null
   virtual?: boolean
+  owner_inbound_id?: number
+  isDraftTunnel?: boolean
+  server_id?: number
 }
 
 interface BoxData {
@@ -234,13 +236,11 @@ function getBoxWidth(serverId: number | string): number {
 }
 
 // 盒高估算（对齐 CSS 渲染附近；仅用于自动排版间距）：
-// 标准盒 = max(入站列高含层胶囊, 出站列高) + 直通管道高度。
+// 标准盒 = max(入站列高含层胶囊, 出站列高)。
 function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, outCount: number) {
   const inbCol = inboundColumnRows(srv.id).colH
   const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + 16
-  const tunnelCount = tunnelInboundsOf(srv.id).length
-  const tunnelH = tunnelCount > 0 ? tunnelCount * 48 + 12 : 0
-  return Math.max(inbCol, outCol) + tunnelH
+  return Math.max(inbCol, outCol)
 }
 
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
@@ -250,32 +250,18 @@ function nodePosOf(s: TopologyData['servers'][number], idx: number) {
 function typeInfo(t?: string) {
   if (t === 'relay') return { cls: 'relay', text: '转发' }
   if (t === 'tunnel') return { cls: 'tunnel', text: '直通' }
+  if (t === 'forward') return { cls: 'forward', text: '代理' }
+  if (t === 'channel') return { cls: 'channel', text: '通道' }
   return { cls: 'user', text: '用户' }
-}
-
-function tunnelInboundsOf(serverId: number): TopologyData['inbounds'] {
-  const data = props.topology
-  if (!data) return []
-  return data.inbounds.filter((i) => i.server_id === serverId && i.type === 'tunnel')
-}
-
-function tunnelTargetDesc(inb: InboundItem): string {
-  if (inb.target_inbound_id && props.topology) {
-    const tgt = props.topology.inbounds.find((i) => i.id === inb.target_inbound_id)
-    if (tgt) {
-      const srv = props.topology.servers.find((s) => s.id === tgt.server_id)
-      return `➜ ${srv ? srv.name + '/' : ''}${tgt.tag} (:${tgt.port})`
-    }
-  }
-  if (inb.target_address && inb.target_port) {
-    return `➜ ${inb.target_address}:${inb.target_port}`
-  }
-  return ''
 }
 
 // 快速切换入站二态 (user <-> relay)
 async function cycleInboundType(inb: InboundItem) {
   if (!props.editable) return
+  if (inb.type === 'tunnel' || inb.type === 'forward' || inb.type === 'channel') {
+    openEditInbound(inb)
+    return
+  }
   const nextType = inb.type === 'relay' ? 'user' : 'relay'
   const labels: Record<string, string> = { user: '用户入站', relay: '转发入站 (relay)' }
   try {
@@ -325,7 +311,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
   const rank = order && order.length > 0 ? new Map(order.map((id, idx) => [id, idx])) : null
   for (const l of data.layers ?? []) {
     if (l.server_id !== serverId) continue
-    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id && i.type !== 'tunnel' && i.type !== 'channel')
+    const rawInbs = data.inbounds.filter((i) => i.server_id === serverId && i.layer_id === l.id && i.type !== 'channel')
     const inbounds = rank
       ? [...rawInbs].sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 9999) - (rank.has(b.id) ? rank.get(b.id)! : 9999))
       : rawInbs
@@ -337,7 +323,7 @@ function layerGroupsOf(serverId: number): { layer: AccessLayer; inbounds: Topolo
 function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
   const data = props.topology
   if (!data) return []
-  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id && i.type !== 'tunnel' && i.type !== 'channel')
+  const list = data.inbounds.filter((i) => i.server_id === serverId && !i.layer_id && i.type !== 'channel')
   const order = boxTagOrders.get(`server-${serverId}`)?.inbounds
   if (!order || order.length === 0) return list
   const rank = new Map(order.map((id, idx) => [id, idx]))
@@ -426,9 +412,9 @@ function getOrderedOutbounds(serverId: number, rawList: BoxOutbound[]): BoxOutbo
   })
 }
 
-// 该服务器全部入站 id（原生 + 挂层，排除直通管道），顺序 = 后端返回序（显示排序的回退基准）
+// 该服务器全部入站 id（原生 + 挂层），顺序 = 后端返回序（显示排序的回退基准）
 function allInboundsOf(serverId: number): number[] {
-  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId && i.type !== 'tunnel' && i.type !== 'channel').map((i) => i.id)
+  return (props.topology?.inbounds ?? []).filter((i) => i.server_id === serverId && i.type !== 'channel').map((i) => i.id)
 }
 
 // 更新并持久化卡片内出入站自定义顺序
@@ -457,8 +443,30 @@ function setServerTagOrder(serverId: number, patch: { inbounds?: number[]; outbo
     const data = srvNode.data as BoxData
     if (props.topology) {
       const rawOut = (props.topology.outbounds || []).filter((o) => o.server_id === serverId && o.protocol !== 'blackhole')
-      const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref
-      const list: BoxOutbound[] = rawOut.map((o) => ({ ...o, id: String(o.id), virtual: isDirect(o) }))
+      const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref && !o.owner_inbound_id
+      const list: BoxOutbound[] = rawOut.map((o) => ({
+        ...o,
+        id: String(o.id),
+        virtual: isDirect(o),
+        owner_inbound_id: o.owner_inbound_id,
+        server_id: o.server_id,
+      }))
+      for (const inb of props.topology.inbounds) {
+        if (inb.server_id === serverId && (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door')) {
+          const hasOut = rawOut.some((o) => o.owner_inbound_id === inb.id)
+          if (!hasOut) {
+            list.push({
+              id: `draft-tunnel-${inb.id}`,
+              tag: `out-${inb.tag}`,
+              protocol: 'freedom',
+              virtual: false,
+              owner_inbound_id: inb.id,
+              isDraftTunnel: true,
+              server_id: inb.server_id,
+            })
+          }
+        }
+      }
       data.outbounds = getOrderedOutbounds(serverId, list)
     }
   }
@@ -538,6 +546,12 @@ function autoAlignServerTags(serverId: number) {
         matchedOutboundIds.push(targetOut.id)
         usedOutboundIds.add(targetOut.id)
       }
+    } else if (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door') {
+      const tunnelOut = outbounds.find((o) => o.owner_inbound_id === inb.id && !usedOutboundIds.has(o.id))
+      if (tunnelOut) {
+        matchedOutboundIds.push(tunnelOut.id)
+        usedOutboundIds.add(tunnelOut.id)
+      }
     }
   }
   for (const out of outbounds) {
@@ -561,12 +575,33 @@ function buildGraph(data: TopologyData) {
   for (const out of data.outbounds) {
     if (out.protocol === 'blackhole') continue // blocked 保留口不入画布（后端保留，仅供规则引用）
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
-    const isDirect = (out.tag === 'direct' || out.protocol === 'freedom') && !out.inbound_ref
+    const isDirect = (out.tag === 'direct' || out.protocol === 'freedom') && !out.inbound_ref && !out.owner_inbound_id
     outByServer.get(out.server_id)!.push({
       ...out,
       id: String(out.id),
       virtual: isDirect,
+      owner_inbound_id: out.owner_inbound_id,
+      server_id: out.server_id,
     })
+  }
+
+  // 为没有派生出站的四层直通入站注入草稿出站行，供用户从右侧把手拖线直连落地入站
+  for (const inb of data.inbounds) {
+    if (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door') {
+      const hasOut = data.outbounds.some((o) => o.owner_inbound_id === inb.id)
+      if (!hasOut) {
+        if (!outByServer.has(inb.server_id)) outByServer.set(inb.server_id, [])
+        outByServer.get(inb.server_id)!.push({
+          id: `draft-tunnel-${inb.id}`,
+          tag: `out-${inb.tag}`,
+          protocol: 'freedom',
+          virtual: false,
+          owner_inbound_id: inb.id,
+          isDraftTunnel: true,
+          server_id: inb.server_id,
+        })
+      }
+    }
   }
 
   const serverNodes = data.servers.map((s, idx) => ({
@@ -622,7 +657,7 @@ function buildGraph(data: TopologyData) {
     }
   }
 
-  // InboundRef 跨盒实线
+  // InboundRef 跨盒实线（含四层直通派生链路 out-<tag>）
   for (const out of data.outbounds) {
     if (out.protocol === 'blackhole' || !out.inbound_ref || !inbNode.has(out.inbound_ref)) continue
     const inb = data.inbounds.find((i) => i.id === out.inbound_ref)
@@ -636,22 +671,7 @@ function buildGraph(data: TopologyData) {
       targetHandle: `inb-tgt-${out.inbound_ref}`,
       type: 'refedge',
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: {},
-    })
-  }
-
-  // 四层直通管道跨盒连线（dokodemo-door -> 目标落地机入站）
-  for (const inb of data.inbounds) {
-    if (inb.type !== 'tunnel' || !inb.target_inbound_id || !inbNode.has(inb.target_inbound_id)) continue
-    es.push({
-      id: `tunnel-${inb.id}`,
-      source: `server-${inb.server_id}`,
-      sourceHandle: `tunnel-src-${inb.id}`,
-      target: inbNode.get(inb.target_inbound_id)!,
-      targetHandle: `inb-tgt-${inb.target_inbound_id}`,
-      type: 'refedge',
-      markerEnd: { type: MarkerType.ArrowClosed },
-      data: { isTunnel: true },
+      data: { isTunnel: !!out.owner_inbound_id },
     })
   }
 
@@ -712,40 +732,48 @@ function isValidConnection(conn: Connection): boolean {
   const src = conn.sourceHandle ?? ''
   const tgt = conn.targetHandle ?? ''
   const apSrc = src.match(/^ap-src-(\d+)$/)
-  const outSrc = src.match(/^out-src-(\d+)$/)
-  const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const outSrc = src.match(/^out-src-(.+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
-  const tunnelSrc = src.match(/^tunnel-src-(\d+)$/)
   const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
-  const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
-  const outAny = tgt.match(/^out-tgt-(\d+)$/)
+  const outAny = tgt.match(/^out-tgt-(.+)$/)
 
-  // 用户接入点 -> 用户入站或四层直通管道
+  // 1. 用户接入点 -> 入站管道（可连用户入站、四层直通管道或转发代理入站，不可连内部中继 relay）
   if (apSrc && inbTgt) {
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbTgt[1]))
-    return !!inb && (inb.type === 'user' || inb.type === 'tunnel')
+    return !!inb && inb.type !== 'relay'
   }
-  // 四层直通管道出口 -> 落地机入站
-  if (tunnelSrc && inbAny) {
-    const srcInb = props.topology.inbounds.find((i) => i.id === Number(tunnelSrc[1]))
-    const tgtInb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
-    return !!(srcInb && tgtInb && srcInb.server_id !== tgtInb.server_id && srcInb.id !== tgtInb.id)
+
+  // 2. 出站右侧 -> 他服务器入站左侧（设置 InboundRef 或建立四层直通管道）
+  if (outSrc && inbTgt) {
+    const outKey = outSrc[1]
+    const tgtInb = props.topology.inbounds.find((i) => i.id === Number(inbTgt[1]))
+    if (!tgtInb) return false
+
+    // 草稿直通出站: out-src-draft-tunnel-{inboundId}
+    const draftMatch = outKey.match(/^draft-tunnel-(\d+)$/)
+    if (draftMatch) {
+      const srcInb = props.topology.inbounds.find((i) => i.id === Number(draftMatch[1]))
+      return !!(srcInb && srcInb.server_id !== tgtInb.server_id)
+    }
+
+    // 数据库出站: out-src-{outboundId}
+    const out = props.topology.outbounds.find((o) => o.id === Number(outKey))
+    return !!(out && out.server_id !== tgtInb.server_id)
   }
-  if (outSrc && inbAny) {
-    const out = props.topology.outbounds.find((o) => o.id === Number(outSrc[1]))
-    const inb = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
-    return !!(out && inb && out.server_id !== inb.server_id)
-  }
-  if (inbSrcExt && inbAny) {
-    const inb1 = props.topology.inbounds.find((i) => i.id === Number(inbSrcExt[1]))
-    const inb2 = props.topology.inbounds.find((i) => i.id === Number(inbAny[1]))
-    return !!(inb1 && inb2 && inb1.server_id !== inb2.server_id)
-  }
+
+  // 3. 入站右侧 -> 同服务器出站左侧（盒内路由规则）
   if (inbSrc && outAny) {
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbSrc[1]))
-    const out = props.topology.outbounds.find((o) => o.id === Number(outAny[1]))
-    return !!(inb && out && inb.server_id === out.server_id)
+    if (!inb) return false
+    const outKey = outAny[1]
+    const draftMatch = outKey.match(/^draft-tunnel-(\d+)$/)
+    if (draftMatch) {
+      return Number(draftMatch[1]) === inb.id
+    }
+    const out = props.topology.outbounds.find((o) => o.id === Number(outKey))
+    return !!(out && inb.server_id === out.server_id)
   }
+
   return false
 }
 
@@ -755,15 +783,12 @@ async function handleConnect(conn: Connection) {
   const src = conn.sourceHandle ?? ''
   const tgt = conn.targetHandle ?? ''
   const apSrc = src.match(/^ap-src-(\d+)$/)
-  const outSrc = src.match(/^out-src-(\d+)$/)
-  const inbSrcExt = src.match(/^inb-src-ext-(\d+)$/)
+  const outSrc = src.match(/^out-src-(.+)$/)
   const inbSrc = src.match(/^inb-src-(\d+)$/)
-  const tunnelSrc = src.match(/^tunnel-src-(\d+)$/)
   const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
-  const inbAny = tgt.match(/^(?:inb-src-ext|inb-tgt)-(\d+)$/)
-  const outAny = tgt.match(/^out-tgt-(\d+)$/)
+  const outAny = tgt.match(/^out-tgt-(.+)$/)
 
-  // 用户接入点 → 目标（用户入站或四层直通管道）
+  // 1. 用户接入点 → 目标（用户入站或四层直通管道）
   if (apSrc) {
     const apId = Number(apSrc[1])
     if (inbTgt) {
@@ -781,20 +806,46 @@ async function handleConnect(conn: Connection) {
     }
     return
   }
-  if (tunnelSrc && inbAny) {
-    await connectTunnel(Number(tunnelSrc[1]), Number(inbAny[1]))
+
+  // 2. 出站右侧 -> 他服务器入站
+  if (outSrc && inbTgt) {
+    const outKey = outSrc[1]
+    const tgtInbId = Number(inbTgt[1])
+
+    // 草稿直通出站连接
+    const draftMatch = outKey.match(/^draft-tunnel-(\d+)$/)
+    if (draftMatch) {
+      const srcInbId = Number(draftMatch[1])
+      await connectTunnel(srcInbId, tgtInbId)
+      return
+    }
+
+    // 数据库出站连接
+    const outId = Number(outKey)
+    const out = props.topology.outbounds.find((o) => o.id === outId)
+    if (out && out.owner_inbound_id) {
+      await connectTunnel(out.owner_inbound_id, tgtInbId)
+    } else if (out) {
+      await createRef(outId, tgtInbId)
+    }
     return
   }
-  if (outSrc && inbAny) {
-    await createRef(Number(outSrc[1]), Number(inbAny[1]))
-  } else if (inbSrcExt && inbAny) {
-    await createViaOutbound(Number(inbSrcExt[1]), Number(inbAny[1]))
-  } else if (inbSrc && outAny) {
-    openRuleDialog(Number(inbSrc[1]), Number(outAny[1]))
-  } else if (inbSrc && inbAny) {
-    ElMessage.warning('盒内端点仅限服务器内连接（入站 → 出站）；跨服务器请从盒子边缘端点拖出')
+
+  // 3. 入站右侧 -> 同服务器出站（盒内规则）
+  if (inbSrc && outAny) {
+    const outKey = outAny[1]
+    if (outKey.startsWith('draft-tunnel-')) {
+      ElMessage.info('四层直通管道在连线落地入站后将自动生成专属转发规则')
+      return
+    }
+    openRuleDialog(Number(inbSrc[1]), Number(outKey))
+    return
+  }
+
+  if (inbSrc && inbTgt) {
+    ElMessage.warning('入站端点仅限连接服务器内部出站；跨服务器请从右侧「出站」端点拖出连接至落地入站')
   } else {
-    ElMessage.warning('仅支持：接入点右侧端点 -> 入站/直通管道、管道右侧端点 -> 落地机入站、出站边缘点 -> 入站（设置引用）、入站边缘点 -> 他服务器入站（自动建中转出站）、入站内点 -> 出站（盒内规则）')
+    ElMessage.warning('仅支持：接入点 -> 入站/管道、出站 -> 他服务器落地入站、入站 -> 盒内出站')
   }
 }
 
@@ -813,31 +864,53 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
   let targetAcceptsPP = false
   try {
     const ss = JSON.parse(tgtInb.stream_settings || '{}')
-    targetAcceptsPP = !!ss.acceptProxyProtocol
+    targetAcceptsPP = !!(ss.acceptProxyProtocol || ss.tcpSettings?.acceptProxyProtocol || ss.xhttpSettings?.acceptProxyProtocol)
   } catch {}
 
-  let confirmMsg = `将四层直通管道「${srcInb.tag}」（${srcSrv}）连接至落地入站「${tgtInb.tag}」（${tgtSrv}）？\n直通管道将通过 dokodemo-door 发送 ProxyProtocol v2 报文。`
-  if (!targetAcceptsPP) {
-    confirmMsg += `\n\n【提示】落地入站「${tgtInb.tag}」尚未开启「接收 Proxy Protocol」。是否自动为其开启？`
+  let confirmMsg = `将四层直通管道「${srcInb.tag}」（${srcSrv}）连接至落地入站「${tgtInb.tag}」（${tgtSrv}）？\n\n开启 PROXY Protocol v2 可将客户端真实 IP 传递给落地节点；若落地入站未开启接收或不需要真实 IP，请选择「直接连接（不开启 PPv2）」。`
+  if (targetAcceptsPP) {
+    confirmMsg += `\n\n【提示】落地入站「${tgtInb.tag}」当前已开启「接收 Proxy Protocol」。`
   }
 
+  let enablePP = true
   try {
     await ElMessageBox.confirm(confirmMsg, '建立四层直通管道', {
       type: 'info',
-      confirmButtonText: '确认建立',
-      cancelButtonText: '取消',
+      distinguishCancelAndClose: true,
+      confirmButtonText: '开启 PPv2 并连接',
+      cancelButtonText: '直接连接（不开启 PPv2）',
+      showClose: true,
     })
-  } catch {
-    return
+    enablePP = true
+  } catch (action) {
+    if (action === 'cancel') {
+      enablePP = false
+    } else {
+      // 点击右上角叉号或遮罩关闭，取消本次连接
+      return
+    }
   }
 
   try {
-    if (!targetAcceptsPP) {
+    let srcSS: Record<string, any> = {}
+    try {
+      srcSS = JSON.parse(srcInb.stream_settings || '{}')
+    } catch {}
+    srcSS.proxy_protocol = enablePP
+    if (!srcSS.network) {
+      srcSS.network = 'tcp,udp'
+    }
+
+    if (enablePP && !targetAcceptsPP) {
       let ss: Record<string, any> = {}
       try {
         ss = JSON.parse(tgtInb.stream_settings || '{}')
       } catch {}
       ss.acceptProxyProtocol = true
+      if (!ss.tcpSettings || typeof ss.tcpSettings !== 'object') {
+        ss.tcpSettings = {}
+      }
+      ss.tcpSettings.acceptProxyProtocol = true
       await updateInbound(tgtInb.id, { stream_settings: JSON.stringify(ss) })
     }
 
@@ -845,9 +918,10 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
       target_inbound_id: targetInboundId,
       target_address: '',
       target_port: 0,
+      stream_settings: JSON.stringify(srcSS),
     })
     if (res.code === 0) {
-      ElMessage.success('四层直通管道已连接，落地入站已配置 ProxyProtocol')
+      ElMessage.success(enablePP ? '四层直通管道已连接（已启用 PPv2）' : '四层直通管道已连接（未启用 PPv2）')
       emit('changed')
     } else {
       ElMessage.error(res.message)
@@ -857,60 +931,6 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
   }
 }
 
-// 入站 → 他服务器入站：自动创建「via 出站」+ 路由规则
-async function createViaOutbound(srcInboundId: number, tgtInboundId: number) {
-  const data = props.topology!
-  const srcInb = data.inbounds.find((i) => i.id === srcInboundId)
-  const tgtInb = data.inbounds.find((i) => i.id === tgtInboundId)
-  if (!srcInb || !tgtInb) return
-  if (srcInb.server_id === tgtInb.server_id) {
-    ElMessage.warning('同服务器入站请拖到本盒「出站」（创建路由规则）')
-    return
-  }
-  const srcSrv = data.servers.find((s) => s.id === srcInb.server_id)
-  const tgtSrv = data.servers.find((s) => s.id === tgtInb.server_id)
-  if (!srcSrv || !tgtSrv) return
-
-  let tag = `via-${tgtInb.tag}`
-  const sameServerOuts = data.outbounds.filter((o) => o.server_id === srcInb.server_id)
-  let n = 2
-  while (sameServerOuts.some((o) => o.tag === tag)) tag = `via-${tgtInb.tag}-${n++}`
-  try {
-    await ElMessageBox.confirm(
-      `将自动完成中转配置：\n` +
-        `① 在「${srcSrv.name}」创建出站「${tag}」（vless 引用 ${tgtSrv.name}/${tgtInb.tag} 落地，地址/端口/UUID 自动构造）\n` +
-        `② 创建路由规则：${srcInb.tag} → ${tag}`,
-      '自动建出站 + 路由',
-      { type: 'info' },
-    )
-  } catch {
-    return
-  }
-  try {
-    const { data: r1 } = await createServerOutbound(srcInb.server_id, {
-      tag,
-      protocol: 'vless',
-      inbound_ref: tgtInb.id,
-      enabled: true,
-    })
-    if (r1.code !== 0) {
-      ElMessage.error(r1.message)
-      return
-    }
-    const { data: r2 } = await createServerRoutingRule(srcInb.server_id, {
-      inbound_tag: srcInb.tag,
-      outbound_tag: tag,
-    })
-    if (r2.code !== 0) {
-      ElMessage.warning(`出站「${tag}」已创建，但路由规则创建失败：${r2.message}`)
-    } else {
-      ElMessage.success('出站与路由规则已创建，配置将自动更新')
-    }
-    emit('changed')
-  } catch (e) {
-    ElMessage.error(errMsg(e, '创建失败'))
-  }
-}
 
 async function createRef(outboundId: number, inboundId: number) {
   const data = props.topology!
@@ -1141,6 +1161,21 @@ function openCreateOutbound(serverId: number) {
   outboundEditorOpen.value = true
 }
 
+function openEditOutbound(out: TopologyData['outbounds'][number] | BoxOutbound) {
+  if (out.virtual) return
+  if (out.owner_inbound_id) {
+    const inb = props.topology?.inbounds.find((i) => i.id === out.owner_inbound_id)
+    if (inb) {
+      openEditInbound(inb)
+      return
+    }
+  }
+  if (!out.server_id) return
+  outboundServerId.value = out.server_id
+  outboundEditing.value = out as any
+  outboundEditorOpen.value = true
+}
+
 function handleOutboundSaved() {
   outboundEditorOpen.value = false
   emit('changed')
@@ -1151,6 +1186,7 @@ const inboundCreateOpen = ref(false)
 const inboundCreateServerId = ref(0)
 const inboundEditingItem = ref<InboundItem | null>(null)
 const inboundFormType = ref('user')
+const inboundFormCertId = ref(0)
 const inboundChangePayload = ref<InboundEditorChangePayload | null>(null)
 const inboundSaving = ref(false)
 
@@ -1158,6 +1194,7 @@ function openCreateInbound(serverId: number) {
   inboundCreateServerId.value = serverId
   inboundEditingItem.value = null
   inboundFormType.value = 'user'
+  inboundFormCertId.value = 0
   inboundChangePayload.value = null
   inboundCreateOpen.value = true
 }
@@ -1166,6 +1203,7 @@ function openEditInbound(inb: InboundItem) {
   inboundCreateServerId.value = inb.server_id
   inboundEditingItem.value = inb
   inboundFormType.value = inb.type || 'user'
+  inboundFormCertId.value = inb.cert_id || 0
   inboundChangePayload.value = null
   inboundCreateOpen.value = true
 }
@@ -1184,6 +1222,7 @@ function inboundEditorModelValue(): string {
     tag: inb.tag,
     port: inb.port,
     listen: inb.listen,
+    protocol: inb.protocol || 'vless',
     network,
     tls_type: tlsType,
     flow: inb.flow || '',
@@ -1237,12 +1276,13 @@ async function handleSaveInbound() {
       sniffing: c.sniffing || undefined,
       ratio: c.ratio,
       total_gb: c.total_gb,
-      expiry_time: c.expiry_time ?? null,
-      type: inboundFormType.value,
+      expiry_time: (c.expiry_time && c.expiry_time.trim()) ? c.expiry_time : null,
+      type: c.type || inboundFormType.value,
       target_inbound_id: c.targetInboundId || 0,
       target_address: c.targetAddress || '',
       target_port: c.targetPort || 0,
       flow: c.flow || undefined,
+      cert_id: inboundFormCertId.value || undefined,
       share_addr_strategy: c.shareAddrStrategy || undefined,
       share_addr: c.shareAddr || undefined,
       share_port: c.sharePort || undefined,
@@ -1280,6 +1320,7 @@ async function handleDeleteInbound(inb: InboundItem) {
     const { data } = await deleteInbound(inb.id)
     if (data.code === 0) {
       ElMessage.success('入站已删除')
+      inboundCreateOpen.value = false
       emit('changed')
     } else {
       ElMessage.error(data.message)
@@ -1391,6 +1432,34 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
         }
       } catch (e) {
         ElMessage.error(errMsg(e, '删除失败'))
+        deselectEdge(edge.id)
+      }
+      return
+    }
+    if (out.owner_inbound_id) {
+      const inb = props.topology.inbounds.find((i) => i.id === out.owner_inbound_id)
+      const inbTag = inb ? inb.tag : out.tag
+      try {
+        await ElMessageBox.confirm(
+          `解除四层直通管道「${inbTag}」与目标入站的连线？解除后管道将恢复为草稿状态。`,
+          '解除直通管道',
+          { type: 'warning' },
+        )
+      } catch {
+        deselectEdge(edge.id)
+        return
+      }
+      try {
+        const { data } = await updateInbound(out.owner_inbound_id, { target_inbound_id: 0 })
+        if (data.code === 0) {
+          ElMessage.success('已解除直通连线')
+          emit('changed')
+        } else {
+          ElMessage.error(data.message)
+          deselectEdge(edge.id)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '解除连线失败'))
         deselectEdge(edge.id)
       }
       return
@@ -1860,72 +1929,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             </div>
           </div>
 
-          <!-- 四层直通管道卡片（横跨整机的通栏卡片 Full-width Tunnel Card） -->
-          <div v-if="tunnelInboundsOf(nodeProps.data.server.id).length > 0" class="sb-tunnels-wrap">
-            <div
-              v-for="inb in tunnelInboundsOf(nodeProps.data.server.id)"
-              :key="inb.id"
-              class="tunnel-card"
-            >
-              <!-- 左侧入口端点：供 AP 拖线接入（inb-tgt） -->
-              <Handle
-                type="target"
-                :id="`inb-tgt-${inb.id}`"
-                :position="Position.Left"
-                :connectable="editable"
-                class="ep ext-tgt tunnel-ep-left"
-                title="供用户接入点连接"
-              />
-
-              <div class="tunnel-card-content">
-                <!-- 左侧入站信息 -->
-                <div class="tunnel-entry">
-                  <span class="tunnel-badge">直通</span>
-                  <span class="tunnel-tag" :title="inb.tag">{{ inb.tag }}</span>
-                  <span class="port-badge">:{{ inb.port }}</span>
-                </div>
-
-                <!-- 中间管道视觉 -->
-                <div class="tunnel-pipe">
-                  <div class="pipe-line" :class="{ 'is-active': inb.target_inbound_id || inb.target_address }">
-                    <span class="pipe-flow-icon">⚡</span>
-                    <span class="pipe-text">dokodemo-door (L4)</span>
-                    <span class="pipe-arrow">➜</span>
-                    <span class="pipe-proto">PPv2</span>
-                  </div>
-                  <div class="pipe-target-info">
-                    <span v-if="tunnelTargetDesc(inb)" class="target-desc" :title="tunnelTargetDesc(inb)">
-                      {{ tunnelTargetDesc(inb) }}
-                    </span>
-                    <span v-else class="target-draft">
-                      ⚠️ 待连线 (从右侧端点拖至目标入站)
-                    </span>
-                  </div>
-                </div>
-
-                <!-- 右侧操作与出口端点 -->
-                <div class="tunnel-actions">
-                  <button v-if="editable" class="tunnel-btn" title="编辑直通管道" @click.stop="openEditInbound(inb)">
-                    <el-icon><Setting /></el-icon>
-                  </button>
-                  <button v-if="editable" class="tunnel-btn danger" title="删除直通管道" @click.stop="handleDeleteInbound(inb)">
-                    <el-icon><Delete /></el-icon>
-                  </button>
-                </div>
-              </div>
-
-              <!-- 右侧出口端点：拖线连至落地机入站 -->
-              <Handle
-                type="source"
-                :id="`tunnel-src-${inb.id}`"
-                :position="Position.Right"
-                :connectable="editable"
-                class="ep ext-src tunnel-ep-right"
-                title="拖线至目标落地机入站"
-              />
-            </div>
-          </div>
-
           <div class="sb-cols">
             <!-- 入站列：包含 Caddy 认知层容器与常规入站 -->
             <div class="sb-col">
@@ -2006,13 +2009,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                         :connectable="editable"
                         class="ep ext-tgt"
                       />
-                      <Handle
-                        type="source"
-                        :id="`inb-src-ext-${inb.id}`"
-                        :position="Position.Left"
-                        :connectable="editable"
-                        class="ep ext-src"
-                      />
                       <span
                         class="type-tag"
                         :class="typeInfo(inb.type).cls"
@@ -2025,7 +2021,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                         {{ inb.share_path }}
                       </span>
                       <span class="port-badge">:{{ inb.port }}</span>
-                      <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
+                      <span class="tag clickable" :title="`编辑入站「${inb.tag}」`" @click.stop="openEditInbound(inb)">{{ inb.tag }}</span>
                       <button
                         v-if="editable"
                         class="layer-unbind-btn"
@@ -2074,13 +2070,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     :connectable="editable"
                     class="ep ext-tgt"
                   />
-                  <Handle
-                    type="source"
-                    :id="`inb-src-ext-${inb.id}`"
-                    :position="Position.Left"
-                    :connectable="editable"
-                    class="ep ext-src"
-                  />
                   <span
                     class="type-tag"
                     :class="typeInfo(inb.type).cls"
@@ -2090,7 +2079,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     {{ typeInfo(inb.type).text }}
                   </span>
                   <span class="port-badge">:{{ inb.port }}</span>
-                  <span class="tag" :title="inb.tag">{{ inb.tag }}</span>
+                  <span class="tag clickable" :title="`编辑入站「${inb.tag}」`" @click.stop="openEditInbound(inb)">{{ inb.tag }}</span>
                   <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
                   <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
 
@@ -2153,13 +2142,16 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     class="ep in-ep"
                   />
                   <span
-                    class="tag out-tag"
-                    :class="out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
-                    :title="out.tag"
+                    class="tag out-tag clickable"
+                    :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
+                    :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : `出站「${out.tag}」`"
+                    @click.stop="openEditOutbound(out)"
                   >
-                    {{ (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
+                    {{ out.isDraftTunnel ? '🔗 ' + out.tag : (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
                   </span>
-                  <span v-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
+                  <span v-if="out.isDraftTunnel" class="out-proto-badge draft" title="草稿直通：拖拽右侧端点至落地入站建立管道">待连线</span>
+                  <span v-else-if="out.owner_inbound_id" class="out-proto-badge tunnel">LINK</span>
+                  <span v-else-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
                   <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
@@ -2245,15 +2237,32 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
         :target-inbound-id="inboundEditingItem?.target_inbound_id"
         :target-address="inboundEditingItem?.target_address || ''"
         :target-port="inboundEditingItem?.target_port || 0"
+        :protocol="inboundEditingItem?.protocol || 'vless'"
+        :cert-id="inboundFormCertId"
         :model-value="inboundEditorModelValue()"
         @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (inboundFormType = v)"
+        @update:cert-id="(v: number) => (inboundFormCertId = v || 0)"
       />
       <template #footer>
-        <el-button @click="inboundCreateOpen = false">取消</el-button>
-        <el-button type="primary" :loading="inboundSaving" @click="handleSaveInbound">
-          {{ inboundEditingItem ? '保存入站' : '创建入站' }}
-        </el-button>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+          <div>
+            <el-button
+              v-if="inboundEditingItem"
+              type="danger"
+              plain
+              @click="handleDeleteInbound(inboundEditingItem)"
+            >
+              删除入站
+            </el-button>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <el-button @click="inboundCreateOpen = false">取消</el-button>
+            <el-button type="primary" :loading="inboundSaving" @click="handleSaveInbound">
+              {{ inboundEditingItem ? '保存入站' : '创建入站' }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -2978,10 +2987,26 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 110px;
+      &.clickable {
+        cursor: pointer;
+        &:hover {
+          color: #38bdf8;
+          text-decoration: underline;
+        }
+      }
     }
     .out-tag {
       font-weight: 600;
       color: #93c5fd;
+      &.clickable {
+        cursor: pointer;
+        &:hover {
+          text-decoration: underline;
+        }
+      }
+      &.tunnel {
+        color: #c084fc;
+      }
       &.ref {
         color: #fbbf24;
       }
@@ -3033,6 +3058,11 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       flex: none;
       background: rgba(148, 163, 184, 0.15);
       color: #cbd5e1;
+      &.tunnel {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+      }
       &.ref {
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
@@ -3068,6 +3098,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       &.relay {
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
+      }
+      &.tunnel {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+      }
+      &.forward {
+        background: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+      }
+      &.channel {
+        background: rgba(244, 114, 182, 0.15);
+        color: #f472b6;
       }
     }
 
@@ -3281,7 +3323,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
   }
   &.ext-tgt {
     z-index: 2;
-    opacity: 0;
+    opacity: 1;
+    border-color: rgba(255, 255, 255, 0.35);
   }
   &.in-ep {
     border-color: rgba(255, 255, 255, 0.15);
