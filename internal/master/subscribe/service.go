@@ -71,69 +71,101 @@ func escapeSingleQuote(s string) string {
 // 导出器为哑渲染器：flow 等协议语义已由插件决议进 DTO，此处只做格式映射；
 // 新协议的 Clash 分支在此按 dto.Protocol 扩展。
 func formatClashNode(dto *contracts.ProxyNodeDTO) string {
-	if dto.Protocol != "vless" || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
+	if dto == nil || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
 		return ""
 	}
-	sec := dto.Security.Type
-	if sec == "reality" && dto.Security.Reality == nil {
-		return ""
-	}
-	parts := make([]string, 0, 16)
-	parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
-	parts = append(parts, "type: vless")
-	parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
-	parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
-	parts = append(parts, fmt.Sprintf("uuid: %s", dto.Auth.UUID))
-	parts = append(parts, "udp: true")
-
-	// flow: 仅 TCP 传输可用且有效（插件已决议，含自动 vision 与 none 抑制）
-	network := dto.Transport.Network
-	if network == "tcp" && dto.Auth.Flow != "" {
-		parts = append(parts, fmt.Sprintf("flow: %s", dto.Auth.Flow))
-	}
-
-	// 客户端 utls 指纹：入站 streamSettings.fingerprint（插件已兜底 chrome）
-	fp := dto.Security.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
-
-	switch sec {
-	case "reality":
-		parts = append(parts, "tls: true")
-		if dto.Security.SNI != "" {
-			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+	switch dto.Protocol {
+	case "vless":
+		sec := dto.Security.Type
+		if sec == "reality" && dto.Security.Reality == nil {
+			return ""
 		}
-		parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s }", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID))
-		parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
-	case "tls":
-		parts = append(parts, "tls: true")
+		parts := make([]string, 0, 16)
+		parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
+		parts = append(parts, "type: vless")
+		parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
+		parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
+		parts = append(parts, fmt.Sprintf("uuid: %s", dto.Auth.UUID))
+		parts = append(parts, "udp: true")
+
+		// flow: 仅 TCP 传输可用且有效（插件已决议，含自动 vision 与 none 抑制）
+		network := dto.Transport.Network
+		if network == "tcp" && dto.Auth.Flow != "" {
+			parts = append(parts, fmt.Sprintf("flow: %s", dto.Auth.Flow))
+		}
+
+		// 客户端 utls 指纹：入站 streamSettings.fingerprint（插件已兜底 chrome）
+		fp := dto.Security.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+
+		switch sec {
+		case "reality":
+			parts = append(parts, "tls: true")
+			if dto.Security.SNI != "" {
+				parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+			}
+			parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s }", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID))
+			parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
+		case "tls":
+			parts = append(parts, "tls: true")
+			if dto.Security.AllowInsecure {
+				parts = append(parts, "skip-cert-verify: true")
+			}
+			if dto.Security.SNI != "" {
+				parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+			}
+			parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
+		default:
+			parts = append(parts, "tls: false")
+		}
+
+		if network == "xhttp" {
+			parts = append(parts, "network: xhttp")
+			parts = append(parts, "alpn: [h2]")
+			if dto.Transport.Mode != "" {
+				hostField := ""
+				if dto.Transport.Host != "" {
+					hostField = fmt.Sprintf(", host: %s", dto.Transport.Host)
+				}
+				parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", dto.Transport.Mode, dto.Transport.Path, hostField))
+			}
+		} else {
+			parts = append(parts, "network: tcp")
+		}
+
+		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
+
+	case "hysteria":
+		password := dto.Auth.Password
+		if password == "" {
+			password = dto.Auth.UUID
+		}
+		if password == "" {
+			return ""
+		}
+		parts := make([]string, 0, 16)
+		parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
+		parts = append(parts, "type: hysteria2")
+		parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
+		parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
+		parts = append(parts, fmt.Sprintf("password: '%s'", escapeSingleQuote(password)))
+		if dto.Security.SNI != "" {
+			parts = append(parts, fmt.Sprintf("sni: %s", dto.Security.SNI))
+		}
 		if dto.Security.AllowInsecure {
 			parts = append(parts, "skip-cert-verify: true")
 		}
-		if dto.Security.SNI != "" {
-			parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+		if dto.Security.Fingerprint != "" {
+			parts = append(parts, fmt.Sprintf("fingerprint: %s", dto.Security.Fingerprint))
 		}
-		parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
+		parts = append(parts, "alpn: [h3]")
+		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
+
 	default:
-		parts = append(parts, "tls: false")
+		return ""
 	}
-
-	if network == "xhttp" {
-		parts = append(parts, "network: xhttp")
-		parts = append(parts, "alpn: [h2]")
-		if dto.Transport.Mode != "" {
-			hostField := ""
-			if dto.Transport.Host != "" {
-				hostField = fmt.Sprintf(", host: %s", dto.Transport.Host)
-			}
-			parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", dto.Transport.Mode, dto.Transport.Path, hostField))
-		}
-	} else {
-		parts = append(parts, "network: tcp")
-	}
-
-	return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
 }
 
 // FormatNodesYAML 将节点 DTO 列表格式化为 YAML 节点块（每项单行紧凑映射），并返回有效节点名称列表。
@@ -368,59 +400,83 @@ func BuildBase64(nodes []contracts.ProxyNodeDTO) string {
 	links := make([]string, 0, len(nodes))
 	for i := range nodes {
 		dto := &nodes[i]
-		if dto.Protocol != "vless" || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
-			continue
-		}
-		q := url.Values{}
-		q.Set("encryption", "none")
-		sec := dto.Security.Type
-		network := dto.Transport.Network
-		if fp := dto.Security.Fingerprint; fp != "" {
-			q.Set("fp", fp)
-		}
-		switch sec {
-		case "reality":
-			if dto.Security.Reality == nil {
+		switch dto.Protocol {
+		case "vless":
+			q := url.Values{}
+			q.Set("encryption", "none")
+			sec := dto.Security.Type
+			network := dto.Transport.Network
+			if fp := dto.Security.Fingerprint; fp != "" {
+				q.Set("fp", fp)
+			}
+			switch sec {
+			case "reality":
+				if dto.Security.Reality == nil {
+					continue
+				}
+				q.Set("security", "reality")
+				q.Set("sni", dto.Security.SNI)
+				q.Set("pbk", dto.Security.Reality.PublicKey)
+				q.Set("sid", dto.Security.Reality.ShortID)
+				if network == "tcp" && dto.Auth.Flow != "" {
+					q.Set("flow", dto.Auth.Flow)
+				}
+			case "tls":
+				q.Set("security", "tls")
+				if dto.Security.SNI != "" {
+					q.Set("sni", dto.Security.SNI)
+				}
+				if dto.Security.AllowInsecure {
+					q.Set("allowInsecure", "1")
+				}
+				// TCP+TLS+Vision：仅当用户已配置 flow（vision 不适用 ws/xhttp）
+				if network == "tcp" && dto.Auth.Flow != "" {
+					q.Set("flow", dto.Auth.Flow)
+				}
+			default:
+				q.Set("security", "none")
+			}
+			// 传输层参数（与 TLS 类型无关，独立输出）
+			if network == "xhttp" {
+				q.Set("type", "xhttp")
+				if dto.Transport.Mode != "" {
+					q.Set("mode", dto.Transport.Mode)
+					q.Set("path", dto.Transport.Path)
+					if dto.Transport.Host != "" {
+						q.Set("host", dto.Transport.Host)
+					}
+				}
+			} else if network == "tcp" && sec != "reality" {
+				q.Set("type", "tcp")
+			}
+			frag := url.QueryEscape(dto.Name)
+			link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag)
+			links = append(links, link)
+
+		case "hysteria":
+			password := dto.Auth.Password
+			if password == "" {
+				password = dto.Auth.UUID
+			}
+			if password == "" {
 				continue
 			}
-			q.Set("security", "reality")
-			q.Set("sni", dto.Security.SNI)
-			q.Set("pbk", dto.Security.Reality.PublicKey)
-			q.Set("sid", dto.Security.Reality.ShortID)
-			if network == "tcp" && dto.Auth.Flow != "" {
-				q.Set("flow", dto.Auth.Flow)
-			}
-		case "tls":
-			q.Set("security", "tls")
+			q := url.Values{}
 			if dto.Security.SNI != "" {
 				q.Set("sni", dto.Security.SNI)
 			}
 			if dto.Security.AllowInsecure {
-				q.Set("allowInsecure", "1")
+				q.Set("insecure", "1")
 			}
-			// TCP+TLS+Vision：仅当用户已配置 flow（vision 不适用 ws/xhttp）
-			if network == "tcp" && dto.Auth.Flow != "" {
-				q.Set("flow", dto.Auth.Flow)
+			u := url.URL{
+				Scheme:   "hysteria2",
+				User:     url.User(password),
+				Host:     fmt.Sprintf("%s:%d", dto.ServerHost, dto.ServerPort),
+				RawQuery: q.Encode(),
+				Fragment: dto.Name,
 			}
-		default:
-			q.Set("security", "none")
+			links = append(links, u.String())
 		}
-		// 传输层参数（与 TLS 类型无关，独立输出）
-		if network == "xhttp" {
-			q.Set("type", "xhttp")
-			if dto.Transport.Mode != "" {
-				q.Set("mode", dto.Transport.Mode)
-				q.Set("path", dto.Transport.Path)
-				if dto.Transport.Host != "" {
-					q.Set("host", dto.Transport.Host)
-				}
-			}
-		} else if network == "tcp" && sec != "reality" {
-			q.Set("type", "tcp")
-		}
-		frag := url.QueryEscape(dto.Name)
-		link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag)
-		links = append(links, link)
 	}
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
 }

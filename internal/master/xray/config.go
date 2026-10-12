@@ -290,7 +290,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !ok {
 			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
 		}
-		if ob.Protocol == "vless" && target.Inbound.InternalUUID == "" {
+		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && target.Inbound.InternalUUID == "" {
 			return nil, fmt.Errorf("出站 %s 引用的落地入站 %s 未完成内部账户 setup（InternalUUID 为空）", ob.Tag, target.Inbound.Tag)
 		}
 	}
@@ -379,13 +379,13 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if !ob.Enabled {
 			continue
 		}
-		if ob.Protocol == "vless" && ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" {
+		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" {
 			// 草稿未连线出站（等待管理员在拓扑画布中拖线关联目标入站）：安全跳过注入，避免 Xray 配置校验失败
 			continue
 		}
 		item := make(map[string]any)
-		if ob.InboundRef != nil && ctx != nil && ob.Protocol == "vless" {
-			// InboundRef VLESS 出站：vnext / streamSettings 全自动构造（不手填）
+		if ob.InboundRef != nil && ctx != nil && (ob.Protocol == "vless" || ob.Protocol == "hysteria") {
+			// InboundRef 节点间出站：由对应目标协议插件统一投影全自动构造
 			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
 				if err := buildRefOutbound(item, target); err != nil {
 					return nil, err
@@ -547,6 +547,37 @@ func renderPeerOutbound(item map[string]any, dto *contracts.ProxyNodeDTO) error 
 			}
 			ss["tlsSettings"] = tlsSettings
 		}
+		item["streamSettings"] = ss
+		return nil
+	case "hysteria":
+		item["protocol"] = "hysteria"
+		item["settings"] = map[string]any{
+			"version": 2,
+			"address": dto.ServerHost,
+			"port":    dto.ServerPort,
+		}
+		auth := dto.Auth.Password
+		if auth == "" {
+			auth = dto.Auth.UUID
+		}
+		ss := map[string]any{
+			"network":  "hysteria",
+			"security": "tls",
+			"hysteriaSettings": map[string]any{
+				"version": 2,
+				"auth":    auth,
+			},
+		}
+		tlsSettings := map[string]any{
+			"serverName": dto.Security.SNI,
+		}
+		if dto.Security.Fingerprint != "" {
+			tlsSettings["fingerprint"] = dto.Security.Fingerprint
+		}
+		if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
+			tlsSettings["pinnedPeerCertSha256"] = pin
+		}
+		ss["tlsSettings"] = tlsSettings
 		item["streamSettings"] = ss
 		return nil
 	default:
@@ -776,14 +807,16 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
 			flow = "xtls-rprx-vision"
 		}
-		c := map[string]any{
-			"id":    inb.InternalUUID,
-			"email": RelayEmail(inb.Tag),
+		relayUser := protocol.User{
+			UUID:  inb.InternalUUID,
+			Email: RelayEmail(inb.Tag),
+			Flow:  flow,
 		}
-		if flow != "" {
-			c["flow"] = flow
+		key, items, err := protocols.ServerUsers(inb.Protocol, []protocol.User{relayUser}, spec)
+		if err != nil {
+			return nil, fmt.Errorf("relay 入站 %s 注入内部账户失败: %w", inb.Tag, err)
 		}
-		settings["clients"] = []any{c}
+		settings[key] = items
 	case inb.IsForwardProxy():
 		// 独立通道 / 转发代理入站（SOCKS5 / HTTP 等）
 		if inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
@@ -870,6 +903,28 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			}
 			delete(stream, "acceptProxyProtocol")
 		}
+		item["streamSettings"] = stream
+	}
+	// Hysteria 2 特性与默认值规范化（服务端抛弃共享密码，必须 version=2）
+	if inb.Protocol == "hysteria" {
+		settings["version"] = 2
+		stream, _ := item["streamSettings"].(map[string]any)
+		if stream == nil {
+			stream = map[string]any{}
+		}
+		stream["network"] = "hysteria"
+		stream["security"] = "tls"
+		hySettings, _ := stream["hysteriaSettings"].(map[string]any)
+		if hySettings == nil {
+			hySettings = map[string]any{
+				"version":        2,
+				"udpIdleTimeout": 60,
+			}
+		} else {
+			hySettings["version"] = 2
+			delete(hySettings, "auth")
+		}
+		stream["hysteriaSettings"] = hySettings
 		item["streamSettings"] = stream
 	}
 	// 3. 解析 sniffing JSON（完全透传）

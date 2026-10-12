@@ -39,6 +39,7 @@ const (
 	ProtocolDokodemo = "dokodemo-door"
 	ProtocolSocks    = "socks"
 	ProtocolHTTP     = "http"
+	ProtocolHysteria = "hysteria"
 
 	ChannelTypeTunnel = "tunnel"
 	ChannelTypeSocks5 = "socks5"

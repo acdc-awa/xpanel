@@ -14,6 +14,7 @@ var registry = contracts.NewPluginRegistry()
 
 func init() {
 	registry.Register(VLESSPlugin{})
+	registry.Register(HysteriaPlugin{})
 }
 
 // Find 按协议名查找插件；未注册返回 nil。

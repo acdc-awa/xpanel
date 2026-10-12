@@ -33,6 +33,9 @@ func sanitizeStreamSettings(raw string) string {
 	// verifyPeerCertByName），携带会直接拒绝加载；面板保留 DB 标志仅供订阅 skip-cert-verify 透传
 	deleteNestedKey(stream, "tlsSettings", "allowInsecure")
 
+	// Hysteria: 服务端 streamSettings 不保留客户端 auth 共享密码
+	deleteNestedKey(stream, "hysteriaSettings", "auth")
+
 	// REALITY + finalmask 组合会导致 xray panic（XTLS/Xray-core#6453）
 	if security, _ := stream["security"].(string); security == "reality" {
 		delete(stream, "finalmask")

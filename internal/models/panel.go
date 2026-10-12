@@ -111,9 +111,9 @@ func (inb *Inbound) IsForwardProxy() bool {
 	return inb.Protocol == ProtocolSocks || inb.Protocol == ProtocolHTTP || inb.Type == InboundTypeForward
 }
 
-// IsRelay 判断入站是否为内部中转链路（VLESS + relay）。
+// IsRelay 判断入站是否为内部中转链路（relay）。
 func (inb *Inbound) IsRelay() bool {
-	return inb.Protocol == ProtocolVless && inb.Type == InboundTypeRelay
+	return inb.Type == InboundTypeRelay
 }
 
 // CanServeAccessPoint 判断入站端口是否具备对外接入属性（可挂载用户接入点）。
