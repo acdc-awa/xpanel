@@ -1078,8 +1078,6 @@ watch(
                   <el-option label="Hysteria 2" value="hysteria" />
                   <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
                   <el-option label="Mixed (SOCKS5 / HTTP 混合代理)" value="mixed" />
-                  <el-option label="SOCKS5 (兼容旧配置)" value="socks" />
-                  <el-option label="HTTP (兼容旧配置)" value="http" />
                 </el-select>
               </el-form-item>
 

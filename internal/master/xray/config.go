@@ -818,8 +818,8 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 		settings[key] = items
 	case inb.IsForwardProxy():
-		// 独立通道 / 转发代理入站（SOCKS5 / HTTP 等）
-		if inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
+		// 独立通道 / 转发代理入站（Mixed / SOCKS5 / HTTP 等）
+		if inb.Protocol == models.ProtocolMixed || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
 			var allowedGroups []uint64
 			if ctx != nil && ctx.InboundAuthorizedGroups != nil {
 				allowedGroups = ctx.InboundAuthorizedGroups[inb.ID]
@@ -843,12 +843,12 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			// 严格零信任物理跳过：若无任何有效认证账号（未挂载接入点或权限组内无有效用户），
 			// 绝不注入该入站到 Xray 配置（彻底杜绝 Xray 空 accounts 沦为免密开放代理）
 			if len(accounts) == 0 {
-				log.Printf("[xray-generate] SOCKS/HTTP 入站 %s (id=%d) 无有效认证账号，物理跳过以防免密开放代理", inb.Tag, inb.ID)
+				log.Printf("[xray-generate] Mixed/转发入站 %s (id=%d) 无有效认证账号，物理跳过以防免密开放代理", inb.Tag, inb.ID)
 				return nil, nil
 			}
 			settings["auth"] = "password"
 			settings["accounts"] = accounts
-			if inb.Protocol == models.ProtocolSocks {
+			if inb.Protocol == models.ProtocolMixed || inb.Protocol == models.ProtocolSocks {
 				if _, hasUDP := settings["udp"]; !hasUDP {
 					settings["udp"] = true
 				}

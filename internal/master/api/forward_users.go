@@ -61,11 +61,11 @@ type forwardUsersSummaryView struct {
 	TotalUsedBytes int64 `json:"total_used_bytes"`
 }
 
-// AdminSyncForwardUsersConfigs 手动将所有转发用户最新凭据配置下发到包含 SOCKS/HTTP 入站的服务器。
+// AdminSyncForwardUsersConfigs 手动将所有转发用户最新凭据配置下发到包含 Mixed/SOCKS/HTTP 入站的服务器。
 func (d *Deps) AdminSyncForwardUsersConfigs(c *gin.Context) {
 	var serverIDs []uint64
 	if err := d.DB.Model(&models.Inbound{}).
-		Where("enabled = ? AND (protocol = ? OR protocol = ?)", true, models.ProtocolSocks, models.ProtocolHTTP).
+		Where("enabled = ? AND (protocol = ? OR protocol = ? OR protocol = ?)", true, models.ProtocolMixed, models.ProtocolSocks, models.ProtocolHTTP).
 		Distinct().
 		Pluck("server_id", &serverIDs).Error; err != nil {
 		util.ServerError(c, "查询转发入站服务器列表失败")

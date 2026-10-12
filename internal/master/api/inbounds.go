@@ -94,7 +94,7 @@ func normalizeInboundType(protocol, currentType string) string {
 	switch protocol {
 	case models.ProtocolDokodemo:
 		return models.InboundTypeTunnel
-	case models.ProtocolSocks, models.ProtocolHTTP:
+	case models.ProtocolMixed, models.ProtocolSocks, models.ProtocolHTTP:
 		return models.InboundTypeForward
 	default:
 		if p := protocols.Find(protocol); p != nil {
@@ -213,7 +213,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed / socks / http）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed）")
 		return
 	}
 	if req.Protocol == models.ProtocolSocks || req.Protocol == models.ProtocolHTTP || req.Protocol == models.ProtocolMixed {
@@ -974,12 +974,12 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、Mixed、SOCKS5 与 HTTP）。
+// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、Mixed；SOCKS5 与 HTTP 已退役）。
 func validInboundProtocol(p string) bool {
 	if protocols.Find(p) != nil {
 		return true
 	}
-	return p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP || p == models.ProtocolMixed
+	return p == models.ProtocolDokodemo || p == models.ProtocolMixed
 }
 
 func validInboundType(t string) bool {

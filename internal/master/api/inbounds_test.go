@@ -391,11 +391,11 @@ func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
 	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
 	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
 
-	// 1. 创建带静态 accounts 的 SOCKS5 -> 成功创建，但 accounts 必须被清洗剔除
+	// 1. 创建带静态 accounts 的 Mixed -> 成功创建，但 accounts 必须被清洗剔除且 type 权威归一化为 forward
 	bodyAuth := map[string]any{
 		"server_id":     5,
-		"tag":           "socks-test",
-		"protocol":      "socks",
+		"tag":           "mixed-test",
+		"protocol":      "mixed",
 		"port":          10801,
 		"settings_json": `{"auth":"password","accounts":[{"user":"admin","pass":"secret"}],"udp":true}`,
 	}
@@ -405,11 +405,14 @@ func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("创建 SOCKS5 应成功，实际: %d, body: %s", w.Code, w.Body.String())
+		t.Fatalf("创建 Mixed 应成功，实际: %d, body: %s", w.Code, w.Body.String())
 	}
 
 	var created models.Inbound
-	db.Where("tag = ?", "socks-test").First(&created)
+	db.Where("tag = ?", "mixed-test").First(&created)
+	if created.Type != models.InboundTypeForward {
+		t.Fatalf("Mixed 入站应权威归一化为 forward，实际: %s", created.Type)
+	}
 	if strings.Contains(created.SettingsJSON, "admin") || strings.Contains(created.SettingsJSON, "secret") {
 		t.Fatalf("入站 settings_json 中不应残留静态 accounts: %s", created.SettingsJSON)
 	}
@@ -424,7 +427,7 @@ func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("更新 SOCKS5 应成功，实际: %d, body: %s", w.Code, w.Body.String())
+		t.Fatalf("更新 Mixed 应成功，实际: %d, body: %s", w.Code, w.Body.String())
 	}
 
 	db.Where("id = ?", created.ID).First(&created)

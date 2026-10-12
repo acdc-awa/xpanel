@@ -403,6 +403,9 @@ interface MatchedInbound {
   protocol: string
   port: number
   host: string
+  isMixed?: boolean
+  socksUrl?: string
+  httpUrl?: string
   connectionUrl: string
 }
 
@@ -425,23 +428,53 @@ const matchedInbounds = computed<MatchedInbound[]>(() => {
 
     const ib = inbMap.get(ap.target_inbound_id)
     if (!ib || !ib.enabled) continue
-    if (ib.protocol !== 'socks' && ib.protocol !== 'http') continue
+    if (ib.protocol !== 'mixed' && ib.protocol !== 'socks' && ib.protocol !== 'http') continue
 
     const srv = srvMap.get(ib.server_id)
     const host = ap.custom_host || ap.resolved_host || ib.share_addr || (srv ? srv.host : '127.0.0.1')
     const port = ap.custom_port || ap.resolved_port || ib.share_port || ib.port
-    const proto = ib.protocol === 'socks' ? 'socks5' : 'http'
-    const connectionUrl = `${proto}://${encodeURIComponent(user.username)}:${encodeURIComponent(user.password)}@${host}:${port}`
 
-    results.push({
-      id: ap.id,
-      serverName: srv ? `${srv.name} (${ap.name})` : ap.name,
-      apName: ap.name,
-      protocol: proto.toUpperCase(),
-      port,
-      host,
-      connectionUrl,
-    })
+    let isTls = false
+    try {
+      const ss = JSON.parse(ib.stream_settings || '{}')
+      if (ss.security === 'tls') isTls = true
+    } catch {}
+
+    const socksScheme = isTls ? 'socks5s' : 'socks5'
+    const httpScheme = isTls ? 'https' : 'http'
+    const userPass = `${encodeURIComponent(user.username)}:${encodeURIComponent(user.password)}@${host}:${port}`
+    const socksUrl = `${socksScheme}://${userPass}`
+    const httpUrl = `${httpScheme}://${userPass}`
+
+    if (ib.protocol === 'mixed') {
+      results.push({
+        id: ap.id,
+        serverName: srv ? `${srv.name} (${ap.name})` : ap.name,
+        apName: ap.name,
+        protocol: 'MIXED',
+        port,
+        host,
+        isMixed: true,
+        socksUrl,
+        httpUrl,
+        connectionUrl: socksUrl,
+      })
+    } else {
+      const proto = ib.protocol === 'socks' ? 'socks5' : 'http'
+      const connUrl = ib.protocol === 'socks' ? socksUrl : httpUrl
+      results.push({
+        id: ap.id,
+        serverName: srv ? `${srv.name} (${ap.name})` : ap.name,
+        apName: ap.name,
+        protocol: proto.toUpperCase(),
+        port,
+        host,
+        isMixed: false,
+        socksUrl,
+        httpUrl,
+        connectionUrl: connUrl,
+      })
+    }
   }
 
   return results
@@ -874,14 +907,14 @@ async function handleSyncConfigs() {
 
         <div class="conn-section-title">
           <span>可用接入点（已向该权限组开放）</span>
-          <TipIcon content="此账号已根据接入点权限组授权，自动注入至对应接入点指向的 SOCKS5 / HTTP 入站。客户端填写对应协议、服务器地址、端口及上述账密即可连接。" />
+          <TipIcon content="此账号已根据接入点权限组授权，自动注入至对应接入点指向的 Mixed 代理入站。客户端填写对应协议、服务器地址、端口及上述账密即可连接。" />
         </div>
 
         <div v-if="matchedInbounds.length === 0" class="conn-empty">
-          <el-empty description="当前权限组暂无可用的 SOCKS5 或 HTTP 接入点">
+          <el-empty description="当前权限组暂无可用的 Mixed 代理接入点">
             <template #extra>
               <div style="font-size: 13px; color: var(--x-text-secondary); line-height: 1.6">
-                请前往「接入点管理」或「拓扑画布」，为该组开放一个指向 SOCKS5 / HTTP 入站的接入点（授权该权限组并连接至对应入站）。
+                请前往「接入点管理」或「拓扑画布」，为该组开放一个指向 Mixed 代理入站的接入点（授权该权限组并连接至对应入站）。
               </div>
             </template>
           </el-empty>
@@ -891,7 +924,7 @@ async function handleSyncConfigs() {
           <div v-for="ib in matchedInbounds" :key="ib.id" class="conn-inbound-card">
             <div class="ib-card-head">
               <div class="ib-title">
-                <el-tag size="small" :type="ib.protocol === 'SOCKS5' ? 'success' : 'warning'" effect="dark">
+                <el-tag size="small" :type="ib.protocol === 'MIXED' ? 'primary' : (ib.protocol === 'SOCKS5' ? 'success' : 'warning')" effect="dark">
                   {{ ib.protocol }}
                 </el-tag>
                 <span class="server-title">{{ ib.serverName }}</span>
@@ -899,17 +932,45 @@ async function handleSyncConfigs() {
               <div class="ib-port cell-mono">端口: {{ ib.port }}</div>
             </div>
 
-            <div class="ib-url-row">
-              <code class="cell-mono url-text">{{ ib.connectionUrl }}</code>
-              <el-button
-                type="primary"
-                size="small"
-                :icon="CopyDocument"
-                @click="copyText(ib.connectionUrl, `${ib.protocol} 代理链接`)"
-              >
-                复制链接
-              </el-button>
-            </div>
+            <template v-if="ib.isMixed">
+              <div class="ib-url-row">
+                <span class="url-proto-tag">SOCKS5</span>
+                <code class="cell-mono url-text">{{ ib.socksUrl }}</code>
+                <el-button
+                  type="primary"
+                  size="small"
+                  :icon="CopyDocument"
+                  @click="copyText(ib.socksUrl!, 'SOCKS5 代理链接')"
+                >
+                  复制 SOCKS5
+                </el-button>
+              </div>
+              <div class="ib-url-row" style="margin-top: 8px">
+                <span class="url-proto-tag">HTTP</span>
+                <code class="cell-mono url-text">{{ ib.httpUrl }}</code>
+                <el-button
+                  type="primary"
+                  size="small"
+                  :icon="CopyDocument"
+                  @click="copyText(ib.httpUrl!, 'HTTP 代理链接')"
+                >
+                  复制 HTTP
+                </el-button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="ib-url-row">
+                <code class="cell-mono url-text">{{ ib.connectionUrl }}</code>
+                <el-button
+                  type="primary"
+                  size="small"
+                  :icon="CopyDocument"
+                  @click="copyText(ib.connectionUrl, `${ib.protocol} 代理链接`)"
+                >
+                  复制链接
+                </el-button>
+              </div>
+            </template>
 
             <div class="ib-params-row">
               <div class="param-tag" @click="copyText(ib.host, '服务器地址')">
@@ -1315,6 +1376,18 @@ async function handleSyncConfigs() {
     display: flex;
     align-items: center;
     gap: 8px;
+
+    .url-proto-tag {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 4px;
+      background: var(--el-color-primary-light-9, #ecf5ff);
+      color: var(--el-color-primary, #409eff);
+      border: 1px solid var(--el-color-primary-light-7, #d9ecff);
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
 
     .url-text {
       flex: 1;

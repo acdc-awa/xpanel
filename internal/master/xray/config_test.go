@@ -2068,4 +2068,96 @@ func TestGenerate_ForwardUserMultipleAccessPointsUnion(t *testing.T) {
 	}
 }
 
+func TestGenerate_MixedInboundWithForwardUsers(t *testing.T) {
+	inbounds := []models.Inbound{
+		{
+			ID:       20,
+			Tag:      "mixed-fwd",
+			Protocol: models.ProtocolMixed,
+			Port:     10808,
+			Type:     models.InboundTypeForward,
+			Enabled:  true,
+		},
+	}
+
+	ctx := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{
+			20: {8},
+		},
+		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
+			8: {
+				{ID: 201, Username: "mixed_user1", Password: "pass_user1"},
+				{ID: 202, Username: "mixed_user2", Password: "pass_user2"},
+			},
+		},
+	}
+
+	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	inbList := parsed["inbounds"].([]any)
+	// mixed + api
+	if len(inbList) != 2 {
+		t.Fatalf("expected 2 inbounds, got %d", len(inbList))
+	}
+
+	mixedInb := inbList[0].(map[string]any)
+	if mixedInb["protocol"] != "mixed" {
+		t.Fatalf("protocol want mixed, got %v", mixedInb["protocol"])
+	}
+	settings := mixedInb["settings"].(map[string]any)
+	if settings["auth"] != "password" {
+		t.Fatalf("auth want password, got %v", settings["auth"])
+	}
+	if settings["udp"] != true {
+		t.Fatalf("udp want true, got %v", settings["udp"])
+	}
+	accounts := settings["accounts"].([]any)
+	if len(accounts) != 2 {
+		t.Fatalf("accounts want 2, got %d", len(accounts))
+	}
+	acc0 := accounts[0].(map[string]any)
+	if acc0["user"] != "mixed_user1" || acc0["pass"] != "pass_user1" || acc0["email"] != "fu201.i20@panel.local" {
+		t.Fatalf("unexpected account[0]: %v", acc0)
+	}
+
+	// 零信任物理跳过：无账号时物理跳过，防止免密开放代理
+	ctxEmpty := &xray.GenerateContext{
+		InboundAuthorizedGroups: map[uint64][]uint64{20: {99}},
+		ForwardUsersByGroup:     map[uint64][]models.ForwardUser{},
+	}
+	rawEmpty, err := xray.Generate(inbounds, nil, nil, nil, ctxEmpty, "", "")
+	if err != nil {
+		t.Fatalf("Generate empty accounts failed: %v", err)
+	}
+	var parsedEmpty map[string]any
+	if err := json.Unmarshal(rawEmpty, &parsedEmpty); err != nil {
+		t.Fatalf("Unmarshal empty failed: %v", err)
+	}
+	inbListEmpty := parsedEmpty["inbounds"].([]any)
+	if len(inbListEmpty) != 1 { // 仅剩 api 入站
+		t.Fatalf("期望仅剩 1 个 api 入站（mixed 物理跳过），实际得到 %d", len(inbListEmpty))
+	}
+
+	// 真实 xray 二进制验证
+	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmpMixed := filepath.Join(t.TempDir(), "mixed.json")
+		if err := os.WriteFile(tmpMixed, raw, 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		cmd := exec.Command(xrayBin, "-test", "-config", tmpMixed)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Mixed 配置 xray -test 校验失败: %v, out: %s", err, string(out))
+		}
+	}
+}
+
 

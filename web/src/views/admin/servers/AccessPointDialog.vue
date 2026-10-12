@@ -84,8 +84,9 @@ const selectedInbound = computed(() =>
 
 function inboundOptionLabel(inb: InboundItem): string {
   if (inb.type === 'tunnel') return `[四层直通] ${inb.tag} (:${inb.port})`
-  if (inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'socks' || inb.protocol === 'http') {
-    return `[转发代理 ${(inb.protocol || 'socks').toUpperCase()}] ${inb.tag} (:${inb.port})`
+  if (inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'mixed' || inb.protocol === 'socks' || inb.protocol === 'http') {
+    const protoLabel = inb.protocol === 'mixed' ? 'Mixed' : (inb.protocol || 'mixed').toUpperCase()
+    return `[转发代理 ${protoLabel}] ${inb.tag} (:${inb.port})`
   }
   if (inb.protocol === 'hysteria') {
     return `[Hysteria 2] ${inb.tag} (:${inb.port})`
