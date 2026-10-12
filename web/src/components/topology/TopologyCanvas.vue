@@ -1879,8 +1879,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
           <div v-if="nodeProps.data.ap.resolved_host" class="ap-resolved-text">
             <span class="ap-dot online" />
             <code class="cell-mono">{{ nodeProps.data.ap.resolved_host }}:{{ nodeProps.data.ap.resolved_port }}</code>
-            <span class="x-chip purple" style="font-size: 10px">
-              {{ nodeProps.data.ap.resolved_protocol?.toUpperCase() || 'VLESS' }}
+            <span class="x-chip" :class="nodeProps.data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'purple'" style="font-size: 10px">
+              {{ nodeProps.data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (nodeProps.data.ap.resolved_protocol?.toUpperCase() || 'VLESS') }}
             </span>
           </div>
           <div v-else class="ap-resolved-text waiting">

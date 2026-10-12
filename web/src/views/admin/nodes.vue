@@ -46,6 +46,7 @@ function inboundChipText(row: InboundItem): string {
   if (row.type === 'relay') return '内部转发'
   if (row.type === 'tunnel') return '四层直通'
   if (row.type === 'forward') return '转发代理'
+  if (row.protocol === 'hysteria') return 'Hysteria 2'
   return 'VLESS'
 }
 
@@ -53,6 +54,7 @@ function inboundChipClass(row: InboundItem): string {
   if (row.type === 'relay') return 'orange'
   if (row.type === 'tunnel') return 'cyan'
   if (row.type === 'forward') return 'blue'
+  if (row.protocol === 'hysteria') return 'teal'
   return 'purple'
 }
 

@@ -1,9 +1,13 @@
 import type { FallbackItem } from '@/api/types'
 
-export type InboundProtocol = 'vless' | 'dokodemo-door' | 'socks' | 'http'
-export type InboundNetwork = 'tcp' | 'xhttp'
+export type InboundProtocol = 'vless' | 'dokodemo-door' | 'socks' | 'http' | 'hysteria'
+export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'vlessenc' | 'none'
 export type InboundType = 'user' | 'relay' | 'forward' | 'tunnel'
+
+export interface HysteriaConfig {
+  udp_idle_timeout?: number
+}
 
 export interface TcpConfig {
   header_type: 'none' | 'http'

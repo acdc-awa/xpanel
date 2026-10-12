@@ -87,6 +87,9 @@ function inboundOptionLabel(inb: InboundItem): string {
   if (inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'socks' || inb.protocol === 'http') {
     return `[转发代理 ${(inb.protocol || 'socks').toUpperCase()}] ${inb.tag} (:${inb.port})`
   }
+  if (inb.protocol === 'hysteria') {
+    return `[Hysteria 2] ${inb.tag} (:${inb.port})`
+  }
   const proto = (inb.protocol || 'vless').toUpperCase()
   return `[${proto}] ${inb.tag} (:${inb.port})`
 }

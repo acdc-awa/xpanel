@@ -28,6 +28,7 @@ import type {
   VlessConfig,
   DokodemoConfig,
   SocksHttpConfig,
+  HysteriaConfig,
 } from './inbound/types'
 import TcpTransport from './inbound/transports/TcpTransport.vue'
 import XhttpTransport from './inbound/transports/XhttpTransport.vue'
@@ -37,6 +38,7 @@ import VlessencSecurity from './inbound/securities/VlessencSecurity.vue'
 import VlessSettings from './inbound/protocols/VlessSettings.vue'
 import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
 import SocksHttpSettings from './inbound/protocols/SocksHttpSettings.vue'
+import HysteriaSettings from './inbound/protocols/HysteriaSettings.vue'
 import BusinessSettings from './inbound/common/BusinessSettings.vue'
 
 export interface InboundEditorChangePayload {
@@ -194,6 +196,10 @@ const socksHttpForm = ref<SocksHttpConfig>({
   udp: true,
 })
 
+const hysteriaForm = ref<HysteriaConfig>({
+  udp_idle_timeout: 60,
+})
+
 // 传输层状态对象
 const tcpForm = ref<TcpConfig>({
   header_type: 'none',
@@ -260,12 +266,14 @@ const isInternalUpdating = ref(false)
 // 能力矩阵联动规则 (Capability Matrix)
 // -----------------------------------------------------------------------------
 const allowedNetworks = computed<InboundNetwork[]>(() => {
+  if (localProtocol.value === 'hysteria') return ['hysteria']
   if (localProtocol.value === 'dokodemo-door') return ['tcp']
   if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['tcp']
   return ['tcp', 'xhttp']
 })
 
 const allowedSecurities = computed<InboundSecurity[]>(() => {
+  if (localProtocol.value === 'hysteria') return ['tls']
   if (localProtocol.value === 'dokodemo-door') return ['none']
   if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['none', 'tls']
   return ['none', 'tls', 'reality', 'vlessenc']
@@ -322,10 +330,14 @@ function onTypeChange(type: any) {
   if (t === 'tunnel') {
     localProtocol.value = 'dokodemo-door'
   } else if (t === 'relay') {
-    localProtocol.value = 'vless'
-    localTlsType.value = 'vlessenc'
+    if (localProtocol.value !== 'hysteria') {
+      localProtocol.value = 'vless'
+      localTlsType.value = 'vlessenc'
+    }
   } else if (t === 'user') {
-    localProtocol.value = 'vless'
+    if (localProtocol.value !== 'hysteria') {
+      localProtocol.value = 'vless'
+    }
   }
   enforceCapabilityMatrix()
   syncFormToJson()
@@ -334,7 +346,13 @@ function onTypeChange(type: any) {
 function onProtocolChange(proto: any) {
   const p = String(proto) as InboundProtocol
   localProtocol.value = p
-  if (p === 'dokodemo-door') {
+  if (p === 'hysteria') {
+    localNetwork.value = 'hysteria'
+    localTlsType.value = 'tls'
+    if (localInboundType.value === 'tunnel' || localInboundType.value === 'forward') {
+      localInboundType.value = 'user'
+    }
+  } else if (p === 'dokodemo-door') {
     localInboundType.value = 'tunnel'
   } else if (p === 'socks' || p === 'http') {
     localInboundType.value = 'forward'
@@ -401,6 +419,12 @@ function buildSettingsJSON(): string {
     return JSON.stringify(s)
   }
 
+  if (localProtocol.value === 'hysteria') {
+    return JSON.stringify({
+      version: 2,
+    })
+  }
+
   // vless
   const s: Record<string, any> = {
     decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
@@ -427,6 +451,30 @@ function buildStreamSettingsJSON(): string {
     if (tcpForm.value.acceptProxyProtocol) {
       s.acceptProxyProtocol = true
       s.tcpSettings = { acceptProxyProtocol: true }
+    }
+    return JSON.stringify(s)
+  }
+
+  if (localProtocol.value === 'hysteria') {
+    const alpnArr = tlsForm.value.alpn ? tlsForm.value.alpn.split(',').map((x: string) => x.trim()).filter(Boolean) : ['h3']
+    const t: Record<string, any> = {
+      serverName: tlsForm.value.server_name || undefined,
+      certificates: [{ certificateFile: tlsForm.value.cert_file, keyFile: tlsForm.value.key_file }],
+    }
+    if (alpnArr.length > 0) t.alpn = alpnArr
+    if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
+    if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
+    if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
+    if (tlsForm.value.allow_insecure) t.allowInsecure = true
+
+    const s: Record<string, any> = {
+      network: 'hysteria',
+      security: 'tls',
+      tlsSettings: t,
+      hysteriaSettings: {
+        version: 2,
+        udpIdleTimeout: hysteriaForm.value.udp_idle_timeout || 60,
+      },
     }
     return JSON.stringify(s)
   }
@@ -631,7 +679,14 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
     if (typeof parsed.layer_id === 'number') localLayerId.value = parsed.layer_id
 
-    if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
+    if (parsed.protocol === 'hysteria' || localProtocol.value === 'hysteria') {
+      localProtocol.value = 'hysteria'
+      if (parsed.type === 'relay') {
+        localInboundType.value = 'relay'
+      } else {
+        localInboundType.value = 'user'
+      }
+    } else if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
       localInboundType.value = 'tunnel'
       localProtocol.value = 'dokodemo-door'
     } else if (parsed.type === 'forward' || parsed.protocol === 'socks' || parsed.protocol === 'http' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
@@ -648,7 +703,12 @@ function parseJsonToForm(str: string) {
     }
 
     // 协议层回显
-    if (localProtocol.value === 'dokodemo-door') {
+    if (localProtocol.value === 'hysteria') {
+      const hySettings = streamObj.hysteriaSettings
+      hysteriaForm.value = {
+        udp_idle_timeout: typeof hySettings?.udpIdleTimeout === 'number' ? hySettings.udpIdleTimeout : 60,
+      }
+    } else if (localProtocol.value === 'dokodemo-door') {
       dokodemoForm.value = {
         target_mode: parsed.target_inbound_id ? 'inbound' : (s?.address || parsed.target_address || s?.port || parsed.target_port ? 'manual' : 'draft'),
         target_inbound_id: parsed.target_inbound_id,
@@ -941,6 +1001,7 @@ watch(
     vlessForm,
     dokodemoForm,
     socksHttpForm,
+    hysteriaForm,
     tcpForm,
     xhttpForm,
     realityForm,
@@ -1012,13 +1073,14 @@ watch(
               <el-form-item label="代理协议">
                 <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
                   <el-option label="VLESS" value="vless" />
+                  <el-option label="Hysteria 2" value="hysteria" />
                   <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
                   <el-option label="SOCKS5" value="socks" />
                   <el-option label="HTTP" value="http" />
                 </el-select>
               </el-form-item>
 
-              <el-form-item v-if="localProtocol === 'vless'" label="入站用途">
+              <el-form-item v-if="localProtocol === 'vless' || localProtocol === 'hysteria'" label="入站用途">
                 <el-radio-group v-model="localInboundType" class="type-segmented-group" @change="onTypeChange">
                   <el-radio-button value="user">用户接入点</el-radio-button>
                   <el-radio-button value="relay">内部中继链路</el-radio-button>
@@ -1074,7 +1136,7 @@ watch(
         <!-- ==================== 2. 协议参数 Tab ==================== -->
         <div v-show="activeTab === 'protocol'" class="tab-pane">
           <div class="form-card">
-            <div class="card-title">{{ localProtocol.toUpperCase() }} 协议参数</div>
+            <div class="card-title">{{ localProtocol === 'hysteria' ? 'HYSTERIA 2' : localProtocol.toUpperCase() }} 协议参数</div>
             <VlessSettings
               v-if="localProtocol === 'vless'"
               v-model="vlessForm"
@@ -1082,6 +1144,14 @@ watch(
               :internal-u-u-i-d="localInternalUUID"
               :inbound-id="props.inboundId"
               :allow-vision="allowVisionFlow"
+              @internal-uuid-changed="(v) => emit('internal-uuid-changed', v)"
+            />
+            <HysteriaSettings
+              v-else-if="localProtocol === 'hysteria'"
+              v-model="hysteriaForm"
+              :inbound-type="localInboundType"
+              :internal-u-u-i-d="localInternalUUID"
+              :inbound-id="props.inboundId"
               @internal-uuid-changed="(v) => emit('internal-uuid-changed', v)"
             />
             <DokodemoSettings
