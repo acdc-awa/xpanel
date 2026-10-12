@@ -478,94 +478,80 @@ func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
 	return t, ok
 }
 
-// buildRefOutbound 按目标入站自动构造中转出站（vless）：vnext address/port/uuid/flow
-// 与 streamSettings（reality 公钥/SNI/shortId 派生、tls serverName）全部由生成器填充。
-// 目标入站启用 vlessenc（settings_json.decryption 非空）时，出站 encryption 派生为
-// 0rtt+公钥串，flow 条件同步放行（无安全层时 vlessenc 撑起 vision）。
+// buildRefOutbound 按目标入站自动构造中转出站：由目标入站协议插件的 Peer 角色投影决议端点 DTO，
+// 再由 renderPeerOutbound 统一渲染为对应核心的出站结构。
 func buildRefOutbound(item map[string]any, target RefTarget) error {
 	inb := target.Inbound
-	spec := contracts.DecodeInbound(&inb)
-	net := spec.Network
-	sec := spec.Security
+	plugin := protocols.Find(inb.Protocol)
+	if plugin == nil {
+		return fmt.Errorf("出站 %s 引用的目标入站协议 %q 未注册协议插件", item["tag"], inb.Protocol)
+	}
 
-	encryption := "none"
-	dec, err := VlessDecryptionFromSettings(inb.SettingsJSON)
+	dto, err := plugin.ProjectClient(&contracts.ClientProjectionInput{
+		Role:      contracts.RolePeer,
+		RefTarget: &target,
+	})
 	if err != nil {
-		return fmt.Errorf("出站 %s 目标入站 %s settings 解析失败: %w", item["tag"], inb.Tag, err)
+		return fmt.Errorf("出站 %s 投影目标入站 %s 失败: %w", item["tag"], inb.Tag, err)
 	}
-	if VlessEncEnabled(dec) {
-		if encryption, err = VlessEncClientFromDecryption(dec); err != nil {
-			return fmt.Errorf("出站 %s 目标入站 %s VLESS Encryption 派生失败: %w", item["tag"], inb.Tag, err)
+
+	return renderPeerOutbound(item, dto)
+}
+
+// renderPeerOutbound 将中性 ProxyNodeDTO 渲染为 Xray peer 出站配置 map。
+func renderPeerOutbound(item map[string]any, dto *contracts.ProxyNodeDTO) error {
+	switch dto.Protocol {
+	case "vless":
+		user := map[string]any{
+			"id":         dto.Auth.UUID,
+			"encryption": dto.Auth.Encryption,
 		}
-	}
+		if dto.Auth.Flow != "" {
+			user["flow"] = dto.Auth.Flow
+		}
+		item["protocol"] = "vless"
+		item["settings"] = map[string]any{
+			"vnext": []any{map[string]any{
+				"address": dto.ServerHost,
+				"port":    dto.ServerPort,
+				"users":   []any{user},
+			}},
+		}
 
-	flow := ""
-	if net == "tcp" && (sec == "reality" || sec == "tls" || VlessEncEnabled(dec)) {
-		flow = "xtls-rprx-vision"
-	}
-	user := map[string]any{
-		"id":         inb.InternalUUID,
-		"encryption": encryption,
-	}
-	if flow != "" {
-		user["flow"] = flow
-	}
-	item["protocol"] = "vless"
-	item["settings"] = map[string]any{
-		"vnext": []any{map[string]any{
-			"address": target.ServerHost,
-			"port":    inb.Port,
-			"users":   []any{user},
-		}},
-	}
-
-	// streamSettings：传输参数透传目标 + 安全参数自动填充
-	ss := map[string]any{"network": net, "security": sec}
-	if net == "xhttp" {
-		if x := spec.XHTTP; x != nil {
-			xh := map[string]any{"mode": x.Mode, "path": x.Path}
-			if x.Host != "" {
-				xh["host"] = x.Host
+		ss := map[string]any{"network": dto.Transport.Network, "security": dto.Security.Type}
+		if dto.Transport.Network == "xhttp" {
+			xh := map[string]any{"mode": dto.Transport.Mode, "path": dto.Transport.Path}
+			if dto.Transport.Host != "" {
+				xh["host"] = dto.Transport.Host
 			}
 			ss["xhttpSettings"] = xh
 		}
-	}
-	switch sec {
-	case "reality":
-		// 出站 REALITY：公钥标准名 password、SNI/shortId 单数（01 号文档 §2.2）；
-		// 指纹取目标入站存储的 fingerprint（客户端角色字段），空兜底 chrome
-		if r := spec.Reality; r != nil && r.ServerName != "" {
-			fp := spec.Fingerprint
-			if fp == "" {
-				fp = "chrome"
+		switch dto.Security.Type {
+		case "reality":
+			if r := dto.Security.Reality; r != nil && dto.Security.SNI != "" {
+				ss["realitySettings"] = map[string]any{
+					"serverName":  dto.Security.SNI,
+					"password":    r.PublicKey,
+					"shortId":     r.ShortID,
+					"fingerprint": dto.Security.Fingerprint,
+					"spiderX":     "/",
+				}
 			}
-			ss["realitySettings"] = map[string]any{
-				"serverName":  r.ServerName,
-				"password":    r.PublicKey,
-				"shortId":     r.ShortID,
-				"fingerprint": fp,
-				"spiderX":     "/",
+		case "tls":
+			tlsSettings := map[string]any{"serverName": dto.Security.SNI}
+			if dto.Security.Fingerprint != "" {
+				tlsSettings["fingerprint"] = dto.Security.Fingerprint
 			}
+			if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
+				tlsSettings["pinnedPeerCertSha256"] = pin
+			}
+			ss["tlsSettings"] = tlsSettings
 		}
-	case "tls":
-		serverName := target.ServerHost
-		if t := spec.TLS; t != nil && t.ServerName != "" {
-			serverName = t.ServerName
-		}
-		// 注意：v26.6.27 已移除 allowInsecure（迁移 pinnedPeerCertSha256/verifyPeerCertByName），不输出
-		tlsSettings := map[string]any{"serverName": serverName}
-		if fp := spec.Fingerprint; fp != "" {
-			tlsSettings["fingerprint"] = fp
-		}
-		// 链式代理证书固定：目标入站绑定的证书带 pin（面板生成/上传时自动计算入库）时注入，
-		// pin 命中即验证通过——自签证书链路亦防 MITM（v26.6.27 实测字段为 leaf DER 的 64 位小写 hex）。
-		if target.CertPin != "" {
-			tlsSettings["pinnedPeerCertSha256"] = target.CertPin
-		}
-		ss["tlsSettings"] = tlsSettings
+		item["streamSettings"] = ss
+		return nil
+	default:
+		return fmt.Errorf("暂不支持将协议 %q 渲染为中转出站", dto.Protocol)
 	}
-	item["streamSettings"] = ss
-	return nil
 }
 
 // normalizeVlessOutbound 对 vless 出站的 settings.vnext[].users[] 兜底注入
@@ -837,9 +823,13 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 	default:
 		// user 入站：动态用户列表（已由服务层 GetValidUsers 按接入点白名单派生过滤，无接入点指向返回空列表）；
-		// clients 结构由协议插件生成（未注册协议走最小通用注入）
+		// 用户数组结构与挂载键名由协议插件生成（未注册协议显式报错阻断，Fail-Closed 铁律）
 		userList := usersByTag[inb.Tag]
-		settings["clients"] = protocols.ServerClients(inb.Protocol, userList, spec)
+		key, items, err := protocols.ServerUsers(inb.Protocol, userList, spec)
+		if err != nil {
+			return nil, fmt.Errorf("入站 %s 注入用户失败: %w", inb.Tag, err)
+		}
+		settings[key] = items
 	}
 
 	// 2. 解析 streamSettings JSON（完全透传）

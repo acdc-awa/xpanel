@@ -13,6 +13,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -95,12 +96,22 @@ func normalizeInboundType(protocol, currentType string) string {
 		return models.InboundTypeTunnel
 	case models.ProtocolSocks, models.ProtocolHTTP:
 		return models.InboundTypeForward
-	case models.ProtocolVless:
-		if currentType == models.InboundTypeRelay {
-			return models.InboundTypeRelay
-		}
-		return models.InboundTypeUser
 	default:
+		if p := protocols.Find(protocol); p != nil {
+			desc := p.Descriptor()
+			for _, allowed := range desc.InboundTypes {
+				if allowed == currentType {
+					return currentType
+				}
+			}
+			return models.InboundTypeUser
+		}
+		if protocol == models.ProtocolVless {
+			if currentType == models.InboundTypeRelay {
+				return models.InboundTypeRelay
+			}
+			return models.InboundTypeUser
+		}
 		return models.InboundTypeUser
 	}
 }
@@ -963,10 +974,12 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持 VLESS、四层直通 dokodemo-door、SOCKS5 与 HTTP；
-// vmess/trojan/ss 订阅导出未实现，创建时拒绝避免"能建但订阅静默丢弃"，同时防拼写错误/未知协议卡出不可能存在的配置）。
+// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、SOCKS5 与 HTTP）。
 func validInboundProtocol(p string) bool {
-	return p == models.ProtocolVless || p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP
+	if protocols.Find(p) != nil {
+		return true
+	}
+	return p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP
 }
 
 func validInboundType(t string) bool {

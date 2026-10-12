@@ -12,6 +12,18 @@ func decodeStream(raw string) *contracts.InboundSpec {
 	return contracts.DecodeInbound(&models.Inbound{StreamSettings: raw})
 }
 
+// TestVLESSDescriptor 验证描述符属性。
+func TestVLESSDescriptor(t *testing.T) {
+	p := VLESSPlugin{}
+	desc := p.Descriptor()
+	if desc.Name != "vless" {
+		t.Fatalf("expected vless, got %s", desc.Name)
+	}
+	if !desc.HotSync || !desc.SupportsUDP {
+		t.Fatalf("vless descriptor capabilities mismatch: %+v", desc)
+	}
+}
+
 // TestVLESSResolveFlow flow 决议（生成侧盖戳与订阅侧同源）：
 // 入站级 none 禁用自动注入 → 空 + tcp+reality 自动 vision → 其余透传。
 func TestVLESSResolveFlow(t *testing.T) {
@@ -39,18 +51,23 @@ func TestVLESSResolveFlow(t *testing.T) {
 	}
 }
 
-// TestVLESSServerClients 服务端 clients 注入（id/email/flow/limit，空 UUID 跳过）。
-func TestVLESSServerClients(t *testing.T) {
+// TestVLESSServerUsers 服务端用户注入与反向验证。
+func TestVLESSServerUsers(t *testing.T) {
 	// 经由注册表分发，验证协议路由正确
-	clients := ServerClients("vless", nil, &contracts.InboundSpec{})
-	if len(clients) != 0 {
-		t.Fatalf("空用户应产出空 clients，got %v", clients)
+	key, clients, err := ServerUsers("vless", nil, &contracts.InboundSpec{})
+	if err != nil {
+		t.Fatalf("vless ServerUsers 失败: %v", err)
 	}
-	// 未注册协议回退最小通用注入（不含 flow）
-	fallback := ServerClients("vmess", nil, &contracts.InboundSpec{})
-	if len(fallback) != 0 {
-		t.Fatalf("未注册协议空用户应产出空 clients，got %v", fallback)
+	if key != "clients" || len(clients) != 0 {
+		t.Fatalf("空用户应产出 key=clients 空列表，got key=%s, len=%d", key, len(clients))
 	}
+
+	// 反向验证：未注册协议必须显式硬报错（Fail-Closed 铁律）
+	_, _, err = ServerUsers("vmess", nil, &contracts.InboundSpec{})
+	if err == nil {
+		t.Fatal("未注册协议应显式报错，但 err 为 nil")
+	}
+
 	// 未注册协议 ResolveFlow 返回空（flow 是 VLESS 语义）
 	spec := &contracts.InboundSpec{Network: "tcp", Security: "reality"}
 	if got := ResolveFlow("vmess", spec, ""); got != "" {
@@ -98,24 +115,55 @@ func TestVLESSBuildClientNode(t *testing.T) {
 		UserUUID: "uuid-3",
 	})
 	if dto == nil {
-		t.Fatal("Caddy 反代场景应产出 DTO")
+		t.Fatal("share 覆写应产出 DTO")
 	}
 	if dto.Security.Type != "tls" || dto.Security.SNI != "caddy.example.com" {
-		t.Errorf("share 安全覆写错误: %+v", dto.Security)
+		t.Errorf("安全覆写未生效: %+v", dto.Security)
 	}
-	if dto.Transport.Mode != "auto" || dto.Transport.Path != "/my-vless-xhttp" || dto.Transport.Host != "caddy.example.com" {
-		t.Errorf("share 传输覆写错误: %+v", dto.Transport)
+	if dto.Transport.Path != "/my-vless-xhttp" || dto.Transport.Host != "caddy.example.com" || dto.Transport.Mode != "auto" {
+		t.Errorf("xhttp 传输覆写未生效: %+v", dto.Transport)
 	}
-	if dto.Auth.Flow != "" {
-		t.Errorf("xhttp 不应注入 flow，got %q", dto.Auth.Flow)
+}
+
+// TestVLESSProjectPeer 节点互联端点投影。
+func TestVLESSProjectPeer(t *testing.T) {
+	p := VLESSPlugin{}
+	inb := models.Inbound{
+		ID:           101,
+		Tag:          "relay-land",
+		Protocol:     "vless",
+		Port:         8443,
+		InternalUUID: "internal-uuid-peer",
+		StreamSettings: `{"network":"tcp","security":"reality","fingerprint":"chrome","realitySettings":{
+			"serverNames":["peer.example.com"],"publicKey":"peer-pbk","shortIds":["cd34"],"privateKey":"priv"}}`,
+	}
+	target := &contracts.RefTarget{
+		Inbound:    inb,
+		ServerHost: "peer-exit.example.com",
+		CertPin:    "aabbccddeeff",
 	}
 
-	// 入站级 flow=none + tcp+reality → 不注入（与服务端 clients 一致）
-	noneFlow := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{"serverName":"s.com","publicKey":"pbk"}}`)
-	dto = p.BuildClientNode(&contracts.ClientNodeInput{
-		Name: "n4", Host: "h4", Port: 443, Spec: noneFlow, InboundFlow: "none", UserUUID: "uuid-4",
+	dto, err := p.ProjectClient(&contracts.ClientProjectionInput{
+		Role:      contracts.RolePeer,
+		RefTarget: target,
 	})
-	if dto == nil || dto.Auth.Flow != "" {
-		t.Errorf("flow=none 应产出空 flow，got %+v", dto)
+	if err != nil {
+		t.Fatalf("ProjectClient(peer) 失败: %v", err)
+	}
+	if dto == nil {
+		t.Fatal("ProjectClient(peer) 返回了 nil")
+	}
+
+	if dto.ServerHost != "peer-exit.example.com" || dto.ServerPort != 8443 {
+		t.Errorf("目标地址端口不符合预期: host=%s, port=%d", dto.ServerHost, dto.ServerPort)
+	}
+	if dto.Auth.UUID != "internal-uuid-peer" || dto.Auth.Flow != "xtls-rprx-vision" {
+		t.Errorf("peer auth 不符合预期: %+v", dto.Auth)
+	}
+	if dto.Auth.Extra["CertPin"] != "aabbccddeeff" {
+		t.Errorf("CertPin 未正确透传: %+v", dto.Auth.Extra)
+	}
+	if dto.Security.Reality == nil || dto.Security.Reality.PublicKey != "peer-pbk" || dto.Security.Reality.ShortID != "cd34" {
+		t.Errorf("reality 选项未正确提取: %+v", dto.Security.Reality)
 	}
 }

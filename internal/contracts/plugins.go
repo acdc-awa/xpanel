@@ -12,35 +12,109 @@ type ShareOverride struct {
 	AllowInsecure bool
 }
 
-// ClientNodeInput 协议插件组装订阅节点 DTO 的输入。
-// 节点名/对外地址/端口已由订阅服务决议（ShareAddrOf/NodeName），插件只负责协议知识。
-type ClientNodeInput struct {
-	Name string // 已决议节点名
-	Host string // 已决议对外地址
-	Port int    // 已决议对外端口
+// EndpointRole 区分客户端投影语义。
+type EndpointRole string
 
-	Spec        *InboundSpec  // 入站统一解码结果
-	Share       ShareOverride // 分享覆写
-	InboundFlow string        // 入站级 Flow（"" 自动 / none 禁用 / 显式值）
-	UserUUID    string        // 用户凭证原料（各协议派生规则见插件实现）
+const (
+	RoleSubscription EndpointRole = "subscription" // 用户客户端订阅（消费 share_* 门面覆写）
+	RolePeer         EndpointRole = "peer"         // 节点间互联（消费 RefTarget 内部真实地址与 InternalUUID）
+)
+
+// CredentialKind 凭证语义（决定服务端用户元素与客户端凭证字段）。
+type CredentialKind string
+
+const (
+	CredentialUUID     CredentialKind = "uuid"     // vless / vmess
+	CredentialPassword CredentialKind = "password" // hysteria / trojan / ss / socks / http
+)
+
+// FieldRole 字段角色：决定 sanitize 剥离与订阅消费。
+type FieldRole string
+
+const (
+	RoleServerOnly FieldRole = "server" // 只进服务端配置（如 realitySettings.privateKey）
+	RoleClientOnly FieldRole = "client" // 只进客户端（如 fingerprint）
+	RoleBoth       FieldRole = "both"
+)
+
+// LayerSegment 某一层上的协议专有具名段。
+type LayerSegment struct {
+	Layer string    // "settings" | "stream" | "sniffing"
+	Key   string    // "xhttpSettings" / "hysteriaSettings" / "finalmask" / "realitySettings"
+	Role  FieldRole
 }
 
-// ProtocolPlugin 协议插件：同一协议的「服务端 clients 注入 / 用户 flow 决议 /
-// 订阅 DTO 组装 / 入站校验」内聚一处。新增协议 = 实现本接口并注册。
-type ProtocolPlugin interface {
-	Protocol() string // "vless" / "vmess" / "trojan" / "ss" ...
+// ProtocolDescriptor 协议能力描述符（纯数据；生成/校验/订阅/前端共用）。
+type ProtocolDescriptor struct {
+	Name  string // Xray 的 protocol 字符串："vless" / "hysteria" / ...
+	Label string // 前端显示名
 
-	// ServerClients 生成服务端入站 settings.clients（用户态入站）。
-	// users 已经过权限组过滤与 flow 盖戳（ResolveFlow 同源）。
+	Networks   []string // 允许的传输：{"tcp","xhttp"} / {"hysteria"}
+	Securities []string // 允许的安全层：{"reality","tls","none"} / {"tls"}
+
+	// 非空 = 该协议强绑定此值，前端不可选、生成期强制。
+	ForceNetwork  string // hysteria → "hysteria"
+	ForceSecurity string // hysteria → "tls"
+
+	Credential  CredentialKind
+	SupportsUDP bool
+	HotSync     bool   // 能否 gRPC 热更（决定用户变更走热更还是整配置重推）
+	AccountType string // agent 侧 account 的 Go 类型标识："vless" / "hysteria"
+
+	InboundTypes []string       // 允许的入站角色：{"user","relay"} / {"user"}
+	Segments     []LayerSegment // 该协议的专有段（供 sanitize/订阅/前端）
+}
+
+// ClientProjectionInput 统一客户端投影输入。
+type ClientProjectionInput struct {
+	Role EndpointRole // subscription | peer
+
+	// 订阅视角（RoleSubscription）：节点名/对外地址/端口已由订阅服务决议
+	Name        string
+	Host        string
+	Port        int
+	Spec        *InboundSpec  // 入站统一解码结果
+	Share       ShareOverride // 分享覆写
+	InboundFlow string        // 入站级 Flow
+	UserUUID    string        // 用户凭证原料
+
+	// 节点互联视角（RolePeer）：中转出站引用的真实目标节点信息
+	RefTarget *RefTarget
+}
+
+// ClientNodeInput 兼容保留：旧版订阅节点组装输入（内部桥接至 ClientProjectionInput）。
+type ClientNodeInput struct {
+	Name string
+	Host string
+	Port int
+
+	Spec        *InboundSpec
+	Share       ShareOverride
+	InboundFlow string
+	UserUUID    string
+}
+
+// ProtocolPlugin 协议插件：同一协议的「服务端用户注入 / 用户 flow 决议 /
+// 客户端投影 / 入站校验 / 能力描述」内聚一处。新增协议 = 实现本接口并注册。
+type ProtocolPlugin interface {
+	Protocol() string // "vless" / "hysteria" ...
+	Descriptor() ProtocolDescriptor
+
+	// ServerUsers 生成服务端入站用户数组：返回「挂载键名」+「元素切片」+「error」。
+	// 如 vless 返回 key="clients", items=[{id,email,flow,limit}], err=nil。
+	ServerUsers(users []protocol.User, spec *InboundSpec) (key string, items []any, err error)
+
+	// ServerClients 兼容保留：旧版服务端 clients 注入，内部桥接调用 ServerUsers。
 	ServerClients(users []protocol.User, spec *InboundSpec) []any
 
-	// ResolveFlow 决议用户在该入站上的 flow（生成侧盖戳与订阅侧同源）。
-	// inboundFlow 为入站级 Flow 字段（"" 自动 / none 禁用 / 显式值）。
-	ResolveFlow(spec *InboundSpec, inboundFlow string) string
+	// ProjectClient 统一客户端端点投影（按 role 区分 subscription / peer）。
+	ProjectClient(in *ClientProjectionInput) (*ProxyNodeDTO, error)
 
-	// BuildClientNode 组装订阅导出用 ProxyNodeDTO；
-	// 返回 nil 表示该入站不足以产出订阅节点（如 reality 缺 SNI），调用方跳过。
+	// BuildClientNode 兼容保留：组装订阅导出用 ProxyNodeDTO，内部桥接调用 ProjectClient。
 	BuildClientNode(in *ClientNodeInput) *ProxyNodeDTO
+
+	// ResolveFlow 决议用户在该入站上的 flow（生成侧盖戳与订阅侧同源）。
+	ResolveFlow(spec *InboundSpec, inboundFlow string) string
 
 	// ValidateInbound 入站保存时的协议级校验（在 JSON 可解析校验之上）。
 	ValidateInbound(spec *InboundSpec) error
@@ -78,4 +152,22 @@ func (r *PluginRegistry) Find(proto string) ProtocolPlugin {
 		}
 	}
 	return nil
+}
+
+// AllDescriptors 返回已注册协议的所有能力描述符。
+func (r *PluginRegistry) AllDescriptors() []ProtocolDescriptor {
+	res := make([]ProtocolDescriptor, 0, len(r.plugins))
+	for _, p := range r.plugins {
+		res = append(res, p.Descriptor())
+	}
+	return res
+}
+
+// RegisteredProtocols 返回所有已注册的协议名。
+func (r *PluginRegistry) RegisteredProtocols() []string {
+	res := make([]string, 0, len(r.plugins))
+	for _, p := range r.plugins {
+		res = append(res, p.Protocol())
+	}
+	return res
 }

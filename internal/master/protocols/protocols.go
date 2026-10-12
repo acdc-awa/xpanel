@@ -4,8 +4,10 @@
 package protocols
 
 import (
-	"github.com/acdc-awa/xpanel/internal/contracts"
+	"fmt"
+
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 )
 
 var registry = contracts.NewPluginRegistry()
@@ -19,27 +21,30 @@ func Find(proto string) contracts.ProtocolPlugin {
 	return registry.Find(proto)
 }
 
-// ServerClients 按协议生成服务端入站 settings.clients。
-// 未注册协议回退最小通用注入（id/email/limit，不含协议专有字段如 flow）。
+// AllDescriptors 获取所有已注册协议的描述符。
+func AllDescriptors() []contracts.ProtocolDescriptor {
+	return registry.AllDescriptors()
+}
+
+// RegisteredProtocols 获取所有已注册的协议名列表。
+func RegisteredProtocols() []string {
+	return registry.RegisteredProtocols()
+}
+
+// ServerUsers 按协议生成服务端入站用户数组及挂载键名。
+// 未注册协议显式报错拒绝（Fail-Closed 铁律，坚决杜绝静默注入假 UUID 或丢节点）。
+func ServerUsers(proto string, users []protocol.User, spec *contracts.InboundSpec) (string, []any, error) {
+	p := Find(proto)
+	if p == nil {
+		return "", nil, fmt.Errorf("协议 %q 未注册协议插件", proto)
+	}
+	return p.ServerUsers(users, spec)
+}
+
+// ServerClients 兼容保留：按协议生成服务端入站 settings.clients。
 func ServerClients(proto string, users []protocol.User, spec *contracts.InboundSpec) []any {
-	if p := Find(proto); p != nil {
-		return p.ServerClients(users, spec)
-	}
-	clients := make([]any, 0, len(users))
-	for _, u := range users {
-		if u.UUID == "" {
-			continue
-		}
-		c := map[string]any{
-			"id":    u.UUID,
-			"email": u.Email,
-		}
-		if u.Limit > 0 {
-			c["limit"] = u.Limit
-		}
-		clients = append(clients, c)
-	}
-	return clients
+	_, items, _ := ServerUsers(proto, users, spec)
+	return items
 }
 
 // ResolveFlow 按协议决议用户 flow（生成侧盖戳与订阅侧同源）；

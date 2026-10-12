@@ -498,7 +498,8 @@ func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string, laye
 			sni = layer.Host
 		}
 	}
-	dto := plugin.BuildClientNode(&contracts.ClientNodeInput{
+	dto, err := plugin.ProjectClient(&contracts.ClientProjectionInput{
+		Role: contracts.RoleSubscription,
 		Name: NodeName(srv, inb),
 		Host: host,
 		Port: port,
@@ -513,6 +514,10 @@ func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string, laye
 		InboundFlow: inb.Flow,
 		UserUUID:    userUUID,
 	})
+	if err != nil {
+		log.Printf("[subscribe] 入站 %s 投影订阅节点失败: %v，跳过", inb.Tag, err)
+		return nil
+	}
 	if dto == nil {
 		log.Printf("[subscribe] 入站 %s 协议参数不足以产出订阅节点（如 reality 缺 SNI/公钥），跳过", inb.Tag)
 	}
