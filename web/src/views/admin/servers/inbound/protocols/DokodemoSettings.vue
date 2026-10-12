@@ -7,6 +7,8 @@ import type { DokodemoConfig } from '../types'
 const props = defineProps<{
   modelValue: DokodemoConfig
   currentInboundId?: number
+  listenPort?: number
+  listenAddress?: string
 }>()
 
 const emit = defineEmits<{
@@ -106,7 +108,9 @@ const targetSummaryText = computed(() => {
       <div class="pipeline-flow">
         <div class="pipeline-node inbound">
           <span class="node-tag">入站监听</span>
-          <span class="node-val">Dokodemo-door</span>
+          <span class="node-val" :title="`监听 ${listenAddress || '0.0.0.0'}:${listenPort || 443}`">
+            {{ listenAddress || '0.0.0.0' }}:{{ listenPort || 443 }}
+          </span>
         </div>
         <span class="pipeline-arrow">➔</span>
         <div class="pipeline-node rule">
@@ -123,21 +127,21 @@ const targetSummaryText = computed(() => {
         </div>
       </div>
       <div class="pipeline-hint">
-        四层直通管道：保存后将自动关联生成专属的直通路由规则与出站通道，并在拓扑画布中以实线通道呈现。
+        四层直通管道：入站监听本地流量，出站通过专属路由通道转发至目标。入站监听的端口与 IP 请在「基础配置」调整。
       </div>
     </div>
 
     <div style="margin-bottom: 14px">
       <el-radio-group :model-value="modelValue.target_mode" size="small" @change="onModeChange">
-        <el-radio-button value="inbound">指定入站</el-radio-button>
-        <el-radio-button value="manual">手动指定目标</el-radio-button>
+        <el-radio-button value="inbound">指定目标入站</el-radio-button>
+        <el-radio-button value="manual">手动指定远程目标</el-radio-button>
         <el-radio-button value="draft">留空待连线 (草稿)</el-radio-button>
       </el-radio-group>
     </div>
 
     <!-- 模式一：指定入站 -->
     <div v-if="modelValue.target_mode === 'inbound'" class="form-grid">
-      <el-form-item label="目标入站" style="grid-column: 1 / -1">
+      <el-form-item label="直通目标入站" style="grid-column: 1 / -1">
         <el-select
           :model-value="modelValue.target_inbound_id || undefined"
           filterable
@@ -165,14 +169,14 @@ const targetSummaryText = computed(() => {
 
     <!-- 模式二：手动指定 -->
     <div v-else-if="modelValue.target_mode === 'manual'" class="form-grid">
-      <el-form-item label="目标地址">
+      <el-form-item label="转发目标地址 (Target Address)">
         <el-input
           :model-value="modelValue.target_address"
-          placeholder="IP 或域名，如 1.2.3.4"
+          placeholder="远程 IP 或域名，如 1.2.3.4"
           @input="(v: string) => updateField('target_address', v)"
         />
       </el-form-item>
-      <el-form-item label="目标端口">
+      <el-form-item label="转发目标端口 (Target Port)">
         <el-input-number
           :model-value="modelValue.target_port"
           :min="1"
@@ -181,6 +185,11 @@ const targetSummaryText = computed(() => {
           @update:model-value="(v: any) => updateField('target_port', Number(v || 0))"
         />
       </el-form-item>
+      <div style="grid-column: 1 / -1; margin-top: -6px; margin-bottom: 6px">
+        <span class="muted" style="font-size: 11.5px">
+          提示：上述为数据包转发的目标端点，本入站本身的监听端口（:{{ listenPort || 443 }}）请在「基础配置」中修改。
+        </span>
+      </div>
     </div>
 
     <!-- 模式三：草稿留空 -->

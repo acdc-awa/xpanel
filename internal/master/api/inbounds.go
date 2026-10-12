@@ -213,10 +213,10 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / dokodemo-door / socks / http）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed / socks / http）")
 		return
 	}
-	if req.Protocol == models.ProtocolSocks || req.Protocol == models.ProtocolHTTP {
+	if req.Protocol == models.ProtocolSocks || req.Protocol == models.ProtocolHTTP || req.Protocol == models.ProtocolMixed {
 		var s map[string]any
 		if json.Unmarshal([]byte(req.SettingsJSON), &s) == nil {
 			delete(s, "accounts")
@@ -466,7 +466,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 
-	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP {
+	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP || effProto == models.ProtocolMixed {
 		var s map[string]any
 		if json.Unmarshal([]byte(sj), &s) == nil {
 			delete(s, "accounts")
@@ -489,7 +489,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / dokodemo-door / socks / http）")
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed / socks / http）")
 		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
@@ -974,12 +974,12 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、SOCKS5 与 HTTP）。
+// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、Mixed、SOCKS5 与 HTTP）。
 func validInboundProtocol(p string) bool {
 	if protocols.Find(p) != nil {
 		return true
 	}
-	return p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP
+	return p == models.ProtocolDokodemo || p == models.ProtocolSocks || p == models.ProtocolHTTP || p == models.ProtocolMixed
 }
 
 func validInboundType(t string) bool {

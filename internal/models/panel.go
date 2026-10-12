@@ -106,9 +106,9 @@ func (inb *Inbound) IsTunnel() bool {
 	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeTunnel
 }
 
-// IsForwardProxy 判断入站是否为代理转发入口（SOCKS5 / HTTP）。
+// IsForwardProxy 判断入站是否为代理转发入口（Mixed / SOCKS5 / HTTP）。
 func (inb *Inbound) IsForwardProxy() bool {
-	return inb.Protocol == ProtocolSocks || inb.Protocol == ProtocolHTTP || inb.Type == InboundTypeForward
+	return inb.Protocol == ProtocolSocks || inb.Protocol == ProtocolHTTP || inb.Protocol == ProtocolMixed || inb.Type == InboundTypeForward
 }
 
 // IsRelay 判断入站是否为内部中转链路（relay）。

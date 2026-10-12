@@ -111,10 +111,10 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 	}
 	ctx.InboundAuthorizedGroups = inboundGroupMap
 
-	// 转发用户映射：收集 SOCKS5 / HTTP 入站所需的权限组并获取对应的有效 ForwardUser
+	// 转发用户映射：收集 Mixed / SOCKS5 / HTTP 入站所需的权限组并获取对应的有效 ForwardUser
 	fwdGroupSet := make(map[uint64]struct{})
 	for _, inb := range inbounds {
-		if inb.IsForwardProxy() || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
+		if inb.IsForwardProxy() || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP || inb.Protocol == models.ProtocolMixed {
 			for _, gid := range inboundGroupMap[inb.ID] {
 				fwdGroupSet[gid] = struct{}{}
 			}

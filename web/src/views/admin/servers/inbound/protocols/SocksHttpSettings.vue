@@ -2,7 +2,7 @@
 import type { SocksHttpConfig } from '../types'
 
 const props = defineProps<{
-  protocol: 'socks' | 'http'
+  protocol: 'socks' | 'http' | 'mixed'
   modelValue: SocksHttpConfig
 }>()
 
@@ -31,7 +31,7 @@ function updateField<K extends keyof SocksHttpConfig>(key: K, val: SocksHttpConf
         </el-select>
       </el-form-item>
 
-      <el-form-item v-if="protocol === 'socks'" label="UDP 转发">
+      <el-form-item v-if="protocol === 'socks' || protocol === 'mixed'" label="UDP 转发">
         <div style="padding-top: 6px">
           <el-switch
             :model-value="modelValue.udp"

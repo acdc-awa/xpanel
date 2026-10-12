@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Plus, Delete, QuestionFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { ref } from 'vue'
+import { Plus, Delete, QuestionFilled, CopyDocument, Refresh, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { rotateInternalInbound } from '@/api/admin'
+import { rotateInternalInbound, getXrayVlessEnc } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem } from '@/api/types'
 import type { VlessConfig } from '../types'
@@ -18,6 +19,25 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: VlessConfig): void
   (e: 'internal-uuid-changed', value: string): void
 }>()
+
+const veGenLoading = ref(false)
+
+async function fetchVlessencKey() {
+  veGenLoading.value = true
+  try {
+    const { data } = await getXrayVlessEnc()
+    if (data.code === 0 && data.data) {
+      updateField('decryption', data.data.decryption)
+      ElMessage.success('已生成 VLESS Encryption 密钥')
+    } else {
+      ElMessage.error(data.message || '生成失败')
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '生成密钥失败'))
+  } finally {
+    veGenLoading.value = false
+  }
+}
 
 function updateField<K extends keyof VlessConfig>(key: K, val: VlessConfig[K]) {
   emit('update:modelValue', {
@@ -59,6 +79,8 @@ async function rotateInternal() {
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '轮换内部 UUID 失败'))
+  } finally {
+    ElMessage.closeAll()
   }
 }
 
@@ -91,7 +113,7 @@ function copyText(txt: string, label = '内容') {
       <el-form-item>
         <template #label>
           <span>流控 (Flow)</span>
-          <el-tooltip content="TCP + REALITY 建议开启 xtls-rprx-vision。" placement="top">
+          <el-tooltip content="TCP + REALITY 或 TLS / VLESS Encryption 建议开启 xtls-rprx-vision。" placement="top">
             <el-icon class="help-icon"><QuestionFilled /></el-icon>
           </el-tooltip>
         </template>
@@ -101,14 +123,39 @@ function copyText(txt: string, label = '内容') {
           style="width: 100%"
           @update:model-value="(v: string) => updateField('flow', v)"
         >
-          <el-option label="自动 (Vision)" value="" />
           <el-option label="开启 (xtls-rprx-vision)" value="xtls-rprx-vision" />
-          <el-option label="关闭" value="none" />
+          <el-option label="不启用 (留空)" value="" />
         </el-select>
         <div v-if="!allowVision" class="muted" style="font-size: 11.5px; margin-top: 4px">
-          Vision 流控仅在 TCP + REALITY / TLS / vlessenc 下生效
+          Vision 流控仅在 TCP + REALITY / TLS / VLESS Encryption 下生效
         </div>
       </el-form-item>
+    </div>
+
+    <!-- 协议层加密 (VLESS Encryption / ML-KEM-768) -->
+    <div class="vlessenc-card">
+      <div class="card-head-flex" style="margin-bottom: 8px">
+        <span class="sub-title">协议加密 (VLESS Encryption)</span>
+        <el-tag size="small" type="info">ML-KEM-768 后量子算法</el-tag>
+      </div>
+      <el-form-item label="解密密钥 (decryption)">
+        <div style="display: flex; gap: 8px; width: 100%">
+          <el-input
+            :model-value="modelValue.decryption || ''"
+            placeholder="留空即为关闭 (none)；点击右侧生成或填入解密密钥"
+            @input="(v: string) => updateField('decryption', v)"
+          />
+          <el-button v-if="modelValue.decryption" title="复制密钥" @click="copyText(modelValue.decryption, '密钥')">
+            <el-icon><CopyDocument /></el-icon>
+          </el-button>
+          <el-button type="primary" plain :loading="veGenLoading" @click="fetchVlessencKey">
+            <el-icon><MagicStick /></el-icon>&nbsp;生成密钥
+          </el-button>
+        </div>
+      </el-form-item>
+      <div class="muted" style="font-size: 11.5px; line-height: 1.5; margin-top: 4px">
+        基于后量子算法的协议内加密方案，适用于节点间私有中继链路（relay）。启用后协议层实施解密保护，底层传输层可保持明文 (none) 并支持 Splice / Vision 直通。
+      </div>
     </div>
 
     <!-- Fallbacks 回落 -->
@@ -185,7 +232,8 @@ function copyText(txt: string, label = '内容') {
   gap: 14px;
 }
 
-.relay-card {
+.relay-card,
+.vlessenc-card {
   background: var(--x-card);
   border: 1px solid var(--x-border);
   border-radius: 8px;

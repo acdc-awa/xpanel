@@ -34,7 +34,6 @@ import TcpTransport from './inbound/transports/TcpTransport.vue'
 import XhttpTransport from './inbound/transports/XhttpTransport.vue'
 import RealitySecurity from './inbound/securities/RealitySecurity.vue'
 import TlsSecurity from './inbound/securities/TlsSecurity.vue'
-import VlessencSecurity from './inbound/securities/VlessencSecurity.vue'
 import VlessSettings from './inbound/protocols/VlessSettings.vue'
 import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
 import SocksHttpSettings from './inbound/protocols/SocksHttpSettings.vue'
@@ -179,6 +178,7 @@ const localLayerId = ref(props.layerId || 0)
 const vlessForm = ref<VlessConfig>({
   flow: '',
   fallbacks: [],
+  decryption: '',
 })
 
 const dokodemoForm = ref<DokodemoConfig>({
@@ -240,8 +240,6 @@ const tlsForm = ref<TlsConfig>({
   allow_insecure: false,
 })
 
-const vlessencKey = ref('')
-
 // 嗅探状态
 const sniffingForm = reactive({
   enabled: false,
@@ -268,15 +266,15 @@ const isInternalUpdating = ref(false)
 const allowedNetworks = computed<InboundNetwork[]>(() => {
   if (localProtocol.value === 'hysteria') return ['hysteria']
   if (localProtocol.value === 'dokodemo-door') return ['tcp']
-  if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['tcp']
+  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') return ['tcp']
   return ['tcp', 'xhttp']
 })
 
 const allowedSecurities = computed<InboundSecurity[]>(() => {
   if (localProtocol.value === 'hysteria') return ['tls']
   if (localProtocol.value === 'dokodemo-door') return ['none']
-  if (localProtocol.value === 'socks' || localProtocol.value === 'http') return ['none', 'tls']
-  return ['none', 'tls', 'reality', 'vlessenc']
+  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') return ['none', 'tls']
+  return ['none', 'tls', 'reality']
 })
 
 const visibleTabs = computed(() => {
@@ -301,7 +299,7 @@ const visibleTabs = computed(() => {
 const allowVisionFlow = computed(() => {
   return localProtocol.value === 'vless' &&
     localNetwork.value === 'tcp' &&
-    (localTlsType.value === 'reality' || localTlsType.value === 'tls' || localTlsType.value === 'vlessenc')
+    (localTlsType.value === 'reality' || localTlsType.value === 'tls' || Boolean(vlessForm.value.decryption && vlessForm.value.decryption !== 'none'))
 })
 
 function enforceCapabilityMatrix() {
@@ -332,7 +330,7 @@ function onTypeChange(type: any) {
   } else if (t === 'relay') {
     if (localProtocol.value !== 'hysteria') {
       localProtocol.value = 'vless'
-      localTlsType.value = 'vlessenc'
+      localTlsType.value = 'none'
     }
   } else if (t === 'user') {
     if (localProtocol.value !== 'hysteria') {
@@ -354,7 +352,7 @@ function onProtocolChange(proto: any) {
     }
   } else if (p === 'dokodemo-door') {
     localInboundType.value = 'tunnel'
-  } else if (p === 'socks' || p === 'http') {
+  } else if (p === 'mixed' || p === 'socks' || p === 'http') {
     localInboundType.value = 'forward'
   } else if (p === 'vless' && (localInboundType.value === 'tunnel' || localInboundType.value === 'forward')) {
     localInboundType.value = 'user'
@@ -403,7 +401,7 @@ function buildSettingsJSON(): string {
     })
   }
 
-  if (localProtocol.value === 'socks') {
+  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks') {
     const s: Record<string, any> = {
       auth: 'password',
       udp: socksHttpForm.value.udp,
@@ -427,7 +425,7 @@ function buildSettingsJSON(): string {
 
   // vless
   const s: Record<string, any> = {
-    decryption: localTlsType.value === 'vlessenc' && vlessencKey.value ? vlessencKey.value : 'none',
+    decryption: vlessForm.value.decryption && vlessForm.value.decryption !== 'none' ? vlessForm.value.decryption : 'none',
   }
   if (vlessForm.value.fallbacks.length > 0) {
     s.fallbacks = vlessForm.value.fallbacks.map((f) => ({
@@ -479,10 +477,9 @@ function buildStreamSettingsJSON(): string {
     return JSON.stringify(s)
   }
 
-  const streamSecurity = localTlsType.value === 'vlessenc' ? 'none' : localTlsType.value
   const s: Record<string, any> = {
     network: localNetwork.value,
-    security: streamSecurity,
+    security: localTlsType.value,
   }
 
   if (tcpForm.value.acceptProxyProtocol || xhttpForm.value.acceptProxyProtocol) {
@@ -561,6 +558,10 @@ function syncFormToJson() {
   const sniffJson = buildSniffingJSON()
 
   rawJsonText.value = JSON.stringify({
+    tag: localTag.value,
+    port: localPort.value,
+    listen: localListen.value || '0.0.0.0',
+    protocol: localProtocol.value,
     settings_json: JSON.parse(settingsJson),
     stream_settings: JSON.parse(streamJson),
     sniffing: sniffJson ? JSON.parse(sniffJson) : null,
@@ -650,13 +651,12 @@ function parseJsonToForm(str: string) {
       localTlsType.value = streamObj.security as InboundSecurity
     }
 
-    // vlessenc 回显判断
+    // vlessenc 回显判断（迁移至协议层 decryption）
     const decRaw = (s && typeof s === 'object' ? s.decryption : '') as string
-    if (localTlsType.value === 'none' && typeof decRaw === 'string' && decRaw && decRaw !== 'none') {
-      localTlsType.value = 'vlessenc'
-      vlessencKey.value = decRaw
-    } else if (localTlsType.value === 'vlessenc') {
-      vlessencKey.value = decRaw || ''
+    const parsedDec = (typeof decRaw === 'string' && decRaw !== 'none') ? decRaw : ''
+    vlessForm.value.decryption = parsedDec
+    if ((localTlsType.value as string) === 'vlessenc') {
+      localTlsType.value = 'none'
     }
 
     if (typeof parsed.port === 'number') localPort.value = parsed.port
@@ -689,10 +689,12 @@ function parseJsonToForm(str: string) {
     } else if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
       localInboundType.value = 'tunnel'
       localProtocol.value = 'dokodemo-door'
-    } else if (parsed.type === 'forward' || parsed.protocol === 'socks' || parsed.protocol === 'http' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
+    } else if (parsed.type === 'forward' || parsed.protocol === 'mixed' || parsed.protocol === 'socks' || parsed.protocol === 'http' || localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
       localInboundType.value = 'forward'
-      if (localProtocol.value !== 'socks' && localProtocol.value !== 'http') {
-        localProtocol.value = (parsed.protocol === 'socks' || parsed.protocol === 'http') ? (parsed.protocol as InboundProtocol) : 'http'
+      if (parsed.protocol === 'mixed' || localProtocol.value === 'mixed') {
+        localProtocol.value = 'mixed'
+      } else if (localProtocol.value !== 'socks' && localProtocol.value !== 'http') {
+        localProtocol.value = (parsed.protocol === 'socks' || parsed.protocol === 'http') ? (parsed.protocol as InboundProtocol) : 'mixed'
       }
     } else if (parsed.type === 'relay') {
       localInboundType.value = 'relay'
@@ -717,7 +719,7 @@ function parseJsonToForm(str: string) {
         network: s?.network || 'tcp,udp',
         proxy_protocol: streamObj.proxy_protocol !== false && streamObj.proxyProtocol !== false,
       }
-    } else if (localProtocol.value === 'socks' || localProtocol.value === 'http') {
+    } else if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
       socksHttpForm.value = {
         auth: 'password',
         udp: s?.udp !== false,
@@ -726,6 +728,7 @@ function parseJsonToForm(str: string) {
     } else {
       vlessForm.value = {
         flow: parsed.flow || '',
+        decryption: parsedDec,
         fallbacks: Array.isArray(s?.fallbacks)
           ? s.fallbacks.map((f: any) => ({
               name: f.name || '',
@@ -1007,7 +1010,6 @@ watch(
     realityForm,
     realityFingerprint,
     tlsForm,
-    vlessencKey,
     sniffingForm,
   ],
   () => {
@@ -1075,8 +1077,9 @@ watch(
                   <el-option label="VLESS" value="vless" />
                   <el-option label="Hysteria 2" value="hysteria" />
                   <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
-                  <el-option label="SOCKS5" value="socks" />
-                  <el-option label="HTTP" value="http" />
+                  <el-option label="Mixed (SOCKS5 / HTTP 混合代理)" value="mixed" />
+                  <el-option label="SOCKS5 (兼容旧配置)" value="socks" />
+                  <el-option label="HTTP (兼容旧配置)" value="http" />
                 </el-select>
               </el-form-item>
 
@@ -1091,7 +1094,7 @@ watch(
                 <el-input value="四层直通 (tunnel)" disabled />
               </el-form-item>
 
-              <el-form-item v-else-if="localProtocol === 'socks' || localProtocol === 'http'" label="入站用途">
+              <el-form-item v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'" label="入站用途">
                 <el-input value="转发代理 (forward)" disabled />
               </el-form-item>
 
@@ -1158,9 +1161,11 @@ watch(
               v-else-if="localProtocol === 'dokodemo-door'"
               v-model="dokodemoForm"
               :current-inbound-id="props.inboundId"
+              :listen-port="localPort"
+              :listen-address="localListen"
             />
             <SocksHttpSettings
-              v-else-if="localProtocol === 'socks' || localProtocol === 'http'"
+              v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'"
               v-model="socksHttpForm"
               :protocol="localProtocol"
             />
@@ -1191,12 +1196,29 @@ watch(
             <div class="card-title">安全加密层 (Security)</div>
             <el-form-item label="安全协议类型">
               <el-radio-group v-model="localTlsType" size="default" @change="onSecurityChange">
-                <el-radio-button value="none">无 (none)</el-radio-button>
+                <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无 (none)</el-radio-button>
                 <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">TLS</el-radio-button>
                 <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">Reality</el-radio-button>
-                <el-radio-button v-if="allowedSecurities.includes('vlessenc')" value="vlessenc">VLESS Encryption</el-radio-button>
               </el-radio-group>
             </el-form-item>
+
+            <div v-if="localProtocol === 'hysteria'" style="margin-bottom: 12px">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="Hysteria 2 强制启用 TLS/QUIC 加密，不支持明文传输 (none)。"
+              />
+            </div>
+            <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" style="margin-bottom: 12px">
+              <el-alert
+                type="warning"
+                :closable="false"
+                show-icon
+                title="Mixed / SOCKS 套用 TLS 说明"
+                description="Mixed 套用 TLS 后，客户端必须支持 HTTPS 代理（HTTP over TLS）或 SOCKS over TLS（如在 Clash / SwitchyOmega 中配置 HTTPS 代理）。普通仅支持明文 TCP 的 SOCKS5 客户端将无法建立连接。"
+              />
+            </div>
 
             <div style="margin-top: 16px">
               <TlsSecurity
@@ -1208,10 +1230,6 @@ watch(
                 v-else-if="localTlsType === 'reality'"
                 v-model="realityForm"
                 v-model:fingerprint="realityFingerprint"
-              />
-              <VlessencSecurity
-                v-else-if="localTlsType === 'vlessenc'"
-                v-model="vlessencKey"
               />
               <div v-else>
                 <el-alert
