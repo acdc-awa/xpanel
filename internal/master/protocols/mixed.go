@@ -169,7 +169,7 @@ func (p MixedPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 		if spec.TLS != nil && spec.TLS.ServerName != "" {
 			sni = spec.TLS.ServerName
 		}
-		dto.Security.SNI = sni
+		ApplyPeerTLSValidation(dto, in, sni)
 	}
 	return dto, nil
 }

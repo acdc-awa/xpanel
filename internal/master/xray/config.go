@@ -522,9 +522,10 @@ func buildRefOutbound(item map[string]any, target RefTarget, ob models.ServerOut
 	}
 
 	dto, err := plugin.ProjectClient(&contracts.ClientProjectionInput{
-		Role:         contracts.RolePeer,
-		RefTarget:    &target,
-		OutboundUUID: ob.InternalUUID,
+		Role:          contracts.RolePeer,
+		RefTarget:     &target,
+		OutboundUUID:  ob.InternalUUID,
+		TlsVerifyMode: ob.TlsVerifyMode,
 	})
 	if err != nil {
 		return fmt.Errorf("出站 %s 投影目标入站 %s 失败: %w", item["tag"], inb.Tag, err)

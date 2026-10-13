@@ -58,7 +58,7 @@ func All() []any {
 		&User{}, &InvitationCode{}, &GiftCard{}, &BalanceLog{},
 		&Server{}, &Inbound{}, &PendingConfig{}, &PendingCert{},
 		&ServerOutbound{}, &ServerRoutingRule{},
-		&Plan{}, &Order{}, &Cert{},
+		&Plan{}, &Order{}, &Cert{}, &CACert{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{}, &TrafficBatch{},
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{},

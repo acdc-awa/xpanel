@@ -88,6 +88,8 @@ type ClientProjectionInput struct {
 	RefTarget *RefTarget
 	// 出站专属机间认证凭据（Per-Outbound InternalUUID）
 	OutboundUUID string
+	// TlsVerifyMode 出站显式配置的验证模式（"" = 自动/优先CA, "ca" = 强制CA验签, "pin" = 强制Pin）
+	TlsVerifyMode string
 }
 
 // ClientNodeInput 兼容保留：旧版订阅节点组装输入（内部桥接至 ClientProjectionInput）。

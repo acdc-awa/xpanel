@@ -284,7 +284,7 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 		if t := spec.TLS; t != nil && t.ServerName != "" {
 			serverName = t.ServerName
 		}
-		dto.Security.SNI = serverName
+		ApplyPeerTLSValidation(dto, in, serverName)
 	}
 
 	return dto, nil

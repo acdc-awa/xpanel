@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,7 @@ import (
 	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/certutil"
 	"github.com/acdc-awa/xpanel/internal/pkg/db"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -30,6 +32,9 @@ type certView struct {
 	NotAfter   string        `json:"not_after"`
 	PinSHA256  string        `json:"pin_sha256"`  // leaf DER SHA-256（hex），链式代理自动 pin
 	SelfSigned bool          `json:"self_signed"` // 面板一键生成的自签证书
+	CAID       *uint64       `json:"ca_id,omitempty"`
+	CAName     string        `json:"ca_name,omitempty"`
+	KeyType    string        `json:"key_type,omitempty"`
 	Remark     string        `json:"remark"`
 	Refs       []certRefView `json:"refs"` // 引用该证书的入站（服务器/标签）
 	CreatedAt  string        `json:"created_at"`
@@ -37,10 +42,13 @@ type certView struct {
 
 func toCertView(c *models.Cert) certView {
 	return certView{
-		ID: c.ID, Domain: c.Domain,
+		ID:         c.ID,
+		Domain:     c.Domain,
 		NotAfter:   c.NotAfter.Format("2006-01-02 15:04"),
 		PinSHA256:  c.PinSHA256,
 		SelfSigned: c.SelfSigned,
+		CAID:       c.CAID,
+		KeyType:    c.KeyType,
 		Remark:     c.Remark,
 		CreatedAt:  c.CreatedAt.Format("2006-01-02 15:04"),
 	}
@@ -92,10 +100,30 @@ func (d *Deps) AdminCerts(c *gin.Context) {
 			})
 		}
 	}
+	// 汇总所有关联的 CA 名称
+	caIDs := make([]uint64, 0)
+	for _, c := range list {
+		if c.CAID != nil && *c.CAID != 0 {
+			caIDs = append(caIDs, *c.CAID)
+		}
+	}
+	caNames := map[uint64]string{}
+	if len(caIDs) > 0 {
+		var cas []models.CACert
+		if err := d.DB.Select("id", "name").Where("id IN ?", caIDs).Find(&cas).Error; err == nil {
+			for _, ca := range cas {
+				caNames[ca.ID] = ca.Name
+			}
+		}
+	}
+
 	items := make([]certView, 0, len(list))
 	for i := range list {
 		v := toCertView(&list[i])
 		v.Refs = refMap[list[i].ID]
+		if list[i].CAID != nil {
+			v.CAName = caNames[*list[i].CAID]
+		}
 		items = append(items, v)
 	}
 	util.OK(c, gin.H{"items": items})
@@ -138,27 +166,48 @@ func (d *Deps) AdminCreateCert(c *gin.Context) {
 	util.OK(c, gin.H{"cert": toCertView(&cert)})
 }
 
-// AdminGenerateSelfSignedCert POST /api/v1/admin/certs/self-signed —— 一键生成自签证书。
-// 链式代理 TLS 场景：面板生成 ECDSA P-256 十年期自签证书并计算 pin；
-// 中转出站生成时自动注入 pinnedPeerCertSha256（pin 命中即验证通过，自签亦防 MITM）。
+// AdminGenerateSelfSignedCert POST /api/v1/admin/certs/self-signed —— 一键生成自签证书（支持高级自定义参数）。
 func (d *Deps) AdminGenerateSelfSignedCert(c *gin.Context) {
 	var req struct {
-		Domain string `json:"domain" binding:"required,max=128"`
-		Remark string `json:"remark"`
+		Domain       string   `json:"domain" binding:"required,max=128"`
+		SANDNS       []string `json:"san_dns"`
+		SANIP        []string `json:"san_ip"`
+		Organization string   `json:"organization"`
+		Country      string   `json:"country"`
+		KeyType      string   `json:"key_type"`
+		ValidDays    int      `json:"valid_days"`
+		Remark       string   `json:"remark"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
 	}
-	certPEM, keyPEM, err := tlscert.GenerateSelfSigned(req.Domain)
+	domain := strings.TrimSpace(req.Domain)
+	if !tlscert.DomainRe.MatchString(domain) {
+		util.BadRequest(c, "域名格式无效（仅允许字母数字 . -）")
+		return
+	}
+	genRes, err := certutil.GenerateCustomSelfSigned(certutil.SelfSignedRequest{
+		CommonName:   domain,
+		SANDNS:       req.SANDNS,
+		SANIP:        req.SANIP,
+		Organization: req.Organization,
+		Country:      req.Country,
+		KeyType:      req.KeyType,
+		ValidDays:    req.ValidDays,
+	})
 	if err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	notAfter, _ := tlscert.NotAfter(certPEM) // 生成即合法，忽略错误
-	pin, _ := tlscert.PinSHA256Hex(certPEM)
 	cert := models.Cert{
-		Domain: req.Domain, CertPEM: certPEM, KeyPEM: keyPEM,
-		NotAfter: notAfter, PinSHA256: pin, SelfSigned: true, Remark: req.Remark,
+		Domain:     domain,
+		CertPEM:    genRes.FullchainPEM,
+		KeyPEM:     genRes.KeyPEM,
+		NotAfter:   genRes.NotAfter,
+		PinSHA256:  genRes.PinSHA256,
+		SelfSigned: true,
+		KeyType:    genRes.KeyType,
+		Remark:     req.Remark,
 	}
 	if err := d.DB.Create(&cert).Error; err != nil {
 		if db.IsUniqueViolation(err, "certs.domain") {
@@ -235,6 +284,95 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 		}
 	}
 	util.OK(c, gin.H{"cert": toCertView(&cert)})
+}
+
+// AdminReissueCert POST /api/v1/admin/certs/:id/reissue —— 证书一键重签 / 续期
+func (d *Deps) AdminReissueCert(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的 ID")
+		return
+	}
+	var cert models.Cert
+	if err := d.DB.First(&cert, id).Error; err != nil {
+		util.Fail(c, 404, "证书不存在")
+		return
+	}
+
+	var req struct {
+		ValidDays int `json:"valid_days"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	if cert.CAID != nil && *cert.CAID != 0 {
+		var ca models.CACert
+		if err := d.DB.First(&ca, *cert.CAID).Error; err != nil {
+			util.BadRequest(c, "关联的 CA 根证书已不存在")
+			return
+		}
+		if !ca.HasKey || ca.CAKeyPEM == "" {
+			util.BadRequest(c, "关联的 CA 不持有私钥，无法重签")
+			return
+		}
+		days := req.ValidDays
+		if days <= 0 {
+			days = 365
+		}
+		signRes, err := certutil.SignServerCert(ca.CACertPEM, ca.CAKeyPEM, certutil.CertSignRequest{
+			CommonName: cert.Domain,
+			KeyType:    cert.KeyType,
+			ValidDays:  days,
+		})
+		if err != nil {
+			util.BadRequest(c, "重签证书失败: "+err.Error())
+			return
+		}
+		cert.CertPEM = signRes.FullchainPEM
+		cert.KeyPEM = signRes.KeyPEM
+		cert.NotAfter = signRes.NotAfter
+		cert.PinSHA256 = signRes.PinSHA256
+		if err := d.DB.Save(&cert).Error; err != nil {
+			util.ServerError(c, "保存证书失败")
+			return
+		}
+	} else if cert.SelfSigned {
+		days := req.ValidDays
+		if days <= 0 {
+			days = 3650
+		}
+		selfRes, err := certutil.GenerateCustomSelfSigned(certutil.SelfSignedRequest{
+			CommonName: cert.Domain,
+			KeyType:    cert.KeyType,
+			ValidDays:  days,
+		})
+		if err != nil {
+			util.BadRequest(c, "重新生成自签证书失败: "+err.Error())
+			return
+		}
+		cert.CertPEM = selfRes.FullchainPEM
+		cert.KeyPEM = selfRes.KeyPEM
+		cert.NotAfter = selfRes.NotAfter
+		cert.PinSHA256 = selfRes.PinSHA256
+		if err := d.DB.Save(&cert).Error; err != nil {
+			util.ServerError(c, "保存证书失败")
+			return
+		}
+	} else {
+		util.BadRequest(c, "外部导入的证书请使用「上传换证」功能更新")
+		return
+	}
+
+	d.pushCertToUsers(&cert)
+	d.reenqueueRelayConfigsForCert(cert.ID)
+
+	view := toCertView(&cert)
+	if cert.CAID != nil {
+		var ca models.CACert
+		if err := d.DB.First(&ca, *cert.CAID).Error; err == nil {
+			view.CAName = ca.Name
+		}
+	}
+	util.OK(c, gin.H{"cert": view})
 }
 
 // reenqueueRelayConfigsForCert 换证/重签后重推中转配置：

@@ -113,3 +113,39 @@ func ResolveFlow(proto string, spec *contracts.InboundSpec, inboundFlow string) 
 	}
 	return ""
 }
+
+// ApplyPeerTLSValidation 统一处理机间互联 Peer 出站的 TLS 校验配置（支持 Pin 与 托管 CA 验签）。
+func ApplyPeerTLSValidation(dto *contracts.ProxyNodeDTO, in *contracts.ClientProjectionInput, defaultServerName string) {
+	if dto == nil || in == nil || in.RefTarget == nil || dto.Security == nil || dto.Security.Type != "tls" {
+		return
+	}
+	target := in.RefTarget
+	serverName := defaultServerName
+	if target.TargetCertDomain != "" {
+		serverName = target.TargetCertDomain
+	}
+	dto.Security.SNI = serverName
+
+	useCA := false
+	if in.TlsVerifyMode == "ca" {
+		useCA = (target.CACert != "")
+	} else if in.TlsVerifyMode == "pin" {
+		useCA = false
+	} else {
+		// 自动模式：目标入站绑定证书若关联托管 CA，则优先采用 CA 验签
+		useCA = (target.CACert != "")
+	}
+
+	if useCA {
+		dto.Security.CACert = target.CACert
+		dto.Security.DisableSystemRoot = true
+		dto.Security.VerifyPeerCertByName = serverName
+		if dto.Auth != nil && dto.Auth.Extra != nil {
+			delete(dto.Auth.Extra, "CertPin")
+		}
+	} else if target.CertPin != "" {
+		if dto.Auth != nil && dto.Auth.Extra != nil {
+			dto.Auth.Extra["CertPin"] = target.CertPin
+		}
+	}
+}

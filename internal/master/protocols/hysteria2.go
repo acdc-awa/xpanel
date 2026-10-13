@@ -172,15 +172,11 @@ func (p HysteriaPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contr
 			Extra:    make(map[string]any),
 		},
 	}
-	if target.CertPin != "" {
-		dto.Auth.Extra["CertPin"] = target.CertPin
-	}
+	serverName := target.ServerHost
 	if spec.TLS != nil && spec.TLS.ServerName != "" {
-		dto.Security.SNI = spec.TLS.ServerName
+		serverName = spec.TLS.ServerName
 	}
-	if dto.Security.SNI == "" {
-		dto.Security.SNI = target.ServerHost
-	}
+	ApplyPeerTLSValidation(dto, in, serverName)
 
 	return dto, nil
 }

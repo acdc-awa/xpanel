@@ -526,6 +526,7 @@ export interface ServerOutbound {
   priority: number
   remark: string
   inbound_ref?: number // Phase T：引用落地入站
+  tls_verify_mode?: string // 节点间 TLS 验证方式: '' (自动), 'ca' (托管CA), 'pin' (指纹Pin)
   owner_inbound_id?: number // C2：>0 = 由该四层直通入站自动维护（目标只能在通道页/入站页改）
   created_at: string
   updated_at: string
@@ -539,12 +540,30 @@ export interface CertRef {
   inbound_tag: string
 }
 
+export interface CACertItem {
+  id: number
+  name: string
+  common_name: string
+  organization: string
+  country: string
+  ca_cert_pem: string
+  has_key: boolean
+  not_after: string
+  key_type: string
+  remark: string
+  issued_count: number
+  created_at: string
+}
+
 export interface CertItem {
   id: number
   domain: string
   not_after: string
   pin_sha256: string // leaf DER SHA-256（hex），链式代理 TLS 中转出站自动 pin
   self_signed: boolean // 面板一键生成的自签证书
+  ca_id?: number
+  ca_name?: string
+  key_type?: string
   remark: string
   refs: CertRef[] // 引用该证书的入站位置（服务器/入站标签）
   created_at: string

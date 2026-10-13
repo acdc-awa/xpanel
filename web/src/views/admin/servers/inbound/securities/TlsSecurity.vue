@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getCerts, type CertItem } from '@/api/admin'
+import { getCerts, getCACerts, type CertItem, type CACertItem } from '@/api/admin'
 import type { TlsConfig } from '../types'
 
 const props = defineProps<{
@@ -13,6 +13,7 @@ const emit = defineEmits<{
 }>()
 
 const certs = ref<CertItem[]>([])
+const caCerts = ref<CACertItem[]>([])
 
 async function loadCerts() {
   try {
@@ -25,7 +26,21 @@ async function loadCerts() {
   }
 }
 
-onMounted(loadCerts)
+async function loadCAs() {
+  try {
+    const { data } = await getCACerts()
+    if (data.code === 0 && data.data) {
+      caCerts.value = data.data.items || []
+    }
+  } catch {
+    caCerts.value = []
+  }
+}
+
+onMounted(() => {
+  loadCerts()
+  loadCAs()
+})
 
 function updateField<K extends keyof TlsConfig>(key: K, val: TlsConfig[K]) {
   emit('update:modelValue', {
@@ -54,7 +69,9 @@ function onCertChange(val: any) {
         >
           <el-option v-for="ct in certs" :key="ct.id" :value="ct.id" :label="`${ct.domain}（到期 ${ct.not_after}）`">
             <span>{{ ct.domain }}（到期 {{ ct.not_after }}）</span>
-            <span v-if="ct.self_signed" class="x-chip green" style="margin-left: 6px; font-size: 11px">自签·中转自动Pin</span>
+            <span v-if="ct.ca_name" class="x-chip purple" style="margin-left: 6px; font-size: 11px">CA: {{ ct.ca_name }}</span>
+            <span v-else-if="ct.self_signed" class="x-chip green" style="margin-left: 6px; font-size: 11px">自签·自动Pin</span>
+            <span v-else class="x-chip blue" style="margin-left: 6px; font-size: 11px">外部导入</span>
           </el-option>
         </el-select>
         <div v-if="certs.find(ct => ct.id === modelValue.cert_id)?.self_signed" class="muted" style="font-size: 12px; margin-top: 4px">
@@ -158,6 +175,26 @@ function onCertChange(val: any) {
           clearable
           @input="(v: string) => updateField('verify_peer_cert_by_name', v)"
         />
+      </el-form-item>
+
+      <el-form-item label="从托管 CA 选择验签证书（快速填充）">
+        <el-select
+          placeholder="从已保存的 CA 中选择"
+          clearable
+          style="width: 100%"
+          @change="(id: any) => {
+            const ca = caCerts.find(c => c.id === id)
+            if (ca) updateField('ca_cert_content', ca.ca_cert_pem)
+          }"
+        >
+          <el-option
+            v-for="ca in caCerts"
+            :key="ca.id"
+            :value="ca.id"
+            :label="`${ca.name} (${ca.common_name}) · ${ca.has_key ? '完整CA' : '纯公钥'}`"
+          />
+        </el-select>
+        <div class="field-hint">选择后将自动提取并填充下方 CA 证书 PEM 内容</div>
       </el-form-item>
 
       <el-form-item label="CA 证书内容 (PEM 直接粘贴)">

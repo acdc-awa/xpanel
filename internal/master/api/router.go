@@ -221,9 +221,17 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			// Phase T：内部账户指令 / 证书 / 权限组
 			admin.POST("/inbounds/:id/setup-internal", d.AdminSetupInternal)
 			admin.POST("/inbounds/:id/rotate-internal", d.AdminRotateInternal)
+			// 证书与 CA 根证书体系
+			admin.GET("/ca-certs", d.AdminCACerts)
+			admin.POST("/ca-certs", d.AdminCreateCACert)
+			admin.POST("/ca-certs/generate", d.AdminGenerateCACert)
+			admin.POST("/ca-certs/:id/issue", d.AdminIssueCertFromCA)
+			admin.DELETE("/ca-certs/:id", d.AdminDeleteCACert)
+
 			admin.GET("/certs", d.AdminCerts)
 			admin.POST("/certs", d.AdminCreateCert)
 			admin.POST("/certs/self-signed", d.AdminGenerateSelfSignedCert)
+			admin.POST("/certs/:id/reissue", d.AdminReissueCert)
 			admin.PUT("/certs/:id", d.AdminUpdateCert)
 			admin.DELETE("/certs/:id", d.AdminDeleteCert)
 			admin.GET("/permission-groups", d.AdminPermissionGroups)

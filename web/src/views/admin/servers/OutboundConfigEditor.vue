@@ -87,6 +87,7 @@ const form = reactive({
   priority: 0,
   remark: '',
   send_through: '',
+  tls_verify_mode: '',
   // freedom 子字段
   domain_strategy: 'AsIs',
   block_private: true,
@@ -581,6 +582,7 @@ function parseExisting() {
   if (ob.inbound_ref) {
     sceneMode.value = 'inbound_ref'
     refInboundId.value = ob.inbound_ref
+    form.tls_verify_mode = ob.tls_verify_mode || ''
     const target = allInbounds.value.find((i) => i.id === ob.inbound_ref)
     if (target) {
       refServerId.value = target.server_id
@@ -771,6 +773,7 @@ async function save() {
       payload.inbound_ref = undefined
     } else if (sceneMode.value === 'inbound_ref') {
       payload.inbound_ref = refInboundId.value || undefined
+      payload.tls_verify_mode = form.tls_verify_mode || ''
       payload.settings_json = ''
       payload.stream_settings_json = ''
       payload.outbound_json = ''
@@ -982,6 +985,16 @@ async function copyText(text: string, label: string) {
                 <el-option :value="0" label="（稍后在拓扑画布中拖线连接）" />
                 <el-option v-for="i in refInboundOptions" :key="i.id" :label="inboundLabel(i)" :value="i.id" />
               </el-select>
+            </el-form-item>
+            <el-form-item label="机间 TLS 验证方式" style="grid-column: 1 / -1">
+              <el-radio-group v-model="form.tls_verify_mode">
+                <el-radio value="">自动（目标绑定 CA 时优先 CA 验签，否则指纹 Pin）</el-radio>
+                <el-radio value="ca">托管 CA 验签（内联 CA 根公钥，校验证书链）</el-radio>
+                <el-radio value="pin">证书指纹 Pin（固定目标证书 SHA-256）</el-radio>
+              </el-radio-group>
+              <div class="field-hint" style="margin-top: 4px">
+                若目标使用托管 CA 签发的证书，选择「托管 CA 验签」将自动内联 CA 根公钥并禁用系统根证书（严格防劫持）；若目标为独立自签证书，将使用证书指纹 Pin 验证。
+              </div>
             </el-form-item>
           </div>
           <div class="tip-banner" style="margin-top: 10px">

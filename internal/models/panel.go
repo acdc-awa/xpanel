@@ -347,9 +347,9 @@ type ServerOutbound struct {
 	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
 	// InboundRef 跨机链式出站的专属机间认证凭据（主控同步生成 UUIDv4）
 	InternalUUID string `gorm:"size:36" json:"internal_uuid,omitempty"`
-	// OwnerInboundID > 0 = 该行由某个四层直通入站自动维护（C2）：目标改动即本行改动，
-	// 面板不允许手改/删除（唯一入口是通道页或入站页），删除直通时级联删除。
 	OwnerInboundID uint64 `gorm:"index" json:"owner_inbound_id,omitempty"`
+	// InboundRef 节点间 TLS 验证方式："" = 自动（目标有 CA 则优先 CA，否则 Pin）；"ca" = 强制托管 CA 验签；"pin" = 强制指纹 Pin
+	TlsVerifyMode string `gorm:"size:16" json:"tls_verify_mode,omitempty"`
 	Enabled        bool   `gorm:"default:true" json:"enabled"`
 	Priority       int    `gorm:"default:0" json:"priority"`
 	Remark         string `gorm:"size:255" json:"remark"`

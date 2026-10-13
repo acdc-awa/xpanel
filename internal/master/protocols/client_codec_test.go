@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // runXrayTestHelper 构造一个包含待测 outbound 的完整配置，调用仓库随附的 xray.exe 进行校验。
@@ -256,5 +258,70 @@ func TestRenderOutbound_TLSCAAndPin(t *testing.T) {
 	if len(certs) != 1 || certs[0].(map[string]any)["usage"] != "verify" {
 		t.Errorf("CA certificates 不符合预期: %v", certs)
 	}
+}
+
+func TestProjectPeer_CAAndPinVerification(t *testing.T) {
+	vlessPlugin := protocols.Find("vless")
+	inb := models.Inbound{
+		ID:             10,
+		Protocol:       "vless",
+		Port:           443,
+		InternalUUID:   "peer-uuid-1234",
+		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"peer.example.com"}}`,
+	}
+
+	targetWithCA := contracts.RefTarget{
+		Inbound:          inb,
+		ServerHost:       "node-b.example.com",
+		TargetCertDomain: "peer.example.com",
+		CertPin:          "1122334455667788",
+		CACert:           "-----BEGIN CERTIFICATE-----\nMIICA...\n-----END CERTIFICATE-----",
+	}
+
+	// 1. 自动模式（优先 CA）
+	dtoAuto, err := vlessPlugin.ProjectClient(&contracts.ClientProjectionInput{
+		Role:         contracts.RolePeer,
+		RefTarget:    &targetWithCA,
+		OutboundUUID: "out-peer-uuid",
+	})
+	if err != nil {
+		t.Fatalf("ProjectClient auto failed: %v", err)
+	}
+	if dtoAuto.Security.CACert != targetWithCA.CACert {
+		t.Errorf("CACert want %s, got %s", targetWithCA.CACert, dtoAuto.Security.CACert)
+	}
+	if !dtoAuto.Security.DisableSystemRoot {
+		t.Errorf("DisableSystemRoot should be true")
+	}
+	if dtoAuto.Security.VerifyPeerCertByName != "peer.example.com" {
+		t.Errorf("VerifyPeerCertByName want peer.example.com, got %s", dtoAuto.Security.VerifyPeerCertByName)
+	}
+	if _, ok := dtoAuto.Auth.Extra["CertPin"]; ok {
+		t.Errorf("CertPin should be cleared in CA mode")
+	}
+
+	// 2. 强制 Pin 模式
+	dtoPin, err := vlessPlugin.ProjectClient(&contracts.ClientProjectionInput{
+		Role:          contracts.RolePeer,
+		RefTarget:     &targetWithCA,
+		OutboundUUID:  "out-peer-uuid",
+		TlsVerifyMode: "pin",
+	})
+	if err != nil {
+		t.Fatalf("ProjectClient pin failed: %v", err)
+	}
+	if dtoPin.Security.CACert != "" {
+		t.Errorf("CACert should be empty in Pin mode")
+	}
+	if dtoPin.Auth.Extra["CertPin"] != "1122334455667788" {
+		t.Errorf("CertPin want 1122334455667788, got %v", dtoPin.Auth.Extra["CertPin"])
+	}
+
+	// 3. 渲染出站测试（CA 模式）
+	rendered, err := protocols.RenderOutbound(dtoAuto)
+	if err != nil {
+		t.Fatalf("RenderOutbound failed: %v", err)
+	}
+	runXrayTestHelper(t, rendered)
 }
 

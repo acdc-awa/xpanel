@@ -73,19 +73,40 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 		}
 	}
 	certPins := map[uint64]string{}
+	certDomains := map[uint64]string{}
+	certCAs := map[uint64]string{}
 	if len(certIDs) > 0 {
 		var certs []models.Cert
 		if err := db.Where("id IN ?", certIDs).Find(&certs).Error; err != nil {
 			return nil, err
 		}
+		var caIDs []uint64
 		for _, c := range certs {
 			ctx.CertDomains[c.ID] = c.Domain
+			certDomains[c.ID] = c.Domain
 			if c.PinSHA256 != "" {
 				certPins[c.ID] = c.PinSHA256
 			}
+			if c.CAID != nil && *c.CAID != 0 {
+				caIDs = append(caIDs, *c.CAID)
+			}
+		}
+		if len(caIDs) > 0 {
+			var cas []models.CACert
+			if err := db.Where("id IN ?", caIDs).Find(&cas).Error; err == nil {
+				caMap := map[uint64]string{}
+				for _, ca := range cas {
+					caMap[ca.ID] = ca.CACertPEM
+				}
+				for _, c := range certs {
+					if c.CAID != nil && caMap[*c.CAID] != "" {
+						certCAs[c.ID] = caMap[*c.CAID]
+					}
+				}
+			}
 		}
 	}
-	// 引用映射（出站 InboundRef → 目标入站 + 服务器 Host + 目标证书 pin）
+	// 引用映射（出站 InboundRef → 目标入站 + 服务器 Host + 目标证书 pin / 托管 CA 验签）
 	if len(targets) > 0 {
 		for _, t := range targets {
 			var srv models.Server
@@ -95,6 +116,8 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 			rt := contracts.RefTarget{Inbound: t, ServerHost: srv.Host}
 			if t.CertID != nil {
 				rt.CertPin = certPins[*t.CertID]
+				rt.CACert = certCAs[*t.CertID]
+				rt.TargetCertDomain = certDomains[*t.CertID]
 			}
 			ctx.RefTargets[t.ID] = rt
 		}

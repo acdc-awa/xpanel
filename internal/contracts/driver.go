@@ -14,6 +14,10 @@ type RefTarget struct {
 	// CertPin 目标入站绑定证书的 leaf SHA-256（hex，取自已入库的 Cert.PinSHA256）；
 	// 非空时 TLS 中转出站注入 pinnedPeerCertSha256（自签证书防 MITM；空 = 走系统 CA 验证）。
 	CertPin string
+	// CACert 目标入站绑定证书若由托管 CA 签发，该 CA 的证书公钥 PEM（供机间出站内联 CA 验签）
+	CACert string
+	// TargetCertDomain 目标入站绑定的证书域名（供机间 TLS SNI 校验）
+	TargetCertDomain string
 }
 
 // TopologyContext 拓扑化上下文（Phase T）：跨服务器引用与证书映射，由 provision 领域从 DB 组装。

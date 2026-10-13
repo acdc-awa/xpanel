@@ -8,6 +8,7 @@ import type {
   ApiResp,
   AuditLog,
   CertItem,
+  CACertItem,
   CreateInvitationResult,
   InboundItem,
   UserAccessPoint,
@@ -33,6 +34,7 @@ export type {
   AdminUserPage,
   AuditLog,
   CertItem,
+  CACertItem,
   InboundItem,
   UserAccessPoint,
   Invitation,
@@ -648,7 +650,47 @@ export function syncForwardUsersConfigs() {
   return http.post<ApiResp<{ synced_servers: number }>>('/admin/forward-users/sync')
 }
 
-// Phase T：证书管理
+// 证书与 CA 根证书体系
+export function getCACerts() {
+  return http.get<ApiResp<{ items: CACertItem[] }>>('/admin/ca-certs')
+}
+
+export function createCACert(payload: { name: string; ca_cert_pem: string; ca_key_pem?: string; remark?: string }) {
+  return http.post<ApiResp<{ ca_cert: CACertItem }>>('/admin/ca-certs', payload)
+}
+
+export function generateCACert(payload: {
+  name: string
+  common_name?: string
+  organization?: string
+  country?: string
+  key_type?: string
+  valid_days?: number
+  remark?: string
+}) {
+  return http.post<ApiResp<{ ca_cert: CACertItem }>>('/admin/ca-certs/generate', payload)
+}
+
+export function issueCertFromCA(
+  id: number,
+  payload: {
+    domain: string
+    san_dns?: string[]
+    san_ip?: string[]
+    organization?: string
+    country?: string
+    key_type?: string
+    valid_days?: number
+    remark?: string
+  },
+) {
+  return http.post<ApiResp<{ cert: CertItem }>>(`/admin/ca-certs/${id}/issue`, payload)
+}
+
+export function deleteCACert(id: number) {
+  return http.delete<ApiResp<{ ok: boolean }>>(`/admin/ca-certs/${id}`)
+}
+
 export function getCerts() {
   return http.get<ApiResp<{ items: CertItem[] }>>('/admin/certs')
 }
@@ -664,9 +706,24 @@ export function createCert(payload: CertPayload) {
   return http.post<ApiResp<{ cert: CertItem }>>('/admin/certs', payload)
 }
 
+export interface SelfSignedCertPayload {
+  domain: string
+  san_dns?: string[]
+  san_ip?: string[]
+  organization?: string
+  country?: string
+  key_type?: string
+  valid_days?: number
+  remark?: string
+}
+
 // 一键生成自签证书（链式代理 TLS 场景：自动生成 + pin 计算，中转出站自动注入）
-export function generateSelfSignedCert(payload: { domain: string; remark?: string }) {
+export function generateSelfSignedCert(payload: SelfSignedCertPayload) {
   return http.post<ApiResp<{ cert: CertItem }>>('/admin/certs/self-signed', payload)
+}
+
+export function reissueCert(id: number, payload?: { valid_days?: number }) {
+  return http.post<ApiResp<{ cert: CertItem }>>(`/admin/certs/${id}/reissue`, payload || {})
 }
 
 export function updateCert(id: number, payload: Partial<CertPayload>) {
