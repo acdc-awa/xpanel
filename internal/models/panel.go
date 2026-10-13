@@ -342,6 +342,8 @@ type ServerOutbound struct {
 	SendThrough        string `gorm:"size:64" json:"send_through,omitempty"`
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
 	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
+	// InboundRef 跨机链式出站的专属机间认证凭据（主控同步生成 UUIDv4）
+	InternalUUID string `gorm:"size:36" json:"internal_uuid,omitempty"`
 	// OwnerInboundID > 0 = 该行由某个四层直通入站自动维护（C2）：目标改动即本行改动，
 	// 面板不允许手改/删除（唯一入口是通道页或入站页），删除直通时级联删除。
 	OwnerInboundID uint64 `gorm:"index" json:"owner_inbound_id,omitempty"`

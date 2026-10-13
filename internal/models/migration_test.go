@@ -790,3 +790,71 @@ func TestTrafficBilledBackfill(t *testing.T) {
 		t.Fatalf("重跑回填污染了免费行 billed = %d/%d, want 0/0", free.BilledUp, free.BilledDown)
 	}
 }
+
+// TestMigrateRelayOutboundCredentials 验证将存量 relay 入站的 internal_uuid 回填到引用它的 server_outbounds，并将入站归正为 user
+func TestMigrateRelayOutboundCredentials(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(All()...); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	// 模拟存量数据：具有 relay 入站及其引用的出站
+	inb := Inbound{
+		ServerID:     2,
+		Tag:          "relay-node",
+		Protocol:     ProtocolVless,
+		Port:         443,
+		Type:         InboundTypeRelay,
+		InternalUUID: "legacy-relay-uuid-999",
+		PreviousType: InboundTypeUser,
+		Enabled:      true,
+	}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatalf("create relay inbound: %v", err)
+	}
+
+	ob := ServerOutbound{
+		ServerID:     1,
+		Tag:          "to-relay",
+		Protocol:     ProtocolVless,
+		InboundRef:   &inb.ID,
+		InternalUUID: "",
+		Enabled:      true,
+	}
+	if err := db.Create(&ob).Error; err != nil {
+		t.Fatalf("create outbound: %v", err)
+	}
+
+	// 执行迁移
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	var gotOb ServerOutbound
+	if err := db.First(&gotOb, ob.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotOb.InternalUUID != "legacy-relay-uuid-999" {
+		t.Fatalf("出站 InternalUUID 回填失败，期望 legacy-relay-uuid-999，实际 %q", gotOb.InternalUUID)
+	}
+
+	var gotInb Inbound
+	if err := db.First(&gotInb, inb.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotInb.Type != InboundTypeUser {
+		t.Fatalf("入站 Type 应归正为 %q，实际 %q", InboundTypeUser, gotInb.Type)
+	}
+	if gotInb.PreviousType != "" {
+		t.Fatalf("入站 PreviousType 应清空，实际 %q", gotInb.PreviousType)
+	}
+
+	// 幂等性：二次执行不产生副作用
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("second AutoMigrate should be idempotent: %v", err)
+	}
+}
+

@@ -128,11 +128,43 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateForwardUsersFromInbounds(db); err != nil {
 		return err
 	}
+	if err := migrateRelayOutboundCredentials(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
 	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// migrateRelayOutboundCredentials 将存量 relay 入站的 internal_uuid 回填到引用它的 server_outbounds.internal_uuid，
+// 并将存量 relay 入站归正为普通 user 入站、清空 previous_type。幂等执行。
+func migrateRelayOutboundCredentials(db *gorm.DB) error {
+	var obs []ServerOutbound
+	if err := db.Where("inbound_ref IS NOT NULL AND (internal_uuid IS NULL OR internal_uuid = '')").Find(&obs).Error; err != nil {
+		return err
+	}
+	for _, ob := range obs {
+		if ob.InboundRef == nil {
+			continue
+		}
+		var target Inbound
+		if err := db.First(&target, *ob.InboundRef).Error; err == nil && target.InternalUUID != "" {
+			_ = db.Model(&ServerOutbound{}).Where("id = ?", ob.ID).Update("internal_uuid", target.InternalUUID).Error
+		} else {
+			uid, _ := util.NewUUID()
+			_ = db.Model(&ServerOutbound{}).Where("id = ?", ob.ID).Update("internal_uuid", uid).Error
+		}
+	}
+
+	// 存量 relay 入站归正为 user，清空 previous_type
+	_ = db.Model(&Inbound{}).Where("type = ?", "relay").Updates(map[string]any{
+		"type":          InboundTypeUser,
+		"previous_type": "",
+	}).Error
+
+	return nil
 }
 
 // migrateForwardUsersFromInbounds 将存量 SOCKS5/HTTP 入站内的静态账密迁移为独立 ForwardUser 实体，

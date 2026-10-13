@@ -74,7 +74,7 @@ const form = reactive({
 
 const availableInbounds = computed(() =>
   effectiveInbounds.value.filter(
-    (i) => i.server_id === targetServerId.value && i.enabled && i.type !== 'relay',
+    (i) => i.server_id === targetServerId.value && i.enabled,
   ),
 )
 

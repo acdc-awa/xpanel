@@ -142,6 +142,19 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 		}
 	}
 
+	// 汇聚所有连入当前服务器入站的跨机出站（机间中继凭据）
+	ctx.ReferencingOutbounds = make(map[uint64][]models.ServerOutbound)
+	if len(allInboundIDs) > 0 {
+		var refOutbounds []models.ServerOutbound
+		if err := db.Where("inbound_ref IN ? AND enabled = ?", allInboundIDs, true).Find(&refOutbounds).Error; err == nil {
+			for _, ob := range refOutbounds {
+				if ob.InboundRef != nil {
+					ctx.ReferencingOutbounds[*ob.InboundRef] = append(ctx.ReferencingOutbounds[*ob.InboundRef], ob)
+				}
+			}
+		}
+	}
+
 	return ctx, nil
 }
 
@@ -245,7 +258,7 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 // AP 单点授权下用户注入完全由「指向该入站的启用接入点」派生：
 // 已落库入站（ID > 0）按库内 AP 白名单解析；未落库新入站（ID = 0）不可能被 AP 指向，返回空。
 func (s *ConfigService) PreviewUsers(inb *models.Inbound) []protocol.User {
-	if inb.Type == models.InboundTypeRelay || inb.ID == 0 {
+	if inb.ID == 0 {
 		return nil
 	}
 	validUsers, err := s.filterValidUsers()

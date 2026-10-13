@@ -321,25 +321,6 @@ function enforceCapabilityMatrix() {
 // -----------------------------------------------------------------------------
 // 协议 / 模式切换响应
 // -----------------------------------------------------------------------------
-function onTypeChange(type: any) {
-  const t = String(type)
-  localInboundType.value = t
-  emit('update:inboundType', t)
-  if (t === 'tunnel') {
-    localProtocol.value = 'dokodemo-door'
-  } else if (t === 'relay') {
-    if (localProtocol.value !== 'hysteria') {
-      localProtocol.value = 'vless'
-      localTlsType.value = 'none'
-    }
-  } else if (t === 'user') {
-    if (localProtocol.value !== 'hysteria') {
-      localProtocol.value = 'vless'
-    }
-  }
-  enforceCapabilityMatrix()
-  syncFormToJson()
-}
 
 function onProtocolChange(proto: any) {
   const p = String(proto) as InboundProtocol
@@ -681,11 +662,7 @@ function parseJsonToForm(str: string) {
 
     if (parsed.protocol === 'hysteria' || localProtocol.value === 'hysteria') {
       localProtocol.value = 'hysteria'
-      if (parsed.type === 'relay') {
-        localInboundType.value = 'relay'
-      } else {
-        localInboundType.value = 'user'
-      }
+      localInboundType.value = 'user'
     } else if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
       localInboundType.value = 'tunnel'
       localProtocol.value = 'dokodemo-door'
@@ -696,10 +673,7 @@ function parseJsonToForm(str: string) {
       } else if (localProtocol.value !== 'socks' && localProtocol.value !== 'http') {
         localProtocol.value = (parsed.protocol === 'socks' || parsed.protocol === 'http') ? (parsed.protocol as InboundProtocol) : 'mixed'
       }
-    } else if (parsed.type === 'relay') {
-      localInboundType.value = 'relay'
-      localProtocol.value = 'vless'
-    } else if (parsed.type === 'user') {
+    } else {
       localInboundType.value = 'user'
       localProtocol.value = 'vless'
     }
@@ -1081,14 +1055,8 @@ watch(
                 </el-select>
               </el-form-item>
 
-              <el-form-item v-if="localProtocol === 'vless' || localProtocol === 'hysteria'" label="入站用途">
-                <el-radio-group v-model="localInboundType" class="type-segmented-group" @change="onTypeChange">
-                  <el-radio-button value="user">用户接入点</el-radio-button>
-                  <el-radio-button value="relay">内部中继链路</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
 
-              <el-form-item v-else-if="localProtocol === 'dokodemo-door'" label="入站用途">
+              <el-form-item v-if="localProtocol === 'dokodemo-door'" label="入站用途">
                 <el-input value="四层直通 (tunnel)" disabled />
               </el-form-item>
 
@@ -1145,7 +1113,6 @@ watch(
               :internal-u-u-i-d="localInternalUUID"
               :inbound-id="props.inboundId"
               :allow-vision="allowVisionFlow"
-              @internal-uuid-changed="(v) => emit('internal-uuid-changed', v)"
             />
             <HysteriaSettings
               v-else-if="localProtocol === 'hysteria'"
@@ -1153,7 +1120,6 @@ watch(
               :inbound-type="localInboundType"
               :internal-u-u-i-d="localInternalUUID"
               :inbound-id="props.inboundId"
-              @internal-uuid-changed="(v) => emit('internal-uuid-changed', v)"
             />
             <DokodemoSettings
               v-else-if="localProtocol === 'dokodemo-door'"

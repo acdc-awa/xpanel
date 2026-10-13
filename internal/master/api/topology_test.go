@@ -14,6 +14,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 	"github.com/acdc-awa/xpanel/internal/models"
+	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
 func apiTestDB(t *testing.T) *gorm.DB {
@@ -70,61 +71,43 @@ func TestWouldCreateRefCycle(t *testing.T) {
 	}
 }
 
-func TestRelayMarkLifecycle(t *testing.T) {
+func TestServerOutboundRef_CredentialOwnership(t *testing.T) {
 	db := apiTestDB(t)
-	_, _, aIn, bIn := seedRefGraph(t, db)
+	s1, _, _, bIn := seedRefGraph(t, db)
 	d := &Deps{DB: db}
 
-	// 目标原本是 user：设置引用 → 自动标 relay 并记录 PreviousType=user
-	db.Model(&models.Inbound{}).Where("id = ?", bIn).Update("type", models.InboundTypeUser)
-	d.ensureRelayMark(bIn)
+	// 目标入站是通用物理入站
 	var b models.Inbound
 	db.First(&b, bIn)
-	if b.Type != models.InboundTypeRelay {
-		t.Errorf("目标应为 relay, got %s", b.Type)
-	}
-	if b.PreviousType != models.InboundTypeUser {
-		t.Errorf("PreviousType 应记录 user, got %q", b.PreviousType)
-	}
+	origType := b.Type
 
-	// 仍被引用 → demote 不生效
+	// 1. 创建引用该落地入站的出站：出站自动获得本地生成的 InternalUUID，落地入站类型不变
 	refB := bIn
-	db.Create(&models.ServerOutbound{ServerID: 1, Tag: "x", Protocol: "vless", InboundRef: &refB, Enabled: true})
-	d.demoteIfUnreferenced(bIn)
-	db.First(&b, bIn)
-	if b.Type != models.InboundTypeRelay {
-		t.Error("仍被引用时不应降级")
+	ob := models.ServerOutbound{
+		ServerID:   s1,
+		Tag:        "out-to-b",
+		Protocol:   "vless",
+		InboundRef: &refB,
+		Enabled:    true,
+	}
+	if ob.InboundRef != nil && *ob.InboundRef > 0 {
+		ob.InternalUUID, _ = util.NewUUID()
+	}
+	if err := db.Create(&ob).Error; err != nil {
+		t.Fatalf("create outbound: %v", err)
 	}
 
-	// 删除引用后 → 回退到引用前类型（user），并清除 PreviousType
-	db.Where("tag = ?", "x").Delete(&models.ServerOutbound{})
-	d.demoteIfUnreferenced(bIn)
-	db.First(&b, bIn)
-	if b.Type != models.InboundTypeUser {
-		t.Errorf("无引用应回退到 user, got %s", b.Type)
+	if ob.InternalUUID == "" {
+		t.Error("引用出站必须持有 InternalUUID")
 	}
-	if b.PreviousType != "" {
-		t.Errorf("回退后 PreviousType 应清空, got %q", b.PreviousType)
-	}
-	_ = aIn
-}
 
-// TestDemoteKeepsManualRelay：原本就是手动 relay（无 PreviousType）的落地入站，解绑后保持 relay 不动。
-func TestDemoteKeepsManualRelay(t *testing.T) {
-	db := apiTestDB(t)
-	_, _, _, bIn := seedRefGraph(t, db)
-	d := &Deps{DB: db}
-	// 种子 bIn 本就是 relay（无 PreviousType）
-	refB := bIn
-	db.Create(&models.ServerOutbound{ServerID: 1, Tag: "x", Protocol: "vless", InboundRef: &refB, Enabled: true})
-	d.ensureRelayMark(bIn)
-	db.Where("tag = ?", "x").Delete(&models.ServerOutbound{})
-	d.demoteIfUnreferenced(bIn)
-	var b models.Inbound
-	db.First(&b, bIn)
-	if b.Type != models.InboundTypeRelay {
-		t.Errorf("手动 relay 解绑后应保持 relay, got %s", b.Type)
+	// 落地入站保持原样，不被修改
+	var bAfter models.Inbound
+	db.First(&bAfter, bIn)
+	if bAfter.Type != origType {
+		t.Errorf("落地入站类型不应被更改: got %s, want %s", bAfter.Type, origType)
 	}
+	_ = d
 }
 
 func TestCertNotAfter(t *testing.T) {

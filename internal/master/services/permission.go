@@ -262,7 +262,7 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 		log.Printf("permission: 读取启用接入点失败（用户 %d 的可见节点按空处理）: %v", user.ID, err)
 	}
 	var inbs []models.Inbound
-	_ = db.Where("enabled = ? AND type != ?", true, models.InboundTypeRelay).Find(&inbs).Error
+	_ = db.Where("enabled = ?", true).Find(&inbs).Error
 	inbServer := make(map[uint64]uint64, len(inbs))
 	for _, inb := range inbs {
 		inbServer[inb.ID] = inb.ServerID

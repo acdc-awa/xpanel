@@ -2160,4 +2160,165 @@ func TestGenerate_MixedInboundWithForwardUsers(t *testing.T) {
 	}
 }
 
+// TestGenerate_MultiplexedInboundAndZeroSkip 验证物理入站归一、多源动态汇聚（商业用户 + 跨机中继）及零凭据物理跳过防御。
+func TestGenerate_MultiplexedInboundAndZeroSkip(t *testing.T) {
+	realitySK := "uOF-_qWw55cTMdM8CbaDieJg6HiKUV2g7BOj1GIvf04"
+	realityPK := "7_G5gW_8n9rV1wA6jO_iXQ7G9uN2m4vK0lQ3wE5rT6Y"
+	inbLanding := models.Inbound{
+		ID:       10,
+		ServerID: 2,
+		Tag:      "landing-vless",
+		Protocol: "vless",
+		Port:     8443,
+		Enabled:  true,
+		StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"dest":"1.1.1.1:443","serverNames":["gateway.example.com"],"privateKey":"` + realitySK + `","shortIds":["abcd1234"],"publicKey":"` + realityPK + `"}}`,
+	}
+	inbEmpty := models.Inbound{
+		ID:       11,
+		ServerID: 2,
+		Tag:      "empty-vless",
+		Protocol: "vless",
+		Port:     9443,
+		Enabled:  true,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+	}
 
+	commUser := protocol.User{
+		UUID:  "11111111-1111-1111-1111-111111111111",
+		Email: "u1.i10@panel.local",
+	}
+	usersByTag := map[string][]protocol.User{
+		"landing-vless": {commUser},
+	}
+
+	transitOut := models.ServerOutbound{
+		ID:           88,
+		ServerID:     1,
+		Tag:          "to-landing",
+		Protocol:     "vless",
+		InboundRef:   &inbLanding.ID,
+		InternalUUID: "88888888-8888-8888-8888-888888888888",
+		Enabled:      true,
+	}
+
+	ctxLanding := &xray.GenerateContext{
+		ReferencingOutbounds: map[uint64][]models.ServerOutbound{
+			inbLanding.ID: {transitOut},
+		},
+	}
+
+	// 1. 生成落地机 Server 2 配置（包含 landing-vless 与 empty-vless）
+	rawLanding, err := xray.Generate([]models.Inbound{inbLanding, inbEmpty}, nil, nil, usersByTag, ctxLanding, "", "")
+	if err != nil {
+		t.Fatalf("Generate landing server failed: %v", err)
+	}
+
+	var parsedLanding map[string]any
+	if err := json.Unmarshal(rawLanding, &parsedLanding); err != nil {
+		t.Fatalf("Unmarshal landing config failed: %v", err)
+	}
+	inboundsLanding := parsedLanding["inbounds"].([]any)
+	// 期望仅有 2 个入站：landing-vless 与 api 入站（empty-vless 零客户端物理跳过）
+	if len(inboundsLanding) != 2 {
+		t.Fatalf("期望 2 个入站 (landing-vless + api)，实际得到 %d", len(inboundsLanding))
+	}
+
+	var landingItem map[string]any
+	for _, it := range inboundsLanding {
+		m := it.(map[string]any)
+		if m["tag"] == "landing-vless" {
+			landingItem = m
+			break
+		}
+	}
+	if landingItem == nil {
+		t.Fatal("未找到 landing-vless 入站")
+	}
+
+	sett := landingItem["settings"].(map[string]any)
+	clients := sett["clients"].([]any)
+	if len(clients) != 2 {
+		t.Fatalf("landing-vless 期望汇聚 2 个 client (商业用户 + 中继)，实际得到 %d", len(clients))
+	}
+
+	c0 := clients[0].(map[string]any)
+	c1 := clients[1].(map[string]any)
+	if c0["id"] != "11111111-1111-1111-1111-111111111111" || c0["email"] != "u1.i10@panel.local" {
+		t.Errorf("商业用户注入不匹配: %v", c0)
+	}
+	if c1["id"] != "88888888-8888-8888-8888-888888888888" || c1["email"] != "relay.in_10.out_88@panel.local" {
+		t.Errorf("机间中继凭据注入不匹配: %v", c1)
+	}
+
+	// 2. 生成前置机 Server 1 配置（拥有指向 landing-vless 的出站 transitOut）
+	ctxFront := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{
+			inbLanding.ID: {Inbound: inbLanding, ServerHost: "node2.example.com"},
+		},
+	}
+	rawFront, err := xray.Generate(nil, []models.ServerOutbound{transitOut}, nil, nil, ctxFront, "to-landing", "")
+	if err != nil {
+		t.Fatalf("Generate front server failed: %v", err)
+	}
+
+	var parsedFront map[string]any
+	if err := json.Unmarshal(rawFront, &parsedFront); err != nil {
+		t.Fatalf("Unmarshal front config failed: %v", err)
+	}
+	outsFront := parsedFront["outbounds"].([]any)
+	var frontOutItem map[string]any
+	for _, it := range outsFront {
+		m := it.(map[string]any)
+		if m["tag"] == "to-landing" {
+			frontOutItem = m
+			break
+		}
+	}
+	if frontOutItem == nil {
+		t.Fatal("前置机未找到 to-landing 出站")
+	}
+
+	outSett := frontOutItem["settings"].(map[string]any)
+	vnext := outSett["vnext"].([]any)[0].(map[string]any)
+	outUser := vnext["users"].([]any)[0].(map[string]any)
+	if outUser["id"] != "88888888-8888-8888-8888-888888888888" {
+		t.Fatalf("前置出站 vnext users[0].id 期望使用出站专属 InternalUUID, 实际: %v", outUser["id"])
+	}
+
+	// 3. 随仓真实 xray.exe 金标准校验
+	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmpLanding := filepath.Join(t.TempDir(), "landing.json")
+		if err := os.WriteFile(tmpLanding, rawLanding, 0644); err != nil {
+			t.Fatalf("WriteFile landing failed: %v", err)
+		}
+		cmdL := exec.Command(xrayBin, "-test", "-config", tmpLanding)
+		if out, err := cmdL.CombinedOutput(); err != nil {
+			t.Fatalf("Landing 配置 xray -test 校验失败: %v, out: %s", err, string(out))
+		}
+
+		tmpFront := filepath.Join(t.TempDir(), "front.json")
+		if err := os.WriteFile(tmpFront, rawFront, 0644); err != nil {
+			t.Fatalf("WriteFile front failed: %v", err)
+		}
+		cmdF := exec.Command(xrayBin, "-test", "-config", tmpFront)
+		if out, err := cmdF.CombinedOutput(); err != nil {
+			t.Fatalf("Front 配置 xray -test 校验失败: %v, out: %s", err, string(out))
+		}
+	}
+}
+
+func TestParseRelayEmail(t *testing.T) {
+	if iid, oid, ok := xray.ParseRelayEmail("relay.in_12.out_34@panel.local"); !ok || iid != 12 || oid != 34 {
+		t.Fatalf("ParseRelayEmail standard failed: iid=%d, oid=%d, ok=%v", iid, oid, ok)
+	}
+	if iid, oid, ok := xray.ParseRelayEmail("RELAY.IN_12.OUT_34@PANEL.LOCAL"); !ok || iid != 12 || oid != 34 {
+		t.Fatalf("ParseRelayEmail uppercase failed: iid=%d, oid=%d, ok=%v", iid, oid, ok)
+	}
+	if iid, oid, ok := xray.ParseRelayEmail("relay.out_56@panel.local"); !ok || iid != 0 || oid != 56 {
+		t.Fatalf("ParseRelayEmail legacy failed: iid=%d, oid=%d, ok=%v", iid, oid, ok)
+	}
+	if _, _, ok := xray.ParseRelayEmail("u1.i2@panel.local"); ok {
+		t.Fatal("commercial user email should not match relay email")
+	}
+}

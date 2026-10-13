@@ -248,33 +248,10 @@ function nodePosOf(s: TopologyData['servers'][number], idx: number) {
 }
 
 function typeInfo(t?: string) {
-  if (t === 'relay') return { cls: 'relay', text: '转发' }
   if (t === 'tunnel') return { cls: 'tunnel', text: '直通' }
   if (t === 'forward') return { cls: 'forward', text: '代理' }
   if (t === 'channel') return { cls: 'channel', text: '通道' }
-  return { cls: 'user', text: '用户' }
-}
-
-// 快速切换入站二态 (user <-> relay)
-async function cycleInboundType(inb: InboundItem) {
-  if (!props.editable) return
-  if (inb.type === 'tunnel' || inb.type === 'forward' || inb.type === 'channel') {
-    openEditInbound(inb)
-    return
-  }
-  const nextType = inb.type === 'relay' ? 'user' : 'relay'
-  const labels: Record<string, string> = { user: '用户入站', relay: '转发入站 (relay)' }
-  try {
-    const { data } = await updateInbound(inb.id, { type: nextType })
-    if (data.code === 0) {
-      ElMessage.success(`入站「${inb.tag}」已切换为 ${labels[nextType]}`)
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '切换类型失败'))
-  }
+  return { cls: '', text: '' }
 }
 
 // 提取入站传输层与安全层摘要标签
@@ -737,10 +714,10 @@ function isValidConnection(conn: Connection): boolean {
   const inbTgt = tgt.match(/^inb-tgt-(\d+)$/)
   const outAny = tgt.match(/^out-tgt-(.+)$/)
 
-  // 1. 用户接入点 -> 入站管道（可连用户入站、四层直通管道或转发代理入站，不可连内部中继 relay）
+  // 1. 用户接入点 -> 入站管道
   if (apSrc && inbTgt) {
     const inb = props.topology.inbounds.find((i) => i.id === Number(inbTgt[1]))
-    return !!inb && inb.type !== 'relay'
+    return !!inb
   }
 
   // 2. 出站右侧 -> 他服务器入站左侧（设置 InboundRef 或建立四层直通管道）
@@ -1095,7 +1072,7 @@ const bindSaving = ref(false)
 
 const availableBindInbounds = computed(() => {
   if (!props.topology) return []
-  return props.topology.inbounds.filter((i) => i.server_id === bindServerId.value && !i.layer_id && i.type !== 'relay')
+  return props.topology.inbounds.filter((i) => i.server_id === bindServerId.value && !i.layer_id)
 })
 
 function openBindInbound(layer: AccessLayer) {
@@ -1103,7 +1080,7 @@ function openBindInbound(layer: AccessLayer) {
   bindLayerId.value = layer.id
   bindInboundId.value = undefined
   if (availableBindInbounds.value.length === 0) {
-    ElMessage.info('该服务器暂无可挂载的入站（已全部挂层或全为 relay）')
+    ElMessage.info('该服务器暂无可挂载的入站（已全部挂层）')
     return
   }
   bindDialogOpen.value = true
@@ -1466,7 +1443,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     }
     try {
       await ElMessageBox.confirm(
-        `解除出站「${out.tag}」的 InboundRef 引用？目标落地入站在无其他引用时将回退到引用前类型。`,
+        `解除出站「${out.tag}」的 InboundRef 引用？`,
         '解除引用',
         { type: 'warning' },
       )
@@ -2010,10 +1987,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                         class="ep ext-tgt"
                       />
                       <span
+                        v-if="typeInfo(inb.type).text"
                         class="type-tag"
                         :class="typeInfo(inb.type).cls"
-                        title="点击快速切换二态 (用户/转发)"
-                        @click.stop="cycleInboundType(inb)"
+                        :title="`类型：${typeInfo(inb.type).text}`"
                       >
                         {{ typeInfo(inb.type).text }}
                       </span>
@@ -2022,6 +1999,8 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                       </span>
                       <span class="port-badge">:{{ inb.port }}</span>
                       <span class="tag clickable" :title="`编辑入站「${inb.tag}」`" @click.stop="openEditInbound(inb)">{{ inb.tag }}</span>
+                      <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
+                      <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
                       <button
                         v-if="editable"
                         class="layer-unbind-btn"
@@ -2071,10 +2050,10 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     class="ep ext-tgt"
                   />
                   <span
+                    v-if="typeInfo(inb.type).text"
                     class="type-tag"
                     :class="typeInfo(inb.type).cls"
-                    title="点击快速切换二态 (用户/转发)"
-                    @click.stop="cycleInboundType(inb)"
+                    :title="`类型：${typeInfo(inb.type).text}`"
                   >
                     {{ typeInfo(inb.type).text }}
                   </span>

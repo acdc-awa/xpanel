@@ -29,7 +29,7 @@ func (HysteriaPlugin) Descriptor() contracts.ProtocolDescriptor {
 		SupportsUDP:   true,
 		HotSync:       true,
 		AccountType:   "hysteria",
-		InboundTypes:  []string{"user", "relay"},
+		InboundTypes:  []string{"user"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "version", Role: contracts.RoleBoth},
 			{Layer: "stream", Key: "hysteriaSettings", Role: contracts.RoleBoth},
@@ -149,6 +149,11 @@ func (p HysteriaPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contr
 	inb := target.Inbound
 	spec := contracts.DecodeInbound(&inb)
 
+	peerAuth := in.OutboundUUID
+	if peerAuth == "" {
+		peerAuth = inb.InternalUUID
+	}
+
 	dto := &contracts.ProxyNodeDTO{
 		ID:         inb.ID,
 		Name:       inb.Tag,
@@ -158,8 +163,8 @@ func (p HysteriaPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contr
 		Transport:  &contracts.TransportOptions{Network: "hysteria"},
 		Security:   &contracts.SecurityOptions{Type: "tls"},
 		Auth: &contracts.ClientCredentialDTO{
-			UUID:     inb.InternalUUID,
-			Password: inb.InternalUUID,
+			UUID:     peerAuth,
+			Password: peerAuth,
 			Extra:    make(map[string]any),
 		},
 	}

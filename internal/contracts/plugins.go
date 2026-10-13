@@ -80,6 +80,8 @@ type ClientProjectionInput struct {
 
 	// 节点互联视角（RolePeer）：中转出站引用的真实目标节点信息
 	RefTarget *RefTarget
+	// 出站专属机间认证凭据（Per-Outbound InternalUUID）
+	OutboundUUID string
 }
 
 // ClientNodeInput 兼容保留：旧版订阅节点组装输入（内部桥接至 ClientProjectionInput）。

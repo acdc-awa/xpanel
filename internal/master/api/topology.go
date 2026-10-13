@@ -10,7 +10,6 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
-	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/subscribe"
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -19,7 +18,7 @@ import (
 
 // ---- 入站内部账户指令（relay UUID 节点自治） ----
 
-// adminInternalAccount 执行 setup/rotate 指令：Ask 节点 → 回执写 internal_uuid → 重新生成配置。
+// adminInternalAccount 执行 setup/rotate 指令：本地生成 internal_uuid 并重新生成配置。
 func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -31,37 +30,12 @@ func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
-	if inb.Type != models.InboundTypeRelay {
-		util.BadRequest(c, "仅 relay 入站支持内部账户指令")
-		return
-	}
-	if d.Hub == nil {
-		util.ServerError(c, "服务器网关未初始化")
-		return
-	}
-	res, err := d.Hub.Ask(inb.ServerID, typ,
-		protocol.SetupInternalAccountPayload{Tag: inb.Tag}, nodegate.AskTimeout)
+	u, err := util.NewUUID()
 	if err != nil {
-		util.BadRequest(c, "指令发送失败（服务器离线或超时）")
+		util.ServerError(c, "生成内部 UUID 失败: "+err.Error())
 		return
 	}
-	if !res.OK {
-		util.BadRequest(c, "服务器处理失败: "+res.Error)
-		return
-	}
-	var out protocol.SetupInternalResult
-	if data, ok := res.Data.(map[string]any); ok {
-		out.Tag, _ = data["tag"].(string)
-		out.UUID, _ = data["uuid"].(string)
-	} else {
-		util.ServerError(c, "回执格式异常")
-		return
-	}
-	if out.UUID == "" {
-		util.ServerError(c, "回执缺少 UUID")
-		return
-	}
-	if err := d.DB.Model(&inb).Update("internal_uuid", out.UUID).Error; err != nil {
+	if err := d.DB.Model(&inb).Update("internal_uuid", u).Error; err != nil {
 		util.ServerError(c, "保存内部 UUID 失败")
 		return
 	}
@@ -69,7 +43,7 @@ func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
 		pushFail(c, inb.ServerID, err)
 		return
 	}
-	util.OK(c, gin.H{"inbound_id": inb.ID, "internal_uuid": out.UUID})
+	util.OK(c, gin.H{"inbound_id": inb.ID, "internal_uuid": u})
 }
 
 // AdminSetupInternal POST /api/v1/admin/inbounds/:id/setup-internal —— 节点生成并上报内部 UUID（幂等）。
@@ -582,7 +556,7 @@ func (d *Deps) previewAccessPointNodes(groupID uint64, mockUUID string) []contra
 		srvMap[s.ID] = s
 	}
 	var inbs []models.Inbound
-	_ = d.DB.Where("enabled = ? AND type != ?", true, models.InboundTypeRelay).Find(&inbs).Error
+	_ = d.DB.Where("enabled = ?", true).Find(&inbs).Error
 	inbs = services.FilterAvailableInbounds(inbs)
 	inbMap := make(map[uint64]models.Inbound, len(inbs))
 	for _, inb := range inbs {

@@ -25,7 +25,7 @@ func (VLESSPlugin) Descriptor() contracts.ProtocolDescriptor {
 		SupportsUDP:  true,
 		HotSync:      true,
 		AccountType:  "vless",
-		InboundTypes: []string{"user", "relay"},
+		InboundTypes: []string{"user"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "decryption", Role: contracts.RoleServerOnly},
 			{Layer: "settings", Key: "encryption", Role: contracts.RoleClientOnly},
@@ -228,6 +228,11 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 		flow = "xtls-rprx-vision"
 	}
 
+	peerUUID := in.OutboundUUID
+	if peerUUID == "" {
+		peerUUID = inb.InternalUUID
+	}
+
 	dto := &contracts.ProxyNodeDTO{
 		ID:         inb.ID,
 		Name:       inb.Tag,
@@ -237,7 +242,7 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 		Transport:  &contracts.TransportOptions{Network: net},
 		Security:   &contracts.SecurityOptions{Type: sec},
 		Auth: &contracts.ClientCredentialDTO{
-			UUID:       inb.InternalUUID,
+			UUID:       peerUUID,
 			Flow:       flow,
 			Encryption: encryption,
 			Extra:      make(map[string]any),

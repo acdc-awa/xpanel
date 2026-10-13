@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Plus, Delete, QuestionFilled, CopyDocument, Refresh, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Delete, QuestionFilled, CopyDocument, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { rotateInternalInbound, getXrayVlessEnc } from '@/api/admin'
+import { getXrayVlessEnc } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem } from '@/api/types'
 import type { VlessConfig } from '../types'
 
 const props = defineProps<{
   modelValue: VlessConfig
-  inboundType: string
+  inboundType?: string
   internalUUID?: string
   inboundId?: number
   allowVision: boolean
@@ -17,7 +17,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: VlessConfig): void
-  (e: 'internal-uuid-changed', value: string): void
 }>()
 
 const veGenLoading = ref(false)
@@ -64,26 +63,6 @@ function updateFallback(idx: number, patch: Partial<FallbackItem>) {
   updateField('fallbacks', list)
 }
 
-async function rotateInternal() {
-  if (!props.inboundId) {
-    ElMessage.warning('请先保存入站后再执行轮换')
-    return
-  }
-  try {
-    const { data } = await rotateInternalInbound(props.inboundId)
-    if (data.code === 0 && data.data?.internal_uuid) {
-      emit('internal-uuid-changed', data.data.internal_uuid)
-      ElMessage.success('内部 UUID 已成功轮换')
-    } else {
-      ElMessage.error(data.message || '轮换失败')
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '轮换内部 UUID 失败'))
-  } finally {
-    ElMessage.closeAll()
-  }
-}
-
 function copyText(txt: string, label = '内容') {
   if (!txt) return
   navigator.clipboard.writeText(txt)
@@ -93,23 +72,8 @@ function copyText(txt: string, label = '内容') {
 
 <template>
   <div class="vless-settings-box">
-    <!-- Relay 内部 UUID 状态 -->
-    <div v-if="inboundType === 'relay'" class="relay-card">
-      <el-form-item label="内部 UUID">
-        <div style="display: flex; gap: 8px; width: 100%">
-          <el-input :model-value="internalUUID" placeholder="保存并下发后由系统生成" disabled />
-          <el-button v-if="internalUUID" @click="copyText(internalUUID, '内部 UUID')">
-            <el-icon><CopyDocument /></el-icon>
-          </el-button>
-          <el-button type="primary" plain :disabled="!inboundId" @click="rotateInternal">
-            <el-icon><Refresh /></el-icon>&nbsp;轮换
-          </el-button>
-        </div>
-      </el-form-item>
-    </div>
-
     <!-- 用户流控 (Flow) -->
-    <div v-if="inboundType !== 'relay'" class="form-grid">
+    <div class="form-grid">
       <el-form-item>
         <template #label>
           <span>流控 (Flow)</span>
@@ -154,7 +118,7 @@ function copyText(txt: string, label = '内容') {
         </div>
       </el-form-item>
       <div class="muted" style="font-size: 11.5px; line-height: 1.5; margin-top: 4px">
-        基于后量子算法的协议内加密方案，适用于节点间私有中继链路（relay）。启用后协议层实施解密保护，底层传输层可保持明文 (none) 并支持 Splice / Vision 直通。
+        基于后量子算法的协议内加密方案，适用于节点间私有中继链路。启用后协议层实施解密保护，底层传输层可保持明文 (none) 并支持 Splice / Vision 直通。
       </div>
     </div>
 

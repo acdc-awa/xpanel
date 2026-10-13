@@ -10,9 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
-	"github.com/acdc-awa/xpanel/internal/master/nodegate"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
@@ -97,21 +94,6 @@ func normalizeInboundType(protocol, currentType string) string {
 	case models.ProtocolMixed, models.ProtocolSocks, models.ProtocolHTTP:
 		return models.InboundTypeForward
 	default:
-		if p := protocols.Find(protocol); p != nil {
-			desc := p.Descriptor()
-			for _, allowed := range desc.InboundTypes {
-				if allowed == currentType {
-					return currentType
-				}
-			}
-			return models.InboundTypeUser
-		}
-		if protocol == models.ProtocolVless {
-			if currentType == models.InboundTypeRelay {
-				return models.InboundTypeRelay
-			}
-			return models.InboundTypeUser
-		}
 		return models.InboundTypeUser
 	}
 }
@@ -330,15 +312,6 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	if inb.ShareSecurity != "" && !validShareSecurity(inb.ShareSecurity) {
 		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
 		return
-	}
-	// 创建请求不映射 internal_uuid 字段，relay 入站在此必然为空，交给 ensure 补齐。
-	// Ask 成功后若 DB.Create 失败，节点账户文件会残留 tag→uuid 条目：幂等设计下
-	// 同 tag 重建时节点复用该条目，无害，不做清理。
-	if inb.Type == models.InboundTypeRelay {
-		if err := d.ensureInternalUUID(&inb); err != nil {
-			util.ServerError(c, "初始化内部转发账户失败: "+err.Error())
-			return
-		}
 	}
 	if err := d.DB.Create(&inb).Error; err != nil {
 		util.ServerError(c, "创建失败")
@@ -615,18 +588,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 
 	if req.Type != nil || req.Protocol != nil {
 		updates["type"] = effType
-		// 手动修改 type：清除自动标 relay 的历史（PreviousType），避免后续解绑引用错误回退
 		updates["previous_type"] = ""
-		if effType == models.InboundTypeRelay && inb.InternalUUID == "" {
-			temp := inb
-			temp.Type = models.InboundTypeRelay
-			if err := d.ensureInternalUUID(&temp); err != nil {
-				util.ServerError(c, "初始化内部转发账户失败: "+err.Error())
-				return
-			}
-			updates["internal_uuid"] = temp.InternalUUID
-			inb.InternalUUID = temp.InternalUUID
-		} else if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
+		if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
 			updates["protocol"] = models.ProtocolDokodemo
 			inb.Protocol = models.ProtocolDokodemo
 		}
@@ -955,8 +918,7 @@ func (d *Deps) AdminXrayVlessEnc(c *gin.Context) {
 }
 
 // checkVlessDecryption VLESS Encryption（vlessenc 安全层）保存期校验：
-// settings_json.decryption 启用时，一期仅转发入站放行（用户入站加密=二期规划），并预检
-// 完整点格式，避免配置推送后 agent 端 xray -test 才暴露。
+// settings_json.decryption 启用时预检完整点格式，避免配置推送后 agent 端 xray -test 才暴露。
 func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	if protocol != "vless" {
 		return nil
@@ -967,9 +929,6 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	}
 	if !xray.VlessEncEnabled(dec) {
 		return nil
-	}
-	if inboundType != models.InboundTypeRelay {
-		return fmt.Errorf("VLESS Encryption 暂仅支持转发入站，请切回 REALITY/TLS/none 或改用转发入站")
 	}
 	return xray.ValidateVlessEncDecryption(dec)
 }
@@ -1019,24 +978,10 @@ func pushFail(c *gin.Context, serverID uint64, err error) {
 	util.ServerError(c, "变更已保存，但配置生成失败: "+err.Error())
 }
 
-// ensureInternalUUID 确保 relay 入站拥有内部 UUID。
-// 优先通过 Ask 向在线节点请求 setup-internal（保持节点本地文件存储权威）；
-// 若节点离线、超时或网关未就绪，则由主控生成 UUID 兜底，避免配置生成死锁。
+// ensureInternalUUID 确保入站拥有内部 UUID。
 func (d *Deps) ensureInternalUUID(inb *models.Inbound) error {
-	if inb.Type != models.InboundTypeRelay || inb.InternalUUID != "" {
+	if inb.InternalUUID != "" {
 		return nil
-	}
-	if d.Hub != nil && d.Hub.IsOnline(inb.ServerID) {
-		res, err := d.Hub.Ask(inb.ServerID, protocol.MsgSetupInternalAccount,
-			protocol.SetupInternalAccountPayload{Tag: inb.Tag}, nodegate.SetupInternalAskTimeout)
-		if err == nil && res.OK {
-			if data, ok := res.Data.(map[string]any); ok {
-				if u, ok := data["uuid"].(string); ok && u != "" {
-					inb.InternalUUID = u
-					return nil
-				}
-			}
-		}
 	}
 	u, err := util.NewUUID()
 	if err != nil {
@@ -1048,17 +993,6 @@ func (d *Deps) ensureInternalUUID(inb *models.Inbound) error {
 
 // enqueueConfig 入站变更后自动生成配置并待推送。
 func (d *Deps) enqueueConfig(serverID uint64) error {
-	// 自愈保护：若存在历史或异常遗留的缺少 internal_uuid 的 relay 入站，自动补齐以避免配置生成死锁
-	if d.DB != nil {
-		var broken []models.Inbound
-		if err := d.DB.Where("server_id = ? AND type = ? AND (internal_uuid IS NULL OR internal_uuid = '')", serverID, models.InboundTypeRelay).Find(&broken).Error; err == nil {
-			for _, inb := range broken {
-				if err := d.ensureInternalUUID(&inb); err == nil && inb.InternalUUID != "" {
-					_ = d.DB.Model(&inb).Update("internal_uuid", inb.InternalUUID).Error
-				}
-			}
-		}
-	}
 	if d.Config == nil || d.Hub == nil {
 		return nil
 	}

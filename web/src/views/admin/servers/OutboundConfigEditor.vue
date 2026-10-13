@@ -35,24 +35,18 @@ const refInboundId = ref<number>(0)
 const servers = ref<ServerItem[]>([])
 const allInbounds = ref<InboundItem[]>([])
 
-// 选中服务器的可引用入站（relay 优先展示）
+// 选中服务器的可引用入站
 const refInboundOptions = computed(() => {
-  const list = allInbounds.value.filter((i) => i.server_id === refServerId.value && i.enabled)
-  const sorted = [...list].sort((a, b) => {
-    const rank = (t?: string) => (t === 'relay' ? 0 : t === 'user' ? 1 : 2)
-    return rank(a.type) - rank(b.type)
-  })
-  return sorted
+  return allInbounds.value.filter((i) => i.server_id === refServerId.value && i.enabled)
 })
 
 function inboundLabel(i: InboundItem) {
-  const typeLabel = i.type === 'relay' ? '转发' : '用户'
   let net = '—'
   try {
     const s = JSON.parse(i.stream_settings || '{}')
     net = `${s.network || 'tcp'}/${s.security || 'none'}`
   } catch { /* ignore */ }
-  return `${i.tag}（${typeLabel} · vless+${net}）`
+  return `${i.tag} :${i.port}（${i.protocol}+${net}）`
 }
 
 async function loadRefTargets() {

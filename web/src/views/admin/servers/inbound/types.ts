@@ -3,7 +3,7 @@ import type { FallbackItem } from '@/api/types'
 export type InboundProtocol = 'vless' | 'dokodemo-door' | 'mixed' | 'socks' | 'http' | 'hysteria'
 export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'none'
-export type InboundType = 'user' | 'relay' | 'forward' | 'tunnel'
+export type InboundType = 'user' | 'forward' | 'tunnel'
 
 export interface HysteriaConfig {
   udp_idle_timeout?: number

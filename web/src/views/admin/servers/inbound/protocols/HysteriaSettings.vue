@@ -1,20 +1,16 @@
 <script setup lang="ts">
-import { CopyDocument, Refresh, QuestionFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { rotateInternalInbound } from '@/api/admin'
-import { errMsg } from '@/api/http'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import type { HysteriaConfig } from '../types'
 
 const props = defineProps<{
   modelValue: HysteriaConfig
-  inboundType: string
+  inboundType?: string
   internalUUID?: string
   inboundId?: number
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: HysteriaConfig): void
-  (e: 'internal-uuid-changed', value: string): void
 }>()
 
 function updateField<K extends keyof HysteriaConfig>(key: K, val: HysteriaConfig[K]) {
@@ -23,60 +19,18 @@ function updateField<K extends keyof HysteriaConfig>(key: K, val: HysteriaConfig
     [key]: val,
   })
 }
-
-async function rotateInternal() {
-  if (!props.inboundId) {
-    ElMessage.warning('请先保存入站后再执行轮换')
-    return
-  }
-  try {
-    const { data } = await rotateInternalInbound(props.inboundId)
-    if (data.code === 0 && data.data?.internal_uuid) {
-      emit('internal-uuid-changed', data.data.internal_uuid)
-      ElMessage.success('内部 UUID 已成功轮换')
-    } else {
-      ElMessage.error(data.message || '轮换失败')
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '轮换内部 UUID 失败'))
-  }
-}
-
-function copyText(txt: string, label = '内容') {
-  if (!txt) return
-  navigator.clipboard.writeText(txt)
-  ElMessage.success(`已复制 ${label}`)
-}
 </script>
 
 <template>
   <div class="hysteria-settings-box">
-    <!-- Relay 内部 UUID 状态（节点间互联中继认证） -->
-    <div v-if="inboundType === 'relay'" class="relay-card">
-      <el-form-item label="内部中继认证 UUID">
-        <div style="display: flex; gap: 8px; width: 100%">
-          <el-input :model-value="internalUUID" placeholder="保存并下发后由系统生成" disabled />
-          <el-button v-if="internalUUID" @click="copyText(internalUUID, '内部 UUID')">
-            <el-icon><CopyDocument /></el-icon>
-          </el-button>
-          <el-button type="primary" plain :disabled="!inboundId" @click="rotateInternal">
-            <el-icon><Refresh /></el-icon>&nbsp;轮换
-          </el-button>
-        </div>
-      </el-form-item>
-      <p class="relay-tip">
-        本入站作为链式代理落地端时，上游前置节点出站将使用该内部 UUID 作为认证凭据进行握手。
-      </p>
-    </div>
-
     <!-- 用户入站提示 -->
-    <div v-else class="auth-notice">
+    <div class="auth-notice">
       <el-alert
         type="info"
         :closable="false"
         show-icon
         title="接入点统一鉴权与用户动态装配"
-        description="Hysteria 2 基于 UDP (QUIC) 协议，专为恶劣网络和高丢包环境设计。服务端物理入站不设全局共享密码，认证完全由接入点关联的用户凭据（系统分配的用户 UUID 作为 auth）承担并进行独立计量计费与限速。"
+        description="Hysteria 2 基于 UDP (QUIC) 协议，专为恶劣网络和高丢包环境设计。服务端物理入站不设全局共享密码，认证由接入点关联的用户凭据及跨机中继凭据动态汇聚承担并进行独立计量计费与限速。"
       />
     </div>
 

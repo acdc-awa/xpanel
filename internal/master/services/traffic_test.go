@@ -1136,3 +1136,69 @@ func TestRelayInboundTrafficTracking(t *testing.T) {
 	}
 }
 
+// TestInterMachineRelayTrafficTracking 验证机间中继客户端（relay.in_<iid>.out_<oid>@panel.local）
+// 上报后作为 UserID=0 写入 traffic_logs，计入落地机大盘物理用量，不扣商业用户配额。
+func TestInterMachineRelayTrafficTracking(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Inbound{}, &models.TrafficLog{}, &models.TrafficDaily{}, &models.TrafficBatch{},
+		&models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}, &models.User{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	user := models.User{
+		Username: "comm-user",
+		UUID:     "11111111-1111-1111-1111-111111111111",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	landingInb := models.Inbound{
+		ServerID: 1, Tag: "landing-vless", Protocol: "vless", Port: 8443,
+		Type: models.InboundTypeUser, Enabled: true,
+	}
+	if err := db.Create(&landingInb).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &TrafficService{DB: db}
+
+	// 1. 上报机间中继客户端流量（email = relay.in_...）
+	relayEmail := "relay.in_1.out_88@panel.local"
+	_, err = svc.Save(protocol.TrafficReportPayload{
+		Period: "2026-10-13T10:00:00Z",
+		Entries: []protocol.TrafficEntry{
+			{Email: relayEmail, UpBytes: 5000, DownBytes: 10000},
+		},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Save relay client traffic failed: %v", err)
+	}
+
+	// 验证 traffic_logs 写入了 UserID=0 的流水，且 InboundID 准确映射到 landingInb.ID
+	var logs []models.TrafficLog
+	if err := db.Where("inbound_id = ?", landingInb.ID).Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 traffic_log for relay client, got %d", len(logs))
+	}
+	if logs[0].UserID != 0 || logs[0].UpBytes != 5000 || logs[0].DownBytes != 10000 {
+		t.Fatalf("unexpected relay client traffic_log: %+v", logs[0])
+	}
+	if logs[0].BilledUp != 0 || logs[0].BilledDown != 0 {
+		t.Fatalf("relay client billed must be 0, got %d/%d", logs[0].BilledUp, logs[0].BilledDown)
+	}
+
+	// 验证商业用户绝无流水记录
+	var userLogs []models.TrafficLog
+	if err := db.Where("user_id = ?", user.ID).Find(&userLogs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(userLogs) != 0 {
+		t.Fatalf("commercial user should not have traffic logs, got %d", len(userLogs))
+	}
+}

@@ -340,6 +340,53 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 				if e.Email == "" {
 					continue
 				}
+				// 机间中继客户端（relay.in_<iid>.out_<oid>@panel.local 或 relay.out_<oid>@panel.local）：
+				// 作为 UserID=0 写入 traffic_logs，计入落地机大盘物理用量，不扣商业用户配额
+				if strings.HasPrefix(e.Email, "relay.") {
+					relayInboundID := inboundID
+					if relayInboundID == 0 {
+						if iid, _, ok := xray.ParseRelayEmail(e.Email); ok && iid > 0 {
+							if _, found := inboundByID[iid]; found {
+								relayInboundID = iid
+							}
+						}
+					}
+					row := models.TrafficLog{
+						UserID:      0,
+						InboundID:   relayInboundID,
+						UpBytes:     e.UpBytes,
+						DownBytes:   e.DownBytes,
+						BilledUp:    0,
+						BilledDown:  0,
+						PeriodStart: periodStart,
+						PeriodEnd:   periodEnd,
+						CycleID:     0,
+					}
+					var doUpdates clause.Set
+					if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+						doUpdates = clause.Assignments(map[string]any{
+							"up_bytes":   gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
+							"down_bytes": gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
+							"period_end": gorm.Expr("VALUES(period_end)"),
+						})
+					} else {
+						doUpdates = clause.Assignments(map[string]any{
+							"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
+							"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
+							"period_end": gorm.Expr("excluded.period_end"),
+						})
+					}
+					if err := tx.Clauses(clause.OnConflict{
+						Columns: []clause.Column{
+							{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
+						},
+						DoUpdates: doUpdates,
+					}).Create(&row).Error; err != nil {
+						return err
+					}
+					continue
+				}
+
 				// 优先解析面板生成的统计键（新格式 u<uid>.i<iid> / 旧格式 user-<uid>@panel.local）
 				if uid, _, ok := xray.ParseUserEmailAny(e.Email); ok {
 					userID = uid

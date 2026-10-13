@@ -38,7 +38,33 @@ var (
 	userEmailForRe     = regexp.MustCompile(`^u(\d+)\.i(\d+)@panel\.local$`)
 	userEmailLegacyRe  = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
 	forwardUserEmailRe = regexp.MustCompile(`^fu(\d+)\.i(\d+)@panel\.local$`)
+	relayEmailRe       = regexp.MustCompile(`^relay\.in_(\d+)\.out_(\d+)@panel\.local$`)
+	relayEmailLegacyRe = regexp.MustCompile(`^relay\.out_(\d+)@panel\.local$`)
 )
+
+// ParseRelayEmail 反解 RelayEmail 格式 → (inboundID, outboundID, ok)。
+func ParseRelayEmail(email string) (inboundID, outboundID uint64, ok bool) {
+	e := strings.ToLower(email)
+	if m := relayEmailRe.FindStringSubmatch(e); m != nil {
+		iid, err := strconv.ParseUint(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		oid, err := strconv.ParseUint(m[2], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return iid, oid, true
+	}
+	if m := relayEmailLegacyRe.FindStringSubmatch(e); m != nil {
+		oid, err := strconv.ParseUint(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return 0, oid, true
+	}
+	return 0, 0, false
+}
 
 // ParseForwardUserEmail 反解 ForwardUser 统计键：fu<fuid>.i<iid>@panel.local → (forwardUserID, inboundID, ok)。
 func ParseForwardUserEmail(email string) (forwardUserID, inboundID uint64, ok bool) {
@@ -281,7 +307,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		}
 	}
 
-	// Phase T 预检：InboundRef 出站的落地入站必须已完成 setup（InternalUUID 非空）
+	// 预检：InboundRef 出站或其引用的落地入站必须持有认证凭据
 	for _, ob := range outbounds {
 		if !ob.Enabled || ob.InboundRef == nil {
 			continue
@@ -290,7 +316,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !ok {
 			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
 		}
-		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && target.Inbound.InternalUUID == "" {
+		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && target.Inbound.InternalUUID == "" && ob.InternalUUID == "" {
 			return nil, fmt.Errorf("出站 %s 引用的落地入站 %s 未完成内部账户 setup（InternalUUID 为空）", ob.Tag, target.Inbound.Tag)
 		}
 	}
@@ -387,7 +413,7 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if ob.InboundRef != nil && ctx != nil && (ob.Protocol == "vless" || ob.Protocol == "hysteria") {
 			// InboundRef 节点间出站：由对应目标协议插件统一投影全自动构造
 			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
-				if err := buildRefOutbound(item, target); err != nil {
+				if err := buildRefOutbound(item, target, ob); err != nil {
 					return nil, err
 				}
 			}
@@ -480,7 +506,7 @@ func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
 
 // buildRefOutbound 按目标入站自动构造中转出站：由目标入站协议插件的 Peer 角色投影决议端点 DTO，
 // 再由 renderPeerOutbound 统一渲染为对应核心的出站结构。
-func buildRefOutbound(item map[string]any, target RefTarget) error {
+func buildRefOutbound(item map[string]any, target RefTarget, ob models.ServerOutbound) error {
 	inb := target.Inbound
 	plugin := protocols.Find(inb.Protocol)
 	if plugin == nil {
@@ -488,8 +514,9 @@ func buildRefOutbound(item map[string]any, target RefTarget) error {
 	}
 
 	dto, err := plugin.ProjectClient(&contracts.ClientProjectionInput{
-		Role:      contracts.RolePeer,
-		RefTarget: &target,
+		Role:         contracts.RolePeer,
+		RefTarget:    &target,
+		OutboundUUID: ob.InternalUUID,
 	})
 	if err != nil {
 		return fmt.Errorf("出站 %s 投影目标入站 %s 失败: %w", item["tag"], inb.Tag, err)
@@ -794,29 +821,8 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 	}
 
-	// Phase T：入站分流
+	// 入站认证用户/凭据动态装配
 	switch {
-	case inb.Type == models.InboundTypeRelay:
-		if inb.InternalUUID == "" {
-			return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
-		}
-		flow := ""
-		// vision 门槛（v26.6.27）：TCP+TLS/REALITY 可用；无安全层时 VLESS Encryption 是
-		// 唯一能撑起 vision 的组合（裸 VLESS+vision 运行时报错），vlessenc+裸 TCP+native 下 Splice 保持
-		if spec.Network == "tcp" &&
-			(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
-			flow = "xtls-rprx-vision"
-		}
-		relayUser := protocol.User{
-			UUID:  inb.InternalUUID,
-			Email: RelayEmail(inb.Tag),
-			Flow:  flow,
-		}
-		key, items, err := protocols.ServerUsers(inb.Protocol, []protocol.User{relayUser}, spec)
-		if err != nil {
-			return nil, fmt.Errorf("relay 入站 %s 注入内部账户失败: %w", inb.Tag, err)
-		}
-		settings[key] = items
 	case inb.IsForwardProxy():
 		// 独立通道 / 转发代理入站（Mixed / SOCKS5 / HTTP 等）
 		if inb.Protocol == models.ProtocolMixed || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
@@ -855,10 +861,72 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 			}
 		}
 	default:
-		// user 入站：动态用户列表（已由服务层 GetValidUsers 按接入点白名单派生过滤，无接入点指向返回空列表）；
-		// 用户数组结构与挂载键名由协议插件生成（未注册协议显式报错阻断，Fail-Closed 铁律）
-		userList := usersByTag[inb.Tag]
-		key, items, err := protocols.ServerUsers(inb.Protocol, userList, spec)
+		// 通用入站：多源动态汇聚（商业用户 + 连入出站的机间中继凭据）
+		var aggregatedUsers []protocol.User
+
+		// 1. 商业用户（由服务层 GetValidUsers 按接入点白名单派生过滤）
+		if commercialUsers, ok := usersByTag[inb.Tag]; ok {
+			aggregatedUsers = append(aggregatedUsers, commercialUsers...)
+		}
+
+		// 2. 机间中继凭据（来自所有连入该入站的前置 ServerOutbound）
+		if ctx != nil && ctx.ReferencingOutbounds != nil {
+			for _, refOut := range ctx.ReferencingOutbounds[inb.ID] {
+				refUUID := refOut.InternalUUID
+				if refUUID == "" && inb.InternalUUID != "" {
+					refUUID = inb.InternalUUID
+				}
+				if refUUID != "" {
+					flow := protocols.ResolveFlow(inb.Protocol, spec, inb.Flow)
+					if flow == "" && spec.Network == "tcp" &&
+						(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
+						flow = "xtls-rprx-vision"
+					}
+					aggregatedUsers = append(aggregatedUsers, protocol.User{
+						UUID:  refUUID,
+						Email: fmt.Sprintf("relay.in_%d.out_%d@panel.local", inb.ID, refOut.ID),
+						Flow:  flow,
+					})
+				}
+			}
+		}
+
+		// 兼容存量单测与遗留数据：若显式标为 relay
+		if inb.Type == models.InboundTypeRelay {
+			if inb.InternalUUID == "" {
+				return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
+			}
+			if len(aggregatedUsers) == 0 {
+				flow := protocols.ResolveFlow(inb.Protocol, spec, inb.Flow)
+				if flow == "" && spec.Network == "tcp" &&
+					(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
+					flow = "xtls-rprx-vision"
+				}
+				aggregatedUsers = append(aggregatedUsers, protocol.User{
+					UUID:  inb.InternalUUID,
+					Email: RelayEmail(inb.Tag),
+					Flow:  flow,
+				})
+			}
+		}
+
+		// 2. 提前解析 streamSettings JSON，尽早发现语法错误
+		if inb.StreamSettings != "" {
+			cleaned := sanitizeStreamSettings(inb.StreamSettings)
+			var tmpStream map[string]any
+			if err := json.Unmarshal([]byte(cleaned), &tmpStream); err != nil {
+				return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
+			}
+		}
+
+		// 3. 严格零客户端物理跳过防御（杜绝 Xray -test 因 clients 为空报错）
+		// 在真实编排上下文（ctx != nil）下执行跳过；在 ctx == nil 的底层单元测试中保留空列表以支持透传断言
+		if ctx != nil && len(aggregatedUsers) == 0 {
+			log.Printf("[xray-generate] 入站 %s (id=%d) 无有效认证用户或连入出站，物理跳过以防 Xray 启动报错", inb.Tag, inb.ID)
+			return nil, nil
+		}
+
+		key, items, err := protocols.ServerUsers(inb.Protocol, aggregatedUsers, spec)
 		if err != nil {
 			return nil, fmt.Errorf("入站 %s 注入用户失败: %w", inb.Tag, err)
 		}

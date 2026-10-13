@@ -236,13 +236,14 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks）")
 		return
 	}
-	// Phase T：InboundRef 校验（引用存在 + 无环）+ 目标自动标 relay（记录 PreviousType）
+	// InboundRef 校验（引用存在 + 无环）与出站凭据生成
+	var targetInboundID uint64
 	if req.InboundRef != nil && *req.InboundRef > 0 {
 		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
 			util.BadRequest(c, msg)
 			return
 		}
-		d.ensureRelayMark(*req.InboundRef)
+		targetInboundID = *req.InboundRef
 	} else {
 		req.InboundRef = nil
 	}
@@ -268,6 +269,9 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		Remark:             req.Remark,
 		InboundRef:         req.InboundRef,
 	}
+	if ob.InboundRef != nil && *ob.InboundRef > 0 {
+		ob.InternalUUID, _ = util.NewUUID()
+	}
 
 	if err := d.DB.Create(&ob).Error; err != nil {
 		util.ServerError(c, "创建出站规则失败")
@@ -277,6 +281,13 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	if err := d.enqueueConfig(id); err != nil {
 		pushFail(c, id, err)
 		return
+	}
+	// 跨服联动推送落地机
+	if targetInboundID > 0 {
+		var targetInb models.Inbound
+		if err := d.DB.First(&targetInb, targetInboundID).Error; err == nil {
+			_ = d.enqueueConfig(targetInb.ServerID)
+		}
 	}
 	util.OK(c, gin.H{"outbound": ob})
 }
@@ -390,7 +401,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		updates["remark"] = *req.Remark
 	}
 
-	// Phase T：InboundRef 变更（>0 设置 / 0 解除），校验无环 + 维护目标入站标记
+	// InboundRef 变更（>0 设置 / 0 解除），校验无环并维护凭据
 	if req.InboundRef != nil {
 		if isReservedOutboundTag(ob.Tag) && *req.InboundRef > 0 {
 			util.BadRequest(c, "系统内置直连/黑洞出站不支持设置落地入站引用")
@@ -402,6 +413,10 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 				return
 			}
 			updates["inbound_ref"] = *req.InboundRef
+			if ob.InternalUUID == "" {
+				u, _ := util.NewUUID()
+				updates["internal_uuid"] = u
+			}
 		} else {
 			updates["inbound_ref"] = nil
 		}
@@ -415,13 +430,23 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 			return
 		}
 	}
-	// 引用目标维护：新目标标 relay；旧目标（被改走/解除）无其他引用则回退为原有类型
+
+	// 联动推送：若引用发生变化，重推旧目标服务器与新目标服务器配置
 	if req.InboundRef != nil {
-		if *req.InboundRef > 0 {
-			d.ensureRelayMark(*req.InboundRef)
+		pushedServers := map[uint64]bool{id: true}
+		if oldRef != nil && *oldRef > 0 && (*req.InboundRef == 0 || *oldRef != *req.InboundRef) {
+			var oldTarget models.Inbound
+			if err := d.DB.First(&oldTarget, *oldRef).Error; err == nil && !pushedServers[oldTarget.ServerID] {
+				_ = d.enqueueConfig(oldTarget.ServerID)
+				pushedServers[oldTarget.ServerID] = true
+			}
 		}
-		if oldRef != nil && (*req.InboundRef == 0 || *oldRef != *req.InboundRef) {
-			d.demoteIfUnreferenced(*oldRef)
+		if *req.InboundRef > 0 && (oldRef == nil || *oldRef != *req.InboundRef) {
+			var newTarget models.Inbound
+			if err := d.DB.First(&newTarget, *req.InboundRef).Error; err == nil && !pushedServers[newTarget.ServerID] {
+				_ = d.enqueueConfig(newTarget.ServerID)
+				pushedServers[newTarget.ServerID] = true
+			}
 		}
 	}
 
@@ -472,8 +497,11 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 			log.Printf("outbounds_routing: 级联删除路由规则失败 (server=%d tag=%s): %v", id, ob.Tag, err)
 		}
 	}
-	if ob.InboundRef != nil {
-		d.demoteIfUnreferenced(*ob.InboundRef)
+	if ob.InboundRef != nil && *ob.InboundRef > 0 {
+		var targetInb models.Inbound
+		if err := d.DB.First(&targetInb, *ob.InboundRef).Error; err == nil {
+			_ = d.enqueueConfig(targetInb.ServerID)
+		}
 	}
 
 	if err := d.enqueueConfig(id); err != nil {
@@ -534,45 +562,6 @@ func (d *Deps) wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOut
 	return false
 }
 
-// ensureRelayMark 引用目标入站自动标记 relay。
-// ensureRelayMark 目标入站设为 relay，并记录引用前的类型（PreviousType），解绑后回退。
-func (d *Deps) ensureRelayMark(targetInboundID uint64) {
-	var inb models.Inbound
-	if err := d.DB.First(&inb, targetInboundID).Error; err != nil {
-		return
-	}
-	updates := map[string]any{}
-	if inb.Type != models.InboundTypeRelay {
-		updates["previous_type"] = inb.Type
-		updates["type"] = models.InboundTypeRelay
-		inb.Type = models.InboundTypeRelay
-	}
-	if inb.InternalUUID == "" {
-		if err := d.ensureInternalUUID(&inb); err == nil && inb.InternalUUID != "" {
-			updates["internal_uuid"] = inb.InternalUUID
-		}
-	}
-	if len(updates) > 0 {
-		d.DB.Model(&inb).Updates(updates)
-	}
-}
-
-// demoteIfUnreferenced 目标入站不再被任何出站引用时回退到引用前类型（PreviousType）；
-// 无 PreviousType 则保持现状不动。
-func (d *Deps) demoteIfUnreferenced(targetInboundID uint64) {
-	var cnt int64
-	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", targetInboundID).Count(&cnt)
-	if cnt > 0 {
-		return
-	}
-	var inb models.Inbound
-	if err := d.DB.First(&inb, targetInboundID).Error; err != nil {
-		return
-	}
-	if inb.PreviousType != "" && inb.PreviousType != models.InboundTypeRelay {
-		d.DB.Model(&inb).Updates(map[string]any{"type": inb.PreviousType, "previous_type": ""})
-	}
-}
 
 // AdminGetServerRoutingRules GET /api/v1/admin/servers/:id/routing
 func (d *Deps) AdminGetServerRoutingRules(c *gin.Context) {

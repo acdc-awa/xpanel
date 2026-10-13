@@ -514,7 +514,7 @@ func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
 		return
 	}
 	var inb models.Inbound
-	err := h.DB.Where("server_id = ? AND tag = ? AND type = ?", conn.ServerID, p.Tag, models.InboundTypeRelay).First(&inb).Error
+	err := h.DB.Where("server_id = ? AND tag = ?", conn.ServerID, p.Tag).First(&inb).Error
 	if err != nil || inb.InternalUUID == p.UUID {
 		return
 	}

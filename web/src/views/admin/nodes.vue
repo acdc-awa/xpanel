@@ -35,7 +35,7 @@ const list = ref<InboundItem[]>([])
 const servers = ref<ServerItem[]>([])
 const loading = ref(false)
 const serverFilter = ref<number | undefined>(undefined)
-const typeFilter = ref<'' | 'user' | 'relay' | 'tunnel' | 'forward'>('')
+const typeFilter = ref<'' | 'user' | 'tunnel' | 'forward'>('')
 
 // 本地类型过滤（列表数据已全量在本地；历史行 type 为空按用户入站口径处理）
 const filteredInbounds = computed(() =>
@@ -43,7 +43,6 @@ const filteredInbounds = computed(() =>
 )
 
 function inboundChipText(row: InboundItem): string {
-  if (row.type === 'relay') return '内部转发'
   if (row.type === 'tunnel') return '四层直通'
   if (row.type === 'forward') return '转发代理'
   if (row.protocol === 'hysteria') return 'Hysteria 2'
@@ -51,7 +50,6 @@ function inboundChipText(row: InboundItem): string {
 }
 
 function inboundChipClass(row: InboundItem): string {
-  if (row.type === 'relay') return 'orange'
   if (row.type === 'tunnel') return 'cyan'
   if (row.type === 'forward') return 'blue'
   if (row.protocol === 'hysteria') return 'teal'
@@ -411,13 +409,12 @@ function quotaOf(row: any): string {
             </el-select>
             <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px">
               <el-option label="用户入站" value="user" />
-              <el-option label="内部转发" value="relay" />
               <el-option label="转发代理" value="forward" />
               <el-option label="四层直通" value="tunnel" />
             </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
             <TipIcon
-              content="在此为 Xray 服务器配置入站：用户入站承载用户真实流量，内部转发作为链路节点间落地，转发代理提供标准SOCKS5/HTTP/直通中转，四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
+              content="在此为 Xray 服务器配置物理入站：代理入站支持多源复用（同时承载用户与链式中继），转发代理提供标准SOCKS5/HTTP/直通中转，四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
             />
           </div>
           <div style="display: flex; gap: 10px">
