@@ -27,16 +27,52 @@ type InboundSpec struct {
 	TLS         *TLSSpec     // tlsSettings 存在时非 nil（不限于 security=tls）
 	Reality     *RealitySpec // security=reality 且 realitySettings 存在时非 nil
 	XHTTP       *XHTTPSpec   // network=xhttp 且 xhttpSettings.mode 非空时非 nil
+	Sockopt     *SockoptSpec // streamSettings.sockopt 存在时非 nil
 
 	Settings map[string]any // 协议 settings 解码（clients 由后端注入，不经此结构）
 	Stream   map[string]any // streamSettings 原始 map（高级/新增字段兜底通道）
 	Sniffing map[string]any // sniffing 原始 map
 }
 
-// TLSSpec TLS 安全层（订阅/生成消费的最小字段集；其余经 InboundSpec.Stream 兜底）。
+// TLSSpec TLS 安全层（订阅/生成消费的字段集；其余经 InboundSpec.Stream 兜底）。
 type TLSSpec struct {
-	ServerName    string
-	AllowInsecure bool
+	ServerName           string
+	AllowInsecure        bool
+	DisableSystemRoot    bool
+	PinnedPeerCertSha256 string
+	VerifyPeerCertByName string
+	RejectUnknownSni     bool
+	Certificates         []TLSCertSpec
+}
+
+// TLSCertSpec 单项证书配置（含服务端证书与 CA 验签证书）。
+type TLSCertSpec struct {
+	Usage           string   `json:"usage"` // encipherment / verify / issue
+	CertificateFile string   `json:"certificateFile,omitempty"`
+	KeyFile         string   `json:"keyFile,omitempty"`
+	Certificate     []string `json:"certificate,omitempty"`
+	Key             []string `json:"key,omitempty"`
+	BuildChain      bool     `json:"buildChain,omitempty"`
+	OcspStapling    uint64   `json:"ocspStapling,omitempty"`
+	OneTimeLoading  bool     `json:"oneTimeLoading,omitempty"`
+}
+
+// SockoptSpec 底层 socket 行为与性能调优规范。
+type SockoptSpec struct {
+	Mark                 int    `json:"mark,omitempty"`
+	TCPFastOpen          any    `json:"tcpFastOpen,omitempty"` // bool 或 int
+	TProxy               string `json:"tproxy,omitempty"`     // off / tproxy / redirect
+	AcceptProxyProtocol  bool   `json:"acceptProxyProtocol,omitempty"`
+	DomainStrategy       string `json:"domainStrategy,omitempty"`
+	TCPCongestion        string `json:"tcpCongestion,omitempty"`
+	TCPKeepAliveIdle     int    `json:"tcpKeepAliveIdle,omitempty"`
+	TCPKeepAliveInterval int    `json:"tcpKeepAliveInterval,omitempty"`
+	TCPUserTimeout       int    `json:"tcpUserTimeout,omitempty"`
+	TCPMaxSeg            int    `json:"tcpMaxSeg,omitempty"`
+	TCPWindowClamp       int    `json:"tcpWindowClamp,omitempty"`
+	TCPMptcp             bool   `json:"tcpMptcp,omitempty"`
+	Interface            string `json:"interface,omitempty"`
+	V6Only               bool   `json:"v6only,omitempty"`
 }
 
 // RealitySpec REALITY 安全层。ServerName/ShortID 已做「单数优先、数组兜底」归一；
@@ -99,9 +135,17 @@ func decodeStreamInto(spec *InboundSpec, raw string) {
 
 	if tls, ok := m["tlsSettings"].(map[string]any); ok {
 		spec.TLS = &TLSSpec{
-			ServerName:    strOf(tls, "serverName"),
-			AllowInsecure: boolOf(tls, "allowInsecure"),
+			ServerName:           strOf(tls, "serverName"),
+			AllowInsecure:        boolOf(tls, "allowInsecure"),
+			DisableSystemRoot:    boolOf(tls, "disableSystemRoot"),
+			PinnedPeerCertSha256: strOf(tls, "pinnedPeerCertSha256"),
+			VerifyPeerCertByName: strOf(tls, "verifyPeerCertByName"),
+			RejectUnknownSni:     boolOf(tls, "rejectUnknownSni"),
+			Certificates:         decodeTLSCerts(tls["certificates"]),
 		}
+	}
+	if so, ok := m["sockopt"].(map[string]any); ok {
+		spec.Sockopt = decodeSockoptSpec(so)
 	}
 	if spec.Security == "reality" {
 		if r, ok := m["realitySettings"].(map[string]any); ok {
@@ -198,3 +242,78 @@ func scalarToString(v any) string {
 		return ""
 	}
 }
+
+func intOf(m map[string]any, key string) int {
+	if v, ok := m[key]; ok {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		case int64:
+			return int(n)
+		}
+	}
+	return 0
+}
+
+func decodeSockoptSpec(m map[string]any) *SockoptSpec {
+	if m == nil {
+		return nil
+	}
+	s := &SockoptSpec{
+		Mark:                 intOf(m, "mark"),
+		TCPFastOpen:          m["tcpFastOpen"],
+		TProxy:               strOf(m, "tproxy"),
+		AcceptProxyProtocol:  boolOf(m, "acceptProxyProtocol"),
+		DomainStrategy:       strOf(m, "domainStrategy"),
+		TCPCongestion:        strOf(m, "tcpCongestion"),
+		TCPKeepAliveIdle:     intOf(m, "tcpKeepAliveIdle"),
+		TCPKeepAliveInterval: intOf(m, "tcpKeepAliveInterval"),
+		TCPUserTimeout:       intOf(m, "tcpUserTimeout"),
+		TCPMaxSeg:            intOf(m, "tcpMaxSeg"),
+		TCPWindowClamp:       intOf(m, "tcpWindowClamp"),
+		TCPMptcp:             boolOf(m, "tcpMptcp"),
+		Interface:            strOf(m, "interface"),
+		V6Only:               boolOf(m, "v6only"),
+	}
+	if s.TCPCongestion == "" {
+		s.TCPCongestion = strOf(m, "tcpcongestion")
+	}
+	if !s.V6Only {
+		s.V6Only = boolOf(m, "V6Only")
+	}
+	return s
+}
+
+func decodeTLSCerts(v any) []TLSCertSpec {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var res []TLSCertSpec
+	for _, item := range arr {
+		cm, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		c := TLSCertSpec{
+			Usage:           strOf(cm, "usage"),
+			CertificateFile: strOf(cm, "certificateFile"),
+			KeyFile:         strOf(cm, "keyFile"),
+			Certificate:     strListOf(cm, "certificate"),
+			Key:             strListOf(cm, "key"),
+			BuildChain:      boolOf(cm, "buildChain"),
+			OneTimeLoading:  boolOf(cm, "oneTimeLoading"),
+		}
+		if c.Usage == "" {
+			c.Usage = "encipherment"
+		}
+		if ocsp, ok := cm["ocspStapling"].(float64); ok {
+			c.OcspStapling = uint64(ocsp)
+		}
+		res = append(res, c)
+	}
+	return res
+}
+

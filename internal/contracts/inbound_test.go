@@ -124,3 +124,60 @@ func TestDecodeStream_Lenient(t *testing.T) {
 		t.Errorf("mode 空应视为未配置: %+v", spec.XHTTP)
 	}
 }
+
+func TestDecodeStream_SockoptAndTLSExtended(t *testing.T) {
+	raw := `{
+		"security": "tls",
+		"tlsSettings": {
+			"serverName": "test.com",
+			"disableSystemRoot": true,
+			"rejectUnknownSni": true,
+			"pinnedPeerCertSha256": "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+			"verifyPeerCertByName": "alt.com",
+			"certificates": [
+				{
+					"certificateFile": "/etc/ca.crt",
+					"usage": "verify"
+				}
+			]
+		},
+		"sockopt": {
+			"mark": 100,
+			"tcpFastOpen": true,
+			"tcpCongestion": "bbr",
+			"tcpMptcp": true,
+			"tcpKeepAliveIdle": 60,
+			"tcpKeepAliveInterval": 15,
+			"tcpUserTimeout": 5000,
+			"acceptProxyProtocol": true,
+			"tproxy": "tproxy"
+		}
+	}`
+	spec := decodeStream(raw)
+	if spec.TLS == nil {
+		t.Fatal("TLS 应解析")
+	}
+	if !spec.TLS.DisableSystemRoot || !spec.TLS.RejectUnknownSni {
+		t.Errorf("TLS 布尔标志解析失败: %+v", spec.TLS)
+	}
+	if spec.TLS.PinnedPeerCertSha256 != "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff" {
+		t.Errorf("pinnedPeerCertSha256 解析失败: %s", spec.TLS.PinnedPeerCertSha256)
+	}
+	if spec.TLS.VerifyPeerCertByName != "alt.com" {
+		t.Errorf("verifyPeerCertByName 解析失败: %s", spec.TLS.VerifyPeerCertByName)
+	}
+	if len(spec.TLS.Certificates) != 1 || spec.TLS.Certificates[0].Usage != "verify" || spec.TLS.Certificates[0].CertificateFile != "/etc/ca.crt" {
+		t.Errorf("Certificates 解析失败: %+v", spec.TLS.Certificates)
+	}
+
+	if spec.Sockopt == nil {
+		t.Fatal("Sockopt 应解析")
+	}
+	if spec.Sockopt.Mark != 100 || spec.Sockopt.TCPCongestion != "bbr" || !spec.Sockopt.TCPMptcp || !spec.Sockopt.AcceptProxyProtocol {
+		t.Errorf("Sockopt 字段解析失败: %+v", spec.Sockopt)
+	}
+	if spec.Sockopt.TCPKeepAliveIdle != 60 || spec.Sockopt.TCPKeepAliveInterval != 15 || spec.Sockopt.TCPUserTimeout != 5000 || spec.Sockopt.TProxy != "tproxy" {
+		t.Errorf("Sockopt 细节字段解析失败: %+v", spec.Sockopt)
+	}
+}
+

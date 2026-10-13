@@ -438,6 +438,17 @@ export interface SniffingSettings {
   route_only?: boolean
 }
 
+export interface TLSCertificateItem {
+  certificate_file?: string
+  key_file?: string
+  certificate?: string[]
+  key?: string[]
+  usage?: 'encipherment' | 'verify' | 'issue'
+  ocsp_stapling?: number
+  one_time_loading?: boolean
+  build_chain?: boolean
+}
+
 export interface TLSSettings {
   server_name?: string
   cert_file?: string
@@ -446,8 +457,28 @@ export interface TLSSettings {
   min_version?: string
   max_version?: string
   cipher_suites?: string[]
-  certificates?: { certificate_file: string; key_file: string }[]
+  certificates?: TLSCertificateItem[]
+  disable_system_root?: boolean
+  pinned_peer_cert_sha256?: string
+  verify_peer_cert_by_name?: string
+  reject_unknown_sni?: boolean
 }
+
+export interface SockoptSettings {
+  mark?: number
+  tcp_fast_open?: boolean | number
+  tproxy?: 'off' | 'tproxy' | 'redirect'
+  domain_strategy?: string
+  tcp_congestion?: string
+  tcp_mptcp?: boolean
+  tcp_keep_alive_idle?: number
+  tcp_keep_alive_interval?: number
+  tcp_user_timeout?: number
+  accept_proxy_protocol?: boolean
+  interface?: string
+  v6_only?: boolean
+}
+
 
 export interface FallbackItem {
   name?: string

@@ -223,3 +223,38 @@ func TestMixed_ClientCodec(t *testing.T) {
 	}
 	runXrayTestHelper(t, out3)
 }
+
+func TestRenderOutbound_TLSCAAndPin(t *testing.T) {
+	// 测试 VLESS TLS 携带 CA 证书与 Pin SHA256 出站生成并送 xray.exe 校验
+	rawVless := "vless://a0000000-0000-0000-0000-000000000001@1.2.3.4:443?security=tls&sni=proxy.example.com#VlessNode"
+	dto, err := protocols.ParseLink(rawVless)
+	if err != nil {
+		t.Fatalf("ParseLink failed: %v", err)
+	}
+	dto.Security.PinnedPeerCertSha256 = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+	dto.Security.DisableSystemRoot = true
+	dto.Security.VerifyPeerCertByName = "proxy.example.com"
+	dto.Security.CACertFile = "ca.crt"
+
+	out, err := protocols.RenderOutbound(dto)
+	if err != nil {
+		t.Fatalf("RenderOutbound failed: %v", err)
+	}
+
+	stream := out["streamSettings"].(map[string]any)
+	tlsSettings := stream["tlsSettings"].(map[string]any)
+	if tlsSettings["pinnedPeerCertSha256"] != "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff" {
+		t.Errorf("pinnedPeerCertSha256 不符合预期: %v", tlsSettings)
+	}
+	if tlsSettings["disableSystemRoot"] != true {
+		t.Errorf("disableSystemRoot 不符合预期: %v", tlsSettings)
+	}
+	if tlsSettings["verifyPeerCertByName"] != "proxy.example.com" {
+		t.Errorf("verifyPeerCertByName 不符合预期: %v", tlsSettings)
+	}
+	certs := tlsSettings["certificates"].([]any)
+	if len(certs) != 1 || certs[0].(map[string]any)["usage"] != "verify" {
+		t.Errorf("CA certificates 不符合预期: %v", certs)
+	}
+}
+

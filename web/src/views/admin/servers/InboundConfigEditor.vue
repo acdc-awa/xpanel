@@ -26,6 +26,7 @@ import type {
   TcpConfig,
   XhttpConfig,
   TlsConfig,
+  SockoptConfig,
   RealityConfig,
   VlessConfig,
   DokodemoConfig,
@@ -34,6 +35,7 @@ import type {
 } from './inbound/types'
 import TcpTransport from './inbound/transports/TcpTransport.vue'
 import XhttpTransport from './inbound/transports/XhttpTransport.vue'
+import SockoptSettings from './inbound/transports/SockoptSettings.vue'
 import RealitySecurity from './inbound/securities/RealitySecurity.vue'
 import TlsSecurity from './inbound/securities/TlsSecurity.vue'
 import VlessSettings from './inbound/protocols/VlessSettings.vue'
@@ -240,6 +242,27 @@ const tlsForm = ref<TlsConfig>({
   min_version: '1.2',
   max_version: '1.3',
   allow_insecure: false,
+  pinned_peer_cert_sha256: '',
+  disable_system_root: false,
+  reject_unknown_sni: false,
+  verify_peer_cert_by_name: '',
+  ca_cert_file: '',
+  ca_cert_content: '',
+})
+
+// 底层 Socket 优化状态
+const sockoptForm = ref<SockoptConfig>({
+  enabled: false,
+  tcp_fast_open: false,
+  tcp_fast_open_qlen: undefined,
+  tcp_congestion: '',
+  tcp_mptcp: false,
+  tcp_keep_alive_idle: undefined,
+  tcp_keep_alive_interval: undefined,
+  tcp_user_timeout: undefined,
+  accept_proxy_protocol: false,
+  mark: undefined,
+  tproxy: 'off',
 })
 
 // 嗅探状态
@@ -289,6 +312,7 @@ const visibleTabs = computed(() => {
   }
   tabs.push(
     { key: 'security', label: '安全层' },
+    { key: 'sockopt', label: '网络调优' },
     { key: 'sniffing', label: '流量嗅探' },
   )
   if (localInboundType.value === 'user') {
@@ -422,6 +446,87 @@ function buildSettingsJSON(): string {
   return JSON.stringify(s)
 }
 
+function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
+  const alpnArr = tlsForm.value.alpn
+    ? tlsForm.value.alpn.split(',').map((x: string) => x.trim()).filter(Boolean)
+    : (defaultAlpn || [])
+
+  const t: Record<string, any> = {
+    serverName: tlsForm.value.server_name || undefined,
+  }
+
+  const certsList: any[] = []
+  if (tlsForm.value.cert_file || tlsForm.value.key_file) {
+    certsList.push({
+      certificateFile: tlsForm.value.cert_file || undefined,
+      keyFile: tlsForm.value.key_file || undefined,
+      usage: 'encipherment',
+    })
+  }
+  if (tlsForm.value.ca_cert_file) {
+    certsList.push({
+      certificateFile: tlsForm.value.ca_cert_file,
+      usage: 'verify',
+    })
+  } else if (tlsForm.value.ca_cert_content) {
+    const lines = tlsForm.value.ca_cert_content.split('\n').map((x: string) => x.trim()).filter(Boolean)
+    if (lines.length > 0) {
+      certsList.push({
+        certificate: lines,
+        usage: 'verify',
+      })
+    }
+  }
+  if (certsList.length > 0) {
+    t.certificates = certsList
+  }
+
+  if (alpnArr.length > 0) t.alpn = alpnArr
+  if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
+  if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
+  if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
+  if (tlsForm.value.allow_insecure) t.allowInsecure = true
+  if (tlsForm.value.pinned_peer_cert_sha256) t.pinnedPeerCertSha256 = tlsForm.value.pinned_peer_cert_sha256
+  if (tlsForm.value.disable_system_root) t.disableSystemRoot = true
+  if (tlsForm.value.reject_unknown_sni) t.rejectUnknownSni = true
+  if (tlsForm.value.verify_peer_cert_by_name) t.verifyPeerCertByName = tlsForm.value.verify_peer_cert_by_name
+
+  return t
+}
+
+function buildSockoptObject(): Record<string, any> | undefined {
+  if (!sockoptForm.value.enabled) return undefined
+  const so: Record<string, any> = {}
+  if (sockoptForm.value.tcp_fast_open) {
+    so.tcpFastOpen = sockoptForm.value.tcp_fast_open_qlen ? Number(sockoptForm.value.tcp_fast_open_qlen) : true
+  }
+  if (sockoptForm.value.tcp_congestion) {
+    so.tcpCongestion = sockoptForm.value.tcp_congestion
+  }
+  if (sockoptForm.value.tcp_mptcp) {
+    so.tcpMptcp = true
+  }
+  if (sockoptForm.value.tcp_keep_alive_idle !== undefined && sockoptForm.value.tcp_keep_alive_idle !== null) {
+    so.tcpKeepAliveIdle = Number(sockoptForm.value.tcp_keep_alive_idle)
+  }
+  if (sockoptForm.value.tcp_keep_alive_interval !== undefined && sockoptForm.value.tcp_keep_alive_interval !== null) {
+    so.tcpKeepAliveInterval = Number(sockoptForm.value.tcp_keep_alive_interval)
+  }
+  if (sockoptForm.value.tcp_user_timeout !== undefined && sockoptForm.value.tcp_user_timeout !== null) {
+    so.tcpUserTimeout = Number(sockoptForm.value.tcp_user_timeout)
+  }
+  if (sockoptForm.value.accept_proxy_protocol) {
+    so.acceptProxyProtocol = true
+  }
+  if (sockoptForm.value.mark !== undefined && sockoptForm.value.mark !== null) {
+    so.mark = Number(sockoptForm.value.mark)
+  }
+  if (sockoptForm.value.tproxy && sockoptForm.value.tproxy !== 'off') {
+    so.tproxy = sockoptForm.value.tproxy
+  }
+  return Object.keys(so).length > 0 ? so : undefined
+}
+
 function buildStreamSettingsJSON(): string {
   if (localProtocol.value === 'dokodemo-door') {
     const s: Record<string, any> = {
@@ -429,25 +534,17 @@ function buildStreamSettingsJSON(): string {
       security: 'none',
       proxy_protocol: dokodemoForm.value.proxy_protocol !== false,
     }
-    if (tcpForm.value.acceptProxyProtocol) {
+    if (tcpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
       s.acceptProxyProtocol = true
       s.tcpSettings = { acceptProxyProtocol: true }
     }
+    const so = buildSockoptObject()
+    if (so) s.sockopt = so
     return JSON.stringify(s)
   }
 
   if (localProtocol.value === 'hysteria') {
-    const alpnArr = tlsForm.value.alpn ? tlsForm.value.alpn.split(',').map((x: string) => x.trim()).filter(Boolean) : ['h3']
-    const t: Record<string, any> = {
-      serverName: tlsForm.value.server_name || undefined,
-      certificates: [{ certificateFile: tlsForm.value.cert_file, keyFile: tlsForm.value.key_file }],
-    }
-    if (alpnArr.length > 0) t.alpn = alpnArr
-    if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
-    if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
-    if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
-    if (tlsForm.value.allow_insecure) t.allowInsecure = true
-
+    const t = buildTlsSettingsObject(['h3'])
     const s: Record<string, any> = {
       network: 'hysteria',
       security: 'tls',
@@ -457,6 +554,8 @@ function buildStreamSettingsJSON(): string {
         udpIdleTimeout: hysteriaForm.value.udp_idle_timeout || 60,
       },
     }
+    const so = buildSockoptObject()
+    if (so) s.sockopt = so
     return JSON.stringify(s)
   }
 
@@ -465,7 +564,7 @@ function buildStreamSettingsJSON(): string {
     security: localTlsType.value,
   }
 
-  if (tcpForm.value.acceptProxyProtocol || xhttpForm.value.acceptProxyProtocol) {
+  if (tcpForm.value.acceptProxyProtocol || xhttpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
     s.acceptProxyProtocol = true
   }
 
@@ -484,7 +583,7 @@ function buildStreamSettingsJSON(): string {
       }
       tcpSettings.header = hdr
     }
-    if (tcpForm.value.acceptProxyProtocol) {
+    if (tcpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
       tcpSettings.acceptProxyProtocol = true
     }
     if (Object.keys(tcpSettings).length > 0) {
@@ -506,18 +605,11 @@ function buildStreamSettingsJSON(): string {
     if (realityForm.value.max_client_ver) s.realitySettings.maxClientVer = realityForm.value.max_client_ver
     if (realityForm.value.max_time_diff > 0) s.realitySettings.maxTimeDiff = realityForm.value.max_time_diff
   } else if (localTlsType.value === 'tls') {
-    const alpnArr = tlsForm.value.alpn ? tlsForm.value.alpn.split(',').map((x: string) => x.trim()).filter(Boolean) : []
-    const t: Record<string, any> = {
-      serverName: tlsForm.value.server_name || undefined,
-      certificates: [{ certificateFile: tlsForm.value.cert_file, keyFile: tlsForm.value.key_file }],
-    }
-    if (alpnArr.length > 0) t.alpn = alpnArr
-    if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
-    if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
-    if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
-    if (tlsForm.value.allow_insecure) t.allowInsecure = true
-    s.tlsSettings = t
+    s.tlsSettings = buildTlsSettingsObject()
   }
+
+  const so = buildSockoptObject()
+  if (so) s.sockopt = so
 
   return JSON.stringify(s)
 }
@@ -757,19 +849,75 @@ function parseJsonToForm(str: string) {
     }
 
     if (tlsSettings && typeof tlsSettings === 'object') {
-      const cert = Array.isArray(tlsSettings.certificates) ? tlsSettings.certificates[0] : undefined
+      let certFile = ''
+      let keyFile = ''
+      let caCertFile = ''
+      let caCertContent = ''
+      if (Array.isArray(tlsSettings.certificates)) {
+        for (const c of tlsSettings.certificates) {
+          if (c && typeof c === 'object') {
+            if (c.usage === 'verify') {
+              if (c.certificateFile) caCertFile = c.certificateFile
+              if (Array.isArray(c.certificate)) caCertContent = c.certificate.join('\n')
+            } else {
+              if (c.certificateFile) certFile = c.certificateFile
+              if (c.keyFile) keyFile = c.keyFile
+            }
+          }
+        }
+      }
       tlsForm.value = {
         cert_id: parsed.cert_id || 0,
         server_name: tlsSettings.serverName || '',
         alpn: Array.isArray(tlsSettings.alpn) ? tlsSettings.alpn.join(',') : '',
-        cert_file: cert?.certificateFile || '',
-        key_file: cert?.keyFile || '',
+        cert_file: certFile,
+        key_file: keyFile,
         cipher_suites: Array.isArray(tlsSettings.cipherSuites) ? tlsSettings.cipherSuites.join(',') : '',
         min_version: tlsSettings.minVersion || '1.2',
         max_version: tlsSettings.maxVersion || '1.3',
         allow_insecure: !!tlsSettings.allowInsecure,
+        pinned_peer_cert_sha256: tlsSettings.pinnedPeerCertSha256 || '',
+        disable_system_root: !!tlsSettings.disableSystemRoot,
+        reject_unknown_sni: !!tlsSettings.rejectUnknownSni,
+        verify_peer_cert_by_name: tlsSettings.verifyPeerCertByName || '',
+        ca_cert_file: caCertFile,
+        ca_cert_content: caCertContent,
       }
     }
+
+    // Sockopt 回显
+    const sockoptSettings: any = streamObj.sockopt
+    if (sockoptSettings && typeof sockoptSettings === 'object') {
+      const isTfoNumber = typeof sockoptSettings.tcpFastOpen === 'number'
+      sockoptForm.value = {
+        enabled: true,
+        tcp_fast_open: !!sockoptSettings.tcpFastOpen,
+        tcp_fast_open_qlen: isTfoNumber ? sockoptSettings.tcpFastOpen : undefined,
+        tcp_congestion: sockoptSettings.tcpCongestion || sockoptSettings.tcpcongestion || '',
+        tcp_mptcp: !!sockoptSettings.tcpMptcp,
+        tcp_keep_alive_idle: typeof sockoptSettings.tcpKeepAliveIdle === 'number' ? sockoptSettings.tcpKeepAliveIdle : undefined,
+        tcp_keep_alive_interval: typeof sockoptSettings.tcpKeepAliveInterval === 'number' ? sockoptSettings.tcpKeepAliveInterval : undefined,
+        tcp_user_timeout: typeof sockoptSettings.tcpUserTimeout === 'number' ? sockoptSettings.tcpUserTimeout : undefined,
+        accept_proxy_protocol: !!sockoptSettings.acceptProxyProtocol,
+        mark: typeof sockoptSettings.mark === 'number' ? sockoptSettings.mark : undefined,
+        tproxy: sockoptSettings.tproxy || 'off',
+      }
+    } else {
+      sockoptForm.value = {
+        enabled: false,
+        tcp_fast_open: false,
+        tcp_fast_open_qlen: undefined,
+        tcp_congestion: '',
+        tcp_mptcp: false,
+        tcp_keep_alive_idle: undefined,
+        tcp_keep_alive_interval: undefined,
+        tcp_user_timeout: undefined,
+        accept_proxy_protocol: false,
+        mark: undefined,
+        tproxy: 'off',
+      }
+    }
+
 
     // 嗅探回显
     const sniffRaw: any = parsed.sniffing ?? (s && typeof s === 'object' ? s.sniffing : undefined)
@@ -987,6 +1135,7 @@ watch(
     realityFingerprint,
     tlsForm,
     sniffingForm,
+    sockoptForm,
   ],
   () => {
     syncFormToJson()
@@ -1185,6 +1334,13 @@ watch(
                 <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- ==================== 4.5. 网络调优 Tab (Sockopt) ==================== -->
+        <div v-show="activeTab === 'sockopt'" class="tab-pane">
+          <div class="form-card">
+            <SockoptSettings v-model="sockoptForm" />
           </div>
         </div>
 

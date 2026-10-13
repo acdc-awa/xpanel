@@ -127,11 +127,69 @@ function onCertChange(val: any) {
         </div>
       </el-form-item>
 
+      <el-form-item label="证书指纹固定 (Pin SHA-256)">
+        <el-input
+          :model-value="modelValue.pinned_peer_cert_sha256"
+          placeholder="64位 Hex 散列，多个以逗号分隔"
+          clearable
+          @input="(v: string) => updateField('pinned_peer_cert_sha256', v)"
+        />
+        <div class="field-hint">
+          固定远端或 CA 根证书的 SHA-256 散列值；命中即验证通过，自签证书亦防中间人劫持
+        </div>
+      </el-form-item>
+
+      <el-form-item label="CA 根证书路径 (CA File)">
+        <el-input
+          :model-value="modelValue.ca_cert_file"
+          placeholder="/etc/xray/ca.crt"
+          clearable
+          @input="(v: string) => updateField('ca_cert_file', v)"
+        />
+        <div class="field-hint">
+          用于验签对端证书的 CA 根证书（usage: verify，对端证书须由该 CA 签发）
+        </div>
+      </el-form-item>
+
+      <el-form-item label="校验证书域名 (verifyPeerCertByName)">
+        <el-input
+          :model-value="modelValue.verify_peer_cert_by_name"
+          placeholder="留空默认匹配 SNI，逗号分隔多个"
+          clearable
+          @input="(v: string) => updateField('verify_peer_cert_by_name', v)"
+        />
+      </el-form-item>
+
+      <el-form-item label="CA 证书内容 (PEM 直接粘贴)">
+        <el-input
+          :model-value="modelValue.ca_cert_content"
+          type="textarea"
+          :rows="2"
+          placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+          @input="(v: string) => updateField('ca_cert_content', v)"
+        />
+      </el-form-item>
+
+      <el-form-item label="证书与握手保护">
+        <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 4px">
+          <el-switch
+            :model-value="modelValue.disable_system_root"
+            active-text="禁用系统内置根证书 (disableSystemRoot)"
+            @update:model-value="(v: any) => updateField('disable_system_root', Boolean(v))"
+          />
+          <el-switch
+            :model-value="modelValue.reject_unknown_sni"
+            active-text="拒绝未知 SNI 握手 (rejectUnknownSni)"
+            @update:model-value="(v: any) => updateField('reject_unknown_sni', Boolean(v))"
+          />
+        </div>
+      </el-form-item>
+
       <el-form-item label="跳过证书校验 (allowInsecure)">
         <div style="padding-top: 6px">
           <el-switch
             :model-value="modelValue.allow_insecure"
-            active-text="允许不安全证书"
+            active-text="允许不安全证书 (客户端/订阅)"
             @update:model-value="(v: any) => updateField('allow_insecure', Boolean(v))"
           />
         </div>
@@ -164,6 +222,13 @@ function onCertChange(val: any) {
 
 .muted {
   color: var(--x-text-3);
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--x-text-3);
+  margin-top: 3px;
+  line-height: 1.35;
 }
 
 @media (max-width: 640px) {

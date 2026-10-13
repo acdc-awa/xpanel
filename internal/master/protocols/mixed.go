@@ -369,8 +369,31 @@ func (MixedPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, 
 
 	if sec == "tls" {
 		tlsSettings := map[string]any{}
-		if dto.Security != nil && dto.Security.SNI != "" {
-			tlsSettings["serverName"] = dto.Security.SNI
+		if dto.Security != nil {
+			if dto.Security.SNI != "" {
+				tlsSettings["serverName"] = dto.Security.SNI
+			}
+			if dto.Security.Fingerprint != "" {
+				tlsSettings["fingerprint"] = dto.Security.Fingerprint
+			}
+			if dto.Security.PinnedPeerCertSha256 != "" {
+				tlsSettings["pinnedPeerCertSha256"] = dto.Security.PinnedPeerCertSha256
+			}
+			if dto.Security.DisableSystemRoot {
+				tlsSettings["disableSystemRoot"] = true
+			}
+			if dto.Security.VerifyPeerCertByName != "" {
+				tlsSettings["verifyPeerCertByName"] = dto.Security.VerifyPeerCertByName
+			}
+			if dto.Security.CACertFile != "" || dto.Security.CACert != "" {
+				var certEntry map[string]any
+				if dto.Security.CACertFile != "" {
+					certEntry = map[string]any{"certificateFile": dto.Security.CACertFile, "usage": "verify"}
+				} else {
+					certEntry = map[string]any{"certificate": strings.Split(dto.Security.CACert, "\n"), "usage": "verify"}
+				}
+				tlsSettings["certificates"] = []any{certEntry}
+			}
 		}
 		ss["tlsSettings"] = tlsSettings
 	}

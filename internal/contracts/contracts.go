@@ -37,11 +37,16 @@ type TransportOptions struct {
 
 // SecurityOptions 安全层通用扩展点。
 type SecurityOptions struct {
-	Type          string // none, tls, reality, ech ...
-	SNI           string // 已由 share_sni 或安全设置决策
-	AllowInsecure bool   // 是否跳过证书校验
-	Fingerprint   string // 客户端 utls 指纹（streamSettings.fingerprint；空视为 chrome）
-	Reality       *RealityOptions
+	Type                 string // none, tls, reality, ech ...
+	SNI                  string // 已由 share_sni 或安全设置决策
+	AllowInsecure        bool   // 是否跳过证书校验
+	Fingerprint          string // 客户端 utls 指纹（streamSettings.fingerprint；空视为 chrome）
+	PinnedPeerCertSha256 string // 证书指纹固定（hex SHA-256，逗号分隔）
+	DisableSystemRoot    bool   // 禁用系统根证书
+	VerifyPeerCertByName string // 校验使用的 SNI
+	CACertFile           string // 自定义 CA 证书路径
+	CACert               string // 自定义 CA 证书 PEM 内容
+	Reality              *RealityOptions
 }
 
 // RealityOptions REALITY 专有扩展参数。

@@ -893,17 +893,30 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		if err := json.Unmarshal([]byte(cleaned), &stream); err != nil {
 			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
 		}
-		// 证书路径动态注入（Phase T）：当关联了 CertID 且为 TLS 入站时，覆盖 certificates 路径
+		// 证书路径动态注入（Phase T）：当关联了 CertID 且为 TLS 入站时，注入托管证书路径并保留已有 CA 证书
 		if spec.Security == "tls" {
 			if domain, ok := certDomainFor(inb, ctx); ok {
-				stream["tlsSettings"] = map[string]any{
-					"certificates": []any{
-						map[string]any{
-							"certificateFile": certFilePath(domain, "fullchain.pem"),
-							"keyFile":         certFilePath(domain, "key.pem"),
-						},
-					},
+				var tlsSettings map[string]any
+				if ts, ok := stream["tlsSettings"].(map[string]any); ok && ts != nil {
+					tlsSettings = ts
+				} else {
+					tlsSettings = make(map[string]any)
 				}
+				var certs []any
+				if existingCerts, ok := tlsSettings["certificates"].([]any); ok {
+					for _, c := range existingCerts {
+						if cm, ok := c.(map[string]any); ok && cm["usage"] == "verify" {
+							certs = append(certs, cm)
+						}
+					}
+				}
+				serverCert := map[string]any{
+					"certificateFile": certFilePath(domain, "fullchain.pem"),
+					"keyFile":         certFilePath(domain, "key.pem"),
+				}
+				certs = append([]any{serverCert}, certs...)
+				tlsSettings["certificates"] = certs
+				stream["tlsSettings"] = tlsSettings
 			}
 		}
 		// PROXY Protocol 规范化：若开启了 acceptProxyProtocol，确保注入 tcpSettings，并清理顶层私有键

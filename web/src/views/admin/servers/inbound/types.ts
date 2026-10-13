@@ -33,7 +33,28 @@ export interface TlsConfig {
   min_version: string
   max_version: string
   allow_insecure: boolean
+  pinned_peer_cert_sha256: string
+  disable_system_root: boolean
+  reject_unknown_sni: boolean
+  verify_peer_cert_by_name: string
+  ca_cert_file: string
+  ca_cert_content: string
 }
+
+export interface SockoptConfig {
+  enabled: boolean
+  tcp_fast_open: boolean
+  tcp_fast_open_qlen?: number
+  tcp_congestion: string
+  tcp_mptcp: boolean
+  tcp_keep_alive_idle?: number
+  tcp_keep_alive_interval?: number
+  tcp_user_timeout?: number
+  accept_proxy_protocol: boolean
+  mark?: number
+  tproxy: 'off' | 'tproxy' | 'redirect'
+}
+
 
 export interface RealityConfig {
   dest: string

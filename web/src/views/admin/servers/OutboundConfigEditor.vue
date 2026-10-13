@@ -115,6 +115,9 @@ const form = reactive({
   // vless 安全层
   tls_server_name: '',
   tls_allow_insecure: false,
+  tls_pinned_peer_cert_sha256: '',
+  tls_disable_system_root: false,
+  tls_ca_cert_file: '',
   reality_server_name: '',
   reality_public_key: '',
   reality_short_id: '',
@@ -128,6 +131,8 @@ const form = reactive({
   hy2_sni: '',
   hy2_allow_insecure: false,
   hy2_fingerprint: 'chrome',
+  hy2_pinned_peer_cert_sha256: '',
+  hy2_ca_cert_file: '',
 
   // SOCKS 子字段
   socks_address: '',
@@ -488,6 +493,9 @@ function buildStreamJSON(): string {
       const t: Record<string, any> = { serverName: form.tls_server_name || undefined }
       if (form.tls_allow_insecure) t.allowInsecure = true
       if (form.vless_fingerprint) t.fingerprint = form.vless_fingerprint
+      if (form.tls_pinned_peer_cert_sha256) t.pinnedPeerCertSha256 = form.tls_pinned_peer_cert_sha256
+      if (form.tls_disable_system_root) t.disableSystemRoot = true
+      if (form.tls_ca_cert_file) t.certificates = [{ certificateFile: form.tls_ca_cert_file, usage: 'verify' }]
       s.tlsSettings = t
     } else if (form.vless_security === 'reality') {
       s.realitySettings = {
@@ -502,13 +510,17 @@ function buildStreamJSON(): string {
   }
 
   if (form.protocol === 'hysteria') {
+    const t: Record<string, any> = {
+      serverName: form.hy2_sni || undefined,
+      allowInsecure: form.hy2_allow_insecure || false,
+    }
+    if (form.hy2_fingerprint) t.fingerprint = form.hy2_fingerprint
+    if (form.hy2_pinned_peer_cert_sha256) t.pinnedPeerCertSha256 = form.hy2_pinned_peer_cert_sha256
+    if (form.hy2_ca_cert_file) t.certificates = [{ certificateFile: form.hy2_ca_cert_file, usage: 'verify' }]
     const s: Record<string, any> = {
       network: 'hysteria',
       security: 'tls',
-      tlsSettings: {
-        serverName: form.hy2_sni || undefined,
-        allowInsecure: form.hy2_allow_insecure || false,
-      },
+      tlsSettings: t,
       hysteriaSettings: {
         auth: form.hy2_password,
       },
@@ -644,7 +656,16 @@ function parseExisting() {
       if (stream.xhttpSettings) { form.xhttp_mode = stream.xhttpSettings.mode || 'auto'; form.xhttp_path = stream.xhttpSettings.path || '/'; form.xhttp_host = stream.xhttpSettings.host || '' }
       if (stream.grpcSettings) { form.grpc_service_name = stream.grpcSettings.serviceName || 'grpc'; form.grpc_authority = stream.grpcSettings.authority || ''; form.grpc_multi_mode = !!stream.grpcSettings.multiMode }
 
-      if (stream.tlsSettings) { form.tls_server_name = stream.tlsSettings.serverName || ''; form.tls_allow_insecure = !!stream.tlsSettings.allowInsecure }
+      if (stream.tlsSettings) {
+        form.tls_server_name = stream.tlsSettings.serverName || ''
+        form.tls_allow_insecure = !!stream.tlsSettings.allowInsecure
+        form.tls_pinned_peer_cert_sha256 = stream.tlsSettings.pinnedPeerCertSha256 || ''
+        form.tls_disable_system_root = !!stream.tlsSettings.disableSystemRoot
+        if (Array.isArray(stream.tlsSettings.certificates)) {
+          const caCert = stream.tlsSettings.certificates.find((c: any) => c?.usage === 'verify')
+          form.tls_ca_cert_file = caCert?.certificateFile || ''
+        }
+      }
       if (stream.realitySettings) {
         form.reality_server_name = stream.realitySettings.serverName || ''
         form.reality_public_key = stream.realitySettings.password || stream.realitySettings.publicKey || ''
@@ -659,6 +680,11 @@ function parseExisting() {
       if (stream.tlsSettings) {
         form.hy2_sni = stream.tlsSettings.serverName || ''
         form.hy2_allow_insecure = !!stream.tlsSettings.allowInsecure
+        form.hy2_pinned_peer_cert_sha256 = stream.tlsSettings.pinnedPeerCertSha256 || ''
+        if (Array.isArray(stream.tlsSettings.certificates)) {
+          const caCert = stream.tlsSettings.certificates.find((c: any) => c?.usage === 'verify')
+          form.hy2_ca_cert_file = caCert?.certificateFile || ''
+        }
       }
     } else if (form.protocol === 'socks') {
       form.socks_tls = stream.security === 'tls'
@@ -1056,6 +1082,21 @@ async function copyText(text: string, label: string) {
                   <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
                 </el-select>
               </el-form-item>
+              <el-form-item label="证书指纹 (Pin SHA-256)">
+                <el-input v-model="form.tls_pinned_peer_cert_sha256" placeholder="远端证书 64位 Hex 散列" clearable />
+              </el-form-item>
+              <el-form-item label="CA 根证书路径 (CA File)">
+                <el-input v-model="form.tls_ca_cert_file" placeholder="如 /etc/xray/ca.crt" clearable />
+              </el-form-item>
+              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
+                <div class="toggle-info">
+                  <span class="toggle-title">
+                    禁用系统根证书 (disableSystemRoot)
+                    <TipIcon type="info" content="仅使用指定 CA 证书验证远端身份。" />
+                  </span>
+                </div>
+                <el-switch v-model="form.tls_disable_system_root" />
+              </div>
               <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
                 <div class="toggle-info">
                   <span class="toggle-title">
@@ -1116,6 +1157,12 @@ async function copyText(text: string, label: string) {
                 <el-select v-model="form.hy2_fingerprint" style="width: 100%">
                   <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
                 </el-select>
+              </el-form-item>
+              <el-form-item label="证书指纹 (Pin SHA-256)">
+                <el-input v-model="form.hy2_pinned_peer_cert_sha256" placeholder="远端证书 64位 Hex 散列" clearable />
+              </el-form-item>
+              <el-form-item label="CA 根证书路径 (CA File)">
+                <el-input v-model="form.hy2_ca_cert_file" placeholder="如 /etc/xray/ca.crt" clearable />
               </el-form-item>
               <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
                 <div class="toggle-info">

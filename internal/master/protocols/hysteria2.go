@@ -336,6 +336,24 @@ func (HysteriaPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]an
 				tlsSettings["pinnedPeerCertSha256"] = pin
 			}
 		}
+		if dto.Security.PinnedPeerCertSha256 != "" {
+			tlsSettings["pinnedPeerCertSha256"] = dto.Security.PinnedPeerCertSha256
+		}
+		if dto.Security.DisableSystemRoot {
+			tlsSettings["disableSystemRoot"] = true
+		}
+		if dto.Security.VerifyPeerCertByName != "" {
+			tlsSettings["verifyPeerCertByName"] = dto.Security.VerifyPeerCertByName
+		}
+		if dto.Security.CACertFile != "" || dto.Security.CACert != "" {
+			var certEntry map[string]any
+			if dto.Security.CACertFile != "" {
+				certEntry = map[string]any{"certificateFile": dto.Security.CACertFile, "usage": "verify"}
+			} else {
+				certEntry = map[string]any{"certificate": strings.Split(dto.Security.CACert, "\n"), "usage": "verify"}
+			}
+			tlsSettings["certificates"] = []any{certEntry}
+		}
 	}
 	item["streamSettings"].(map[string]any)["tlsSettings"] = tlsSettings
 	return item, nil
