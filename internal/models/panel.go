@@ -22,6 +22,7 @@ type Server struct {
 	Price                 string `gorm:"size:64" json:"price"`                                // 价格 / 续费金额（如 $5.99 / ¥35 / 120/年）
 	IDCAddress            string `gorm:"column:idc_address;size:255" json:"idc_address"`      // IDC 地址 / 服务商控制台链接
 	Status                int    `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
+	SortOrder             int    `gorm:"default:0;index" json:"sort_order"`                   // 排序序号（数字越小越靠前，默认 0）
 	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
 	// 出站域名解析策略（freedom settings.domainStrategy）不在此建模：它是出站级属性，唯一入口是

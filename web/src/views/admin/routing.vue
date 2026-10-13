@@ -406,7 +406,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="x-page">
+  <div class="x-page routing-page">
     <!-- 顶部工具栏 -->
     <div class="x-toolbar">
       <div class="x-toolbar-left">
@@ -1087,6 +1087,10 @@ onMounted(async () => {
     padding: 0 14px !important;
     font-size: 13.5px !important;
   }
+}
+
+.routing-page {
+  max-width: var(--x-wide-max, 1800px);
 }
 </style>
 

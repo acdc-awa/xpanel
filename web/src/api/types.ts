@@ -91,6 +91,7 @@ export interface UserTrafficRankItem {
 
 export interface ServerMatrixItem {
   id: number
+  sort_order?: number
   name: string
   node_id: string
   host: string

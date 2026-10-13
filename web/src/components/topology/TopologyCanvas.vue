@@ -16,7 +16,7 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete } from '@element-plus/icons-vue'
+import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete, Edit } from '@element-plus/icons-vue'
 import {
   createServerRoutingRule,
   deleteServerOutbound,
@@ -254,27 +254,31 @@ function typeInfo(t?: string) {
   return { cls: '', text: '' }
 }
 
-// 提取入站传输层与安全层摘要标签
+// 提取入站协议与端口摘要标签（主协议名：VLESS / HY2 / MIXED / TUNNEL）
 function inboundSummary(inb: TopologyData['inbounds'][number]) {
-  let net = 'TCP'
-  let sec = ''
-  try {
-    if (inb.stream_settings) {
-      const s = JSON.parse(inb.stream_settings)
-      if (s.network) net = String(s.network).toUpperCase()
-      if (s.security) {
-        const secUpper = String(s.security).toUpperCase()
-        if (secUpper === 'REALITY') sec = 'REALITY'
-        else if (secUpper === 'TLS') sec = 'TLS'
-      }
-    }
-  } catch {
-    /* ignore json parse error */
+  let proto = 'VLESS'
+  let cls = 'vless'
+  const p = (inb.protocol || '').toLowerCase()
+  if (p === 'hysteria') {
+    proto = 'HY2'
+    cls = 'hy2'
+  } else if (p === 'mixed' || p === 'socks' || p === 'http') {
+    proto = 'MIXED'
+    cls = 'mixed'
+  } else if (p === 'dokodemo-door' || inb.type === 'tunnel') {
+    proto = 'TUNNEL'
+    cls = 'tunnel'
+  } else if (p === 'vless') {
+    proto = 'VLESS'
+    cls = 'vless'
+  } else if (p) {
+    proto = p.toUpperCase()
+    cls = 'other'
   }
   return {
     port: inb.port,
-    net,
-    sec,
+    proto,
+    cls,
   }
 }
 
@@ -1978,7 +1982,13 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   </div>
                   <div class="layer-capsule-body">
                     <div v-if="g.inbounds.length === 0" class="sb-empty layer-empty">暂无挂载入站</div>
-                    <div v-for="(inb, inbIdx) in g.inbounds" :key="inb.id" class="sb-row layer-subrow">
+                    <div
+                      v-for="(inb, inbIdx) in g.inbounds"
+                      :key="inb.id"
+                      class="sb-row layer-subrow clickable"
+                      title="点击编辑入站"
+                      @click="openEditInbound(inb)"
+                    >
                       <Handle
                         type="target"
                         :id="`inb-tgt-${inb.id}`"
@@ -1998,9 +2008,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                         {{ inb.share_path }}
                       </span>
                       <span class="port-badge">:{{ inb.port }}</span>
-                      <span class="tag clickable" :title="`编辑入站「${inb.tag}」`" @click.stop="openEditInbound(inb)">{{ inb.tag }}</span>
-                      <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
-                      <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
+                      <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
+                      <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
+                      <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
                       <button
                         v-if="editable"
                         class="layer-unbind-btn"
@@ -2040,7 +2050,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                 <div
                   v-for="(inb, inbIdx) in nativeInboundsOf(nodeProps.data.server.id)"
                   :key="inb.id"
-                  class="sb-row"
+                  class="sb-row clickable"
+                  title="点击编辑入站"
+                  @click="openEditInbound(inb)"
                 >
                   <Handle
                     type="target"
@@ -2058,9 +2070,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     {{ typeInfo(inb.type).text }}
                   </span>
                   <span class="port-badge">:{{ inb.port }}</span>
-                  <span class="tag clickable" :title="`编辑入站「${inb.tag}」`" @click.stop="openEditInbound(inb)">{{ inb.tag }}</span>
-                  <span v-if="inboundSummary(inb).sec" class="proto-badge sec">{{ inboundSummary(inb).sec }}</span>
-                  <span v-else class="proto-badge net">{{ inboundSummary(inb).net }}</span>
+                  <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
+                  <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
+                  <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
 
                   <div v-if="editable && nativeInboundsOf(nodeProps.data.server.id).length > 1" class="tag-order-actions">
                     <button
@@ -2110,7 +2122,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   v-for="(out, outIdx) in nodeProps.data.outbounds"
                   :key="out.id"
                   class="sb-row"
-                  :class="{ 'direct-row': out.virtual }"
+                  :class="{ 'direct-row': out.virtual, clickable: !out.virtual }"
+                  :title="out.virtual ? '' : '点击编辑出站'"
+                  @click="!out.virtual && openEditOutbound(out)"
                 >
                   <!-- 左侧内端接口（所有出站包括 direct 均有，接收盒内路由规则） -->
                   <Handle
@@ -2124,7 +2138,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                     class="tag out-tag clickable"
                     :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
                     :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : `出站「${out.tag}」`"
-                    @click.stop="openEditOutbound(out)"
                   >
                     {{ out.isDraftTunnel ? '🔗 ' + out.tag : (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
                   </span>
@@ -2135,6 +2148,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
                   <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
+                  <el-icon v-if="!out.virtual" class="row-edit-icon" title="编辑出站"><Edit /></el-icon>
 
                   <div v-if="editable && nodeProps.data.outbounds.length > 1" class="tag-order-actions">
                     <button
@@ -2203,7 +2217,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     <el-dialog
       v-model="inboundCreateOpen"
       :title="inboundEditingItem ? '编辑入站' : '为服务器新建入站'"
-      width="840px"
+      :width="'min(1080px, 92vw)'"
       append-to-body
       destroy-on-close
     >
@@ -3003,6 +3017,25 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       background: rgba(52, 211, 153, 0.1);
       border-color: rgba(52, 211, 153, 0.2);
     }
+    &.clickable {
+      cursor: pointer;
+      transition: background 0.15s ease;
+      &:hover {
+        background: var(--x-bg-hover, rgba(59, 130, 246, 0.08));
+        .row-edit-icon {
+          opacity: 0.85;
+        }
+      }
+    }
+
+    .row-edit-icon {
+      font-size: 11px;
+      opacity: 0;
+      margin-left: 3px;
+      color: var(--x-text-3);
+      transition: opacity 0.15s ease;
+      flex: none;
+    }
 
     .port-badge {
       font-size: 11px;
@@ -3018,6 +3051,30 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       border-radius: 4px;
       font-weight: 600;
       flex: none;
+      &.vless {
+        background: rgba(59, 130, 246, 0.12);
+        color: #60a5fa;
+        border: 1px solid rgba(59, 130, 246, 0.25);
+      }
+      &.hy2 {
+        background: rgba(20, 184, 166, 0.15);
+        color: #2dd4bf;
+        border: 1px solid rgba(20, 184, 166, 0.3);
+      }
+      &.mixed {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+      }
+      &.tunnel {
+        background: rgba(249, 115, 22, 0.15);
+        color: #fb923c;
+        border: 1px solid rgba(249, 115, 22, 0.3);
+      }
+      &.other {
+        background: rgba(148, 163, 184, 0.15);
+        color: #cbd5e1;
+      }
       &.sec {
         background: rgba(168, 85, 247, 0.15);
         color: #c084fc;

@@ -109,7 +109,6 @@ type rankWindow struct {
 // parseRankWindow 解析 rank_period 查询参数；未知/缺省一律回退今日。
 // 不可识别的取值不做报错：仪表盘是轮询接口，参数漂移不应让整个看板 500。
 func parseRankWindow(raw string, now time.Time, loc *time.Location) rankWindow {
-	bizNow := now.In(loc)
 	todayStart := services.DayStart(now, loc)
 	var start time.Time
 	var key, label string
@@ -117,9 +116,9 @@ func parseRankWindow(raw string, now time.Time, loc *time.Location) rankWindow {
 	case "7d":
 		key, label = "7d", "近 7 天"
 		start = todayStart.AddDate(0, 0, -6)
-	case "month":
-		key, label = "month", "本月"
-		start = time.Date(bizNow.Year(), bizNow.Month(), 1, 0, 0, 0, 0, loc)
+	case "30d", "month":
+		key, label = "30d", "近 30 天"
+		start = todayStart.AddDate(0, 0, -29)
 	default:
 		key, label = "today", "今日"
 		start = todayStart
@@ -136,6 +135,7 @@ func parseRankWindow(raw string, now time.Time, loc *time.Location) rankWindow {
 
 type ServerMatrixItem struct {
 	ID           uint64     `json:"id"`
+	SortOrder    int        `json:"sort_order"`
 	Name         string     `json:"name"`
 	NodeID       string     `json:"node_id"`
 	Host         string     `json:"host"`
@@ -308,7 +308,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 
 	// 4. 服务器健康度矩阵 & 实时速率（优先读取 Hub 纯内存快照，0 磁盘 I/O）
 	var servers []models.Server
-	d.DB.Order("id ASC").Find(&servers)
+	d.DB.Order("sort_order ASC, id ASC").Find(&servers)
 
 	var liveMetrics map[uint64]*nodegate.NodeMetricsSnapshot
 	if d.Hub != nil {
@@ -387,6 +387,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 
 		data.ServerMatrix = append(data.ServerMatrix, ServerMatrixItem{
 			ID:           s.ID,
+			SortOrder:    s.SortOrder,
 			Name:         s.Name,
 			NodeID:       s.NodeID,
 			Host:         s.Host,
@@ -658,7 +659,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 // AdminDashboardRealtime GET /api/v1/admin/dashboard/realtime —— 高频轻量实时网速接口（纯内存组装，耗时 < 0.1ms）。
 func (d *Deps) AdminDashboardRealtime(c *gin.Context) {
 	var servers []models.Server
-	if err := d.DB.Select("id, name, host, node_id, location, status, last_seen_at").Order("id ASC").Find(&servers).Error; err != nil {
+	if err := d.DB.Select("id, name, host, node_id, location, status, last_seen_at").Order("sort_order ASC, id ASC").Find(&servers).Error; err != nil {
 		util.ServerError(c, "查询服务器失败")
 		return
 	}
@@ -713,6 +714,7 @@ func (d *Deps) AdminDashboardRealtime(c *gin.Context) {
 
 		data.ServerMatrix = append(data.ServerMatrix, ServerMatrixItem{
 			ID:           s.ID,
+			SortOrder:    s.SortOrder,
 			Name:         s.Name,
 			NodeID:       s.NodeID,
 			Host:         s.Host,

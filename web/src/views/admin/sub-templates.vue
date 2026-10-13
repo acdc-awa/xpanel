@@ -453,7 +453,7 @@ async function saveAsFromEditor() {
 </script>
 
 <template>
-  <div class="x-page">
+  <div class="x-page sub-templates-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
         <div>
@@ -971,5 +971,9 @@ async function saveAsFromEditor() {
   .pick-list {
     max-height: 300px;
   }
+}
+
+.sub-templates-page {
+  max-width: var(--x-wide-max, 1800px);
 }
 </style>

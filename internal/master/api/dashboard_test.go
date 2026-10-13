@@ -215,23 +215,25 @@ func TestAdminDashboardRankWindow(t *testing.T) {
 		t.Fatalf("7d 节点排行错误: %+v", weekData.ServerRank)
 	}
 
-	// ---- 本月：2 天前是否同月决定 u1 是否为 1100 ----
-	monthData := dashReq(t, db, "?rank_period=month")
-	if monthData.RankPeriod != "month" || monthData.RankLabel != "本月" {
-		t.Fatalf("month 口径回显错误: period=%q label=%q", monthData.RankPeriod, monthData.RankLabel)
-	}
-	wantU1 := int64(100)
-	if olderDate[:7] == today[:7] {
-		wantU1 = 1100
+	// ---- 近 30 天（同时兼容旧 month 参数）：纳入 2 天前的 1000，u1 为 1100 ----
+	thirtyDayData := dashReq(t, db, "?rank_period=30d")
+	if thirtyDayData.RankPeriod != "30d" || thirtyDayData.RankLabel != "近 30 天" {
+		t.Fatalf("30d 口径回显错误: period=%q label=%q", thirtyDayData.RankPeriod, thirtyDayData.RankLabel)
 	}
 	var gotU1 int64
-	for _, r := range monthData.UserRank {
+	for _, r := range thirtyDayData.UserRank {
 		if r.Username == "u1" {
 			gotU1 = r.TotalBytes
 		}
 	}
-	if gotU1 != wantU1 {
-		t.Fatalf("month 用户 u1 用量 = %d, want %d（跨月时不含 2 天前）", gotU1, wantU1)
+	if gotU1 != 1100 {
+		t.Fatalf("30d 用户 u1 用量 = %d, want 1100", gotU1)
+	}
+
+	// 兼容旧参数 month 回退至 30d
+	monthData := dashReq(t, db, "?rank_period=month")
+	if monthData.RankPeriod != "30d" || monthData.RankLabel != "近 30 天" {
+		t.Fatalf("month 别名口径回显错误: period=%q label=%q", monthData.RankPeriod, monthData.RankLabel)
 	}
 
 	// 缺省/非法参数回退今日，且不得 500

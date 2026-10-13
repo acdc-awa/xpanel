@@ -203,6 +203,7 @@ function pushChip(row: any) {
 const createOpen = ref(false)
 const createForm = reactive({
   server_type: 'xray' as 'xray',
+  sort_order: 0,
   name: '',
   host: '',
   location: '',
@@ -224,6 +225,7 @@ async function submitCreate() {
   try {
     const { data } = await createServer({
       server_type: createForm.server_type,
+      sort_order: createForm.sort_order,
       name: createForm.name,
       host: createForm.host,
       location: createForm.location,
@@ -235,6 +237,7 @@ async function submitCreate() {
     })
     if (data.code === 0) {
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
+      createForm.sort_order = 0
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
@@ -266,6 +269,7 @@ async function copyText(text: string, label: string) {
 function closeCreate() {
   createOpen.value = false
   createdResult.value = null
+  createForm.sort_order = 0
   createForm.name = ''
   createForm.host = ''
   createForm.location = ''
@@ -774,6 +778,7 @@ const editOpen = ref(false)
 const editForm = reactive({
   id: 0,
   server_type: 'xray' as 'xray',
+  sort_order: 0,
   name: '',
   host: '',
   location: '',
@@ -789,6 +794,7 @@ function openEdit(row: any) {
   Object.assign(editForm, {
     id: row.id,
     server_type: 'xray',
+    sort_order: row.sort_order ?? 0,
     name: row.name,
     host: row.host,
     location: row.location ?? '',
@@ -810,6 +816,7 @@ async function submitEdit() {
   try {
     const { data } = await updateServer(editForm.id, {
       server_type: editForm.server_type,
+      sort_order: editForm.sort_order,
       name: editForm.name,
       host: editForm.host,
       location: editForm.location,
@@ -978,6 +985,7 @@ async function removeServer(row: any) {
                 @change="(v: any) => toggleSelect(row.id, !!v)"
                 @click.stop
               />
+              <span class="sort-order-pill" :title="`排序序号: ${row.sort_order ?? 0}`">#{{ row.sort_order ?? 0 }}</span>
               <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
               <span class="server-name" title="点击查看详情" @click="openDrawer(row)">{{ row.name }}</span>
               <span class="x-chip" :class="row.status === 1 ? 'green' : 'gray'" style="font-size: 10px; padding: 1px 5px">
@@ -1003,95 +1011,90 @@ async function removeServer(row: any) {
             <span v-else class="x-chip" :class="pushChip(row).cls" style="font-size: 10.5px">{{ pushChip(row).text }}</span>
           </div>
 
-          <!-- 属性网格 -->
-          <div class="card-grid">
-            <div class="grid-item full-width">
+          <!-- 核心指标高亮区 (突出地址与入站数) -->
+          <div class="card-highlight-bar">
+            <div class="highlight-item host-item">
               <span class="item-label">服务器地址</span>
-              <div class="item-value">
-                <code class="cell-mono font-12" style="cursor: pointer; color: var(--x-primary); font-weight: 600" title="点击复制" @click="copyText(row.host, '服务器地址')">
-                  {{ row.host }}
-                </code>
+              <div class="host-val" title="点击复制" @click="copyText(row.host, '服务器地址')">
+                <code class="cell-mono font-13">{{ row.host }}</code>
+                <el-icon class="copy-icon"><CopyDocument /></el-icon>
               </div>
             </div>
-            <div class="grid-item">
+            <div class="highlight-item inbounds-item" title="点击查看关联节点" @click="goInbounds(row)">
               <span class="item-label">接入点</span>
-              <div class="item-value">
-                <el-link type="primary" :underline="false" style="font-size: 12.5px; font-weight: 600" @click="goInbounds(row)">
-                  {{ inboundCount(row.id) }} 个入站
-                </el-link>
+              <div class="inbound-val">
+                <span class="count-num">{{ inboundCount(row.id) }}</span>
+                <span class="count-unit">个入站</span>
               </div>
             </div>
-            <div class="grid-item">
-              <span class="item-label">Agent 版本</span>
-              <div class="item-value" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap">
-                <span class="cell-mono muted font-12">{{ row.agent_version || 'v—' }}</span>
+          </div>
+
+          <!-- 次要运维指标行 -->
+          <div class="card-meta-row">
+            <div class="meta-item">
+              <span class="meta-label">Agent</span>
+              <span class="cell-mono meta-val">{{ row.agent_version || 'v—' }}</span>
+              <span
+                v-if="getAgentVersionStatus(row.agent_version).type === 'latest'"
+                class="x-chip green mini-chip"
+              >最新</span>
+              <span
+                v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
+                class="x-chip orange mini-chip"
+                :title="`官方最新版本 ${latestAgentVersion}`"
+              >有新版</span>
+              <el-link
+                v-if="row.status === 1"
+                :type="getAgentVersionStatus(row.agent_version).type === 'outdated' ? 'warning' : 'primary'"
+                :underline="false"
+                :disabled="upgradingId === row.id"
+                class="upgrade-btn"
+                @click="upgradeNodeAgent(row)"
+              >
+                {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重装' : '升级') }}
+              </el-link>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">心跳</span>
+              <span class="cell-mono muted font-11">{{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}</span>
+            </div>
+          </div>
+          <!-- VPS 续费与资产信息（若设置了其中任何一项） -->
+          <div v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address" class="card-asset-bar">
+            <span class="item-label">VPS 资产</span>
+            <div class="asset-content">
+              <div class="asset-badges">
                 <span
-                  v-if="getAgentVersionStatus(row.agent_version).type === 'latest'"
-                  class="x-chip green"
-                  style="font-size: 9.5px; padding: 0 4px"
-                >最新</span>
-                <span
-                  v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
-                  class="x-chip orange"
-                  style="font-size: 9.5px; padding: 0 4px"
-                  :title="`官方最新版本 ${latestAgentVersion}`"
-                >有新版</span>
-                <el-link
-                  v-if="row.status === 1"
-                  :type="getAgentVersionStatus(row.agent_version).type === 'outdated' ? 'warning' : 'primary'"
-                  :underline="false"
-                  :disabled="upgradingId === row.id"
-                  style="font-size: 11px; font-weight: 600"
-                  @click="upgradeNodeAgent(row)"
+                  v-if="row.expire_at"
+                  class="cell-mono expire-text"
+                  :style="getExpiryStatus(row.expire_at)?.isUrgent ? { color: getExpiryStatus(row.expire_at)!.color, fontWeight: 600 } : {}"
+                  :title="getExpiryStatus(row.expire_at)?.tip || `到期日：${formatExpireDate(row.expire_at)}`"
                 >
-                  {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装' : '升级') }}
+                  {{ formatExpireDate(row.expire_at) }}
+                </span>
+                <span v-if="row.billing_cycle" class="x-chip gray" style="font-size: 9.5px; padding: 0 4px">{{ row.billing_cycle }}</span>
+                <span v-if="row.price" class="cell-mono price-text">{{ row.price }}</span>
+              </div>
+              <div v-if="row.idc_address" class="idc-link-box">
+                <el-link
+                  v-if="isUrl(row.idc_address)"
+                  type="primary"
+                  :underline="false"
+                  style="font-size: 11px"
+                  :href="normalizeUrl(row.idc_address)"
+                  target="_blank"
+                >
+                  <el-icon style="margin-right: 2px"><Link /></el-icon>IDC 控制台
                 </el-link>
-              </div>
-            </div>
-            <div class="grid-item full-width">
-              <span class="item-label">最后心跳</span>
-              <div class="item-value cell-mono muted" style="font-size: 11.5px">
-                {{ row.last_seen_at ? fmtTime(row.last_seen_at) : '未有心跳记录' }}
-              </div>
-            </div>
-            <!-- VPS 续费与资产信息（若设置了其中任何一项） -->
-            <div v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address" class="grid-item full-width">
-              <span class="item-label">VPS 续费与资产</span>
-              <div class="item-value" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap">
-                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px">
-                  <span
-                    v-if="row.expire_at"
-                    class="cell-mono"
-                    :style="getExpiryStatus(row.expire_at)?.isUrgent ? { color: getExpiryStatus(row.expire_at)!.color, fontWeight: 600 } : {}"
-                    :title="getExpiryStatus(row.expire_at)?.tip || `到期日：${formatExpireDate(row.expire_at)}`"
-                  >
-                    {{ formatExpireDate(row.expire_at) }}
-                  </span>
-                  <span v-if="row.billing_cycle" class="x-chip gray" style="font-size: 9.5px; padding: 0 4px">{{ row.billing_cycle }}</span>
-                  <span v-if="row.price" class="cell-mono" style="font-weight: 600; color: var(--x-primary)">{{ row.price }}</span>
-                </div>
-                <div v-if="row.idc_address" style="display: flex; align-items: center; gap: 4px">
-                  <el-link
-                    v-if="isUrl(row.idc_address)"
-                    type="primary"
-                    :underline="false"
-                    style="font-size: 11px"
-                    :href="normalizeUrl(row.idc_address)"
-                    target="_blank"
-                  >
-                    <el-icon style="margin-right: 2px"><Link /></el-icon>IDC 控制台
-                  </el-link>
-                  <span
-                    v-else
-                    class="muted font-12"
-                    style="cursor: pointer; display: inline-flex; align-items: center; gap: 2px"
-                    title="点击复制 IDC 地址"
-                    @click="copyText(row.idc_address, 'IDC 地址')"
-                  >
-                    {{ row.idc_address }}
-                    <el-icon style="font-size: 11px"><CopyDocument /></el-icon>
-                  </span>
-                </div>
+                <span
+                  v-else
+                  class="muted font-11 idc-copy"
+                  title="点击复制 IDC 地址"
+                  @click="copyText(row.idc_address, 'IDC 地址')"
+                >
+                  {{ row.idc_address }}
+                  <el-icon style="font-size: 11px"><CopyDocument /></el-icon>
+                </span>
               </div>
             </div>
           </div>
@@ -1151,10 +1154,15 @@ async function removeServer(row: any) {
             </el-col>
           </el-row>
           <el-row :gutter="14">
-            <el-col :span="12">
+            <el-col :span="8">
+              <el-form-item label="排序序号">
+                <el-input-number v-model="createForm.sort_order" :min="0" :step="1" placeholder="越小越靠前" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
               <el-form-item label="地区"><el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" /></el-form-item>
             </el-col>
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item label="备注"><el-input v-model="createForm.remark" placeholder="选填" /></el-form-item>
             </el-col>
           </el-row>
@@ -1445,10 +1453,15 @@ async function removeServer(row: any) {
           </el-col>
         </el-row>
         <el-row :gutter="14">
-          <el-col :span="12">
+          <el-col :span="8">
+            <el-form-item label="排序序号">
+              <el-input-number v-model="editForm.sort_order" :min="0" :step="1" placeholder="越小越靠前" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
             <el-form-item label="地区"><el-input v-model="editForm.location" placeholder="选填" /></el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :span="8">
             <el-form-item label="备注"><el-input v-model="editForm.remark" placeholder="选填" /></el-form-item>
           </el-col>
         </el-row>
@@ -1733,41 +1746,207 @@ async function removeServer(row: any) {
       flex-wrap: wrap;
     }
 
+    .sort-order-pill {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--x-primary);
+      background: var(--x-primary-soft);
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--x-border, rgba(0, 0, 0, 0.08));
+      line-height: 1.3;
+      flex: none;
+    }
+
     .server-name {
-      font-weight: 600;
-      font-size: 14px;
+      font-weight: 700;
+      font-size: 15px;
       color: var(--x-text, #111827);
       cursor: pointer;
+      line-height: 1.3;
       &:hover {
         color: var(--x-primary);
       }
     }
   }
 
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
+  .card-highlight-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0 8px;
 
-    .grid-item {
+    .highlight-item {
       display: flex;
       flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
+      gap: 3px;
 
       .item-label {
         font-size: 11px;
         color: var(--x-text-3, #9ca3af);
       }
 
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
+      &.host-item {
+        flex: 1;
+        min-width: 0;
+
+        .host-val {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          color: var(--x-text);
+          background: var(--x-fill-2, #f8fafc);
+          padding: 4px 8px;
+          border-radius: 6px;
+          border: 1px solid var(--x-border-light, #e2e8f0);
+          max-width: 100%;
+          transition: all 0.15s ease;
+
+          &:hover {
+            border-color: var(--x-primary);
+            color: var(--x-primary);
+            code { color: var(--x-primary); }
+          }
+
+          code {
+            font-size: 13px;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .copy-icon {
+            font-size: 12px;
+            color: var(--x-text-3);
+            flex: none;
+          }
+        }
+      }
+
+      &.inbounds-item {
+        flex: none;
+        cursor: pointer;
+        text-align: right;
+
+        .inbound-val {
+          display: inline-flex;
+          align-items: baseline;
+          gap: 3px;
+
+          .count-num {
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--x-primary);
+            line-height: 1;
+          }
+
+          .count-unit {
+            font-size: 11.5px;
+            color: var(--x-text-2);
+            font-weight: 500;
+          }
+        }
+
+        &:hover .inbound-val .count-num {
+          text-decoration: underline;
+        }
+      }
+    }
+  }
+
+  .card-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    gap: 10px;
+    font-size: 11.5px;
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+
+      .meta-label {
+        font-size: 10.5px;
+        color: var(--x-text-3);
+      }
+
+      .meta-val {
+        color: var(--x-text-2);
+        font-size: 11.5px;
+      }
+
+      .mini-chip {
+        font-size: 9.5px;
+        padding: 0 4px;
+        line-height: 1.3;
+      }
+
+      .upgrade-btn {
+        font-size: 11px;
+        font-weight: 600;
+      }
+    }
+  }
+
+  .card-asset-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0 4px;
+    border-top: 1px dashed var(--x-border-light, #f1f5f9);
+    margin-top: 4px;
+    gap: 8px;
+    flex-wrap: wrap;
+
+    .item-label {
+      font-size: 11px;
+      color: var(--x-text-3);
+    }
+
+    .asset-content {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      flex: 1;
+
+      .asset-badges {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+
+        .expire-text {
+          font-size: 11.5px;
+        }
+
+        .price-text {
+          font-weight: 600;
+          color: var(--x-primary);
+          font-size: 12px;
+        }
+      }
+
+      .idc-link-box {
+        display: flex;
+        align-items: center;
+
+        .idc-copy {
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          &:hover {
+            color: var(--x-primary);
+          }
+        }
       }
     }
   }

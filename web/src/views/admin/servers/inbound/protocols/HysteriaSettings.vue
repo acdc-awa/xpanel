@@ -23,17 +23,6 @@ function updateField<K extends keyof HysteriaConfig>(key: K, val: HysteriaConfig
 
 <template>
   <div class="hysteria-settings-box">
-    <!-- 用户入站提示 -->
-    <div class="auth-notice">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="接入点统一鉴权与用户动态装配"
-        description="Hysteria 2 基于 UDP (QUIC) 协议，专为恶劣网络和高丢包环境设计。服务端物理入站不设全局共享密码，认证由接入点关联的用户凭据及跨机中继凭据动态汇聚承担并进行独立计量计费与限速。"
-      />
-    </div>
-
     <!-- 协议运行参数 -->
     <div class="form-grid">
       <el-form-item>
@@ -53,20 +42,14 @@ function updateField<K extends keyof HysteriaConfig>(key: K, val: HysteriaConfig
         />
       </el-form-item>
 
-      <el-form-item label="传输与安全绑定">
-        <el-input value="强制 QUIC/UDP 传输 + TLS 加密" disabled />
+      <el-form-item label="传输与加密模式">
+        <el-input value="QUIC / UDP 传输 + 强制 TLS" disabled />
       </el-form-item>
     </div>
 
-    <!-- 证书提醒 -->
-    <div class="cert-notice">
-      <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="TLS 证书要求"
-        description="Hysteria 2 强制要求 TLS 加密。请切换至「安全层」标签页绑定有效证书（域名证书或面板自签证书）。若为内部中继链路，对端节点出站将自动进行证书指纹锁定 (Pinned SHA256)。"
-      />
+    <!-- 紧凑轻量提示 -->
+    <div class="compact-notice">
+      <span>提示：Hysteria 2 采用 UDP (QUIC) 传输并强制 TLS 加密，账号由绑定的接入点动态提供。请在「安全层」绑定有效证书。</span>
     </div>
   </div>
 </template>
@@ -96,13 +79,15 @@ function updateField<K extends keyof HysteriaConfig>(key: K, val: HysteriaConfig
   line-height: 1.4;
 }
 
-.auth-notice {
-  margin-bottom: 16px;
-}
-
-.cert-notice {
-  margin-top: 8px;
-  margin-bottom: 12px;
+.compact-notice {
+  font-size: 11.5px;
+  color: var(--x-text-3);
+  line-height: 1.5;
+  background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--x-border-light, #e5e7eb);
+  margin-top: 4px;
 }
 
 .form-grid {

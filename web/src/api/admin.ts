@@ -48,7 +48,7 @@ export type {
 } from './types'
 
 /** 仪表盘流量口径：今日 / 近 7 天 / 本月（驱动排行榜与服务器流量分布，三者同源）。 */
-export type RankPeriod = 'today' | '7d' | 'month'
+export type RankPeriod = 'today' | '7d' | '30d' | 'month'
 
 export function getDashboard(days?: 3 | 7 | 30, rankPeriod?: RankPeriod) {
   const params: Record<string, string | number> = {}
@@ -395,6 +395,7 @@ export interface ServerItem {
   location: string
   remark: string
   status: number // 0 离线 1 在线
+  sort_order?: number // 排序序号（越小越靠前）
   config_status: string // pushed / pending / ''（无待推送配置）
   push_error?: string // 待推送配置最近一次失败原因（仅 pending 时有值）
   push_attempts?: number // 待推送配置累计失败次数
@@ -447,6 +448,7 @@ export function createServer(payload: {
   billing_cycle?: string
   price?: string
   idc_address?: string
+  sort_order?: number
 }) {
   return http.post<ApiResp<CreateServerResult>>('/admin/servers', payload)
 }
@@ -469,6 +471,7 @@ export function updateServer(
     billing_cycle?: string
     price?: string
     idc_address?: string
+    sort_order?: number
   },
 ) {
   return http.put<ApiResp<{ server: ServerItem }>>(`/admin/servers/${id}`, payload)

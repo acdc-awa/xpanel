@@ -371,7 +371,7 @@ const activeTab = ref('basic')
   <el-dialog
     :model-value="visible"
     :title="outbound ? `编辑出站规则 · ${outbound.tag}` : '新增出站规则'"
-    width="720px"
+    :width="'min(960px, 92vw)'"
     @closed="onClosed"
   >
     <el-alert

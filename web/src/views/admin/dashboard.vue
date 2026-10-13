@@ -49,7 +49,7 @@ const trendRange = ref<3 | 7 | 30>(30)
 // 流量口径档位（今日 / 近 7 天 / 本月）：驱动用户排行、节点排行与服务器流量分布，
 // 三者后端同源同期，切换一次全部联动——避免「占比/累计」这类无时间基准的表述。
 const rankPeriod = ref<RankPeriod>('today')
-const RANK_PERIOD_LABELS: Record<RankPeriod, string> = { today: '今日', '7d': '近 7 天', month: '本月' }
+const RANK_PERIOD_LABELS: Record<RankPeriod, string> = { today: '今日', '7d': '近 7 天', '30d': '近 30 天', month: '近 30 天' }
 // 后端回显的中文口径标签；未加载时按档位兜底，避免副标题闪烁空白。
 const rankLabel = computed(() => dashData.value?.rank_label || RANK_PERIOD_LABELS[rankPeriod.value])
 
@@ -556,8 +556,8 @@ onUnmounted(() => {
             </div>
             <el-radio-group v-model="rankPeriod" size="small">
               <el-radio-button value="today">今日</el-radio-button>
-              <el-radio-button value="7d">7 天</el-radio-button>
-              <el-radio-button value="month">本月</el-radio-button>
+              <el-radio-button value="7d">近 7 天</el-radio-button>
+              <el-radio-button value="30d">近 30 天</el-radio-button>
             </el-radio-group>
           </div>
         </div>
@@ -580,7 +580,10 @@ onUnmounted(() => {
             <!-- 1. 节点与地址 -->
             <el-table-column label="服务器" min-width="110">
               <template #default="{ row }">
-                <div style="font-weight: 600; color: var(--x-text); font-size: 13px">{{ row.name }}</div>
+                <div style="display: flex; align-items: center; gap: 5px">
+                  <span class="sort-tag">#{{ row.sort_order ?? 0 }}</span>
+                  <div style="font-weight: 600; color: var(--x-text); font-size: 13px">{{ row.name }}</div>
+                </div>
                 <div class="muted cell-mono" style="font-size: 11px">{{ row.host }}</div>
               </template>
             </el-table-column>
@@ -659,6 +662,7 @@ onUnmounted(() => {
             <div v-for="row in dashData.server_matrix" :key="row.id" class="mobile-data-card">
               <div class="card-head">
                 <div class="head-title">
+                  <span class="sort-tag">#{{ row.sort_order ?? 0 }}</span>
                   <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
                   <span style="font-weight: 700">{{ row.name }}</span>
                   <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
@@ -1220,5 +1224,17 @@ onUnmounted(() => {
     color: var(--x-primary);
     border-bottom-color: var(--x-primary);
   }
+}
+
+.sort-tag {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--x-text-3);
+  background: var(--x-fill-2, rgba(0, 0, 0, 0.04));
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--x-border, rgba(0, 0, 0, 0.08));
+  line-height: 1.3;
 }
 </style>

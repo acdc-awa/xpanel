@@ -682,10 +682,20 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		updates["traffic_reset"] = resetPolicy
 		inb.TrafficReset = resetPolicy
 	}
+	oldTag := inb.Tag
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新失败")
 			return
+		}
+		// 级联改名：若入站 Tag 发生改名，同步更新本服务器上引用该 Tag 的路由规则，杜绝拓扑隐藏或规则悬空
+		if req.Tag != nil {
+			newTag := *req.Tag
+			if oldTag != "" && oldTag != newTag {
+				d.DB.Model(&models.ServerRoutingRule{}).
+					Where("server_id = ? AND inbound_tag = ?", inb.ServerID, oldTag).
+					Update("inbound_tag", newTag)
+			}
 		}
 	}
 	// C2：直通的目标变更 / tag 改名 / 启停都会改变它的派生出口与转发规则，这里统一对账
@@ -701,9 +711,25 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if ensureTarget != nil && xray.TunnelSendProxyProtocol(&inb) {
 		d.ensureTargetAcceptProxyProtocol(ensureTarget)
 	}
-	if err := d.enqueueConfig(inb.ServerID); err != nil {
-		pushFail(c, inb.ServerID, err)
-		return
+	// 分级推送：仅当存在影响 Xray 运行期配置的核心字段改动时，才向节点重推配置与重载；
+	// 纯计费倍率、备注、周期、配额或订阅分享门面修改仅写库，跳过下发推送。
+	hasXrayConfigChanges := false
+	for k := range updates {
+		switch k {
+		case "tag", "protocol", "port", "listen", "settings_json", "stream_settings",
+			"sniffing", "enabled", "type", "internal_uuid", "target_inbound_id",
+			"target_address", "target_port", "cert_id", "flow", "layer_id":
+			hasXrayConfigChanges = true
+		}
+	}
+	if ensureTarget != nil {
+		hasXrayConfigChanges = true
+	}
+	if hasXrayConfigChanges {
+		if err := d.enqueueConfig(inb.ServerID); err != nil {
+			pushFail(c, inb.ServerID, err)
+			return
+		}
 	}
 	var srv models.Server
 	serverName := ""

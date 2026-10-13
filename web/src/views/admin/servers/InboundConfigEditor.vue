@@ -4,6 +4,8 @@ import {
   Check,
   Warning,
   MagicStick,
+  InfoFilled,
+  WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -1056,14 +1058,6 @@ watch(
               </el-form-item>
 
 
-              <el-form-item v-if="localProtocol === 'dokodemo-door'" label="入站用途">
-                <el-input value="四层直通 (tunnel)" disabled />
-              </el-form-item>
-
-              <el-form-item v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'" label="入站用途">
-                <el-input value="转发代理 (forward)" disabled />
-              </el-form-item>
-
               <el-form-item label="监听端口">
                 <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
               </el-form-item>
@@ -1166,25 +1160,16 @@ watch(
               </el-radio-group>
             </el-form-item>
 
-            <div v-if="localProtocol === 'hysteria'" style="margin-bottom: 12px">
-              <el-alert
-                type="info"
-                :closable="false"
-                show-icon
-                title="Hysteria 2 强制启用 TLS/QUIC 加密，不支持明文传输 (none)。"
-              />
+            <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
+              <el-icon><InfoFilled /></el-icon>
+              <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
             </div>
-            <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" style="margin-bottom: 12px">
-              <el-alert
-                type="warning"
-                :closable="false"
-                show-icon
-                title="Mixed / SOCKS 套用 TLS 说明"
-                description="Mixed 套用 TLS 后，客户端必须支持 HTTPS 代理（HTTP over TLS）或 SOCKS over TLS（如在 Clash / SwitchyOmega 中配置 HTTPS 代理）。普通仅支持明文 TCP 的 SOCKS5 客户端将无法建立连接。"
-              />
+            <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" class="compact-tip orange">
+              <el-icon><WarningFilled /></el-icon>
+              <span>Mixed/SOCKS 套用 TLS 后，客户端须支持 HTTPS 代理或 SOCKS over TLS。</span>
             </div>
 
-            <div style="margin-top: 16px">
+            <div style="margin-top: 14px">
               <TlsSecurity
                 v-if="localTlsType === 'tls'"
                 v-model="tlsForm"
@@ -1195,14 +1180,9 @@ watch(
                 v-model="realityForm"
                 v-model:fingerprint="realityFingerprint"
               />
-              <div v-else>
-                <el-alert
-                  type="info"
-                  :closable="false"
-                  show-icon
-                  title="明文传输 (none)"
-                  description="当前未启用传输层加密保护。适用于前置反代（Caddy/Nginx TLS 卸载）或受信任局域网环境。"
-                />
+              <div v-else class="compact-tip gray">
+                <el-icon><InfoFilled /></el-icon>
+                <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
               </div>
             </div>
           </div>
@@ -1444,6 +1424,39 @@ watch(
 @media (max-width: 640px) {
   .form-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.compact-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  line-height: 1.4;
+
+  .el-icon {
+    font-size: 14px;
+    flex: none;
+  }
+
+  &.blue {
+    background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
+    color: var(--x-primary, #3b82f6);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+  }
+
+  &.orange {
+    background: rgba(245, 158, 11, 0.08);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+  }
+
+  &.gray {
+    background: var(--x-fill-2, rgba(0, 0, 0, 0.03));
+    color: var(--x-text-3, #9ca3af);
+    border: 1px solid var(--x-border-light, #e5e7eb);
   }
 }
 </style>

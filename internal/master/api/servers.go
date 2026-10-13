@@ -36,6 +36,7 @@ type serverView struct {
 	Price                 string     `json:"price"`
 	IDCAddress            string     `json:"idc_address"`
 	Status                int        `json:"status"`                  // 0 离线 1 在线
+	SortOrder             int        `json:"sort_order"`              // 排序序号
 	ConfigStatus          string     `json:"config_status"`           // pushed / pending / ""（无待推送配置）
 	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
 	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
@@ -72,6 +73,7 @@ func toServerView(s *models.Server) serverView {
 		Location: s.Location, Remark: s.Remark,
 		ExpireAt: s.ExpireAt, BillingCycle: s.BillingCycle, Price: s.Price, IDCAddress: s.IDCAddress,
 		Status:                s.Status,
+		SortOrder:             s.SortOrder,
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		AgentVersion:          s.AgentVersion,
@@ -89,7 +91,7 @@ func toServerView(s *models.Server) serverView {
 // AdminServers GET /api/v1/admin/servers —— 服务器列表（在线状态以网关实时为准，附带配置同步状态）。
 func (d *Deps) AdminServers(c *gin.Context) {
 	var list []models.Server
-	if err := d.DB.Order("id DESC").Find(&list).Error; err != nil {
+	if err := d.DB.Order("sort_order ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -206,6 +208,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		IDCURL                string          `json:"idc_url" binding:"max=255"` // 兼容别名
 		DefaultOutboundTag    string          `json:"default_outbound_tag"`
 		RoutingDomainStrategy string          `json:"routing_domain_strategy"`
+		SortOrder             int             `json:"sort_order"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -245,6 +248,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Price:                 strings.TrimSpace(req.Price),
 		IDCAddress:            idcAddr,
 		Status:                0,
+		SortOrder:             req.SortOrder,
 		DefaultOutboundTag:    req.DefaultOutboundTag,
 		RoutingDomainStrategy: req.RoutingDomainStrategy,
 	}
@@ -317,6 +321,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		IDCURL                *string         `json:"idc_url"`
 		DefaultOutboundTag    *string         `json:"default_outbound_tag"`
 		RoutingDomainStrategy *string         `json:"routing_domain_strategy"`
+		SortOrder             *int            `json:"sort_order"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -344,6 +349,9 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
+	}
+	if req.SortOrder != nil {
+		updates["sort_order"] = *req.SortOrder
 	}
 	if req.ExpireAt != nil && len(req.ExpireAt) > 0 {
 		// null / 空串都归一为 ""（清空），非空则为 YYYY-MM-DD

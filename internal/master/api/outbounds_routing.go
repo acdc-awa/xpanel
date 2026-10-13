@@ -422,12 +422,25 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 	}
 
+	oldTag := ob.Tag
 	// 在 Updates 前捕获旧引用（GORM Updates 会回写 struct 字段，否则解绑后 oldRef 已被置 nil）
 	oldRef := ob.InboundRef
 	if len(updates) > 0 {
 		if err := d.DB.Model(&ob).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新出站规则失败")
 			return
+		}
+		// 级联改名：若出站 Tag 发生改名，同步更新本服务器上引用该 Tag 的路由规则与默认出口，杜绝拓扑隐藏或规则悬空
+		if req.Tag != nil {
+			newTag := strings.TrimSpace(*req.Tag)
+			if oldTag != "" && oldTag != newTag {
+				d.DB.Model(&models.ServerRoutingRule{}).
+					Where("server_id = ? AND outbound_tag = ?", id, oldTag).
+					Update("outbound_tag", newTag)
+				d.DB.Model(&models.Server{}).
+					Where("id = ? AND default_outbound_tag = ?", id, oldTag).
+					Update("default_outbound_tag", newTag)
+			}
 		}
 	}
 

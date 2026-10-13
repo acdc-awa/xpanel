@@ -42,15 +42,9 @@ function updateField<K extends keyof SocksHttpConfig>(key: K, val: SocksHttpConf
       </el-form-item>
     </div>
 
-    <!-- 统一接入点鉴权提示 -->
-    <div class="auth-notice">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="接入点统一鉴权与转发用户动态装配"
-        description="物理入站不持有静态账号。请在「接入点」或「拓扑画布」中创建接入点并连线指向本入站，系统会自动聚合所有关联接入点开放权限组下的「转发用户」生成认证账号并提供独立计量计费。若无有效关联账号，本入站将被物理跳过以杜绝免密开放风险。"
-      />
+    <!-- 接入点账号装配提示 -->
+    <div class="compact-notice">
+      <span>提示：SOCKS/HTTP 认证账号由关联的接入点与转发用户动态装配；若无有效账号，入站将物理跳过以保障安全。</span>
     </div>
   </div>
 </template>
@@ -71,9 +65,15 @@ function updateField<K extends keyof SocksHttpConfig>(key: K, val: SocksHttpConf
   }
 }
 
-.auth-notice {
-  margin-top: 8px;
-  margin-bottom: 14px;
+.compact-notice {
+  font-size: 11.5px;
+  color: var(--x-text-3);
+  line-height: 1.5;
+  background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--x-border-light, #e5e7eb);
+  margin-top: 6px;
 }
 
 @media (max-width: 640px) {
