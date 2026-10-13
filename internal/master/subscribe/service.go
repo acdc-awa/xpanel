@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -71,11 +70,14 @@ func escapeSingleQuote(s string) string {
 // 导出器为哑渲染器：flow 等协议语义已由插件决议进 DTO，此处只做格式映射；
 // 新协议的 Clash 分支在此按 dto.Protocol 扩展。
 func formatClashNode(dto *contracts.ProxyNodeDTO) string {
-	if dto == nil || dto.Auth == nil || dto.Transport == nil || dto.Security == nil {
+	if dto == nil || dto.Auth == nil {
 		return ""
 	}
 	switch dto.Protocol {
 	case "vless":
+		if dto.Transport == nil || dto.Security == nil {
+			return ""
+		}
 		sec := dto.Security.Type
 		if sec == "reality" && dto.Security.Reality == nil {
 			return ""
@@ -151,16 +153,55 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 		parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
 		parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
 		parts = append(parts, fmt.Sprintf("password: '%s'", escapeSingleQuote(password)))
-		if dto.Security.SNI != "" {
-			parts = append(parts, fmt.Sprintf("sni: %s", dto.Security.SNI))
-		}
-		if dto.Security.AllowInsecure {
-			parts = append(parts, "skip-cert-verify: true")
-		}
-		if dto.Security.Fingerprint != "" {
-			parts = append(parts, fmt.Sprintf("fingerprint: %s", dto.Security.Fingerprint))
+		if dto.Security != nil {
+			if dto.Security.SNI != "" {
+				parts = append(parts, fmt.Sprintf("sni: %s", dto.Security.SNI))
+			}
+			if dto.Security.AllowInsecure {
+				parts = append(parts, "skip-cert-verify: true")
+			}
+			if dto.Security.Fingerprint != "" {
+				parts = append(parts, fmt.Sprintf("fingerprint: %s", dto.Security.Fingerprint))
+			}
 		}
 		parts = append(parts, "alpn: [h3]")
+		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
+
+	case "socks", "socks5":
+		parts := make([]string, 0, 10)
+		parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
+		parts = append(parts, "type: socks5")
+		parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
+		parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
+		if dto.Auth != nil && dto.Auth.User != "" {
+			parts = append(parts, fmt.Sprintf("username: '%s'", escapeSingleQuote(dto.Auth.User)))
+			parts = append(parts, fmt.Sprintf("password: '%s'", escapeSingleQuote(dto.Auth.Password)))
+		}
+		if dto.Security != nil && dto.Security.Type == "tls" {
+			parts = append(parts, "tls: true")
+			if dto.Security.SNI != "" {
+				parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+			}
+		}
+		parts = append(parts, "udp: true")
+		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
+
+	case "http":
+		parts := make([]string, 0, 10)
+		parts = append(parts, fmt.Sprintf("name: '%s'", escapeSingleQuote(dto.Name)))
+		parts = append(parts, "type: http")
+		parts = append(parts, fmt.Sprintf("server: %s", dto.ServerHost))
+		parts = append(parts, fmt.Sprintf("port: %d", dto.ServerPort))
+		if dto.Auth != nil && dto.Auth.User != "" {
+			parts = append(parts, fmt.Sprintf("username: '%s'", escapeSingleQuote(dto.Auth.User)))
+			parts = append(parts, fmt.Sprintf("password: '%s'", escapeSingleQuote(dto.Auth.Password)))
+		}
+		if dto.Security != nil && dto.Security.Type == "tls" {
+			parts = append(parts, "tls: true")
+			if dto.Security.SNI != "" {
+				parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
+			}
+		}
 		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
 
 	default:
@@ -394,89 +435,17 @@ func getLeadingWhitespace(s string) string {
 	return s
 }
 
-// BuildBase64 生成 vless:// 分享链接列表的 Base64（兜底，非 Clash 客户端）。
-// 哑渲染器：flow 等协议语义已由插件决议进 DTO；reality 缺参数的节点跳过。
+// BuildBase64 生成节点分享链接列表的 Base64（兜底，非 Clash 客户端）。
+// 委托协议插件层的 FormatLink 统一生成，支持 VLESS / Hysteria 2 / SOCKS5 / HTTP。
 func BuildBase64(nodes []contracts.ProxyNodeDTO) string {
 	links := make([]string, 0, len(nodes))
 	for i := range nodes {
 		dto := &nodes[i]
-		switch dto.Protocol {
-		case "vless":
-			q := url.Values{}
-			q.Set("encryption", "none")
-			sec := dto.Security.Type
-			network := dto.Transport.Network
-			if fp := dto.Security.Fingerprint; fp != "" {
-				q.Set("fp", fp)
-			}
-			switch sec {
-			case "reality":
-				if dto.Security.Reality == nil {
-					continue
-				}
-				q.Set("security", "reality")
-				q.Set("sni", dto.Security.SNI)
-				q.Set("pbk", dto.Security.Reality.PublicKey)
-				q.Set("sid", dto.Security.Reality.ShortID)
-				if network == "tcp" && dto.Auth.Flow != "" {
-					q.Set("flow", dto.Auth.Flow)
-				}
-			case "tls":
-				q.Set("security", "tls")
-				if dto.Security.SNI != "" {
-					q.Set("sni", dto.Security.SNI)
-				}
-				if dto.Security.AllowInsecure {
-					q.Set("allowInsecure", "1")
-				}
-				// TCP+TLS+Vision：仅当用户已配置 flow（vision 不适用 ws/xhttp）
-				if network == "tcp" && dto.Auth.Flow != "" {
-					q.Set("flow", dto.Auth.Flow)
-				}
-			default:
-				q.Set("security", "none")
-			}
-			// 传输层参数（与 TLS 类型无关，独立输出）
-			if network == "xhttp" {
-				q.Set("type", "xhttp")
-				if dto.Transport.Mode != "" {
-					q.Set("mode", dto.Transport.Mode)
-					q.Set("path", dto.Transport.Path)
-					if dto.Transport.Host != "" {
-						q.Set("host", dto.Transport.Host)
-					}
-				}
-			} else if network == "tcp" && sec != "reality" {
-				q.Set("type", "tcp")
-			}
-			frag := url.QueryEscape(dto.Name)
-			link := fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag)
-			links = append(links, link)
-
-		case "hysteria":
-			password := dto.Auth.Password
-			if password == "" {
-				password = dto.Auth.UUID
-			}
-			if password == "" {
-				continue
-			}
-			q := url.Values{}
-			if dto.Security.SNI != "" {
-				q.Set("sni", dto.Security.SNI)
-			}
-			if dto.Security.AllowInsecure {
-				q.Set("insecure", "1")
-			}
-			u := url.URL{
-				Scheme:   "hysteria2",
-				User:     url.User(password),
-				Host:     fmt.Sprintf("%s:%d", dto.ServerHost, dto.ServerPort),
-				RawQuery: q.Encode(),
-				Fragment: dto.Name,
-			}
-			links = append(links, u.String())
+		link, err := protocols.FormatLink(dto)
+		if err != nil || link == "" {
+			continue
 		}
+		links = append(links, link)
 	}
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
 }

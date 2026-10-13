@@ -2,6 +2,9 @@ package protocols
 
 import (
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
@@ -30,6 +33,7 @@ func (HysteriaPlugin) Descriptor() contracts.ProtocolDescriptor {
 		HotSync:       true,
 		AccountType:   "hysteria",
 		InboundTypes:  []string{"user"},
+		ClientSchemes: []string{"hysteria2", "hy2"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "version", Role: contracts.RoleBoth},
 			{Layer: "stream", Key: "hysteriaSettings", Role: contracts.RoleBoth},
@@ -197,4 +201,142 @@ func (p HysteriaPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contract
 		UserUUID:    in.UserUUID,
 	})
 	return dto
+}
+
+// FormatLink 格式化为标准 hysteria2:// 订阅链接。
+func (HysteriaPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
+	if dto == nil || dto.Auth == nil {
+		return "", fmt.Errorf("hysteria DTO 不能为空")
+	}
+	password := dto.Auth.Password
+	if password == "" {
+		password = dto.Auth.UUID
+	}
+	if password == "" {
+		return "", fmt.Errorf("hysteria DTO 缺少认证密码")
+	}
+	q := url.Values{}
+	if dto.Security != nil {
+		if dto.Security.SNI != "" {
+			q.Set("sni", dto.Security.SNI)
+		}
+		if dto.Security.AllowInsecure {
+			q.Set("insecure", "1")
+		}
+	}
+	u := url.URL{
+		Scheme:   "hysteria2",
+		User:     url.User(password),
+		Host:     fmt.Sprintf("%s:%d", dto.ServerHost, dto.ServerPort),
+		RawQuery: q.Encode(),
+		Fragment: dto.Name,
+	}
+	return u.String(), nil
+}
+
+// ParseLink 解析 hysteria2:// 或 hy2:// 订阅链接为中性 ProxyNodeDTO。
+func (HysteriaPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
+	if u == nil {
+		return nil, fmt.Errorf("url 不能为空")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "hysteria2" && scheme != "hy2" {
+		return nil, fmt.Errorf("协议 scheme 不匹配: %s, 期望 hysteria2 或 hy2", u.Scheme)
+	}
+
+	password := u.User.Username()
+	if password == "" {
+		if p, ok := u.User.Password(); ok {
+			password = p
+		}
+	}
+	if password == "" {
+		return nil, fmt.Errorf("hysteria2 链接缺少认证密码")
+	}
+
+	host := u.Hostname()
+	portStr := u.Port()
+	if host == "" || portStr == "" {
+		return nil, fmt.Errorf("hysteria2 链接缺少主机或端口: %s", u.Host)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("非法端口: %s", portStr)
+	}
+
+	q := u.Query()
+	sni := q.Get("sni")
+	if sni == "" {
+		sni = host
+	}
+	allowInsecure := q.Get("insecure") == "1"
+
+	name, _ := url.QueryUnescape(u.Fragment)
+	if name == "" {
+		name = fmt.Sprintf("hy2-%s-%d", host, port)
+	}
+
+	dto := &contracts.ProxyNodeDTO{
+		Name:       name,
+		ServerHost: host,
+		ServerPort: port,
+		Protocol:   "hysteria",
+		Transport:  &contracts.TransportOptions{Network: "hysteria"},
+		Security: &contracts.SecurityOptions{
+			Type:          "tls",
+			SNI:           sni,
+			AllowInsecure: allowInsecure,
+			Fingerprint:   "chrome",
+		},
+		Auth: &contracts.ClientCredentialDTO{
+			Password: password,
+			UUID:     password,
+			Extra:    make(map[string]any),
+		},
+	}
+	return dto, nil
+}
+
+// RenderOutbound 将中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。
+func (HysteriaPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, error) {
+	if dto == nil || dto.Auth == nil {
+		return nil, fmt.Errorf("DTO 不能为空")
+	}
+	auth := dto.Auth.Password
+	if auth == "" {
+		auth = dto.Auth.UUID
+	}
+	item := map[string]any{
+		"protocol": "hysteria",
+		"settings": map[string]any{
+			"version": 2,
+			"address": dto.ServerHost,
+			"port":    dto.ServerPort,
+		},
+		"streamSettings": map[string]any{
+			"network":  "hysteria",
+			"security": "tls",
+			"hysteriaSettings": map[string]any{
+				"version": 2,
+				"auth":    auth,
+			},
+		},
+	}
+
+	tlsSettings := map[string]any{}
+	if dto.Security != nil {
+		if dto.Security.SNI != "" {
+			tlsSettings["serverName"] = dto.Security.SNI
+		}
+		if dto.Security.Fingerprint != "" {
+			tlsSettings["fingerprint"] = dto.Security.Fingerprint
+		}
+		if dto.Auth.Extra != nil {
+			if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
+				tlsSettings["pinnedPeerCertSha256"] = pin
+			}
+		}
+	}
+	item["streamSettings"].(map[string]any)["tlsSettings"] = tlsSettings
+	return item, nil
 }

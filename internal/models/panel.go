@@ -340,7 +340,9 @@ type ServerOutbound struct {
 	Protocol           string `gorm:"size:32;not null" json:"protocol"` // freedom / blackhole / socks / vmess / etc.
 	SettingsJSON       string `gorm:"type:text" json:"settings_json"`
 	StreamSettingsJSON string `gorm:"type:text" json:"stream_settings_json,omitempty"`
-	SendThrough        string `gorm:"size:64" json:"send_through,omitempty"`
+	// OutboundJSON 原生完整 Xray 出站 JSON（非空时优先直接透传并校验，对标 RuleJSON）
+	OutboundJSON string `gorm:"type:text" json:"outbound_json,omitempty"`
+	SendThrough  string `gorm:"size:64" json:"send_through,omitempty"`
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
 	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
 	// InboundRef 跨机链式出站的专属机间认证凭据（主控同步生成 UUIDv4）

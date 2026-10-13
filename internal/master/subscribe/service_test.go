@@ -255,3 +255,62 @@ func TestResolveAPSubscription_TunnelPipeline(t *testing.T) {
 		t.Errorf("悬空管道 AP 不应产出节点 DTO: %v", dtoDraft)
 	}
 }
+
+func TestBuildMultiProtocolSubscription(t *testing.T) {
+	nodes := []contracts.ProxyNodeDTO{
+		{
+			Name:       "Hy2-Node",
+			ServerHost: "hy2.example.com",
+			ServerPort: 8443,
+			Protocol:   "hysteria",
+			Security:   &contracts.SecurityOptions{Type: "tls", SNI: "hy2.example.com"},
+			Auth:       &contracts.ClientCredentialDTO{Password: "secret123"},
+		},
+		{
+			Name:       "Socks5-Node",
+			ServerHost: "socks.example.com",
+			ServerPort: 1080,
+			Protocol:   "socks",
+			Security:   &contracts.SecurityOptions{Type: "none"},
+			Auth:       &contracts.ClientCredentialDTO{User: "alice", Password: "pwd"},
+		},
+		{
+			Name:       "HTTP-Node",
+			ServerHost: "http.example.com",
+			ServerPort: 8080,
+			Protocol:   "http",
+			Security:   &contracts.SecurityOptions{Type: "tls", SNI: "http.example.com"},
+			Auth:       &contracts.ClientCredentialDTO{User: "bob", Password: "pwd"},
+		},
+	}
+
+	// 1. Base64 订阅
+	b64 := BuildBase64(nodes)
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatalf("Base64 解码失败: %v", err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "hysteria2://secret123@hy2.example.com:8443") {
+		t.Errorf("BuildBase64 缺少 hysteria2 链接: %s", content)
+	}
+	if !strings.Contains(content, "socks5://alice:pwd@socks.example.com:1080#Socks5-Node") {
+		t.Errorf("BuildBase64 缺少 socks5 链接: %s", content)
+	}
+	if !strings.Contains(content, "https://bob:pwd@http.example.com:8080#HTTP-Node") {
+		t.Errorf("BuildBase64 缺少 https 链接: %s", content)
+	}
+
+	// 2. Clash YAML
+	yaml := BuildClashWithTemplate(nodes, "")
+	if !strings.Contains(yaml, "type: hysteria2") {
+		t.Errorf("BuildClashWithTemplate 缺少 hysteria2: %s", yaml)
+	}
+	if !strings.Contains(yaml, "type: socks5") || !strings.Contains(yaml, "username: 'alice'") {
+		t.Errorf("BuildClashWithTemplate 缺少 socks5: %s", yaml)
+	}
+	if !strings.Contains(yaml, "type: http") || !strings.Contains(yaml, "username: 'bob'") {
+		t.Errorf("BuildClashWithTemplate 缺少 http: %s", yaml)
+	}
+}
+

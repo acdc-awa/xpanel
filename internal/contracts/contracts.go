@@ -54,8 +54,9 @@ type RealityOptions struct {
 // 这里放“大多数代理协议会用到的通用认证字段”，具体协议用不到就留空；
 // 更冷门的协议专属字段放入 Extra，避免公共结构被协议写死。
 type ClientCredentialDTO struct {
+	User           string         // SOCKS / HTTP username
 	UUID           string         // VLESS / VMess
-	Password       string         // Trojan / Shadowsocks / SOCKS / HTTP
+	Password       string         // Trojan / Shadowsocks / SOCKS / HTTP / Hysteria
 	Cipher         string         // VMess cipher / Shadowsocks cipher
 	AlterID        int            // VMess alterId
 	Flow           string         // VLESS flow (xtls-rprx-vision, ...)

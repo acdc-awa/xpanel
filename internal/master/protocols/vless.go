@@ -2,6 +2,9 @@ package protocols
 
 import (
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
@@ -17,15 +20,16 @@ func (VLESSPlugin) Protocol() string { return "vless" }
 // Descriptor 声明 VLESS 的能力描述符。
 func (VLESSPlugin) Descriptor() contracts.ProtocolDescriptor {
 	return contracts.ProtocolDescriptor{
-		Name:         "vless",
-		Label:        "VLESS",
-		Networks:     []string{"tcp", "xhttp"},
-		Securities:   []string{"reality", "tls", "none"},
-		Credential:   contracts.CredentialUUID,
-		SupportsUDP:  true,
-		HotSync:      true,
-		AccountType:  "vless",
-		InboundTypes: []string{"user"},
+		Name:          "vless",
+		Label:         "VLESS",
+		Networks:      []string{"tcp", "xhttp"},
+		Securities:    []string{"reality", "tls", "none"},
+		Credential:    contracts.CredentialUUID,
+		SupportsUDP:   true,
+		HotSync:       true,
+		AccountType:   "vless",
+		InboundTypes:  []string{"user"},
+		ClientSchemes: []string{"vless"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "decryption", Role: contracts.RoleServerOnly},
 			{Layer: "settings", Key: "encryption", Role: contracts.RoleClientOnly},
@@ -302,4 +306,315 @@ func (p VLESSPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.P
 		UserUUID:    in.UserUUID,
 	})
 	return dto
+}
+
+// FormatLink 格式化为标准 vless:// 订阅链接。
+func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
+	if dto == nil || dto.Auth == nil || dto.Auth.UUID == "" {
+		return "", fmt.Errorf("vless DTO 缺少 UUID")
+	}
+	q := url.Values{}
+	enc := "none"
+	if dto.Auth.Encryption != "" {
+		enc = dto.Auth.Encryption
+	}
+	q.Set("encryption", enc)
+
+	sec := "none"
+	if dto.Security != nil && dto.Security.Type != "" {
+		sec = dto.Security.Type
+	}
+	q.Set("security", sec)
+	switch sec {
+	case "reality":
+		if dto.Security.Reality == nil || dto.Security.Reality.PublicKey == "" {
+			return "", fmt.Errorf("reality 缺少公钥")
+		}
+		q.Set("pbk", dto.Security.Reality.PublicKey)
+		if dto.Security.Reality.ShortID != "" {
+			q.Set("sid", dto.Security.Reality.ShortID)
+		}
+		if dto.Security.SNI != "" {
+			q.Set("sni", dto.Security.SNI)
+		}
+		fp := dto.Security.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+		q.Set("fp", fp)
+	case "tls":
+		if dto.Security.SNI != "" {
+			q.Set("sni", dto.Security.SNI)
+		}
+		if dto.Security.Fingerprint != "" {
+			q.Set("fp", dto.Security.Fingerprint)
+		}
+		if dto.Security.AllowInsecure {
+			q.Set("allowInsecure", "1")
+		}
+	}
+
+	if dto.Auth.Flow != "" {
+		q.Set("flow", dto.Auth.Flow)
+	}
+
+	net := "tcp"
+	if dto.Transport != nil && dto.Transport.Network != "" {
+		net = dto.Transport.Network
+	}
+	q.Set("type", net)
+	switch net {
+	case "xhttp":
+		if dto.Transport.Path != "" {
+			q.Set("path", dto.Transport.Path)
+		}
+		if dto.Transport.Host != "" {
+			q.Set("host", dto.Transport.Host)
+		}
+		if dto.Transport.Mode != "" {
+			q.Set("mode", dto.Transport.Mode)
+		}
+	case "ws":
+		if dto.Transport.Path != "" {
+			q.Set("path", dto.Transport.Path)
+		}
+		if dto.Transport.Host != "" {
+			q.Set("host", dto.Transport.Host)
+		}
+	case "grpc":
+		if dto.Transport.Opts != nil && dto.Transport.Opts["serviceName"] != "" {
+			q.Set("serviceName", dto.Transport.Opts["serviceName"])
+		}
+	}
+
+	frag := url.QueryEscape(dto.Name)
+	return fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag), nil
+}
+
+// ParseLink 解析 vless:// 订阅链接为中性 ProxyNodeDTO。
+func (VLESSPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
+	if u == nil {
+		return nil, fmt.Errorf("url 不能为空")
+	}
+	if strings.ToLower(u.Scheme) != "vless" {
+		return nil, fmt.Errorf("协议 scheme 不匹配: %s, 期望 vless", u.Scheme)
+	}
+
+	uuid := u.User.Username()
+	if uuid == "" {
+		return nil, fmt.Errorf("vless 链接缺少 UUID")
+	}
+	host := u.Hostname()
+	portStr := u.Port()
+	if host == "" || portStr == "" {
+		return nil, fmt.Errorf("vless 链接缺少主机或端口: %s", u.Host)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("非法端口: %s", portStr)
+	}
+
+	q := u.Query()
+	net := q.Get("type")
+	if net == "" {
+		net = q.Get("network")
+	}
+	if net == "" {
+		net = "tcp"
+	}
+	net = strings.ToLower(net)
+
+	sec := strings.ToLower(q.Get("security"))
+	if sec == "" {
+		sec = "none"
+	}
+
+	name, _ := url.QueryUnescape(u.Fragment)
+	if name == "" {
+		name = fmt.Sprintf("vless-%s-%d", host, port)
+	}
+
+	dto := &contracts.ProxyNodeDTO{
+		Name:       name,
+		ServerHost: host,
+		ServerPort: port,
+		Protocol:   "vless",
+		Transport:  &contracts.TransportOptions{Network: net},
+		Security:   &contracts.SecurityOptions{Type: sec},
+		Auth: &contracts.ClientCredentialDTO{
+			UUID:       uuid,
+			Flow:       q.Get("flow"),
+			Encryption: "none",
+			Extra:      make(map[string]any),
+		},
+	}
+
+	// 提取 SNI 与 Fingerprint
+	sni := q.Get("sni")
+	if sni == "" {
+		sni = q.Get("serverName")
+	}
+	dto.Security.SNI = sni
+
+	fp := q.Get("fp")
+	if fp == "" {
+		fp = q.Get("fingerprint")
+	}
+	dto.Security.Fingerprint = fp
+
+	switch sec {
+	case "reality":
+		pbk := q.Get("pbk")
+		if pbk == "" {
+			pbk = q.Get("publicKey")
+		}
+		sid := q.Get("sid")
+		if sid == "" {
+			sid = q.Get("shortId")
+		}
+		dto.Security.Reality = &contracts.RealityOptions{
+			PublicKey: pbk,
+			ShortID:   sid,
+		}
+	case "tls":
+		if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {
+			dto.Security.AllowInsecure = true
+		}
+	}
+
+	// 传输层参数
+	switch net {
+	case "xhttp":
+		dto.Transport.Path = q.Get("path")
+		dto.Transport.Host = q.Get("host")
+		dto.Transport.Mode = q.Get("mode")
+		if dto.Transport.Mode == "" {
+			dto.Transport.Mode = "auto"
+		}
+		if dto.Transport.Path == "" {
+			dto.Transport.Path = "/"
+		}
+	case "ws":
+		dto.Transport.Path = q.Get("path")
+		dto.Transport.Host = q.Get("host")
+		if dto.Transport.Path == "" {
+			dto.Transport.Path = "/"
+		}
+	case "grpc":
+		svc := q.Get("serviceName")
+		if svc != "" {
+			dto.Transport.Opts = map[string]string{"serviceName": svc}
+		}
+	}
+
+	return dto, nil
+}
+
+// RenderOutbound 将中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。
+func (VLESSPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, error) {
+	if dto == nil || dto.Auth == nil {
+		return nil, fmt.Errorf("DTO 不能为空")
+	}
+	encryption := dto.Auth.Encryption
+	if encryption == "" {
+		encryption = "none"
+	}
+	user := map[string]any{
+		"id":         dto.Auth.UUID,
+		"encryption": encryption,
+	}
+	if dto.Auth.Flow != "" {
+		user["flow"] = dto.Auth.Flow
+	}
+	item := map[string]any{
+		"protocol": "vless",
+		"settings": map[string]any{
+			"vnext": []any{map[string]any{
+				"address": dto.ServerHost,
+				"port":    dto.ServerPort,
+				"users":   []any{user},
+			}},
+		},
+	}
+
+	net := "tcp"
+	if dto.Transport != nil && dto.Transport.Network != "" {
+		net = dto.Transport.Network
+	}
+	sec := "none"
+	if dto.Security != nil && dto.Security.Type != "" {
+		sec = dto.Security.Type
+	}
+	ss := map[string]any{
+		"network":  net,
+		"security": sec,
+	}
+
+	switch net {
+	case "xhttp":
+		mode := "auto"
+		path := "/"
+		if dto.Transport != nil {
+			if dto.Transport.Mode != "" {
+				mode = dto.Transport.Mode
+			}
+			if dto.Transport.Path != "" {
+				path = dto.Transport.Path
+			}
+		}
+		xh := map[string]any{"mode": mode, "path": path}
+		if dto.Transport != nil && dto.Transport.Host != "" {
+			xh["host"] = dto.Transport.Host
+		}
+		ss["xhttpSettings"] = xh
+	case "ws":
+		path := "/"
+		if dto.Transport != nil && dto.Transport.Path != "" {
+			path = dto.Transport.Path
+		}
+		ws := map[string]any{"path": path}
+		if dto.Transport != nil && dto.Transport.Host != "" {
+			ws["host"] = dto.Transport.Host
+		}
+		ss["wsSettings"] = ws
+	case "grpc":
+		svc := "grpc"
+		if dto.Transport != nil && dto.Transport.Opts != nil && dto.Transport.Opts["serviceName"] != "" {
+			svc = dto.Transport.Opts["serviceName"]
+		}
+		ss["grpcSettings"] = map[string]any{"serviceName": svc}
+	}
+
+	switch sec {
+	case "reality":
+		if dto.Security != nil && dto.Security.Reality != nil {
+			fp := dto.Security.Fingerprint
+			if fp == "" {
+				fp = "chrome"
+			}
+			ss["realitySettings"] = map[string]any{
+				"serverName":  dto.Security.SNI,
+				"password":    dto.Security.Reality.PublicKey,
+				"shortId":     dto.Security.Reality.ShortID,
+				"fingerprint": fp,
+				"spiderX":     "/",
+			}
+		}
+	case "tls":
+		if dto.Security != nil {
+			tlsSettings := map[string]any{"serverName": dto.Security.SNI}
+			if dto.Security.Fingerprint != "" {
+				tlsSettings["fingerprint"] = dto.Security.Fingerprint
+			}
+			if dto.Auth.Extra != nil {
+				if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
+					tlsSettings["pinnedPeerCertSha256"] = pin
+				}
+			}
+			ss["tlsSettings"] = tlsSettings
+		}
+	}
+
+	item["streamSettings"] = ss
+	return item, nil
 }

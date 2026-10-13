@@ -1,6 +1,11 @@
 package contracts
 
-import "github.com/acdc-awa/xpanel-node/pkg/protocol"
+import (
+	"net/url"
+	"strings"
+
+	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+)
 
 // ShareOverride 订阅分享覆写（入站 share_* 字段的纯数据快照）。
 // 服务端物理监听与外部反代/订阅视图解耦：覆写只影响客户端可见参数。
@@ -61,8 +66,9 @@ type ProtocolDescriptor struct {
 	HotSync     bool   // 能否 gRPC 热更（决定用户变更走热更还是整配置重推）
 	AccountType string // agent 侧 account 的 Go 类型标识："vless" / "hysteria"
 
-	InboundTypes []string       // 允许的入站角色：{"user","relay"} / {"user"}
-	Segments     []LayerSegment // 该协议的专有段（供 sanitize/订阅/前端）
+	InboundTypes  []string       // 允许的入站角色：{"user","relay"} / {"user"}
+	Segments      []LayerSegment // 该协议的专有段（供 sanitize/订阅/前端）
+	ClientSchemes []string       // 支持的客户端订阅 URL Scheme 列表，如 ["vless"] / ["hysteria2", "hy2"] / ["socks5", "socks", "http", "https"]
 }
 
 // ClientProjectionInput 统一客户端投影输入。
@@ -120,6 +126,15 @@ type ProtocolPlugin interface {
 
 	// ValidateInbound 入站保存时的协议级校验（在 JSON 可解析校验之上）。
 	ValidateInbound(spec *InboundSpec) error
+
+	// FormatLink 格式化为该协议的标准订阅 URL（如 vless://...）。
+	FormatLink(dto *ProxyNodeDTO) (string, error)
+
+	// ParseLink 解析订阅 URL 为中性 ProxyNodeDTO。
+	ParseLink(u *url.URL) (*ProxyNodeDTO, error)
+
+	// RenderOutbound 渲染为 Xray 客户端出站结构 map（含 settings 与 streamSettings）。
+	RenderOutbound(dto *ProxyNodeDTO) (map[string]any, error)
 }
 
 // PluginRegistry 协议插件注册表：按协议名注册/查找。
@@ -151,6 +166,19 @@ func (r *PluginRegistry) Find(proto string) ProtocolPlugin {
 	for _, p := range r.plugins {
 		if p.Protocol() == proto {
 			return p
+		}
+	}
+	return nil
+}
+
+// FindByScheme 按 URL scheme 查找匹配的协议插件；未找到返回 nil。
+func (r *PluginRegistry) FindByScheme(scheme string) ProtocolPlugin {
+	sLower := strings.ToLower(scheme)
+	for _, p := range r.plugins {
+		for _, s := range p.Descriptor().ClientSchemes {
+			if strings.ToLower(s) == sLower {
+				return p
+			}
 		}
 	}
 	return nil

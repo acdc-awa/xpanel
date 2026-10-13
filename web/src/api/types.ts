@@ -489,6 +489,7 @@ export interface ServerOutbound {
   protocol: string
   settings_json: string
   stream_settings_json?: string
+  outbound_json?: string
   send_through?: string
   enabled: boolean
   priority: number

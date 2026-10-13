@@ -405,13 +405,21 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if !ob.Enabled {
 			continue
 		}
-		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" {
+		if (ob.Protocol == "vless" || ob.Protocol == "hysteria" || ob.Protocol == "socks" || ob.Protocol == "http") &&
+			ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" && strings.TrimSpace(ob.OutboundJSON) == "" {
 			// 草稿未连线出站（等待管理员在拓扑画布中拖线关联目标入站）：安全跳过注入，避免 Xray 配置校验失败
 			continue
 		}
 		item := make(map[string]any)
-		if ob.InboundRef != nil && ctx != nil && (ob.Protocol == "vless" || ob.Protocol == "hysteria") {
-			// InboundRef 节点间出站：由对应目标协议插件统一投影全自动构造
+
+		if strings.TrimSpace(ob.OutboundJSON) != "" {
+			// 原生完整出站 JSON 优先模式
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(ob.OutboundJSON), &parsed); err == nil {
+				item = parsed
+			}
+		} else if ob.InboundRef != nil && ctx != nil && ob.Protocol != "freedom" {
+			// InboundRef 节点间出站：由对应目标协议插件统一投影全自动构造（支持 vless / hysteria / mixed 等）
 			if target, ok := ctx.RefTargets[*ob.InboundRef]; ok {
 				if err := buildRefOutbound(item, target, ob); err != nil {
 					return nil, err
@@ -451,7 +459,7 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if ob.Tag != "" {
 			item["tag"] = ob.Tag
 		}
-		if ob.Protocol != "" {
+		if ob.Protocol != "" && item["protocol"] == nil {
 			item["protocol"] = ob.Protocol
 		}
 		if ob.StreamSettingsJSON != "" {
@@ -505,7 +513,7 @@ func ctxTarget(ctx *GenerateContext, id uint64) (RefTarget, bool) {
 }
 
 // buildRefOutbound 按目标入站自动构造中转出站：由目标入站协议插件的 Peer 角色投影决议端点 DTO，
-// 再由 renderPeerOutbound 统一渲染为对应核心的出站结构。
+// 再由 protocols.RenderOutbound 统一渲染为对应核心的出站结构。
 func buildRefOutbound(item map[string]any, target RefTarget, ob models.ServerOutbound) error {
 	inb := target.Inbound
 	plugin := protocols.Find(inb.Protocol)
@@ -522,94 +530,14 @@ func buildRefOutbound(item map[string]any, target RefTarget, ob models.ServerOut
 		return fmt.Errorf("出站 %s 投影目标入站 %s 失败: %w", item["tag"], inb.Tag, err)
 	}
 
-	return renderPeerOutbound(item, dto)
-}
-
-// renderPeerOutbound 将中性 ProxyNodeDTO 渲染为 Xray peer 出站配置 map。
-func renderPeerOutbound(item map[string]any, dto *contracts.ProxyNodeDTO) error {
-	switch dto.Protocol {
-	case "vless":
-		user := map[string]any{
-			"id":         dto.Auth.UUID,
-			"encryption": dto.Auth.Encryption,
-		}
-		if dto.Auth.Flow != "" {
-			user["flow"] = dto.Auth.Flow
-		}
-		item["protocol"] = "vless"
-		item["settings"] = map[string]any{
-			"vnext": []any{map[string]any{
-				"address": dto.ServerHost,
-				"port":    dto.ServerPort,
-				"users":   []any{user},
-			}},
-		}
-
-		ss := map[string]any{"network": dto.Transport.Network, "security": dto.Security.Type}
-		if dto.Transport.Network == "xhttp" {
-			xh := map[string]any{"mode": dto.Transport.Mode, "path": dto.Transport.Path}
-			if dto.Transport.Host != "" {
-				xh["host"] = dto.Transport.Host
-			}
-			ss["xhttpSettings"] = xh
-		}
-		switch dto.Security.Type {
-		case "reality":
-			if r := dto.Security.Reality; r != nil && dto.Security.SNI != "" {
-				ss["realitySettings"] = map[string]any{
-					"serverName":  dto.Security.SNI,
-					"password":    r.PublicKey,
-					"shortId":     r.ShortID,
-					"fingerprint": dto.Security.Fingerprint,
-					"spiderX":     "/",
-				}
-			}
-		case "tls":
-			tlsSettings := map[string]any{"serverName": dto.Security.SNI}
-			if dto.Security.Fingerprint != "" {
-				tlsSettings["fingerprint"] = dto.Security.Fingerprint
-			}
-			if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
-				tlsSettings["pinnedPeerCertSha256"] = pin
-			}
-			ss["tlsSettings"] = tlsSettings
-		}
-		item["streamSettings"] = ss
-		return nil
-	case "hysteria":
-		item["protocol"] = "hysteria"
-		item["settings"] = map[string]any{
-			"version": 2,
-			"address": dto.ServerHost,
-			"port":    dto.ServerPort,
-		}
-		auth := dto.Auth.Password
-		if auth == "" {
-			auth = dto.Auth.UUID
-		}
-		ss := map[string]any{
-			"network":  "hysteria",
-			"security": "tls",
-			"hysteriaSettings": map[string]any{
-				"version": 2,
-				"auth":    auth,
-			},
-		}
-		tlsSettings := map[string]any{
-			"serverName": dto.Security.SNI,
-		}
-		if dto.Security.Fingerprint != "" {
-			tlsSettings["fingerprint"] = dto.Security.Fingerprint
-		}
-		if pin, ok := dto.Auth.Extra["CertPin"].(string); ok && pin != "" {
-			tlsSettings["pinnedPeerCertSha256"] = pin
-		}
-		ss["tlsSettings"] = tlsSettings
-		item["streamSettings"] = ss
-		return nil
-	default:
-		return fmt.Errorf("暂不支持将协议 %q 渲染为中转出站", dto.Protocol)
+	rendered, err := protocols.RenderOutbound(dto)
+	if err != nil {
+		return fmt.Errorf("出站 %s 渲染中转出站失败: %w", item["tag"], err)
 	}
+	for k, v := range rendered {
+		item[k] = v
+	}
+	return nil
 }
 
 // normalizeVlessOutbound 对 vless 出站的 settings.vnext[].users[] 兜底注入
@@ -843,6 +771,22 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 								"email": fmt.Sprintf("fu%d.i%d@panel.local", fu.ID, inb.ID),
 							})
 						}
+					}
+				}
+			}
+			// 机间中继凭据注入（来自引用该 Mixed 入站的前置 ServerOutbound）
+			if ctx != nil && ctx.ReferencingOutbounds != nil {
+				for _, refOut := range ctx.ReferencingOutbounds[inb.ID] {
+					refUUID := refOut.InternalUUID
+					if refUUID == "" && inb.InternalUUID != "" {
+						refUUID = inb.InternalUUID
+					}
+					if refUUID != "" {
+						accounts = append(accounts, map[string]any{
+							"user":  fmt.Sprintf("relay_out_%d", inb.ID),
+							"pass":  refUUID,
+							"email": fmt.Sprintf("relay.in_%d.out_%d@panel.local", inb.ID, refOut.ID),
+						})
 					}
 				}
 			}

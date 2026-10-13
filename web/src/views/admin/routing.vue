@@ -485,7 +485,11 @@ onMounted(async () => {
                     <div class="item-value">
                       <span v-if="row.protocol === 'freedom'" class="x-chip green" style="font-size: 10.5px">直连 (freedom)</span>
                       <span v-else-if="row.protocol === 'vless'" class="x-chip purple" style="font-size: 10.5px">VLESS 链</span>
+                      <span v-else-if="row.protocol === 'hysteria'" class="x-chip blue" style="font-size: 10.5px">Hysteria 2</span>
+                      <span v-else-if="row.protocol === 'socks'" class="x-chip orange" style="font-size: 10.5px">SOCKS5</span>
+                      <span v-else-if="row.protocol === 'http'" class="x-chip teal" style="font-size: 10.5px">HTTP(S)</span>
                       <span v-else-if="row.protocol === 'blackhole'" class="x-chip red" style="font-size: 10.5px">黑洞 (blackhole)</span>
+                      <span v-else-if="row.protocol === 'custom'" class="x-chip yellow" style="font-size: 10.5px">原生 JSON</span>
                       <span v-else class="x-chip blue" style="font-size: 10.5px">{{ row.protocol }}</span>
                     </div>
                   </div>
@@ -497,6 +501,9 @@ onMounted(async () => {
                       </span>
                       <span v-else-if="row.inbound_ref" class="x-chip orange" style="font-size: 10.5px">
                         引用入站 #{{ row.inbound_ref }}
+                      </span>
+                      <span v-else-if="row.outbound_json" class="x-chip gray" style="font-size: 10.5px">
+                        自定义透传
                       </span>
                       <span v-else-if="row.tag === 'direct'" class="muted font-11">服务器直连互联网</span>
                       <span v-else-if="row.tag === 'blocked'" class="muted font-11">黑洞丢弃阻断</span>

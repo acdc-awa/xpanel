@@ -5,6 +5,8 @@ package protocols
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
@@ -15,11 +17,66 @@ var registry = contracts.NewPluginRegistry()
 func init() {
 	registry.Register(VLESSPlugin{})
 	registry.Register(HysteriaPlugin{})
+	registry.Register(MixedPlugin{})
 }
 
 // Find 按协议名查找插件；未注册返回 nil。
 func Find(proto string) contracts.ProtocolPlugin {
-	return registry.Find(proto)
+	p := registry.Find(proto)
+	if p != nil {
+		return p
+	}
+	// 兼容支持以 socks/http 等 scheme 别名查找 mixed 插件
+	return registry.FindByScheme(proto)
+}
+
+// FindByScheme 按 URL scheme 查找匹配的协议插件；未注册返回 nil。
+func FindByScheme(scheme string) contracts.ProtocolPlugin {
+	return registry.FindByScheme(scheme)
+}
+
+// ParseLink 将经典代理订阅链接（vless://, hysteria2://, socks5://, http:// 等）解析为统一中性 ProxyNodeDTO。
+func ParseLink(rawURL string) (*contracts.ProxyNodeDTO, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, fmt.Errorf("代理链接不能为空")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("解析 URL 失败: %w", err)
+	}
+	if u.Scheme == "" {
+		return nil, fmt.Errorf("缺少协议 Scheme")
+	}
+	p := FindByScheme(u.Scheme)
+	if p == nil {
+		return nil, fmt.Errorf("暂不支持协议 scheme %q 的代理链接", u.Scheme)
+	}
+	return p.ParseLink(u)
+}
+
+// RenderOutbound 将统一中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。
+func RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, error) {
+	if dto == nil {
+		return nil, fmt.Errorf("DTO 不能为空")
+	}
+	p := Find(dto.Protocol)
+	if p == nil {
+		return nil, fmt.Errorf("暂不支持将协议 %q 渲染为出站配置", dto.Protocol)
+	}
+	return p.RenderOutbound(dto)
+}
+
+// FormatLink 将统一中性 ProxyNodeDTO 导出为对应协议的标准订阅链接。
+func FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
+	if dto == nil {
+		return "", fmt.Errorf("DTO 不能为空")
+	}
+	p := Find(dto.Protocol)
+	if p == nil {
+		return "", fmt.Errorf("暂不支持将协议 %q 格式化为订阅链接", dto.Protocol)
+	}
+	return p.FormatLink(dto)
 }
 
 // AllDescriptors 获取所有已注册协议的描述符。

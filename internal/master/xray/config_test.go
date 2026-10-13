@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
@@ -2320,5 +2321,171 @@ func TestParseRelayEmail(t *testing.T) {
 	}
 	if _, _, ok := xray.ParseRelayEmail("u1.i2@panel.local"); ok {
 		t.Fatal("commercial user email should not match relay email")
+	}
+}
+
+// TestGenerate_CustomOutboundJSON 验证原生 OutboundJSON 配置能正确透传并覆盖 tag。
+func TestGenerate_CustomOutboundJSON(t *testing.T) {
+	outs := []models.ServerOutbound{
+		{
+			ID:           501,
+			Tag:          "my-custom-socks",
+			Protocol:     "custom",
+			Enabled:      true,
+			OutboundJSON: `{"protocol":"socks","settings":{"servers":[{"address":"10.0.0.1","port":1080}]},"streamSettings":{"network":"tcp"}}`,
+		},
+	}
+	raw, err := xray.Generate(nil, outs, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	outbounds := parsed["outbounds"].([]any)
+	found := false
+	for _, o := range outbounds {
+		om := o.(map[string]any)
+		if om["tag"] == "my-custom-socks" {
+			found = true
+			if om["protocol"] != "socks" {
+				t.Fatalf("protocol want socks, got %v", om["protocol"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("custom outbound not found in generated config")
+	}
+
+	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmp := filepath.Join(t.TempDir(), "custom.json")
+		_ = os.WriteFile(tmp, raw, 0644)
+		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("xray -test failed: %v, out: %s", err, string(out))
+		}
+	}
+}
+
+// TestGenerate_InterMachineRelayToMixedInbound 验证跨机连线至 Mixed 入站的全链路装配。
+func TestGenerate_InterMachineRelayToMixedInbound(t *testing.T) {
+	// 落地 Mixed 入站
+	mixedInb := models.Inbound{
+		ID:           301,
+		ServerID:     2,
+		Tag:          "mixed-land",
+		Protocol:     models.ProtocolMixed,
+		Port:         1080,
+		Enabled:      true,
+		Type:         models.InboundTypeUser,
+		InternalUUID: "b8045e7f-71ad-4674-8b65-66778899aabb",
+	}
+
+	// 前置出站连向 Mixed 301
+	targetRef := uint64(301)
+	frontOut := models.ServerOutbound{
+		ID:           401,
+		ServerID:     1,
+		Tag:          "relay-mixed-out",
+		Protocol:     "socks",
+		Enabled:      true,
+		InboundRef:   &targetRef,
+		InternalUUID: "11111111-2222-3333-4444-555555555555",
+	}
+
+	// 1. 生成落地机配置（Mixed 入站注入机间中继凭据）
+	ctxLand := &xray.GenerateContext{
+		ReferencingOutbounds: map[uint64][]models.ServerOutbound{
+			301: {frontOut},
+		},
+	}
+	rawLand, err := xray.Generate([]models.Inbound{mixedInb}, nil, nil, nil, ctxLand, "", "")
+	if err != nil {
+		t.Fatalf("Generate land failed: %v", err)
+	}
+	var parsedLand map[string]any
+	_ = json.Unmarshal(rawLand, &parsedLand)
+	inbs := parsedLand["inbounds"].([]any)
+	var mixedGenerated map[string]any
+	for _, inb := range inbs {
+		m := inb.(map[string]any)
+		if m["tag"] == "mixed-land" {
+			mixedGenerated = m
+			break
+		}
+	}
+	if mixedGenerated == nil {
+		t.Fatal("mixed-land not found in land config")
+	}
+	settings := mixedGenerated["settings"].(map[string]any)
+	accounts := settings["accounts"].([]any)
+	if len(accounts) != 1 {
+		t.Fatalf("accounts want 1, got %d", len(accounts))
+	}
+	acc := accounts[0].(map[string]any)
+	if acc["user"] != "relay_out_301" || acc["pass"] != "11111111-2222-3333-4444-555555555555" || acc["email"] != "relay.in_301.out_401@panel.local" {
+		t.Fatalf("unexpected relay account: %v", acc)
+	}
+
+	// 2. 生成前置机配置（前置出站自动渲染为 SOCKS5 出站）
+	ctxFront := &xray.GenerateContext{
+		RefTargets: map[uint64]contracts.RefTarget{
+			301: {
+				Inbound:    mixedInb,
+				ServerHost: "land.example.com",
+			},
+		},
+	}
+	rawFront, err := xray.Generate(nil, []models.ServerOutbound{frontOut}, nil, nil, ctxFront, "", "")
+	if err != nil {
+		t.Fatalf("Generate front failed: %v", err)
+	}
+	var parsedFront map[string]any
+	_ = json.Unmarshal(rawFront, &parsedFront)
+	outbs := parsedFront["outbounds"].([]any)
+	var frontGenerated map[string]any
+	for _, o := range outbs {
+		m := o.(map[string]any)
+		if m["tag"] == "relay-mixed-out" {
+			frontGenerated = m
+			break
+		}
+	}
+	if frontGenerated == nil {
+		t.Fatal("relay-mixed-out not found in front config")
+	}
+	if frontGenerated["protocol"] != "socks" {
+		t.Fatalf("front protocol want socks, got %v", frontGenerated["protocol"])
+	}
+	frontSettings := frontGenerated["settings"].(map[string]any)
+	servers := frontSettings["servers"].([]any)
+	srv0 := servers[0].(map[string]any)
+	if srv0["address"] != "land.example.com" || srv0["port"] != float64(1080) {
+		t.Fatalf("unexpected front server: %v", srv0)
+	}
+	users := srv0["users"].([]any)
+	u0 := users[0].(map[string]any)
+	if u0["user"] != "relay_out_301" || u0["pass"] != "11111111-2222-3333-4444-555555555555" {
+		t.Fatalf("unexpected front user credentials: %v", u0)
+	}
+
+	// 3. 真实 xray -test 二进制双向验证
+	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	if _, err := os.Stat(xrayBin); err == nil {
+		tmpLand := filepath.Join(t.TempDir(), "mixed_land.json")
+		_ = os.WriteFile(tmpLand, rawLand, 0644)
+		cmdL := exec.Command(xrayBin, "-test", "-config", tmpLand)
+		if out, err := cmdL.CombinedOutput(); err != nil {
+			t.Fatalf("Mixed land config xray -test failed: %v, out: %s", err, string(out))
+		}
+
+		tmpFront := filepath.Join(t.TempDir(), "mixed_front.json")
+		_ = os.WriteFile(tmpFront, rawFront, 0644)
+		cmdF := exec.Command(xrayBin, "-test", "-config", tmpFront)
+		if out, err := cmdF.CombinedOutput(); err != nil {
+			t.Fatalf("Mixed front config xray -test failed: %v, out: %s", err, string(out))
+		}
 	}
 }

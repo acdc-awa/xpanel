@@ -17,8 +17,8 @@ import (
 
 // validOutboundProtocol 出站协议白名单（与生成器支持范围保持一致）。
 func validOutboundProtocol(p string) bool {
-	switch p {
-	case "freedom", "blackhole", "vless", "socks":
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "freedom", "blackhole", "vless", "socks", "http", "hysteria", "custom":
 		return true
 	}
 	return false
@@ -44,6 +44,7 @@ type outboundForm struct {
 	Protocol           string  `json:"protocol" binding:"required,max=32"`
 	SettingsJSON       string  `json:"settings_json"`
 	StreamSettingsJSON string  `json:"stream_settings_json"`
+	OutboundJSON       string  `json:"outbound_json"` // 原生完整 Xray Outbound JSON
 	SendThrough        string  `json:"send_through"`
 	Enabled            *bool   `json:"enabled"`
 	Priority           *int    `json:"priority"`
@@ -211,10 +212,19 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	if !util.BindJSON(c, &req) {
 		return
 	}
-	// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
-	if err := xray.ValidateOutbound(req.SettingsJSON, req.StreamSettingsJSON); err != nil {
-		util.BadRequest(c, err.Error())
-		return
+	req.OutboundJSON = strings.TrimSpace(req.OutboundJSON)
+	if req.OutboundJSON != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(req.OutboundJSON), &m); err != nil {
+			util.BadRequest(c, "Outbound JSON 格式非法: "+err.Error())
+			return
+		}
+	} else {
+		// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
+		if err := xray.ValidateOutbound(req.SettingsJSON, req.StreamSettingsJSON); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
 	}
 	// ISSUE-13：tag 非空/同服务器唯一、协议白名单。
 	req.Tag = strings.TrimSpace(req.Tag)
@@ -233,7 +243,7 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		return
 	}
 	if !validOutboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks）")
+		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
 		return
 	}
 	// InboundRef 校验（引用存在 + 无环）与出站凭据生成
@@ -263,6 +273,7 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		Protocol:           req.Protocol,
 		SettingsJSON:       req.SettingsJSON,
 		StreamSettingsJSON: req.StreamSettingsJSON,
+		OutboundJSON:       req.OutboundJSON,
 		SendThrough:        req.SendThrough,
 		Enabled:            enabled,
 		Priority:           priority,
@@ -322,6 +333,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		Protocol           *string `json:"protocol"`
 		SettingsJSON       *string `json:"settings_json"`
 		StreamSettingsJSON *string `json:"stream_settings_json"`
+		OutboundJSON       *string `json:"outbound_json"`
 		SendThrough        *string `json:"send_through"`
 		Enabled            *bool   `json:"enabled"`
 		Priority           *int    `json:"priority"`
@@ -332,21 +344,37 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		return
 	}
 
-	// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
-	sj := ob.SettingsJSON
-	if req.SettingsJSON != nil {
-		sj = *req.SettingsJSON
+	targetOutboundJSON := ob.OutboundJSON
+	if req.OutboundJSON != nil {
+		targetOutboundJSON = strings.TrimSpace(*req.OutboundJSON)
 	}
-	ssj := ob.StreamSettingsJSON
-	if req.StreamSettingsJSON != nil {
-		ssj = *req.StreamSettingsJSON
-	}
-	if err := xray.ValidateOutbound(sj, ssj); err != nil {
-		util.BadRequest(c, err.Error())
-		return
+
+	if targetOutboundJSON != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(targetOutboundJSON), &m); err != nil {
+			util.BadRequest(c, "Outbound JSON 格式非法: "+err.Error())
+			return
+		}
+	} else {
+		// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
+		sj := ob.SettingsJSON
+		if req.SettingsJSON != nil {
+			sj = *req.SettingsJSON
+		}
+		ssj := ob.StreamSettingsJSON
+		if req.StreamSettingsJSON != nil {
+			ssj = *req.StreamSettingsJSON
+		}
+		if err := xray.ValidateOutbound(sj, ssj); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	updates := map[string]any{}
+	if req.OutboundJSON != nil {
+		updates["outbound_json"] = strings.TrimSpace(*req.OutboundJSON)
+	}
 	if req.Tag != nil {
 		tag := strings.TrimSpace(*req.Tag)
 		if tag == "" {
@@ -373,7 +401,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 	if req.Protocol != nil {
 		if !validOutboundProtocol(*req.Protocol) {
-			util.BadRequest(c, "不支持的出站协议: "+*req.Protocol+"（支持 freedom/blackhole/vless/socks）")
+			util.BadRequest(c, "不支持的出站协议: "+*req.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
 			return
 		}
 		if isReservedOutboundTag(ob.Tag) && *req.Protocol != ob.Protocol {

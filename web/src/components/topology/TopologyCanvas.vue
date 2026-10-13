@@ -73,6 +73,21 @@ interface BoxData {
   boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
 }
 
+function isOutboundDraft(out: any): boolean {
+  if (out.isDraftTunnel) return true
+  if (out.inbound_ref || out.owner_inbound_id || out.virtual || out.outbound_json) return false
+  if (out.protocol === 'freedom' || out.protocol === 'blackhole') return false
+  try {
+    const s = JSON.parse(out.settings_json || '{}')
+    if (out.protocol === 'vless') return !s.vnext?.[0]?.address
+    if (out.protocol === 'hysteria') return !s.address
+    if (out.protocol === 'socks' || out.protocol === 'http') return !s.servers?.[0]?.address
+  } catch {
+    return true
+  }
+  return false
+}
+
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
 const flowRef = ref<{
@@ -2136,17 +2151,18 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   />
                   <span
                     class="tag out-tag clickable"
-                    :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : (out.protocol === 'vless' && !out.inbound_ref) ? 'draft' : ''"
-                    :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : `出站「${out.tag}」`"
+                    :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : isOutboundDraft(out) ? 'draft' : ''"
+                    :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : isOutboundDraft(out) ? `待连线出站「${out.tag}」（拖拽右侧端点至目标入站完成绑定）` : `出站「${out.tag}」`"
                   >
-                    {{ out.isDraftTunnel ? '🔗 ' + out.tag : (out.protocol === 'vless' && !out.inbound_ref) ? '⚠️ ' + out.tag : out.tag }}
+                    {{ out.isDraftTunnel ? '🔗 ' + out.tag : isOutboundDraft(out) ? '⚠️ ' + out.tag : out.tag }}
                   </span>
                   <span v-if="out.isDraftTunnel" class="out-proto-badge draft" title="草稿直通：拖拽右侧端点至落地入站建立管道">待连线</span>
                   <span v-else-if="out.owner_inbound_id" class="out-proto-badge tunnel">LINK</span>
                   <span v-else-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
-                  <span v-else-if="out.protocol === 'vless' && !out.inbound_ref" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
+                  <span v-else-if="isOutboundDraft(out)" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
+                  <span v-else-if="out.outbound_json" class="out-proto-badge">JSON</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
                   <el-icon v-if="!out.virtual" class="row-edit-icon" title="编辑出站"><Edit /></el-icon>
 
