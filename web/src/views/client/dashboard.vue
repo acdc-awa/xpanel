@@ -407,11 +407,12 @@ function viewNotice(n: NoticeItem) {
   }
 }
 .dash-hero {
-  background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%);
-  border-radius: var(--x-radius);
+  background: linear-gradient(135deg, #3730a3 0%, #4f46e5 50%, #6366f1 100%);
+  border-radius: var(--x-radius-lg, 14px);
   padding: 22px;
   color: #fff;
-  box-shadow: var(--x-shadow-md);
+  box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   margin-bottom: 16px;
   position: relative;
   overflow: hidden;
@@ -457,6 +458,8 @@ function viewNotice(n: NoticeItem) {
       border: 1px solid rgba(255, 255, 255, 0.22);
       color: #fff;
       font-size: 11.5px;
+      font-family: var(--x-font-mono);
+      font-variant-numeric: tabular-nums;
     }
   }
 }
@@ -503,9 +506,12 @@ function viewNotice(n: NoticeItem) {
   }
 
   .stat-val {
-    font-size: 18px;
+    font-size: var(--x-font-2xl, 22px);
     font-weight: 700;
     white-space: nowrap;
+    font-family: var(--x-font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
     &.remain {
       color: #ffffff;
     }
@@ -519,16 +525,16 @@ function viewNotice(n: NoticeItem) {
   margin-bottom: 18px;
 
   .progress-bar-bg {
-    height: 6px;
+    height: 7px;
     background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+    border-radius: 4px;
     overflow: hidden;
   }
 
   .progress-bar-fill {
     height: 100%;
     background: #38bdf8;
-    border-radius: 3px;
+    border-radius: 4px;
     transition: width 0.3s ease, background-color 0.3s ease;
 
     &.is-warning {

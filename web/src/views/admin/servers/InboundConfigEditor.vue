@@ -304,21 +304,18 @@ const allowedSecurities = computed<InboundSecurity[]>(() => {
 
 const visibleTabs = computed(() => {
   const tabs = [
-    { key: 'basic', label: '基础配置' },
+    { key: 'basic', label: '基础网络' },
     { key: 'protocol', label: '协议参数' },
   ]
   if (localProtocol.value === 'vless') {
-    tabs.push({ key: 'transport', label: '传输层' })
+    tabs.push({ key: 'transport', label: '底层传输' })
   }
-  tabs.push(
-    { key: 'security', label: '安全层' },
-    { key: 'sockopt', label: '网络调优' },
-    { key: 'sniffing', label: '流量嗅探' },
-  )
+  tabs.push({ key: 'security', label: '安全加密' })
   if (localInboundType.value === 'user') {
-    tabs.push({ key: 'share', label: '订阅与分享' })
+    tabs.push({ key: 'share', label: '订阅与接入' })
   }
-  tabs.push({ key: 'advanced', label: '高级配置 (JSON)' })
+  tabs.push({ key: 'tuning', label: '调优与嗅探' })
+  tabs.push({ key: 'advanced', label: '底层 JSON' })
   return tabs
 })
 
@@ -1186,150 +1183,185 @@ watch(
       <el-form label-position="top">
         <!-- ==================== 1. 基础配置 Tab ==================== -->
         <div v-show="activeTab === 'basic'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-title">网络监听与基础参数</div>
-            <div class="form-grid">
-              <el-form-item label="入站标签 (Tag)">
-                <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
-              </el-form-item>
+          <!-- 微卡片 1：网络监听必填 -->
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span>网络监听与基础参数</span>
+              </div>
+              <div class="head-meta">基础网络层</div>
+            </div>
+            <div class="x-micro-card__body">
+              <div class="form-grid-2">
+                <el-form-item label="入站标签 (Tag)">
+                  <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
+                </el-form-item>
 
-              <el-form-item label="备注 (Remark)">
-                <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
-              </el-form-item>
+                <el-form-item label="备注 (Remark)">
+                  <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
+                </el-form-item>
 
-              <el-form-item label="代理协议">
-                <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
-                  <el-option label="VLESS" value="vless" />
-                  <el-option label="Hysteria 2" value="hysteria" />
-                  <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
-                  <el-option label="Mixed (SOCKS5 / HTTP 混合代理)" value="mixed" />
-                </el-select>
-              </el-form-item>
+                <el-form-item label="代理协议">
+                  <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
+                    <el-option label="VLESS" value="vless" />
+                    <el-option label="Hysteria 2" value="hysteria" />
+                    <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
+                    <el-option label="Mixed (SOCKS5 / HTTP 混合代理)" value="mixed" />
+                  </el-select>
+                </el-form-item>
 
+                <el-form-item label="监听端口">
+                  <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
+                </el-form-item>
 
-              <el-form-item label="监听端口">
-                <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" />
-              </el-form-item>
+                <el-form-item label="监听地址" style="grid-column: span 2">
+                  <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="font-mono-num" />
+                </el-form-item>
+              </div>
+            </div>
+          </div>
 
-              <el-form-item label="监听地址">
-                <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" />
-              </el-form-item>
+          <!-- 微卡片 2：计费与配额策略 -->
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>计费策略与流量配额</span>
+              </div>
+              <div class="head-meta">用量与生命周期</div>
+            </div>
+            <div class="x-micro-card__body">
+              <div class="form-grid-2">
+                <el-form-item label="流量倍率">
+                  <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" class="font-mono-num" />
+                </el-form-item>
 
-              <el-form-item label="流量倍率">
-                <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" />
-              </el-form-item>
+                <el-form-item label="流量配额 (GB)">
+                  <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" class="font-mono-num" />
+                </el-form-item>
 
-              <el-form-item label="流量配额 (GB)">
-                <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" />
-              </el-form-item>
+                <el-form-item label="流量重置周期">
+                  <el-select v-model="localTrafficReset" style="width: 100%">
+                    <el-option label="不重置 (never)" value="never" />
+                    <el-option label="每日重置 (daily)" value="daily" />
+                    <el-option label="每周重置 (weekly)" value="weekly" />
+                    <el-option label="每月重置 (monthly)" value="monthly" />
+                  </el-select>
+                </el-form-item>
 
-              <el-form-item label="流量重置周期">
-                <el-select v-model="localTrafficReset" style="width: 100%">
-                  <el-option label="不重置 (never)" value="never" />
-                  <el-option label="每日重置 (daily)" value="daily" />
-                  <el-option label="每周重置 (weekly)" value="weekly" />
-                  <el-option label="每月重置 (monthly)" value="monthly" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="到期时间">
-                <el-date-picker
-                  v-model="localExpiryTime"
-                  type="datetime"
-                  placeholder="留空为永久"
-                  style="width: 100%"
-                  value-format="YYYY-MM-DDTHH:mm:ssZ"
-                />
-              </el-form-item>
+                <el-form-item label="到期时间">
+                  <el-date-picker
+                    v-model="localExpiryTime"
+                    type="datetime"
+                    placeholder="留空为永久有效"
+                    style="width: 100%"
+                    value-format="YYYY-MM-DDTHH:mm:ssZ"
+                  />
+                </el-form-item>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- ==================== 2. 协议参数 Tab ==================== -->
         <div v-show="activeTab === 'protocol'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-title">{{ localProtocol === 'hysteria' ? 'HYSTERIA 2' : localProtocol.toUpperCase() }} 协议参数</div>
-            <VlessSettings
-              v-if="localProtocol === 'vless'"
-              v-model="vlessForm"
-              :inbound-type="localInboundType"
-              :internal-u-u-i-d="localInternalUUID"
-              :inbound-id="props.inboundId"
-              :allow-vision="allowVisionFlow"
-            />
-            <HysteriaSettings
-              v-else-if="localProtocol === 'hysteria'"
-              v-model="hysteriaForm"
-              :inbound-type="localInboundType"
-              :internal-u-u-i-d="localInternalUUID"
-              :inbound-id="props.inboundId"
-            />
-            <DokodemoSettings
-              v-else-if="localProtocol === 'dokodemo-door'"
-              v-model="dokodemoForm"
-              :current-inbound-id="props.inboundId"
-              :listen-port="localPort"
-              :listen-address="localListen"
-            />
-            <SocksHttpSettings
-              v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'"
-              v-model="socksHttpForm"
-              :protocol="localProtocol"
-            />
-          </div>
+          <VlessSettings
+            v-if="localProtocol === 'vless'"
+            v-model="vlessForm"
+            :inbound-type="localInboundType"
+            :internal-u-u-i-d="localInternalUUID"
+            :inbound-id="props.inboundId"
+            :allow-vision="allowVisionFlow"
+          />
+          <HysteriaSettings
+            v-else-if="localProtocol === 'hysteria'"
+            v-model="hysteriaForm"
+            :inbound-type="localInboundType"
+            :internal-u-u-i-d="localInternalUUID"
+            :inbound-id="props.inboundId"
+          />
+          <DokodemoSettings
+            v-else-if="localProtocol === 'dokodemo-door'"
+            v-model="dokodemoForm"
+            :current-inbound-id="props.inboundId"
+            :listen-port="localPort"
+            :listen-address="localListen"
+          />
+          <SocksHttpSettings
+            v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'"
+            v-model="socksHttpForm"
+            :protocol="localProtocol"
+          />
         </div>
 
         <!-- ==================== 3. 传输层 Tab (仅限 VLESS) ==================== -->
         <div v-if="localProtocol === 'vless'" v-show="activeTab === 'transport'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-title">底层传输协议 (Transport)</div>
-            <el-form-item label="传输协议类型">
-              <el-radio-group v-model="localNetwork" size="default" @change="onNetworkChange">
-                <el-radio-button value="tcp">TCP (RAW)</el-radio-button>
-                <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
-            <div style="margin-top: 16px">
-              <TcpTransport v-if="localNetwork === 'tcp'" v-model="tcpForm" />
-              <XhttpTransport v-else-if="localNetwork === 'xhttp'" v-model="xhttpForm" />
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+                <span>底层传输协议 (Transport Protocol)</span>
+              </div>
+              <div class="head-meta">网络流封装</div>
+            </div>
+            <div class="x-micro-card__body">
+              <el-form-item label="传输协议类型" style="margin-bottom: 0">
+                <el-radio-group v-model="localNetwork" size="small" @change="onNetworkChange">
+                  <el-radio-button value="tcp">TCP (RAW 推荐)</el-radio-button>
+                  <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
             </div>
           </div>
+
+          <TcpTransport v-if="localNetwork === 'tcp'" v-model="tcpForm" />
+          <XhttpTransport v-else-if="localNetwork === 'xhttp'" v-model="xhttpForm" />
         </div>
 
         <!-- ==================== 4. 安全层 Tab ==================== -->
         <div v-show="activeTab === 'security'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-title">安全加密层 (Security)</div>
-            <el-form-item label="安全协议类型">
-              <el-radio-group v-model="localTlsType" size="default" @change="onSecurityChange">
-                <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无 (none)</el-radio-button>
-                <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">TLS</el-radio-button>
-                <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">Reality</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
-            <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
-              <el-icon><InfoFilled /></el-icon>
-              <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>安全加密协议 (Security Layer)</span>
+              </div>
+              <div class="head-meta">TLS / 伪装认证</div>
             </div>
-            <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" class="compact-tip orange">
-              <el-icon><WarningFilled /></el-icon>
-              <span>Mixed/SOCKS 套用 TLS 后，客户端须支持 HTTPS 代理或 SOCKS over TLS。</span>
+            <div class="x-micro-card__body">
+              <el-form-item label="安全协议类型" style="margin-bottom: 0">
+                <el-radio-group v-model="localTlsType" size="small" @change="onSecurityChange">
+                  <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无加密 (none)</el-radio-button>
+                  <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">标准 TLS</el-radio-button>
+                  <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">REALITY 伪装</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
             </div>
+          </div>
 
-            <div style="margin-top: 14px">
-              <TlsSecurity
-                v-if="localTlsType === 'tls'"
-                v-model="tlsForm"
-                @update:cert-id="(id) => emit('update:certId', id)"
-              />
-              <RealitySecurity
-                v-else-if="localTlsType === 'reality'"
-                v-model="realityForm"
-                v-model:fingerprint="realityFingerprint"
-              />
-              <div v-else class="compact-tip gray">
+          <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
+            <el-icon><InfoFilled /></el-icon>
+            <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
+          </div>
+          <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" class="compact-tip orange">
+            <el-icon><WarningFilled /></el-icon>
+            <span>Mixed/SOCKS 套用 TLS 后，客户端须支持 HTTPS 代理或 SOCKS over TLS。</span>
+          </div>
+
+          <TlsSecurity
+            v-if="localTlsType === 'tls'"
+            v-model="tlsForm"
+            @update:cert-id="(id) => emit('update:certId', id)"
+          />
+          <RealitySecurity
+            v-else-if="localTlsType === 'reality'"
+            v-model="realityForm"
+            v-model:fingerprint="realityFingerprint"
+          />
+          <div v-else-if="localTlsType === 'none'" class="x-micro-card">
+            <div class="x-micro-card__body">
+              <div class="compact-tip gray">
                 <el-icon><InfoFilled /></el-icon>
                 <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
               </div>
@@ -1337,56 +1369,7 @@ watch(
           </div>
         </div>
 
-        <!-- ==================== 4.5. 网络调优 Tab (Sockopt) ==================== -->
-        <div v-show="activeTab === 'sockopt'" class="tab-pane">
-          <div class="form-card">
-            <SockoptSettings v-model="sockoptForm" />
-          </div>
-        </div>
-
-        <!-- ==================== 5. 嗅探 Tab ==================== -->
-        <div v-show="activeTab === 'sniffing'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-title">流量嗅探 (Sniffing)</div>
-            <div class="form-grid">
-              <el-form-item label="启用嗅探">
-                <el-switch
-                  v-model="sniffingForm.enabled"
-                  active-text="开启流量嗅探"
-                />
-              </el-form-item>
-
-              <el-form-item label="嗅探目标协议">
-                <el-checkbox-group
-                  v-model="sniffingForm.destOverride"
-                  :disabled="!sniffingForm.enabled"
-                >
-                  <el-checkbox value="http" label="HTTP" />
-                  <el-checkbox value="tls" label="TLS" />
-                  <el-checkbox value="quic" label="QUIC" />
-                </el-checkbox-group>
-              </el-form-item>
-
-              <el-form-item label="仅提取元数据 (MetadataOnly)">
-                <el-switch
-                  v-model="sniffingForm.metadataOnly"
-                  :disabled="!sniffingForm.enabled"
-                  active-text="开启"
-                />
-              </el-form-item>
-
-              <el-form-item label="仅用于路由 (RouteOnly)">
-                <el-switch
-                  v-model="sniffingForm.routeOnly"
-                  :disabled="!sniffingForm.enabled"
-                  active-text="开启"
-                />
-              </el-form-item>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== 6. 订阅与分享 Tab (仅用户入站) ==================== -->
+        <!-- ==================== 5. 订阅与分享 Tab (仅用户入站) ==================== -->
         <div v-if="localInboundType === 'user'" v-show="activeTab === 'share'" class="tab-pane">
           <BusinessSettings
             :inbound-type="localInboundType"
@@ -1418,14 +1401,63 @@ watch(
           />
         </div>
 
+        <!-- ==================== 6. 调优与嗅探 Tab ==================== -->
+        <div v-show="activeTab === 'tuning'" class="tab-pane">
+          <!-- 流量嗅探微卡片 -->
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-violet-500"></span>
+                <span>流量嗅探 (Sniffing)</span>
+              </div>
+              <div class="head-meta">
+                <el-switch
+                  v-model="sniffingForm.enabled"
+                  active-text="启用流量嗅探"
+                  size="small"
+                />
+              </div>
+            </div>
+            <div v-if="sniffingForm.enabled" class="x-micro-card__body">
+              <div class="form-grid-2">
+                <el-form-item label="嗅探目标协议" style="grid-column: span 2">
+                  <el-checkbox-group v-model="sniffingForm.destOverride">
+                    <el-checkbox value="http" label="HTTP 域名" />
+                    <el-checkbox value="tls" label="TLS SNI" />
+                    <el-checkbox value="quic" label="QUIC" />
+                  </el-checkbox-group>
+                </el-form-item>
+
+                <el-form-item label="仅提取元数据 (MetadataOnly)">
+                  <el-switch
+                    v-model="sniffingForm.metadataOnly"
+                    active-text="仅提取不覆盖连接"
+                  />
+                </el-form-item>
+
+                <el-form-item label="仅用于路由 (RouteOnly)">
+                  <el-switch
+                    v-model="sniffingForm.routeOnly"
+                    active-text="仅供出站路由分流决策"
+                  />
+                </el-form-item>
+              </div>
+            </div>
+          </div>
+
+          <!-- Socket 底层网络配置组件 -->
+          <SockoptSettings v-model="sockoptForm" />
+        </div>
+
         <!-- ==================== 7. 高级配置 Tab (原始 Config JSON 编辑器) ==================== -->
         <div v-show="activeTab === 'advanced'" class="tab-pane">
-          <div class="form-card">
-            <div class="card-head-flex" style="margin-bottom: 12px">
-              <div class="card-title" style="margin-bottom: 0">
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
                 <span>入站底层配置 (Config JSON)</span>
               </div>
-              <div style="display: flex; align-items: center; gap: 10px">
+              <div class="head-meta" style="display: flex; align-items: center; gap: 8px">
                 <el-tag v-if="!jsonError" type="success" size="small">
                   <el-icon><Check /></el-icon>&nbsp;语法正确
                 </el-tag>
@@ -1437,13 +1469,15 @@ watch(
                 </el-button>
               </div>
             </div>
-            <div class="json-editor-wrap">
-              <CodeEditor
-                :model-value="rawJsonText"
-                language="json"
-                height="480px"
-                @update:model-value="onRawJsonInput"
-              />
+            <div class="x-micro-card__body">
+              <div class="json-editor-wrap">
+                <CodeEditor
+                  :model-value="rawJsonText"
+                  language="json"
+                  height="480px"
+                  @update:model-value="onRawJsonInput"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1468,7 +1502,7 @@ watch(
           <el-input v-model="layerQuickForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
         </el-form-item>
         <el-form-item label="对外端口">
-          <el-input-number v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" />
+          <el-input-number v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
         </el-form-item>
       </div>
       <el-form-item label="对外安全层" style="margin-bottom: 0">
@@ -1509,88 +1543,29 @@ watch(
 .form-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .tab-pane {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.form-card {
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 16px 18px;
-}
-
-.card-title {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--x-text);
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.card-head-flex {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 18px;
-
-  :deep(.el-form-item) {
-    margin-bottom: 14px;
-  }
-}
-
-.type-segmented-group {
-  width: 100%;
-  display: flex !important;
-
-  :deep(.el-radio-button) {
-    flex: 1;
-    display: flex;
-
-    .el-radio-button__inner {
-      width: 100%;
-      padding: 8px 4px;
-      font-size: 13px;
-      text-align: center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
+  gap: 12px;
 }
 
 .json-editor-wrap {
   border: 1px solid var(--x-border);
-  border-radius: 6px;
+  border-radius: var(--x-radius);
   overflow: hidden;
-}
-
-@media (max-width: 640px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .compact-tip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: var(--x-font-xs);
   padding: 8px 12px;
-  border-radius: 6px;
-  line-height: 1.4;
+  border-radius: var(--x-radius);
+  line-height: var(--x-leading-tight);
 
   .el-icon {
     font-size: 14px;

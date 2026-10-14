@@ -578,7 +578,7 @@ onUnmounted(() => {
         <div class="desktop-table-view">
           <el-table :data="dashData?.server_matrix || []" size="small" style="width: 100%">
             <!-- 1. 节点与地址 -->
-            <el-table-column label="服务器" min-width="110">
+            <el-table-column label="服务器" min-width="120">
               <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 5px">
                   <span class="sort-tag">#{{ row.sort_order ?? 0 }}</span>
@@ -589,7 +589,7 @@ onUnmounted(() => {
             </el-table-column>
 
             <!-- 2. 状态与心跳 -->
-            <el-table-column label="状态" width="105">
+            <el-table-column label="状态" width="110">
               <template #default="{ row }">
                 <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
                   <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
@@ -602,39 +602,39 @@ onUnmounted(() => {
             </el-table-column>
 
             <!-- 3. 系统负载 (CPU + 内存复合) -->
-            <el-table-column label="负载 (CPU / 内存)" width="145">
+            <el-table-column label="负载 (CPU / 内存)" width="150">
               <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px; font-size: 11px" class="cell-mono">
-                  <span class="muted" style="font-size: 10px; width: 28px">CPU</span>
+                  <span class="muted" style="font-size: 10px; width: 26px">CPU</span>
                   <el-progress
                     :percentage="Math.min(100, Math.round(row.cpu || 0))"
                     :color="row.cpu > 80 ? '#ef4444' : row.cpu > 50 ? '#f59e0b' : '#10b981'"
                     :stroke-width="4"
                     :show-text="false"
-                    style="width: 42px"
+                    style="width: 44px"
                   />
-                  <span>{{ (row.cpu || 0).toFixed(0) }}%</span>
+                  <span style="min-width: 32px; text-align: right">{{ (row.cpu || 0).toFixed(0) }}%</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 2px" class="cell-mono">
-                  <span class="muted" style="font-size: 10px; width: 28px">MEM</span>
+                  <span class="muted" style="font-size: 10px; width: 26px">MEM</span>
                   <el-progress
                     :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
                     color="#3b82f6"
                     :stroke-width="4"
                     :show-text="false"
-                    style="width: 42px"
+                    style="width: 44px"
                   />
-                  <span>{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
+                  <span style="min-width: 32px; text-align: right">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
                 </div>
               </template>
             </el-table-column>
 
             <!-- 4. 实时速率与在线设备 -->
-            <el-table-column label="速率 / 在线" min-width="125">
+            <el-table-column label="速率 / 在线" min-width="140">
               <template #default="{ row }">
-                <div class="cell-mono" style="font-size: 11px">
+                <div class="cell-mono" style="font-size: 11px; display: flex; gap: 6px">
                   <span style="color: #0284c7">↓{{ formatBandwidth(row.rx_rate) }}</span>
-                  <span style="color: #6366f1; margin-left: 4px">↑{{ formatBandwidth(row.tx_rate) }}</span>
+                  <span style="color: #6366f1">↑{{ formatBandwidth(row.tx_rate) }}</span>
                 </div>
                 <div class="muted cell-mono" style="font-size: 10.5px; margin-top: 2px">
                   在线：<b class="online-link" @click="openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
@@ -1035,8 +1035,8 @@ onUnmounted(() => {
   background: var(--x-card);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius);
-  box-shadow: var(--x-shadow);
-  padding: 14px 16px;
+  box-shadow: var(--x-shadow-xs, var(--x-shadow));
+  padding: 13px 15px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1052,7 +1052,60 @@ onUnmounted(() => {
   &:hover {
     transform: translateY(-2px);
     box-shadow: var(--x-shadow-md);
-    border-color: rgba(99, 102, 241, 0.25);
+  }
+
+  &.card-cyan {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), var(--x-card) 75%);
+    border-color: rgba(6, 182, 212, 0.24);
+    &:hover { border-color: rgba(6, 182, 212, 0.45); }
+    .kpi-icon-box { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
+    .kpi-label { color: #0891b2; }
+  }
+  &.card-purple {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), var(--x-card) 75%);
+    border-color: rgba(168, 85, 247, 0.24);
+    &:hover { border-color: rgba(168, 85, 247, 0.45); }
+    .kpi-icon-box { background: rgba(168, 85, 247, 0.14); color: #9333ea; }
+    .kpi-label { color: #9333ea; }
+  }
+  &.card-blue {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), var(--x-card) 75%);
+    border-color: rgba(59, 130, 246, 0.24);
+    &:hover { border-color: rgba(59, 130, 246, 0.45); }
+    .kpi-icon-box { background: rgba(59, 130, 246, 0.14); color: #2563eb; }
+    .kpi-label { color: #2563eb; }
+  }
+  &.card-emerald {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), var(--x-card) 75%);
+    border-color: rgba(16, 185, 129, 0.24);
+    &:hover { border-color: rgba(16, 185, 129, 0.45); }
+    .kpi-icon-box { background: rgba(16, 185, 129, 0.14); color: #059669; }
+    .kpi-label { color: #059669; }
+  }
+  &.card-indigo {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), var(--x-card) 75%);
+    border-color: rgba(99, 102, 241, 0.24);
+    &:hover { border-color: rgba(99, 102, 241, 0.45); }
+    .kpi-icon-box { background: rgba(99, 102, 241, 0.14); color: #4f46e5; }
+    .kpi-label { color: #4f46e5; }
+  }
+  &.card-amber {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), var(--x-card) 75%);
+    border-color: rgba(245, 158, 11, 0.24);
+    &:hover { border-color: rgba(245, 158, 11, 0.45); }
+    .kpi-icon-box { background: rgba(245, 158, 11, 0.14); color: #d97706; }
+    .kpi-label { color: #d97706; }
+  }
+}
+
+html.dark {
+  .kpi-card {
+    &.card-cyan   { .kpi-label { color: #22d3ee; } .kpi-icon-box { color: #22d3ee; } }
+    &.card-purple { .kpi-label { color: #c084fc; } .kpi-icon-box { color: #c084fc; } }
+    &.card-blue   { .kpi-label { color: #60a5fa; } .kpi-icon-box { color: #60a5fa; } }
+    &.card-emerald{ .kpi-label { color: #34d399; } .kpi-icon-box { color: #34d399; } }
+    &.card-indigo { .kpi-label { color: #818cf8; } .kpi-icon-box { color: #818cf8; } }
+    &.card-amber  { .kpi-label { color: #fbbf24; } .kpi-icon-box { color: #fbbf24; } }
   }
 }
 
@@ -1073,13 +1126,6 @@ onUnmounted(() => {
   }
 }
 
-.card-cyan .kpi-icon-box { background: var(--x-info-soft, #e0f2fe); color: var(--x-info, #0284c7); }
-.card-purple .kpi-icon-box { background: var(--x-primary-soft, #f3e8ff); color: var(--x-primary, #9333ea); }
-.card-blue .kpi-icon-box { background: var(--x-info-soft, #dbeafe); color: #3b82f6; }
-.card-emerald .kpi-icon-box { background: var(--x-success-soft, #d1fae5); color: var(--x-success, #059669); }
-.card-indigo .kpi-icon-box { background: var(--x-primary-soft, #e0e7ff); color: var(--x-primary, #4338ca); }
-.card-amber .kpi-icon-box { background: var(--x-warning-soft, #fef3c7); color: var(--x-warning, #d97706); }
-
 .kpi-content {
   display: flex;
   flex-direction: column;
@@ -1089,12 +1135,12 @@ onUnmounted(() => {
 }
 
 .kpi-label {
-  font-size: 12px;
-  color: var(--x-text-2);
-  font-weight: 500;
+  font-size: var(--x-font-xs, 11.5px);
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: 0.01em;
 
   @media (max-width: 768px) {
     font-size: 11px;
@@ -1102,7 +1148,7 @@ onUnmounted(() => {
 }
 
 .kpi-val {
-  font-size: 17px;
+  font-size: var(--x-font-xl, 18.5px);
   font-weight: 700;
   color: var(--x-text);
   margin: 2px 0 1px;
@@ -1110,18 +1156,22 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 
   @media (max-width: 768px) {
-    font-size: 14.5px;
+    font-size: 15px;
   }
 }
 
 .kpi-sub {
-  font-size: 11px;
+  font-size: var(--x-font-xs, 10.5px);
   color: var(--x-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
 
   @media (max-width: 768px) {
     font-size: 10px;

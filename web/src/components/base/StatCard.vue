@@ -1,20 +1,24 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import type { Component } from 'vue'
 
 defineProps<{
   icon: Component
-  value: string
+  value: string | number
   label: string
-  tone?: 'purple' | 'green' | 'blue' | 'orange'
+  sub?: string
+  tone?: 'purple' | 'green' | 'blue' | 'orange' | 'cyan' | 'amber' | 'emerald' | 'indigo'
 }>()
 </script>
 
 <template>
   <div class="x-stat-card">
-    <div class="x-stat-icon" :class="tone ?? 'purple'">
-      <el-icon :size="20"><component :is="icon" /></el-icon>
+    <div class="x-stat-card__top">
+      <span class="x-stat-label">{{ label }}</span>
+      <div class="x-stat-icon" :class="tone ?? 'purple'">
+        <el-icon :size="18"><component :is="icon" /></el-icon>
+      </div>
     </div>
-    <div class="x-stat-value">{{ value }}</div>
-    <div class="x-stat-label">{{ label }}</div>
+    <div class="x-stat-value font-mono-num">{{ value }}</div>
+    <div v-if="sub" class="x-stat-sub font-mono-num">{{ sub }}</div>
   </div>
 </template>

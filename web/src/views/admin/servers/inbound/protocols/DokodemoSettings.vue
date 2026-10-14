@@ -108,14 +108,14 @@ const targetSummaryText = computed(() => {
       <div class="pipeline-flow">
         <div class="pipeline-node inbound">
           <span class="node-tag">入站监听</span>
-          <span class="node-val" :title="`监听 ${listenAddress || '0.0.0.0'}:${listenPort || 443}`">
+          <span class="node-val font-mono-num" :title="`监听 ${listenAddress || '0.0.0.0'}:${listenPort || 443}`">
             {{ listenAddress || '0.0.0.0' }}:{{ listenPort || 443 }}
           </span>
         </div>
         <span class="pipeline-arrow">➔</span>
         <div class="pipeline-node rule">
           <span class="node-tag">直达分流</span>
-          <span class="node-val">Tag 独占规则</span>
+          <span class="node-val">Tag 独占通道</span>
         </div>
         <span class="pipeline-arrow">➔</span>
         <div
@@ -123,115 +123,135 @@ const targetSummaryText = computed(() => {
           :class="{ empty: modelValue.target_mode === 'draft' || (!modelValue.target_inbound_id && !modelValue.target_address) }"
         >
           <span class="node-tag">目标出口</span>
-          <span class="node-val" :title="targetSummaryText">{{ targetSummaryText }}</span>
+          <span class="node-val font-mono-num" :title="targetSummaryText">{{ targetSummaryText }}</span>
         </div>
       </div>
       <div class="pipeline-hint">
-        四层直通管道：入站监听本地流量，出站通过专属路由通道转发至目标。入站监听的端口与 IP 请在「基础配置」调整。
+        四层直通管道：入站监听本地流量，出站通过专属路由通道转发至目标。
       </div>
     </div>
 
-    <div style="margin-bottom: 14px">
-      <el-radio-group :model-value="modelValue.target_mode" size="small" @change="onModeChange">
-        <el-radio-button value="inbound">指定目标入站</el-radio-button>
-        <el-radio-button value="manual">手动指定远程目标</el-radio-button>
-        <el-radio-button value="draft">留空待连线 (草稿)</el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <!-- 模式一：指定入站 -->
-    <div v-if="modelValue.target_mode === 'inbound'" class="form-grid">
-      <el-form-item label="直通目标入站" style="grid-column: 1 / -1">
-        <el-select
-          :model-value="modelValue.target_inbound_id || undefined"
-          filterable
-          placeholder="选择要直通的目标入站"
-          style="width: 100%"
-          @update:model-value="(v: any) => updateField('target_inbound_id', Number(v || 0))"
-        >
-          <el-option
-            v-for="item in candidateInbounds"
-            :key="item.id"
-            :label="`[${serverMap[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`"
-            :value="item.id"
-          />
-        </el-select>
-      </el-form-item>
-      <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-          title="所选目标入站未启用 Proxy Protocol，无法透传客户端真实 IP，可能导致连接异常。"
-        />
+    <!-- 微卡片 1: 转发目标定义 -->
+    <div class="x-micro-card">
+      <div class="x-micro-card__head">
+        <div class="head-title">
+          <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+          <span>转发目标出口 (Target Destination)</span>
+        </div>
+        <div class="head-meta">
+          <el-radio-group :model-value="modelValue.target_mode" size="small" @change="onModeChange">
+            <el-radio-button value="inbound">指定目标入站</el-radio-button>
+            <el-radio-button value="manual">手动指定远程目标</el-radio-button>
+            <el-radio-button value="draft">草稿留空</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
-    </div>
+      <div class="x-micro-card__body">
+        <!-- 模式一：指定入站 -->
+        <div v-if="modelValue.target_mode === 'inbound'" class="form-grid-2">
+          <el-form-item label="直通目标入站" style="grid-column: 1 / -1">
+            <el-select
+              :model-value="modelValue.target_inbound_id || undefined"
+              filterable
+              placeholder="选择要直通的目标入站"
+              style="width: 100%"
+              @update:model-value="(v: any) => updateField('target_inbound_id', Number(v || 0))"
+            >
+              <el-option
+                v-for="item in candidateInbounds"
+                :key="item.id"
+                :label="`[${serverMap[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+          <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+              title="所选目标入站未启用 Proxy Protocol，无法透传真实客户端 IP。"
+            />
+          </div>
+        </div>
 
-    <!-- 模式二：手动指定 -->
-    <div v-else-if="modelValue.target_mode === 'manual'" class="form-grid">
-      <el-form-item label="转发目标地址 (Target Address)">
-        <el-input
-          :model-value="modelValue.target_address"
-          placeholder="远程 IP 或域名，如 1.2.3.4"
-          @input="(v: string) => updateField('target_address', v)"
-        />
-      </el-form-item>
-      <el-form-item label="转发目标端口 (Target Port)">
-        <el-input-number
-          :model-value="modelValue.target_port"
-          :min="1"
-          :max="65535"
-          style="width: 100%"
-          @update:model-value="(v: any) => updateField('target_port', Number(v || 0))"
-        />
-      </el-form-item>
-      <div style="grid-column: 1 / -1; margin-top: -6px; margin-bottom: 6px">
-        <span class="muted" style="font-size: 11.5px">
-          提示：上述为数据包转发的目标端点，本入站本身的监听端口（:{{ listenPort || 443 }}）请在「基础配置」中修改。
-        </span>
-      </div>
-    </div>
+        <!-- 模式二：手动指定 -->
+        <div v-else-if="modelValue.target_mode === 'manual'" class="form-grid-2">
+          <el-form-item label="转发目标地址 (Target Address)">
+            <el-input
+              :model-value="modelValue.target_address"
+              placeholder="远程 IP 或域名，如 1.2.3.4"
+              class="font-mono-num"
+              @input="(v: string) => updateField('target_address', v)"
+            />
+          </el-form-item>
+          <el-form-item label="转发目标端口 (Target Port)">
+            <el-input-number
+              :model-value="modelValue.target_port"
+              :min="1"
+              :max="65535"
+              style="width: 100%"
+              class="font-mono-num"
+              @update:model-value="(v: any) => updateField('target_port', Number(v || 0))"
+            />
+          </el-form-item>
+        </div>
 
-    <!-- 模式三：草稿留空 -->
-    <div v-else class="draft-tip-box">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="草稿状态：未指定目标地址与端口"
-        description="可在拓扑画布中拖拽连线绑定目标入站。未绑定前不会下发此转发规则。"
-      />
-    </div>
-
-    <!-- 转发协议 (TCP / UDP) 与 PROXY Protocol -->
-    <div class="form-grid" style="margin-top: 14px">
-      <el-form-item label="转发协议">
-        <el-select
-          :model-value="modelValue.network || 'tcp,udp'"
-          style="width: 100%"
-          @update:model-value="(v: string) => updateField('network', v)"
-        >
-          <el-option label="TCP + UDP" value="tcp,udp" />
-          <el-option label="仅 TCP" value="tcp" />
-          <el-option label="仅 UDP" value="udp" />
-        </el-select>
-      </el-form-item>
-
-      <el-form-item>
-        <template #label>
-          <span style="display: inline-flex; align-items: center; gap: 4px">
-            透传真实 IP (Proxy Protocol v2)
-            <TipIcon content="开启后直通出站向落地入站发送 PROXY Protocol v2 报文。落地入站须开启「接收 Proxy Protocol」；若落地为第三方普通服务或未开启 PP，请关闭此项。" />
-          </span>
-        </template>
-        <div style="padding-top: 6px">
-          <el-switch
-            :model-value="modelValue.proxy_protocol !== false"
-            active-text="发送 PPv2 报文"
-            @update:model-value="(v: any) => updateField('proxy_protocol', Boolean(v))"
+        <!-- 模式三：草稿留空 -->
+        <div v-else class="draft-tip-box">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            title="草稿状态：未指定目标地址与端口"
+            description="可在拓扑画布中连线绑定目标入站。"
           />
         </div>
-      </el-form-item>
+      </div>
+    </div>
+
+    <!-- 微卡片 2: 传输协议与 Proxy Protocol -->
+    <div class="x-micro-card">
+      <div class="x-micro-card__head">
+        <div class="head-title">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span>四层传输协议与透传策略</span>
+        </div>
+        <div class="head-meta">
+          <span>直通网络层</span>
+        </div>
+      </div>
+      <div class="x-micro-card__body">
+        <div class="form-grid-2">
+          <el-form-item label="转发传输协议">
+            <el-select
+              :model-value="modelValue.network || 'tcp,udp'"
+              style="width: 100%"
+              @update:model-value="(v: string) => updateField('network', v)"
+            >
+              <el-option label="TCP + UDP" value="tcp,udp" />
+              <el-option label="仅 TCP" value="tcp" />
+              <el-option label="仅 UDP" value="udp" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item>
+            <template #label>
+              <span style="display: inline-flex; align-items: center; gap: 4px">
+                透传真实客户端 IP (Proxy Protocol v2)
+                <TipIcon content="开启后向落地端发送 PROXY Protocol v2 报文。落地端须开启「接收 Proxy Protocol」；若落地为普通外部 Web 服务请关闭此项。" />
+              </span>
+            </template>
+            <div style="padding-top: 4px">
+              <el-switch
+                :model-value="modelValue.proxy_protocol !== false"
+                active-text="发送 PPv2 报文"
+                @update:model-value="(v: any) => updateField('proxy_protocol', Boolean(v))"
+              />
+            </div>
+          </el-form-item>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -242,14 +262,8 @@ const targetSummaryText = computed(() => {
   flex-direction: column;
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 18px;
-
-  :deep(.el-form-item) {
-    margin-bottom: 14px;
-  }
+:deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 .pipeline-banner {
@@ -257,7 +271,7 @@ const targetSummaryText = computed(() => {
   border: 1px solid var(--x-border, #e2e8f0);
   border-radius: var(--x-radius, 8px);
   padding: 12px 14px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .pipeline-flow {
@@ -324,13 +338,10 @@ const targetSummaryText = computed(() => {
 }
 
 .draft-tip-box {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 @media (max-width: 640px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
   .pipeline-flow {
     flex-direction: column;
     align-items: stretch;

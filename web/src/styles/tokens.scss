@@ -16,10 +16,32 @@
   --x-fill-2: rgba(0, 0, 0, 0.04);
   --x-sidebar-bg: #171b2e;
 
-  /* ===== 文字阶梯 (Typography Colors) ===== */
+  /* ===== 文字颜色阶梯 (Typography Colors) ===== */
   --x-text: #1e2333;
   --x-text-2: #6b7280;
   --x-text-3: #9ca3af;
+
+  /* ===== 字体字号阶梯 (Typography Scale) ===== */
+  --x-font-xs: 11px;     /* 辅助说明、统计副标、状态元数据 */
+  --x-font-sm: 12px;     /* 表格内微注、胶囊标签、小徽章 */
+  --x-font-base: 13px;   /* 表单正文、输入框、常规列表 */
+  --x-font-md: 14px;     /* 主要段落、次级标头、弹窗正文 */
+  --x-font-lg: 15px;     /* 卡片标头、抽屉标头、组别标题 */
+  --x-font-xl: 18px;     /* 弹窗大标、模块总标题 */
+  --x-font-2xl: 22px;    /* 统计卡大数、看板次级 KPI */
+  --x-font-3xl: 26px;    /* 核心 KPI 吞吐大数、核心指标数 */
+
+  /* ===== 行高阶梯 (Line Heights) ===== */
+  --x-leading-tight: 1.25;
+  --x-leading-snug: 1.35;
+  --x-leading-normal: 1.45;
+  --x-leading-relaxed: 1.55;
+
+  /* ===== 字重阶梯 (Font Weights) ===== */
+  --x-weight-normal: 400;
+  --x-weight-medium: 500;
+  --x-weight-semibold: 600;
+  --x-weight-bold: 700;
 
   /* ===== 语义状态色 (Semantic Status) ===== */
   --x-success: #10b981;
@@ -80,6 +102,7 @@
   --x-code-block-text: #e2e8f0;
 
   /* ===== 阴影系统 ===== */
+  --x-shadow-xs: 0 1px 2px rgba(23, 27, 46, 0.04);
   --x-shadow: 0 1px 3px rgba(23, 27, 46, 0.06);
   --x-shadow-md: 0 4px 12px rgba(23, 27, 46, 0.08);
   --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
@@ -151,6 +174,7 @@ html.dark {
   --x-info-soft: rgba(59, 130, 246, 0.16);
 
   /* ===== 阴影系统 (Elevation in Dark) ===== */
+  --x-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --x-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   --x-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
   --x-shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.6);
