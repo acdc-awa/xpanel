@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Check, MagicStick, Refresh, CopyDocument, Download, Share } from '@element-plus/icons-vue'
+import { Check, CopyDocument, Download, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import TipIcon from '@/components/base/TipIcon.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { parseNodeLink, formatNodeLink, type ParsedNodeLink } from '@/utils/nodeLink'
 import {
@@ -808,8 +807,21 @@ async function copyText(text: string, label: string) {
   try { await navigator.clipboard.writeText(text); ElMessage.success(`${label}已复制`) }
   catch { ElMessage.warning('复制失败') }
 }
-</script>
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    form.vless_uuid = crypto.randomUUID()
+    ElMessage.success('已生成新 UUID')
+  } else {
+    form.vless_uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0
+      const v = c === 'x' ? r : (r & 0x3) | 0x8
+      return v.toString(16)
+    })
+    ElMessage.success('已生成新 UUID')
+  }
+}
+</script>
 <template>
   <el-dialog
     :model-value="visible"
@@ -827,27 +839,78 @@ async function copyText(text: string, label: string) {
     />
 
     <el-form label-position="top">
-      <!-- 场景模式选择卡片 -->
-      <div class="scene-selector-box" style="margin-bottom: 16px">
-        <div class="box-title" style="margin-bottom: 8px">出站场景模式</div>
-        <el-radio-group
-          v-model="sceneMode"
-          :disabled="isSystemReserved"
-          size="default"
-          style="width: 100%; display: flex; flex-wrap: wrap; gap: 8px"
-          @change="onSceneChange"
-        >
-          <el-radio-button value="basic">基础出口 (Freedom / Blackhole)</el-radio-button>
-          <el-radio-button value="inbound_ref">引用落地入站 (拓扑连线中转)</el-radio-button>
-          <el-radio-button value="proxy">外部代理节点 (VLESS / Hy2 / Socks / HTTP)</el-radio-button>
-          <el-radio-button value="custom">原生自定义 JSON</el-radio-button>
-        </el-radio-group>
+      <!-- 场景模式分段选择卡片 -->
+      <div class="scene-selector-container">
+        <div class="scene-selector-label">出站业务场景模式 (Scene Mode)</div>
+        <div class="scene-card-grid">
+          <div
+            class="scene-option-card"
+            :class="{ active: sceneMode === 'basic', disabled: isSystemReserved }"
+            @click="!isSystemReserved && (sceneMode = 'basic', onSceneChange('basic'))"
+          >
+            <div class="scene-card-head">
+              <span class="x-dot emerald"></span>
+              <span class="scene-title">基础出口 (Basic)</span>
+            </div>
+            <div class="scene-desc">Freedom 直连 / Blackhole 阻断</div>
+            <div class="scene-badge font-mono-num">direct / blocked</div>
+          </div>
+
+          <div
+            class="scene-option-card"
+            :class="{ active: sceneMode === 'inbound_ref', disabled: isSystemReserved }"
+            @click="!isSystemReserved && (sceneMode = 'inbound_ref', onSceneChange('inbound_ref'))"
+          >
+            <div class="scene-card-head">
+              <span class="x-dot purple"></span>
+              <span class="scene-title">引用落地入站 (Ref)</span>
+            </div>
+            <div class="scene-desc">跨机中继拓扑连线 · 自动对账</div>
+            <div class="scene-badge font-mono-num">InboundRef</div>
+          </div>
+
+          <div
+            class="scene-option-card"
+            :class="{ active: sceneMode === 'proxy', disabled: isSystemReserved }"
+            @click="!isSystemReserved && (sceneMode = 'proxy', onSceneChange('proxy'))"
+          >
+            <div class="scene-card-head">
+              <span class="x-dot blue"></span>
+              <span class="scene-title">外部代理节点 (Proxy)</span>
+            </div>
+            <div class="scene-desc">VLESS / Hy2 / Mixed / Socks</div>
+            <div class="scene-badge font-mono-num">订阅导出 + 链接互转</div>
+          </div>
+
+          <div
+            class="scene-option-card"
+            :class="{ active: sceneMode === 'custom', disabled: isSystemReserved }"
+            @click="!isSystemReserved && (sceneMode = 'custom', onSceneChange('custom'))"
+          >
+            <div class="scene-card-head">
+              <span class="x-dot amber"></span>
+              <span class="scene-title">原生 JSON (Custom)</span>
+            </div>
+            <div class="scene-desc">WireGuard / 自定义 Outbound</div>
+            <div class="scene-badge font-mono-num">Raw Xray Object</div>
+          </div>
+        </div>
       </div>
 
-      <!-- 基础公共字段 -->
-      <div class="card-box" style="margin-bottom: 14px">
-        <div class="box-title">公共元数据</div>
-        <div class="form-grid">
+      <!-- 1. 公共元数据微卡片 -->
+      <div class="x-micro-card" style="margin-bottom: 14px">
+        <div class="x-micro-card-head">
+          <div class="x-micro-card-title">
+            <span class="x-dot blue"></span>
+            <span>公共元数据与网络属性</span>
+            <span class="x-sub-label">出站 Tag 与网络出口标识</span>
+          </div>
+          <div class="card-head-action">
+            <span class="action-label">启用此出站规则</span>
+            <el-switch v-model="form.enabled" />
+          </div>
+        </div>
+        <div class="form-grid-2">
           <el-form-item>
             <template #label>
               <div class="field-label">
@@ -858,7 +921,7 @@ async function copyText(text: string, label: string) {
                 </el-tooltip>
               </div>
             </template>
-            <el-input v-model="form.tag" :disabled="isSystemReserved" placeholder="如 proxy-out / via-japan" />
+            <el-input v-model="form.tag" :disabled="isSystemReserved" class="font-mono-num" placeholder="如 proxy-out / via-japan" />
           </el-form-item>
 
           <el-form-item>
@@ -870,7 +933,7 @@ async function copyText(text: string, label: string) {
                 </el-tooltip>
               </div>
             </template>
-            <el-input v-model="form.send_through" placeholder="留空使用系统默认 IP" />
+            <el-input v-model="form.send_through" class="font-mono-num" placeholder="留空使用系统默认 IP" />
           </el-form-item>
 
           <el-form-item>
@@ -882,38 +945,33 @@ async function copyText(text: string, label: string) {
                 </el-tooltip>
               </div>
             </template>
-            <el-input-number v-model="form.priority" :min="0" style="width: 100%" />
+            <el-input-number v-model="form.priority" :min="0" class="font-mono-num" style="width: 100%" />
           </el-form-item>
 
           <el-form-item label="备注说明">
             <el-input v-model="form.remark" placeholder="选填，如 默认直连出口 / 日本落地中转" />
           </el-form-item>
         </div>
-
-        <div class="toggle-card" style="margin-top: 8px">
-          <div class="toggle-info">
-            <span class="toggle-title">启用此出站规则</span>
-            <span class="toggle-sub">开启后写入服务器 Xray 配置中；停用则不参与流量转发</span>
-          </div>
-          <el-switch v-model="form.enabled" />
-        </div>
       </div>
 
       <!-- ===== 场景 1: 基础出口 (Freedom / Blackhole) ===== -->
       <template v-if="sceneMode === 'basic'">
-        <div class="card-box" style="margin-bottom: 14px">
-          <div class="box-title">基础协议选择</div>
-          <div class="form-grid">
-            <el-form-item label="出口协议" style="grid-column: 1 / -1">
+        <div class="x-micro-card" style="margin-bottom: 14px">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot emerald"></span>
+              <span>基础出口协议与策略</span>
+            </div>
+            <span class="x-chip emerald font-mono-num">{{ form.protocol.toUpperCase() }}</span>
+          </div>
+          <div class="form-grid-2">
+            <el-form-item label="出口协议" :class="{ 'col-span-2': form.protocol === 'blackhole' }">
               <el-select v-model="form.protocol" :disabled="isSystemReserved" style="width: 100%">
                 <el-option v-for="opt in BASIC_PROTOCOL_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
-          </div>
 
-          <!-- Freedom 专属参数 -->
-          <template v-if="form.protocol === 'freedom'">
-            <div class="form-grid" style="margin-top: 8px">
+            <template v-if="form.protocol === 'freedom'">
               <el-form-item>
                 <template #label>
                   <div class="field-label">
@@ -927,53 +985,54 @@ async function copyText(text: string, label: string) {
                   <el-option v-for="opt in DOMAIN_STRATEGY_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="透明代理重定向 (redirect)">
-                <el-input v-model="form.redirect" placeholder="如 127.0.0.1:3366（选填）" />
+
+              <el-form-item label="透明代理重定向 (redirect)" class="col-span-2">
+                <el-input v-model="form.redirect" class="font-mono-num" placeholder="如 127.0.0.1:3366（选填）" />
               </el-form-item>
-            </div>
+            </template>
 
-            <!-- 屏蔽内网私有 IP Toggle -->
-            <div class="toggle-card inner-toggle" style="margin-top: 8px">
-              <div class="toggle-info">
-                <span class="toggle-title">
-                  屏蔽内网私有 IP (block_private)
-                  <TipIcon content="开启后拦截访问 10.x / 172.16.x / 192.168.x 等局域网私有段（命中即断开）。关闭则显式放行私网。" />
-                </span>
-              </div>
-              <el-switch v-model="form.block_private" />
-            </div>
-
-            <!-- 阻止回国流量 Toggle -->
-            <div class="toggle-card inner-toggle" style="margin-top: 8px">
-              <div class="toggle-info">
-                <span class="toggle-title">
-                  阻断回国流量 (block_cn)
-                  <TipIcon content="阻断走本出站的大陆 IP 段 (geoip:cn)，防止海外服务器被滥用回国。" />
-                </span>
-              </div>
-              <el-switch v-model="form.block_cn" />
-            </div>
-          </template>
-
-          <!-- Blackhole 专属参数 -->
-          <template v-if="form.protocol === 'blackhole'">
-            <div class="form-grid" style="margin-top: 8px">
-              <el-form-item label="阻断响应类型" style="grid-column: 1 / -1">
+            <template v-if="form.protocol === 'blackhole'">
+              <el-form-item label="阻断响应类型" class="col-span-2">
                 <el-select v-model="form.response_type" style="width: 100%">
                   <el-option label="none（直接断开 TCP 连接，静默丢弃）" value="none" />
                   <el-option label="http（返回 HTTP 403 Forbidden）" value="http" />
                 </el-select>
               </el-form-item>
+            </template>
+          </div>
+
+          <!-- Freedom 紧凑两项安全开关 -->
+          <div v-if="form.protocol === 'freedom'" class="compact-switches-grid">
+            <div class="compact-switch-card">
+              <div class="switch-card-info">
+                <div class="switch-card-title">屏蔽内网私有 IP (block_private)</div>
+                <div class="switch-card-sub">拦截访问 10.x / 172.16.x / 192.168.x 等局域网私网</div>
+              </div>
+              <el-switch v-model="form.block_private" />
             </div>
-          </template>
+
+            <div class="compact-switch-card">
+              <div class="switch-card-info">
+                <div class="switch-card-title">阻断回国流量 (block_cn)</div>
+                <div class="switch-card-sub">阻断走本出站的大陆 IP 段 (geoip:cn)，防止海外节点被滥用代理回国</div>
+              </div>
+              <el-switch v-model="form.block_cn" />
+            </div>
+          </div>
         </div>
       </template>
 
       <!-- ===== 场景 2: 引用落地入站 (InboundRef 拓扑连线) ===== -->
       <template v-if="sceneMode === 'inbound_ref'">
-        <div class="card-box" style="margin-bottom: 14px">
-          <div class="box-title">引用目标落地入站</div>
-          <div class="form-grid">
+        <div class="x-micro-card" style="margin-bottom: 14px">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot purple"></span>
+              <span>引用目标落地入站 (拓扑级联)</span>
+            </div>
+            <span class="x-chip purple font-mono-num">AUTO RELAY PEER</span>
+          </div>
+          <div class="form-grid-2">
             <el-form-item label="目标落地服务器（选填）">
               <el-select v-model="refServerId" style="width: 100%" clearable placeholder="留空可在画布中拖线连接" @change="refInboundId = 0">
                 <el-option :value="0" label="（稍后在拓扑画布中拖线连接）" />
@@ -986,18 +1045,18 @@ async function copyText(text: string, label: string) {
                 <el-option v-for="i in refInboundOptions" :key="i.id" :label="inboundLabel(i)" :value="i.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="机间 TLS 验证方式" style="grid-column: 1 / -1">
-              <el-radio-group v-model="form.tls_verify_mode">
-                <el-radio value="">自动（目标绑定 CA 时优先 CA 验签，否则指纹 Pin）</el-radio>
-                <el-radio value="ca">托管 CA 验签（内联 CA 根公钥，校验证书链）</el-radio>
-                <el-radio value="pin">证书指纹 Pin（固定目标证书 SHA-256）</el-radio>
+            <el-form-item label="机间 TLS 验证方式" class="col-span-2">
+              <el-radio-group v-model="form.tls_verify_mode" class="tls-verify-group">
+                <el-radio-button value="">自动（目标绑定 CA 时优先 CA 验签，否则指纹 Pin）</el-radio-button>
+                <el-radio-button value="ca">托管 CA 验签（内联 CA 根公钥，校验证书链）</el-radio-button>
+                <el-radio-button value="pin">证书指纹 Pin（固定目标证书 SHA-256）</el-radio-button>
               </el-radio-group>
-              <div class="field-hint" style="margin-top: 4px">
+              <div class="field-hint" style="margin-top: 6px">
                 若目标使用托管 CA 签发的证书，选择「托管 CA 验签」将自动内联 CA 根公钥并禁用系统根证书（严格防劫持）；若目标为独立自签证书，将使用证书指纹 Pin 验证。
               </div>
             </el-form-item>
           </div>
-          <div class="tip-banner" style="margin-top: 10px">
+          <div class="compact-tip" style="margin-top: 12px">
             <b>拓扑中继说明：</b>系统已支持跨服务器引用 <b>VLESS、Hysteria 2、Mixed (SOCKS/HTTP)</b> 落地入站！
             在此处绑定目标落地入站（或保存后在拓扑画布中拖拽端点连线），配置生成器将自动打通对称机间凭据并防双计，无需手动维护密钥。
           </div>
@@ -1006,9 +1065,13 @@ async function copyText(text: string, label: string) {
 
       <!-- ===== 场景 3: 外部代理节点 (Proxy Node) ===== -->
       <template v-if="sceneMode === 'proxy'">
-        <div class="card-box" style="margin-bottom: 14px">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-            <div class="box-title" style="margin-bottom: 0">代理协议与订阅流转</div>
+        <!-- 3.1 代理协议与订阅流转微卡片 -->
+        <div class="x-micro-card" style="margin-bottom: 14px">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot indigo"></span>
+              <span>代理协议与订阅流转</span>
+            </div>
             <div style="display: flex; gap: 8px">
               <el-button size="small" type="primary" plain @click="openImportDialog">
                 <el-icon><Download /></el-icon>&nbsp;从代理链接导入
@@ -1018,37 +1081,135 @@ async function copyText(text: string, label: string) {
               </el-button>
             </div>
           </div>
-
-          <div class="form-grid">
-            <el-form-item label="客户端代理协议" style="grid-column: 1 / -1">
+          <div class="form-grid-2">
+            <el-form-item label="客户端代理协议" :class="{ 'col-span-2': form.protocol !== 'vless' }">
               <el-select v-model="form.protocol" style="width: 100%">
                 <el-option v-for="opt in PROXY_PROTOCOL_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
+
+            <el-form-item v-if="form.protocol === 'vless'" label="Flow（流控算法）">
+              <el-select v-model="form.vless_flow" style="width: 100%" clearable placeholder="无流控">
+                <el-option v-for="opt in FLOW_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </el-form-item>
+          </div>
+        </div>
+
+        <!-- 3.2 远端服务器端点与凭据微卡片 -->
+        <div class="x-micro-card" style="margin-bottom: 14px">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot blue"></span>
+              <span>远端服务器端点与鉴权凭据</span>
+            </div>
+            <span class="x-chip blue font-mono-num">{{ form.protocol.toUpperCase() }} CREDENTIALS</span>
           </div>
 
-          <!-- 3.1 VLESS 配置表单 -->
+          <!-- VLESS 端点凭据 -->
           <template v-if="form.protocol === 'vless'">
-            <div class="box-title" style="margin-top: 8px">远端服务器凭据</div>
-            <div class="form-grid">
+            <div class="form-grid-2">
               <el-form-item label="远端地址 Address">
-                <el-input v-model="form.vless_address" placeholder="如 proxy.example.com 或 1.2.3.4" />
+                <el-input v-model="form.vless_address" class="font-mono-num" placeholder="如 proxy.example.com 或 1.2.3.4" />
               </el-form-item>
               <el-form-item label="远端端口 Port">
-                <el-input-number v-model="form.vless_port" :min="1" :max="65535" style="width: 100%" />
+                <el-input-number v-model="form.vless_port" :min="1" :max="65535" class="font-mono-num" style="width: 100%" />
               </el-form-item>
-              <el-form-item label="UUID（用户 ID）">
-                <el-input v-model="form.vless_uuid" placeholder="xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx" />
-              </el-form-item>
-              <el-form-item label="Flow（流控）">
-                <el-select v-model="form.vless_flow" style="width: 100%" clearable placeholder="无流控">
-                  <el-option v-for="opt in FLOW_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
-                </el-select>
+              <el-form-item label="UUID（用户凭据）" class="col-span-2">
+                <div style="display: flex; gap: 8px">
+                  <el-input v-model="form.vless_uuid" class="font-mono-num" placeholder="xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx" />
+                  <el-button @click="generateUUID">换一个</el-button>
+                  <el-button @click="copyText(form.vless_uuid, 'UUID')">
+                    <el-icon><CopyDocument /></el-icon>&nbsp;复制
+                  </el-button>
+                </div>
               </el-form-item>
             </div>
+          </template>
 
-            <div class="box-title" style="margin-top: 14px">传输与安全协议</div>
-            <div class="form-grid">
+          <!-- Hysteria 2 端点凭据 -->
+          <template v-if="form.protocol === 'hysteria'">
+            <div class="form-grid-2">
+              <el-form-item label="远端地址 Address">
+                <el-input v-model="form.hy2_address" class="font-mono-num" placeholder="如 hy2.example.com 或 1.2.3.4" />
+              </el-form-item>
+              <el-form-item label="UDP 端口 Port">
+                <el-input-number v-model="form.hy2_port" :min="1" :max="65535" class="font-mono-num" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="Auth 认证密码" class="col-span-2">
+                <el-input v-model="form.hy2_password" show-password class="font-mono-num" placeholder="Hysteria 2 服务端连接密钥" />
+              </el-form-item>
+            </div>
+          </template>
+
+          <!-- SOCKS5 凭据 -->
+          <template v-if="form.protocol === 'socks'">
+            <div class="form-grid-2">
+              <el-form-item label="远端地址 Address">
+                <el-input v-model="form.socks_address" class="font-mono-num" placeholder="如 socks.example.com 或 1.2.3.4" />
+              </el-form-item>
+              <el-form-item label="远端端口 Port">
+                <el-input-number v-model="form.socks_port" :min="1" :max="65535" class="font-mono-num" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="认证用户名 (User，选填)">
+                <el-input v-model="form.socks_user" placeholder="留空表示无密码认证" />
+              </el-form-item>
+              <el-form-item label="认证密码 (Password，选填)">
+                <el-input v-model="form.socks_password" show-password placeholder="认证密码" />
+              </el-form-item>
+              <div class="compact-switch-card col-span-2">
+                <div class="switch-card-info">
+                  <div class="switch-card-title">启用 TLS 加密 (SOCKS5 Over TLS)</div>
+                  <div class="switch-card-sub">开启后在 SOCKS 握手之上套用 TLS 加密隧道</div>
+                </div>
+                <el-switch v-model="form.socks_tls" />
+              </div>
+              <el-form-item v-if="form.socks_tls" label="TLS SNI (serverName)" class="col-span-2">
+                <el-input v-model="form.socks_sni" class="font-mono-num" placeholder="留空默认使用远端地址" />
+              </el-form-item>
+            </div>
+          </template>
+
+          <!-- HTTP 凭据 -->
+          <template v-if="form.protocol === 'http'">
+            <div class="form-grid-2">
+              <el-form-item label="远端地址 Address">
+                <el-input v-model="form.http_address" class="font-mono-num" placeholder="如 proxy.example.com 或 1.2.3.4" />
+              </el-form-item>
+              <el-form-item label="远端端口 Port">
+                <el-input-number v-model="form.http_port" :min="1" :max="65535" class="font-mono-num" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="认证用户名 (User，选填)">
+                <el-input v-model="form.http_user" placeholder="留空表示无需认证" />
+              </el-form-item>
+              <el-form-item label="认证密码 (Password，选填)">
+                <el-input v-model="form.http_password" show-password placeholder="认证密码" />
+              </el-form-item>
+              <div class="compact-switch-card col-span-2">
+                <div class="switch-card-info">
+                  <div class="switch-card-title">启用 HTTPS 加密 (HTTP Over TLS)</div>
+                  <div class="switch-card-sub">开启后使用 HTTPS 安全代理</div>
+                </div>
+                <el-switch v-model="form.http_tls" />
+              </div>
+              <el-form-item v-if="form.http_tls" label="TLS SNI (serverName)" class="col-span-2">
+                <el-input v-model="form.http_sni" class="font-mono-num" placeholder="留空默认使用远端地址" />
+              </el-form-item>
+            </div>
+          </template>
+        </div>
+
+        <!-- 3.3 底层传输与安全加密 (VLESS 专属微卡片) -->
+        <template v-if="form.protocol === 'vless'">
+          <div class="x-micro-card" style="margin-bottom: 14px">
+            <div class="x-micro-card-head">
+              <div class="x-micro-card-title">
+                <span class="x-dot emerald"></span>
+                <span>底层传输与安全加密 (Transport & Security)</span>
+              </div>
+              <span class="x-chip emerald font-mono-num">{{ form.vless_network.toUpperCase() }} + {{ form.vless_security.toUpperCase() }}</span>
+            </div>
+            <div class="form-grid-2">
               <el-form-item label="传输协议 (Network)">
                 <el-select v-model="form.vless_network" style="width: 100%">
                   <el-option v-for="opt in NETWORK_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
@@ -1059,205 +1220,168 @@ async function copyText(text: string, label: string) {
                   <el-option v-for="opt in SECURITY_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
                 </el-select>
               </el-form-item>
-            </div>
 
-            <!-- WS -->
-            <div v-if="form.vless_network === 'ws'" class="form-grid" style="margin-top: 6px">
-              <el-form-item label="WS Path"><el-input v-model="form.ws_path" placeholder="/" /></el-form-item>
-              <el-form-item label="WS Host（选填）"><el-input v-model="form.ws_host" placeholder="留空默认" /></el-form-item>
-            </div>
+              <!-- WS 专属 -->
+              <template v-if="form.vless_network === 'ws'">
+                <el-form-item label="WS Path"><el-input v-model="form.ws_path" class="font-mono-num" placeholder="/" /></el-form-item>
+                <el-form-item label="WS Host（选填）"><el-input v-model="form.ws_host" class="font-mono-num" placeholder="留空默认" /></el-form-item>
+              </template>
 
-            <!-- XHTTP -->
-            <div v-if="form.vless_network === 'xhttp'" class="form-grid" style="margin-top: 6px">
-              <el-form-item label="XHTTP Mode">
-                <el-select v-model="form.xhttp_mode" style="width: 100%">
-                  <el-option label="auto" value="auto" />
-                  <el-option label="packet-up" value="packet-up" />
-                  <el-option label="stream-up" value="stream-up" />
-                  <el-option label="stream-one" value="stream-one" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="XHTTP Path"><el-input v-model="form.xhttp_path" placeholder="/" /></el-form-item>
-              <el-form-item label="XHTTP Host（选填）" style="grid-column: 1 / -1"><el-input v-model="form.xhttp_host" placeholder="留空默认" /></el-form-item>
-            </div>
+              <!-- XHTTP 专属 -->
+              <template v-if="form.vless_network === 'xhttp'">
+                <el-form-item label="XHTTP Mode">
+                  <el-select v-model="form.xhttp_mode" style="width: 100%">
+                    <el-option label="auto" value="auto" />
+                    <el-option label="packet-up" value="packet-up" />
+                    <el-option label="stream-up" value="stream-up" />
+                    <el-option label="stream-one" value="stream-one" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="XHTTP Path"><el-input v-model="form.xhttp_path" class="font-mono-num" placeholder="/" /></el-form-item>
+                <el-form-item label="XHTTP Host（选填）" class="col-span-2"><el-input v-model="form.xhttp_host" class="font-mono-num" placeholder="留空默认" /></el-form-item>
+              </template>
 
-            <!-- gRPC -->
-            <div v-if="form.vless_network === 'grpc'" class="form-grid" style="margin-top: 6px">
-              <el-form-item label="gRPC Service Name"><el-input v-model="form.grpc_service_name" placeholder="grpc" /></el-form-item>
-              <el-form-item label="gRPC Authority（选填）"><el-input v-model="form.grpc_authority" placeholder="留空默认" /></el-form-item>
-            </div>
+              <!-- gRPC 专属 -->
+              <template v-if="form.vless_network === 'grpc'">
+                <el-form-item label="gRPC Service Name"><el-input v-model="form.grpc_service_name" class="font-mono-num" placeholder="grpc" /></el-form-item>
+                <el-form-item label="gRPC Authority（选填）"><el-input v-model="form.grpc_authority" class="font-mono-num" placeholder="留空默认" /></el-form-item>
+              </template>
 
-            <!-- TLS -->
-            <div v-if="form.vless_security === 'tls'" class="form-grid" style="margin-top: 6px">
-              <el-form-item label="SNI (serverName)"><el-input v-model="form.tls_server_name" placeholder="如 example.com" /></el-form-item>
-              <el-form-item label="uTLS Fingerprint">
-                <el-select v-model="form.vless_fingerprint" style="width: 100%">
-                  <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="证书指纹 (Pin SHA-256)">
-                <el-input v-model="form.tls_pinned_peer_cert_sha256" placeholder="远端证书 64位 Hex 散列" clearable />
-              </el-form-item>
-              <el-form-item label="CA 根证书路径 (CA File)">
-                <el-input v-model="form.tls_ca_cert_file" placeholder="如 /etc/xray/ca.crt" clearable />
-              </el-form-item>
-              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
-                <div class="toggle-info">
-                  <span class="toggle-title">
-                    禁用系统根证书 (disableSystemRoot)
-                    <TipIcon type="info" content="仅使用指定 CA 证书验证远端身份。" />
-                  </span>
-                </div>
-                <el-switch v-model="form.tls_disable_system_root" />
-              </div>
-              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
-                <div class="toggle-info">
-                  <span class="toggle-title">
-                    跳过证书校验 (allowInsecure)
-                    <TipIcon type="warn" content="允许使用自签名或域名不匹配的证书（生产环境慎用）。" />
-                  </span>
-                </div>
-                <el-switch v-model="form.tls_allow_insecure" />
-              </div>
-            </div>
+              <!-- TLS 专属 -->
+              <template v-if="form.vless_security === 'tls'">
+                <el-form-item label="SNI (serverName)"><el-input v-model="form.tls_server_name" class="font-mono-num" placeholder="如 example.com" /></el-form-item>
+                <el-form-item label="uTLS Fingerprint">
+                  <el-select v-model="form.vless_fingerprint" style="width: 100%">
+                    <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
+                  </el-select>
+                </el-form-item>
+              </template>
 
-            <!-- REALITY -->
-            <div v-if="form.vless_security === 'reality'" class="form-grid" style="margin-top: 6px">
-              <el-form-item label="SNI (serverName)"><el-input v-model="form.reality_server_name" placeholder="如 www.apple.com" /></el-form-item>
-              <el-form-item label="uTLS Fingerprint">
-                <el-select v-model="form.reality_fingerprint" style="width: 100%">
-                  <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="Short ID">
-                <div style="display: flex; gap: 8px; width: 100%">
-                  <el-input v-model="form.reality_short_id" placeholder="abcdef0123456789" />
-                  <el-button @click="genShortId"><el-icon><Refresh /></el-icon></el-button>
-                </div>
-              </el-form-item>
-              <el-form-item label="SpiderX 路径"><el-input v-model="form.reality_spider_x" placeholder="/" /></el-form-item>
-              <el-form-item label="Public Key（服务端公钥）" style="grid-column: 1 / -1">
-                <el-input v-model="form.reality_public_key" placeholder="x25519 公钥 (32 字节 base64url 格式)" />
-              </el-form-item>
-              <div style="grid-column: 1 / -1; display: flex; gap: 8px">
-                <el-button size="small" type="primary" plain :loading="genKeyLoading" @click="fetchRealityKeys">
-                  <el-icon><MagicStick /></el-icon>&nbsp;生成 x25519 密钥
-                </el-button>
-                <el-button v-if="form.reality_public_key" size="small" text @click="copyText(form.reality_public_key, '公钥')">
-                  <el-icon><CopyDocument /></el-icon>&nbsp;复制公钥
-                </el-button>
+              <!-- REALITY 专属 -->
+              <template v-if="form.vless_security === 'reality'">
+                <el-form-item label="目标域名 ServerName (SNI)">
+                  <el-input v-model="form.reality_server_name" class="font-mono-num" placeholder="如 gateway.icloud.com" />
+                </el-form-item>
+                <el-form-item>
+                  <template #label>
+                    <div class="field-label">
+                      <span>PublicKey（公钥）</span>
+                      <span class="required-star">*</span>
+                      <el-button size="small" text type="primary" :loading="genKeyLoading" @click="fetchRealityKeys">生成密钥对</el-button>
+                    </div>
+                  </template>
+                  <el-input v-model="form.reality_public_key" class="font-mono-num" placeholder="x25519 对应公钥" />
+                </el-form-item>
+                <el-form-item>
+                  <template #label>
+                    <div class="field-label">
+                      <span>ShortId（简短标识）</span>
+                      <el-button size="small" text type="primary" @click="genShortId">随机生成</el-button>
+                    </div>
+                  </template>
+                  <el-input v-model="form.reality_short_id" class="font-mono-num" placeholder="十六进制 shortId，如 6ba7b810" />
+                </el-form-item>
+                <el-form-item label="uTLS Fingerprint">
+                  <el-select v-model="form.reality_fingerprint" style="width: 100%">
+                    <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="SpiderX 爬虫伪装路径" class="col-span-2">
+                  <el-input v-model="form.reality_spider_x" class="font-mono-num" placeholder="如 / 或 /dl/" />
+                </el-form-item>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- 3.4 Hysteria 2 TLS 与高级参数微卡片 -->
+        <template v-if="form.protocol === 'hysteria'">
+          <div class="x-micro-card" style="margin-bottom: 14px">
+            <div class="x-micro-card-head">
+              <div class="x-micro-card-title">
+                <span class="x-dot cyan"></span>
+                <span>Hysteria 2 TLS 与验证参数</span>
               </div>
             </div>
-          </template>
-
-          <!-- 3.2 Hysteria 2 配置表单 -->
-          <template v-if="form.protocol === 'hysteria'">
-            <div class="box-title" style="margin-top: 8px">Hysteria 2 远端与凭据</div>
-            <div class="form-grid">
-              <el-form-item label="远端地址 Address">
-                <el-input v-model="form.hy2_address" placeholder="如 hy2.example.com 或 1.2.3.4" />
+            <div class="form-grid-2">
+              <el-form-item label="SNI (serverName)">
+                <el-input v-model="form.hy2_sni" class="font-mono-num" placeholder="如 hy2.example.com" />
               </el-form-item>
-              <el-form-item label="远端端口 Port">
-                <el-input-number v-model="form.hy2_port" :min="1" :max="65535" style="width: 100%" />
-              </el-form-item>
-              <el-form-item label="认证密码 (Password)" style="grid-column: 1 / -1">
-                <el-input v-model="form.hy2_password" show-password placeholder="目标 Hysteria 2 节点的认证密码" />
-              </el-form-item>
-              <el-form-item label="TLS SNI (serverName)">
-                <el-input v-model="form.hy2_sni" placeholder="留空默认使用远端地址" />
-              </el-form-item>
-              <el-form-item label="uTLS Fingerprint">
+              <el-form-item label="uTLS 客户端指纹">
                 <el-select v-model="form.hy2_fingerprint" style="width: 100%">
                   <el-option v-for="fp in FINGERPRINT_OPTIONS" :key="fp" :label="fp" :value="fp" />
                 </el-select>
               </el-form-item>
               <el-form-item label="证书指纹 (Pin SHA-256)">
-                <el-input v-model="form.hy2_pinned_peer_cert_sha256" placeholder="远端证书 64位 Hex 散列" clearable />
+                <el-input v-model="form.hy2_pinned_peer_cert_sha256" class="font-mono-num" placeholder="远端证书 64位 Hex 散列" clearable />
               </el-form-item>
-              <el-form-item label="CA 根证书路径 (CA File)">
-                <el-input v-model="form.hy2_ca_cert_file" placeholder="如 /etc/xray/ca.crt" clearable />
+              <el-form-item label="CA 证书路径 (certificateFile)">
+                <el-input v-model="form.hy2_ca_cert_file" class="font-mono-num" placeholder="如 /etc/ssl/certs/ca.crt" clearable />
               </el-form-item>
-              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
-                <div class="toggle-info">
-                  <span class="toggle-title">
-                    跳过证书校验 (allowInsecure)
-                    <TipIcon type="warn" content="允许使用自签名或域名不匹配的证书。" />
-                  </span>
+              <div class="compact-switch-card col-span-2">
+                <div class="switch-card-info">
+                  <div class="switch-card-title">允许不安全证书 (allowInsecure)</div>
+                  <div class="switch-card-sub">允许跳过 TLS 服务端证书链校验（仅测试时使用）</div>
                 </div>
                 <el-switch v-model="form.hy2_allow_insecure" />
               </div>
             </div>
-          </template>
+          </div>
+        </template>
 
-          <!-- 3.3 SOCKS5 配置表单 -->
-          <template v-if="form.protocol === 'socks'">
-            <div class="box-title" style="margin-top: 8px">SOCKS5 代理服务器凭据</div>
-            <div class="form-grid">
-              <el-form-item label="远端地址 Address">
-                <el-input v-model="form.socks_address" placeholder="如 socks.example.com 或 1.2.3.4" />
-              </el-form-item>
-              <el-form-item label="远端端口 Port">
-                <el-input-number v-model="form.socks_port" :min="1" :max="65535" style="width: 100%" />
-              </el-form-item>
-              <el-form-item label="认证用户名 (User，选填)">
-                <el-input v-model="form.socks_user" placeholder="留空表示无密码认证" />
-              </el-form-item>
-              <el-form-item label="认证密码 (Password，选填)">
-                <el-input v-model="form.socks_password" show-password placeholder="认证密码" />
-              </el-form-item>
-              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
-                <div class="toggle-info">
-                  <span class="toggle-title">启用 TLS 加密 (SOCKS5 Over TLS)</span>
-                </div>
-                <el-switch v-model="form.socks_tls" />
+        <!-- 3.5 VLESS 高级 TLS 证书验签微卡片 (当 VLESS + TLS 时) -->
+        <template v-if="form.protocol === 'vless' && form.vless_security === 'tls'">
+          <div class="x-micro-card" style="margin-bottom: 14px; border-style: dashed;">
+            <div class="x-micro-card-head">
+              <div class="x-micro-card-title">
+                <span class="x-dot amber"></span>
+                <span>高级 TLS 证书防劫持（CA 根公钥 / 证书指纹 Pin）</span>
               </div>
-              <el-form-item v-if="form.socks_tls" label="TLS SNI" style="grid-column: 1 / -1">
-                <el-input v-model="form.socks_sni" placeholder="留空默认使用远端地址" />
-              </el-form-item>
+              <span class="x-chip amber">Phase 60/61 扩展</span>
             </div>
-          </template>
-
-          <!-- 3.4 HTTP 配置表单 -->
-          <template v-if="form.protocol === 'http'">
-            <div class="box-title" style="margin-top: 8px">HTTP / HTTPS 代理凭据</div>
-            <div class="form-grid">
-              <el-form-item label="远端地址 Address">
-                <el-input v-model="form.http_address" placeholder="如 proxy.example.com 或 1.2.3.4" />
+            <div class="form-grid-2">
+              <el-form-item label="证书指纹 (Pin SHA-256)">
+                <el-input v-model="form.tls_pinned_peer_cert_sha256" class="font-mono-num" placeholder="远端证书 64位 Hex 散列" clearable />
               </el-form-item>
-              <el-form-item label="远端端口 Port">
-                <el-input-number v-model="form.http_port" :min="1" :max="65535" style="width: 100%" />
+              <el-form-item label="CA 证书路径 (certificateFile)">
+                <el-input v-model="form.tls_ca_cert_file" class="font-mono-num" placeholder="如 /etc/ssl/certs/xpanel_ca.crt" clearable />
               </el-form-item>
-              <el-form-item label="认证用户名 (User，选填)">
-                <el-input v-model="form.http_user" placeholder="留空表示无需认证" />
-              </el-form-item>
-              <el-form-item label="认证密码 (Password，选填)">
-                <el-input v-model="form.http_password" show-password placeholder="认证密码" />
-              </el-form-item>
-              <div class="toggle-card inner-toggle" style="grid-column: 1 / -1">
-                <div class="toggle-info">
-                  <span class="toggle-title">启用 HTTPS 加密 (HTTP Over TLS)</span>
+              <div class="compact-switch-card">
+                <div class="switch-card-info">
+                  <div class="switch-card-title">禁用系统根证书库 (disableSystemRoot)</div>
+                  <div class="switch-card-sub">仅信任内联 CA 证书，杜绝第三方系统 CA 假冒</div>
                 </div>
-                <el-switch v-model="form.http_tls" />
+                <el-switch v-model="form.tls_disable_system_root" />
               </div>
-              <el-form-item v-if="form.http_tls" label="TLS SNI" style="grid-column: 1 / -1">
-                <el-input v-model="form.http_sni" placeholder="留空默认使用远端地址" />
-              </el-form-item>
+              <div class="compact-switch-card">
+                <div class="switch-card-info">
+                  <div class="switch-card-title">允许不安全证书 (allowInsecure)</div>
+                  <div class="switch-card-sub">生成配置时将自动转换为证书指纹验证</div>
+                </div>
+                <el-switch v-model="form.tls_allow_insecure" />
+              </div>
             </div>
-          </template>
-        </div>
+          </div>
+        </template>
       </template>
 
       <!-- ===== 场景 4: 原生自定义 JSON ===== -->
       <template v-if="sceneMode === 'custom'">
-        <div class="card-box" style="margin-bottom: 14px">
-          <div class="box-title">原生 Xray 出站对象 JSON</div>
+        <div class="x-micro-card" style="margin-bottom: 14px">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot amber"></span>
+              <span>原生 Xray 出站对象 JSON (Custom Mode)</span>
+            </div>
+            <span class="x-chip amber font-mono-num">RAW XRAY OBJECT</span>
+          </div>
           <CodeEditor
             v-model="form.outbound_json"
             language="json"
             height="260px"
             :placeholder="OUTBOUND_JSON_PLACEHOLDER"
           />
-          <div class="tip-banner" style="margin-top: 10px">
+          <div class="compact-tip" style="margin-top: 10px">
             <b>高级自定义：</b>填写完整的 Xray outbound JSON 对象。配置生成器将直接透传该对象，支持
             WireGuard、Shadowsocks、WARP 等任意原生出站协议，且会自动确保 tag 与上方设置对齐。
           </div>
@@ -1306,26 +1430,172 @@ async function copyText(text: string, label: string) {
 </template>
 
 <style scoped lang="scss">
-.scene-selector-box {
-  background: var(--x-card-bg, #fff);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 12px 14px;
+.scene-selector-container {
+  margin-bottom: 14px;
 }
-.form-grid {
+.scene-selector-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--x-text-muted, #64748b);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+.scene-card-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 16px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
 }
+@media (max-width: 768px) {
+  .scene-card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.scene-option-card {
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 72px;
+
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+    transform: translateY(-1px);
+  }
+  &.active {
+    background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
+    border: 1.5px solid var(--x-primary, #3b82f6);
+    .scene-title {
+      color: var(--x-primary, #3b82f6);
+    }
+  }
+  &.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+.scene-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.scene-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--x-text-1, #0f172a);
+}
+.scene-desc {
+  font-size: 10.5px;
+  color: var(--x-text-muted, #64748b);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.scene-badge {
+  font-size: 10px;
+  color: var(--x-text-3, #94a3b8);
+  margin-top: 6px;
+}
+
+/* 规范业务分组微卡片 */
+.x-micro-card {
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border, #e2e8f0);
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: border-color 0.15s ease;
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+  }
+}
+.x-micro-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--x-border, #e2e8f0);
+}
+.x-micro-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--x-text-1, #0f172a);
+}
+.x-sub-label {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--x-text-muted, #64748b);
+  margin-left: 4px;
+}
+.card-head-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.action-label {
+  font-size: 12px;
+  color: var(--x-text-2, #334155);
+}
+
+.x-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  &.blue { background: #3b82f6; box-shadow: 0 0 6px rgba(59, 130, 246, 0.5); }
+  &.emerald { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
+  &.purple { background: #8b5cf6; box-shadow: 0 0 6px rgba(139, 92, 246, 0.5); }
+  &.amber { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+  &.indigo { background: #6366f1; box-shadow: 0 0 6px rgba(99, 102, 241, 0.5); }
+  &.cyan { background: #06b6d4; box-shadow: 0 0 6px rgba(6, 182, 212, 0.5); }
+}
+
+.x-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  border: 1px solid transparent;
+  &.blue { background: rgba(59, 130, 246, 0.1); color: #3b82f6; border-color: rgba(59, 130, 246, 0.25); }
+  &.emerald { background: rgba(16, 185, 129, 0.1); color: #10b981; border-color: rgba(16, 185, 129, 0.25); }
+  &.purple { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; border-color: rgba(139, 92, 246, 0.25); }
+  &.amber { background: rgba(245, 158, 11, 0.1); color: #f59e0b; border-color: rgba(245, 158, 11, 0.25); }
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+@media (max-width: 640px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.col-span-2 {
+  grid-column: 1 / -1;
+}
+
 .field-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
 }
 .required-star {
-  color: var(--el-color-danger);
+  color: var(--el-color-danger, #ef4444);
   font-weight: bold;
 }
 .help-icon {
@@ -1335,62 +1605,66 @@ async function copyText(text: string, label: string) {
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--x-border);
-  color: var(--x-text-3);
+  background: var(--x-border, #e2e8f0);
+  color: var(--x-text-3, #94a3b8);
   font-size: 10px;
   cursor: help;
 }
-.card-box {
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 12px 14px;
+
+.compact-switches-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
-.box-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--x-primary);
-  margin-bottom: 8px;
-}
-.toggle-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  &.inner-toggle {
-    background: var(--x-card-bg, #fff);
+@media (max-width: 640px) {
+  .compact-switches-grid {
+    grid-template-columns: 1fr;
   }
 }
-.toggle-info {
+.compact-switch-card {
+  background: var(--x-bg, #f8fafc);
+  border: 1px solid var(--x-border, #e2e8f0);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.switch-card-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.toggle-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--x-text-1);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.toggle-sub {
-  font-size: 11.5px;
-  color: var(--x-text-3);
-}
-.tip-banner {
+.switch-card-title {
   font-size: 12px;
-  color: var(--x-text-2);
+  font-weight: 600;
+  color: var(--x-text-1, #0f172a);
+}
+.switch-card-sub {
+  font-size: 10.5px;
+  color: var(--x-text-muted, #64748b);
+}
+
+.compact-tip {
+  font-size: 11.5px;
+  color: var(--x-text-2, #334155);
   line-height: 1.5;
-  background: rgba(var(--x-primary-rgb, 59, 130, 246), 0.06);
-  border-left: 3px solid var(--x-primary);
-  padding: 6px 10px;
-  border-radius: 0 4px 4px 0;
+  background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
+  border-left: 3px solid var(--x-primary, #3b82f6);
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+}
+.field-hint {
+  font-size: 11px;
+  color: var(--x-text-muted, #64748b);
+  line-height: 1.4;
+}
+.tls-verify-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .muted {
-  color: var(--x-text-3);
+  color: var(--x-text-3, #94a3b8);
 }
 </style>

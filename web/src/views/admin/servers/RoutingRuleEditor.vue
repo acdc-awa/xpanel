@@ -217,16 +217,15 @@ function onClosed() {
   emit('close')
 }
 </script>
-
 <template>
   <el-dialog
     :model-value="visible"
     :title="rule ? `编辑路由规则 · ${rule.outbound_tag}` : '新增路由规则'"
-    width="760px"
+    width="780px"
     @closed="onClosed"
   >
     <!-- 顶部四层直通派生规则提示 -->
-    <div v-if="isDerived" style="margin-bottom: 16px">
+    <div v-if="isDerived" style="margin-bottom: 14px">
       <el-alert
         type="info"
         :closable="false"
@@ -236,7 +235,7 @@ function onClosed() {
       />
     </div>
 
-    <!-- 顶部常用预设气泡栏（仅非直通派生规则展示） -->
+    <!-- 顶部常用预设胶囊栏（仅非直通派生规则展示） -->
     <div v-else class="preset-section">
       <div class="preset-title">
         <el-icon><MagicStick /></el-icon>&nbsp;常用规则一键预设：
@@ -257,109 +256,120 @@ function onClosed() {
     <el-form label-position="top" class="rule-form">
       <div class="dual-panel-grid">
         <!-- ===== 左栏：入站匹配条件 ===== -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <span class="panel-title">1. 入站流量匹配条件 (Match Criteria)</span>
+        <div class="x-micro-card">
+          <div class="x-micro-card-head">
+            <div class="x-micro-card-title">
+              <span class="x-dot cyan"></span>
+              <span>1. 流量匹配条件 (Match Criteria)</span>
+            </div>
           </div>
 
-          <el-form-item label="协议嗅探 Protocol">
-            <el-checkbox-group v-model="selectedProtocols" @change="onProtocolsChange">
-              <el-checkbox label="bittorrent">BitTorrent (BT)</el-checkbox>
-              <el-checkbox label="http">HTTP</el-checkbox>
-              <el-checkbox label="tls">TLS</el-checkbox>
-            </el-checkbox-group>
-          </el-form-item>
-
-          <el-form-item label="域名匹配 Domain（每行一条）">
-            <el-input
-              v-model="form.domain"
-              type="textarea"
-              :rows="3"
-              class="code-textarea"
-              placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com"
-            />
-          </el-form-item>
-
-          <el-form-item label="IP 段匹配 IP（每行一条）">
-            <el-input
-              v-model="form.ip"
-              type="textarea"
-              :rows="3"
-              class="code-textarea"
-              placeholder="geoip:private&#10;geoip:cn&#10;8.8.8.8"
-            />
-          </el-form-item>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px">
-            <el-form-item label="目标端口 Port">
-              <el-input v-model="form.port" placeholder="如 443 或 80,443" />
+          <div class="panel-form-stack">
+            <el-form-item label="协议嗅探 Protocol">
+              <el-checkbox-group v-model="selectedProtocols" @change="onProtocolsChange">
+                <el-checkbox label="bittorrent">BitTorrent (BT)</el-checkbox>
+                <el-checkbox label="http">HTTP</el-checkbox>
+                <el-checkbox label="tls">TLS</el-checkbox>
+              </el-checkbox-group>
             </el-form-item>
-            <el-form-item label="传输层网络">
-              <el-select v-model="form.network" style="width: 100%" clearable placeholder="全部网络">
-                <el-option label="TCP" value="tcp" />
-                <el-option label="UDP" value="udp" />
-                <el-option label="TCP, UDP" value="tcp,udp" />
+
+            <el-form-item label="域名匹配 Domain（每行一条）">
+              <el-input
+                v-model="form.domain"
+                type="textarea"
+                :rows="3"
+                class="code-textarea font-mono-num"
+                placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com"
+              />
+            </el-form-item>
+
+            <el-form-item label="IP 段匹配 IP（每行一条）">
+              <el-input
+                v-model="form.ip"
+                type="textarea"
+                :rows="3"
+                class="code-textarea font-mono-num"
+                placeholder="geoip:private&#10;geoip:cn&#10;8.8.8.8"
+              />
+            </el-form-item>
+
+            <div class="form-grid-2">
+              <el-form-item label="目标端口 Port">
+                <el-input v-model="form.port" class="font-mono-num" placeholder="如 443 或 80,443" />
+              </el-form-item>
+              <el-form-item label="传输层网络">
+                <el-select v-model="form.network" style="width: 100%" clearable placeholder="全部网络">
+                  <el-option label="TCP" value="tcp" />
+                  <el-option label="UDP" value="udp" />
+                  <el-option label="TCP, UDP" value="tcp,udp" />
+                </el-select>
+              </el-form-item>
+            </div>
+
+            <el-form-item label="限定来源入站 InboundTag" style="margin-bottom: 0">
+              <el-select
+                v-model="selectedInboundTags"
+                style="width: 100%"
+                :disabled="isDerived"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="默认匹配全部入站流量"
+                @change="onInboundTagsChange"
+              >
+                <el-option v-for="t in inboundTags ?? []" :key="t" :label="t" :value="t" />
               </el-select>
+              <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
+                直通派生规则的来源入站由直通入站本身维护，已锁定不可更改
+              </span>
             </el-form-item>
           </div>
-
-          <el-form-item label="限定入站 InboundTag" style="margin-bottom: 0">
-            <el-select
-              v-model="selectedInboundTags"
-              style="width: 100%"
-              :disabled="isDerived"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              placeholder="默认匹配全部入站"
-              @change="onInboundTagsChange"
-            >
-              <el-option v-for="t in inboundTags ?? []" :key="t" :label="t" :value="t" />
-            </el-select>
-            <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
-              直通派生规则的来源入站由直通入站本身维护，已锁定不可更改
-            </span>
-          </el-form-item>
         </div>
 
-        <!-- ===== 右栏：路由目标 ===== -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <span class="panel-title">2. 转发目标与属性 (Target & Control)</span>
+        <!-- ===== 右栏：路由目标与控制 ===== -->
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="x-micro-card">
+            <div class="x-micro-card-head">
+              <div class="x-micro-card-title">
+                <span class="x-dot purple"></span>
+                <span>2. 转发目标与属性 (Target)</span>
+              </div>
+              <div class="card-head-action">
+                <span class="action-label">生效此规则</span>
+                <el-switch v-model="form.enabled" :disabled="isDerived" />
+              </div>
+            </div>
+
+            <div class="panel-form-stack">
+              <el-form-item label="目标出站出口 (OutboundTag)">
+                <el-select
+                  v-model="form.outbound_tag"
+                  style="width: 100%"
+                  filterable
+                  allow-create
+                  default-first-option
+                  placeholder="请选择转发到的出站"
+                >
+                  <el-option v-for="t in outboundTags ?? []" :key="t" :label="t" :value="t" />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="规则优先级 (Priority)">
+                <el-input-number v-model="form.priority" :min="0" class="font-mono-num" style="width: 100%" />
+                <span class="muted" style="font-size: 11px; margin-top: 3px; display: block">
+                  数字越小越先被 Xray 规则链评估匹配
+                </span>
+              </el-form-item>
+
+              <el-form-item label="规则备注说明">
+                <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
+              </el-form-item>
+            </div>
           </div>
 
-          <el-form-item label="目标出站标签 (OutboundTag)">
-            <el-select
-              v-model="form.outbound_tag"
-              style="width: 100%"
-              filterable
-              allow-create
-              default-first-option
-              placeholder="请选择转发到的出站"
-            >
-              <el-option v-for="t in outboundTags ?? []" :key="t" :label="t" :value="t" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="规则优先级 (Priority)">
-            <el-input-number v-model="form.priority" :min="0" style="width: 100%" />
-            <span class="muted" style="font-size: 11px; margin-top: 3px; display: block">数字越小越先被 Xray 规则链评估匹配</span>
-          </el-form-item>
-
-          <el-form-item label="启用规则">
-            <el-switch v-model="form.enabled" :disabled="isDerived" active-text="生效此规则" />
-            <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
-              直通派生规则的启用状态跟随直通入站，请在入站管理中开启或关闭
-            </span>
-          </el-form-item>
-
-          <el-form-item label="规则备注">
-            <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
-          </el-form-item>
-
-          <div class="info-tip-box" style="margin-top: 10px">
-            规则将按优先级升序生成到服务器 Xray <code>routing.rules</code> 中，优先命中先执行。
+          <div class="compact-tip">
+            💡 <b>规则判定顺序：</b> Xray 从上至下按 Priority 优先级顺序检索规则，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。
           </div>
         </div>
       </div>
@@ -405,8 +415,8 @@ function onClosed() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border, #e2e8f0);
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 14px;
@@ -416,7 +426,7 @@ function onClosed() {
   align-items: center;
   font-size: 12px;
   font-weight: 600;
-  color: var(--x-primary);
+  color: var(--x-primary, #3b82f6);
   white-space: nowrap;
 }
 .preset-chips {
@@ -429,22 +439,23 @@ function onClosed() {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: 6px;
+  background: var(--x-subcard-bg, #f8fafc);
+  border: 1px solid var(--x-border, #e2e8f0);
+  border-radius: 20px;
   font-size: 11.5px;
-  color: var(--x-text);
+  color: var(--x-text-2, #334155);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.15s ease;
   &:hover {
-    border-color: var(--x-primary);
-    color: var(--x-primary);
-    background: var(--x-primary-soft);
+    border-color: var(--x-primary, #3b82f6);
+    color: var(--x-primary, #3b82f6);
+    background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
   }
 }
+
 .dual-panel-grid {
   display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
+  grid-template-columns: 1.15fr 0.85fr;
   gap: 14px;
 }
 @media (max-width: 680px) {
@@ -452,51 +463,95 @@ function onClosed() {
     grid-template-columns: 1fr;
   }
 }
-.panel-card {
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
+
+/* 规范业务分组微卡片 */
+.x-micro-card {
+  background: var(--x-card-bg, #fff);
+  border: 1px solid var(--x-border, #e2e8f0);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 14px 16px;
+  transition: border-color 0.15s ease;
+  &:hover {
+    border-color: var(--x-border-hover, #cbd5e1);
+  }
 }
-.panel-header {
+.x-micro-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 12px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--x-border);
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--x-border, #e2e8f0);
 }
-.panel-title {
+.x-micro-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--x-primary);
+  color: var(--x-text-1, #0f172a);
 }
+.card-head-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.action-label {
+  font-size: 12px;
+  color: var(--x-text-2, #334155);
+}
+
+.x-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  &.cyan { background: #06b6d4; box-shadow: 0 0 6px rgba(6, 182, 212, 0.5); }
+  &.purple { background: #8b5cf6; box-shadow: 0 0 6px rgba(139, 92, 246, 0.5); }
+}
+
+.panel-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
 .code-textarea {
   font-family: var(--x-font-mono, monospace);
   font-size: 12px;
   line-height: 1.5;
 }
-.info-tip-box {
+
+.compact-tip {
   font-size: 11.5px;
-  color: var(--x-text-2);
+  color: var(--x-text-2, #334155);
   line-height: 1.5;
-  background: var(--x-primary-soft);
-  border: 1px solid var(--x-border);
-  border-radius: 6px;
-  padding: 8px 10px;
+  background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
+  border-left: 3px solid var(--x-primary, #3b82f6);
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
 }
+
 .json-collapse {
-  margin-top: 12px;
-  border: 1px dashed var(--x-border);
+  margin-top: 14px;
+  border: 1px dashed var(--x-border, #e2e8f0);
   border-radius: 8px;
   padding: 8px 12px;
 }
 .collapse-summary {
   font-size: 12px;
-  color: var(--x-text-2);
+  color: var(--x-text-2, #334155);
   cursor: pointer;
   user-select: none;
   font-weight: 500;
 }
 .muted {
-  color: var(--x-text-3);
+  color: var(--x-text-3, #94a3b8);
 }
 </style>
-
