@@ -28,6 +28,12 @@ const serverColumns: TableColumn[] = [
   { id: 'actions', header: '操作', width: 64, align: 'center' },
 ]
 
+/** 窄卡片下让表格保持可读列宽并横向滚动，而不是把每列压到逐字换行。 */
+const tableMinWidth = serverColumns.reduce(
+  (sum, column) => sum + Number(column.width ?? column.minWidth ?? 120),
+  0
+)
+
 const serverSearchText = ref('')
 const filteredServerMatrix = computed(() => {
   const list = dashData.value?.server_matrix || []
@@ -74,10 +80,11 @@ function fmtTime(t: string | null) {
       />
     </template>
 
-    <div class="table-container">
+    <div class="table-container" :style="{ '--server-table-min-width': `${tableMinWidth}px` }">
       <CsTable
         :items="filteredServerMatrix"
         :columns="serverColumns"
+        :wrap-lines="false"
         track-by="id"
         empty-text="暂无服务器"
       >
@@ -171,6 +178,10 @@ function fmtTime(t: string | null) {
   overflow: auto;
   box-sizing: border-box;
   padding: 0 16px 16px;
+
+  :deep(table) {
+    min-width: var(--server-table-min-width, 0);
+  }
 }
 
 .compact-filter :deep(input) {

@@ -109,7 +109,7 @@ function formatCompactRate(bytesPerSec: number): string {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   gap: 12px;
-  height: 100%;
+  min-height: 100%;
   width: 100%;
   align-content: start;
   box-sizing: border-box;

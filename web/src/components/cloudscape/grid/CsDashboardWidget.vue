@@ -153,11 +153,45 @@ const headerClass = computed(() => CSB['board-item'].header)
   min-width: 0;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+
+  /* 滚动容器的子项不能被 flex 压缩，否则内容会缩到卡片高度而不是产生滚动。 */
+  > * {
+    flex-shrink: 0;
+  }
+
+  /* Chrome 在设置标准 scrollbar-width/color 后会忽略 ::-webkit-scrollbar，
+     退回带箭头的原生滚动条；这里只用伪元素统一外观。 */
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--color-text-interactive-default-pauydh, #545b64);
+    background-clip: content-box;
+    border: 3px solid transparent;
+    border-radius: 8px;
+  }
+}
+
+/* 官方 content-inner 是 flex:1 但 min-height 默认 auto，
+   内容高于卡片时会把它撑开，导致外层裁切而不是滚动。 */
+.dashboard-widget-container :deep([class*='content-inner']) {
+  min-block-size: 0;
 }
 
 /* Container fit-height 的内容区默认 overflow:auto，会在卡片右下角叠出一条滚动条，
-   与缩放手柄挤在一起；widget 内部（表格/图表）各自管理滚动，这里直接裁掉外层滚动。 */
+   与缩放手柄挤在一起；滚动统一交给 widget-body 管理。 */
 .dashboard-widget-container :deep([class*='content-fit-height']) {
   overflow: hidden !important;
 }
