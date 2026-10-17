@@ -205,27 +205,32 @@ defineExpose({
   z-index: 100 !important;
 }
 
-/* Official resize handle glyph, bottom-right. */
+/* 官方 resize-area 图标；GridStack 默认图标是竖直箭头并带 rotate(-45deg)，
+   若不解除旋转，换成的对角图标会变成竖线。 */
 :deep(.grid-stack-item > .ui-resizable-se) {
-  right: 6px;
-  bottom: 6px;
-  width: 18px;
-  height: 18px;
+  /* 手柄是 grid-stack-item 的子元素，坐标含 16px 卡片间距；
+     加上 margin 才能落在卡片圆角内侧，而不是浮在卡片外的间隙里。 */
+  right: calc(var(--gs-item-margin-right, 16px) + 6px);
+  bottom: calc(var(--gs-item-margin-bottom, 16px) + 6px);
+  width: 20px;
+  height: 20px;
   background-image: none !important;
+  transform: none !important;
   cursor: nwse-resize;
+  z-index: 102;
+  opacity: 0.7;
+  transition: opacity 0.12s ease;
 
   &::after {
     content: '';
     position: absolute;
-    inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23545b64' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M14 4 4 14M10 14l4-4'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-size: 14px 14px;
-    background-position: center;
-    opacity: 0.7;
+    inset: 2px;
+    background-color: var(--color-text-interactive-default-pauydh, #545b64);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M14 4 4 14M10 14l4-4'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M14 4 4 14M10 14l4-4'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
   }
 
-  &:hover::after {
+  &:hover {
     opacity: 1;
   }
 }

@@ -83,6 +83,7 @@ const headerClass = computed(() => CSB['board-item'].header)
           disable-header-paddings
           :disable-content-paddings="noPadding"
           :class="CSB['board-item']['container-override']"
+          class="dashboard-widget-container"
         >
           <template #header>
             <div :class="headerClass">
@@ -153,5 +154,11 @@ const headerClass = computed(() => CSB['board-item'].header)
   min-height: 0;
   height: 100%;
   overflow: hidden;
+}
+
+/* Container fit-height 的内容区默认 overflow:auto，会在卡片右下角叠出一条滚动条，
+   与缩放手柄挤在一起；widget 内部（表格/图表）各自管理滚动，这里直接裁掉外层滚动。 */
+.dashboard-widget-container :deep([class*='content-fit-height']) {
+  overflow: hidden !important;
 }
 </style>
