@@ -24,26 +24,6 @@ const trendOptions: SegmentedOption[] = [
   { id: 30, text: '30 天' },
 ]
 
-function getMockTrend(days: number) {
-  const result = []
-  const now = new Date()
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 86400000)
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const factor = 1 + 0.35 * Math.sin((i / days) * Math.PI * 4) + (i % 3 === 0 ? 0.2 : -0.1)
-    const downGb = Math.max(30, Math.round((95 + (i * 3.5)) * factor))
-    const upGb = Math.max(8, Math.round((22 + (i * 0.9)) * factor))
-    result.push({
-      date: `${month}-${day}`,
-      up_gb: upGb,
-      down_gb: downGb,
-      total_gb: upGb + downGb,
-    })
-  }
-  return result
-}
-
 function updateChart() {
   if (!chartRef.value) return
   if (!chart) {
@@ -64,12 +44,7 @@ function updateChart() {
   let downData: number[] = []
   let upData: number[] = []
 
-  if (ctx.useMockData.value) {
-    const mock = getMockTrend(ctx.trendRange.value)
-    dates = mock.map((m) => m.date)
-    downData = mock.map((m) => m.down_gb)
-    upData = mock.map((m) => m.up_gb)
-  } else if (ctx.dashData.value?.traffic_trend?.length) {
+  if (ctx.dashData.value?.traffic_trend?.length) {
     const trend = ctx.dashData.value.traffic_trend
     dates = trend.map((t) => t.date.slice(5))
     downData = trend.map((t) => parseFloat((t.down_bytes / 1073741824).toFixed(2)))
@@ -160,7 +135,7 @@ function updateChart() {
   })
 }
 
-watch([() => ctx.dashData.value, () => ctx.useMockData.value, () => ctx.trendRange.value], () => {
+watch([() => ctx.dashData.value, () => ctx.trendRange.value], () => {
   nextTick(() => updateChart())
 })
 

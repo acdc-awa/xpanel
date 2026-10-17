@@ -40,7 +40,7 @@ export function resetSubscribeToken() {
   return http.post<ApiResp<{ subscribe_token: string }>>('/user/subscribe/reset')
 }
 
-// ---- 用户端节点可用性（J15，替换 mock）----
+// ---- 用户端节点可用性（J15）----
 
 export interface MyServerItem {
   id: number

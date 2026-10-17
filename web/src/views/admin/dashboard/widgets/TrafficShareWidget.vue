@@ -27,14 +27,6 @@ const rankPeriodOptions: SegmentedOption[] = [
 const RANK_PERIOD_LABELS: Record<string, string> = { today: '今日', '7d': '近 7 天', '30d': '近 30 天', month: '近 30 天' }
 const rankLabel = computed(() => ctx.dashData.value?.rank_label || RANK_PERIOD_LABELS[ctx.rankPeriod.value] || '今日')
 
-const MOCK_SERVER_BREAKDOWN = [
-  { name: 'hk-edge-01 (CN2 GIA)', value: 482.5, percent: 36.5 },
-  { name: 'tokyo-bgp-02 (SoftBank)', value: 356.2, percent: 27.0 },
-  { name: 'sg-direct-01 (SingTel)', value: 242.0, percent: 18.3 },
-  { name: 'us-west-01 (Silicon Valley)', value: 154.8, percent: 11.7 },
-  { name: 'de-frankfurt-01 (Core)', value: 86.5, percent: 6.5 },
-]
-
 const awsChartPalette = ['#006ce0', '#8c4bff', '#00a1c9', '#ec7211', '#1d8102', '#656871', '#d13212', '#2489c5']
 
 function updateChart() {
@@ -51,13 +43,7 @@ function updateChart() {
   const donutCenterBg = isDark ? '#161f2e' : '#ffffff'
 
   let pieData: { name: string; value: number; percent?: number }[] = []
-  if (ctx.useMockData.value) {
-    pieData = MOCK_SERVER_BREAKDOWN.map((m) => ({
-      name: m.name,
-      value: m.value,
-      percent: m.percent,
-    }))
-  } else if (ctx.dashData.value?.server_rank?.length) {
+  if (ctx.dashData.value?.server_rank?.length) {
     pieData = ctx.dashData.value.server_rank.map((s) => ({
       name: s.name || `节点#${s.server_id}`,
       value: parseFloat((s.total_bytes / 1073741824).toFixed(2)),
@@ -134,7 +120,7 @@ function updateChart() {
   })
 }
 
-watch([() => ctx.dashData.value, () => ctx.useMockData.value, () => ctx.rankPeriod.value], () => {
+watch([() => ctx.dashData.value, () => ctx.rankPeriod.value], () => {
   nextTick(() => updateChart())
 })
 

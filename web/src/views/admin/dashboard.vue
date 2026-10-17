@@ -19,7 +19,6 @@ import {
   CsModal,
   CsSpaceBetween,
   CsStatusIndicator,
-  CsToggle,
   loadSavedLayout,
   saveLayout,
   resetLayout,
@@ -42,8 +41,7 @@ const dashData = ref<DashboardData | null>(null)
 const lastUpdatedTime = ref('')
 const pollFailed = ref(false)
 
-// 演示数据开关（默认关闭，优先直接使用数据库真实聚合数据）
-const useMockData = ref(false)
+// 数据只来自主控 DB 聚合（不再提供前端演示数据开关）
 const trendRange = ref<number>(30)
 const rankPeriod = ref<RankPeriod>('today')
 
@@ -148,7 +146,6 @@ provide<DashboardContext>('adminDashboardContext', {
   dashData,
   loading,
   pollFailed,
-  useMockData,
   trendRange,
   rankPeriod,
   openServerMetrics,
@@ -287,7 +284,6 @@ onUnmounted(() => {
 
         <template #actions>
           <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-            <CsToggle v-model="useMockData" label="演示数据 (Mock)" />
             <CsBox variant="span" color="text-body-secondary" font-size="body-s" :title="POLL_HINT">
               最后同步：{{ lastUpdatedTime || '—' }} · 3s 实时 / 30s 统计
             </CsBox>

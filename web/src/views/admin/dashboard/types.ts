@@ -6,7 +6,6 @@ export interface DashboardContext {
   dashData: Ref<DashboardData | null>
   loading: Ref<boolean>
   pollFailed: Ref<boolean>
-  useMockData: Ref<boolean>
   trendRange: Ref<number>
   rankPeriod: Ref<RankPeriod>
   openServerMetrics: (s: ServerMatrixItem) => void
