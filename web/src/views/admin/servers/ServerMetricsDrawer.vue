@@ -131,123 +131,273 @@ function updateCharts() {
   const axisLineColor = isDark ? '#25334d' : '#e2e8f0'
   const splitLineColor = isDark ? '#1e293b' : '#f1f5f9'
 
-  // 1. 网络带宽图
+  // AWS CloudWatch 官方色板与设计 Tokens
+  const awsChartPalette = {
+    blue: '#0972d3',      // Inbound / Rx
+    purple: '#8c4bff',    // Outbound / Tx
+    green: '#1d8102',     // CPU
+    teal: '#00a1c9',      // Memory
+    orange: '#ec7211',    // Disk / Alert
+    active: '#4338ca',    // Active users
+  }
+
+  // 1. 网络带宽图 (AWS CloudWatch Rx/Tx Smooth Area Line Chart)
   netChart?.setOption({
     tooltip: {
       trigger: 'axis',
       ...tooltipConfig.value,
       formatter: (params: any) => {
-        let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
+        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px;letter-spacing:-0.01em">${params[0]?.axisValue} (UTC)</div>`
         params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;gap:6px;margin-top:2px">${item.marker} <span style="color:#cbd5e1">${item.seriesName}:</span> <b style="color:#fff">${item.value} Mbps</b></div>`
+          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
+              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
+            </span>
+            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} Mbps</b>
+          </div>`
         })
         return res
       },
     },
-    legend: { data: ['下行均值 (Rx)', '下行峰值 (Rx)', '上行均值 (Tx)', '上行峰值 (Tx)'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    legend: {
+      data: ['下行均值 (Rx)', '下行峰值 (Rx)', '上行均值 (Tx)', '上行峰值 (Tx)'],
+      top: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
+    },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', name: 'Mbps', nameTextStyle: { color: textColor }, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
+    xAxis: {
+      type: 'category',
+      data: ts,
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisTick: { show: false },
+      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Mbps',
+      nameTextStyle: { color: textColor, fontSize: 11, fontFamily: "'Open Sans', sans-serif" },
+      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
+      axisLabel: { color: textColor, fontFamily: "'Open Sans', sans-serif" },
+    },
     series: [
       {
         name: '下行均值 (Rx)',
         type: 'line',
-        smooth: true,
+        smooth: 0.35,
         showSymbol: false,
         data: data.rx_mbps,
-        itemStyle: { color: '#0284c7' },
+        lineStyle: { width: 2.2, color: awsChartPalette.blue },
+        itemStyle: { color: awsChartPalette.blue },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(2, 132, 199, 0.35)' : 'rgba(2, 132, 199, 0.25)' },
-            { offset: 1, color: 'rgba(2, 132, 199, 0.0)' },
+            { offset: 0, color: isDark ? 'rgba(9, 114, 211, 0.35)' : 'rgba(9, 114, 211, 0.22)' },
+            { offset: 1, color: 'rgba(9, 114, 211, 0.01)' },
           ]),
         },
       },
       {
         name: '上行均值 (Tx)',
         type: 'line',
-        smooth: true,
+        smooth: 0.35,
         showSymbol: false,
         data: data.tx_mbps,
-        itemStyle: { color: '#6366f1' },
+        lineStyle: { width: 2.2, color: awsChartPalette.purple },
+        itemStyle: { color: awsChartPalette.purple },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.25)' },
-            { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
+            { offset: 0, color: isDark ? 'rgba(140, 75, 255, 0.32)' : 'rgba(140, 75, 255, 0.20)' },
+            { offset: 1, color: 'rgba(140, 75, 255, 0.01)' },
           ]),
         },
       },
-      peakSeries('下行峰值 (Rx)', '#0284c7', data.rx_mbps_max),
-      peakSeries('上行峰值 (Tx)', '#6366f1', data.tx_mbps_max),
+      peakSeries('下行峰值 (Rx)', awsChartPalette.blue, data.rx_mbps_max),
+      peakSeries('上行峰值 (Tx)', awsChartPalette.purple, data.tx_mbps_max),
     ],
   })
 
-  // 2. CPU 使用率
+  // 2. CPU 使用率 (AWS CloudWatch Smooth Area Line Chart)
   cpuChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
-    legend: { data: ['CPU 均值', 'CPU 峰值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    tooltip: {
+      trigger: 'axis',
+      ...tooltipConfig.value,
+      formatter: (params: any) => {
+        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
+        params.forEach((item: any) => {
+          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
+              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
+            </span>
+            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} %</b>
+          </div>`
+        })
+        return res
+      },
+    },
+    legend: {
+      data: ['CPU 均值', 'CPU 峰值'],
+      top: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
+    },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
+    xAxis: {
+      type: 'category',
+      data: ts,
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisTick: { show: false },
+      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
+      axisLabel: { color: textColor, formatter: '{value}%', fontFamily: "'Open Sans', sans-serif" },
+    },
     series: [
       {
         name: 'CPU 均值',
         type: 'line',
-        smooth: true,
+        smooth: 0.35,
         showSymbol: false,
         data: data.cpu,
-        itemStyle: { color: '#10b981' },
+        lineStyle: { width: 2.2, color: awsChartPalette.green },
+        itemStyle: { color: awsChartPalette.green },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)' },
-            { offset: 1, color: 'rgba(16, 185, 129, 0.0)' },
+            { offset: 0, color: isDark ? 'rgba(29, 129, 2, 0.35)' : 'rgba(29, 129, 2, 0.22)' },
+            { offset: 1, color: 'rgba(29, 129, 2, 0.01)' },
           ]),
         },
         markLine: {
           silent: true,
-          lineStyle: { color: '#ef4444', type: 'dashed' },
-          data: [{ yAxis: 80, label: { formatter: '80% 警戒', color: '#ef4444' } }],
+          lineStyle: { color: '#d13212', type: 'dashed', width: 1.5 },
+          data: [{ yAxis: 80, label: { formatter: '80% 警戒 (High)', color: '#d13212', fontSize: 11 } }],
         },
       },
-      peakSeries('CPU 峰值', '#10b981', data.cpu_max),
+      peakSeries('CPU 峰值', awsChartPalette.green, data.cpu_max),
     ],
   })
 
-  // 3. 内存 & 磁盘负载
+  // 3. 内存 & 磁盘负载 (AWS CloudWatch Smooth Area Line Chart)
   memChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} %` },
-    legend: { data: ['内存均值', '内存峰值', '磁盘均值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    tooltip: {
+      trigger: 'axis',
+      ...tooltipConfig.value,
+      formatter: (params: any) => {
+        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
+        params.forEach((item: any) => {
+          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
+              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
+            </span>
+            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} %</b>
+          </div>`
+        })
+        return res
+      },
+    },
+    legend: {
+      data: ['内存均值', '内存峰值', '磁盘均值'],
+      top: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
+    },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor, formatter: '{value}%' } },
+    xAxis: {
+      type: 'category',
+      data: ts,
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisTick: { show: false },
+      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
+      axisLabel: { color: textColor, formatter: '{value}%', fontFamily: "'Open Sans', sans-serif" },
+    },
     series: [
       {
         name: '内存均值',
         type: 'line',
-        smooth: true,
+        smooth: 0.35,
         showSymbol: false,
         data: data.mem_percent,
-        itemStyle: { color: '#3b82f6' },
+        lineStyle: { width: 2.2, color: awsChartPalette.teal },
+        itemStyle: { color: awsChartPalette.teal },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: isDark ? 'rgba(0, 161, 201, 0.30)' : 'rgba(0, 161, 201, 0.20)' },
+            { offset: 1, color: 'rgba(0, 161, 201, 0.01)' },
+          ]),
+        },
       },
-      peakSeries('内存峰值', '#3b82f6', data.mem_percent_max),
+      peakSeries('内存峰值', awsChartPalette.teal, data.mem_percent_max),
       {
         name: '磁盘均值',
         type: 'line',
-        smooth: true,
+        smooth: 0.35,
         showSymbol: false,
         data: data.disk_percent,
-        itemStyle: { color: '#8b5cf6' },
+        lineStyle: { width: 1.8, color: awsChartPalette.orange },
+        itemStyle: { color: awsChartPalette.orange },
       },
     ],
   })
 
-  // 4. 在线用户数
+  // 4. 在线用户数 (AWS CloudWatch Step/Smooth Area Chart)
   userChart?.setOption({
-    tooltip: { trigger: 'axis', ...tooltipConfig.value, valueFormatter: (val: any) => `${val} 人` },
-    legend: { data: ['在线均值', '在线峰值'], top: 0, textStyle: { color: textColor, fontSize: 12 } },
+    tooltip: {
+      trigger: 'axis',
+      ...tooltipConfig.value,
+      formatter: (params: any) => {
+        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
+        params.forEach((item: any) => {
+          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
+              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
+            </span>
+            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} 人</b>
+          </div>`
+        })
+        return res
+      },
+    },
+    legend: {
+      data: ['在线均值', '在线峰值'],
+      top: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
+    },
     grid: commonGrid.value,
-    xAxis: { type: 'category', data: ts, axisLine: { lineStyle: { color: axisLineColor } }, axisLabel: { color: textColor, fontSize: 11, hideOverlap: true } },
-    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: splitLineColor } }, axisLabel: { color: textColor } },
+    xAxis: {
+      type: 'category',
+      data: ts,
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisTick: { show: false },
+      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
+      axisLabel: { color: textColor, fontFamily: "'Open Sans', sans-serif" },
+    },
     series: [
       {
         name: '在线均值',
@@ -255,15 +405,16 @@ function updateCharts() {
         step: 'start',
         showSymbol: false,
         data: data.online_users,
-        itemStyle: { color: '#6366f1' },
+        lineStyle: { width: 2, color: awsChartPalette.active },
+        itemStyle: { color: awsChartPalette.active },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)' },
-            { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
+            { offset: 0, color: isDark ? 'rgba(67, 56, 202, 0.35)' : 'rgba(67, 56, 202, 0.22)' },
+            { offset: 1, color: 'rgba(67, 56, 202, 0.01)' },
           ]),
         },
       },
-      peakSeries('在线峰值', '#6366f1', data.online_users_max),
+      peakSeries('在线峰值', awsChartPalette.active, data.online_users_max),
     ],
   })
 }
