@@ -1,45 +1,24 @@
 /*
- * Element Plus el-table 的 Cloudscape 外观适配层。
- * 只在仪表盘等尚未移植官方 Table 的页面使用，所有颜色走官方 token，
- * 亮/暗色由 body.awsui-dark-mode 自动切换，无需组件内再写 html.dark 补丁。
+ * CsTable：官方 Table 结构与 token，但仪表盘卡片内需要更紧凑的单元格留白。
+ * 官方 CSS 选择器带 :not(#\9)，普通选择器压不住间距，这里用 !important 覆盖。
+ * 亮/暗色由 body.awsui-dark-mode 自动切换。
  */
-.aws-cloudscape-table {
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: var(--color-background-table-header-pgyagt, #fafafa);
-  --el-table-border-color: var(--color-border-divider-default-diwd4w, #e9ebed);
-  --el-table-row-hover-bg-color: var(--color-background-dropdown-item-hover-pvfsrg, #f2f3f3);
-  --el-table-text-color: var(--color-text-body-default-b2us04, #0f141a);
-  --el-table-header-text-color: var(--color-text-body-secondary-66ygbb, #656871);
-  --el-table-expanded-cell-bg-color: transparent;
-  background-color: transparent;
-  font-family: var(--font-family-base-c9u5cr, 'Open Sans', 'Helvetica Neue', Roboto, Arial, sans-serif);
+.cs-cloudscape-table {
+  inline-size: 100%;
+  background: transparent;
 }
 
-.aws-cloudscape-table.el-table th.el-table__cell {
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  background-color: var(--color-background-table-header-pgyagt, #fafafa);
-  border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed) !important;
+.cs-cloudscape-table th[class*='header-cell'],
+.cs-cloudscape-table td[class*='body-cell'] {
+  padding: 0 !important;
 }
 
-.aws-cloudscape-table.el-table td.el-table__cell {
-  padding: 8px 10px;
-  font-size: 12.5px;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+.cs-cloudscape-table [class*='header-cell-content'],
+.cs-cloudscape-table [class*='body-cell-content'] {
+  padding-block: 6px !important;
+  padding-inline: 10px !important;
 }
 
-.aws-cloudscape-table.el-table .el-table__row:last-child td.el-table__cell {
-  border-bottom: none;
-}
-
-.aws-cloudscape-table.el-table .el-table__empty-block {
-  background-color: transparent;
-}
-
-.aws-cloudscape-table.el-table .el-table__empty-text {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.cs-cloudscape-table thead th {
+  white-space: nowrap;
 }

@@ -27,6 +27,7 @@ export { default as CsInput } from './Input.vue'
 export { default as CsToggle } from './Toggle.vue'
 export { default as CsModal } from './Modal.vue'
 export { default as CsTextFilter } from './TextFilter.vue'
+export { default as CsTable } from './Table.vue'
 
 export type { StatusType } from './StatusIndicator.vue'
 export type { BreadcrumbItem } from './BreadcrumbGroup.vue'
@@ -35,6 +36,7 @@ export type { TabItem } from './Tabs.vue'
 export type { FlashbarItem } from './Flashbar.vue'
 export type { KeyValuePair } from './KeyValuePairs.vue'
 export type { GridDefinition } from './Grid'
+export type { TableColumn } from './Table.vue'
 
 // Dashboard grid (GridStack-backed) is defined in ./grid.
 export { default as CsDashboardGrid } from './grid/CsDashboardGrid.vue'
