@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
+  CsBadge,
   CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
   CsContainer,
   CsDatePicker,
   CsForm,
@@ -64,6 +69,11 @@ function chipOf(row: Invitation): { cls: string; text: string } {
   if (row.status === 2) return { cls: 'red', text: '已禁用' }
   if (isExpired(row)) return { cls: 'gray', text: '已过期' }
   return { cls: 'blue', text: '未使用' }
+}
+
+function badgeColorOf(row: Invitation): 'green' | 'red' | 'grey' | 'blue' {
+  const cls = chipOf(row).cls
+  return cls === 'gray' ? 'grey' : (cls as 'green' | 'red' | 'blue')
 }
 
 // ---- 本地分页（列表后端 Limit(200) 全量返回）----
@@ -211,66 +221,37 @@ function fmtTime(t: string | null) {
         <p style="margin-top: 8px">{{ list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码' }}</p>
       </div>
 
-      <!-- 全局统一邀请码卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="inv-card-grid">
-        <div v-for="row in paged" :key="row.id" class="inv-card" :class="{ disabled: row.status !== 0 }">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <code
-                class="cell-mono inv-code-text"
-                title="点击复制邀请码"
-                @click="copyCode(row.code)"
-              >
-                {{ row.code }}
-              </code>
-            </div>
-            <span
-              class="x-chip"
-              :class="chipOf(row).cls"
-              style="font-size: 10.5px"
-            >
-              {{ chipOf(row).text }}
-            </span>
-          </div>
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，次要信息 12/16 -->
+      <CsCardGrid v-else>
+        <CsCard v-for="row in paged" :key="row.id" :class="{ 'inv-card-muted': row.status !== 0 || isExpired(row) }">
+          <template #header>
+            <button type="button" class="inv-code" title="点击复制邀请码" @click="copyCode(row.code)">
+              {{ row.code }}
+            </button>
+          </template>
+          <template #actions>
+            <CsBadge :color="badgeColorOf(row)">{{ chipOf(row).text }}</CsBadge>
+          </template>
 
-          <!-- 邀请码属性网格 -->
-          <div class="card-grid">
-            <div class="grid-item">
-              <span class="item-label">创建人</span>
-              <div class="item-value">{{ row.created_by || '系统生成' }}</div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">有效期</span>
-              <div class="item-value cell-mono font-11">
-                {{ row.expires_at ? '至 ' + fmtTime(row.expires_at) : '永不过期' }}
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">创建时间</span>
-              <div class="item-value cell-mono muted font-11">{{ fmtTime(row.created_at) }}</div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">使用时间</span>
-              <div class="item-value cell-mono font-11" :style="{ color: row.used_at ? '#10b981' : 'var(--x-text-3)' }">
-                {{ row.used_at ? fmtTime(row.used_at) : '未使用' }}
-              </div>
-            </div>
-          </div>
+          <CsCardFacts>
+            <CsCardFact label="创建人" :value="row.created_by || '系统生成'" />
+            <CsCardFact label="有效期" :value="row.expires_at ? '至 ' + fmtTime(row.expires_at) : '永不过期'" mono />
+            <CsCardFact label="创建时间" :value="fmtTime(row.created_at)" mono />
+            <CsCardFact label="使用时间" :value="row.used_at ? fmtTime(row.used_at) : '未使用'" mono />
+          </CsCardFacts>
 
-          <!-- 底部操作栏 -->
-          <div class="card-foot-actions">
+          <template #footer>
             <template v-if="row.status === 0 && !isExpired(row)">
               <CsButton icon-name="external" @click="copyRegisterLink(row.code)">复制链接</CsButton>
               <CsButton icon-name="copy" @click="copyCode(row.code)">复制码</CsButton>
               <CsButton icon-name="remove" @click="revoke(row)">作废</CsButton>
             </template>
-            <span v-else class="muted font-11" style="line-height: 30px">
+            <span v-else class="inv-card-note">
               {{ row.status === 1 ? '该邀请码已被成功使用' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
             </span>
-          </div>
-        </div>
-      </div>
+          </template>
+        </CsCard>
+      </CsCardGrid>
 
       <!-- 本地分页 -->
       <div v-if="filtered.length > PAGE_SIZE" style="display: flex; justify-content: center; margin-top: 16px">
@@ -338,100 +319,6 @@ function fmtTime(t: string | null) {
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
 
-/* ================= 全局统一邀请码卡片网格流 ================= */
-.inv-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
-}
-
-.inv-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  &.disabled {
-    opacity: 0.75;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .inv-code-text {
-      font-weight: 700;
-      font-size: 13px;
-      color: var(--x-primary);
-      cursor: pointer;
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    button {
-      flex: 1;
-      margin: 0;
-    }
-  }
-}
-
 .inv-codes { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
 .inv-code-row {
   display: flex;
@@ -442,15 +329,34 @@ function fmtTime(t: string | null) {
   padding: 6px 12px;
 }
 .inv-code {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 13px;
-  color: var(--x-primary);
-  word-break: break-all;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  cursor: pointer;
+  text-align: start;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
-@media (max-width: 640px) {
-  .inv-card-grid {
-    grid-template-columns: 1fr;
-  }
+.inv-card-muted .inv-code {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.inv-card-note {
+  margin-inline-start: auto;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  text-align: end;
 }
 </style>

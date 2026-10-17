@@ -1,10 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Document, Edit, Delete, Loading, FolderChecked, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
+  CsContainer,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsModal,
+  CsOption,
+  CsSelect,
+  CsSpinner,
+} from '@/components/cloudscape'
 import {
   createPermissionGroup,
   deletePermissionGroup,
@@ -152,6 +168,10 @@ function openTemplates(row: PermissionGroup) {
   router.push({ path: '/admin/sub-templates', query: { group: String(row.id) } })
 }
 
+function hasTemplate(row: PermissionGroup) {
+  return !!(row.clash_template && row.clash_template.trim())
+}
+
 async function remove(row: any) {
   try {
     await ElMessageBox.confirm(`确认删除权限组「${row.name}」？关联的套餐和节点权限引用将一并解除。`, '删除权限组', { type: 'error' })
@@ -176,123 +196,105 @@ async function remove(row: any) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增权限组</el-button>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增权限组</CsButton>
         <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。" />
       </div>
     </div>
 
-    <BaseCard title="权限分组列表">
+    <CsContainer header="权限分组列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><FolderChecked /></el-icon>
+        <CsIcon name="folder-open" size="large" />
         <p style="margin-top: 8px">尚无权限组，点击右上角「新增权限组」</p>
       </div>
 
-      <!-- 全局统一权限组卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="group-card-grid">
-        <div v-for="row in list" :key="row.id" class="group-card">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span class="group-name" title="点击编辑权限组" @click="openEdit(row)">{{ row.name }}</span>
-            </div>
-            <span
-              class="x-chip"
-              :class="row.clash_template && row.clash_template.trim() ? 'purple' : 'gray'"
-              style="font-size: 10.5px; cursor: pointer"
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，模板状态作为卡片角标 -->
+      <CsCardGrid v-else>
+        <CsCard v-for="row in list" :key="row.id">
+          <template #header>
+            <button type="button" class="pg-name" title="点击编辑权限组" @click="openEdit(row)">
+              {{ row.name }}
+            </button>
+            <div class="pg-id">#{{ row.id }}</div>
+          </template>
+          <template #actions>
+            <button
+              type="button"
+              class="pg-template-flag"
               title="订阅模板已独立成页，点击前往编辑"
               @click="openTemplates(row)"
             >
-              {{ row.clash_template && row.clash_template.trim() ? '自定义模板' : '系统默认' }}
-            </span>
-          </div>
+              <CsBadge :color="hasTemplate(row) ? 'blue' : 'grey'">
+                {{ hasTemplate(row) ? '自定义模板' : '系统默认' }}
+              </CsBadge>
+            </button>
+          </template>
 
-          <!-- 属性网格 -->
-          <div class="card-grid">
-            <div class="grid-item full-width">
-              <span class="item-label">备注说明</span>
-              <div class="item-value">{{ row.remark || '—' }}</div>
-            </div>
-            <div class="grid-item full-width">
-              <span class="item-label">包含接入点</span>
-              <div class="item-value">
+          <CsCardFacts>
+            <CsCardFact label="备注说明" :value="row.remark || '—'" full-width />
+            <CsCardFact label="包含接入点" full-width>
+              <div class="pg-aps">
                 <template v-if="row.access_point_names && row.access_point_names.length">
-                  <span
-                    v-for="(name, idx) in row.access_point_names"
-                    :key="name"
-                    class="x-chip blue"
-                    style="margin-right: 4px; margin-bottom: 2px; font-size: 10.5px"
-                  >
+                  <CsBadge v-for="(name, idx) in row.access_point_names" :key="name" color="blue">
                     {{ idx + 1 }}. {{ name }}
-                  </span>
-                  <el-button size="small" text type="primary" style="font-size: 11.5px" @click="openAPEditor(row)">
-                    调整顺序
-                  </el-button>
+                  </CsBadge>
+                  <CsButton variant="link" @click="openAPEditor(row)">调整顺序</CsButton>
                 </template>
-                <span v-else class="muted font-11">暂无接入点（在拓扑画布中绑定该组）</span>
+                <span v-else class="pg-empty">暂无接入点（在拓扑画布中绑定该组）</span>
               </div>
-            </div>
-          </div>
+            </CsCardFact>
+          </CsCardFacts>
 
-          <!-- 底部操作栏 -->
-          <div class="card-foot-actions">
-            <el-button size="small" type="warning" plain @click="openTemplates(row)">
-              <el-icon><Document /></el-icon>&nbsp;订阅模板
-            </el-button>
-            <el-button size="small" type="primary" plain @click="openEdit(row)">
-              <el-icon><Edit /></el-icon>&nbsp;编辑
-            </el-button>
-            <el-button size="small" type="danger" plain @click="remove(row)">
-              <el-icon><Delete /></el-icon>&nbsp;删除
-            </el-button>
-          </div>
-        </div>
-      </div>
-    </BaseCard>
+          <template #footer>
+            <CsButton icon-name="file" @click="openTemplates(row)">订阅模板</CsButton>
+            <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
+            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
+          </template>
+        </CsCard>
+      </CsCardGrid>
+    </CsContainer>
 
     <!-- ===== 权限组基础信息编辑弹窗 ===== -->
-    <el-dialog v-model="formOpen" :title="editing ? '编辑权限组' : '新增权限组'" width="440px" :append-to-body="true">
-      <el-form label-position="top">
-        <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 VIP 1 / 基础套餐组" /></el-form-item>
-        <el-form-item label="备注说明"><el-input v-model="form.remark" placeholder="选填，如 普通节点权限组" /></el-form-item>
-      </el-form>
+    <CsModal v-model:visible="formOpen" :header="editing ? '编辑权限组' : '新增权限组'" size="medium">
+      <CsForm label-position="top">
+        <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 VIP 1 / 基础套餐组" /></CsFormItem>
+        <CsFormItem label="备注说明"><CsInput v-model="form.remark" placeholder="选填，如 普通节点权限组" /></CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="formOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <CsButton @click="formOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 组内接入点优先级编辑弹窗 ===== -->
-    <el-dialog
-      v-model="apDialogOpen"
-      :title="`接入点优先级 · ${apTarget?.name || ''}`"
-      width="560px"
-      :append-to-body="true"
+    <CsModal
+      v-model:visible="apDialogOpen"
+      :header="`接入点优先级 · ${apTarget?.name || ''}`"
+      size="medium"
     >
-      <el-alert type="info" :closable="false" style="margin-bottom: 12px"
-        title="列表顺序即该权限组订阅中节点的输出顺序（$PROXIES$ 注入与客户端显示同序）。同组调整不影响接入点在其他权限组中的优先级。"
-      />
-      <el-form label-position="top">
-        <el-form-item label="添加接入点（下方列表调整顺序）">
+      <CsAlert type="info" style="margin-bottom: 12px">
+        列表顺序即该权限组订阅中节点的输出顺序（$PROXIES$ 注入与客户端显示同序）。同组调整不影响接入点在其他权限组中的优先级。
+      </CsAlert>
+      <CsForm label-position="top">
+        <CsFormItem label="添加接入点（下方列表调整顺序）">
           <div style="display: flex; gap: 8px; width: 100%">
-            <el-select
+            <CsSelect
               v-model="selectedApId"
               placeholder="选择启用中的接入点"
               style="flex: 1"
               :disabled="availableAPs.length === 0"
               filterable
             >
-              <el-option v-for="ap in availableAPs" :key="ap.id" :label="ap.name" :value="ap.id" />
-            </el-select>
-            <el-button type="primary" :disabled="!selectedApId" @click="addAP">
-              <el-icon><Plus /></el-icon>&nbsp;加入
-            </el-button>
+              <CsOption v-for="ap in availableAPs" :key="ap.id" :label="ap.name" :value="ap.id" />
+            </CsSelect>
+            <CsButton variant="primary" icon-name="add-plus" :disabled="!selectedApId" @click="addAP">
+              加入
+            </CsButton>
           </div>
-        </el-form-item>
+        </CsFormItem>
 
         <div v-if="orderedApIds.length === 0" class="muted" style="font-size: 12.5px; padding: 16px 0; text-align: center">
           当前权限组未绑定接入点（订阅将无节点）
@@ -302,28 +304,70 @@ async function remove(row: any) {
             <span class="order-idx">{{ idx + 1 }}</span>
             <span class="order-name">{{ apNameMap.get(apId) || ('#' + apId) }}</span>
             <div class="order-actions">
-              <el-button size="small" text :icon="ArrowUp" :disabled="idx === 0" @click="moveAP(idx, -1)" />
-              <el-button size="small" text :icon="ArrowDown" :disabled="idx === orderedApIds.length - 1" @click="moveAP(idx, 1)" />
-              <el-button size="small" text type="danger" :icon="Delete" @click="removeAP(idx)" />
+              <CsButton variant="icon" icon-name="arrow-up" aria-label="上移" :disabled="idx === 0" @click="moveAP(idx, -1)" />
+              <CsButton variant="icon" icon-name="arrow-down" aria-label="下移" :disabled="idx === orderedApIds.length - 1" @click="moveAP(idx, 1)" />
+              <CsButton variant="icon" icon-name="remove" aria-label="移除" @click="removeAP(idx)" />
             </div>
           </div>
         </div>
-      </el-form>
+      </CsForm>
       <template #footer>
-        <el-button @click="apDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="orderingSaving" @click="saveOrdering">保存顺序</el-button>
+        <CsButton @click="apDialogOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="orderingSaving" @click="saveOrdering">保存顺序</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
 <style scoped lang="scss">
 .muted { color: var(--x-text-3); }
-.cell-mono {
-  font-family: var(--x-font-mono, monospace);
-  font-size: 12px;
+
+.pg-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+  }
 }
-.table-empty { padding: 30px 0; text-align: center; color: var(--x-text-3); font-size: 13px; }
+
+.pg-id {
+  margin-block-start: 2px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.pg-template-flag {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.pg-aps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pg-empty {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
 
 .order-list {
   display: flex;
@@ -368,108 +412,6 @@ async function remove(row: any) {
 .order-actions {
   display: flex;
   gap: 2px;
-}
-
-
-/* ================= 全局统一权限组卡片网格流 ================= */
-.group-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.group-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .group-name {
-      font-weight: 600;
-      font-size: 13.5px;
-      color: var(--x-text, #111827);
-      cursor: pointer;
-      &:hover {
-        color: var(--x-primary);
-      }
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    .el-button {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-    }
-  }
-}
-
-@media (max-width: 640px) {
-  .group-card-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
 

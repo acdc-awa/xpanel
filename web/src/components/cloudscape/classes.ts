@@ -108,6 +108,22 @@ export const CS: Record<string, Record<string, string>> = {
     "footer": "awsui_footer_14iqq_1wfvd_357",
     "with-divider": "awsui_with-divider_14iqq_1wfvd_361"
   },
+  "item-card": {
+    "root": "awsui_root_n1fwt_1f9u9_13",
+    "header-inner": "awsui_header-inner_n1fwt_1f9u9_45",
+    "header": "awsui_header_n1fwt_1f9u9_45",
+    "body": "awsui_body_n1fwt_1f9u9_54",
+    "footer": "awsui_footer_n1fwt_1f9u9_62",
+    "refresh": "awsui_refresh_n1fwt_1f9u9_128",
+    "highlighted": "awsui_highlighted_n1fwt_1f9u9_131",
+    "variant-default": "awsui_variant-default_n1fwt_1f9u9_138",
+    "variant-embedded": "awsui_variant-embedded_n1fwt_1f9u9_138",
+    "inner-card": "awsui_inner-card_n1fwt_1f9u9_138",
+    "no-padding": "awsui_no-padding_n1fwt_1f9u9_144",
+    "with-actions": "awsui_with-actions_n1fwt_1f9u9_169",
+    "full-height": "awsui_full-height_n1fwt_1f9u9_215",
+    "description": "awsui_description_n1fwt_1f9u9_219"
+  },
   "header": {
     "root": "awsui_root_2qdw9_199nd_9",
     "refresh": "awsui_refresh_2qdw9_199nd_45",

@@ -14,18 +14,17 @@
 // 全页不自动保存：切换到别的权限组/模板、新建、清空、离开页面之前都会先确认，绝不静默丢弃修改。
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
-import {
-  ArrowDown,
-  Check,
-  CopyDocument,
-  Delete,
-  Plus,
-  Refresh,
-  Search,
-} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
+import {
+  CsButton,
+  CsButtonDropdown,
+  CsContainer,
+  CsInput,
+  CsLoading,
+  CsTabs,
+} from '@/components/cloudscape'
+import type { ButtonDropdownItem } from '@/components/cloudscape'
 import {
   createSubTemplate,
   deleteSubTemplate,
@@ -45,6 +44,14 @@ import CodeEditor from '@/components/CodeEditor.vue'
 const route = useRoute()
 
 const activeTab = ref<'groups' | 'library'>('groups')
+const outerTabs = [
+  { id: 'groups', label: '组级订阅模板' },
+  { id: 'library', label: '我的模板库' },
+]
+const editorTabs = [
+  { id: 'edit', label: '模板代码 (YAML)' },
+  { id: 'preview', label: '实时编译预览 (Preview)' },
+]
 
 // ==================== 未保存修改闸门 ====================
 // 所有会覆盖编辑缓冲的动作都先过这里：不自动保存，但也不静默丢弃。
@@ -200,8 +207,8 @@ async function fetchPreview() {
   }
 }
 
-function onTabChange(tab: any) {
-  if (tab === 'preview') fetchPreview()
+function onTabChange(detail: { activeTabId: string }) {
+  if (detail.activeTabId === 'preview') fetchPreview()
 }
 
 async function saveTemplate() {
@@ -264,6 +271,11 @@ async function copyPreview() {
 
 // ==================== 我的模板库（素材库，不直接生效） ====================
 const subTemplates = ref<SubTemplate[]>([])
+const libraryMenuItems = computed<ButtonDropdownItem[]>(() =>
+  subTemplates.value.length
+    ? subTemplates.value.map((template) => ({ id: template.id, text: template.name }))
+    : [{ id: '__empty', text: '模板库为空', disabled: true }]
+)
 const libraryLoading = ref(false)
 const librarySaving = ref(false)
 const libEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
@@ -423,6 +435,12 @@ async function loadFromLibrary(id: number) {
   )
 }
 
+function onLibraryMenuSelect(id: string | number) {
+  const templateId = Number(id)
+  if (!Number.isFinite(templateId)) return
+  loadFromLibrary(templateId)
+}
+
 // 把组编辑器当前内容沉淀为模板库条目（组 → 库）。纯写入：不切标签页、不动模板编辑器。
 async function saveAsFromEditor() {
   if (!templateCode.value.trim()) {
@@ -467,18 +485,17 @@ async function saveAsFromEditor() {
       </div>
     </div>
 
-    <el-tabs v-model="activeTab">
+    <CsTabs v-model="activeTab" :tabs="outerTabs" disable-content-paddings>
       <!-- ==================== TAB 1：组级订阅模板（生效位置） ==================== -->
-      <el-tab-pane label="组级订阅模板" name="groups">
-        <div class="tpl-layout">
+      <div v-show="activeTab === 'groups'" class="tpl-layout">
           <!-- 左：权限组选择 -->
-          <BaseCard title="权限组">
-            <template #extra>
-              <el-input
+          <CsContainer header="权限组">
+            <template #actions>
+              <CsInput
                 v-model="groupKeyword"
                 size="small"
                 placeholder="搜索权限组"
-                :prefix-icon="Search"
+                prefix-icon="search"
                 clearable
                 style="width: 150px"
               />
@@ -513,11 +530,11 @@ async function saveAsFromEditor() {
               </button>
             </div>
             <div class="list-foot">再次点击已选中的权限组可放弃修改、重新加载服务端已存的模板。</div>
-          </BaseCard>
+          </CsContainer>
 
           <!-- 右：模板编辑器 -->
-          <BaseCard :title="selectedGroup ? `配置订阅模板 · ${selectedGroup.name}` : '配置订阅模板'">
-            <template #extra>
+          <CsContainer :header="selectedGroup ? `配置订阅模板 · ${selectedGroup.name}` : '配置订阅模板'">
+            <template #actions>
               <span v-if="groupDirty" class="dirty-mark">未保存</span>
               <span class="x-chip" :class="hasCustomTemplate ? 'purple' : 'gray'" style="font-size: 10.5px">
                 {{ hasCustomTemplate ? '自定义模板' : '系统默认模板' }}
@@ -532,25 +549,13 @@ async function saveAsFromEditor() {
               <div class="preset-section">
                 <div class="preset-row">
                   <span class="preset-label">模板库：</span>
-                  <el-dropdown trigger="click" @command="loadFromLibrary">
-                    <el-button size="small" plain>
-                      从模板库加载<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                    </el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item v-for="t in subTemplates" :key="t.id" :command="t.id">
-                          {{ t.name }}
-                        </el-dropdown-item>
-                        <el-dropdown-item v-if="subTemplates.length === 0" disabled>
-                          模板库为空
-                        </el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                  <el-button size="small" @click="saveAsFromEditor">将当前内容另存为模板</el-button>
-                  <el-button size="small" type="danger" plain @click="clearTemplate">
-                    清空（恢复系统默认）
-                  </el-button>
+                  <CsButtonDropdown
+                    :items="libraryMenuItems"
+                    text="从模板库加载"
+                    @select="onLibraryMenuSelect"
+                  />
+                  <CsButton @click="saveAsFromEditor">将当前内容另存为模板</CsButton>
+                  <CsButton @click="clearTemplate">清空（恢复系统默认）</CsButton>
                 </div>
 
                 <div class="preset-row" style="margin-top: 8px">
@@ -575,12 +580,13 @@ async function saveAsFromEditor() {
                 </div>
               </div>
 
-              <el-tabs v-model="editorTab" @tab-change="onTabChange">
-                <el-tab-pane label="模板代码 (YAML)" name="edit">
+              <CsTabs v-model="editorTab" :tabs="editorTabs" disable-content-paddings @change="onTabChange">
+                <div v-show="editorTab === 'edit'">
                   <CodeEditor
                     ref="groupEditorRef"
                     v-model="templateCode"
                     height="330px"
+                    resizable
                     placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
                     @lint="(e, w) => { groupLint.errors = e; groupLint.warnings = w }"
                   />
@@ -590,10 +596,10 @@ async function saveAsFromEditor() {
                       错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
                     </span>
                   </div>
-                </el-tab-pane>
+                </div>
 
-                <el-tab-pane label="实时编译预览 (Preview)" name="preview" lazy>
-                  <div v-loading="previewLoading">
+                <div v-if="editorTab === 'preview'">
+                  <CsLoading :loading="previewLoading">
                     <div v-if="previewData" class="preview-header">
                       <div class="preview-stats">
                         <span class="stat-badge">
@@ -604,8 +610,8 @@ async function saveAsFromEditor() {
                         </span>
                       </div>
                       <div style="display: flex; gap: 8px">
-                        <el-button size="small" :icon="Refresh" @click="fetchPreview">刷新预览</el-button>
-                        <el-button size="small" type="primary" plain :icon="CopyDocument" @click="copyPreview">复制预览配置</el-button>
+                        <CsButton icon-name="refresh" @click="fetchPreview">刷新预览</CsButton>
+                        <CsButton variant="primary" icon-name="copy" @click="copyPreview">复制预览配置</CsButton>
                       </div>
                     </div>
 
@@ -621,6 +627,7 @@ async function saveAsFromEditor() {
                       :model-value="previewData.rendered"
                       height="300px"
                       readonly
+                      resizable
                       @lint="(e, w) => { previewLint.errors = e; previewLint.warnings = w }"
                     />
                     <div v-else class="list-hint" style="padding: 30px 0">正在编译渲染…</div>
@@ -629,32 +636,33 @@ async function saveAsFromEditor() {
                         编译结果有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
                       </span>
                     </div>
-                  </div>
-                </el-tab-pane>
-              </el-tabs>
+                  </CsLoading>
+                </div>
+              </CsTabs>
 
               <div class="save-bar">
                 <span class="muted" style="font-size: 12px">
                   保存后权限组「{{ selectedGroup.name }}」的用户请求订阅时将直接返回此配置
                 </span>
-                <el-button type="primary" :loading="templateSaving" @click="saveTemplate">
-                  <el-icon><Check /></el-icon>&nbsp;保存到该权限组
-                </el-button>
+                <CsButton variant="primary" icon-name="check" :loading="templateSaving" @click="saveTemplate">
+                  保存到该权限组
+                </CsButton>
               </div>
             </template>
-          </BaseCard>
+          </CsContainer>
         </div>
-      </el-tab-pane>
 
       <!-- ==================== TAB 2：我的模板库（素材库，与 TAB 1 同一套双列骨架） ==================== -->
-      <el-tab-pane label="我的模板库" name="library">
-        <div class="tpl-layout">
+      <div v-show="activeTab === 'library'" class="tpl-layout">
           <!-- 左：模板列表 -->
-          <BaseCard title="模板库" title-tip="这里的改动不会影响任何用户的订阅：它只是素材，要生效需加载到某个权限组。">
-            <template #extra>
-              <el-button type="primary" size="small" @click="startNewLibrary">
-                <el-icon><Plus /></el-icon>&nbsp;新建模板
-              </el-button>
+          <CsContainer header="模板库">
+            <template #info>
+              <TipIcon content="这里的改动不会影响任何用户的订阅：它只是素材，要生效需加载到某个权限组。" />
+            </template>
+            <template #actions>
+              <CsButton variant="primary" icon-name="add-plus" @click="startNewLibrary">
+                新建模板
+              </CsButton>
             </template>
 
             <div v-if="libraryLoading" class="list-hint">正在加载…</div>
@@ -679,14 +687,16 @@ async function saveAsFromEditor() {
                 <span v-if="tpl.id === libForm.id && libDirty" class="dirty-mark">未保存</span>
               </button>
             </div>
-          </BaseCard>
+          </CsContainer>
 
           <!-- 右：模板编辑器（与组级页共用同一套骨架，不再用弹窗） -->
-          <BaseCard
-            :title="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'"
-            title-tip="与组级模板语法一致：$PROXIES$（节点池）、$ALL_PROXIES$（全部节点名称）、$FILTER_PROXIES(关键词)$（按地区过滤）、$PANEL_HOST$（面板域名）。"
+          <CsContainer
+            :header="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'"
           >
-            <template #extra>
+            <template #info>
+              <TipIcon content="与组级模板语法一致：$PROXIES$（节点池）、$ALL_PROXIES$（全部节点名称）、$FILTER_PROXIES(关键词)$（按地区过滤）、$PANEL_HOST$（面板域名）。" />
+            </template>
+            <template #actions>
               <span v-if="libPaneOpen && libDirty" class="dirty-mark">未保存</span>
             </template>
 
@@ -698,10 +708,10 @@ async function saveAsFromEditor() {
               <div class="preset-section">
                 <div class="preset-row">
                   <span class="preset-label">模板名称：</span>
-                  <el-input
+                  <CsInput
                     v-model="libForm.name"
                     size="small"
-                    maxlength="64"
+                    :maxlength="64"
                     show-word-limit
                     placeholder="如 通用精简模板 / 流媒体分流模板"
                     style="width: 280px"
@@ -713,6 +723,7 @@ async function saveAsFromEditor() {
                 ref="libEditorRef"
                 v-model="libForm.content"
                 height="330px"
+                resizable
                 placeholder="留空则使用系统内置默认模板"
                 @lint="(e, w) => { libLint.errors = e; libLint.warnings = w }"
               />
@@ -728,19 +739,16 @@ async function saveAsFromEditor() {
                   保存只更新这条素材，不会改变任何权限组当前使用的订阅模板
                 </span>
                 <div style="display: flex; gap: 8px">
-                  <el-button v-if="!libIsNew" type="danger" plain @click="removeLibrary">
-                    <el-icon><Delete /></el-icon>&nbsp;删除
-                  </el-button>
-                  <el-button type="primary" :loading="librarySaving" @click="saveLibrary">
-                    <el-icon><Check /></el-icon>&nbsp;{{ libIsNew ? '保存到模板库' : '保存修改' }}
-                  </el-button>
+                  <CsButton v-if="!libIsNew" icon-name="remove" @click="removeLibrary">删除</CsButton>
+                  <CsButton variant="primary" icon-name="check" :loading="librarySaving" @click="saveLibrary">
+                    {{ libIsNew ? '保存到模板库' : '保存修改' }}
+                  </CsButton>
                 </div>
               </div>
             </template>
-          </BaseCard>
+          </CsContainer>
         </div>
-      </el-tab-pane>
-    </el-tabs>
+    </CsTabs>
   </div>
 </template>
 

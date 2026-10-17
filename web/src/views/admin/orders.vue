@@ -1,8 +1,21 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Refresh, Tickets, Loading, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  CsBadge,
+  CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
+  CsContainer,
+  CsIcon,
+  CsInput,
+  CsOption,
+  CsPagination,
+  CsSelect,
+  CsSpinner,
+} from '@/components/cloudscape'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -54,103 +67,93 @@ function fmtTime(t: string | null) {
   if (!t) return '—'
   return String(t).replace('T', ' ').slice(0, 16)
 }
+
+function statusOf(row: Order): { color: 'green' | 'grey' | 'severity-medium'; text: string } {
+  if (row.status === 'paid') return { color: 'green', text: '已生效' }
+  if (row.status === 'pending') return { color: 'severity-medium', text: '待支付' }
+  return { color: 'grey', text: '已取消' }
+}
+
+function amountClassOf(row: Order) {
+  if (row.status === 'paid') return 'order-amount--paid'
+  if (row.status === 'pending') return 'order-amount--pending'
+  return 'order-amount--muted'
+}
+
+function paymentLabel(row: Order) {
+  return row.payment_method === 'balance' ? '余额支付' : row.payment_method || '—'
+}
 </script>
 
 <template>
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
-        <el-select
+        <CsSelect
           v-model="filterStatus"
           placeholder="全部状态"
           clearable
           style="width: 140px"
           @change="onFilterChange"
         >
-          <el-option label="全部状态" value="" />
-          <el-option label="已生效 (paid)" value="paid" />
-          <el-option label="待支付 (pending)" value="pending" />
-          <el-option label="已取消 (cancelled)" value="cancelled" />
-        </el-select>
-        <el-input
+          <CsOption label="全部状态" value="" />
+          <CsOption label="已生效 (paid)" value="paid" />
+          <CsOption label="待支付 (pending)" value="pending" />
+          <CsOption label="已取消 (cancelled)" value="cancelled" />
+        </CsSelect>
+        <CsInput
           v-model="keyword"
           placeholder="搜索流水号 / 用户名..."
           clearable
+          prefix-icon="search"
           style="width: 220px"
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
-        >
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-button type="primary" @click="onFilterChange"><el-icon><Search /></el-icon>&nbsp;查询</el-button>
-        <el-button @click="resetFilters">重置</el-button>
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        />
+        <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
+        <CsButton @click="resetFilters">重置</CsButton>
+        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       </div>
     </div>
 
-    <BaseCard title="服务订购记录">
+    <CsContainer header="服务订购记录">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Tickets /></el-icon>
+        <CsIcon name="ticket" size="large" />
         <p style="margin-top: 8px">{{ filterStatus || keyword ? '未找到符合条件的订单记录' : '暂无订购记录' }}</p>
       </div>
 
-      <!-- 全局统一订单卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="order-card-grid">
-        <div v-for="row in list" :key="row.id" class="order-card">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="plan-name">{{ row.plan_name }}</span>
-              <span class="x-chip" :class="row.status === 'paid' ? 'green' : (row.status === 'pending' ? 'orange' : 'gray')" style="font-size: 10.5px">
-                {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
-              </span>
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，金额作为卡片主指标 -->
+      <CsCardGrid v-else>
+        <CsCard v-for="row in list" :key="row.id">
+          <template #header>
+            <div class="order-plan">{{ row.plan_name }}</div>
+            <div class="order-meta">
+              <span class="order-id">#{{ row.id }}</span>
+              <CsBadge :color="statusOf(row).color">{{ statusOf(row).text }}</CsBadge>
             </div>
-            <span class="cell-mono font-14" style="font-weight: 700; color: #059669">
+          </template>
+          <template #actions>
+            <span class="order-amount" :class="amountClassOf(row)">
               ¥ {{ (row.amount_cents / 100).toFixed(2) }}
             </span>
-          </div>
+          </template>
 
-          <!-- 订单属性网格 -->
-          <div class="card-grid">
-            <div class="grid-item">
-              <span class="item-label">订购用户</span>
-              <div class="item-value">
-                <span class="x-chip purple" style="font-size: 11px">{{ row.username }}</span>
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">支付方式</span>
-              <div class="item-value">
-                <span v-if="row.payment_method === 'balance'" class="x-chip green" style="font-size: 10.5px">
-                  余额支付
-                </span>
-                <span v-else class="x-chip blue" style="font-size: 10.5px">
-                  {{ row.payment_method }}
-                </span>
-              </div>
-            </div>
-            <div class="grid-item full-width">
-              <span class="item-label">订单流水号</span>
-              <div class="item-value">
-                <code class="cell-mono font-11 muted">{{ row.order_no }}</code>
-              </div>
-            </div>
-            <div class="grid-item full-width">
-              <span class="item-label">支付生效时间</span>
-              <div class="item-value cell-mono muted font-11">
-                {{ row.paid_at ? fmtTime(row.paid_at) : fmtTime(row.created_at) }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+          <CsCardFacts>
+            <CsCardFact label="订购用户" :value="row.username || '—'" />
+            <CsCardFact label="支付方式" :value="paymentLabel(row)" />
+            <CsCardFact label="订单流水号" :value="row.order_no" full-width mono />
+            <CsCardFact label="创建时间" :value="fmtTime(row.created_at)" mono />
+            <CsCardFact label="支付时间" :value="row.paid_at ? fmtTime(row.paid_at) : '—'" mono />
+          </CsCardFacts>
+        </CsCard>
+      </CsCardGrid>
 
       <div class="x-pager">
-        <el-pagination
+        <CsPagination
           v-model:current-page="page"
           v-model:page-size="size"
           :total="total"
@@ -160,86 +163,49 @@ function fmtTime(t: string | null) {
           @size-change="() => { page = 1; load() }"
         />
       </div>
-    </BaseCard>
+    </CsContainer>
   </div>
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
-.muted { color: var(--x-text-3); }
-
-/* ================= 全局统一订单卡片网格流 ================= */
-.order-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+.order-plan {
+  overflow-wrap: anywhere;
 }
 
-.order-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+.order-meta {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 4px;
+}
 
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
+.order-id {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
 
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+.order-amount {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
+.order-amount--paid {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
 
-    .plan-name {
-      font-weight: 600;
-      font-size: 13.5px;
-      color: var(--x-text, #111827);
-    }
-  }
+.order-amount--pending {
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
 
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0 2px;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
+.order-amount--muted {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .x-pager {
@@ -248,12 +214,5 @@ function fmtTime(t: string | null) {
   padding: 14px 0 0;
   margin-top: 16px;
   border-top: 1px solid var(--x-border-light, #f1f5f9);
-}
-.x-toolbar-hint { font-size: 13px; color: var(--x-text-3); margin-right: 8px; }
-
-@media (max-width: 640px) {
-  .order-card-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

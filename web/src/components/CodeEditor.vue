@@ -30,8 +30,10 @@ const props = withDefaults(
     placeholder?: string
     // 关闭校验：用于「预览」这类由后端生成的只读内容（默认仍开启，生成的 YAML 同样可能不合法）
     lint?: boolean
+    // 允许拖动右下角调整高度（双击恢复 height 指定的初始值）
+    resizable?: boolean
   }>(),
-  { modelValue: '', language: 'yaml', height: '360px', readonly: false, placeholder: '', lint: true }
+  { modelValue: '', language: 'yaml', height: '360px', readonly: false, placeholder: '', lint: true, resizable: false }
 )
 
 const emit = defineEmits<{
@@ -256,24 +258,32 @@ const highlight = HighlightStyle.define([
 
 const editorTheme = EditorView.theme({
   '&': {
-    backgroundColor: 'var(--x-code-bg)',
-    color: 'var(--x-code-text)',
-    border: '1px solid var(--x-border)',
+    backgroundColor: 'var(--color-background-input-default-1u0v1p, #ffffff)',
+    color: 'var(--color-text-body-default-b2us04, #0f141a)',
+    border: '1px solid var(--color-border-input-default-jtkw9d, #8c8c94)',
     borderRadius: '8px',
-    fontSize: '12px',
+    fontSize: '14px',
     overflow: 'hidden',
   },
-  '&.cm-focused': { outline: 'none', borderColor: 'var(--x-primary)' },
-  '.cm-scroller': { fontFamily: 'var(--x-font-mono)', lineHeight: '1.55' },
-  '.cm-content': { padding: '8px 0', caretColor: 'var(--x-code-text)' },
+  '&.cm-focused': {
+    outline: 'none',
+    borderColor: 'var(--color-border-input-focused-ppoq5z, #006ce0)',
+    boxShadow: '0 0 0 1px var(--color-border-item-focused-sewkzn, #006ce0)',
+  },
+  '.cm-scroller': {
+    fontFamily: 'var(--font-family-monospace-842lr2, Monaco, Menlo, Consolas, "Courier Prime", Courier, "Courier New", monospace)',
+    lineHeight: '20px',
+  },
+  '.cm-content': { padding: '8px 0', caretColor: 'var(--color-text-body-default-b2us04, #0f141a)' },
   '.cm-gutters': {
-    backgroundColor: 'var(--x-code-gutter)',
-    color: 'var(--x-text-3)',
+    backgroundColor: 'var(--color-background-code-editor-gutter-default-8n8dxf, #f3f3f7)',
+    color: 'var(--color-text-code-editor-gutter-default-u68cfj, #0f141a)',
     border: 'none',
-    borderRight: '1px solid var(--x-border)',
+    borderRight: '1px solid var(--color-border-input-default-jtkw9d, #8c8c94)',
   },
   '.cm-activeLine': { backgroundColor: 'var(--x-code-active-line)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--x-code-active-line)', color: 'var(--x-text-2)' },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--x-code-active-line)', color: 'var(--color-text-body-default-b2us04, #0f141a)' },
+  '.cm-placeholder': { color: 'var(--color-text-input-placeholder-l6klmg, #656871)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
     backgroundColor: 'var(--x-code-selection)',
   },
@@ -301,6 +311,62 @@ const editorTheme = EditorView.theme({
     color: 'var(--x-text-2)',
   },
 })
+
+// ==================== 高度与拖拽缩放 ====================
+// Cloudscape 官方 CodeEditor 自带可缩放盒；这里用同样的交互给 CodeMirror 外壳加右下角手柄。
+const shell = ref<HTMLDivElement>()
+const editorHeight = ref(props.height)
+const MIN_EDITOR_HEIGHT = 220
+const MAX_EDITOR_HEIGHT = 900
+let resizing = false
+let resizeStartY = 0
+let resizeStartHeight = 0
+
+watch(
+  () => props.height,
+  (v) => {
+    editorHeight.value = v
+  }
+)
+
+function parseHeight(v: string): number {
+  const n = Number.parseInt(v, 10)
+  return Number.isFinite(n) ? n : 360
+}
+
+function onResizeMove(e: PointerEvent) {
+  if (!resizing) return
+  const next = Math.min(MAX_EDITOR_HEIGHT, Math.max(MIN_EDITOR_HEIGHT, resizeStartHeight + e.clientY - resizeStartY))
+  editorHeight.value = `${Math.round(next)}px`
+}
+
+function stopResize() {
+  if (!resizing) return
+  resizing = false
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', stopResize)
+  window.removeEventListener('pointercancel', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+function startResize(e: PointerEvent) {
+  if (!props.resizable || e.button !== 0) return
+  e.preventDefault()
+  resizing = true
+  resizeStartY = e.clientY
+  resizeStartHeight = shell.value?.getBoundingClientRect().height ?? parseHeight(editorHeight.value)
+  document.body.style.cursor = 'nwse-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onResizeMove)
+  window.addEventListener('pointerup', stopResize)
+  window.addEventListener('pointercancel', stopResize)
+}
+
+// 双击手柄恢复组件声明的初始高度，避免拖歪后只能刷新页面
+function resetHeight() {
+  if (props.resizable) editorHeight.value = props.height
+}
 
 function extensions(): Extension[] {
   const isYaml = props.language === 'yaml'
@@ -344,6 +410,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopResize()
   view?.destroy()
   view = null
 })
@@ -400,17 +467,55 @@ defineExpose({ insertAtCursor, focus, validate })
 </script>
 
 <template>
-  <div ref="host" class="code-editor" :style="{ height }" />
+  <div ref="shell" class="code-editor-shell">
+    <div ref="host" class="code-editor" :style="{ height: editorHeight }" />
+    <div
+      v-if="resizable"
+      class="code-editor-resize-handle"
+      title="拖动调整高度，双击恢复默认"
+      @pointerdown="startResize"
+      @dblclick="resetHeight"
+    />
+  </div>
 </template>
 
 <style scoped>
+.code-editor-shell {
+  position: relative;
+  width: 100%;
+}
 .code-editor {
   width: 100%;
+  overflow: hidden;
 }
 .code-editor :deep(.cm-editor) {
   height: 100%;
 }
 .code-editor :deep(.cm-scroller) {
   overflow: auto;
+}
+.code-editor-resize-handle {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  z-index: 10;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.code-editor-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset-inline-end: 4px;
+  inset-block-end: 4px;
+  width: 8px;
+  height: 8px;
+  border-inline-end: 2px solid var(--color-text-body-secondary-66ygbb, #656871);
+  border-block-end: 2px solid var(--color-text-body-secondary-66ygbb, #656871);
+  opacity: 0.6;
+}
+.code-editor-resize-handle:hover::before {
+  opacity: 1;
 }
 </style>

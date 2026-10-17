@@ -4,6 +4,10 @@ import {
   CsAlert,
   CsBadge,
   CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
   CsContainer,
   CsDatePicker,
   CsForm,
@@ -204,70 +208,49 @@ function isExpired(row: GiftCard) {
         <p style="margin-top: 8px">暂无礼品卡记录，点击右上角「批量生成礼品卡」</p>
       </div>
 
-      <!-- 全局统一礼品卡卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="gift-card-grid">
-        <div v-for="row in list" :key="row.id" class="gift-card" :class="{ used: row.status === 'used' }">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span class="card-name">{{ row.name || '通用礼品卡' }}</span>
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，面额作为卡片主指标 -->
+      <CsCardGrid v-else>
+        <CsCard
+          v-for="row in list"
+          :key="row.id"
+          :class="{ 'gift-card-muted': row.status !== 'unused' || isExpired(row) }"
+        >
+          <template #header>
+            <div class="gift-card-title">{{ row.name || '通用礼品卡' }}</div>
+            <div class="gift-card-id">#{{ row.id }}</div>
+          </template>
+          <template #actions>
+            <div class="gift-card-summary">
+              <span class="gift-card-metric">{{ fmtMoney(row.face_value_cents) }}</span>
               <CsBadge v-if="row.status === 'unused' && isExpired(row)" color="red">已过期</CsBadge>
               <CsBadge v-else :color="statusMap[row.status]?.color || 'grey'">
                 {{ statusMap[row.status]?.text || row.status }}
               </CsBadge>
             </div>
-            <span class="cell-mono font-14" style="font-weight: 700; color: #059669">
-              {{ fmtMoney(row.face_value_cents) }}
-            </span>
-          </div>
+          </template>
 
-          <!-- 卡密与属性网格 -->
-          <div class="card-grid">
-            <div class="grid-item full-width">
-              <span class="item-label">卡密（点击复制）</span>
-              <div class="item-value">
-                <code
-                  class="cell-mono font-12"
-                  style="cursor: pointer; color: var(--x-primary); font-weight: 600"
-                  title="点击复制卡密"
-                  @click="copyText(row.code, '卡密')"
-                >
-                  {{ row.code }}
-                </code>
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">兑换用户</span>
-              <div class="item-value cell-mono">
-                {{ row.used_by ? (row.used_by_username || `用户 #${row.used_by}`) : '待兑换' }}
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">有效期</span>
-              <div class="item-value cell-mono font-11">
-                {{ row.expires_at ? fmtTime(row.expires_at) : '永久有效' }}
-              </div>
-            </div>
-            <div v-if="row.used_at" class="grid-item full-width">
-              <span class="item-label">兑换时间</span>
-              <div class="item-value cell-mono muted font-11">{{ fmtTime(row.used_at) }}</div>
-            </div>
-          </div>
+          <CsCardFacts>
+            <CsCardFact label="卡密（点击复制）" full-width mono>
+              <button type="button" class="gift-card-code" title="点击复制卡密" @click="copyText(row.code, '卡密')">
+                {{ row.code }}
+              </button>
+            </CsCardFact>
+            <CsCardFact
+              label="兑换用户"
+              :value="row.used_by ? (row.used_by_username || `用户 #${row.used_by}`) : '待兑换'"
+            />
+            <CsCardFact label="有效期" :value="row.expires_at ? fmtTime(row.expires_at) : '永久有效'" mono />
+            <CsCardFact v-if="row.used_at" label="兑换时间" :value="fmtTime(row.used_at)" mono full-width />
+          </CsCardFacts>
 
-          <!-- 底部操作栏 -->
-          <div class="card-foot-actions">
+          <template #footer>
             <CsButton icon-name="copy" @click="copyText(row.code, '卡密')">复制卡密</CsButton>
-            <CsButton
-              icon-name="remove"
-              :disabled="row.status === 'used'"
-              @click="remove(row)"
-            >
+            <CsButton icon-name="remove" :disabled="row.status === 'used'" @click="remove(row)">
               作废/删除
             </CsButton>
-          </div>
-        </div>
-      </div>
+          </template>
+        </CsCard>
+      </CsCardGrid>
 
       <div class="x-pager">
         <CsPagination
@@ -335,97 +318,58 @@ function isExpired(row: GiftCard) {
 </template>
 
 <style scoped lang="scss">
-/* ================= 全局统一礼品卡卡片网格流 ================= */
-.gift-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+.gift-card-title {
+  overflow-wrap: anywhere;
 }
 
-.gift-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+.gift-card-id {
+  margin-block-start: 2px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.gift-card-summary {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.gift-card-metric {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.gift-card-code {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  cursor: pointer;
+  text-align: start;
+  overflow-wrap: anywhere;
 
   &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
+    text-decoration: underline;
   }
+}
 
-  &.used {
-    opacity: 0.75;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  }
+.gift-card-muted .gift-card-code {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
 
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .card-name {
-      font-weight: 600;
-      font-size: 13.5px;
-      color: var(--x-text, #111827);
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    button {
-      flex: 1;
-      margin: 0;
-    }
-  }
+.gift-card-muted .gift-card-metric {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .x-pager {
@@ -437,11 +381,5 @@ function isExpired(row: GiftCard) {
 }
 .muted {
   color: var(--x-text-3);
-}
-
-@media (max-width: 640px) {
-  .gift-card-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

@@ -15,6 +15,7 @@ const props = withDefaults(
     warning?: boolean
     clearable?: boolean
     showPassword?: boolean
+    showWordLimit?: boolean
     rows?: number
     maxlength?: number
     prefixIcon?: string
@@ -37,6 +38,7 @@ const props = withDefaults(
     warning: false,
     clearable: false,
     showPassword: false,
+    showWordLimit: false,
     rows: 3,
     maxlength: undefined,
     prefixIcon: undefined,
@@ -70,6 +72,7 @@ const showClear = computed(() => props.clearable && hasValue.value && !props.dis
 const showPasswordToggle = computed(() => props.showPassword && !isTextarea.value)
 const hasEndIcon = computed(() => showClear.value || showPasswordToggle.value)
 const hasStartIcon = computed(() => Boolean(props.prefixIcon || slots.icon))
+const charCount = computed(() => String(props.modelValue ?? '').length)
 
 const effectiveType = computed(() => {
   if (props.type === 'visualSearch') return 'text'
@@ -106,7 +109,7 @@ function clear() {
 </script>
 
 <template>
-  <div v-if="isTextarea" :class="CS.textarea.root">
+  <div v-if="isTextarea" :class="[CS.textarea.root, 'cs-input-root']">
     <textarea
       :class="
         cx(
@@ -130,8 +133,9 @@ function clear() {
       @keydown="emit('keydown', $event)"
       @keyup="emit('keyup', $event)"
     />
+    <span v-if="showWordLimit && maxlength" class="cs-input-word-count">{{ charCount }} / {{ maxlength }}</span>
   </div>
-  <div v-else :class="CS.input['input-container']">
+  <div v-else :class="[CS.input['input-container'], 'cs-input-root']">
     <span v-if="hasStartIcon" :class="CS.input['input-icon-start']">
       <slot name="icon"><Icon v-if="prefixIcon" :name="prefixIcon" /></slot>
     </span>
@@ -181,5 +185,23 @@ function clear() {
         </svg>
       </button>
     </span>
+    <span v-if="showWordLimit && maxlength" class="cs-input-word-count">{{ charCount }} / {{ maxlength }}</span>
   </div>
 </template>
+
+<style scoped lang="scss">
+.cs-input-root {
+  position: relative;
+}
+
+.cs-input-word-count {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--color-text-body-secondary, #656871);
+  pointer-events: none;
+}
+</style>

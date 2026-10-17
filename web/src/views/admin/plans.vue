@@ -4,6 +4,10 @@ import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsBadge,
   CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
   CsCheckbox,
   CsContainer,
   CsForm,
@@ -188,6 +192,19 @@ async function toggleFlag(row: any, flag: 'purchasable' | 'renewable') {
   }
 }
 
+function priceLabel(cents: number) {
+  return `¥ ${(cents / 100).toFixed(2)}`
+}
+
+function trafficLabel(gb: number) {
+  return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`
+}
+
+function groupNameOf(id?: number) {
+  if (!id) return '未绑定'
+  return groups.value.find((g) => g.id === id)?.name || `#${id}`
+}
+
 async function remove(row: any) {
   try {
     await ElMessageBox.confirm(`确认删除套餐「${row.name}」？`, '删除套餐', { type: 'error' })
@@ -225,75 +242,60 @@ async function remove(row: any) {
         <p style="margin-top: 8px">暂无套餐，点击右上角「新增套餐」</p>
       </div>
 
-      <!-- 全局统一套餐卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="plan-card-grid">
-        <div v-for="row in list" :key="row.id" class="plan-card" :class="{ disabled: !row.purchasable && !row.renewable }">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span class="plan-name" title="点击编辑套餐" @click="openEdit(row)">{{ row.name }}</span>
-              <span
-                class="x-chip"
-                :class="row.purchasable ? 'green' : 'gray'"
-                style="font-size: 10px; padding: 1px 5px; cursor: pointer"
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，价格作为卡片主指标 -->
+      <CsCardGrid v-else>
+        <CsCard v-for="row in list" :key="row.id">
+          <template #header>
+            <button type="button" class="plan-name" title="点击编辑套餐" @click="openEdit(row)">
+              {{ row.name }}
+            </button>
+            <div class="plan-meta">
+              <span class="plan-id">#{{ row.id }}</span>
+              <button
+                type="button"
+                class="plan-flag"
                 title="可新购：商店展示并允许非持有者购买，点击切换"
                 @click="toggleFlag(row, 'purchasable')"
-              >{{ row.purchasable ? '可新购' : '停售' }}</span>
-              <span
-                class="x-chip"
-                :class="row.renewable ? 'blue' : 'gray'"
-                style="font-size: 10px; padding: 1px 5px; cursor: pointer"
+              >
+                <CsBadge :color="row.purchasable ? 'green' : 'grey'">
+                  {{ row.purchasable ? '可新购' : '停售' }}
+                </CsBadge>
+              </button>
+              <button
+                type="button"
+                class="plan-flag"
                 title="可续费：持有者余额直付顺延，点击切换"
                 @click="toggleFlag(row, 'renewable')"
-              >{{ row.renewable ? '可续费' : '停续' }}</span>
-              <span v-if="row.is_featured" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">热门推荐</span>
+              >
+                <CsBadge :color="row.renewable ? 'blue' : 'grey'">
+                  {{ row.renewable ? '可续费' : '停续' }}
+                </CsBadge>
+              </button>
+              <CsBadge v-if="row.is_featured" color="severity-medium">热门推荐</CsBadge>
             </div>
-          </div>
+          </template>
+          <template #actions>
+            <span class="plan-price" :class="{ 'plan-price--muted': !row.purchasable && !row.renewable }">
+              {{ priceLabel(row.price_cents) }}
+            </span>
+          </template>
 
-          <div v-if="row.description" class="card-desc-box">
-            {{ row.description }}
-          </div>
+          <div v-if="row.description" class="card-desc-box">{{ row.description }}</div>
 
-          <!-- 属性 2x2 网格 -->
-          <div class="card-grid">
-            <div class="grid-item">
-              <span class="item-label">套餐价格</span>
-              <div class="item-value cell-mono font-14" style="color: #059669; font-weight: 700">
-                ¥ {{ (row.price_cents / 100).toFixed(2) }}
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">包含流量</span>
-              <div class="item-value cell-mono" style="font-weight: 600">
-                {{ row.traffic_gb >= 1024 ? `${(row.traffic_gb / 1024).toFixed(1)} TB` : `${row.traffic_gb} GB` }}
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">有效期</span>
-              <div class="item-value cell-mono">{{ row.duration_days }} 天</div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">设备限制</span>
-              <div class="item-value">
-                <span class="x-chip" :class="row.device_limit ? 'blue' : 'gray'" style="font-size: 11px">
-                  {{ row.device_limit ? `${row.device_limit} 台` : '不限设备' }}
-                </span>
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">展示排序</span>
-              <div class="item-value cell-mono">#{{ row.sort_order ?? 0 }}</div>
-            </div>
-          </div>
+          <CsCardFacts>
+            <CsCardFact label="包含流量" :value="trafficLabel(row.traffic_gb)" mono />
+            <CsCardFact label="有效期" :value="`${row.duration_days} 天`" mono />
+            <CsCardFact label="设备限制" :value="row.device_limit ? `${row.device_limit} 台` : '不限设备'" />
+            <CsCardFact label="展示排序" :value="`#${row.sort_order ?? 0}`" mono />
+            <CsCardFact label="权限组" :value="groupNameOf(row.permission_group_id)" full-width />
+          </CsCardFacts>
 
-          <!-- 底部操作栏 -->
-          <div class="card-foot-actions">
+          <template #footer>
             <CsButton icon-name="edit" @click="openEdit(row)">编辑套餐</CsButton>
             <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
-          </div>
-        </div>
-      </div>
+          </template>
+        </CsCard>
+      </CsCardGrid>
     </CsContainer>
 
     <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium">
@@ -387,25 +389,71 @@ async function remove(row: any) {
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
-.plan-desc-preview {
-  font-size: 11.5px;
-  color: var(--x-text-3);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
+.plan-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+  }
 }
-.card-desc-box {
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: var(--x-bg);
-  border-radius: var(--x-radius-sm);
+
+.plan-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 4px;
+}
+
+.plan-id {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: 12px;
-  color: var(--x-text-2);
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.plan-flag {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.plan-price {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.plan-price--muted {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.card-desc-box {
+  margin-block-end: 12px;
+  padding: 8px 10px;
+  background: var(--x-bg);
+  border-radius: 8px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: var(--line-height-body-s, 16px);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
   white-space: pre-line;
-  line-height: 1.4;
 }
 
 .placeholder-chips {
@@ -432,105 +480,6 @@ async function remove(row: any) {
       border-color: var(--x-primary, #6366f1);
       color: var(--x-primary, #6366f1);
     }
-  }
-}
-
-/* ================= 全局统一套餐卡片网格流 ================= */
-.plan-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
-}
-
-.plan-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  &.disabled {
-    opacity: 0.75;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .plan-name {
-      font-weight: 600;
-      font-size: 14px;
-      color: var(--x-text, #111827);
-      cursor: pointer;
-      &:hover {
-        color: var(--x-primary);
-      }
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    button {
-      flex: 1;
-      margin: 0;
-    }
-  }
-}
-
-@media (max-width: 640px) {
-  .plan-card-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

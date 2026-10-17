@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { InfoFilled, WarningFilled } from '@element-plus/icons-vue'
+import CsTooltip from '@/components/cloudscape/Tooltip.vue'
+import CsIcon from '@/components/cloudscape/Icon.vue'
 
 /**
  * 说明性小字收纳图标：常驻小字说明统一挂到图标上，悬停展示。
- * info = 圆点问号（解释机制）；warn = 橙色叹号（提醒注意）。
+ * info = 圆形信息图标（解释机制）；warn = 橙色警告图标（提醒注意）。
  */
 withDefaults(
   defineProps<{
@@ -16,35 +17,24 @@ withDefaults(
 </script>
 
 <template>
-  <el-tooltip :placement="placement" :show-after="150" :content="content">
-    <el-icon class="tip-icon" :class="type">
-      <WarningFilled v-if="type === 'warn'" />
-      <InfoFilled v-else />
-    </el-icon>
-  </el-tooltip>
+  <CsTooltip :content="content" :placement="placement" :show-delay="150" class="tip-icon" :class="type">
+    <CsIcon
+      :name="type === 'warn' ? 'status-warning' : 'status-info'"
+      size="small"
+      :variant="type === 'warn' ? 'warning' : 'subtle'"
+    />
+  </CsTooltip>
 </template>
 
 <style scoped lang="scss">
 .tip-icon {
-  font-size: 13.5px;
-  color: var(--x-text-3);
   cursor: help;
   vertical-align: middle;
   flex: none;
-  transition: color 0.15s ease, transform 0.15s ease;
+  transition: transform 0.15s ease;
 
   &:hover {
-    color: var(--x-primary);
     transform: scale(1.15);
-  }
-
-  &.warn {
-    color: var(--x-warning);
-
-    &:hover {
-      color: var(--x-warning);
-      transform: scale(1.15);
-    }
   }
 }
 </style>

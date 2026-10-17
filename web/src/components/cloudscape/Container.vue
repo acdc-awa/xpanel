@@ -58,7 +58,15 @@ const footerClasses = computed(() => cx(CS.container.footer, CS.container['with-
     <div :class="contentWrapperClasses">
       <div v-if="slots.header || header" :class="headerClasses">
         <slot name="header">
-          <Header variant="h2">{{ header }}</Header>
+          <Header variant="h2">
+            {{ header }}
+            <template v-if="slots.info" #info>
+              <slot name="info" />
+            </template>
+            <template v-if="slots.actions" #actions>
+              <slot name="actions" />
+            </template>
+          </Header>
         </slot>
       </div>
       <div :class="contentClasses">
