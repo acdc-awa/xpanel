@@ -1,0 +1,50 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_toggle-button_16w0h_17svp_9:not(#\9) {
+  cursor: pointer;
+  border-block: 0;
+  border-inline: 0;
+  padding-block: calc(var(--space-scaled-xxs-j00t0m, 4px) + 1px);
+  padding-inline: calc(var(--space-xxs-3o1yoq, 4px) + 1px);
+  background: transparent;
+  color: currentColor;
+}
+.awsui_toggle-button_16w0h_17svp_9:not(#\9):focus {
+  outline: none;
+  text-decoration: none;
+}
+body[data-awsui-focus-visible=true] .awsui_toggle-button_16w0h_17svp_9:not(#\9):focus {
+  position: relative;
+}
+body[data-awsui-focus-visible=true] .awsui_toggle-button_16w0h_17svp_9:not(#\9):focus {
+  outline: 2px dotted transparent;
+  outline-offset: calc(var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px) - 1px);
+}
+body[data-awsui-focus-visible=true] .awsui_toggle-button_16w0h_17svp_9:not(#\9):focus::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px));
+  inset-block-start: calc(-1 * var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px));
+  inline-size: calc(100% + var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px) + var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px));
+  block-size: calc(100% + var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px) + var(--space-button-inline-icon-focus-outline-gutter-rit6yp, 0px));
+  border-start-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-start-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  box-shadow: 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
+}
+
+.awsui_close-button_16w0h_17svp_44:not(#\9) {
+  position: absolute;
+  outline: none;
+  inset-inline-end: var(--space-m-n8iq8o, 16px);
+  inset-block-start: var(--size-vertical-panel-icon-offset-4593ko, 15px);
+  z-index: 1;
+}

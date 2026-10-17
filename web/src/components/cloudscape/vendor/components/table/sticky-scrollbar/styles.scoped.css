@@ -1,0 +1,41 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_sticky-scrollbar_faqt8_sgc16_9:not(#\9) {
+  block-size: 15px;
+  position: sticky;
+  display: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  inset-block-end: 0;
+  inline-size: 100%;
+}
+.awsui_sticky-scrollbar_faqt8_sgc16_9[data-stuck=false]:not(#\9) {
+  clip-path: inset(-9999px 0 0 0 round var(--border-radius-container-33hhdh, 16px));
+}
+.awsui_sticky-scrollbar-content_faqt8_sgc16_21:not(#\9) {
+  block-size: 15px;
+}
+.awsui_sticky-scrollbar-visible_faqt8_sgc16_24:not(#\9) {
+  display: block;
+}
+.awsui_sticky-scrollbar-native-invisible_faqt8_sgc16_27:not(#\9) {
+  margin-block-start: -15px;
+}
+.awsui_sticky-scrollbar-offset_faqt8_sgc16_30:not(#\9) {
+  z-index: 799;
+}
+.awsui_sticky-scrollbar-offset_faqt8_sgc16_30:not(#\9):not(.awsui_is-visual-refresh_faqt8_sgc16_33) {
+  background-color: var(--color-background-container-content-mjfil9, #ffffff);
+  block-size: 15px;
+  margin-block-start: calc(-1 * var(--border-divider-section-width-dlkb8v, 1px));
+  border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+.awsui_sticky-scrollbar-offset_faqt8_sgc16_30.awsui_is-visual-refresh_faqt8_sgc16_33:not(#\9) {
+  margin-block-start: -5px;
+}

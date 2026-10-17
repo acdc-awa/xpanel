@@ -1,0 +1,113 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+@property --awsui-style-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-background-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-border-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-width {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-radius {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-block {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-inline {
+  syntax: "*";
+  inherits: false;
+}
+/* awsui:style-api-slot name=control tokens=color, background-color, border-color, focus-ring-color, focus-ring-width, focus-ring-radius, focus-ring-gutter-block, focus-ring-gutter-inline properties= */
+/* awsui:style-api-slot name=label tokens=color properties= */
+/* awsui:style-api-slot name=description tokens=color properties= */
+.awsui_root_k2y2q_1svvf_44.awsui_root_k2y2q_1svvf_44:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  display: flex;
+}
+
+.awsui_checkbox-control_k2y2q_1svvf_77:not(#\9) {
+  --awsui-internal-style-color: var(--awsui-style-color);
+  --awsui-internal-style-background-color: var(--awsui-style-background-color);
+  --awsui-internal-style-border-color: var(--awsui-style-border-color);
+  --awsui-internal-style-focus-ring-color: var(--awsui-style-focus-ring-color);
+  --awsui-internal-style-focus-ring-width: var(--awsui-style-focus-ring-width);
+  --awsui-internal-style-focus-ring-radius: var(--awsui-style-focus-ring-radius);
+  --awsui-internal-style-focus-ring-gutter-block: var(--awsui-style-focus-ring-gutter-block);
+  --awsui-internal-style-focus-ring-gutter-inline: var(--awsui-style-focus-ring-gutter-inline);
+  margin-block-start: calc((var(--line-height-body-m-5xw6xo, 20px) - var(--size-control-jpgj8e, 16px)) / 2);
+  min-block-size: var(--size-control-jpgj8e, 16px);
+  min-inline-size: var(--size-control-jpgj8e, 16px);
+  block-size: var(--size-control-jpgj8e, 16px);
+  inline-size: var(--size-control-jpgj8e, 16px);
+}
+
+.awsui_outline_k2y2q_1svvf_93:not(#\9) {
+  position: relative;
+}
+.awsui_outline_k2y2q_1svvf_93:not(#\9) {
+  outline: 2px dotted transparent;
+  outline-offset: calc(var(--awsui-internal-style-focus-ring-gutter-inline, 2px) - 1px);
+}
+.awsui_outline_k2y2q_1svvf_93:not(#\9)::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--awsui-internal-style-focus-ring-gutter-inline, 2px));
+  inset-block-start: calc(-1 * var(--awsui-internal-style-focus-ring-gutter-block, 2px));
+  inline-size: calc(100% + var(--awsui-internal-style-focus-ring-gutter-inline, 2px) + var(--awsui-internal-style-focus-ring-gutter-inline, 2px));
+  block-size: calc(100% + var(--awsui-internal-style-focus-ring-gutter-block, 2px) + var(--awsui-internal-style-focus-ring-gutter-block, 2px));
+  border-start-start-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-start-end-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-end-start-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-end-end-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  box-shadow: 0 0 0 var(--awsui-internal-style-focus-ring-width, var(--awsui-style-focus-ring-border-width-ka4djm, 2px)) var(--awsui-internal-style-focus-ring-color, var(--awsui-style-focus-ring-border-color-ka4djm, var(--color-border-item-focused-sewkzn, #006ce0)));
+}

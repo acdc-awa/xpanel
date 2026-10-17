@@ -1,0 +1,12 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_jocwy_14pzr_5:not(#\9),
+.awsui_header_jocwy_14pzr_6:not(#\9),
+.awsui_header-actions_jocwy_14pzr_7:not(#\9),
+.awsui_content_jocwy_14pzr_8:not(#\9),
+.awsui_footer_jocwy_14pzr_9:not(#\9),
+.awsui_dismiss-button_jocwy_14pzr_10:not(#\9) {
+  /* used in test-utils */
+}

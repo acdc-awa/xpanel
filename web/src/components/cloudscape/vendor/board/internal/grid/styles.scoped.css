@@ -1,0 +1,36 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_grid_1hw7z_109ya_5:not(#\9) {
+  display: grid;
+  /* Matches GRID_GAP constant used for calculations. */
+  gap: 20px;
+  /* Matches ROWSPAN_HEIGHT constant used for calculations. */
+  grid-auto-rows: 96px;
+}
+.awsui_grid-compact_1hw7z_109ya_12:not(#\9) {
+  gap: 16px;
+  grid-auto-rows: 76px;
+}
+
+.awsui_grid_1hw7z_109ya_5.awsui_columns-1_1hw7z_109ya_17:not(#\9) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.awsui_grid_1hw7z_109ya_5.awsui_columns-2_1hw7z_109ya_21:not(#\9) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.awsui_grid_1hw7z_109ya_5.awsui_columns-4_1hw7z_109ya_25:not(#\9) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.awsui_grid_1hw7z_109ya_5.awsui_columns-6_1hw7z_109ya_29:not(#\9) {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.awsui_grid__item_1hw7z_109ya_33:not(#\9) {
+  display: block;
+  position: relative;
+}

@@ -1,0 +1,160 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_root_fvjdu_11nbn_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  box-sizing: border-box;
+  align-items: center;
+  padding-inline-start: 0;
+  margin-block: 0;
+  margin-inline: 0;
+  list-style: none;
+}
+
+.awsui_button_fvjdu_11nbn_50:not(#\9),
+.awsui_dots_fvjdu_11nbn_51:not(#\9) {
+  min-inline-size: var(--space-l-dpyxli, 20px);
+  border-block: var(--border-width-button-lffd4t, 2px) solid transparent;
+  border-inline: var(--border-width-button-lffd4t, 2px) solid transparent;
+}
+
+.awsui_button_fvjdu_11nbn_50:not(#\9) {
+  cursor: pointer;
+  text-align: center;
+  box-sizing: border-box;
+  background: transparent;
+  line-height: inherit;
+  padding-block: 0;
+  padding-inline: 0;
+}
+.awsui_button_fvjdu_11nbn_50:not(#\9):focus {
+  outline: none;
+}
+body[data-awsui-focus-visible=true] .awsui_button_fvjdu_11nbn_50:not(#\9):focus {
+  outline: 2px dotted transparent;
+  border-block: var(--border-width-button-lffd4t, 2px) solid var(--color-border-item-focused-sewkzn, #006ce0);
+  border-inline: var(--border-width-button-lffd4t, 2px) solid var(--color-border-item-focused-sewkzn, #006ce0);
+  border-start-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-start-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  box-shadow: 0 0 0 var(--border-control-focus-ring-shadow-spread-iijyo6, 1px) var(--color-border-item-focused-sewkzn, #006ce0);
+}
+.awsui_button-disabled_fvjdu_11nbn_79:not(#\9) {
+  cursor: default;
+  color: var(--color-text-interactive-disabled-tuxgxq, #b4b4bb);
+}
+
+.awsui_arrow_fvjdu_11nbn_84:not(#\9) {
+  color: var(--color-text-interactive-default-pauydh, #424650);
+}
+.awsui_arrow_fvjdu_11nbn_84:not(#\9):not(.awsui_button-disabled_fvjdu_11nbn_79):hover {
+  color: var(--color-text-interactive-hover-zj1911, #0f141a);
+}
+.awsui_arrow_fvjdu_11nbn_84.awsui_button-disabled_fvjdu_11nbn_79:not(#\9) {
+  color: var(--color-text-interactive-disabled-tuxgxq, #b4b4bb);
+}
+
+.awsui_page-number_fvjdu_11nbn_94:not(#\9) {
+  color: var(--color-text-pagination-page-number-default-lt9i33, #424650);
+}
+.awsui_page-number_fvjdu_11nbn_94:not(#\9):not(.awsui_button-disabled_fvjdu_11nbn_79):hover {
+  color: var(--color-text-interactive-hover-zj1911, #0f141a);
+}
+.awsui_page-number_fvjdu_11nbn_94.awsui_button-current_fvjdu_11nbn_100:not(#\9) {
+  font-weight: var(--font-wayfinding-link-active-weight-mlvia6, 700);
+  -webkit-font-smoothing: var(--font-smoothing-webkit-dpz0hr, antialiased);
+  -moz-osx-font-smoothing: var(--font-smoothing-moz-osx-kjlydy, grayscale);
+  color: var(--color-text-interactive-active-nbyczy, #0f141a);
+}
+.awsui_page-number_fvjdu_11nbn_94.awsui_button-current_fvjdu_11nbn_100.awsui_button-disabled_fvjdu_11nbn_79:not(#\9) {
+  color: var(--color-text-pagination-page-number-active-disabled-xo5o10, #b4b4bb);
+}
+.awsui_page-number_fvjdu_11nbn_94.awsui_button-disabled_fvjdu_11nbn_79:not(#\9) {
+  color: var(--color-text-interactive-disabled-tuxgxq, #b4b4bb);
+}
+
+.awsui_jump-to-page_fvjdu_11nbn_113:not(#\9) {
+  border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+  box-sizing: border-box;
+  margin-inline-start: var(--space-xs-m9b7jf, 8px);
+  padding-inline-start: var(--space-xs-m9b7jf, 8px);
+  padding-inline-start: 15px;
+  list-style: none;
+}
+.awsui_jump-to-page-input_fvjdu_11nbn_121:not(#\9) {
+  inline-size: 87px;
+  margin-block-start: calc(-0.6em - var(--space-scaled-xs-pajbd1, 8px));
+  overflow: visible;
+}
+
+.awsui_dots_fvjdu_11nbn_51:not(#\9) {
+  color: var(--color-text-interactive-default-pauydh, #424650);
+}
+
+.awsui_pages-compact_fvjdu_11nbn_131:not(#\9) {
+  color: var(--color-text-pagination-page-number-default-lt9i33, #424650);
+  white-space: nowrap;
+}
+
+.awsui_page-item_fvjdu_11nbn_136:not(#\9),
+.awsui_dots_fvjdu_11nbn_51:not(#\9),
+.awsui_pages-compact_fvjdu_11nbn_131:not(#\9) {
+  margin-block: var(--space-field-vertical-77df8s, 5px);
+  margin-inline: var(--space-xxs-3o1yoq, 4px);
+  text-align: center;
+  box-sizing: border-box;
+  padding-block: 0;
+  padding-inline: 0;
+}
+.awsui_page-item_fvjdu_11nbn_136:not(#\9):first-child,
+.awsui_dots_fvjdu_11nbn_51:not(#\9):first-child,
+.awsui_pages-compact_fvjdu_11nbn_131:not(#\9):first-child {
+  margin-inline-start: 0;
+}
+.awsui_page-item_fvjdu_11nbn_136:not(#\9):last-child,
+.awsui_dots_fvjdu_11nbn_51:not(#\9):last-child,
+.awsui_pages-compact_fvjdu_11nbn_131:not(#\9):last-child {
+  margin-inline-end: 0;
+}
+
+.awsui_root-disabled_fvjdu_11nbn_157 > .awsui_dots_fvjdu_11nbn_51:not(#\9),
+.awsui_root-disabled_fvjdu_11nbn_157 > .awsui_pages-compact_fvjdu_11nbn_131:not(#\9) {
+  color: var(--color-text-interactive-disabled-tuxgxq, #b4b4bb);
+}

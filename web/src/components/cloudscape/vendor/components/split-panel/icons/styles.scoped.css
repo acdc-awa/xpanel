@@ -1,0 +1,84 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_preference-icon--svg_d4xxm_fuw29_9:not(#\9) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+}
+.awsui_preference-icon--svg_d4xxm_fuw29_9:not(#\9):dir(rtl) {
+  transform: scaleX(-1);
+}
+.awsui_preference-icon--layout-border_d4xxm_fuw29_15:not(#\9) {
+  stroke: var(--color-background-home-header-x3x77n, #0f141a);
+  fill: var(--color-background-container-content-mjfil9, #ffffff);
+}
+.awsui_preference-icon--layout-background_d4xxm_fuw29_19:not(#\9) {
+  fill: var(--color-background-layout-main-y4565g, #ffffff);
+}
+.awsui_preference-icon--layout-header_d4xxm_fuw29_22:not(#\9) {
+  fill: var(--color-background-home-header-x3x77n, #0f141a);
+}
+.awsui_preference-icon--border_d4xxm_fuw29_25:not(#\9) {
+  stroke: var(--color-text-group-label-8ordkz, #424650);
+  fill: var(--color-background-container-content-mjfil9, #ffffff);
+}
+.awsui_preference-icon--primary-button_d4xxm_fuw29_29:not(#\9) {
+  fill: var(--color-background-button-primary-default-x6ecit, #006ce0);
+}
+.awsui_preference-icon--secondary_d4xxm_fuw29_32:not(#\9) {
+  fill: var(--color-text-group-label-8ordkz, #424650);
+}
+.awsui_preference-icon--disabled-element_d4xxm_fuw29_35:not(#\9) {
+  fill: var(--color-background-control-disabled-m61b8s, #dedee3);
+}
+.awsui_preference-icon--separator_d4xxm_fuw29_38:not(#\9) {
+  stroke: var(--color-background-control-disabled-m61b8s, #dedee3);
+}
+.awsui_preference-icon--focus-text_d4xxm_fuw29_41:not(#\9) {
+  fill: var(--color-text-interactive-default-pauydh, #424650);
+}
+
+.awsui_preference-icon-refresh--svg_d4xxm_fuw29_45:not(#\9) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+}
+.awsui_preference-icon-refresh--svg_d4xxm_fuw29_45:not(#\9):dir(rtl) {
+  transform: scaleX(-1);
+}
+.awsui_preference-icon-refresh--layout-top_d4xxm_fuw29_51:not(#\9) {
+  fill: var(--color-background-button-primary-disabled-9w6u2t, #ebebf0);
+}
+.awsui_preference-icon-refresh--layout-main_d4xxm_fuw29_54:not(#\9) {
+  fill: var(--color-background-layout-main-y4565g, #ffffff);
+}
+.awsui_preference-icon-refresh--primary_d4xxm_fuw29_57:not(#\9) {
+  fill: var(--color-background-button-primary-default-x6ecit, #006ce0);
+}
+.awsui_preference-icon-refresh--disabled_d4xxm_fuw29_60:not(#\9) {
+  fill: var(--color-background-control-disabled-m61b8s, #dedee3);
+}
+.awsui_preference-icon-refresh--column-header_d4xxm_fuw29_63:not(#\9) {
+  fill: var(--color-text-input-disabled-s4k7tb, #b4b4bb);
+}
+.awsui_preference-icon-refresh--window_d4xxm_fuw29_66:not(#\9) {
+  stroke: var(--color-background-home-header-x3x77n, #0f141a);
+  fill: var(--color-background-container-content-mjfil9, #ffffff);
+}
+.awsui_preference-icon-refresh--secondary_d4xxm_fuw29_70:not(#\9) {
+  fill: var(--color-text-body-secondary-66ygbb, #424650);
+}
+.awsui_preference-icon-refresh--default_d4xxm_fuw29_73:not(#\9) {
+  fill: var(--color-text-body-default-b2us04, #0f141a);
+}
+.awsui_preference-icon-refresh--separator_d4xxm_fuw29_76:not(#\9) {
+  stroke: var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+.awsui_preference-icon-refresh--input-default_d4xxm_fuw29_79:not(#\9) {
+  fill: var(--color-border-input-default-jtkw9d, #8c8c94);
+}
+.awsui_preference-icon-refresh--heading_d4xxm_fuw29_82:not(#\9) {
+  fill: var(--color-text-heading-default-e3tuze, #0f141a);
+}

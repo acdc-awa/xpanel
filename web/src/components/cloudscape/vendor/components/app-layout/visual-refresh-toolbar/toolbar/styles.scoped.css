@@ -1,0 +1,238 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_universal-toolbar_1kzri_7i1bc_13:not(#\9) {
+  background-color: var(--color-background-layout-toolbar-1jwzza, #ffffff);
+  box-sizing: border-box;
+  position: sticky;
+  z-index: 1000;
+  display: flex;
+  transition: ease var(--motion-duration-refresh-only-slow-8cyf6l, 250ms);
+  transition-property: inset-block-start, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_universal-toolbar_1kzri_7i1bc_13:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_universal-toolbar_1kzri_7i1bc_13:not(#\9), .awsui-mode-entering .awsui_universal-toolbar_1kzri_7i1bc_13:not(#\9) {
+  animation: none;
+  transition: none;
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):before, .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 5px;
+  block-size: 5px;
+  background: var(--color-background-layout-ai-drawer-u8ll44, #161d26);
+  /**
+   * Adds a border to visually separate the main content area from the left global drawer.
+   *
+   * Note: Direct border application is not possible for either target element:
+   * - Main content area: Uses `display: contents`, preventing border application
+   * - Nav panel: May be hidden, causing the border to disappear when separation is still needed
+  */
+}
+@media not print {
+  .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):before, .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):before, .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):before, .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after, .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+    inset-block-start: 42px;
+    inline-size: var(--border-divider-section-width-dlkb8v, 1px);
+    block-size: calc(100vh - 42px);
+    background: var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+  background-color: var(--color-background-layout-toolbar-1jwzza, #ffffff);
+  border-start-start-radius: var(--space-xxs-3o1yoq, 4px);
+}
+@media not print {
+  .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after, .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9):not(:has(.awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32)):after {
+    display: none;
+  }
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13.awsui_disable-body-scroll_1kzri_7i1bc_71:not(#\9) {
+  inset-block-start: 0px;
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9) {
+  grid-column: 1;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  align-self: flex-start;
+  padding-inline: var(--space-static-s-bwcdfm, 12px);
+  box-sizing: border-box;
+  /**
+   * Button sizing adjustments for theme-specific design requirements
+   *
+   * Light mode: Button width is set to 100% + border width to intentionally overlap
+   * with the bottom border, as specified in the UI design.
+   *
+   * Dark mode: Resets the overlap styling due to different design requirements
+   * where overlap should not occur.
+   */
+  block-size: calc(100% + var(--border-divider-section-width-dlkb8v, 1px));
+  background: var(--color-background-layout-ai-drawer-u8ll44, #161d26);
+}
+@media not print {
+  .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9) {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9), .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9) {
+    block-size: 100%;
+  }
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):before, .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):after {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: -5px;
+  inline-size: 5px;
+  block-size: 5px;
+  background: var(--color-background-layout-ai-drawer-u8ll44, #161d26);
+}
+@media not print {
+  .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):before, .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):after {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):before, .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):before, .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):after, .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):after {
+    display: none;
+  }
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_universal-toolbar-ai-custom_1kzri_7i1bc_32:not(#\9):after {
+  background-color: var(--color-background-layout-toolbar-1jwzza, #ffffff);
+  border-start-start-radius: var(--space-xxs-3o1yoq, 4px);
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124:not(#\9) {
+  block-size: 100%;
+  align-items: center;
+  display: grid;
+  inline-size: 100%;
+  grid-template-columns: min-content min-content minmax(0, 3fr) minmax(auto, 1fr);
+  grid-template-rows: 1fr;
+}
+@media not print {
+  .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124:not(#\9) {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124:not(#\9), .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124:not(#\9) {
+    border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+  .awsui-polaris-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9), .awsui-dark-mode .awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124.awsui_with-ai-drawer_1kzri_7i1bc_32:not(#\9) {
+    border-start-start-radius: var(--space-xxs-3o1yoq, 4px);
+    border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124 > .awsui_universal-toolbar-nav_1kzri_7i1bc_144:not(#\9) {
+  grid-column: 2;
+  padding-inline-start: var(--space-s-kll7oj, 12px);
+  padding-inline-end: var(--space-static-xxs-vzto3j, 4px);
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124 > .awsui_universal-toolbar-breadcrumbs_1kzri_7i1bc_149:not(#\9) {
+  grid-column: 3;
+  padding-inline: var(--space-static-xs-789l1l, 8px);
+  background-color: transparent;
+  flex: 1 0;
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124 > .awsui_universal-toolbar-breadcrumbs_1kzri_7i1bc_149:not(#\9):first-child {
+  padding-inline: calc(var(--space-static-xs-789l1l, 8px) + var(--space-static-m-0gdnhk, 16px));
+}
+.awsui_universal-toolbar_1kzri_7i1bc_13 > .awsui_toolbar-container_1kzri_7i1bc_124 > .awsui_universal-toolbar-drawers_1kzri_7i1bc_158:not(#\9) {
+  grid-column: 4;
+  column-gap: var(--space-static-xs-789l1l, 8px);
+  display: flex;
+  justify-content: flex-end;
+  block-size: 100%;
+}
+
+.awsui_drawers-desktop-triggers-container_1kzri_7i1bc_166:not(#\9),
+.awsui_drawers-mobile-triggers-container_1kzri_7i1bc_167:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  background-color: transparent;
+  padding-inline: var(--space-s-kll7oj, 12px);
+  box-sizing: border-box;
+  overflow-y: hidden;
+  overflow-x: hidden;
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+  overscroll-behavior-y: contain;
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+  overscroll-behavior-x: contain;
+  inline-size: 100%;
+}
+
+.awsui_drawers-trigger-content_1kzri_7i1bc_209:not(#\9) {
+  block-size: 100%;
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-xs-m9b7jf, 8px);
+  justify-content: flex-end;
+  padding-inline-start: var(--space-xs-m9b7jf, 8px);
+}
+
+.awsui_group-divider_1kzri_7i1bc_219:not(#\9) {
+  border-inline-end: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+  block-size: 60%;
+}
+
+@media (max-width: 688px) {
+  .awsui_drawers-trigger_1kzri_7i1bc_209:not(#\9) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+}
+
+.awsui_block-body-scroll_1kzri_7i1bc_232:not(#\9) {
+  overflow: hidden;
+}
+
+.awsui_external-breadcrumbs_1kzri_7i1bc_236:not(#\9) {
+  display: none;
+}

@@ -1,0 +1,9 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_3gfu1_3lgbu_5:not(#\9) {
+  position: absolute !important;
+  inset-block-start: -9999px !important;
+  inset-inline-start: -9999px !important;
+}

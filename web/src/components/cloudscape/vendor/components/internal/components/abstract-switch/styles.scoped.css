@@ -1,0 +1,90 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_content_1wepg_spx2u_9:not(#\9),
+.awsui_description_1wepg_spx2u_10:not(#\9),
+.awsui_label_1wepg_spx2u_11:not(#\9) {
+  display: block;
+}
+
+.awsui_label_1wepg_spx2u_11:not(#\9) {
+  color: var(--awsui-style-color, var(--color-text-form-default-8bb22s, #0f141a));
+}
+
+.awsui_outline_1wepg_spx2u_19:not(#\9) {
+  display: none;
+}
+.awsui_outline_1wepg_spx2u_19.awsui_show-outline_1wepg_spx2u_22:not(#\9) {
+  display: block;
+}
+
+body[data-awsui-focus-visible=true] .awsui_native-input_1wepg_spx2u_26:not(#\9):focus + .awsui_outline_1wepg_spx2u_19 {
+  display: block;
+}
+
+.awsui_wrapper_1wepg_spx2u_30:not(#\9) {
+  min-inline-size: 0;
+  word-break: break-word;
+  display: flex;
+}
+
+.awsui_label-wrapper_1wepg_spx2u_36:not(#\9) {
+  position: relative;
+  display: flex;
+  cursor: default;
+}
+
+.awsui_content_1wepg_spx2u_9:not(#\9) {
+  min-inline-size: 0;
+  word-break: break-word;
+}
+
+.awsui_empty-content_1wepg_spx2u_47:not(#\9) {
+  inline-size: 0px;
+}
+
+.awsui_description_1wepg_spx2u_10:not(#\9) {
+  color: var(--awsui-style-color, var(--color-text-form-secondary-wt0md2, #656871));
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+  letter-spacing: var(--letter-spacing-body-s-dzcybc, 0.005em);
+}
+.awsui_description-bottom-padding_1wepg_spx2u_57:not(#\9) {
+  padding-block-end: var(--space-scaled-xxs-j00t0m, 4px);
+}
+
+.awsui_label_1wepg_spx2u_11:not(#\9),
+.awsui_description_1wepg_spx2u_10:not(#\9) {
+  padding-inline-start: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_label-disabled_1wepg_spx2u_65:not(#\9),
+.awsui_description-disabled_1wepg_spx2u_66:not(#\9) {
+  color: var(--awsui-style-color, var(--color-text-control-disabled-54tz75, #b4b4bb));
+}
+
+.awsui_control_1wepg_spx2u_70:not(#\9) {
+  position: relative;
+  /* stylelint-disable selector-max-type */
+  /* stylelint-enable selector-max-type */
+}
+.awsui_control_1wepg_spx2u_70 > input:not(#\9), .awsui_control_1wepg_spx2u_70 > svg:not(#\9), .awsui_control_1wepg_spx2u_70 > .awsui_outline_1wepg_spx2u_19:not(#\9) {
+  position: absolute;
+  inline-size: 100%;
+  block-size: 100%;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+}
+.awsui_control_1wepg_spx2u_70 > input:not(#\9) {
+  opacity: 0;
+  z-index: 1;
+  -webkit-user-select: none;
+          user-select: none;
+  cursor: default;
+  margin-block: 0;
+  margin-inline: 0;
+}

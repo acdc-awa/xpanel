@@ -1,0 +1,10 @@
+/*
+ * Minimal dark-mode token patches for the pinned Cloudscape build.
+ * The upstream base theme defines a few component tokens on `body` and does not
+ * re-declare them inside `.awsui-dark-mode`; because custom-property var()
+ * references are substituted at computed-value time, those tokens stay light.
+ * Only tokens that are visibly affected are overridden here.
+ */
+.awsui-dark-mode {
+  --color-background-segment-wrapper-yqb22i: var(--color-neutral-950-qa1l7j);
+}

@@ -1,0 +1,42 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_row_3yyds_npyws_5:not(#\9) {
+  position: relative;
+  box-sizing: border-box;
+}
+
+.awsui_row-grid_3yyds_npyws_10:not(#\9) {
+  display: grid;
+  inline-size: 100%;
+  align-items: center;
+}
+
+.awsui_row_3yyds_npyws_5[data-awsui-selected]:not(#\9)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  grid-column: 1/-1;
+  grid-row: 1;
+  border-block-start: var(--border-width-item-selected-l41fek, 2px) solid var(--color-border-item-selected-7104rh, #006ce0);
+  border-block-end: var(--border-width-item-selected-l41fek, 2px) solid var(--color-border-item-selected-7104rh, #006ce0);
+  border-inline-start: var(--border-width-item-selected-l41fek, 2px) solid var(--color-border-item-selected-7104rh, #006ce0);
+  border-inline-end: var(--border-width-item-selected-l41fek, 2px) solid var(--color-border-item-selected-7104rh, #006ce0);
+  border-start-start-radius: var(--border-radius-item-mitz8h, 8px);
+  border-start-end-radius: var(--border-radius-item-mitz8h, 8px);
+  border-end-start-radius: var(--border-radius-item-mitz8h, 8px);
+  border-end-end-radius: var(--border-radius-item-mitz8h, 8px);
+  pointer-events: none;
+}
+
+.awsui_row_3yyds_npyws_5[data-awsui-selected]:not(#\9):has(+ .awsui_row_3yyds_npyws_5[data-awsui-selected])::after {
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.awsui_row_3yyds_npyws_5[data-awsui-selected] + .awsui_row_3yyds_npyws_5[data-awsui-selected]:not(#\9)::after {
+  border-block-start-width: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}

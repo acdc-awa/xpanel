@@ -1,0 +1,10 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_tabs-header-list_1acwa_dp0cl_5:not(#\9),
+.awsui_active-tab-header_1acwa_dp0cl_6:not(#\9),
+.awsui_tab-label_1acwa_dp0cl_7:not(#\9),
+.awsui_tab-dismiss-button_1acwa_dp0cl_8:not(#\9) {
+  /* used in analytics metadata */
+}

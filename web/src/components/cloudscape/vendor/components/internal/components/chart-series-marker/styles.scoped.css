@@ -1,0 +1,93 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_marker_1isd1_1rfds_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  margin-inline-end: var(--space-xxs-3o1yoq, 4px);
+  margin-block-start: var(--space-xxs-3o1yoq, 4px);
+  border-start-start-radius: 2px;
+  border-start-end-radius: 2px;
+  border-end-start-radius: 2px;
+  border-end-end-radius: 2px;
+  inline-size: 14px;
+  flex-shrink: 0;
+  cursor: inherit;
+}
+.awsui_marker--line_1isd1_1rfds_49:not(#\9) {
+  margin-block-start: 9px;
+  block-size: 4px;
+}
+.awsui_marker--rectangle_1isd1_1rfds_53:not(#\9) {
+  block-size: 14px;
+  border-start-start-radius: 2px;
+  border-start-end-radius: 2px;
+  border-end-start-radius: 2px;
+  border-end-end-radius: 2px;
+}
+.awsui_marker--hollow-rectangle_1isd1_1rfds_60:not(#\9) {
+  block-size: 14px;
+  border-start-start-radius: 2px;
+  border-start-end-radius: 2px;
+  border-end-start-radius: 2px;
+  border-end-end-radius: 2px;
+}
+.awsui_marker--hollow-rectangle_1isd1_1rfds_60:not(#\9)::after {
+  content: "";
+  display: block;
+  margin-block: 2px;
+  margin-inline: 2px;
+  block-size: 10px;
+  background-color: var(--color-background-container-content-mjfil9, #ffffff);
+  opacity: 0.5;
+}
+.awsui_marker--dashed_1isd1_1rfds_76:not(#\9) {
+  block-size: 4px;
+  inline-size: 6px;
+  margin-block-start: 9px;
+  margin-inline-end: 12px;
+}
+.awsui_marker--dashed_1isd1_1rfds_76:not(#\9)::after {
+  content: "";
+  display: block;
+  inline-size: 6px;
+  block-size: 4px;
+  margin-inline-start: 8px;
+  border-start-start-radius: 2px;
+  border-start-end-radius: 2px;
+  border-end-start-radius: 2px;
+  border-end-end-radius: 2px;
+  background-color: inherit;
+}

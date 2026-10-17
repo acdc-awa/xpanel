@@ -1,0 +1,12 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_polq8_6ggi7_5:not(#\9),
+.awsui_file-option-thumbnail_polq8_6ggi7_6:not(#\9),
+.awsui_file-option-name_polq8_6ggi7_7:not(#\9),
+.awsui_file-option-size_polq8_6ggi7_8:not(#\9),
+.awsui_file-option-last-modified_polq8_6ggi7_9:not(#\9),
+.awsui_ellipsis-active_polq8_6ggi7_10:not(#\9) {
+  /* used in test-utils */
+}

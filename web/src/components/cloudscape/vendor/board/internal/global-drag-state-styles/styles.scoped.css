@@ -1,0 +1,23 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_show-grab-cursor_1fgk7_1xrvg_9 *:not(#\9) {
+  cursor: grabbing;
+}
+
+.awsui_show-resize-cursor_1fgk7_1xrvg_13 *:not(#\9) {
+  cursor: nwse-resize;
+}
+.awsui_show-resize-cursor_1fgk7_1xrvg_13 *:not(#\9):dir(rtl) {
+  cursor: nesw-resize;
+}
+
+.awsui_disable-selection_1fgk7_1xrvg_20 *:not(#\9) {
+  -webkit-user-select: none;
+          user-select: none;
+}

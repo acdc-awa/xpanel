@@ -1,0 +1,119 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_marker_1kjc7_994uv_13:not(#\9) {
+  transition: opacity var(--motion-duration-transition-quick-1p8yzt, 90ms) var(--motion-easing-transition-quick-afgcka, linear);
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_marker_1kjc7_994uv_13:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_marker_1kjc7_994uv_13:not(#\9), .awsui-mode-entering .awsui_marker_1kjc7_994uv_13:not(#\9) {
+  animation: none;
+  transition: none;
+}
+
+.awsui_root_1kjc7_994uv_27:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+.awsui_root_1kjc7_994uv_27:not(#\9):focus {
+  outline: none;
+}
+
+.awsui_title_1kjc7_994uv_62:not(#\9) {
+  /* used in test utils */
+}
+
+.awsui_list_1kjc7_994uv_66:not(#\9) {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  margin-block: 0;
+  margin-inline: 0;
+  padding-block: 0;
+  padding-inline: 0;
+  gap: var(--space-scaled-xxs-j00t0m, 4px) var(--space-m-n8iq8o, 16px);
+}
+
+.awsui_marker_1kjc7_994uv_13:not(#\9) {
+  min-inline-size: 0;
+  word-break: break-word;
+  display: inline-flex;
+  align-items: flex-start;
+  padding-block: 0;
+  padding-inline: 0;
+  border-block: 0;
+  border-inline: 0;
+  background-color: transparent;
+  cursor: pointer;
+  opacity: 1;
+}
+.awsui_marker_1kjc7_994uv_13:not(#\9):focus {
+  outline: none;
+}
+body[data-awsui-focus-visible=true] .awsui_marker_1kjc7_994uv_13:not(#\9):focus {
+  position: relative;
+}
+body[data-awsui-focus-visible=true] .awsui_marker_1kjc7_994uv_13:not(#\9):focus {
+  outline: 2px dotted transparent;
+  outline-offset: calc(2px - 1px);
+}
+body[data-awsui-focus-visible=true] .awsui_marker_1kjc7_994uv_13:not(#\9):focus::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * 2px);
+  inset-block-start: calc(-1 * 2px);
+  inline-size: calc(100% + 2px + 2px);
+  block-size: calc(100% + 2px + 2px);
+  border-start-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-start-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  box-shadow: 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
+}
+.awsui_marker_1kjc7_994uv_13.awsui_marker--dimmed_1kjc7_994uv_114:not(#\9) {
+  opacity: 0.35;
+}
+.awsui_marker_1kjc7_994uv_13.awsui_marker--highlighted_1kjc7_994uv_117:not(#\9) {
+  /* used in test utils */
+}

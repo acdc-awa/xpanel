@@ -1,0 +1,8 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_1epxo_12cv0_5:not(#\9),
+.awsui_dismiss-button_1epxo_12cv0_6:not(#\9) {
+  /* used in test-utils */
+}

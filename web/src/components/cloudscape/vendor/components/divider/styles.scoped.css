@@ -1,0 +1,80 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_divider_1noo2_gvayg_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  border-block: none;
+  border-inline: none;
+  margin-block: 0;
+  margin-inline: 0;
+}
+
+.awsui_divider-horizontal_1noo2_gvayg_45:not(#\9) {
+  display: block;
+  border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+  inline-size: 100%;
+  block-size: 0;
+}
+
+.awsui_divider-has-label_1noo2_gvayg_52:not(#\9) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs-m9b7jf, 8px);
+  border-block: none;
+  border-inline: none;
+  block-size: auto;
+}
+
+.awsui_divider-line_1noo2_gvayg_61:not(#\9) {
+  flex: 1;
+  block-size: 0;
+  min-inline-size: var(--space-m-n8iq8o, 16px);
+  border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+
+.awsui_divider-label_1noo2_gvayg_68:not(#\9) {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  word-break: break-word;
+}
+
+.awsui_divider-vertical_1noo2_gvayg_74:not(#\9) {
+  display: inline-block;
+  border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+  inline-size: 0;
+  block-size: 100%;
+  align-self: stretch;
+}

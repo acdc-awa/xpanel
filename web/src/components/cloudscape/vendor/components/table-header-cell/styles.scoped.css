@@ -1,0 +1,49 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_header-cell_uzgsh_ga5hv_5:not(#\9) {
+  box-sizing: border-box;
+}
+
+.awsui_header-cell_uzgsh_ga5hv_5:not(#\9):not(:last-child):not(.awsui_no-divider_uzgsh_ga5hv_9)::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 0;
+  inset-block-end: 0;
+  min-block-size: var(--line-height-heading-xs-wcrr4i, 18px);
+  max-block-size: calc(100% - calc(2 * var(--space-xs-m9b7jf, 8px) + var(--space-xxxs-3ulqs3, 2px)));
+  margin-block: auto;
+  border-inline-start: var(--border-divider-list-width-2qbfmz, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.awsui_header-cell_uzgsh_ga5hv_5.awsui_disable-paddings_uzgsh_ga5hv_23:not(#\9) {
+  padding-block: 0;
+  padding-inline: 0;
+}
+
+.awsui_header-cell-content_uzgsh_ga5hv_28:not(#\9) {
+  padding-block: var(--space-scaled-xxs-j00t0m, 4px);
+  padding-inline-start: var(--space-s-kll7oj, 12px);
+  padding-inline-end: var(--space-s-kll7oj, 12px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+}
+
+.awsui_header-cell_uzgsh_ga5hv_5.awsui_disable-paddings_uzgsh_ga5hv_23 > .awsui_header-cell-content_uzgsh_ga5hv_28:not(#\9) {
+  padding-block: 0;
+  padding-inline: 0;
+}
+
+.awsui_header-cell_uzgsh_ga5hv_5.awsui_is-visual-refresh_uzgsh_ga5hv_40:not(#\9):first-child > .awsui_header-cell-content_uzgsh_ga5hv_28 {
+  padding-inline-start: 0;
+}
+
+.awsui_header-cell-grid_uzgsh_ga5hv_44:not(#\9) {
+  min-inline-size: 0;
+  align-self: stretch;
+  display: grid;
+  align-items: center;
+}

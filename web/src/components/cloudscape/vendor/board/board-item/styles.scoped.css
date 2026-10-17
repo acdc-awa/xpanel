@@ -1,0 +1,72 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_9ckv7_m5bgn_9:not(#\9) {
+  display: contents;
+}
+
+/* TODO: use container API instead of styles override */
+.awsui_container-override_9ckv7_m5bgn_14.awsui_active_9ckv7_m5bgn_14:not(#\9) {
+  box-shadow: var(--shadow-container-active-iomjxu, 0px 1px 1px 1px #e9ebed, 0px 6px 36px rgba(0, 7, 22, 0.1019607843));
+  position: relative;
+  box-sizing: border-box;
+  outline: 2px dotted transparent;
+  outline-offset: -1px;
+}
+.awsui_container-override_9ckv7_m5bgn_14.awsui_active_9ckv7_m5bgn_14:not(#\9)::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  box-sizing: border-box;
+  inset-inline-start: calc(-1 * 0px);
+  inset-block-start: calc(-1 * 0px);
+  inline-size: calc(100% + 2 * 0px);
+  block-size: calc(100% + 2 * 0px);
+  border-radius: var(--border-radius-container-33hhdh, 16px);
+  border: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
+}
+
+.awsui_header_9ckv7_m5bgn_34:not(#\9) {
+  display: flex;
+  justify-items: center;
+  padding-block: var(--space-scaled-s-2crg2b, 12px);
+  padding-inline: calc(var(--space-container-horizontal-quy5ai, 20px) - var(--space-scaled-xs-pajbd1, 8px));
+}
+
+.awsui_flexible_9ckv7_m5bgn_41:not(#\9) {
+  flex: 1 1 min-content;
+}
+
+.awsui_handle_9ckv7_m5bgn_45:not(#\9) {
+  margin-block-start: calc(var(--space-scaled-xxs-j00t0m, 4px) + 1px);
+}
+.awsui_refresh_9ckv7_m5bgn_48 > .awsui_handle_9ckv7_m5bgn_45:not(#\9) {
+  margin-block-start: calc(var(--space-static-xxxs-opeihl, 2px) + 1px);
+}
+
+.awsui_header-content_9ckv7_m5bgn_52:not(#\9) {
+  margin-inline-start: var(--space-scaled-xxs-j00t0m, 4px);
+}
+
+.awsui_settings_9ckv7_m5bgn_56:not(#\9) {
+  margin-block-start: calc(var(--space-scaled-xxxs-n0ri6o, 2px) + 1px);
+  margin-inline-start: var(--space-static-xs-789l1l, 8px);
+}
+.awsui_refresh_9ckv7_m5bgn_48 > .awsui_settings_9ckv7_m5bgn_56:not(#\9) {
+  margin-block-start: 0px;
+}
+
+.awsui_fixed_9ckv7_m5bgn_64:not(#\9) {
+  flex: 0 0 auto;
+}
+
+.awsui_resizer_9ckv7_m5bgn_68:not(#\9) {
+  position: absolute;
+  inset-block-end: calc(var(--space-static-xs-789l1l, 8px) - var(--space-static-xxxs-opeihl, 2px));
+  inset-inline-end: calc(var(--space-static-xs-789l1l, 8px) - var(--space-static-xxxs-opeihl, 2px));
+}

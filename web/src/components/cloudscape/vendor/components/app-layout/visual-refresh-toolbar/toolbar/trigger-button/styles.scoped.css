@@ -1,0 +1,88 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_trigger_lpshu_1aod4_9:not(#\9) {
+  all: initial;
+  cursor: pointer;
+  color: var(--color-text-interactive-default-pauydh, #424650);
+  text-align: center;
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_custom_lpshu_1aod4_15:not(#\9) {
+  display: flex;
+  block-size: 100%;
+  inline-size: 100%;
+  box-sizing: border-box;
+}
+.awsui_trigger_lpshu_1aod4_9:not(#\9):focus {
+  outline: none;
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24:not(#\9) {
+  border-start-start-radius: var(--border-radius-button-9k0hrl, 20px);
+  border-start-end-radius: var(--border-radius-button-9k0hrl, 20px);
+  border-end-start-radius: var(--border-radius-button-9k0hrl, 20px);
+  border-end-end-radius: var(--border-radius-button-9k0hrl, 20px);
+  block-size: 30px;
+  inline-size: 30px;
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24:not(#\9):hover {
+  background: var(--color-background-input-disabled-pyvhb1, #ebebf0);
+  color: var(--color-text-interactive-hover-zj1911, #0f141a);
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24:not(#\9):active {
+  background: var(--color-background-control-disabled-m61b8s, #dedee3);
+  color: var(--color-text-interactive-hover-zj1911, #0f141a);
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24.awsui_selected_lpshu_1aod4_40:not(#\9) {
+  background: var(--color-background-layout-toggle-selected-default-oz0e3e, #006ce0);
+  color: var(--color-text-layout-toggle-selected-rty4rx, #ffffff);
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24.awsui_selected_lpshu_1aod4_40:not(#\9):hover {
+  background: var(--color-background-layout-toggle-selected-hover-w25090, #004a9e);
+}
+.awsui_trigger_lpshu_1aod4_9.awsui_default_lpshu_1aod4_24.awsui_selected_lpshu_1aod4_40:not(#\9):active {
+  background: var(--color-background-layout-toggle-selected-active-lon4qo, #006ce0);
+}
+
+.awsui_trigger-wrapper_lpshu_1aod4_51:not(#\9) {
+  position: relative;
+}
+.awsui_trigger-wrapper_lpshu_1aod4_51:not(#\9):has(:focus-visible) {
+  position: relative;
+}
+.awsui_trigger-wrapper_lpshu_1aod4_51:not(#\9):has(:focus-visible) {
+  outline: 2px dotted transparent;
+  outline-offset: calc(3px - 1px);
+}
+.awsui_trigger-wrapper_lpshu_1aod4_51:not(#\9):has(:focus-visible)::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * 3px);
+  inset-block-start: calc(-1 * 3px);
+  inline-size: calc(100% + 3px + 3px);
+  block-size: calc(100% + 3px + 3px);
+  border-start-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-start-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  box-shadow: 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
+}
+
+.awsui_dot_lpshu_1aod4_76:not(#\9) {
+  position: absolute;
+  inline-size: 8px;
+  block-size: 8px;
+  border-start-start-radius: 8px;
+  border-start-end-radius: 8px;
+  border-end-start-radius: 8px;
+  border-end-end-radius: 8px;
+  background-color: var(--color-background-badge-icon-7pcuv1, #db0000);
+  inset-block-start: -1px;
+  inset-inline-end: -1px;
+  outline: solid 2px var(--color-background-layout-toolbar-1jwzza, #ffffff);
+}

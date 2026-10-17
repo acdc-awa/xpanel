@@ -1,0 +1,64 @@
+/* Open Sans, Apache-2.0 / OFL. Extracted from @cloudscape-design/global-styles@1.0.71 fonts.css. */
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  src: url('./open-sans/open-sans-300-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+  src: url('./open-sans/open-sans-300-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('./open-sans/open-sans-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url('./open-sans/open-sans-400-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('./open-sans/open-sans-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+  src: url('./open-sans/open-sans-700-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url('./open-sans/open-sans-800-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+  src: url('./open-sans/open-sans-800-italic.woff2') format('woff2');
+}

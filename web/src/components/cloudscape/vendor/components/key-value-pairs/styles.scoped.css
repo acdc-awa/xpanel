@@ -1,0 +1,121 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_key-value-pairs_1y9fy_12gks_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+.awsui_group-title_1y9fy_12gks_41:not(#\9) {
+  padding-block-end: var(--space-scaled-m-lfeh3i, 16px);
+}
+
+.awsui_group-list_1y9fy_12gks_45:not(#\9) {
+  margin-block-start: 0;
+  margin-block-end: 0;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  row-gap: var(--space-scaled-m-lfeh3i, 16px);
+}
+
+.awsui_group-list-item_1y9fy_12gks_55:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_term_1y9fy_12gks_59:not(#\9) {
+  color: var(--color-text-label-g80qnu, #0f141a);
+  margin-block-end: var(--space-key-value-gap-ju2jyr, 0px);
+  line-height: 0;
+}
+
+.awsui_key-label_1y9fy_12gks_65:not(#\9),
+.awsui_info_1y9fy_12gks_66:not(#\9) {
+  font-size: var(--font-size-key-value-pairs-label-3n21ly, 14px);
+  line-height: var(--line-height-key-value-pairs-label-hztspf, 20px);
+  font-weight: var(--font-weight-key-value-pairs-label-zp4d0l, 700);
+}
+
+.awsui_key-label_1y9fy_12gks_65:not(#\9) {
+  display: inline-flex;
+  margin-inline-end: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_key-label_1y9fy_12gks_65:not(#\9):only-child {
+  margin-block: 0;
+  margin-inline: 0;
+}
+
+.awsui_detail_1y9fy_12gks_81:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  margin-inline-start: 0;
+  margin-block-start: 0;
+  margin-block-end: 0;
+  color: var(--color-text-key-value-pairs-value-i86dvj, #0f141a);
+}
+
+.awsui_info_1y9fy_12gks_66:not(#\9) {
+  display: inline-flex;
+  padding-inline-start: var(--space-xs-m9b7jf, 8px);
+  border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}

@@ -1,0 +1,23 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_modal-actions_12hyz_1pesb_9:not(#\9) {
+  justify-content: flex-end;
+}
+
+.awsui_submit-button_12hyz_1pesb_13:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_last-updated-caption_12hyz_1pesb_17:not(#\9) {
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+  letter-spacing: var(--letter-spacing-body-s-dzcybc, 0.005em);
+  text-align: end;
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}

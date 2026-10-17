@@ -1,0 +1,168 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+@property --awsui-style-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-background-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-width {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-radius {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-block {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-inline {
+  syntax: "*";
+  inherits: false;
+}
+/* awsui:style-api-slot name=control tokens=color, background-color, focus-ring-color, focus-ring-width, focus-ring-radius, focus-ring-gutter-block, focus-ring-gutter-inline properties= */
+/* awsui:style-api-slot name=label tokens=color properties= */
+/* awsui:style-api-slot name=description tokens=color properties= */
+.awsui_root_4yi2u_1yunw_40:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  display: flex;
+}
+
+.awsui_outline_4yi2u_1yunw_73:not(#\9) {
+  position: relative;
+}
+.awsui_outline_4yi2u_1yunw_73:not(#\9) {
+  outline: 2px dotted transparent;
+  outline-offset: calc(var(--awsui-internal-style-focus-ring-gutter-inline, 2px) - 1px);
+}
+.awsui_outline_4yi2u_1yunw_73:not(#\9)::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--awsui-internal-style-focus-ring-gutter-inline, 2px));
+  inset-block-start: calc(-1 * var(--awsui-internal-style-focus-ring-gutter-block, 2px));
+  inline-size: calc(100% + var(--awsui-internal-style-focus-ring-gutter-inline, 2px) + var(--awsui-internal-style-focus-ring-gutter-inline, 2px));
+  block-size: calc(100% + var(--awsui-internal-style-focus-ring-gutter-block, 2px) + var(--awsui-internal-style-focus-ring-gutter-block, 2px));
+  border-start-start-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-start-end-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-end-start-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  border-end-end-radius: var(--awsui-internal-style-focus-ring-radius, var(--awsui-style-focus-ring-border-radius-ka4djm, var(--border-radius-control-default-focus-ring-akwhsf, 4px)));
+  box-shadow: 0 0 0 var(--awsui-internal-style-focus-ring-width, var(--awsui-style-focus-ring-border-width-ka4djm, 2px)) var(--awsui-internal-style-focus-ring-color, var(--awsui-style-focus-ring-border-color-ka4djm, var(--color-border-item-focused-sewkzn, #006ce0)));
+}
+
+.awsui_toggle-control_4yi2u_1yunw_95:not(#\9) {
+  --awsui-internal-style-color: var(--awsui-style-color);
+  --awsui-internal-style-background-color: var(--awsui-style-background-color);
+  --awsui-internal-style-focus-ring-color: var(--awsui-style-focus-ring-color);
+  --awsui-internal-style-focus-ring-width: var(--awsui-style-focus-ring-width);
+  --awsui-internal-style-focus-ring-radius: var(--awsui-style-focus-ring-radius);
+  --awsui-internal-style-focus-ring-gutter-block: var(--awsui-style-focus-ring-gutter-block);
+  --awsui-internal-style-focus-ring-gutter-inline: var(--awsui-style-focus-ring-gutter-inline);
+  forced-color-adjust: none;
+  margin-block-start: calc((var(--line-height-body-m-5xw6xo, 20px) - 16px) / 2);
+  min-block-size: 16px;
+  min-inline-size: 24px;
+  block-size: 16px;
+  inline-size: 24px;
+  background: var(--awsui-internal-style-background-color, var(--color-background-toggle-default-quxg9w, #424650));
+  border-start-start-radius: 8px;
+  border-start-end-radius: 8px;
+  border-end-start-radius: 8px;
+  border-end-end-radius: 8px;
+}
+.awsui_toggle-control-checked_4yi2u_1yunw_115:not(#\9) {
+  background: var(--awsui-internal-style-background-color, var(--color-background-control-checked-ksqwhc, #006ce0));
+}
+.awsui_toggle-control-disabled_4yi2u_1yunw_118:not(#\9) {
+  background: var(--awsui-internal-style-background-color, var(--color-background-control-disabled-m61b8s, #dedee3));
+}
+.awsui_toggle-control-disabled_4yi2u_1yunw_118.awsui_toggle-control-checked_4yi2u_1yunw_115:not(#\9) {
+  background: var(--awsui-internal-style-background-color, var(--color-background-toggle-checked-disabled-81loy3, #b8e7ff));
+}
+.awsui_toggle-control-readonly_4yi2u_1yunw_124:not(#\9) {
+  background: var(--awsui-internal-style-background-color, var(--color-background-control-disabled-m61b8s, #dedee3));
+}
+.awsui_toggle-handle_4yi2u_1yunw_127:not(#\9) {
+  display: block;
+  position: absolute;
+  border-start-start-radius: 6px;
+  border-start-end-radius: 6px;
+  border-end-start-radius: 6px;
+  border-end-end-radius: 6px;
+  background: var(--awsui-internal-style-color, var(--color-foreground-control-default-poakg0, #ffffff));
+  box-shadow: 1px 1px var(--color-shadow-toggle-handle-h7hwyu, rgba(0, 0, 0, 0.25));
+  inline-size: 12px;
+  block-size: 12px;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  transition: transform var(--motion-duration-fast-yb0m8k, 90ms) var(--motion-easing-ease-out-quart-k5q7pi, cubic-bezier(0.165, 0.84, 0.44, 1)), background-color var(--motion-duration-fast-yb0m8k, 90ms) var(--motion-easing-ease-out-quart-k5q7pi, cubic-bezier(0.165, 0.84, 0.44, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_toggle-handle_4yi2u_1yunw_127:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_toggle-handle_4yi2u_1yunw_127:not(#\9), .awsui-mode-entering .awsui_toggle-handle_4yi2u_1yunw_127:not(#\9) {
+  animation: none;
+  transition: none;
+}
+.awsui_toggle-handle-checked_4yi2u_1yunw_152:not(#\9) {
+  transform: translateX(8px);
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+}
+.awsui_toggle-handle-checked_4yi2u_1yunw_152:not(#\9):dir(rtl) {
+  transform: translateX(-8px);
+}
+.awsui_toggle-handle-disabled_4yi2u_1yunw_159:not(#\9) {
+  background: var(--awsui-internal-style-color, var(--color-foreground-control-disabled-bikivj, #ffffff));
+  box-shadow: none;
+}
+.awsui_toggle-handle-readonly_4yi2u_1yunw_163:not(#\9):not(.awsui_toggle-handle-disabled_4yi2u_1yunw_159) {
+  box-shadow: none;
+}
+.awsui_toggle-handle-readonly_4yi2u_1yunw_163:not(#\9):not(.awsui_toggle-handle-disabled_4yi2u_1yunw_159).awsui_toggle-handle-checked_4yi2u_1yunw_152 {
+  background: var(--awsui-internal-style-color, var(--color-foreground-control-read-only-8sqxyy, #656871));
+}

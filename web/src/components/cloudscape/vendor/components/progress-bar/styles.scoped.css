@@ -1,0 +1,204 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-value {
+  -webkit-transition: width var(--motion-duration-moderate-evtfj0, 135ms) linear;
+  transition: width var(--motion-duration-moderate-evtfj0, 135ms) linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-value {
+    animation: none;
+    -webkit-transition: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-value, .awsui-mode-entering .awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-value {
+  animation: none;
+  -webkit-transition: none;
+  transition: none;
+}
+
+.awsui_result-state_11huc_15p30_27:not(#\9) {
+  animation: awsui_awsui-motion-fade-in_11huc_15p30_1 var(--motion-duration-transition-show-paced-ljwltl, 180ms) var(--motion-easing-transition-show-paced-9j2ih7, ease-out);
+}
+@keyframes awsui_awsui-motion-fade-in_11huc_15p30_1 {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_result-state_11huc_15p30_27:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_result-state_11huc_15p30_27:not(#\9), .awsui-mode-entering .awsui_result-state_11huc_15p30_27:not(#\9) {
+  animation: none;
+  transition: none;
+}
+
+.awsui_root_11huc_15p30_49:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+.awsui_with-result-button_11huc_15p30_81:not(#\9) {
+  padding-inline-end: var(--space-m-n8iq8o, 16px);
+}
+
+.awsui_result-text_11huc_15p30_85:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_result-container-error_11huc_15p30_89:not(#\9), .awsui_result-container-success_11huc_15p30_89:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_result-button_11huc_15p30_93:not(#\9) {
+  display: inline-block;
+  margin-block: var(--space-scaled-xxs-j00t0m, 4px);
+  margin-inline: 0;
+}
+
+.awsui_word-wrap_11huc_15p30_99:not(#\9) {
+  min-inline-size: 0;
+  word-break: break-word;
+}
+
+.awsui_label-flash_11huc_15p30_104:not(#\9) {
+  color: inherit;
+  font-weight: var(--font-weight-bold-xpar9m, 700);
+}
+.awsui_label-key-value_11huc_15p30_108:not(#\9) {
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  font-weight: var(--font-display-label-weight-tz6zkz, 700);
+  color: var(--color-text-label-g80qnu, #0f141a);
+  margin-block-end: var(--space-scaled-xxxs-n0ri6o, 2px);
+}
+
+.awsui_flash_11huc_15p30_116:not(#\9) {
+  color: inherit;
+}
+
+.awsui_progress-container_11huc_15p30_120:not(#\9) {
+  display: flex;
+  align-items: center;
+  max-inline-size: 800px;
+  block-size: var(--line-height-body-m-5xw6xo, 20px);
+}
+
+.awsui_percentage-container_11huc_15p30_127:not(#\9) {
+  inline-size: 33px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  text-align: end;
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+  letter-spacing: var(--letter-spacing-body-s-dzcybc, 0.005em);
+}
+
+.awsui_percentage_11huc_15p30_127:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_progress_11huc_15p30_13:not(#\9) {
+  inline-size: 100%;
+  margin-inline-end: var(--space-s-kll7oj, 12px);
+  min-inline-size: 0;
+  block-size: var(--awsui-progress-bar-height-ka4djm, 4px);
+  border-block: 0;
+  border-inline: none;
+  box-sizing: border-box;
+  border-start-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-start-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  background-color: var(--awsui-progress-bar-background-color-ka4djm, var(--color-background-progress-bar-default-34ibji, #ebebf0));
+}
+.awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-bar {
+  block-size: var(--awsui-progress-bar-height-ka4djm, 4px);
+  border-block: 0;
+  border-inline: none;
+  box-sizing: border-box;
+  border-start-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-start-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  background-color: var(--awsui-progress-bar-background-color-ka4djm, var(--color-background-progress-bar-default-34ibji, #ebebf0));
+}
+.awsui_progress_11huc_15p30_13:not(#\9)::-webkit-progress-value {
+  border-start-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-start-end-radius: 0;
+  border-end-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-end-radius: 0;
+  background-color: var(--awsui-progress-value-background-color-ka4djm, var(--color-background-progress-bar-value-default-ddtpb6, #006ce0));
+}
+.awsui_progress_11huc_15p30_13.awsui_complete_11huc_15p30_173:not(#\9)::-webkit-progress-value {
+  border-start-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-start-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-end-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+}
+.awsui_progress_11huc_15p30_13:not(#\9)::-moz-progress-bar {
+  border-start-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-start-end-radius: 0;
+  border-end-start-radius: var(--awsui-progress-bar-border-radius-ka4djm, 10px);
+  border-end-end-radius: 0;
+  background-color: var(--awsui-progress-value-background-color-ka4djm, var(--color-background-progress-bar-value-default-ddtpb6, #006ce0));
+}
+.awsui_progress_11huc_15p30_13.awsui_progress-flash_11huc_15p30_186:not(#\9) {
+  background-color: var(--awsui-progress-bar-background-color-ka4djm, var(--color-background-progress-bar-flash-npejc5, #ebebf0));
+}
+.awsui_progress_11huc_15p30_13.awsui_progress-flash_11huc_15p30_186:not(#\9)::-webkit-progress-bar {
+  background-color: var(--awsui-progress-bar-background-color-ka4djm, var(--color-background-progress-bar-flash-npejc5, #ebebf0));
+}
+.awsui_progress_11huc_15p30_13.awsui_progress-flash_11huc_15p30_186:not(#\9)::-webkit-progress-value {
+  background-color: var(--awsui-progress-value-background-color-ka4djm, var(--color-background-progress-bar-value-flash-urwrbg, #006ce0));
+}
+.awsui_progress_11huc_15p30_13.awsui_progress-flash_11huc_15p30_186:not(#\9)::-moz-progress-bar {
+  background-color: var(--awsui-progress-value-background-color-ka4djm, var(--color-background-progress-bar-value-flash-urwrbg, #006ce0));
+}
+
+.awsui_additional-info_11huc_15p30_199:not(#\9) {
+  /* used in test-utils */
+}

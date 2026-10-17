@@ -1,0 +1,76 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_series_1yz9c_iqexa_9:not(#\9),
+.awsui_series--bar_1yz9c_iqexa_10 > .awsui_series__rect_1yz9c_iqexa_10:not(#\9) {
+  transition: opacity var(--motion-duration-transition-quick-1p8yzt, 90ms) var(--motion-easing-transition-quick-afgcka, linear);
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_series_1yz9c_iqexa_9:not(#\9),
+  .awsui_series--bar_1yz9c_iqexa_10 > .awsui_series__rect_1yz9c_iqexa_10:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_series_1yz9c_iqexa_9:not(#\9), .awsui-mode-entering .awsui_series_1yz9c_iqexa_9:not(#\9), .awsui-motion-disabled .awsui_series--bar_1yz9c_iqexa_10 > .awsui_series__rect_1yz9c_iqexa_10:not(#\9), .awsui-mode-entering .awsui_series--bar_1yz9c_iqexa_10 > .awsui_series__rect_1yz9c_iqexa_10:not(#\9) {
+  animation: none;
+  transition: none;
+}
+
+.awsui_exiting_1yz9c_iqexa_27:not(#\9) {
+  animation: awsui_awsui-motion-fade-out-0_1yz9c_iqexa_1 var(--motion-duration-refresh-only-fast-y8f250, 115ms) var(--motion-easing-refresh-only-b-qfsc10, cubic-bezier(1, 0, 0.83, 1));
+}
+@keyframes awsui_awsui-motion-fade-out-0_1yz9c_iqexa_1 {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_exiting_1yz9c_iqexa_27:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_exiting_1yz9c_iqexa_27:not(#\9), .awsui-mode-entering .awsui_exiting_1yz9c_iqexa_27:not(#\9) {
+  animation: none;
+  transition: none;
+}
+
+.awsui_root_1yz9c_iqexa_49:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_series_1yz9c_iqexa_9:not(#\9) {
+  display: block;
+  stroke-width: var(--border-line-chart-width-vyj7eu, 2px);
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: var(--border-line-chart-line-join-lskdht, round);
+  pointer-events: none;
+}
+
+.awsui_series--highlighted_1yz9c_iqexa_62:not(#\9),
+.awsui_series__bar--highlighted_1yz9c_iqexa_63:not(#\9) {
+  /* used in dom query */
+}
+
+.awsui_series--dimmed_1yz9c_iqexa_67:not(#\9) {
+  opacity: 0.3;
+}
+
+.awsui_series--threshold_1yz9c_iqexa_71:not(#\9) {
+  stroke-dasharray: var(--border-line-chart-dash-array-ctwkrt, 3 5);
+  stroke-width: var(--border-line-chart-width-vyj7eu, 2px);
+}
+
+.awsui_bar-group_1yz9c_iqexa_76:not(#\9) {
+  pointer-events: none;
+}

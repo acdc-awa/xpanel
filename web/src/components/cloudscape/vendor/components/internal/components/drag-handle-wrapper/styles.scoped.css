@@ -1,0 +1,242 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+@keyframes awsui_drag-handle-entry_155yk_1825q_1 {
+  from {
+    transform: translate(var(--awsui-drag-handle-animation-inline-offset-ka4djm), var(--awsui-drag-handle-animation-block-offset-ka4djm));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+@keyframes awsui_drag-handle-exit_155yk_1825q_1 {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(var(--awsui-drag-handle-animation-inline-offset-ka4djm), var(--awsui-drag-handle-animation-block-offset-ka4djm));
+  }
+}
+.awsui_direction-button-wrapper_155yk_1825q_29:not(#\9) {
+  --awsui-drag-handle-animation-inline-offset-ka4djm: 0;
+  --awsui-drag-handle-animation-block-offset-ka4djm: 0;
+}
+@keyframes awsui_awsui-motion-fade-in_155yk_1825q_1 {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes awsui_awsui-motion-fade-out-0_155yk_1825q_1 {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.awsui_direction-button-wrapper-motion-enter_155yk_1825q_49:not(#\9), .awsui_direction-button-wrapper-motion-entering_155yk_1825q_49:not(#\9), .awsui_direction-button-wrapper-motion-exit_155yk_1825q_49:not(#\9), .awsui_direction-button-wrapper-motion-exiting_155yk_1825q_49:not(#\9) {
+  pointer-events: none;
+}
+.awsui_direction-button-wrapper-motion-entering_155yk_1825q_49:not(#\9) {
+  animation: awsui_drag-handle-entry_155yk_1825q_1 var(--motion-duration-complex-n5wfwh, 250ms) var(--motion-easing-responsive-k7246o, cubic-bezier(0, 0, 0, 1)), awsui_awsui-motion-fade-in_155yk_1825q_1 var(--motion-duration-complex-n5wfwh, 250ms) var(--motion-easing-responsive-k7246o, cubic-bezier(0, 0, 0, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_direction-button-wrapper-motion-entering_155yk_1825q_49:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_direction-button-wrapper-motion-entering_155yk_1825q_49:not(#\9), .awsui-mode-entering .awsui_direction-button-wrapper-motion-entering_155yk_1825q_49:not(#\9) {
+  animation: none;
+  transition: none;
+}
+.awsui_direction-button-wrapper-motion-exiting_155yk_1825q_49:not(#\9) {
+  animation: awsui_drag-handle-exit_155yk_1825q_1 var(--motion-duration-complex-n5wfwh, 250ms) var(--motion-easing-responsive-k7246o, cubic-bezier(0, 0, 0, 1)) forwards, awsui_awsui-motion-fade-out-0_155yk_1825q_1 var(--motion-duration-complex-n5wfwh, 250ms) var(--motion-easing-responsive-k7246o, cubic-bezier(0, 0, 0, 1)) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_direction-button-wrapper-motion-exiting_155yk_1825q_49:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_direction-button-wrapper-motion-exiting_155yk_1825q_49:not(#\9), .awsui-mode-entering .awsui_direction-button-wrapper-motion-exiting_155yk_1825q_49:not(#\9) {
+  animation: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .awsui_direction-button-wrapper_155yk_1825q_29:not(#\9) {
+    animation: none;
+    transition: none;
+  }
+}
+.awsui-motion-disabled .awsui_direction-button-wrapper_155yk_1825q_29:not(#\9), .awsui-mode-entering .awsui_direction-button-wrapper_155yk_1825q_29:not(#\9) {
+  animation: none;
+  transition: none;
+}
+
+.awsui_direction-button-wrapper-block-start_155yk_1825q_89:not(#\9) {
+  --awsui-drag-handle-animation-block-offset-ka4djm: 20px;
+}
+
+.awsui_direction-button-wrapper-block-end_155yk_1825q_93:not(#\9) {
+  --awsui-drag-handle-animation-block-offset-ka4djm: -20px;
+}
+
+.awsui_direction-button-wrapper-inline-start_155yk_1825q_97:not(#\9) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+}
+.awsui_direction-button-wrapper-inline-start_155yk_1825q_97:not(#\9):dir(ltr) {
+  --awsui-drag-handle-animation-inline-offset-ka4djm: 20px;
+}
+.awsui_direction-button-wrapper-inline-start_155yk_1825q_97:not(#\9):dir(rtl) {
+  --awsui-drag-handle-animation-inline-offset-ka4djm: -20px;
+}
+
+.awsui_direction-button-wrapper-inline-end_155yk_1825q_108:not(#\9) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+}
+.awsui_direction-button-wrapper-inline-end_155yk_1825q_108:not(#\9):dir(ltr) {
+  --awsui-drag-handle-animation-inline-offset-ka4djm: -20px;
+}
+.awsui_direction-button-wrapper-inline-end_155yk_1825q_108:not(#\9):dir(rtl) {
+  --awsui-drag-handle-animation-inline-offset-ka4djm: 20px;
+}
+
+.awsui_contents_155yk_1825q_119:not(#\9) {
+  display: contents;
+}
+
+.awsui_portal-overlay_155yk_1825q_123:not(#\9) {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  pointer-events: none;
+  z-index: 7000;
+}
+
+.awsui_portal-overlay-disabled_155yk_1825q_131:not(#\9) {
+  display: none;
+}
+
+.awsui_portal-overlay-contents_155yk_1825q_135:not(#\9) {
+  pointer-events: auto;
+}
+
+.awsui_drag-handle_155yk_1825q_139:not(#\9) {
+  position: relative;
+  display: inline-flex;
+}
+
+.awsui_direction-button-wrapper_155yk_1825q_29:not(#\9) {
+  position: absolute;
+  block-size: var(--space-static-xl-frcfkv, 24px);
+  inline-size: var(--space-static-xl-frcfkv, 24px);
+  padding-block: var(--space-static-xxs-vzto3j, 4px);
+  padding-inline: var(--space-static-xxs-vzto3j, 4px);
+}
+
+.awsui_direction-button-wrapper-hidden_155yk_1825q_152:not(#\9) {
+  display: none;
+}
+
+.awsui_direction-button-wrapper-block-start_155yk_1825q_89:not(#\9) {
+  inset-block-start: calc(-1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+  inset-inline-start: calc(50% - (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)) / 2);
+}
+
+.awsui_direction-button-wrapper-block-end_155yk_1825q_93:not(#\9) {
+  inset-block-end: calc(-1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+  inset-inline-start: calc(50% - (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)) / 2);
+}
+
+.awsui_direction-button-wrapper-inline-start_155yk_1825q_97:not(#\9) {
+  inset-inline-start: calc(-1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+  inset-block-start: calc(50% - (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)) / 2);
+}
+
+.awsui_direction-button-wrapper-inline-end_155yk_1825q_108:not(#\9) {
+  inset-inline-end: calc(-1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+  inset-block-start: calc(50% - (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)) / 2);
+}
+
+.awsui_direction-button-wrapper-forced_155yk_1825q_176:not(#\9) {
+  inset-inline-start: calc(50% - (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)) / 2);
+}
+
+.awsui_direction-button-wrapper-forced-top-0_155yk_1825q_180:not(#\9) {
+  inset-block-start: calc(-1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-top-1_155yk_1825q_184:not(#\9) {
+  inset-block-start: calc(-2 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-top-2_155yk_1825q_188:not(#\9) {
+  inset-block-start: calc(-3 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-top-3_155yk_1825q_192:not(#\9) {
+  inset-block-start: calc(-4 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-bottom-0_155yk_1825q_196:not(#\9) {
+  inset-block-start: calc(1 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-bottom-1_155yk_1825q_200:not(#\9) {
+  inset-block-start: calc(2 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-bottom-2_155yk_1825q_204:not(#\9) {
+  inset-block-start: calc(3 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button-wrapper-forced-bottom-3_155yk_1825q_208:not(#\9) {
+  inset-block-start: calc(4 * (var(--space-static-xl-frcfkv, 24px) + 2 * var(--space-static-xxs-vzto3j, 4px)));
+}
+
+.awsui_direction-button_155yk_1825q_29:not(#\9) {
+  position: absolute;
+  border-width: 0;
+  cursor: pointer;
+  display: inline-block;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  inline-size: var(--space-static-xl-frcfkv, 24px);
+  block-size: var(--space-static-xl-frcfkv, 24px);
+  padding-block: var(--space-xxs-3o1yoq, 4px);
+  padding-inline: var(--space-xxs-3o1yoq, 4px);
+  border-start-start-radius: 50%;
+  border-start-end-radius: 50%;
+  border-end-start-radius: 50%;
+  border-end-end-radius: 50%;
+  background-color: var(--color-background-direction-button-default-vtjmq9, #424650);
+  color: var(--color-text-direction-button-default-rvsx02, #ffffff);
+  box-shadow: var(--shadow-dropdown-ogwesf, 0px 4px 20px 1px rgba(0, 7, 22, 0.1));
+}
+.awsui_direction-button_155yk_1825q_29:not(#\9):not(.awsui_direction-button-disabled_155yk_1825q_231):hover {
+  background-color: var(--color-background-direction-button-hover-ixmpit, #333843);
+}
+.awsui_direction-button_155yk_1825q_29:not(#\9):not(.awsui_direction-button-disabled_155yk_1825q_231):active {
+  background-color: var(--color-background-direction-button-active-ilpypx, #232b37);
+}
+
+.awsui_direction-button-disabled_155yk_1825q_231:not(#\9) {
+  cursor: default;
+  background-color: var(--color-background-direction-button-disabled-p1avil, #ebebf0);
+  color: var(--color-text-direction-button-disabled-qzn64l, #b4b4bb);
+}

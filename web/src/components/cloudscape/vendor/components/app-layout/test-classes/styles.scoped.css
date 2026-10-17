@@ -1,0 +1,32 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_1fj9k_q6akd_5:not(#\9),
+.awsui_navigation_1fj9k_q6akd_6:not(#\9),
+.awsui_navigation-toggle_1fj9k_q6akd_7:not(#\9),
+.awsui_navigation-close_1fj9k_q6akd_8:not(#\9),
+.awsui_content_1fj9k_q6akd_9:not(#\9),
+.awsui_notifications_1fj9k_q6akd_10:not(#\9),
+.awsui_breadcrumbs_1fj9k_q6akd_11:not(#\9),
+.awsui_tools_1fj9k_q6akd_12:not(#\9),
+.awsui_tools-close_1fj9k_q6akd_13:not(#\9),
+.awsui_tools-toggle_1fj9k_q6akd_14:not(#\9),
+.awsui_drawer-closed_1fj9k_q6akd_15:not(#\9),
+.awsui_mobile-bar_1fj9k_q6akd_16:not(#\9),
+.awsui_disable-body-scroll-root_1fj9k_q6akd_17:not(#\9),
+.awsui_drawers-trigger_1fj9k_q6akd_18:not(#\9),
+.awsui_drawers-trigger-global_1fj9k_q6akd_19:not(#\9),
+.awsui_drawers-trigger-with-badge_1fj9k_q6akd_20:not(#\9),
+.awsui_active-drawer_1fj9k_q6akd_21:not(#\9),
+.awsui_active-drawer-close-button_1fj9k_q6akd_22:not(#\9),
+.awsui_overflow-menu_1fj9k_q6akd_23:not(#\9),
+.awsui_drawers-slider_1fj9k_q6akd_24:not(#\9),
+.awsui_toolbar_1fj9k_q6akd_25:not(#\9),
+.awsui_trigger-wrapper-tooltip-visible_1fj9k_q6akd_26:not(#\9),
+.awsui_trigger-tooltip_1fj9k_q6akd_27:not(#\9),
+.awsui_active-drawer-expanded-mode-button_1fj9k_q6akd_28:not(#\9),
+.awsui_ai-drawer-toggle_1fj9k_q6akd_29:not(#\9),
+.awsui_active-ai-drawer-leave-expanded-mode-custom-button_1fj9k_q6akd_30:not(#\9) {
+  /* used in test-utils */
+}

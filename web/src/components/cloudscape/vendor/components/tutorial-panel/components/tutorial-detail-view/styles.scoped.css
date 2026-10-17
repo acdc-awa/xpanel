@@ -1,0 +1,127 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_tutorial-list_1u70p_yti1z_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  padding-block: 0;
+  padding-inline: 0;
+  margin-block: 0;
+  margin-inline: 0;
+}
+
+.awsui_tutorial-title_1u70p_yti1z_45:not(#\9) {
+  display: flex;
+  align-items: flex-start;
+  margin-inline-start: calc(-1 * var(--space-xxs-3o1yoq, 4px));
+  padding-block-end: var(--space-xxxs-3ulqs3, 2px);
+}
+
+.awsui_task_1u70p_yti1z_52:not(#\9) {
+  list-style: none;
+  padding-block-start: 0;
+}
+.awsui_task_1u70p_yti1z_52:not(#\9):not(:first-child) {
+  margin-block-start: var(--space-xl-6jh0ay, 24px);
+}
+
+.awsui_task-title_1u70p_yti1z_60:not(#\9) {
+  display: flex;
+  align-items: flex-start;
+  padding-inline-start: var(--border-divider-section-width-dlkb8v, 1px);
+  font-size: var(--font-size-heading-s-hm1hv8, 16px);
+  line-height: var(--line-height-heading-s-3z7qjv, 20px);
+  letter-spacing: var(--letter-spacing-heading-s-kfu48f, -0.005em);
+}
+.awsui_task-title--status_1u70p_yti1z_68:not(#\9) {
+  line-height: inherit;
+}
+
+.awsui_current-task_1u70p_yti1z_72:not(#\9) {
+  font-weight: var(--font-weight-bold-xpar9m, 700);
+}
+
+.awsui_successful-task_1u70p_yti1z_76:not(#\9) {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.awsui_congratulation-message_1u70p_yti1z_80:not(#\9) {
+  display: flex;
+  font-size: var(--font-size-heading-s-hm1hv8, 16px);
+  line-height: var(--line-height-heading-s-3z7qjv, 20px);
+  letter-spacing: var(--letter-spacing-heading-s-kfu48f, -0.005em);
+  font-weight: var(--font-weight-heading-xs-s1j3wn, 700);
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+.awsui_congratulation-message--status_1u70p_yti1z_88:not(#\9) {
+  line-height: inherit;
+  flex-shrink: 0;
+}
+
+.awsui_plaintext-congratulation-description_1u70p_yti1z_93:not(#\9) {
+  white-space: pre-line;
+}
+
+.awsui_divider_1u70p_yti1z_97:not(#\9) {
+  border-block-end: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+
+.awsui_step-list_1u70p_yti1z_101:not(#\9) {
+  list-style: none;
+  padding-block: 0;
+  padding-inline-start: var(--space-xxxs-3ulqs3, 2px);
+  padding-inline-end: 0;
+}
+
+.awsui_step_1u70p_yti1z_101:not(#\9):not(:first-child) {
+  padding-block-start: var(--space-xxs-3o1yoq, 4px);
+}
+
+.awsui_expandable-section-wrapper_1u70p_yti1z_112:not(#\9) {
+  inline-size: 100%;
+}
+
+.awsui_expandable-section-header_1u70p_yti1z_116:not(#\9) {
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+}
+
+.awsui_step-title_1u70p_yti1z_121:not(#\9),
+.awsui_feedback-link_1u70p_yti1z_122:not(#\9),
+.awsui_dismiss-button_1u70p_yti1z_123:not(#\9),
+.awsui_completion-screen-title_1u70p_yti1z_124:not(#\9),
+.awsui_completion-screen-description_1u70p_yti1z_125:not(#\9) {
+  /* used in test-utils */
+}

@@ -1,0 +1,330 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_7nfqu_106pl_13:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  background-color: var(--color-background-layout-main-y4565g, #ffffff);
+  --awsui-max-content-width-ka4djm: 100%;
+  display: grid;
+  grid-template-areas: "toolbar    toolbar     toolbar" ".       notifications  ." ".           main       .";
+  grid-template-columns: var(--space-layout-content-horizontal-axaoos, 24px) minmax(0, 1fr) var(--space-layout-content-horizontal-axaoos, 24px);
+  grid-template-rows: min-content min-content 1fr;
+}
+@media (min-width: 689px) {
+  .awsui_root_7nfqu_106pl_13:not(#\9) {
+    grid-template-areas: "ai-drawer toolbar    toolbar      toolbar       toolbar   toolbar         toolbar  toolbar" "ai-drawer navigation .         notifications    .         sideSplitPanel  tools    global-tools" "ai-drawer navigation .             main         .         sideSplitPanel  tools    global-tools" "ai-drawer bottom-tool bottom-tool bottom-tool  bottom-tool  bottom-tool bottom-tool global-tools";
+    grid-template-columns: min-content min-content minmax(var(--space-layout-content-horizontal-axaoos, 24px), 1fr) minmax(0, var(--awsui-max-content-width-ka4djm)) minmax(var(--space-layout-content-horizontal-axaoos, 24px), 1fr) min-content min-content;
+    grid-template-rows: min-content min-content 1fr min-content min-content;
+  }
+  .awsui_root_7nfqu_106pl_13.awsui_has-adaptive-widths-default_7nfqu_106pl_57:not(#\9) {
+    --awsui-max-content-width-ka4djm: 1620px;
+  }
+}
+@media (min-width: 689px) and (min-width: 1401px) {
+  .awsui_root_7nfqu_106pl_13.awsui_has-adaptive-widths-dashboard_7nfqu_106pl_62:not(#\9) {
+    --awsui-max-content-width-ka4djm: 1280px;
+  }
+}
+@media (min-width: 689px) and (min-width: 1921px) {
+  .awsui_root_7nfqu_106pl_13.awsui_has-adaptive-widths-dashboard_7nfqu_106pl_62:not(#\9) {
+    --awsui-max-content-width-ka4djm: 1620px;
+  }
+}
+@media (min-width: 689px) and (min-width: 2541px) {
+  .awsui_root_7nfqu_106pl_13.awsui_has-adaptive-widths-dashboard_7nfqu_106pl_62:not(#\9) {
+    --awsui-max-content-width-ka4djm: 2160px;
+  }
+}
+@media (min-width: 689px) {
+  .awsui_root_7nfqu_106pl_13.awsui_drawer-expanded-mode_7nfqu_106pl_77:not(#\9) {
+    grid-template-columns: 0 0 0 0 0 0 0 auto;
+  }
+  .awsui_root_7nfqu_106pl_13.awsui_drawer-expanded-mode_7nfqu_106pl_77.awsui_ai-drawer-expanded-mode_7nfqu_106pl_80:not(#\9) {
+    grid-template-columns: auto 0 0 0 0 0 0 0;
+  }
+  .awsui_root_7nfqu_106pl_13.awsui_drawer-expanded-mode_7nfqu_106pl_77.awsui_bottom-drawer-expanded-mode_7nfqu_106pl_83:not(#\9) {
+    grid-template-rows: auto;
+    grid-template-columns: 0 0 0 0 0 auto 0 0;
+  }
+}
+
+.awsui_ai-drawer_7nfqu_106pl_80:not(#\9),
+.awsui_navigation_7nfqu_106pl_90:not(#\9),
+.awsui_tools_7nfqu_106pl_91:not(#\9),
+.awsui_global-tools_7nfqu_106pl_92:not(#\9),
+.awsui_bottom-tool_7nfqu_106pl_93:not(#\9) {
+  grid-row: 1/-1;
+  grid-column: 1/-1;
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  opacity: 1;
+}
+@media (max-width: 688px) {
+  .awsui_ai-drawer_7nfqu_106pl_80:not(#\9),
+  .awsui_navigation_7nfqu_106pl_90:not(#\9),
+  .awsui_tools_7nfqu_106pl_91:not(#\9),
+  .awsui_global-tools_7nfqu_106pl_92:not(#\9),
+  .awsui_bottom-tool_7nfqu_106pl_93:not(#\9) {
+    inline-size: 100%;
+  }
+}
+
+@media (min-width: 689px) {
+  .awsui_bottom-tool_7nfqu_106pl_93:not(#\9) {
+    grid-area: bottom-tool;
+    position: sticky;
+    inset-block-end: 0;
+    overflow: hidden;
+    z-index: 840;
+  }
+}
+
+@media (min-width: 689px) {
+  .awsui_ai-drawer_7nfqu_106pl_80:not(#\9) {
+    grid-area: ai-drawer;
+    position: sticky;
+  }
+}
+
+.awsui_navigation_7nfqu_106pl_90:not(#\9) {
+  z-index: 830;
+}
+@media (min-width: 689px) {
+  .awsui_navigation_7nfqu_106pl_90:not(#\9) {
+    grid-area: navigation;
+    inline-size: var(--awsui-navigation-width-ka4djm);
+    border-inline-end: var(--border-width-layout-side-navigation-q0k26x, 1px) solid var(--color-border-layout-side-navigation-a02vgs, #c6c6cd);
+  }
+}
+@media (max-width: 688px) {
+  .awsui_navigation_7nfqu_106pl_90:not(#\9) {
+    z-index: 1001;
+  }
+}
+@media (min-width: 689px) {
+  .awsui_navigation_7nfqu_106pl_90.awsui_navigation-collapsed_7nfqu_106pl_142:not(#\9) {
+    inline-size: var(--awsui-navigation-collapsed-width-ka4djm, var(--size-side-navigation-collapsed-width-irf8ik, 52px));
+  }
+}
+
+@media (min-width: 689px) {
+  .awsui_tools_7nfqu_106pl_91:not(#\9) {
+    grid-area: tools;
+    /* stylelint-disable plugin/no-unsupported-browser-features */
+  }
+  .awsui_tools_7nfqu_106pl_91:not(#\9):not(:has(> [data-testid])) {
+    inline-size: var(--awsui-tools-width-ka4djm);
+  }
+  .awsui_tools_7nfqu_106pl_91:not(#\9):not(:has(> [data-testid])).awsui_tools-open_7nfqu_106pl_155 {
+    border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+}
+
+@media (min-width: 689px) {
+  .awsui_global-tools_7nfqu_106pl_92:not(#\9) {
+    display: flex;
+    grid-area: global-tools;
+    justify-content: flex-end;
+  }
+}
+
+@media (min-width: 689px) {
+  .awsui_split-panel-side_7nfqu_106pl_169:not(#\9) {
+    grid-area: sideSplitPanel;
+    border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+    opacity: 1;
+  }
+}
+
+.awsui_split-panel-bottom_7nfqu_106pl_176:not(#\9) {
+  position: sticky;
+  z-index: 840;
+  align-self: end;
+  grid-area: main;
+  grid-column: 1/-1;
+}
+@media (min-width: 689px) {
+  .awsui_split-panel-bottom_7nfqu_106pl_176:not(#\9) {
+    grid-column: 3/6;
+  }
+}
+
+.awsui_panel-hidden_7nfqu_106pl_189:not(#\9) {
+  border-block: none;
+  border-inline: none;
+  opacity: 0;
+  z-index: 0;
+}
+.awsui_panel-hidden_7nfqu_106pl_189.awsui_navigation_7nfqu_106pl_90:not(#\9), .awsui_panel-hidden_7nfqu_106pl_189.awsui_tools_7nfqu_106pl_91:not(#\9), .awsui_panel-hidden_7nfqu_106pl_189.awsui_global-tools_7nfqu_106pl_92:not(#\9) {
+  inline-size: 0px;
+}
+
+.awsui_toolbar-container_7nfqu_106pl_199:not(#\9) {
+  grid-area: toolbar;
+  block-size: 42px;
+  border-block-end: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+  box-sizing: border-box;
+}
+
+/**
+ * A zero-height sticky element placed in the toolbar grid area when the toolbar is absent
+ * and the left panel (AI drawer) is open. It reuses the toolbar's pseudo-element technique
+ * to render the border-radius corner between the AI drawer and the content area.
+ * In light mode: inverse radius trick (dark square + white square with radius).
+ * In dark mode: a vertical border line with a rounded top corner + top border on the element itself.
+ */
+.awsui_pseudo-toolbar_7nfqu_106pl_213:not(#\9) {
+  grid-area: toolbar;
+  position: sticky;
+  z-index: 1000;
+}
+@media not print {
+  .awsui_pseudo-toolbar_7nfqu_106pl_213:not(#\9):before {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_pseudo-toolbar_7nfqu_106pl_213:not(#\9):before, .awsui-dark-mode .awsui_pseudo-toolbar_7nfqu_106pl_213:not(#\9):before {
+    content: "";
+    position: absolute;
+    inline-size: var(--border-divider-section-width-dlkb8v, 1px);
+    block-size: 100vh;
+    background: var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+}
+
+.awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9) {
+  position: relative;
+}
+@media not print {
+  .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9) {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9), .awsui-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9) {
+    border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+    border-start-start-radius: var(--space-xxs-3o1yoq, 4px);
+  }
+}
+.awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):before, .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):after {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 5px;
+  block-size: 5px;
+  background: var(--color-background-layout-ai-drawer-u8ll44, #161d26);
+}
+@media not print {
+  .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):before, .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):after {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):before, .awsui-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):before, .awsui-polaris-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):after, .awsui-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9):after {
+    inset-block-start: -1px;
+  }
+}
+.awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9)::after {
+  background-color: var(--color-background-layout-toolbar-1jwzza, #ffffff);
+  border-start-start-radius: var(--space-xxs-3o1yoq, 4px);
+}
+@media not print {
+  .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9)::after {
+    /* stylelint-disable selector-combinator-disallowed-list, selector-class-pattern */
+  }
+  .awsui-polaris-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9)::after, .awsui-dark-mode .awsui_pseudo-toolbar-content_7nfqu_106pl_231:not(#\9)::after {
+    background-color: transparent;
+    border-inline-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+    border-block-start: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-layout-h5yp20, #c6c6cd);
+  }
+}
+
+.awsui_notifications-container_7nfqu_106pl_275:not(#\9) {
+  grid-area: notifications;
+}
+
+.awsui_notifications-background_7nfqu_106pl_279:not(#\9) {
+  background: var(--color-background-layout-main-y4565g, #ffffff);
+  grid-area: notifications;
+  grid-column: 1/-1;
+}
+@media (min-width: 689px) {
+  .awsui_notifications-background_7nfqu_106pl_279:not(#\9) {
+    grid-column: 3/6;
+  }
+}
+
+.awsui_main-landmark_7nfqu_106pl_290:not(#\9) {
+  display: contents;
+}
+
+.awsui_main_7nfqu_106pl_290:not(#\9) {
+  grid-area: main;
+  margin-block-start: var(--space-scaled-s-2crg2b, 12px);
+  margin-block-end: var(--space-layout-content-bottom-adv8e9, 40px);
+}
+.awsui_main-disable-paddings_7nfqu_106pl_299:not(#\9) {
+  margin-block: 0;
+  grid-column: 1/-1;
+}
+@media (min-width: 689px) {
+  .awsui_main-disable-paddings_7nfqu_106pl_299:not(#\9) {
+    grid-column: 3/6;
+  }
+}
+
+.awsui_content-header_7nfqu_106pl_309:not(#\9) {
+  margin-block-end: var(--space-content-header-padding-bottom-yv2yex, 16px);
+}
+
+.awsui_content_7nfqu_106pl_309:not(#\9) {
+  display: contents;
+}
+
+/* stylelint-disable-next-line selector-combinator-disallowed-list, selector-max-universal */
+@media (max-width: 688px) {
+  .awsui_unfocusable-mobile_7nfqu_106pl_319 *:not(#\9) {
+    visibility: hidden;
+  }
+}
+
+.awsui_hidden_7nfqu_106pl_324:not(#\9) {
+  display: none;
+}
+
+.awsui_breadcrumbs-own_7nfqu_106pl_328:not(#\9):not(:empty) + .awsui_breadcrumbs-discovered_7nfqu_106pl_328 {
+  display: none;
+}

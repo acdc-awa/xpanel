@@ -1,0 +1,72 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+@property --awsui-style-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-background-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-border-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-width {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-radius {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-block {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-focus-ring-gutter-inline {
+  syntax: "*";
+  inherits: false;
+}
+/* awsui:style-api-slot name=control tokens=color, background-color, border-color, focus-ring-color, focus-ring-width, focus-ring-radius, focus-ring-gutter-block, focus-ring-gutter-inline properties= */
+.awsui_radio-button_zdbjz_cw5ye_42:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}

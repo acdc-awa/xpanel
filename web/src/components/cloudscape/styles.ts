@@ -1,0 +1,48 @@
+// Official Cloudscape Design System assets, vendored from the pinned npm packages.
+// Source: @cloudscape-design/components@3.0.1401 and @cloudscape-design/global-styles@1.0.71
+// License: Apache-2.0 (see the LICENSE/NOTICE files in ./vendor).
+import './vendor/open-sans.css'
+import './vendor/base-theme.css'
+import './vendor/dark-overrides.css'
+import './dashboard-tables.css'
+
+import './vendor/components/icon/styles.scoped.css'
+import './vendor/components/spinner/styles.scoped.css'
+import './vendor/components/button/styles.scoped.css'
+import './vendor/components/badge/styles.scoped.css'
+import './vendor/components/status-indicator/styles.scoped.css'
+import './vendor/components/box/styles.scoped.css'
+import './vendor/components/space-between/styles.scoped.css'
+import './vendor/components/container/styles.scoped.css'
+import './vendor/components/header/styles.scoped.css'
+import './vendor/components/grid/styles.scoped.css'
+import './vendor/components/breadcrumb-group/styles.scoped.css'
+import './vendor/components/breadcrumb-group/item/styles.scoped.css'
+import './vendor/components/segmented-control/styles.scoped.css'
+import './vendor/components/tabs/styles.scoped.css'
+import './vendor/components/alert/styles.scoped.css'
+import './vendor/components/flashbar/styles.scoped.css'
+import './vendor/components/progress-bar/styles.scoped.css'
+import './vendor/components/expandable-section/styles.scoped.css'
+import './vendor/components/key-value-pairs/styles.scoped.css'
+import './vendor/components/copy-to-clipboard/styles.scoped.css'
+import './vendor/components/form-field/styles.scoped.css'
+import './vendor/components/input/styles.scoped.css'
+import './vendor/components/modal/styles.scoped.css'
+import './vendor/components/toggle/styles.scoped.css'
+import './vendor/components/text-filter/styles.scoped.css'
+
+// Internal building blocks used by the components above.
+import './vendor/components/internal/components/tooltip/styles.scoped.css'
+import './vendor/components/internal/components/checkbox-icon/styles.scoped.css'
+import './vendor/components/internal/components/abstract-switch/styles.scoped.css'
+
+// Board styles are applied to the GridStack-backed dashboard layout.
+import './vendor/board/board/styles.scoped.css'
+import './vendor/board/board-item/styles.scoped.css'
+import './vendor/board/internal/grid/styles.scoped.css'
+import './vendor/board/internal/item-container/styles.scoped.css'
+import './vendor/board/internal/drag-handle/styles.scoped.css'
+import './vendor/board/internal/resize-handle/styles.scoped.css'
+import './vendor/board/internal/screenreader-only/styles.scoped.css'
+import './vendor/board/internal/global-drag-state-styles/styles.scoped.css'

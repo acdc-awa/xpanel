@@ -1,0 +1,38 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_root_cqcqk_237up_9:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_wrapper_cqcqk_237up_13:not(#\9) {
+  position: relative;
+}
+
+.awsui_elementWrapper_cqcqk_237up_17:not(#\9) {
+  flex: 1;
+}
+
+.awsui_markerWrapper_cqcqk_237up_21:not(#\9) {
+  position: absolute;
+  inset-block-start: 0;
+}
+
+.awsui_placement-right_cqcqk_237up_26:not(#\9) {
+  inset-inline-start: 100%;
+  margin-inline-start: var(--space-xxs-3o1yoq, 4px);
+}
+
+.awsui_placement-left_cqcqk_237up_31:not(#\9) {
+  inset-inline-end: 100%;
+  margin-inline-end: var(--space-xxs-3o1yoq, 4px);
+}
+
+.awsui_inlineWrapper_cqcqk_237up_36:not(#\9) {
+  margin-inline: var(--space-xxs-3o1yoq, 4px);
+}

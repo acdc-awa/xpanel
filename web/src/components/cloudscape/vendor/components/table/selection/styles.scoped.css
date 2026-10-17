@@ -1,0 +1,34 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_root_1s55x_n5kgx_9:not(#\9) {
+  /* used in test-utils and in the use-selection hook */
+}
+
+.awsui_label_1s55x_n5kgx_13:not(#\9) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  padding-block-end: var(--space-xxs-3o1yoq, 4px);
+  block-size: 100%;
+  inset-block-start: 0;
+  inline-size: 100%;
+  inset-inline-start: 0;
+  box-sizing: border-box;
+  border-inline-end: 1px solid transparent;
+}
+
+.awsui_label-top_1s55x_n5kgx_27:not(#\9) {
+  align-items: baseline;
+  padding-block-start: var(--space-xs-m9b7jf, 8px);
+}
+
+.awsui_stud_1s55x_n5kgx_32:not(#\9) {
+  visibility: hidden;
+}

@@ -1,0 +1,109 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_button_m5h9f_x0p7y_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  min-inline-size: 0;
+  word-break: break-word;
+  font-weight: var(--font-weight-button-2p3grf, 700);
+  -webkit-font-smoothing: var(--font-smoothing-webkit-dpz0hr, antialiased);
+  -moz-osx-font-smoothing: var(--font-smoothing-moz-osx-kjlydy, grayscale);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+  block-size: 100%;
+  padding-inline: var(--space-xs-m9b7jf, 8px);
+  text-decoration: none;
+  cursor: pointer;
+  border-block: transparent;
+  border-inline: transparent;
+  background: transparent;
+  color: var(--color-text-interactive-default-pauydh, #424650);
+}
+.awsui_button_m5h9f_x0p7y_9:not(#\9):hover {
+  color: var(--color-text-interactive-hover-zj1911, #0f141a);
+  text-decoration: none;
+}
+.awsui_button_m5h9f_x0p7y_9:not(#\9):active, .awsui_button_m5h9f_x0p7y_9.awsui_expanded_m5h9f_x0p7y_61:not(#\9) {
+  background: transparent;
+  color: var(--color-text-interactive-active-nbyczy, #0f141a);
+}
+.awsui_button_m5h9f_x0p7y_9.awsui_expanded_m5h9f_x0p7y_61:not(#\9) {
+  color: var(--color-text-accent-1mglsg, #006ce0);
+}
+.awsui_button_m5h9f_x0p7y_9:not(#\9):focus {
+  outline: none;
+  text-decoration: none;
+}
+.awsui_button_m5h9f_x0p7y_9.awsui_offset-right-none_m5h9f_x0p7y_72:not(#\9) {
+  margin-inline-end: 0;
+}
+.awsui_button_m5h9f_x0p7y_9.awsui_offset-right-l_m5h9f_x0p7y_75:not(#\9) {
+  margin-inline-end: var(--space-s-kll7oj, 12px);
+}
+.awsui_button_m5h9f_x0p7y_9.awsui_offset-right-xxl_m5h9f_x0p7y_78:not(#\9) {
+  margin-inline-end: var(--space-xl-6jh0ay, 24px);
+}
+body[data-awsui-focus-visible=true] .awsui_button_m5h9f_x0p7y_9:not(#\9):focus {
+  position: relative;
+}
+body[data-awsui-focus-visible=true] .awsui_button_m5h9f_x0p7y_9:not(#\9):focus {
+  outline: 2px dotted transparent;
+  outline-offset: calc(-1px - 1px);
+}
+body[data-awsui-focus-visible=true] .awsui_button_m5h9f_x0p7y_9:not(#\9):focus::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * -1px);
+  inset-block-start: calc(-1 * -1px);
+  inline-size: calc(100% + -1px + -1px);
+  block-size: calc(100% + -1px + -1px);
+  border-start-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-start-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-start-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  border-end-end-radius: var(--border-radius-control-default-focus-ring-akwhsf, 4px);
+  box-shadow: 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
+}
+
+.awsui_text_m5h9f_x0p7y_103:not(#\9) {
+  margin-inline-end: var(--space-xs-m9b7jf, 8px);
+}
+
+.awsui_icon_m5h9f_x0p7y_107 + .awsui_text_m5h9f_x0p7y_103:not(#\9) {
+  margin-inline-start: var(--space-xs-m9b7jf, 8px);
+}

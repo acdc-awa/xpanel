@@ -1,0 +1,128 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+@property --awsui-style-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-background-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-border-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-border-width {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-border-radius {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-padding-block {
+  syntax: "*";
+  inherits: false;
+}
+@property --awsui-style-padding-inline {
+  syntax: "*";
+  inherits: false;
+}
+/* awsui:style-api-slot name=root tokens=color, background-color, border-color, border-width, border-radius, padding-block, padding-inline properties= */
+.awsui_badge_1yjyg_119vh_38:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+  letter-spacing: var(--letter-spacing-body-s-dzcybc, 0.005em);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  display: inline-block;
+  border-start-start-radius: var(--awsui-style-border-radius, var(--border-radius-badge-86n91d, 4px));
+  border-start-end-radius: var(--awsui-style-border-radius, var(--border-radius-badge-86n91d, 4px));
+  border-end-start-radius: var(--awsui-style-border-radius, var(--border-radius-badge-86n91d, 4px));
+  border-end-end-radius: var(--awsui-style-border-radius, var(--border-radius-badge-86n91d, 4px));
+  border-block-style: solid;
+  border-inline-style: solid;
+  border-width: var(--awsui-style-border-width, var(--border-width-badge-p88itr, 0px));
+  padding-block: var(--awsui-style-padding-block, 0);
+  padding-inline: var(--awsui-style-padding-inline, var(--space-xs-m9b7jf, 8px));
+  color: var(--awsui-style-color, var(--color-text-notification-default-j0vb8v, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-grey_1yjyg_119vh_84:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-badge-grey-6h1dmu, #424650));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-grey-7uvo1l, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-grey-9tpmmu, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-green_1yjyg_119vh_89:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-badge-green-vna6pb, #00802f));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-green-lv2jw1, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-green-5g7a8n, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-blue_1yjyg_119vh_94:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-badge-blue-knlb4f, #006ce0));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-blue-ze81zs, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-blue-r39mon, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-red_1yjyg_119vh_99:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-badge-red-4ap748, #db0000));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-red-5xqfzk, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-red-wvf8rj, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-severity-critical_1yjyg_119vh_104:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-notification-severity-critical-bklmxp, #870303));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-severity-critical-iy9xj7, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-severity-critical-y13z63, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-severity-high_1yjyg_119vh_109:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-notification-severity-high-44r6oe, #ce3311));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-severity-high-byl1dx, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-severity-high-kckiuo, #f9f9fa));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-severity-medium_1yjyg_119vh_114:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-notification-severity-medium-87oafh, #f89256));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-severity-medium-7z1far, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-severity-medium-ns9l4d, #0f141a));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-severity-low_1yjyg_119vh_119:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-notification-severity-low-g8anka, #f2cd54));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-severity-low-jxgtiz, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-severity-low-pnvr07, #0f141a));
+}
+.awsui_badge_1yjyg_119vh_38.awsui_badge-color-severity-neutral_1yjyg_119vh_124:not(#\9) {
+  background-color: var(--awsui-style-background-color, var(--color-background-notification-severity-neutral-2smv4l, #656871));
+  border-color: var(--awsui-style-border-color, var(--color-border-badge-severity-neutral-p51wlk, transparent));
+  color: var(--awsui-style-color, var(--color-text-badge-severity-neutral-vz3r3d, #f9f9fa));
+}

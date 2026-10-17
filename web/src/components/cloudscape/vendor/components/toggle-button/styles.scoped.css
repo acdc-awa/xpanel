@@ -1,0 +1,24 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_toggle-button_1a743_1lvax_5.awsui_variant-normal_1a743_1lvax_5:not(#\9) {
+  background: var(--color-background-toggle-button-normal-default-9tccuh, #ffffff);
+  border-color: var(--color-border-toggle-button-normal-default-7wco5p, #006ce0);
+}
+.awsui_toggle-button_1a743_1lvax_5.awsui_variant-normal_1a743_1lvax_5:not(#\9):not(:disabled):not([aria-disabled=true]):hover {
+  background: var(--color-background-toggle-button-normal-hover-tg91r6, #f0fbff);
+  border-color: var(--color-border-toggle-button-normal-hover-snh2tp, #002b66);
+}
+
+.awsui_variant-normal_1a743_1lvax_5.awsui_pressed_1a743_1lvax_14:not(#\9) {
+  background: var(--color-background-toggle-button-normal-pressed-aidxyc, #d1f1ff);
+  border-color: var(--color-border-toggle-button-normal-pressed-j5gmhc, #006ce0);
+  color: var(--color-text-toggle-button-normal-pressed-9l3s2t, #002b66);
+}
+
+.awsui_variant-icon_1a743_1lvax_20.awsui_pressed_1a743_1lvax_14:not(#\9) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-toggle-button-icon-pressed-9zicna, #0f141a);
+}

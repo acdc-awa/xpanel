@@ -1,0 +1,18 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_rjqu5_1kbym_5:not(#\9),
+.awsui_header-actions_rjqu5_1kbym_6:not(#\9),
+.awsui_header-before_rjqu5_1kbym_7:not(#\9),
+.awsui_header-description_rjqu5_1kbym_8:not(#\9),
+.awsui_header-info_rjqu5_1kbym_9:not(#\9),
+.awsui_header-text_rjqu5_1kbym_10:not(#\9),
+.awsui_open-button_rjqu5_1kbym_11:not(#\9),
+.awsui_close-button_rjqu5_1kbym_12:not(#\9),
+.awsui_preferences-button_rjqu5_1kbym_13:not(#\9),
+.awsui_slider_rjqu5_1kbym_14:not(#\9),
+.awsui_open-position-bottom_rjqu5_1kbym_15:not(#\9),
+.awsui_open-position-side_rjqu5_1kbym_16:not(#\9) {
+  /* used in test-utils */
+}

@@ -1,0 +1,83 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_root_1ifko_1tdsl_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  min-inline-size: 0;
+  word-break: break-word;
+  cursor: inherit;
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  align-items: baseline;
+  column-gap: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_root_1ifko_1tdsl_9.awsui_disable-paddings_1ifko_1tdsl_48:not(#\9) {
+  column-gap: 0;
+}
+
+.awsui_main_1ifko_1tdsl_52:not(#\9) {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.awsui_actions_1ifko_1tdsl_59:not(#\9) {
+  margin-inline-start: auto;
+}
+
+.awsui_content-wrap_1ifko_1tdsl_63:not(#\9) {
+  flex-grow: 1;
+  display: flex;
+  align-items: baseline;
+  flex-direction: row;
+  column-gap: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_disable-paddings_1ifko_1tdsl_48 > .awsui_main_1ifko_1tdsl_52 > .awsui_content-wrap_1ifko_1tdsl_63:not(#\9) {
+  column-gap: 0;
+}
+.awsui_content-wrap_1ifko_1tdsl_63.awsui_wrap-actions_1ifko_1tdsl_73:not(#\9) {
+  flex-wrap: wrap;
+}
+.awsui_content-wrap_1ifko_1tdsl_63:not(#\9):not(.awsui_wrap-actions_1ifko_1tdsl_73) > .awsui_actions_1ifko_1tdsl_59 {
+  flex-shrink: 0;
+}
+
+.awsui_content_1ifko_1tdsl_63:not(#\9) {
+  flex-grow: 1;
+  min-inline-size: 0;
+}

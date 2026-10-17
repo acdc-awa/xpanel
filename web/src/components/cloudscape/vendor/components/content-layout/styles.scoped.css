@@ -1,0 +1,77 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_layout_5gtk3_fdloi_9:not(#\9) {
+  --awsui-content-layout-default-horizontal-padding-ka4djm: var(--space-layout-content-horizontal-axaoos, 24px);
+  --awsui-content-layout-max-content-width-ka4djm: 0px;
+  --awsui-content-layout-main-gap-ka4djm: 0px;
+  display: grid;
+  grid-template-columns: 0 0 1fr minmax(0, var(--awsui-content-layout-max-content-width-ka4djm)) 1fr 0 0;
+  grid-template-rows: var(--awsui-content-layout-main-gap-ka4djm) min-content min-content auto var(--space-dark-header-overlap-distance-16rv3i, 36px) 1fr;
+  min-block-size: 100%;
+}
+@media (max-width: 688px) {
+  .awsui_layout_5gtk3_fdloi_9:not(#\9) {
+    --awsui-content-layout-default-horizontal-padding-ka4djm: var(--space-l-dpyxli, 20px);
+  }
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_background_5gtk3_fdloi_23:not(#\9) {
+  grid-column: 1/8;
+  grid-row: 1/6;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_background_5gtk3_fdloi_23.awsui_is-overlap-disabled_5gtk3_fdloi_28:not(#\9) {
+  grid-row: 1/5;
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_background_5gtk3_fdloi_23 > .awsui_header-background_5gtk3_fdloi_31:not(#\9) {
+  inline-size: 100%;
+  block-size: 100%;
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_notifications_5gtk3_fdloi_35:not(#\9) {
+  grid-column: 4;
+  grid-row: 2;
+  padding-block-end: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_breadcrumbs_5gtk3_fdloi_40:not(#\9) {
+  grid-column: 4;
+  grid-row: 3;
+  padding-block-end: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_layout_5gtk3_fdloi_9.awsui_default-padding_5gtk3_fdloi_45:not(#\9) {
+  --awsui-content-layout-main-gap-ka4djm: var(--space-scaled-m-lfeh3i, 16px);
+  grid-template-columns: var(--awsui-toggles-left-width-ka4djm, 0) var(--awsui-content-layout-default-horizontal-padding-ka4djm, 0) 1fr minmax(0, var(--awsui-content-layout-max-content-width-ka4djm)) 1fr var(--awsui-content-layout-default-horizontal-padding-ka4djm, 0) var(--awsui-toggles-right-width-ka4djm, 0);
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_header-wrapper_5gtk3_fdloi_49:not(#\9) {
+  grid-column: 4;
+  grid-row: 4;
+  padding-block-end: var(--space-content-header-padding-bottom-yv2yex, 16px);
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_header-wrapper_5gtk3_fdloi_49.awsui_with-divider_5gtk3_fdloi_54:not(#\9) {
+  border-block-end: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+.awsui_layout_5gtk3_fdloi_9 > .awsui_content_5gtk3_fdloi_57:not(#\9) {
+  grid-column: 4;
+  grid-row: 5/8;
+}
+.awsui_layout_5gtk3_fdloi_9:not(#\9):not(.awsui_has-header_5gtk3_fdloi_61) {
+  grid-template-rows: var(--awsui-content-layout-main-gap-ka4djm) min-content min-content 0 calc(var(--space-dark-header-overlap-distance-16rv3i, 36px)) 1fr;
+}
+.awsui_layout_5gtk3_fdloi_9.awsui_is-overlap-disabled_5gtk3_fdloi_28:not(#\9) {
+  grid-template-rows: var(--awsui-content-layout-main-gap-ka4djm) min-content min-content auto 0 1fr;
+}
+
+.awsui_layout_5gtk3_fdloi_9.awsui_is-visual-refresh_5gtk3_fdloi_68 > .awsui_background_5gtk3_fdloi_23.awsui_has-default-background_5gtk3_fdloi_68:not(#\9) {
+  background-color: var(--color-background-layout-main-y4565g, #ffffff);
+}
+
+.awsui_layout_5gtk3_fdloi_9:not(#\9):not(.awsui_is-visual-refresh_5gtk3_fdloi_68).awsui_has-notifications_5gtk3_fdloi_72 {
+  --awsui-content-layout-main-gap-ka4djm: 0px;
+}
+.awsui_layout_5gtk3_fdloi_9:not(#\9):not(.awsui_is-visual-refresh_5gtk3_fdloi_68) > .awsui_notifications_5gtk3_fdloi_35 {
+  grid-column: 1/8;
+}

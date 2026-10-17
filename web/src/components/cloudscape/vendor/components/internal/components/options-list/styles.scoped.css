@@ -1,0 +1,66 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_options-list_19gcf_1h3yo_9:not(#\9) {
+  padding-block: 0;
+  padding-inline: 0;
+  margin-block: 0;
+  margin-inline: 0;
+  outline: none;
+  border-block: none;
+  border-inline: none;
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  white-space: inherit;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  border-start-start-radius: var(--border-radius-dropdown-azs8zp, 8px);
+  border-start-end-radius: var(--border-radius-dropdown-azs8zp, 8px);
+  border-end-start-radius: var(--border-radius-dropdown-azs8zp, 8px);
+  border-end-end-radius: var(--border-radius-dropdown-azs8zp, 8px);
+  -webkit-user-select: none;
+          user-select: none;
+}
+.awsui_options-list-embedded_19gcf_1h3yo_56:not(#\9) {
+  border-start-start-radius: 0px;
+  border-start-end-radius: 0px;
+  border-end-start-radius: 0px;
+  border-end-end-radius: 0px;
+}
+
+.awsui_decrease-block-margin_19gcf_1h3yo_63:not(#\9) {
+  margin-block: -1px;
+}

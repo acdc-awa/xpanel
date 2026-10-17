@@ -1,0 +1,67 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_hide-navigation_2p2ab_yj8p7_13:not(#\9) {
+  position: absolute;
+  inset-inline-end: var(--space-m-n8iq8o, 16px);
+  inset-block-start: 14px;
+}
+
+.awsui_navigation-container_2p2ab_yj8p7_19:not(#\9) {
+  position: sticky;
+  z-index: 830;
+  background-color: var(--color-background-layout-panel-content-lmvj28, #ffffff);
+  inset-block-end: 0;
+  overflow-x: hidden;
+  word-wrap: break-word;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+}
+.awsui_navigation-container_2p2ab_yj8p7_19 > .awsui_navigation_2p2ab_yj8p7_19:not(#\9) {
+  flex-grow: 1;
+  block-size: 100%;
+  overflow-y: auto;
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features */
+  overscroll-behavior-y: contain;
+  inline-size: var(--awsui-navigation-width-ka4djm);
+  position: relative;
+}
+.awsui_navigation-container_2p2ab_yj8p7_19:not(#\9):not(.awsui_is-navigation-open_2p2ab_yj8p7_39) {
+  inline-size: 0px;
+  display: none;
+}
+.awsui_navigation-container_2p2ab_yj8p7_19.awsui_is-navigation-collapsed_2p2ab_yj8p7_43:not(#\9) {
+  display: flex;
+  align-items: center;
+  inline-size: var(--awsui-navigation-collapsed-width-ka4djm, var(--size-side-navigation-collapsed-width-irf8ik, 52px));
+}
+.awsui_navigation-container_2p2ab_yj8p7_19.awsui_is-navigation-collapsed_2p2ab_yj8p7_43 > .awsui_navigation_2p2ab_yj8p7_19:not(#\9) {
+  inline-size: var(--awsui-navigation-collapsed-width-ka4djm, var(--size-side-navigation-collapsed-width-irf8ik, 52px));
+  overflow-x: hidden;
+}
+.awsui_navigation-container_2p2ab_yj8p7_19.awsui_is-navigation-collapsed_2p2ab_yj8p7_43 > .awsui_navigation_2p2ab_yj8p7_19 > .awsui_hide-navigation_2p2ab_yj8p7_13:not(#\9) {
+  display: none;
+}
+.awsui_navigation-container_2p2ab_yj8p7_19.awsui_is-navigation-collapsed_2p2ab_yj8p7_43 > .awsui_navigation_2p2ab_yj8p7_19 > .awsui_hide-navigation_2p2ab_yj8p7_13.awsui_expand-navigation-toggle_2p2ab_yj8p7_55:not(#\9) {
+  display: flex;
+  position: static;
+  align-items: center;
+  justify-content: center;
+  padding-block: var(--space-s-kll7oj, 12px);
+}
+@media (max-width: 688px) {
+  .awsui_navigation-container_2p2ab_yj8p7_19:not(#\9) {
+    --awsui-navigation-width-ka4djm: 100vw;
+    z-index: 1001;
+  }
+}

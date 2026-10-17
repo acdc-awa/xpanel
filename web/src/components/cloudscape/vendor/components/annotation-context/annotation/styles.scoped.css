@@ -1,0 +1,119 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_annotation_1hpp3_be2vv_9:not(#\9),
+.awsui_next-button_1hpp3_be2vv_10:not(#\9),
+.awsui_previous-button_1hpp3_be2vv_11:not(#\9),
+.awsui_finish-button_1hpp3_be2vv_12:not(#\9),
+.awsui_header_1hpp3_be2vv_13:not(#\9),
+.awsui_step-counter-content_1hpp3_be2vv_14:not(#\9),
+.awsui_content_1hpp3_be2vv_15:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_description_1hpp3_be2vv_19:not(#\9) {
+  overflow: hidden;
+  margin-block-start: var(--space-xxs-3o1yoq, 4px);
+}
+
+.awsui_actionBar_1hpp3_be2vv_24:not(#\9) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+}
+
+.awsui_stepCounter_1hpp3_be2vv_31:not(#\9) {
+  margin-inline-end: 20px;
+}
+
+.awsui_divider_1hpp3_be2vv_35:not(#\9) {
+  border-block-end: var(--border-divider-section-width-dlkb8v, 1px) solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+
+.awsui_hotspot_1hpp3_be2vv_39:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  background: transparent;
+  border-block: none;
+  border-inline: none;
+  padding-block: 0;
+  padding-inline: 0;
+  cursor: pointer;
+  scroll-margin: var(--awsui-content-scroll-margin-ka4djm, 40px 0 0 0);
+  position: relative;
+  inline-size: 16px;
+  block-size: 16px;
+}
+.awsui_hotspot_1hpp3_be2vv_39:not(#\9):before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--space-xxs-3o1yoq, 4px));
+  z-index: 1;
+}
+.awsui_hotspot_1hpp3_be2vv_39:not(#\9):focus {
+  outline: none;
+}
+body[data-awsui-focus-visible=true] .awsui_hotspot_1hpp3_be2vv_39:not(#\9):focus {
+  position: relative;
+}
+body[data-awsui-focus-visible=true] .awsui_hotspot_1hpp3_be2vv_39:not(#\9):focus {
+  outline: 2px dotted transparent;
+  outline-offset: calc(2px - 1px);
+}
+body[data-awsui-focus-visible=true] .awsui_hotspot_1hpp3_be2vv_39:not(#\9):focus::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  inset-inline-start: calc(-1 * 2px);
+  inset-block-start: calc(-1 * 2px);
+  inline-size: calc(100% + 2px + 2px);
+  block-size: calc(100% + 2px + 2px);
+  border-start-start-radius: var(--border-radius-control-circular-focus-ring-go6crh, 4px);
+  border-start-end-radius: var(--border-radius-control-circular-focus-ring-go6crh, 4px);
+  border-end-start-radius: var(--border-radius-control-circular-focus-ring-go6crh, 4px);
+  border-end-end-radius: var(--border-radius-control-circular-focus-ring-go6crh, 4px);
+  box-shadow: 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
+}
+.awsui_hotspot_1hpp3_be2vv_39 > .awsui_icon_1hpp3_be2vv_110:not(#\9) {
+  position: relative;
+  stroke: var(--color-text-tutorial-hotspot-default-wh1ngd, #006ce0);
+}
+.awsui_hotspot_1hpp3_be2vv_39:not(#\9):hover > .awsui_icon_1hpp3_be2vv_110 {
+  stroke: var(--color-text-tutorial-hotspot-hover-azi6ck, #002b66);
+}
+.awsui_hotspot_1hpp3_be2vv_39:not(#\9):active > .awsui_icon_1hpp3_be2vv_110 {
+  stroke: var(--color-text-tutorial-hotspot-default-wh1ngd, #006ce0);
+}

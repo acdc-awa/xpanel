@@ -25,6 +25,7 @@
     "codemirror": "^6.0.2",
     "echarts": "^6.1.0",
     "element-plus": "^2.9.1",
+    "gridstack": "^14.0.0",
     "marked": "^18.0.10",
     "pinia": "^2.3.0",
     "qrcode": "^1.5.4",

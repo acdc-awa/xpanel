@@ -1,0 +1,39 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_custom-range_16zmw_1aor8_9:not(#\9) {
+  padding-inline-start: calc(14px + var(--space-xs-m9b7jf, 8px));
+  display: flex;
+  inline-size: 80%;
+}
+
+.awsui_custom-range--no-padding_16zmw_1aor8_15:not(#\9) {
+  padding-inline-start: 0;
+}
+
+.awsui_custom-range-form-controls_16zmw_1aor8_19:not(#\9) {
+  display: flex;
+  inline-size: 100%;
+}
+.awsui_custom-range-form-controls_16zmw_1aor8_19 > .awsui_custom-range-duration_16zmw_1aor8_23:not(#\9),
+.awsui_custom-range-form-controls_16zmw_1aor8_19 > .awsui_custom-range-unit_16zmw_1aor8_24:not(#\9) {
+  inline-size: 50%;
+}
+.awsui_custom-range-form-controls_16zmw_1aor8_19 > .awsui_custom-range-duration_16zmw_1aor8_23:not(#\9) {
+  margin-inline-end: var(--space-xs-m9b7jf, 8px);
+}
+.awsui_custom-range-form-controls_16zmw_1aor8_19.awsui_vertical_16zmw_1aor8_30:not(#\9) {
+  flex-direction: column;
+}
+.awsui_custom-range-form-controls_16zmw_1aor8_19.awsui_vertical_16zmw_1aor8_30 > .awsui_custom-range-duration_16zmw_1aor8_23:not(#\9),
+.awsui_custom-range-form-controls_16zmw_1aor8_19.awsui_vertical_16zmw_1aor8_30 > .awsui_custom-range-unit_16zmw_1aor8_24:not(#\9) {
+  inline-size: 100%;
+}
+.awsui_custom-range-form-controls_16zmw_1aor8_19.awsui_vertical_16zmw_1aor8_30 > .awsui_custom-range-unit_16zmw_1aor8_24:not(#\9) {
+  margin-block-start: var(--space-s-kll7oj, 12px);
+}

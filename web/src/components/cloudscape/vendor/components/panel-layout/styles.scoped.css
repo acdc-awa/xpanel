@@ -1,0 +1,89 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+/* stylelint-disable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* stylelint-enable @cloudscape-design/no-motion-outside-of-mixin, selector-combinator-disallowed-list, selector-pseudo-class-no-unknown, selector-class-pattern */
+/* Style used for links in slots/components that are text heavy, to help links stand out among
+surrounding text. (WCAG F73) https://www.w3.org/WAI/WCAG21/Techniques/failures/F73#description */
+.awsui_root_1ksu1_zgols_9:not(#\9) {
+  border-collapse: separate;
+  border-spacing: 0;
+  box-sizing: border-box;
+  caption-side: top;
+  cursor: auto;
+  direction: inherit;
+  empty-cells: show;
+  font-family: serif;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: normal;
+  hyphens: none;
+  letter-spacing: normal;
+  list-style: disc outside none;
+  tab-size: 8;
+  text-align: start;
+  text-indent: 0;
+  text-shadow: none;
+  text-transform: none;
+  visibility: visible;
+  white-space: normal;
+  word-spacing: normal;
+  font-size: var(--font-size-body-m-tq5a14, 14px);
+  line-height: var(--line-height-body-m-5xw6xo, 20px);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  font-weight: var(--font-weight-normal-fr92v6, 400);
+  font-family: var(--font-family-base-c9u5cr, "Open Sans", "Helvetica Neue", Roboto, Arial, sans-serif);
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  block-size: 100%;
+  overflow: hidden;
+  display: flex;
+}
+
+.awsui_panel_1ksu1_zgols_44:not(#\9) {
+  display: flex;
+  flex-shrink: 0;
+}
+.awsui_panel_1ksu1_zgols_44 > .awsui_handle_1ksu1_zgols_48:not(#\9) {
+  display: flex;
+  align-items: center;
+}
+.awsui_panel_1ksu1_zgols_44 > .awsui_panel-content_1ksu1_zgols_52:not(#\9) {
+  overflow-y: auto;
+  overflow-x: visible;
+  flex-grow: 1;
+}
+body[data-awsui-focus-visible=true] .awsui_panel_1ksu1_zgols_44 > .awsui_panel-content_1ksu1_zgols_52:not(#\9):focus {
+  border-start-start-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-start-end-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-end-start-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-end-end-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
+  outline-offset: calc(-1 * 2px);
+}
+.awsui_display-main-only_1ksu1_zgols_65 > .awsui_panel_1ksu1_zgols_44:not(#\9) {
+  display: none;
+}
+.awsui_display-panel-only_1ksu1_zgols_68 > .awsui_panel_1ksu1_zgols_44:not(#\9) {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: visible;
+}
+
+.awsui_content_1ksu1_zgols_74:not(#\9) {
+  overflow-y: auto;
+  flex-grow: 1;
+  flex-shrink: 1;
+}
+.awsui_display-panel-only_1ksu1_zgols_68 > .awsui_content_1ksu1_zgols_74:not(#\9) {
+  display: none;
+}
+body[data-awsui-focus-visible=true] .awsui_content_1ksu1_zgols_74:not(#\9):focus {
+  border-start-start-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-start-end-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-end-start-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  border-end-end-radius: calc(var(--border-radius-control-default-focus-ring-akwhsf, 4px) + 2px);
+  outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
+  outline-offset: calc(-1 * 2px);
+}

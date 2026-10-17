@@ -1,0 +1,31 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_nr3gs_kgbet_5:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_textarea_nr3gs_kgbet_9:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_content-editable_nr3gs_kgbet_13:not(#\9) {
+  /* used in test-utils - contentEditable element for token mode */
+}
+
+.awsui_action-button_nr3gs_kgbet_17:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_primary-action_nr3gs_kgbet_21:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_secondary-actions_nr3gs_kgbet_25:not(#\9) {
+  /* used in test-utils */
+}
+
+.awsui_secondary-content_nr3gs_kgbet_29:not(#\9) {
+  /* used in test-utils */
+}

@@ -1,0 +1,44 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+@keyframes awsui-fade-in-jiml2r {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes awsui-fade-out-au27m5 {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes awsui-status-icon-error-mjjk3s {
+  0% {
+    transform: translateX(-5px);
+    animation-timing-function: linear;
+  }
+  50% {
+    transform: translateX(5px);
+    animation-timing-function: var(--motion-easing-refresh-only-a-b2p95e, cubic-bezier(0, 0, 0, 1));
+  }
+  100% {
+    transform: translateX(0px);
+  }
+}
+@keyframes awsui-scale-popup-2m9987 {
+  0% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+:root {
+  --awsui-version-info-8bbfddc2: true;
+}

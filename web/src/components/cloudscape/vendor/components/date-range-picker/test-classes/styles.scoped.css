@@ -1,0 +1,42 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_root_1afkv_i99li_5:not(#\9),
+.awsui_dropdown_1afkv_i99li_6:not(#\9),
+.awsui_label_1afkv_i99li_7:not(#\9),
+.awsui_relative-range-radio-group_1afkv_i99li_8:not(#\9),
+.awsui_custom-range-duration-input_1afkv_i99li_9:not(#\9),
+.awsui_custom-range-unit-select_1afkv_i99li_10:not(#\9),
+.awsui_mode-switch_1afkv_i99li_11:not(#\9),
+.awsui_first-grid_1afkv_i99li_12:not(#\9),
+.awsui_second-grid_1afkv_i99li_13:not(#\9),
+.awsui_calendar-header_1afkv_i99li_14:not(#\9),
+.awsui_calendar-next-page-btn_1afkv_i99li_15:not(#\9),
+.awsui_calendar-prev-page-btn_1afkv_i99li_16:not(#\9),
+.awsui_calendar-next-month-btn_1afkv_i99li_17:not(#\9),
+.awsui_calendar-prev-month-btn_1afkv_i99li_18:not(#\9),
+.awsui_calendar-aria-live_1afkv_i99li_19:not(#\9),
+.awsui_calendar-date_1afkv_i99li_20:not(#\9),
+.awsui_calendar-week_1afkv_i99li_21:not(#\9),
+.awsui_calendar-month_1afkv_i99li_22:not(#\9),
+.awsui_calendar-quarter_1afkv_i99li_23:not(#\9),
+.awsui_today_1afkv_i99li_24:not(#\9),
+.awsui_this-month_1afkv_i99li_25:not(#\9),
+.awsui_day-header_1afkv_i99li_26:not(#\9),
+.awsui_start-date_1afkv_i99li_27:not(#\9),
+.awsui_end-date_1afkv_i99li_28:not(#\9),
+.awsui_start-time-input_1afkv_i99li_29:not(#\9),
+.awsui_end-time-input_1afkv_i99li_30:not(#\9),
+.awsui_start-date-input_1afkv_i99li_31:not(#\9),
+.awsui_end-date-input_1afkv_i99li_32:not(#\9),
+.awsui_start-month-input_1afkv_i99li_33:not(#\9),
+.awsui_end-month-input_1afkv_i99li_34:not(#\9),
+.awsui_disabled-reason-tooltip_1afkv_i99li_35:not(#\9),
+.awsui_validation-section_1afkv_i99li_36:not(#\9),
+.awsui_validation-error_1afkv_i99li_37:not(#\9),
+.awsui_clear-button_1afkv_i99li_38:not(#\9),
+.awsui_apply-button_1afkv_i99li_39:not(#\9),
+.awsui_cancel-button_1afkv_i99li_40:not(#\9) {
+  /* used in test-utils */
+}

@@ -39,10 +39,15 @@ export const useThemeStore = defineStore('theme', () => {
   function applyTheme() {
     if (typeof document === 'undefined') return
     const html = document.documentElement
+    // Cloudscape 官方暗色 token 定义在 .awsui-dark-mode 上。挂在 body 而不是页面容器上，
+    // 才能覆盖 body 自身的亮色 token，并让 Teleport 到 body 的 Modal/下拉层继承暗色。
+    const body = document.body
     if (isDark.value) {
       html.classList.add('dark')
+      body?.classList.add('awsui-dark-mode')
     } else {
       html.classList.remove('dark')
+      body?.classList.remove('awsui-dark-mode')
     }
   }
 

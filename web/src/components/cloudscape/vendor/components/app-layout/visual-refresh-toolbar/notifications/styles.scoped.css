@@ -1,0 +1,15 @@
+/*
+ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ SPDX-License-Identifier: Apache-2.0
+*/
+.awsui_sticky-notifications_154bi_1mv35_5:not(#\9) {
+  position: sticky;
+  z-index: 850;
+}
+.awsui_sticky-notifications-with-background_154bi_1mv35_9:not(#\9) {
+  background-color: var(--color-background-layout-main-y4565g, #ffffff);
+}
+
+.awsui_has-notifications-content_154bi_1mv35_13:not(#\9) {
+  padding-block-start: var(--space-scaled-xs-pajbd1, 8px);
+}
