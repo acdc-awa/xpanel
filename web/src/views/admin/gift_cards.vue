@@ -1,7 +1,22 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Refresh, Search, Delete, CopyDocument, Ticket, Loading } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsContainer,
+  CsDatePicker,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsOption,
+  CsPagination,
+  CsSelect,
+  CsSpinner,
+} from '@/components/cloudscape'
 import {
   getAdminGiftCards,
   batchCreateGiftCards,
@@ -141,10 +156,10 @@ async function remove(row: any) {
   }
 }
 
-const statusMap: Record<string, { type: 'success' | 'info' | 'danger'; text: string }> = {
-  unused: { type: 'success', text: '未使用' },
-  used: { type: 'info', text: '已使用' },
-  disabled: { type: 'danger', text: '已作废' },
+const statusMap: Record<string, { color: 'green' | 'grey' | 'red'; text: string }> = {
+  unused: { color: 'green', text: '未使用' },
+  used: { color: 'grey', text: '已使用' },
+  disabled: { color: 'red', text: '已作废' },
 }
 
 // 过期不落库，现场推导；过期的未使用卡不可兑换，排序上也排在使用可用项之后
@@ -158,36 +173,34 @@ function isExpired(row: GiftCard) {
     <!-- 工具栏 -->
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input
+        <CsInput
           v-model="keyword"
           placeholder="搜索卡密 / 批次名称"
-          :prefix-icon="Search"
+          prefix-icon="search"
           clearable
           style="width: 220px"
           @keyup.enter="load"
         />
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
-          <el-option label="全部状态" value="" />
-          <el-option label="未使用" value="unused" />
-          <el-option label="已使用" value="used" />
-          <el-option label="已作废" value="disabled" />
-        </el-select>
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
+          <CsOption label="全部状态" value="" />
+          <CsOption label="未使用" value="unused" />
+          <CsOption label="已使用" value="used" />
+          <CsOption label="已作废" value="disabled" />
+        </CsSelect>
+        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       </div>
-      <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>&nbsp;批量生成礼品卡
-      </el-button>
+      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">批量生成礼品卡</CsButton>
     </div>
 
     <!-- 数据表格 -->
-    <BaseCard title="卡密列表">
+    <CsContainer header="卡密列表">
       <!-- 桌面端表格视图 (双行紧凑聚合自适应展示) -->
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
+        <CsIcon name="ticket" size="large" />
         <p style="margin-top: 8px">暂无礼品卡记录，点击右上角「批量生成礼品卡」</p>
       </div>
 
@@ -199,10 +212,10 @@ function isExpired(row: GiftCard) {
             <div class="head-title">
               <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
               <span class="card-name">{{ row.name || '通用礼品卡' }}</span>
-              <el-tag v-if="row.status === 'unused' && isExpired(row)" type="warning" size="small">已过期</el-tag>
-              <el-tag v-else :type="statusMap[row.status]?.type || 'info'" size="small">
+              <CsBadge v-if="row.status === 'unused' && isExpired(row)" color="red">已过期</CsBadge>
+              <CsBadge v-else :color="statusMap[row.status]?.color || 'grey'">
                 {{ statusMap[row.status]?.text || row.status }}
-              </el-tag>
+              </CsBadge>
             </div>
             <span class="cell-mono font-14" style="font-weight: 700; color: #059669">
               {{ fmtMoney(row.face_value_cents) }}
@@ -244,24 +257,20 @@ function isExpired(row: GiftCard) {
 
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
-            <el-button size="small" type="primary" plain @click="copyText(row.code, '卡密')">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制卡密
-            </el-button>
-            <el-button
-              size="small"
-              type="danger"
-              plain
+            <CsButton icon-name="copy" @click="copyText(row.code, '卡密')">复制卡密</CsButton>
+            <CsButton
+              icon-name="remove"
               :disabled="row.status === 'used'"
               @click="remove(row)"
             >
-              <el-icon><Delete /></el-icon>&nbsp;作废/删除
-            </el-button>
+              作废/删除
+            </CsButton>
           </div>
         </div>
       </div>
 
       <div class="x-pager">
-        <el-pagination
+        <CsPagination
           v-model:current-page="page"
           v-model:page-size="size"
           :total="total"
@@ -271,61 +280,57 @@ function isExpired(row: GiftCard) {
           @size-change="load"
         />
       </div>
-    </BaseCard>
+    </CsContainer>
 
     <!-- 批量生成弹窗 -->
-    <el-dialog v-model="createOpen" title="批量生成礼品卡" width="460px">
-      <el-form label-position="top">
-        <el-form-item label="批次名称 / 备注">
-          <el-input v-model="createForm.name" placeholder="如 新年促销50元礼品卡" />
-        </el-form-item>
+    <CsModal v-model:visible="createOpen" header="批量生成礼品卡" size="small">
+      <CsForm label-position="top">
+        <CsFormItem label="批次名称 / 备注">
+          <CsInput v-model="createForm.name" placeholder="如 新年促销50元礼品卡" />
+        </CsFormItem>
         <div class="form-grid-2">
-          <el-form-item label="生成数量（张）">
-            <el-input-number v-model="createForm.count" :min="1" :max="500" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="单张面值（元）">
-            <el-input-number v-model="createForm.face_value_yuan" :min="0.01" :step="10" :precision="2" style="width: 100%" />
-          </el-form-item>
+          <CsFormItem label="生成数量（张）">
+            <CsInputNumber v-model="createForm.count" :min="1" :max="500" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="单张面值（元）">
+            <CsInputNumber v-model="createForm.face_value_yuan" :min="0.01" :step="10" :precision="2" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="过期时间（选填，留空永久有效）">
-          <el-date-picker
+        <CsFormItem label="过期时间（选填，留空永久有效）">
+          <CsDatePicker
             v-model="createForm.expires_at"
             type="datetime"
             placeholder="选择过期时间"
             style="width: 100%"
           />
-        </el-form-item>
-      </el-form>
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="createOpen = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="submitCreate">立即生成</el-button>
+        <CsButton @click="createOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="creating" @click="submitCreate">立即生成</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 生成结果弹窗 -->
-    <el-dialog v-model="resultOpen" title="礼品卡生成成功" width="520px">
-      <el-alert
-        type="success"
-        :closable="false"
-        show-icon
-        :title="`本次已成功生成 ${createdCards.length} 张面值为 ¥ ${createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0'} 的卡密：`"
-        style="margin-bottom: 14px"
-      />
-      <el-input
+    <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium">
+      <CsAlert type="success" style="margin-bottom: 14px">
+        本次已成功生成 {{ createdCards.length }} 张面值为 ¥
+        {{ createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0' }}
+        的卡密：
+      </CsAlert>
+      <CsInput
         :model-value="createdCards.map((c) => c.code).join('\n')"
         type="textarea"
         :rows="8"
-        readonly
+        read-only
         class="cell-mono"
         style="font-size: 13px"
       />
       <template #footer>
-        <el-button type="primary" @click="copyAllCreated">
-          <el-icon><CopyDocument /></el-icon>&nbsp;一键复制全部卡密
-        </el-button>
-        <el-button @click="resultOpen = false">关闭</el-button>
+        <CsButton variant="primary" icon-name="copy" @click="copyAllCreated">一键复制全部卡密</CsButton>
+        <CsButton @click="resultOpen = false">关闭</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
@@ -416,12 +421,9 @@ function isExpired(row: GiftCard) {
     border-top: 1px solid var(--x-border-light, #f1f5f9);
     margin-top: 6px;
 
-    .el-button {
+    button {
       flex: 1;
       margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
     }
   }
 }

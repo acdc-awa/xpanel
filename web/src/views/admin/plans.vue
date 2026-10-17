@@ -1,8 +1,22 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from 'vue'
-import { Plus, Edit, Delete, Refresh, Loading, ShoppingBag } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
+import {
+  CsBadge,
+  CsButton,
+  CsCheckbox,
+  CsContainer,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsOption,
+  CsSelect,
+  CsSpinner,
+  CsToggle,
+} from '@/components/cloudscape'
 import { createPlan, deletePlan, getPermissionGroups, getPlans, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -196,18 +210,18 @@ async function remove(row: any) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       </div>
-      <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增套餐</el-button>
+      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增套餐</CsButton>
     </div>
 
-    <BaseCard title="套餐列表">
+    <CsContainer header="套餐列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><ShoppingBag /></el-icon>
+        <CsIcon name="ticket" size="large" />
         <p style="margin-top: 8px">暂无套餐，点击右上角「新增套餐」</p>
       </div>
 
@@ -275,80 +289,61 @@ async function remove(row: any) {
 
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
-            <el-button size="small" type="primary" plain @click="openEdit(row)">
-              <el-icon><Edit /></el-icon>&nbsp;编辑套餐
-            </el-button>
-            <el-button size="small" type="danger" plain @click="remove(row)">
-              <el-icon><Delete /></el-icon>&nbsp;删除
-            </el-button>
+            <CsButton icon-name="edit" @click="openEdit(row)">编辑套餐</CsButton>
+            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
           </div>
         </div>
       </div>
-    </BaseCard>
+    </CsContainer>
 
-    <el-dialog v-model="formOpen" :title="editing ? '编辑套餐' : '新增套餐'" width="520px">
-      <el-form label-position="top">
-        <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 月付 200G" /></el-form-item>
-        <el-form-item label="套餐文案 / 特性描述（每行一条特性，支持占位符）">
+    <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium">
+      <CsForm label-position="top">
+        <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 月付 200G" /></CsFormItem>
+        <CsFormItem label="套餐文案 / 特性描述（每行一条特性，支持占位符）">
           <div class="placeholder-chips">
             <span class="chip-label">快捷插入占位符：</span>
-            <el-tag
-              size="small"
-              class="placeholder-tag"
-              effect="plain"
-              @click="insertPlaceholder('$TRAFFIC$')"
-            >
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$TRAFFIC$')">
               $TRAFFIC$ (流量)
-            </el-tag>
-            <el-tag
-              size="small"
-              class="placeholder-tag"
-              effect="plain"
-              @click="insertPlaceholder('$DURATION$')"
-            >
+            </CsBadge>
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$DURATION$')">
               $DURATION$ (周期)
-            </el-tag>
-            <el-tag
-              size="small"
-              class="placeholder-tag"
-              effect="plain"
-              @click="insertPlaceholder('$DEVICE_LIMIT$')"
-            >
+            </CsBadge>
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$DEVICE_LIMIT$')">
               $DEVICE_LIMIT$ (设备限制)
-            </el-tag>
+            </CsBadge>
           </div>
-          <el-input
+          <CsInput
             ref="descInputRef"
             v-model="form.description"
             type="textarea"
             :rows="5"
             placeholder="如：&#10;包含 $TRAFFIC$ 高速流量&#10;有效期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
           />
-        </el-form-item>
+        </CsFormItem>
         <div class="form-grid-2">
-          <el-form-item label="价格（元）">
-            <el-input-number v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="有效期（天）">
-            <el-input-number v-model="form.duration_days" :min="1" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="流量配额（GB）">
-            <el-input-number v-model="form.traffic_gb" :min="1" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="并发设备上限（台，0 为不限）">
-            <el-input-number v-model="form.device_limit" :min="0" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="展示排序（越小越靠前）">
-            <el-input-number v-model="form.sort_order" :min="0" :step="10" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="热门推荐">
+          <CsFormItem label="价格（元）">
+            <CsInputNumber v-model="form.price_yuan" :min="0" :step="1" :precision="2" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="有效期（天）">
+            <CsInputNumber v-model="form.duration_days" :min="1" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="流量配额（GB）">
+            <CsInputNumber v-model="form.traffic_gb" :min="1" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="并发设备上限（台，0 为不限）">
+            <CsInputNumber v-model="form.device_limit" :min="0" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="展示排序（越小越靠前）">
+            <CsInputNumber v-model="form.sort_order" :min="0" :step="10" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="热门推荐">
             <div style="display: flex; align-items: center; gap: 8px; width: 100%">
-              <el-switch v-model="form.is_featured" />
+              <CsToggle v-model="form.is_featured" />
               <TipIcon content="商城展示「热门推荐」徽标并高亮（多个标记时仅排最前的生效）" />
             </div>
-          </el-form-item>
+          </CsFormItem>
         </div>
-        <el-form-item>
+        <CsFormItem>
           <template #label>
             上架状态
             <TipIcon
@@ -357,37 +352,37 @@ async function remove(row: any) {
           </template>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%">
             <div style="display: flex; align-items: center; gap: 8px">
-              <el-switch v-model="form.purchasable" />
+              <CsToggle v-model="form.purchasable" />
               <span style="font-size: 12.5px">可新购</span>
               <span class="muted" style="font-size: 11.5px">商店展示并允许非持有者购买</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px">
-              <el-switch v-model="form.renewable" />
+              <CsToggle v-model="form.renewable" />
               <span style="font-size: 12.5px">可续费</span>
               <span class="muted" style="font-size: 11.5px">持有者余额直付顺延</span>
             </div>
           </div>
-        </el-form-item>
-        <el-form-item label="权限组（选填，购买后自动授权组内入站）">
-          <el-select v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
-            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="editing">
+        </CsFormItem>
+        <CsFormItem label="权限组（选填，购买后自动授权组内入站）">
+          <CsSelect v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
+            <CsOption v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+          </CsSelect>
+        </CsFormItem>
+        <CsFormItem v-if="editing">
           <div style="display: flex; align-items: center; gap: 6px">
-            <el-checkbox v-model="form.sync_users">同步存量用户</el-checkbox>
+            <CsCheckbox v-model="form.sync_users">同步存量用户</CsCheckbox>
             <TipIcon
               type="warn"
               content="默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。"
             />
           </div>
-        </el-form-item>
-      </el-form>
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="formOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <CsButton @click="formOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
@@ -526,12 +521,9 @@ async function remove(row: any) {
     border-top: 1px solid var(--x-border-light, #f1f5f9);
     margin-top: 6px;
 
-    .el-button {
+    button {
       flex: 1;
       margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
     }
   }
 }

@@ -1,8 +1,22 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Edit, Delete, Refresh, Search, Loading, ChatDotSquare } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  CsButton,
+  CsContainer,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsOption,
+  CsRadio,
+  CsRadioGroup,
+  CsSelect,
+  CsSpinner,
+  CsToggle,
+} from '@/components/cloudscape'
 import {
   getAdminNotices,
   createAdminNotice,
@@ -202,38 +216,38 @@ async function remove(row: NoticeItem) {
     <!-- 顶部工具栏（带标准留白与对齐） -->
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input
+        <CsInput
           v-model="keyword"
           placeholder="搜索公告标题或内容..."
           clearable
+          prefix-icon="search"
           style="width: 220px"
-          :prefix-icon="Search"
           @keyup.enter="load"
           @clear="load"
         />
-        <el-select
+        <CsSelect
           v-model="statusFilter"
           placeholder="全部状态"
           clearable
           style="width: 120px"
           @change="load"
         >
-          <el-option label="已启用" :value="1" />
-          <el-option label="已隐藏" :value="0" />
-        </el-select>
-        <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+          <CsOption label="已启用" :value="1" />
+          <CsOption label="已隐藏" :value="0" />
+        </CsSelect>
+        <CsButton icon-name="refresh" :loading="loading" @click="load">刷新</CsButton>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">发布公告</el-button>
+      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">发布公告</CsButton>
     </div>
 
     <!-- 表格列表 -->
-    <BaseCard title="全站公告列表">
+    <CsContainer header="全站公告列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><ChatDotSquare /></el-icon>
+        <CsIcon name="announcement" size="large" />
         <p style="margin-top: 8px">暂无公告，点击右上角「发布公告」</p>
       </div>
 
@@ -252,9 +266,8 @@ async function remove(row: NoticeItem) {
               </span>
               <span class="notice-name" title="点击编辑公告" @click="openEdit(row as NoticeItem)">{{ (row as NoticeItem).title }}</span>
             </div>
-            <el-switch
+            <CsToggle
               :model-value="(row as NoticeItem).status === 1"
-              size="small"
               @change="() => handleToggle(row as NoticeItem, 'status')"
             />
           </div>
@@ -271,9 +284,8 @@ async function remove(row: NoticeItem) {
             <div class="grid-item">
               <span class="item-label">置顶显示</span>
               <div class="item-value">
-                <el-switch
+                <CsToggle
                   :model-value="(row as NoticeItem).is_pinned"
-                  size="small"
                   @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
                 />
               </div>
@@ -281,9 +293,8 @@ async function remove(row: NoticeItem) {
             <div class="grid-item">
               <span class="item-label">登录强制弹窗</span>
               <div class="item-value">
-                <el-switch
+                <CsToggle
                   :model-value="(row as NoticeItem).is_popup"
-                  size="small"
                   @change="() => handleToggle(row as NoticeItem, 'is_popup')"
                 />
               </div>
@@ -298,29 +309,23 @@ async function remove(row: NoticeItem) {
 
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
-            <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(row as NoticeItem)">
-              编辑公告
-            </el-button>
-            <el-button size="small" type="danger" plain :icon="Delete" @click="remove(row as NoticeItem)">
-              删除
-            </el-button>
+            <CsButton icon-name="edit" @click="openEdit(row as NoticeItem)">编辑公告</CsButton>
+            <CsButton icon-name="remove" @click="remove(row as NoticeItem)">删除</CsButton>
           </div>
         </div>
       </div>
-    </BaseCard>
+    </CsContainer>
 
     <!-- 发布/编辑公告对话框（支持双栏 Markdown 实时渲染预览与 4x4 表格拾取器） -->
-    <el-dialog
-      v-model="formOpen"
-      :title="editing ? '编辑公告' : '发布新公告'"
-      width="960px"
-      destroy-on-close
-      class="notice-editor-dialog"
+    <CsModal
+      v-model:visible="formOpen"
+      :header="editing ? '编辑公告' : '发布新公告'"
+      size="x-large"
     >
-      <el-form label-position="top">
-        <el-form-item label="公告标题" required>
-          <el-input v-model="form.title" placeholder="如：系统升级维护通知 / 节点新增上线" maxlength="100" show-word-limit />
-        </el-form-item>
+      <CsForm label-position="top">
+        <CsFormItem label="公告标题" required>
+          <CsInput v-model="form.title" placeholder="如：系统升级维护通知 / 节点新增上线" :maxlength="100" />
+        </CsFormItem>
 
         <!-- 双栏 Markdown 编辑与实时预览区 -->
         <div class="md-editor-split">
@@ -390,7 +395,7 @@ async function remove(row: NoticeItem) {
               </el-popover>
             </div>
 
-            <el-input
+            <CsInput
               v-model="form.content"
               type="textarea"
               :rows="13"
@@ -413,42 +418,42 @@ async function remove(row: NoticeItem) {
         </div>
 
         <div class="form-row-grid mt-4">
-          <el-form-item label="置顶显示">
+          <CsFormItem label="置顶显示">
             <div class="switch-field">
-              <el-switch v-model="form.is_pinned" />
+              <CsToggle v-model="form.is_pinned" />
               <span class="switch-hint">置顶公告将排在列表最前</span>
             </div>
-          </el-form-item>
+          </CsFormItem>
 
-          <el-form-item label="首页强制弹窗提醒">
+          <CsFormItem label="首页强制弹窗提醒">
             <div class="switch-field">
-              <el-switch v-model="form.is_popup" />
+              <CsToggle v-model="form.is_popup" />
               <span class="switch-hint">用户登录后将自动弹出该公告</span>
             </div>
-          </el-form-item>
+          </CsFormItem>
         </div>
 
         <div class="form-row-grid">
-          <el-form-item label="发布状态">
-            <el-radio-group v-model="form.status">
-              <el-radio :value="1">立即发布</el-radio>
-              <el-radio :value="0">暂不发布</el-radio>
-            </el-radio-group>
-          </el-form-item>
+          <CsFormItem label="发布状态">
+            <CsRadioGroup v-model="form.status">
+              <CsRadio :value="1">立即发布</CsRadio>
+              <CsRadio :value="0">暂不发布</CsRadio>
+            </CsRadioGroup>
+          </CsFormItem>
 
-          <el-form-item label="排序权重">
-            <el-input-number v-model="form.sort_order" :min="0" :max="9999" />
-          </el-form-item>
+          <CsFormItem label="排序权重">
+            <CsInputNumber v-model="form.sort_order" :min="0" :max="9999" />
+          </CsFormItem>
         </div>
-      </el-form>
+      </CsForm>
 
       <template #footer>
-        <el-button @click="formOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">
+        <CsButton @click="formOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="saving" @click="save">
           {{ editing ? '保存修改' : '确认发布' }}
-        </el-button>
+        </CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 

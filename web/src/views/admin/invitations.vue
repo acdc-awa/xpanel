@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { CopyDocument, Refresh, Ticket, Link, Delete, Loading } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  CsButton,
+  CsContainer,
+  CsDatePicker,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsOption,
+  CsPagination,
+  CsSelect,
+  CsSpinner,
+} from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -177,24 +190,24 @@ function fmtTime(t: string | null) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
-          <el-option label="未使用" value="unused" />
-          <el-option label="已使用" value="used" />
-          <el-option label="已过期" value="expired" />
-          <el-option label="已禁用" value="disabled" />
-        </el-select>
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
+          <CsOption label="未使用" value="unused" />
+          <CsOption label="已使用" value="used" />
+          <CsOption label="已过期" value="expired" />
+          <CsOption label="已禁用" value="disabled" />
+        </CsSelect>
+        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       </div>
-      <el-button type="primary" @click="openGen"><el-icon><Ticket /></el-icon>&nbsp;生成邀请码</el-button>
+      <CsButton variant="primary" icon-name="add-plus" @click="openGen">生成邀请码</CsButton>
     </div>
 
-    <BaseCard title="邀请码列表">
+    <CsContainer header="邀请码列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="filtered.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Ticket /></el-icon>
+        <CsIcon name="ticket" size="large" />
         <p style="margin-top: 8px">{{ list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码' }}</p>
       </div>
 
@@ -248,15 +261,9 @@ function fmtTime(t: string | null) {
           <!-- 底部操作栏 -->
           <div class="card-foot-actions">
             <template v-if="row.status === 0 && !isExpired(row)">
-              <el-button size="small" type="primary" plain @click="copyRegisterLink(row.code)">
-                <el-icon><Link /></el-icon>&nbsp;复制链接
-              </el-button>
-              <el-button size="small" type="default" plain @click="copyCode(row.code)">
-                <el-icon><CopyDocument /></el-icon>&nbsp;复制码
-              </el-button>
-              <el-button size="small" type="danger" plain @click="revoke(row)">
-                <el-icon><Delete /></el-icon>&nbsp;作废
-              </el-button>
+              <CsButton icon-name="external" @click="copyRegisterLink(row.code)">复制链接</CsButton>
+              <CsButton icon-name="copy" @click="copyCode(row.code)">复制码</CsButton>
+              <CsButton icon-name="remove" @click="revoke(row)">作废</CsButton>
             </template>
             <span v-else class="muted font-11" style="line-height: 30px">
               {{ row.status === 1 ? '该邀请码已被成功使用' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
@@ -267,64 +274,63 @@ function fmtTime(t: string | null) {
 
       <!-- 本地分页 -->
       <div v-if="filtered.length > PAGE_SIZE" style="display: flex; justify-content: center; margin-top: 16px">
-        <el-pagination
+        <CsPagination
           v-model:current-page="page"
           :total="filtered.length"
           :page-size="PAGE_SIZE"
           layout="prev, pager, next"
-          background
         />
       </div>
-    </BaseCard>
+    </CsContainer>
 
-    <el-dialog v-model="genOpen" title="生成邀请码" width="480px">
+    <CsModal v-model:visible="genOpen" header="生成邀请码" size="small">
       <template v-if="!generated.length">
-        <el-form label-position="top">
-          <el-form-item label="生成数量">
-            <el-input-number v-model="invForm.count" :min="1" :max="100" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="过期时间">
-            <el-date-picker
+        <CsForm label-position="top">
+          <CsFormItem label="生成数量">
+            <CsInputNumber v-model="invForm.count" :min="1" :max="100" style="width: 100%" />
+          </CsFormItem>
+          <CsFormItem label="过期时间">
+            <CsDatePicker
               v-model="invForm.expires"
               type="datetime"
               placeholder="留空表示永不过期"
               value-format="YYYY-MM-DDTHH:mm:ssZ"
               style="width: 100%"
             />
-          </el-form-item>
-        </el-form>
+          </CsFormItem>
+        </CsForm>
       </template>
       <template v-else>
         <p class="muted" style="margin: 0 0 8px">已生成 {{ generated.length }} 个（一次性使用）：</p>
         <div class="inv-codes" style="max-height: 160px; overflow-y: auto">
           <div v-for="c in generated" :key="c" class="inv-code-row">
             <code class="inv-code">{{ c }}</code>
-            <el-button link type="primary" size="small" @click="copyRegisterLink(c)">复制链接</el-button>
+            <CsButton variant="link" @click="copyRegisterLink(c)">复制链接</CsButton>
           </div>
         </div>
         <div style="margin-top: 12px">
           <div class="muted" style="font-size: 12px; margin-bottom: 4px">只读备用文本（便于全选复制）：</div>
-          <el-input
+          <CsInput
             type="textarea"
             :rows="4"
-            readonly
-            :value="generated.join('\n')"
+            read-only
+            :model-value="generated.join('\n')"
             placeholder="邀请码列表"
           />
         </div>
       </template>
       <template #footer>
         <template v-if="!generated.length">
-          <el-button @click="genOpen = false">取消</el-button>
-          <el-button type="primary" :loading="creating" @click="create">生成</el-button>
+          <CsButton @click="genOpen = false">取消</CsButton>
+          <CsButton variant="primary" :loading="creating" @click="create">生成</CsButton>
         </template>
         <template v-else>
-          <el-button @click="genOpen = false; generated = []">完成</el-button>
-          <el-button @click="copyAll"><el-icon><CopyDocument /></el-icon>&nbsp;复制全部邀请码</el-button>
-          <el-button type="primary" @click="copyAllLinks"><el-icon><CopyDocument /></el-icon>&nbsp;复制全部链接</el-button>
+          <CsButton @click="genOpen = false; generated = []">完成</CsButton>
+          <CsButton icon-name="copy" @click="copyAll">复制全部邀请码</CsButton>
+          <CsButton variant="primary" icon-name="copy" @click="copyAllLinks">复制全部链接</CsButton>
         </template>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
@@ -419,12 +425,9 @@ function fmtTime(t: string | null) {
     border-top: 1px solid var(--x-border-light, #f1f5f9);
     margin-top: 6px;
 
-    .el-button {
+    button {
       flex: 1;
       margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
     }
   }
 }

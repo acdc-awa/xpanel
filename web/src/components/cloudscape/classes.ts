@@ -44,7 +44,7 @@ export const CS: Record<string, Record<string, string>> = {
     "name-undo": "awsui_name-undo_h11ix_1fbrz_216",
     "name-view-vertical": "awsui_name-view-vertical_h11ix_1fbrz_217",
     "badge": "awsui_badge_h11ix_1fbrz_241",
-    "custom-icon": "awsui_custom-icon_h11ix_1fbrz_255",
+    "custom-icon": "awsui_custom-icon_h11ix_1fbrz_255"
   },
   "button": {
     "content": "awsui_content_vjswe_1ig09_66",
@@ -70,7 +70,7 @@ export const CS: Record<string, Record<string, string>> = {
     "icon-right": "awsui_icon-right_vjswe_1ig09_568",
     "icon": "awsui_icon_vjswe_1ig09_563",
     "link": "awsui_link_vjswe_1ig09_587",
-    "disabled-with-reason": "awsui_disabled-with-reason_vjswe_1ig09_587",
+    "disabled-with-reason": "awsui_disabled-with-reason_vjswe_1ig09_587"
   },
   "container": {
     "root": "awsui_root_14iqq_1wfvd_13",
@@ -106,7 +106,7 @@ export const CS: Record<string, Record<string, string>> = {
     "content-inner": "awsui_content-inner_14iqq_1wfvd_346",
     "with-header": "awsui_with-header_14iqq_1wfvd_353",
     "footer": "awsui_footer_14iqq_1wfvd_357",
-    "with-divider": "awsui_with-divider_14iqq_1wfvd_361",
+    "with-divider": "awsui_with-divider_14iqq_1wfvd_361"
   },
   "header": {
     "root": "awsui_root_2qdw9_199nd_9",
@@ -143,7 +143,7 @@ export const CS: Record<string, Record<string, string>> = {
     "heading-text-variant-h1": "awsui_heading-text-variant-h1_2qdw9_199nd_249",
     "heading-text-variant-h2": "awsui_heading-text-variant-h2_2qdw9_199nd_258",
     "heading-text-variant-h3": "awsui_heading-text-variant-h3_2qdw9_199nd_267",
-    "counter": "awsui_counter_2qdw9_199nd_277",
+    "counter": "awsui_counter_2qdw9_199nd_277"
   },
   "box": {
     "box": "awsui_box_18wu0_11vk9_24",
@@ -359,7 +359,7 @@ export const CS: Record<string, Record<string, string>> = {
     "visual-accent-purple": "awsui_visual-accent-purple_18wu0_11vk9_905",
     "visual-accent-grey": "awsui_visual-accent-grey_18wu0_11vk9_910",
     "visual-accent-teal": "awsui_visual-accent-teal_18wu0_11vk9_915",
-    "root": "awsui_root_18wu0_11vk9_920",
+    "root": "awsui_root_18wu0_11vk9_920"
   },
   "space-between": {
     "root": "awsui_root_18582_7gmeu_9",
@@ -385,7 +385,7 @@ export const CS: Record<string, Record<string, string>> = {
     "align-center": "awsui_align-center_18582_7gmeu_84",
     "align-start": "awsui_align-start_18582_7gmeu_88",
     "align-end": "awsui_align-end_18582_7gmeu_92",
-    "child-aligned": "awsui_child-aligned_18582_7gmeu_96",
+    "child-aligned": "awsui_child-aligned_18582_7gmeu_96"
   },
   "grid": {
     "grid": "awsui_grid_14yj0_yuht6_9",
@@ -440,7 +440,7 @@ export const CS: Record<string, Record<string, string>> = {
     "offset-9": "awsui_offset-9_14yj0_yuht6_211",
     "offset-10": "awsui_offset-10_14yj0_yuht6_214",
     "offset-11": "awsui_offset-11_14yj0_yuht6_217",
-    "restore-pointer-events": "awsui_restore-pointer-events_14yj0_yuht6_221",
+    "restore-pointer-events": "awsui_restore-pointer-events_14yj0_yuht6_221"
   },
   "column-layout": {
     "column-layout": "awsui_column-layout_vvxn7_8jwuu_9",
@@ -455,7 +455,7 @@ export const CS: Record<string, Record<string, string>> = {
     "grid-columns-3": "awsui_grid-columns-3_vvxn7_8jwuu_74",
     "grid-columns-4": "awsui_grid-columns-4_vvxn7_8jwuu_80",
     "grid-vertical-borders": "awsui_grid-vertical-borders_vvxn7_8jwuu_96",
-    "grid-horizontal-borders": "awsui_grid-horizontal-borders_vvxn7_8jwuu_129",
+    "grid-horizontal-borders": "awsui_grid-horizontal-borders_vvxn7_8jwuu_129"
   },
   "status-indicator": {
     "icon-shake": "awsui_icon-shake_1cbgc_1gw3w_13",
@@ -483,7 +483,7 @@ export const CS: Record<string, Record<string, string>> = {
     "display-inline": "awsui_display-inline_1cbgc_1gw3w_170",
     "icon": "awsui_icon_1cbgc_1gw3w_13",
     "display-inline-block": "awsui_display-inline-block_1cbgc_1gw3w_178",
-    "overflow-ellipsis": "awsui_overflow-ellipsis_1cbgc_1gw3w_187",
+    "overflow-ellipsis": "awsui_overflow-ellipsis_1cbgc_1gw3w_187"
   },
   "badge": {
     "badge": "awsui_badge_1yjyg_119vh_38",
@@ -495,7 +495,7 @@ export const CS: Record<string, Record<string, string>> = {
     "badge-color-severity-high": "awsui_badge-color-severity-high_1yjyg_119vh_109",
     "badge-color-severity-medium": "awsui_badge-color-severity-medium_1yjyg_119vh_114",
     "badge-color-severity-low": "awsui_badge-color-severity-low_1yjyg_119vh_119",
-    "badge-color-severity-neutral": "awsui_badge-color-severity-neutral_1yjyg_119vh_124",
+    "badge-color-severity-neutral": "awsui_badge-color-severity-neutral_1yjyg_119vh_124"
   },
   "spinner": {
     "root": "awsui_root_1612d_1ypck_43",
@@ -511,7 +511,7 @@ export const CS: Record<string, Record<string, string>> = {
     "circle-left": "awsui_circle-left_1612d_1ypck_132",
     "spinner-line-left": "awsui_spinner-line-left_1612d_1ypck_1",
     "circle-right": "awsui_circle-right_1612d_1ypck_137",
-    "spinner-line-right": "awsui_spinner-line-right_1612d_1ypck_1",
+    "spinner-line-right": "awsui_spinner-line-right_1612d_1ypck_1"
   },
   "breadcrumb-group": {
     "breadcrumb-group": "awsui_breadcrumb-group_d19fg_1df7k_9",
@@ -527,7 +527,7 @@ export const CS: Record<string, Record<string, string>> = {
     "collapsed-button": "awsui_collapsed-button_d19fg_1df7k_93",
     "button-icon": "awsui_button-icon_d19fg_1df7k_175",
     "button-icon-open": "awsui_button-icon-open_d19fg_1df7k_189",
-    "hidden": "awsui_hidden_d19fg_1df7k_193",
+    "hidden": "awsui_hidden_d19fg_1df7k_193"
   },
   "segmented-control": {
     "segment": "awsui_segment_8cbea_1jvup_17",
@@ -556,7 +556,7 @@ export const CS: Record<string, Record<string, string>> = {
     "segment-count-4": "awsui_segment-count-4_8cbea_1jvup_263",
     "segment-count-5": "awsui_segment-count-5_8cbea_1jvup_270",
     "segment-count-6": "awsui_segment-count-6_8cbea_1jvup_277",
-    "disabled-reason-tooltip": "awsui_disabled-reason-tooltip_8cbea_1jvup_284",
+    "disabled-reason-tooltip": "awsui_disabled-reason-tooltip_8cbea_1jvup_284"
   },
   "tabs": {
     "tabs-header": "awsui_tabs-header_14rmt_13yzn_14",
@@ -588,7 +588,7 @@ export const CS: Record<string, Record<string, string>> = {
     "with-paddings": "awsui_with-paddings_14rmt_13yzn_318",
     "tabs-container-content-wrapper": "awsui_tabs-container-content-wrapper_14rmt_13yzn_329",
     "disabled-reason-tooltip": "awsui_disabled-reason-tooltip_14rmt_13yzn_340",
-    "tabs-tab-focused": "awsui_tabs-tab-focused_14rmt_13yzn_344",
+    "tabs-tab-focused": "awsui_tabs-tab-focused_14rmt_13yzn_344"
   },
   "alert": {
     "alert": "awsui_alert_mx3cw_13ufl_13",
@@ -617,7 +617,7 @@ export const CS: Record<string, Record<string, string>> = {
     "type-error": "awsui_type-error_mx3cw_13ufl_294",
     "type-warning": "awsui_type-warning_mx3cw_13ufl_302",
     "type-success": "awsui_type-success_mx3cw_13ufl_310",
-    "type-info": "awsui_type-info_mx3cw_13ufl_318",
+    "type-info": "awsui_type-info_mx3cw_13ufl_318"
   },
   "flashbar": {
     "flash-with-motion": "awsui_flash-with-motion_1q84n_1amh9_13",
@@ -669,7 +669,7 @@ export const CS: Record<string, Record<string, string>> = {
     "flash-type-error": "awsui_flash-type-error_1q84n_1amh9_707",
     "flash-type-info": "awsui_flash-type-info_1q84n_1amh9_715",
     "flash-type-in-progress": "awsui_flash-type-in-progress_1q84n_1amh9_716",
-    "flash-type-warning": "awsui_flash-type-warning_1q84n_1amh9_725",
+    "flash-type-warning": "awsui_flash-type-warning_1q84n_1amh9_725"
   },
   "progress-bar": {
     "progress": "awsui_progress_11huc_15p30_13",
@@ -690,7 +690,7 @@ export const CS: Record<string, Record<string, string>> = {
     "percentage": "awsui_percentage_11huc_15p30_127",
     "complete": "awsui_complete_11huc_15p30_173",
     "progress-flash": "awsui_progress-flash_11huc_15p30_186",
-    "additional-info": "awsui_additional-info_11huc_15p30_199",
+    "additional-info": "awsui_additional-info_11huc_15p30_199"
   },
   "expandable-section": {
     "root": "awsui_root_gwq0h_141b4_13",
@@ -736,7 +736,7 @@ export const CS: Record<string, Record<string, string>> = {
     "header-icon-end": "awsui_header-icon-end_gwq0h_141b4_377",
     "header-button-icon-end": "awsui_header-button-icon-end_gwq0h_141b4_394",
     "header-content": "awsui_header-content_gwq0h_141b4_448",
-    "header-navigation-content": "awsui_header-navigation-content_gwq0h_141b4_454",
+    "header-navigation-content": "awsui_header-navigation-content_gwq0h_141b4_454"
   },
   "key-value-pairs": {
     "key-value-pairs": "awsui_key-value-pairs_1y9fy_12gks_9",
@@ -746,14 +746,14 @@ export const CS: Record<string, Record<string, string>> = {
     "term": "awsui_term_1y9fy_12gks_59",
     "key-label": "awsui_key-label_1y9fy_12gks_65",
     "info": "awsui_info_1y9fy_12gks_66",
-    "detail": "awsui_detail_1y9fy_12gks_81",
+    "detail": "awsui_detail_1y9fy_12gks_81"
   },
   "copy-to-clipboard": {
     "root": "awsui_root_5a145_7vjum_5",
     "inline-container": "awsui_inline-container_5a145_7vjum_9",
     "inline-container-trigger": "awsui_inline-container-trigger_5a145_7vjum_12",
     "inline-container-no-wrap": "awsui_inline-container-no-wrap_5a145_7vjum_15",
-    "text-to-display": "awsui_text-to-display_5a145_7vjum_24",
+    "text-to-display": "awsui_text-to-display_5a145_7vjum_24"
   },
   "form-field": {
     "error-icon-shake-wrapper": "awsui_error-icon-shake-wrapper_14mhv_1n0h3_13",
@@ -779,7 +779,7 @@ export const CS: Record<string, Record<string, string>> = {
     "control": "awsui_control_14mhv_1n0h3_168",
     "error__message": "awsui_error__message_14mhv_1n0h3_198",
     "warning__message": "awsui_warning__message_14mhv_1n0h3_199",
-    "visually-hidden": "awsui_visually-hidden_14mhv_1n0h3_203",
+    "visually-hidden": "awsui_visually-hidden_14mhv_1n0h3_203"
   },
   "input": {
     "input-adorned-container": "awsui_input-adorned-container_2rhyz_kxmmb_9",
@@ -819,7 +819,7 @@ export const CS: Record<string, Record<string, string>> = {
     "input-suffix": "awsui_input-suffix_2rhyz_kxmmb_351",
     "input-adornment-content": "awsui_input-adornment-content_2rhyz_kxmmb_364",
     "input-adornment-divider": "awsui_input-adornment-divider_2rhyz_kxmmb_373",
-    "input-adorned": "awsui_input-adorned_2rhyz_kxmmb_9",
+    "input-adorned": "awsui_input-adorned_2rhyz_kxmmb_9"
   },
   "modal": {
     "dialog": "awsui_dialog_1d2i7_187ae_25",
@@ -853,7 +853,7 @@ export const CS: Record<string, Record<string, string>> = {
     "footer": "awsui_footer_1d2i7_187ae_294",
     "footer--rounded": "awsui_footer--rounded_1d2i7_187ae_303",
     "dismiss-control": "awsui_dismiss-control_1d2i7_187ae_315",
-    "modal-open": "awsui_modal-open_1d2i7_187ae_319",
+    "modal-open": "awsui_modal-open_1d2i7_187ae_319"
   },
   "toggle": {
     "root": "awsui_root_4yi2u_1yunw_40",
@@ -865,12 +865,12 @@ export const CS: Record<string, Record<string, string>> = {
     "toggle-handle": "awsui_toggle-handle_4yi2u_1yunw_127",
     "toggle-handle-checked": "awsui_toggle-handle-checked_4yi2u_1yunw_152",
     "toggle-handle-disabled": "awsui_toggle-handle-disabled_4yi2u_1yunw_159",
-    "toggle-handle-readonly": "awsui_toggle-handle-readonly_4yi2u_1yunw_163",
+    "toggle-handle-readonly": "awsui_toggle-handle-readonly_4yi2u_1yunw_163"
   },
   "text-filter": {
     "root": "awsui_root_1sdq3_1nl2w_9",
     "input": "awsui_input_1sdq3_1nl2w_44",
-    "results": "awsui_results_1sdq3_1nl2w_48",
+    "results": "awsui_results_1sdq3_1nl2w_48"
   },
   "table": {
     "root": "awsui_root_wih1l_sf5h0_13",
@@ -909,10 +909,10 @@ export const CS: Record<string, Record<string, string>> = {
     "thead-active": "awsui_thead-active_wih1l_sf5h0_228",
     "row": "awsui_row_wih1l_sf5h0_229",
     "row-selected": "awsui_row-selected_wih1l_sf5h0_230",
-    "skeleton-loading-cell": "awsui_skeleton-loading-cell_wih1l_sf5h0_234",
+    "skeleton-loading-cell": "awsui_skeleton-loading-cell_wih1l_sf5h0_234"
   },
   "internal/components/tooltip": {
-    "root": "awsui_root_1qprf_160mh_5",
+    "root": "awsui_root_1qprf_160mh_5"
   },
   "internal/components/checkbox-icon": {
     "root": "awsui_root_1fn7j_1080n_9",
@@ -923,7 +923,7 @@ export const CS: Record<string, Record<string, string>> = {
     "styled-box-readonly": "awsui_styled-box-readonly_1fn7j_1080n_36",
     "styled-line": "awsui_styled-line_1fn7j_1080n_40",
     "styled-line-disabled": "awsui_styled-line-disabled_1fn7j_1080n_45",
-    "styled-line-readonly": "awsui_styled-line-readonly_1fn7j_1080n_48",
+    "styled-line-readonly": "awsui_styled-line-readonly_1fn7j_1080n_48"
   },
   "internal/components/drag-handle": {
     "handle": "awsui_handle_sdha6_29ghs_9",
@@ -939,7 +939,7 @@ export const CS: Record<string, Record<string, string>> = {
     "resize-icon": "awsui_resize-icon_sdha6_29ghs_84",
     "resize-icon-vertical": "awsui_resize-icon-vertical_sdha6_29ghs_90",
     "resize-icon-horizontal": "awsui_resize-icon-horizontal_sdha6_29ghs_94",
-    "prevent-pointer": "awsui_prevent-pointer_sdha6_29ghs_98",
+    "prevent-pointer": "awsui_prevent-pointer_sdha6_29ghs_98"
   },
   "internal/components/abstract-switch": {
     "content": "awsui_content_1wepg_spx2u_9",
@@ -954,7 +954,7 @@ export const CS: Record<string, Record<string, string>> = {
     "description-bottom-padding": "awsui_description-bottom-padding_1wepg_spx2u_57",
     "label-disabled": "awsui_label-disabled_1wepg_spx2u_65",
     "description-disabled": "awsui_description-disabled_1wepg_spx2u_66",
-    "control": "awsui_control_1wepg_spx2u_70",
+    "control": "awsui_control_1wepg_spx2u_70"
   },
   "breadcrumb-group/item": {
     "link": "awsui_link_1kosq_1kpdt_9",
@@ -963,6 +963,285 @@ export const CS: Record<string, Record<string, string>> = {
     "icon": "awsui_icon_1kosq_1kpdt_17",
     "anchor": "awsui_anchor_1kosq_1kpdt_23",
     "text": "awsui_text_1kosq_1kpdt_71",
-    "last": "awsui_last_1kosq_1kpdt_90",
+    "last": "awsui_last_1kosq_1kpdt_90"
   },
+  "form": {
+    "root": "awsui_root_1i0s3_1k5nu_9",
+    "header": "awsui_header_1i0s3_1k5nu_41",
+    "content": "awsui_content_1i0s3_1k5nu_45",
+    "error": "awsui_error_1i0s3_1k5nu_49",
+    "footer": "awsui_footer_1i0s3_1k5nu_53",
+    "actions-section": "awsui_actions-section_1i0s3_1k5nu_57",
+    "secondary-actions": "awsui_secondary-actions_1i0s3_1k5nu_66",
+    "actions": "awsui_actions_1i0s3_1k5nu_57"
+  },
+  "select": {
+    "root": "awsui_root_r2vco_1ht7k_9",
+    "dropdown-header": "awsui_dropdown-header_r2vco_1ht7k_41",
+    "dropdown-footer": "awsui_dropdown-footer_r2vco_1ht7k_47"
+  },
+  "select/parts": {
+    "placeholder": "awsui_placeholder_dwuol_115g6_9",
+    "disabled": "awsui_disabled_dwuol_115g6_14",
+    "item": "awsui_item_dwuol_115g6_18",
+    "checkbox": "awsui_checkbox_dwuol_115g6_22",
+    "option-group": "awsui_option-group_dwuol_115g6_31",
+    "filter": "awsui_filter_dwuol_115g6_35",
+    "trigger": "awsui_trigger_dwuol_115g6_40",
+    "layout-strut": "awsui_layout-strut_dwuol_115g6_46",
+    "list-bottom": "awsui_list-bottom_dwuol_115g6_52",
+    "selected-icon": "awsui_selected-icon_dwuol_115g6_56",
+    "show-label-tag": "awsui_show-label-tag_dwuol_115g6_61",
+    "inline-token-trigger": "awsui_inline-token-trigger_dwuol_115g6_65",
+    "inline-token-list": "awsui_inline-token-list_dwuol_115g6_72",
+    "inline-token-hidden-placeholder": "awsui_inline-token-hidden-placeholder_dwuol_115g6_86",
+    "inline-token-counter": "awsui_inline-token-counter_dwuol_115g6_92",
+    "inline-label-trigger-wrapper": "awsui_inline-label-trigger-wrapper_dwuol_115g6_96",
+    "inline-label-wrapper": "awsui_inline-label-wrapper_dwuol_115g6_100",
+    "inline-label": "awsui_inline-label_dwuol_115g6_96",
+    "inline-label-disabled": "awsui_inline-label-disabled_dwuol_115g6_125",
+    "inline-label-inline-tokens": "awsui_inline-label-inline-tokens_dwuol_115g6_129",
+    "disabled-reason-tooltip": "awsui_disabled-reason-tooltip_dwuol_115g6_134"
+  },
+  "dropdown": {
+    "dropdown-content-wrapper": "awsui_dropdown-content-wrapper_9duf6_184t9_13",
+    "awsui-motion-fade-in-dropdown": "awsui_awsui-motion-fade-in-dropdown_9duf6_184t9_1",
+    "refresh": "awsui_refresh_9duf6_184t9_34",
+    "awsui-motion-fade-in-0": "awsui_awsui-motion-fade-in-0_9duf6_184t9_1",
+    "root": "awsui_root_9duf6_184t9_76",
+    "interior": "awsui_interior_9duf6_184t9_109",
+    "dropdown": "awsui_dropdown_9duf6_184t9_13",
+    "use-portal": "awsui_use-portal_9duf6_184t9_119",
+    "is-empty": "awsui_is-empty_9duf6_184t9_199",
+    "dropdown-drop-up": "awsui_dropdown-drop-up_9duf6_184t9_206",
+    "with-limited-width": "awsui_with-limited-width_9duf6_184t9_210",
+    "dropdown-drop-left": "awsui_dropdown-drop-left_9duf6_184t9_213",
+    "dropdown-drop-right": "awsui_dropdown-drop-right_9duf6_184t9_216",
+    "occupy-entire-width": "awsui_occupy-entire-width_9duf6_184t9_219",
+    "use-flexible-width": "awsui_use-flexible-width_9duf6_184t9_222",
+    "hide-block-border": "awsui_hide-block-border_9duf6_184t9_230",
+    "open": "awsui_open_9duf6_184t9_239",
+    "nowrap": "awsui_nowrap_9duf6_184t9_248",
+    "dropdown-content": "awsui_dropdown-content_9duf6_184t9_13",
+    "stretch-trigger-height": "awsui_stretch-trigger-height_9duf6_184t9_259"
+  },
+  "internal/components/option": {
+    "option": "awsui_option_1p2cx_125vw_13",
+    "disabled": "awsui_disabled_1p2cx_125vw_50",
+    "parent": "awsui_parent_1p2cx_125vw_53",
+    "highlighted": "awsui_highlighted_1p2cx_125vw_56",
+    "content": "awsui_content_1p2cx_125vw_60",
+    "label-content": "awsui_label-content_1p2cx_125vw_67",
+    "label": "awsui_label_1p2cx_125vw_67",
+    "tag": "awsui_tag_1p2cx_125vw_74",
+    "label-tag": "awsui_label-tag_1p2cx_125vw_75",
+    "label-prefix": "awsui_label-prefix_1p2cx_125vw_85",
+    "tags": "awsui_tags_1p2cx_125vw_98",
+    "description": "awsui_description_1p2cx_125vw_99",
+    "selected": "awsui_selected_1p2cx_125vw_110",
+    "icon": "awsui_icon_1p2cx_125vw_124",
+    "filtering-match-highlight": "awsui_filtering-match-highlight_1p2cx_125vw_131",
+    "trigger-variant": "awsui_trigger-variant_1p2cx_125vw_146",
+    "custom-content": "awsui_custom-content_1p2cx_125vw_152"
+  },
+  "internal/components/selectable-item": {
+    "selectable-item": "awsui_selectable-item_15o6u_5o493_9",
+    "parent": "awsui_parent_15o6u_5o493_28",
+    "interactiveGroups": "awsui_interactiveGroups_15o6u_5o493_28",
+    "highlighted": "awsui_highlighted_15o6u_5o493_28",
+    "selected": "awsui_selected_15o6u_5o493_28",
+    "selectable-item-content": "awsui_selectable-item-content_15o6u_5o493_31",
+    "pad-bottom": "awsui_pad-bottom_15o6u_5o493_35",
+    "virtual": "awsui_virtual_15o6u_5o493_42",
+    "has-background": "awsui_has-background_15o6u_5o493_45",
+    "child": "awsui_child_15o6u_5o493_48",
+    "disabled": "awsui_disabled_15o6u_5o493_54",
+    "is-keyboard": "awsui_is-keyboard_15o6u_5o493_73",
+    "visual-refresh": "awsui_visual-refresh_15o6u_5o493_83",
+    "next-item-selected": "awsui_next-item-selected_15o6u_5o493_97",
+    "previous-item-selected": "awsui_previous-item-selected_15o6u_5o493_107",
+    "sticky": "awsui_sticky_15o6u_5o493_139",
+    "with-scrollbar": "awsui_with-scrollbar_15o6u_5o493_158",
+    "after-header": "awsui_after-header_15o6u_5o493_161",
+    "measure-strut": "awsui_measure-strut_15o6u_5o493_190",
+    "screenreader-content": "awsui_screenreader-content_15o6u_5o493_202",
+    "option-content": "awsui_option-content_15o6u_5o493_208",
+    "select-all": "awsui_select-all_15o6u_5o493_212"
+  },
+  "internal/components/options-list": {
+    "options-list": "awsui_options-list_19gcf_1h3yo_9",
+    "options-list-embedded": "awsui_options-list-embedded_19gcf_1h3yo_56",
+    "decrease-block-margin": "awsui_decrease-block-margin_19gcf_1h3yo_63"
+  },
+  "internal/components/button-trigger": {
+    "button-trigger": "awsui_button-trigger_18eso_1fhoq_17",
+    "arrow": "awsui_arrow_18eso_1fhoq_17",
+    "in-filtering-token-root": "awsui_in-filtering-token-root_18eso_1fhoq_77",
+    "in-filtering-token-nested": "awsui_in-filtering-token-nested_18eso_1fhoq_77",
+    "has-caret": "awsui_has-caret_18eso_1fhoq_113",
+    "placeholder": "awsui_placeholder_18eso_1fhoq_116",
+    "pressed": "awsui_pressed_18eso_1fhoq_129",
+    "disabled": "awsui_disabled_18eso_1fhoq_132",
+    "in-filtering-token": "awsui_in-filtering-token_18eso_1fhoq_77",
+    "readonly": "awsui_readonly_18eso_1fhoq_153",
+    "compact": "awsui_compact_18eso_1fhoq_165",
+    "invalid": "awsui_invalid_18eso_1fhoq_174",
+    "warning": "awsui_warning_18eso_1fhoq_183",
+    "custom-option": "awsui_custom-option_18eso_1fhoq_192",
+    "inline-tokens": "awsui_inline-tokens_18eso_1fhoq_197",
+    "grouped": "awsui_grouped_18eso_1fhoq_239",
+    "grouped-horizontal-first": "awsui_grouped-horizontal-first_18eso_1fhoq_245",
+    "grouped-horizontal-middle": "awsui_grouped-horizontal-middle_18eso_1fhoq_249",
+    "grouped-horizontal-last": "awsui_grouped-horizontal-last_18eso_1fhoq_255",
+    "grouped-vertical-first": "awsui_grouped-vertical-first_18eso_1fhoq_259",
+    "grouped-vertical-middle": "awsui_grouped-vertical-middle_18eso_1fhoq_263",
+    "grouped-vertical-last": "awsui_grouped-vertical-last_18eso_1fhoq_269",
+    "grouped-with-action": "awsui_grouped-with-action_18eso_1fhoq_273"
+  },
+  "internal/components/token-list": {
+    "root": "awsui_root_gfwv3_1qe9q_9",
+    "horizontal": "awsui_horizontal_gfwv3_1qe9q_12",
+    "vertical": "awsui_vertical_gfwv3_1qe9q_18",
+    "list": "awsui_list_gfwv3_1qe9q_23",
+    "grid": "awsui_grid_gfwv3_1qe9q_42",
+    "list-item": "awsui_list-item_gfwv3_1qe9q_54",
+    "toggle-container-inline": "awsui_toggle-container-inline_gfwv3_1qe9q_61",
+    "toggle": "awsui_toggle_gfwv3_1qe9q_61",
+    "description": "awsui_description_gfwv3_1qe9q_154",
+    "separator": "awsui_separator_gfwv3_1qe9q_158"
+  },
+  "checkbox": {
+    "root": "awsui_root_k2y2q_1svvf_44",
+    "checkbox-control": "awsui_checkbox-control_k2y2q_1svvf_77",
+    "outline": "awsui_outline_k2y2q_1svvf_93"
+  },
+  "radio-group": {
+    "radio-group": "awsui_radio-group_1mabk_wzqm2_9",
+    "horizontal-group": "awsui_horizontal-group_1mabk_wzqm2_40",
+    "radio": "awsui_radio_1mabk_wzqm2_9",
+    "horizontal": "awsui_horizontal_1mabk_wzqm2_40",
+    "radio--has-description": "awsui_radio--has-description_1mabk_wzqm2_54"
+  },
+  "internal/components/radio-button": {
+    "radio-control": "awsui_radio-control_1v1hk_1ij2t_9",
+    "outline": "awsui_outline_1v1hk_1ij2t_25",
+    "styled-circle-border": "awsui_styled-circle-border_1v1hk_1ij2t_47",
+    "styled-circle-disabled": "awsui_styled-circle-disabled_1v1hk_1ij2t_51",
+    "styled-circle-readonly": "awsui_styled-circle-readonly_1v1hk_1ij2t_51",
+    "styled-circle-fill": "awsui_styled-circle-fill_1v1hk_1ij2t_56",
+    "styled-circle-checked": "awsui_styled-circle-checked_1v1hk_1ij2t_72"
+  },
+  "textarea": {
+    "root": "awsui_root_qk1j1_1b458_9",
+    "textarea": "awsui_textarea_qk1j1_1b458_13",
+    "textarea-resize-both": "awsui_textarea-resize-both_qk1j1_1b458_64",
+    "textarea-resize-horizontal": "awsui_textarea-resize-horizontal_qk1j1_1b458_67",
+    "textarea-resize-vertical": "awsui_textarea-resize-vertical_qk1j1_1b458_70",
+    "textarea-resize-none": "awsui_textarea-resize-none_qk1j1_1b458_73",
+    "textarea-readonly": "awsui_textarea-readonly_qk1j1_1b458_82",
+    "textarea-invalid": "awsui_textarea-invalid_qk1j1_1b458_119",
+    "textarea-warning": "awsui_textarea-warning_qk1j1_1b458_128"
+  },
+  "pagination": {
+    "root": "awsui_root_fvjdu_11nbn_9",
+    "button": "awsui_button_fvjdu_11nbn_50",
+    "dots": "awsui_dots_fvjdu_11nbn_51",
+    "button-disabled": "awsui_button-disabled_fvjdu_11nbn_79",
+    "arrow": "awsui_arrow_fvjdu_11nbn_84",
+    "page-number": "awsui_page-number_fvjdu_11nbn_94",
+    "button-current": "awsui_button-current_fvjdu_11nbn_100",
+    "jump-to-page": "awsui_jump-to-page_fvjdu_11nbn_113",
+    "jump-to-page-input": "awsui_jump-to-page-input_fvjdu_11nbn_121",
+    "pages-compact": "awsui_pages-compact_fvjdu_11nbn_131",
+    "page-item": "awsui_page-item_fvjdu_11nbn_136",
+    "root-disabled": "awsui_root-disabled_fvjdu_11nbn_157"
+  },
+  "drawer": {
+    "root": "awsui_root_1sxt8_1tqmb_13",
+    "drawer": "awsui_drawer_1sxt8_1tqmb_17",
+    "has-close-action": "awsui_has-close-action_1sxt8_1tqmb_50",
+    "position-absolute": "awsui_position-absolute_1sxt8_1tqmb_53",
+    "placement-end": "awsui_placement-end_1sxt8_1tqmb_53",
+    "position-sticky": "awsui_position-sticky_1sxt8_1tqmb_53",
+    "position-fixed": "awsui_position-fixed_1sxt8_1tqmb_53",
+    "placement-start": "awsui_placement-start_1sxt8_1tqmb_56",
+    "placement-top": "awsui_placement-top_1sxt8_1tqmb_59",
+    "placement-bottom": "awsui_placement-bottom_1sxt8_1tqmb_62",
+    "with-footer": "awsui_with-footer_1sxt8_1tqmb_65",
+    "position-static": "awsui_position-static_1sxt8_1tqmb_69",
+    "content": "awsui_content_1sxt8_1tqmb_72",
+    "header": "awsui_header_1sxt8_1tqmb_100",
+    "hide-close-action": "awsui_hide-close-action_1sxt8_1tqmb_116",
+    "with-additional-action": "awsui_with-additional-action_1sxt8_1tqmb_120",
+    "with-runtime-context": "awsui_with-runtime-context_1sxt8_1tqmb_128",
+    "with-toolbar": "awsui_with-toolbar_1sxt8_1tqmb_131",
+    "header-actions": "awsui_header-actions_1sxt8_1tqmb_150",
+    "close-action": "awsui_close-action_1sxt8_1tqmb_156",
+    "content-with-paddings": "awsui_content-with-paddings_1sxt8_1tqmb_162",
+    "footer": "awsui_footer_1sxt8_1tqmb_169",
+    "is-sticky": "awsui_is-sticky_1sxt8_1tqmb_175",
+    "test-utils-drawer-content": "awsui_test-utils-drawer-content_1sxt8_1tqmb_183",
+    "hidden": "awsui_hidden_1sxt8_1tqmb_187",
+    "focus-trap": "awsui_focus-trap_1sxt8_1tqmb_191",
+    "backdrop": "awsui_backdrop_1sxt8_1tqmb_195",
+    "backdrop-fixed": "awsui_backdrop-fixed_1sxt8_1tqmb_199",
+    "backdrop-absolute": "awsui_backdrop-absolute_1sxt8_1tqmb_202"
+  },
+  "button-dropdown": {
+    "button-dropdown": "awsui_button-dropdown_sne0l_1gbn1_9",
+    "full-width": "awsui_full-width_sne0l_1gbn1_12",
+    "items-list-container": "awsui_items-list-container_sne0l_1gbn1_17",
+    "awsui-motion-fade-in-0": "awsui_awsui-motion-fade-in-0_sne0l_1gbn1_1",
+    "rotate": "awsui_rotate_sne0l_1gbn1_36",
+    "rotate-open": "awsui_rotate-open_sne0l_1gbn1_50",
+    "header": "awsui_header_sne0l_1gbn1_54",
+    "title": "awsui_title_sne0l_1gbn1_65",
+    "description": "awsui_description_sne0l_1gbn1_66",
+    "trigger-button": "awsui_trigger-button_sne0l_1gbn1_70",
+    "loading": "awsui_loading_sne0l_1gbn1_74",
+    "split-trigger-wrapper": "awsui_split-trigger-wrapper_sne0l_1gbn1_78",
+    "trigger-item": "awsui_trigger-item_sne0l_1gbn1_81",
+    "has-no-text": "awsui_has-no-text_sne0l_1gbn1_90",
+    "visual-refresh": "awsui_visual-refresh_sne0l_1gbn1_93",
+    "has-trigger-text": "awsui_has-trigger-text_sne0l_1gbn1_104",
+    "variant-normal": "awsui_variant-normal_sne0l_1gbn1_107",
+    "split-trigger": "awsui_split-trigger_sne0l_1gbn1_78",
+    "dropdown-trigger": "awsui_dropdown-trigger_sne0l_1gbn1_118",
+    "main-action-full-width": "awsui_main-action-full-width_sne0l_1gbn1_122",
+    "main-action-trigger-full-width": "awsui_main-action-trigger-full-width_sne0l_1gbn1_126",
+    "filter": "awsui_filter_sne0l_1gbn1_130",
+    "test-utils-button-trigger": "awsui_test-utils-button-trigger_sne0l_1gbn1_136"
+  },
+  "button-dropdown/item-element": {
+    "item-element": "awsui_item-element_93a1u_1c5nm_9",
+    "no-content-styling": "awsui_no-content-styling_93a1u_1c5nm_21",
+    "disabled": "awsui_disabled_93a1u_1c5nm_26",
+    "show-divider": "awsui_show-divider_93a1u_1c5nm_33",
+    "highlighted": "awsui_highlighted_93a1u_1c5nm_36",
+    "is-focused": "awsui_is-focused_93a1u_1c5nm_51",
+    "visual-refresh": "awsui_visual-refresh_93a1u_1c5nm_54",
+    "menu-item": "awsui_menu-item_93a1u_1c5nm_58",
+    "link-style": "awsui_link-style_93a1u_1c5nm_75",
+    "current-breadcrumb": "awsui_current-breadcrumb_93a1u_1c5nm_112",
+    "link-style-highlighted": "awsui_link-style-highlighted_93a1u_1c5nm_120",
+    "has-category-header": "awsui_has-category-header_93a1u_1c5nm_126",
+    "item-tooltip-wrapper": "awsui_item-tooltip-wrapper_93a1u_1c5nm_126",
+    "has-checkmark": "awsui_has-checkmark_93a1u_1c5nm_126",
+    "icon": "awsui_icon_93a1u_1c5nm_133",
+    "checkmark": "awsui_checkmark_93a1u_1c5nm_137",
+    "external-icon": "awsui_external-icon_93a1u_1c5nm_144",
+    "content-wrapper": "awsui_content-wrapper_93a1u_1c5nm_148",
+    "main-row": "awsui_main-row_93a1u_1c5nm_154",
+    "label-tag": "awsui_label-tag_93a1u_1c5nm_161",
+    "secondary-text": "awsui_secondary-text_93a1u_1c5nm_168"
+  },
+  "internal/components/menu-dropdown": {
+    "button": "awsui_button_m5h9f_x0p7y_9",
+    "expanded": "awsui_expanded_m5h9f_x0p7y_61",
+    "offset-right-none": "awsui_offset-right-none_m5h9f_x0p7y_72",
+    "offset-right-l": "awsui_offset-right-l_m5h9f_x0p7y_75",
+    "offset-right-xxl": "awsui_offset-right-xxl_m5h9f_x0p7y_78",
+    "text": "awsui_text_m5h9f_x0p7y_103",
+    "icon": "awsui_icon_m5h9f_x0p7y_107"
+  }
 }
