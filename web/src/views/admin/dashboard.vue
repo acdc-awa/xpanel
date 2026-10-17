@@ -156,6 +156,7 @@ provide<DashboardContext>('adminDashboardContext', {
 let autoRefreshTimer: any = null
 let realtimeTimer: any = null
 let inFlight = false
+let reloadQueued = false
 let realtimeInFlight = false
 
 const REALTIME_POLL_INTERVAL_MS = 3000
@@ -163,7 +164,11 @@ const POLL_INTERVAL_MS = 30000
 const POLL_HINT = '实时网速与监控矩阵每 3 秒刷新（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。'
 
 async function load(opts: { silent?: boolean } = {}) {
-  if (inFlight) return
+  if (inFlight) {
+    // 30s 轮询或上一次请求未结束时，用户切换粒度/排行榜也要在结束后补一次最新值。
+    reloadQueued = true
+    return
+  }
   inFlight = true
   if (!opts.silent) loading.value = true
   try {
@@ -186,6 +191,10 @@ async function load(opts: { silent?: boolean } = {}) {
   } finally {
     inFlight = false
     if (!opts.silent) loading.value = false
+    if (reloadQueued) {
+      reloadQueued = false
+      void load({ silent: true })
+    }
   }
 }
 

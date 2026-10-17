@@ -180,7 +180,7 @@ onUnmounted(() => {
       <CsSegmentedControl
         v-model="ctx.trendRange.value"
         :options="trendOptions"
-        @change="updateChart"
+        @change="ctx.refreshDashboard"
       />
     </template>
     <div class="chart-container">
