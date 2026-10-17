@@ -31,6 +31,9 @@ import './vendor/components/input/styles.scoped.css'
 import './vendor/components/modal/styles.scoped.css'
 import './vendor/components/toggle/styles.scoped.css'
 import './vendor/components/text-filter/styles.scoped.css'
+import './vendor/components/table/styles.scoped.css'
+import './vendor/components/table/header-cell/styles.scoped.css'
+import './vendor/components/table/body-cell/styles.scoped.css'
 
 // Internal building blocks used by the components above.
 import './vendor/components/internal/components/tooltip/styles.scoped.css'

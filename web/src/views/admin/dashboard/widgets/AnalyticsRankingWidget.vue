@@ -2,8 +2,10 @@
 import { computed, inject, ref } from 'vue'
 import {
   CsDashboardWidget,
+  CsTable,
   CsTabs,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 import { formatBytes } from '@/utils/format'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
@@ -26,6 +28,34 @@ const dashboardTabs = computed(() => [
   { id: 'cards', label: '卡密核销' },
   { id: 'orders', label: '订单流水' },
 ])
+
+const userColumns = computed<TableColumn[]>(() => [
+  { id: 'rank', header: '#', width: 40 },
+  { id: 'user-main', header: '用户', minWidth: 110 },
+  { id: 'user-plan', header: '套餐', width: 90 },
+  { id: 'user-usage', header: `${rankLabel.value}用量`, width: 105 },
+])
+
+const nodeColumns = computed<TableColumn[]>(() => [
+  { id: 'rank', header: '#', width: 40 },
+  { id: 'node-main', header: '节点', minWidth: 110 },
+  { id: 'node-percent', header: '占比', width: 70 },
+  { id: 'node-usage', header: `${rankLabel.value}用量`, width: 105 },
+])
+
+const cardColumns: TableColumn[] = [
+  { id: 'card-code', header: '卡密', minWidth: 110 },
+  { id: 'card-user', header: '使用人', width: 85, key: 'used_by_username' },
+  { id: 'card-face', header: '面值', width: 90 },
+  { id: 'card-time', header: '核销时间', width: 95 },
+]
+
+const orderColumns: TableColumn[] = [
+  { id: 'order-no', header: '订单号', minWidth: 110 },
+  { id: 'order-user', header: '用户', width: 85, key: 'username' },
+  { id: 'order-amount', header: '金额', width: 80 },
+  { id: 'order-status', header: '状态', width: 80 },
+]
 </script>
 
 <template>
@@ -45,137 +75,103 @@ const dashboardTabs = computed(() => [
         <CsTabs v-model="activeTab" :tabs="dashboardTabs" disable-content-paddings>
           <!-- 1. 用户流量排行 -->
           <div v-if="activeTab === 'users'" class="ranking-tab-content">
-        <el-table
-          :data="dashData?.user_rank || []"
-          size="small"
-          class="aws-cloudscape-table"
-          style="width: 100%"
+        <CsTable
+          :items="dashData?.user_rank || []"
+          :columns="userColumns"
+          empty-text="暂无用户流量数据"
         >
-          <el-table-column label="#" width="40">
-            <template #default="{ $index }">
-              <span class="tabular-num rank-badge" :class="`rank-pos-${$index + 1}`">
-                {{ $index + 1 }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="用户" min-width="110">
-            <template #default="{ row }">
-              <span class="user-main-name">{{ row.username }}</span>
-              <div class="user-sub-email tabular-num">{{ row.email || '—' }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="plan_name" label="套餐" width="90">
-            <template #default="{ row }">
-              <span class="user-plan">{{ row.plan_name }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="`${rankLabel}用量`" width="105">
-            <template #default="{ row }">
-              <span class="tabular-num usage-val">
-                {{ formatBytes(row.total_bytes) }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
+          <template #cell-rank="{ index }">
+            <span class="tabular-num rank-badge" :class="`rank-pos-${index + 1}`">
+              {{ index + 1 }}
+            </span>
+          </template>
+          <template #cell-user-main="{ row }">
+            <span class="user-main-name">{{ row.username }}</span>
+            <div class="user-sub-email tabular-num">{{ row.email || '—' }}</div>
+          </template>
+          <template #cell-user-plan="{ row }">
+            <span class="user-plan">{{ row.plan_name }}</span>
+          </template>
+          <template #cell-user-usage="{ row }">
+            <span class="tabular-num usage-val">
+              {{ formatBytes(row.total_bytes) }}
+            </span>
+          </template>
+        </CsTable>
       </div>
 
       <!-- 2. 节点流量排行 -->
       <div v-else-if="activeTab === 'nodes'" class="ranking-tab-content">
-        <el-table
-          :data="dashData?.server_rank || []"
-          size="small"
-          class="aws-cloudscape-table"
-          style="width: 100%"
+        <CsTable
+          :items="dashData?.server_rank || []"
+          :columns="nodeColumns"
+          empty-text="暂无节点流量数据"
         >
-          <el-table-column label="#" width="40">
-            <template #default="{ $index }">
-              <span class="tabular-num rank-badge" :class="`rank-pos-${$index + 1}`">
-                {{ $index + 1 }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="节点" min-width="110">
-            <template #default="{ row }">
-              <span class="user-main-name">{{ row.name || `服务器#${row.server_id}` }}</span>
-              <div class="user-sub-email tabular-num">{{ row.location || '—' }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column label="占比" width="70">
-            <template #default="{ row }">
-              <span class="tabular-num muted-percent">{{ (row.percent || 0).toFixed(1) }}%</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="`${rankLabel}用量`" width="105">
-            <template #default="{ row }">
-              <span class="tabular-num usage-val">
-                {{ formatBytes(row.total_bytes) }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
+          <template #cell-rank="{ index }">
+            <span class="tabular-num rank-badge" :class="`rank-pos-${index + 1}`">
+              {{ index + 1 }}
+            </span>
+          </template>
+          <template #cell-node-main="{ row }">
+            <span class="user-main-name">{{ row.name || `服务器#${row.server_id}` }}</span>
+            <div class="user-sub-email tabular-num">{{ row.location || '—' }}</div>
+          </template>
+          <template #cell-node-percent="{ row }">
+            <span class="tabular-num muted-percent">{{ (row.percent || 0).toFixed(1) }}%</span>
+          </template>
+          <template #cell-node-usage="{ row }">
+            <span class="tabular-num usage-val">
+              {{ formatBytes(row.total_bytes) }}
+            </span>
+          </template>
+        </CsTable>
       </div>
 
       <!-- 3. 最近礼品卡核销 -->
       <div v-else-if="activeTab === 'cards'" class="ranking-tab-content">
-        <el-table
-          :data="dashData?.recent_gift_cards || []"
-          size="small"
-          class="aws-cloudscape-table"
-          style="width: 100%"
+        <CsTable
+          :items="dashData?.recent_gift_cards || []"
+          :columns="cardColumns"
+          empty-text="暂无核销记录"
         >
-          <el-table-column label="卡密" min-width="110">
-            <template #default="{ row }">
-              <code class="aws-code-token">{{ row.code_masked }}</code>
-            </template>
-          </el-table-column>
-          <el-table-column prop="used_by_username" label="使用人" width="85" />
-          <el-table-column label="面值" width="90">
-            <template #default="{ row }">
-              <span class="tabular-num money-gain">
-                +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="核销时间" width="95">
-            <template #default="{ row }">
-              <span class="user-sub-email tabular-num">
-                {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
+          <template #cell-card-code="{ row }">
+            <code class="aws-code-token">{{ row.code_masked }}</code>
+          </template>
+          <template #cell-card-face="{ row }">
+            <span class="tabular-num money-gain">
+              +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
+            </span>
+          </template>
+          <template #cell-card-time="{ row }">
+            <span class="user-sub-email tabular-num">
+              {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
+            </span>
+          </template>
+        </CsTable>
       </div>
 
       <!-- 4. 最近套餐订单 -->
       <div v-else-if="activeTab === 'orders'" class="ranking-tab-content">
-        <el-table
-          :data="dashData?.recent_orders || []"
-          size="small"
-          class="aws-cloudscape-table"
-          style="width: 100%"
+        <CsTable
+          :items="dashData?.recent_orders || []"
+          :columns="orderColumns"
+          empty-text="暂无订单"
         >
-          <el-table-column label="订单号" min-width="110">
-            <template #default="{ row }">
-              <code class="aws-code-token">{{ row.order_no }}</code>
-            </template>
-          </el-table-column>
-          <el-table-column prop="username" label="用户" width="85" />
-          <el-table-column label="金额" width="80">
-            <template #default="{ row }">
-              <span class="tabular-num font-semibold">¥ {{ (row.amount_cents / 100).toFixed(2) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }">
-              <span
-                class="aws-order-status"
-                :class="row.status === 'paid' ? 'status-paid' : (row.status === 'pending' ? 'status-pending' : 'status-cancel')"
-              >
-                {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
+          <template #cell-order-no="{ row }">
+            <code class="aws-code-token">{{ row.order_no }}</code>
+          </template>
+          <template #cell-order-amount="{ row }">
+            <span class="tabular-num font-semibold">¥ {{ (row.amount_cents / 100).toFixed(2) }}</span>
+          </template>
+          <template #cell-order-status="{ row }">
+            <span
+              class="aws-order-status"
+              :class="row.status === 'paid' ? 'status-paid' : (row.status === 'pending' ? 'status-pending' : 'status-cancel')"
+            >
+              {{ row.status === 'paid' ? '已生效' : (row.status === 'pending' ? '待支付' : '已取消') }}
+            </span>
+          </template>
+        </CsTable>
       </div>
         </CsTabs>
       </div>

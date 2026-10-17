@@ -5,7 +5,9 @@ import {
   CsTextFilter,
   CsStatusIndicator,
   CsButton,
+  CsTable,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 import { formatDateTime } from '@/utils/timezone'
 import type { ServerMatrixItem } from '@/api/types'
 import type { DashboardContext } from '../types'
@@ -17,6 +19,14 @@ defineProps<{
 
 const ctx = inject<DashboardContext>('adminDashboardContext')!
 const dashData = ctx.dashData
+
+const serverColumns: TableColumn[] = [
+  { id: 'name', header: '服务器 / 域名', minWidth: 130 },
+  { id: 'status', header: '状态', width: 130 },
+  { id: 'load', header: '负载 (CPU / 内存)', width: 150 },
+  { id: 'rate', header: '速率 / 在线', minWidth: 135 },
+  { id: 'actions', header: '操作', width: 64, align: 'center' },
+]
 
 const serverSearchText = ref('')
 const filteredServerMatrix = computed(() => {
@@ -65,96 +75,86 @@ function fmtTime(t: string | null) {
     </template>
 
     <div class="table-container">
-      <el-table
-        :data="filteredServerMatrix"
-        size="small"
-        class="aws-cloudscape-table"
-        style="width: 100%"
+      <CsTable
+        :items="filteredServerMatrix"
+        :columns="serverColumns"
+        track-by="id"
+        empty-text="暂无服务器"
       >
         <!-- 1. 节点与地址 -->
-        <el-table-column label="服务器 / 域名" min-width="130">
-          <template #default="{ row }">
-            <div class="server-name-cell">
-              <span class="aws-sort-badge">#{{ row.sort_order ?? 0 }}</span>
-              <span class="server-name">{{ row.name }}</span>
-            </div>
-            <div class="server-subhost tabular-num">{{ row.host }}</div>
-          </template>
-        </el-table-column>
+        <template #cell-name="{ row }">
+          <div class="server-name-cell">
+            <span class="aws-sort-badge">#{{ row.sort_order ?? 0 }}</span>
+            <span class="server-name">{{ row.name }}</span>
+          </div>
+          <div class="server-subhost tabular-num">{{ row.host }}</div>
+        </template>
 
         <!-- 2. 状态与心跳 -->
-        <el-table-column label="状态" width="130">
-          <template #default="{ row }">
-            <CsStatusIndicator
-              :status="row.status === 1 ? 'online' : 'offline'"
-              :text="row.status === 1 ? '在线 (Normal)' : '离线 (Offline)'"
-              :pulse="row.status === 1"
-            />
-            <div class="server-heartbeat tabular-num">
-              {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}
-            </div>
-          </template>
-        </el-table-column>
+        <template #cell-status="{ row }">
+          <CsStatusIndicator
+            :status="row.status === 1 ? 'online' : 'offline'"
+            :text="row.status === 1 ? '在线 (Normal)' : '离线 (Offline)'"
+            :pulse="row.status === 1"
+          />
+          <div class="server-heartbeat tabular-num">
+            {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}
+          </div>
+        </template>
 
         <!-- 3. 系统负载 -->
-        <el-table-column label="负载 (CPU / 内存)" width="150">
-          <template #default="{ row }">
-            <div class="aws-load-row tabular-num">
-              <span class="load-lbl">CPU</span>
-              <el-progress
-                :percentage="Math.min(100, Math.round(row.cpu || 0))"
-                :color="
-                  row.cpu > 80
-                    ? 'var(--color-text-status-error-ri38gt)'
-                    : row.cpu > 50
-                      ? 'var(--color-text-status-warning-fabq6h)'
-                      : 'var(--color-text-status-success-1i2jf8)'
-                "
-                :stroke-width="5"
-                :show-text="false"
-                class="load-bar"
-              />
-              <span class="load-val">{{ (row.cpu || 0).toFixed(0) }}%</span>
-            </div>
-            <div class="aws-load-row tabular-num" style="margin-top: 3px">
-              <span class="load-lbl">MEM</span>
-              <el-progress
-                :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
-                color="var(--color-text-link-default-qabnuk)"
-                :stroke-width="5"
-                :show-text="false"
-                class="load-bar"
-              />
-              <span class="load-val">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
-            </div>
-          </template>
-        </el-table-column>
+        <template #cell-load="{ row }">
+          <div class="aws-load-row tabular-num">
+            <span class="load-lbl">CPU</span>
+            <el-progress
+              :percentage="Math.min(100, Math.round(row.cpu || 0))"
+              :color="
+                row.cpu > 80
+                  ? 'var(--color-text-status-error-ri38gt)'
+                  : row.cpu > 50
+                    ? 'var(--color-text-status-warning-fabq6h)'
+                    : 'var(--color-text-status-success-1i2jf8)'
+              "
+              :stroke-width="5"
+              :show-text="false"
+              class="load-bar"
+            />
+            <span class="load-val">{{ (row.cpu || 0).toFixed(0) }}%</span>
+          </div>
+          <div class="aws-load-row tabular-num" style="margin-top: 3px">
+            <span class="load-lbl">MEM</span>
+            <el-progress
+              :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
+              color="var(--color-text-link-default-qabnuk)"
+              :stroke-width="5"
+              :show-text="false"
+              class="load-bar"
+            />
+            <span class="load-val">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
+          </div>
+        </template>
 
         <!-- 4. 实时速率与在线设备 -->
-        <el-table-column label="速率 / 在线" min-width="135">
-          <template #default="{ row }">
-            <div class="tabular-num rate-dual-line">
-              <span class="rate-rx">↓ {{ formatBandwidth(row.rx_rate) }}</span>
-              <span class="rate-tx">↑ {{ formatBandwidth(row.tx_rate) }}</span>
-            </div>
-            <div class="online-users-sub tabular-num">
-              在线：<b class="aws-interactive-link" @click="ctx.openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
-            </div>
-          </template>
-        </el-table-column>
+        <template #cell-rate="{ row }">
+          <div class="tabular-num rate-dual-line">
+            <span class="rate-rx">↓ {{ formatBandwidth(row.rx_rate) }}</span>
+            <span class="rate-tx">↑ {{ formatBandwidth(row.tx_rate) }}</span>
+          </div>
+          <div class="online-users-sub tabular-num">
+            在线：<b class="aws-interactive-link" @click="ctx.openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
+          </div>
+        </template>
 
         <!-- 5. 操作 -->
-        <el-table-column label="操作" width="64" align="center">
-          <template #default="{ row }">
-            <CsButton
-              variant="icon"
-              icon-name="view-vertical"
-              aria-label="查看性能图表"
-              @click="ctx.openServerMetrics(row as ServerMatrixItem)"
-            />
-          </template>
-        </el-table-column>
-      </el-table>
+        <template #cell-actions="{ row }">
+          <CsButton
+            variant="icon"
+            icon-name="view-vertical"
+            aria-label="查看性能图表"
+            @click="ctx.openServerMetrics(row as ServerMatrixItem)"
+          />
+        </template>
+      </CsTable>
     </div>
   </CsDashboardWidget>
 </template>
