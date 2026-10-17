@@ -369,9 +369,13 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			disk = fb.Disk
 			diskTotal = fb.DiskTotal
 			onlineUsers = fb.OnlineUsers
-			// 离线节点速率归零
-			rxRate = 0
-			txRate = 0
+			if isOnline {
+				rxRate = fb.RxRate
+				txRate = fb.TxRate
+			} else {
+				rxRate = 0
+				txRate = 0
+			}
 		}
 
 		isActiveFlow := (rxRate > 1024 || txRate > 1024)
