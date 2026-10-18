@@ -1,24 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Refresh } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
-import { useThemeStore } from '@/stores/theme'
-import { useContainerResize } from '@/composables/useContainerResize'
+import { CsBarChart } from '@/components/cloudscape'
+import type { BarSeries } from '@/components/cloudscape'
 import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { LogStats, CompactResult } from '@/api/admin'
 
-const theme = useThemeStore()
 const loading = ref(false)
 const stats = ref<LogStats | null>(null)
 const rangeDays = ref<30 | 90>(30)
-
-// ---- 图表 ----
-const chartRef = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
 
 // ---- 清理 ----
 type LogTableKey = 'traffic_logs' | 'node_reports' | 'audit_logs'
@@ -28,11 +22,26 @@ interface LogTableMeta {
   desc: string
   color: string
 }
+// 颜色取 Cloudscape 官方分类色板前三位，保证图例、图表与统计点同源。
 const logTables: LogTableMeta[] = [
-  { key: 'traffic_logs', label: '流量明细', desc: '每用户每小时的计费明细（历史分钟级数据可压缩归并），受计费周期与每日聚合保护', color: '#38bdf8' },
-  { key: 'node_reports', label: '节点心跳', desc: '服务器心跳状态上报，仅用于节点监控曲线回看', color: '#a78bfa' },
-  { key: 'audit_logs', label: '审计日志', desc: '操作与登录审计记录，清理后不可再追溯', color: '#f59e0b' },
+  { key: 'traffic_logs', label: '流量明细', desc: '每用户每小时的计费明细（历史分钟级数据可压缩归并），受计费周期与每日聚合保护', color: 'var(--color-charts-palette-categorical-1-r41m2k, #688ae8)' },
+  { key: 'node_reports', label: '节点心跳', desc: '服务器心跳状态上报，仅用于节点监控曲线回看', color: 'var(--color-charts-palette-categorical-2-37jc27, #c33d69)' },
+  { key: 'audit_logs', label: '审计日志', desc: '操作与登录审计记录，清理后不可再追溯', color: 'var(--color-charts-palette-categorical-3-2qk36g, #2ea597)' },
 ]
+
+/** 日志量按天堆叠柱状图（Cloudscape BarChart 语义）。 */
+const chartSeries = computed<BarSeries[]>(() => {
+  const days = stats.value?.days || []
+  return logTables.map((t) => ({
+    type: 'bar',
+    title: t.label,
+    color: t.color,
+    data: days.map((d) => ({ x: d.date.slice(5), y: Number((d as unknown as Record<string, number>)[t.key] || 0) })),
+    valueFormatter: (value) => `${value.toLocaleString()} 行`,
+  }))
+})
+
+const formatRowCount = (value: number) => (value >= 10000 ? `${(value / 1000).toFixed(0)}k` : String(value))
 const cleanupTable = ref<LogTableKey>('audit_logs')
 const cleanupDate = ref('')
 const cleanupRunning = ref(false)
@@ -75,9 +84,6 @@ async function load() {
     const { data } = await getLogStats(rangeDays.value)
     if (data.code === 0) {
       stats.value = data.data
-      await nextTick()
-      initChart()
-      updateChart()
     } else {
       ElMessage.error(data.message)
     }
@@ -87,86 +93,6 @@ async function load() {
     loading.value = false
   }
 }
-
-function initChart() {
-  if (chartRef.value && !chart) {
-    chart = echarts.init(chartRef.value)
-  }
-}
-
-function updateChart() {
-  if (!chart || !stats.value) return
-  const isDark = theme.isDark
-  const textColor = isDark ? '#94a3b8' : '#64748b'
-  const axisLineColor = isDark ? '#25334d' : '#e2e8f0'
-  const splitLineColor = isDark ? '#1e293b' : '#f1f5f9'
-  const tooltipBg = isDark ? 'rgba(19, 27, 46, 0.95)' : 'rgba(15, 23, 42, 0.9)'
-  const tooltipBorder = isDark ? '#25334d' : '#334155'
-
-  const days = stats.value.days
-  chart.setOption({
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      axisPointer: { type: 'shadow' },
-      backgroundColor: tooltipBg,
-      borderColor: tooltipBorder,
-      borderWidth: 1,
-      padding: [8, 12],
-      textStyle: { color: '#ffffff', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px; z-index: var(--x-z-chart-tip, 1200);',
-      formatter: (params: any) => {
-        let res = `<div style="font-weight:600;margin-bottom:4px;color:#f8fafc">${params[0]?.axisValue}</div>`
-        let total = 0
-        params.forEach((item: any) => {
-          const val = Number(item.value || 0)
-          total += val
-          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px">
-            <span style="display:flex;align-items:center;gap:6px">${item.marker} <span style="color:#cbd5e1">${item.seriesName}</span></span>
-            <b style="color:#fff">${val.toLocaleString()} 行</b>
-          </div>`
-        })
-        res += `<div style="border-top:1px dashed rgba(255,255,255,0.2);margin-top:6px;padding-top:4px;display:flex;justify-content:space-between;color:#e2e8f0;font-size:11.5px"><span>合计:</span> <b style="color:#38bdf8">${total.toLocaleString()} 行</b></div>`
-        return res
-      },
-    },
-    legend: {
-      data: logTables.map((t) => t.label),
-      top: 0,
-      right: 10,
-      textStyle: { color: textColor, fontSize: 12 },
-    },
-    grid: { top: 35, right: 20, bottom: 25, left: 60 },
-    xAxis: {
-      type: 'category',
-      data: days.map((d) => d.date.slice(5)),
-      axisLine: { lineStyle: { color: axisLineColor } },
-      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true },
-    },
-    yAxis: {
-      type: 'value',
-      name: '行',
-      nameTextStyle: { color: textColor },
-      splitLine: { lineStyle: { color: splitLineColor } },
-      axisLabel: { color: textColor, formatter: (v: number) => (v >= 10000 ? `${(v / 1000).toFixed(0)}k` : String(v)) },
-    },
-    series: logTables.map((t) => ({
-      name: t.label,
-      type: 'bar',
-      stack: 'logs',
-      barMaxWidth: 16,
-      itemStyle: { color: t.color },
-      data: days.map((d) => Number((d as any)[t.key] || 0)),
-    })),
-  })
-}
-
-function resizeChart() {
-  chart?.resize()
-}
-
-// 容器宽度变化即重算（侧栏折叠不会触发 window resize）
-useContainerResize([chartRef], resizeChart)
 
 // ---- 清理动作 ----
 async function runCleanup() {
@@ -342,12 +268,6 @@ watch(cleanupTable, () => {
 
 onMounted(() => {
   load()
-  window.addEventListener('resize', resizeChart)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', resizeChart)
-  chart?.dispose()
 })
 </script>
 
@@ -389,7 +309,16 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div ref="chartRef" style="width: 100%; height: 300px; margin-top: 8px" />
+        <CsBarChart
+          class="log-volume-chart"
+          :series="chartSeries"
+          :height="300"
+          stacked-bars
+          y-title="行"
+          :y-tick-formatter="formatRowCount"
+          aria-label="日志量趋势"
+          empty-text="暂无日志数据"
+        />
 
         <el-divider style="margin: 12px 0" />
 
@@ -519,6 +448,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.log-volume-chart {
+  margin-top: 8px;
+}
+
 .stat-row {
   display: flex;
   flex-wrap: wrap;

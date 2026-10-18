@@ -47,6 +47,21 @@ import './vendor/components/table/styles.scoped.css'
 import './vendor/components/table/header-cell/styles.scoped.css'
 import './vendor/components/table/body-cell/styles.scoped.css'
 
+// Charts (line / bar / mixed). The plot is rendered as SVG; these official
+// styles carry the axis, grid, legend, series marker and detail popover rules.
+import './vendor/components/line-chart/styles.scoped.css'
+import './vendor/components/bar-chart/styles.scoped.css'
+import './vendor/components/mixed-line-bar-chart/styles.scoped.css'
+import './vendor/components/internal/components/cartesian-chart/styles.scoped.css'
+import './vendor/components/internal/components/chart-plot/styles.scoped.css'
+import './vendor/components/internal/components/chart-legend/styles.scoped.css'
+import './vendor/components/internal/components/chart-series-marker/styles.scoped.css'
+import './vendor/components/internal/components/chart-series-details/styles.scoped.css'
+import './vendor/components/internal/components/chart-popover/styles.scoped.css'
+import './vendor/components/internal/components/chart-wrapper/styles.scoped.css'
+import './vendor/components/internal/components/chart-status-container/styles.scoped.css'
+import './vendor/components/popover/styles.scoped.css'
+
 // Internal building blocks used by the components above.
 import './vendor/components/internal/components/tooltip/styles.scoped.css'
 import './vendor/components/internal/components/checkbox-icon/styles.scoped.css'

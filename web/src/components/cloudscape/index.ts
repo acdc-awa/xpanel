@@ -44,6 +44,18 @@ export { default as CsTable } from './Table.vue'
 export { default as CsTooltip } from './Tooltip.vue'
 export { default as CsButtonDropdown } from './ButtonDropdown.vue'
 export { default as CsLoading } from './Loading.vue'
+export { default as CsLineChart } from './chart/LineChart.vue'
+export { default as CsBarChart } from './chart/BarChart.vue'
+export type {
+  ChartSeries,
+  ChartDatum,
+  ChartProps,
+  ChartDataTypes,
+  BarSeries,
+  LineSeries,
+  YThresholdSeries,
+  XThresholdSeries,
+} from './chart/types'
 export { default as CsCard } from './Card.vue'
 export { default as CsCardGrid } from './CardGrid.vue'
 export { default as CsCardFacts } from './CardFacts.vue'

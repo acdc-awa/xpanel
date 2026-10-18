@@ -1,17 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted, nextTick, computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
 import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
-
-import { useThemeStore } from '@/stores/theme'
-import { useContainerResize } from '@/composables/useContainerResize'
-
-const theme = useThemeStore()
+import { CsLineChart } from '@/components/cloudscape'
+import type { LineSeries } from '@/components/cloudscape'
 
 const props = defineProps<{
   modelValue: boolean
@@ -31,402 +26,108 @@ const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : 
 /** 各档时间跨度（小时），用于坐标轴按跨度切换日期/时刻格式。 */
 const RANGE_SPAN_HOURS: Record<string, number> = { '1h': 1, '6h': 6, '24h': 24, '7d': 168, '30d': 720 }
 
-/** 峰值曲线统一样式：同色虚线、不加面积。峰值不平滑——smooth 会在两点间压出
- *  低于真实峰值的弧线，把「包络线」画成假的。 */
-function peakSeries(name: string, color: string, data?: number[]) {
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * 坐标轴标签。优先用后端返回的原始 UTC 时间戳按「显示时区」渲染；
+ * 旧后端无该字段时回退服务端格式化串。
+ */
+const axisLabels = computed<string[]>(() => {
+  const data = metricsData.value
+  if (!data) return []
+  const spanHours = RANGE_SPAN_HOURS[range.value] ?? 1
+  const raw = data.timestamps_iso || []
+  return raw.length ? raw.map((t) => formatAxisTime(t, spanHours)) : data.timestamps || []
+})
+
+/**
+ * 峰值曲线用虚线（官方 threshold 样式）：峰值不在两点间插值，
+ * 画成平滑曲线会低于真实峰值，把包络线变成假的。
+ */
+function peakSeries(
+  title: string,
+  color: string,
+  values: number[] | undefined,
+  format: (value: number) => string
+): LineSeries {
   return {
-    name,
-    type: 'line' as const,
-    smooth: false,
-    showSymbol: false,
-    data: data ?? [],
-    itemStyle: { color },
-    lineStyle: { type: 'dashed' as const, width: 1, opacity: 0.55 },
+    type: 'line',
+    title,
+    color,
+    dashed: true,
+    data: axisLabels.value.map((label, index) => ({ x: label, y: Number(values?.[index] ?? 0) })),
+    valueFormatter: format,
   }
 }
 
-const netChartRef = ref<HTMLDivElement | null>(null)
-const cpuChartRef = ref<HTMLDivElement | null>(null)
-const memChartRef = ref<HTMLDivElement | null>(null)
-const userChartRef = ref<HTMLDivElement | null>(null)
+function lineSeries(
+  title: string,
+  color: string,
+  values: number[] | undefined,
+  format: (value: number) => string
+): LineSeries {
+  return {
+    type: 'line',
+    title,
+    color,
+    data: axisLabels.value.map((label, index) => ({ x: label, y: Number(values?.[index] ?? 0) })),
+    valueFormatter: format,
+  }
+}
 
-let netChart: echarts.ECharts | null = null
-let cpuChart: echarts.ECharts | null = null
-let memChart: echarts.ECharts | null = null
-let userChart: echarts.ECharts | null = null
-let refreshTimer: any = null
+const PALETTE = {
+  blue: 'var(--color-charts-palette-categorical-1-r41m2k, #688ae8)',
+  pink: 'var(--color-charts-palette-categorical-2-37jc27, #c33d69)',
+  green: 'var(--color-charts-palette-categorical-3-2qk36g, #2ea597)',
+  purple: 'var(--color-charts-palette-categorical-4-greu4f, #8456ce)',
+  orange: 'var(--color-charts-palette-categorical-5-5cbtgt, #e07941)',
+}
 
-const commonGrid = computed(() => ({
-  top: 30,
-  right: isMobile.value ? 10 : 20,
-  bottom: 25,
-  left: isMobile.value ? 42 : 55,
-}))
+const mbps = (value: number) => `${value.toFixed(2)} Mbps`
+const percent = (value: number) => `${value.toFixed(1)}%`
+const people = (value: number) => `${value.toFixed(0)} 人`
 
-const tooltipConfig = computed(() => ({
-  backgroundColor: theme.isDark ? 'rgba(19, 27, 46, 0.95)' : 'rgba(15, 23, 42, 0.9)',
-  borderColor: theme.isDark ? '#25334d' : '#334155',
-  borderWidth: 1,
-  padding: [8, 12],
-  textStyle: { color: '#ffffff', fontSize: 12 },
-  extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,0.25); border-radius: 8px;',
-}))
+const netSeries = computed<LineSeries[]>(() => {
+  const data = metricsData.value
+  return [
+    lineSeries('下行均值 (Rx)', PALETTE.blue, data?.rx_mbps, mbps),
+    peakSeries('下行峰值 (Rx)', PALETTE.blue, data?.rx_mbps_max, mbps),
+    lineSeries('上行均值 (Tx)', PALETTE.purple, data?.tx_mbps, mbps),
+    peakSeries('上行峰值 (Tx)', PALETTE.purple, data?.tx_mbps_max, mbps),
+  ]
+})
+
+const cpuSeries = computed<LineSeries[]>(() => {
+  const data = metricsData.value
+  return [
+    lineSeries('CPU 均值', PALETTE.green, data?.cpu, percent),
+    peakSeries('CPU 峰值', PALETTE.green, data?.cpu_max, percent),
+  ]
+})
+
+const memSeries = computed<LineSeries[]>(() => {
+  const data = metricsData.value
+  return [
+    lineSeries('内存均值', PALETTE.pink, data?.mem_percent, percent),
+    peakSeries('内存峰值', PALETTE.pink, data?.mem_percent_max, percent),
+    lineSeries('磁盘均值', PALETTE.orange, data?.disk_percent, percent),
+  ]
+})
+
+const userSeries = computed<LineSeries[]>(() => {
+  const data = metricsData.value
+  return [
+    lineSeries('在线均值', PALETTE.blue, data?.online_users, people),
+    peakSeries('在线峰值', PALETTE.blue, data?.online_users_max, people),
+  ]
+})
+
+const formatPercentTick = (value: number) => `${value}%`
+const formatCountTick = (value: number) => String(value)
 
 function updateMobileState() {
   isMobile.value = window.innerWidth <= 768
 }
-
-function initCharts() {
-  if (netChartRef.value && !netChart) {
-    netChart = echarts.init(netChartRef.value)
-  }
-  if (cpuChartRef.value && !cpuChart) {
-    cpuChart = echarts.init(cpuChartRef.value)
-  }
-  if (memChartRef.value && !memChart) {
-    memChart = echarts.init(memChartRef.value)
-  }
-  if (userChartRef.value && !userChart) {
-    userChart = echarts.init(userChartRef.value)
-  }
-}
-
-function resizeCharts() {
-  updateMobileState()
-  netChart?.resize()
-  cpuChart?.resize()
-  memChart?.resize()
-  userChart?.resize()
-}
-
-// 弹窗带入场动画、且 destroy-on-close 会销毁重建内部 DOM：
-// 只在打开瞬间 echarts.init 会把 canvas 固定在当时（可能还是小尺寸）的容器上，
-// 表现为四张图空白或被压扁，所以这里持续跟随容器尺寸变化。
-useContainerResize([netChartRef, cpuChartRef, memChartRef, userChartRef], resizeCharts)
-
-// destroy-on-close 会在关闭动画结束后销毁弹窗内 DOM，
-// 实例必须跟着释放并置空，否则下次打开时 initCharts 会因实例非空跳过初始化，
-// setOption 全打在已脱离文档的旧 DOM 上，表现为数据拿到了但图表空白
-function disposeCharts() {
-  netChart?.dispose()
-  cpuChart?.dispose()
-  memChart?.dispose()
-  userChart?.dispose()
-  netChart = null
-  cpuChart = null
-  memChart = null
-  userChart = null
-}
-
-function updateCharts() {
-  if (!metricsData.value) return
-  const data = metricsData.value
-  // 优先用后端返回的原始 UTC 时间戳，按「显示时区」渲染坐标轴；旧后端无该字段时回退服务端格式化串。
-  const spanHours = RANGE_SPAN_HOURS[range.value] ?? 1
-  const raw = data.timestamps_iso || []
-  const ts = raw.length ? raw.map((t) => formatAxisTime(t, spanHours)) : data.timestamps || []
-  const isDark = theme.isDark
-
-  const textColor = isDark ? '#94a3b8' : '#64748b'
-  const axisLineColor = isDark ? '#25334d' : '#e2e8f0'
-  const splitLineColor = isDark ? '#1e293b' : '#f1f5f9'
-
-  // AWS CloudWatch 官方色板与设计 Tokens
-  const awsChartPalette = {
-    blue: '#0972d3',      // Inbound / Rx
-    purple: '#8c4bff',    // Outbound / Tx
-    green: '#1d8102',     // CPU
-    teal: '#00a1c9',      // Memory
-    orange: '#ec7211',    // Disk / Alert
-    active: '#4338ca',    // Active users
-  }
-
-  // 1. 网络带宽图 (AWS CloudWatch Rx/Tx Smooth Area Line Chart)
-  netChart?.setOption({
-    tooltip: {
-      trigger: 'axis',
-      ...tooltipConfig.value,
-      formatter: (params: any) => {
-        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px;letter-spacing:-0.01em">${params[0]?.axisValue} (UTC)</div>`
-        params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
-            <span style="display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
-              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
-            </span>
-            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} Mbps</b>
-          </div>`
-        })
-        return res
-      },
-    },
-    legend: {
-      data: ['下行均值 (Rx)', '下行峰值 (Rx)', '上行均值 (Tx)', '上行峰值 (Tx)'],
-      top: 0,
-      icon: 'roundRect',
-      itemWidth: 12,
-      itemHeight: 8,
-      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
-    },
-    grid: commonGrid.value,
-    xAxis: {
-      type: 'category',
-      data: ts,
-      axisLine: { lineStyle: { color: axisLineColor } },
-      axisTick: { show: false },
-      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
-    },
-    yAxis: {
-      type: 'value',
-      name: 'Mbps',
-      nameTextStyle: { color: textColor, fontSize: 11, fontFamily: "'Open Sans', sans-serif" },
-      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
-      axisLabel: { color: textColor, fontFamily: "'Open Sans', sans-serif" },
-    },
-    series: [
-      {
-        name: '下行均值 (Rx)',
-        type: 'line',
-        smooth: 0.35,
-        showSymbol: false,
-        data: data.rx_mbps,
-        lineStyle: { width: 2.2, color: awsChartPalette.blue },
-        itemStyle: { color: awsChartPalette.blue },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(9, 114, 211, 0.35)' : 'rgba(9, 114, 211, 0.22)' },
-            { offset: 1, color: 'rgba(9, 114, 211, 0.01)' },
-          ]),
-        },
-      },
-      {
-        name: '上行均值 (Tx)',
-        type: 'line',
-        smooth: 0.35,
-        showSymbol: false,
-        data: data.tx_mbps,
-        lineStyle: { width: 2.2, color: awsChartPalette.purple },
-        itemStyle: { color: awsChartPalette.purple },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(140, 75, 255, 0.32)' : 'rgba(140, 75, 255, 0.20)' },
-            { offset: 1, color: 'rgba(140, 75, 255, 0.01)' },
-          ]),
-        },
-      },
-      peakSeries('下行峰值 (Rx)', awsChartPalette.blue, data.rx_mbps_max),
-      peakSeries('上行峰值 (Tx)', awsChartPalette.purple, data.tx_mbps_max),
-    ],
-  })
-
-  // 2. CPU 使用率 (AWS CloudWatch Smooth Area Line Chart)
-  cpuChart?.setOption({
-    tooltip: {
-      trigger: 'axis',
-      ...tooltipConfig.value,
-      formatter: (params: any) => {
-        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
-        params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
-            <span style="display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
-              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
-            </span>
-            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} %</b>
-          </div>`
-        })
-        return res
-      },
-    },
-    legend: {
-      data: ['CPU 均值', 'CPU 峰值'],
-      top: 0,
-      icon: 'roundRect',
-      itemWidth: 12,
-      itemHeight: 8,
-      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
-    },
-    grid: commonGrid.value,
-    xAxis: {
-      type: 'category',
-      data: ts,
-      axisLine: { lineStyle: { color: axisLineColor } },
-      axisTick: { show: false },
-      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
-    },
-    yAxis: {
-      type: 'value',
-      min: 0,
-      max: 100,
-      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
-      axisLabel: { color: textColor, formatter: '{value}%', fontFamily: "'Open Sans', sans-serif" },
-    },
-    series: [
-      {
-        name: 'CPU 均值',
-        type: 'line',
-        smooth: 0.35,
-        showSymbol: false,
-        data: data.cpu,
-        lineStyle: { width: 2.2, color: awsChartPalette.green },
-        itemStyle: { color: awsChartPalette.green },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(29, 129, 2, 0.35)' : 'rgba(29, 129, 2, 0.22)' },
-            { offset: 1, color: 'rgba(29, 129, 2, 0.01)' },
-          ]),
-        },
-        markLine: {
-          silent: true,
-          lineStyle: { color: '#d13212', type: 'dashed', width: 1.5 },
-          data: [{ yAxis: 80, label: { formatter: '80% 警戒 (High)', color: '#d13212', fontSize: 11 } }],
-        },
-      },
-      peakSeries('CPU 峰值', awsChartPalette.green, data.cpu_max),
-    ],
-  })
-
-  // 3. 内存 & 磁盘负载 (AWS CloudWatch Smooth Area Line Chart)
-  memChart?.setOption({
-    tooltip: {
-      trigger: 'axis',
-      ...tooltipConfig.value,
-      formatter: (params: any) => {
-        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
-        params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
-            <span style="display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
-              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
-            </span>
-            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} %</b>
-          </div>`
-        })
-        return res
-      },
-    },
-    legend: {
-      data: ['内存均值', '内存峰值', '磁盘均值'],
-      top: 0,
-      icon: 'roundRect',
-      itemWidth: 12,
-      itemHeight: 8,
-      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
-    },
-    grid: commonGrid.value,
-    xAxis: {
-      type: 'category',
-      data: ts,
-      axisLine: { lineStyle: { color: axisLineColor } },
-      axisTick: { show: false },
-      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
-    },
-    yAxis: {
-      type: 'value',
-      min: 0,
-      max: 100,
-      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
-      axisLabel: { color: textColor, formatter: '{value}%', fontFamily: "'Open Sans', sans-serif" },
-    },
-    series: [
-      {
-        name: '内存均值',
-        type: 'line',
-        smooth: 0.35,
-        showSymbol: false,
-        data: data.mem_percent,
-        lineStyle: { width: 2.2, color: awsChartPalette.teal },
-        itemStyle: { color: awsChartPalette.teal },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(0, 161, 201, 0.30)' : 'rgba(0, 161, 201, 0.20)' },
-            { offset: 1, color: 'rgba(0, 161, 201, 0.01)' },
-          ]),
-        },
-      },
-      peakSeries('内存峰值', awsChartPalette.teal, data.mem_percent_max),
-      {
-        name: '磁盘均值',
-        type: 'line',
-        smooth: 0.35,
-        showSymbol: false,
-        data: data.disk_percent,
-        lineStyle: { width: 1.8, color: awsChartPalette.orange },
-        itemStyle: { color: awsChartPalette.orange },
-      },
-    ],
-  })
-
-  // 4. 在线用户数 (AWS CloudWatch Step/Smooth Area Chart)
-  userChart?.setOption({
-    tooltip: {
-      trigger: 'axis',
-      ...tooltipConfig.value,
-      formatter: (params: any) => {
-        let res = `<div style="font-weight:700;margin-bottom:6px;color:#f8fafc;font-size:12.5px">${params[0]?.axisValue} (UTC)</div>`
-        params.forEach((item: any) => {
-          res += `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0">
-            <span style="display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};"></span>
-              <span style="color:#cbd5e1;font-size:11.5px">${item.seriesName}</span>
-            </span>
-            <b style="color:#ffffff;font-variant-numeric:tabular-nums">${item.value} 人</b>
-          </div>`
-        })
-        return res
-      },
-    },
-    legend: {
-      data: ['在线均值', '在线峰值'],
-      top: 0,
-      icon: 'roundRect',
-      itemWidth: 12,
-      itemHeight: 8,
-      textStyle: { color: textColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
-    },
-    grid: commonGrid.value,
-    xAxis: {
-      type: 'category',
-      data: ts,
-      axisLine: { lineStyle: { color: axisLineColor } },
-      axisTick: { show: false },
-      axisLabel: { color: textColor, fontSize: 11, hideOverlap: true, fontFamily: "'Open Sans', sans-serif" },
-    },
-    yAxis: {
-      type: 'value',
-      minInterval: 1,
-      splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } },
-      axisLabel: { color: textColor, fontFamily: "'Open Sans', sans-serif" },
-    },
-    series: [
-      {
-        name: '在线均值',
-        type: 'line',
-        step: 'start',
-        showSymbol: false,
-        data: data.online_users,
-        lineStyle: { width: 2, color: awsChartPalette.active },
-        itemStyle: { color: awsChartPalette.active },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: isDark ? 'rgba(67, 56, 202, 0.35)' : 'rgba(67, 56, 202, 0.22)' },
-            { offset: 1, color: 'rgba(67, 56, 202, 0.01)' },
-          ]),
-        },
-      },
-      peakSeries('在线峰值', awsChartPalette.active, data.online_users_max),
-    ],
-  })
-}
-
-// 监听主题切换，动态重绘
-watch(
-  () => theme.isDark,
-  async () => {
-    await nextTick()
-    updateCharts()
-  }
-)
 
 async function loadData() {
   if (!props.serverId) return
@@ -435,9 +136,6 @@ async function loadData() {
     const { data } = await getServerMetrics(props.serverId, range.value)
     if (data.code === 0) {
       metricsData.value = data.data
-      await nextTick()
-      initCharts()
-      updateCharts()
     } else {
       ElMessage.error(data.message)
     }
@@ -450,20 +148,14 @@ async function loadData() {
 
 watch(
   () => props.modelValue,
-  async (open) => {
+  (open) => {
     if (open) {
       updateMobileState()
-      await nextTick()
-      initCharts()
-      // 初始化后立刻按当前容器尺寸校正一次，避免首帧按动画期间的尺寸绘制
-      resizeCharts()
-      window.addEventListener('resize', resizeCharts)
       loadData()
       refreshTimer = setInterval(loadData, 15000)
     } else {
       if (refreshTimer) clearInterval(refreshTimer)
-      window.removeEventListener('resize', resizeCharts)
-      disposeCharts()
+      refreshTimer = null
     }
   },
 )
@@ -474,8 +166,6 @@ watch(range, () => {
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
-  window.removeEventListener('resize', resizeCharts)
-  disposeCharts()
 })
 </script>
 
@@ -505,7 +195,7 @@ onUnmounted(() => {
         <div class="range-actions">
           <span class="auto-tip">实线均值 · 虚线峰值</span>
           <span class="auto-tip">15s 自动刷新</span>
-          <el-button size="small" :icon="Refresh" circle @click="loadData" />
+          <el-button size="small" :loading="loading" @click="loadData">刷新</el-button>
         </div>
       </div>
 
@@ -517,7 +207,16 @@ onUnmounted(() => {
             <div class="title">网络吞吐速率 (Network Bandwidth)</div>
             <div class="sub">物理网卡动态聚合速率 (Mbps)</div>
           </div>
-          <div ref="netChartRef" class="echart-box"></div>
+          <CsLineChart
+            class="chart-box"
+            :series="netSeries"
+            :height="210"
+            :loading="loading"
+            y-title="Mbps"
+            :y-tick-formatter="formatCountTick"
+            aria-label="网络吞吐速率 (Network Bandwidth)"
+            empty-text="暂无监控数据"
+          />
         </div>
 
         <!-- 2. CPU 负载 -->
@@ -526,7 +225,16 @@ onUnmounted(() => {
             <div class="title">CPU 使用率 (CPU Utilization)</div>
             <div class="sub">系统全核综合利用百分比 (%)</div>
           </div>
-          <div ref="cpuChartRef" class="echart-box"></div>
+          <CsLineChart
+            class="chart-box"
+            :series="cpuSeries"
+            :height="210"
+            :loading="loading"
+            y-title="%"
+            :y-tick-formatter="formatPercentTick"
+            aria-label="CPU 使用率 (CPU Utilization)"
+            empty-text="暂无监控数据"
+          />
         </div>
 
         <!-- 3. 内存与磁盘 -->
@@ -535,7 +243,16 @@ onUnmounted(() => {
             <div class="title">内存与磁盘空间占用 (Memory & Storage)</div>
             <div class="sub">系统物理内存与根分区挂载负载 (%)</div>
           </div>
-          <div ref="memChartRef" class="echart-box"></div>
+          <CsLineChart
+            class="chart-box"
+            :series="memSeries"
+            :height="210"
+            :loading="loading"
+            y-title="%"
+            :y-tick-formatter="formatPercentTick"
+            aria-label="内存与磁盘空间占用 (Memory & Storage)"
+            empty-text="暂无监控数据"
+          />
         </div>
 
         <!-- 4. 在线连接数 -->
@@ -544,7 +261,16 @@ onUnmounted(() => {
             <div class="title">当前在线连接数 (Active Clients)</div>
             <div class="sub">服务器实时心跳活跃连接设备统计</div>
           </div>
-          <div ref="userChartRef" class="echart-box"></div>
+          <CsLineChart
+            class="chart-box"
+            :series="userSeries"
+            :height="210"
+            :loading="loading"
+            y-title="人"
+            :y-tick-formatter="formatCountTick"
+            aria-label="当前在线连接数 (Active Clients)"
+            empty-text="暂无监控数据"
+          />
         </div>
       </div>
     </div>
@@ -616,9 +342,9 @@ onUnmounted(() => {
   margin-top: 2px;
 }
 
-.echart-box {
+/* 图表自身按 `height` 绘制 SVG，这里只负责宽度；固定高度会把图例挤出卡片。 */
+.chart-box {
   width: 100%;
-  height: 210px;
 }
 
 @media (max-width: 768px) {
@@ -676,8 +402,8 @@ onUnmounted(() => {
     }
   }
 
-  .echart-box {
-    height: 185px;
+  .chart-box {
+    width: 100%;
   }
 }
 </style>
