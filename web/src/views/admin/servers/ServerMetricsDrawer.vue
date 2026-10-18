@@ -185,7 +185,7 @@ onUnmounted(() => {
 <template>
   <el-dialog
     :model-value="modelValue"
-    :title="`时序性能监控 · ${serverName}`"
+    :title="`性能监控 · ${serverName}`"
     :width="isMobile ? '94vw' : '820px'"
     top="5vh"
     align-center
@@ -204,11 +204,7 @@ onUnmounted(() => {
             @change="onRangeChange"
           />
         </div>
-        <div class="range-actions">
-          <span class="auto-tip">实线均值 · 虚线峰值</span>
-          <span class="auto-tip">15s 自动刷新</span>
-          <CsButton :loading="loading" @click="loadData">刷新</CsButton>
-        </div>
+        <CsButton :loading="loading" @click="loadData">刷新</CsButton>
       </div>
 
       <!-- 四张指标卡片 -->
@@ -325,17 +321,6 @@ onUnmounted(() => {
   }
 }
 
-.range-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.auto-tip {
-  font-size: 12px;
-  color: var(--x-text-2, #6b7280);
-}
-
 .charts-grid {
   display: flex;
   flex-direction: column;
@@ -390,12 +375,6 @@ onUnmounted(() => {
       width: 100%;
       overflow-x: auto;
     }
-  }
-
-  .range-actions {
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 6px;
   }
 
   .chart-card {
