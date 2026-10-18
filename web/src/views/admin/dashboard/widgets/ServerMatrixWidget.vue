@@ -6,6 +6,7 @@ import {
   CsStatusIndicator,
   CsButton,
   CsTable,
+  CsProgressBar,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
 import { formatDateTime } from '@/utils/timezone'
@@ -113,8 +114,11 @@ function fmtTime(t: string | null) {
         <template #cell-load="{ row }">
           <div class="aws-load-row tabular-num">
             <span class="load-lbl">CPU</span>
-            <el-progress
-              :percentage="Math.min(100, Math.round(row.cpu || 0))"
+            <CsProgressBar
+              class="load-bar"
+              :value="Math.min(100, Math.round(row.cpu || 0))"
+              :bar-height="5"
+              hide-text
               :color="
                 row.cpu > 80
                   ? 'var(--color-text-status-error-ri38gt)'
@@ -122,20 +126,19 @@ function fmtTime(t: string | null) {
                     ? 'var(--color-text-status-warning-fabq6h)'
                     : 'var(--color-text-status-success-1i2jf8)'
               "
-              :stroke-width="5"
-              :show-text="false"
-              class="load-bar"
+              :aria-label="`CPU 使用率 ${Math.round(row.cpu || 0)}%`"
             />
             <span class="load-val">{{ (row.cpu || 0).toFixed(0) }}%</span>
           </div>
           <div class="aws-load-row tabular-num" style="margin-top: 3px">
             <span class="load-lbl">MEM</span>
-            <el-progress
-              :percentage="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
-              color="var(--color-text-link-default-qabnuk)"
-              :stroke-width="5"
-              :show-text="false"
+            <CsProgressBar
               class="load-bar"
+              :value="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
+              :bar-height="5"
+              hide-text
+              color="var(--color-text-link-default-qabnuk)"
+              :aria-label="`内存使用率 ${row.mem_total ? Math.round((row.mem / row.mem_total) * 100) : 0}%`"
             />
             <span class="load-val">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
           </div>

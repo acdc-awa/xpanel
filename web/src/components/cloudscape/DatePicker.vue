@@ -134,7 +134,7 @@ function onUpdate(raw: string) {
   inset-block-start: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  color: var(--color-text-form-default, #687078);
+  color: var(--color-text-form-default-8bb22s, #687078);
   pointer-events: none;
 }
 </style>

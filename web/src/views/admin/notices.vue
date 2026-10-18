@@ -11,6 +11,7 @@ import {
   CsInputNumber,
   CsModal,
   CsOption,
+  CsPopover,
   CsRadio,
   CsRadioGroup,
   CsSelect,
@@ -357,12 +358,10 @@ async function remove(row: NoticeItem) {
               </div>
 
               <!-- 4x4 自由表格选择器 -->
-              <el-popover
+              <CsPopover
                 v-model:visible="tablePopoverOpen"
                 placement="bottom-start"
                 :width="170"
-                trigger="click"
-                popper-class="table-grid-popover"
               >
                 <template #reference>
                   <button type="button" class="tool-btn highlight-btn" title="插入表格 (最大 4x4)">
@@ -392,7 +391,7 @@ async function remove(row: NoticeItem) {
                     </div>
                   </div>
                 </div>
-              </el-popover>
+              </CsPopover>
             </div>
 
             <CsInput
@@ -766,12 +765,14 @@ async function remove(row: NoticeItem) {
     border-top: 1px solid var(--x-border-light, #f1f5f9);
     margin-top: 6px;
 
-    .el-button {
+    /* 官方按钮类名带 :not(#\9) 高特异性，紧凑尺寸必须 !important 才能压住 */
+    :deep([class*='awsui_button_']) {
       flex: 1;
       margin: 0;
       font-size: 12px;
       padding: 6px 8px;
       height: 30px;
+      white-space: nowrap;
     }
   }
 }

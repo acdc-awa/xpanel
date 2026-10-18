@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import Icon from '../Icon.vue'
-import Button from '../Button.vue'
 import Container from '../Container.vue'
 import Header from '../Header.vue'
+import ButtonDropdown from '../ButtonDropdown.vue'
 import { CSB } from '../board-classes'
 import { cx } from '../utils'
-import { ElDropdown, ElDropdownItem, ElDropdownMenu } from 'element-plus'
 
 const props = withDefaults(
   defineProps<{
@@ -42,7 +41,7 @@ interface GridContext {
 
 const gridContext = inject<GridContext | null>('dashboardGridContext', null)
 
-function handleCommand(cmd: string) {
+function handleCommand(cmd: string | number) {
   if (cmd === 'remove') {
     gridContext?.requestWidgetRemove(props.id)
     emit('remove', props.id)
@@ -50,6 +49,11 @@ function handleCommand(cmd: string) {
     emit('refresh', props.id)
   }
 }
+
+const menuItems = [
+  { id: 'refresh', text: '刷新此卡片' },
+  { id: 'remove', text: '移除小组件', dividerBefore: true },
+]
 
 onMounted(() => {
   if (rootRef.value) gridContext?.registerItem(rootRef.value)
@@ -103,15 +107,13 @@ const headerClass = computed(() => CSB['board-item'].header)
               </div>
               <div :class="cx(CSB['board-item'].fixed, CSB['board-item'].settings, 'widget-settings')">
                 <slot name="actions" />
-                <el-dropdown trigger="click" @command="handleCommand">
-                  <Button variant="icon" icon-name="menu" aria-label="小组件选项" />
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="refresh">刷新此卡片</el-dropdown-item>
-                      <el-dropdown-item command="remove" divided>移除小组件</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                <ButtonDropdown
+                  icon-only
+                  icon-name="ellipsis"
+                  aria-label="小组件选项"
+                  :items="menuItems"
+                  @select="handleCommand"
+                />
               </div>
             </div>
           </template>

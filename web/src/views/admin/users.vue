@@ -1,9 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Plus, Search, Setting, Lock, Unlock, Delete, CopyDocument, Wallet, RefreshRight, Download, MoreFilled, Loading, User, Link } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsButtonDropdown,
+  CsCheckbox,
+  CsContainer,
+  CsDatePicker,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsLoading,
+  CsModal,
+  CsPagination,
+  CsProgressBar,
+  CsSegmentedControl,
+  CsSelect,
+  CsSpinner,
+  CsToggle,
+  CsTooltip,
+} from '@/components/cloudscape'
+import type { SegmentedOption } from '@/components/cloudscape'
 import {
   getUsers,
   createUser,
@@ -65,6 +87,37 @@ async function loadAuxData() {
 function planName(id: number) {
   return plans.value.find((p) => p.id === id)?.name ?? (id ? `#${id}` : '无套餐')
 }
+
+// CsSelect 只读 CsOption 的 label，选项里的副标题在这里拼成文本；
+// 传 options 时子节点不参与选项收集，所以「无套餐 / 跟随套餐」也要并入数组。
+const planOptions = computed(() => [
+  { label: '无套餐', value: 0 },
+  ...plans.value.map((p) => ({ label: `${p.name}（${groupName(p.permission_group_id)}）`, value: p.id })),
+])
+
+const groupOptions = computed(() => [
+  { label: `跟随套餐继承（当前: ${inheritedGroupName.value}）`, value: 0 },
+  ...permissionGroups.value.map((g) => ({
+    label: g.remark ? `${g.name}（${g.remark}）` : g.name,
+    value: g.id,
+  })),
+])
+
+const roleOptions: SegmentedOption[] = [
+  { id: 'user', text: '普通用户' },
+  { id: 'admin', text: '管理员' },
+]
+
+// 新建用户只需名称，不展示权限组副标题
+const newUserPlanOptions = computed(() => [
+  { label: '无套餐', value: 0 },
+  ...plans.value.map((p) => ({ label: p.name, value: p.id })),
+])
+
+const newUserGroupOptions = computed(() => [
+  { label: '跟随套餐', value: 0 },
+  ...permissionGroups.value.map((g) => ({ label: g.name, value: g.id })),
+])
 
 function groupName(id?: number) {
   if (!id) return '无'
@@ -172,41 +225,6 @@ function fmtTime(t: string | null) {
 }
 
 // ---- 时间快捷设定 ----
-const dateShortcuts = [
-  {
-    text: '+1 个月 (30天)',
-    value: () => {
-      const d = new Date()
-      d.setDate(d.getDate() + 30)
-      return d
-    },
-  },
-  {
-    text: '+1 季度 (90天)',
-    value: () => {
-      const d = new Date()
-      d.setDate(d.getDate() + 90)
-      return d
-    },
-  },
-  {
-    text: '+半年 (180天)',
-    value: () => {
-      const d = new Date()
-      d.setDate(d.getDate() + 180)
-      return d
-    },
-  },
-  {
-    text: '+1 年 (365天)',
-    value: () => {
-      const d = new Date()
-      d.setDate(d.getDate() + 365)
-      return d
-    },
-  },
-]
-
 function addQuickExpire(days: number) {
   const base = userEditForm.expire_at ? new Date(userEditForm.expire_at) : new Date()
   const start = base.getTime() < Date.now() ? new Date() : base
@@ -437,6 +455,19 @@ function copyText(text: string, label: string) {
   ElMessage.success(`${label}已复制到剪贴板`)
 }
 
+// 详情弹窗的底部动作：先关弹窗再执行，避免确认框被弹窗遮罩挡住
+function toggleFromDetail() {
+  if (!current.value) return
+  detailOpen.value = false
+  doToggle(current.value)
+}
+
+function deleteFromDetail() {
+  if (!current.value) return
+  detailOpen.value = false
+  doDelete(current.value)
+}
+
 // ---- 订阅信息查看/重置（2026-09-04：管理员轮换用户订阅凭据） ----
 const siteStore = useSiteStore()
 // ---- 自我守卫（2026-09-04）：管理员不能封禁自己，前端直接禁用封禁触点 ----
@@ -627,7 +658,7 @@ function toggleSelectAll(checked: boolean) {
   }
 }
 
-function handleCardAction(cmd: string, row: AdminUser) {
+function handleCardAction(cmd: string | number, row: AdminUser) {
   switch (cmd) {
     case 'adjust':
       openAdjust(row)
@@ -646,51 +677,65 @@ function handleCardAction(cmd: string, row: AdminUser) {
       break
   }
 }
+
+// CsButtonDropdown 的条目是数据驱动，禁用态与文案要按行走
+function cardMenuItems(row: AdminUser) {
+  return [
+    { id: 'subscribe', text: '订阅信息', iconName: 'external' },
+    { id: 'reset_traffic', text: '重置流量', iconName: 'refresh' },
+    {
+      id: 'toggle',
+      text: row.status === 1 ? '封禁用户' : '解封用户',
+      iconName: row.status === 1 ? 'lock-private' : 'unlocked',
+      disabled: isSelf(row),
+    },
+    { id: 'delete', text: '删除用户', iconName: 'remove', dividerBefore: true },
+  ]
+}
 </script>
 
 <template>
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left">
-        <el-input
+        <CsInput
           v-model="keyword"
           placeholder="搜索用户名 / 邮箱 / UUID / 备注"
           clearable
+          prefix-icon="search"
           style="width: 280px"
           @keyup.enter="onSearch"
           @clear="onSearch"
           @input="onSearchInput"
-        >
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
+        />
       </div>
       <div class="toolbar-actions">
-        <el-button :size="isMobile ? 'small' : 'default'" :icon="Download" @click="exportCSV">导出 CSV</el-button>
-        <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="warning" @click="batchToggle(0)">批量封禁</el-button>
-        <el-button :size="isMobile ? 'small' : 'default'" :loading="batchBusy" type="success" @click="batchToggle(1)">批量启用</el-button>
-        <el-button :size="isMobile ? 'small' : 'default'" type="primary" :icon="Plus" @click="newUserOpen = true">新增用户</el-button>
+        <CsButton icon-name="download" @click="exportCSV">导出 CSV</CsButton>
+        <CsButton :loading="batchBusy" @click="batchToggle(0)">批量封禁</CsButton>
+        <CsButton :loading="batchBusy" @click="batchToggle(1)">批量启用</CsButton>
+        <CsButton variant="primary" icon-name="add-plus" @click="newUserOpen = true">新增用户</CsButton>
       </div>
     </div>
 
-    <BaseCard title="用户列表">
-      <template #extra>
+    <CsContainer header="用户列表">
+      <template #actions>
         <div class="user-select-bar">
-          <el-checkbox
+          <CsCheckbox
             :model-value="isAllSelected"
             :indeterminate="isIndeterminate"
-            @change="(v: any) => toggleSelectAll(!!v)"
+            @change="(v: boolean) => toggleSelectAll(!!v)"
           >
             全选当前页 (已选 {{ selected.length }} / {{ total }})
-          </el-checkbox>
+          </CsCheckbox>
         </div>
       </template>
 
       <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+        <CsSpinner size="large" />
       </div>
 
       <div v-else-if="list.length === 0" class="user-empty-state">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><User /></el-icon>
+        <CsIcon name="user-profile" size="large" />
         <p style="margin-top: 8px">暂无匹配用户</p>
       </div>
 
@@ -705,9 +750,10 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <!-- 卡片头部 -->
           <div class="card-head">
             <div class="head-left">
-              <el-checkbox
+              <CsCheckbox
                 :model-value="isRowSelected(row)"
-                @change="(val: any) => toggleSelectRow(row, !!val)"
+                :aria-label="`选择 ${row.username}`"
+                @change="(val: boolean) => toggleSelectRow(row, !!val)"
               />
               <div class="user-info">
                 <div class="user-name-line">
@@ -723,9 +769,9 @@ function handleCardAction(cmd: string, row: AdminUser) {
               </div>
             </div>
             <div class="head-right">
-              <el-tooltip :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
-                <el-switch :model-value="row.status === 1" size="small" :disabled="isSelf(row)" @change="doToggle(row)" />
-              </el-tooltip>
+              <CsTooltip :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
+                <CsToggle :model-value="row.status === 1" :disabled="isSelf(row)" :aria-label="`切换 ${row.username} 的启用状态`" @change="doToggle(row)" />
+              </CsTooltip>
             </div>
           </div>
 
@@ -773,12 +819,13 @@ function handleCardAction(cmd: string, row: AdminUser) {
                 <span v-if="row.total_bytes" class="percent">({{ usagePercent(row) }}%)</span>
               </span>
             </div>
-            <el-progress
+            <CsProgressBar
               v-if="row.total_bytes"
-              :percentage="usagePercent(row)"
-              :stroke-width="5"
-              :show-text="false"
-              :status="usagePercent(row) > 90 ? 'exception' : undefined"
+              :value="usagePercent(row)"
+              :bar-height="5"
+              hide-text
+              :color="usagePercent(row) > 90 ? 'var(--color-text-status-error-ri38gt)' : undefined"
+              :aria-label="`流量已用 ${usagePercent(row)}%`"
             />
             <div class="traffic-expire muted cell-mono" style="font-size: 11px; margin-top: 6px">
               {{ row.expire_at ? fmtTime(row.expire_at) + ' 到期' : '长期有效' }}
@@ -787,152 +834,128 @@ function handleCardAction(cmd: string, row: AdminUser) {
 
           <!-- 底部操作栏 -->
           <div class="card-actions">
-            <el-button size="small" type="primary" plain @click="openDetail(row)">
-              <el-icon><Setting /></el-icon>&nbsp;编辑配置
-            </el-button>
-            <el-button size="small" type="success" plain @click="openAdjust(row)">
-              <el-icon><Wallet /></el-icon>&nbsp;调整余额
-            </el-button>
-            <el-dropdown trigger="click" @command="(cmd: string) => handleCardAction(cmd, row)">
-              <el-button size="small" plain style="flex: none; padding: 0 8px">
-                <el-icon><MoreFilled /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="subscribe">
-                    <el-icon><Link /></el-icon>订阅信息
-                  </el-dropdown-item>
-                  <el-dropdown-item command="reset_traffic">
-                    <el-icon><RefreshRight /></el-icon>重置流量
-                  </el-dropdown-item>
-                  <el-dropdown-item command="toggle" :disabled="isSelf(row)">
-                    <el-icon><Lock v-if="row.status === 1" /><Unlock v-else /></el-icon>
-                    {{ row.status === 1 ? '封禁用户' : '解封用户' }}
-                  </el-dropdown-item>
-                  <el-dropdown-item divided command="delete" style="color: var(--el-color-danger)">
-                    <el-icon><Delete /></el-icon>删除用户
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <CsButton icon-name="settings" @click="openDetail(row)">编辑配置</CsButton>
+            <CsButton icon-name="ticket" @click="openAdjust(row)">调整余额</CsButton>
+            <CsButtonDropdown
+              class="card-more"
+              icon-only
+              icon-name="ellipsis"
+              aria-label="更多操作"
+              :items="cardMenuItems(row)"
+              @select="(cmd) => handleCardAction(cmd, row)"
+            />
           </div>
         </div>
       </div>
 
       <div class="x-pager">
-        <el-pagination
+        <CsPagination
           v-model:current-page="page"
           v-model:page-size="size"
           :total="total"
           :page-sizes="[10, 20, 50]"
-          :small="isMobile"
           :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
           @current-change="load"
           @size-change="load"
         />
       </div>
-    </BaseCard>
+    </CsContainer>
 
-    <!-- 用户详情与权限配置抽屉 -->
-    <el-drawer v-model="detailOpen" :title="`用户管理 · ${current?.username ?? ''}`" size="460px">
+    <!-- 用户详情与权限配置弹窗 -->
+    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.username ?? ''}`" size="large" scrollable>
       <template v-if="current">
-        <div class="detail-rows">
-          <div class="row"><span class="k">用户名</span><span class="v">{{ current.username }}</span></div>
-          <div class="row"><span class="k">邮箱</span><span class="v">{{ current.email || '—' }}</span></div>
-          <div class="row">
-            <span class="k">UUID</span>
-            <code class="cell-mono" style="font-size: 11px; cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis" @click="copyText(current.uuid || '', 'UUID')">{{ current.uuid || '—' }}</code>
+        <div class="user-summary">
+          <div class="sum-item">
+            <span class="sum-label">用户名</span>
+            <span class="sum-value">{{ current.username }}</span>
           </div>
-          <div class="row">
-            <span class="k">角色</span>
-            <span class="v">
-              <el-tag size="small" :type="current.role === 'admin' ? 'warning' : 'info'">
+          <div class="sum-item">
+            <span class="sum-label">邮箱</span>
+            <span class="sum-value">{{ current.email || '—' }}</span>
+          </div>
+          <div class="sum-item">
+            <span class="sum-label">UUID</span>
+            <span class="sum-value sum-inline">
+              <code class="cell-mono" :title="current.uuid">{{ current.uuid || '—' }}</code>
+              <CsButton
+                v-if="current.uuid"
+                variant="inline-icon"
+                icon-name="copy"
+                aria-label="复制 UUID"
+                @click="copyText(current.uuid, 'UUID')"
+              />
+            </span>
+          </div>
+          <div class="sum-item">
+            <span class="sum-label">角色</span>
+            <span class="sum-value">
+              <CsBadge :color="current.role === 'admin' ? 'severity-medium' : 'blue'">
                 {{ current.role === 'admin' ? '管理员' : '普通用户' }}
-              </el-tag>
+              </CsBadge>
             </span>
           </div>
-          <div class="row">
-            <span class="k">账户余额</span>
-            <span class="v" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px">
-              <span class="cell-mono" style="font-weight: 700; color: #059669">
-                ¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}
-              </span>
-              <el-button size="small" type="primary" link @click="openAdjust(current)">调整余额</el-button>
+          <div class="sum-item">
+            <span class="sum-label">账户余额</span>
+            <span class="sum-value sum-inline">
+              <span class="cell-mono balance-text">¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}</span>
+              <CsButton variant="inline-link" @click="openAdjust(current)">调整余额</CsButton>
             </span>
           </div>
-          <div class="row">
-            <span class="k">套餐用量</span>
-            <span class="v" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px">
-              <span class="cell-mono" style="font-size: 12px">
+          <div class="sum-item">
+            <span class="sum-label">套餐用量</span>
+            <span class="sum-value sum-inline">
+              <span class="cell-mono">
                 {{ formatBytes(current.used_bytes) }} / {{ current.total_bytes ? formatBytes(current.total_bytes) : '不限' }}
               </span>
-              <el-button size="small" type="warning" link @click="doResetTraffic(current)">重置流量</el-button>
+              <CsButton variant="inline-link" @click="doResetTraffic(current)">重置流量</CsButton>
             </span>
           </div>
-          <div class="row"><span class="k">注册时间</span><span class="v">{{ fmtTime(current.created_at) }}</span></div>
+          <div class="sum-item">
+            <span class="sum-label">注册时间</span>
+            <span class="sum-value cell-mono">{{ fmtTime(current.created_at) }}</span>
+          </div>
         </div>
 
-        <div class="sec-title" style="margin-top: 20px; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px">
+        <div class="sec-title">
           套餐与权限设置
           <TipIcon content="用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。" />
         </div>
 
-        <el-form label-position="top" style="margin-top: 12px">
-          <el-form-item>
-            <template #label>
-              登录邮箱（用户名）
-              <TipIcon
-                type="warn"
-                content="修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。"
+        <CsForm label-position="top">
+          <div class="form-grid-2">
+            <CsFormItem>
+              <template #label>
+                登录邮箱（用户名）
+                <TipIcon
+                  type="warn"
+                  content="修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。"
+                />
+              </template>
+              <CsInput v-model="userEditForm.email" placeholder="user@example.com" clearable />
+            </CsFormItem>
+
+            <CsFormItem>
+              <template #label>
+                用户身份与角色
+                <TipIcon content="管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。" />
+              </template>
+              <CsSegmentedControl v-model="userEditForm.role" :options="roleOptions" />
+            </CsFormItem>
+
+            <CsFormItem label="绑定套餐">
+              <CsSelect v-model="userEditForm.plan_id" style="width: 100%" placeholder="选择套餐" :options="planOptions" />
+            </CsFormItem>
+
+            <CsFormItem label="所属权限组（覆盖套餐默认）">
+              <CsSelect
+                v-model="userEditForm.permission_group_id"
+                style="width: 100%"
+                :options="groupOptions"
               />
-            </template>
-            <el-input v-model="userEditForm.email" placeholder="user@example.com" clearable />
-          </el-form-item>
+            </CsFormItem>
 
-          <el-form-item>
-            <template #label>
-              用户身份与角色
-              <TipIcon content="管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。" />
-            </template>
-            <el-radio-group v-model="userEditForm.role">
-              <el-radio-button value="user">普通用户</el-radio-button>
-              <el-radio-button value="admin">管理员</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-
-          <el-form-item label="绑定套餐">
-            <el-select v-model="userEditForm.plan_id" style="width: 100%" placeholder="选择套餐">
-              <el-option :value="0" label="无套餐" />
-              <el-option
-                v-for="p in plans"
-                :key="p.id"
-                :value="p.id"
-                :label="p.name"
-              >
-                <span>{{ p.name }}</span>
-                <span class="muted" style="font-size: 12px; margin-left: 8px">({{ groupName(p.permission_group_id) }})</span>
-              </el-option>
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="所属权限组（覆盖套餐默认）">
-            <el-select v-model="userEditForm.permission_group_id" style="width: 100%">
-              <el-option :value="0" :label="`跟随套餐继承（当前: ${inheritedGroupName}）`" />
-              <el-option
-                v-for="g in permissionGroups"
-                :key="g.id"
-                :value="g.id"
-                :label="g.name"
-              >
-                <span>{{ g.name }}</span>
-                <span v-if="g.remark" class="muted" style="font-size: 12px; margin-left: 8px">({{ g.remark }})</span>
-              </el-option>
-            </el-select>
-          </el-form-item>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-            <el-form-item label="设备限制（台，0=跟随套餐）">
-              <el-input-number
+            <CsFormItem label="设备限制（台，0=跟随套餐）">
+              <CsInputNumber
                 v-model="userEditForm.device_limit"
                 :controls="false"
                 :min="0"
@@ -940,104 +963,98 @@ function handleCardAction(cmd: string, row: AdminUser) {
                 placeholder="0"
                 style="width: 100%"
               />
-            </el-form-item>
+            </CsFormItem>
+
+            <CsFormItem label="重置密码（留空不修改）">
+              <CsInput v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
+            </CsFormItem>
           </div>
 
-          <el-form-item label="到期时间">
-            <el-date-picker
+          <CsFormItem label="到期时间">
+            <CsDatePicker
               v-model="userEditForm.expire_at"
               type="datetime"
               placeholder="留空表示永不过期"
               value-format="YYYY-MM-DDTHH:mm:ssZ"
-              :shortcuts="dateShortcuts"
               style="width: 100%"
             />
             <div class="quick-expire-bar">
               <span class="quick-label">快捷设定:</span>
-              <el-button size="small" text bg @click="addQuickExpire(30)">+1个月</el-button>
-              <el-button size="small" text bg @click="addQuickExpire(90)">+1季度</el-button>
-              <el-button size="small" text bg @click="addQuickExpire(180)">+半年</el-button>
-              <el-button size="small" text bg @click="addQuickExpire(365)">+1年</el-button>
-              <el-button size="small" text bg type="danger" @click="clearExpire">永久/清空</el-button>
+              <CsButton @click="addQuickExpire(30)">+1个月</CsButton>
+              <CsButton @click="addQuickExpire(90)">+1季度</CsButton>
+              <CsButton @click="addQuickExpire(180)">+半年</CsButton>
+              <CsButton @click="addQuickExpire(365)">+1年</CsButton>
+              <CsButton @click="clearExpire">永久/清空</CsButton>
             </div>
-          </el-form-item>
+          </CsFormItem>
 
-          <el-form-item label="备注">
-            <el-input
+          <CsFormItem label="备注">
+            <CsInput
               v-model="userEditForm.remark"
               type="textarea"
               :rows="2"
-              :autosize="{ minRows: 2, maxRows: 5 }"
-              maxlength="255"
+              :maxlength="255"
               show-word-limit
               placeholder="仅管理员可见的用户备注，如渠道来源、联系信息等"
             />
-          </el-form-item>
+          </CsFormItem>
 
-          <el-form-item label="自动续费">
+          <CsFormItem label="自动续费">
             <div class="autorenew-admin-box">
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
                   <div class="muted" style="font-size: 11.5px">到期前 1 小时内用余额续购当前套餐</div>
                 </div>
-                <el-switch v-model="userEditForm.auto_renew_expire" />
+                <CsToggle v-model="userEditForm.auto_renew_expire" />
               </div>
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">流量耗尽自动续费</div>
                   <div class="muted" style="font-size: 11.5px">流量用尽后用余额续购（重新计时+清零流量）</div>
                 </div>
-                <el-switch v-model="userEditForm.auto_renew_exhaust" />
+                <CsToggle v-model="userEditForm.auto_renew_exhaust" />
               </div>
             </div>
-          </el-form-item>
+          </CsFormItem>
+        </CsForm>
+      </template>
 
-          <el-form-item label="重置密码（留空不修改）">
-            <el-input v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
-          </el-form-item>
-
-          <el-button type="primary" :loading="userSaving" style="width: 100%; margin-top: 10px" @click="saveUserConfig">
-            保存用户配置
-          </el-button>
-        </el-form>
-
-        <div class="detail-actions" style="margin-top: 24px; border-top: 1px dashed var(--x-border); padding-top: 16px">
-          <el-button size="small" :type="current.status === 1 ? 'warning' : 'success'" :disabled="isSelf(current)" @click="doToggle(current); detailOpen = false">
-            {{ current.status === 1 ? '封禁该用户' : '解封该用户' }}
-          </el-button>
-          <el-button v-if="current.role !== 'admin'" size="small" type="danger" plain @click="doDelete(current); detailOpen = false">
-            删除用户
-          </el-button>
+      <template #footer>
+        <div class="detail-footer">
+          <div class="detail-footer-left">
+            <CsButton :disabled="current ? isSelf(current) : true" @click="toggleFromDetail">
+              {{ current?.status === 1 ? '封禁该用户' : '解封该用户' }}
+            </CsButton>
+            <CsButton v-if="current && current.role !== 'admin'" @click="deleteFromDetail">删除用户</CsButton>
+          </div>
+          <div class="detail-footer-right">
+            <CsButton @click="detailOpen = false">取消</CsButton>
+            <CsButton variant="primary" :loading="userSaving" @click="saveUserConfig">保存用户配置</CsButton>
+          </div>
         </div>
       </template>
-    </el-drawer>
+    </CsModal>
 
     <!-- 手动创建用户弹窗 -->
-    <el-dialog v-model="newUserOpen" title="新建用户" width="520px" @close="closeNewUser">
+    <CsModal v-model:visible="newUserOpen" header="新建用户" size="medium" @close="closeNewUser">
       <template v-if="!newUserResult">
-        <el-form label-position="top">
-          <el-form-item label="邮箱">
-            <el-input v-model="newUserForm.email" placeholder="user@example.com" />
-          </el-form-item>
-          <el-form-item label="密码">
-            <el-input v-model="newUserForm.password" type="password" show-password placeholder="至少 8 位" />
-          </el-form-item>
+        <CsForm label-position="top">
+          <CsFormItem label="邮箱">
+            <CsInput v-model="newUserForm.email" placeholder="user@example.com" />
+          </CsFormItem>
+          <CsFormItem label="密码">
+            <CsInput v-model="newUserForm.password" type="password" show-password placeholder="至少 8 位" />
+          </CsFormItem>
           <div class="form-grid-2">
-            <el-form-item label="初始套餐（选填）">
-              <el-select v-model="newUserForm.plan_id" style="width: 100%" placeholder="选择套餐">
-                <el-option :value="0" label="无套餐" />
-                <el-option v-for="p in plans" :key="p.id" :value="p.id" :label="p.name" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="权限组（选填）">
-              <el-select v-model="newUserForm.permission_group_id" style="width: 100%" placeholder="跟随套餐">
-                <el-option :value="0" label="跟随套餐" />
-                <el-option v-for="g in permissionGroups" :key="g.id" :value="g.id" :label="g.name" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="设备限制（台，0=跟随套餐）">
-              <el-input-number
+            <CsFormItem label="初始套餐（选填）">
+              <CsSelect v-model="newUserForm.plan_id" style="width: 100%" placeholder="选择套餐" :options="newUserPlanOptions" />
+            </CsFormItem>
+            <CsFormItem label="权限组（选填）">
+              <CsSelect v-model="newUserForm.permission_group_id" style="width: 100%" placeholder="跟随套餐" :options="newUserGroupOptions" />
+            </CsFormItem>
+            <CsFormItem label="设备限制（台，0=跟随套餐）">
+              <CsInputNumber
                 v-model="newUserForm.device_limit"
                 :controls="false"
                 :min="0"
@@ -1045,40 +1062,39 @@ function handleCardAction(cmd: string, row: AdminUser) {
                 placeholder="0"
                 style="width: 100%"
               />
-            </el-form-item>
+            </CsFormItem>
           </div>
-          <el-form-item label="到期时间（选填）">
-            <el-date-picker
+          <CsFormItem label="到期时间（选填）">
+            <CsDatePicker
               v-model="newUserForm.expire_at"
               type="datetime"
               placeholder="留空表示永不过期"
               value-format="YYYY-MM-DDTHH:mm:ssZ"
-              :shortcuts="dateShortcuts"
               style="width: 100%"
             />
             <div class="quick-expire-bar">
               <span class="quick-label">快捷设定:</span>
-              <el-button size="small" text bg @click="addNewUserQuickExpire(30)">+1个月</el-button>
-              <el-button size="small" text bg @click="addNewUserQuickExpire(90)">+1季度</el-button>
-              <el-button size="small" text bg @click="addNewUserQuickExpire(180)">+半年</el-button>
-              <el-button size="small" text bg @click="addNewUserQuickExpire(365)">+1年</el-button>
-              <el-button size="small" text bg type="danger" @click="clearNewUserExpire">清空</el-button>
+              <CsButton @click="addNewUserQuickExpire(30)">+1个月</CsButton>
+              <CsButton @click="addNewUserQuickExpire(90)">+1季度</CsButton>
+              <CsButton @click="addNewUserQuickExpire(180)">+半年</CsButton>
+              <CsButton @click="addNewUserQuickExpire(365)">+1年</CsButton>
+              <CsButton @click="clearNewUserExpire">清空</CsButton>
             </div>
-          </el-form-item>
-          <el-form-item label="备注（选填）">
-            <el-input
+          </CsFormItem>
+          <CsFormItem label="备注（选填）">
+            <CsInput
               v-model="newUserForm.remark"
               type="textarea"
               :rows="2"
-              maxlength="255"
+              :maxlength="255"
               show-word-limit
               placeholder="仅管理员可见，如渠道来源、联系信息等"
             />
-          </el-form-item>
-        </el-form>
+          </CsFormItem>
+        </CsForm>
       </template>
       <template v-else>
-        <el-alert type="success" :closable="false" show-icon title="用户已创建" style="margin-bottom: 12px" />
+        <CsAlert type="success" header="用户已创建" style="margin-bottom: 12px" />
         <div class="secret-box">
           <div class="secret-row">
             <span class="k">邮箱</span>
@@ -1087,25 +1103,25 @@ function handleCardAction(cmd: string, row: AdminUser) {
           <div class="secret-row">
             <span class="k">UUID</span>
             <code>{{ newUserResult.uuid }}</code>
-            <el-button size="small" text @click="copyText(newUserResult.uuid, 'UUID')"><el-icon><CopyDocument /></el-icon></el-button>
+            <CsButton variant="inline-icon" icon-name="copy" aria-label="复制 UUID" @click="copyText(newUserResult.uuid, 'UUID')" />
           </div>
           <p class="muted" style="margin: 0; font-size: 12px">UUID 已生成，用户购买套餐或由管理员分配权限组后即可生效使用节点。</p>
         </div>
       </template>
       <template #footer>
         <template v-if="!newUserResult">
-          <el-button @click="newUserOpen = false">取消</el-button>
-          <el-button type="primary" :loading="newUserCreating" @click="submitNewUser">创建</el-button>
+          <CsButton @click="newUserOpen = false">取消</CsButton>
+          <CsButton variant="primary" :loading="newUserCreating" @click="submitNewUser">创建</CsButton>
         </template>
         <template v-else>
-          <el-button type="primary" @click="closeNewUser">完成</el-button>
+          <CsButton variant="primary" @click="closeNewUser">完成</CsButton>
         </template>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 独立余额调账弹窗 -->
-    <el-dialog v-model="adjustOpen" title="调整用户余额" width="420px">
-      <el-form label-position="top">
+    <CsModal v-model:visible="adjustOpen" header="调整用户余额" size="small">
+      <CsForm label-position="top">
         <div class="adjust-header">
           <div class="user-meta">
             <span class="k">用户:</span>
@@ -1118,8 +1134,8 @@ function handleCardAction(cmd: string, row: AdminUser) {
             </span>
           </div>
         </div>
-        <el-form-item label="变动金额（元，支持负数扣款）" style="margin-top: 14px">
-          <el-input-number
+        <CsFormItem label="变动金额（元，支持负数扣款）" style="margin-top: 14px">
+          <CsInputNumber
             v-model="adjustForm.delta_yuan"
             :controls="false"
             :precision="2"
@@ -1127,47 +1143,45 @@ function handleCardAction(cmd: string, row: AdminUser) {
             placeholder="正数充值，负数扣减"
             style="width: 100%"
           />
-        </el-form-item>
-        <el-form-item label="调整备注（选填）">
-          <el-input v-model="adjustForm.remark" placeholder="如：活动赠送、售后退款、误充扣除" />
-        </el-form-item>
-      </el-form>
+        </CsFormItem>
+        <CsFormItem label="调整备注（选填）">
+          <CsInput v-model="adjustForm.remark" placeholder="如：活动赠送、售后退款、误充扣除" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="adjustOpen = false">取消</el-button>
-        <el-button type="primary" :loading="adjusting" @click="submitAdjust">确认调整</el-button>
+        <CsButton @click="adjustOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="adjusting" @click="submitAdjust">确认调整</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 订阅信息查看/重置弹窗 -->
-    <el-dialog v-model="subInfoOpen" title="订阅信息" width="560px">
-      <div v-loading="subInfoLoading" class="sub-info-body">
+    <CsModal v-model:visible="subInfoOpen" header="订阅信息" size="medium">
+      <CsLoading :loading="subInfoLoading" class="sub-info-body">
         <div class="user-meta" style="margin-bottom: 12px">
           <span class="k">用户:</span>
           <span class="v" style="font-weight: 600">{{ subInfoRow?.email }}</span>
         </div>
         <!-- label 置顶独立成行：避免长 label 横向占宽挤压输入框（桌面），并消除窄屏下的行内溢出（移动） -->
-        <el-form label-position="top" @submit.prevent>
-          <el-form-item label="订阅地址（发给用户，客户端添加订阅用）">
+        <CsForm label-position="top">
+          <CsFormItem label="订阅地址（发给用户，客户端添加订阅用）">
             <div class="sub-url-row">
-              <el-input :model-value="subInfoUrl" readonly class="cell-mono" size="default" />
-              <el-button :disabled="!subInfoUrl" @click="copyText(subInfoUrl, '订阅地址')">
-                <el-icon><CopyDocument /></el-icon>&nbsp;复制
-              </el-button>
+              <CsInput :model-value="subInfoUrl" readonly class="cell-mono" />
+              <CsButton :disabled="!subInfoUrl" icon-name="copy" @click="copyText(subInfoUrl, '订阅地址')">复制</CsButton>
             </div>
-          </el-form-item>
-        </el-form>
-      </div>
+          </CsFormItem>
+        </CsForm>
+      </CsLoading>
       <template #footer>
-        <el-button @click="subInfoOpen = false">关闭</el-button>
-        <el-button type="danger" plain :loading="subInfoResetting" :disabled="subInfoLoading" @click="doResetSubscribeToken">
+        <CsButton @click="subInfoOpen = false">关闭</CsButton>
+        <CsButton :loading="subInfoResetting" :disabled="subInfoLoading" @click="doResetSubscribeToken">
           重置订阅地址
-        </el-button>
+        </CsButton>
         <TipIcon
           type="warn"
           content="重置后该用户的原订阅地址及连接密钥（UUID）将立即失效，在线服务器将实时断开旧凭据连接，用户需重新同步订阅。"
         />
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
@@ -1193,27 +1207,115 @@ function handleCardAction(cmd: string, row: AdminUser) {
   margin-top: 16px;
   padding: 8px 16px;
 }
-.detail-rows {
-  background: var(--x-bg, #f4f5fb);
-  border-radius: var(--x-radius-sm, 8px);
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
+.user-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0 24px;
+  background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--x-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
 }
-.detail-rows .row {
+
+.sum-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   font-size: 13px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--x-border, #e5e7eb);
+
+  &:last-child {
+    border-bottom: none;
+  }
 }
-.detail-rows .k {
+
+.sum-label {
+  flex: none;
+  font-size: 12px;
   color: var(--x-text-2, #6b7280);
 }
-.detail-rows .v {
+
+.sum-value {
+  min-width: 0;
+  font-size: 14px;
   font-weight: 500;
   color: var(--x-text, #1e2333);
+  text-align: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  code {
+    font-size: 12.5px;
+  }
+}
+
+/* 值里带操作按钮时改为横向排布；按钮不收缩，文本负责截断 */
+.sum-inline {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: normal;
+
+  > code,
+  > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  > :deep([class*='awsui_button_']) {
+    flex: none;
+  }
+}
+
+.balance-text {
+  font-weight: 700;
+  color: #059669;
+}
+
+.sec-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--x-text, #1e2333);
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.detail-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  /* 占满 footer 宽度，左侧危险动作与右侧主操作才能分列两端 */
+  width: 100%;
+}
+
+.detail-footer-left,
+.detail-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
 .secret-box {
   background: var(--x-bg, #f4f5fb);
@@ -1267,7 +1369,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
   display: flex;
   gap: 8px;
   width: 100%;
-  .el-input {
+  :deep(.cs-input-root) {
     flex: 1;
     min-width: 0; // 弹性收缩，保证复制按钮在窄屏下不被挤出弹窗
   }
@@ -1493,12 +1595,18 @@ function handleCardAction(cmd: string, row: AdminUser) {
     justify-content: flex-end;
     padding-top: 4px;
 
-    .el-button {
+    /* 官方按钮类名带 :not(#\9) 高特异性，紧凑尺寸必须 !important 才能压住 */
+    :deep([class*='awsui_button_']) {
       flex: 1;
       margin: 0;
       font-size: 12px;
       padding: 6px 8px;
       height: 30px;
+      white-space: nowrap;
+    }
+
+    :deep(.card-more) {
+      flex: none;
     }
   }
 }
@@ -1511,7 +1619,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
 
     .x-toolbar-left {
       width: 100%;
-      .el-input {
+      :deep(.cs-input-root) {
         width: 100% !important;
       }
     }
@@ -1522,7 +1630,7 @@ function handleCardAction(cmd: string, row: AdminUser) {
       gap: 6px;
       width: 100%;
 
-      .el-button {
+      :deep([class*='awsui_button_']) {
         margin: 0;
         width: 100%;
         height: 32px;

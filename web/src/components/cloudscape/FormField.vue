@@ -91,6 +91,6 @@ const showWarning = computed(() => Boolean(props.warningText && !props.errorText
 
 <style scoped>
 .cs-form-field-required {
-  color: var(--color-text-status-error, #d91515);
+  color: var(--color-text-status-error-ri38gt, #d91515);
 }
 </style>

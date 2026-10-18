@@ -10,6 +10,8 @@ const props = withDefaults(
     visible: boolean
     header?: string
     size?: 'small' | 'medium' | 'large' | 'x-large' | 'xx-large' | 'max'
+    /** 内容超出视口时固定弹窗高度，让内容区自身滚动（折叠表单类长弹窗用）。 */
+    scrollable?: boolean
     hideDismissButton?: boolean
     disableContentPaddings?: boolean
     closeAriaLabel?: string
@@ -17,6 +19,7 @@ const props = withDefaults(
   {
     header: undefined,
     size: 'medium',
+    scrollable: false,
     hideDismissButton: false,
     disableContentPaddings: false,
     closeAriaLabel: 'Close modal',
@@ -34,8 +37,28 @@ let previousActive: HTMLElement | null = null
 
 const rootClasses = computed(() => cx(CS.modal.root, CS.modal.refresh))
 const focusLockClasses = computed(() => cx(CS.modal['focus-lock'], CS.modal['position-center']))
-const dialogClasses = computed(() => cx(CS.modal.dialog, CS.modal.refresh, CS.modal[props.size]))
-const contentClasses = computed(() => cx(CS.modal.content, props.disableContentPaddings && CS.modal['no-paddings']))
+const dialogClasses = computed(() =>
+  cx(
+    CS.modal.dialog,
+    CS.modal.refresh,
+    CS.modal[props.size],
+    props.scrollable && CS.modal['custom-height']
+  )
+)
+const dialogStyle = computed(() =>
+  props.scrollable ? { '--awsui-modal-custom-height-ka4djm': '88vh' } : undefined
+)
+const containerClasses = computed(() =>
+  cx(CS.modal.container, props.scrollable && CS.modal['custom-height-container'])
+)
+const contentClasses = computed(() =>
+  cx(
+    CS.modal.content,
+    props.disableContentPaddings && CS.modal['no-paddings'],
+    props.scrollable && CS.modal['custom-height-content']
+  )
+)
+const footerClasses = computed(() => cx(CS.modal.footer, CS.modal['footer--rounded'], 'cs-modal-footer'))
 
 function close() {
   emit('update:visible', false)
@@ -109,8 +132,8 @@ onBeforeUnmount(unlockScroll)
       @click.self="close"
     >
       <div :class="focusLockClasses">
-        <div ref="dialogRef" :class="dialogClasses">
-          <div :class="CS.modal.container">
+        <div ref="dialogRef" :class="dialogClasses" :style="dialogStyle">
+          <div :class="containerClasses">
             <div :class="CS.modal.header">
               <Header variant="h2">
                 <span :id="headerId" :class="CS.modal['header--text']">{{ header }}</span>
@@ -128,7 +151,7 @@ onBeforeUnmount(unlockScroll)
             <div :class="contentClasses">
               <slot />
             </div>
-            <div v-if="$slots.footer" :class="CS.modal.footer">
+            <div v-if="$slots.footer" :class="footerClasses">
               <slot name="footer" />
             </div>
           </div>
@@ -137,3 +160,15 @@ onBeforeUnmount(unlockScroll)
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* 官方 footer 只负责分隔线与 sticky，按钮排布由 React 侧的 SpaceBetween 提供，
+   这里补上等价的右对齐排布。 */
+.cs-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+</style>

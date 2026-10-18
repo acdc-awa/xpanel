@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Fragment, computed, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue'
 import Icon from './Icon.vue'
+import IconButton from './IconButton.vue'
 import Input from './Input.vue'
 import Option from './Option.vue'
 import { CS } from './classes'
@@ -343,15 +344,13 @@ onBeforeUnmount(() => {
       </span>
     </button>
 
-    <button
+    <IconButton
       v-if="showClear"
-      type="button"
       class="cs-select-clear"
-      aria-label="清除选择"
+      icon-name="close"
+      label="清除选择"
       @click.stop="clearSelection"
-    >
-      <Icon name="close" size="x-small" />
-    </button>
+    />
 
     <Teleport to="body">
       <div
@@ -445,26 +444,12 @@ onBeforeUnmount(() => {
   inline-size: 100%;
 }
 
+/* 清除按钮的位置与外观来自 CsIconButton，这里只负责定位 */
 .cs-select-clear {
   position: absolute;
   inset-block-start: 50%;
   inset-inline-end: 30px;
   transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  inline-size: 20px;
-  block-size: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-interactive-default-pauydh, #545b64);
-  cursor: pointer;
-}
-
-.cs-select-clear:hover {
-  background: var(--color-background-button-normal-hover, rgba(0, 0, 0, 0.06));
 }
 
 .cs-select-dropdown {
@@ -481,6 +466,6 @@ onBeforeUnmount(() => {
   padding-block: 12px;
   padding-inline: 12px;
   font-size: 13px;
-  color: var(--color-text-body-secondary, #5f6b7a);
+  color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
 }
 </style>

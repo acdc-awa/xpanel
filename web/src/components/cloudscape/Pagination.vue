@@ -158,7 +158,7 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
 
 .cs-pagination-total {
   font-size: 13px;
-  color: var(--color-text-body-secondary, #5f6b7a);
+  color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
 }
 
 .cs-pagination-sizes {

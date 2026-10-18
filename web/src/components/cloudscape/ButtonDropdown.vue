@@ -16,7 +16,13 @@ export interface ButtonDropdownItem {
 const props = withDefaults(
   defineProps<{
     items: ButtonDropdownItem[]
-    text: string
+    /** 非图标模式下显示在按钮上的文字。 */
+    text?: string
+    /** 只渲染图标按钮（无文字、无下拉箭头），用于卡片角标菜单。 */
+    iconOnly?: boolean
+    /** 图标模式下的图标名。 */
+    iconName?: string
+    ariaLabel?: string
     variant?: 'normal' | 'primary'
     disabled?: boolean
     loading?: boolean
@@ -24,6 +30,10 @@ const props = withDefaults(
     emptyText?: string
   }>(),
   {
+    text: '',
+    iconOnly: false,
+    iconName: 'ellipsis',
+    ariaLabel: undefined,
     variant: 'normal',
     disabled: false,
     loading: false,
@@ -53,16 +63,20 @@ function updatePosition() {
   if (!trigger || !panel) return
   const rect = trigger.getBoundingClientRect()
   const height = panel.offsetHeight
+  const width = Math.max(rect.width, 180)
   const gap = 4
   let top = rect.bottom + gap
   if (top + height > window.innerHeight && rect.top - height - gap > 0) {
     top = rect.top - height - gap
   }
+  // 图标按钮通常贴在卡片右缘，面板需要对右对齐并夹在视口内。
+  const maxLeft = Math.max(8, window.innerWidth - width - 8)
+  const left = props.iconOnly ? Math.min(Math.max(8, rect.right - width), maxLeft) : Math.min(Math.max(8, rect.left), maxLeft)
   panelStyle.value = {
     position: 'fixed',
-    left: `${rect.left}px`,
+    left: `${left}px`,
     top: `${top}px`,
-    minWidth: `${Math.max(rect.width, 180)}px`,
+    minWidth: `${width}px`,
     maxWidth: 'min(360px, calc(100vw - 16px))',
     zIndex: '9000',
   }
@@ -173,6 +187,19 @@ onBeforeUnmount(() => {
     :class="[CS['button-dropdown']['button-dropdown'], fullWidth && CS['button-dropdown']['full-width']]"
   >
     <Button
+      v-if="iconOnly"
+      variant="icon"
+      :disabled="disabled"
+      :loading="loading"
+      :icon-name="iconName"
+      :aria-label="ariaLabel || text"
+      aria-haspopup="menu"
+      :aria-expanded="open"
+      @click="togglePanel"
+      @keydown="onTriggerKeydown"
+    />
+    <Button
+      v-else
       :variant="variant"
       :disabled="disabled"
       :loading="loading"
@@ -254,8 +281,8 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .cs-button-dropdown-panel {
   z-index: 9000;
-  background: var(--color-background-container-content, #ffffff);
-  border: 1px solid var(--color-border-dropdown-container, #c6c6cd);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  border: 1px solid var(--color-border-dropdown-container-zmsfa8, #c6c6cd);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   overflow: hidden;

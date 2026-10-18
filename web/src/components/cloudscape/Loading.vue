@@ -39,11 +39,11 @@ withDefaults(
   justify-content: center;
   gap: 8px;
   min-height: 64px;
-  background: color-mix(in srgb, var(--color-background-container-content, #ffffff) 72%, transparent);
+  background: color-mix(in srgb, var(--color-background-container-content-mjfil9, #ffffff) 72%, transparent);
 }
 
 .cs-loading-text {
   font-size: 12px;
-  color: var(--color-text-body-secondary, #656871);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 </style>

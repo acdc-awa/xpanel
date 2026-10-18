@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Refresh, Loading, DocumentCopy, Search } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  CsBadge,
+  CsButton,
+  CsContainer,
+  CsDatePicker,
+  CsIcon,
+  CsInput,
+  CsModal,
+  CsOption,
+  CsPagination,
+  CsSelect,
+  CsSpinner,
+  CsTabs,
+} from '@/components/cloudscape'
+import type { TabItem } from '@/components/cloudscape'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
 import { errMsg } from '@/api/http'
@@ -16,18 +29,18 @@ const size = ref(20)
 const category = ref('')
 const keyword = ref('')
 const operatorType = ref('')
-const dateRange = ref<[Date, Date] | null>(null)
+const startTime = ref<string | null>(null)
+const endTime = ref<string | null>(null)
 
 async function load() {
   loading.value = true
   try {
-    const [start, end] = dateRange.value || []
     const { data } = await getAuditLogs(page.value, size.value, {
       category: category.value || undefined,
       keyword: keyword.value.trim() || undefined,
       operator_type: operatorType.value || undefined,
-      start_time: start ? new Date(start).toISOString() : undefined,
-      end_time: end ? new Date(end).toISOString() : undefined,
+      start_time: startTime.value ? new Date(startTime.value).toISOString() : undefined,
+      end_time: endTime.value ? new Date(endTime.value).toISOString() : undefined,
     })
     if (data.code === 0) {
       list.value = data.data.items
@@ -51,7 +64,8 @@ function resetFilters() {
   category.value = ''
   keyword.value = ''
   operatorType.value = ''
-  dateRange.value = null
+  startTime.value = null
+  endTime.value = null
   page.value = 1
   load()
 }
@@ -74,11 +88,23 @@ const rows = computed<RowView[]>(() =>
   }),
 )
 
+const CATEGORY_BADGE: Record<RowView['categoryColor'], 'blue' | 'green' | 'red' | 'grey'> = {
+  primary: 'blue',
+  info: 'grey',
+  success: 'green',
+  warning: 'grey',
+  danger: 'red',
+}
+
 // 卡片内字段表最多展示条数，超出折叠进弹窗
 const CARD_FIELD_LIMIT = 6
 
 const detailModalOpen = ref(false)
-const detailTab = ref<'translated' | 'raw'>('translated')
+const detailTab = ref('translated')
+const detailTabs: TabItem[] = [
+  { id: 'translated', label: '翻译视图' },
+  { id: 'raw', label: '原文' },
+]
 const currentView = ref<AuditView | null>(null)
 function openDetail(view: AuditView) {
   if (!view.raw && !view.fields.length && !view.texts.length) return
@@ -96,54 +122,61 @@ function fmtTime(t: string) {
   <div class="x-page">
     <div class="x-toolbar">
       <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <el-select v-model="category" placeholder="全部分类" clearable style="width: 130px" @change="onFilterChange">
-          <el-option label="全部分类" value="" />
-          <el-option label="服务器管理" value="servers" />
-          <el-option label="用户管理" value="users" />
-          <el-option label="财务套餐" value="billing" />
-          <el-option label="入站证书" value="inbounds" />
-          <el-option label="系统设置" value="settings" />
-          <el-option label="身份认证" value="auth" />
-        </el-select>
-        <el-select v-model="operatorType" placeholder="操作人类型" clearable style="width: 130px" @change="onFilterChange">
-          <el-option label="全部类型" value="" />
-          <el-option label="管理员" value="admin" />
-          <el-option label="普通用户" value="user" />
-          <el-option label="系统任务" value="system" />
-        </el-select>
-        <el-date-picker
-          v-model="dateRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          style="width: 330px"
-          @change="onFilterChange"
-        />
-        <el-input
+        <CsSelect v-model="category" placeholder="全部分类" clearable style="width: 140px" @change="onFilterChange">
+          <CsOption label="全部分类" value="" />
+          <CsOption label="服务器管理" value="servers" />
+          <CsOption label="用户管理" value="users" />
+          <CsOption label="财务套餐" value="billing" />
+          <CsOption label="入站证书" value="inbounds" />
+          <CsOption label="系统设置" value="settings" />
+          <CsOption label="身份认证" value="auth" />
+        </CsSelect>
+        <CsSelect v-model="operatorType" placeholder="操作人类型" clearable style="width: 140px" @change="onFilterChange">
+          <CsOption label="全部类型" value="" />
+          <CsOption label="管理员" value="admin" />
+          <CsOption label="普通用户" value="user" />
+          <CsOption label="系统任务" value="system" />
+        </CsSelect>
+        <div class="range-filter">
+          <CsDatePicker
+            v-model="startTime"
+            type="datetimerange"
+            placeholder="开始时间"
+            style="width: 165px"
+            @change="onFilterChange"
+          />
+          <span class="range-sep">至</span>
+          <CsDatePicker
+            v-model="endTime"
+            type="datetimerange"
+            placeholder="结束时间"
+            style="width: 165px"
+            @change="onFilterChange"
+          />
+        </div>
+        <CsInput
           v-model="keyword"
           placeholder="搜索操作内容、IP、路由..."
           clearable
-          style="width: 200px"
+          prefix-icon="search"
+          style="width: 220px"
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
-        >
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-button type="primary" @click="onFilterChange"><el-icon><Search /></el-icon>&nbsp;查询</el-button>
-        <el-button @click="resetFilters">重置</el-button>
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
+        />
+        <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
+        <CsButton @click="resetFilters">重置</CsButton>
+        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       </div>
     </div>
 
-    <BaseCard title="系统审计日志">
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
+    <CsContainer header="系统审计日志">
+      <div v-if="loading" class="state-block">
+        <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="rows.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><DocumentCopy /></el-icon>
-        <p style="margin-top: 8px">暂无审计日志</p>
+      <div v-else-if="rows.length === 0" class="state-block state-empty">
+        <CsIcon name="file" size="large" />
+        <p>暂无审计日志</p>
       </div>
 
       <!-- 审计日志卡片网格流（自适应 1~4 列）：摘要 + 字段表 + 大文本预览 -->
@@ -156,9 +189,7 @@ function fmtTime(t: string) {
                 {{ rv.row.operator_type === 'admin' ? '管理员' : rv.row.operator_type === 'system' ? '系统' : '用户' }}
                 {{ rv.row.operator_type === 'system' ? '' : rv.row.operator_username ? rv.row.operator_username : `#${rv.row.operator_id}` }}
               </span>
-              <el-tag :type="rv.categoryColor" size="small" effect="plain" style="font-size: 11px">
-                {{ rv.categoryName }}
-              </el-tag>
+              <CsBadge :color="CATEGORY_BADGE[rv.categoryColor]">{{ rv.categoryName }}</CsBadge>
               <span class="action-name">{{ rv.title }}</span>
             </div>
             <code class="cell-mono muted" style="font-size: 11px">{{ rv.row.ip || '—' }}</code>
@@ -174,9 +205,7 @@ function fmtTime(t: string) {
             <div class="grid-item full-width">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px">
                 <span class="item-label">操作内容</span>
-                <el-button type="primary" link size="small" style="font-size: 11px; padding: 0" @click="openDetail(rv.view)">
-                  展开 / 原文
-                </el-button>
+                <CsButton variant="link" class="link-compact" @click="openDetail(rv.view)">展开 / 原文</CsButton>
               </div>
               <div class="audit-summary" :title="rv.view.summary">{{ rv.view.summary || '—' }}</div>
               <div v-if="rv.view.fields.length" class="audit-fields">
@@ -184,16 +213,14 @@ function fmtTime(t: string) {
                   <span class="af-label">{{ f.label }}</span>
                   <span class="af-value" :class="{ 'cell-mono': f.mono }">{{ f.value }}</span>
                 </div>
-                <el-button
+                <CsButton
                   v-if="rv.view.fields.length > CARD_FIELD_LIMIT"
-                  type="primary"
-                  link
-                  size="small"
-                  style="font-size: 11px; padding: 0"
+                  variant="link"
+                  class="link-compact"
                   @click="openDetail(rv.view)"
                 >
                   全部 {{ rv.view.fields.length }} 项…
-                </el-button>
+                </CsButton>
               </div>
               <div v-if="rv.view.texts.length" class="audit-text-chips">
                 <span v-for="(t, i) in rv.view.texts" :key="i" class="audit-text-chip" :title="t.preview" @click="openDetail(rv.view)">
@@ -210,7 +237,7 @@ function fmtTime(t: string) {
       </div>
 
       <div class="x-pager">
-        <el-pagination
+        <CsPagination
           v-model:current-page="page"
           v-model:page-size="size"
           :total="total"
@@ -220,12 +247,12 @@ function fmtTime(t: string) {
           @size-change="() => { page = 1; load() }"
         />
       </div>
-    </BaseCard>
+    </CsContainer>
 
     <!-- 详情弹窗：翻译视图 / 原文 -->
-    <el-dialog v-model="detailModalOpen" title="操作详情" width="640px" append-to-body>
-      <el-tabs v-if="currentView" v-model="detailTab">
-        <el-tab-pane label="翻译视图" name="translated">
+    <CsModal v-model:visible="detailModalOpen" header="操作详情" size="large">
+      <CsTabs v-if="currentView" v-model="detailTab" :tabs="detailTabs">
+        <div v-if="detailTab === 'translated'">
           <div class="audit-modal-summary">{{ currentView.summary || '—' }}</div>
           <div v-if="currentView.fields.length" class="modal-fields">
             <div v-for="(f, i) in currentView.fields" :key="i" class="modal-field-row">
@@ -242,21 +269,51 @@ function fmtTime(t: string) {
           <div v-if="!currentView.fields.length && !currentView.texts.length" style="color: var(--x-text-3); font-size: 12.5px; padding: 8px 0">
             无结构化字段，可切到「原文」查看。
           </div>
-        </el-tab-pane>
-        <el-tab-pane label="原文" name="raw">
+        </div>
+        <div v-else>
           <pre class="audit-pre">{{ currentView.raw }}</pre>
-        </el-tab-pane>
-      </el-tabs>
+        </div>
+      </CsTabs>
       <template #footer>
-        <el-button @click="detailModalOpen = false">关闭</el-button>
+        <CsButton @click="detailModalOpen = false">关闭</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
   </div>
 </template>
 
 <style scoped lang="scss">
 .cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
 .muted { color: var(--x-text-3); }
+
+.range-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.range-sep {
+  font-size: 13px;
+  color: var(--x-text-3);
+}
+
+.state-block {
+  padding: 48px 0;
+  text-align: center;
+}
+
+.state-empty {
+  color: var(--x-text-3);
+  font-size: 13.5px;
+
+  p {
+    margin-top: 8px;
+  }
+}
+
+.link-compact {
+  font-size: 11px;
+  padding: 0;
+}
 
 /* ================= 全局统一审计日志卡片网格流 ================= */
 .audit-card-grid {

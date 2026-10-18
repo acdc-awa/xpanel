@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useSlots } from 'vue'
 import Icon from './Icon.vue'
+import IconButton from './IconButton.vue'
 import { CS } from './classes'
 import { cx } from './utils'
 
@@ -162,28 +163,20 @@ function clear() {
       @focus="emit('focus', $event)"
     />
     <span v-if="hasEndIcon" :class="CS.input['input-icon-end']">
-      <button
-        v-if="showClear"
-        type="button"
-        :class="CS.input['input-button-right']"
-        aria-label="清除"
-        @click="clear"
-      >
-        <Icon name="close" size="x-small" />
-      </button>
-      <button
+      <IconButton v-if="showClear" icon-name="close" label="清除" @click="clear" />
+      <IconButton
         v-if="showPasswordToggle"
-        type="button"
-        :class="CS.input['input-button-right']"
-        :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
+        :label="passwordVisible ? '隐藏密码' : '显示密码'"
+        :pressed="passwordVisible"
         @click="passwordVisible = !passwordVisible"
       >
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor">
-          <path v-if="passwordVisible" d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" />
-          <circle cx="8" cy="8" r="2.2" />
-          <path v-if="!passwordVisible" d="M2 14 14 2" />
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8 12.1 12.2 8 12.2 1.5 8 1.5 8Z" />
+          <circle cx="8" cy="8" r="2.1" />
+          <!-- 明文态才画斜线：图标表示「再点一下就隐藏」 -->
+          <path v-if="passwordVisible" d="M2.5 13.5 13.5 2.5" />
         </svg>
-      </button>
+      </IconButton>
     </span>
     <span v-if="showWordLimit && maxlength" class="cs-input-word-count">{{ charCount }} / {{ maxlength }}</span>
   </div>
@@ -194,6 +187,20 @@ function clear() {
   position: relative;
 }
 
+/* 两个辅助按钮同时出现时（可清除 + 可显隐）横向排布，避免叠在一起 */
+:deep([class*='input-icon-end']) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 关闭浏览器自带的密码显隐按钮（Edge/IE 会通过 ::-ms-reveal 叠加原生控件，
+   否则会和上面这组按钮并排出现两个眼睛）。 */
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
+
 .cs-input-word-count {
   position: absolute;
   inset-inline-end: 0;
@@ -201,7 +208,7 @@ function clear() {
   margin-top: 2px;
   font-size: 11px;
   line-height: 14px;
-  color: var(--color-text-body-secondary, #656871);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
   pointer-events: none;
 }
 </style>
