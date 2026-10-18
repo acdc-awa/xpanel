@@ -26,7 +26,7 @@ const serverColumns: TableColumn[] = [
   { id: 'status', header: '状态', width: 130 },
   { id: 'load', header: '负载 (CPU / 内存)', width: 150 },
   { id: 'rate', header: '速率 / 在线', minWidth: 135 },
-  { id: 'actions', header: '操作', width: 64, align: 'center' },
+  { id: 'actions', header: '历史数据', width: 72, align: 'center' },
 ]
 
 /** 窄卡片下让表格保持可读列宽并横向滚动，而不是把每列压到逐字换行。 */
@@ -155,12 +155,12 @@ function fmtTime(t: string | null) {
           </div>
         </template>
 
-        <!-- 5. 操作 -->
+        <!-- 5. 历史数据 -->
         <template #cell-actions="{ row }">
           <CsButton
             variant="icon"
-            icon-name="view-vertical"
-            aria-label="查看性能图表"
+            icon-name="history"
+            :aria-label="`查看 ${row.name || row.host} 的历史数据`"
             @click="ctx.openServerMetrics(row as ServerMatrixItem)"
           />
         </template>

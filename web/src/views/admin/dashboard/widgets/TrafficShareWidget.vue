@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { CsDashboardWidget, CsSegmentedControl } from '@/components/cloudscape'
-import type { SegmentedOption } from '@/components/cloudscape'
+import { rankPeriodOptions } from '../rank-period'
 import { useThemeStore } from '@/stores/theme'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
@@ -17,15 +17,6 @@ const theme = useThemeStore()
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
-
-const rankPeriodOptions: SegmentedOption[] = [
-  { id: 'today', text: '今日' },
-  { id: '7d', text: '7 天' },
-  { id: '30d', text: '30 天' },
-]
-
-const RANK_PERIOD_LABELS: Record<string, string> = { today: '今日', '7d': '近 7 天', '30d': '近 30 天', month: '近 30 天' }
-const rankLabel = computed(() => ctx.dashData.value?.rank_label || RANK_PERIOD_LABELS[ctx.rankPeriod.value] || '今日')
 
 const awsChartPalette = ['#006ce0', '#8c4bff', '#00a1c9', '#ec7211', '#1d8102', '#656871', '#d13212', '#2489c5']
 
@@ -152,7 +143,6 @@ onUnmounted(() => {
   <CsDashboardWidget
     id="traffic-share"
     title="服务器流量分布"
-    :badge="rankLabel"
     :x="layoutItem.x"
     :y="layoutItem.y"
     :w="layoutItem.w"

@@ -43,7 +43,11 @@ const pollFailed = ref(false)
 
 // 数据只来自主控 DB 聚合（不再提供前端演示数据开关）
 const trendRange = ref<number>(30)
+/** 饼图（服务器流量分布）的统计粒度。 */
 const rankPeriod = ref<RankPeriod>('today')
+/** 排行卡片的统计粒度；与饼图互相独立，接口不变、各自按需取数。 */
+const rankingPeriod = ref<RankPeriod>('today')
+const rankingData = ref<DashboardData | null>(null)
 
 // 小组件网格布局状态
 const layout = ref<WidgetLayoutItem[]>(loadSavedLayout())
@@ -148,9 +152,12 @@ provide<DashboardContext>('adminDashboardContext', {
   pollFailed,
   trendRange,
   rankPeriod,
+  rankingPeriod,
+  rankingData,
   openServerMetrics,
   openOnlineUsers,
   refreshDashboard: () => load(),
+  setRankingPeriod,
 })
 
 let autoRefreshTimer: any = null
@@ -158,10 +165,51 @@ let realtimeTimer: any = null
 let inFlight = false
 let reloadQueued = false
 let realtimeInFlight = false
+let rankingInFlight = false
+let rankingReloadQueued = false
 
 const REALTIME_POLL_INTERVAL_MS = 3000
 const POLL_INTERVAL_MS = 30000
 const POLL_HINT = '实时网速与监控矩阵每 3 秒刷新（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。'
+
+/**
+ * 排行卡片的数据始终对应 rankingPeriod，不随饼图粒度变化：
+ * 粒度相同复用主数据（零额外请求），不同则单独按排行粒度取一份。
+ * 不能把「排行数据为空时回退到主数据」写成兜底——饼图换粒度会让主数据
+ * 立刻变成新粒度，排行会短暂显示成饼图的粒度再跳回来。
+ */
+async function loadRanking() {
+  const period = rankingPeriod.value
+  if (period === rankPeriod.value) {
+    rankingData.value = dashData.value
+    return
+  }
+  if (rankingInFlight) {
+    // 连点粒度时让进行中的请求结束后补拉最新粒度，而不是直接丢弃。
+    rankingReloadQueued = true
+    return
+  }
+  rankingInFlight = true
+  try {
+    const { data } = await getDashboard(trendRange.value as any, period as any)
+    // 请求期间粒度又变了：丢弃这份过期结果，交给排队的那次重拉。
+    if (data.code === 0 && period === rankingPeriod.value) rankingData.value = data.data
+  } catch {
+    // 静默失败：排行沿用上一份数据，不影响主面板
+  } finally {
+    rankingInFlight = false
+    if (rankingReloadQueued) {
+      rankingReloadQueued = false
+      void loadRanking()
+    }
+  }
+}
+
+async function setRankingPeriod(period: RankPeriod) {
+  if (period === rankingPeriod.value) return
+  rankingPeriod.value = period
+  await loadRanking()
+}
 
 async function load(opts: { silent?: boolean } = {}) {
   if (inFlight) {
@@ -182,6 +230,8 @@ async function load(opts: { silent?: boolean } = {}) {
     } else {
       ElMessage.error(data.message)
     }
+    // 排行粒度与饼图不同源时，跟随主轮询一起刷新
+    void loadRanking()
   } catch (e) {
     if (opts.silent) {
       pollFailed.value = true

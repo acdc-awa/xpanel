@@ -2,11 +2,14 @@
 import { computed, inject, ref } from 'vue'
 import {
   CsDashboardWidget,
+  CsSegmentedControl,
   CsTable,
   CsTabs,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
+import type { RankPeriod } from '@/api/admin'
 import { formatBytes } from '@/utils/format'
+import { rankPeriodOptions } from '../rank-period'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
 
@@ -15,16 +18,23 @@ defineProps<{
 }>()
 
 const ctx = inject<DashboardContext>('adminDashboardContext')!
-const dashData = ctx.dashData
+
+/**
+ * 只认自己的数据：`rankingData` 由 dashboard.vue 维护，粒度与饼图相同时它指向
+ * 主数据、不同时是单独拉的那份。这里不做 `|| dashData` 兜底——否则饼图换粒度
+ * 的瞬间主数据先变、排行数据还没到，会闪一下饼图的粒度。
+ */
+const rankSource = computed(() => ctx.rankingData.value)
 
 const activeTab = ref('users')
 
-const RANK_PERIOD_LABELS: Record<string, string> = { today: '今日', '7d': '近 7 天', '30d': '近 30 天', month: '近 30 天' }
-const rankLabel = computed(() => dashData.value?.rank_label || RANK_PERIOD_LABELS[ctx.rankPeriod.value] || '今日')
+function onPeriodChange(detail: { selectedId: string | number }) {
+  void ctx.setRankingPeriod(detail.selectedId as RankPeriod)
+}
 
 const dashboardTabs = computed(() => [
-  { id: 'users', label: `用户排行 · ${rankLabel.value}` },
-  { id: 'nodes', label: `节点排行 · ${rankLabel.value}` },
+  { id: 'users', label: '用户排行' },
+  { id: 'nodes', label: '节点排行' },
   { id: 'cards', label: '卡密核销' },
   { id: 'orders', label: '订单流水' },
 ])
@@ -33,14 +43,14 @@ const userColumns = computed<TableColumn[]>(() => [
   { id: 'rank', header: '#', width: 40 },
   { id: 'user-main', header: '用户', minWidth: 110 },
   { id: 'user-plan', header: '套餐', width: 90 },
-  { id: 'user-usage', header: `${rankLabel.value}用量`, width: 105 },
+  { id: 'user-usage', header: '用量', width: 105 },
 ])
 
 const nodeColumns = computed<TableColumn[]>(() => [
   { id: 'rank', header: '#', width: 40 },
   { id: 'node-main', header: '节点', minWidth: 110 },
   { id: 'node-percent', header: '占比', width: 70 },
-  { id: 'node-usage', header: `${rankLabel.value}用量`, width: 105 },
+  { id: 'node-usage', header: '用量', width: 105 },
 ])
 
 const cardColumns: TableColumn[] = [
@@ -70,13 +80,21 @@ const orderColumns: TableColumn[] = [
     :min-h="layoutItem.minH"
     @refresh="ctx.refreshDashboard"
   >
+    <template #actions>
+      <CsSegmentedControl
+        :model-value="ctx.rankingPeriod.value"
+        :options="rankPeriodOptions"
+        label="统计粒度"
+        @change="onPeriodChange"
+      />
+    </template>
     <div class="ranking-tab-container">
       <div class="tabs-header-wrapper">
         <CsTabs v-model="activeTab" :tabs="dashboardTabs" disable-content-paddings>
           <!-- 1. 用户流量排行 -->
           <div v-if="activeTab === 'users'" class="ranking-tab-content">
         <CsTable
-          :items="dashData?.user_rank || []"
+          :items="rankSource?.user_rank || []"
           :columns="userColumns"
           empty-text="暂无用户流量数据"
         >
@@ -103,7 +121,7 @@ const orderColumns: TableColumn[] = [
       <!-- 2. 节点流量排行 -->
       <div v-else-if="activeTab === 'nodes'" class="ranking-tab-content">
         <CsTable
-          :items="dashData?.server_rank || []"
+          :items="rankSource?.server_rank || []"
           :columns="nodeColumns"
           empty-text="暂无节点流量数据"
         >
@@ -130,7 +148,7 @@ const orderColumns: TableColumn[] = [
       <!-- 3. 最近礼品卡核销 -->
       <div v-else-if="activeTab === 'cards'" class="ranking-tab-content">
         <CsTable
-          :items="dashData?.recent_gift_cards || []"
+          :items="rankSource?.recent_gift_cards || []"
           :columns="cardColumns"
           empty-text="暂无核销记录"
         >
@@ -153,7 +171,7 @@ const orderColumns: TableColumn[] = [
       <!-- 4. 最近套餐订单 -->
       <div v-else-if="activeTab === 'orders'" class="ranking-tab-content">
         <CsTable
-          :items="dashData?.recent_orders || []"
+          :items="rankSource?.recent_orders || []"
           :columns="orderColumns"
           empty-text="暂无订单"
         >
