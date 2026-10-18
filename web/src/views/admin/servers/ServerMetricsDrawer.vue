@@ -301,7 +301,7 @@ onUnmounted(() => {
 
 .range-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -311,11 +311,16 @@ onUnmounted(() => {
   border-radius: var(--x-radius, 10px);
 }
 
+/* 分段控件在剩余空间里横向滚动，刷新按钮保持完整宽度不被挤压。 */
 .range-tabs {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 
   /* 官方 segment 继承 reset 的 white-space: normal，被 flex 压缩时会把
-     「1 小时 (1m)」折成两行；分段标签本身应始终单行。 */
+     「1 小时」折成两行；分段标签本身应始终单行。 */
   :deep(button) {
     white-space: nowrap;
   }
@@ -366,15 +371,8 @@ onUnmounted(() => {
   }
 
   .range-toolbar {
-    flex-direction: column;
-    align-items: stretch;
     gap: 8px;
     padding: 8px 10px;
-
-    .range-tabs {
-      width: 100%;
-      overflow-x: auto;
-    }
   }
 
   .chart-card {

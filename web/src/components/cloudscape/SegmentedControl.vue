@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import Icon from './Icon.vue'
+import Select from './Select.vue'
 import { CS } from './classes'
 import { cx } from './utils'
 
@@ -30,10 +31,21 @@ const emit = defineEmits<{
 const activeId = computed(() => props.selectedId ?? props.modelValue)
 const isActive = (option: SegmentedOption) => activeId.value !== undefined && String(option.id) === String(activeId.value)
 
+const selectOptions = computed(() =>
+  props.options.map((option) => ({ label: option.text, value: option.id, disabled: option.disabled }))
+)
+
 function select(option: SegmentedOption) {
   if (option.disabled || isActive(option)) return
   emit('update:modelValue', option.id)
   emit('change', { selectedId: option.id })
+}
+
+/** 下拉降级路径：窄屏时官方用 select 承载同一组选项，事件口径保持一致。 */
+function onSelectChange(value: string | number | (string | number)[] | '') {
+  if (value === '') return
+  emit('update:modelValue', value as string | number)
+  emit('change', { selectedId: value as string | number })
 }
 </script>
 
@@ -77,5 +89,28 @@ function select(option: SegmentedOption) {
         <span>{{ option.text }}</span>
       </button>
     </div>
+    <div :class="CS['segmented-control'].select" class="cs-segmented-select">
+      <Select
+        :model-value="activeId"
+        :options="selectOptions"
+        :aria-label="label"
+        @change="onSelectChange"
+      />
+    </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+/* 官方实现同时渲染分段条与下拉框，由 CSS 在 ≤688px 切换：
+   分段条 display:none、下拉框 display:block。分段条的隐藏已由官方
+   styles.scoped.css 内的同名媒体查询完成，这里只需管下拉框的显隐。 */
+.cs-segmented-select {
+  display: none;
+}
+
+@media (max-width: 688px) {
+  .cs-segmented-select {
+    display: block;
+  }
+}
+</style>

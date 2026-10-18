@@ -26,6 +26,8 @@ const props = withDefaults(
     collapseTags?: boolean
     loading?: boolean
     size?: string
+    /** 无可见标签时给触发按钮一个无障碍名（例如分段控件的窄屏下拉降级）。 */
+    ariaLabel?: string
   }>(),
   {
     modelValue: undefined,
@@ -39,6 +41,7 @@ const props = withDefaults(
     collapseTags: false,
     loading: false,
     size: undefined,
+    ariaLabel: undefined,
   }
 )
 
@@ -329,6 +332,7 @@ onBeforeUnmount(() => {
       :disabled="disabled"
       aria-haspopup="listbox"
       :aria-expanded="open"
+      :aria-label="ariaLabel"
       @click="toggleDropdown"
       @keydown="onTriggerKeydown"
     >
