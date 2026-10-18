@@ -156,7 +156,10 @@ const headerClass = computed(() => CSB['board-item'].header)
   min-height: 0;
   height: 100%;
   overflow: auto;
-  overscroll-behavior: contain;
+
+  /* 不要设 overscroll-behavior: contain：卡片是常驻的滚动容器，
+     它会把滚轮事件锁在卡片内（内容不溢出时也一样），导致页面无法滚动。
+     保留默认的链式滚动：卡片滚到底后自然交给页面。 */
 
   /* 滚动容器的子项不能被 flex 压缩，否则内容会缩到卡片高度而不是产生滚动。 */
   > * {
@@ -172,17 +175,23 @@ const headerClass = computed(() => CSB['board-item'].header)
 
   &::-webkit-scrollbar-track {
     background: transparent;
+    margin-block: 4px;
   }
 
   &::-webkit-scrollbar-button {
     display: none;
   }
 
+  /* 透明边框会吃掉可见宽度：10px 滑道减 2×2px 后仍有 6px 滑块，否则只剩 4px 几乎看不见。 */
   &::-webkit-scrollbar-thumb {
-    background-color: var(--color-text-interactive-default-pauydh, #545b64);
+    background-color: var(--color-text-status-inactive-fqjc97, #879596);
     background-clip: content-box;
-    border: 3px solid transparent;
+    border: 2px solid transparent;
     border-radius: 8px;
+
+    &:hover {
+      background-color: var(--color-text-body-secondary-66ygbb, #656871);
+    }
   }
 }
 
