@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Lock, Key } from '@element-plus/icons-vue'
+import { ElMessage } from '@/components/cloudscape'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { forgotPassword, resetPassword } from '@/api/auth'
 import { errMsg } from '@/api/http'

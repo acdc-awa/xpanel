@@ -18,7 +18,7 @@ import type { TabItem } from '@/components/cloudscape'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
 import { errMsg } from '@/api/http'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 
 const list = ref<AuditLog[]>([])
 const total = ref(0)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Plus, Delete, QuestionFilled, CopyDocument, MagicStick } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import { getXrayVlessEnc } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { FallbackItem } from '@/api/types'

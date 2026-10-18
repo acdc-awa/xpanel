@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { User, Lock, Key } from '@element-plus/icons-vue'
+import { ElMessage } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import { useSiteStore } from '@/stores/site'

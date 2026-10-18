@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatAxisTime } from '@/utils/timezone'

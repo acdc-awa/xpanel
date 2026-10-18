@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+/**
+ * 确保 `ElMessage` 只来自 Cloudscape 兼容壳，不会被 unplugin-auto-import 静默换回 Element Plus。
+ *
+ * 背景：vite 的 AutoImport + ElementPlusResolver 会把未显式 import 的 `ElMessage`
+ * 自动声明成 Element Plus 的实现。这种写法不报错、类型也对，但样式是 EP 的白色小方块，
+ * 与 Cloudscape 提示条混在同一页面里——迁移期间就因此漏掉了 165 处调用点。
+ *
+ * 用法：node scripts/check-elmessage.mjs
+ * 退出码：0=全部走兼容壳；1=存在隐式 Element Plus 用法。
+ */
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const webRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..')
+const srcRoot = join(webRoot, 'src')
+const SCAN_EXTENSIONS = ['.vue', '.ts']
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'vendor'])
+/** 兼容壳自身按定义就是 EP 的替代实现，不参与检查 */
+const SKIP_FILES = new Set(['components/cloudscape/message.ts', 'components/cloudscape/toast.ts'])
+const CLOUDSCAPE_IMPORT = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'@\/components\/cloudscape'/g
+const CALL = /\bElMessage\.(?:success|error|warning|info|closeAll|loading)\b/
+
+function* walk(dir) {
+  for (const name of readdirSync(dir)) {
+    if (SKIP_DIRS.has(name)) continue
+    const path = join(dir, name)
+    if (statSync(path).isDirectory()) yield* walk(path)
+    else if (SCAN_EXTENSIONS.some((ext) => name.endsWith(ext))) yield path
+  }
+}
+
+/** 去掉注释，避免把文档里提到的 `ElMessage.success(...)` 当成真实调用 */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+}
+
+function importsElMessage(code) {
+  for (const match of code.matchAll(CLOUDSCAPE_IMPORT)) {
+    const names = match[1].split(',').map((part) => part.trim().split(' as ')[0].trim())
+    if (names.includes('ElMessage')) return true
+  }
+  return false
+}
+
+const problems = []
+for (const file of walk(srcRoot)) {
+  const rel = relative(srcRoot, file).split(sep).join('/')
+  if (SKIP_FILES.has(rel)) continue
+  const code = stripComments(readFileSync(file, 'utf8'))
+  if (!CALL.test(code) || importsElMessage(code)) continue
+  code.split('\n').forEach((line, index) => {
+    if (CALL.test(line)) problems.push({ file: rel, line: index + 1 })
+  })
+}
+
+if (!problems.length) {
+  console.log('OK：所有 ElMessage 调用都显式取自 @/components/cloudscape')
+  process.exit(0)
+}
+
+console.error('发现未显式导入的 ElMessage 调用（会被自动注入成 Element Plus 版本）：')
+for (const p of problems) console.error(`  src/${p.file}:${p.line}`)
+console.error('\n修法：import { ElMessage } from \'@/components/cloudscape\'')
+process.exit(1)

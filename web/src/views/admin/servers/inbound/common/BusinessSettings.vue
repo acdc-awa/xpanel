@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { QuestionFilled, Plus, Delete, MagicStick, CopyDocument } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import type { AccessLayer } from '@/api/types'
 
 defineProps<{

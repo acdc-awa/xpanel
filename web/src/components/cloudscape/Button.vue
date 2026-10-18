@@ -15,6 +15,11 @@ type ButtonVariant =
   | 'modal-dismiss'
   | 'menu-trigger'
   /**
+   * Flashbar 的关闭按钮：透明底 + 反色图标，颜色由外层闪条类型决定。
+   * 官方的 flashbar 关闭按钮用的就是这个变体，CSS 早已随 flashbar 一起 vendor。
+   */
+  | 'flashbar-icon'
+  /**
    * AWS 控制台破坏性操作的两态：
    * - danger-outline：红字红描边（对应确认框里的「No, cancel」）
    * - danger：红色实心（对应「Yes, delete」）
@@ -70,14 +75,16 @@ const emit = defineEmits<{
 
 const slots = useSlots()
 
-const isStandalone = computed(() => props.variant === 'icon' || props.variant === 'inline-icon')
+const isStandalone = computed(
+  () => props.variant === 'icon' || props.variant === 'inline-icon' || props.variant === 'flashbar-icon'
+)
 const effectiveIconAlign = computed(() => (isStandalone.value ? 'left' : props.iconAlign))
 const hasContent = computed(() => Boolean(slots.default))
 
 const classes = computed(() =>
   cx(
     CS.button.button,
-    CS.button[`variant-${props.variant}`],
+    CS.button[`variant-${props.variant}`] ?? CS.button['variant-normal'],
     props.disabled && CS.button.disabled,
     !props.wrapText && CS.button['button-no-wrap'],
     !hasContent.value && CS.button['button-no-text'],

@@ -7,7 +7,8 @@ import {
   InfoFilled,
   WarningFilled,
 } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import {
   getLayers,
   createLayer,

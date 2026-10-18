@@ -8,6 +8,7 @@ import {
   InfoFilled,
   Wallet,
 } from '@element-plus/icons-vue'
+import { ElMessage } from '@/components/cloudscape'
 import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, MagicStick } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import {
   createServerRoutingRule,
   updateServerRoutingRule,

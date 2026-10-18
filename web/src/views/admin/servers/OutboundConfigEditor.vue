@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, CopyDocument, Download, Share } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { parseNodeLink, formatNodeLink, type ParsedNodeLink } from '@/utils/nodeLink'
 import {

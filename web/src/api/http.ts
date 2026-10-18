@@ -1,5 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { apiBase } from '@/config/site'
 

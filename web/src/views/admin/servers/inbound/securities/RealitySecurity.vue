@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Refresh, MagicStick, CopyDocument, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 import { getXrayKeys } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { RealityConfig } from '../types'

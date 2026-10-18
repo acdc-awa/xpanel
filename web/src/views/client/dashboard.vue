@@ -10,6 +10,7 @@ import {
   WarningFilled,
   InfoFilled,
 } from '@element-plus/icons-vue'
+import { ElMessage } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'

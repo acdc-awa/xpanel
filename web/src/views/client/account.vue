@@ -19,7 +19,7 @@ import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { BalanceLog } from '@/api/types'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/components/cloudscape'
 
 const auth = useAuthStore()
 const router = useRouter()

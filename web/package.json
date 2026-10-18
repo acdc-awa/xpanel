@@ -8,7 +8,8 @@
     "build": "vite build && vue-tsc --noEmit",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "check:tokens": "node scripts/check-cloudscape-tokens.mjs"
+    "check:tokens": "node scripts/check-cloudscape-tokens.mjs",
+    "check:elmessage": "node scripts/check-elmessage.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

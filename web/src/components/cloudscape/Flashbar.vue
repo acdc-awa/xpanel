@@ -1,73 +1,45 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import Icon from './Icon.vue'
-import Button from './Button.vue'
+import FlashItem from './FlashItem.vue'
+import type { FlashItemModel } from './FlashItem.vue'
 import { CS } from './classes'
-import { cx } from './utils'
 
-export interface FlashbarItem {
-  id: string
-  type?: 'success' | 'error' | 'warning' | 'info' | 'in-progress'
-  header?: string
-  content?: string
-  dismissible?: boolean
-}
+export type { FlashItemModel }
 
+/**
+ * 官方 Flashbar 的「常驻通知列表」形态：消息留在页面上，由用户点关闭。
+ * 需要「弹出后自动消失」的瞬时提示请用 CsToast。
+ */
 const props = withDefaults(
   defineProps<{
-    items: FlashbarItem[]
+    items: FlashItemModel[]
+    ariaLabel?: string
+    /** ariaRole="status" 时由读屏在内容更新时播报 */
+    ariaRole?: 'status'
   }>(),
-  {}
+  {
+    ariaLabel: '通知',
+    ariaRole: undefined,
+  }
 )
 
 const emit = defineEmits<{
   (e: 'dismiss', id: string): void
+  (e: 'action', id: string): void
 }>()
 
 const visibleItems = computed(() => props.items)
-
-function iconName(type?: string) {
-  switch (type) {
-    case 'error':
-      return 'status-negative'
-    case 'warning':
-      return 'status-warning'
-    case 'success':
-      return 'status-positive'
-    case 'in-progress':
-      return 'status-in-progress'
-    default:
-      return 'status-info'
-  }
-}
 </script>
 
 <template>
-  <div :class="cx(CS.flashbar.flashbar, CS.flashbar['visual-refresh'])">
-    <ul :class="CS.flashbar['flash-list']" role="list">
+  <div :class="CS.flashbar.flashbar">
+    <ul :class="CS.flashbar['flash-list']" :aria-label="ariaLabel">
       <li v-for="item in visibleItems" :key="item.id" :class="CS.flashbar['flash-list-item']">
-        <div :class="cx(CS.flashbar.flash, CS.flashbar[`flash-type-${item.type ?? 'info'}`])">
-          <div :class="CS.flashbar['flash-body']">
-            <div :class="CS.flashbar['flash-message']">
-              <div :class="CS.flashbar['flash-icon']">
-                <Icon :name="iconName(item.type)" size="normal" />
-              </div>
-              <div :class="CS.flashbar['flash-content']">
-                <div v-if="item.header" :class="CS.flashbar['flash-header']">{{ item.header }}</div>
-                <div :class="CS.flashbar['flash-text']">{{ item.content }}</div>
-              </div>
-            </div>
-            <div v-if="item.dismissible" :class="CS.flashbar['dismiss-button-wrapper']">
-              <Button
-                variant="icon"
-                icon-name="close"
-                aria-label="Dismiss"
-                :class="CS.flashbar['dismiss-button']"
-                @click="emit('dismiss', item.id)"
-              />
-            </div>
-          </div>
-        </div>
+        <FlashItem :item="item" :aria-role="ariaRole" @dismiss="emit('dismiss', $event)">
+          <template v-if="$slots.action" #action>
+            <slot name="action" :item="item" />
+          </template>
+        </FlashItem>
       </li>
     </ul>
   </div>

@@ -19,6 +19,7 @@ import {
   CsPagination,
   CsSelect,
   CsSpinner,
+  ElMessage,
 } from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
