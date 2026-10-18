@@ -5,8 +5,8 @@ import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
-import { CsLineChart } from '@/components/cloudscape'
-import type { LineSeries } from '@/components/cloudscape'
+import { CsButton, CsLineChart, CsSegmentedControl } from '@/components/cloudscape'
+import type { LineSeries, SegmentedOption } from '@/components/cloudscape'
 
 const props = defineProps<{
   modelValue: boolean
@@ -125,6 +125,19 @@ const userSeries = computed<LineSeries[]>(() => {
 const formatPercentTick = (value: number) => `${value}%`
 const formatCountTick = (value: number) => String(value)
 
+const rangeOptions: SegmentedOption[] = [
+  { id: '1h', text: '1 小时' },
+  { id: '6h', text: '6 小时' },
+  { id: '24h', text: '24 小时' },
+  { id: '7d', text: '7 天' },
+  { id: '30d', text: '30 天' },
+]
+
+/** CsSegmentedControl 的 v-model 类型是 string | number，这里收窄回本页的档位联合类型。 */
+function onRangeChange(detail: { selectedId: string | number }) {
+  range.value = detail.selectedId as typeof range.value
+}
+
 function updateMobileState() {
   isMobile.value = window.innerWidth <= 768
 }
@@ -184,18 +197,17 @@ onUnmounted(() => {
       <!-- 顶栏时间范围切换 -->
       <div class="range-toolbar">
         <div class="range-tabs">
-          <el-radio-group v-model="range" size="small">
-            <el-radio-button value="1h">1 小时 (1m)</el-radio-button>
-            <el-radio-button value="6h">6 小时 (3m)</el-radio-button>
-            <el-radio-button value="24h">24 小时 (10m)</el-radio-button>
-            <el-radio-button value="7d">7 天 (30m)</el-radio-button>
-            <el-radio-button value="30d">30 天 (1h)</el-radio-button>
-          </el-radio-group>
+          <CsSegmentedControl
+            :model-value="range"
+            :options="rangeOptions"
+            label="监控时间范围"
+            @change="onRangeChange"
+          />
         </div>
         <div class="range-actions">
           <span class="auto-tip">实线均值 · 虚线峰值</span>
           <span class="auto-tip">15s 自动刷新</span>
-          <el-button size="small" :loading="loading" @click="loadData">刷新</el-button>
+          <CsButton :loading="loading" @click="loadData">刷新</CsButton>
         </div>
       </div>
 
@@ -293,12 +305,24 @@ onUnmounted(() => {
 
 .range-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 10px 14px;
   background: var(--x-bg, #f8fafc);
   border: 1px solid var(--x-border, #e6e8f0);
   border-radius: var(--x-radius, 10px);
+}
+
+.range-tabs {
+  flex: 0 0 auto;
+
+  /* 官方 segment 继承 reset 的 white-space: normal，被 flex 压缩时会把
+     「1 小时 (1m)」折成两行；分段标签本身应始终单行。 */
+  :deep(button) {
+    white-space: nowrap;
+  }
 }
 
 .range-actions {
@@ -364,30 +388,14 @@ onUnmounted(() => {
 
     .range-tabs {
       width: 100%;
-
-      .el-radio-group {
-        display: flex;
-        width: 100%;
-        // 5 档标签在窄屏一行放不下：允许换行，按钮按自身宽度排布。
-        flex-wrap: wrap;
-
-        .el-radio-button {
-          flex: 1 0 auto;
-
-          :deep(.el-radio-button__inner) {
-            width: 100%;
-            padding: 6px 2px;
-            font-size: 11px;
-          }
-        }
-      }
+      overflow-x: auto;
     }
+  }
 
-    .range-actions {
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
+  .range-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .chart-card {
