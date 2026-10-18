@@ -63,6 +63,10 @@ import './vendor/components/internal/components/chart-status-container/styles.sc
 import './vendor/components/popover/styles.scoped.css'
 
 // Internal building blocks used by the components above.
+import './vendor/components/steps/styles.scoped.css'
+import './vendor/components/divider/styles.scoped.css'
+import './vendor/components/slider/styles.scoped.css'
+
 import './vendor/components/internal/components/tooltip/styles.scoped.css'
 import './vendor/components/internal/components/checkbox-icon/styles.scoped.css'
 import './vendor/components/internal/components/abstract-switch/styles.scoped.css'

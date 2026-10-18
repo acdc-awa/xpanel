@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
-import { ZoomIn, ZoomOut, RefreshRight, RefreshLeft, Check, Close, Refresh } from '@element-plus/icons-vue'
+import CsButton from '@/components/cloudscape/Button.vue'
+import CsIcon from '@/components/cloudscape/Icon.vue'
+import CsModal from '@/components/cloudscape/Modal.vue'
+import CsSlider from '@/components/cloudscape/Slider.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +30,8 @@ const visible = computed({
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
+/** 弹窗正文容器：舞台宽度以它的实测宽度为准。 */
+const containerRef = ref<HTMLElement | null>(null)
 
 // 视图与变换状态
 const scale = ref(1)
@@ -47,10 +52,12 @@ const estimatedKb = ref(0)
 // 裁剪舞台与裁剪框的基准尺寸（逻辑像素，正方形）。
 // 裁剪框固定占舞台的 CROP_BOX_SIZE / STAGE_SIZE，窄视口下按同一比例一起收缩：
 // 原来是两个写死的 340 / 260，≤360px 视口里弹窗被压到 94vw，340px 的舞台右侧
-// 被 .el-dialog 的 overflow:hidden 裁掉约 34px，裁剪框也不再居中。
+// 被弹窗的 overflow:hidden 裁掉约 34px，裁剪框也不再居中。
 const STAGE_SIZE = 340
 const CROP_BOX_SIZE = 260
 const STAGE_MIN = 240
+/** 舞台与正文容器之间保留的余量（含边框/滚动条）。 */
+const STAGE_GAP = 4
 // 小预览的 CSS 尺寸（后备缓冲再乘 dpr）
 const PREVIEW_SIZE = 32
 
@@ -63,9 +70,14 @@ const cropBoxSize = computed(() => Math.round((stageSize.value * CROP_BOX_SIZE) 
 const dpr = ref(typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 3) : 1)
 
 function syncStageSize() {
-  if (typeof window === 'undefined') return
-  // 弹窗宽 ≤94vw，body 左右各 18px 内边距，再留 8px 余量
-  const avail = Math.floor(window.innerWidth * 0.94) - 44
+  // 舞台尺寸必须服从弹窗正文区的**实测**宽度：不同 size 档的 modal 宽度、
+  // 正文左右 20px 内边距、以及窄视口下的 94vw 收缩都在 CSS 里，靠常量推算
+  // 必然在某一档对不上（曾按 480px 估算，实际 small 档只有 320px，黑色舞台
+  // 比弹窗还宽、左右溢出）。
+  const container = containerRef.value
+  const avail = container
+    ? Math.floor(container.getBoundingClientRect().width) - STAGE_GAP
+    : Math.floor(Math.min(window.innerWidth * 0.94, 600)) - 44
   const next = Math.max(STAGE_MIN, Math.min(STAGE_SIZE, avail))
   if (next === stageSize.value) return
 
@@ -107,6 +119,18 @@ function onViewportChange() {
   syncDpr()
 }
 
+// 弹窗在 visible 变为 true 后才挂到 DOM，正文宽度此时才可测；同时监听容器
+// 自身尺寸（窗口缩放、滚动条出现、modal size 变化都会改变它）。
+let containerObserver: ResizeObserver | null = null
+watch(containerRef, (el) => {
+  containerObserver?.disconnect()
+  containerObserver = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  containerObserver = new ResizeObserver(() => syncStageSize())
+  containerObserver.observe(el)
+  syncStageSize()
+})
+
 onMounted(() => {
   syncStageSize()
   window.addEventListener('resize', onViewportChange)
@@ -114,6 +138,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onViewportChange)
+  containerObserver?.disconnect()
 })
 
 watch(
@@ -293,16 +318,13 @@ function handleConfirm() {
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    :title="title"
-    width="420px"
-    destroy-on-close
-    append-to-body
-    :close-on-click-modal="false"
-    class="image-cropper-dialog"
+  <CsModal
+    v-model:visible="visible"
+    :header="title"
+    size="medium"
+    :close-on-click-overlay="false"
   >
-    <div class="cropper-container">
+    <div ref="containerRef" class="cropper-container">
       <div
         class="cropper-stage"
         :style="{ width: stageSize + 'px', height: stageSize + 'px' }"
@@ -341,24 +363,26 @@ function handleConfirm() {
       <!-- 控制工具栏 -->
       <div class="cropper-controls">
         <div class="zoom-slider-row">
-          <el-icon :size="16" class="ctrl-icon"><ZoomOut /></el-icon>
-          <el-slider
+          <CsIcon name="zoom-out" class="ctrl-icon" />
+          <CsSlider
             v-model="scale"
             :min="minScale"
             :max="maxScale"
             :step="0.02"
-            :show-tooltip="false"
-            @input="() => { draw(); updatePreview() }"
+            aria-label="缩放"
+            @change="() => { draw(); updatePreview() }"
           />
-          <el-icon :size="16" class="ctrl-icon"><ZoomIn /></el-icon>
+          <CsIcon name="zoom-in" class="ctrl-icon" />
         </div>
 
         <div class="action-btn-row">
-          <el-button-group size="small">
-            <el-button :icon="RefreshLeft" @click="rotate(-90)">向左旋转</el-button>
-            <el-button :icon="RefreshRight" @click="rotate(90)">向右旋转</el-button>
-            <el-button :icon="Refresh" @click="() => { resetTransform(); draw(); updatePreview() }">复位</el-button>
-          </el-button-group>
+          <div class="rotate-row">
+            <CsButton icon-name="undo" @click="rotate(-90)">向左旋转</CsButton>
+            <CsButton icon-name="redo" @click="rotate(90)">向右旋转</CsButton>
+            <CsButton icon-name="refresh" @click="() => { resetTransform(); draw(); updatePreview() }">
+              复位
+            </CsButton>
+          </div>
 
           <div class="preview-mini">
             <canvas
@@ -377,14 +401,12 @@ function handleConfirm() {
     </div>
 
     <template #footer>
-      <div class="dialog-footer">
-        <el-button :icon="Close" @click="visible = false">取消</el-button>
-        <el-button type="primary" :icon="Check" @click="handleConfirm">
-          完成裁剪并应用
-        </el-button>
-      </div>
+      <CsButton @click="visible = false">取消</CsButton>
+      <CsButton variant="primary" icon-name="check" @click="handleConfirm">
+        完成裁剪并应用
+      </CsButton>
     </template>
-  </el-dialog>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
@@ -434,7 +456,7 @@ function handleConfirm() {
 
 .crop-box {
   position: relative;
-  border: 2px solid var(--el-color-primary, #6366f1);
+  border: 2px solid var(--color-text-status-info-su6k9n, #006ce0);
   border-radius: var(--x-radius-lg, 14px);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
   box-sizing: border-box;
@@ -471,10 +493,13 @@ function handleConfirm() {
 
   .ctrl-icon {
     color: var(--x-text-2, #64748b);
+    flex: none;
   }
 
-  .el-slider {
-    flex: 1;
+  /* 官方类名带哈希后缀，必须是属性选择器才能命中 */
+  :deep([class*='awsui_root_pcgz5']) {
+    flex: 1 1 auto;
+    min-width: 120px;
   }
 }
 
@@ -483,6 +508,14 @@ function handleConfirm() {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rotate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .preview-mini {
@@ -511,14 +544,9 @@ function handleConfirm() {
   color: var(--x-text-3, #94a3b8);
 
   .kb-text {
-    color: var(--el-color-primary, #6366f1);
+    color: var(--color-text-status-info-su6k9n, #006ce0);
     font-weight: 600;
   }
 }
 
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
 </style>

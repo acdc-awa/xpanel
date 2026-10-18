@@ -13,6 +13,7 @@ const props = withDefaults(
     placeholder?: string
     disabled?: boolean
     clearable?: boolean
+    ariaLabel?: string
     style?: string | Record<string, string>
     disabledDate?: (date: Date) => boolean
   }>(),
@@ -24,6 +25,7 @@ const props = withDefaults(
     placeholder: undefined,
     disabled: false,
     clearable: true,
+    ariaLabel: undefined,
     style: undefined,
     disabledDate: undefined,
   }
@@ -75,11 +77,60 @@ const effectivePlaceholder = computed(() => {
   return props.type === 'date' ? '选择日期' : '选择日期时间'
 })
 
+/**
+ * 原生 input 无法按日期逐格禁用，只能把 disabledDate 收窄成 min/max。
+ * 做法是从今天出发，往两个方向找「第一个被禁的日期」，再取它内侧的那一天
+ * 作为边界：往前找到 d 被禁 ⇒ 下界 = d+1；往后找到 d 被禁 ⇒ 上界 = d-1。
+ * 这覆盖两类实际用法（只禁未来 / 只禁过去）；整段方向都未被禁则不加该侧边界。
+ * 若今天本身就被禁，说明谓词不是区间型，退化为不加边界，交给业务校验兜底。
+ */
+const dateRangeBounds = computed(() => {
+  if (!props.disabledDate || props.type !== 'date') return { min: undefined, max: undefined }
+  const probe = props.disabledDate
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  if (probe(today)) return { min: undefined, max: undefined }
+
+  const toInput = (d: Date) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+
+  // 最多扫两年，避免病态谓词把页面拖死
+  const LIMIT = 730
+  let min: string | undefined
+  for (let i = 1; i <= LIMIT; i++) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    if (probe(d)) {
+      const bound = new Date(d)
+      bound.setDate(d.getDate() + 1)
+      min = toInput(bound)
+      break
+    }
+  }
+  let max: string | undefined
+  for (let i = 1; i <= LIMIT; i++) {
+    const d = new Date(today)
+    d.setDate(today.getDate() + i)
+    if (probe(d)) {
+      const bound = new Date(d)
+      bound.setDate(d.getDate() - 1)
+      max = toInput(bound)
+      break
+    }
+  }
+  return { min, max }
+})
+
 function onUpdate(raw: string) {
   if (!raw) {
     emit('update:modelValue', null)
     emit('change', null)
     return
+  }
+  // 键盘输入可绕过原生 min/max，这里再挡一次，避免把越界日期送进业务逻辑。
+  if (props.disabledDate) {
+    const picked = new Date(raw)
+    if (!Number.isNaN(picked.getTime()) && props.disabledDate(picked)) return
   }
   const date = new Date(raw)
   if (Number.isNaN(date.getTime())) return
@@ -97,14 +148,16 @@ function onUpdate(raw: string) {
 </script>
 
 <template>
-  <div class="cs-date-picker-wrap" :class="{ 'is-empty': !nativeValue }">
+  <div class="cs-date-picker-wrap" :class="{ 'is-empty': !nativeValue }" :style="style">
     <Input
       :type="nativeType"
       :model-value="nativeValue"
       :disabled="disabled"
       :clearable="clearable"
       :step="type === 'date' ? undefined : 1"
-      :style="style"
+      :min="dateRangeBounds.min"
+      :max="dateRangeBounds.max"
+      :aria-label="ariaLabel"
       @update:model-value="onUpdate"
     />
     <span v-if="!nativeValue" class="cs-date-picker-placeholder">{{ effectivePlaceholder }}</span>

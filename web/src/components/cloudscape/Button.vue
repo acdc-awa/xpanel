@@ -14,6 +14,15 @@ type ButtonVariant =
   | 'inline-link'
   | 'modal-dismiss'
   | 'menu-trigger'
+  /**
+   * AWS 控制台破坏性操作的两态：
+   * - danger-outline：红字红描边（对应确认框里的「No, cancel」）
+   * - danger：红色实心（对应「Yes, delete」）
+   * 官方 Cloudscape 没导出这两个变体，但按钮配色全部走 --awsui-style-* 变量，
+   * 这里只覆盖颜色，不新增任何布局/尺寸规则。
+   */
+  | 'danger'
+  | 'danger-outline'
 
 const props = withDefaults(
   defineProps<{
@@ -73,7 +82,9 @@ const classes = computed(() =>
     !props.wrapText && CS.button['button-no-wrap'],
     !hasContent.value && CS.button['button-no-text'],
     props.fullWidth && hasContent.value && CS.button['full-width'],
-    Boolean(props.href) && CS.button.link
+    Boolean(props.href) && CS.button.link,
+    props.variant === 'danger' && 'cs-btn-danger',
+    props.variant === 'danger-outline' && 'cs-btn-danger-outline'
   )
 )
 
@@ -141,3 +152,35 @@ function onClick(event: MouseEvent) {
     />
   </component>
 </template>
+
+<style>
+/*
+ * 破坏性操作配色（AWS 控制台 ConfirmDialog 口径）。
+ * 官方按钮的颜色/描边全部通过 --awsui-style-* 变量注入，所以只覆盖这些变量，
+ * 尺寸、圆角、焦点环、禁用态仍走官方规则。用非 scoped 样式是为了盖过
+ * 官方 scoped.css 里 :not(#\9) 的高特异性选择器。
+ */
+.awsui_button_vjswe_1ig09_70.cs-btn-danger:not(#\9) {
+  --awsui-style-background-default-ka4djm: var(--color-error-600-tub94v, #db0000);
+  --awsui-style-background-hover-ka4djm: var(--color-error-700-jl0s0z, #c20000);
+  --awsui-style-background-active-ka4djm: var(--color-error-800-n1566o, #990000);
+  --awsui-style-border-color-default-ka4djm: var(--color-error-600-tub94v, #db0000);
+  --awsui-style-border-color-hover-ka4djm: var(--color-error-700-jl0s0z, #c20000);
+  --awsui-style-border-color-active-ka4djm: var(--color-error-800-n1566o, #990000);
+  --awsui-style-color-default-ka4djm: #fff;
+  --awsui-style-color-hover-ka4djm: #fff;
+  --awsui-style-color-active-ka4djm: #fff;
+}
+
+.awsui_button_vjswe_1ig09_70.cs-btn-danger-outline:not(#\9) {
+  --awsui-style-background-default-ka4djm: transparent;
+  --awsui-style-background-hover-ka4djm: var(--color-background-status-error-edh6bo, #fff4f4);
+  --awsui-style-background-active-ka4djm: var(--color-background-status-error-edh6bo, #fce8e8);
+  --awsui-style-border-color-default-ka4djm: var(--color-border-status-error-nczvil, #db0000);
+  --awsui-style-border-color-hover-ka4djm: var(--color-error-700-jl0s0z, #c20000);
+  --awsui-style-border-color-active-ka4djm: var(--color-error-800-n1566o, #990000);
+  --awsui-style-color-default-ka4djm: var(--color-text-status-error-ri38gt, #db0000);
+  --awsui-style-color-hover-ka4djm: var(--color-text-status-error-ri38gt, #db0000);
+  --awsui-style-color-active-ka4djm: var(--color-text-status-error-ri38gt, #db0000);
+}
+</style>

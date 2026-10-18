@@ -1,8 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Check, Close, Download, Loading, Refresh, Upload, Delete, Picture, Scissor, CopyDocument, ArrowRight, InfoFilled, Right, Warning, WarningFilled } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsConfirmDialog,
+  CsContainer,
+  CsEmpty,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsKeyValuePairs,
+  CsLoading,
+  CsModal,
+  CsSelect,
+  CsSpinner,
+  CsSteps,
+  CsTable,
+  CsTabs,
+  CsToggle,
+  CsTooltip,
+} from '@/components/cloudscape'
+import type { KeyValuePair, StepItem, StepsStatus, TabItem, TableColumn } from '@/components/cloudscape'
 import {
   getSettings,
   updateSettings,
@@ -50,6 +73,17 @@ const loading = ref(false)
 const saving = ref(false)
 const logoInputRef = ref<HTMLInputElement | null>(null)
 const faviconInputRef = ref<HTMLInputElement | null>(null)
+const backupInputRef = ref<HTMLInputElement | null>(null)
+
+const settingsTabs: TabItem[] = [
+  { id: 'site', label: '站点品牌' },
+  { id: 'subscribe', label: '订阅与清洗网关' },
+  { id: 'captcha', label: '安全设置' },
+  { id: 'agent', label: '服务器上报' },
+  { id: 'timezone', label: '时间与时区' },
+  { id: 'backup', label: '数据备份' },
+  { id: 'system', label: '系统状态' },
+]
 
 // 图片裁剪状态
 const cropperVisible = ref(false)
@@ -135,6 +169,33 @@ const agentHeartbeatSec = computed<number>({
     form.agent.agent_heartbeat_interval = String(v ?? 5)
   },
 })
+
+/**
+ * 设置表把开关存成 '1' / '0' 字符串，而 CsToggle 只认 boolean，
+ * 这里逐个桥接，写入时仍落回字符串，保持接口与库内口径不变。
+ */
+function boolSetting(get: () => string, set: (v: string) => void) {
+  return computed<boolean>({
+    get: () => get() === '1',
+    set: (v) => set(v ? '1' : '0'),
+  })
+}
+const stopRegister = boolSetting(
+  () => form.site.stop_register,
+  (v) => (form.site.stop_register = v),
+)
+const subCleanUa = boolSetting(
+  () => form.site.sub_clean_ua,
+  (v) => (form.site.sub_clean_ua = v),
+)
+const subStrictUa = boolSetting(
+  () => form.site.sub_strict_ua,
+  (v) => (form.site.sub_strict_ua = v),
+)
+const captchaEnable = boolSetting(
+  () => form.captcha.captcha_enable,
+  (v) => (form.captcha.captcha_enable = v),
+)
 
 const subHostName = computed(() => {  if (form.site.subscribe_url) {
     try {
@@ -309,31 +370,84 @@ function downloadBackup(file: string) {
 
 async function removeBackup(row: any) {
   const file = String(row.file)
-  try {
-    await ElMessageBox.confirm(
-      `确认删除备份「${file}」？删除后不可恢复，不影响数据库与自动轮转。`,
-      '删除备份',
-      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteBackup(file)
-    if (data.code === 0) {
-      ElMessage.success('备份已删除')
-      loadBackups()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除备份失败'))
-  }
+  askConfirm({
+    header: '删除这个备份？',
+    warning: '此操作不可恢复。',
+    message: '删除只移除该备份文件，不影响当前数据库与自动轮转策略。',
+    confirmText: '删除',
+    action: async () => {
+      try {
+        const { data } = await deleteBackup(file)
+        if (data.code === 0) {
+          ElMessage.success('备份已删除')
+          loadBackups()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '删除备份失败'))
+      }
+    },
+  })
 }
 
 // ---- 备份上传与恢复 ----
 const backupUploading = ref(false)
 const backupRestoring = ref(false)
+
+/**
+ * 破坏性操作确认走 CsConfirmDialog（AWS 控制台口径：红色「Warning:」+ 红色按钮）。
+ * pending 里存本次要执行的动作，确认后调用。
+ */
+const confirmState = reactive({
+  visible: false,
+  header: '',
+  warning: '',
+  message: '',
+  confirmText: '确认',
+  action: null as null | (() => void | Promise<void>),
+})
+
+function askConfirm(opts: {
+  header: string
+  warning: string
+  message?: string
+  confirmText?: string
+  action: () => void | Promise<void>
+}) {
+  confirmState.header = opts.header
+  confirmState.warning = opts.warning
+  confirmState.message = opts.message ?? ''
+  confirmState.confirmText = opts.confirmText ?? '确认'
+  confirmState.action = opts.action
+  confirmState.visible = true
+}
+
+async function runConfirmed() {
+  const action = confirmState.action
+  confirmState.visible = false
+  confirmState.action = null
+  if (action) await action()
+}
+
+const backupColumns: TableColumn[] = [
+  { id: 'file', header: '备份文件', minWidth: 220 },
+  { id: 'size', header: '大小', width: 110 },
+  { id: 'created', header: '创建时间', width: 170 },
+  { id: 'actions', header: '操作', width: 264, align: 'end' },
+]
+
+/** 文件选择器承载上传：隐藏 input + 按钮，替换掉 el-upload（本页只用到 file 一项）。 */
+function pickBackupFile() {
+  backupInputRef.value?.click()
+}
+
+function onBackupFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (file) onUploadBackup({ file })
+}
 
 /** el-upload 自定义上传：走后端 multipart 接口，由后端校验后落入备份目录。 */
 async function onUploadBackup(options: any) {
@@ -374,36 +488,28 @@ async function waitRestartThenReload() {
 
 async function restoreFromBackup(row: any) {
   const file = String(row.file)
-  try {
-    await ElMessageBox.confirm(
-      `确认用备份「${file}」覆盖当前数据库？<br/><br/>` +
-        `<b>恢复前会自动为当前库生成一份安全快照</b>，恢复后面板将自动重启并短暂离线；` +
-        `管理员登录凭据以该备份库为准，会话可能失效需重新登录。`,
-      '恢复数据库',
-      {
-        type: 'error',
-        dangerouslyUseHTMLString: true,
-        confirmButtonText: '确认恢复',
-        cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
-  backupRestoring.value = true
-  try {
-    const { data } = await restoreBackup(file)
-    if (data.code !== 0) {
-      ElMessage.error(data.message)
-      backupRestoring.value = false
-      return
-    }
-    ElMessage.warning(`恢复已安排（安全快照：${data.data.safety_backup.file}），面板即将重启...`)
-    waitRestartThenReload()
-  } catch (e) {
-    ElMessage.error(errMsg(e, '恢复失败'))
-    backupRestoring.value = false
-  }
+  askConfirm({
+    header: '用这个备份覆盖当前数据库？',
+    warning: '面板将自动重启并短暂离线，管理员登录凭据以该备份库为准。',
+    message: '恢复前系统会自动为当前库生成一份安全快照；恢复后会话可能失效，需要重新登录。',
+    confirmText: '确认恢复',
+    action: async () => {
+      backupRestoring.value = true
+      try {
+        const { data } = await restoreBackup(file)
+        if (data.code !== 0) {
+          ElMessage.error(data.message)
+          backupRestoring.value = false
+          return
+        }
+        ElMessage.warning(`恢复已安排（安全快照：${data.data.safety_backup.file}），面板即将重启...`)
+        waitRestartThenReload()
+      } catch (e) {
+        ElMessage.error(errMsg(e, '恢复失败'))
+        backupRestoring.value = false
+      }
+    },
+  })
 }
 
 function fmtSize(n: number) {
@@ -434,6 +540,29 @@ async function loadSystem() {
     systemLoading.value = false
   }
 }
+
+/**
+ * 系统状态信息对。value 里需要嵌徽标/等宽代码的两项由模板的 #value 插槽接管
+ * （key === 'db' / 'version' / 'panel'），其余直接用字符串。
+ */
+const systemPairs = computed<KeyValuePair[]>(() => {
+  const s = system.value
+  if (!s) return []
+  const uptimeH = Math.floor(s.uptime_seconds / 3600)
+  const uptimeM = Math.floor((s.uptime_seconds % 3600) / 60)
+  return [
+    { key: 'app', label: '应用', value: `${s.app_name}（${s.app_env}）` },
+    { key: 'panel', label: '面板版本', value: s.panel_version },
+    { key: 'go', label: 'Go 版本', value: s.go_version },
+    { key: 'uptime', label: '运行时长', value: `${uptimeH}h ${uptimeM}m` },
+    { key: 'goroutines', label: 'Goroutines', value: s.goroutines },
+    { key: 'db', label: '数据库', value: '' },
+    { key: 'backup', label: '备份调度', value: s.backup_enabled ? '已启用' : '未启用' },
+    { key: 'version', label: '数据库版本', value: '' },
+    { key: 'mem', label: '内存占用', value: `${s.mem_alloc_mb} MB` },
+    { key: 'time', label: '服务时间', value: formatDateTime(s.server_time) },
+  ]
+})
 
 // ---- 面板内更新（容器形态：后台执行 + phase 进度轮询，替换后容器自重启，失败自动回滚） ----
 const updateInfo = ref<UpdateCheckResult | null>(null)
@@ -472,6 +601,31 @@ const updateActiveStep = computed(() => {
     default:
       return 0
   }
+})
+
+/**
+ * 把 phase 映射成官方的逐步状态。失败的落点是「最后经历的有效阶段」：
+ * 该步标记 error，后续步骤保持 not-started，和原 el-steps 的 process-status 口径一致。
+ */
+const updateSteps = computed<StepItem[]>(() => {
+  const phase = updateStatus.value?.phase
+  const failed = phase === 'failed'
+  const active = updateActiveStep.value
+  const done = phase === 'success'
+  const labels = [
+    { header: '下载更新包', details: 'GitHub Release' },
+    { header: '校验与自检', details: 'SHA-256 / self-test' },
+    { header: '替换文件', details: '备份并原子替换' },
+    { header: '重启容器', details: 'unless-stopped 拉起' },
+  ]
+  return labels.map((label, index) => {
+    let status: StepsStatus
+    if (done) status = 'success'
+    else if (index < active) status = 'success'
+    else if (index === active) status = failed ? 'error' : 'in-progress'
+    else status = 'not-started'
+    return { ...label, status }
+  })
 })
 
 const updateBoxClass = computed(() => {
@@ -626,40 +780,41 @@ watch(activeTab, (tab) => {
 
 async function confirmApply() {
   if (!updateInfo.value?.available) return
-  try {
-    await ElMessageBox.confirm(
-      `将下载 ${updateInfo.value.latest_version} 并替换当前版本（${updateInfo.value.current_version}）。\n流程：下载 → SHA-256 校验 → 自检 → 替换 → 容器自动重启（restart: unless-stopped）。\n期间面板短暂不可用；新版本启动失败会自动回滚上一版本。`,
-      '应用更新',
-      { type: 'warning', confirmButtonText: '应用更新', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  updateApplying.value = true
-  try {
-    // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
-    const { data } = await applyUpdate(updateInfo.value.latest_version || '')
-    if (data.code !== 0) {
-      ElMessage.error(data.message)
-      return
-    }
-    if (data.data?.started === false && !data.data.progress?.running) {
-      // 「已是最新版本」等无需进入监控弹窗的情形
-      ElMessage.success(data.data.message || data.message)
-      return
-    }
-    updateTargetVer.value = data.data?.version || updateInfo.value.latest_version || ''
-    updateDowntimeAt = 0
-    resumeUpdateWatch(
-      data.data?.progress?.running
-        ? data.data.progress
-        : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
-    )
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || errMsg(e, '触发更新失败'))
-  } finally {
-    updateApplying.value = false
-  }
+  const target = updateInfo.value.latest_version
+  const current = updateInfo.value.current_version
+  askConfirm({
+    header: `更新到 ${target}？`,
+    warning: '更新期间面板会短暂离线，新版本启动失败将自动回滚。',
+    message: `将下载 ${target} 并替换当前版本（${current}）。流程：下载 → SHA-256 校验 → 自检 → 替换 → 容器自动重启（unless-stopped）。`,
+    confirmText: '应用更新',
+    action: async () => {
+      updateApplying.value = true
+      try {
+        // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
+        const { data } = await applyUpdate(target || '')
+        if (data.code !== 0) {
+          ElMessage.error(data.message)
+          return
+        }
+        if (data.data?.started === false && !data.data.progress?.running) {
+          // 「已是最新版本」等无需进入监控弹窗的情形
+          ElMessage.success(data.data.message || data.message)
+          return
+        }
+        updateTargetVer.value = data.data?.version || target || ''
+        updateDowntimeAt = 0
+        resumeUpdateWatch(
+          data.data?.progress?.running
+            ? data.data.progress
+            : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
+        )
+      } catch (e: any) {
+        ElMessage.error(e?.response?.data?.message || errMsg(e, '触发更新失败'))
+      } finally {
+        updateApplying.value = false
+      }
+    },
+  })
 }
 
 // 拉取版本列表（安装历史版本 / 回滚）：来自 GitHub Release API，安装复用更新链路。
@@ -700,40 +855,37 @@ async function confirmInstallRelease() {
     ElMessage.warning('该版本没有当前架构的安装包')
     return
   }
-  try {
-    await ElMessageBox.confirm(
-      `将下载并安装 ${v}（当前 ${updateInfo.value?.current_version || '—'}）。
-流程同应用更新：下载 → SHA-256 校验 → 自检 → 原子替换 → 容器重启。
-期间面板短暂不可用；降级/回滚前请先手动备份数据库。`,
-      '安装所选版本',
-      { type: 'error', confirmButtonText: '下载并安装', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  updateApplying.value = true
-  try {
-    const { data } = await applyUpdate(v)
-    if (data.code !== 0) {
-      ElMessage.error(data.message)
-      return
-    }
-    if (data.data?.started === false && !data.data.progress?.running) {
-      ElMessage.success(data.data.message || data.message)
-      return
-    }
-    updateTargetVer.value = data.data?.version || v
-    updateDowntimeAt = 0
-    resumeUpdateWatch(
-      data.data?.progress?.running
-        ? data.data.progress
-        : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
-    )
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || errMsg(e, '触发安装失败'))
-  } finally {
-    updateApplying.value = false
-  }
+  askConfirm({
+    header: `安装 ${v}？`,
+    warning: '降级/回滚同样走更新链路，若跨越数据库结构变更，降级前请先备份数据库。',
+    message: `将下载并安装 ${v}（当前 ${updateInfo.value?.current_version || '—'}）。流程同应用更新：下载 → SHA-256 校验 → 自检 → 原子替换 → 容器重启，期间面板短暂不可用。`,
+    confirmText: '下载并安装',
+    action: async () => {
+      updateApplying.value = true
+      try {
+        const { data } = await applyUpdate(v)
+        if (data.code !== 0) {
+          ElMessage.error(data.message)
+          return
+        }
+        if (data.data?.started === false && !data.data.progress?.running) {
+          ElMessage.success(data.data.message || data.message)
+          return
+        }
+        updateTargetVer.value = data.data?.version || v
+        updateDowntimeAt = 0
+        resumeUpdateWatch(
+          data.data?.progress?.running
+            ? data.data.progress
+            : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
+        )
+      } catch (e: any) {
+        ElMessage.error(e?.response?.data?.message || errMsg(e, '触发安装失败'))
+      } finally {
+        updateApplying.value = false
+      }
+    },
+  })
 }
 
 async function save() {
@@ -771,13 +923,14 @@ async function save() {
         <span style="font-weight: 600">站点设置</span>
         <span class="muted" style="font-size: 12px">站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。</span>
       </div>
-      <el-button v-if="isConfigTab" type="primary" :loading="saving" :icon="Check" @click="save">保存配置</el-button>
+      <CsButton v-if="isConfigTab" variant="primary" :loading="saving" :icon-name="'check'" @click="save">保存配置</CsButton>
     </div>
 
-    <BaseCard v-loading="loading" style="max-width: 860px">
-      <el-tabs v-model="activeTab">
+    <CsContainer class="settings-card" header="站点配置">
+      <CsLoading :loading="loading">
+        <CsTabs v-model="activeTab" :tabs="settingsTabs">
         <!-- ==================== TAB 1: 站点 ==================== -->
-        <el-tab-pane :label="isMobile ? '品牌' : '站点品牌'" name="site">
+        <div v-show="activeTab === 'site'">
           <input
             ref="logoInputRef"
             type="file"
@@ -793,102 +946,84 @@ async function save() {
             @change="onFaviconFileSelected"
           />
 
-          <el-form label-position="top" style="max-width: 680px">
+          <CsForm label-position="top" style="max-width: 680px">
             <div class="form-grid">
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    站点名称
-                    <el-tooltip placement="top" :show-after="150" content="用于浏览器页面标题、系统邮件及订阅默认文件名前缀">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  站点名称
+                  <TipIcon content="用于浏览器页面标题、系统邮件及订阅默认文件名前缀" />
                 </template>
-                <el-input v-model="form.site.app_name" placeholder="例如：星云机场" maxlength="64" />
-              </el-form-item>
-              <el-form-item>
+                <CsInput v-model="form.site.app_name" placeholder="例如：星云机场" :maxlength="64" />
+              </CsFormItem>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    站点描述
-                    <el-tooltip placement="top" :show-after="150" content="站点的副标题或一句话描述，展示在登录认证页与页脚">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  站点描述
+                  <TipIcon content="站点的副标题或一句话描述，展示在登录认证页与页脚" />
                 </template>
-                <el-input v-model="form.site.app_description" placeholder="一句话描述站点" maxlength="200" />
-              </el-form-item>
+                <CsInput v-model="form.site.app_description" placeholder="一句话描述站点" :maxlength="200" />
+              </CsFormItem>
             </div>
 
             <!-- LOGO 上传与自定义 -->
-            <el-form-item>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  站点 LOGO
-                  <el-tooltip placement="top" :show-after="150" content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                站点 LOGO
+                <TipIcon content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。" />
               </template>
               <div class="upload-row">
-                <el-input
+                <CsInput
                   v-model="form.site.logo"
                   placeholder="可粘贴图片 URL / Base64 或点击右侧上传本地图片"
                   clearable
                 />
-                <el-button type="primary" plain :icon="Upload" @click="logoInputRef?.click()">
+                <CsButton :icon-name="'upload'" @click="logoInputRef?.click()">
                   上传并裁剪
-                </el-button>
-                <el-button
+                </CsButton>
+                <CsButton
                   v-if="form.site.logo"
-                  plain
-                  :icon="Scissor"
+                  :icon-name="'edit'"
                   @click="openCropperForCurrent('logo')"
                 >
                   重新裁剪
-                </el-button>
-                <el-button v-if="form.site.logo" type="danger" text :icon="Delete" @click="form.site.logo = ''">
+                </CsButton>
+                <CsButton v-if="form.site.logo" :icon-name="'remove'" @click="form.site.logo = ''">
                   恢复默认
-                </el-button>
+                </CsButton>
               </div>
-            </el-form-item>
+            </CsFormItem>
 
             <!-- Favicon 上传与自定义 -->
-            <el-form-item>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  Favicon
-                  <el-tooltip placement="top" :show-after="150" content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                Favicon
+                <TipIcon content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。" />
               </template>
               <div class="upload-row">
-                <el-input
+                <CsInput
                   v-model="form.site.favicon"
                   placeholder="可粘贴 Favicon URL / Base64 或点击右侧上传本地图标"
                   clearable
                 />
-                <el-button plain :icon="Upload" @click="faviconInputRef?.click()">
+                <CsButton :icon-name="'upload'" @click="faviconInputRef?.click()">
                   上传并裁剪
-                </el-button>
-                <el-button
+                </CsButton>
+                <CsButton
                   v-if="form.site.favicon"
-                  plain
-                  :icon="Scissor"
+                  :icon-name="'edit'"
                   @click="openCropperForCurrent('favicon')"
                 >
                   重新裁剪
-                </el-button>
-                <el-button v-if="form.site.favicon" type="danger" text :icon="Delete" @click="form.site.favicon = ''">
+                </CsButton>
+                <CsButton v-if="form.site.favicon" :icon-name="'remove'" @click="form.site.favicon = ''">
                   清空
-                </el-button>
+                </CsButton>
               </div>
-            </el-form-item>
+            </CsFormItem>
 
             <!-- 品牌全景实时预览卡片 -->
             <div class="brand-preview-section">
               <div class="preview-header">
-                <el-icon><Picture /></el-icon>&nbsp;全场景实时效果预览（当前编辑状态）
+                <CsIcon name="grid-view" />&nbsp;全场景实时效果预览（当前编辑状态）
               </div>
               <div class="preview-grid">
                 <!-- 1. 管理端侧栏效果 -->
@@ -927,202 +1062,150 @@ async function save() {
             </div>
 
             <div class="form-grid" style="margin-top: 14px">
-              <el-form-item label="服务条款 URL">
-                <el-input v-model="form.site.tos_url" placeholder="https://example.com/tos" />
-              </el-form-item>
-              <el-form-item label="货币代码">
-                <el-input v-model="form.site.currency" placeholder="CNY" maxlength="8" />
-              </el-form-item>
-              <el-form-item label="货币符号">
-                <el-input v-model="form.site.currency_symbol" placeholder="¥" maxlength="8" />
-              </el-form-item>
+              <CsFormItem label="服务条款 URL">
+                <CsInput v-model="form.site.tos_url" placeholder="https://example.com/tos" />
+              </CsFormItem>
+              <CsFormItem label="货币代码">
+                <CsInput v-model="form.site.currency" placeholder="CNY" :maxlength="8" />
+              </CsFormItem>
+              <CsFormItem label="货币符号">
+                <CsInput v-model="form.site.currency_symbol" placeholder="¥" :maxlength="8" />
+              </CsFormItem>
             </div>
 
-            <el-form-item>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  用户注册准入
-                  <el-tooltip placement="top" :show-after="150" content="关闭后，新用户无法通过前端注册页开户；开放注册状态下仍可受邀请码机制限制。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                用户注册准入
+                <TipIcon content="关闭后，新用户无法通过前端注册页开户；开放注册状态下仍可受邀请码机制限制。" />
               </template>
-              <el-switch
-                v-model="form.site.stop_register"
-                active-value="1"
-                inactive-value="0"
-                active-text="已关闭（禁止新用户注册）"
-                inactive-text="开放注册（需邀请码）"
-              />
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
+              <CsToggle v-model="stopRegister">
+  <template #default>
+    {{ stopRegister ? '已关闭（禁止新用户注册）' : '开放注册（需邀请码）' }}
+  </template>
+</CsToggle>
+            </CsFormItem>
+          </CsForm>
+        </div>
 
         <!-- ==================== TAB 2: 订阅与清洗网关 ==================== -->
-        <el-tab-pane :label="isMobile ? '网关' : '订阅与清洗网关'" name="subscribe">
-          <el-form label-position="top" style="max-width: 820px">
-            <el-alert
-              title="物理端口隔离与反代解耦"
+        <div v-show="activeTab === 'subscribe'">
+          <CsForm label-position="top" style="max-width: 820px">
+            <CsAlert
+              header="物理端口隔离与反代解耦"
               type="info"
-              :closable="false"
-              show-icon
               style="margin-bottom: 20px"
             >
-              <template #default>
-                <div style="font-size: 13px; line-height: 1.6">
-                  将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 服务器长连接</b>物理分离。
-                  独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或服务器网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
-                </div>
-              </template>
-            </el-alert>
+              <div style="font-size: 13px; line-height: 1.6">
+                将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 服务器长连接</b>物理分离。
+                独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或服务器网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
+              </div>
+            </CsAlert>
 
             <div class="section-subtitle">订阅入口与行为参数</div>
             <div class="form-grid">
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    对外订阅根地址
-                    <el-tooltip placement="top" :show-after="150" content="用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），不设置则默认使用当前面板域名 + 订阅路径。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  对外订阅根地址
+                  <TipIcon content="用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），不设置则默认使用当前面板域名 + 订阅路径。" />
                 </template>
-                <el-input v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
-              </el-form-item>
+                <CsInput v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    订阅入口路径
-                    <el-tooltip placement="top" :show-after="150" content="订阅端口唯一入口路径（支持 /path/:token 与 ?token=xxx），其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  订阅入口路径
+                  <TipIcon content="订阅端口唯一入口路径（支持 /path/:token 与 ?token=xxx），其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。" />
                 </template>
-                <el-input v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
-              </el-form-item>
+                <CsInput v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    非订阅路径拒绝码
-                    <el-tooltip placement="top" :show-after="150" content="订阅端口上访问非订阅路径的请求或无效订阅 Token 统一返回该 HTTP 状态码。404 可有效迷惑自动化扫描器。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  非订阅路径拒绝码
+                  <TipIcon content="订阅端口上访问非订阅路径的请求或无效订阅 Token 统一返回该 HTTP 状态码。404 可有效迷惑自动化扫描器。" />
                 </template>
-                <el-select v-model="form.site.sub_deny_code" style="width: 100%">
-                  <el-option label="404 Not Found（推荐，防探测）" value="404" />
-                  <el-option label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
-                </el-select>
-              </el-form-item>
+                <CsSelect v-model="form.site.sub_deny_code" style="width: 100%">
+                  <CsOption label="404 Not Found（推荐，防探测）" value="404" />
+                  <CsOption label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
+                </CsSelect>
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    订阅配置标题
-                    <el-tooltip placement="top" :show-after="150" content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  订阅配置标题
+                  <TipIcon content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。" />
                 </template>
-                <el-input v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable maxlength="64" />
-              </el-form-item>
+                <CsInput v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable :maxlength="64" />
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    客户端更新间隔（小时）
-                    <el-tooltip placement="top" :show-after="150" content="Profile-Update-Interval 响应头：客户端按该周期自动重新拉取订阅，默认 24 小时（范围 1–168 小时）。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  客户端更新间隔（小时）
+                  <TipIcon content="Profile-Update-Interval 响应头：客户端按该周期自动重新拉取订阅，默认 24 小时（范围 1–168 小时）。" />
                 </template>
-                <el-input-number v-model="subUpdateHours" :min="1" :max="168" style="width: 100%" />
-              </el-form-item>
+                <CsInputNumber v-model="subUpdateHours" :min="1" :max="168" style="width: 100%" />
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    多域名分发
-                    <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">暂未开放</span>
-                    <el-tooltip placement="top" :show-after="150" content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  多域名分发
+                  <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">暂未开放</span>
+                  <TipIcon content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。" />
                 </template>
-                <el-input v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
-              </el-form-item>
+                <CsInput v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
+              </CsFormItem>
             </div>
 
             <div class="section-subtitle" style="margin-top: 24px">
               <span>原生订阅清洗防探测网关 (Subscribe Sieve)</span>
-              <el-tooltip placement="top" :show-after="150" content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。">
-                <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-              </el-tooltip>
+              <TipIcon content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。" />
             </div>
             <div class="form-grid">
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    智能 UA 过滤与爬虫拦截
-                    <el-tooltip placement="top" :show-after="150" content="自动识别并阻断 curl、python-requests、空 User-Agent 及已知自动化扫描脚本。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  智能 UA 过滤与爬虫拦截
+                  <TipIcon content="自动识别并阻断 curl、python-requests、空 User-Agent 及已知自动化扫描脚本。" />
                 </template>
-                <el-switch
-                  v-model="form.site.sub_clean_ua"
-                  active-value="1"
-                  inactive-value="0"
-                  active-text="开启（阻断空 UA / 常见脚本）"
-                  inactive-text="放行所有"
-                />
-              </el-form-item>
+                <CsToggle v-model="subCleanUa">
+  <template #default>
+    {{ subCleanUa ? '开启（阻断空 UA / 常见脚本）' : '放行所有' }}
+  </template>
+</CsToggle>
+              </CsFormItem>
 
-              <el-form-item>
+              <CsFormItem>
                 <template #label>
-                  <span class="form-label-with-tip">
-                    严格客户端白名单模式
-                    <el-tooltip placement="top" :show-after="150" content="仅放行知名代理客户端（如 Clash、Sing-box、Shadowrocket、Surge、V2rayN 等），其余均直接阻断。">
-                      <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                    </el-tooltip>
-                  </span>
+                  严格客户端白名单模式
+                  <TipIcon content="仅放行知名代理客户端（如 Clash、Sing-box、Shadowrocket、Surge、V2rayN 等），其余均直接阻断。" />
                 </template>
-                <el-switch
-                  v-model="form.site.sub_strict_ua"
-                  active-value="1"
-                  inactive-value="0"
-                  active-text="严格白名单"
-                  inactive-text="宽松模式"
-                />
-              </el-form-item>
+                <CsToggle v-model="subStrictUa">
+  <template #default>
+    {{ subStrictUa ? '严格白名单' : '宽松模式' }}
+  </template>
+</CsToggle>
+              </CsFormItem>
             </div>
 
-            <el-form-item>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  自定义封禁 UA 关键词
-                  <el-tooltip placement="top" :show-after="150" content="匹配 User-Agent 包含指定关键词时直接拦截并返回拒绝码，英文逗号分隔，如 scan,exploit,badbot。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                自定义封禁 UA 关键词
+                <TipIcon content="匹配 User-Agent 包含指定关键词时直接拦截并返回拒绝码，英文逗号分隔，如 scan,exploit,badbot。" />
               </template>
-              <el-input
+              <CsInput
                 v-model="form.site.sub_blocked_ua"
                 placeholder="如 scan,exploit,badbot（英文逗号分隔，命中即拦截）"
                 clearable
               />
-            </el-form-item>
+            </CsFormItem>
 
             <!-- 反代配置代码片段展示 -->
             <div class="section-subtitle" style="margin-top: 24px">生产反向代理配置参考 (含 Cloudflare 真实 IP 透传)</div>
             <div class="proxy-snippet-box">
               <div class="snippet-header">
                 <span>Caddyfile 配置示例（推荐）</span>
-                <el-button size="small" :icon="CopyDocument" @click="copySnippet(caddySnippet, 'Caddyfile 配置')">
+                <CsButton :icon-name="'copy'" @click="copySnippet(caddySnippet, 'Caddyfile 配置')">
                   复制 Caddy 配置
-                </el-button>
+                </CsButton>
               </div>
               <pre class="snippet-code"><code>{{ caddySnippet }}</code></pre>
             </div>
@@ -1130,218 +1213,182 @@ async function save() {
             <div class="proxy-snippet-box" style="margin-top: 14px">
               <div class="snippet-header">
                 <span>Nginx 配置示例</span>
-                <el-button size="small" :icon="CopyDocument" @click="copySnippet(nginxSnippet, 'Nginx 配置')">
+                <CsButton :icon-name="'copy'" @click="copySnippet(nginxSnippet, 'Nginx 配置')">
                   复制 Nginx 配置
-                </el-button>
+                </CsButton>
               </div>
               <pre class="snippet-code"><code>{{ nginxSnippet }}</code></pre>
             </div>
-          </el-form>
-        </el-tab-pane>
+          </CsForm>
+        </div>
 
         <!-- ==================== TAB 3: 安全（人机验证） ==================== -->
-        <el-tab-pane :label="isMobile ? '安全' : '安全设置'" name="captcha">
-          <el-form label-position="top" style="max-width: 640px">
-            <el-form-item>
+        <div v-show="activeTab === 'captcha'">
+          <CsForm label-position="top" style="max-width: 640px">
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  人机验证保护
-                  <el-tooltip placement="top" :show-after="150" content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                人机验证保护
+                <TipIcon content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。" />
               </template>
-              <el-switch
-                v-model="form.captcha.captcha_enable"
-                active-value="1"
-                inactive-value="0"
-                active-text="已开启（登录与注册保护）"
-                inactive-text="已关闭（开发/内网环境）"
-              />
-            </el-form-item>
-            <el-form-item>
+              <CsToggle v-model="captchaEnable">
+  <template #default>
+    {{ captchaEnable ? '已开启（登录与注册保护）' : '已关闭（开发/内网环境）' }}
+  </template>
+</CsToggle>
+            </CsFormItem>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  验证提供商
-                  <el-tooltip placement="top" :show-after="150" content="当前支持 Cloudflare Turnstile 智能无感验证。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                验证提供商
+                <TipIcon content="当前支持 Cloudflare Turnstile 智能无感验证。" />
               </template>
-              <el-select v-model="form.captcha.captcha_type" style="width: 100%">
-                <el-option label="Cloudflare Turnstile（智能无感验证）" value="turnstile" />
-              </el-select>
-            </el-form-item>
-            <el-form-item>
+              <CsSelect v-model="form.captcha.captcha_type" style="width: 100%">
+                <CsOption label="Cloudflare Turnstile（智能无感验证）" value="turnstile" />
+              </CsSelect>
+            </CsFormItem>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  Turnstile Site Key
-                  <el-tooltip placement="top" :show-after="150" content="从 Cloudflare 控制台 Turnstile 站点获取的公开前端密钥。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                Turnstile Site Key
+                <TipIcon content="从 Cloudflare 控制台 Turnstile 站点获取的公开前端密钥。" />
               </template>
-              <el-input v-model="form.captcha.turnstile_site_key" placeholder="0x4A...（Cloudflare 控制台获取）" />
-            </el-form-item>
-            <el-form-item>
+              <CsInput v-model="form.captcha.turnstile_site_key" placeholder="0x4A...（Cloudflare 控制台获取）" />
+            </CsFormItem>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  Turnstile Secret Key
-                  <el-tooltip placement="top" :show-after="150" content="服务端与 Cloudflare 校验使用的通信私钥，请妥善保管，仅管理员可见。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                Turnstile Secret Key
+                <TipIcon content="服务端与 Cloudflare 校验使用的通信私钥，请妥善保管，仅管理员可见。" />
               </template>
-              <el-input v-model="form.captcha.turnstile_secret_key" type="password" show-password placeholder="0x4B...（请勿泄露）" />
-            </el-form-item>
+              <CsInput v-model="form.captcha.turnstile_secret_key" type="password" show-password placeholder="0x4B...（请勿泄露）" />
+            </CsFormItem>
             <div class="settings-footer-tip">
-              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <CsIcon name="status-info" class="tip-icon" />
               <span>在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。</span>
             </div>
-          </el-form>
-        </el-tab-pane>
+          </CsForm>
+        </div>
 
         <!-- ==================== TAB 3.5: 节点上报 ==================== -->
-        <el-tab-pane :label="isMobile ? '上报' : '服务器上报'" name="agent">
-          <el-form label-position="top" style="max-width: 640px">
-            <el-form-item>
+        <div v-show="activeTab === 'agent'">
+          <CsForm label-position="top" style="max-width: 640px">
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  流量增量上报周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器向面板同步 xray 用户计费流量增量的频率。较长周期（如 60-120 秒）可减少数据库写入压力；超额/到期判定将在落库后即时处置。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                流量增量上报周期（秒）
+                <TipIcon content="服务器向面板同步 xray 用户计费流量增量的频率。较长周期（如 60-120 秒）可减少数据库写入压力；超额/到期判定将在落库后即时处置。" />
               </template>
-              <el-input-number v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
-            </el-form-item>
-            <el-form-item>
+              <CsInputNumber v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
+            </CsFormItem>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  状态心跳周期（秒）
-                  <el-tooltip placement="top" :show-after="150" content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                状态心跳周期（秒）
+                <TipIcon content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。" />
               </template>
-              <el-input-number v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
-            </el-form-item>
+              <CsInputNumber v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
+            </CsFormItem>
             <div class="settings-footer-tip">
-              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <CsIcon name="status-info" class="tip-icon" />
               <span>配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。</span>
             </div>
-          </el-form>
-        </el-tab-pane>
+          </CsForm>
+        </div>
 
         <!-- ==================== TAB 3.6: 时间与时区 ==================== -->
-        <el-tab-pane :label="isMobile ? '时区' : '时间与时区'" name="timezone">
-          <el-form label-position="top" style="max-width: 680px">
-            <el-form-item>
+        <div v-show="activeTab === 'timezone'">
+          <CsForm label-position="top" style="max-width: 680px">
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  业务时区（统计切天口径）
-                  <el-tooltip placement="top" :show-after="150" content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                业务时区（统计切天口径）
+                <TipIcon content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。" />
               </template>
-              <el-select v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
-                <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
-              </el-select>
-            </el-form-item>
-            <el-form-item>
+              <CsSelect v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
+                <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+              </CsSelect>
+            </CsFormItem>
+            <CsFormItem>
               <template #label>
-                <span class="form-label-with-tip">
-                  展示时区
-                  <el-tooltip placement="top" :show-after="150" content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。">
-                    <el-icon class="form-tip-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
-                </span>
+                展示时区
+                <TipIcon content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。" />
               </template>
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
-                <el-select v-model="form.timezone.display_timezone" style="width: 300px">
-                  <el-option label="跟随浏览器" value="browser" />
-                  <el-option v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
-                </el-select>
+                <CsSelect v-model="form.timezone.display_timezone" style="width: 300px">
+                  <CsOption label="跟随浏览器" value="browser" />
+                  <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+                </CsSelect>
                 <span class="x-chip purple" style="font-size: 11px">当前识别：{{ effectiveTimezoneLabel() }}</span>
               </div>
-            </el-form-item>
+            </CsFormItem>
             <div class="settings-footer-tip">
-              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <CsIcon name="status-info" class="tip-icon" />
               <span>底层数据统一以 UTC 存储绝对时间戳。修改业务时区将调整每日 0 点的计算基准，切换当日历史聚合数据可能会有短暂平滑窗口。</span>
             </div>
-          </el-form>
-        </el-tab-pane>
+          </CsForm>
+        </div>
 
         <!-- ==================== TAB 4: 备份 ==================== -->
-        <el-tab-pane :label="isMobile ? '备份' : '数据备份'" name="backup">
+        <div v-show="activeTab === 'backup'">
           <div style="max-width: 720px">
             <div class="x-toolbar" style="margin-bottom: 12px">
               <div class="x-toolbar-left">
-                <el-button :loading="backupLoading" :icon="Refresh" @click="loadBackups">刷新列表</el-button>
+                <CsButton :loading="backupLoading" :icon-name="'refresh'" @click="loadBackups">刷新列表</CsButton>
                 <span class="muted" style="font-size: 12.5px">共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}</span>
               </div>
               <div style="display: flex; gap: 8px; align-items: center">
-                <el-upload
-                  :show-file-list="false"
-                  :http-request="onUploadBackup"
+                <input
+                  ref="backupInputRef"
+                  type="file"
                   accept=".db,.sqlite,.db3"
-                >
-                  <el-button :icon="Upload" :loading="backupUploading">上传备份</el-button>
-                </el-upload>
-                <el-button type="primary" :loading="backupCreating" @click="createBackupNow">立即备份</el-button>
+                  style="display: none"
+                  @change="onBackupFileSelected"
+                />
+                <CsButton :icon-name="'upload'" :loading="backupUploading" @click="pickBackupFile">上传备份</CsButton>
+                <CsButton variant="primary" :loading="backupCreating" @click="createBackupNow">立即备份</CsButton>
               </div>
             </div>
-            <el-table v-loading="backupLoading" :data="backups" size="small">
-              <el-table-column prop="file" label="备份文件" min-width="220">
-                <template #default="{ row }"><code class="cell-mono">{{ row.file }}</code></template>
-              </el-table-column>
-              <el-table-column label="大小" width="110">
-                <template #default="{ row }">{{ fmtSize(row.size) }}</template>
-              </el-table-column>
-              <el-table-column label="创建时间" width="170">
-                <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="190" fixed="right">
-                <template #default="{ row }">
-                  <el-button link type="warning" :disabled="backupRestoring" @click="restoreFromBackup(row)">恢复</el-button>
-                  <el-button link type="primary" :icon="Download" @click="downloadBackup(row.file)">下载</el-button>
-                  <el-button link type="danger" :icon="Delete" @click="removeBackup(row)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <CsTable
+              :items="backups"
+              :columns="backupColumns"
+              :loading="backupLoading"
+              loading-text="正在加载备份列表..."
+              empty-text="暂无备份，点击右上角「立即备份」"
+              aria-label="备份列表"
+            >
+              <template #cell-file="{ row }"><code class="cell-mono">{{ row.file }}</code></template>
+              <template #cell-size="{ row }">{{ fmtSize(row.size) }}</template>
+              <template #cell-created="{ row }">{{ formatDateTime(row.created_at) }}</template>
+              <template #cell-actions="{ row }">
+                <div class="row-actions">
+                  <CsButton :wrap-text="false" :disabled="backupRestoring" @click="restoreFromBackup(row)">恢复</CsButton>
+                  <CsButton :wrap-text="false" icon-name="download" @click="downloadBackup(row.file)">下载</CsButton>
+                  <CsButton :wrap-text="false" icon-name="remove" @click="removeBackup(row)">删除</CsButton>
+                </div>
+              </template>
+            </CsTable>
             <div class="settings-footer-tip">
-              <el-icon class="tip-icon"><InfoFilled /></el-icon>
+              <CsIcon name="status-info" class="tip-icon" />
               <span>备份文件保存在主控备份目录并按配置定期轮转，建议定期下载重要备份离线保存。「上传备份」会先校验完整性与数据库版本再入库；恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。</span>
             </div>
           </div>
-        </el-tab-pane>
+        </div>
 
         <!-- ==================== TAB 6: 系统状态 ==================== -->
-        <el-tab-pane :label="isMobile ? '状态' : '系统状态'" name="system">
-          <div v-loading="systemLoading" style="max-width: 720px; min-height: 200px">
+        <div v-show="activeTab === 'system'">
+          <CsLoading :loading="systemLoading" min-height="200px" class="system-pane">
             <template v-if="system">
               <!-- 窄屏必须降到 1 列：2 列时每格只剩 ~100px，「数据库版本」这类标签会被
                    折成「数据库版 / 本」、「schema v2 / 期望 v2 / 最低兼容 v2」折成三行，
                    整张表看起来像被裁掉了一半，也读不出标签与值的对应关系 -->
-              <el-descriptions :column="isMobile ? 1 : 2" border size="small">
-                <el-descriptions-item label="应用">{{ system.app_name }}（{{ system.app_env }}）</el-descriptions-item>
-                <el-descriptions-item label="面板版本"><code class="cell-mono">{{ system.panel_version }}</code></el-descriptions-item>
-                <el-descriptions-item label="Go 版本">{{ system.go_version }}</el-descriptions-item>
-                <el-descriptions-item label="运行时长">{{ Math.floor(system.uptime_seconds / 3600) }}h {{ Math.floor((system.uptime_seconds % 3600) / 60) }}m</el-descriptions-item>
-                <el-descriptions-item label="Goroutines">{{ system.goroutines }}</el-descriptions-item>
-                <el-descriptions-item label="数据库">
-                  <el-tag :type="system.db_ok ? 'success' : 'danger'" size="small">{{ system.db_ok ? '正常' : '异常' }}</el-tag>
-                  <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
-                </el-descriptions-item>
-                <el-descriptions-item label="备份调度">{{ system.backup_enabled ? '已启用' : '未启用' }}</el-descriptions-item>
-                <el-descriptions-item label="数据库版本">
-                  <code class="cell-mono">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</code>
-                  <span v-if="system.schema_min_compatible" class="muted" style="margin-left: 6px">最低兼容 v{{ system.schema_min_compatible }}</span>
-                </el-descriptions-item>
-                <el-descriptions-item label="内存占用">{{ system.mem_alloc_mb }} MB</el-descriptions-item>
-                <el-descriptions-item label="服务时间">{{ formatDateTime(system.server_time) }}</el-descriptions-item>
-              </el-descriptions>
+              <CsKeyValuePairs :items="systemPairs" :columns="isMobile ? 1 : 2" aria-label="系统状态">
+                <template #value="{ item }">
+                  <template v-if="item.key === 'db'">
+                    <CsBadge :color="system.db_ok ? 'green' : 'red'">{{ system.db_ok ? '正常' : '异常' }}</CsBadge>
+                    <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
+                  </template>
+                  <template v-else-if="item.key === 'version'">
+                    <code class="cell-mono">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</code>
+                    <span v-if="system.schema_min_compatible" class="muted" style="margin-left: 6px">最低兼容 v{{ system.schema_min_compatible }}</span>
+                  </template>
+                  <code v-else-if="item.key === 'panel'" class="cell-mono">{{ item.value }}</code>
+                  <template v-else>{{ item.value }}</template>
+                </template>
+              </CsKeyValuePairs>
               <div class="status-count-grid">
                 <div v-for="(v, k) in system.counts" :key="k" class="status-count">
                   <strong>{{ v }}</strong>
@@ -1358,13 +1405,13 @@ async function save() {
                 <div class="update-header">
                   <div class="update-header-left">
                     <div class="update-badge-icon">
-                      <el-icon><Refresh /></el-icon>
+                      <CsIcon name="refresh" />
                     </div>
                     <div class="update-header-meta">
                       <div class="update-title-line">
                         <span class="update-title">面板更新</span>
                         <span v-if="updateChecking" class="x-chip blue">
-                          <el-icon class="is-loading"><Loading /></el-icon> 检查中…
+                          <CsSpinner size="normal" class="is-loading" /> 检查中…
                         </span>
                         <span v-else-if="updateInfo?.available" class="x-chip green">
                           <span class="x-status-dot online"></span> 发现新版本
@@ -1381,22 +1428,21 @@ async function save() {
                   </div>
 
                   <div class="update-header-right">
-                    <el-tooltip
+                    <CsTooltip
                       placement="top"
-                      :show-after="200"
+                      :show-delay="200"
                       content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
                     >
-                      <el-button text circle size="small" class="update-help-btn" :icon="InfoFilled" />
-                    </el-tooltip>
-                    <el-button
-                      size="small"
+                      <CsButton variant="icon" class="update-help-btn" icon-name="status-info" aria-label="更新机制说明" />
+                    </CsTooltip>
+                    <CsButton
                       class="update-refresh-btn"
-                      :icon="Refresh"
+                      :icon-name="'refresh'"
                       :loading="updateChecking || releasesLoading"
                       @click="refreshUpdate(false)"
                     >
                       检查更新
-                    </el-button>
+                    </CsButton>
                   </div>
                 </div>
 
@@ -1408,7 +1454,7 @@ async function save() {
                       <code class="ver-code">{{ updateInfo?.current_version || system.panel_version }}</code>
                     </div>
                     <div class="route-arrow">
-                      <el-icon><Right /></el-icon>
+                      <CsIcon name="angle-right" />
                     </div>
                     <div class="ver-pill target">
                       <span class="ver-tag">目标版本</span>
@@ -1416,23 +1462,23 @@ async function save() {
                     </div>
                   </div>
 
-                  <el-button
+                  <CsButton
                     class="update-apply-btn"
                     type="primary"
-                    :icon="Download"
+                    :icon-name="'download'"
                     :disabled="!!updateStatus?.running"
                     :loading="updateApplying"
                     @click="confirmApply"
                   >
                     立即更新到 {{ updateInfo?.latest_version }}
-                  </el-button>
+                  </CsButton>
                 </div>
 
                 <!-- 场景 2：已是最新或检查完毕无需更新 -->
                 <div v-else-if="updateInfo && updateInfo.enabled" class="update-status-row">
                   <div class="uptodate-box">
                     <div class="status-check-circle">
-                      <el-icon><Check /></el-icon>
+                      <CsIcon name="check" />
                     </div>
                     <div class="uptodate-info">
                       <span class="cur-ver-text">
@@ -1456,7 +1502,7 @@ async function save() {
                 <!-- 错误提示（若接口报错）：两个请求各报各的。合并成一条会把「版本列表拉取失败」
                      伪装成「暂无可安装版本」，而两者直连同一个 GitHub API、往往同时失败。 -->
                 <div v-if="updateError || releasesError" class="update-error-banner">
-                  <el-icon><WarningFilled /></el-icon>
+                  <CsIcon name="status-warning" />
                   <div class="update-error-lines">
                     <span v-if="updateError">检查更新失败：{{ updateError }}</span>
                     <span v-if="releasesError">版本列表获取失败：{{ releasesError }}</span>
@@ -1472,43 +1518,42 @@ async function save() {
                     @click="showHistoryReleases = !showHistoryReleases"
                   >
                     <div class="trigger-label">
-                      <el-icon class="trigger-chevron"><ArrowRight /></el-icon>
+                      <CsIcon name="angle-right" class="trigger-chevron" />
                       <span>历史版本与安全回退</span>
                     </div>
-                    <span class="trigger-action-text">{{ showHistoryReleases ? '收起选项' : '展开选项' }}</span>
                   </button>
 
                   <div v-if="showHistoryReleases" class="hist-collapse-panel">
                     <div class="hist-form-row">
                       <span class="hist-label">指定版本</span>
-                      <el-select
+                      <CsSelect
                         v-model="selectedRelease"
                         :loading="releasesLoading"
                         :placeholder="releases.length ? '选择要安装或回滚的历史版本' : '暂无可安装版本'"
                         :disabled="!!updateStatus?.running || !releases.length"
                         class="hist-select"
                       >
-                        <el-option
+                        <CsOption
                           v-for="r in releases"
                           :key="r.version"
                           :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
                           :value="r.version"
                           :disabled="!r.installable || r.current"
                         />
-                      </el-select>
-                      <el-button
+                      </CsSelect>
+                      <CsButton
                         v-if="selectedRelease"
-                        type="danger"
-                        plain
+
+
                         :disabled="!!updateStatus?.running"
                         :loading="updateApplying"
                         @click="confirmInstallRelease"
                       >
                         安装 {{ selectedRelease }}
-                      </el-button>
+                      </CsButton>
                     </div>
                     <p class="hist-warning-note">
-                      <el-icon><Warning /></el-icon>
+                      <CsIcon name="status-warning" />
                       <span>降级/回滚走相同更新链路。若跨越数据库结构变更，降级前请务必先备份数据库。</span>
                     </p>
                   </div>
@@ -1516,7 +1561,7 @@ async function save() {
 
                 <!-- 底部精炼提示条：1 句话核心提示，不再大段平铺 -->
                 <div class="update-footer-tip">
-                  <el-icon class="tip-icon"><InfoFilled /></el-icon>
+                  <CsIcon name="status-info" class="tip-icon" />
                   <span>更新期间面板将短暂离线重启；若新版本启动失败，系统将自动安全回滚至上一版本。</span>
                 </div>
               </div>
@@ -1525,13 +1570,10 @@ async function save() {
               <div class="ip-hdr-note">
                 <div class="ip-hdr-header">
                   <span>客户端真实 IP 识别架构</span>
-                  <el-tooltip
-                    placement="top"
-                    :show-after="150"
+                  <TipIcon
+                    type="warn"
                     content="切勿将面板端口直接暴露公网，否则攻击者可伪造 IP 头绕过按 IP 的限流。"
-                  >
-                    <el-icon class="form-tip-icon"><WarningFilled /></el-icon>
-                  </el-tooltip>
+                  />
                 </div>
                 <div class="ip-hdr-content">
                   面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
@@ -1542,14 +1584,15 @@ async function save() {
               </div>
 
               <div class="x-toolbar" style="margin-top: 12px">
-                <el-button :icon="Refresh" @click="loadSystem">刷新状态</el-button>
+                <CsButton :icon-name="'refresh'" @click="loadSystem">刷新状态</CsButton>
               </div>
             </template>
-            <el-empty v-else-if="!systemLoading" description="暂无状态数据" />
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-    </BaseCard>
+            <CsEmpty v-else-if="!systemLoading" description="暂无状态数据" icon-name="status-info" />
+          </CsLoading>
+        </div>
+        </CsTabs>
+      </CsLoading>
+    </CsContainer>
 
     <!-- 图片裁剪弹窗 -->
     <ImageCropperDialog
@@ -1561,25 +1604,20 @@ async function save() {
     />
 
     <!-- 面板更新进度弹窗（交互对齐节点 Agent 升级监控：phase 驱动步骤条 + 轮询状态） -->
-    <el-dialog v-model="updateModalOpen" title="面板更新进度" width="560px" :close-on-click-modal="false">
-      <el-steps
-        :active="updateActiveStep"
-        finish-status="success"
-        :process-status="updateStatus?.phase === 'failed' ? 'error' : 'process'"
-        align-center
-        style="margin: 20px 0 8px"
-      >
-        <el-step title="下载更新包" description="GitHub Release" />
-        <el-step title="校验与自检" description="SHA-256 / self-test" />
-        <el-step title="替换文件" description="备份并原子替换" />
-        <el-step title="重启容器" description="unless-stopped 拉起" />
-      </el-steps>
+    <CsModal
+      v-model:visible="updateModalOpen"
+      header="面板更新进度"
+      size="medium"
+      :close-on-click-overlay="false"
+      :close-on-escape="false"
+    >
+      <CsSteps :steps="updateSteps" orientation="vertical" style="display: flex; justify-content: center" />
 
       <div class="update-status-box" :class="updateBoxClass">
         <div class="status-icon">
-          <el-icon v-if="updateStatus?.phase === 'success'" class="icon-success"><Check /></el-icon>
-          <el-icon v-else-if="updateStatus?.phase === 'failed'" class="icon-error"><Close /></el-icon>
-          <el-icon v-else class="is-loading icon-process"><Loading /></el-icon>
+          <CsIcon v-if="updateStatus?.phase === 'success'" name="status-positive" class="icon-success" />
+          <CsIcon v-else-if="updateStatus?.phase === 'failed'" name="status-negative" class="icon-error" />
+          <CsSpinner v-else size="normal" class="icon-process" />
         </div>
         <div class="status-texts">
           <div class="status-msg">{{ updateDisplayMessage }}</div>
@@ -1589,7 +1627,18 @@ async function save() {
           </div>
         </div>
       </div>
-    </el-dialog>
+    </CsModal>
+
+    <!-- 破坏性操作确认（AWS 控制台口径：红色 Warning 行 + 红描边/红实心按钮） -->
+    <CsConfirmDialog
+      v-model:visible="confirmState.visible"
+      :header="confirmState.header"
+      :warning="confirmState.warning"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      :loading="updateApplying || backupRestoring"
+      @confirm="runConfirmed"
+    />
   </div>
 </template>
 
@@ -1601,6 +1650,18 @@ async function save() {
   @media (max-width: 640px) {
     grid-template-columns: 1fr;
   }
+}
+/* 系统状态页签的内容宽度上限（原 v-loading 容器上的 max-width） */
+.system-pane {
+  max-width: 720px;
+}
+/* 备份表操作列：三个按钮排成一行，不换行 */
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 .tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
 .cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
@@ -1797,7 +1858,7 @@ async function save() {
   .ver-tag {
     font-size: 11px;
     color: var(--x-text-3);
-    text-transform: uppercase;
+   -transform: uppercase;
     letter-spacing: 0.5px;
   }
   .ver-code {
@@ -1895,7 +1956,8 @@ async function save() {
   align-items: flex-start;
   gap: 6px;
 
-  .el-icon {
+  > :deep([class*='awsui_icon']),
+  > :deep([class*='awsui_spinner']) {
     flex: none;
     margin-top: 2px;
   }
@@ -1949,11 +2011,6 @@ async function save() {
 
   &.is-expanded .trigger-chevron {
     transform: rotate(90deg);
-  }
-
-  .trigger-action-text {
-    font-size: 11.5px;
-    color: var(--x-text-3);
   }
 }
 
@@ -2047,7 +2104,7 @@ async function save() {
   width: 100%;
   flex-wrap: wrap;
 
-  .el-input {
+  :deep(.cs-input-root) {
     flex: 1 1 200px;
     min-width: 180px;
   }
@@ -2250,30 +2307,6 @@ async function save() {
     color: #38bdf8;
     overflow-x: auto;
     white-space: pre;
-  }
-}
-
-@media (max-width: 768px) {
-  :deep(.el-tabs__header) {
-    margin-bottom: 14px;
-  }
-  :deep(.el-tabs__nav-wrap) {
-    padding: 0 !important;
-  }
-  :deep(.el-tabs__nav-prev),
-  :deep(.el-tabs__nav-next) {
-    display: none !important;
-  }
-  :deep(.el-tabs__nav-scroll) {
-    overflow-x: auto;
-    scrollbar-width: none;
-    &::-webkit-scrollbar {
-      display: none;
-    }
-  }
-  :deep(.el-tabs__item) {
-    padding: 0 10px !important;
-    font-size: 13px !important;
   }
 }
 

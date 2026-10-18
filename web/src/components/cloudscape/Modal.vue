@@ -14,6 +14,10 @@ const props = withDefaults(
     scrollable?: boolean
     hideDismissButton?: boolean
     disableContentPaddings?: boolean
+    /** 点击遮罩是否关闭。长流程（更新/升级监控）必须为 false，误点会丢进度。 */
+    closeOnClickOverlay?: boolean
+    /** Esc 是否关闭。与遮罩一致地用于长流程弹窗。 */
+    closeOnEscape?: boolean
     closeAriaLabel?: string
   }>(),
   {
@@ -22,6 +26,8 @@ const props = withDefaults(
     scrollable: false,
     hideDismissButton: false,
     disableContentPaddings: false,
+    closeOnClickOverlay: true,
+    closeOnEscape: true,
     closeAriaLabel: 'Close modal',
   }
 )
@@ -69,7 +75,7 @@ function onKeydown(event: KeyboardEvent) {
   if (!props.visible) return
   if (event.key === 'Escape') {
     event.stopPropagation()
-    close()
+    if (props.closeOnEscape) close()
     return
   }
   if (event.key !== 'Tab' || !dialogRef.value) return
@@ -129,7 +135,7 @@ onBeforeUnmount(unlockScroll)
       role="dialog"
       aria-modal="true"
       :aria-labelledby="headerId"
-      @click.self="close"
+      @click.self="closeOnClickOverlay && close()"
     >
       <div :class="focusLockClasses">
         <div ref="dialogRef" :class="dialogClasses" :style="dialogStyle">

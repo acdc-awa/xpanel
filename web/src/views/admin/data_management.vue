@@ -1,18 +1,72 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Refresh } from '@element-plus/icons-vue'
-import BaseCard from '@/components/base/BaseCard.vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import TipIcon from '@/components/base/TipIcon.vue'
-import { CsBarChart } from '@/components/cloudscape'
-import type { BarSeries } from '@/components/cloudscape'
+import {
+  CsBarChart,
+  CsButton,
+  CsConfirmDialog,
+  CsContainer,
+  CsDatePicker,
+  CsDivider,
+  CsInputNumber,
+  CsLoading,
+  CsSegmentedControl,
+  CsSelect,
+} from '@/components/cloudscape'
+import type { BarSeries, SegmentedOption } from '@/components/cloudscape'
 import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { LogStats, CompactResult } from '@/api/admin'
 
+/**
+ * 破坏性操作确认统一走 CsConfirmDialog（AWS 控制台口径：红色 Warning 行 +
+ * 红描边取消 / 红实心确认）。本页三个动作（清理、压缩、VACUUM）都不可逆。
+ */
+const confirmState = reactive({
+  visible: false,
+  header: '',
+  warning: '',
+  message: '',
+  confirmText: '确认',
+  action: null as null | (() => void | Promise<void>),
+})
+
+function askConfirm(opts: {
+  header: string
+  warning: string
+  message?: string
+  confirmText?: string
+  action: () => void | Promise<void>
+}) {
+  confirmState.header = opts.header
+  confirmState.warning = opts.warning
+  confirmState.message = opts.message ?? ''
+  confirmState.confirmText = opts.confirmText ?? '确认'
+  confirmState.action = opts.action
+  confirmState.visible = true
+}
+
+async function runConfirmed() {
+  const action = confirmState.action
+  confirmState.visible = false
+  confirmState.action = null
+  if (action) await action()
+}
+
 const loading = ref(false)
 const stats = ref<LogStats | null>(null)
 const rangeDays = ref<30 | 90>(30)
+
+const rangeOptions: SegmentedOption[] = [
+  { id: 30, text: '近 30 天' },
+  { id: 90, text: '近 90 天' },
+]
+
+/** 分段控件的 v-model 是 string | number，这里收窄回本页的天数联合类型。 */
+function onRangeChange(detail: { selectedId: string | number }) {
+  rangeDays.value = Number(detail.selectedId) === 90 ? 90 : 30
+}
 
 // ---- 清理 ----
 type LogTableKey = 'traffic_logs' | 'node_reports' | 'audit_logs'
@@ -29,6 +83,8 @@ const logTables: LogTableMeta[] = [
   { key: 'audit_logs', label: '审计日志', desc: '操作与登录审计记录，清理后不可再追溯', color: 'var(--color-charts-palette-categorical-3-2qk36g, #2ea597)' },
 ]
 
+const logTableOptions = logTables.map((t) => ({ label: t.label, value: t.key }))
+
 /** 日志量按天堆叠柱状图（Cloudscape BarChart 语义）。 */
 const chartSeries = computed<BarSeries[]>(() => {
   const days = stats.value?.days || []
@@ -43,7 +99,7 @@ const chartSeries = computed<BarSeries[]>(() => {
 
 const formatRowCount = (value: number) => (value >= 10000 ? `${(value / 1000).toFixed(0)}k` : String(value))
 const cleanupTable = ref<LogTableKey>('audit_logs')
-const cleanupDate = ref('')
+const cleanupDate = ref<string | null>('')
 const cleanupRunning = ref(false)
 
 const tableMeta = computed(() => logTables.find((t) => t.key === cleanupTable.value)!)
@@ -101,61 +157,58 @@ async function runCleanup() {
     return
   }
   const meta = tableMeta.value
-  try {
-    await ElMessageBox.confirm(
-      `确认清理 ${meta.label}中「${cleanupDate.value} 00:00」之前的记录？删除后不可恢复${
-        cleanupTable.value === 'audit_logs' ? '，相关操作将不再可追溯' : ''
-      }。`,
-      `清理${meta.label}`,
-      { type: 'error', confirmButtonText: '清理', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  cleanupRunning.value = true
-  try {
-    const { data } = await cleanupLogs(cleanupTable.value, cleanupDate.value)
-    if (data.code === 0) {
-      ElMessage.success(`已清理 ${data.data.deleted.toLocaleString()} 条${meta.label}记录`)
-      load()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '清理失败'))
-  } finally {
-    cleanupRunning.value = false
-  }
+  const before = cleanupDate.value
+  askConfirm({
+    header: `清理${meta.label}？`,
+    warning: `删除后不可恢复${cleanupTable.value === 'audit_logs' ? '，相关操作将不再可追溯' : ''}。`,
+    message: `将删除 ${meta.label}中「${before} 00:00」之前的全部记录。`,
+    confirmText: '清理',
+    action: async () => {
+      cleanupRunning.value = true
+      try {
+        const { data } = await cleanupLogs(cleanupTable.value, before)
+        if (data.code === 0) {
+          ElMessage.success(`已清理 ${data.data.deleted.toLocaleString()} 条${meta.label}记录`)
+          load()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '清理失败'))
+      } finally {
+        cleanupRunning.value = false
+      }
+    },
+  })
 }
 
 // ---- 空间回收 ----
 const vacuumRunning = ref(false)
 const vacuumResult = ref<{ reclaimed: number } | null>(null)
 async function runVacuum() {
-  try {
-    await ElMessageBox.confirm(
-      '空间回收（VACUUM）会重写数据库文件以释放已删除数据占用的空间，期间数据库写入会短暂阻塞，建议在低峰时段执行。',
-      '回收空间',
-      { type: 'warning', confirmButtonText: '开始回收', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  vacuumRunning.value = true
-  try {
-    const { data } = await vacuumDatabase()
-    if (data.code === 0) {
-      vacuumResult.value = data.data
-      ElMessage.success(`已回收 ${fmtSize(Math.max(0, data.data.reclaimed))}`)
-      load()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '空间回收失败'))
-  } finally {
-    vacuumRunning.value = false
-  }
+  askConfirm({
+    header: '回收数据库空间？',
+    warning: '回收期间数据库写入会短暂阻塞，建议在低峰时段执行。',
+    message: 'VACUUM 会重写数据库文件以释放已删除数据占用的空间，需要约 2 倍文件大小的空闲磁盘。',
+    confirmText: '开始回收',
+    action: async () => {
+      vacuumRunning.value = true
+      try {
+        const { data } = await vacuumDatabase()
+        if (data.code === 0) {
+          vacuumResult.value = data.data
+          ElMessage.success(`已回收 ${fmtSize(Math.max(0, data.data.reclaimed))}`)
+          load()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '空间回收失败'))
+      } finally {
+        vacuumRunning.value = false
+      }
+    },
+  })
 }
 
 // ---- 历史数据压缩 ----
@@ -163,30 +216,29 @@ const compactRunning = ref(false)
 const compactResult = ref<CompactResult | null>(null)
 
 async function runCompact() {
-  try {
-    await ElMessageBox.confirm(
-      '将归并存量流量明细、清理超出保留期的数据并回收磁盘空间。期间数据库写入会短暂阻塞，计费与用量口径不变。',
-      '压缩历史数据',
-      { type: 'warning', confirmButtonText: '开始压缩', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  compactRunning.value = true
-  try {
-    const { data } = await compactHistory()
-    if (data.code === 0) {
-      compactResult.value = data.data
-      ElMessage.success('历史数据压缩完成')
-      load()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '压缩失败'))
-  } finally {
-    compactRunning.value = false
-  }
+  askConfirm({
+    header: '压缩历史数据？',
+    warning: '期间数据库写入会短暂阻塞，并额外占用约 2 倍数据库文件的空闲空间。',
+    message: '将归并存量流量明细、清理超出保留期的数据并回收磁盘空间。归并只做求和/抽样，计费与用量口径不变，可重复执行。',
+    confirmText: '开始压缩',
+    action: async () => {
+      compactRunning.value = true
+      try {
+        const { data } = await compactHistory()
+        if (data.code === 0) {
+          compactResult.value = data.data
+          ElMessage.success('历史数据压缩完成')
+          load()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '压缩失败'))
+      } finally {
+        compactRunning.value = false
+      }
+    },
+  })
 }
 
 // ---- 保留天数 ----
@@ -213,7 +265,7 @@ watch(
 async function saveRetention() {
   const f = retentionForm.value
   for (const v of [f.retention_traffic_days, f.retention_node_reports_days, f.retention_audit_days]) {
-    if (!Number.isInteger(v) || v < 1 || v > 3650) {
+    if (v === null || !Number.isInteger(v) || v < 1 || v > 3650) {
       ElMessage.warning('保留天数需为 1–3650 的整数')
       return
     }
@@ -283,19 +335,16 @@ onMounted(() => {
           </div>
         </div>
       </div>
-      <el-button :loading="loading" :icon="Refresh" @click="load">刷新</el-button>
+      <CsButton :loading="loading" icon-name="refresh" @click="load">刷新</CsButton>
     </div>
 
     <!-- 日志量可视化 + 按日期清理 -->
-    <BaseCard title="日志量与清理" style="margin-bottom: 16px">
-      <template #extra>
-        <el-radio-group v-model="rangeDays" size="small">
-          <el-radio-button :value="30">近 30 天</el-radio-button>
-          <el-radio-button :value="90">近 90 天</el-radio-button>
-        </el-radio-group>
+    <CsContainer class="data-card" header="日志量与清理">
+      <template #actions>
+        <CsSegmentedControl :model-value="rangeDays" :options="rangeOptions" label="统计窗口" @change="onRangeChange" />
       </template>
 
-      <div v-loading="loading" style="min-height: 240px">
+      <CsLoading :loading="loading" min-height="240px">
         <div class="stat-row">
           <div v-for="t in logTables" :key="t.key" class="stat-cell">
             <span class="dot" :style="{ background: t.color }" />
@@ -320,18 +369,17 @@ onMounted(() => {
           empty-text="暂无日志数据"
         />
 
-        <el-divider style="margin: 12px 0" />
+        <CsDivider style="margin: 12px 0" />
 
         <div class="cleanup-row">
-          <el-select v-model="cleanupTable" style="width: 160px">
-            <el-option v-for="t in logTables" :key="t.key" :label="t.label" :value="t.key" />
-          </el-select>
-          <el-date-picker
+          <CsSelect v-model="cleanupTable" :options="logTableOptions" style="width: 160px" aria-label="清理目标" />
+          <CsDatePicker
             v-model="cleanupDate"
             type="date"
-            placeholder="选择清理截止日期（不含当日）"
             value-format="YYYY-MM-DD"
+            placeholder="选择清理截止日期（不含当日）"
             :disabled-date="disabledDate"
+            aria-label="清理截止日期"
             style="width: 240px"
           />
           <span class="muted" style="font-size: 12.5px">
@@ -339,9 +387,9 @@ onMounted(() => {
             <template v-else-if="estimatedRows">预估删除 {{ fmtCount(estimatedRows.count) }} 行（不含窗口外更早数据）</template>
             <template v-else>—</template>
           </span>
-          <el-button type="danger" :icon="Delete" :loading="cleanupRunning" :disabled="!cleanupDate" @click="runCleanup">
+          <CsButton icon-name="remove" :loading="cleanupRunning" :disabled="!cleanupDate" @click="runCleanup">
             清理
-          </el-button>
+          </CsButton>
         </div>
         <p class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.7">
           {{ tableMeta.desc }}。<template v-if="cleanupTable === 'traffic_logs'">
@@ -357,17 +405,16 @@ onMounted(() => {
             content="审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。"
           />
         </p>
-      </div>
-    </BaseCard>
+      </CsLoading>
+    </CsContainer>
 
     <!-- 历史数据压缩 -->
-    <BaseCard
-      title="历史数据压缩"
-      style="margin-bottom: 16px"
-      title-tip="把存量流量明细归并到小时桶、节点心跳按行龄抽稀（近 6 小时 1 分钟，更早 10 分钟），并清理超出保留期的数据。归并只做求和/抽样，计费与用量口径不变，可重复执行。"
-    >
+    <CsContainer class="data-card" header="历史数据压缩">
+      <template #info>
+        <TipIcon content="把存量流量明细归并到小时桶、节点心跳按行龄抽稀（近 6 小时 1 分钟，更早 10 分钟），并清理超出保留期的数据。归并只做求和/抽样，计费与用量口径不变，可重复执行。" />
+      </template>
       <div class="cleanup-row" style="align-items: center">
-        <el-button type="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</el-button>
+        <CsButton variant="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</CsButton>
         <TipIcon
           type="warn"
           content="压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。"
@@ -387,18 +434,17 @@ onMounted(() => {
         <div v-if="compactResult.reclaimed !== undefined">
           释放空间 <b class="cell-mono">{{ fmtSize(Math.max(0, compactResult.reclaimed || 0)) }}</b>
         </div>
-        <div v-if="compactResult.vacuum_error" style="color: var(--el-color-warning)">
+        <div v-if="compactResult.vacuum_error" style="color: var(--color-text-status-warning-fabq6h, #8d6605)">
           {{ compactResult.vacuum_error }}
         </div>
       </div>
-    </BaseCard>
+    </CsContainer>
 
     <!-- 空间回收 -->
-    <BaseCard
-      title="空间回收（VACUUM）"
-      style="margin-bottom: 16px"
-      title-tip="SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。"
-    >
+    <CsContainer class="data-card" header="空间回收（VACUUM）">
+      <template #info>
+        <TipIcon content="SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。" />
+      </template>
       <div class="cleanup-row" style="align-items: center">
         <span class="muted" style="font-size: 12.5px">
           当前占用：
@@ -409,47 +455,64 @@ onMounted(() => {
           </template>
           <template v-else>当前数据库类型不支持在线回收</template>
         </span>
-        <el-button type="primary" :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
+        <CsButton variant="primary" :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
           回收空间
-        </el-button>
+        </CsButton>
         <TipIcon type="warn" content="回收期间数据库写入会短暂阻塞，建议在低峰时段执行；日常无需频繁回收。" />
       </div>
       <p v-if="vacuumResult" class="muted" style="font-size: 12.5px; margin-top: 10px">
         上次回收释放了 <b class="cell-mono">{{ fmtSize(Math.max(0, vacuumResult.reclaimed)) }}</b>
       </p>
-    </BaseCard>
+    </CsContainer>
 
     <!-- 自动保留天数 -->
-    <BaseCard
-      title="自动保留天数"
-      title-tip="每日凌晨 4 点自动清理超过保留期的日志数据；保存后次日生效。手动清理请使用上方「按日期清理」。"
-    >
+    <CsContainer class="data-card" header="自动保留天数">
+      <template #info>
+        <TipIcon content="每日凌晨 4 点自动清理超过保留期的日志数据；保存后次日生效。手动清理请使用上方「按日期清理」。" />
+      </template>
       <div class="retention-row">
         <div class="retention-item">
           <span class="stat-label">流量明细</span>
           <TipIcon type="warn" content="建议 ≥ 在售套餐最长计费周期（如年付套餐建议 ≥ 366 天），否则自动清理会提前抹掉部分用户的已用流量。" />
-          <el-input-number v-model="retentionForm.retention_traffic_days" :min="1" :max="3650" size="small" />
+          <CsInputNumber v-model="retentionForm.retention_traffic_days" :min="1" :max="3650" style="width: 120px" />
           <span class="muted" style="font-size: 12px">天</span>
         </div>
         <div class="retention-item">
           <span class="stat-label">节点心跳</span>
-          <el-input-number v-model="retentionForm.retention_node_reports_days" :min="1" :max="3650" size="small" />
+          <CsInputNumber v-model="retentionForm.retention_node_reports_days" :min="1" :max="3650" style="width: 120px" />
           <span class="muted" style="font-size: 12px">天</span>
         </div>
         <div class="retention-item">
           <span class="stat-label">审计日志</span>
-          <el-input-number v-model="retentionForm.retention_audit_days" :min="1" :max="3650" size="small" />
+          <CsInputNumber v-model="retentionForm.retention_audit_days" :min="1" :max="3650" style="width: 120px" />
           <span class="muted" style="font-size: 12px">天</span>
         </div>
-        <el-button type="primary" size="small" :loading="retentionSaving" @click="saveRetention">保存</el-button>
+        <CsButton variant="primary" :loading="retentionSaving" @click="saveRetention">保存</CsButton>
       </div>
-    </BaseCard>
+    </CsContainer>
+
+    <!-- 破坏性操作确认（AWS 控制台口径：红色 Warning 行 + 红描边/红实心按钮） -->
+    <CsConfirmDialog
+      v-model:visible="confirmState.visible"
+      :header="confirmState.header"
+      :warning="confirmState.warning"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      :loading="cleanupRunning || compactRunning || vacuumRunning"
+      @confirm="runConfirmed"
+    />
   </div>
 </template>
 
 <style scoped>
 .log-volume-chart {
   margin-top: 8px;
+}
+
+/* CsContainer 自身不带外边距（官方容器假定间距由 SpaceBetween 提供），
+   这里补回原 BaseCard 的卡片间距。 */
+.data-card + .data-card {
+  margin-top: 16px;
 }
 
 .stat-row {
