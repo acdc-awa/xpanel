@@ -22,6 +22,17 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'vendor'])
 const theme = readFileSync(themeFile, 'utf8')
 const defined = new Set([...theme.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]))
 
+/** 模板字符串拼出的动态变量名（如 `--color-charts-palette-categorical-${key}`）
+    会被正则截到末尾的连字符；此时按前缀检查，命中任一具体 token 即视为合法。 */
+function isDefined(name) {
+  if (defined.has(name)) return true
+  if (!name.endsWith('-')) return false
+  for (const token of defined) {
+    if (token.startsWith(name)) return true
+  }
+  return false
+}
+
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     if (SKIP_DIRS.has(name)) continue
@@ -35,7 +46,7 @@ const problems = []
 for (const file of walk(srcRoot)) {
   const text = readFileSync(file, 'utf8')
   for (const match of text.matchAll(/var\((--color-[a-z0-9-]+)/g)) {
-    if (defined.has(match[1])) continue
+    if (isDefined(match[1])) continue
     const line = text.slice(0, match.index).split('\n').length
     problems.push({ file: relative(webRoot, file).split(sep).join('/'), line, name: match[1] })
   }
