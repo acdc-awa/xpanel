@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, Download, MoreFilled, Loading, Check, Close, Platform, Link } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'

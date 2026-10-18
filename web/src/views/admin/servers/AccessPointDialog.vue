@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
   createAccessPoint,
   updateAccessPoint,

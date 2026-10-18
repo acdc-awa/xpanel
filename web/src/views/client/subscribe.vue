@@ -9,8 +9,7 @@ import {
   RefreshRight,
   ShoppingBag,
 } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'

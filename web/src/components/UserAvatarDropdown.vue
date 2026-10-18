@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { User, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { ElMessageBox } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{

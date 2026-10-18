@@ -15,8 +15,7 @@ import {
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
-import { ElMessageBox } from 'element-plus'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete, Edit } from '@element-plus/icons-vue'
 import {
   createServerRoutingRule,

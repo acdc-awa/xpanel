@@ -20,6 +20,7 @@ import {
   CsSelect,
   CsSpinner,
   ElMessage,
+  ElMessageBox,
 } from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'

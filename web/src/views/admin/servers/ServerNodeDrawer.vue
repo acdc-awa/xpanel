@@ -2,8 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Delete, Key, CopyDocument, Refresh, Link } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
   deleteServer,
   getServerConfigPreview,

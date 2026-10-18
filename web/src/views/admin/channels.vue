@@ -16,8 +16,7 @@ import {
   View,
   Hide,
 } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {

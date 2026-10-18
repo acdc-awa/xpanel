@@ -19,6 +19,12 @@ const props = withDefaults(
     /** Esc 是否关闭。与遮罩一致地用于长流程弹窗。 */
     closeOnEscape?: boolean
     closeAriaLabel?: string
+    /**
+     * 打开时优先聚焦的元素选择器（在弹窗内查找）。
+     * 默认聚焦第一个可聚焦元素——对输入类弹窗那会是右上角关闭按钮，
+     * 所以要直接落焦到输入框时传它。
+     */
+    initialFocus?: string
   }>(),
   {
     header: undefined,
@@ -29,6 +35,7 @@ const props = withDefaults(
     closeOnClickOverlay: true,
     closeOnEscape: true,
     closeAriaLabel: 'Close modal',
+    initialFocus: undefined,
   }
 )
 
@@ -113,6 +120,11 @@ watch(
     if (visible) {
       lockScroll()
       await nextTick()
+      const preferred = props.initialFocus ? dialogRef.value?.querySelector<HTMLElement>(props.initialFocus) : null
+      if (preferred) {
+        preferred.focus()
+        return
+      }
       const focusables = dialogRef.value?.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
       )

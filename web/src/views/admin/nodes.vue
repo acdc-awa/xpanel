@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, Loading, Connection, Promotion } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
