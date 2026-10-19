@@ -339,7 +339,8 @@ async function loadBackups() {
   backupLoading.value = true
   try {
     const { data } = await getBackups()
-    if (data.code === 0) backups.value = data.data.items
+    // 后端空目录返回 []（已修）；这里再兜一层，避免任何 null 把整页渲染打断
+    if (data.code === 0) backups.value = data.data.items || []
     else ElMessage.error(data.message)
   } catch (e) {
     ElMessage.error(errMsg(e, '加载备份列表失败'))

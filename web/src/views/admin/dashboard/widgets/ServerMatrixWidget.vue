@@ -83,6 +83,7 @@ function fmtTime(t: string | null) {
 
     <div class="table-container" :style="{ '--server-table-min-width': `${tableMinWidth}px` }">
       <CsTable
+        compact
         :items="filteredServerMatrix"
         :columns="serverColumns"
         :wrap-lines="false"

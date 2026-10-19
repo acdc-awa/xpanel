@@ -145,7 +145,9 @@ func (s *Service) listLocked() ([]BackupInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var items []BackupInfo
+	// 用非 nil 切片：备份目录为空时若返回 nil，JSON 会序列化成 null，
+	// 前端按数组取 .length 会直接抛错（整页渲染失败）。
+	items := make([]BackupInfo, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !tsRe.MatchString(e.Name()) {
 			continue

@@ -30,7 +30,7 @@ const props = withDefaults(
     trackBy?: string | ((item: any, index: number) => string | number)
     wrapLines?: boolean
     stripedRows?: boolean
-    /** 仪表盘等密集场景：套用官方 compact 间距并收紧单元格内边距 */
+    /** 仪表盘等密集场景：套用官方 compact 间距并收紧单元格内边距（默认关闭，需显式开启） */
     compact?: boolean
   }>(),
   {
@@ -42,7 +42,7 @@ const props = withDefaults(
     trackBy: undefined,
     wrapLines: true,
     stripedRows: false,
-    compact: true,
+    compact: false,
   }
 )
 

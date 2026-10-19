@@ -186,9 +186,12 @@ function onKeydown(event: KeyboardEvent) {
           <slot name="actions" />
         </div>
       </div>
-      <div :class="cx(CS.tabs['tabs-content'], CS.tabs['tabs-content-active'])">
+      <!-- 官方结构是「外层 wrapper 持 with-paddings，内层 content 持 tabs-content-active」；
+           vendored CSS 的内边距选择器写死为 `.tabs-content-wrapper.with-paddings > .tabs-content`，
+           两层顺序颠倒会让 padding-block 完全不匹配（每个页签内容顶到表头分割线上）。 -->
+      <div :class="cx(CS.tabs['tabs-content-wrapper'], !disableContentPaddings && CS.tabs['with-paddings'])">
         <div
-          :class="cx(CS.tabs['tabs-content-wrapper'], !disableContentPaddings && CS.tabs['with-paddings'])"
+          :class="cx(CS.tabs['tabs-content'], CS.tabs['tabs-content-active'])"
           :id="`tabpanel-${activeId}`"
           role="tabpanel"
         >

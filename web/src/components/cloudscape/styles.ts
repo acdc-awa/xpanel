@@ -26,6 +26,9 @@ import './vendor/components/flashbar/styles.scoped.css'
 import './vendor/components/progress-bar/styles.scoped.css'
 import './vendor/components/expandable-section/styles.scoped.css'
 import './vendor/components/key-value-pairs/styles.scoped.css'
+// CsKeyValuePairs 走 ColumnLayout 的 text-grid 变体：行/列间距全部在 column-layout 里，
+// 漏引这条会让 key-value 每对 dt/dd 紧贴（看起来「行距不够」）。
+import './vendor/components/column-layout/styles.scoped.css'
 import './vendor/components/copy-to-clipboard/styles.scoped.css'
 import './vendor/components/form/styles.scoped.css'
 import './vendor/components/form-field/styles.scoped.css'

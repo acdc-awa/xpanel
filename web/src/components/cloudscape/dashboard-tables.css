@@ -1,6 +1,8 @@
 /*
  * CsTable：官方 Table 结构与 token，但仪表盘卡片内需要更紧凑的单元格留白。
  * 官方 CSS 选择器带 :not(#\9)，普通选择器压不住间距，这里用 !important 覆盖。
+ * 作用域限定在紧凑表（compact，即带 awsui-context-compact-table 的表）——此前无条件
+ * 命中所有 CsTable，把管理端普通表格也压成 6px/10px 的仪表盘间距。
  * 亮/暗色由 body.awsui-dark-mode 自动切换。
  */
 .cs-cloudscape-table {
@@ -8,13 +10,13 @@
   background: transparent;
 }
 
-.cs-cloudscape-table th[class*='header-cell'],
-.cs-cloudscape-table td[class*='body-cell'] {
+.cs-cloudscape-table.awsui-context-compact-table th[class*='header-cell'],
+.cs-cloudscape-table.awsui-context-compact-table td[class*='body-cell'] {
   padding: 0 !important;
 }
 
-.cs-cloudscape-table [class*='header-cell-content'],
-.cs-cloudscape-table [class*='body-cell-content'] {
+.cs-cloudscape-table.awsui-context-compact-table [class*='header-cell-content'],
+.cs-cloudscape-table.awsui-context-compact-table [class*='body-cell-content'] {
   padding-block: 6px !important;
   padding-inline: 10px !important;
 }

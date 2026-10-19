@@ -94,6 +94,7 @@ const orderColumns: TableColumn[] = [
           <!-- 1. 用户流量排行 -->
           <div v-if="activeTab === 'users'" class="ranking-tab-content">
         <CsTable
+          compact
           :items="rankSource?.user_rank || []"
           :columns="userColumns"
           empty-text="暂无用户流量数据"
@@ -121,6 +122,7 @@ const orderColumns: TableColumn[] = [
       <!-- 2. 节点流量排行 -->
       <div v-else-if="activeTab === 'nodes'" class="ranking-tab-content">
         <CsTable
+          compact
           :items="rankSource?.server_rank || []"
           :columns="nodeColumns"
           empty-text="暂无节点流量数据"
@@ -148,6 +150,7 @@ const orderColumns: TableColumn[] = [
       <!-- 3. 最近礼品卡核销 -->
       <div v-else-if="activeTab === 'cards'" class="ranking-tab-content">
         <CsTable
+          compact
           :items="rankSource?.recent_gift_cards || []"
           :columns="cardColumns"
           empty-text="暂无核销记录"
@@ -171,6 +174,7 @@ const orderColumns: TableColumn[] = [
       <!-- 4. 最近套餐订单 -->
       <div v-else-if="activeTab === 'orders'" class="ranking-tab-content">
         <CsTable
+          compact
           :items="rankSource?.recent_orders || []"
           :columns="orderColumns"
           empty-text="暂无订单"
