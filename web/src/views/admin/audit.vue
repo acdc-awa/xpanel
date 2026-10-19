@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import {
   CsBadge,
   CsButton,
+  CsCard,
+  CsCardGrid,
   CsContainer,
   CsDatePicker,
   CsIcon,
@@ -179,62 +181,52 @@ function fmtTime(t: string) {
         <p>暂无审计日志</p>
       </div>
 
-      <!-- 审计日志卡片网格流（自适应 1~4 列）：摘要 + 字段表 + 大文本预览 -->
-      <div v-else class="audit-card-grid">
-        <div v-for="rv in rows" :key="rv.row.id" class="audit-card">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="x-chip" :class="rv.row.operator_type === 'admin' ? 'orange' : rv.row.operator_type === 'system' ? 'gray' : 'blue'" style="font-size: 10px; padding: 1px 5px">
-                {{ rv.row.operator_type === 'admin' ? '管理员' : rv.row.operator_type === 'system' ? '系统' : '用户' }}
-                {{ rv.row.operator_type === 'system' ? '' : rv.row.operator_username ? rv.row.operator_username : `#${rv.row.operator_id}` }}
-              </span>
-              <CsBadge :color="CATEGORY_BADGE[rv.categoryColor]">{{ rv.categoryName }}</CsBadge>
+      <!-- 审计日志卡片网格（官方 ItemCard）：摘要 + 字段表 + 大文本预览 -->
+      <CsCardGrid v-else>
+        <CsCard v-for="rv in rows" :key="rv.row.id">
+          <template #header>
+            <div class="audit-head">
               <span class="action-name">{{ rv.title }}</span>
-            </div>
-            <code class="cell-mono muted" style="font-size: 11px">{{ rv.row.ip || '—' }}</code>
-          </div>
-
-          <!-- 动作原始技术标识 -->
-          <div class="action-code-bar">
-            <span class="action-code cell-mono" :title="rv.row.action">{{ rv.row.action }}</span>
-          </div>
-
-          <!-- 翻译视图：一句话摘要 + 字段表 + 大文本预览 -->
-          <div class="card-grid">
-            <div class="grid-item full-width">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px">
-                <span class="item-label">操作内容</span>
-                <CsButton variant="link" class="link-compact" @click="openDetail(rv.view)">展开 / 原文</CsButton>
-              </div>
-              <div class="audit-summary" :title="rv.view.summary">{{ rv.view.summary || '—' }}</div>
-              <div v-if="rv.view.fields.length" class="audit-fields">
-                <div v-for="(f, i) in rv.view.fields.slice(0, CARD_FIELD_LIMIT)" :key="i" class="audit-field-row">
-                  <span class="af-label">{{ f.label }}</span>
-                  <span class="af-value" :class="{ 'cell-mono': f.mono }">{{ f.value }}</span>
-                </div>
-                <CsButton
-                  v-if="rv.view.fields.length > CARD_FIELD_LIMIT"
-                  variant="link"
-                  class="link-compact"
-                  @click="openDetail(rv.view)"
-                >
-                  全部 {{ rv.view.fields.length }} 项…
-                </CsButton>
-              </div>
-              <div v-if="rv.view.texts.length" class="audit-text-chips">
-                <span v-for="(t, i) in rv.view.texts" :key="i" class="audit-text-chip" :title="t.preview" @click="openDetail(rv.view)">
-                  {{ t.title }} · {{ t.meta }}
+              <div class="audit-meta">
+                <CsBadge :color="CATEGORY_BADGE[rv.categoryColor]">{{ rv.categoryName }}</CsBadge>
+                <CsBadge :color="rv.row.operator_type === 'admin' ? 'severity-medium' : rv.row.operator_type === 'system' ? 'grey' : 'blue'">
+                  {{ rv.row.operator_type === 'admin' ? '管理员' : rv.row.operator_type === 'system' ? '系统' : '用户' }}
+                </CsBadge>
+                <span v-if="rv.row.operator_type !== 'system'" class="audit-operator">
+                  {{ rv.row.operator_username || `#${rv.row.operator_id}` }}
                 </span>
               </div>
+              <code class="action-code">{{ rv.row.action }}</code>
             </div>
-            <div class="grid-item full-width">
-              <span class="item-label">记录时间</span>
-              <div class="item-value cell-mono muted font-11">{{ fmtTime(rv.row.created_at) }}</div>
+          </template>
+
+          <template #actions>
+            <code class="audit-ip">{{ rv.row.ip || '—' }}</code>
+          </template>
+
+          <div class="audit-summary" :title="rv.view.summary">{{ rv.view.summary || '—' }}</div>
+
+          <div v-if="rv.view.fields.length" class="audit-fields">
+            <div v-for="(f, i) in rv.view.fields.slice(0, CARD_FIELD_LIMIT)" :key="i" class="audit-field-row">
+              <span class="af-label">{{ f.label }}</span>
+              <span class="af-value" :class="{ 'af-value--mono': f.mono }">{{ f.value }}</span>
             </div>
           </div>
-        </div>
-      </div>
+
+          <div v-if="rv.view.texts.length" class="audit-text-chips">
+            <span v-for="(t, i) in rv.view.texts" :key="i" class="audit-text-chip" :title="t.preview" @click="openDetail(rv.view)">
+              {{ t.title }} · {{ t.meta }}
+            </span>
+          </div>
+
+          <template #footer>
+            <span class="audit-time">{{ fmtTime(rv.row.created_at) }}</span>
+            <CsButton variant="inline-link" @click="openDetail(rv.view)">
+              {{ rv.view.fields.length > CARD_FIELD_LIMIT ? `全部 ${rv.view.fields.length} 项 / 原文` : '展开 / 原文' }}
+            </CsButton>
+          </template>
+        </CsCard>
+      </CsCardGrid>
 
       <div class="x-pager">
         <CsPagination
@@ -310,162 +302,129 @@ function fmtTime(t: string) {
   }
 }
 
-.link-compact {
-  font-size: 11px;
-  padding: 0;
+/* ================= 审计日志卡片（官方 ItemCard 口径） ================= */
+.audit-head {
+  min-inline-size: 0;
 }
 
-/* ================= 全局统一审计日志卡片网格流 ================= */
-.audit-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
+.action-name {
+  display: block;
+  font-size: var(--font-size-heading-s-hm1hv8, 16px);
+  line-height: var(--line-height-heading-s-3z7qjv, 20px);
+  font-weight: 700;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  overflow-wrap: anywhere;
 }
 
-.audit-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+.audit-meta {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 4px;
+}
 
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
+.audit-operator {
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow-wrap: anywhere;
+}
 
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
+.action-code {
+  display: inline-block;
+  margin-block-start: 4px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow-wrap: anywhere;
+}
 
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .action-name {
-      font-weight: 600;
-      font-size: 13px;
-      color: var(--x-text, #111827);
-    }
-  }
-
-  .action-code-bar {
-    padding: 6px 0 2px;
-    .action-code {
-      font-size: 11px;
-      color: var(--x-text-3);
-      background: var(--x-fill-2, #f8fafc);
-      padding: 2px 6px;
-      border-radius: 4px;
-      border: 1px solid var(--x-border-light, #f1f5f9);
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0 2px;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
+.audit-ip {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  white-space: nowrap;
 }
 
 /* 翻译视图：摘要一句话 */
 .audit-summary {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--x-text, #111827);
-  line-height: 1.5;
-  word-break: break-all;
-  background: var(--x-bg, #f9fafb);
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--x-border-light, #f3f4f6);
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 18px;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 /* 翻译视图：字段表 */
 .audit-fields {
-  margin-top: 6px;
+  margin-block-start: 10px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .audit-field-row {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
 
   .af-label {
     flex: 0 0 auto;
     min-width: 64px;
-    color: var(--x-text-3, #9ca3af);
+    color: var(--color-text-body-secondary-66ygbb, #656871);
   }
 
   .af-value {
     flex: 1 1 auto;
-    color: var(--x-text-2, #374151);
-    word-break: break-all;
+    color: var(--color-text-body-default-b2us04, #0f141a);
+    overflow-wrap: anywhere;
+  }
+
+  .af-value--mono {
+    font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   }
 }
 
 /* 翻译视图：大文本预览 chip（模板/正文/PEM） */
 .audit-text-chips {
-  margin-top: 6px;
+  margin-block-start: 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .audit-text-chip {
-  font-size: 11px;
-  color: var(--x-primary);
-  background: var(--x-fill-2, #f1f5f9);
-  border: 1px dashed var(--x-border, #e5e7eb);
-  border-radius: 4px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  border: 1px dashed var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: var(--border-radius-input-k1q34z, 8px);
   padding: 2px 8px;
   cursor: pointer;
 
   &:hover {
-    border-color: var(--x-primary);
+    border-color: var(--color-text-link-default-qabnuk, #006ce0);
   }
+}
+
+.audit-time {
+  margin-inline-end: auto;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .x-pager {
@@ -547,11 +506,5 @@ function fmtTime(t: string) {
   max-height: 380px;
   overflow-y: auto;
   margin: 0;
-}
-
-@media (max-width: 640px) {
-  .audit-card-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

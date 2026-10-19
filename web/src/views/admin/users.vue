@@ -7,6 +7,10 @@ import {
   CsBadge,
   CsButton,
   CsButtonDropdown,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
   CsCheckbox,
   CsContainer,
   CsDatePicker,
@@ -433,9 +437,8 @@ async function doResetTraffic(row: any) {
 async function doDelete(row: any) {
   try {
     await ElMessageBox.confirm(`确定删除用户 ${row.username}？该操作不可逆。`, '删除确认', {
-      type: 'warning',
+      type: 'error',
       confirmButtonText: '删除',
-      confirmButtonClass: 'el-button--danger',
       cancelButtonText: '取消',
     })
     const { data } = await deleteUser(row.id)
@@ -739,84 +742,75 @@ function cardMenuItems(row: AdminUser) {
         <p style="margin-top: 8px">暂无匹配用户</p>
       </div>
 
-      <!-- 全局统一卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="user-card-grid">
-        <div
+      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，额度作为卡片主指标 -->
+      <CsCardGrid v-else>
+        <CsCard
           v-for="row in list"
           :key="row.id"
-          class="user-card"
-          :class="{ selected: isRowSelected(row), banned: row.status !== 1 }"
+          :class="{ 'user-card--selected': isRowSelected(row), 'user-card--banned': row.status !== 1 }"
         >
-          <!-- 卡片头部 -->
-          <div class="card-head">
-            <div class="head-left">
+          <template #header>
+            <div class="user-head">
               <CsCheckbox
                 :model-value="isRowSelected(row)"
                 :aria-label="`选择 ${row.username}`"
                 @change="(val: boolean) => toggleSelectRow(row, !!val)"
               />
-              <div class="user-info">
-                <div class="user-name-line">
-                  <span class="user-id cell-mono">#{{ row.id }}</span>
-                  <span class="user-name" title="点击查看与编辑详情" @click="openDetail(row)">{{ row.username }}</span>
-                  <span v-if="row.role === 'admin'" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">管理员</span>
-                  <span class="x-chip" :class="row.status === 1 ? 'green' : 'red'" style="font-size: 10px; padding: 1px 5px">
-                    {{ row.status === 1 ? '正常' : '已封禁' }}
-                  </span>
-                </div>
-                <div class="user-email cell-mono">{{ row.email || '—' }}</div>
-                <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
-              </div>
+              <button type="button" class="user-name" title="点击查看与编辑详情" @click="openDetail(row)">
+                {{ row.username }}
+              </button>
             </div>
-            <div class="head-right">
-              <CsTooltip :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'" placement="top">
-                <CsToggle :model-value="row.status === 1" :disabled="isSelf(row)" :aria-label="`切换 ${row.username} 的启用状态`" @change="doToggle(row)" />
-              </CsTooltip>
+            <div class="user-meta">
+              <span class="user-id">#{{ row.id }}</span>
+              <CsBadge v-if="row.role === 'admin'" color="severity-medium">管理员</CsBadge>
+              <CsBadge :color="row.status === 1 ? 'green' : 'red'">
+                {{ row.status === 1 ? '正常' : '已封禁' }}
+              </CsBadge>
             </div>
-          </div>
+            <div class="user-email">{{ row.email || '—' }}</div>
+            <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
+          </template>
 
-          <!-- 关键指标 2x2 网格 -->
-          <div class="card-body-grid">
-            <div class="grid-item">
-              <span class="grid-label">套餐</span>
-              <span class="grid-value">
-                <span class="x-chip purple" style="font-size: 11px">
-                  {{ planName(row.plan_id) }}
-                </span>
-              </span>
-            </div>
+          <template #actions>
+            <CsTooltip
+              :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'"
+              placement="top"
+            >
+              <CsToggle
+                :model-value="row.status === 1"
+                :disabled="isSelf(row)"
+                :aria-label="`切换 ${row.username} 的启用状态`"
+                @change="doToggle(row)"
+              />
+            </CsTooltip>
+          </template>
 
-            <div class="grid-item">
-              <span class="grid-label">所属权限组</span>
-              <span class="grid-value">
-                <span class="x-chip" :class="userGroupDisplay(row).custom ? 'blue' : 'green'" style="font-size: 10.5px">
-                  {{ userGroupDisplay(row).name }}
-                </span>
-              </span>
-            </div>
+          <CsCardFacts>
+            <CsCardFact label="套餐">
+              <CsBadge color="blue">{{ planName(row.plan_id) }}</CsBadge>
+            </CsCardFact>
+            <CsCardFact label="所属权限组">
+              <CsBadge :color="userGroupDisplay(row).custom ? 'blue' : 'green'">
+                {{ userGroupDisplay(row).name }}
+              </CsBadge>
+            </CsCardFact>
+            <CsCardFact label="账户余额" mono>
+              <span class="balance-value">¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}</span>
+            </CsCardFact>
+            <CsCardFact
+              label="设备限制"
+              mono
+              :value="row.is_custom_device_limit ? `${row.effective_device_limit} 台 (自定义)` : (row.effective_device_limit && row.effective_device_limit > 0) ? `${row.effective_device_limit} 台` : '不限'"
+            />
+          </CsCardFacts>
 
-            <div class="grid-item">
-              <span class="grid-label">账户余额</span>
-              <span class="grid-value balance-value cell-mono">
-                ¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}
-              </span>
-            </div>
-
-            <div class="grid-item">
-              <span class="grid-label">设备限制</span>
-              <span class="grid-value device-value cell-mono">
-                {{ row.is_custom_device_limit ? `${row.effective_device_limit} 台 (自定义)` : (row.effective_device_limit && row.effective_device_limit > 0) ? `${row.effective_device_limit} 台` : '不限' }}
-              </span>
-            </div>
-          </div>
-
-          <!-- 流量使用与到期 -->
-          <div class="card-traffic">
-            <div class="traffic-header">
-              <span class="traffic-label">流量使用</span>
-              <span class="traffic-val cell-mono">
-                <strong>{{ formatBytes(row.used_bytes) }}</strong> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}
-                <span v-if="row.total_bytes" class="percent">({{ usagePercent(row) }}%)</span>
+          <div class="user-traffic">
+            <div class="traffic-head">
+              <span>流量使用</span>
+              <span class="traffic-value">
+                <strong>{{ formatBytes(row.used_bytes) }}</strong> /
+                {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}
+                <span v-if="row.total_bytes" class="traffic-percent">({{ usagePercent(row) }}%)</span>
               </span>
             </div>
             <CsProgressBar
@@ -827,13 +821,10 @@ function cardMenuItems(row: AdminUser) {
               :color="usagePercent(row) > 90 ? 'var(--color-text-status-error-ri38gt)' : undefined"
               :aria-label="`流量已用 ${usagePercent(row)}%`"
             />
-            <div class="traffic-expire muted cell-mono" style="font-size: 11px; margin-top: 6px">
-              {{ row.expire_at ? fmtTime(row.expire_at) + ' 到期' : '长期有效' }}
-            </div>
+            <div class="traffic-expire">{{ row.expire_at ? fmtTime(row.expire_at) + ' 到期' : '长期有效' }}</div>
           </div>
 
-          <!-- 底部操作栏 -->
-          <div class="card-actions">
+          <template #footer>
             <CsButton icon-name="settings" @click="openDetail(row)">编辑配置</CsButton>
             <CsButton icon-name="ticket" @click="openAdjust(row)">调整余额</CsButton>
             <CsButtonDropdown
@@ -844,9 +835,9 @@ function cardMenuItems(row: AdminUser) {
               :items="cardMenuItems(row)"
               @select="(cmd) => handleCardAction(cmd, row)"
             />
-          </div>
-        </div>
-      </div>
+          </template>
+        </CsCard>
+      </CsCardGrid>
 
       <div class="x-pager">
         <CsPagination
@@ -1411,7 +1402,117 @@ function cardMenuItems(row: AdminUser) {
   flex-wrap: wrap;
 }
 
-/* ================= 全局统一响应式卡片网格流 ================= */
+/* ================= 用户卡片（官方 ItemCard 口径） ================= */
+.user-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+  }
+}
+
+.user-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 4px;
+}
+
+.user-id {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.user-email {
+  margin-block-start: 4px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow-wrap: anywhere;
+}
+
+.user-remark {
+  margin-block-start: 4px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选中 / 封禁只用官方高亮边框语义表达，不另造一层卡片底色 */
+.user-card--selected :deep(.awsui_inner-card_n1fwt_1f9u9_138) {
+  border-color: var(--color-border-item-selected-7104rh, #006ce0) !important;
+}
+
+.user-card--banned {
+  opacity: 0.88;
+}
+
+.balance-value {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+  font-weight: 700;
+}
+
+.user-traffic {
+  margin-block-start: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+}
+
+.traffic-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block-end: 6px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-value {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  text-align: end;
+}
+
+.traffic-percent {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  margin-inline-start: 2px;
+}
+
+.traffic-expire {
+  margin-block-start: 6px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
 .user-select-bar {
   display: flex;
   align-items: center;
@@ -1423,192 +1524,6 @@ function cardMenuItems(row: AdminUser) {
   padding: 48px 0;
   color: var(--x-text-3);
   font-size: 13.5px;
-}
-
-.user-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.user-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  &.selected {
-    border-color: var(--x-primary, #6366f1);
-    background: rgba(99, 102, 241, 0.02);
-  }
-  &.banned {
-    opacity: 0.88;
-    border-color: rgba(239, 68, 68, 0.25);
-    background: rgba(239, 68, 68, 0.02);
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-left {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .user-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .user-name-line {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .user-id {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--x-text-3, #9ca3af);
-      background: var(--x-fill-2, rgba(0, 0, 0, 0.05));
-      padding: 1px 5px;
-      border-radius: 4px;
-    }
-
-    .user-name {
-      font-weight: 600;
-      font-size: 13.5px;
-      color: var(--x-text, #111827);
-      word-break: break-all;
-      cursor: pointer;
-      &:hover {
-        color: var(--x-primary);
-      }
-    }
-
-    .user-email {
-      font-size: 11.5px;
-      color: var(--x-text-2, #6b7280);
-      margin-top: 2px;
-      word-break: break-all;
-    }
-
-    .user-remark {
-      font-size: 11px;
-      color: #b45309;
-      margin-top: 3px;
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .head-right {
-      padding-left: 8px;
-      flex: none;
-    }
-  }
-
-  .card-body-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      .grid-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .grid-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-
-      .balance-value {
-        color: #059669;
-        font-weight: 700;
-      }
-
-      .device-value {
-        font-size: 12px;
-      }
-    }
-  }
-
-  .card-traffic {
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-    border: 1px solid var(--x-border, #f1f3f9);
-    border-radius: 6px;
-    padding: 8px 10px;
-    margin: 2px 0 10px;
-
-    .traffic-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 11.5px;
-      margin-bottom: 5px;
-
-      .traffic-label {
-        color: var(--x-text-2, #6b7280);
-      }
-
-      .traffic-val {
-        color: var(--x-text, #111827);
-        .percent {
-          color: var(--x-text-3, #9ca3af);
-          margin-left: 2px;
-        }
-      }
-    }
-  }
-
-  .card-actions {
-    display: flex;
-    gap: 6px;
-    justify-content: flex-end;
-    padding-top: 4px;
-
-    /* 官方按钮类名带 :not(#\9) 高特异性，紧凑尺寸必须 !important 才能压住 */
-    :deep([class*='awsui_button_']) {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-      white-space: nowrap;
-    }
-
-    :deep(.card-more) {
-      flex: none;
-    }
-  }
 }
 
 @media (max-width: 768px) {
@@ -1646,8 +1561,8 @@ function cardMenuItems(row: AdminUser) {
 }
 
 @media (max-width: 640px) {
-  .user-card-grid {
-    grid-template-columns: 1fr;
+  .user-traffic {
+    padding: 8px 10px;
   }
 }
 </style>

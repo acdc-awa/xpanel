@@ -2,7 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
+  CsBadge,
   CsButton,
+  CsCard,
+  CsCardGrid,
   CsContainer,
   CsForm,
   CsFormItem,
@@ -17,6 +20,7 @@ import {
   CsSelect,
   CsSpinner,
   CsToggle,
+  CsTooltip,
 } from '@/components/cloudscape'
 import {
   getAdminNotices,
@@ -252,69 +256,71 @@ async function remove(row: NoticeItem) {
         <p style="margin-top: 8px">暂无公告，点击右上角「发布公告」</p>
       </div>
 
-      <!-- 全局统一公告卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="notice-card-grid">
-        <div v-for="row in list" :key="row.id" class="notice-card" :class="{ disabled: row.status !== 1 }">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <span class="cell-mono muted" style="font-size: 11px">#{{ row.id }}</span>
-              <span v-if="(row as NoticeItem).is_pinned" class="x-chip red" style="font-size: 10px; padding: 1px 5px">
-                置顶
-              </span>
-              <span v-if="(row as NoticeItem).is_popup" class="x-chip orange" style="font-size: 10px; padding: 1px 5px">
-                强制弹窗
-              </span>
-              <span class="notice-name" title="点击编辑公告" @click="openEdit(row as NoticeItem)">{{ (row as NoticeItem).title }}</span>
+      <!-- 公告卡片网格（官方 ItemCard 口径） -->
+      <CsCardGrid v-else>
+        <CsCard v-for="row in list" :key="row.id" :class="{ 'notice-card--off': row.status !== 1 }">
+          <template #header>
+            <button
+              type="button"
+              class="notice-name"
+              title="点击编辑公告"
+              @click="openEdit(row as NoticeItem)"
+            >
+              {{ (row as NoticeItem).title }}
+            </button>
+            <div class="notice-meta">
+              <span class="notice-id">#{{ row.id }}</span>
+              <CsBadge v-if="(row as NoticeItem).is_pinned" color="red">置顶</CsBadge>
+              <CsBadge v-if="(row as NoticeItem).is_popup" color="severity-medium">强制弹窗</CsBadge>
+              <CsBadge :color="row.status === 1 ? 'green' : 'grey'">
+                {{ row.status === 1 ? '已启用' : '已隐藏' }}
+              </CsBadge>
             </div>
-            <CsToggle
-              :model-value="(row as NoticeItem).status === 1"
-              @change="() => handleToggle(row as NoticeItem, 'status')"
-            />
+          </template>
+
+          <template #actions>
+            <CsTooltip
+              :content="row.status === 1 ? '已启用，点击隐藏' : '已隐藏，点击启用'"
+              placement="top"
+            >
+              <CsToggle
+                :model-value="(row as NoticeItem).status === 1"
+                :aria-label="`切换公告 ${(row as NoticeItem).title} 的启用状态`"
+                @change="() => handleToggle(row as NoticeItem, 'status')"
+              />
+            </CsTooltip>
+          </template>
+
+          <div class="notice-content-preview">
+            <span class="notice-content-text">{{ (row as NoticeItem).content }}</span>
           </div>
 
-          <!-- 内容摘要 -->
-          <div class="card-body-content">
-            <div class="notice-content-preview">
-              {{ (row as NoticeItem).content }}
+          <div class="notice-switches">
+            <div class="notice-switch-row">
+              <span class="switch-label">置顶显示</span>
+              <CsToggle
+                :model-value="(row as NoticeItem).is_pinned"
+                aria-label="切换置顶显示"
+                @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
+              />
+            </div>
+            <div class="notice-switch-row">
+              <span class="switch-label">登录强制弹窗</span>
+              <CsToggle
+                :model-value="(row as NoticeItem).is_popup"
+                aria-label="切换登录强制弹窗"
+                @change="() => handleToggle(row as NoticeItem, 'is_popup')"
+              />
             </div>
           </div>
 
-          <!-- 属性状态网格 -->
-          <div class="card-grid">
-            <div class="grid-item">
-              <span class="item-label">置顶显示</span>
-              <div class="item-value">
-                <CsToggle
-                  :model-value="(row as NoticeItem).is_pinned"
-                  @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
-                />
-              </div>
-            </div>
-            <div class="grid-item">
-              <span class="item-label">登录强制弹窗</span>
-              <div class="item-value">
-                <CsToggle
-                  :model-value="(row as NoticeItem).is_popup"
-                  @change="() => handleToggle(row as NoticeItem, 'is_popup')"
-                />
-              </div>
-            </div>
-            <div class="grid-item full-width">
-              <span class="item-label">更新时间</span>
-              <div class="item-value cell-mono muted font-11">
-                {{ formatDate((row as NoticeItem).updated_at) }}
-              </div>
-            </div>
-          </div>
-
-          <!-- 底部操作栏 -->
-          <div class="card-foot-actions">
+          <template #footer>
+            <span class="notice-updated">{{ formatDate((row as NoticeItem).updated_at) }} 更新</span>
             <CsButton icon-name="edit" @click="openEdit(row as NoticeItem)">编辑公告</CsButton>
             <CsButton icon-name="remove" @click="remove(row as NoticeItem)">删除</CsButton>
-          </div>
-        </div>
-      </div>
+          </template>
+        </CsCard>
+      </CsCardGrid>
     </CsContainer>
 
     <!-- 发布/编辑公告对话框（支持双栏 Markdown 实时渲染预览与 4x4 表格拾取器） -->
@@ -658,129 +664,90 @@ async function remove(row: NoticeItem) {
   margin-top: 16px;
 }
 
-/* ================= 全局统一公告卡片网格流 ================= */
-.notice-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.notice-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+/* ================= 公告卡片（官方 ItemCard 口径） ================= */
+.notice-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
 
   &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  &.disabled {
-    opacity: 0.75;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .notice-name {
-      font-weight: 600;
-      font-size: 13.5px;
-      color: var(--x-text, #111827);
-      cursor: pointer;
-      &:hover {
-        color: var(--x-primary);
-      }
-    }
-  }
-
-  .card-body-content {
-    padding: 10px 0 4px;
-    .notice-content-preview {
-      font-size: 12.5px;
-      color: var(--x-text-2, #4b5563);
-      line-height: 1.5;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      background: var(--x-bg, #f9fafb);
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--x-border-light, #f3f4f6);
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 8px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    /* 官方按钮类名带 :not(#\9) 高特异性，紧凑尺寸必须 !important 才能压住 */
-    :deep([class*='awsui_button_']) {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-      white-space: nowrap;
-    }
+    color: var(--color-text-link-default-qabnuk, #006ce0);
   }
 }
 
-@media (max-width: 640px) {
-  .notice-card-grid {
-    grid-template-columns: 1fr;
-  }
+.notice-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 4px;
+}
+
+.notice-id {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.notice-content-preview {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+}
+
+/*
+ * 正文截断放在内层：外层负责内边距与边框，内层只留一个 3 行高的裁切盒。
+ * 若直接在带 padding 的外层上 overflow:hidden，裁剪边界是 padding box，
+ * 第 4 行会从下方内边距里露出来。
+ */
+.notice-content-text {
+  display: block;
+  max-height: 54px; /* 3 × 18px 行高 */
+  overflow: hidden;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 18px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  white-space: pre-line;
+}
+
+.notice-switches {
+  margin-block-start: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.notice-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-label {
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.notice-updated {
+  margin-inline-end: auto;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.notice-card--off {
+  opacity: 0.85;
 }
 
 @media (max-width: 768px) {
