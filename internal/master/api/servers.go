@@ -44,6 +44,7 @@ type serverView struct {
 	DefaultOutboundTag    string     `json:"default_outbound_tag"`      // 路由默认出口
 	RoutingDomainStrategy string     `json:"routing_domain_strategy"`   // 路由域名策略（路由匹配阶段）
 	AgentVersion          string     `json:"agent_version"`             // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayVersion           string     `json:"xray_version,omitempty"`    // 节点心跳上报的 xray 内核版本（旧 agent 为空）
 	XrayRunning           bool       `json:"xray_running"`              // 节点心跳上报的 xray 进程运行状态
 	XrayState             string     `json:"xray_state,omitempty"`      // running / restarting / failed / stopped（旧 agent 为空）
 	XrayLastError         string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
@@ -77,6 +78,7 @@ func toServerView(s *models.Server) serverView {
 		DefaultOutboundTag:    s.DefaultOutboundTag,
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		AgentVersion:          s.AgentVersion,
+		XrayVersion:           s.XrayVersion,
 		XrayRunning:           s.XrayRunning,
 		XrayState:             s.XrayState,
 		XrayLastError:         s.XrayLastError,
@@ -579,29 +581,75 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 			})
 		}
 		payload = protocol.UpgradeAgentPayload{Target: target, Force: req.Force}
+	case protocol.MsgUpgradeXray:
+		target = strings.TrimSpace(req.Target)
+		if target != "" && !agentTagPattern.MatchString(target) {
+			util.BadRequest(c, "Xray 版本号格式不正确（示例：v26.10.17）")
+			return
+		}
+		actionName = "Xray 内核升级"
+		if req.Force {
+			actionName = "Xray 内核重装"
+		}
+		if d.Hub != nil {
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "starting",
+				Target:  target,
+				Message: fmt.Sprintf("正在向服务器下发%s指令…", actionName),
+				Kind:    "xray",
+				TS:      time.Now().Unix(),
+			})
+		}
+		payload = protocol.UpgradeXrayPayload{Target: target, Force: req.Force}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
 		return
 	}
 
-	// 自升级的回执要等节点从 GitHub 拉完二进制才发，用专用的长超时
+	// 自升级/内核升级的回执要等节点从 GitHub 拉完二进制才发，用专用的长超时
 	askTimeout := nodegate.AskTimeout
-	if req.Type == protocol.MsgUpgradeAgent {
+	if req.Type == protocol.MsgUpgradeAgent || req.Type == protocol.MsgUpgradeXray {
 		askTimeout = nodegate.UpgradeAskTimeout
 	}
 	res, err := d.Hub.Ask(id, req.Type, payload, askTimeout)
 	if err != nil {
-		if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
+		if (req.Type == protocol.MsgUpgradeAgent || req.Type == protocol.MsgUpgradeXray) && d.Hub != nil {
 			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
 				Phase:   "failed",
 				Target:  target,
 				Message: actionName + "指令超时或失败",
 				Error:   err.Error(),
+				Kind:    upgradeKind(req.Type),
 				TS:      time.Now().Unix(),
 			})
 		}
 		util.Fail(c, 502, "指令失败: "+err.Error())
 		return
+	}
+	if req.Type == protocol.MsgUpgradeXray && d.Hub != nil {
+		if !res.OK {
+			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+				Phase:   "failed",
+				Target:  target,
+				Message: actionName + "失败",
+				Error:   res.Error,
+				Kind:    "xray",
+				TS:      time.Now().Unix(),
+			})
+			util.OK(c, gin.H{"ok": false, "error": res.Error, "data": res.Data})
+			return
+		}
+		msg := actionName + "完成"
+		if s, ok := res.Data.(string); ok && s != "" {
+			msg = s
+		}
+		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+			Phase:   "success",
+			Target:  target,
+			Message: msg,
+			Kind:    "xray",
+			TS:      time.Now().Unix(),
+		})
 	}
 	if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
 		isRollback := req.Force || actionName == "回滚"
@@ -634,6 +682,14 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		})
 	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
+}
+
+// upgradeKind 升级进度对象标识：agent（默认）| xray。
+func upgradeKind(msgType string) string {
+	if msgType == protocol.MsgUpgradeXray {
+		return "xray"
+	}
+	return "agent"
 }
 
 // AdminGetServerUpgradeStatus GET /api/v1/admin/servers/:id/upgrade-status

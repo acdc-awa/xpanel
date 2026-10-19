@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/acdc-awa/xpanel/internal/contracts"
@@ -90,6 +91,11 @@ func TestVLESS_ClientCodec(t *testing.T) {
 	}
 	if dto1Re.Auth.UUID != dto1.Auth.UUID || dto1Re.Security.Reality.PublicKey != dto1.Security.Reality.PublicKey {
 		t.Fatalf("Round-trip DTO 不一致")
+	}
+	// Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello 携带 X25519MLKEM768；
+	// mihomo 默认剥离，链接必须显式声明该开关。
+	if !strings.Contains(link1, "support-x25519mlkem768=1") {
+		t.Errorf("reality 链接缺少 support-x25519mlkem768=1: %s", link1)
 	}
 
 	// 渲染出站并验证

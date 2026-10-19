@@ -719,6 +719,9 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
 		updates["agent_version"] = hb.Version
 	}
+	if hb.XrayVersion != "" { // 旧 agent 不上报内核版本，不覆盖已有值
+		updates["xray_version"] = hb.XrayVersion
+	}
 	prevXrayState := conn.lastXrayState
 	stateChanged := false
 	if hb.XrayState != "" {

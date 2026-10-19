@@ -92,7 +92,8 @@ rules:
 		res := BuildClashWithTemplate(items, tmpl, "clash.perlica.cloud")
 
 		// 验证单行 flow 映射（已清理冗余 alterId/cipher/encryption/skip-cert-verify）
-		if !strings.Contains(res, "- { name: '🇭🇰香港01 x1 | IEPL', type: vless, server: gz.perlica.cloud, port: 50000, uuid: 00000000-0000-0000-0000-000000000001, udp: true, flow: xtls-rprx-vision, tls: true, servername: www.pcps.edu.hk, reality-opts: { public-key: pQDGvDURYEv8nxAVW9xsbBsQjOXzX0rCh5OWDW5q8kg, short-id: e69c1c }, client-fingerprint: chrome, network: tcp }") {
+		// REALITY 固定带 support-x25519mlkem768: true（Xray ≥26.9.8 服务端强制要求 keyshare）
+		if !strings.Contains(res, "- { name: '🇭🇰香港01 x1 | IEPL', type: vless, server: gz.perlica.cloud, port: 50000, uuid: 00000000-0000-0000-0000-000000000001, udp: true, flow: xtls-rprx-vision, tls: true, servername: www.pcps.edu.hk, reality-opts: { public-key: pQDGvDURYEv8nxAVW9xsbBsQjOXzX0rCh5OWDW5q8kg, short-id: e69c1c, support-x25519mlkem768: true }, client-fingerprint: chrome, network: tcp }") {
 			t.Errorf("flow mapping format mismatch:\n%s", res)
 		}
 

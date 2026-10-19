@@ -342,6 +342,11 @@ func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 			fp = "chrome"
 		}
 		q.Set("fp", fp)
+		// Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello 携带 X25519MLKEM768，
+		// mihomo 默认会剥离；订阅链接显式声明，mihomo 的 URL 转换器识别该参数
+		// （common/convert/v.go → reality-opts.support-x25519mlkem768）。
+		// 旧内核/旧版客户端忽略它，无副作用。
+		q.Set("support-x25519mlkem768", "1")
 	case "tls":
 		if dto.Security.SNI != "" {
 			q.Set("sni", dto.Security.SNI)

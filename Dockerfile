@@ -11,7 +11,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- Go 后端构建 ----
-FROM golang:1.26-alpine AS go
+FROM golang:1.27-alpine AS go
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
