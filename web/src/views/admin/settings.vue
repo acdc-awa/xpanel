@@ -5,7 +5,10 @@ import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
   CsAlert,
   CsBadge,
+  CsBox,
   CsButton,
+  CsCard,
+  CsCardGrid,
   CsConfirmDialog,
   CsContainer,
   CsEmpty,
@@ -17,12 +20,15 @@ import {
   CsKeyValuePairs,
   CsLoading,
   CsModal,
+  CsPage,
   CsSelect,
   CsSpinner,
+  CsStatusIndicator,
   CsSteps,
   CsTable,
   CsTabs,
   CsToggle,
+  CsToolbar,
   CsTooltip,
   ElMessage,
 } from '@/components/cloudscape'
@@ -919,14 +925,16 @@ async function save() {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <span style="font-weight: 600">站点设置</span>
-        <span class="muted" style="font-size: 12px">站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。</span>
-      </div>
-      <CsButton v-if="isConfigTab" variant="primary" :loading="saving" :icon-name="'check'" @click="save">保存配置</CsButton>
-    </div>
+  <CsPage>
+    <CsToolbar>
+      <CsBox variant="span" font-size="heading-s" font-weight="bold">站点设置</CsBox>
+      <CsBox variant="span" font-size="body-s" color="text-body-secondary">
+        站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。
+      </CsBox>
+      <template #actions>
+        <CsButton v-if="isConfigTab" variant="primary" :loading="saving" :icon-name="'check'" @click="save">保存配置</CsButton>
+      </template>
+    </CsToolbar>
 
     <CsContainer class="settings-card" header="站点配置">
       <CsLoading :loading="loading">
@@ -1103,7 +1111,7 @@ async function save() {
               </div>
             </CsAlert>
 
-            <div class="section-subtitle">订阅入口与行为参数</div>
+            <CsBox variant="div" font-size="heading-s" font-weight="bold">订阅入口与行为参数</CsBox>
             <div class="form-grid">
               <CsFormItem>
                 <template #label>
@@ -1151,17 +1159,17 @@ async function save() {
               <CsFormItem>
                 <template #label>
                   多域名分发
-                  <span class="x-chip gray" style="font-size: 10px; padding: 1px 5px">暂未开放</span>
+                  <CsBadge color="grey">暂未开放</CsBadge>
                   <TipIcon content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。" />
                 </template>
                 <CsInput v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
               </CsFormItem>
             </div>
 
-            <div class="section-subtitle" style="margin-top: 24px">
-              <span>原生订阅清洗防探测网关 (Subscribe Sieve)</span>
+            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">
+              原生订阅清洗防探测网关 (Subscribe Sieve)
               <TipIcon content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。" />
-            </div>
+            </CsBox>
             <div class="form-grid">
               <CsFormItem>
                 <template #label>
@@ -1201,7 +1209,7 @@ async function save() {
             </CsFormItem>
 
             <!-- 反代配置代码片段展示 -->
-            <div class="section-subtitle" style="margin-top: 24px">生产反向代理配置参考 (含 Cloudflare 真实 IP 透传)</div>
+            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">生产反向代理配置参考 (含 Cloudflare 真实 IP 透传)</CsBox>
             <div class="proxy-snippet-box">
               <div class="snippet-header">
                 <span>Caddyfile 配置示例（推荐）</span>
@@ -1261,10 +1269,9 @@ async function save() {
               </template>
               <CsInput v-model="form.captcha.turnstile_secret_key" type="password" show-password placeholder="0x4B...（请勿泄露）" />
             </CsFormItem>
-            <div class="settings-footer-tip">
-              <CsIcon name="status-info" class="tip-icon" />
-              <span>在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。</span>
-            </div>
+            <CsAlert type="info">
+              在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。
+            </CsAlert>
           </CsForm>
         </div>
 
@@ -1285,10 +1292,9 @@ async function save() {
               </template>
               <CsInputNumber v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
             </CsFormItem>
-            <div class="settings-footer-tip">
-              <CsIcon name="status-info" class="tip-icon" />
-              <span>配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。</span>
-            </div>
+            <CsAlert type="info">
+              配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。
+            </CsAlert>
           </CsForm>
         </div>
 
@@ -1314,25 +1320,24 @@ async function save() {
                   <CsOption label="跟随浏览器" value="browser" />
                   <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
                 </CsSelect>
-                <span class="x-chip purple" style="font-size: 11px">当前识别：{{ effectiveTimezoneLabel() }}</span>
+                <CsBadge color="blue">当前识别：{{ effectiveTimezoneLabel() }}</CsBadge>
               </div>
             </CsFormItem>
-            <div class="settings-footer-tip">
-              <CsIcon name="status-info" class="tip-icon" />
-              <span>底层数据统一以 UTC 存储绝对时间戳。修改业务时区将调整每日 0 点的计算基准，切换当日历史聚合数据可能会有短暂平滑窗口。</span>
-            </div>
+            <CsAlert type="info">
+              底层数据统一以 UTC 存储绝对时间戳。修改业务时区将调整每日 0 点的计算基准，切换当日历史聚合数据可能会有短暂平滑窗口。
+            </CsAlert>
           </CsForm>
         </div>
 
         <!-- ==================== TAB 4: 备份 ==================== -->
         <div v-show="activeTab === 'backup'">
           <div style="max-width: 720px">
-            <div class="x-toolbar" style="margin-bottom: 12px">
-              <div class="x-toolbar-left">
-                <CsButton :loading="backupLoading" :icon-name="'refresh'" @click="loadBackups">刷新列表</CsButton>
-                <span class="muted" style="font-size: 12.5px">共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}</span>
-              </div>
-              <div style="display: flex; gap: 8px; align-items: center">
+            <CsToolbar>
+              <CsButton :loading="backupLoading" :icon-name="'refresh'" @click="loadBackups">刷新列表</CsButton>
+              <CsBox variant="span" font-size="body-s" color="text-body-secondary">
+                共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}
+              </CsBox>
+              <template #actions>
                 <input
                   ref="backupInputRef"
                   type="file"
@@ -1342,8 +1347,8 @@ async function save() {
                 />
                 <CsButton :icon-name="'upload'" :loading="backupUploading" @click="pickBackupFile">上传备份</CsButton>
                 <CsButton variant="primary" :loading="backupCreating" @click="createBackupNow">立即备份</CsButton>
-              </div>
-            </div>
+              </template>
+            </CsToolbar>
             <CsTable
               :items="backups"
               :columns="backupColumns"
@@ -1352,7 +1357,7 @@ async function save() {
               empty-text="暂无备份，点击右上角「立即备份」"
               aria-label="备份列表"
             >
-              <template #cell-file="{ row }"><code class="cell-mono">{{ row.file }}</code></template>
+              <template #cell-file="{ row }"><code class="cs-text-mono">{{ row.file }}</code></template>
               <template #cell-size="{ row }">{{ fmtSize(row.size) }}</template>
               <template #cell-created="{ row }">{{ formatDateTime(row.created_at) }}</template>
               <template #cell-actions="{ row }">
@@ -1363,10 +1368,9 @@ async function save() {
                 </div>
               </template>
             </CsTable>
-            <div class="settings-footer-tip">
-              <CsIcon name="status-info" class="tip-icon" />
-              <span>备份文件保存在主控备份目录并按配置定期轮转，建议定期下载重要备份离线保存。「上传备份」会先校验完整性与数据库版本再入库；恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。</span>
-            </div>
+            <CsAlert type="info">
+              备份文件保存在主控备份目录并按配置定期轮转，建议定期下载重要备份离线保存。「上传备份」会先校验完整性与数据库版本再入库；恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。
+            </CsAlert>
           </div>
         </div>
 
@@ -1384,69 +1388,52 @@ async function save() {
                     <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
                   </template>
                   <template v-else-if="item.key === 'version'">
-                    <code class="cell-mono">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</code>
-                    <span v-if="system.schema_min_compatible" class="muted" style="margin-left: 6px">最低兼容 v{{ system.schema_min_compatible }}</span>
+                    <CsBox variant="code">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</CsBox>
+                    <CsBox variant="span" color="text-body-secondary" :margin="{ left: 'xs' }">
+                      最低兼容 v{{ system.schema_min_compatible }}
+                    </CsBox>
                   </template>
-                  <code v-else-if="item.key === 'panel'" class="cell-mono">{{ item.value }}</code>
+                  <CsBox v-else-if="item.key === 'panel'" variant="code">{{ item.value }}</CsBox>
                   <template v-else>{{ item.value }}</template>
                 </template>
               </CsKeyValuePairs>
-              <div class="status-count-grid">
-                <div v-for="(v, k) in system.counts" :key="k" class="status-count">
-                  <strong>{{ v }}</strong>
-                  <span>{{ { users: '用户', servers: '服务器', inbounds: '入站', orders: '订单', gift_cards: '礼品卡', audit_logs: '审计日志' }[k] ?? k }}</span>
-                </div>
-              </div>
-              <p v-if="!system.db_ok" class="muted tip">数据库异常：{{ system.db_error }}</p>
+              <!-- 计数块：与系统状态表同源，放在同一列宽里，用 CsCardGrid 的官方卡距 -->
+              <CsCardGrid class="status-count-grid" :min-width="160" :gap="10">
+                <CsCard v-for="(v, k) in system.counts" :key="k">
+                  <CsBox variant="span" font-size="heading-l" font-weight="bold" display="block">{{ v }}</CsBox>
+                  <CsBox variant="span" font-size="body-s" color="text-body-secondary">
+                    {{ { users: '用户', servers: '服务器', inbounds: '入站', orders: '订单', gift_cards: '礼品卡', audit_logs: '审计日志' }[k] ?? k }}
+                  </CsBox>
+                </CsCard>
+              </CsCardGrid>
+              <CsAlert v-if="!system.db_ok" type="error" header="数据库异常">{{ system.db_error }}</CsAlert>
 
               <!-- 面板内更新（容器形态自更新）：进入本页签自动检查更新 + 拉取版本列表，
                    有新版才出现「应用更新」，不再常驻「检查更新 / 加载版本列表」两个按钮 -->
               <!-- 面板内更新卡片 -->
-              <div class="update-card">
-                <!-- 头部：图标 + 标题 + 状态 Pill + 操作区 -->
-                <div class="update-header">
-                  <div class="update-header-left">
-                    <div class="update-badge-icon">
-                      <CsIcon name="refresh" />
-                    </div>
-                    <div class="update-header-meta">
-                      <div class="update-title-line">
-                        <span class="update-title">面板更新</span>
-                        <span v-if="updateChecking" class="x-chip blue">
-                          <CsSpinner size="normal" class="is-loading" /> 检查中…
-                        </span>
-                        <span v-else-if="updateInfo?.available" class="x-chip green">
-                          <span class="x-status-dot online"></span> 发现新版本
-                        </span>
-                        <span v-else-if="updateInfo && !updateInfo.enabled" class="x-chip gray">
-                          更新已禁用
-                        </span>
-                        <span v-else-if="updateInfo" class="x-chip gray">
-                          已是最新
-                        </span>
-                      </div>
-                      <span class="update-subtitle">保持系统运行在最新稳定状态以获取性能与安全性改进</span>
-                    </div>
-                  </div>
-
-                  <div class="update-header-right">
-                    <CsTooltip
-                      placement="top"
-                      :show-delay="200"
-                      content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
-                    >
-                      <CsButton variant="icon" class="update-help-btn" icon-name="status-info" aria-label="更新机制说明" />
-                    </CsTooltip>
-                    <CsButton
-                      class="update-refresh-btn"
-                      :icon-name="'refresh'"
-                      :loading="updateChecking || releasesLoading"
-                      @click="refreshUpdate(false)"
-                    >
-                      检查更新
-                    </CsButton>
-                  </div>
-                </div>
+              <CsContainer header="面板更新">
+                <template #info>
+                  <CsStatusIndicator v-if="updateChecking" type="loading" text="检查中…" />
+                  <CsStatusIndicator v-else-if="updateInfo?.available" type="success" text="发现新版本" />
+                  <CsStatusIndicator v-else-if="updateInfo && !updateInfo.enabled" type="stopped" text="更新已禁用" />
+                  <CsStatusIndicator v-else-if="updateInfo" type="info" text="已是最新" />
+                </template>
+                <template #actions>
+                  <CsTooltip
+                    placement="top"
+                    :show-delay="200"
+                    content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
+                  >
+                    <CsButton variant="icon" icon-name="status-info" aria-label="更新机制说明" />
+                  </CsTooltip>
+                  <CsButton
+                    :icon-name="'refresh'"
+                    :loading="updateChecking || releasesLoading"
+                    @click="refreshUpdate(false)"
+                  >
+                    检查更新
+                  </CsButton>
+                </template>
 
                 <!-- 场景 1：有可用更新 -> 升级对比舱 -->
                 <div v-if="updateInfo?.available" class="update-action-banner">
@@ -1484,7 +1471,7 @@ async function save() {
                     </div>
                     <div class="uptodate-info">
                       <span class="cur-ver-text">
-                        当前运行版本：<code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                        当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
                       </span>
                       <span class="uptodate-hint">系统已安装最新版本，各项组件运行正常。</span>
                     </div>
@@ -1495,7 +1482,7 @@ async function save() {
                 <div v-else-if="updateInfo && !updateInfo.enabled" class="update-status-row">
                   <div class="disabled-box">
                     <span class="cur-ver-text">
-                      当前运行版本：<code class="cell-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                      当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
                     </span>
                     <span class="disabled-hint">当前部署形态未启用面板内在线更新（由环境设定），可在宿主机手动替换镜像或二进制版本。</span>
                   </div>
@@ -1503,13 +1490,13 @@ async function save() {
 
                 <!-- 错误提示（若接口报错）：两个请求各报各的。合并成一条会把「版本列表拉取失败」
                      伪装成「暂无可安装版本」，而两者直连同一个 GitHub API、往往同时失败。 -->
-                <div v-if="updateError || releasesError" class="update-error-banner">
-                  <CsIcon name="status-warning" />
+                <CsAlert v-if="updateError || releasesError" type="error" header="更新检查失败">
+                  <!-- 后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），必须允许断词，否则横向顶出卡片 -->
                   <div class="update-error-lines">
-                    <span v-if="updateError">检查更新失败：{{ updateError }}</span>
-                    <span v-if="releasesError">版本列表获取失败：{{ releasesError }}</span>
+                    <div v-if="updateError">检查更新失败：{{ updateError }}</div>
+                    <div v-if="releasesError">版本列表获取失败：{{ releasesError }}</div>
                   </div>
-                </div>
+                </CsAlert>
 
                 <!-- 历史版本与回退区（可折叠高级选项，默认收起） -->
                 <div v-if="updateInfo?.enabled" class="update-hist-section">
@@ -1562,32 +1549,24 @@ async function save() {
                 </div>
 
                 <!-- 底部精炼提示条：1 句话核心提示，不再大段平铺 -->
-                <div class="update-footer-tip">
-                  <CsIcon name="status-info" class="tip-icon" />
-                  <span>更新期间面板将短暂离线重启；若新版本启动失败，系统将自动安全回滚至上一版本。</span>
-                </div>
-              </div>
+                <CsAlert type="info">
+                  更新期间面板将短暂离线重启；若新版本启动失败，系统将自动安全回滚至上一版本。
+                </CsAlert>
+              </CsContainer>
 
               <!-- 客户端 IP 来源说明 -->
-              <div class="ip-hdr-note">
-                <div class="ip-hdr-header">
-                  <span>客户端真实 IP 识别架构</span>
-                  <TipIcon
-                    type="warn"
-                    content="切勿将面板端口直接暴露公网，否则攻击者可伪造 IP 头绕过按 IP 的限流。"
-                  />
-                </div>
-                <div class="ip-hdr-content">
-                  面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
-                  <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
-                  请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态：反代会覆盖/追加可信的 IP
-                  头，限流与审计才能按真实 IP 生效。
-                </div>
-              </div>
+              <CsAlert type="warning" header="客户端真实 IP 识别架构">
+                面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
+                <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
+                请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态：反代会覆盖/追加可信的 IP
+                头，限流与审计才能按真实 IP 生效。切勿将面板端口直接暴露公网，否则攻击者可伪造 IP 头绕过按 IP 的限流。
+              </CsAlert>
 
-              <div class="x-toolbar" style="margin-top: 12px">
-                <CsButton :icon-name="'refresh'" @click="loadSystem">刷新状态</CsButton>
-              </div>
+              <CsToolbar class="system-refresh-bar">
+                <template #actions>
+                  <CsButton :icon-name="'refresh'" @click="loadSystem">刷新状态</CsButton>
+                </template>
+              </CsToolbar>
             </template>
             <CsEmpty v-else-if="!systemLoading" description="暂无状态数据" icon-name="status-info" />
           </CsLoading>
@@ -1641,7 +1620,7 @@ async function save() {
       :loading="updateApplying || backupRestoring"
       @confirm="runConfirmed"
     />
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
@@ -1665,179 +1644,24 @@ async function save() {
   justify-content: flex-end;
   flex-wrap: nowrap;
 }
-.tip { font-size: 12.5px; margin: 4px 0; line-height: 1.7; color: var(--x-text-3); }
-.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
 
-/* 统一表单 Label 提示图标 */
-.form-label-with-tip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--x-text);
-  font-weight: 500;
-  line-height: 1.4;
-
-  .form-tip-icon {
-    font-size: 13.5px;
-    color: var(--x-text-3);
-    cursor: help;
-    transition: color 0.15s ease, transform 0.15s ease;
-    vertical-align: middle;
-
-    &:hover {
-      color: var(--x-primary);
-      transform: scale(1.15);
-    }
-  }
-}
-
-/* 统一精致底部提示条 */
-.settings-footer-tip {
-  margin-top: 14px;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: var(--x-radius-sm);
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  font-size: 12px;
-  color: var(--x-text-2);
-  line-height: 1.5;
-
-  .tip-icon {
-    font-size: 14px;
-    color: var(--x-primary);
-    flex: none;
-    margin-top: 2px;
-  }
-}
-
-.ip-hdr-note {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-card);
-  box-shadow: var(--x-shadow);
-
-  .ip-hdr-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--x-text);
-    margin-bottom: 6px;
-
-    .form-tip-icon {
-      font-size: 13.5px;
-      color: var(--x-text-3);
-      cursor: help;
-      &:hover { color: var(--x-primary); }
-    }
-  }
-
-  .ip-hdr-content {
-    font-size: 12px;
-    color: var(--x-text-2);
-    line-height: 1.6;
-  }
-
-  code {
-    font-family: var(--x-font-mono);
-    font-size: 11.5px;
-    color: var(--x-primary);
-  }
-}
 /* 面板更新卡片 */
-.update-card {
-  margin-top: 16px;
-  padding: 18px 20px;
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  background: var(--x-card);
-  box-shadow: var(--x-shadow);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
-  &:hover {
-    border-color: rgba(99, 102, 241, 0.25);
-  }
-}
 
-.update-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
 
-.update-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 
-.update-badge-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--x-radius-sm);
-  background: var(--x-primary-soft);
-  color: var(--x-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex: none;
-}
 
-.update-header-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
 
-.update-title-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 
-.update-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--x-text);
-}
 
-.update-subtitle {
-  font-size: 12px;
-  color: var(--x-text-3);
-  line-height: 1.4;
-}
 
-.update-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-
-.update-help-btn {
-  color: var(--x-text-3);
-  font-size: 16px;
-  &:hover {
-    color: var(--x-primary);
-  }
-}
 
 /* 升级对比舱（有可用新版本） */
 .update-action-banner {
   margin-top: 14px;
   padding: 14px 18px;
-  border-radius: var(--x-radius-sm);
-  background: linear-gradient(135deg, var(--x-primary-soft) 0%, var(--x-card-soft) 100%);
+  border-radius: var(--border-radius-input-k1q34z);
+  background: linear-gradient(135deg, var(--color-background-item-selected-dotkup) 0%, var(--color-background-cell-shaded-twxsbz) 100%);
   border: 1px solid rgba(99, 102, 241, 0.2);
   display: flex;
   align-items: center;
@@ -1859,23 +1683,23 @@ async function save() {
 
   .ver-tag {
     font-size: 11px;
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
    -transform: uppercase;
     letter-spacing: 0.5px;
   }
   .ver-code {
-    font-family: var(--x-font-mono);
+    font-family: var(--font-family-monospace-842lr2);
     font-size: 14px;
     font-weight: 700;
-    color: var(--x-text);
+    color: var(--color-text-body-default-b2us04);
   }
   &.target .ver-code {
-    color: var(--x-primary);
+    color: var(--color-text-link-default-qabnuk);
   }
 }
 
 .route-arrow {
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -1889,9 +1713,9 @@ async function save() {
 .update-status-row {
   margin-top: 14px;
   padding: 12px 16px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border-soft);
-  border-radius: var(--x-radius-sm);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
+  border-radius: var(--border-radius-input-k1q34z);
 }
 
 .uptodate-box {
@@ -1904,8 +1728,8 @@ async function save() {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--x-success-soft);
-  color: var(--x-success);
+  background: var(--color-background-alert-success-9dyn87);
+  color: var(--color-text-status-success-1i2jf8);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1922,17 +1746,17 @@ async function save() {
 
 .cur-ver-text {
   font-size: 12.5px;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   code {
-    font-family: var(--x-font-mono);
-    color: var(--x-primary);
+    font-family: var(--font-family-monospace-842lr2);
+    color: var(--color-text-link-default-qabnuk);
     font-weight: 600;
   }
 }
 
 .uptodate-hint {
   font-size: 11.5px;
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .disabled-box {
@@ -1941,44 +1765,21 @@ async function save() {
   gap: 3px;
   .disabled-hint {
     font-size: 11.5px;
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
   }
 }
 
-/* 错误提示条 */
-.update-error-banner {
-  margin-top: 12px;
-  padding: 8px 12px;
-  border-radius: var(--x-radius-xs);
-  background: var(--x-danger-soft);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: var(--x-danger);
-  font-size: 12px;
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-
-  > :deep([class*='awsui_icon']),
-  > :deep([class*='awsui_spinner']) {
-    flex: none;
-    margin-top: 2px;
-  }
-
-  /* 后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），不折断会横向顶出卡片 */
-  .update-error-lines {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
+/* 更新失败原因：后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），
+   不折断会横向顶出容器 */
+.update-error-lines {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 历史版本与安全回退 */
 .update-hist-section {
   margin-top: 12px;
-  border-top: 1px solid var(--x-border-soft);
+  border-top: 1px solid var(--color-border-divider-default-diwd4w);
   padding-top: 10px;
 }
 
@@ -1992,11 +1793,11 @@ async function save() {
   padding: 6px 0;
   cursor: pointer;
   font-size: 12.5px;
-  color: var(--x-text-2);
+  color: var(--color-text-body-secondary-66ygbb);
   transition: color 0.15s ease;
 
   &:hover {
-    color: var(--x-primary);
+    color: var(--color-text-link-default-qabnuk);
   }
 
   .trigger-label {
@@ -2019,9 +1820,9 @@ async function save() {
 .hist-collapse-panel {
   margin-top: 8px;
   padding: 12px 14px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius-sm);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
+  border-radius: var(--border-radius-input-k1q34z);
 }
 
 .hist-form-row {
@@ -2032,7 +1833,7 @@ async function save() {
 
   .hist-label {
     font-size: 12px;
-    color: var(--x-text-2);
+    color: var(--color-text-body-secondary-66ygbb);
     flex: none;
   }
   .hist-select {
@@ -2045,43 +1846,14 @@ async function save() {
 .hist-warning-note {
   margin: 8px 0 0;
   font-size: 11.5px;
-  color: var(--x-warning);
+  color: var(--color-text-status-warning-fabq6h);
   display: flex;
   align-items: center;
   gap: 5px;
   line-height: 1.4;
 }
 
-/* 底部精炼提示条 */
-.update-footer-tip {
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--x-text-3);
-  line-height: 1.4;
-
-  .tip-icon {
-    font-size: 13px;
-    color: var(--x-text-3);
-    flex: none;
-  }
-}
-
 @media (max-width: 640px) {
-  .update-card {
-    padding: 14px;
-  }
-  .update-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .update-header-right {
-    width: 100%;
-    justify-content: flex-end;
-    margin-top: 6px;
-  }
   .update-action-banner {
     flex-direction: column;
     align-items: stretch;
@@ -2115,15 +1887,15 @@ async function save() {
 .brand-preview-section {
   margin-top: 8px;
   padding: 14px 16px;
-  background: var(--x-bg, #f8fafc);
-  border: 1px dashed var(--x-border, #e2e8f0);
-  border-radius: var(--x-radius, 12px);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px dashed var(--color-border-divider-default-diwd4w);
+  border-radius: var(--border-radius-item-card-default-nurfq3);
 }
 
 .preview-header {
   font-size: 13px;
   font-weight: 600;
-  color: var(--x-text-2, #475569);
+  color: var(--color-text-body-secondary-66ygbb);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -2141,7 +1913,7 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid var(--x-border, #e2e8f0);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   position: relative;
 
   .preview-tag {
@@ -2170,10 +1942,10 @@ async function save() {
   }
 
   &.auth-theme {
-    background: var(--x-card);
-    border-color: var(--x-border);
-    box-shadow: var(--x-shadow-md);
-    .preview-tag { background: var(--x-primary-soft); color: var(--x-primary); }
+    background: var(--color-background-container-content-mjfil9);
+    border-color: var(--color-border-divider-default-diwd4w);
+    box-shadow: var(--shadow-container-quglkl);
+    .preview-tag { background: var(--color-background-item-selected-dotkup); color: var(--color-text-link-default-qabnuk); }
   }
 }
 
@@ -2217,8 +1989,8 @@ async function save() {
   height: 38px;
   border-radius: 10px;
   object-fit: contain;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   flex: none;
 }
 
@@ -2240,48 +2012,15 @@ async function save() {
 .p-auth-title {
   font-size: 15px;
   font-weight: 700;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
 }
 
 .p-auth-sub {
   font-size: 11px;
-  color: var(--x-text-2);
+  color: var(--color-text-body-secondary-66ygbb);
   margin-top: 1px;
 }
 
-.status-count-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 14px;
-
-  /* 与 base.scss 的 .x-stat-grid 同口径：窄屏 3 列时每格只剩 ~97px（375px 实测），
-     降到 2 列给标签留出换行余量 */
-  @media (max-width: 480px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-.status-count {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px;
-  border: 1px solid var(--x-border);
-  border-radius: 10px;
-  background: var(--x-card-soft);
-}
-.status-count strong { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--x-text); }
-.status-count span { font-size: 12px; color: var(--x-text-3); }
-
-.section-subtitle {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--x-text);
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
 .proxy-snippet-box {
   background: #0f172a;
@@ -2303,7 +2042,7 @@ async function save() {
   .snippet-code {
     margin: 0;
     padding: 12px 14px;
-    font-family: var(--x-font-mono, ui-monospace, Consolas, monospace);
+    font-family: var(--font-family-monospace-842lr2);
     font-size: 12px;
     line-height: 1.5;
     color: #38bdf8;
@@ -2319,35 +2058,35 @@ async function save() {
   gap: 14px;
   padding: 14px 16px;
   border-radius: 8px;
-  background: var(--x-bg, #f9fafb);
-  border: 1px solid var(--x-border, #e5e7eb);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   margin-top: 12px;
 
   // 结果面板的状态色统一走语义 token：原来写死亮色底/亮色描边，
   // 深色模式下这几块会变成刺眼的浅色块（本文件里没有任何 html.dark 覆盖）
   &.is-running {
-    border-color: var(--x-info);
-    background: var(--x-info-soft);
+    border-color: var(--color-text-status-info-su6k9n);
+    background: var(--color-background-alert-info-lqhdg0);
     .icon-process {
       font-size: 22px;
-      color: var(--x-info);
+      color: var(--color-text-status-info-su6k9n);
     }
   }
   &.is-success {
-    border-color: var(--x-success);
-    background: var(--x-success-soft);
+    border-color: var(--color-text-status-success-1i2jf8);
+    background: var(--color-background-alert-success-9dyn87);
     .icon-success {
       font-size: 22px;
-      color: var(--x-success);
+      color: var(--color-text-status-success-1i2jf8);
       font-weight: bold;
     }
   }
   &.is-failed {
-    border-color: var(--x-danger);
-    background: var(--x-danger-soft);
+    border-color: var(--color-text-status-error-ri38gt);
+    background: var(--color-background-alert-error-dpj69i);
     .icon-error {
       font-size: 22px;
-      color: var(--x-danger);
+      color: var(--color-text-status-error-ri38gt);
       font-weight: bold;
     }
   }
@@ -2360,22 +2099,22 @@ async function save() {
     .status-msg {
       font-weight: 600;
       font-size: 13.5px;
-      color: var(--x-text);
+      color: var(--color-text-body-default-b2us04);
       line-height: 1.5;
     }
     .status-err {
       margin-top: 6px;
-      color: var(--x-danger);
+      color: var(--color-text-status-error-ri38gt);
       font-size: 11.5px;
       line-height: 1.4;
       word-break: break-all;
-      background: var(--x-danger-soft);
+      background: var(--color-background-alert-error-dpj69i);
       padding: 6px 8px;
       border-radius: 4px;
     }
     .status-hint {
       margin-top: 4px;
-      color: var(--x-text-3);
+      color: var(--color-text-body-secondary-66ygbb);
       font-size: 11.5px;
     }
   }

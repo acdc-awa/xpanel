@@ -10,16 +10,19 @@ import {
   CsCardGrid,
   CsContainer,
   CsDatePicker,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
   CsModal,
   CsOption,
+  CsPage,
   CsPagination,
+  CsPaginationBar,
   CsSelect,
   CsSpinner,
+  CsToolbar,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
@@ -175,28 +178,27 @@ function isExpired(row: GiftCard) {
 </script>
 
 <template>
-  <div class="x-page">
-    <!-- 工具栏 -->
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <CsInput
-          v-model="keyword"
-          placeholder="搜索卡密 / 批次名称"
-          prefix-icon="search"
-          clearable
-          style="width: 220px"
-          @keyup.enter="load"
-        />
-        <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
-          <CsOption label="全部状态" value="" />
-          <CsOption label="未使用" value="unused" />
-          <CsOption label="已使用" value="used" />
-          <CsOption label="已作废" value="disabled" />
-        </CsSelect>
-        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      </div>
-      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">批量生成礼品卡</CsButton>
-    </div>
+  <CsPage>
+    <CsToolbar>
+      <CsInput
+        v-model="keyword"
+        placeholder="搜索卡密 / 批次名称"
+        prefix-icon="search"
+        clearable
+        style="width: 220px"
+        @keyup.enter="load"
+      />
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <CsOption label="全部状态" value="" />
+        <CsOption label="未使用" value="unused" />
+        <CsOption label="已使用" value="used" />
+        <CsOption label="已作废" value="disabled" />
+      </CsSelect>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+      <template #actions>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">批量生成礼品卡</CsButton>
+      </template>
+    </CsToolbar>
 
     <!-- 数据表格 -->
     <CsContainer header="卡密列表">
@@ -205,10 +207,7 @@ function isExpired(row: GiftCard) {
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="ticket" size="large" />
-        <p style="margin-top: 8px">暂无礼品卡记录，点击右上角「批量生成礼品卡」</p>
-      </div>
+      <CsEmpty v-else-if="list.length === 0" icon-name="ticket" description="暂无礼品卡记录，点击右上角「批量生成礼品卡」" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，面额作为卡片主指标 -->
       <CsCardGrid v-else>
@@ -254,17 +253,19 @@ function isExpired(row: GiftCard) {
         </CsCard>
       </CsCardGrid>
 
-      <div class="x-pager">
-        <CsPagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @current-change="load"
-          @size-change="load"
-        />
-      </div>
+      <template #footer>
+        <CsPaginationBar>
+          <CsPagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="load"
+            @size-change="load"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
 
     <!-- 批量生成弹窗 -->
@@ -308,7 +309,7 @@ function isExpired(row: GiftCard) {
         type="textarea"
         :rows="8"
         read-only
-        class="cell-mono"
+        class="cs-text-mono"
         style="font-size: 13px"
       />
       <template #footer>
@@ -316,7 +317,7 @@ function isExpired(row: GiftCard) {
         <CsButton @click="resultOpen = false">关闭</CsButton>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
@@ -374,14 +375,4 @@ function isExpired(row: GiftCard) {
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.x-pager {
-  padding: 14px 0 0;
-  margin-top: 16px;
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--x-border-light, #f1f5f9);
-}
-.muted {
-  color: var(--x-text-3);
-}
 </style>

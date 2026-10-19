@@ -14,19 +14,22 @@ import {
   CsCheckbox,
   CsContainer,
   CsDatePicker,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
   CsLoading,
   CsModal,
+  CsPage,
   CsPagination,
+  CsPaginationBar,
   CsProgressBar,
   CsSegmentedControl,
   CsSelect,
   CsSpinner,
   CsToggle,
+  CsToolbar,
   CsTooltip,
 } from '@/components/cloudscape'
 import type { SegmentedOption } from '@/components/cloudscape'
@@ -698,27 +701,25 @@ function cardMenuItems(row: AdminUser) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <CsInput
-          v-model="keyword"
-          placeholder="搜索用户名 / 邮箱 / UUID / 备注"
-          clearable
-          prefix-icon="search"
-          style="width: 280px"
-          @keyup.enter="onSearch"
-          @clear="onSearch"
-          @input="onSearchInput"
-        />
-      </div>
-      <div class="toolbar-actions">
+  <CsPage>
+    <CsToolbar>
+      <CsInput
+        v-model="keyword"
+        placeholder="搜索用户名 / 邮箱 / UUID / 备注"
+        clearable
+        prefix-icon="search"
+        style="width: 280px"
+        @keyup.enter="onSearch"
+        @clear="onSearch"
+        @input="onSearchInput"
+      />
+      <template #actions>
         <CsButton icon-name="download" @click="exportCSV">导出 CSV</CsButton>
         <CsButton :loading="batchBusy" @click="batchToggle(0)">批量封禁</CsButton>
         <CsButton :loading="batchBusy" @click="batchToggle(1)">批量启用</CsButton>
         <CsButton variant="primary" icon-name="add-plus" @click="newUserOpen = true">新增用户</CsButton>
-      </div>
-    </div>
+      </template>
+    </CsToolbar>
 
     <CsContainer header="用户列表">
       <template #actions>
@@ -737,10 +738,7 @@ function cardMenuItems(row: AdminUser) {
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" class="user-empty-state">
-        <CsIcon name="user-profile" size="large" />
-        <p style="margin-top: 8px">暂无匹配用户</p>
-      </div>
+      <CsEmpty v-else-if="list.length === 0" icon-name="user-profile" description="暂无匹配用户" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，额度作为卡片主指标 -->
       <CsCardGrid v-else>
@@ -839,17 +837,19 @@ function cardMenuItems(row: AdminUser) {
         </CsCard>
       </CsCardGrid>
 
-      <div class="x-pager">
-        <CsPagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
-          @current-change="load"
-          @size-change="load"
-        />
-      </div>
+      <template #footer>
+        <CsPaginationBar>
+          <CsPagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[10, 20, 50]"
+            :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
+            @current-change="load"
+            @size-change="load"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
 
     <!-- 用户详情与权限配置弹窗 -->
@@ -867,7 +867,7 @@ function cardMenuItems(row: AdminUser) {
           <div class="sum-item">
             <span class="sum-label">UUID</span>
             <span class="sum-value sum-inline">
-              <code class="cell-mono" :title="current.uuid">{{ current.uuid || '—' }}</code>
+              <code class="cs-text-mono" :title="current.uuid">{{ current.uuid || '—' }}</code>
               <CsButton
                 v-if="current.uuid"
                 variant="inline-icon"
@@ -888,14 +888,14 @@ function cardMenuItems(row: AdminUser) {
           <div class="sum-item">
             <span class="sum-label">账户余额</span>
             <span class="sum-value sum-inline">
-              <span class="cell-mono balance-text">¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}</span>
+              <span class="cs-text-mono balance-text">¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}</span>
               <CsButton variant="inline-link" @click="openAdjust(current)">调整余额</CsButton>
             </span>
           </div>
           <div class="sum-item">
             <span class="sum-label">套餐用量</span>
             <span class="sum-value sum-inline">
-              <span class="cell-mono">
+              <span class="cs-text-mono">
                 {{ formatBytes(current.used_bytes) }} / {{ current.total_bytes ? formatBytes(current.total_bytes) : '不限' }}
               </span>
               <CsButton variant="inline-link" @click="doResetTraffic(current)">重置流量</CsButton>
@@ -995,14 +995,14 @@ function cardMenuItems(row: AdminUser) {
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
-                  <div class="muted" style="font-size: 11.5px">到期前 1 小时内用余额续购当前套餐</div>
+                  <div class="cs-text-secondary" style="font-size: 11.5px">到期前 1 小时内用余额续购当前套餐</div>
                 </div>
                 <CsToggle v-model="userEditForm.auto_renew_expire" />
               </div>
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">流量耗尽自动续费</div>
-                  <div class="muted" style="font-size: 11.5px">流量用尽后用余额续购（重新计时+清零流量）</div>
+                  <div class="cs-text-secondary" style="font-size: 11.5px">流量用尽后用余额续购（重新计时+清零流量）</div>
                 </div>
                 <CsToggle v-model="userEditForm.auto_renew_exhaust" />
               </div>
@@ -1096,7 +1096,7 @@ function cardMenuItems(row: AdminUser) {
             <code>{{ newUserResult.uuid }}</code>
             <CsButton variant="inline-icon" icon-name="copy" aria-label="复制 UUID" @click="copyText(newUserResult.uuid, 'UUID')" />
           </div>
-          <p class="muted" style="margin: 0; font-size: 12px">UUID 已生成，用户购买套餐或由管理员分配权限组后即可生效使用节点。</p>
+          <p class="cs-text-secondary" style="margin: 0; font-size: 12px">UUID 已生成，用户购买套餐或由管理员分配权限组后即可生效使用节点。</p>
         </div>
       </template>
       <template #footer>
@@ -1120,7 +1120,7 @@ function cardMenuItems(row: AdminUser) {
           </div>
           <div class="user-meta">
             <span class="k">当前余额:</span>
-            <span class="v cell-mono" style="font-weight: 700; color: var(--x-primary)">
+            <span class="v cs-text-mono" style="font-weight: 700; color: var(--color-text-link-default-qabnuk)">
               ¥ {{ (((adjustUser as any)?.balance_cents || 0) / 100).toFixed(2) }}
             </span>
           </div>
@@ -1156,7 +1156,7 @@ function cardMenuItems(row: AdminUser) {
         <CsForm label-position="top">
           <CsFormItem label="订阅地址（发给用户，客户端添加订阅用）">
             <div class="sub-url-row">
-              <CsInput :model-value="subInfoUrl" readonly class="cell-mono" />
+              <CsInput :model-value="subInfoUrl" readonly class="cs-text-mono" />
               <CsButton :disabled="!subInfoUrl" icon-name="copy" @click="copyText(subInfoUrl, '订阅地址')">复制</CsButton>
             </div>
           </CsFormItem>
@@ -1173,37 +1173,16 @@ function cardMenuItems(row: AdminUser) {
         />
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.desktop-table-view {
-  display: block;
-}
-.mobile-cards-view {
-  display: none;
-}
-
-.traffic-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.traffic-text {
-  font-size: 12px;
-}
-.x-pager {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-  padding: 8px 16px;
-}
 .user-summary {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 0 24px;
-  background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  border: 1px solid var(--x-border, #e5e7eb);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 20px;
@@ -1216,7 +1195,7 @@ function cardMenuItems(row: AdminUser) {
   gap: 12px;
   font-size: 13px;
   padding: 5px 0;
-  border-bottom: 1px dashed var(--x-border, #e5e7eb);
+  border-bottom: 1px dashed var(--color-border-divider-default-diwd4w);
 
   &:last-child {
     border-bottom: none;
@@ -1226,14 +1205,14 @@ function cardMenuItems(row: AdminUser) {
 .sum-label {
   flex: none;
   font-size: 12px;
-  color: var(--x-text-2, #6b7280);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .sum-value {
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
-  color: var(--x-text, #1e2333);
+  color: var(--color-text-body-default-b2us04);
   text-align: end;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1277,7 +1256,7 @@ function cardMenuItems(row: AdminUser) {
   margin-bottom: 12px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--x-text, #1e2333);
+  color: var(--color-text-body-default-b2us04);
 }
 
 .form-grid-2 {
@@ -1309,8 +1288,8 @@ function cardMenuItems(row: AdminUser) {
   }
 }
 .secret-box {
-  background: var(--x-bg, #f4f5fb);
-  border-radius: var(--x-radius-sm, 8px);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border-radius: var(--border-radius-input-k1q34z);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -1323,13 +1302,13 @@ function cardMenuItems(row: AdminUser) {
   font-size: 13px;
 }
 .secret-row .k {
-  color: var(--x-text-2, #6b7280);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 .secret-row code {
   font-size: 12px;
 }
 .adjust-header {
-  background: var(--x-bg, #f4f5fb);
+  background: var(--color-background-cell-shaded-twxsbz);
   border-radius: 8px;
   padding: 12px 14px;
   display: flex;
@@ -1347,7 +1326,7 @@ function cardMenuItems(row: AdminUser) {
   gap: 8px;
   font-size: 13px;
   .k {
-    color: var(--x-text-3, #909399);
+    color: var(--color-text-body-secondary-66ygbb);
     flex: none;
   }
   .v {
@@ -1371,7 +1350,7 @@ function cardMenuItems(row: AdminUser) {
   flex-direction: column;
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid var(--x-border, #e4e7ed);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
 
   .autorenew-admin-row {
@@ -1392,14 +1371,8 @@ function cardMenuItems(row: AdminUser) {
 
 .quick-label {
   font-size: 12px;
-  color: var(--x-text-3, #9ca3af);
+  color: var(--color-text-body-secondary-66ygbb);
   margin-right: 2px;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 /* ================= 用户卡片（官方 ItemCard 口径） ================= */
@@ -1519,44 +1492,35 @@ function cardMenuItems(row: AdminUser) {
   gap: 8px;
 }
 
-.user-empty-state {
-  text-align: center;
-  padding: 48px 0;
-  color: var(--x-text-3);
-  font-size: 13.5px;
-}
-
 @media (max-width: 768px) {
-  .x-toolbar {
+  /* 窄屏工具栏整体竖排：搜索独占一行，操作按钮两列等分 */
+  .cs-toolbar {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: var(--space-xs-m9b7jf, 8px);
+  }
 
-    .x-toolbar-left {
-      width: 100%;
-      :deep(.cs-input-root) {
-        width: 100% !important;
-      }
-    }
+  /* CsToolbar 的内部结构不在本组件模板里，必须用 :deep 才能命中 */
+  :deep(.cs-toolbar-main) {
+    inline-size: 100%;
 
-    .toolbar-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      width: 100%;
-
-      :deep([class*='awsui_button_']) {
-        margin: 0;
-        width: 100%;
-        height: 32px;
-        font-size: 12.5px;
-      }
+    .cs-input-root {
+      inline-size: 100% !important;
     }
   }
 
-  .x-pager {
-    justify-content: center;
-    padding: 12px 0 4px;
+  :deep(.cs-toolbar-actions) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    inline-size: 100%;
+
+    [class*='awsui_button_'] {
+      margin: 0;
+      inline-size: 100%;
+      block-size: 32px;
+      font-size: 12.5px;
+    }
   }
 }
 

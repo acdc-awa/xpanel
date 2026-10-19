@@ -12,14 +12,16 @@ import {
   CsCardFacts,
   CsCardGrid,
   CsContainer,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsModal,
   CsOption,
+  CsPage,
   CsSelect,
   CsSpinner,
+  CsToolbar,
 } from '@/components/cloudscape'
 import {
   createPermissionGroup,
@@ -193,23 +195,20 @@ async function remove(row: any) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
+  <CsPage>
+    <CsToolbar>
+      <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。" />
+      <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增权限组</CsButton>
-        <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。" />
-      </div>
-    </div>
+      </template>
+    </CsToolbar>
 
     <CsContainer header="权限分组列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="folder-open" size="large" />
-        <p style="margin-top: 8px">尚无权限组，点击右上角「新增权限组」</p>
-      </div>
+      <CsEmpty v-else-if="list.length === 0" icon-name="folder-open" description="尚无权限组，点击右上角「新增权限组」" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，模板状态作为卡片角标 -->
       <CsCardGrid v-else>
@@ -296,7 +295,7 @@ async function remove(row: any) {
           </div>
         </CsFormItem>
 
-        <div v-if="orderedApIds.length === 0" class="muted" style="font-size: 12.5px; padding: 16px 0; text-align: center">
+        <div v-if="orderedApIds.length === 0" class="cs-text-secondary" style="font-size: 12.5px; padding: 16px 0; text-align: center">
           当前权限组未绑定接入点（订阅将无节点）
         </div>
         <div v-else class="order-list">
@@ -316,11 +315,10 @@ async function remove(row: any) {
         <CsButton variant="primary" :loading="orderingSaving" @click="saveOrdering">保存顺序</CsButton>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.muted { color: var(--x-text-3); }
 
 .pg-name {
   appearance: none;
@@ -375,7 +373,7 @@ async function remove(row: any) {
   gap: 6px;
   max-height: 320px;
   overflow-y: auto;
-  border: 1px solid var(--x-border);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 8px;
 }
@@ -383,8 +381,8 @@ async function remove(row: any) {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border-light);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 6px;
   padding: 6px 10px;
 }
@@ -392,8 +390,8 @@ async function remove(row: any) {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--x-primary-soft);
-  color: var(--x-primary);
+  background: var(--color-background-item-selected-dotkup);
+  color: var(--color-text-link-default-qabnuk);
   font-size: 11.5px;
   font-weight: 600;
   display: inline-flex;
@@ -404,7 +402,7 @@ async function remove(row: any) {
 .order-name {
   flex: 1;
   font-size: 12.5px;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

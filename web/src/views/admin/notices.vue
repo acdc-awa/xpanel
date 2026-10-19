@@ -7,19 +7,21 @@ import {
   CsCard,
   CsCardGrid,
   CsContainer,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
   CsModal,
   CsOption,
+  CsPage,
   CsPopover,
   CsRadio,
   CsRadioGroup,
   CsSelect,
   CsSpinner,
   CsToggle,
+  CsToolbar,
   CsTooltip,
 } from '@/components/cloudscape'
 import {
@@ -217,11 +219,9 @@ async function remove(row: NoticeItem) {
 </script>
 
 <template>
-  <div class="x-page">
-    <!-- 顶部工具栏（带标准留白与对齐） -->
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <CsInput
+  <CsPage>
+    <CsToolbar>
+      <CsInput
           v-model="keyword"
           placeholder="搜索公告标题或内容..."
           clearable
@@ -240,10 +240,11 @@ async function remove(row: NoticeItem) {
           <CsOption label="已启用" :value="1" />
           <CsOption label="已隐藏" :value="0" />
         </CsSelect>
-        <CsButton icon-name="refresh" :loading="loading" @click="load">刷新</CsButton>
-      </div>
-      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">发布公告</CsButton>
-    </div>
+      <CsButton icon-name="refresh" :loading="loading" @click="load">刷新</CsButton>
+      <template #actions>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">发布公告</CsButton>
+      </template>
+    </CsToolbar>
 
     <!-- 表格列表 -->
     <CsContainer header="全站公告列表">
@@ -251,10 +252,7 @@ async function remove(row: NoticeItem) {
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="announcement" size="large" />
-        <p style="margin-top: 8px">暂无公告，点击右上角「发布公告」</p>
-      </div>
+      <CsEmpty v-else-if="list.length === 0" icon-name="announcement" description="暂无公告，点击右上角「发布公告」" />
 
       <!-- 公告卡片网格（官方 ItemCard 口径） -->
       <CsCardGrid v-else>
@@ -459,28 +457,17 @@ async function remove(row: NoticeItem) {
         </CsButton>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.notice-title-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-
-  .notice-title-text {
-    font-weight: 500;
-    color: var(--x-text);
-  }
-}
-
 .md-editor-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-top: 4px;
-  background: var(--x-fill-1, #f8fafc);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 12px;
 }
@@ -496,12 +483,12 @@ async function remove(row: NoticeItem) {
     justify-content: space-between;
     padding-bottom: 6px;
     margin-bottom: 6px;
-    border-bottom: 1px dashed var(--x-border);
+    border-bottom: 1px dashed var(--color-border-divider-default-diwd4w);
 
     .md-pane-title {
       font-size: 13px;
       font-weight: 600;
-      color: var(--x-text);
+      color: var(--color-text-body-default-b2us04);
     }
   }
 }
@@ -513,8 +500,8 @@ async function remove(row: NoticeItem) {
   gap: 6px;
   flex-wrap: wrap;
   padding: 5px 8px;
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 6px;
   margin-bottom: 8px;
 
@@ -523,7 +510,7 @@ async function remove(row: NoticeItem) {
     align-items: center;
     gap: 3px;
     padding-right: 6px;
-    border-right: 1px solid var(--x-border-light, #e2e8f0);
+    border-right: 1px solid var(--color-border-divider-default-diwd4w);
 
     &:last-child {
       border-right: none;
@@ -539,7 +526,7 @@ async function remove(row: NoticeItem) {
     border-radius: 4px;
     font-size: 12px;
     font-weight: 500;
-    color: var(--x-text-2, #475569);
+    color: var(--color-text-body-secondary-66ygbb);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -547,8 +534,8 @@ async function remove(row: NoticeItem) {
     transition: all 0.15s ease;
 
     &:hover {
-      background: var(--x-fill-2, rgba(99, 102, 241, 0.08));
-      color: var(--x-primary, #6366f1);
+      background: var(--color-background-cell-shaded-twxsbz);
+      color: var(--color-text-link-default-qabnuk);
       border-color: rgba(99, 102, 241, 0.2);
     }
 
@@ -561,7 +548,7 @@ async function remove(row: NoticeItem) {
     }
 
     &.highlight-btn {
-      color: var(--x-primary, #6366f1);
+      color: var(--color-text-link-default-qabnuk);
       font-weight: 600;
     }
   }
@@ -573,7 +560,7 @@ async function remove(row: NoticeItem) {
 
   .table-picker-label {
     font-size: 12px;
-    color: var(--x-text-2);
+    color: var(--color-text-body-secondary-66ygbb);
     margin-bottom: 8px;
     display: flex;
     justify-content: space-between;
@@ -593,34 +580,34 @@ async function remove(row: NoticeItem) {
     .grid-cell {
       width: 26px;
       height: 26px;
-      border: 1px solid var(--x-border, #cbd5e1);
-      background: var(--x-fill-1, #f8fafc);
+      border: 1px solid var(--color-border-divider-default-diwd4w);
+      background: var(--color-background-cell-shaded-twxsbz);
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.12s ease;
 
       &.cell-active {
         background: rgba(99, 102, 241, 0.25);
-        border-color: var(--x-primary, #6366f1);
+        border-color: var(--color-text-link-default-qabnuk);
       }
     }
   }
 }
 
 .text-primary {
-  color: var(--x-primary, #6366f1);
+  color: var(--color-text-link-default-qabnuk);
 }
 
 .md-preview-body {
   height: 350px;
   overflow-y: auto;
   padding: 12px 14px;
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 6px;
 
   .preview-empty-hint {
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
     font-size: 13px;
     padding-top: 50px;
     text-align: center;
@@ -640,24 +627,16 @@ async function remove(row: NoticeItem) {
 
   .switch-hint {
     font-size: 12px;
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
   }
 }
 
 .text-muted {
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .text-xs {
   font-size: 12px;
-}
-
-.font-mono {
-  font-family: var(--x-font-mono, monospace);
-}
-
-.mr-1 {
-  margin-right: 4px;
 }
 
 .mt-4 {

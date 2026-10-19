@@ -9,12 +9,15 @@ import {
   CsCardFacts,
   CsCardGrid,
   CsContainer,
-  CsIcon,
+  CsEmpty,
   CsInput,
   CsOption,
+  CsPage,
   CsPagination,
+  CsPaginationBar,
   CsSelect,
   CsSpinner,
+  CsToolbar,
 } from '@/components/cloudscape'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -86,10 +89,9 @@ function paymentLabel(row: Order) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
-        <CsSelect
+  <CsPage>
+    <CsToolbar>
+      <CsSelect
           v-model="filterStatus"
           placeholder="全部状态"
           clearable
@@ -112,19 +114,19 @@ function paymentLabel(row: Order) {
         />
         <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
         <CsButton @click="resetFilters">重置</CsButton>
-        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      </div>
-    </div>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+    </CsToolbar>
 
     <CsContainer header="服务订购记录">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="ticket" size="large" />
-        <p style="margin-top: 8px">{{ filterStatus || keyword ? '未找到符合条件的订单记录' : '暂无订购记录' }}</p>
-      </div>
+      <CsEmpty
+        v-else-if="list.length === 0"
+        icon-name="ticket"
+        :description="filterStatus || keyword ? '未找到符合条件的订单记录' : '暂无订购记录'"
+      />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，金额作为卡片主指标 -->
       <CsCardGrid v-else>
@@ -152,19 +154,21 @@ function paymentLabel(row: Order) {
         </CsCard>
       </CsCardGrid>
 
-      <div class="x-pager">
-        <CsPagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next"
-          @current-change="load"
-          @size-change="() => { page = 1; load() }"
-        />
-      </div>
+      <template #footer>
+        <CsPaginationBar>
+          <CsPagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="load"
+            @size-change="() => { page = 1; load() }"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
@@ -208,11 +212,4 @@ function paymentLabel(row: Order) {
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.x-pager {
-  display: flex;
-  justify-content: flex-end;
-  padding: 14px 0 0;
-  margin-top: 16px;
-  border-top: 1px solid var(--x-border-light, #f1f5f9);
-}
 </style>

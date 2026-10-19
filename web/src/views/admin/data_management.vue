@@ -4,6 +4,7 @@ import { ElMessage } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsBarChart,
+  CsBox,
   CsButton,
   CsConfirmDialog,
   CsContainer,
@@ -11,8 +12,10 @@ import {
   CsDivider,
   CsInputNumber,
   CsLoading,
+  CsPage,
   CsSegmentedControl,
   CsSelect,
+  CsToolbar,
 } from '@/components/cloudscape'
 import type { BarSeries, SegmentedOption } from '@/components/cloudscape'
 import { getLogStats, cleanupLogs, vacuumDatabase, compactHistory, updateSettings } from '@/api/admin'
@@ -324,22 +327,21 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="x-page">
-    <!-- 顶栏 -->
-    <div class="x-toolbar" style="margin-bottom: 20px">
-      <div class="x-toolbar-left">
-        <div>
-          <div style="font-size: 18px; font-weight: 600">数据管理</div>
-          <div style="font-size: 12.5px; color: var(--x-text-3); margin-top: 2px">
-            日志量可视化、按日期清理与空间回收（统计数据按天分桶）
-          </div>
-        </div>
+  <CsPage>
+    <CsToolbar>
+      <div>
+        <CsBox variant="div" font-size="heading-m" font-weight="bold">数据管理</CsBox>
+        <CsBox variant="div" font-size="body-s" color="text-body-secondary">
+          日志量可视化、按日期清理与空间回收（统计数据按天分桶）
+        </CsBox>
       </div>
-      <CsButton :loading="loading" icon-name="refresh" @click="load">刷新</CsButton>
-    </div>
+      <template #actions>
+        <CsButton :loading="loading" icon-name="refresh" @click="load">刷新</CsButton>
+      </template>
+    </CsToolbar>
 
     <!-- 日志量可视化 + 按日期清理 -->
-    <CsContainer class="data-card" header="日志量与清理">
+    <CsContainer header="日志量与清理">
       <template #actions>
         <CsSegmentedControl :model-value="rangeDays" :options="rangeOptions" label="统计窗口" @change="onRangeChange" />
       </template>
@@ -348,13 +350,15 @@ onMounted(() => {
         <div class="stat-row">
           <div v-for="t in logTables" :key="t.key" class="stat-cell">
             <span class="dot" :style="{ background: t.color }" />
-            <span class="stat-label">{{ t.label }}</span>
-            <span class="stat-val cell-mono">{{ fmtCount(stats?.totals?.[t.key]) }}</span>
+            <CsBox variant="span" color="text-body-secondary">{{ t.label }}</CsBox>
+            <CsBox variant="span" font-weight="bold">{{ fmtCount(stats?.totals?.[t.key]) }}</CsBox>
           </div>
           <div v-if="stats?.sqlite_avail" class="stat-cell">
             <span class="dot" style="background: #94a3b8" />
-            <span class="stat-label">数据库文件</span>
-            <span class="stat-val cell-mono">{{ fmtSize(stats?.db_size) }} + WAL {{ fmtSize(stats?.wal_size) }} = {{ fmtSize(totalDbSize) }}</span>
+            <CsBox variant="span" color="text-body-secondary">数据库文件</CsBox>
+            <CsBox variant="span" font-weight="bold">
+              {{ fmtSize(stats?.db_size) }} + WAL {{ fmtSize(stats?.wal_size) }} = {{ fmtSize(totalDbSize) }}
+            </CsBox>
           </div>
         </div>
 
@@ -382,16 +386,16 @@ onMounted(() => {
             aria-label="清理截止日期"
             style="width: 240px"
           />
-          <span class="muted" style="font-size: 12.5px">
+          <CsBox variant="span" font-size="body-s" color="text-body-secondary">
             <template v-if="estimatedRows?.fullOutside">所选日期早于统计窗口，实际删除量以执行结果为准</template>
             <template v-else-if="estimatedRows">预估删除 {{ fmtCount(estimatedRows.count) }} 行（不含窗口外更早数据）</template>
             <template v-else>—</template>
-          </span>
+          </CsBox>
           <CsButton icon-name="remove" :loading="cleanupRunning" :disabled="!cleanupDate" @click="runCleanup">
             清理
           </CsButton>
         </div>
-        <p class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.7">
+        <CsBox variant="p" font-size="body-s" color="text-body-secondary" :margin="{ top: 's' }">
           {{ tableMeta.desc }}。<template v-if="cleanupTable === 'traffic_logs'">
             仅可清理 <b>{{ maxDeleteDate || '—' }}</b> 及更早的日期（受计费周期与每日聚合窗口保护）。
           </template>
@@ -404,12 +408,12 @@ onMounted(() => {
             type="warn"
             content="审计日志删除后，对应时段的操作记录将无法追溯，请谨慎清理。"
           />
-        </p>
+        </CsBox>
       </CsLoading>
     </CsContainer>
 
     <!-- 历史数据压缩 -->
-    <CsContainer class="data-card" header="历史数据压缩">
+    <CsContainer header="历史数据压缩">
       <template #info>
         <TipIcon content="把存量流量明细归并到小时桶、节点心跳按行龄抽稀（近 6 小时 1 分钟，更早 10 分钟），并清理超出保留期的数据。归并只做求和/抽样，计费与用量口径不变，可重复执行。" />
       </template>
@@ -420,7 +424,7 @@ onMounted(() => {
           content="压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。"
         />
       </div>
-      <div v-if="compactResult" class="muted" style="font-size: 12.5px; margin-top: 10px; line-height: 1.9">
+      <CsBox v-if="compactResult" variant="div" font-size="body-s" color="text-body-secondary" :margin="{ top: 's' }">
         <div>
           流量明细：{{ fmtCount(compactResult.stats.traffic_rows_before) }} →
           {{ fmtCount(compactResult.stats.traffic_rows_after) }} 行（减少
@@ -432,60 +436,60 @@ onMounted(() => {
           {{ fmtCount(compactResult.stats.node_rows_removed) }}）
         </div>
         <div v-if="compactResult.reclaimed !== undefined">
-          释放空间 <b class="cell-mono">{{ fmtSize(Math.max(0, compactResult.reclaimed || 0)) }}</b>
+          释放空间 <CsBox variant="b">{{ fmtSize(Math.max(0, compactResult.reclaimed || 0)) }}</CsBox>
         </div>
         <div v-if="compactResult.vacuum_error" style="color: var(--color-text-status-warning-fabq6h, #8d6605)">
           {{ compactResult.vacuum_error }}
         </div>
-      </div>
+      </CsBox>
     </CsContainer>
 
     <!-- 空间回收 -->
-    <CsContainer class="data-card" header="空间回收（VACUUM）">
+    <CsContainer header="空间回收（VACUUM）">
       <template #info>
         <TipIcon content="SQLite 删除数据后文件不会自动缩小，此处重写数据库文件以释放空间。" />
       </template>
       <div class="cleanup-row" style="align-items: center">
-        <span class="muted" style="font-size: 12.5px">
+        <CsBox variant="span" font-size="body-s" color="text-body-secondary">
           当前占用：
           <template v-if="stats?.sqlite_avail">
-            主库 <b class="cell-mono">{{ fmtSize(stats?.db_size) }}</b> + WAL
-            <span class="cell-mono">{{ fmtSize(stats?.wal_size) }}</span> = 共
-            <b class="cell-mono">{{ fmtSize(totalDbSize) }}</b>
+            主库 <CsBox variant="b">{{ fmtSize(stats?.db_size) }}</CsBox> + WAL
+            <CsBox variant="span">{{ fmtSize(stats?.wal_size) }}</CsBox> = 共
+            <CsBox variant="b">{{ fmtSize(totalDbSize) }}</CsBox>
           </template>
           <template v-else>当前数据库类型不支持在线回收</template>
-        </span>
+        </CsBox>
         <CsButton variant="primary" :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
           回收空间
         </CsButton>
         <TipIcon type="warn" content="回收期间数据库写入会短暂阻塞，建议在低峰时段执行；日常无需频繁回收。" />
       </div>
-      <p v-if="vacuumResult" class="muted" style="font-size: 12.5px; margin-top: 10px">
-        上次回收释放了 <b class="cell-mono">{{ fmtSize(Math.max(0, vacuumResult.reclaimed)) }}</b>
-      </p>
+      <CsBox v-if="vacuumResult" variant="p" font-size="body-s" color="text-body-secondary" :margin="{ top: 's' }">
+        上次回收释放了 <CsBox variant="b">{{ fmtSize(Math.max(0, vacuumResult.reclaimed)) }}</CsBox>
+      </CsBox>
     </CsContainer>
 
     <!-- 自动保留天数 -->
-    <CsContainer class="data-card" header="自动保留天数">
+    <CsContainer header="自动保留天数">
       <template #info>
         <TipIcon content="每日凌晨 4 点自动清理超过保留期的日志数据；保存后次日生效。手动清理请使用上方「按日期清理」。" />
       </template>
       <div class="retention-row">
         <div class="retention-item">
-          <span class="stat-label">流量明细</span>
+          <span class="cs-text-secondary">流量明细</span>
           <TipIcon type="warn" content="建议 ≥ 在售套餐最长计费周期（如年付套餐建议 ≥ 366 天），否则自动清理会提前抹掉部分用户的已用流量。" />
           <CsInputNumber v-model="retentionForm.retention_traffic_days" :min="1" :max="3650" style="width: 120px" />
-          <span class="muted" style="font-size: 12px">天</span>
+          <span class="cs-text-secondary" style="font-size: 12px">天</span>
         </div>
         <div class="retention-item">
-          <span class="stat-label">节点心跳</span>
+          <span class="cs-text-secondary">节点心跳</span>
           <CsInputNumber v-model="retentionForm.retention_node_reports_days" :min="1" :max="3650" style="width: 120px" />
-          <span class="muted" style="font-size: 12px">天</span>
+          <span class="cs-text-secondary" style="font-size: 12px">天</span>
         </div>
         <div class="retention-item">
-          <span class="stat-label">审计日志</span>
+          <span class="cs-text-secondary">审计日志</span>
           <CsInputNumber v-model="retentionForm.retention_audit_days" :min="1" :max="3650" style="width: 120px" />
-          <span class="muted" style="font-size: 12px">天</span>
+          <span class="cs-text-secondary" style="font-size: 12px">天</span>
         </div>
         <CsButton variant="primary" :loading="retentionSaving" @click="saveRetention">保存</CsButton>
       </div>
@@ -501,18 +505,12 @@ onMounted(() => {
       :loading="cleanupRunning || compactRunning || vacuumRunning"
       @confirm="runConfirmed"
     />
-  </div>
+  </CsPage>
 </template>
 
 <style scoped>
 .log-volume-chart {
   margin-top: 8px;
-}
-
-/* CsContainer 自身不带外边距（官方容器假定间距由 SpaceBetween 提供），
-   这里补回原 BaseCard 的卡片间距。 */
-.data-card + .data-card {
-  margin-top: 16px;
 }
 
 .stat-row {
@@ -532,20 +530,11 @@ onMounted(() => {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.stat-label {
-  color: var(--x-text-2);
-}
-.stat-val {
-  font-weight: 600;
-}
 .cleanup-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-}
-.muted {
-  color: var(--x-text-3);
 }
 .retention-row {
   display: flex;

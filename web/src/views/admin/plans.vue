@@ -10,16 +10,18 @@ import {
   CsCardGrid,
   CsCheckbox,
   CsContainer,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
   CsModal,
   CsOption,
+  CsPage,
   CsSelect,
   CsSpinner,
   CsToggle,
+  CsToolbar,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
@@ -226,23 +228,20 @@ async function remove(row: any) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      </div>
-      <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增套餐</CsButton>
-    </div>
+  <CsPage>
+    <CsToolbar>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+      <template #actions>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增套餐</CsButton>
+      </template>
+    </CsToolbar>
 
     <CsContainer header="套餐列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="list.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="ticket" size="large" />
-        <p style="margin-top: 8px">暂无套餐，点击右上角「新增套餐」</p>
-      </div>
+      <CsEmpty v-else-if="list.length === 0" icon-name="ticket" description="暂无套餐，点击右上角「新增套餐」" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，价格作为卡片主指标 -->
       <CsCardGrid v-else>
@@ -358,12 +357,12 @@ async function remove(row: any) {
             <div style="display: flex; align-items: center; gap: 8px">
               <CsToggle v-model="form.purchasable" />
               <span style="font-size: 12.5px">可新购</span>
-              <span class="muted" style="font-size: 11.5px">商店展示并允许非持有者购买</span>
+              <span class="cs-text-secondary" style="font-size: 11.5px">商店展示并允许非持有者购买</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px">
               <CsToggle v-model="form.renewable" />
               <span style="font-size: 12.5px">可续费</span>
-              <span class="muted" style="font-size: 11.5px">持有者余额直付顺延</span>
+              <span class="cs-text-secondary" style="font-size: 11.5px">持有者余额直付顺延</span>
             </div>
           </div>
         </CsFormItem>
@@ -387,7 +386,7 @@ async function remove(row: any) {
         <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
@@ -450,7 +449,7 @@ async function remove(row: any) {
 .card-desc-box {
   margin-block-end: 12px;
   padding: 8px 10px;
-  background: var(--x-bg);
+  background: var(--color-background-cell-shaded-twxsbz);
   border-radius: 8px;
   font-size: var(--font-size-body-s, 12px);
   line-height: var(--line-height-body-s, 16px);
@@ -467,20 +466,20 @@ async function remove(row: any) {
   font-size: 12px;
 
   .chip-label {
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
     font-size: 11.5px;
   }
 
   .placeholder-tag {
     cursor: pointer;
-    font-family: var(--x-font-mono, monospace);
+    font-family: var(--font-family-monospace-842lr2);
     font-size: 11px;
     user-select: none;
     transition: all 0.15s ease;
     &:hover {
-      background: var(--x-primary-soft, #eef2ff);
-      border-color: var(--x-primary, #6366f1);
-      color: var(--x-primary, #6366f1);
+      background: var(--color-background-item-selected-dotkup);
+      border-color: var(--color-text-link-default-qabnuk);
+      color: var(--color-text-link-default-qabnuk);
     }
   }
 }

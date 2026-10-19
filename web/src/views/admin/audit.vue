@@ -7,14 +7,17 @@ import {
   CsCardGrid,
   CsContainer,
   CsDatePicker,
-  CsIcon,
+  CsEmpty,
   CsInput,
   CsModal,
   CsOption,
+  CsPage,
   CsPagination,
+  CsPaginationBar,
   CsSelect,
   CsSpinner,
   CsTabs,
+  CsToolbar,
 } from '@/components/cloudscape'
 import type { TabItem } from '@/components/cloudscape'
 import { getAuditLogs, type AuditLog } from '@/api/admin'
@@ -121,10 +124,9 @@ function fmtTime(t: string) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <CsSelect v-model="category" placeholder="全部分类" clearable style="width: 140px" @change="onFilterChange">
+  <CsPage>
+    <CsToolbar>
+      <CsSelect v-model="category" placeholder="全部分类" clearable style="width: 140px" @change="onFilterChange">
           <CsOption label="全部分类" value="" />
           <CsOption label="服务器管理" value="servers" />
           <CsOption label="用户管理" value="users" />
@@ -167,19 +169,15 @@ function fmtTime(t: string) {
         />
         <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
         <CsButton @click="resetFilters">重置</CsButton>
-        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      </div>
-    </div>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+    </CsToolbar>
 
     <CsContainer header="系统审计日志">
       <div v-if="loading" class="state-block">
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="rows.length === 0" class="state-block state-empty">
-        <CsIcon name="file" size="large" />
-        <p>暂无审计日志</p>
-      </div>
+      <CsEmpty v-else-if="rows.length === 0" icon-name="file" description="暂无审计日志" />
 
       <!-- 审计日志卡片网格（官方 ItemCard）：摘要 + 字段表 + 大文本预览 -->
       <CsCardGrid v-else>
@@ -228,17 +226,19 @@ function fmtTime(t: string) {
         </CsCard>
       </CsCardGrid>
 
-      <div class="x-pager">
-        <CsPagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next"
-          @current-change="load"
-          @size-change="() => { page = 1; load() }"
-        />
-      </div>
+      <template #footer>
+        <CsPaginationBar>
+          <CsPagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="load"
+            @size-change="() => { page = 1; load() }"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
 
     <!-- 详情弹窗：翻译视图 / 原文 -->
@@ -258,7 +258,7 @@ function fmtTime(t: string) {
             </div>
             <pre class="audit-pre">{{ t.preview }}</pre>
           </div>
-          <div v-if="!currentView.fields.length && !currentView.texts.length" style="color: var(--x-text-3); font-size: 12.5px; padding: 8px 0">
+          <div v-if="!currentView.fields.length && !currentView.texts.length" style="color: var(--color-text-body-secondary-66ygbb); font-size: 12.5px; padding: 8px 0">
             无结构化字段，可切到「原文」查看。
           </div>
         </div>
@@ -270,12 +270,10 @@ function fmtTime(t: string) {
         <CsButton @click="detailModalOpen = false">关闭</CsButton>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: var(--x-font-mono); font-size: 12.5px; color: var(--x-text-2); }
-.muted { color: var(--x-text-3); }
 
 .range-filter {
   display: flex;
@@ -285,21 +283,12 @@ function fmtTime(t: string) {
 
 .range-sep {
   font-size: 13px;
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .state-block {
   padding: 48px 0;
   text-align: center;
-}
-
-.state-empty {
-  color: var(--x-text-3);
-  font-size: 13.5px;
-
-  p {
-    margin-top: 8px;
-  }
 }
 
 /* ================= 审计日志卡片（官方 ItemCard 口径） ================= */
@@ -427,19 +416,12 @@ function fmtTime(t: string) {
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.x-pager {
-  display: flex;
-  justify-content: flex-end;
-  padding: 14px 0 0;
-  margin-top: 16px;
-  border-top: 1px solid var(--x-border-light, #f1f5f9);
-}
 
 /* 详情弹窗：翻译视图 */
 .audit-modal-summary {
   font-size: 13.5px;
   font-weight: 600;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   padding: 2px 0 10px;
   word-break: break-all;
 }
@@ -447,7 +429,7 @@ function fmtTime(t: string) {
 .modal-fields {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--x-border-light, #f1f5f9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -460,17 +442,17 @@ function fmtTime(t: string) {
   line-height: 1.5;
 
   &:nth-child(odd) {
-    background: var(--x-bg, #f9fafb);
+    background: var(--color-background-cell-shaded-twxsbz);
   }
 
   .mf-label {
     flex: 0 0 128px;
-    color: var(--x-text-3, #9ca3af);
+    color: var(--color-text-body-secondary-66ygbb);
   }
 
   .mf-value {
     flex: 1;
-    color: var(--x-text-2, #374151);
+    color: var(--color-text-body-secondary-66ygbb);
     word-break: break-all;
   }
 }
@@ -480,27 +462,27 @@ function fmtTime(t: string) {
 
   .mt-head {
     font-size: 12px;
-    color: var(--x-text-2);
+    color: var(--color-text-body-secondary-66ygbb);
     margin-bottom: 4px;
     display: flex;
     align-items: baseline;
     gap: 8px;
 
     .mt-meta {
-      color: var(--x-text-3);
+      color: var(--color-text-body-secondary-66ygbb);
       font-size: 11px;
     }
   }
 }
 
 .audit-pre {
-  background: var(--x-fill-2, #f1f5f9);
+  background: var(--color-background-cell-shaded-twxsbz);
   padding: 12px 14px;
   border-radius: 8px;
-  font-family: var(--x-font-mono, monospace);
+  font-family: var(--font-family-monospace-842lr2);
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 380px;

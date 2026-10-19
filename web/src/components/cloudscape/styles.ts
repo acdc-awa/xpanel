@@ -5,6 +5,7 @@ import './vendor/open-sans.css'
 import './vendor/base-theme.css'
 import './vendor/dark-overrides.css'
 import './dashboard-tables.css'
+import './utilities.css'
 
 import './vendor/components/icon/styles.scoped.css'
 import './vendor/components/spinner/styles.scoped.css'

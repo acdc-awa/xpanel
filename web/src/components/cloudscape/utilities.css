@@ -1,0 +1,14 @@
+/*
+ * 小工具类：只承载「次要文字色 / 等宽文字」两种在各页反复出现的排版语义。
+ * 颜色一律取官方 token，保证 light/dark 由 Cloudscape 主题统一切换；
+ * 不要再在页面 <style> 里各自复制一份。更复杂的排版请用 CsBox。
+ */
+.cs-text-secondary {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.cs-text-mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+}

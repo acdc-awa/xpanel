@@ -17,12 +17,16 @@ import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
+  CsBadge,
+  CsBox,
   CsButton,
   CsButtonDropdown,
   CsContainer,
   CsInput,
   CsLoading,
+  CsPage,
   CsTabs,
+  CsToolbar,
 } from '@/components/cloudscape'
 import type { ButtonDropdownItem } from '@/components/cloudscape'
 import {
@@ -471,19 +475,15 @@ async function saveAsFromEditor() {
 </script>
 
 <template>
-  <div class="x-page sub-templates-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <div>
-          <div class="page-title">
-            订阅模板
-            <TipIcon
-              content="模板决定权限组用户在 Clash / Mihomo 客户端看到的配置骨架。模板库是可复用素材，只有保存到具体权限组后才会对该组用户的订阅生效。"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+  <CsPage class="sub-templates-page">
+    <CsToolbar>
+      <CsBox variant="span" font-size="heading-s" font-weight="bold">
+        订阅模板
+        <TipIcon
+          content="模板决定权限组用户在 Clash / Mihomo 客户端看到的配置骨架。模板库是可复用素材，只有保存到具体权限组后才会对该组用户的订阅生效。"
+        />
+      </CsBox>
+    </CsToolbar>
 
     <CsTabs v-model="activeTab" :tabs="outerTabs" disable-content-paddings>
       <!-- ==================== TAB 1：组级订阅模板（生效位置） ==================== -->
@@ -520,13 +520,9 @@ async function saveAsFromEditor() {
                   <span class="pick-remark">{{ g.remark || '—' }}</span>
                 </span>
                 <span v-if="g.id === selectedGroupId && groupDirty" class="dirty-mark">未保存</span>
-                <span
-                  class="x-chip"
-                  :class="g.clash_template && g.clash_template.trim() ? 'purple' : 'gray'"
-                  style="font-size: 10.5px; flex: none"
-                >
+                <CsBadge :color="g.clash_template && g.clash_template.trim() ? 'blue' : 'grey'">
                   {{ g.clash_template && g.clash_template.trim() ? '自定义' : '系统默认' }}
-                </span>
+                </CsBadge>
               </button>
             </div>
             <div class="list-foot">再次点击已选中的权限组可放弃修改、重新加载服务端已存的模板。</div>
@@ -535,10 +531,10 @@ async function saveAsFromEditor() {
           <!-- 右：模板编辑器 -->
           <CsContainer :header="selectedGroup ? `配置订阅模板 · ${selectedGroup.name}` : '配置订阅模板'">
             <template #actions>
-              <span v-if="groupDirty" class="dirty-mark">未保存</span>
-              <span class="x-chip" :class="hasCustomTemplate ? 'purple' : 'gray'" style="font-size: 10.5px">
+              <CsBadge v-if="groupDirty" color="severity-medium">未保存</CsBadge>
+              <CsBadge :color="hasCustomTemplate ? 'blue' : 'grey'">
                 {{ hasCustomTemplate ? '自定义模板' : '系统默认模板' }}
-              </span>
+              </CsBadge>
             </template>
 
             <div v-if="!selectedGroup" class="list-hint" style="padding: 60px 0">
@@ -590,12 +586,15 @@ async function saveAsFromEditor() {
                     placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
                     @lint="(e, w) => { groupLint.errors = e; groupLint.warnings = w }"
                   />
-                  <div v-if="groupLint.errors > 0 || groupLint.warnings > 0" class="lint-banner" :class="groupLint.errors ? 'error' : 'warn'">
-                    <span>
-                      YAML 校验：{{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
-                      错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
-                    </span>
-                  </div>
+                  <CsAlert
+                    v-if="groupLint.errors > 0 || groupLint.warnings > 0"
+                    class="lint-banner"
+                    :type="groupLint.errors ? 'error' : 'warning'"
+                    header="YAML 校验未通过"
+                  >
+                    {{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
+                    错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
+                  </CsAlert>
                 </div>
 
                 <div v-if="editorTab === 'preview'">
@@ -617,7 +616,7 @@ async function saveAsFromEditor() {
 
                     <div v-if="previewData?.proxy_names && previewData.proxy_names.length" class="matched-nodes-box">
                       <span class="box-label">组内可用节点池：</span>
-                      <span v-for="name in previewData.proxy_names" :key="name" class="node-chip cell-mono">
+                      <span v-for="name in previewData.proxy_names" :key="name" class="node-chip cs-text-mono">
                         {{ name }}
                       </span>
                     </div>
@@ -631,17 +630,15 @@ async function saveAsFromEditor() {
                       @lint="(e, w) => { previewLint.errors = e; previewLint.warnings = w }"
                     />
                     <div v-else class="list-hint" style="padding: 30px 0">正在编译渲染…</div>
-                    <div v-if="previewLint.errors > 0" class="lint-banner error" style="margin-top: 8px">
-                      <span>
-                        编译结果有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
-                      </span>
-                    </div>
+                    <CsAlert v-if="previewLint.errors > 0" class="lint-banner" type="error" header="编译结果不合法">
+                      有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
+                    </CsAlert>
                   </CsLoading>
                 </div>
               </CsTabs>
 
               <div class="save-bar">
-                <span class="muted" style="font-size: 12px">
+                <span class="cs-text-secondary" style="font-size: 12px">
                   保存后权限组「{{ selectedGroup.name }}」的用户请求订阅时将直接返回此配置
                 </span>
                 <CsButton variant="primary" icon-name="check" :loading="templateSaving" @click="saveTemplate">
@@ -727,15 +724,18 @@ async function saveAsFromEditor() {
                 placeholder="留空则使用系统内置默认模板"
                 @lint="(e, w) => { libLint.errors = e; libLint.warnings = w }"
               />
-              <div v-if="libLint.errors > 0 || libLint.warnings > 0" class="lint-banner" :class="libLint.errors ? 'error' : 'warn'">
-                <span>
-                  YAML 校验：{{ libLint.errors }} 处错误<span v-if="libLint.warnings">、{{ libLint.warnings }} 处警告</span>。
-                  错误行已在编辑器中标红，悬停可看原因。
-                </span>
-              </div>
+              <CsAlert
+                v-if="libLint.errors > 0 || libLint.warnings > 0"
+                class="lint-banner"
+                :type="libLint.errors ? 'error' : 'warning'"
+                header="YAML 校验未通过"
+              >
+                {{ libLint.errors }} 处错误<span v-if="libLint.warnings">、{{ libLint.warnings }} 处警告</span>。
+                错误行已在编辑器中标红，悬停可看原因。
+              </CsAlert>
 
               <div class="save-bar">
-                <span class="muted" style="font-size: 12px">
+                <span class="cs-text-secondary" style="font-size: 12px">
                   保存只更新这条素材，不会改变任何权限组当前使用的订阅模板
                 </span>
                 <div style="display: flex; gap: 8px">
@@ -749,23 +749,10 @@ async function saveAsFromEditor() {
           </CsContainer>
         </div>
     </CsTabs>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.muted { color: var(--x-text-3); }
-.cell-mono {
-  font-family: var(--x-font-mono, monospace);
-  font-size: 12px;
-}
-.page-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--x-text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
 /* ===== 两栏骨架：两个标签页共用（左列表 + 右编辑器） ===== */
 .tpl-layout {
@@ -788,19 +775,19 @@ async function saveAsFromEditor() {
   gap: 8px;
   width: 100%;
   text-align: left;
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
   transition: all 0.18s ease;
   font: inherit;
   &:hover {
-    border-color: var(--x-primary);
+    border-color: var(--color-text-link-default-qabnuk);
   }
   &.active {
-    border-color: var(--x-primary);
-    background: var(--x-primary-soft);
+    border-color: var(--color-text-link-default-qabnuk);
+    background: var(--color-background-item-selected-dotkup);
   }
   .pick-main {
     display: flex;
@@ -811,41 +798,41 @@ async function saveAsFromEditor() {
   .pick-name {
     font-size: 13px;
     font-weight: 600;
-    color: var(--x-text);
+    color: var(--color-text-body-default-b2us04);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .pick-remark {
     font-size: 11.5px;
-    color: var(--x-text-3);
+    color: var(--color-text-body-secondary-66ygbb);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
-/* 有未保存修改的标记：列表行与卡片标题栏共用（与 x-chip.orange 同色系） */
+/* 列表行里的「未保存」标记；卡片标题栏改用 CsBadge severity-medium */
 .dirty-mark {
   flex: none;
   font-size: 10.5px;
   line-height: 1.5;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--x-warning-soft);
-  color: var(--x-warning);
+  background: var(--color-background-alert-warning-021z3n);
+  color: var(--color-text-status-warning-fabq6h);
   white-space: nowrap;
 }
 .list-hint {
   padding: 24px 0;
   text-align: center;
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
   font-size: 13px;
 }
 .list-foot {
   margin-top: 10px;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb);
 }
 .save-bar {
   display: flex;
@@ -853,15 +840,15 @@ async function saveAsFromEditor() {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  border-top: 1px solid var(--x-border-light);
+  border-top: 1px solid var(--color-border-divider-default-diwd4w);
   margin-top: 14px;
   padding-top: 12px;
 }
 
 /* ===== 编辑器工具条 ===== */
 .preset-section {
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 12px;
@@ -875,7 +862,7 @@ async function saveAsFromEditor() {
 .preset-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--x-primary);
+  color: var(--color-text-link-default-qabnuk);
   white-space: nowrap;
 }
 .preset-chips {
@@ -886,41 +873,27 @@ async function saveAsFromEditor() {
 .preset-chip {
   display: inline-flex;
   align-items: center;
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 11.5px;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   cursor: pointer;
   transition: all 0.2s ease;
   &:hover {
-    border-color: var(--x-primary);
-    color: var(--x-primary);
+    border-color: var(--color-text-link-default-qabnuk);
+    color: var(--color-text-link-default-qabnuk);
     background: rgba(99, 102, 241, 0.06);
   }
   &.code {
-    font-family: var(--x-font-mono, monospace);
+    font-family: var(--font-family-monospace-842lr2);
     font-size: 11px;
   }
 }
-/* YAML 校验结果提示条（错误红色 / 警告琥珀色，与编辑器行内标记同色系） */
+/* YAML 校验结果改用 CsAlert；这里只补编辑器与提示条之间的间距 */
 .lint-banner {
   margin-top: 8px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  padding: 6px 10px;
-  border-radius: 0 4px 4px 0;
-}
-.lint-banner.error {
-  color: var(--x-danger);
-  background: var(--x-code-error-bg);
-  border-left: 3px solid var(--x-danger);
-}
-.lint-banner.warn {
-  color: var(--x-warning);
-  background: var(--x-code-warn-bg);
-  border-left: 3px solid var(--x-warning);
 }
 .preview-header {
   display: flex;
@@ -937,13 +910,13 @@ async function saveAsFromEditor() {
 }
 .stat-badge {
   font-size: 12px;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   padding: 3px 8px;
   border-radius: 6px;
-  color: var(--x-text);
+  color: var(--color-text-body-default-b2us04);
   &.warning {
-    background: var(--x-warning-soft);
+    background: var(--color-background-alert-warning-021z3n);
     border-color: #fde68a;
     color: #92400e;
   }
@@ -953,19 +926,19 @@ async function saveAsFromEditor() {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-cell-shaded-twxsbz);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 11.5px;
 }
 .box-label {
-  color: var(--x-text-2);
+  color: var(--color-text-body-secondary-66ygbb);
   font-weight: 500;
 }
 .node-chip {
-  background: var(--x-card, #fff);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 11px;
@@ -981,7 +954,9 @@ async function saveAsFromEditor() {
   }
 }
 
+/* 订阅模板页是双栏（列表 + 编辑器），内容上限比其它页更宽；
+   仍复用同一个布局常量，只是在这里放大到 1.36 倍。 */
 .sub-templates-page {
-  max-width: var(--x-wide-max, 1800px);
+  max-width: 1800px;
 }
 </style>

@@ -9,16 +9,19 @@ import {
   CsCardGrid,
   CsContainer,
   CsDatePicker,
+  CsEmpty,
   CsForm,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
   CsModal,
   CsOption,
+  CsPage,
   CsPagination,
+  CsPaginationBar,
   CsSelect,
   CsSpinner,
+  CsToolbar,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
@@ -199,29 +202,31 @@ function fmtTime(t: string | null) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
-          <CsOption label="未使用" value="unused" />
-          <CsOption label="已使用" value="used" />
-          <CsOption label="已过期" value="expired" />
-          <CsOption label="已禁用" value="disabled" />
-        </CsSelect>
-        <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      </div>
-      <CsButton variant="primary" icon-name="add-plus" @click="openGen">生成邀请码</CsButton>
-    </div>
+  <CsPage>
+    <CsToolbar>
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
+        <CsOption label="未使用" value="unused" />
+        <CsOption label="已使用" value="used" />
+        <CsOption label="已过期" value="expired" />
+        <CsOption label="已禁用" value="disabled" />
+      </CsSelect>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+      <template #actions>
+        <CsButton variant="primary" icon-name="add-plus" @click="openGen">生成邀请码</CsButton>
+      </template>
+    </CsToolbar>
 
     <CsContainer header="邀请码列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <CsSpinner size="large" />
       </div>
 
-      <div v-else-if="filtered.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <CsIcon name="ticket" size="large" />
-        <p style="margin-top: 8px">{{ list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码' }}</p>
-      </div>
+      <!-- 空集合用 CsEmpty：手写居中文案在暗色下用的是自造 token，换主题会掉色 -->
+      <CsEmpty
+        v-else-if="filtered.length === 0"
+        icon-name="ticket"
+        :description="list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码'"
+      />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，次要信息 12/16 -->
       <CsCardGrid v-else>
@@ -255,15 +260,17 @@ function fmtTime(t: string | null) {
         </CsCard>
       </CsCardGrid>
 
-      <!-- 本地分页 -->
-      <div v-if="filtered.length > PAGE_SIZE" style="display: flex; justify-content: center; margin-top: 16px">
-        <CsPagination
-          v-model:current-page="page"
-          :total="filtered.length"
-          :page-size="PAGE_SIZE"
-          layout="prev, pager, next"
-        />
-      </div>
+      <!-- 分页放容器 footer：官方容器 footer 自带分隔线与内边距 -->
+      <template v-if="filtered.length > PAGE_SIZE" #footer>
+        <CsPaginationBar>
+          <CsPagination
+            v-model:current-page="page"
+            :total="filtered.length"
+            :page-size="PAGE_SIZE"
+            layout="prev, pager, next"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
 
     <CsModal v-model:visible="genOpen" header="生成邀请码" size="small">
@@ -284,7 +291,7 @@ function fmtTime(t: string | null) {
         </CsForm>
       </template>
       <template v-else>
-        <p class="muted" style="margin: 0 0 8px">已生成 {{ generated.length }} 个（一次性使用）：</p>
+        <p class="cs-text-secondary" style="margin: 0 0 8px">已生成 {{ generated.length }} 个（一次性使用）：</p>
         <div class="inv-codes" style="max-height: 160px; overflow-y: auto">
           <div v-for="c in generated" :key="c" class="inv-code-row">
             <code class="inv-code">{{ c }}</code>
@@ -292,7 +299,7 @@ function fmtTime(t: string | null) {
           </div>
         </div>
         <div style="margin-top: 12px">
-          <div class="muted" style="font-size: 12px; margin-bottom: 4px">只读备用文本（便于全选复制）：</div>
+          <div class="cs-text-secondary" style="font-size: 12px; margin-bottom: 4px">只读备用文本（便于全选复制）：</div>
           <CsInput
             type="textarea"
             :rows="4"
@@ -314,19 +321,17 @@ function fmtTime(t: string | null) {
         </template>
       </template>
     </CsModal>
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-text-2); }
-.muted { color: var(--x-text-3); }
 
 .inv-codes { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
 .inv-code-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--x-primary-soft);
+  background: var(--color-background-item-selected-dotkup);
   border-radius: 8px;
   padding: 6px 12px;
 }
