@@ -525,6 +525,48 @@ func (d *Deps) ReconcileServerCerts(serverID uint64) {
 			}
 		}
 	}
+	// 推送完成后清理节点上不再被引用的托管证书目录。
+	d.SyncServerCerts(serverID)
+}
+
+// serverCertDomains 该服务器入站引用的证书域名全集（含禁用入站：文件保留，重新启用时无需再推）。
+func (d *Deps) serverCertDomains(serverID uint64) []string {
+	var certIDs []uint64
+	if err := d.DB.Model(&models.Inbound{}).
+		Where("server_id = ? AND cert_id IS NOT NULL", serverID).
+		Pluck("cert_id", &certIDs).Error; err != nil || len(certIDs) == 0 {
+		return nil
+	}
+	var domains []string
+	if err := d.DB.Model(&models.Cert{}).Where("id IN ?", certIDs).Pluck("domain", &domains).Error; err != nil {
+		return nil
+	}
+	return domains
+}
+
+// SyncServerCerts 让节点上的托管证书目录与当前引用集合对齐（GC 解绑/删除后的遗留目录）。
+// 只在 agent 声明 CapSyncCerts 时下发；旧 agent 忽略未知消息，不必等它。
+func (d *Deps) SyncServerCerts(serverID uint64) {
+	if d.Hub == nil {
+		return
+	}
+	var srv models.Server
+	if err := d.DB.Select("id", "agent_caps").First(&srv, serverID).Error; err != nil || !srv.HasAgentCap(protocol.CapSyncCerts) {
+		return
+	}
+	res, err := d.Hub.Ask(serverID, protocol.MsgSyncCerts,
+		protocol.SyncCertsPayload{Domains: d.serverCertDomains(serverID)}, nodegate.AskTimeout)
+	if err != nil {
+		log.Printf("certs: 节点 %d 证书目录 GC 失败: %v", serverID, err)
+		return
+	}
+	if res == nil || !res.OK {
+		msg := "无回执"
+		if res != nil && res.Error != "" {
+			msg = res.Error
+		}
+		log.Printf("certs: 节点 %d 证书目录 GC 被拒绝: %s", serverID, msg)
+	}
 }
 
 // PushPendingCerts 补推该节点所有待推证书（手动触发；上线路径走 ReconcileServerCerts）。

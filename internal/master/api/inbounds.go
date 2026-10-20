@@ -768,6 +768,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			pushFail(c, inb.ServerID, err)
 			return
 		}
+		// 解绑/换绑后清理节点上不再被引用的托管证书目录（幂等；旧 agent 自动跳过）。
+		d.SyncServerCerts(inb.ServerID)
 	}
 	var srv models.Server
 	serverName := ""
@@ -850,6 +852,8 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 			pushFail(c, inb.ServerID, err)
 			return
 		}
+		// 入站删除后其引用证书可能已无人使用：清理节点上的遗留证书目录。
+		d.SyncServerCerts(inb.ServerID)
 	}
 	util.OK(c, gin.H{"deleted": id})
 }
