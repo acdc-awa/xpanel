@@ -108,12 +108,12 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 			if dto.Security.SNI != "" {
 				parts = append(parts, fmt.Sprintf("servername: %s", dto.Security.SNI))
 			}
-			// support-x25519mlkem768：Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello
-			// 携带 X25519MLKEM768 keyshare，而 mihomo 默认会主动剥离（为兼容旧服务端）。
-			// 不开这个开关，新内核上 REALITY 必然认证失败。
-			// 无条件输出是安全的：旧内核对该 keyshare 不敏感（26.6.27 实测带/不带均连通），
-			// 旧版 mihomo 忽略未知字段，非 mihomo 客户端也只当作未知 query 参数。
-			parts = append(parts, fmt.Sprintf("reality-opts: { public-key: %s, short-id: %s, support-x25519mlkem768: true }", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID))
+			// 方言翻译：DTO 的 SupportMLKEM 在 mihomo YAML 里是 reality-opts 下的 bool 字段。
+			realityOpts := fmt.Sprintf("public-key: %s, short-id: %s", dto.Security.Reality.PublicKey, dto.Security.Reality.ShortID)
+			if dto.Security.Reality.SupportMLKEM {
+				realityOpts += ", support-x25519mlkem768: true"
+			}
+			parts = append(parts, fmt.Sprintf("reality-opts: { %s }", realityOpts))
 			parts = append(parts, fmt.Sprintf("client-fingerprint: %s", fp))
 		case "tls":
 			parts = append(parts, "tls: true")

@@ -79,6 +79,10 @@ func TestVLESS_ClientCodec(t *testing.T) {
 	if dto1.Security.Type != "reality" || dto1.Security.Reality.PublicKey != "1fX-n4WsBK43qAdhkvmHMvshe533A_Aj5fWcnSGcyzw" || dto1.Security.Reality.ShortID != "1234abcd" {
 		t.Fatalf("DTO Reality 不匹配: %+v", dto1.Security)
 	}
+	// 链接未声明该参数时按面板默认（开启）解析。
+	if !dto1.Security.Reality.SupportMLKEM {
+		t.Fatalf("DTO REALITY 默认应开启 SupportMLKEM")
+	}
 
 	// 格式化回 URL
 	link1, err := protocols.FormatLink(dto1)
@@ -92,10 +96,28 @@ func TestVLESS_ClientCodec(t *testing.T) {
 	if dto1Re.Auth.UUID != dto1.Auth.UUID || dto1Re.Security.Reality.PublicKey != dto1.Security.Reality.PublicKey {
 		t.Fatalf("Round-trip DTO 不一致")
 	}
+	if !dto1Re.Security.Reality.SupportMLKEM {
+		t.Fatalf("Round-trip 后 SupportMLKEM 丢失")
+	}
 	// Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello 携带 X25519MLKEM768；
 	// mihomo 默认剥离，链接必须显式声明该开关。
 	if !strings.Contains(link1, "support-x25519mlkem768=1") {
 		t.Errorf("reality 链接缺少 support-x25519mlkem768=1: %s", link1)
+	}
+
+	// 反向验证：开关来自基准模型，而非渲染器无条件硬编码。
+	off := *dto1
+	offSec := *dto1.Security
+	offReality := *dto1.Security.Reality
+	offReality.SupportMLKEM = false
+	offSec.Reality = &offReality
+	off.Security = &offSec
+	linkOff, err := protocols.FormatLink(&off)
+	if err != nil {
+		t.Fatalf("FormatLink (mlkem off) failed: %v", err)
+	}
+	if strings.Contains(linkOff, "support-x25519mlkem768") {
+		t.Errorf("SupportMLKEM=false 时链接不应输出该参数: %s", linkOff)
 	}
 
 	// 渲染出站并验证

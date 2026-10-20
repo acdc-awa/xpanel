@@ -167,10 +167,7 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		}
 		dto.Security.SNI = r.ServerName
 		dto.Security.Fingerprint = fp
-		dto.Security.Reality = &contracts.RealityOptions{
-			PublicKey: r.PublicKey,
-			ShortID:   r.ShortID,
-		}
+		dto.Security.Reality = contracts.NewRealityOptions(r.PublicKey, r.ShortID)
 	}
 
 	// XHTTP 传输参数与覆写（mode 为空且有 path/host 覆写时按 auto 兜底）
@@ -274,10 +271,7 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 	case "reality":
 		if r := spec.Reality; r != nil && r.ServerName != "" {
 			dto.Security.SNI = r.ServerName
-			dto.Security.Reality = &contracts.RealityOptions{
-				PublicKey: r.PublicKey,
-				ShortID:   r.ShortID,
-			}
+			dto.Security.Reality = contracts.NewRealityOptions(r.PublicKey, r.ShortID)
 		}
 	case "tls":
 		serverName := target.ServerHost
@@ -342,11 +336,11 @@ func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 			fp = "chrome"
 		}
 		q.Set("fp", fp)
-		// Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello 携带 X25519MLKEM768，
-		// mihomo 默认会剥离；订阅链接显式声明，mihomo 的 URL 转换器识别该参数
-		// （common/convert/v.go → reality-opts.support-x25519mlkem768）。
-		// 旧内核/旧版客户端忽略它，无副作用。
-		q.Set("support-x25519mlkem768", "1")
+		// 方言翻译：DTO 的 SupportMLKEM 在链接里写成 query 参数（mihomo 的转换器识别它，
+		// 见 common/convert/v.go → reality-opts.support-x25519mlkem768）。
+		if dto.Security.Reality.SupportMLKEM {
+			q.Set("support-x25519mlkem768", "1")
+		}
 	case "tls":
 		if dto.Security.SNI != "" {
 			q.Set("sni", dto.Security.SNI)
@@ -477,9 +471,12 @@ func (VLESSPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
 		if sid == "" {
 			sid = q.Get("shortId")
 		}
-		dto.Security.Reality = &contracts.RealityOptions{
-			PublicKey: pbk,
-			ShortID:   sid,
+		dto.Security.Reality = contracts.NewRealityOptions(pbk, sid)
+		// 链接未声明时按面板默认（开启）处理：旧内核不敏感，开启无副作用。
+		if v := q.Get("support-x25519mlkem768"); v != "" {
+			if enabled, err := strconv.ParseBool(v); err == nil {
+				dto.Security.Reality.SupportMLKEM = enabled
+			}
 		}
 	case "tls":
 		if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {

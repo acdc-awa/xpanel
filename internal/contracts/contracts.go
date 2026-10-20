@@ -53,6 +53,17 @@ type SecurityOptions struct {
 type RealityOptions struct {
 	PublicKey string
 	ShortID   string
+	// SupportMLKEM 客户端是否在 ClientHello 中携带 X25519MLKEM768 keyshare。
+	// 这是派生值而非入站字段：Xray ≥26.9.8 的 REALITY 服务端强制要求该 keyshare，
+	// 而 mihomo 默认主动剥离（为兼容旧服务端）——不开启则新内核上认证必然失败。
+	// 旧内核/旧客户端忽略该参数，开启无副作用，故面板统一派生为 true。
+	SupportMLKEM bool
+}
+
+// NewRealityOptions 构造 REALITY 客户端参数并落实面板默认策略（SupportMLKEM 开启）。
+// 所有投影的 DTO 都必须经由此构造函数生成，避免漏设导致订阅静默丢失 keyshare。
+func NewRealityOptions(publicKey, shortID string) *RealityOptions {
+	return &RealityOptions{PublicKey: publicKey, ShortID: shortID, SupportMLKEM: true}
 }
 
 // ClientCredentialDTO 客户端认证凭证 DTO。

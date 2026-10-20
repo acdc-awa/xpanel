@@ -33,7 +33,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 	nodes := []contracts.ProxyNodeDTO{
 		dtoVless("tcp-reality", "r.example.com", 443, "uuid-r", "tcp",
 			&contracts.SecurityOptions{Type: "reality", SNI: "r.example.com",
-				Reality: &contracts.RealityOptions{PublicKey: "pbk123", ShortID: "abcd"}},
+				Reality: contracts.NewRealityOptions("pbk123", "abcd")},
 			nil, "xtls-rprx-vision"), // tcp+reality 自动 vision（插件已决议）
 		dtoVless("tcp-tls-vision", "t.example.com", 443, "uuid-t", "tcp",
 			&contracts.SecurityOptions{Type: "tls", SNI: "t.example.com", AllowInsecure: true},
@@ -43,7 +43,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp-tls", Host: "cdn.example.com"}, ""),
 		dtoVless("xhttp-reality", "x.example.com", 443, "uuid-x", "xhttp",
 			&contracts.SecurityOptions{Type: "reality", SNI: "x.example.com",
-				Reality: &contracts.RealityOptions{PublicKey: "pbk456", ShortID: "ef01"}},
+				Reality: contracts.NewRealityOptions("pbk456", "ef01")},
 			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp", Host: "h.example.com"}, ""),
 		// reality 参数缺失（Reality=nil）应跳过不崩溃
 		dtoVless("broken-reality", "b.example.com", 443, "uuid-b", "tcp",
@@ -103,7 +103,7 @@ func TestBuildBase64_Gaps(t *testing.T) {
 			nil, "xtls-rprx-vision"),
 		dtoVless("xhttp-host", "x.example.com", 443, "uuid-x", "xhttp",
 			&contracts.SecurityOptions{Type: "reality", SNI: "x.example.com",
-				Reality: &contracts.RealityOptions{PublicKey: "pbk456", ShortID: "ef01"}},
+				Reality: contracts.NewRealityOptions("pbk456", "ef01")},
 			&contracts.TransportOptions{Network: "xhttp", Mode: "auto", Path: "/xp", Host: "h.example.com"}, ""),
 		dtoVless("xhttp-tls", "w.example.com", 8443, "uuid-w", "xhttp",
 			&contracts.SecurityOptions{Type: "tls", SNI: "w.example.com"},
@@ -141,7 +141,7 @@ func TestBuildClash_SkipsBrokenReality(t *testing.T) {
 	nodes := []contracts.ProxyNodeDTO{
 		dtoVless("ok", "a.com", 443, "u", "tcp",
 			&contracts.SecurityOptions{Type: "reality", SNI: "a.com",
-				Reality: &contracts.RealityOptions{PublicKey: "pk", ShortID: "sid"}},
+				Reality: contracts.NewRealityOptions("pk", "sid")},
 			nil, "xtls-rprx-vision"),
 		dtoVless("broken", "b.com", 443, "u2", "tcp",
 			&contracts.SecurityOptions{Type: "reality"}, nil, ""),
@@ -299,6 +299,28 @@ func TestBuildMultiProtocolSubscription(t *testing.T) {
 	}
 	if !strings.Contains(yaml, "type: vless") {
 		t.Errorf("BuildClashWithTemplate 缺少 vless: %s", yaml)
+	}
+}
+
+// REALITY 的 MLKEM 开关来自 DTO（基准模型），而不是 YAML 渲染器的无条件输出。
+func TestFormatClashNode_RealityMLKEMToggle(t *testing.T) {
+	on := dtoVless("reality-on", "r.example.com", 443, "uuid-1", "tcp",
+		&contracts.SecurityOptions{Type: "reality", SNI: "r.example.com",
+			Reality: contracts.NewRealityOptions("pbk", "sid")}, nil, "")
+	yamlOn := BuildClashWithTemplate([]contracts.ProxyNodeDTO{on}, "")
+	if !strings.Contains(yamlOn, "support-x25519mlkem768: true") {
+		t.Fatalf("开启时 YAML 应包含 MLKEM 开关:\n%s", yamlOn)
+	}
+
+	off := on
+	offSec := *on.Security
+	offReality := *on.Security.Reality
+	offReality.SupportMLKEM = false
+	offSec.Reality = &offReality
+	off.Security = &offSec
+	yamlOff := BuildClashWithTemplate([]contracts.ProxyNodeDTO{off}, "")
+	if strings.Contains(yamlOff, "support-x25519mlkem768") {
+		t.Fatalf("关闭时 YAML 不应包含 MLKEM 开关:\n%s", yamlOff)
 	}
 }
 
