@@ -141,8 +141,52 @@ func (p VLESSPlugin) ProjectClient(in *contracts.ClientProjectionInput) (*contra
 	}
 }
 
-// projectSubscription 用户订阅端点投影：消费分享覆写（ShareSecurity/SNI/Host/Path/AllowInsecure）。
-// reality 入站缺 SNI/公钥时返回 nil（与历史上 FormatProxiesYAML 跳过坏节点同源）。
+// projectBase 协议语义投影（P2 订阅 / P4 互联共用）：传输层 + 安全层。
+// 只依赖入站规范模型与「生效的安全类型」，不关心角色、地址、凭证来源；
+// 角色差异（名字/地址/端口、凭证、抹平下发）由调用方在此之上覆写。
+func (p VLESSPlugin) projectBase(spec *contracts.InboundSpec, sec string) *contracts.ProxyNodeDTO {
+	dto := &contracts.ProxyNodeDTO{
+		ID:         spec.ID,
+		Protocol:   "vless",
+		Transport:  &contracts.TransportOptions{Network: spec.Network},
+		Security:   &contracts.SecurityOptions{Type: sec},
+	}
+	// 指纹为客户端角色字段（streamSettings.fingerprint），仅 TLS 类安全层消费，空兜底 chrome。
+	fp := spec.Fingerprint
+	if fp == "" {
+		fp = "chrome"
+	}
+	switch sec {
+	case "tls":
+		if spec.TLS != nil {
+			dto.Security.SNI = spec.TLS.ServerName
+			dto.Security.AllowInsecure = spec.TLS.AllowInsecure
+		}
+		dto.Security.Fingerprint = fp
+	case "reality":
+		if r := spec.Reality; r != nil {
+			dto.Security.SNI = r.ServerName
+			dto.Security.Reality = contracts.NewRealityOptions(r.PublicKey, r.ShortID)
+		}
+		dto.Security.Fingerprint = fp
+	}
+
+	if spec.Network == "xhttp" {
+		if spec.XHTTP != nil {
+			dto.Transport.Mode = spec.XHTTP.Mode
+			dto.Transport.Path = spec.XHTTP.Path
+			dto.Transport.Host = spec.XHTTP.Host
+			if len(spec.XHTTP.Extra) > 0 {
+				dto.Transport.Opts = make(map[string]string, len(spec.XHTTP.Extra))
+				for k, v := range spec.XHTTP.Extra {
+					dto.Transport.Opts[k] = v
+				}
+			}
+		}
+	}
+	return dto
+}
+
 func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *contracts.ProxyNodeDTO {
 	spec := in.Spec
 	if spec == nil {
@@ -158,75 +202,41 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		sec = "none"
 	}
 
-	dto := &contracts.ProxyNodeDTO{
-		ID:         spec.ID,
-		Name:       in.Name,
-		ServerHost: in.Host,
-		ServerPort: in.Port,
-		Protocol:   "vless",
-		Transport:  &contracts.TransportOptions{Network: spec.Network},
-		Security:   &contracts.SecurityOptions{Type: sec},
-		Auth:       &contracts.ClientCredentialDTO{UUID: in.UserUUID},
-	}
+	dto := p.projectBase(spec, sec)
+	dto.Name = in.Name
+	dto.ServerHost = in.Host
+	dto.ServerPort = in.Port
+	dto.Auth = &contracts.ClientCredentialDTO{UUID: in.UserUUID}
 	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）
 	dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
 
-	// 指纹为客户端角色字段（streamSettings.fingerprint），tls/reality 均消费，空兜底 chrome
-	fp := spec.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
-
 	switch sec {
 	case "tls":
-		sni, allowInsecure := "", false
-		if spec.TLS != nil {
-			sni, allowInsecure = spec.TLS.ServerName, spec.TLS.AllowInsecure
-		}
 		if in.Share.SNI != "" {
-			sni = in.Share.SNI
+			dto.Security.SNI = in.Share.SNI
 		}
 		if in.Share.AllowInsecure {
-			allowInsecure = true
+			dto.Security.AllowInsecure = true
 		}
-		dto.Security.SNI = sni
-		dto.Security.AllowInsecure = allowInsecure
-		dto.Security.Fingerprint = fp
 	case "reality":
-		r := spec.Reality
-		if r == nil || r.ServerName == "" {
+		// reality 入站缺 SNI/公钥时返回 nil（与历史上 FormatProxiesYAML 跳过坏节点同源）
+		if r := spec.Reality; r == nil || r.ServerName == "" {
 			return nil
 		}
-		dto.Security.SNI = r.ServerName
-		dto.Security.Fingerprint = fp
-		dto.Security.Reality = contracts.NewRealityOptions(r.PublicKey, r.ShortID)
 	}
 
 	// XHTTP 传输参数与覆写（mode 为空且有 path/host 覆写时按 auto 兜底）
 	if spec.Network == "xhttp" {
-		mode, path, host := "", "", ""
-		if spec.XHTTP != nil {
-			mode, path, host = spec.XHTTP.Mode, spec.XHTTP.Path, spec.XHTTP.Host
-		}
 		if in.Share.Path != "" {
-			path = in.Share.Path
+			dto.Transport.Path = in.Share.Path
 		}
 		if in.Share.Host != "" {
-			host = in.Share.Host
+			dto.Transport.Host = in.Share.Host
 		}
-		if mode == "" && (in.Share.Path != "" || in.Share.Host != "") {
-			mode = "auto"
-			if path == "" {
-				path = "/"
-			}
-		}
-		dto.Transport.Mode = mode
-		dto.Transport.Path = path
-		dto.Transport.Host = host
-		if spec.XHTTP != nil && len(spec.XHTTP.Extra) > 0 {
-			dto.Transport.Opts = make(map[string]string, len(spec.XHTTP.Extra))
-			for k, v := range spec.XHTTP.Extra {
-				dto.Transport.Opts[k] = v
+		if dto.Transport.Mode == "" && (in.Share.Path != "" || in.Share.Host != "") {
+			dto.Transport.Mode = "auto"
+			if dto.Transport.Path == "" {
+				dto.Transport.Path = "/"
 			}
 		}
 	}
@@ -242,8 +252,11 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 	target := in.RefTarget
 	inb := target.Inbound
 	spec := contracts.DecodeInbound(&inb)
-	net := spec.Network
-	sec := spec.Security
+
+	dto := p.projectBase(spec, spec.Security)
+	dto.Name = inb.Tag
+	dto.ServerHost = target.ServerHost
+	dto.ServerPort = inb.Port
 
 	encryption := "none"
 	dec, err := VlessDecryptionFromSettings(inb.SettingsJSON)
@@ -257,7 +270,7 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 	}
 
 	flow := ""
-	if net == "tcp" && (sec == "reality" || sec == "tls" || VlessEncEnabled(dec)) {
+	if spec.Network == "tcp" && (spec.Security == "reality" || spec.Security == "tls" || VlessEncEnabled(dec)) {
 		flow = "xtls-rprx-vision"
 	}
 
@@ -266,44 +279,22 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 		peerUUID = inb.InternalUUID
 	}
 
-	dto := &contracts.ProxyNodeDTO{
-		ID:         inb.ID,
-		Name:       inb.Tag,
-		ServerHost: target.ServerHost,
-		ServerPort: inb.Port,
-		Protocol:   "vless",
-		Transport:  &contracts.TransportOptions{Network: net},
-		Security:   &contracts.SecurityOptions{Type: sec},
-		Auth: &contracts.ClientCredentialDTO{
-			UUID:       peerUUID,
-			Flow:       flow,
-			Encryption: encryption,
-			Extra:      make(map[string]any),
-		},
+	dto.Auth = &contracts.ClientCredentialDTO{
+		UUID:       peerUUID,
+		Flow:       flow,
+		Encryption: encryption,
+		Extra:      make(map[string]any),
 	}
 	if target.CertPin != "" {
 		dto.Auth.Extra["CertPin"] = target.CertPin
 	}
 
-	// 传输层参数
-	if net == "xhttp" && spec.XHTTP != nil {
-		dto.Transport.Mode = spec.XHTTP.Mode
-		dto.Transport.Path = spec.XHTTP.Path
-		dto.Transport.Host = spec.XHTTP.Host
-	}
-
-	// 安全层参数
-	fp := spec.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
-	dto.Security.Fingerprint = fp
-
-	switch sec {
+	switch spec.Security {
 	case "reality":
-		if r := spec.Reality; r != nil && r.ServerName != "" {
-			dto.Security.SNI = r.ServerName
-			dto.Security.Reality = contracts.NewRealityOptions(r.PublicKey, r.ShortID)
+		// 目标 reality 缺 serverName/公钥时历史上不写 realitySettings（保持原状，避免掩盖坏目标）
+		if r := spec.Reality; r == nil || r.ServerName == "" {
+			dto.Security.Reality = nil
+			dto.Security.SNI = ""
 		}
 	case "tls":
 		serverName := target.ServerHost

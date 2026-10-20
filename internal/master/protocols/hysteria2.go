@@ -134,6 +134,24 @@ func (p HysteriaPlugin) ProjectClient(in *contracts.ClientProjectionInput) (*con
 	}
 }
 
+// projectBase 协议语义投影（P2 订阅 / P4 互联共用）：Hysteria 2 固定
+// transport=hysteria / security=tls，安全参数只取入站自身配置。
+func (p HysteriaPlugin) projectBase(spec *contracts.InboundSpec) *contracts.ProxyNodeDTO {
+	dto := &contracts.ProxyNodeDTO{
+		ID:         spec.ID,
+		Protocol:   "hysteria",
+		Transport:  &contracts.TransportOptions{Network: "hysteria"},
+		Security:   &contracts.SecurityOptions{Type: "tls"},
+	}
+	if spec.TLS != nil {
+		dto.Security.SNI = spec.TLS.ServerName
+		dto.Security.AllowInsecure = spec.TLS.AllowInsecure
+	}
+	// Hysteria 2 走 QUIC，不存在 TLS ClientHello 指纹模拟，Fingerprint 对本协议没有意义。
+	// 不写入 DTO：mihomo 的 hysteria2.fingerprint 是证书 pin，填浏览器名会让整份配置加载失败。
+	return dto
+}
+
 // projectSubscription 用户订阅端点投影：生成中性 ProxyNodeDTO。
 func (p HysteriaPlugin) projectSubscription(in *contracts.ClientProjectionInput) *contracts.ProxyNodeDTO {
 	spec := in.Spec
@@ -141,18 +159,13 @@ func (p HysteriaPlugin) projectSubscription(in *contracts.ClientProjectionInput)
 		return nil
 	}
 
-	dto := &contracts.ProxyNodeDTO{
-		ID:         spec.ID,
-		Name:       in.Name,
-		ServerHost: in.Host,
-		ServerPort: in.Port,
-		Protocol:   "hysteria",
-		Transport:  &contracts.TransportOptions{Network: "hysteria"},
-		Security:   &contracts.SecurityOptions{Type: "tls"},
-		Auth: &contracts.ClientCredentialDTO{
-			Password: in.UserUUID,
-			UUID:     in.UserUUID,
-		},
+	dto := p.projectBase(spec)
+	dto.Name = in.Name
+	dto.ServerHost = in.Host
+	dto.ServerPort = in.Port
+	dto.Auth = &contracts.ClientCredentialDTO{
+		Password: in.UserUUID,
+		UUID:     in.UserUUID,
 	}
 
 	sni := in.Host
@@ -163,13 +176,7 @@ func (p HysteriaPlugin) projectSubscription(in *contracts.ClientProjectionInput)
 		sni = in.Share.SNI
 	}
 	dto.Security.SNI = sni
-	dto.Security.AllowInsecure = in.Share.AllowInsecure
-	if spec.TLS != nil && spec.TLS.AllowInsecure {
-		dto.Security.AllowInsecure = true
-	}
-
-	// Hysteria 2 走 QUIC，不存在 TLS ClientHello 指纹模拟，Fingerprint 对本协议没有意义。
-	// 不写入 DTO：mihomo 的 hysteria2.fingerprint 是证书 pin，填浏览器名会让整份配置加载失败。
+	dto.Security.AllowInsecure = in.Share.AllowInsecure || dto.Security.AllowInsecure
 
 	return dto
 }
@@ -188,19 +195,14 @@ func (p HysteriaPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contr
 		peerAuth = inb.InternalUUID
 	}
 
-	dto := &contracts.ProxyNodeDTO{
-		ID:         inb.ID,
-		Name:       inb.Tag,
-		ServerHost: target.ServerHost,
-		ServerPort: inb.Port,
-		Protocol:   "hysteria",
-		Transport:  &contracts.TransportOptions{Network: "hysteria"},
-		Security:   &contracts.SecurityOptions{Type: "tls"},
-		Auth: &contracts.ClientCredentialDTO{
-			UUID:     peerAuth,
-			Password: peerAuth,
-			Extra:    make(map[string]any),
-		},
+	dto := p.projectBase(spec)
+	dto.Name = inb.Tag
+	dto.ServerHost = target.ServerHost
+	dto.ServerPort = inb.Port
+	dto.Auth = &contracts.ClientCredentialDTO{
+		UUID:     peerAuth,
+		Password: peerAuth,
+		Extra:    make(map[string]any),
 	}
 	serverName := target.ServerHost
 	if spec.TLS != nil && spec.TLS.ServerName != "" {
