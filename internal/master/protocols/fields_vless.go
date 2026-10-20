@@ -86,7 +86,7 @@ func vlessFieldSet() contracts.ProtocolFieldSet {
 		{Path: "stream.tlsSettings.pinnedPeerCertSha256", Xray: "streamSettings.tlsSettings.pinnedPeerCertSha256", Mihomo: "fingerprint", Link: "pcs",
 			Note: "同名不同义：mihomo YAML 的 fingerprint 是 pin"},
 		{Path: "stream.tlsSettings.allowInsecure", Mihomo: "skip-cert-verify", Link: "allowInsecure",
-			Note: "xray v26.6.27 已移除 allowInsecure，不写入服务端配置"},
+			Note: "xray v26.6.27 起已移除 allowInsecure，不写入服务端配置"},
 		{Path: "stream.realitySettings.serverNames", Xray: "streamSettings.realitySettings.serverNames", Mihomo: "servername", Link: "sni", Transform: "first",
 			Note: "服务端数组、客户端标量（基数陷阱）"},
 		{Path: "stream.realitySettings.shortIds", Xray: "streamSettings.realitySettings.shortIds", Mihomo: "reality-opts.short-id", Link: "sid", Transform: "first",

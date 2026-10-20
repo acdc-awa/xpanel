@@ -40,7 +40,7 @@ func sanitizeStreamMap(stream map[string]any) map[string]any {
 	deleteNestedKey(stream, "tlsSettings", "settings")
 	deleteNestedKey(stream, "realitySettings", "settings")
 
-	// xray v26.6.27 已移除 tlsSettings.allowInsecure（迁移到 pinnedPeerCertSha256 /
+	// xray v26.6.27 起已移除 tlsSettings.allowInsecure（迁移到 pinnedPeerCertSha256 /
 	// verifyPeerCertByName），携带会直接拒绝加载；面板保留 DB 标志仅供订阅 skip-cert-verify 透传
 	deleteNestedKey(stream, "tlsSettings", "allowInsecure")
 

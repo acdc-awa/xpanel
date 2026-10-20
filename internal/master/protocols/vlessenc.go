@@ -16,7 +16,7 @@ import (
 // xray 层面该加密挂在协议 settings（decryption / encryption 字段），不属于 streamSettings；
 // 面板将其抽象为安全层选项：选中时 stream 层写 security:"none"，settings_json 写 decryption，
 // 上游中转出站的 encryption 由生成器按目标入站派生（VlessEncClientFromDecryption）。
-// 格式（v26.6.27 infra/conf 强制完整点式，裸密钥写法会被拒）：
+// 格式（v26.6.27 起 infra/conf 强制完整点式，裸密钥写法会被拒）：
 //
 //	decryption: mlkem768x25519plus.{native|xorpub|random}.{Ns|N-Ms}[.padding...].<key32|key64>[.keyN...]
 //	encryption: mlkem768x25519plus.{native|xorpub|random}.{0rtt|1rtt}[.padding...].<pub32|pub1184>
