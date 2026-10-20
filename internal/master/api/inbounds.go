@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // inboundView 入站对外结构。
@@ -33,24 +33,24 @@ type inboundView struct {
 	TotalGB            int64      `json:"total_gb"`
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
-	Type               string     `json:"type"`                    // user / relay / tunnel / forward
-	InternalUUID       string     `json:"internal_uuid,omitempty"` // relay 只读（节点上报）
+	Type               string     `json:"type"`                        // user / relay / tunnel / forward
+	InternalUUID       string     `json:"internal_uuid,omitempty"`     // relay 只读（节点上报）
 	TargetInboundID    *uint64    `json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port,omitempty"`       // 手动指定的外部目标端口
-	CertID             *uint64    `json:"cert_id,omitempty"`       // 绑定的证书
-	Flow               string     `json:"flow"`                    // 入站级流控（空=自动 / xtls-rprx-vision / none）
-	ShareAddrStrategy  string     `json:"share_addr_strategy"`     // node / custom（订阅专用）
-	ShareAddr          string     `json:"share_addr"`              // 自定义分享地址（订阅专用，域名/IP）
-	SharePort          int        `json:"share_port"`              // 自定义分享端口（0 = 使用入站端口）
-	ShareSecurity      string     `json:"share_security"`          // auto / tls / none
-	ShareSNI           string     `json:"share_sni"`               // 订阅 SNI 覆写
-	ShareHost          string     `json:"share_host"`              // 订阅 HTTP/WS Host 覆写
-	SharePath          string     `json:"share_path"`              // 订阅 WS/XHTTP Path 覆写
-	ShareAllowInsecure bool       `json:"share_allow_insecure"`    // 订阅跳过证书校验
-	LayerID            *uint64    `json:"layer_id,omitempty"`      // 所属对外接入层（空/0 = 直连自持端点）
-	Remark             string     `json:"remark,omitempty"`        // 入站备注/通道名称
-	TrafficReset       string     `json:"traffic_reset,omitempty"` // 重置周期
+	CertID             *uint64    `json:"cert_id,omitempty"`           // 绑定的证书
+	Flow               string     `json:"flow"`                        // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	ShareAddrStrategy  string     `json:"share_addr_strategy"`         // node / custom（订阅专用）
+	ShareAddr          string     `json:"share_addr"`                  // 自定义分享地址（订阅专用，域名/IP）
+	SharePort          int        `json:"share_port"`                  // 自定义分享端口（0 = 使用入站端口）
+	ShareSecurity      string     `json:"share_security"`              // auto / tls / none
+	ShareSNI           string     `json:"share_sni"`                   // 订阅 SNI 覆写
+	ShareHost          string     `json:"share_host"`                  // 订阅 HTTP/WS Host 覆写
+	SharePath          string     `json:"share_path"`                  // 订阅 WS/XHTTP Path 覆写
+	ShareAllowInsecure bool       `json:"share_allow_insecure"`        // 订阅跳过证书校验
+	LayerID            *uint64    `json:"layer_id,omitempty"`          // 所属对外接入层（空/0 = 直连自持端点）
+	Remark             string     `json:"remark,omitempty"`            // 入站备注/通道名称
+	TrafficReset       string     `json:"traffic_reset,omitempty"`     // 重置周期
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
@@ -273,12 +273,12 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	inb := models.Inbound{
 		ServerID: req.ServerID, Tag: req.Tag, Protocol: req.Protocol,
 		Port: req.Port, Listen: req.Listen,
-		Remark: strings.TrimSpace(req.Remark),
+		Remark:       strings.TrimSpace(req.Remark),
 		TrafficReset: resetPolicy,
 		SettingsJSON: req.SettingsJSON, StreamSettings: req.StreamSettings,
 		Sniffing: req.Sniffing, Ratio: req.Ratio,
 		Total: req.TotalGB, ExpiryTime: utcPtr(req.ExpiryTime), Enabled: true,
-		Type:              req.Type,
+		Type:            req.Type,
 		TargetInboundID: req.TargetInboundID, TargetAddress: req.TargetAddress, TargetPort: req.TargetPort,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
@@ -339,6 +339,14 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		}
 		inb.Ratio = 0
 	}
+	// 绑定证书即推送：证书端点只在「证书记录变化」时推送，覆盖不到
+	// 「证书先建、入站后绑」与「新节点首次引用既有证书」这两种时序。
+	// 推送失败不阻断创建（配置推送会失败并提示；节点重连时 ReconcileServerCerts 兜底）。
+	if inb.CertID != nil && *inb.CertID != 0 {
+		if err := d.pushCertToServer(inb.ServerID, *inb.CertID); err != nil {
+			log.Printf("inbounds: 创建入站 %s 时推送证书 %d 失败: %v", inb.Tag, *inb.CertID, err)
+		}
+	}
 	if err := d.enqueueConfig(req.ServerID); err != nil {
 		pushFail(c, req.ServerID, err)
 		return
@@ -373,8 +381,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ExpiryTime         json.RawMessage `json:"expiry_time"` // 三元：字段缺省=不动 / null=清空 / 字符串=设置
 		Enabled            *bool           `json:"enabled"`
 		Type               *string         `json:"type"`
-		InternalUUID       *string         `json:"internal_uuid"`       // 仅节点回执写入（管理员只读展示）
-		TargetInboundID    *uint64         `json:"target_inbound_id"`   // nil 不更新；显式传 0 解绑
+		InternalUUID       *string         `json:"internal_uuid"`     // 仅节点回执写入（管理员只读展示）
+		TargetInboundID    *uint64         `json:"target_inbound_id"` // nil 不更新；显式传 0 解绑
 		TargetAddress      *string         `json:"target_address"`
 		TargetPort         *int            `json:"target_port"`
 		CertID             *uint64         `json:"cert_id"`             // nil 不更新；显式传 0 解绑
@@ -748,6 +756,13 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if ensureTarget != nil {
 		hasXrayConfigChanges = true
 	}
+	// 绑定/换绑证书、或本次更新会影响运行配置时，先把证书推到节点（幂等）。
+	// 覆盖「入站更新后才绑定既有证书」「节点从未收到过该证书」等时序。
+	if hasXrayConfigChanges && inb.CertID != nil && *inb.CertID != 0 {
+		if err := d.pushCertToServer(inb.ServerID, *inb.CertID); err != nil {
+			log.Printf("inbounds: 更新入站 %s 时推送证书 %d 失败: %v", inb.Tag, *inb.CertID, err)
+		}
+	}
 	if hasXrayConfigChanges {
 		if err := d.enqueueConfig(inb.ServerID); err != nil {
 			pushFail(c, inb.ServerID, err)
@@ -1020,8 +1035,6 @@ func validShareSecurity(s string) bool {
 	return false
 }
 
-
-
 // pushFail 配置生成/待推送失败时向客户端上抛（U19：不再静默打日志返回成功——
 // 变更已入库但节点侧未生效，必须让管理员知道并处理）。
 func pushFail(c *gin.Context, serverID uint64, err error) {
@@ -1067,10 +1080,10 @@ func formToInbound(f *inboundForm) models.Inbound {
 		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
 		Total: f.TotalGB, ExpiryTime: f.ExpiryTime,
 		Remark: f.Remark, TrafficReset: f.TrafficReset,
-		TargetInboundID:   f.TargetInboundID,
-		TargetAddress:     f.TargetAddress,
-		TargetPort:        f.TargetPort,
-		ShareAddrStrategy: f.ShareAddrStrategy,
+		TargetInboundID:    f.TargetInboundID,
+		TargetAddress:      f.TargetAddress,
+		TargetPort:         f.TargetPort,
+		ShareAddrStrategy:  f.ShareAddrStrategy,
 		ShareAddr:          f.ShareAddr,
 		SharePort:          f.SharePort,
 		ShareSecurity:      f.ShareSecurity,

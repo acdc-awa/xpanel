@@ -220,7 +220,7 @@ func main() {
 	api.PanelVersion = Version
 	subServer := api.NewSubscribeServer(deps)
 	deps.SubServer = subServer
-	hub.CertPusher = deps.PushPendingCerts
+	hub.CertPusher = deps.ReconcileServerCerts
 	hub.CAPusher = deps.PushPendingCAs
 
 	// 三端口模型（2026-08-25 拍板）：面板（SPA+API 合并）/ 节点 WS 网关 / 订阅 各自独立监听，

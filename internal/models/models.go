@@ -80,6 +80,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := dropLegacyTrafficUniqueIndexes(db); err != nil {
 		return err
 	}
+	if err := dropLegacyPendingCertIndex(db); err != nil {
+		return err
+	}
 	if err := dropRetiredAccessControlTables(db); err != nil {
 		return err
 	}
@@ -241,7 +244,6 @@ func migrateDokodemoInboundsToTunnelType(db *gorm.DB) error {
 		Where("protocol = ? AND (type IS NULL OR type = '' OR type != ?)", ProtocolDokodemo, InboundTypeTunnel).
 		Update("type", InboundTypeTunnel).Error
 }
-
 
 // backfillTrafficBilled 流量计费两列一次性回填（2026-09-06 倍率计费）：
 // 存量行按 1:1 回填（billed = 原始字节，等价倍率 1）——历史消费不追溯倍率。
@@ -743,6 +745,25 @@ func dropLegacyTrafficUniqueIndexes(db *gorm.DB) error {
 		if err := db.Migrator().DropIndex(&TrafficLog{}, legacy); err != nil {
 			return fmt.Errorf("删除旧唯一索引 %s 失败: %w", legacy, err)
 		}
+	}
+	return nil
+}
+
+// dropLegacyPendingCertIndex 删除 pending_certs 上的单列唯一索引（旧口径：每节点只能有一条待推证书）。
+//
+// 当前口径是 (server_id, cert_id) 复合唯一：同一节点离线期间可能变更多张证书，单列唯一会
+// 让后写的覆盖先写的，上线后只补推最后一张。GORM AutoMigrate 只补建缺失索引、不删除旧索引，
+// 所以必须先显式删掉旧的 idx_pending_certs_server_id，再由同一次 AutoMigrate 建出复合索引。
+func dropLegacyPendingCertIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&PendingCert{}) {
+		return nil
+	}
+	const legacy = "idx_pending_certs_server_id"
+	if !db.Migrator().HasIndex(&PendingCert{}, legacy) {
+		return nil
+	}
+	if err := db.Migrator().DropIndex(&PendingCert{}, legacy); err != nil {
+		return fmt.Errorf("删除旧唯一索引 %s 失败: %w", legacy, err)
 	}
 	return nil
 }

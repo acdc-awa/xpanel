@@ -282,11 +282,12 @@ type PendingConfig struct {
 	PushedAt      *time.Time `json:"pushed_at"`
 }
 
-// PendingCert 证书待推记录（U7：节点离线时上传的证书，上线后补推）。
+// PendingCert 证书待推记录（U7：节点离线/推送失败时记录，上线后按需对账补推）。
+// 唯一键是 (server_id, cert_id)：同一节点可能同时有多张待推证书，单列唯一会互相覆盖。
 type PendingCert struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
-	ServerID  uint64    `gorm:"uniqueIndex;not null" json:"server_id"`
-	CertID    uint64    `gorm:"not null" json:"cert_id"`
+	ServerID  uint64    `gorm:"not null;uniqueIndex:idx_pending_certs_server_cert" json:"server_id"`
+	CertID    uint64    `gorm:"not null;uniqueIndex:idx_pending_certs_server_cert" json:"cert_id"`
 	Status    string    `gorm:"size:16;default:pending" json:"status"` // pending / pushed
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

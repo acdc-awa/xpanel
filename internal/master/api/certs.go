@@ -5,7 +5,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -420,58 +419,122 @@ func (d *Deps) AdminDeleteCert(c *gin.Context) {
 	util.OK(c, gin.H{"ok": true})
 }
 
-// pushCertToUsers 将证书推送到引用它的入站所在节点（按服务器分组，在线 Ask）。
-// 节点离线时由管理员稍后重试（证书变更不阻塞 API）。
+// certServerIDs 引用某证书的服务器（去重）。
+func (d *Deps) certServerIDs(certID uint64) []uint64 {
+	var serverIDs []uint64
+	if err := d.DB.Model(&models.Inbound{}).
+		Where("cert_id = ?", certID).
+		Distinct("server_id").
+		Pluck("server_id", &serverIDs).Error; err != nil {
+		return nil
+	}
+	return serverIDs
+}
+
+// markPendingCert 记录「该服务器还欠这张证书」；复合唯一键 (server_id, cert_id) 保证幂等。
+func (d *Deps) markPendingCert(serverID, certID uint64) {
+	pc := models.PendingCert{ServerID: serverID, CertID: certID}
+	_ = d.DB.Where("server_id = ? AND cert_id = ?", serverID, certID).
+		Assign(map[string]any{"status": "pending"}).
+		FirstOrCreate(&pc).Error
+}
+
+// clearPendingCert 证书已确认落盘，删掉待推记录。
+func (d *Deps) clearPendingCert(serverID, certID uint64) {
+	_ = d.DB.Where("server_id = ? AND cert_id = ?", serverID, certID).
+		Delete(&models.PendingCert{}).Error
+}
+
+// pushCertToServer 把一张证书推给指定服务器（push_cert）。
+// 失败落 (server_id, cert_id) 待推记录，由节点上线对账或手动补推。
+func (d *Deps) pushCertToServer(serverID, certID uint64) error {
+	if d.Hub == nil {
+		return fmt.Errorf("节点网关未初始化")
+	}
+	var cert models.Cert
+	if err := d.DB.First(&cert, certID).Error; err != nil {
+		// 证书已删除：待推记录没有意义，顺手清掉
+		d.clearPendingCert(serverID, certID)
+		return fmt.Errorf("证书 %d 不存在: %w", certID, err)
+	}
+	res, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
+		protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
+		nodegate.AskTimeout)
+	if err != nil {
+		d.markPendingCert(serverID, certID)
+		return err
+	}
+	if res == nil || !res.OK {
+		msg := "无回执"
+		if res != nil && res.Error != "" {
+			msg = res.Error
+		}
+		d.markPendingCert(serverID, certID)
+		return fmt.Errorf("节点拒绝证书 %s: %s", cert.Domain, msg)
+	}
+	d.clearPendingCert(serverID, certID)
+	return nil
+}
+
+// pushCertToUsers 将证书推送到引用它的入站所在节点（按服务器去重）。
+// 节点离线时落待推记录，上线后由 ReconcileServerCerts 补推（证书变更不阻塞 API）。
 func (d *Deps) pushCertToUsers(cert *models.Cert) {
+	for _, serverID := range d.certServerIDs(cert.ID) {
+		if err := d.pushCertToServer(serverID, cert.ID); err != nil {
+			log.Printf("certs: 推送证书 %s 到节点 %d 失败: %v（已记待推）", cert.Domain, serverID, err)
+		}
+	}
+}
+
+// ReconcileServerCerts 节点上线对账：把该服务器所有入站引用的证书全量推一遍，再补推 pending。
+// 这一步补的是「证书早就在库里、但节点从未收到过」的场景（新建入站绑定既有证书、节点重装、
+// 证书目录被清空）——只靠 cert 端点的 push_cert 永远覆盖不到这些时序。
+func (d *Deps) ReconcileServerCerts(serverID uint64) {
 	if d.Hub == nil {
 		return
 	}
-	var inbounds []models.Inbound
-	if err := d.DB.Where("cert_id = ?", cert.ID).Find(&inbounds).Error; err != nil {
+	var certIDs []uint64
+	if err := d.DB.Model(&models.Inbound{}).
+		Where("server_id = ? AND cert_id IS NOT NULL", serverID).
+		Pluck("cert_id", &certIDs).Error; err != nil {
+		log.Printf("certs: 节点 %d 证书对账查询失败: %v", serverID, err)
 		return
 	}
-	seen := map[uint64]bool{}
-	for _, inb := range inbounds {
-		if seen[inb.ServerID] {
+	var pending []models.PendingCert
+	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").Find(&pending).Error; err == nil {
+		for _, pc := range pending {
+			certIDs = append(certIDs, pc.CertID)
+		}
+	}
+	seen := make(map[uint64]bool, len(certIDs))
+	for _, id := range certIDs {
+		if id == 0 || seen[id] {
 			continue
 		}
-		seen[inb.ServerID] = true
-		serverID := inb.ServerID
-		_, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
-			protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
-			nodegate.AskTimeout)
-		if err != nil {
-			// U7：离线节点落待推记录，上线后由 nodegate 回调补推
-			log.Printf("certs: 推送证书 %s 到节点 %d 失败: %v（已记待推）", cert.Domain, serverID, err)
-			var pc models.PendingCert
-			if e := d.DB.Where("server_id = ?", serverID).First(&pc).Error; e == nil {
-				_ = d.DB.Model(&pc).Updates(map[string]any{"cert_id": cert.ID, "status": "pending", "updated_at": time.Now()})
-			} else {
-				_ = d.DB.Create(&models.PendingCert{ServerID: serverID, CertID: cert.ID, Status: "pending"})
+		seen[id] = true
+		if err := d.pushCertToServer(serverID, id); err != nil {
+			log.Printf("certs: 节点 %d 证书对账补推 %d 失败: %v", serverID, id, err)
+		}
+	}
+	// 引用关系已消失、但仍挂着 pending 的证书（入站被删/解绑）：不必再推，直接清掉。
+	var stale []models.PendingCert
+	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").Find(&stale).Error; err == nil {
+		for _, pc := range stale {
+			if !seen[pc.CertID] {
+				_ = d.DB.Delete(&models.PendingCert{}, pc.ID).Error
 			}
 		}
 	}
 }
 
-// PushPendingCerts 补推某节点的待推证书（节点上线回调 / 手动触发）。
+// PushPendingCerts 补推该节点所有待推证书（手动触发；上线路径走 ReconcileServerCerts）。
 func (d *Deps) PushPendingCerts(serverID uint64) {
-	if d.Hub == nil {
+	var pcs []models.PendingCert
+	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").Find(&pcs).Error; err != nil {
 		return
 	}
-	var pc models.PendingCert
-	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").First(&pc).Error; err != nil {
-		return
-	}
-	var cert models.Cert
-	if err := d.DB.First(&cert, pc.CertID).Error; err != nil {
-		_ = d.DB.Delete(&pc)
-		return
-	}
-	_, err := d.Hub.Ask(serverID, protocol.MsgPushCert,
-		protocol.PushCertPayload{Domain: cert.Domain, CertPEM: cert.CertPEM, KeyPEM: cert.KeyPEM},
-		nodegate.AskTimeout)
-	if err == nil {
-		_ = d.DB.Model(&pc).Update("status", "pushed")
+	for _, pc := range pcs {
+		_ = d.pushCertToServer(serverID, pc.CertID)
 	}
 }
 

@@ -858,3 +858,49 @@ func TestMigrateRelayOutboundCredentials(t *testing.T) {
 	}
 }
 
+// TestPendingCertLegacyIndexMigration 旧库的 pending_certs 只有 server_id 单列唯一：
+// 迁移后必须能容纳同一节点的多张待推证书（换证 + 另一张证书同时离线变更）。
+func TestPendingCertLegacyIndexMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	oldDDL := `
+CREATE TABLE pending_certs (
+	id integer PRIMARY KEY AUTOINCREMENT,
+	server_id integer NOT NULL,
+	cert_id integer NOT NULL,
+	status text DEFAULT 'pending',
+	created_at datetime,
+	updated_at datetime
+);
+CREATE UNIQUE INDEX idx_pending_certs_server_id ON pending_certs(server_id);
+`
+	for _, stmt := range strings.Split(oldDDL, ";") {
+		if stmt = strings.TrimSpace(stmt); stmt == "" {
+			continue
+		}
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("旧 schema 建表失败: %v", err)
+		}
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	if db.Migrator().HasIndex(&PendingCert{}, "idx_pending_certs_server_id") {
+		t.Error("旧单列唯一索引应已删除")
+	}
+	if !db.Migrator().HasIndex(&PendingCert{}, "idx_pending_certs_server_cert") {
+		t.Error("缺少 (server_id, cert_id) 复合唯一索引")
+	}
+	for _, certID := range []uint64{2, 3} {
+		if err := db.Create(&PendingCert{ServerID: 1, CertID: certID, Status: "pending"}).Error; err != nil {
+			t.Fatalf("同一节点多张待推证书应可共存（cert=%d）: %v", certID, err)
+		}
+	}
+	var n int64
+	db.Model(&PendingCert{}).Where("server_id = ?", 1).Count(&n)
+	if n != 2 {
+		t.Errorf("pending 记录数 = %d, want 2", n)
+	}
+}
