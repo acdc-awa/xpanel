@@ -16,6 +16,7 @@ func dokodemoFieldSet() contracts.ProtocolFieldSet {
 		field("settings.port", "入站目标端口（已废弃）", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleServerOnly, contracts.OriginSystem),
 
 		field("stream.acceptProxyProtocol", "接受 PROXY Protocol", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleServerOnly, contracts.OriginAdmin),
+		field("stream.tcpSettings.acceptProxyProtocol", "TCP 层接受 PROXY Protocol", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleServerOnly, contracts.OriginDerived),
 		field("stream.proxy_protocol", "透传 PROXY Protocol（面板私有键）", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleServerOnly, contracts.OriginAdmin),
 
 		enumField("target.mode", "目标方式", contracts.RoleServerOnly, contracts.OriginAdmin, []string{"linked", "external"}, "linked"),

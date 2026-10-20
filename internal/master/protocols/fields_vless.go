@@ -24,6 +24,7 @@ func vlessFieldSet() contracts.ProtocolFieldSet {
 		field("stream.xhttpSettings.xPaddingBytes", "XHTTP 填充区间", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleBoth, contracts.OriginAdmin),
 		field("stream.xhttpSettings.sessionIDPlacement", "会话 ID 位置", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleBoth, contracts.OriginAdmin),
 		field("stream.xhttpSettings.sessionIDLength", "会话 ID 长度", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleBoth, contracts.OriginAdmin),
+		field("stream.xhttpSettings.sessionID", "会话 ID（旧键提升）", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleBoth, contracts.OriginDerived),
 		field("stream.xhttpSettings.xmux", "XHTTP 多路复用", contracts.ShapeObject, contracts.CardOptional, contracts.RoleBoth, contracts.OriginAdmin),
 		field("stream.xhttpSettings.extra", "XHTTP 扩展参数", contracts.ShapeMap, contracts.CardOptional, contracts.RoleClientOnly, contracts.OriginAdmin),
 		field("stream.finalmask", "finalmask（本协议禁用）", contracts.ShapeObject, contracts.CardOptional, contracts.RoleBoth, contracts.OriginSystem),
