@@ -309,7 +309,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 			// C2（2026-09-28）：直通的派生 freedom 出站（`out-<tag>`）与转发规则已落库为真行
 			// （owner_inbound_id = 该入站），本函数不再现场派生——出站随 Outbounds 参数、规则随
 			// RoutingRules 参数进来，顺序由 Priority 决定（见 mergeRoutingRules）。
-			item, err := buildTunnelInbound(&inb, ctx)
+			item, err := buildTunnelInbound(&inb, contracts.DecodeInbound(&inb), ctx)
 			if err != nil {
 				return nil, fmt.Errorf("生成直通管道 %s 失败: %w", inb.Tag, err)
 			}
@@ -325,7 +325,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 			return nil, fmt.Errorf("生成入站 %s 失败: %w", inb.Tag, err)
 		}
 		if item == nil {
-			// 未连线直通管道或无有效认证账号的 SOCKS/HTTP 入站，物理跳过注入 Xray 防免密开放
+			// 协议插件判定为不可生成（如无有效认证账号），物理跳过注入 Xray
 			continue
 		}
 		inboundList = append(inboundList, item)
@@ -699,31 +699,38 @@ func mergeRoutingRules(rules []models.ServerRoutingRule) []any {
 	return list
 }
 
-// buildInbound 透传模式：解析 SettingsJSON / StreamSettings / Sniffing 原文，
-// 动态注入 clients 列表（按入站二态分流——user 动态用户 / relay 内部 UUID）。其余字段完全透传。
+// buildInbound 服务端入站投影（P1）：从 InboundSpec（settings/stream/sniffing 一次解码）
+// 组装 xray 入站。协议专属语义全部由协议插件的 NormalizeServer 提供，本函数不再认识具体协议；
+// 动态注入 clients 列表（按入站二态分流——user 动态用户 / relay 内部 UUID）。
 func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ctx *GenerateContext) (map[string]any, error) {
-	spec := contracts.DecodeInbound(inb)
-
-	// 1. 解析协议 settings JSON → 注入 clients
-	settings := map[string]any{}
-	if inb.SettingsJSON != "" {
-		if err := json.Unmarshal([]byte(inb.SettingsJSON), &settings); err != nil {
-			return nil, fmt.Errorf("入站 %s settings 解析失败: %w", inb.Tag, err)
+	spec, err := contracts.DecodeInboundStrict(inb)
+	if err != nil {
+		return nil, fmt.Errorf("入站 %s %w", inb.Tag, err)
+	}
+	// 协议级规范化：强约束与派生默认（VLESS decryption、Hysteria 2 network/security/version …）。
+	overrides, err := protocols.NormalizeServer(inb.Protocol, spec)
+	if err != nil {
+		return nil, fmt.Errorf("入站 %s %w", inb.Tag, err)
+	}
+	settings, stream := spec.Settings, spec.Stream
+	if overrides != nil {
+		if overrides.Settings != nil {
+			settings = overrides.Settings
+		}
+		if len(overrides.Stream) > 0 {
+			if stream == nil {
+				stream = make(map[string]any, len(overrides.Stream))
+			}
+			for k, v := range overrides.Stream {
+				stream[k] = v
+			}
 		}
 	}
-	// VLESS: xray 拒绝入站级别的 encryption 字段（运行时固定为 "none"）；
-	// decryption 为安全层 vlessenc 的载体（settings_json 透传），缺省补 "none"。
-	vlessDecryption := ""
-	if inb.Protocol == "vless" {
-		delete(settings, "encryption")
-		if d, _ := settings["decryption"].(string); VlessEncEnabled(d) {
-			if err := ValidateVlessEncDecryption(d); err != nil {
-				return nil, fmt.Errorf("入站 %s VLESS Encryption decryption 非法: %w", inb.Tag, err)
-			}
-			vlessDecryption = d
-		} else {
-			settings["decryption"] = "none"
-		}
+	if settings == nil {
+		settings = map[string]any{}
+	}
+	if stream != nil {
+		stream = sanitizeStreamMap(stream)
 	}
 
 	// 入站认证用户/凭据动态装配
@@ -747,15 +754,10 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 					refUUID = inb.InternalUUID
 				}
 				if refUUID != "" {
-					flow := protocols.ResolveFlow(inb.Protocol, spec, inb.Flow)
-					if flow == "" && spec.Network == "tcp" &&
-						(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
-						flow = "xtls-rprx-vision"
-					}
 					aggregatedUsers = append(aggregatedUsers, protocol.User{
 						UUID:  refUUID,
 						Email: fmt.Sprintf("relay.in_%d.out_%d@panel.local", inb.ID, refOut.ID),
-						Flow:  flow,
+						Flow:  protocols.ResolveRelayFlow(inb.Protocol, spec, inb.Flow),
 					})
 				}
 			}
@@ -767,25 +769,11 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 				return nil, fmt.Errorf("relay 入站 %s 缺少内部 UUID（请先执行 setup-internal）", inb.Tag)
 			}
 			if len(aggregatedUsers) == 0 {
-				flow := protocols.ResolveFlow(inb.Protocol, spec, inb.Flow)
-				if flow == "" && spec.Network == "tcp" &&
-					(spec.Security == "reality" || spec.Security == "tls" || vlessDecryption != "") {
-					flow = "xtls-rprx-vision"
-				}
 				aggregatedUsers = append(aggregatedUsers, protocol.User{
 					UUID:  inb.InternalUUID,
 					Email: RelayEmail(inb.Tag),
-					Flow:  flow,
+					Flow:  protocols.ResolveRelayFlow(inb.Protocol, spec, inb.Flow),
 				})
-			}
-		}
-
-		// 2. 提前解析 streamSettings JSON，尽早发现语法错误
-		if inb.StreamSettings != "" {
-			cleaned := sanitizeStreamSettings(inb.StreamSettings)
-			var tmpStream map[string]any
-			if err := json.Unmarshal([]byte(cleaned), &tmpStream); err != nil {
-				return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
 			}
 		}
 
@@ -803,22 +791,16 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		settings[key] = items
 	}
 
-	// 2. 解析 streamSettings JSON（完全透传）
 	item := map[string]any{
-		"tag":      inb.Tag,
-		"protocol": inb.Protocol,
-		"port":     inb.Port,
+		"tag":      spec.Tag,
+		"protocol": spec.Protocol,
+		"port":     spec.Port,
 		"settings": settings,
 	}
-	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
-		item["listen"] = inb.Listen
+	if spec.Listen != "" && spec.Listen != "0.0.0.0" {
+		item["listen"] = spec.Listen
 	}
-	if inb.StreamSettings != "" {
-		cleaned := sanitizeStreamSettings(inb.StreamSettings)
-		var stream map[string]any
-		if err := json.Unmarshal([]byte(cleaned), &stream); err != nil {
-			return nil, fmt.Errorf("入站 %s streamSettings 解析失败: %w", inb.Tag, err)
-		}
+	if stream != nil {
 		// 证书路径动态注入（Phase T）：当关联了 CertID 且为 TLS 入站时，注入托管证书路径并保留已有 CA 证书
 		if spec.Security == "tls" {
 			if domain, ok := certDomainFor(inb, ctx); ok {
@@ -856,34 +838,9 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		}
 		item["streamSettings"] = stream
 	}
-	// Hysteria 2 特性与默认值规范化（服务端抛弃共享密码，必须 version=2）
-	if inb.Protocol == "hysteria" {
-		settings["version"] = 2
-		stream, _ := item["streamSettings"].(map[string]any)
-		if stream == nil {
-			stream = map[string]any{}
-		}
-		stream["network"] = "hysteria"
-		stream["security"] = "tls"
-		hySettings, _ := stream["hysteriaSettings"].(map[string]any)
-		if hySettings == nil {
-			hySettings = map[string]any{
-				"version":        2,
-				"udpIdleTimeout": 60,
-			}
-		} else {
-			hySettings["version"] = 2
-			delete(hySettings, "auth")
-		}
-		stream["hysteriaSettings"] = hySettings
-		item["streamSettings"] = stream
-	}
-	// 3. 解析 sniffing JSON（完全透传）
-	if inb.Sniffing != "" {
-		var sniffing map[string]any
-		if err := json.Unmarshal([]byte(inb.Sniffing), &sniffing); err == nil {
-			item["sniffing"] = sniffing
-		}
+	// 解析 sniffing JSON（完全透传）
+	if spec.Sniffing != nil {
+		item["sniffing"] = spec.Sniffing
 	}
 	return item, nil
 }
@@ -945,7 +902,7 @@ func TunnelOutboundSettings(host string, port int, sendProxyProtocol bool) (stri
 // 目标不写进入站：目标由该直通的 freedom 出站（tag = TunnelOutboundTag(tag)）的 `redirect` 承担
 // （入站 = 哪里听、出站 = 转到哪，两者解耦；该出站自 C2 起是库内真行）。
 // 若既无连线目标又无有效手动外部目标，返回 nil（草稿状态，跳过注入 Xray，防启动报错）。
-func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]any, error) {
+func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *GenerateContext) (map[string]any, error) {
 	if _, _, ok := TunnelTarget(inb, ctx); !ok {
 		// 目标未配置或未连线，作为草稿状态跳过注入
 		return nil, nil
@@ -953,27 +910,24 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 
 	network := "tcp,udp"
 	wantAcceptPP := false
-	if inb.StreamSettings != "" {
-		var ss map[string]any
-		if err := json.Unmarshal([]byte(inb.StreamSettings), &ss); err == nil {
-			if net, _ := ss["network"].(string); net != "" {
-				network = net
-			}
-			// 接收侧 PROXY Protocol（发送侧见 TunnelSendProxyProtocol）：
-			// - ensureTargetAcceptProxyProtocol 在上游管道指向本入站时写入顶层 acceptProxyProtocol；
-			// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
-			// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
-			// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
-			// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
-			if ap, _ := ss["acceptProxyProtocol"].(bool); ap {
-				wantAcceptPP = true
-			}
-			if pp, _ := ss["proxy_protocol"].(bool); pp {
-				wantAcceptPP = true
-			}
-			if pp, _ := ss["proxyProtocol"].(bool); pp {
-				wantAcceptPP = true
-			}
+	if spec.Stream != nil {
+		if net, _ := spec.Stream["network"].(string); net != "" {
+			network = net
+		}
+		// 接收侧 PROXY Protocol（发送侧见 TunnelSendProxyProtocol）：
+		// - ensureTargetAcceptProxyProtocol 在上游管道指向本入站时写入顶层 acceptProxyProtocol；
+		// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
+		// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
+		// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
+		// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
+		if ap, _ := spec.Stream["acceptProxyProtocol"].(bool); ap {
+			wantAcceptPP = true
+		}
+		if pp, _ := spec.Stream["proxy_protocol"].(bool); pp {
+			wantAcceptPP = true
+		}
+		if pp, _ := spec.Stream["proxyProtocol"].(bool); pp {
+			wantAcceptPP = true
 		}
 	}
 
@@ -983,9 +937,9 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 	}
 
 	item := map[string]any{
-		"tag":      inb.Tag,
+		"tag":      spec.Tag,
 		"protocol": "dokodemo-door",
-		"port":     inb.Port,
+		"port":     spec.Port,
 		"settings": settings,
 	}
 	if wantAcceptPP {
@@ -993,8 +947,8 @@ func buildTunnelInbound(inb *models.Inbound, ctx *GenerateContext) (map[string]a
 			"tcpSettings": map[string]any{"acceptProxyProtocol": true},
 		}
 	}
-	if inb.Listen != "" && inb.Listen != "0.0.0.0" {
-		item["listen"] = inb.Listen
+	if spec.Listen != "" && spec.Listen != "0.0.0.0" {
+		item["listen"] = spec.Listen
 	}
 	return item, nil
 }

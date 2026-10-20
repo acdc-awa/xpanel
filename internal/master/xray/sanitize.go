@@ -14,6 +14,17 @@ func sanitizeStreamSettings(raw string) string {
 	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
 		return raw // 解析失败则原样保留（让 xray -test 报错）
 	}
+	stream = sanitizeStreamMap(stream)
+
+	result, err := json.Marshal(stream)
+	if err != nil {
+		return raw
+	}
+	return string(result)
+}
+
+// sanitizeStreamMap 就地规范化已解析的 stream map（生成链路直接消费 InboundSpec.Stream 时使用）。
+func sanitizeStreamMap(stream map[string]any) map[string]any {
 
 	// 面板专用字段，xray 不识别
 	delete(stream, "externalProxy")
@@ -47,11 +58,7 @@ func sanitizeStreamSettings(raw string) string {
 	// xray-core #6258：session 旧键名提升
 	liftXhttpSessionKeys(stream)
 
-	result, err := json.Marshal(stream)
-	if err != nil {
-		return raw
-	}
-	return string(result)
+	return stream
 }
 
 // deleteNestedKey 删除 m[key] 下的 subKey（如果 m[key] 是一个 map）。

@@ -104,11 +104,24 @@ type ClientNodeInput struct {
 	UserUUID    string
 }
 
-// ProtocolPlugin 协议插件：同一协议的「服务端用户注入 / 用户 flow 决议 /
+// ServerOverrides 协议插件对服务端入站结构的规范化结果（纯数据，不修改入参 spec）。
+// nil 字段表示该层无需修正：Settings 为 nil 时沿用 spec.Settings，Stream 为 nil 时沿用 spec.Stream。
+// Stream 是「覆盖键」而不是完整替换：插件只声明该协议强制/派生的键。
+type ServerOverrides struct {
+	Settings map[string]any
+	Stream   map[string]any
+}
+
+// ProtocolPlugin 协议插件：同一协议的「服务端规范化 / 服务端用户注入 / 用户 flow 决议 /
 // 客户端投影 / 入站校验 / 能力描述」内聚一处。新增协议 = 实现本接口并注册。
 type ProtocolPlugin interface {
 	Protocol() string // "vless" / "hysteria" ...
 	Descriptor() ProtocolDescriptor
+
+	// NormalizeServer 服务端生成前的协议级规范化（纯函数：不读写 DB/文件，不修改入参）。
+	// 负责落实协议强约束与派生默认（如 VLESS decryption 归一、Hysteria 2 强制
+	// network/security/version）。返回 nil 表示无需修正。
+	NormalizeServer(spec *InboundSpec) (*ServerOverrides, error)
 
 	// ServerUsers 生成服务端入站用户数组：返回「挂载键名」+「元素切片」+「error」。
 	// 如 vless 返回 key="clients", items=[{id,email,flow,limit}], err=nil。
@@ -125,6 +138,10 @@ type ProtocolPlugin interface {
 
 	// ResolveFlow 决议用户在该入站上的 flow（生成侧盖戳与订阅侧同源）。
 	ResolveFlow(spec *InboundSpec, inboundFlow string) string
+
+	// ResolveRelayFlow 决议机间中继凭据的 flow（仅服务端注入使用）。
+	// 与商业用户的 ResolveFlow 分开：中继链路在 tls / vlessenc 下同样需要 vision。
+	ResolveRelayFlow(spec *InboundSpec, inboundFlow string) string
 
 	// ValidateInbound 入站保存时的协议级校验（在 JSON 可解析校验之上）。
 	ValidateInbound(spec *InboundSpec) error

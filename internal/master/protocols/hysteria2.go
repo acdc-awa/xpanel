@@ -44,6 +44,34 @@ func (HysteriaPlugin) Descriptor() contracts.ProtocolDescriptor {
 	}
 }
 
+// NormalizeServer 服务端规范化：Hysteria 2 强制 settings.version=2、
+// network=hysteria、security=tls，并补齐 hysteriaSettings 默认值、剥离共享密码 auth。
+func (HysteriaPlugin) NormalizeServer(spec *contracts.InboundSpec) (*contracts.ServerOverrides, error) {
+	settings := make(map[string]any, len(spec.Settings)+1)
+	for k, v := range spec.Settings {
+		settings[k] = v
+	}
+	settings["version"] = 2
+
+	hy := map[string]any{"version": 2, "udpIdleTimeout": 60}
+	if existing, ok := spec.Stream["hysteriaSettings"].(map[string]any); ok {
+		hy = make(map[string]any, len(existing)+1)
+		for k, v := range existing {
+			hy[k] = v
+		}
+		hy["version"] = 2
+		delete(hy, "auth")
+	}
+	return &contracts.ServerOverrides{
+		Settings: settings,
+		Stream: map[string]any{
+			"network":          "hysteria",
+			"security":         "tls",
+			"hysteriaSettings": hy,
+		},
+	}, nil
+}
+
 // ServerUsers 生成服务端入站用户数组，返回挂载键 users 及用户元素。
 func (HysteriaPlugin) ServerUsers(users []protocol.User, _ *contracts.InboundSpec) (string, []any, error) {
 	items := make([]any, 0, len(users))
@@ -68,6 +96,11 @@ func (p HysteriaPlugin) ServerClients(users []protocol.User, spec *contracts.Inb
 
 // ResolveFlow Hysteria 2 无 flow，固定返回空。
 func (HysteriaPlugin) ResolveFlow(_ *contracts.InboundSpec, _ string) string {
+	return ""
+}
+
+// ResolveRelayFlow Hysteria 2 无 flow，中继凭据同样固定返回空。
+func (HysteriaPlugin) ResolveRelayFlow(_ *contracts.InboundSpec, _ string) string {
 	return ""
 }
 

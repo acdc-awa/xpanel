@@ -43,6 +43,26 @@ func (VLESSPlugin) Descriptor() contracts.ProtocolDescriptor {
 	}
 }
 
+// NormalizeServer 服务端规范化：
+//  1. xray 拒绝入站级 encryption（运行时恒为 none），库内存量写入也必须剥掉；
+//  2. decryption 是 vlessenc 安全层的服务端载体：合法则原样保留，否则补 "none"。
+func (VLESSPlugin) NormalizeServer(spec *contracts.InboundSpec) (*contracts.ServerOverrides, error) {
+	settings := make(map[string]any, len(spec.Settings)+1)
+	for k, v := range spec.Settings {
+		settings[k] = v
+	}
+	delete(settings, "encryption")
+	dec, _ := settings["decryption"].(string)
+	if VlessEncEnabled(dec) {
+		if err := ValidateVlessEncDecryption(dec); err != nil {
+			return nil, fmt.Errorf("VLESS Encryption decryption 非法: %w", err)
+		}
+	} else {
+		settings["decryption"] = "none"
+	}
+	return &contracts.ServerOverrides{Settings: settings}, nil
+}
+
 // ServerUsers 生成服务端入站的用户数组，返回挂载键 clients 及用户元素。
 func (VLESSPlugin) ServerUsers(users []protocol.User, _ *contracts.InboundSpec) (string, []any, error) {
 	clients := make([]any, 0, len(users))
@@ -74,6 +94,18 @@ func (p VLESSPlugin) ServerClients(users []protocol.User, spec *contracts.Inboun
 // ResolveFlow 用户 flow 决议（生成侧盖戳与订阅侧同源，入参为入站自身的传输/安全）。
 func (VLESSPlugin) ResolveFlow(spec *contracts.InboundSpec, inboundFlow string) string {
 	return resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
+}
+
+// ResolveRelayFlow 机间中继凭据的 flow：在 ResolveFlow 之上，tcp 且
+// tls / vlessenc 同样自动 vision（中继链路必须带流控，普通用户不自动注入）。
+func (VLESSPlugin) ResolveRelayFlow(spec *contracts.InboundSpec, inboundFlow string) string {
+	flow := resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
+	dec, _ := spec.Settings["decryption"].(string)
+	if flow == "" && spec.Network == "tcp" &&
+		(spec.Security == "reality" || spec.Security == "tls" || VlessEncEnabled(dec)) {
+		flow = "xtls-rprx-vision"
+	}
+	return flow
 }
 
 // resolveVLESSFlow flow 决议规则：

@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -96,7 +97,20 @@ type XHTTPSpec struct {
 }
 
 // DecodeInbound 将入站模型三段 JSON 一次解码为 InboundSpec。
+// 解析容错：非法 JSON 对应字段留零值——面向只读展示/投影。
 func DecodeInbound(inb *models.Inbound) *InboundSpec {
+	spec, _ := decodeInbound(inb, false)
+	return spec
+}
+
+// DecodeInboundStrict 同 DecodeInbound，但 settings / streamSettings 非法 JSON 返回错误。
+// 生成链路（P1）使用：坏配置必须显式失败，不能静默降级为空对象后推到节点才暴露。
+// sniffing 保持容错（历史上非法 sniffing 直接忽略，不影响 xray 启动）。
+func DecodeInboundStrict(inb *models.Inbound) (*InboundSpec, error) {
+	return decodeInbound(inb, true)
+}
+
+func decodeInbound(inb *models.Inbound, strict bool) (*InboundSpec, error) {
 	spec := &InboundSpec{
 		ID:       inb.ID,
 		Tag:      inb.Tag,
@@ -106,27 +120,36 @@ func DecodeInbound(inb *models.Inbound) *InboundSpec {
 	}
 	if inb.SettingsJSON != "" {
 		var m map[string]any
-		if err := json.Unmarshal([]byte(inb.SettingsJSON), &m); err == nil {
+		if err := json.Unmarshal([]byte(inb.SettingsJSON), &m); err != nil {
+			if strict {
+				return nil, fmt.Errorf("settings 解析失败: %w", err)
+			}
+		} else {
 			spec.Settings = m
 		}
 	}
-	decodeStreamInto(spec, inb.StreamSettings)
+	if err := decodeStreamInto(spec, inb.StreamSettings, strict); err != nil {
+		return nil, err
+	}
 	if inb.Sniffing != "" {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(inb.Sniffing), &m); err == nil {
 			spec.Sniffing = m
 		}
 	}
-	return spec
+	return spec, nil
 }
 
-func decodeStreamInto(spec *InboundSpec, raw string) {
+func decodeStreamInto(spec *InboundSpec, raw string, strict bool) error {
 	if raw == "" {
-		return
+		return nil
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return
+		if strict {
+			return fmt.Errorf("streamSettings 解析失败: %w", err)
+		}
+		return nil
 	}
 	spec.Stream = m
 	spec.Network, _ = m["network"].(string)
@@ -173,6 +196,7 @@ func decodeStreamInto(spec *InboundSpec, raw string) {
 			spec.XHTTP = x
 		}
 	}
+	return nil
 }
 
 // decodeRealitySpec 解析 realitySettings，归一化单数/数组与 password/publicKey 双写。

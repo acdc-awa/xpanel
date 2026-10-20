@@ -125,6 +125,40 @@ func TestDecodeStream_Lenient(t *testing.T) {
 	}
 }
 
+func TestDecodeInboundStrict(t *testing.T) {
+	// 合法输入与宽松解码结果一致
+	raw := &models.Inbound{
+		ID:             3,
+		Tag:            "in",
+		Protocol:       "vless",
+		Port:           443,
+		SettingsJSON:   `{"decryption":"none"}`,
+		StreamSettings: `{"network":"tcp","security":"reality"}`,
+		Sniffing:       `{"enabled":true}`,
+	}
+	strict, err := DecodeInboundStrict(raw)
+	if err != nil {
+		t.Fatalf("合法输入不应报错: %v", err)
+	}
+	lenient := DecodeInbound(raw)
+	if strict.Settings["decryption"] != lenient.Settings["decryption"] || strict.Network != lenient.Network || strict.Sniffing["enabled"] != lenient.Sniffing["enabled"] {
+		t.Fatalf("严格/宽松解码结果不一致: %+v vs %+v", strict, lenient)
+	}
+
+	// settings 非法 → 报错（生成链路必须显式失败，不能静默降级为空对象）
+	if _, err := DecodeInboundStrict(&models.Inbound{SettingsJSON: `{bad`}); err == nil {
+		t.Error("非法 settings 应报错")
+	}
+	// streamSettings 非法 → 报错
+	if _, err := DecodeInboundStrict(&models.Inbound{StreamSettings: `{bad`}); err == nil {
+		t.Error("非法 streamSettings 应报错")
+	}
+	// sniffing 非法 → 保持历史容错（忽略）
+	if spec, err := DecodeInboundStrict(&models.Inbound{Sniffing: `{bad`}); err != nil || spec.Sniffing != nil {
+		t.Errorf("非法 sniffing 应被忽略: spec=%+v err=%v", spec, err)
+	}
+}
+
 func TestDecodeStream_SockoptAndTLSExtended(t *testing.T) {
 	raw := `{
 		"security": "tls",
@@ -180,4 +214,3 @@ func TestDecodeStream_SockoptAndTLSExtended(t *testing.T) {
 		t.Errorf("Sockopt 细节字段解析失败: %+v", spec.Sockopt)
 	}
 }
-

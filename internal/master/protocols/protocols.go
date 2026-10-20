@@ -83,6 +83,15 @@ func RegisteredProtocols() []string {
 	return registry.RegisteredProtocols()
 }
 
+// NormalizeServer 调用协议插件的服务端规范化；未注册协议原样透传
+// （与历史行为一致：真正拒绝发生在 ServerUsers，未知协议无法注入用户）。
+func NormalizeServer(proto string, spec *contracts.InboundSpec) (*contracts.ServerOverrides, error) {
+	if p := Find(proto); p != nil {
+		return p.NormalizeServer(spec)
+	}
+	return nil, nil
+}
+
 // ServerUsers 按协议生成服务端入站用户数组及挂载键名。
 // 未注册协议显式报错拒绝（Fail-Closed 铁律，坚决杜绝静默注入假 UUID 或丢节点）。
 func ServerUsers(proto string, users []protocol.User, spec *contracts.InboundSpec) (string, []any, error) {
@@ -104,6 +113,15 @@ func ServerClients(proto string, users []protocol.User, spec *contracts.InboundS
 func ResolveFlow(proto string, spec *contracts.InboundSpec, inboundFlow string) string {
 	if p := Find(proto); p != nil {
 		return p.ResolveFlow(spec, inboundFlow)
+	}
+	return ""
+}
+
+// ResolveRelayFlow 按协议决议机间中继凭据的 flow（服务端注入）。
+// 未注册协议返回空。
+func ResolveRelayFlow(proto string, spec *contracts.InboundSpec, inboundFlow string) string {
+	if p := Find(proto); p != nil {
+		return p.ResolveRelayFlow(spec, inboundFlow)
 	}
 	return ""
 }
