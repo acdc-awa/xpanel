@@ -108,3 +108,25 @@ type ProtocolFieldSet struct {
 	Rules    []Rule           `json:"rules"`
 	Dialects []DialectMapping `json:"dialects"`
 }
+
+// ValidationIssue 结构化校验错误：前端按 Path 定位控件，Params 供文案插值。
+type ValidationIssue struct {
+	Path    string         `json:"path"`
+	Code    string         `json:"code"` // required / forbidden / not_allowed
+	Params  map[string]any `json:"params,omitempty"`
+	Message string         `json:"message"`
+}
+
+// ProvenanceEntry 只读预览里的字段来源说明。
+// Declared=false 表示该字段在生成/存储里出现但没有声明——"无法解释的字段"，
+// 前端与测试应把它当成缺陷而不是正常状态。
+type ProvenanceEntry struct {
+	Path     string      `json:"path"`
+	Label    string      `json:"label,omitempty"`
+	Present  bool        `json:"present"`
+	Declared bool        `json:"declared"`
+	Origin   FieldOrigin `json:"origin,omitempty"`
+	Role     FieldRole   `json:"role,omitempty"`
+	Value    any         `json:"value,omitempty"`
+	Note     string      `json:"note,omitempty"`
+}

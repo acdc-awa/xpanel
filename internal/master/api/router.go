@@ -176,6 +176,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/servers/:id/layers/:layer_id", d.AdminDeleteLayer)
 			admin.GET("/xray/keys", d.AdminXrayKeys)
 			admin.GET("/xray/vlessenc", d.AdminXrayVlessEnc)
+			admin.GET("/protocols", d.AdminProtocols)
 			admin.POST("/xray/preview-config", d.AdminPreviewConfig)
 			admin.GET("/inbounds", d.AdminInbounds)
 			admin.POST("/inbounds", d.AdminCreateInbound)

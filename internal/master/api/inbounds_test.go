@@ -473,5 +473,103 @@ func TestFormToInbound_PreservesTargetFields(t *testing.T) {
 	}
 }
 
+// S4：字段交叉规则失败时返回 400 + 结构化 issues（data.issues），
+// 前端可按 path 定位控件；message 保持可读。
+func TestCreateInbound_StructuredFieldIssues(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 11, Name: "node-11", Host: "1.2.3.4", NodeID: "n11", Secret: "sec"})
+	d := &Deps{DB: db}
 
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
 
+	body := map[string]any{
+		"server_id":       11,
+		"tag":             "bad-reality",
+		"protocol":        "vless",
+		"port":            44302,
+		"type":            "user",
+		"settings_json":   `{}`,
+		"stream_settings": `{"network":"tcp","security":"reality","realitySettings":{}}`,
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/v1/admin/inbounds", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("缺少 REALITY 必填项应 400，got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Issues []struct {
+				Path string `json:"path"`
+				Code string `json:"code"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应解析失败: %v", err)
+	}
+	got := map[string]string{}
+	for _, is := range resp.Data.Issues {
+		got[is.Path] = is.Code
+	}
+	for _, path := range []string{
+		"stream.realitySettings.privateKey",
+		"stream.realitySettings.dest",
+		"stream.realitySettings.serverNames",
+		"stream.realitySettings.shortIds",
+	} {
+		if got[path] != "required" {
+			t.Errorf("缺少结构化问题 %s=required，got %+v", path, got)
+		}
+	}
+}
+
+// S4：协议字段声明接口（GET /admin/protocols）返回三套声明与协议描述符的并集。
+func TestAdminProtocols(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/api/v1/admin/protocols", (&Deps{}).AdminProtocols)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/protocols", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			Protocols []struct {
+				FieldSet struct {
+					Protocol string `json:"protocol"`
+					Fields   []any  `json:"fields"`
+					Rules    []any  `json:"rules"`
+				} `json:"field_set"`
+				Descriptor *struct {
+					Name string `json:"Name"`
+				} `json:"descriptor"`
+			} `json:"protocols"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应解析失败: %v", err)
+	}
+	found := map[string]bool{}
+	for _, p := range resp.Data.Protocols {
+		found[p.FieldSet.Protocol] = true
+		if len(p.FieldSet.Fields) == 0 {
+			t.Errorf("%s 字段声明为空", p.FieldSet.Protocol)
+		}
+	}
+	for _, proto := range []string{"vless", "hysteria", "dokodemo-door"} {
+		if !found[proto] {
+			t.Errorf("缺少协议声明: %s", proto)
+		}
+	}
+}

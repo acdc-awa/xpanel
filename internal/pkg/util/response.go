@@ -27,6 +27,16 @@ func Fail(c *gin.Context, status int, msg string) {
 // BadRequest 400 快捷方式。
 func BadRequest(c *gin.Context, msg string) { Fail(c, http.StatusBadRequest, msg) }
 
+// BadRequestIssues 400 + 结构化问题列表（data.issues），供前端按字段路径定位控件。
+// 保留 message 以兼容只读 message 的旧客户端。
+func BadRequestIssues(c *gin.Context, msg string, issues any) {
+	c.JSON(http.StatusBadRequest, Response{
+		Code:    http.StatusBadRequest,
+		Message: msg,
+		Data:    gin.H{"issues": issues},
+	})
+}
+
 // Unauthorized 401 快捷方式。
 func Unauthorized(c *gin.Context, msg string) { Fail(c, http.StatusUnauthorized, msg) }
 

@@ -172,8 +172,6 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-
-
 	if req.Type != "" && !validInboundType(req.Type) {
 		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
 		return
@@ -301,6 +299,11 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	if inb.ShareSecurity != "" && !validShareSecurity(inb.ShareSecurity) {
 		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
+		return
+	}
+	// 字段声明交叉规则（S4）：协议强约束与安全层互斥，返回结构化问题便于前端定位。
+	if issues := protocols.ValidateInboundFields(&inb); len(issues) > 0 {
+		util.BadRequestIssues(c, "入站字段校验未通过", issues)
 		return
 	}
 	if err := d.DB.Create(&inb).Error; err != nil {
@@ -669,6 +672,40 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		inb.TrafficReset = resetPolicy
 	}
 	oldTag := inb.Tag
+	// 字段声明交叉规则（S4）：用「更新后的终态」校验，避免只校验本次提交的字段。
+	candidate := inb
+	if req.Tag != nil {
+		candidate.Tag = *req.Tag
+	}
+	if req.Protocol != nil {
+		candidate.Protocol = *req.Protocol
+	}
+	if req.Port != nil {
+		candidate.Port = *req.Port
+	}
+	if req.Listen != nil {
+		candidate.Listen = *req.Listen
+	}
+	if req.SettingsJSON != nil {
+		candidate.SettingsJSON = sj
+	}
+	if req.StreamSettings != nil {
+		candidate.StreamSettings = *req.StreamSettings
+	}
+	if req.Sniffing != nil {
+		candidate.Sniffing = *req.Sniffing
+	}
+	if req.Flow != nil {
+		candidate.Flow = *req.Flow
+	}
+	candidate.Type = effType
+	if effType == models.InboundTypeTunnel {
+		candidate.Protocol = models.ProtocolDokodemo
+	}
+	if issues := protocols.ValidateInboundFields(&candidate); len(issues) > 0 {
+		util.BadRequestIssues(c, "入站字段校验未通过", issues)
+		return
+	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&inb).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新失败")
@@ -1075,5 +1112,26 @@ func (d *Deps) AdminPreviewConfig(c *gin.Context) {
 		util.BadRequest(c, "配置生成失败: "+err.Error())
 		return
 	}
-	util.OK(c, gin.H{"config": cfg})
+	resp := gin.H{"config": cfg}
+	// S4：只读预览附带字段来源与交叉规则问题。
+	// 有表单 → 解释本次编辑的终态；无表单 → 逐入站解释服务器现有配置。
+	if formInb != nil {
+		resp["provenance"] = protocols.ExplainInbound(formInb)
+		resp["issues"] = protocols.ValidateInboundFields(formInb)
+	} else {
+		var list []models.Inbound
+		if err := d.DB.Where("server_id = ?", req.ServerID).Order("id").Find(&list).Error; err == nil {
+			items := make([]gin.H, 0, len(list))
+			for i := range list {
+				items = append(items, gin.H{
+					"inbound_id": list[i].ID,
+					"tag":        list[i].Tag,
+					"provenance": protocols.ExplainInbound(&list[i]),
+					"issues":     protocols.ValidateInboundFields(&list[i]),
+				})
+			}
+			resp["inbounds"] = items
+		}
+	}
+	util.OK(c, resp)
 }
