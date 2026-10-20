@@ -165,9 +165,9 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 			if dto.Security.AllowInsecure {
 				parts = append(parts, "skip-cert-verify: true")
 			}
-			if dto.Security.Fingerprint != "" {
-				parts = append(parts, fmt.Sprintf("fingerprint: %s", dto.Security.Fingerprint))
-			}
+			// hysteria2 不输出 fingerprint：mihomo 该字段是证书 pin（SHA-256 hex），
+			// 填浏览器名会让 adapter.ParseProxy 报错并中止整份配置加载。
+			// Hysteria 2 走 QUIC，本就不支持 uTLS ClientHello 指纹模拟。
 		}
 		parts = append(parts, "alpn: [h3]")
 		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))

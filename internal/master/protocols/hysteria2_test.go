@@ -152,6 +152,11 @@ func TestHysteriaPlugin_ProjectClient_SubscriptionAndClash(t *testing.T) {
 	if !dto.Security.AllowInsecure {
 		t.Fatal("DTO AllowInsecure 期望 true")
 	}
+	// 回归锁：Hysteria 2 的 Fingerprint 必须是空。mihomo 的 hysteria2.fingerprint 是证书 pin，
+	// 一旦导出浏览器名，adapter.ParseProxy 会报错并中止整份订阅配置加载。
+	if dto.Security.Fingerprint != "" {
+		t.Fatalf("Hysteria 2 DTO 不应携带 Fingerprint, got %q", dto.Security.Fingerprint)
+	}
 
 	// 1. 验证 Clash 节点 YAML 导出
 	yamlBlock, names := subscribe.FormatNodesYAML([]contracts.ProxyNodeDTO{*dto})
@@ -172,6 +177,10 @@ func TestHysteriaPlugin_ProjectClient_SubscriptionAndClash(t *testing.T) {
 	}
 	if !strings.Contains(yamlBlock, "alpn: [h3]") {
 		t.Fatalf("YAML 块应包含 alpn: [h3], got:\n%s", yamlBlock)
+	}
+	// 回归锁：Clash YAML 不得输出 fingerprint（mihomo 会当成证书 pin 并拒绝加载）。
+	if strings.Contains(yamlBlock, "fingerprint") {
+		t.Fatalf("Hysteria 2 Clash 节点不应包含 fingerprint, got:\n%s", yamlBlock)
 	}
 
 	// 2. 验证 Base64 订阅链接导出

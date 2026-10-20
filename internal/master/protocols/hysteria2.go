@@ -135,11 +135,8 @@ func (p HysteriaPlugin) projectSubscription(in *contracts.ClientProjectionInput)
 		dto.Security.AllowInsecure = true
 	}
 
-	fp := spec.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
-	dto.Security.Fingerprint = fp
+	// Hysteria 2 走 QUIC，不存在 TLS ClientHello 指纹模拟，Fingerprint 对本协议没有意义。
+	// 不写入 DTO：mihomo 的 hysteria2.fingerprint 是证书 pin，填浏览器名会让整份配置加载失败。
 
 	return dto
 }
