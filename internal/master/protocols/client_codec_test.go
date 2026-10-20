@@ -179,59 +179,6 @@ func TestHysteria_ClientCodec(t *testing.T) {
 }
 
 // TestMixed_ClientCodec 测试 SOCKS5 与 HTTP 协议的 URL 格式化、解析与 Xray 出站生成。
-func TestMixed_ClientCodec(t *testing.T) {
-	// 1. SOCKS5 链接解析与出站
-	rawSocks := "socks5://user1:pass1@1.2.3.4:1080#SocksNode"
-	dto1, err := protocols.ParseLink(rawSocks)
-	if err != nil {
-		t.Fatalf("ParseLink socks5 failed: %v", err)
-	}
-	if dto1.Protocol != "socks" || dto1.Auth.User != "user1" || dto1.Auth.Password != "pass1" {
-		t.Fatalf("DTO socks5 参数不匹配: %+v", dto1)
-	}
-	out1, err := protocols.RenderOutbound(dto1)
-	if err != nil {
-		t.Fatalf("RenderOutbound socks5 failed: %v", err)
-	}
-	if out1["protocol"] != "socks" {
-		t.Fatalf("protocol want socks, got %v", out1["protocol"])
-	}
-	runXrayTestHelper(t, out1)
-
-	// 2. HTTP 链接解析与出站
-	rawHTTP := "http://admin:secret@1.2.3.4:8080#HttpNode"
-	dto2, err := protocols.ParseLink(rawHTTP)
-	if err != nil {
-		t.Fatalf("ParseLink http failed: %v", err)
-	}
-	if dto2.Protocol != "http" || dto2.Auth.User != "admin" || dto2.Auth.Password != "secret" {
-		t.Fatalf("DTO http 参数不匹配: %+v", dto2)
-	}
-	out2, err := protocols.RenderOutbound(dto2)
-	if err != nil {
-		t.Fatalf("RenderOutbound http failed: %v", err)
-	}
-	if out2["protocol"] != "http" {
-		t.Fatalf("protocol want http, got %v", out2["protocol"])
-	}
-	runXrayTestHelper(t, out2)
-
-	// 3. HTTPS 与 SOCKS5S (带 TLS)
-	rawHTTPS := "https://admin:secret@1.2.3.4:8443?sni=proxy.example.com#HttpsNode"
-	dto3, err := protocols.ParseLink(rawHTTPS)
-	if err != nil {
-		t.Fatalf("ParseLink https failed: %v", err)
-	}
-	if dto3.Security.Type != "tls" || dto3.Security.SNI != "proxy.example.com" {
-		t.Fatalf("DTO https TLS 不匹配: %+v", dto3.Security)
-	}
-	out3, err := protocols.RenderOutbound(dto3)
-	if err != nil {
-		t.Fatalf("RenderOutbound https failed: %v", err)
-	}
-	runXrayTestHelper(t, out3)
-}
-
 func TestRenderOutbound_TLSCAAndPin(t *testing.T) {
 	// 测试 VLESS TLS 携带 CA 证书与 Pin SHA256 出站生成并送 xray.exe 校验
 	rawVless := "vless://a0000000-0000-0000-0000-000000000001@1.2.3.4:443?security=tls&sni=proxy.example.com#VlessNode"

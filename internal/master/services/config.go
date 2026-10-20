@@ -128,42 +128,6 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 	for _, inb := range inbounds {
 		allInboundIDs = append(allInboundIDs, inb.ID)
 	}
-	inboundGroupMap, err := BatchInboundAuthorizedGroupIDs(db, allInboundIDs)
-	if err != nil {
-		return nil, fmt.Errorf("批量计算入站授权组失败: %w", err)
-	}
-	ctx.InboundAuthorizedGroups = inboundGroupMap
-
-	// 转发用户映射：收集 Mixed / SOCKS5 / HTTP 入站所需的权限组并获取对应的有效 ForwardUser
-	fwdGroupSet := make(map[uint64]struct{})
-	for _, inb := range inbounds {
-		if inb.IsForwardProxy() || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP || inb.Protocol == models.ProtocolMixed {
-			for _, gid := range inboundGroupMap[inb.ID] {
-				fwdGroupSet[gid] = struct{}{}
-			}
-		}
-	}
-
-	ctx.ForwardUsersByGroup = make(map[uint64][]models.ForwardUser)
-	if len(fwdGroupSet) > 0 {
-		fwdGroupIDs := make([]uint64, 0, len(fwdGroupSet))
-		for gid := range fwdGroupSet {
-			fwdGroupIDs = append(fwdGroupIDs, gid)
-		}
-		var fUsers []models.ForwardUser
-		now := time.Now()
-		if err := db.Where("permission_group_id IN ? AND enabled = ?", fwdGroupIDs, true).
-			Where("expires_at IS NULL OR expires_at > ?", now).
-			Find(&fUsers).Error; err == nil {
-			for _, fu := range fUsers {
-				// 流量上限检查（GB 转 Bytes：0 为不限）
-				if fu.TrafficLimitGB > 0 && fu.TrafficUsedBytes >= fu.TrafficLimitGB*1024*1024*1024 {
-					continue
-				}
-				ctx.ForwardUsersByGroup[fu.PermissionGroupID] = append(ctx.ForwardUsersByGroup[fu.PermissionGroupID], fu)
-			}
-		}
-	}
 
 	// 汇聚所有连入当前服务器入站的跨机出站（机间中继凭据）
 	ctx.ReferencingOutbounds = make(map[uint64][]models.ServerOutbound)

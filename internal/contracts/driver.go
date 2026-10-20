@@ -23,11 +23,9 @@ type RefTarget struct {
 // TopologyContext 拓扑化上下文（Phase T）：跨服务器引用与证书映射，由 provision 领域从 DB 组装。
 // 传 nil 时生成行为退化为无 InboundRef / CertID 注入。
 type TopologyContext struct {
-	RefTargets              map[uint64]RefTarget             // 出站 InboundRef → 目标入站
-	CertDomains             map[uint64]string                // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
-	ForwardUsersByGroup     map[uint64][]models.ForwardUser  // 权限组 ID → 生效的转发用户列表（SOCKS/HTTP 动态账号注入）
-	InboundAuthorizedGroups map[uint64][]uint64              // 入站 ID → 授权的权限组 ID 列表（由启用 AP 白名单派生）
-	ReferencingOutbounds    map[uint64][]models.ServerOutbound // 入站 ID → 所有指向该入站的启用 ServerOutbound
+	RefTargets           map[uint64]RefTarget         // 出站 InboundRef → 目标入站
+	CertDomains          map[uint64]string            // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
+	ReferencingOutbounds map[uint64][]models.ServerOutbound // 入站 ID → 所有指向该入站的启用 ServerOutbound
 }
 
 // GenerateInput 核心生成输入（中立结构）：由 provision 领域取数装配，

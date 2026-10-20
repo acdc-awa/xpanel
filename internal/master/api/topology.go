@@ -271,13 +271,6 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 		util.BadRequest(c, "该权限组正被用户绑定，请先在用户管理中解除")
 		return
 	}
-	// 阶段一防御：转发用户绑定检查——防止自用代理账号成为孤儿
-	var fuCnt int64
-	d.DB.Model(&models.ForwardUser{}).Where("permission_group_id = ?", id).Count(&fuCnt)
-	if fuCnt > 0 {
-		util.BadRequest(c, "该权限组正被转发自用用户绑定，请先在转发用户管理中解除")
-		return
-	}
 
 	err = d.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("permission_group_id = ?", id).Delete(&models.PermissionGroupAccessPoint{}).Error; err != nil {

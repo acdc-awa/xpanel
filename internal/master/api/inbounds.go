@@ -91,8 +91,6 @@ func normalizeInboundType(protocol, currentType string) string {
 	switch protocol {
 	case models.ProtocolDokodemo:
 		return models.InboundTypeTunnel
-	case models.ProtocolMixed, models.ProtocolSocks, models.ProtocolHTTP:
-		return models.InboundTypeForward
 	default:
 		return models.InboundTypeUser
 	}
@@ -195,16 +193,8 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door）")
 		return
-	}
-	if req.Protocol == models.ProtocolSocks || req.Protocol == models.ProtocolHTTP || req.Protocol == models.ProtocolMixed {
-		var s map[string]any
-		if json.Unmarshal([]byte(req.SettingsJSON), &s) == nil {
-			delete(s, "accounts")
-			clean, _ := json.Marshal(s)
-			req.SettingsJSON = string(clean)
-		}
 	}
 	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
 		util.BadRequest(c, "入站标签需为 1-64 字符")
@@ -440,12 +430,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 
 	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP || effProto == models.ProtocolMixed {
-		var s map[string]any
-		if json.Unmarshal([]byte(sj), &s) == nil {
-			delete(s, "accounts")
-			clean, _ := json.Marshal(s)
-			sj = string(clean)
-		}
+		util.BadRequest(c, "SOCKS5 / HTTP 入站已退役，不支持的协议: "+effProto)
+		return
 	}
 	// U15：更新校验闭环——tag 非空/同服务器唯一 / 协议白名单 / CertID 存在性
 	if req.Tag != nil {
@@ -849,10 +835,12 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 	util.OK(c, gin.H{"id": id, "enabled": inb.Enabled})
 }
 
-// refInboundProtected 检查入站是否被其他出站 inbound_ref 引用（U4：删除/停用保护）。
+// refInboundProtected 检查入站是否被其他**已启用**出站 inbound_ref 引用（U4：删除/停用保护）。
+// 只统计启用出站：C2 的派生出站会随直通入站停用而 enabled=false，此时它不再生成，
+// 若仍计数会导致落地入站被永久锁死（停用直通后仍无法停用/删除落地）。
 func (d *Deps) refInboundProtected(c *gin.Context, inbID uint64) bool {
 	var cnt int64
-	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ?", inbID).Count(&cnt)
+	d.DB.Model(&models.ServerOutbound{}).Where("inbound_ref = ? AND enabled = ?", inbID, true).Count(&cnt)
 	if cnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(cnt, 10)+" 个出站引用（落地），无法删除/停用，请先解除引用")
 		return true
@@ -959,12 +947,12 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door、Mixed；SOCKS5 与 HTTP 已退役）。
+// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door；Mixed / SOCKS5 / HTTP 已退役）。
 func validInboundProtocol(p string) bool {
 	if protocols.Find(p) != nil {
 		return true
 	}
-	return p == models.ProtocolDokodemo || p == models.ProtocolMixed
+	return p == models.ProtocolDokodemo
 }
 
 func validInboundType(t string) bool {

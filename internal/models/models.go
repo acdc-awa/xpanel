@@ -66,7 +66,6 @@ func All() []any {
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 		&SubTemplate{},
-		&ForwardUser{},
 	}
 }
 
@@ -125,9 +124,6 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateDokodemoInboundsToTunnelType(db); err != nil {
 		return err
 	}
-	if err := migrateForwardUsersFromInbounds(db); err != nil {
-		return err
-	}
 	if err := migrateRelayOutboundCredentials(db); err != nil {
 		return err
 	}
@@ -165,119 +161,6 @@ func migrateRelayOutboundCredentials(db *gorm.DB) error {
 	}).Error
 
 	return nil
-}
-
-// migrateForwardUsersFromInbounds 将存量 SOCKS5/HTTP 入站内的静态账密迁移为独立 ForwardUser 实体，
-// 并关联/创建对应的权限组与 Inbound.PermissionGroupID（schema v4，2026-09-29）。幂等执行。
-func migrateForwardUsersFromInbounds(db *gorm.DB) error {
-	var mark Setting
-	err := db.Where("key = ?", "forward_users_migrated_from_inbounds").First(&mark).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-
-	var inbounds []Inbound
-	if err := db.Where("protocol IN ?", []string{ProtocolSocks, ProtocolHTTP}).Find(&inbounds).Error; err == nil {
-		for _, inb := range inbounds {
-			if inb.SettingsJSON == "" {
-				continue
-			}
-			var settings map[string]any
-			if err := json.Unmarshal([]byte(inb.SettingsJSON), &settings); err != nil {
-				continue
-			}
-			rawAccs, ok := settings["accounts"].([]any)
-			if !ok || len(rawAccs) == 0 {
-				continue
-			}
-
-			// 寻找可用组或新建专属组
-			var pgID uint64
-			var pg PermissionGroup
-			if err := db.Where("name = ?", "默认转发组").First(&pg).Error; err == nil {
-				pgID = pg.ID
-			} else {
-				newPG := PermissionGroup{
-					Name:   "默认转发组",
-					Remark: "系统自动创建的默认转发代理权限组",
-				}
-				if err := db.Create(&newPG).Error; err == nil {
-					pgID = newPG.ID
-				}
-			}
-
-			// 确保有 UserAccessPoint 指向该入站并关联权限组
-			if pgID > 0 {
-				var ap UserAccessPoint
-				if err := db.Where("target_type = ? AND target_inbound_id = ?", "inbound", inb.ID).First(&ap).Error; err != nil {
-					apName := inb.Remark
-					if apName == "" {
-						apName = inb.Tag
-					}
-					newAP := UserAccessPoint{
-						Name:            apName,
-						TargetType:      "inbound",
-						TargetInboundID: &inb.ID,
-						Enabled:         inb.Enabled,
-					}
-					if err := db.Create(&newAP).Error; err == nil {
-						_ = db.Create(&PermissionGroupAccessPoint{
-							PermissionGroupID: pgID,
-							AccessPointID:     newAP.ID,
-						}).Error
-					}
-				}
-			}
-
-			// 清理 settings_json 中的静态 accounts 字段，物理入站不再持久化账密凭据
-			delete(settings, "accounts")
-			cleanJSON, _ := json.Marshal(settings)
-			_ = db.Model(&Inbound{}).Where("id = ?", inb.ID).Update("settings_json", string(cleanJSON)).Error
-
-			for _, raw := range rawAccs {
-				accMap, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				u, _ := accMap["user"].(string)
-				p, _ := accMap["pass"].(string)
-				if u == "" || p == "" {
-					continue
-				}
-				// 检查是否已有该用户名
-				var cnt int64
-				db.Model(&ForwardUser{}).Where("username = ?", u).Count(&cnt)
-				if cnt > 0 {
-					continue
-				}
-
-				limitGB := inb.Total / (1024 * 1024 * 1024)
-				fu := ForwardUser{
-					Username:          u,
-					Password:          p,
-					PermissionGroupID: pgID,
-					TrafficLimitGB:    limitGB,
-					TrafficUsedBytes:  inb.Up + inb.Down,
-					UpBytes:           inb.Up,
-					DownBytes:         inb.Down,
-					TrafficReset:      inb.TrafficReset,
-					ExpiresAt:         inb.ExpiryTime,
-					Enabled:           inb.Enabled,
-					Remark:            inb.Remark,
-				}
-				_ = db.Create(&fu).Error
-			}
-		}
-	}
-
-	return db.Create(&Setting{
-		Key:       "forward_users_migrated_from_inbounds",
-		Value:     "true",
-		UpdatedAt: time.Now(),
-	}).Error
 }
 
 // migrateProxyChannelsToForwardInbounds 将存量 ProxyChannel 记录平滑整合至底层 Inbound（type='forward'），

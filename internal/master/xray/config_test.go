@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
-	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
@@ -1439,14 +1438,11 @@ func TestCountDistinctOnlineUsers(t *testing.T) {
 		{Email: "u1.i7@panel.local", IPs: []string{"1.1.1.1"}},
 		{Email: "u1.i9@panel.local", IPs: []string{"1.1.1.1", "2.2.2.2"}},
 		{Email: "user-2@panel.local", IPs: []string{"3.3.3.3"}},
-		{Email: "fu10.i1@panel.local", IPs: []string{"6.6.6.6"}},
-		{Email: "fu10.i2@panel.local", IPs: []string{"6.6.6.6", "7.7.7.7"}},
-		{Email: "fu11.i1@panel.local", IPs: []string{"8.8.8.8"}},
 		{Email: "relay-in-relay@panel.local", IPs: []string{"4.4.4.4"}},
 		{Email: "custom@x.com", IPs: []string{"5.5.5.5"}},
 	}
-	if got := xray.CountDistinctOnlineUsers(users); got != 6 {
-		t.Fatalf("CountDistinctOnlineUsers = %d, want 6（商业用户1 两键去重 + 商业用户2 + 自用代理10 双协议去重 + 自用代理11 + relay + 自定义）", got)
+	if got := xray.CountDistinctOnlineUsers(users); got != 4 {
+		t.Fatalf("CountDistinctOnlineUsers = %d, want 4（商业用户1 两键去重 + 商业用户2 + relay + 自定义）", got)
 	}
 	if got := xray.CountDistinctOnlineUsers(nil); got != 0 {
 		t.Fatalf("empty = %d, want 0", got)
@@ -1815,419 +1811,6 @@ func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
 	}
 }
 
-func TestGenerateConfig_ChannelSocks5AndHTTPAndTunnel(t *testing.T) {
-	inbounds := []models.Inbound{
-		{
-			ID:           101,
-			ServerID:     1,
-			Tag:          "chan-101-1080",
-			Protocol:     "socks",
-			Port:         1080,
-			Type:         models.InboundTypeChannel,
-			SettingsJSON: `{"auth":"password","accounts":[{"user":"testuser","pass":"testpass"}],"udp":true}`,
-			Enabled:      true,
-		},
-		{
-			ID:           102,
-			ServerID:     1,
-			Tag:          "chan-102-8080",
-			Protocol:     "http",
-			Port:         8080,
-			Type:         models.InboundTypeChannel,
-			SettingsJSON: `{"accounts":[{"user":"testuser","pass":"testpass"}]}`,
-			Enabled:      true,
-		},
-		{
-			ID:            103,
-			ServerID:      1,
-			Tag:           "chan-103-3306",
-			Protocol:      "dokodemo-door",
-			Port:          3306,
-			Type:          models.InboundTypeChannel,
-			TargetAddress: "db.remote.com",
-			TargetPort:    3306,
-			Enabled:       true,
-		},
-	}
-
-	// C2：通道直通（dokodemo-door）的派生出口与转发规则同为库内真行
-	var obs []models.ServerOutbound
-	var rules []models.ServerRoutingRule
-	for _, inb := range inbounds {
-		if inb.Protocol == models.ProtocolDokodemo {
-			o, r := tunnelLedgerRows(t, inb, nil)
-			obs = append(obs, o...)
-			rules = append(rules, r...)
-		}
-	}
-	ctx := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{
-			101: {1},
-			102: {1},
-		},
-		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
-			1: {
-				{ID: 1, Username: "testuser", Password: "testpass"},
-			},
-		},
-	}
-	raw, err := xray.Generate(inbounds, obs, rules, nil, ctx, "", "")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	inbList := parsed["inbounds"].([]any)
-	// 期望有 4 个入站（socks + http + tunnel + api）
-	if len(inbList) != 4 {
-		t.Fatalf("期望 4 个入站，实际 %d", len(inbList))
-	}
-
-	// 验证 socks 入站没有 clients 字段
-	socksInb := inbList[0].(map[string]any)
-	socksSettings := socksInb["settings"].(map[string]any)
-	if _, hasClients := socksSettings["clients"]; hasClients {
-		t.Errorf("socks 入站不应存在 clients: %v", socksSettings)
-	}
-	if socksSettings["auth"] != "password" {
-		t.Errorf("socks auth 不正确: %v", socksSettings["auth"])
-	}
-
-	// 验证 http 入站没有 clients 字段
-	httpInb := inbList[1].(map[string]any)
-	httpSettings := httpInb["settings"].(map[string]any)
-	if _, hasClients := httpSettings["clients"]; hasClients {
-		t.Errorf("http 入站不应存在 clients: %v", httpSettings)
-	}
-
-	// 真实 xray 二进制语义校验
-	xrayBin := filepath.Join("..", "..", "..", "tools", "xray-windows-64", "xray.exe")
-	if _, err := os.Stat(xrayBin); err == nil {
-		tmp := filepath.Join(t.TempDir(), "channel_config.json")
-		if err := os.WriteFile(tmp, raw, 0644); err != nil {
-			t.Fatalf("WriteFile failed: %v", err)
-		}
-		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("xray -test 校验通道配置失败: %v, out: %s", err, string(out))
-		}
-	}
-}
-
-func TestGenerate_ForwardUserAccountsInjection(t *testing.T) {
-	inbounds := []models.Inbound{
-		{
-			ID:       10,
-			Tag:      "socks-fwd",
-			Protocol: "socks",
-			Port:     20808,
-			Type:     models.InboundTypeForward,
-			Enabled:  true,
-		},
-		{
-			ID:       11,
-			Tag:      "http-fwd",
-			Protocol: "http",
-			Port:     20809,
-			Type:     models.InboundTypeForward,
-			Enabled:  true,
-		},
-	}
-
-	ctx := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{
-			10: {5},
-			11: {5},
-		},
-		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
-			5: {
-				{ID: 101, Username: "forward_alice", Password: "alice_pass_123"},
-				{ID: 102, Username: "forward_bob", Password: "bob_pass_456"},
-			},
-		},
-	}
-
-	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	inbList := parsed["inbounds"].([]any)
-	// socks + http + api
-	if len(inbList) != 3 {
-		t.Fatalf("expected 3 inbounds, got %d", len(inbList))
-	}
-
-	// 验证 socks 入站 accounts
-	socksInb := inbList[0].(map[string]any)
-	socksSettings := socksInb["settings"].(map[string]any)
-	if socksSettings["auth"] != "password" {
-		t.Errorf("socks auth want password, got %v", socksSettings["auth"])
-	}
-	accounts := socksSettings["accounts"].([]any)
-	if len(accounts) != 2 {
-		t.Fatalf("expected 2 accounts in socks, got %d", len(accounts))
-	}
-	acc0 := accounts[0].(map[string]any)
-	if acc0["user"] != "forward_alice" || acc0["pass"] != "alice_pass_123" || acc0["email"] != "fu101.i10@panel.local" {
-		t.Errorf("socks account[0] mismatch: %+v", acc0)
-	}
-
-	// 验证 http 入站 accounts
-	httpInb := inbList[1].(map[string]any)
-	httpSettings := httpInb["settings"].(map[string]any)
-	if httpSettings["auth"] != "password" {
-		t.Errorf("http auth want password, got %v", httpSettings["auth"])
-	}
-	httpAccounts := httpSettings["accounts"].([]any)
-	if len(httpAccounts) != 2 {
-		t.Fatalf("expected 2 accounts in http, got %d", len(httpAccounts))
-	}
-	hacc1 := httpAccounts[1].(map[string]any)
-	if hacc1["user"] != "forward_bob" || hacc1["pass"] != "bob_pass_456" || hacc1["email"] != "fu102.i11@panel.local" {
-		t.Errorf("http account[1] mismatch: %+v", hacc1)
-	}
-
-	// 真实 xray -test 校验
-	xrayBin := filepath.Join("..", "..", "..", "tools", "xray-windows-64", "xray.exe")
-	if _, err := os.Stat(xrayBin); err == nil {
-		tmp := filepath.Join(t.TempDir(), "fwd_config.json")
-		if err := os.WriteFile(tmp, raw, 0644); err != nil {
-			t.Fatalf("WriteFile failed: %v", err)
-		}
-		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("xray -test 校验转发配置失败: %v, out: %s", err, string(out))
-		}
-	}
-}
-
-func TestGenerate_ForwardUserAccountsOverwriteStaticAccounts(t *testing.T) {
-	// 验证：即使入站的 SettingsJSON 含有残留静态账密（如 admin/secret123），
-	// 经由接入点派生授权组后，静态账密绝对不可残留。
-	// 同时验证严格物理跳过：无有效转发用户的入站绝不注入 Xray 配置（防止空 accounts 沦为免密开放代理）。
-	inbounds := []models.Inbound{
-		{
-			ID:           20,
-			Tag:          "http-with-dummy",
-			Protocol:     "http",
-			Port:         20810,
-			Type:         models.InboundTypeForward,
-			SettingsJSON: `{"auth":"password","accounts":[{"user":"admin","pass":"secret123"}]}`,
-			Enabled:      true,
-		},
-		{
-			ID:           21,
-			Tag:          "http-empty-group",
-			Protocol:     "http",
-			Port:         20811,
-			Type:         models.InboundTypeForward,
-			SettingsJSON: `{"auth":"password","accounts":[{"user":"admin","pass":"secret123"}]}`,
-			Enabled:      true,
-		},
-	}
-
-	ctx := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{
-			20: {8},
-			21: {9}, // 无有效转发用户的权限组
-		},
-		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
-			8: {
-				{ID: 201, Username: "real_user", Password: "real_password_888"},
-			},
-		},
-	}
-
-	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	rawStr := string(raw)
-	if strings.Contains(rawStr, "admin") || strings.Contains(rawStr, "secret123") {
-		t.Fatalf("生成的 Xray 配置中依然残留默认静态账密 admin/secret123: %s", rawStr)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	inbList := parsed["inbounds"].([]any)
-	// 只有 http-with-dummy (0) 和 api (1)！
-	// http-empty-group 因有效账号数为 0，必须被严格物理跳过（防止 Xray 监听开放代理端口）
-	if len(inbList) != 2 {
-		t.Fatalf("期望 2 个入站 (包含 api)，实际得到: %d 个入站", len(inbList))
-	}
-	inb0 := inbList[0].(map[string]any)
-	if inb0["tag"] != "http-with-dummy" {
-		t.Errorf("入站 0 tag 期望 http-with-dummy，实际: %v", inb0["tag"])
-	}
-	s0 := inb0["settings"].(map[string]any)
-	acc0 := s0["accounts"].([]any)
-	if len(acc0) != 1 {
-		t.Fatalf("期望 1 个有效转发用户，实际得到: %d", len(acc0))
-	}
-	userMap := acc0[0].(map[string]any)
-	if userMap["user"] != "real_user" || userMap["pass"] != "real_password_888" {
-		t.Errorf("转发用户账密不符合预期: %+v", userMap)
-	}
-
-	// 确认 http-empty-group 确实未注入
-	if strings.Contains(rawStr, "http-empty-group") {
-		t.Fatalf("无有效用户的入站 http-empty-group 绝不应出现在 Xray 配置中: %s", rawStr)
-	}
-}
-
-func TestGenerate_ForwardUserMultipleAccessPointsUnion(t *testing.T) {
-	// 验证：单个入站挂接多个接入点（对应多个权限组），账号能够聚合注入并自动去重
-	inbounds := []models.Inbound{
-		{
-			ID:       30,
-			Tag:      "socks-shared",
-			Protocol: "socks",
-			Port:     20812,
-			Type:     models.InboundTypeForward,
-			Enabled:  true,
-		},
-	}
-
-	ctx := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{
-			30: {10, 11}, // 挂载两个权限组
-		},
-		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
-			10: {
-				{ID: 301, Username: "spider_a", Password: "pass_a"},
-			},
-			11: {
-				{ID: 302, Username: "spider_b", Password: "pass_b"},
-			},
-		},
-	}
-
-	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	inbList := parsed["inbounds"].([]any)
-	inb0 := inbList[0].(map[string]any)
-	s0 := inb0["settings"].(map[string]any)
-	accounts := s0["accounts"].([]any)
-	if len(accounts) != 2 {
-		t.Fatalf("多权限组聚合期望 2 个账号，实际得到 %d", len(accounts))
-	}
-}
-
-func TestGenerate_MixedInboundWithForwardUsers(t *testing.T) {
-	inbounds := []models.Inbound{
-		{
-			ID:       20,
-			Tag:      "mixed-fwd",
-			Protocol: models.ProtocolMixed,
-			Port:     10808,
-			Type:     models.InboundTypeForward,
-			Enabled:  true,
-		},
-	}
-
-	ctx := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{
-			20: {8},
-		},
-		ForwardUsersByGroup: map[uint64][]models.ForwardUser{
-			8: {
-				{ID: 201, Username: "mixed_user1", Password: "pass_user1"},
-				{ID: 202, Username: "mixed_user2", Password: "pass_user2"},
-			},
-		},
-	}
-
-	raw, err := xray.Generate(inbounds, nil, nil, nil, ctx, "", "")
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	inbList := parsed["inbounds"].([]any)
-	// mixed + api
-	if len(inbList) != 2 {
-		t.Fatalf("expected 2 inbounds, got %d", len(inbList))
-	}
-
-	mixedInb := inbList[0].(map[string]any)
-	if mixedInb["protocol"] != "mixed" {
-		t.Fatalf("protocol want mixed, got %v", mixedInb["protocol"])
-	}
-	settings := mixedInb["settings"].(map[string]any)
-	if settings["auth"] != "password" {
-		t.Fatalf("auth want password, got %v", settings["auth"])
-	}
-	if settings["udp"] != true {
-		t.Fatalf("udp want true, got %v", settings["udp"])
-	}
-	accounts := settings["accounts"].([]any)
-	if len(accounts) != 2 {
-		t.Fatalf("accounts want 2, got %d", len(accounts))
-	}
-	acc0 := accounts[0].(map[string]any)
-	if acc0["user"] != "mixed_user1" || acc0["pass"] != "pass_user1" || acc0["email"] != "fu201.i20@panel.local" {
-		t.Fatalf("unexpected account[0]: %v", acc0)
-	}
-
-	// 零信任物理跳过：无账号时物理跳过，防止免密开放代理
-	ctxEmpty := &xray.GenerateContext{
-		InboundAuthorizedGroups: map[uint64][]uint64{20: {99}},
-		ForwardUsersByGroup:     map[uint64][]models.ForwardUser{},
-	}
-	rawEmpty, err := xray.Generate(inbounds, nil, nil, nil, ctxEmpty, "", "")
-	if err != nil {
-		t.Fatalf("Generate empty accounts failed: %v", err)
-	}
-	var parsedEmpty map[string]any
-	if err := json.Unmarshal(rawEmpty, &parsedEmpty); err != nil {
-		t.Fatalf("Unmarshal empty failed: %v", err)
-	}
-	inbListEmpty := parsedEmpty["inbounds"].([]any)
-	if len(inbListEmpty) != 1 { // 仅剩 api 入站
-		t.Fatalf("期望仅剩 1 个 api 入站（mixed 物理跳过），实际得到 %d", len(inbListEmpty))
-	}
-
-	// 真实 xray 二进制验证
-	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
-	if _, err := os.Stat(xrayBin); err == nil {
-		tmpMixed := filepath.Join(t.TempDir(), "mixed.json")
-		if err := os.WriteFile(tmpMixed, raw, 0644); err != nil {
-			t.Fatalf("WriteFile failed: %v", err)
-		}
-		cmd := exec.Command(xrayBin, "-test", "-config", tmpMixed)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("Mixed 配置 xray -test 校验失败: %v, out: %s", err, string(out))
-		}
-	}
-}
-
-// TestGenerate_MultiplexedInboundAndZeroSkip 验证物理入站归一、多源动态汇聚（商业用户 + 跨机中继）及零凭据物理跳过防御。
 func TestGenerate_MultiplexedInboundAndZeroSkip(t *testing.T) {
 	realitySK := "uOF-_qWw55cTMdM8CbaDieJg6HiKUV2g7BOj1GIvf04"
 	realityPK := "7_G5gW_8n9rV1wA6jO_iXQ7G9uN2m4vK0lQ3wE5rT6Y"
@@ -2436,122 +2019,50 @@ func TestGenerate_CustomOutboundJSON(t *testing.T) {
 }
 
 // TestGenerate_InterMachineRelayToMixedInbound 验证跨机连线至 Mixed 入站的全链路装配。
-func TestGenerate_InterMachineRelayToMixedInbound(t *testing.T) {
-	// 落地 Mixed 入站
-	mixedInb := models.Inbound{
-		ID:           301,
-		ServerID:     2,
-		Tag:          "mixed-land",
-		Protocol:     models.ProtocolMixed,
-		Port:         1080,
-		Enabled:      true,
-		Type:         models.InboundTypeUser,
-		InternalUUID: "b8045e7f-71ad-4674-8b65-66778899aabb",
-	}
 
-	// 前置出站连向 Mixed 301
-	targetRef := uint64(301)
-	frontOut := models.ServerOutbound{
-		ID:           401,
-		ServerID:     1,
-		Tag:          "relay-mixed-out",
-		Protocol:     "socks",
-		Enabled:      true,
-		InboundRef:   &targetRef,
-		InternalUUID: "11111111-2222-3333-4444-555555555555",
+func TestGenerateConfig_ChannelTunnel(t *testing.T) {
+	// 独立通道仅保留四层直通（dokodemo-door）：无用户维度，settings 原样透传。
+	inb := models.Inbound{
+		ID:            103,
+		ServerID:      1,
+		Tag:           "chan-103-3306",
+		Protocol:      models.ProtocolDokodemo,
+		Port:          3306,
+		Type:          models.InboundTypeChannel,
+		TargetAddress: "db.remote.com",
+		TargetPort:    3306,
+		Enabled:       true,
 	}
-
-	// 1. 生成落地机配置（Mixed 入站注入机间中继凭据）
-	ctxLand := &xray.GenerateContext{
-		ReferencingOutbounds: map[uint64][]models.ServerOutbound{
-			301: {frontOut},
-		},
-	}
-	rawLand, err := xray.Generate([]models.Inbound{mixedInb}, nil, nil, nil, ctxLand, "", "")
+	obs, rules := tunnelLedgerRows(t, inb, nil)
+	raw, err := xray.Generate([]models.Inbound{inb}, obs, rules, nil, nil, "", "")
 	if err != nil {
-		t.Fatalf("Generate land failed: %v", err)
+		t.Fatalf("Generate failed: %v", err)
 	}
-	var parsedLand map[string]any
-	_ = json.Unmarshal(rawLand, &parsedLand)
-	inbs := parsedLand["inbounds"].([]any)
-	var mixedGenerated map[string]any
-	for _, inb := range inbs {
-		m := inb.(map[string]any)
-		if m["tag"] == "mixed-land" {
-			mixedGenerated = m
-			break
-		}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
 	}
-	if mixedGenerated == nil {
-		t.Fatal("mixed-land not found in land config")
+	inbList := parsed["inbounds"].([]any)
+	// tunnel + api
+	if len(inbList) != 2 {
+		t.Fatalf("期望 2 个入站，实际 %d", len(inbList))
 	}
-	settings := mixedGenerated["settings"].(map[string]any)
-	accounts := settings["accounts"].([]any)
-	if len(accounts) != 1 {
-		t.Fatalf("accounts want 1, got %d", len(accounts))
-	}
-	acc := accounts[0].(map[string]any)
-	if acc["user"] != "relay_out_301" || acc["pass"] != "11111111-2222-3333-4444-555555555555" || acc["email"] != "relay.in_301.out_401@panel.local" {
-		t.Fatalf("unexpected relay account: %v", acc)
+	tun := inbList[0].(map[string]any)
+	settings, _ := tun["settings"].(map[string]any)
+	if _, hasClients := settings["clients"]; hasClients {
+		t.Errorf("tunnel 入站不应存在 clients: %v", settings)
 	}
 
-	// 2. 生成前置机配置（前置出站自动渲染为 SOCKS5 出站）
-	ctxFront := &xray.GenerateContext{
-		RefTargets: map[uint64]contracts.RefTarget{
-			301: {
-				Inbound:    mixedInb,
-				ServerHost: "land.example.com",
-			},
-		},
-	}
-	rawFront, err := xray.Generate(nil, []models.ServerOutbound{frontOut}, nil, nil, ctxFront, "", "")
-	if err != nil {
-		t.Fatalf("Generate front failed: %v", err)
-	}
-	var parsedFront map[string]any
-	_ = json.Unmarshal(rawFront, &parsedFront)
-	outbs := parsedFront["outbounds"].([]any)
-	var frontGenerated map[string]any
-	for _, o := range outbs {
-		m := o.(map[string]any)
-		if m["tag"] == "relay-mixed-out" {
-			frontGenerated = m
-			break
-		}
-	}
-	if frontGenerated == nil {
-		t.Fatal("relay-mixed-out not found in front config")
-	}
-	if frontGenerated["protocol"] != "socks" {
-		t.Fatalf("front protocol want socks, got %v", frontGenerated["protocol"])
-	}
-	frontSettings := frontGenerated["settings"].(map[string]any)
-	servers := frontSettings["servers"].([]any)
-	srv0 := servers[0].(map[string]any)
-	if srv0["address"] != "land.example.com" || srv0["port"] != float64(1080) {
-		t.Fatalf("unexpected front server: %v", srv0)
-	}
-	users := srv0["users"].([]any)
-	u0 := users[0].(map[string]any)
-	if u0["user"] != "relay_out_301" || u0["pass"] != "11111111-2222-3333-4444-555555555555" {
-		t.Fatalf("unexpected front user credentials: %v", u0)
-	}
-
-	// 3. 真实 xray -test 二进制双向验证
-	xrayBin := `..\..\..\tools\xray-windows-64\xray.exe`
+	// 真实 xray 二进制语义校验
+	xrayBin := filepath.Join("..", "..", "..", "tools", "xray-windows-64", "xray.exe")
 	if _, err := os.Stat(xrayBin); err == nil {
-		tmpLand := filepath.Join(t.TempDir(), "mixed_land.json")
-		_ = os.WriteFile(tmpLand, rawLand, 0644)
-		cmdL := exec.Command(xrayBin, "-test", "-config", tmpLand)
-		if out, err := cmdL.CombinedOutput(); err != nil {
-			t.Fatalf("Mixed land config xray -test failed: %v, out: %s", err, string(out))
+		tmp := filepath.Join(t.TempDir(), "channel_config.json")
+		if err := os.WriteFile(tmp, raw, 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
 		}
-
-		tmpFront := filepath.Join(t.TempDir(), "mixed_front.json")
-		_ = os.WriteFile(tmpFront, rawFront, 0644)
-		cmdF := exec.Command(xrayBin, "-test", "-config", tmpFront)
-		if out, err := cmdF.CombinedOutput(); err != nil {
-			t.Fatalf("Mixed front config xray -test failed: %v, out: %s", err, string(out))
+		cmd := exec.Command(xrayBin, "-test", "-config", tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("xray -test 校验通道配置失败: %v, out: %s", err, string(out))
 		}
 	}
 }

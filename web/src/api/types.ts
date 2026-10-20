@@ -374,43 +374,6 @@ export interface UserAccessPoint {
   created_at?: string
 }
 
-// 转发用户（SOCKS5 / HTTP 多账号隔离与计量计费）
-export interface ForwardUserItem {
-  id: number
-  username: string
-  password: string
-  permission_group_id: number
-  group_name?: string
-  traffic_limit_gb: number
-  traffic_used_bytes: number
-  up_bytes: number
-  down_bytes: number
-  traffic_reset: 'never' | 'daily' | 'weekly' | 'monthly'
-  expires_at?: string
-  enabled: boolean
-  remark: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ForwardUserPayload {
-  username: string
-  password: string
-  permission_group_id: number
-  traffic_limit_gb?: number
-  traffic_reset?: string
-  expires_at?: string
-  enabled?: boolean
-  remark?: string
-}
-
-export interface ForwardUsersSummary {
-  total_users: number
-  active_users: number
-  total_limit_gb: number
-  total_used_bytes: number
-}
-
 export interface RealitySettings {
   server_name?: string
   server_names?: string[]

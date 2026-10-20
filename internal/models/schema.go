@@ -46,9 +46,8 @@ const (
 	//     从「生成期现场派生」改为库内真行；
 	//  ② 退役 proxy_channels：Inbound 加 Remark 备注列，存量 ProxyChannel 账本数据
 	//     （配额/重置/账密/状态）平滑迁入底层 Inbound（type='forward'），遗留 type='channel' 归一化为
-	//     'forward'，两套实体与表单合二为一；
-	//  ③ 转发账号独立计量：新增 ForwardUser 实体与 forward_users 表，存量入站内嵌的静态账号迁移为
-	//     独立转发用户，由权限组聚合动态注入 SOCKS5/HTTP 入站。
+	//     'forward'，两套实体与表单合二为一。
+	// 注：Mixed / SOCKS5 / HTTP 协议与 ForwardUser 实体已在本版本发布前移除，从未在任何线上库建表。
 	DBSchemaVersion = 4
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
@@ -71,10 +70,9 @@ const (
 	// 会与切换后的新账期混算。故拒绝回滚，出路是前进到 v3 或从升级前备份恢复。
 	//
 	// v4 与 DBSchemaVersion 同步提升，依据有两重，任何一重都指向拒绝回滚：
-	//  ① **安全漏洞防护（Fail-closed）**：旧版（v3）面板不识别 type=forward 与 ForwardUser，
-	//     配置生成器会把未知类型归一化为 user 走 VLESS clients 分支，导致 SOCKS5 / HTTP 入站丢弃
-	//     accounts 认证凭据，沦为公网无认证开放代理；它也不具备转发用户与权限组聚合生成逻辑，
-	//     回滚会造成认证阻断。
+	//  ① **类型语义阻断**：旧版（v3）面板不识别 type=forward（四层直通/独立通道），
+	//     配置生成器会把未知类型归一化为 user 走 VLESS clients 分支，向无用户维度的通道入站
+	//     注入用户数组，生成的配置与 v4 语义不一致。
 	//  ② **语义静默失效**：v3 面板把直通规则固定注入在全部节点规则之前，于是管理员在 v4 上
 	//     「把某条规则（如按来源封禁）排到直通规则之前」的安全语义在回滚后会静默失效——规则仍在
 	//     库里、界面也照常显示，实际不再命中（与 v2 同类取舍）。

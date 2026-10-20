@@ -109,9 +109,11 @@ func (inb *Inbound) IsTunnel() bool {
 	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeTunnel
 }
 
-// IsForwardProxy 判断入站是否为代理转发入口（Mixed / SOCKS5 / HTTP）。
+// IsForwardProxy 判断入站是否为无用户维度的转发入口（四层直通 / 独立通道）。
+// 这类入站 settings 原样透传，不注入 clients；已退役的 Mixed/SOCKS5/HTTP 协议不再匹配，
+// 存量脏数据会落入通用分支并被协议注册表显式拒绝（Fail-closed）。
 func (inb *Inbound) IsForwardProxy() bool {
-	return inb.Protocol == ProtocolSocks || inb.Protocol == ProtocolHTTP || inb.Protocol == ProtocolMixed || inb.Type == InboundTypeForward
+	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeForward || inb.Type == InboundTypeTunnel
 }
 
 // IsRelay 判断入站是否为内部中转链路（relay）。
@@ -123,48 +125,6 @@ func (inb *Inbound) IsRelay() bool {
 // 任何非内部中转链路（relay）的入站端口（包括用户接入入站、四层直通、转发代理以及后续添加的任何新协议）均具备对外接入属性。
 func (inb *Inbound) CanServeAccessPoint() bool {
 	return inb.Type != InboundTypeRelay
-}
-
-// ForwardUser 独立转发用户（SOCKS5 / HTTP 账密认证与独立计量计费）。
-// 绑定 PermissionGroupID，由该组下所有 SOCKS5/HTTP 入站共享；流量独立归账与限额。
-type ForwardUser struct {
-	ID                uint64     `gorm:"primaryKey" json:"id"`
-	Username          string     `gorm:"size:64;uniqueIndex;not null" json:"username"`
-	Password          string     `gorm:"size:128;not null" json:"password"`
-	PermissionGroupID uint64     `gorm:"index;not null" json:"permission_group_id"` // 所属权限组
-	TrafficLimitGB    int64      `gorm:"default:0" json:"traffic_limit_gb"`         // 流量限额（GB，0=不限）
-	TrafficUsedBytes  int64      `gorm:"default:0" json:"traffic_used_bytes"`       // 本周期已用字节数
-	UpBytes           int64      `gorm:"default:0" json:"up_bytes"`                 // 原始上行累加字节
-	DownBytes         int64      `gorm:"default:0" json:"down_bytes"`               // 原始下行累加字节
-	TrafficReset      string     `gorm:"size:16;default:never" json:"traffic_reset"` // 重置周期 never / daily / weekly / monthly
-	LastResetDate     string     `gorm:"size:10" json:"-"`                          // 上次重置周期键（防止重复清零）
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`                      // 到期时间（空=不过期）
-	Enabled           bool       `gorm:"default:true" json:"enabled"`               // 启用状态
-	Remark            string     `gorm:"size:255" json:"remark"`                    // 备注
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-}
-
-// ForwardUserTrafficUserIDBase 转发代理用户写入 traffic_logs 时的 UserID 基准偏移量。
-// 避免与商业用户（users.id）在计费/风控/账期查询中的 JOIN 冲突（商业用户 ID 递增不会达此量级）。
-const ForwardUserTrafficUserIDBase uint64 = 1_000_000_000_000 // 1 万亿 (1e12)
-
-// ForwardUserTrafficUserID 计算 ForwardUser 对应的 traffic_logs.user_id
-func ForwardUserTrafficUserID(fuid uint64) uint64 {
-	return ForwardUserTrafficUserIDBase + fuid
-}
-
-// IsForwardUserTrafficUserID 判断是否为 ForwardUser 的 traffic_logs.user_id
-func IsForwardUserTrafficUserID(uid uint64) bool {
-	return uid >= ForwardUserTrafficUserIDBase
-}
-
-// ParseForwardUserTrafficUserID 从 traffic_logs.user_id 还原 ForwardUser.ID
-func ParseForwardUserTrafficUserID(uid uint64) uint64 {
-	if uid >= ForwardUserTrafficUserIDBase {
-		return uid - ForwardUserTrafficUserIDBase
-	}
-	return 0
 }
 
 // Plan 套餐。

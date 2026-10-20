@@ -1,6 +1,6 @@
 import type { FallbackItem } from '@/api/types'
 
-export type InboundProtocol = 'vless' | 'dokodemo-door' | 'mixed' | 'socks' | 'http' | 'hysteria'
+export type InboundProtocol = 'vless' | 'dokodemo-door' | 'hysteria'
 export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'none'
 export type InboundType = 'user' | 'forward' | 'tunnel'
@@ -80,17 +80,6 @@ export interface DokodemoConfig {
   target_port?: number
   network: string // 'tcp,udp' | 'tcp' | 'udp'
   proxy_protocol?: boolean // 是否向目标发送 PROXY Protocol v2
-}
-
-export interface AccountItem {
-  user: string
-  pass: string
-}
-
-export interface SocksHttpConfig {
-  auth: 'password' | 'none'
-  accounts: AccountItem[]
-  udp: boolean // 仅 socks5
 }
 
 export function copyText(txt: string) {

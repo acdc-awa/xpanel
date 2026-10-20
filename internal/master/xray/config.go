@@ -37,7 +37,6 @@ func UserEmailFor(u *models.User, inboundID uint64) string {
 var (
 	userEmailForRe     = regexp.MustCompile(`^u(\d+)\.i(\d+)@panel\.local$`)
 	userEmailLegacyRe  = regexp.MustCompile(`^user-(\d+)@panel\.local$`)
-	forwardUserEmailRe = regexp.MustCompile(`^fu(\d+)\.i(\d+)@panel\.local$`)
 	relayEmailRe       = regexp.MustCompile(`^relay\.in_(\d+)\.out_(\d+)@panel\.local$`)
 	relayEmailLegacyRe = regexp.MustCompile(`^relay\.out_(\d+)@panel\.local$`)
 )
@@ -62,23 +61,6 @@ func ParseRelayEmail(email string) (inboundID, outboundID uint64, ok bool) {
 			return 0, 0, false
 		}
 		return 0, oid, true
-	}
-	return 0, 0, false
-}
-
-// ParseForwardUserEmail 反解 ForwardUser 统计键：fu<fuid>.i<iid>@panel.local → (forwardUserID, inboundID, ok)。
-func ParseForwardUserEmail(email string) (forwardUserID, inboundID uint64, ok bool) {
-	e := strings.ToLower(email)
-	if m := forwardUserEmailRe.FindStringSubmatch(e); m != nil {
-		fuid, err := strconv.ParseUint(m[1], 10, 64)
-		if err != nil {
-			return 0, 0, false
-		}
-		iid, err := strconv.ParseUint(m[2], 10, 64)
-		if err != nil {
-			return 0, 0, false
-		}
-		return fuid, iid, true
 	}
 	return 0, 0, false
 }
@@ -119,25 +101,19 @@ func ParseUserEmailAny(email string) (userID, inboundID uint64, ok bool) {
 	return 0, 0, false
 }
 
-// CountDistinctOnlineUsers 按去重用户口径统计在线快照人数：面板用户与自用代理用户按统计键反解去重
-// （按入站区分统计键后，同一商业用户或自用代理用户若跨入站/双协议连接，只计一人）；
+// CountDistinctOnlineUsers 按去重用户口径统计在线快照人数：面板用户按统计键反解去重
+// （按入站区分统计键后，同一商业用户若跨入站/双协议连接，只计一人）；
 // relay 内部账户与自定义 email 各计一。
 func CountDistinctOnlineUsers(users []protocol.OnlineUserIPs) int {
 	if len(users) == 0 {
 		return 0
 	}
 	seenUsers := make(map[uint64]struct{}, len(users))
-	seenForwardUsers := make(map[uint64]struct{}, len(users))
 	n := 0
 	for _, u := range users {
 		if uid, _, ok := ParseUserEmailAny(u.Email); ok {
 			if _, dup := seenUsers[uid]; !dup {
 				seenUsers[uid] = struct{}{}
-				n++
-			}
-		} else if fuid, _, ok := ParseForwardUserEmail(u.Email); ok {
-			if _, dup := seenForwardUsers[fuid]; !dup {
-				seenForwardUsers[fuid] = struct{}{}
 				n++
 			}
 		} else {
@@ -753,58 +729,7 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	// 入站认证用户/凭据动态装配
 	switch {
 	case inb.IsForwardProxy():
-		// 独立通道 / 转发代理入站（Mixed / SOCKS5 / HTTP 等）
-		if inb.Protocol == models.ProtocolMixed || inb.Protocol == models.ProtocolSocks || inb.Protocol == models.ProtocolHTTP {
-			var allowedGroups []uint64
-			if ctx != nil && ctx.InboundAuthorizedGroups != nil {
-				allowedGroups = ctx.InboundAuthorizedGroups[inb.ID]
-			}
-			accounts := make([]map[string]any, 0)
-			seenUsers := make(map[uint64]bool)
-			if ctx != nil && ctx.ForwardUsersByGroup != nil {
-				for _, gid := range allowedGroups {
-					for _, fu := range ctx.ForwardUsersByGroup[gid] {
-						if !seenUsers[fu.ID] {
-							seenUsers[fu.ID] = true
-							accounts = append(accounts, map[string]any{
-								"user":  fu.Username,
-								"pass":  fu.Password,
-								"email": fmt.Sprintf("fu%d.i%d@panel.local", fu.ID, inb.ID),
-							})
-						}
-					}
-				}
-			}
-			// 机间中继凭据注入（来自引用该 Mixed 入站的前置 ServerOutbound）
-			if ctx != nil && ctx.ReferencingOutbounds != nil {
-				for _, refOut := range ctx.ReferencingOutbounds[inb.ID] {
-					refUUID := refOut.InternalUUID
-					if refUUID == "" && inb.InternalUUID != "" {
-						refUUID = inb.InternalUUID
-					}
-					if refUUID != "" {
-						accounts = append(accounts, map[string]any{
-							"user":  fmt.Sprintf("relay_out_%d", inb.ID),
-							"pass":  refUUID,
-							"email": fmt.Sprintf("relay.in_%d.out_%d@panel.local", inb.ID, refOut.ID),
-						})
-					}
-				}
-			}
-			// 严格零信任物理跳过：若无任何有效认证账号（未挂载接入点或权限组内无有效用户），
-			// 绝不注入该入站到 Xray 配置（彻底杜绝 Xray 空 accounts 沦为免密开放代理）
-			if len(accounts) == 0 {
-				log.Printf("[xray-generate] Mixed/转发入站 %s (id=%d) 无有效认证账号，物理跳过以防免密开放代理", inb.Tag, inb.ID)
-				return nil, nil
-			}
-			settings["auth"] = "password"
-			settings["accounts"] = accounts
-			if inb.Protocol == models.ProtocolMixed || inb.Protocol == models.ProtocolSocks {
-				if _, hasUDP := settings["udp"]; !hasUDP {
-					settings["udp"] = true
-				}
-			}
-		}
+		// 四层直通 / 独立通道：没有用户维度，settings 原样透传（不注入 clients）。
 	default:
 		// 通用入站：多源动态汇聚（商业用户 + 连入出站的机间中继凭据）
 		var aggregatedUsers []protocol.User

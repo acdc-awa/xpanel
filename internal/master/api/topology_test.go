@@ -287,7 +287,7 @@ func TestTopologyLayoutTagOrders(t *testing.T) {
 	}
 }
 
-// 阶段一防御：权限组删除防护（ForwardUser 与 Inbound 绑定检查）
+// 阶段一防御：权限组删除防护（用户绑定检查）
 func TestAdminDeletePermissionGroup_ProtectionChecks(t *testing.T) {
 	db := apiTestDB(t)
 	d := &Deps{DB: db}
@@ -296,27 +296,7 @@ func TestAdminDeletePermissionGroup_ProtectionChecks(t *testing.T) {
 	r := gin.New()
 	r.DELETE("/api/v1/admin/permission-groups/:id", d.AdminDeletePermissionGroup)
 
-	// 1. 被 ForwardUser 绑定的权限组禁止删除
-	pg1 := models.PermissionGroup{Name: "PG-FU"}
-	db.Create(&pg1)
-	fu := models.ForwardUser{
-		Username:          "fu_test_1",
-		Password:          "pass123",
-		PermissionGroupID: pg1.ID,
-		Enabled:           true,
-	}
-	db.Create(&fu)
-
-	req1 := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/admin/permission-groups/%d", pg1.ID), nil)
-	w1 := httptest.NewRecorder()
-	r.ServeHTTP(w1, req1)
-	if w1.Code != http.StatusBadRequest {
-		t.Fatalf("期望被 ForwardUser 绑定的组删除返回 400，实际: %d, body: %s", w1.Code, w1.Body.String())
-	}
-
-
-
-	// 3. 无任何绑定的权限组允许删除
+	// 1. 无任何绑定的权限组允许删除
 	pg3 := models.PermissionGroup{Name: "PG-Empty"}
 	db.Create(&pg3)
 

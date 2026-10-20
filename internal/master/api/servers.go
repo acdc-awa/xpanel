@@ -1205,7 +1205,6 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 
 	entries := make([]onlineIPEntry, 0, len(raw))
 	userIdx := make(map[uint64]int, len(raw))
-	forwardUserIdx := make(map[uint64]int, len(raw))
 	for _, e := range raw {
 		if uid, _, ok := xray.ParseUserEmailAny(e.Email); ok {
 			// 同一商业用户跨入站的多条快照合并为一行（IP 并集去重）
@@ -1215,16 +1214,6 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 			}
 			userIdx[uid] = len(entries)
 			entries = append(entries, onlineIPEntry{Email: e.Email, Kind: "user", UserID: uid, IPs: e.IPs})
-			continue
-		}
-		if fuid, _, ok := xray.ParseForwardUserEmail(e.Email); ok {
-			// 同一自用代理用户跨入站/双协议的多条快照合并为一行（IP 并集去重）
-			if idx, dup := forwardUserIdx[fuid]; dup {
-				entries[idx].IPs = mergeIPs(entries[idx].IPs, e.IPs)
-				continue
-			}
-			forwardUserIdx[fuid] = len(entries)
-			entries = append(entries, onlineIPEntry{Email: e.Email, Kind: "forward_user", UserID: fuid, IPs: e.IPs})
 			continue
 		}
 		entry := onlineIPEntry{Email: e.Email, Kind: "other", IPs: e.IPs}
@@ -1254,27 +1243,6 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 				if u.Email != "" {
 					entries[i].Email = u.Email // 统计键是合成格式，展示回填真实邮箱
 				}
-			}
-		}
-	}
-
-	if len(forwardUserIdx) > 0 {
-		fids := make([]uint64, 0, len(forwardUserIdx))
-		for fuid := range forwardUserIdx {
-			fids = append(fids, fuid)
-		}
-		var fUsers []models.ForwardUser
-		d.DB.Select("id, username").Where("id IN ?", fids).Find(&fUsers)
-		byID := make(map[uint64]models.ForwardUser, len(fUsers))
-		for _, fu := range fUsers {
-			byID[fu.ID] = fu
-		}
-		for i := range entries {
-			if entries[i].Kind != "forward_user" {
-				continue
-			}
-			if fu, ok := byID[entries[i].UserID]; ok {
-				entries[i].Name = fu.Username
 			}
 		}
 	}

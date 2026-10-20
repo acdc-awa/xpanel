@@ -18,7 +18,6 @@ import {
   Bell,
   Histogram,
   Document,
-  Switch,
 } from '@element-plus/icons-vue'
 
 export interface SubMenuItem {
@@ -49,7 +48,6 @@ export const adminMenuGroups: MenuGroup[] = [
     children: [
       { title: '服务器管理', path: '/admin/servers', icon: Monitor },
       { title: '接入点', path: '/admin/nodes', icon: Share },
-      { title: '转发用户管理', path: '/admin/channels', icon: Switch },
       { title: '路由管理', path: '/admin/routing', icon: Connection },
       { title: '证书管理', path: '/admin/certs', icon: Lock },
     ],

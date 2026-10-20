@@ -5,7 +5,6 @@ import {
   Warning,
   MagicStick,
   InfoFilled,
-  WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
@@ -30,7 +29,6 @@ import type {
   RealityConfig,
   VlessConfig,
   DokodemoConfig,
-  SocksHttpConfig,
   HysteriaConfig,
 } from './inbound/types'
 import TcpTransport from './inbound/transports/TcpTransport.vue'
@@ -40,7 +38,6 @@ import RealitySecurity from './inbound/securities/RealitySecurity.vue'
 import TlsSecurity from './inbound/securities/TlsSecurity.vue'
 import VlessSettings from './inbound/protocols/VlessSettings.vue'
 import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
-import SocksHttpSettings from './inbound/protocols/SocksHttpSettings.vue'
 import HysteriaSettings from './inbound/protocols/HysteriaSettings.vue'
 import BusinessSettings from './inbound/common/BusinessSettings.vue'
 
@@ -194,12 +191,6 @@ const dokodemoForm = ref<DokodemoConfig>({
   proxy_protocol: true,
 })
 
-const socksHttpForm = ref<SocksHttpConfig>({
-  auth: 'password',
-  accounts: [],
-  udp: true,
-})
-
 const hysteriaForm = ref<HysteriaConfig>({
   udp_idle_timeout: 60,
 })
@@ -291,14 +282,12 @@ const isInternalUpdating = ref(false)
 const allowedNetworks = computed<InboundNetwork[]>(() => {
   if (localProtocol.value === 'hysteria') return ['hysteria']
   if (localProtocol.value === 'dokodemo-door') return ['tcp']
-  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') return ['tcp']
   return ['tcp', 'xhttp']
 })
 
 const allowedSecurities = computed<InboundSecurity[]>(() => {
   if (localProtocol.value === 'hysteria') return ['tls']
   if (localProtocol.value === 'dokodemo-door') return ['none']
-  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') return ['none', 'tls']
   return ['none', 'tls', 'reality']
 })
 
@@ -356,8 +345,6 @@ function onProtocolChange(proto: any) {
     }
   } else if (p === 'dokodemo-door') {
     localInboundType.value = 'tunnel'
-  } else if (p === 'mixed' || p === 'socks' || p === 'http') {
-    localInboundType.value = 'forward'
   } else if (p === 'vless' && (localInboundType.value === 'tunnel' || localInboundType.value === 'forward')) {
     localInboundType.value = 'user'
   }
@@ -403,22 +390,6 @@ function buildSettingsJSON(): string {
       network: dokodemoForm.value.network || 'tcp,udp',
       followRedirect: false,
     })
-  }
-
-  if (localProtocol.value === 'mixed' || localProtocol.value === 'socks') {
-    const s: Record<string, any> = {
-      auth: 'password',
-      udp: socksHttpForm.value.udp,
-    }
-    return JSON.stringify(s)
-  }
-
-  if (localProtocol.value === 'http') {
-    const s: Record<string, any> = {
-      auth: 'password',
-      allowTransparent: false,
-    }
-    return JSON.stringify(s)
   }
 
   if (localProtocol.value === 'hysteria') {
@@ -757,13 +728,6 @@ function parseJsonToForm(str: string) {
     } else if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
       localInboundType.value = 'tunnel'
       localProtocol.value = 'dokodemo-door'
-    } else if (parsed.type === 'forward' || parsed.protocol === 'mixed' || parsed.protocol === 'socks' || parsed.protocol === 'http' || localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
-      localInboundType.value = 'forward'
-      if (parsed.protocol === 'mixed' || localProtocol.value === 'mixed') {
-        localProtocol.value = 'mixed'
-      } else if (localProtocol.value !== 'socks' && localProtocol.value !== 'http') {
-        localProtocol.value = (parsed.protocol === 'socks' || parsed.protocol === 'http') ? (parsed.protocol as InboundProtocol) : 'mixed'
-      }
     } else {
       localInboundType.value = 'user'
       localProtocol.value = 'vless'
@@ -783,12 +747,6 @@ function parseJsonToForm(str: string) {
         target_port: s?.port || parsed.target_port || 0,
         network: s?.network || 'tcp,udp',
         proxy_protocol: streamObj.proxy_protocol !== false && streamObj.proxyProtocol !== false,
-      }
-    } else if (localProtocol.value === 'mixed' || localProtocol.value === 'socks' || localProtocol.value === 'http') {
-      socksHttpForm.value = {
-        auth: 'password',
-        udp: s?.udp !== false,
-        accounts: Array.isArray(s?.accounts) ? s.accounts : [],
       }
     } else {
       vlessForm.value = {
@@ -1124,7 +1082,6 @@ watch(
     localLayerId,
     vlessForm,
     dokodemoForm,
-    socksHttpForm,
     hysteriaForm,
     tcpForm,
     xhttpForm,
@@ -1207,7 +1164,6 @@ watch(
                     <el-option label="VLESS" value="vless" />
                     <el-option label="Hysteria 2" value="hysteria" />
                     <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
-                    <el-option label="Mixed (SOCKS5 / HTTP 混合代理)" value="mixed" />
                   </el-select>
                 </el-form-item>
 
@@ -1288,11 +1244,6 @@ watch(
             :listen-port="localPort"
             :listen-address="localListen"
           />
-          <SocksHttpSettings
-            v-else-if="localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http'"
-            v-model="socksHttpForm"
-            :protocol="localProtocol"
-          />
         </div>
 
         <!-- ==================== 3. 传输层 Tab (仅限 VLESS) ==================== -->
@@ -1343,10 +1294,6 @@ watch(
           <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
             <el-icon><InfoFilled /></el-icon>
             <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
-          </div>
-          <div v-else-if="(localProtocol === 'mixed' || localProtocol === 'socks' || localProtocol === 'http') && localTlsType === 'tls'" class="compact-tip orange">
-            <el-icon><WarningFilled /></el-icon>
-            <span>Mixed/SOCKS 套用 TLS 后，客户端须支持 HTTPS 代理或 SOCKS over TLS。</span>
           </div>
 
           <TlsSecurity

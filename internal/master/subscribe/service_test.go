@@ -256,6 +256,7 @@ func TestResolveAPSubscription_TunnelPipeline(t *testing.T) {
 	}
 }
 
+// 订阅只承载 vless 与 hysteria2 两种客户端协议（Mixed/SOCKS5/HTTP 已退役）。
 func TestBuildMultiProtocolSubscription(t *testing.T) {
 	nodes := []contracts.ProxyNodeDTO{
 		{
@@ -267,20 +268,13 @@ func TestBuildMultiProtocolSubscription(t *testing.T) {
 			Auth:       &contracts.ClientCredentialDTO{Password: "secret123"},
 		},
 		{
-			Name:       "Socks5-Node",
-			ServerHost: "socks.example.com",
-			ServerPort: 1080,
-			Protocol:   "socks",
+			Name:       "Vless-Node",
+			ServerHost: "vless.example.com",
+			ServerPort: 443,
+			Protocol:   "vless",
+			Transport:  &contracts.TransportOptions{Network: "tcp"},
 			Security:   &contracts.SecurityOptions{Type: "none"},
-			Auth:       &contracts.ClientCredentialDTO{User: "alice", Password: "pwd"},
-		},
-		{
-			Name:       "HTTP-Node",
-			ServerHost: "http.example.com",
-			ServerPort: 8080,
-			Protocol:   "http",
-			Security:   &contracts.SecurityOptions{Type: "tls", SNI: "http.example.com"},
-			Auth:       &contracts.ClientCredentialDTO{User: "bob", Password: "pwd"},
+			Auth:       &contracts.ClientCredentialDTO{UUID: "11111111-1111-1111-1111-111111111111"},
 		},
 	}
 
@@ -294,11 +288,8 @@ func TestBuildMultiProtocolSubscription(t *testing.T) {
 	if !strings.Contains(content, "hysteria2://secret123@hy2.example.com:8443") {
 		t.Errorf("BuildBase64 缺少 hysteria2 链接: %s", content)
 	}
-	if !strings.Contains(content, "socks5://alice:pwd@socks.example.com:1080#Socks5-Node") {
-		t.Errorf("BuildBase64 缺少 socks5 链接: %s", content)
-	}
-	if !strings.Contains(content, "https://bob:pwd@http.example.com:8080#HTTP-Node") {
-		t.Errorf("BuildBase64 缺少 https 链接: %s", content)
+	if !strings.Contains(content, "vless://11111111-1111-1111-1111-111111111111@vless.example.com:443") {
+		t.Errorf("BuildBase64 缺少 vless 链接: %s", content)
 	}
 
 	// 2. Clash YAML
@@ -306,11 +297,8 @@ func TestBuildMultiProtocolSubscription(t *testing.T) {
 	if !strings.Contains(yaml, "type: hysteria2") {
 		t.Errorf("BuildClashWithTemplate 缺少 hysteria2: %s", yaml)
 	}
-	if !strings.Contains(yaml, "type: socks5") || !strings.Contains(yaml, "username: 'alice'") {
-		t.Errorf("BuildClashWithTemplate 缺少 socks5: %s", yaml)
-	}
-	if !strings.Contains(yaml, "type: http") || !strings.Contains(yaml, "username: 'bob'") {
-		t.Errorf("BuildClashWithTemplate 缺少 http: %s", yaml)
+	if !strings.Contains(yaml, "type: vless") {
+		t.Errorf("BuildClashWithTemplate 缺少 vless: %s", yaml)
 	}
 }
 

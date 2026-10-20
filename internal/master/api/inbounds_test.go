@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -128,11 +127,10 @@ func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
 	}
 	db.Create(&tunnel)
 
-	// 2. Channel 入站
+	// 2. Channel 入站（四层直通通道）
 	chanInb := models.Inbound{
-		ServerID: 1, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
+		ServerID: 1, Tag: "chan-tunnel-1080", Protocol: "dokodemo-door", Port: 1080,
 		Type: models.InboundTypeChannel, Enabled: true,
-		SettingsJSON: `{"auth":"password","accounts":[{"user":"test","pass":"pass123"}],"udp":true}`,
 	}
 	db.Create(&chanInb)
 
@@ -186,9 +184,9 @@ func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
 	}
 	db.Create(&tunnel)
 
-	// 2. Channel 入站
+	// 2. Channel 入站（四层直通通道）
 	chanInb := models.Inbound{
-		ServerID: 2, Tag: "chan-socks-1080", Protocol: "socks", Port: 1080,
+		ServerID: 2, Tag: "chan-tunnel-1080", Protocol: "dokodemo-door", Port: 1080,
 		Type: models.InboundTypeForward, Enabled: true,
 	}
 	db.Create(&chanInb)
@@ -226,8 +224,13 @@ func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
 	}
 
 	// D. 停用 Tunnel 后，落地入站应允许 Toggle 停用
-	tunnel.Enabled = false
-	db.Save(&tunnel)
+	// 必须走 API 停用：C2 的派生出站随直通入站 enabled 联动，直改库不会触发对账。
+	reqTgl := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", tunnel.ID), nil)
+	wTgl := httptest.NewRecorder()
+	r.ServeHTTP(wTgl, reqTgl)
+	if wTgl.Code != http.StatusOK {
+		t.Fatalf("停用 Tunnel 应成功, 实际: %d, body: %s", wTgl.Code, wTgl.Body.String())
+	}
 
 	req4 := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/admin/inbounds/%d/toggle", landing.ID), nil)
 	w4 := httptest.NewRecorder()
@@ -286,8 +289,8 @@ func TestEnsureTargetAcceptProxyProtocol(t *testing.T) {
 	}
 }
 
-// 阶段一防御：入站不再持久化静态 accounts，写入或更新时自动剔除 accounts，防止残留静态账密。
-func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
+// 协议退役：Mixed / SOCKS5 / HTTP 入站不再允许创建（Fail-closed，避免任何匿名代理形态复活）。
+func TestAdminInbounds_RetiredProtocolsRejected(t *testing.T) {
 	db := apiTestDB(t)
 	db.Create(&models.Server{ID: 5, Name: "node-5", Host: "1.2.3.4", NodeID: "n5", Secret: "sec"})
 
@@ -295,50 +298,29 @@ func TestAdminInbounds_SocksHttpSanitization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/api/v1/admin/inbounds", d.AdminCreateInbound)
-	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
 
-	// 1. 创建带静态 accounts 的 Mixed -> 成功创建，但 accounts 必须被清洗剔除且 type 权威归一化为 forward
-	bodyAuth := map[string]any{
-		"server_id":     5,
-		"tag":           "mixed-test",
-		"protocol":      "mixed",
-		"port":          10801,
-		"settings_json": `{"auth":"password","accounts":[{"user":"admin","pass":"secret"}],"udp":true}`,
-	}
-	raw, _ := json.Marshal(bodyAuth)
-	req := httptest.NewRequest("POST", "/api/v1/admin/inbounds", bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("创建 Mixed 应成功，实际: %d, body: %s", w.Code, w.Body.String())
-	}
-
-	var created models.Inbound
-	db.Where("tag = ?", "mixed-test").First(&created)
-	if created.Type != models.InboundTypeForward {
-		t.Fatalf("Mixed 入站应权威归一化为 forward，实际: %s", created.Type)
-	}
-	if strings.Contains(created.SettingsJSON, "admin") || strings.Contains(created.SettingsJSON, "secret") {
-		t.Fatalf("入站 settings_json 中不应残留静态 accounts: %s", created.SettingsJSON)
+	for _, proto := range []string{"mixed", "socks", "http"} {
+		body := map[string]any{
+			"server_id":     5,
+			"tag":           proto + "-test",
+			"protocol":      proto,
+			"port":          10801,
+			"settings_json": `{"auth":"password","accounts":[{"user":"admin","pass":"secret"}],"udp":true}`,
+		}
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest("POST", "/api/v1/admin/inbounds", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("创建 %s 入站应被拒绝，实际: %d, body: %s", proto, w.Code, w.Body.String())
+		}
 	}
 
-	// 2. 更新时尝试写入静态 accounts -> 同样被清洗剔除
-	updateRaw := map[string]any{
-		"settings_json": `{"auth":"password","accounts":[{"user":"hacker","pass":"pass"}],"udp":true}`,
-	}
-	raw, _ = json.Marshal(updateRaw)
-	req = httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", created.ID), bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("更新 Mixed 应成功，实际: %d, body: %s", w.Code, w.Body.String())
-	}
-
-	db.Where("id = ?", created.ID).First(&created)
-	if strings.Contains(created.SettingsJSON, "hacker") {
-		t.Fatalf("更新后入站 settings_json 中不应残留静态 accounts: %s", created.SettingsJSON)
+	var cnt int64
+	db.Model(&models.Inbound{}).Count(&cnt)
+	if cnt != 0 {
+		t.Fatalf("退役协议不应落库，实际 %d 条", cnt)
 	}
 }
 

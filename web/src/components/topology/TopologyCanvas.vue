@@ -269,7 +269,7 @@ function typeInfo(t?: string) {
   return { cls: '', text: '' }
 }
 
-// 提取入站协议与端口摘要标签（主协议名：VLESS / HY2 / MIXED / TUNNEL）
+// 提取入站协议与端口摘要标签（主协议名：VLESS / HY2 / TUNNEL）
 function inboundSummary(inb: TopologyData['inbounds'][number]) {
   let proto = 'VLESS'
   let cls = 'vless'
@@ -277,9 +277,6 @@ function inboundSummary(inb: TopologyData['inbounds'][number]) {
   if (p === 'hysteria') {
     proto = 'HY2'
     cls = 'hy2'
-  } else if (p === 'mixed' || p === 'socks' || p === 'http') {
-    proto = 'MIXED'
-    cls = 'mixed'
   } else if (p === 'dokodemo-door' || inb.type === 'tunnel') {
     proto = 'TUNNEL'
     cls = 'tunnel'

@@ -17,17 +17,11 @@ var registry = contracts.NewPluginRegistry()
 func init() {
 	registry.Register(VLESSPlugin{})
 	registry.Register(HysteriaPlugin{})
-	registry.Register(MixedPlugin{})
 }
 
 // Find 按协议名查找插件；未注册返回 nil。
 func Find(proto string) contracts.ProtocolPlugin {
-	p := registry.Find(proto)
-	if p != nil {
-		return p
-	}
-	// 兼容支持以 socks/http 等 scheme 别名查找 mixed 插件
-	return registry.FindByScheme(proto)
+	return registry.Find(proto)
 }
 
 // FindByScheme 按 URL scheme 查找匹配的协议插件；未注册返回 nil。

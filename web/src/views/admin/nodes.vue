@@ -44,15 +44,13 @@ const filteredInbounds = computed(() =>
 )
 
 function inboundChipText(row: InboundItem): string {
-  if (row.type === 'tunnel') return '四层直通'
-  if (row.type === 'forward') return '转发代理'
+  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'dokodemo-door') return '四层直通'
   if (row.protocol === 'hysteria') return 'Hysteria 2'
   return 'VLESS'
 }
 
 function inboundChipClass(row: InboundItem): string {
-  if (row.type === 'tunnel') return 'cyan'
-  if (row.type === 'forward') return 'blue'
+  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'dokodemo-door') return 'cyan'
   if (row.protocol === 'hysteria') return 'teal'
   return 'purple'
 }
@@ -410,12 +408,12 @@ function quotaOf(row: any): string {
             </el-select>
             <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px">
               <el-option label="用户入站" value="user" />
-              <el-option label="转发代理" value="forward" />
+              <el-option label="直通通道" value="forward" />
               <el-option label="四层直通" value="tunnel" />
             </el-select>
             <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
             <TipIcon
-              content="在此为 Xray 服务器配置物理入站：代理入站支持多源复用（同时承载用户与链式中继），转发代理提供标准SOCKS5/HTTP/直通中转，四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
+              content="在此为 Xray 服务器配置物理入站：VLESS / Hysteria 2 代理入站支持多源复用（同时承载用户与链式中继），四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
             />
           </div>
           <div style="display: flex; gap: 10px">

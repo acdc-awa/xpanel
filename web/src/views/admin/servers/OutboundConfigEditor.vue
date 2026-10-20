@@ -62,11 +62,7 @@ function inboundLabel(i: InboundItem) {
 function onRefInboundChange(inbId: number) {
   const inb = allInbounds.value.find((i) => i.id === inbId)
   if (inb) {
-    if (inb.protocol === 'mixed') {
-      form.protocol = 'socks'
-    } else {
-      form.protocol = inb.protocol
-    }
+    form.protocol = inb.protocol
   }
 }
 
@@ -585,7 +581,7 @@ function parseExisting() {
     const target = allInbounds.value.find((i) => i.id === ob.inbound_ref)
     if (target) {
       refServerId.value = target.server_id
-      form.protocol = target.protocol === 'mixed' ? 'socks' : target.protocol
+      form.protocol = target.protocol
     }
     return
   }

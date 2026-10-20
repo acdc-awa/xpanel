@@ -128,9 +128,6 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 		}
 		if e.UserID > 0 {
 			idSet[e.UserID] = struct{}{}
-		} else if _, _, ok := xray.ParseForwardUserEmail(e.Email); ok {
-			// 转发用户维度，无需加入普通商城用户的 idSet 或 emailSet 查询
-			continue
 		} else if uid, _, ok := xray.ParseUserEmailAny(e.Email); ok {
 			idSet[uid] = struct{}{}
 		} else {
@@ -222,59 +219,6 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 						exactRatio = true
 					}
 				}
-			}
-
-			// 转发用户维度条目（SOCKS5 / HTTP 多账号统计键 fu<fuid>.i<iid>@panel.local）
-			if fuid, iid, ok := xray.ParseForwardUserEmail(e.Email); ok {
-				totalBytes := e.UpBytes + e.DownBytes
-				_ = tx.Model(&models.ForwardUser{}).Where("id = ?", fuid).Updates(map[string]any{
-					"up_bytes":           gorm.Expr("up_bytes + ?", e.UpBytes),
-					"down_bytes":         gorm.Expr("down_bytes + ?", e.DownBytes),
-					"traffic_used_bytes": gorm.Expr("traffic_used_bytes + ?", totalBytes),
-				})
-
-				ratio := 1.0
-				if inb, found := inboundByID[iid]; found && inb.Ratio >= 0 {
-					ratio = inb.Ratio
-				}
-				row := models.TrafficLog{
-					UserID:      models.ForwardUserTrafficUserID(fuid),
-					InboundID:   iid,
-					UpBytes:     e.UpBytes,
-					DownBytes:   e.DownBytes,
-					BilledUp:    roundBilled(e.UpBytes, ratio),
-					BilledDown:  roundBilled(e.DownBytes, ratio),
-					PeriodStart: periodStart,
-					PeriodEnd:   periodEnd,
-					CycleID:     0,
-				}
-				var doUpdates clause.Set
-				if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
-					doUpdates = clause.Assignments(map[string]any{
-						"up_bytes":    gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
-						"down_bytes":  gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
-						"billed_up":   gorm.Expr("traffic_logs.billed_up + VALUES(billed_up)"),
-						"billed_down": gorm.Expr("traffic_logs.billed_down + VALUES(billed_down)"),
-						"period_end":  gorm.Expr("VALUES(period_end)"),
-					})
-				} else {
-					doUpdates = clause.Assignments(map[string]any{
-						"up_bytes":    gorm.Expr("up_bytes + excluded.up_bytes"),
-						"down_bytes":  gorm.Expr("down_bytes + excluded.down_bytes"),
-						"billed_up":   gorm.Expr("billed_up + excluded.billed_up"),
-						"billed_down": gorm.Expr("billed_down + excluded.billed_down"),
-						"period_end":  gorm.Expr("excluded.period_end"),
-					})
-				}
-				if err := tx.Clauses(clause.OnConflict{
-					Columns: []clause.Column{
-						{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
-					},
-					DoUpdates: doUpdates,
-				}).Create(&row).Error; err != nil {
-					return err
-				}
-				continue
 			}
 
 			// 入站维度条目（agent 从 inbound>>> 计数器派生，Email 恒空）：
@@ -697,44 +641,6 @@ func (s *TrafficService) resetInboundTraffic() {
 		}
 	}
 
-	if s.DB.Migrator().HasTable(&models.ForwardUser{}) {
-		var fUsers []models.ForwardUser
-		if err := s.DB.Where("traffic_reset != ? AND traffic_reset != ''", "never").Find(&fUsers).Error; err == nil {
-			resetGroups := make(map[uint64]bool)
-			for _, fu := range fUsers {
-				key := resetPeriodKey(now, fu.TrafficReset, loc)
-				if key == "" || fu.LastResetDate == key {
-					continue
-				}
-				updates := map[string]any{
-					"up_bytes":           0,
-					"down_bytes":         0,
-					"traffic_used_bytes": 0,
-					"last_reset_date":    key,
-				}
-				// 若未过期，自动解除熔断并恢复 enabled
-				if fu.ExpiresAt == nil || now.Before(*fu.ExpiresAt) {
-					updates["enabled"] = true
-				}
-				if err := s.DB.Model(&models.ForwardUser{}).
-					Where("id = ? AND (last_reset_date IS NULL OR last_reset_date != ?)", fu.ID, key).
-					Updates(updates).Error; err == nil {
-					resetGroups[fu.PermissionGroupID] = true
-				}
-			}
-			if len(resetGroups) > 0 {
-				var gids []uint64
-				for gid := range resetGroups {
-					gids = append(gids, gid)
-				}
-				sids, _ := FindServersByPermissionGroups(s.DB, gids)
-				for _, sid := range sids {
-					modifiedServers[sid] = true
-				}
-			}
-		}
-	}
-
 	for sid := range modifiedServers {
 		if s.OnInboundLifecycleChanged != nil {
 			s.OnInboundLifecycleChanged(sid)
@@ -1017,33 +923,6 @@ func (s *TrafficService) checkInboundLifecycle() {
 		if expired {
 			_ = s.DB.Model(&inb).Update("enabled", false)
 			modifiedServers[inb.ServerID] = true
-		}
-	}
-
-	if s.DB.Migrator().HasTable(&models.ForwardUser{}) {
-		var fUsers []models.ForwardUser
-		if err := s.DB.Where("enabled = ?", true).Find(&fUsers).Error; err == nil {
-			fwdModifiedGroups := make(map[uint64]bool)
-			for _, fu := range fUsers {
-				limitBytes := fu.TrafficLimitGB * 1024 * 1024 * 1024
-				exceeded := (fu.TrafficLimitGB > 0 && fu.TrafficUsedBytes >= limitBytes)
-				expired := (fu.ExpiresAt != nil && now.After(*fu.ExpiresAt))
-				if exceeded || expired {
-					if err := s.DB.Model(&fu).Update("enabled", false).Error; err == nil {
-						fwdModifiedGroups[fu.PermissionGroupID] = true
-					}
-				}
-			}
-			if len(fwdModifiedGroups) > 0 {
-				var gids []uint64
-				for gid := range fwdModifiedGroups {
-					gids = append(gids, gid)
-				}
-				sids, _ := FindServersByPermissionGroups(s.DB, gids)
-				for _, sid := range sids {
-					modifiedServers[sid] = true
-				}
-			}
 		}
 	}
 

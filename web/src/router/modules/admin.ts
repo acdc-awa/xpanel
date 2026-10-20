@@ -31,12 +31,6 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '接入点' },
       },
       {
-        path: 'channels',
-        name: 'admin.channels',
-        component: () => import('@/views/admin/channels.vue'),
-        meta: { title: '转发用户管理' },
-      },
-      {
         path: 'routing',
         name: 'admin.routing',
         component: () => import('@/views/admin/routing.vue'),
