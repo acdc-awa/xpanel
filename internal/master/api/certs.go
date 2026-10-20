@@ -526,13 +526,18 @@ func (d *Deps) pushCAToServer(serverID, caID uint64) error {
 }
 
 // PushPendingCAs 按需把该服务器中继链路用到的 CA 公钥补推到节点。
-// 由节点上线回调同步调用：配置里的 certificateFile 生效前文件必须已落盘。
-// 旧 agent 不声明 push_ca（收到未知消息静默丢弃、不回帧）→ Ask 超时，
-// 但生成侧此时仍走内联 PEM（见 services.buildGenerateContext），配置不受影响。
+// 由 nodegate.PushPending 在重算/推送配置前同步调用：certificateFile 生效前文件必须已落盘。
+// 未声明 push_ca 的旧 agent 直接跳过（生成侧走内联 PEM，见 services.buildGenerateContext）。
 func (d *Deps) PushPendingCAs(serverID uint64) {
+	// 旧 agent 根本没有 push_ca：既不需要推，也不能推——未知消息不回帧，只会白等 Ask 超时。
+	// 这类节点生成配置时走内联 PEM（services.buildGenerateContext 同源判定）。
+	var srv models.Server
+	if err := d.DB.Select("id", "agent_caps").First(&srv, serverID).Error; err != nil || !srv.HasAgentCap(protocol.CapPushCA) {
+		return
+	}
 	for _, caID := range d.serverCAIDs(serverID) {
 		if err := d.pushCAToServer(serverID, caID); err != nil {
-			log.Printf("certs: 推送 CA %d 到节点 %d 失败: %v（该节点若为旧 agent 将回退内联 CA）", caID, serverID, err)
+			log.Printf("certs: 推送 CA %d 到节点 %d 失败: %v（配置将保持内联 CA 直到下次重推）", caID, serverID, err)
 		}
 	}
 }
