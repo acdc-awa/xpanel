@@ -59,7 +59,8 @@ func EnsureTunnelDerivedObjects(db *gorm.DB, serverID uint64) error {
 	if err := db.Where("server_id = ?", serverID).Find(&inbounds).Error; err != nil {
 		return err
 	}
-	topo, err := buildGenerateContext(db, inbounds, nil)
+	// 这里只消费 CertDomains（直通入站），与 agent 能力无关，source 传 nil。
+	topo, err := buildGenerateContext(db, nil, inbounds, nil)
 	if err != nil {
 		return err
 	}

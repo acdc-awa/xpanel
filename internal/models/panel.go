@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ServerTypeXray 托管 Xray-core 计算节点（默认服务器类型；l4_relay 已于 2026-08-24 退役）。
 const ServerTypeXray = "xray"
@@ -28,8 +31,11 @@ type Server struct {
 	// 出站域名解析策略（freedom settings.domainStrategy）不在此建模：它是出站级属性，唯一入口是
 	// 出站编辑器（ServerOutbound.SettingsJSON.domainStrategy）。历史上的服务器级
 	// default_outbound_domain_strategy 列已移除，存量值由 migrateDefaultOutboundDSIntoOutbounds 并入出站。
-	AgentVersion string `gorm:"size:32" json:"agent_version"`      // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayRunning  bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
+	AgentVersion string `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
+	// AgentCaps 节点能力声明（心跳上报，逗号分隔；旧 agent 为空）。
+	// 主控据此选择只在新 agent 上可行的配置形态（当前仅 push_ca → 出站 CA 用 certificateFile）。
+	AgentCaps   string `gorm:"size:128" json:"agent_caps"`
+	XrayRunning bool   `gorm:"default:false" json:"xray_running"` // 节点心跳上报的 xray 进程运行状态（旧 agent 不上报，保持上次值）
 	// xray 启动失败可观测性（2026-09-21）：节点把"为什么没起来"带回主控，面板直接显示，
 	// 不必再 SSH 翻 journalctl。旧 agent 不发这些字段（空值保持，不覆盖）。
 	XrayState     string     `gorm:"size:16" json:"xray_state"`       // running / restarting / failed / stopped
@@ -50,6 +56,19 @@ type Server struct {
 	LastSeenAt *time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// HasAgentCap 节点是否声明了某项能力（空值 = 旧 agent，恒 false）。
+func (s *Server) HasAgentCap(cap string) bool {
+	if s == nil || s.AgentCaps == "" {
+		return false
+	}
+	for _, c := range strings.Split(s.AgentCaps, ",") {
+		if strings.TrimSpace(c) == cap {
+			return true
+		}
+	}
+	return false
 }
 
 // Inbound 入站（接入点），每节点可配多个。
@@ -86,15 +105,15 @@ type Inbound struct {
 	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
 	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`            // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
 	// 入站物理类型形态：user / relay / tunnel
-	Type            string  `gorm:"size:16;default:user" json:"type"`                 // user（用户入站）/ relay（内部链式转发入站）/ tunnel（四层直通管道）
-	PreviousType    string  `gorm:"size:16" json:"-"`                                 // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
-	InternalUUID    string  `gorm:"size:36" json:"internal_uuid,omitempty"`           // relay 入站 UUID（节点生成上报，主控只读）
-	TargetInboundID *uint64 `gorm:"index" json:"target_inbound_id,omitempty"`       // 四层直通目标落地入站 ID（空=待拓扑连线）
-	TargetAddress   string  `gorm:"size:255" json:"target_address,omitempty"`        // 手动指定的外部目标地址
-	TargetPort      int     `gorm:"default:0" json:"target_port,omitempty"`          // 手动指定的外部目标端口
-	CertID          *uint64 `gorm:"index" json:"cert_id,omitempty"`                   // TLS 入站选择证书（certs 表）
+	Type            string  `gorm:"size:16;default:user" json:"type"`         // user（用户入站）/ relay（内部链式转发入站）/ tunnel（四层直通管道）
+	PreviousType    string  `gorm:"size:16" json:"-"`                         // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
+	InternalUUID    string  `gorm:"size:36" json:"internal_uuid,omitempty"`   // relay 入站 UUID（节点生成上报，主控只读）
+	TargetInboundID *uint64 `gorm:"index" json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID（空=待拓扑连线）
+	TargetAddress   string  `gorm:"size:255" json:"target_address,omitempty"` // 手动指定的外部目标地址
+	TargetPort      int     `gorm:"default:0" json:"target_port,omitempty"`   // 手动指定的外部目标端口
+	CertID          *uint64 `gorm:"index" json:"cert_id,omitempty"`           // TLS 入站选择证书（certs 表）
 	Enabled         bool    `gorm:"default:true" json:"enabled"`
-	Remark          string  `gorm:"size:255" json:"remark"`                           // 入站名称/备注说明 (如独立通道名称等)
+	Remark          string  `gorm:"size:255" json:"remark"` // 入站名称/备注说明 (如独立通道名称等)
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
 	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
 	// xtls-rprx-vision = 为该入站用户全部开启；
@@ -308,15 +327,15 @@ type ServerOutbound struct {
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
 	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
 	// InboundRef 跨机链式出站的专属机间认证凭据（主控同步生成 UUIDv4）
-	InternalUUID string `gorm:"size:36" json:"internal_uuid,omitempty"`
+	InternalUUID   string `gorm:"size:36" json:"internal_uuid,omitempty"`
 	OwnerInboundID uint64 `gorm:"index" json:"owner_inbound_id,omitempty"`
 	// InboundRef 节点间 TLS 验证方式："" = 自动（目标有 CA 则优先 CA，否则 Pin）；"ca" = 强制托管 CA 验签；"pin" = 强制指纹 Pin
-	TlsVerifyMode string `gorm:"size:16" json:"tls_verify_mode,omitempty"`
-	Enabled        bool   `gorm:"default:true" json:"enabled"`
-	Priority       int    `gorm:"default:0" json:"priority"`
-	Remark         string `gorm:"size:255" json:"remark"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	TlsVerifyMode string    `gorm:"size:16" json:"tls_verify_mode,omitempty"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	Priority      int       `gorm:"default:0" json:"priority"`
+	Remark        string    `gorm:"size:255" json:"remark"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // DefaultFreedomDirectSettingsJSON freedom 出站的面板默认 settings（canonical 形状，唯一真源）。
@@ -333,16 +352,16 @@ const DefaultFreedomDirectSettingsJSON = `{"domainStrategy":"AsIs","finalRules":
 
 // ServerRoutingRule 服务器独立路由规则（§多节点 3x-ui 架构）。
 type ServerRoutingRule struct {
-	ID          uint64    `gorm:"primaryKey" json:"id"`
-	ServerID    uint64    `gorm:"index;not null" json:"server_id"`
-	OutboundTag string    `gorm:"size:64;not null" json:"outbound_tag"`
-	RuleJSON    string    `gorm:"type:text" json:"rule_json,omitempty"` // 自定义完整 Rule JSON
-	Domain      string    `gorm:"type:text" json:"domain,omitempty"`    // 逗号/换行分隔或 JSON 数组
-	IP          string    `gorm:"type:text" json:"ip,omitempty"`        // 逗号/换行分隔或 JSON 数组
-	Port        string    `gorm:"size:64" json:"port,omitempty"`
-	Network     string    `gorm:"size:32" json:"network,omitempty"`
-	Protocol    string    `gorm:"size:64" json:"protocol,omitempty"`      // bittorrent / http / tls / quic，逗号分隔多选
-	InboundTag  string    `gorm:"type:text" json:"inbound_tag,omitempty"` // 逗号/换行分隔或 JSON 数组
+	ID          uint64 `gorm:"primaryKey" json:"id"`
+	ServerID    uint64 `gorm:"index;not null" json:"server_id"`
+	OutboundTag string `gorm:"size:64;not null" json:"outbound_tag"`
+	RuleJSON    string `gorm:"type:text" json:"rule_json,omitempty"` // 自定义完整 Rule JSON
+	Domain      string `gorm:"type:text" json:"domain,omitempty"`    // 逗号/换行分隔或 JSON 数组
+	IP          string `gorm:"type:text" json:"ip,omitempty"`        // 逗号/换行分隔或 JSON 数组
+	Port        string `gorm:"size:64" json:"port,omitempty"`
+	Network     string `gorm:"size:32" json:"network,omitempty"`
+	Protocol    string `gorm:"size:64" json:"protocol,omitempty"`      // bittorrent / http / tls / quic，逗号分隔多选
+	InboundTag  string `gorm:"type:text" json:"inbound_tag,omitempty"` // 逗号/换行分隔或 JSON 数组
 	// OwnerInboundID > 0 = 该规则由某个四层直通入站自动维护（C2）：可编辑（改指向/加条件/调优先级），
 	// 但不可删除——停用或删除直通本身才是唯一入口；删除直通时级联删除。
 	OwnerInboundID uint64    `gorm:"index" json:"owner_inbound_id,omitempty"`

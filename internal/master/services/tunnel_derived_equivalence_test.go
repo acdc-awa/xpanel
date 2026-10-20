@@ -122,7 +122,7 @@ func TestTunnelDerived_C2Equivalence(t *testing.T) {
 	if err := db.Where("server_id = ?", serverID).Find(&allInbounds).Error; err != nil {
 		t.Fatal(err)
 	}
-	topoA, err := buildGenerateContext(db, allInbounds, dbOutbounds)
+	topoA, err := buildGenerateContext(db, nil, allInbounds, dbOutbounds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestTunnelDerived_C2Equivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	topo, err := buildGenerateContext(db, inbounds, outbounds)
+	topo, err := buildGenerateContext(db, nil, inbounds, outbounds)
 	if err != nil {
 		t.Fatal(err)
 	}

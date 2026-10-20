@@ -37,7 +37,10 @@ func (s *ConfigService) driver() contracts.CoreDriver {
 
 // buildGenerateContext 组装生成器拓扑化上下文（Phase T T3）：
 // InboundRef → 目标入站（可跨服务器，含 Server Host 与目标证书 pin）与 CertID → 域名映射。
-func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*contracts.TopologyContext, error) {
+// source 为消费该配置的服务器：其 agent 能力决定 CA 验签用文件（push_ca 已落盘）
+// 还是内联 PEM（旧 agent 兜底）。
+func buildGenerateContext(db *gorm.DB, source *models.Server, inbounds []models.Inbound, outbounds []models.ServerOutbound) (*contracts.TopologyContext, error) {
+	useCAFile := source != nil && source.HasAgentCap(protocol.CapPushCA)
 	ctx := &contracts.TopologyContext{
 		RefTargets:  map[uint64]contracts.RefTarget{},
 		CertDomains: map[uint64]string{},
@@ -75,6 +78,7 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 	certPins := map[uint64]string{}
 	certDomains := map[uint64]string{}
 	certCAs := map[uint64]string{}
+	certCAIDs := map[uint64]uint64{}
 	if len(certIDs) > 0 {
 		var certs []models.Cert
 		if err := db.Where("id IN ?", certIDs).Find(&certs).Error; err != nil {
@@ -89,6 +93,7 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 			}
 			if c.CAID != nil && *c.CAID != 0 {
 				caIDs = append(caIDs, *c.CAID)
+				certCAIDs[c.ID] = *c.CAID
 			}
 		}
 		if len(caIDs) > 0 {
@@ -116,8 +121,19 @@ func buildGenerateContext(db *gorm.DB, inbounds []models.Inbound, outbounds []mo
 			rt := contracts.RefTarget{Inbound: t, ServerHost: srv.Host}
 			if t.CertID != nil {
 				rt.CertPin = certPins[*t.CertID]
-				rt.CACert = certCAs[*t.CertID]
 				rt.TargetCertDomain = certDomains[*t.CertID]
+				caID := certCAIDs[*t.CertID]
+				caPEM := certCAs[*t.CertID]
+				if caID != 0 && caPEM != "" {
+					rt.CACertID = caID
+					if useCAFile {
+						// 新 agent：CA 由 push_ca 落到 <certs_dir>/ca/<id>.crt，配置只引用路径
+						rt.CACertFile = contracts.CACertPath(caID)
+					} else {
+						// 旧 agent 兜底：内联 PEM，不依赖节点磁盘
+						rt.CACert = caPEM
+					}
+				}
 			}
 			ctx.RefTargets[t.ID] = rt
 		}
@@ -378,7 +394,7 @@ func (s *ConfigService) Generate(serverID uint64) (string, error) {
 		return "", err
 	}
 
-	topo, err := buildGenerateContext(s.DB, inbounds, outbounds)
+	topo, err := buildGenerateContext(s.DB, &srv, inbounds, outbounds)
 	if err != nil {
 		return "", err
 	}
@@ -430,7 +446,11 @@ func (s *ConfigService) Preview(serverID uint64, form *models.Inbound) (string, 
 	if err != nil {
 		return "", err
 	}
-	topo, err := buildGenerateContext(s.DB, inbounds, outbounds)
+	var srv models.Server
+	if err := s.DB.First(&srv, serverID).Error; err != nil {
+		return "", err
+	}
+	topo, err := buildGenerateContext(s.DB, &srv, inbounds, outbounds)
 	if err != nil {
 		return "", err
 	}

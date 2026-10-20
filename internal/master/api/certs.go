@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -471,5 +472,67 @@ func (d *Deps) PushPendingCerts(serverID uint64) {
 		nodegate.AskTimeout)
 	if err == nil {
 		_ = d.DB.Model(&pc).Update("status", "pushed")
+	}
+}
+
+// serverCAIDs 返回某服务器「中继出站 → 目标入站 → 证书 → 托管 CA」链路上需要的 CA ID。
+// 只算启用的出站与启用的入站：它们生成的配置才可能引用 CA 证书。
+func (d *Deps) serverCAIDs(serverID uint64) []uint64 {
+	var refInboundIDs []uint64
+	if err := d.DB.Model(&models.ServerOutbound{}).
+		Where("server_id = ? AND enabled = ? AND inbound_ref IS NOT NULL", serverID, true).
+		Pluck("inbound_ref", &refInboundIDs).Error; err != nil || len(refInboundIDs) == 0 {
+		return nil
+	}
+	var certIDs []uint64
+	// 与 services.buildGenerateContext 对齐：目标入站不看 enabled（出站仍可能引用它），
+	// 只有「出站生效」这一层过滤，避免生成侧要文件但这里不推。
+	if err := d.DB.Model(&models.Inbound{}).
+		Where("id IN ? AND cert_id IS NOT NULL", refInboundIDs).
+		Pluck("cert_id", &certIDs).Error; err != nil || len(certIDs) == 0 {
+		return nil
+	}
+	var caIDs []uint64
+	if err := d.DB.Model(&models.Cert{}).
+		Where("id IN ? AND ca_id IS NOT NULL", certIDs).
+		Pluck("ca_id", &caIDs).Error; err != nil {
+		return nil
+	}
+	seen := map[uint64]bool{}
+	out := make([]uint64, 0, len(caIDs))
+	for _, id := range caIDs {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// pushCAToServer 把单个托管 CA 的公钥推给节点（push_ca，落盘 <certs_dir>/ca/<id>.crt）。
+func (d *Deps) pushCAToServer(serverID, caID uint64) error {
+	if d.Hub == nil {
+		return fmt.Errorf("节点网关未初始化")
+	}
+	var ca models.CACert
+	if err := d.DB.First(&ca, caID).Error; err != nil {
+		return fmt.Errorf("CA %d 不存在: %w", caID, err)
+	}
+	_, err := d.Hub.Ask(serverID, protocol.MsgPushCA,
+		protocol.PushCAPayload{ID: ca.ID, Name: ca.Name, CertPEM: ca.CACertPEM},
+		nodegate.AskTimeout)
+	return err
+}
+
+// PushPendingCAs 按需把该服务器中继链路用到的 CA 公钥补推到节点。
+// 由节点上线回调同步调用：配置里的 certificateFile 生效前文件必须已落盘。
+// 旧 agent 不声明 push_ca（收到未知消息静默丢弃、不回帧）→ Ask 超时，
+// 但生成侧此时仍走内联 PEM（见 services.buildGenerateContext），配置不受影响。
+func (d *Deps) PushPendingCAs(serverID uint64) {
+	for _, caID := range d.serverCAIDs(serverID) {
+		if err := d.pushCAToServer(serverID, caID); err != nil {
+			log.Printf("certs: 推送 CA %d 到节点 %d 失败: %v（该节点若为旧 agent 将回退内联 CA）", caID, serverID, err)
+		}
 	}
 }

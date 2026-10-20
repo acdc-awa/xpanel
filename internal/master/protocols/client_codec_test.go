@@ -300,3 +300,56 @@ func TestProjectPeer_CAAndPinVerification(t *testing.T) {
 	runXrayTestHelper(t, rendered)
 }
 
+// TestProjectPeer_CAFileWhenAgentSupports：源节点声明 push_ca 后，机间 CA 验签
+// 必须写成 certificateFile（文件由 push_ca 落盘），而不是内联 PEM。
+func TestProjectPeer_CAFileWhenAgentSupports(t *testing.T) {
+	vlessPlugin := protocols.Find("vless")
+	inb := models.Inbound{
+		ID:             11,
+		Protocol:       "vless",
+		Port:           443,
+		InternalUUID:   "peer-uuid-5678",
+		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"peer.example.com"}}`,
+	}
+	target := contracts.RefTarget{
+		Inbound:          inb,
+		ServerHost:       "node-b.example.com",
+		TargetCertDomain: "peer.example.com",
+		CertPin:          "1122334455667788",
+		CACertID:         7,
+		CACertFile:       "/etc/xray/certs/ca/7.crt",
+	}
+	dto, err := vlessPlugin.ProjectClient(&contracts.ClientProjectionInput{
+		Role:         contracts.RolePeer,
+		RefTarget:    &target,
+		OutboundUUID: "out-peer-uuid",
+	})
+	if err != nil {
+		t.Fatalf("ProjectClient failed: %v", err)
+	}
+	if dto.Security.CACertFile != target.CACertFile {
+		t.Errorf("CACertFile want %s, got %s", target.CACertFile, dto.Security.CACertFile)
+	}
+	if dto.Security.CACert != "" {
+		t.Errorf("CACert 应留空（文件模式），got %s", dto.Security.CACert)
+	}
+	if !dto.Security.DisableSystemRoot || dto.Security.VerifyPeerCertByName != "peer.example.com" {
+		t.Errorf("CA 模式字段不完整: %+v", dto.Security)
+	}
+
+	rendered, err := protocols.RenderOutbound(dto)
+	if err != nil {
+		t.Fatalf("RenderOutbound failed: %v", err)
+	}
+	raw, _ := json.Marshal(rendered)
+	s := string(raw)
+	if !strings.Contains(s, `"certificateFile":"/etc/xray/certs/ca/7.crt"`) {
+		t.Errorf("出站未引用 CA 文件: %s", s)
+	}
+	if strings.Contains(s, `"certificate":[`) {
+		t.Errorf("文件模式不应再内联 CA PEM: %s", s)
+	}
+	if !strings.Contains(s, `"disableSystemRoot":true`) || !strings.Contains(s, `"verifyPeerCertByName":"peer.example.com"`) {
+		t.Errorf("出站缺少 CA 验签字段: %s", s)
+	}
+}

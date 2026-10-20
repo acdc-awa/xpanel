@@ -56,13 +56,13 @@ const (
 
 // NodeMetricsSnapshot 节点实时指标纯内存快照（供实时大盘毫秒级无锁读取，0 磁盘 I/O）。
 type NodeMetricsSnapshot struct {
-	ServerID    uint64    `json:"server_id"`
-	CPU         float64   `json:"cpu"`
-	Mem         float64   `json:"mem"`
-	MemTotal    uint64    `json:"mem_total"`
-	Disk        float64   `json:"disk"`
-	DiskTotal   uint64    `json:"disk_total"`
-	OnlineUsers int       `json:"online_users"`
+	ServerID    uint64  `json:"server_id"`
+	CPU         float64 `json:"cpu"`
+	Mem         float64 `json:"mem"`
+	MemTotal    uint64  `json:"mem_total"`
+	Disk        float64 `json:"disk"`
+	DiskTotal   uint64  `json:"disk_total"`
+	OnlineUsers int     `json:"online_users"`
 	// OnlineIPs 每用户在线连接源 IP 快照（心跳 payload 原样引用：每帧新解析、只读共享、
 	// 替换式更新，不就地修改）。在线用户面板优先读本字段（与 dashboard 人数同源同帧），
 	// servers.online_ips 列只作主控重启后的兜底与历史留痕。
@@ -148,6 +148,9 @@ type Hub struct {
 	Upgrader websocket.Upgrader
 	// CertPusher 节点上线后补推待推证书的回调（U7，由 main 注入 api 层实现）。
 	CertPusher func(serverID uint64)
+	// CAPusher 节点上线后按需推送 CA 根证书的回调（由 main 注入 api 层实现）。
+	// 在 PushPending 之前**同步**调用：配置里的 certificateFile 生效前文件必须已落盘。
+	CAPusher func(serverID uint64)
 
 	mu      sync.RWMutex
 	conns   map[uint64]*Conn       // by server_id
@@ -268,6 +271,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 		Updates(map[string]any{"status": 1, "last_seen_at": time.Now()})
 
 	// 节点上线：自动补推待推送配置 + 待推证书（非阻塞）+ 对齐最新用户名单 + 下发运行时设置
+	// （PushPending 内部会先补齐按需 CA，再重算/推送配置）
 	go h.PushPending(server.ID)
 	if h.CertPusher != nil {
 		go h.CertPusher(server.ID)
@@ -719,6 +723,9 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	if hb.Version != "" { // 旧 agent 不上报版本，不覆盖已有值
 		updates["agent_version"] = hb.Version
 	}
+	if len(hb.Caps) > 0 { // 旧 agent 不上报能力，不覆盖已有值
+		updates["agent_caps"] = strings.Join(hb.Caps, ",")
+	}
 	if hb.XrayVersion != "" { // 旧 agent 不上报内核版本，不覆盖已有值
 		updates["xray_version"] = hb.XrayVersion
 	}
@@ -966,6 +973,11 @@ func (h *Hub) PushPending(serverID uint64) {
 		log.Printf("nodegate: 节点 %d 离线，配置待推送（上线时由 ServeWS 自动补推）", serverID)
 		h.recordPushFailure(p.ID, "服务器离线，等待上线自动补推")
 		return
+	}
+	// 配置可能引用节点本地的 CA 证书文件（certificateFile）：推送前先补齐，
+	// 保证 agent 落盘发生在 xray -test/重启之前。旧 agent 无此能力，生成侧走内联 PEM。
+	if h.CAPusher != nil {
+		h.CAPusher(serverID)
 	}
 	// P1b：推送前现场重算待推内容（见 refreshPending）
 	p = h.refreshPending(serverID, p)

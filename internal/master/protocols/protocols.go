@@ -138,18 +138,25 @@ func ApplyPeerTLSValidation(dto *contracts.ProxyNodeDTO, in *contracts.ClientPro
 	}
 	dto.Security.SNI = serverName
 
+	// 托管 CA 验签材料：新 agent 走文件（push_ca 落盘），旧 agent 走内联 PEM。
+	hasCA := target.CACert != "" || target.CACertFile != ""
 	useCA := false
 	if in.TlsVerifyMode == "ca" {
-		useCA = (target.CACert != "")
+		useCA = hasCA
 	} else if in.TlsVerifyMode == "pin" {
 		useCA = false
 	} else {
 		// 自动模式：目标入站绑定证书若关联托管 CA，则优先采用 CA 验签
-		useCA = (target.CACert != "")
+		useCA = hasCA
 	}
 
 	if useCA {
-		dto.Security.CACert = target.CACert
+		if target.CACertFile != "" {
+			dto.Security.CACertFile = target.CACertFile
+			dto.Security.CACert = ""
+		} else {
+			dto.Security.CACert = target.CACert
+		}
 		dto.Security.DisableSystemRoot = true
 		dto.Security.VerifyPeerCertByName = serverName
 		if dto.Auth != nil && dto.Auth.Extra != nil {

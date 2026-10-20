@@ -221,6 +221,7 @@ func main() {
 	subServer := api.NewSubscribeServer(deps)
 	deps.SubServer = subServer
 	hub.CertPusher = deps.PushPendingCerts
+	hub.CAPusher = deps.PushPendingCAs
 
 	// 三端口模型（2026-08-25 拍板）：面板（SPA+API 合并）/ 节点 WS 网关 / 订阅 各自独立监听，
 	// 域名与路径分流由反代（Caddy）承担——每个端口只做自己的职责，程序内全部根路径语义。

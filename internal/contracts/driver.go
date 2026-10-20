@@ -3,8 +3,8 @@ package contracts
 import (
 	"context"
 
-	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // RefTarget 出站 InboundRef 引用的目标入站（可跨服务器）。
@@ -14,8 +14,13 @@ type RefTarget struct {
 	// CertPin 目标入站绑定证书的 leaf SHA-256（hex，取自已入库的 Cert.PinSHA256）；
 	// 非空时 TLS 中转出站注入 pinnedPeerCertSha256（自签证书防 MITM；空 = 走系统 CA 验证）。
 	CertPin string
-	// CACert 目标入站绑定证书若由托管 CA 签发，该 CA 的证书公钥 PEM（供机间出站内联 CA 验签）
+	// CACert 目标入站绑定证书若由托管 CA 签发，该 CA 的证书公钥 PEM（供机间出站内联 CA 验签）。
+	// 节点声明 CapPushCA 时改用 CACertFile（文件由 push_ca 落到节点）。
 	CACert string
+	// CACertID 托管 CA 的主键（节点落盘路径 <certs_dir>/ca/<id>.crt 的来源）。
+	CACertID uint64
+	// CACertFile 节点本地 CA 证书路径（仅当源服务器 agent 声明 CapPushCA 时非空）。
+	CACertFile string
 	// TargetCertDomain 目标入站绑定的证书域名（供机间 TLS SNI 校验）
 	TargetCertDomain string
 }
@@ -23,8 +28,8 @@ type RefTarget struct {
 // TopologyContext 拓扑化上下文（Phase T）：跨服务器引用与证书映射，由 provision 领域从 DB 组装。
 // 传 nil 时生成行为退化为无 InboundRef / CertID 注入。
 type TopologyContext struct {
-	RefTargets           map[uint64]RefTarget         // 出站 InboundRef → 目标入站
-	CertDomains          map[uint64]string            // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
+	RefTargets           map[uint64]RefTarget               // 出站 InboundRef → 目标入站
+	CertDomains          map[uint64]string                  // CertID → 证书域名（路径注入 /etc/xray/certs/<domain>/）
 	ReferencingOutbounds map[uint64][]models.ServerOutbound // 入站 ID → 所有指向该入站的启用 ServerOutbound
 }
 
