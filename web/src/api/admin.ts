@@ -409,6 +409,7 @@ export interface ServerItem {
   default_outbound_tag: string // 路由默认出口
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）
+  xray_version?: string // 节点心跳上报的 xray 内核版本（旧 agent 为空）
   expire_at?: string // VPS 到期日（YYYY-MM-DD，空串=未设置）
   billing_cycle?: string // 计费周期（月付/季付/年付等）
   price?: string // 续费价格
@@ -517,10 +518,45 @@ export interface AgentUpgradeStatus {
   message: string
   error?: string
   ts: number
+  // 升级对象：agent（默认）| xray。两者共用同一个状态槽，界面据此显示对应文案。
+  kind?: 'agent' | 'xray'
 }
 
 export function getAgentUpgradeStatus(id: number) {
   return http.get<ApiResp<{ status: AgentUpgradeStatus | null }>>(`/admin/servers/${id}/upgrade-status`)
+}
+
+// ---- 版本目录（Agent / Xray 共用，均读 releases.atom） ----
+
+export interface ReleaseVersionInfo {
+  latest_version: string
+  versions: string[]
+  checked_at: string
+}
+
+export type XrayVersionInfo = ReleaseVersionInfo
+
+// 可选内核版本（含 prerelease，按新→旧；atom 只给最近若干条，更老的版本由界面手填）
+export function getXrayVersions(refresh = false) {
+  return http.get<ApiResp<ReleaseVersionInfo>>('/admin/servers/xray-versions', {
+    params: refresh ? { refresh: 1 } : undefined,
+  })
+}
+
+// Agent 可选版本（与内核版本目录同源；用于面板内自由升级/降级）
+export function getAgentVersions(refresh = false) {
+  return http.get<ApiResp<ReleaseVersionInfo>>('/admin/servers/agent-versions', {
+    params: refresh ? { refresh: 1 } : undefined,
+  })
+}
+
+// 切换节点内核：升级/降级/重装共用；节点要下载 zip 并重启内核，超时同 Agent 升级
+export function upgradeXray(id: number, payload: { target: string; force?: boolean }) {
+  return http.post<ApiResp<CommandResult>>(
+    `/admin/servers/${id}/command`,
+    { type: 'upgrade_xray', ...payload },
+    { timeout: 320000 },
+  )
 }
 
 // ---- 批量升级 Agent ----

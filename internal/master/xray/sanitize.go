@@ -2,6 +2,7 @@ package xray
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // sanitizeStreamSettings 规范化入站 streamSettings：删除面板专用字段、修复旧版键名、
@@ -40,6 +41,9 @@ func sanitizeStreamMap(stream map[string]any) map[string]any {
 	deleteNestedKey(stream, "tlsSettings", "settings")
 	deleteNestedKey(stream, "realitySettings", "settings")
 
+	// cipherSuites 在 xray 里是「: 分隔的 string」；历史前端按数组提交会让整份配置反序列化失败。
+	normalizeCipherSuites(stream)
+
 	// xray v26.6.27 起已移除 tlsSettings.allowInsecure（迁移到 pinnedPeerCertSha256 /
 	// verifyPeerCertByName），携带会直接拒绝加载；面板保留 DB 标志仅供订阅 skip-cert-verify 透传
 	deleteNestedKey(stream, "tlsSettings", "allowInsecure")
@@ -59,6 +63,76 @@ func sanitizeStreamMap(stream map[string]any) map[string]any {
 	liftXhttpSessionKeys(stream)
 
 	return stream
+}
+
+// normalizeCipherSuites 把 tlsSettings.cipherSuites 归一为 xray 要求的字符串形态。
+// 历史数据可能是数组（旧前端按数组提交），直接透传会导致 xray 整份配置反序列化失败：
+//   - 数组 → ":" 连接；
+//   - 字符串原样保留（已是正确形态）；
+//   - 空数组 / 空白字符串 → 删除，交给 xray 默认套件。
+func normalizeCipherSuites(stream map[string]any) {
+	tls, ok := stream["tlsSettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	switch v := tls["cipherSuites"].(type) {
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				parts = append(parts, strings.TrimSpace(s))
+			}
+		}
+		if len(parts) == 0 {
+			delete(tls, "cipherSuites")
+			return
+		}
+		tls["cipherSuites"] = strings.Join(parts, ":")
+	case string:
+		if strings.TrimSpace(v) == "" {
+			delete(tls, "cipherSuites")
+		} else {
+			tls["cipherSuites"] = strings.TrimSpace(v)
+		}
+	}
+}
+
+// stripInboundClientOnlyTLS 删除入站 TLS 配置里「只对客户端有意义」的字段。
+//
+// 这三类字段在服务端入站上没有任何消费方：
+//   - usage=verify 的证书：服务端只做 encipherment，verify 是客户端校验远端用的；
+//   - disableSystemRoot / pinnedPeerCertSha256 / verifyPeerCertByName：都是客户端校验远端的参数。
+//
+// 机间出站的验证参数由 protocols.ApplyPeerTLSValidation 按目标证书派生（有托管 CA 走 CA
+// 验签，否则走证书指纹 Pin），不读取入站上的这些值；用户订阅也不透传它们。
+// DB 原文保留（历史配置不丢数据），仅在生成侧剥离。
+func stripInboundClientOnlyTLS(stream map[string]any) {
+	tls, ok := stream["tlsSettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(tls, "disableSystemRoot")
+	delete(tls, "pinnedPeerCertSha256")
+	delete(tls, "verifyPeerCertByName")
+
+	certs, ok := tls["certificates"].([]any)
+	if !ok {
+		return
+	}
+	kept := make([]any, 0, len(certs))
+	for _, c := range certs {
+		if cm, ok := c.(map[string]any); ok {
+			if usage, _ := cm["usage"].(string); usage == "verify" {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	if len(kept) == 0 {
+		delete(tls, "certificates")
+		return
+	}
+	tls["certificates"] = kept
 }
 
 // deleteNestedKey 删除 m[key] 下的 subKey（如果 m[key] 是一个 map）。

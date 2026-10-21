@@ -184,6 +184,55 @@ func ValidateOutbound(settingsJSON, streamSettings string) error {
 	return ValidateRealityStream(streamSettings)
 }
 
+// ValidateTLSCertSource 保存期校验：TLS 入站必须有可用的服务端证书来源。
+// 来源二选一：绑定面板托管证书（certID），或 certificates 里成对的证书/私钥。
+// 否则节点加载配置时直接失败（xray -test 不校验这一点，只有真正握手才暴露）。
+// Hysteria 2 无论 streamSettings 是否为空都强制 TLS（协议插件会补 security=tls），因此单独判定。
+func ValidateTLSCertSource(streamSettings string, certID *uint64, protocol string) error {
+	if certID != nil && *certID != 0 {
+		return nil
+	}
+	isTLS := protocol == models.ProtocolHysteria
+	if strings.TrimSpace(streamSettings) == "" {
+		if !isTLS {
+			return nil
+		}
+	} else {
+		var s struct {
+			Security string `json:"security"`
+			TLS      *struct {
+				Certificates []struct {
+					Usage           string   `json:"usage"`
+					CertificateFile string   `json:"certificateFile"`
+					KeyFile         string   `json:"keyFile"`
+					Certificate     []string `json:"certificate"`
+					Key             []string `json:"key"`
+				} `json:"certificates"`
+			} `json:"tlsSettings"`
+		}
+		if err := json.Unmarshal([]byte(streamSettings), &s); err != nil {
+			return fmt.Errorf("streamSettings JSON 无效: %w", err)
+		}
+		if s.Security != "tls" {
+			return nil
+		}
+		if s.TLS != nil {
+			for _, c := range s.TLS.Certificates {
+				if c.Usage == "verify" {
+					continue // 纯客户端语义，服务端忽略
+				}
+				if c.CertificateFile != "" && c.KeyFile != "" {
+					return nil
+				}
+				if len(c.Certificate) > 0 && len(c.Key) > 0 {
+					return nil
+				}
+			}
+		}
+	}
+	return fmt.Errorf("TLS 入站必须绑定托管证书，或填写成对的证书/私钥文件路径")
+}
+
 // ValidateRealityStream 校验 streamSettings 中 REALITY 密钥格式：x25519 密钥须为
 // base64 RawURL 解码 32 字节（xray x25519 输出格式）。非法直接报错，避免配置
 // 推送到 agent 端 -test 才暴露（01 号文档 §4 第 6 项）。
@@ -356,6 +405,13 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		routing["domainStrategy"] = routingDomainStrategy
 	}
 	cfg["routing"] = routing
+
+	// 4. 规则库热重载：顶层 geodata.cron 让 xray 按周期重读磁盘上的 geoip.dat/geosite.dat。
+	// assets 留空表示只重读本地文件（不联网）；这样 agent 的规则库更新落盘后无需重启内核。
+	// 模板若已显式给出 geodata（自定义 cron/assets），以模板为准。
+	if _, exists := cfg["geodata"]; !exists {
+		cfg["geodata"] = map[string]any{"cron": "0 5 * * *"}
+	}
 
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -731,6 +787,8 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 	}
 	if stream != nil {
 		stream = sanitizeStreamMap(stream)
+		// 服务端入站不消费客户端校验证书/根池的字段，生成前剥离，避免脏配置透传。
+		stripInboundClientOnlyTLS(stream)
 	}
 
 	// 入站认证用户/凭据动态装配
@@ -810,20 +868,12 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 				} else {
 					tlsSettings = make(map[string]any)
 				}
-				var certs []any
-				if existingCerts, ok := tlsSettings["certificates"].([]any); ok {
-					for _, c := range existingCerts {
-						if cm, ok := c.(map[string]any); ok && cm["usage"] == "verify" {
-							certs = append(certs, cm)
-						}
-					}
-				}
 				serverCert := map[string]any{
 					"certificateFile": certFilePath(domain, "fullchain.pem"),
 					"keyFile":         certFilePath(domain, "key.pem"),
 				}
-				certs = append([]any{serverCert}, certs...)
-				tlsSettings["certificates"] = certs
+				// 绑定托管证书时以托管路径为准；usage=verify 项已在 sanitize 阶段剥离。
+				tlsSettings["certificates"] = []any{serverCert}
 				stream["tlsSettings"] = tlsSettings
 			}
 		}

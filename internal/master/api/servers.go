@@ -584,11 +584,25 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 	case protocol.MsgUpgradeXray:
 		target = strings.TrimSpace(req.Target)
 		if target != "" && !agentTagPattern.MatchString(target) {
-			util.BadRequest(c, "Xray 版本号格式不正确（示例：v26.10.17）")
+			util.BadRequest(c, "Xray 版本号格式不正确（示例：v26.10.21）")
 			return
 		}
 		actionName = "Xray 内核升级"
-		if req.Force {
+		// 自由升降级：显式目标低于当前 = 降级、等于当前 = 强制重装，两种情况都必须带 force
+		// （agent 对「目标不高于当前」的请求默认跳过）。主控在这里统一置位，调用方不必理解协议细节。
+		if target != "" {
+			var xraySrv models.Server
+			if err := d.DB.First(&xraySrv, id).Error; err == nil && xraySrv.XrayVersion != "" {
+				switch CompareAgentVersion(target, xraySrv.XrayVersion) {
+				case -1:
+					req.Force = true
+					actionName = "Xray 内核降级"
+				case 0:
+					req.Force = true
+					actionName = "Xray 内核重装"
+				}
+			}
+		} else if req.Force {
 			actionName = "Xray 内核重装"
 		}
 		if d.Hub != nil {

@@ -82,6 +82,9 @@ func TestGenerateConfigWithOutboundsAndRouting(t *testing.T) {
 	if err := json.Unmarshal(rawCfg, &parsed); err != nil {
 		t.Fatalf("Unmarshal config JSON failed: %v", err)
 	}
+	if gd, ok := parsed["geodata"].(map[string]any); !ok || gd["cron"] == "" {
+		t.Errorf("expected geodata.cron for hot reload, got %+v", parsed["geodata"])
+	}
 
 	obs, _ := parsed["outbounds"].([]any)
 	if len(obs) == 0 {
@@ -520,25 +523,24 @@ func TestGenerateConfig_SockoptAndCACertPreserved(t *testing.T) {
 		t.Errorf("sockopt 丢失或不匹配: %v", sockopt)
 	}
 
-	// 检查 tlsSettings 与 CA 证书保留
+	// 客户端校验字段（disableSystemRoot / pin / verifyPeerCertByName）在服务端入站上无消费方，
+	// 生成时必须剥离；usage=verify 的 CA 证书同理。DB 原文保留。
 	tls := asObject(t, stream["tlsSettings"], "tlsSettings")
-	if tls["serverName"] != "domain.com" || tls["rejectUnknownSni"] != true || tls["disableSystemRoot"] != true {
-		t.Errorf("tls 基础字段或开关丢失: %v", tls)
+	if tls["serverName"] != "domain.com" || tls["rejectUnknownSni"] != true {
+		t.Errorf("tls 服务端字段丢失: %v", tls)
 	}
-	if tls["pinnedPeerCertSha256"] != "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff" {
-		t.Errorf("pinnedPeerCertSha256 丢失: %v", tls)
+	for _, dead := range []string{"disableSystemRoot", "pinnedPeerCertSha256", "verifyPeerCertByName"} {
+		if _, ok := tls[dead]; ok {
+			t.Errorf("客户端专用字段 %s 不应出现在服务端入站配置: %v", dead, tls)
+		}
 	}
 	certs := asArray(t, tls["certificates"], "certificates")
-	if len(certs) != 2 {
-		t.Fatalf("期望 2 项证书（1 项注入的主机证书 + 1 项保留的 CA 验证证书），实际: %d", len(certs))
+	if len(certs) != 1 {
+		t.Fatalf("期望仅 1 项注入的主机证书（verify 项应被剥离），实际: %d", len(certs))
 	}
 	c0 := asObject(t, certs[0], "certs[0]")
-	c1 := asObject(t, certs[1], "certs[1]")
 	if c0["certificateFile"] != "/etc/xray/certs/domain.com/fullchain.pem" {
 		t.Errorf("主机证书未优先注入: %v", c0)
-	}
-	if c1["certificateFile"] != "/path/to/ca.crt" || c1["usage"] != "verify" {
-		t.Errorf("CA 验签证书未保留: %v", c1)
 	}
 }
 

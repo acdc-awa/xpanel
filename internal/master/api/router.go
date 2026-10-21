@@ -150,6 +150,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/invitations/:id", d.AdminRevokeInvitation)
 			admin.GET("/servers", d.AdminServers)
 			admin.GET("/servers/agent-version", d.AdminGetAgentVersion)
+			admin.GET("/servers/agent-versions", d.AdminGetAgentVersions)
+			admin.GET("/servers/xray-versions", d.AdminGetXrayVersions)
 			admin.GET("/servers/upgrade-status", d.AdminGetUpgradeStatuses)
 			admin.POST("/servers/batch-upgrade", d.AdminBatchUpgradeServers)
 			admin.GET("/servers/:id/metrics", d.AdminServerMetrics)

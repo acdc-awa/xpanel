@@ -200,3 +200,135 @@ func TestAdminCreateCACert_PureVerifyMode(t *testing.T) {
 		t.Fatalf("纯公钥 CA 签发证书应报错，但返回了 200")
 	}
 }
+
+// 重签必须保留原证书的 SAN（DNS + IP），否则多域名 / IP 证书续期后退化。
+func TestAdminReissueCertPreservesSANs(t *testing.T) {
+	deps, db := setupTestDeps(t)
+	gin.SetMode(gin.TestMode)
+
+	caRes, err := certutil.GenerateCA(certutil.CAGenRequest{
+		CommonName: "SAN Test CA", KeyType: "ecdsa_p256", ValidDays: 365,
+	})
+	if err != nil {
+		t.Fatalf("generate CA: %v", err)
+	}
+	ca := models.CACert{
+		Name: "san-ca", CommonName: "SAN Test CA", CACertPEM: caRes.CertPEM,
+		CAKeyPEM: caRes.KeyPEM, HasKey: true, NotAfter: caRes.NotAfter,
+	}
+	if err := db.Create(&ca).Error; err != nil {
+		t.Fatalf("save CA: %v", err)
+	}
+	signRes, err := certutil.SignServerCert(ca.CACertPEM, ca.CAKeyPEM, certutil.CertSignRequest{
+		CommonName: "main.example.com",
+		SANDNS:     []string{"main.example.com", "*.example.com"},
+		SANIP:      []string{"10.0.0.8"},
+		KeyType:    "ecdsa_p256",
+		ValidDays:  30,
+	})
+	if err != nil {
+		t.Fatalf("sign cert: %v", err)
+	}
+	cert := models.Cert{
+		Domain: "main.example.com", CertPEM: signRes.FullchainPEM, KeyPEM: signRes.KeyPEM,
+		NotAfter: signRes.NotAfter, PinSHA256: signRes.PinSHA256, CAID: &ca.ID,
+	}
+	if err := db.Create(&cert).Error; err != nil {
+		t.Fatalf("save cert: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatUint(cert.ID, 10)}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/certs/"+strconv.FormatUint(cert.ID, 10)+"/reissue",
+		bytes.NewReader([]byte(`{"valid_days":30}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	deps.AdminReissueCert(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reissue failed: %d body=%s", w.Code, w.Body.String())
+	}
+
+	var renewed models.Cert
+	if err := db.First(&renewed, cert.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := certutil.ParseCertificate(renewed.CertPEM)
+	if err != nil {
+		t.Fatalf("parse renewed: %v", err)
+	}
+	hasWildcard, hasIP := false, false
+	for _, n := range leaf.DNSNames {
+		if n == "*.example.com" {
+			hasWildcard = true
+		}
+	}
+	for _, ip := range leaf.IPAddresses {
+		if ip.String() == "10.0.0.8" {
+			hasIP = true
+		}
+	}
+	if !hasWildcard || !hasIP {
+		t.Fatalf("重签丢失 SAN: dns=%v ip=%v", leaf.DNSNames, leaf.IPAddresses)
+	}
+}
+
+// 换证（上传新 PEM）后必须清空 ca_id，避免机间出站继续按旧 CA 校验。
+func TestAdminUpdateCertClearsCAID(t *testing.T) {
+	deps, db := setupTestDeps(t)
+	gin.SetMode(gin.TestMode)
+
+	caRes, err := certutil.GenerateCA(certutil.CAGenRequest{
+		CommonName: "Clear CA", KeyType: "ecdsa_p256", ValidDays: 365,
+	})
+	if err != nil {
+		t.Fatalf("generate CA: %v", err)
+	}
+	ca := models.CACert{
+		Name: "clear-ca", CommonName: "Clear CA", CACertPEM: caRes.CertPEM,
+		CAKeyPEM: caRes.KeyPEM, HasKey: true, NotAfter: caRes.NotAfter,
+	}
+	db.Create(&ca)
+	signRes, err := certutil.SignServerCert(ca.CACertPEM, ca.CAKeyPEM, certutil.CertSignRequest{
+		CommonName: "old.example.com", KeyType: "ecdsa_p256", ValidDays: 30,
+	})
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	cert := models.Cert{
+		Domain: "old.example.com", CertPEM: signRes.FullchainPEM, KeyPEM: signRes.KeyPEM,
+		NotAfter: signRes.NotAfter, PinSHA256: signRes.PinSHA256, CAID: &ca.ID,
+	}
+	db.Create(&cert)
+
+	// 换证：上传一张同域名的新证书。
+	newCert, err := certutil.GenerateCustomSelfSigned(certutil.SelfSignedRequest{
+		CommonName: "old.example.com", KeyType: "ecdsa_p256", ValidDays: 90,
+	})
+	if err != nil {
+		t.Fatalf("generate new cert: %v", err)
+	}
+	body, _ := json.Marshal(map[string]string{
+		"cert_pem": newCert.FullchainPEM,
+		"key_pem":  newCert.KeyPEM,
+	})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatUint(cert.ID, 10)}}
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/certs/"+strconv.FormatUint(cert.ID, 10), bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	deps.AdminUpdateCert(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update failed: %d body=%s", w.Code, w.Body.String())
+	}
+
+	var updated models.Cert
+	if err := db.First(&updated, cert.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.CAID != nil {
+		t.Fatalf("换证后 ca_id 应被清空，实际 %d", *updated.CAID)
+	}
+	if updated.PinSHA256 == signRes.PinSHA256 {
+		t.Fatal("换证后 pin 应更新")
+	}
+}

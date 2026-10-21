@@ -168,3 +168,62 @@ func (d *Deps) AdminGetAgentVersion(c *gin.Context) {
 		"checked_at":     checkedAt.Format(time.RFC3339),
 	})
 }
+
+// ---- Agent 版本列表（面板内自由升级/降级共用，与 Xray 版本目录同源） ----
+
+type agentVersionsCacheEntry struct {
+	sync.RWMutex
+	versions  []string
+	checkedAt time.Time
+}
+
+var globalAgentVersionsCache agentVersionsCacheEntry
+
+// GetCachedAgentVersions 返回 Agent 可选版本（新→旧）；过期或 force 时重新拉取，
+// 拉取失败时降级返回旧缓存。
+func (d *Deps) GetCachedAgentVersions(ctx context.Context, force bool) ([]string, time.Time, error) {
+	globalAgentVersionsCache.RLock()
+	versions := append([]string(nil), globalAgentVersionsCache.versions...)
+	checked := globalAgentVersionsCache.checkedAt
+	globalAgentVersionsCache.RUnlock()
+
+	if !force && len(versions) > 0 && time.Since(checked) < agentVersionTTL {
+		return versions, checked, nil
+	}
+
+	mirror := ""
+	if d.Cfg != nil {
+		mirror = d.Cfg.Update.Mirror
+	}
+	got, err := FetchRepoVersions(ctx, mirror, defaultAgentRepo)
+	if err != nil {
+		if len(versions) > 0 {
+			return versions, checked, nil
+		}
+		return nil, time.Time{}, err
+	}
+
+	now := time.Now()
+	globalAgentVersionsCache.Lock()
+	globalAgentVersionsCache.versions = got
+	globalAgentVersionsCache.checkedAt = now
+	globalAgentVersionsCache.Unlock()
+	return got, now, nil
+}
+
+// AdminGetAgentVersions GET /api/v1/admin/servers/agent-versions?refresh=1
+// 返回最近发布的 Agent 版本列表（含 prerelease），供面板的版本选择器使用。
+func (d *Deps) AdminGetAgentVersions(c *gin.Context) {
+	force := c.Query("refresh") == "1" || c.Query("refresh") == "true"
+	versions, checkedAt, err := d.GetCachedAgentVersions(c.Request.Context(), force)
+	if err != nil {
+		util.Fail(c, 502, "获取 Agent 版本列表失败: "+err.Error())
+		return
+	}
+	util.OK(c, gin.H{
+		"repo":           defaultAgentRepo,
+		"latest_version": versions[0],
+		"versions":       versions,
+		"checked_at":     checkedAt.Format(time.RFC3339),
+	})
+}

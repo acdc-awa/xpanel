@@ -270,6 +270,10 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 		updates["not_after"] = notAfter
 		updates["pin_sha256"] = pin
 		updates["self_signed"] = false // 手工换证后不再是面板生成的自签证书
+		// 换证后旧 CA 关系不再可信（新证书未必由同一 CA 签发；ca_id 在库内无法验证）。
+		// 保留会让机间出站继续按旧 CA 做校验（disableSystemRoot=true 时没有回退），因此清空，
+		// 由管理员重新上传/重签时显式恢复。受影响出站在下方 reenqueue 重推。
+		updates["ca_id"] = nil
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&cert).Updates(updates).Error; err != nil {
@@ -284,6 +288,24 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 		}
 	}
 	util.OK(c, gin.H{"cert": toCertView(&cert)})
+}
+
+// certSANs 读取证书里的 SAN（DNS / IP），重签时原样复用。
+// 解析失败返回空：重签退化为「仅 CN」而不是直接失败（与旧行为一致）。
+func certSANs(certPEM string) (dnsNames []string, ipStrings []string) {
+	c, err := certutil.ParseCertificate(certPEM)
+	if err != nil {
+		return nil, nil
+	}
+	for _, n := range c.DNSNames {
+		if n != "" {
+			dnsNames = append(dnsNames, n)
+		}
+	}
+	for _, ip := range c.IPAddresses {
+		ipStrings = append(ipStrings, ip.String())
+	}
+	return dnsNames, ipStrings
 }
 
 // AdminReissueCert POST /api/v1/admin/certs/:id/reissue —— 证书一键重签 / 续期
@@ -304,6 +326,9 @@ func (d *Deps) AdminReissueCert(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
+	// 重签沿用原证书的 SAN（多域名 / IP 证书续期后不能退化成单域名）。
+	sanDNS, sanIP := certSANs(cert.CertPEM)
+
 	if cert.CAID != nil && *cert.CAID != 0 {
 		var ca models.CACert
 		if err := d.DB.First(&ca, *cert.CAID).Error; err != nil {
@@ -320,6 +345,8 @@ func (d *Deps) AdminReissueCert(c *gin.Context) {
 		}
 		signRes, err := certutil.SignServerCert(ca.CACertPEM, ca.CAKeyPEM, certutil.CertSignRequest{
 			CommonName: cert.Domain,
+			SANDNS:     sanDNS,
+			SANIP:      sanIP,
 			KeyType:    cert.KeyType,
 			ValidDays:  days,
 		})
@@ -342,6 +369,8 @@ func (d *Deps) AdminReissueCert(c *gin.Context) {
 		}
 		selfRes, err := certutil.GenerateCustomSelfSigned(certutil.SelfSignedRequest{
 			CommonName: cert.Domain,
+			SANDNS:     sanDNS,
+			SANIP:      sanIP,
 			KeyType:    cert.KeyType,
 			ValidDays:  days,
 		})

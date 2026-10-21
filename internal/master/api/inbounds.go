@@ -194,6 +194,11 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door）")
 		return
 	}
+	// TLS 入站必须有服务端证书来源（托管证书或成对路径），否则节点加载配置直接失败。
+	if err := xray.ValidateTLSCertSource(req.StreamSettings, req.CertID, req.Protocol); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
 	if strings.TrimSpace(req.Tag) == "" || len(req.Tag) > 64 {
 		util.BadRequest(c, "入站标签需为 1-64 字符")
 		return
@@ -442,6 +447,23 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 
 	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP || effProto == models.ProtocolMixed {
 		util.BadRequest(c, "SOCKS5 / HTTP 入站已退役，不支持的协议: "+effProto)
+		return
+	}
+	// TLS 入站必须有服务端证书来源：本次未传 cert_id 时沿用库内既有绑定。
+	effCertID := inb.CertID
+	if req.CertID != nil {
+		if *req.CertID == 0 {
+			effCertID = nil
+		} else {
+			effCertID = req.CertID
+		}
+	}
+	effCertProtocol := effProto
+	if effType == models.InboundTypeTunnel {
+		effCertProtocol = models.ProtocolDokodemo // 直通无安全层，按终态协议判定
+	}
+	if err := xray.ValidateTLSCertSource(ss, effCertID, effCertProtocol); err != nil {
+		util.BadRequest(c, err.Error())
 		return
 	}
 	// U15：更新校验闭环——tag 非空/同服务器唯一 / 协议白名单 / CertID 存在性

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, Download, MoreFilled, Loading, Check, Close, Platform, Link } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled, Loading, Check, Close, Platform, Link } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
@@ -16,6 +16,9 @@ import {
   serverCommand,
   upgradeAgent,
   getAgentUpgradeStatus,
+  getAgentVersions,
+  getXrayVersions,
+  upgradeXray,
   batchUpgradeServers,
   getBatchUpgradeStatus,
   type AgentUpgradeStatus,
@@ -340,6 +343,33 @@ const upgradingId = ref(0)
 const upgradeModalOpen = ref(false)
 const upgradeTarget = ref<ServerItem | null>(null)
 const upgradeStatus = ref<AgentUpgradeStatus | null>(null)
+// 升级对象：Agent 与 Xray 内核共用同一套进度弹窗，但版本字段与文案不同。
+const upgradeKind = ref<'agent' | 'xray'>('agent')
+const upgradeIsRollback = ref(false)
+const rollbackTargetVersion = ref('')
+// 版本选择器当前目标（Agent / Xray 共用）
+const versionTarget = ref('')
+
+const upgradeTitle = computed(() => {
+  if (upgradeKind.value === 'xray') {
+    return `Xray 内核${upgradeIsRollback.value ? '降级' : '切换'}监控 · ${upgradeTarget.value?.name ?? ''}`
+  }
+  return `Agent ${upgradeIsRollback.value ? '回滚' : '升级'}监控 · ${upgradeTarget.value?.name ?? ''}`
+})
+
+const upgradeFromLabel = computed(() =>
+  upgradeKind.value === 'xray'
+    ? upgradeTarget.value?.xray_version || '未知'
+    : upgradeTarget.value?.agent_version || '未知',
+)
+
+const upgradeToLabel = computed(() => {
+  // 版本选择器会显式写入目标版本（含升级到非最新版的情况），优先使用它
+  if (rollbackTargetVersion.value) return rollbackTargetVersion.value
+  return upgradeKind.value === 'xray'
+    ? versionTarget.value || '目标版本'
+    : latestAgentVersion.value || '目标版本'
+})
 
 const upgradeActiveStep = computed(() => {
   if (!upgradeStatus.value) return 0
@@ -391,52 +421,127 @@ async function pollUpgradeStatus(serverId: number) {
   }
 }
 
-const upgradeIsRollback = ref(false)
-const rollbackTargetVersion = ref('')
+// ---- 版本切换（Agent / Xray 共用一套选择器与进度弹窗） ----
+type VersionSubject = 'agent' | 'xray'
 
-async function upgradeNodeAgent(row: any) {
-  upgradeIsRollback.value = false
-  rollbackTargetVersion.value = ''
-  const currentVer = row.agent_version || ''
-  const latest = latestAgentVersion.value
-  let msg = ''
-  let isAlreadyLatest = false
+const versionDialogOpen = ref(false)
+const versionSubject = ref<VersionSubject>('agent')
+const versionServer = ref<ServerItem | null>(null)
+const versionOptions = ref<string[]>([])
+const versionOptionsLoading = ref(false)
+const versionHint = ref('')
+const versionSwitching = ref(false)
 
-  if (latest && currentVer) {
-    const cmp = compareVersion(currentVer, latest)
-    if (cmp >= 0) {
-      isAlreadyLatest = true
-      msg = `服务器「${row.name}」当前 Agent 版本（${currentVer}）已是官方最新版本（${latest}）。\n\n是否仍要重新拉取并覆盖安装？`
-    } else {
-      msg = `检测到官方最新版本 Agent：\n- 当前服务器版本：${currentVer}\n- 官方最新版本：${latest}\n\n确认将服务器「${row.name}」升级至最新版？（sha256 校验，完成后服务器自动重启，期间短暂离线）`
-    }
-  } else {
-    msg = `将从 GitHub Releases 下载最新版 Agent 并在服务器「${row.name}」上升级（sha256 校验），完成后服务器自动重启，期间短暂离线。当前版本：${currentVer || '未知'}`
-  }
+function normVersionTag(v: string) {
+  const s = (v || '').trim()
+  if (!s) return ''
+  return s.startsWith('v') ? s : `v${s}`
+}
 
+const versionSubjectLabel = computed(() => (versionSubject.value === 'agent' ? 'Agent' : 'Xray 内核'))
+const versionCurrent = computed(() =>
+  normVersionTag(
+    versionSubject.value === 'agent'
+      ? versionServer.value?.agent_version || ''
+      : versionServer.value?.xray_version || '',
+  ),
+)
+const versionCompare = computed(() => {
+  if (!versionCurrent.value || !versionTarget.value) return null
+  return compareVersion(versionCurrent.value, versionTarget.value)
+})
+const versionActionLabel = computed(() => {
+  if (!versionTarget.value) return '切换'
+  if (!versionCurrent.value) return '安装'
+  if (versionCompare.value === 0) return '重新安装'
+  return (versionCompare.value ?? 0) > 0 ? '升级' : '降级'
+})
+
+async function loadVersionOptions(refresh = false) {
+  versionOptionsLoading.value = true
   try {
-    await ElMessageBox.confirm(
-      msg,
-      isAlreadyLatest ? '重新安装 Agent' : '升级 Agent',
-      {
-        type: isAlreadyLatest ? 'info' : 'warning',
-        confirmButtonText: isAlreadyLatest ? '重新安装' : '立即升级',
-        cancelButtonText: '取消',
-      },
-    )
+    const { data } =
+      versionSubject.value === 'agent'
+        ? await getAgentVersions(refresh)
+        : await getXrayVersions(refresh)
+    if (data.code === 0) {
+      versionOptions.value = data.data.versions || []
+      versionHint.value = data.data.checked_at
+        ? `版本列表更新于 ${formatDateTime(data.data.checked_at)}（只列最近版本，更老的版本可直接输入）`
+        : '可直接输入版本号'
+    }
+  } catch (e) {
+    versionHint.value = `版本列表获取失败，可直接手动输入（${errMsg(e, '网络异常')}）`
+  } finally {
+    versionOptionsLoading.value = false
+  }
+}
+
+async function openVersionDialog(row: any, subject: VersionSubject) {
+  versionSubject.value = subject
+  versionServer.value = row
+  const current = normVersionTag(subject === 'agent' ? row.agent_version || '' : row.xray_version || '')
+  // 默认预选：Agent 落后于最新版时选最新版（点开即升级），否则选当前版本（重装/切换）
+  const latest = subject === 'agent' ? latestAgentVersion.value : ''
+  versionTarget.value = latest && compareVersion(current || '0', latest) < 0 ? normVersionTag(latest) : current
+  versionDialogOpen.value = true
+  await loadVersionOptions(false)
+}
+
+async function applyVersionSwitch() {
+  const row = versionServer.value
+  const target = normVersionTag(versionTarget.value)
+  const subject = versionSubject.value
+  if (!row) return
+  if (!target || !/^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$/.test(target)) {
+    ElMessage.error('版本号格式不正确（示例：v0.1.19 / v26.10.21）')
+    return
+  }
+  const cmp = versionCompare.value
+  const label = versionActionLabel.value
+  const lines = [
+    `服务器：${row.name}`,
+    `当前 ${versionSubjectLabel.value}：${versionCurrent.value || '未知（旧 Agent 未上报）'}`,
+    `目标 ${versionSubjectLabel.value}：${target}`,
+    '',
+  ]
+  if (subject === 'agent') {
+    if (cmp !== null && cmp < 0) {
+      lines.push('⚠️ 降级风险：更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。')
+    }
+    lines.push('将从 XPanel-Node Releases 下载 Agent 二进制并做 sha256 校验，完成后服务自动重启（短暂离线）。')
+  } else if (cmp !== null && cmp < 0) {
+    lines.push('⚠️ 降级风险：Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。')
+    lines.push('安装失败会自动回滚到原内核；期间 xray 会短暂中断。')
+  } else {
+    lines.push('节点将从 XTLS/Xray-core Releases 下载并做 SHA-256 校验，完成后重启 xray（短暂中断）。')
+    lines.push('geoip.dat / geosite.dat 会一并同步为该发布包内的数据。')
+  }
+  try {
+    await ElMessageBox.confirm(lines.join('\n'), `确认${label}${versionSubjectLabel.value}`, {
+      type: 'warning',
+      confirmButtonText: `立即${label}`,
+      cancelButtonText: '取消',
+    })
   } catch {
     return
   }
 
+  versionDialogOpen.value = false
+  upgradeKind.value = subject
+  upgradeIsRollback.value = cmp !== null && cmp < 0
+  rollbackTargetVersion.value = target
   upgradeTarget.value = row
   upgradeStatus.value = {
     phase: 'starting',
-    target: latest || undefined,
-    message: '正在向服务器下发自升级指令...',
+    target,
+    message: `正在向服务器下发${versionSubjectLabel.value}${label}指令...`,
     ts: Math.floor(Date.now() / 1000),
+    kind: subject,
   }
   upgradeModalOpen.value = true
   upgradingId.value = row.id
+  versionSwitching.value = true
 
   stopUpgradePolling()
   upgradeTimer = setInterval(() => {
@@ -444,106 +549,19 @@ async function upgradeNodeAgent(row: any) {
   }, 1500)
 
   try {
-    const { data } = await upgradeAgent(row.id, {
-      target: latest || undefined,
-      force: isAlreadyLatest,
-    })
-    if (data.code === 0 && data.data.ok) {
-      upgradeStatus.value = {
-        phase: 'success',
-        target: latest || undefined,
-        message: (data.data.data as string) || '已升级完成，服务器已重新加载新版本',
-        ts: Math.floor(Date.now() / 1000),
-      }
-      stopUpgradePolling()
-      load()
-      setTimeout(load, 15000)
-    } else {
-      upgradeStatus.value = {
-        phase: 'failed',
-        target: latest || undefined,
-        message: '升级失败',
-        error: data.data?.error || data.message || '升级失败',
-        ts: Math.floor(Date.now() / 1000),
-      }
-      stopUpgradePolling()
-    }
-  } catch (e) {
-    upgradeStatus.value = {
-      phase: 'failed',
-      target: latest || undefined,
-      message: '升级请求超时或网络异常',
-      error: errMsg(e, '升级失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
-      ts: Math.floor(Date.now() / 1000),
-    }
-    stopUpgradePolling()
-  } finally {
-    upgradingId.value = 0
-  }
-}
-
-async function rollbackNodeAgent(row: any) {
-  const currentVer = row.agent_version || ''
-  try {
-    const { value } = await ElMessageBox.prompt(
-      `当前服务器「${row.name}」Agent 版本为：${currentVer || '未知'}\n\n请输入要回滚的目标版本号（如 v0.1.15）：`,
-      '回滚 Agent',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        inputPattern: /^v?\d+(\.\d+)+.*$/,
-        inputErrorMessage: '版本号格式不正确（示例：v0.1.15）',
-      },
-    )
-    let target = (value || '').trim()
-    if (!target) return
-    if (!target.startsWith('v')) target = 'v' + target
-    if (currentVer && (currentVer === target || compareVersion(currentVer, target) === 0)) {
-      ElMessage.info(`服务器当前已是版本 ${target}，无需回滚`)
-      return
-    }
-
-    try {
-      await ElMessageBox.confirm(
-        `确认将服务器「${row.name}」的 Agent 版本从 ${currentVer || '当前版本'} 回滚至 ${target}？\n\n（将下载旧版本并执行 sha256 完整性校验，完成后服务器自动重启，期间短暂离线）`,
-        '确认回滚 Agent',
-        {
-          type: 'warning',
-          confirmButtonText: '立即回滚',
-          cancelButtonText: '取消',
-        },
-      )
-    } catch {
-      return
-    }
-
-    upgradeIsRollback.value = true
-    rollbackTargetVersion.value = target
-    upgradeTarget.value = row
-    upgradeStatus.value = {
-      phase: 'starting',
-      target,
-      message: '正在向服务器下发回滚指令...',
-      ts: Math.floor(Date.now() / 1000),
-    }
-    upgradeModalOpen.value = true
-    upgradingId.value = row.id
-
-    stopUpgradePolling()
-    upgradeTimer = setInterval(() => {
-      pollUpgradeStatus(row.id)
-    }, 1500)
-
-    const { data } = await upgradeAgent(row.id, {
-      target,
-      force: true,
-    })
+    // 目标不高于当前时必须 force（协议语义：force 才允许降级/同版本重装）
+    const force = cmp === null || cmp <= 0
+    const { data } =
+      subject === 'agent'
+        ? await upgradeAgent(row.id, { target, force })
+        : await upgradeXray(row.id, { target, force })
     if (data.code === 0 && data.data.ok) {
       upgradeStatus.value = {
         phase: 'success',
         target,
-        message: (data.data.data as string) || '已回滚完成，服务器已重新加载旧版本',
+        message: (data.data.data as string) || `${versionSubjectLabel.value}已切换完成`,
         ts: Math.floor(Date.now() / 1000),
+        kind: subject,
       }
       stopUpgradePolling()
       load()
@@ -552,23 +570,25 @@ async function rollbackNodeAgent(row: any) {
       upgradeStatus.value = {
         phase: 'failed',
         target,
-        message: '回滚失败',
-        error: data.data?.error || data.message || '回滚失败',
+        message: `${versionSubjectLabel.value}切换失败`,
+        error: data.data?.error || data.message || `${versionSubjectLabel.value}切换失败`,
         ts: Math.floor(Date.now() / 1000),
+        kind: subject,
       }
       stopUpgradePolling()
     }
   } catch (e: any) {
-    if (e === 'cancel' || e?.action === 'cancel') return
     upgradeStatus.value = {
       phase: 'failed',
-      target: rollbackTargetVersion.value || undefined,
-      message: '回滚请求超时或网络异常',
-      error: errMsg(e, '回滚失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
+      target,
+      message: `${versionSubjectLabel.value}切换请求超时或网络异常`,
+      error: errMsg(e, '切换失败（服务器可能仍在后台下载，可稍后刷新查看版本）'),
       ts: Math.floor(Date.now() / 1000),
+      kind: subject,
     }
     stopUpgradePolling()
   } finally {
+    versionSwitching.value = false
     upgradingId.value = 0
   }
 }
@@ -884,8 +904,8 @@ function onMore(cmd: string, row: any) {
   else if (cmd === 'status') openStatus(row)
   else if (cmd === 'restart') restartXray(row)
   else if (cmd === 'logs') openLogs(row)
-  else if (cmd === 'upgrade') upgradeNodeAgent(row)
-  else if (cmd === 'rollback') rollbackNodeAgent(row)
+  else if (cmd === 'agent_version') openVersionDialog(row, 'agent')
+  else if (cmd === 'xray') openVersionDialog(row, 'xray')
   else if (cmd === 'open_idc') {
     if (row.idc_address) window.open(normalizeUrl(row.idc_address), '_blank')
   }
@@ -1080,10 +1100,22 @@ async function removeServer(row: any) {
                 :underline="false"
                 :disabled="upgradingId === row.id"
                 class="upgrade-btn"
-                @click="upgradeNodeAgent(row)"
+                @click="openVersionDialog(row, 'agent')"
               >
-                {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重装' : '升级') }}
+                {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : '版本' }}
               </el-link>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Xray</span>
+              <span class="cell-mono font-mono-num meta-val">{{ row.xray_version || '—' }}</span>
+              <el-link
+                v-if="row.status === 1"
+                type="primary"
+                :underline="false"
+                :disabled="upgradingId === row.id"
+                class="upgrade-btn"
+                @click="openVersionDialog(row, 'xray')"
+              >版本</el-link>
             </div>
             <div class="meta-item">
               <span class="meta-label">心跳</span>
@@ -1152,12 +1184,11 @@ async function removeServer(row: any) {
                   <el-dropdown-item v-if="row.idc_address && isUrl(row.idc_address)" command="open_idc">
                     <el-icon><Link /></el-icon>打开 IDC 控制台
                   </el-dropdown-item>
-                  <el-dropdown-item command="upgrade">
-                    <el-icon><Upload /></el-icon>
-                    {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级 Agent' : (getAgentVersionStatus(row.agent_version).type === 'latest' ? '重新安装 Agent' : '升级 Agent') }}
+                  <el-dropdown-item command="agent_version">
+                    <el-icon><Upload /></el-icon>Agent 版本…
                   </el-dropdown-item>
-                  <el-dropdown-item command="rollback">
-                    <el-icon><Download /></el-icon>回滚 Agent
+                  <el-dropdown-item command="xray">
+                    <el-icon><Setting /></el-icon>Xray 内核版本…
                   </el-dropdown-item>
                   <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
                   <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
@@ -1338,10 +1369,71 @@ async function removeServer(row: any) {
       <pre ref="logPreRef" v-loading="logLoading" class="log-view">{{ displayedLogContent }}</pre>
     </el-dialog>
 
-    <!-- Agent 升级/回滚监控弹窗 -->
+    <!-- 版本切换：Agent / Xray 共用（升级/降级/重装） -->
+    <el-dialog v-model="versionDialogOpen" :title="`${versionSubjectLabel} 版本`" width="560px">
+      <div class="xray-version-dialog">
+        <div class="xray-current-row">
+          <span class="meta-label">当前{{ versionSubjectLabel }}</span>
+          <code class="cell-mono">{{ versionCurrent || '未知（旧 Agent 未上报）' }}</code>
+        </div>
+        <el-form label-position="top" style="margin-top: 16px">
+          <el-form-item label="目标版本">
+            <el-select
+              v-model="versionTarget"
+              filterable
+              allow-create
+              default-first-option
+              :loading="versionOptionsLoading"
+              :placeholder="versionSubject === 'agent' ? '选择版本，或直接输入（如 v0.1.19）' : '选择版本，或直接输入（如 v26.10.21）'"
+              style="width: 100%"
+            >
+              <el-option v-for="v in versionOptions" :key="v" :label="v" :value="v">
+                <span class="cell-mono">{{ v }}</span>
+                <span v-if="v === versionOptions[0]" class="x-chip emerald mini-chip" style="margin-left: 8px">最新</span>
+              </el-option>
+            </el-select>
+            <div class="field-hint">{{ versionHint }}</div>
+          </el-form-item>
+        </el-form>
+        <el-alert
+          v-if="versionCompare !== null && versionCompare < 0"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`降级${versionSubjectLabel}有风险`"
+          :description="versionSubject === 'agent'
+            ? '更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。服务重启期间节点短暂离线。'
+            : 'Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。安装失败会自动回滚，期间 xray 短暂中断。'"
+        />
+        <el-alert
+          v-else
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`将${versionActionLabel}${versionSubjectLabel}：${versionCurrent || '未知'} → ${versionTarget || '未选择'}`"
+          :description="versionSubject === 'agent'
+            ? '节点从 XPanel-Node Releases 下载并做 sha256 校验，完成后服务自动重启。'
+            : '节点从官方 Releases 下载并做 SHA-256 校验；内核与规则库（geoip/geosite）一起切换。'"
+        />
+        <div class="xray-dialog-foot">
+          <el-button size="small" :loading="versionOptionsLoading" @click="loadVersionOptions(true)">刷新版本列表</el-button>
+          <span class="muted font-11">
+            {{ versionSubject === 'agent' ? 'Agent 与内核版本相互独立，切换 Agent 不会改动 Xray。' : 'Agent 与内核版本相互独立，切换内核不会改动 Agent。' }}
+          </span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="versionDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="versionSwitching" :disabled="!versionTarget" @click="applyVersionSwitch">
+          {{ versionActionLabel }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Agent 升级/回滚 / Xray 内核切换 监控弹窗 -->
     <el-dialog
       v-model="upgradeModalOpen"
-      :title="`Agent ${upgradeIsRollback ? '回滚' : '升级'}监控 · ${upgradeTarget?.name ?? ''}`"
+      :title="upgradeTitle"
       width="640px"
       :close-on-click-modal="false"
       @close="stopUpgradePolling"
@@ -1354,10 +1446,10 @@ async function removeServer(row: any) {
           </div>
           <div class="upgrade-ver-info">
             <span class="ver-label">版本流转:</span>
-            <el-tag size="small" type="info">{{ upgradeTarget?.agent_version || '未知' }}</el-tag>
+            <el-tag size="small" type="info">{{ upgradeFromLabel }}</el-tag>
             <span class="ver-arrow">→</span>
             <el-tag size="small" :type="upgradeIsRollback ? 'warning' : 'success'">
-              {{ (upgradeIsRollback ? rollbackTargetVersion : latestAgentVersion) || '目标版本' }}
+              {{ upgradeToLabel }}
             </el-tag>
           </div>
         </div>
@@ -1370,10 +1462,13 @@ async function removeServer(row: any) {
           align-center
           style="margin: 28px 0 20px"
         >
-          <el-step title="版本解析" :description="upgradeIsRollback ? '检查指定版本' : '检查远端版本'" />
-          <el-step title="下载资源" description="GitHub Releases" />
+          <el-step
+            title="版本解析"
+            :description="upgradeKind === 'xray' ? '确认目标内核' : (upgradeIsRollback ? '检查指定版本' : '检查远端版本')"
+          />
+          <el-step title="下载资源" :description="upgradeKind === 'xray' ? 'XTLS Releases' : 'GitHub Releases'" />
           <el-step title="完整性校验" description="SHA256 校验" />
-          <el-step title="重启生效" description="服务重载就绪" />
+          <el-step title="重启生效" :description="upgradeKind === 'xray' ? '重启 xray' : '服务重载就绪'" />
         </el-steps>
 
         <!-- 当前状态卡片 -->
@@ -1396,7 +1491,7 @@ async function removeServer(row: any) {
               {{ upgradeStatus.error }}
             </div>
             <div v-else-if="upgradeStatus?.phase !== 'success' && upgradeStatus?.phase !== 'failed'" class="status-hint">
-              服务器正在执行后台{{ upgradeIsRollback ? '回滚' : '升级' }}操作，若网络连通较慢请耐心等待（通常耗时 10-60 秒）
+              服务器正在执行后台{{ upgradeKind === 'xray' ? '内核切换' : (upgradeIsRollback ? '回滚' : '升级') }}操作，若网络连通较慢请耐心等待（通常耗时 10-60 秒）
             </div>
           </div>
         </div>
@@ -1774,6 +1869,26 @@ async function removeServer(row: any) {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* ================= Xray 内核版本弹窗 ================= */
+.xray-version-dialog {
+  .xray-current-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--x-fill-2, #f8fafc);
+    border: 1px solid var(--x-border-light, #f1f5f9);
+    border-radius: 8px;
+  }
+  .xray-dialog-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+  }
 }
 
 /* ================= Agent 升级监控弹窗 ================= */

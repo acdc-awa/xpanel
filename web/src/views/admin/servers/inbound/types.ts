@@ -32,13 +32,12 @@ export interface TlsConfig {
   cipher_suites: string
   min_version: string
   max_version: string
+  // 仅影响用户订阅（skip-cert-verify）。入站服务端不消费。
   allow_insecure: boolean
-  pinned_peer_cert_sha256: string
-  disable_system_root: boolean
   reject_unknown_sni: boolean
-  verify_peer_cert_by_name: string
-  ca_cert_file: string
-  ca_cert_content: string
+  // 历史遗留：入站曾允许配置 usage=verify 的 CA 证书（服务端不消费）。
+  // 控件已移除，仅原样回写，避免存量配置在保存时丢字段。
+  legacy_verify_certs: any[]
 }
 
 export interface SockoptConfig {

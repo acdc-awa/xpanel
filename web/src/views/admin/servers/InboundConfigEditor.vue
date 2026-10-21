@@ -227,18 +227,15 @@ const tlsForm = ref<TlsConfig>({
   cert_id: props.certId || 0,
   server_name: '',
   alpn: 'h2,http/1.1',
-  cert_file: '/etc/xray/cert.pem',
-  key_file: '/etc/xray/key.pem',
+  // 不再预填路径：未绑定托管证书时会写出节点上不存在的文件，导致 xray 加载失败。
+  cert_file: '',
+  key_file: '',
   cipher_suites: '',
   min_version: '1.2',
   max_version: '1.3',
   allow_insecure: false,
-  pinned_peer_cert_sha256: '',
-  disable_system_root: false,
   reject_unknown_sni: false,
-  verify_peer_cert_by_name: '',
-  ca_cert_file: '',
-  ca_cert_content: '',
+  legacy_verify_certs: [],
 })
 
 // 底层 Socket 优化状态
@@ -431,20 +428,8 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
       usage: 'encipherment',
     })
   }
-  if (tlsForm.value.ca_cert_file) {
-    certsList.push({
-      certificateFile: tlsForm.value.ca_cert_file,
-      usage: 'verify',
-    })
-  } else if (tlsForm.value.ca_cert_content) {
-    const lines = tlsForm.value.ca_cert_content.split('\n').map((x: string) => x.trim()).filter(Boolean)
-    if (lines.length > 0) {
-      certsList.push({
-        certificate: lines,
-        usage: 'verify',
-      })
-    }
-  }
+  // 存量 usage=verify 项原样回写（客户端语义，服务端生成时由后端剥离）。
+  certsList.push(...(tlsForm.value.legacy_verify_certs || []))
   if (certsList.length > 0) {
     t.certificates = certsList
   }
@@ -452,12 +437,13 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
   if (alpnArr.length > 0) t.alpn = alpnArr
   if (tlsForm.value.min_version) t.minVersion = tlsForm.value.min_version
   if (tlsForm.value.max_version) t.maxVersion = tlsForm.value.max_version
-  if (tlsForm.value.cipher_suites) t.cipherSuites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
+  // xray 的 cipherSuites 是「: 分隔的字符串」；提交数组会让整份配置反序列化失败。
+  if (tlsForm.value.cipher_suites) {
+    const suites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
+    if (suites.length > 0) t.cipherSuites = suites.join(':')
+  }
   if (tlsForm.value.allow_insecure) t.allowInsecure = true
-  if (tlsForm.value.pinned_peer_cert_sha256) t.pinnedPeerCertSha256 = tlsForm.value.pinned_peer_cert_sha256
-  if (tlsForm.value.disable_system_root) t.disableSystemRoot = true
   if (tlsForm.value.reject_unknown_sni) t.rejectUnknownSni = true
-  if (tlsForm.value.verify_peer_cert_by_name) t.verifyPeerCertByName = tlsForm.value.verify_peer_cert_by_name
 
   return t
 }
@@ -806,14 +792,13 @@ function parseJsonToForm(str: string) {
     if (tlsSettings && typeof tlsSettings === 'object') {
       let certFile = ''
       let keyFile = ''
-      let caCertFile = ''
-      let caCertContent = ''
+      const legacyVerifyCerts: any[] = []
       if (Array.isArray(tlsSettings.certificates)) {
         for (const c of tlsSettings.certificates) {
           if (c && typeof c === 'object') {
             if (c.usage === 'verify') {
-              if (c.certificateFile) caCertFile = c.certificateFile
-              if (Array.isArray(c.certificate)) caCertContent = c.certificate.join('\n')
+              // 服务端不消费，仅原样保留，避免存量配置丢字段。
+              legacyVerifyCerts.push(c)
             } else {
               if (c.certificateFile) certFile = c.certificateFile
               if (c.keyFile) keyFile = c.keyFile
@@ -827,16 +812,15 @@ function parseJsonToForm(str: string) {
         alpn: Array.isArray(tlsSettings.alpn) ? tlsSettings.alpn.join(',') : '',
         cert_file: certFile,
         key_file: keyFile,
-        cipher_suites: Array.isArray(tlsSettings.cipherSuites) ? tlsSettings.cipherSuites.join(',') : '',
+        // 兼容历史脏数据：数组（旧前端）与字符串（xray 正确形态）两种存法。
+        cipher_suites: Array.isArray(tlsSettings.cipherSuites)
+          ? tlsSettings.cipherSuites.join(',')
+          : (typeof tlsSettings.cipherSuites === 'string' ? tlsSettings.cipherSuites.split(':').join(',') : ''),
         min_version: tlsSettings.minVersion || '1.2',
         max_version: tlsSettings.maxVersion || '1.3',
         allow_insecure: !!tlsSettings.allowInsecure,
-        pinned_peer_cert_sha256: tlsSettings.pinnedPeerCertSha256 || '',
-        disable_system_root: !!tlsSettings.disableSystemRoot,
         reject_unknown_sni: !!tlsSettings.rejectUnknownSni,
-        verify_peer_cert_by_name: tlsSettings.verifyPeerCertByName || '',
-        ca_cert_file: caCertFile,
-        ca_cert_content: caCertContent,
+        legacy_verify_certs: legacyVerifyCerts,
       }
     }
 

@@ -8,6 +8,9 @@
     "tag": "api"
   },
   "dns": {},
+  "geodata": {
+    "cron": "0 5 * * *"
+  },
   "inbounds": [
     {
       "port": 8443,
@@ -30,10 +33,6 @@
             {
               "certificateFile": "/etc/xray/certs/t.example.com/fullchain.pem",
               "keyFile": "/etc/xray/certs/t.example.com/key.pem"
-            },
-            {
-              "certificateFile": "/etc/ca.pem",
-              "usage": "verify"
             }
           ],
           "serverName": "t.example.com"

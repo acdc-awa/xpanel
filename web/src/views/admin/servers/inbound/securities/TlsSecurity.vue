@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
-import { getCerts, getCACerts, type CertItem, type CACertItem } from '@/api/admin'
+import { getCerts, type CertItem } from '@/api/admin'
 import type { TlsConfig } from '../types'
 
 const props = defineProps<{
@@ -14,8 +14,8 @@ const emit = defineEmits<{
 }>()
 
 const certs = ref<CertItem[]>([])
-const caCerts = ref<CACertItem[]>([])
 const showAdvanced = ref(false)
+const showClient = ref(false)
 
 async function loadCerts() {
   try {
@@ -28,20 +28,8 @@ async function loadCerts() {
   }
 }
 
-async function loadCAs() {
-  try {
-    const { data } = await getCACerts()
-    if (data.code === 0 && data.data) {
-      caCerts.value = data.data.items || []
-    }
-  } catch {
-    caCerts.value = []
-  }
-}
-
 onMounted(() => {
   loadCerts()
-  loadCAs()
 })
 
 function updateField<K extends keyof TlsConfig>(key: K, val: TlsConfig[K]) {
@@ -93,13 +81,14 @@ function onCertChange(val: any) {
             </div>
           </el-form-item>
 
-          <el-form-item label="SNI (server_name)">
+          <el-form-item label="分享/客户端 SNI (serverName)">
             <el-input
               :model-value="modelValue.server_name"
               placeholder="如 example.com"
               class="font-mono-num"
               @input="(v: string) => updateField('server_name', v)"
             />
+            <div class="field-hint">服务端不读取该字段；作为订阅与机间连接的默认 SNI 使用。</div>
           </el-form-item>
 
           <el-form-item label="ALPN (逗号分隔)">
@@ -111,20 +100,10 @@ function onCertChange(val: any) {
             />
           </el-form-item>
 
-          <el-form-item label="跳过客户端证书校验 (allowInsecure)">
-            <div style="padding-top: 4px">
-              <el-switch
-                :model-value="modelValue.allow_insecure"
-                active-text="允许不安全证书 (客户端直连/订阅下发)"
-                @update:model-value="(v: any) => updateField('allow_insecure', Boolean(v))"
-              />
-            </div>
-          </el-form-item>
-
           <el-form-item label="证书文件路径 (Cert File)">
             <el-input
               :model-value="modelValue.cert_file"
-              placeholder="/etc/xray/cert.pem"
+              placeholder="如 /etc/xray/cert.pem（未绑定托管证书时必填）"
               class="font-mono-num"
               @input="(v: string) => updateField('cert_file', v)"
             />
@@ -133,16 +112,19 @@ function onCertChange(val: any) {
           <el-form-item label="私钥文件路径 (Key File)">
             <el-input
               :model-value="modelValue.key_file"
-              placeholder="/etc/xray/key.pem"
+              placeholder="如 /etc/xray/key.pem（与证书路径成对填写）"
               class="font-mono-num"
               @input="(v: string) => updateField('key_file', v)"
             />
+            <div class="field-hint">
+              未绑定面板托管证书时，必须填写成对的证书/私钥路径，且文件需真实存在于节点上。
+            </div>
           </el-form-item>
         </div>
       </div>
     </div>
 
-    <!-- 微卡片 2: 高级安全策略与验签 (折叠) -->
+    <!-- 微卡片 2: 服务端 TLS 策略（仅服务端生效，折叠） -->
     <div class="x-micro-card">
       <div
         class="x-micro-card__head cursor-pointer select-none"
@@ -150,10 +132,10 @@ function onCertChange(val: any) {
       >
         <div class="head-title">
           <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-          <span>高级 TLS 策略、CA 验签与证书锁定 (选填调优)</span>
+          <span>服务端 TLS 策略（选填调优）</span>
         </div>
         <div class="head-meta flex items-center gap-1 text-indigo-500">
-          <span>{{ showAdvanced ? '收起高级配置' : '展开 6 项高级调优' }}</span>
+          <span>{{ showAdvanced ? '收起高级配置' : '展开高级调优' }}</span>
           <el-icon><component :is="showAdvanced ? ArrowUp : ArrowDown" /></el-icon>
         </div>
       </div>
@@ -187,64 +169,53 @@ function onCertChange(val: any) {
           <el-form-item label="加密套件 (Cipher Suites)">
             <el-input
               :model-value="modelValue.cipher_suites"
-              placeholder="留空默认标准套件"
+              placeholder="留空使用标准套件；多个用逗号分隔"
               class="font-mono-num"
               @input="(v: string) => updateField('cipher_suites', v)"
             />
           </el-form-item>
 
-          <el-form-item label="证书指纹固定 (Pin SHA-256)">
-            <el-input
-              :model-value="modelValue.pinned_peer_cert_sha256"
-              placeholder="64位 Hex 散列"
-              class="font-mono-num"
-              clearable
-              @input="(v: string) => updateField('pinned_peer_cert_sha256', v)"
-            />
-          </el-form-item>
-
-          <el-form-item label="从托管 CA 选择验签证书">
-            <el-select
-              placeholder="选择已保存的 CA"
-              clearable
-              style="width: 100%"
-              @change="(id: any) => {
-                const ca = caCerts.find(c => c.id === id)
-                if (ca) updateField('ca_cert_content', ca.ca_cert_pem)
-              }"
-            >
-              <el-option
-                v-for="ca in caCerts"
-                :key="ca.id"
-                :value="ca.id"
-                :label="`${ca.name} (${ca.common_name})`"
-              />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="CA 证书内容 (PEM 直接粘贴)">
-            <el-input
-              :model-value="modelValue.ca_cert_content"
-              type="textarea"
-              :rows="2"
-              class="font-mono-num"
-              placeholder="-----BEGIN CERTIFICATE-----..."
-              @input="(v: string) => updateField('ca_cert_content', v)"
-            />
-          </el-form-item>
-
-          <el-form-item label="证书与握手保护">
-            <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 4px">
-              <el-switch
-                :model-value="modelValue.disable_system_root"
-                active-text="禁用系统内置根证书"
-                @update:model-value="(v: any) => updateField('disable_system_root', Boolean(v))"
-              />
+          <el-form-item label="拒绝未知 SNI 握手">
+            <div style="padding-top: 4px">
               <el-switch
                 :model-value="modelValue.reject_unknown_sni"
-                active-text="拒绝未知 SNI 握手"
+                active-text="rejectUnknownSni"
                 @update:model-value="(v: any) => updateField('reject_unknown_sni', Boolean(v))"
               />
+            </div>
+          </el-form-item>
+        </div>
+      </div>
+    </div>
+
+    <!-- 微卡片 3: 订阅透传（仅影响用户订阅，服务端不生效） -->
+    <div class="x-micro-card">
+      <div
+        class="x-micro-card__head cursor-pointer select-none"
+        @click="showClient = !showClient"
+      >
+        <div class="head-title">
+          <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+          <span>订阅透传（仅影响用户订阅）</span>
+        </div>
+        <div class="head-meta flex items-center gap-1 text-indigo-500">
+          <span>{{ showClient ? '收起' : '展开' }}</span>
+          <el-icon><component :is="showClient ? ArrowUp : ArrowDown" /></el-icon>
+        </div>
+      </div>
+      <div v-show="showClient" class="x-micro-card__body">
+        <div class="form-grid-2">
+          <el-form-item label="跳过客户端证书校验 (allowInsecure)">
+            <div style="padding-top: 4px">
+              <el-switch
+                :model-value="modelValue.allow_insecure"
+                active-text="订阅下发 skip-cert-verify"
+                @update:model-value="(v: any) => updateField('allow_insecure', Boolean(v))"
+              />
+              <div class="field-hint">
+                仅写入用户订阅；xray 服务端已移除该字段，不会进入节点配置。
+                机间出站的证书校验由落地方自动决定（托管 CA → CA 验签，自签 → 指纹 Pin），不读取本页配置。
+              </div>
             </div>
           </el-form-item>
         </div>

@@ -216,3 +216,93 @@ func TestSanitizeStreamSettings(t *testing.T) {
 		})
 	}
 }
+
+// xray 的 cipherSuites 是 ":" 分隔字符串；历史前端按数组提交会整份配置反序列化失败。
+func TestSanitizeCipherSuites(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want any // nil = 字段应被删除
+	}{
+		{
+			name: "array joined with colon",
+			in:   `{"security":"tls","tlsSettings":{"cipherSuites":["TLS_AES_128_GCM_SHA256","TLS_AES_256_GCM_SHA384"]}}`,
+			want: "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384",
+		},
+		{
+			name: "string passthrough",
+			in:   `{"security":"tls","tlsSettings":{"cipherSuites":"TLS_AES_128_GCM_SHA256"}}`,
+			want: "TLS_AES_128_GCM_SHA256",
+		},
+		{
+			name: "empty array dropped",
+			in:   `{"security":"tls","tlsSettings":{"cipherSuites":[]}}`,
+			want: nil,
+		},
+		{
+			name: "blank string dropped",
+			in:   `{"security":"tls","tlsSettings":{"cipherSuites":"  "}}`,
+			want: nil,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(sanitizeStreamSettings(tt.in)), &m); err != nil {
+				t.Fatalf("output should be valid JSON: %v", err)
+			}
+			tls, _ := m["tlsSettings"].(map[string]any)
+			got, ok := tls["cipherSuites"]
+			if tt.want == nil {
+				if ok {
+					t.Fatalf("cipherSuites should be dropped, got %v", got)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Fatalf("cipherSuites = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// 入站生成时剥离客户端专用的 TLS 校验字段与 usage=verify 证书（DB 原文保留）。
+func TestStripInboundClientOnlyTLS(t *testing.T) {
+	stream := map[string]any{
+		"security": "tls",
+		"tlsSettings": map[string]any{
+			"disableSystemRoot":    true,
+			"pinnedPeerCertSha256": "abc",
+			"verifyPeerCertByName": "a.com",
+			"certificates": []any{
+				map[string]any{"usage": "verify", "certificateFile": "/ca.crt"},
+				map[string]any{"usage": "encipherment", "certificateFile": "/srv.crt", "keyFile": "/srv.key"},
+			},
+		},
+	}
+	stripInboundClientOnlyTLS(stream)
+	tls := stream["tlsSettings"].(map[string]any)
+	for _, k := range []string{"disableSystemRoot", "pinnedPeerCertSha256", "verifyPeerCertByName"} {
+		if _, ok := tls[k]; ok {
+			t.Fatalf("%s should be stripped", k)
+		}
+	}
+	certs := tls["certificates"].([]any)
+	if len(certs) != 1 {
+		t.Fatalf("expected 1 cert after strip, got %d", len(certs))
+	}
+	if certs[0].(map[string]any)["usage"] != "encipherment" {
+		t.Fatalf("wrong cert kept: %v", certs[0])
+	}
+
+	// 只有 verify 项时整个 certificates 删除。
+	onlyVerify := map[string]any{
+		"tlsSettings": map[string]any{
+			"certificates": []any{map[string]any{"usage": "verify", "certificateFile": "/ca.crt"}},
+		},
+	}
+	stripInboundClientOnlyTLS(onlyVerify)
+	if _, ok := onlyVerify["tlsSettings"].(map[string]any)["certificates"]; ok {
+		t.Fatal("certificates should be deleted when only verify entries exist")
+	}
+}

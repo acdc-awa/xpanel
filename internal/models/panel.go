@@ -47,7 +47,7 @@ type Server struct {
 	// 旧 agent 不上报（空值保持，不覆盖）。
 	XrayDiskHash    string `gorm:"size:64" json:"xray_disk_hash"`
 	XrayRunningHash string `gorm:"size:64" json:"xray_running_hash"`
-	// XrayVersion 节点上报的 xray 内核版本（如 "26.10.17"）。旧 agent 不填（空值保持，不覆盖）。
+	// XrayVersion 节点上报的 xray 内核版本（如 "26.10.21"）。旧 agent 不填（空值保持，不覆盖）。
 	XrayVersion string `gorm:"size:32" json:"xray_version"`
 	// 当前在线用户 IP 快照：agent 心跳每次覆写的 JSON（[]{email,ips}，源自 xray GetUsersStats，
 	// refcount 语义=当前活跃连接的去重源 IP）。不直接 JSON 透出，经 GET /admin/servers/:id/online-ips

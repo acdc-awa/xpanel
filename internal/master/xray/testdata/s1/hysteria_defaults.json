@@ -8,6 +8,9 @@
     "tag": "api"
   },
   "dns": {},
+  "geodata": {
+    "cron": "0 5 * * *"
+  },
   "inbounds": [
     {
       "port": 44321,
