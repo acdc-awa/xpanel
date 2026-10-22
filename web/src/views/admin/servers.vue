@@ -1,9 +1,31 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Refresh, View, Document, Delete, Key, CopyDocument, Edit, Setting, RefreshRight, TrendCharts, Upload, MoreFilled, Loading, Check, Close, Platform, Link } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
-import BaseCard from '@/components/base/BaseCard.vue'
+import { Check, Close, CopyDocument, Loading, Refresh } from '@element-plus/icons-vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsButtonDropdown,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
+  CsCheckbox,
+  CsContainer,
+  CsEmpty,
+  CsInput,
+  CsPage,
+  CsSegmentedControl,
+  CsSpinner,
+  CsStatusIndicator,
+  CsToolbar,
+  CsTooltip,
+  ElMessage,
+  ElMessageBox,
+  type ButtonDropdownItem,
+  type SegmentedOption,
+} from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
@@ -80,7 +102,20 @@ const expiringServers = computed(() => {
 
 const onlineCount = computed(() => list.value.filter((s) => s.status === 1).length)
 const offlineCount = computed(() => list.value.filter((s) => s.status !== 1).length)
-const statusFilter = ref<'all' | 'online' | 'offline' | 'expiring'>('all')
+
+type StatusFilter = 'all' | 'online' | 'offline' | 'expiring'
+type BadgeColor =
+  | 'grey'
+  | 'green'
+  | 'blue'
+  | 'red'
+  | 'severity-critical'
+  | 'severity-high'
+  | 'severity-medium'
+  | 'severity-low'
+  | 'severity-neutral'
+
+const statusFilter = ref<StatusFilter>('all')
 
 const filtered = computed(() => {
   let res = list.value
@@ -106,6 +141,65 @@ const filtered = computed(() => {
       (s.idc_address ?? '').toLowerCase().includes(kw),
   )
 })
+
+const statusFilterOptions = computed<SegmentedOption[]>(() => {
+  const options: SegmentedOption[] = [
+    { id: 'all', text: `全部 ${list.value.length}` },
+    { id: 'online', text: `在线 ${onlineCount.value}` },
+    { id: 'offline', text: `离线 ${offlineCount.value}` },
+  ]
+  if (expiringServers.value.length > 0) {
+    options.push({ id: 'expiring', text: `待续费 ${expiringServers.value.length}` })
+  }
+  return options
+})
+
+function onStatusFilterChange(value: string | number) {
+  statusFilter.value = value as StatusFilter
+}
+
+/** 页面原有的 x-chip 配色语义映射到 Cloudscape Badge。 */
+function badgeColorOf(cls: string): BadgeColor {
+  switch (cls) {
+    case 'red':
+      return 'red'
+    case 'green':
+    case 'emerald':
+      return 'green'
+    case 'blue':
+      return 'blue'
+    case 'orange':
+    case 'deep-orange':
+    case 'yellow':
+    case 'amber':
+      return 'severity-medium'
+    default:
+      return 'grey'
+  }
+}
+
+function expiryBadgeColor(row: ServerItem): BadgeColor {
+  const st = getExpiryStatus(row.expire_at)
+  return st ? badgeColorOf(st.cls) : 'grey'
+}
+
+function cardMenuItems(row: ServerItem): ButtonDropdownItem[] {
+  const items: ButtonDropdownItem[] = [
+    { id: 'status', text: '运行状态', iconName: 'view-horizontal' },
+    { id: 'logs', text: '服务器日志', iconName: 'file' },
+  ]
+  if (row.idc_address && isUrl(row.idc_address)) {
+    items.push({ id: 'open_idc', text: '打开 IDC 控制台', iconName: 'external' })
+  }
+  items.push(
+    { id: 'agent_version', text: 'Agent 版本…', iconName: 'upload' },
+    { id: 'xray', text: 'Xray 内核版本…', iconName: 'settings' },
+    { id: 'edit', text: '编辑服务器', iconName: 'edit', dividerBefore: true },
+    { id: 'reset', text: '重置密钥', iconName: 'key' },
+    { id: 'delete', text: '删除服务器', iconName: 'remove', dividerBefore: true, danger: true },
+  )
+  return items
+}
 
 // ---- 官方 Agent 最新版本感知与比对 ----
 const latestAgentVersion = ref('')
@@ -139,8 +233,13 @@ async function load() {
   loading.value = true
   try {
     const { data } = await getServers()
-    if (data.code === 0) list.value = data.data.items
-    else ElMessage.error(data.message)
+    if (data.code === 0) {
+      list.value = data.data.items
+      // 待续费筛选项会随列表消失，避免筛选项没了列表还停在空结果上
+      if (statusFilter.value === 'expiring' && expiringServers.value.length === 0) {
+        statusFilter.value = 'all'
+      }
+    } else ElMessage.error(data.message)
   } catch (e) {
     ElMessage.error(errMsg(e, '加载服务器失败'))
   } finally {
@@ -935,273 +1034,206 @@ async function removeServer(row: any) {
 </script>
 
 <template>
-  <div class="x-page">
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <el-input v-model="keyword" placeholder="搜索名称 / 地址 / 地区" :prefix-icon="Search" clearable style="width: 240px" />
-        <el-button @click="load"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-        <el-checkbox
-          :model-value="allSelected"
-          :disabled="filtered.length === 0"
-          @change="(v: any) => toggleSelectAll(!!v)"
-        >全选</el-checkbox>
-        <template v-if="selectedIds.length">
-          <span class="x-chip blue font-mono-num" style="font-size: 11px">已选 {{ selectedIds.length }} 台</span>
-          <el-button type="warning" plain @click="batchUpgradeSelected">
-            <el-icon><Upload /></el-icon>&nbsp;批量升级
-          </el-button>
-          <el-button link @click="selectedIds = []">取消选择</el-button>
-        </template>
-        <el-tag
-          v-if="latestAgentVersion"
-          size="default"
-          type="info"
-          class="cell-mono font-mono-num"
-          style="cursor: pointer; height: 32px; display: inline-flex; align-items: center"
-          title="官方最新 Agent 版本，点击刷新最新版本检测"
+  <CsPage>
+    <CsToolbar>
+      <CsInput
+        v-model="keyword"
+        placeholder="搜索名称 / 地址 / 地区"
+        prefix-icon="search"
+        clearable
+        style="width: 240px"
+        aria-label="搜索服务器"
+      />
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
+      <CsCheckbox
+        :model-value="allSelected"
+        :indeterminate="selectedIds.length > 0 && !allSelected"
+        :disabled="filtered.length === 0"
+        @change="(v: boolean) => toggleSelectAll(!!v)"
+      >全选</CsCheckbox>
+      <template v-if="selectedIds.length">
+        <CsBadge color="blue"><span class="cs-text-mono">已选 {{ selectedIds.length }} 台</span></CsBadge>
+        <CsButton icon-name="upload" @click="batchUpgradeSelected">批量升级</CsButton>
+        <CsButton variant="link" @click="selectedIds = []">取消选择</CsButton>
+      </template>
+      <CsTooltip v-if="latestAgentVersion" content="官方最新 Agent 版本，点击刷新最新版本检测" placement="top">
+        <CsButton
+          variant="inline-link"
+          icon-name="refresh"
+          :loading="fetchingLatestAgent"
           @click="loadLatestAgentVersion(true)"
         >
-          官方最新: {{ latestAgentVersion }}
-        </el-tag>
-      </div>
-      <el-button type="primary" @click="createOpen = true"><el-icon><Plus /></el-icon>&nbsp;新增服务器</el-button>
-    </div>
+          <span class="cs-text-mono">官方最新: {{ latestAgentVersion }}</span>
+        </CsButton>
+      </CsTooltip>
+      <template #actions>
+        <CsButton variant="primary" icon-name="add-plus" @click="createOpen = true">新增服务器</CsButton>
+      </template>
+    </CsToolbar>
 
     <!-- 续费提醒横幅（仅在未专门过滤待续费时提示） -->
-    <el-alert
-      v-if="expiringServers.length > 0 && statusFilter !== 'expiring'"
-      type="warning"
-      show-icon
-      :closable="false"
-      style="margin-bottom: 12px"
-    >
-      <template #title>
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px">
-          <span>
-            续费提醒：共 <strong>{{ expiringServers.length }}</strong> 台服务器已到期或将在 7 天内到期，请注意及时前往 IDC 控制台续费。
-          </span>
-          <el-button
-            size="small"
-            type="warning"
-            plain
-            round
-            @click="statusFilter = 'expiring'"
-          >
-            仅看待续费服务器
-          </el-button>
-        </div>
+    <CsAlert v-if="expiringServers.length > 0 && statusFilter !== 'expiring'" type="warning">
+      续费提醒：共 <strong>{{ expiringServers.length }}</strong> 台服务器已到期或将在 7 天内到期，请注意及时前往 IDC 控制台续费。
+      <template #action>
+        <CsButton @click="statusFilter = 'expiring'">仅看待续费服务器</CsButton>
       </template>
-    </el-alert>
+    </CsAlert>
 
-    <BaseCard title="服务器列表" compact>
-      <template #extra>
-        <div class="stat-pills">
-          <span class="stat-pill" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">
-            全部 <span class="num font-mono-num">{{ list.length }}</span>
-          </span>
-          <span class="stat-pill online" :class="{ active: statusFilter === 'online' }" @click="statusFilter = 'online'">
-            在线 <span class="num font-mono-num">{{ onlineCount }}</span>
-          </span>
-          <span class="stat-pill offline" :class="{ active: statusFilter === 'offline' }" @click="statusFilter = 'offline'">
-            离线 <span class="num font-mono-num">{{ offlineCount }}</span>
-          </span>
-          <span
-            v-if="expiringServers.length > 0"
-            class="stat-pill warning"
-            :class="{ active: statusFilter === 'expiring' }"
-            @click="statusFilter = 'expiring'"
-          >
-            待续费 <span class="num font-mono-num">{{ expiringServers.length }}</span>
-          </span>
-        </div>
+    <CsContainer header="服务器列表">
+      <template #actions>
+        <CsSegmentedControl
+          :model-value="statusFilter"
+          :options="statusFilterOptions"
+          label="按状态筛选服务器"
+          @update:model-value="onStatusFilterChange"
+        />
       </template>
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
-      </div>
 
-      <div v-else-if="filtered.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><Platform /></el-icon>
-        <p style="margin-top: 8px">{{ keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」' }}</p>
-      </div>
+      <div v-if="loading" class="server-loading"><CsSpinner size="large" /></div>
 
-      <!-- 全局统一服务器卡片网格流 (自适应 1~4 列) -->
-      <div v-else class="server-card-grid">
-        <div v-for="row in filtered" :key="row.id" class="server-card">
-          <!-- 头部 -->
-          <div class="card-head">
-            <div class="head-title">
-              <el-checkbox
+      <CsEmpty
+        v-else-if="filtered.length === 0"
+        icon-name="grid-view"
+        :description="keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」'"
+      />
+
+      <CsCardGrid v-else>
+        <CsCard v-for="row in filtered" :key="row.id">
+          <template #header>
+            <div class="server-card-head">
+              <CsCheckbox
                 :model-value="selectedIds.includes(row.id)"
-                style="height: auto; margin-right: 2px"
-                @change="(v: any) => toggleSelect(row.id, !!v)"
+                :aria-label="`选择 ${row.name}`"
+                @change="(v: boolean) => toggleSelect(row.id, !!v)"
                 @click.stop
               />
-              <span class="sort-order-pill font-mono-num" :title="`排序序号: ${row.sort_order ?? 0}`">#{{ row.sort_order ?? 0 }}</span>
-              <span class="x-status-dot" :class="row.status === 1 ? 'online' : 'offline'" />
-              <span class="server-name" title="点击查看详情" @click="openDrawer(row)">{{ row.name }}</span>
-              <span class="x-chip" :class="row.status === 1 ? 'emerald' : 'gray'" style="font-size: 10px; padding: 1px 5px">
-                {{ row.status === 1 ? '在线' : '离线' }}
-              </span>
-              <span v-if="row.location" class="x-chip blue" style="font-size: 10px; padding: 1px 5px">{{ row.location }}</span>
-              <!-- 到期预警徽标 -->
-              <el-tooltip v-if="getExpiryStatus(row.expire_at)" :content="getExpiryStatus(row.expire_at)!.tip" placement="top">
-                <span class="x-chip" :class="getExpiryStatus(row.expire_at)!.cls" style="cursor: help; font-size: 10px; padding: 1px 5px">
-                  {{ getExpiryStatus(row.expire_at)!.text }}
-                </span>
-              </el-tooltip>
-              <el-tooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
-                <span class="x-chip" :class="xrayAlertChip(row).cls" style="cursor: help; font-size: 10px; padding: 1px 5px">
-                  {{ xrayAlertChip(row).text }}
-                </span>
-              </el-tooltip>
-            </div>
-            <!-- 配置同步状态（push_state 由后端推导：none/pending/rejected/synced/drift） -->
-            <el-tooltip v-if="pushChip(row).tip" :content="pushChip(row).tip" placement="top">
-              <span class="x-chip font-mono-num" :class="pushChip(row).cls" style="cursor: help; font-size: 10.5px">{{ pushChip(row).text }}</span>
-            </el-tooltip>
-            <span v-else class="x-chip font-mono-num" :class="pushChip(row).cls" style="font-size: 10.5px">{{ pushChip(row).text }}</span>
-          </div>
-
-          <!-- 核心指标高亮区 (突出地址与入站数) -->
-          <div class="card-highlight-bar">
-            <div class="highlight-item host-item">
-              <span class="item-label">服务器地址 / 域名</span>
-              <div class="host-val" title="点击复制" @click="copyText(row.host, '服务器地址')">
-                <code class="cell-mono font-mono-num font-13">{{ row.host }}</code>
-                <el-icon class="copy-icon"><CopyDocument /></el-icon>
-              </div>
-            </div>
-            <div class="highlight-item inbounds-item" title="点击查看关联节点" @click="goInbounds(row)">
-              <span class="item-label">接入点</span>
-              <div class="inbound-val">
-                <span class="count-num font-mono-num">{{ inboundCount(row.id) }}</span>
-                <span class="count-unit">个入站</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 次要运维指标行 -->
-          <div class="card-meta-row">
-            <div class="meta-item">
-              <span class="meta-label">Agent</span>
-              <span class="cell-mono font-mono-num meta-val">{{ row.agent_version || 'v—' }}</span>
-              <span
-                v-if="getAgentVersionStatus(row.agent_version).type === 'latest'"
-                class="x-chip emerald mini-chip"
-              >最新</span>
-              <span
-                v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
-                class="x-chip orange mini-chip"
-                :title="`官方最新版本 ${latestAgentVersion}`"
-              >有新版</span>
-              <el-link
-                v-if="row.status === 1"
-                :type="getAgentVersionStatus(row.agent_version).type === 'outdated' ? 'warning' : 'primary'"
-                :underline="false"
-                :disabled="upgradingId === row.id"
-                class="upgrade-btn"
-                @click="openVersionDialog(row, 'agent')"
+              <CsBadge color="grey"><span class="cs-text-mono">#{{ row.sort_order ?? 0 }}</span></CsBadge>
+              <CsStatusIndicator
+                :type="row.status === 1 ? 'success' : 'stopped'"
+                :text="row.status === 1 ? '在线' : '离线'"
+              />
+              <CsButton variant="link" class="server-name" @click="openDrawer(row)">{{ row.name }}</CsButton>
+              <CsBadge v-if="row.location" color="blue">{{ row.location }}</CsBadge>
+              <CsTooltip
+                v-if="getExpiryStatus(row.expire_at)"
+                :content="getExpiryStatus(row.expire_at)!.tip"
+                placement="top"
               >
-                {{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : '版本' }}
-              </el-link>
+                <CsBadge :color="expiryBadgeColor(row)" class="server-chip-help">
+                  {{ getExpiryStatus(row.expire_at)!.text }}
+                </CsBadge>
+              </CsTooltip>
+              <CsTooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
+                <CsBadge :color="badgeColorOf(xrayAlertChip(row).cls)" class="server-chip-help">
+                  {{ xrayAlertChip(row).text }}
+                </CsBadge>
+              </CsTooltip>
             </div>
-            <div class="meta-item">
-              <span class="meta-label">Xray</span>
-              <span class="cell-mono font-mono-num meta-val">{{ row.xray_version || '—' }}</span>
-              <el-link
-                v-if="row.status === 1"
-                type="primary"
-                :underline="false"
-                :disabled="upgradingId === row.id"
-                class="upgrade-btn"
-                @click="openVersionDialog(row, 'xray')"
-              >版本</el-link>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">心跳</span>
-              <span class="cell-mono font-mono-num muted font-11">{{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}</span>
-            </div>
-          </div>
-          <!-- VPS 续费与资产信息（若设置了其中任何一项） -->
-          <div v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address" class="card-asset-bar">
-            <span class="item-label">VPS 资产</span>
-            <div class="asset-content">
-              <div class="asset-badges">
+          </template>
+
+          <template #actions>
+            <CsTooltip v-if="pushChip(row).tip" :content="pushChip(row).tip" placement="top">
+              <CsBadge :color="badgeColorOf(pushChip(row).cls)">{{ pushChip(row).text }}</CsBadge>
+            </CsTooltip>
+            <CsBadge v-else :color="badgeColorOf(pushChip(row).cls)">{{ pushChip(row).text }}</CsBadge>
+          </template>
+
+          <CsCardFacts :columns="2">
+            <CsCardFact label="服务器地址 / 域名" full-width>
+              <CsButton
+                variant="inline-link"
+                icon-name="copy"
+                class="server-host"
+                @click="copyText(row.host, '服务器地址')"
+              >
+                <span class="cs-text-mono">{{ row.host }}</span>
+              </CsButton>
+            </CsCardFact>
+
+            <CsCardFact label="Agent">
+              <span class="server-inline">
+                <span class="cs-text-mono">{{ row.agent_version || 'v—' }}</span>
+                <CsBadge v-if="getAgentVersionStatus(row.agent_version).type === 'latest'" color="green">最新</CsBadge>
+                <CsBadge
+                  v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
+                  color="severity-medium"
+                  :title="`官方最新版本 ${latestAgentVersion}`"
+                >有新版</CsBadge>
+                <CsButton
+                  v-if="row.status === 1"
+                  variant="inline-link"
+                  :disabled="upgradingId === row.id"
+                  @click="openVersionDialog(row, 'agent')"
+                >{{ getAgentVersionStatus(row.agent_version).type === 'outdated' ? '升级' : '版本' }}</CsButton>
+              </span>
+            </CsCardFact>
+
+            <CsCardFact label="Xray">
+              <span class="server-inline">
+                <span class="cs-text-mono">{{ row.xray_version || '—' }}</span>
+                <CsButton
+                  v-if="row.status === 1"
+                  variant="inline-link"
+                  :disabled="upgradingId === row.id"
+                  @click="openVersionDialog(row, 'xray')"
+                >版本</CsButton>
+              </span>
+            </CsCardFact>
+
+            <CsCardFact label="接入点">
+              <CsButton variant="inline-link" @click="goInbounds(row)">
+                <span class="cs-text-mono">{{ inboundCount(row.id) }}</span> 个入站
+              </CsButton>
+            </CsCardFact>
+
+            <CsCardFact label="心跳" mono :value="row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—'" />
+
+            <CsCardFact
+              v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address"
+              label="VPS 资产"
+              full-width
+            >
+              <div class="server-asset">
                 <span
                   v-if="row.expire_at"
-                  class="cell-mono font-mono-num expire-text"
+                  class="cs-text-mono"
                   :style="getExpiryStatus(row.expire_at)?.isUrgent ? { color: getExpiryStatus(row.expire_at)!.color, fontWeight: 600 } : {}"
                   :title="getExpiryStatus(row.expire_at)?.tip || `到期日：${formatExpireDate(row.expire_at)}`"
-                >
-                  {{ formatExpireDate(row.expire_at) }}
-                </span>
-                <span v-if="row.billing_cycle" class="x-chip gray" style="font-size: 9.5px; padding: 0 4px">{{ row.billing_cycle }}</span>
-                <span v-if="row.price" class="cell-mono font-mono-num price-text">{{ row.price }}</span>
-              </div>
-              <div v-if="row.idc_address" class="idc-link-box">
-                <el-link
-                  v-if="isUrl(row.idc_address)"
-                  type="primary"
-                  :underline="false"
-                  style="font-size: 11px"
+                >{{ formatExpireDate(row.expire_at) }}</span>
+                <CsBadge v-if="row.billing_cycle" color="grey">{{ row.billing_cycle }}</CsBadge>
+                <span v-if="row.price" class="cs-text-mono server-price">{{ row.price }}</span>
+                <CsButton
+                  v-if="row.idc_address && isUrl(row.idc_address)"
+                  variant="inline-link"
+                  icon-name="external"
                   :href="normalizeUrl(row.idc_address)"
                   target="_blank"
-                >
-                  <el-icon style="margin-right: 2px"><Link /></el-icon>IDC 控制台
-                </el-link>
-                <span
-                  v-else
-                  class="muted font-11 idc-copy"
-                  title="点击复制 IDC 地址"
+                >IDC 控制台</CsButton>
+                <CsButton
+                  v-else-if="row.idc_address"
+                  variant="inline-link"
+                  icon-name="copy"
                   @click="copyText(row.idc_address, 'IDC 地址')"
-                >
-                  {{ row.idc_address }}
-                  <el-icon style="font-size: 11px"><CopyDocument /></el-icon>
-                </span>
+                >{{ row.idc_address }}</CsButton>
               </div>
-            </div>
-          </div>
+            </CsCardFact>
+          </CsCardFacts>
 
-          <!-- 操作按钮栏 -->
-          <div class="card-foot-actions">
-            <el-button size="small" type="primary" plain @click="openDrawer(row)">
-              <el-icon><Setting /></el-icon>&nbsp;详情
-            </el-button>
-            <el-button size="small" type="success" plain @click="openMetrics(row)">
-              <el-icon><TrendCharts /></el-icon>&nbsp;监控
-            </el-button>
-            <el-button size="small" @click="restartXray(row)">
-              <el-icon><RefreshRight /></el-icon>&nbsp;重启
-            </el-button>
-            <el-dropdown trigger="click" @command="(cmd: string) => onMore(cmd, row)">
-              <el-button size="small" style="flex: none; padding: 0 8px">
-                <el-icon><MoreFilled /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="status"><el-icon><View /></el-icon>运行状态</el-dropdown-item>
-                  <el-dropdown-item command="logs"><el-icon><Document /></el-icon>服务器日志</el-dropdown-item>
-                  <el-dropdown-item v-if="row.idc_address && isUrl(row.idc_address)" command="open_idc">
-                    <el-icon><Link /></el-icon>打开 IDC 控制台
-                  </el-dropdown-item>
-                  <el-dropdown-item command="agent_version">
-                    <el-icon><Upload /></el-icon>Agent 版本…
-                  </el-dropdown-item>
-                  <el-dropdown-item command="xray">
-                    <el-icon><Setting /></el-icon>Xray 内核版本…
-                  </el-dropdown-item>
-                  <el-dropdown-item divided command="edit"><el-icon><Edit /></el-icon>编辑服务器</el-dropdown-item>
-                  <el-dropdown-item command="reset"><el-icon><Key /></el-icon>重置密钥</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided style="color: var(--el-color-danger)">
-                    <el-icon><Delete /></el-icon>删除服务器
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
-        </div>
-      </div>
-    </BaseCard>
+          <template #footer>
+            <CsButton icon-name="settings" @click="openDrawer(row)">详情</CsButton>
+            <CsButton icon-name="view-horizontal" @click="openMetrics(row)">监控</CsButton>
+            <CsButton icon-name="refresh" @click="restartXray(row)">重启</CsButton>
+            <CsButtonDropdown
+              icon-only
+              icon-name="ellipsis"
+              aria-label="更多操作"
+              :items="cardMenuItems(row)"
+              @select="(cmd: string | number) => onMore(String(cmd), row)"
+            />
+          </template>
+        </CsCard>
+      </CsCardGrid>
+    </CsContainer>
 
     <!-- 新增服务器 -->
     <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
@@ -1695,76 +1727,58 @@ async function removeServer(row: any) {
       :server-id="metricsServer?.id || 0"
       :server-name="metricsServer?.name || ''"
     />
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
 .cell-mono { font-family: var(--x-font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 12.5px; color: var(--x-text-2); }
 
-/* 统计胶囊条 */
-.stat-pills {
+/* 页面壳：Cloudscape 卡片内只保留必需的布局类 */
+.server-loading {
+  padding: 48px 0;
+  text-align: center;
+}
+
+.server-card-head {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.server-name {
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.server-host {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+.server-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.server-asset {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
 
-  .stat-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--x-text-2, #64748b);
-    background: var(--x-fill-2, #f1f5f9);
-    border: 1px solid var(--x-border, #e2e8f0);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    user-select: none;
+.server-price {
+  font-weight: 600;
+  color: var(--color-text-link-default-qabnuk, #0972d3);
+}
 
-    .num {
-      font-weight: 700;
-      font-size: 11.5px;
-    }
-
-    &:hover {
-      background: var(--x-fill-3, #e2e8f0);
-      color: var(--x-text-1, #0f172a);
-    }
-
-    &.active {
-      background: var(--x-primary-soft, rgba(59, 130, 246, 0.1));
-      color: var(--x-primary, #3b82f6);
-      border-color: var(--x-primary, #3b82f6);
-    }
-
-    &.online {
-      &.active {
-        background: rgba(16, 185, 129, 0.1);
-        color: #10b981;
-        border-color: #10b981;
-      }
-    }
-
-    &.offline {
-      &.active {
-        background: rgba(148, 163, 184, 0.15);
-        color: #64748b;
-        border-color: #94a3b8;
-      }
-    }
-
-    &.warning {
-      color: #f59e0b;
-      border-color: rgba(245, 158, 11, 0.3);
-      &.active {
-        background: rgba(245, 158, 11, 0.12);
-        color: #d97706;
-        border-color: #f59e0b;
-      }
-    }
-  }
+.server-chip-help {
+  cursor: help;
 }
 
 /* 弹窗微卡片与工控表单栈 */
@@ -1819,10 +1833,8 @@ async function removeServer(row: any) {
     grid-template-columns: 1fr;
   }
 }
-.agent-cell { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--x-text-3); }
 .secret-box { display: grid; gap: 10px; }
-.tip { font-size: 12px; color: var(--x-text-3); }
 .install-cmd { font-size: 11.5px; }
 .secret-row {
   display: flex;
@@ -1834,8 +1846,6 @@ async function removeServer(row: any) {
   .k { color: var(--x-text-2); font-size: 12.5px; flex: none; width: 56px; }
   code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-primary); word-break: break-all; flex: 1; }
 }
-.ok-text { color: var(--x-success); font-size: 13px; }
-.err-text { color: var(--x-danger); font-size: 13px; }
 .status-rows .row { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--x-border); font-size: 13.5px; }
 .status-rows .k { color: var(--x-text-2); }
 .status-rows .v { font-weight: 500; }
@@ -1981,267 +1991,6 @@ async function removeServer(row: any) {
   }
 }
 
-/* ================= 全局统一服务器卡片网格流 ================= */
-.server-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.server-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .sort-order-pill {
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--x-primary);
-      background: var(--x-primary-soft);
-      padding: 1px 6px;
-      border-radius: 4px;
-      border: 1px solid var(--x-border, rgba(0, 0, 0, 0.08));
-      line-height: 1.3;
-      flex: none;
-    }
-
-    .server-name {
-      font-weight: 700;
-      font-size: 15px;
-      color: var(--x-text, #111827);
-      cursor: pointer;
-      line-height: 1.3;
-      &:hover {
-        color: var(--x-primary);
-      }
-    }
-  }
-
-  .card-highlight-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 0 8px;
-
-    .highlight-item {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      &.host-item {
-        flex: 1;
-        min-width: 0;
-
-        .host-val {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          cursor: pointer;
-          color: var(--x-text);
-          background: var(--x-fill-2, #f8fafc);
-          padding: 4px 8px;
-          border-radius: 6px;
-          border: 1px solid var(--x-border-light, #e2e8f0);
-          max-width: 100%;
-          transition: all 0.15s ease;
-
-          &:hover {
-            border-color: var(--x-primary);
-            color: var(--x-primary);
-            code { color: var(--x-primary); }
-          }
-
-          code {
-            font-size: 13px;
-            font-weight: 600;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
-
-          .copy-icon {
-            font-size: 12px;
-            color: var(--x-text-3);
-            flex: none;
-          }
-        }
-      }
-
-      &.inbounds-item {
-        flex: none;
-        cursor: pointer;
-        text-align: right;
-
-        .inbound-val {
-          display: inline-flex;
-          align-items: baseline;
-          gap: 3px;
-
-          .count-num {
-            font-size: 17px;
-            font-weight: 700;
-            color: var(--x-primary);
-            line-height: 1;
-          }
-
-          .count-unit {
-            font-size: 11.5px;
-            color: var(--x-text-2);
-            font-weight: 500;
-          }
-        }
-
-        &:hover .inbound-val .count-num {
-          text-decoration: underline;
-        }
-      }
-    }
-  }
-
-  .card-meta-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    gap: 10px;
-    font-size: 11.5px;
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-
-      .meta-label {
-        font-size: 10.5px;
-        color: var(--x-text-3);
-      }
-
-      .meta-val {
-        color: var(--x-text-2);
-        font-size: 11.5px;
-      }
-
-      .mini-chip {
-        font-size: 9.5px;
-        padding: 0 4px;
-        line-height: 1.3;
-      }
-
-      .upgrade-btn {
-        font-size: 11px;
-        font-weight: 600;
-      }
-    }
-  }
-
-  .card-asset-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0 4px;
-    border-top: 1px dashed var(--x-border-light, #f1f5f9);
-    margin-top: 4px;
-    gap: 8px;
-    flex-wrap: wrap;
-
-    .item-label {
-      font-size: 11px;
-      color: var(--x-text-3);
-    }
-
-    .asset-content {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      flex: 1;
-
-      .asset-badges {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-
-        .expire-text {
-          font-size: 11.5px;
-        }
-
-        .price-text {
-          font-weight: 600;
-          color: var(--x-primary);
-          font-size: 12px;
-        }
-      }
-
-      .idc-link-box {
-        display: flex;
-        align-items: center;
-
-        .idc-copy {
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 2px;
-          &:hover {
-            color: var(--x-primary);
-          }
-        }
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    .el-button {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-    }
-  }
-}
-
 @media (max-width: 768px) {
   .secret-row {
     flex-direction: column;
@@ -2262,9 +2011,4 @@ async function removeServer(row: any) {
   }
 }
 
-@media (max-width: 640px) {
-  .server-card-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

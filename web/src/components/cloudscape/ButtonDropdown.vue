@@ -11,6 +11,8 @@ export interface ButtonDropdownItem {
   disabled?: boolean
   iconName?: string
   dividerBefore?: boolean
+  /** 破坏性操作（如删除）用错误色呈现。 */
+  danger?: boolean
 }
 
 const props = withDefaults(
@@ -248,11 +250,12 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   role="menuitem"
-                  class="cs-button-dropdown-item"
+                    class="cs-button-dropdown-item"
                   :class="
                     cx(
                       CS['button-dropdown/item-element']['menu-item'],
-                      item.disabled && CS['button-dropdown/item-element'].disabled
+                      item.disabled && CS['button-dropdown/item-element'].disabled,
+                      item.danger && 'cs-button-dropdown-item--danger'
                     )
                   "
                   :disabled="item.disabled"
@@ -308,5 +311,10 @@ onBeforeUnmount(() => {
   background: transparent;
   font: inherit;
   text-align: start;
+}
+
+/* 官方 menu-item 规则带 ID 级 :not(#\9) 特异度，普通选择器压不过，只能显式提升优先级 */
+.cs-button-dropdown-item.cs-button-dropdown-item--danger {
+  color: var(--color-text-status-error-ri38gt, #d91515) !important;
 }
 </style>
