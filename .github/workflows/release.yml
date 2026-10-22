@@ -20,7 +20,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: 构建 amd64 release 包（含前端构建）
         run: bash scripts/build-release.sh "${GITHUB_REF_NAME}"
       - name: 构建 arm64 release 包（复用前端产物）

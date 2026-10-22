@@ -3,7 +3,7 @@
 # 注意：2026-08-24 XPanel-Node v0.1.0 发布后已解除本地 replace——
 # 构建上下文 = master 仓库根（deploy/master 的 ../..），协议包由 go.mod require v0.1.0 从 GitHub 拉取。
 # ---- 前端构建 ----
-FROM node:22-alpine AS web
+FROM node:24-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
