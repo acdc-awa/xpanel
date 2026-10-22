@@ -1,8 +1,29 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { Plus, Delete, MagicStick, Edit, Loading, Key, Refresh, CopyDocument, Stamp, View } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
-import BaseCard from '@/components/base/BaseCard.vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import {
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
+  CsConfirmDialog,
+  CsContainer,
+  CsEmpty,
+  CsForm,
+  CsFormItem,
+  CsIconButton,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsPage,
+  CsSelect,
+  CsSpinner,
+  CsTabs,
+  CsToolbar,
+  ElMessage,
+} from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   getCerts,
@@ -21,7 +42,11 @@ import {
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
-const activeTab = ref<'server' | 'ca'>('server')
+const activeTab = ref('server')
+const certTabs = [
+  { id: 'server', label: 'TLS 服务端证书' },
+  { id: 'ca', label: 'CA 根证书体系' },
+]
 
 // ===== 密钥算法选项 =====
 const keyTypeOptions = [
@@ -72,28 +97,68 @@ function loadAll() {
 }
 onMounted(loadAll)
 
+const issueCaOptions = computed(() =>
+  caList.value
+    .filter((ca) => ca.has_key)
+    .map((ca) => ({
+      label: `${ca.name} (${ca.common_name}) · ${ca.key_type}`,
+      value: ca.id,
+    })),
+)
+
+// ================= 确认弹窗 =================
+const confirmState = reactive({
+  visible: false,
+  header: '',
+  warning: '',
+  message: '',
+  confirmText: '确认',
+  action: null as null | (() => void | Promise<void>),
+})
+
+function askConfirm(opts: {
+  header: string
+  warning: string
+  message?: string
+  confirmText?: string
+  action: () => void | Promise<void>
+}) {
+  confirmState.header = opts.header
+  confirmState.warning = opts.warning
+  confirmState.message = opts.message ?? ''
+  confirmState.confirmText = opts.confirmText ?? '确认'
+  confirmState.action = opts.action
+  confirmState.visible = true
+}
+
+async function runConfirmed() {
+  const action = confirmState.action
+  confirmState.visible = false
+  confirmState.action = null
+  if (action) await action()
+}
+
 // ---- 一键重签/续期 ----
-async function handleReissue(row: CertItem) {
-  try {
-    await ElMessageBox.confirm(
-      `确定为证书「${row.domain}」一键重新签发/续期？\n签发后将自动下发到落地节点，并重新渲染中转出站配置。`,
-      '证书重新签发',
-      { type: 'warning', confirmButtonText: '立即重签', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  try {
-    const { data } = await reissueCert(row.id)
-    if (data.code === 0) {
-      ElMessage.success('证书已重签并推送到节点！')
-      loadCerts()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '重签失败'))
-  }
+function handleReissue(row: CertItem) {
+  askConfirm({
+    header: '重新签发这张证书？',
+    warning: '签发后将自动下发到落地节点，并重新渲染中转出站配置。',
+    message: `证书「${row.domain}」将按现有 SAN 重新签发/续期。`,
+    confirmText: '立即重签',
+    action: async () => {
+      try {
+        const { data } = await reissueCert(row.id)
+        if (data.code === 0) {
+          ElMessage.success('证书已重签并推送到节点！')
+          loadCerts()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '重签失败'))
+      }
+    },
+  })
 }
 
 // ---- 生成自签证书（高级弹窗）----
@@ -109,6 +174,13 @@ const ssForm = reactive({
   valid_days: 3650,
   remark: '',
 })
+
+function splitSan(value: string): string[] {
+  return value
+    .split(/[,，\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
 
 function openSelfSigned() {
   ssForm.domain = ''
@@ -129,19 +201,10 @@ async function saveSelfSigned() {
   }
   ssSaving.value = true
   try {
-    const dnsList = ssForm.san_dns
-      .split(/[,，\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const ipList = ssForm.san_ip
-      .split(/[,，\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-
     const { data } = await generateSelfSignedCert({
       domain: ssForm.domain.trim(),
-      san_dns: dnsList,
-      san_ip: ipList,
+      san_dns: splitSan(ssForm.san_dns),
+      san_ip: splitSan(ssForm.san_ip),
       organization: ssForm.organization.trim(),
       country: ssForm.country.trim(),
       key_type: ssForm.key_type,
@@ -178,12 +241,13 @@ const issueForm = reactive({
 })
 
 function openIssue(preselectedCaId = 0) {
-  const availableCAs = caList.value.filter((ca) => ca.has_key)
-  if (availableCAs.length === 0) {
+  const available = issueCaOptions.value
+  if (available.length === 0) {
     ElMessage.warning('当前暂无可用于签发的 CA（需持有私钥），请先生成或导入完整 CA')
     return
   }
-  issueForm.ca_id = preselectedCaId || availableCAs[0].id
+  const preset = available.find((ca) => ca.value === preselectedCaId)
+  issueForm.ca_id = preset ? preselectedCaId : available[0].value
   issueForm.domain = ''
   issueForm.san_dns = ''
   issueForm.san_ip = ''
@@ -206,19 +270,10 @@ async function saveIssue() {
   }
   issueSaving.value = true
   try {
-    const dnsList = issueForm.san_dns
-      .split(/[,，\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const ipList = issueForm.san_ip
-      .split(/[,，\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-
     const { data } = await issueCertFromCA(issueForm.ca_id, {
       domain: issueForm.domain.trim(),
-      san_dns: dnsList,
-      san_ip: ipList,
+      san_dns: splitSan(issueForm.san_dns),
+      san_ip: splitSan(issueForm.san_ip),
       organization: issueForm.organization.trim(),
       country: issueForm.country.trim(),
       key_type: issueForm.key_type,
@@ -330,7 +385,9 @@ async function saveImportCA() {
       remark: importCAForm.remark.trim(),
     })
     if (data.code === 0) {
-      ElMessage.success(importCAForm.ca_key_pem.trim() ? '完整 CA 已导入（支持签发与验签）' : '纯公钥 CA 已导入（仅供节点验签）')
+      ElMessage.success(
+        importCAForm.ca_key_pem.trim() ? '完整 CA 已导入（支持签发与验签）' : '纯公钥 CA 已导入（仅供节点验签）',
+      )
       importCAOpen.value = false
       loadCAs()
     } else {
@@ -350,6 +407,11 @@ const viewingCA = ref<CACertItem | null>(null)
 function openViewCA(ca: CACertItem) {
   viewingCA.value = ca
   viewCAOpen.value = true
+}
+
+function closeViewCA() {
+  viewCAOpen.value = false
+  viewingCA.value = null
 }
 
 async function copyText(text: string, title = '内容') {
@@ -415,42 +477,48 @@ async function save() {
   }
 }
 
-async function removeCert(row: CertItem) {
-  try {
-    await ElMessageBox.confirm(`确认删除证书「${row.domain}」？`, '删除证书', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteCert(row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      loadCerts()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
+function removeCert(row: CertItem) {
+  askConfirm({
+    header: '删除这张证书？',
+    warning: '此操作不可恢复。',
+    message: `确认删除证书「${row.domain}」？若正被入站引用，需先解绑。`,
+    confirmText: '删除',
+    action: async () => {
+      try {
+        const { data } = await deleteCert(row.id)
+        if (data.code === 0) {
+          ElMessage.success('已删除')
+          loadCerts()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '删除失败'))
+      }
+    },
+  })
 }
 
-async function removeCA(row: CACertItem) {
-  try {
-    await ElMessageBox.confirm(`确认删除 CA 根证书「${row.name}」？\n若已签发证书，需先将签发的证书解绑删除。`, '删除 CA 根证书', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteCACert(row.id)
-    if (data.code === 0) {
-      ElMessage.success('CA 已删除')
-      loadCAs()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
+function removeCA(row: CACertItem) {
+  askConfirm({
+    header: '删除这个 CA 根证书？',
+    warning: '若已签发证书，需先将签发的证书解绑删除。',
+    message: `确认删除 CA 根证书「${row.name}」？`,
+    confirmText: '删除',
+    action: async () => {
+      try {
+        const { data } = await deleteCACert(row.id)
+        if (data.code === 0) {
+          ElMessage.success('CA 已删除')
+          loadCAs()
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (e) {
+        ElMessage.error(errMsg(e, '删除失败'))
+      }
+    },
+  })
 }
 
 function daysLeft(notAfter: string): number {
@@ -459,536 +527,510 @@ function daysLeft(notAfter: string): number {
   return Math.ceil((t.getTime() - Date.now()) / 86400000)
 }
 
-function expireTag(notAfter: string) {
+type ExpireColor = 'red' | 'severity-medium' | 'green' | 'grey'
+
+function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
+  if (!notAfter) return { color: 'grey', text: '—' }
   const d = daysLeft(notAfter)
-  if (d < 0) return { type: 'danger' as const, text: `已过期 ${-d} 天` }
-  if (d <= 30) return { type: 'warning' as const, text: `剩 ${d} 天` }
-  return { type: 'success' as const, text: `剩 ${d} 天` }
+  if (d < 0) return { color: 'red', text: `已过期 ${-d} 天` }
+  if (d <= 30) return { color: 'severity-medium', text: `剩 ${d} 天` }
+  return { color: 'green', text: `剩 ${d} 天` }
 }
 </script>
 
 <template>
-  <div class="x-page">
-    <!-- 顶层标签页导航 -->
-    <el-tabs v-model="activeTab" class="cert-nav-tabs">
-      <el-tab-pane label="TLS 服务端证书" name="server" />
-      <el-tab-pane label="CA 根证书体系" name="ca" />
-    </el-tabs>
+  <CsPage>
+    <CsTabs v-model="activeTab" :tabs="certTabs" aria-label="证书管理">
+      <!-- ================= Tab 1: TLS 服务端证书 ================= -->
+      <div v-if="activeTab === 'server'" class="cert-tab-body">
+        <CsToolbar>
+          <CsButton icon-name="refresh" @click="loadCerts">刷新</CsButton>
+          <TipIcon
+            content="服务端证书由主控推送到引用服务器落盘（/etc/xray/certs/域名/），xray 每小时热重载；支持 CA 签发完整链、多算法自签与外部证书导入。"
+          />
+          <template #actions>
+            <CsButton variant="primary" icon-name="security" @click="openIssue()">基于 CA 签发证书</CsButton>
+            <CsButton icon-name="lock-private" @click="openSelfSigned">生成自签证书</CsButton>
+            <CsButton icon-name="upload" @click="openCreate">上传外部证书</CsButton>
+          </template>
+        </CsToolbar>
 
-    <!-- ================= Tab 1: TLS 服务端证书 ================= -->
-    <div v-if="activeTab === 'server'">
-      <div class="x-toolbar">
-        <div class="x-toolbar-left">
-          <el-button type="primary" @click="openIssue()"><el-icon><Stamp /></el-icon>&nbsp;基于 CA 签发证书</el-button>
-          <el-button type="success" plain @click="openSelfSigned"><el-icon><MagicStick /></el-icon>&nbsp;生成自签证书</el-button>
-          <el-button plain @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;上传外部证书</el-button>
-          <TipIcon content="服务端证书由主控推送到引用服务器落盘（/etc/xray/certs/域名/），xray 每小时热重载；支持 CA 签发完整链、多算法自签与外部证书导入。" />
-        </div>
-      </div>
+        <CsContainer header="TLS 服务端证书列表">
+          <div v-if="certLoading" class="cert-loading">
+            <CsSpinner size="large" />
+          </div>
 
-      <BaseCard title="TLS 服务端证书列表">
-        <div v-if="certLoading" style="padding: 48px 0; text-align: center">
-          <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
-        </div>
+          <CsEmpty
+            v-else-if="certList.length === 0"
+            icon-name="key"
+            description="暂无 TLS 证书，可「基于 CA 签发」、「生成自签」或「上传证书」"
+          />
 
-        <div v-else-if="certList.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-          <el-icon style="font-size: 32px; color: var(--x-text-3)"><Key /></el-icon>
-          <p style="margin-top: 8px">暂无 TLS 证书，可「基于 CA 签发」、「生成自签」或「上传证书」</p>
-        </div>
-
-        <div v-else class="cert-card-grid">
-          <div v-for="row in certList" :key="row.id" class="cert-card">
-            <!-- 头部 -->
-            <div class="card-head">
-              <div class="head-title">
-                <code class="cell-mono cert-domain">{{ row.domain }}</code>
-                <span v-if="row.ca_id" class="x-chip purple" style="font-size: 10px; padding: 1px 5px">
-                  CA: {{ row.ca_name || '托管CA' }}
-                </span>
-                <span v-else-if="row.self_signed" class="x-chip green" style="font-size: 10px; padding: 1px 5px">
-                  自签·自动Pin
-                </span>
-                <span v-else class="x-chip blue" style="font-size: 10px; padding: 1px 5px">
-                  外部导入
-                </span>
-                <span v-if="row.key_type" class="x-chip gray" style="font-size: 10px; padding: 1px 5px">
-                  {{ row.key_type }}
-                </span>
-              </div>
-              <span
-                class="x-chip"
-                :class="expireTag(row.not_after).type === 'danger' ? 'red' : (expireTag(row.not_after).type === 'warning' ? 'orange' : 'green')"
-                style="font-size: 10.5px"
-              >
-                {{ expireTag(row.not_after).text }}
-              </span>
-            </div>
-
-            <!-- 证书属性网格 -->
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">证书备注</span>
-                <div class="item-value">{{ row.remark || '标准 TLS 证书' }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">到期时间</span>
-                <div class="item-value cell-mono font-12">{{ row.not_after || '—' }}</div>
-              </div>
-              <div class="grid-item full-width" v-if="row.pin_sha256">
-                <span class="item-label">证书指纹 (Pin SHA-256)</span>
-                <div class="item-value pin-value">
-                  <code class="cell-mono font-11 text-ellipsis">{{ row.pin_sha256 }}</code>
-                  <el-button link size="small" type="primary" @click="copyText(row.pin_sha256, '证书指纹')">
-                    <el-icon><CopyDocument /></el-icon>
-                  </el-button>
+          <CsCardGrid v-else>
+            <CsCard v-for="row in certList" :key="row.id">
+              <template #header>
+                <div class="cert-head">
+                  <code class="cert-domain">{{ row.domain }}</code>
+                  <div class="cert-badges">
+                    <CsBadge v-if="row.ca_id" color="blue">CA: {{ row.ca_name || '托管CA' }}</CsBadge>
+                    <CsBadge v-else-if="row.self_signed" color="green">自签 · 自动 Pin</CsBadge>
+                    <CsBadge v-else color="grey">外部导入</CsBadge>
+                    <CsBadge v-if="row.key_type" color="grey">{{ row.key_type }}</CsBadge>
+                  </div>
                 </div>
-              </div>
-              <div class="grid-item full-width">
-                <span class="item-label">引用服务器</span>
-                <div class="item-value">
-                  <template v-if="row.refs && row.refs.length > 0">
-                    <span v-for="r in row.refs" :key="r.inbound_id" class="x-chip purple" style="margin: 1px 4px 1px 0; font-size: 10.5px">
+              </template>
+              <template #actions>
+                <CsBadge :color="expireBadge(row.not_after).color">{{ expireBadge(row.not_after).text }}</CsBadge>
+              </template>
+
+              <CsCardFacts>
+                <CsCardFact label="证书备注" :value="row.remark || '标准 TLS 证书'" />
+                <CsCardFact label="到期时间" :value="row.not_after || '—'" mono />
+                <CsCardFact v-if="row.pin_sha256" label="证书指纹 (Pin SHA-256)" full-width>
+                  <div class="pin-row">
+                    <code class="pin-text" :title="row.pin_sha256">{{ row.pin_sha256 }}</code>
+                    <CsIconButton icon-name="copy" label="复制证书指纹" @click="copyText(row.pin_sha256, '证书指纹')" />
+                  </div>
+                </CsCardFact>
+                <CsCardFact label="引用服务器" full-width>
+                  <div v-if="row.refs && row.refs.length > 0" class="cert-refs">
+                    <CsBadge v-for="r in row.refs" :key="r.inbound_id" color="grey">
                       {{ r.server_name }} / {{ r.inbound_tag }}
-                    </span>
-                  </template>
-                  <span v-else class="muted font-11">未被任何入站引用</span>
-                </div>
-              </div>
-            </div>
+                    </CsBadge>
+                  </div>
+                  <span v-else class="cert-muted">未被任何入站引用</span>
+                </CsCardFact>
+              </CsCardFacts>
 
-            <!-- 底部操作栏 -->
-            <div class="card-foot-actions">
-              <el-button v-if="row.ca_id || row.self_signed" size="small" type="success" plain @click="handleReissue(row)">
-                <el-icon><Refresh /></el-icon>&nbsp;一键重签/续期
-              </el-button>
-              <el-button size="small" type="primary" plain @click="openEdit(row)">
-                <el-icon><Edit /></el-icon>&nbsp;编辑
-              </el-button>
-              <el-button size="small" type="danger" plain @click="removeCert(row)">
-                <el-icon><Delete /></el-icon>&nbsp;删除
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </BaseCard>
-    </div>
-
-    <!-- ================= Tab 2: CA 根证书体系 ================= -->
-    <div v-else-if="activeTab === 'ca'">
-      <div class="x-toolbar">
-        <div class="x-toolbar-left">
-          <el-button type="primary" @click="openGenerateCA"><el-icon><Plus /></el-icon>&nbsp;生成新根 CA</el-button>
-          <el-button plain @click="openImportCA"><el-icon><Stamp /></el-icon>&nbsp;导入外部 CA</el-button>
-          <TipIcon content="CA 根证书体系：完整 CA（含私钥）可无限签发节点 TLS 服务端证书；纯公钥 CA 可直接内联下发到出入站作为验签根证书。" />
-        </div>
+              <template #footer>
+                <CsButton v-if="row.ca_id || row.self_signed" icon-name="refresh" @click="handleReissue(row)">
+                  一键重签/续期
+                </CsButton>
+                <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
+                <CsButton variant="danger-outline" icon-name="remove" @click="removeCert(row)">删除</CsButton>
+              </template>
+            </CsCard>
+          </CsCardGrid>
+        </CsContainer>
       </div>
 
-      <BaseCard title="托管 CA 根证书列表">
-        <div v-if="caLoading" style="padding: 48px 0; text-align: center">
-          <el-icon class="is-loading" style="font-size: 26px; color: var(--x-primary)"><Loading /></el-icon>
-        </div>
+      <!-- ================= Tab 2: CA 根证书体系 ================= -->
+      <div v-else-if="activeTab === 'ca'" class="cert-tab-body">
+        <CsToolbar>
+          <CsButton icon-name="refresh" @click="loadCAs">刷新</CsButton>
+          <TipIcon
+            content="CA 根证书体系：完整 CA（含私钥）可无限签发节点 TLS 服务端证书；纯公钥 CA 可直接内联下发到出入站作为验签根证书。"
+          />
+          <template #actions>
+            <CsButton variant="primary" icon-name="add-plus" @click="openGenerateCA">生成新根 CA</CsButton>
+            <CsButton icon-name="file-open" @click="openImportCA">导入外部 CA</CsButton>
+          </template>
+        </CsToolbar>
 
-        <div v-else-if="caList.length === 0" style="text-align: center; padding: 48px 0; color: var(--x-text-3); font-size: 13.5px">
-          <el-icon style="font-size: 32px; color: var(--x-text-3)"><Stamp /></el-icon>
-          <p style="margin-top: 8px">暂无 CA 证书，点击上方「生成新根 CA」或「导入外部 CA」</p>
-        </div>
-
-        <div v-else class="cert-card-grid">
-          <div v-for="ca in caList" :key="ca.id" class="cert-card">
-            <!-- 头部 -->
-            <div class="card-head">
-              <div class="head-title">
-                <code class="cell-mono cert-domain">{{ ca.name }}</code>
-                <span v-if="ca.has_key" class="x-chip green" style="font-size: 10px; padding: 1px 5px">
-                  完整·可签发
-                </span>
-                <span v-else class="x-chip orange" style="font-size: 10px; padding: 1px 5px">
-                  纯公钥·仅验签
-                </span>
-                <span v-if="ca.key_type" class="x-chip gray" style="font-size: 10px; padding: 1px 5px">
-                  {{ ca.key_type }}
-                </span>
-              </div>
-              <span
-                class="x-chip"
-                :class="expireTag(ca.not_after).type === 'danger' ? 'red' : (expireTag(ca.not_after).type === 'warning' ? 'orange' : 'green')"
-                style="font-size: 10.5px"
-              >
-                {{ expireTag(ca.not_after).text }}
-              </span>
-            </div>
-
-            <!-- CA 属性网格 -->
-            <div class="card-grid">
-              <div class="grid-item">
-                <span class="item-label">通用名称 (CN)</span>
-                <div class="item-value text-ellipsis">{{ ca.common_name || ca.name }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">组织 / 国家</span>
-                <div class="item-value text-ellipsis">{{ [ca.organization, ca.country].filter(Boolean).join(' · ') || '—' }}</div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">已签发证书</span>
-                <div class="item-value">
-                  <span class="x-chip purple font-11" style="padding: 1px 6px">{{ ca.issued_count }} 张证书</span>
-                </div>
-              </div>
-              <div class="grid-item">
-                <span class="item-label">到期时间</span>
-                <div class="item-value cell-mono font-12">{{ ca.not_after || '—' }}</div>
-              </div>
-              <div class="grid-item full-width" v-if="ca.remark">
-                <span class="item-label">备注</span>
-                <div class="item-value">{{ ca.remark }}</div>
-              </div>
-            </div>
-
-            <!-- 底部操作栏 -->
-            <div class="card-foot-actions">
-              <el-button v-if="ca.has_key" size="small" type="primary" plain @click="openIssue(ca.id)">
-                <el-icon><Stamp /></el-icon>&nbsp;签发证书
-              </el-button>
-              <el-button size="small" plain @click="openViewCA(ca)">
-                <el-icon><View /></el-icon>&nbsp;查看公钥
-              </el-button>
-              <el-button size="small" type="danger" plain @click="removeCA(ca)">
-                <el-icon><Delete /></el-icon>&nbsp;删除
-              </el-button>
-            </div>
+        <CsContainer header="托管 CA 根证书列表">
+          <div v-if="caLoading" class="cert-loading">
+            <CsSpinner size="large" />
           </div>
-        </div>
-      </BaseCard>
-    </div>
+
+          <CsEmpty
+            v-else-if="caList.length === 0"
+            icon-name="security"
+            description="暂无 CA 证书，点击上方「生成新根 CA」或「导入外部 CA」"
+          />
+
+          <CsCardGrid v-else>
+            <CsCard v-for="ca in caList" :key="ca.id">
+              <template #header>
+                <div class="cert-head">
+                  <code class="cert-domain">{{ ca.name }}</code>
+                  <div class="cert-badges">
+                    <CsBadge :color="ca.has_key ? 'green' : 'severity-medium'">
+                      {{ ca.has_key ? '完整 · 可签发' : '纯公钥 · 仅验签' }}
+                    </CsBadge>
+                    <CsBadge v-if="ca.key_type" color="grey">{{ ca.key_type }}</CsBadge>
+                  </div>
+                </div>
+              </template>
+              <template #actions>
+                <CsBadge :color="expireBadge(ca.not_after).color">{{ expireBadge(ca.not_after).text }}</CsBadge>
+              </template>
+
+              <CsCardFacts>
+                <CsCardFact label="通用名称 (CN)" :value="ca.common_name || ca.name" />
+                <CsCardFact
+                  label="组织 / 国家"
+                  :value="[ca.organization, ca.country].filter(Boolean).join(' · ') || '—'"
+                />
+                <CsCardFact label="已签发证书">
+                  <CsBadge color="grey">{{ ca.issued_count }} 张证书</CsBadge>
+                </CsCardFact>
+                <CsCardFact label="到期时间" :value="ca.not_after || '—'" mono />
+                <CsCardFact v-if="ca.remark" label="备注" :value="ca.remark" full-width />
+              </CsCardFacts>
+
+              <template #footer>
+                <CsButton v-if="ca.has_key" icon-name="security" @click="openIssue(ca.id)">签发证书</CsButton>
+                <CsButton icon-name="view-vertical" @click="openViewCA(ca)">查看公钥</CsButton>
+                <CsButton variant="danger-outline" icon-name="remove" @click="removeCA(ca)">删除</CsButton>
+              </template>
+            </CsCard>
+          </CsCardGrid>
+        </CsContainer>
+      </div>
+    </CsTabs>
 
     <!-- ===== 弹窗 1: 基于 CA 签发证书 ===== -->
-    <el-dialog v-model="issueOpen" title="基于 CA 签发服务端 TLS 证书" width="620px" :append-to-body="true">
-      <el-form label-position="top">
-        <el-form-item label="签发根 CA">
-          <el-select v-model="issueForm.ca_id" style="width: 100%">
-            <el-option
-              v-for="ca in caList.filter((c) => c.has_key)"
-              :key="ca.id"
-              :value="ca.id"
-              :label="`${ca.name} (${ca.common_name}) · ${ca.key_type}`"
-            />
-          </el-select>
-        </el-form-item>
-        <div class="form-row">
-          <el-form-item label="域名 / 通用名称 (CN)" style="flex: 1">
-            <el-input v-model="issueForm.domain" placeholder="如 relay.example.com" />
-          </el-form-item>
-          <el-form-item label="密钥算法" style="width: 200px">
-            <el-select v-model="issueForm.key_type">
-              <el-option v-for="opt in keyTypeOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
-            </el-select>
-          </el-form-item>
+    <CsModal
+      v-model:visible="issueOpen"
+      header="基于 CA 签发服务端 TLS 证书"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <CsForm label-position="top">
+        <CsFormItem label="签发根 CA" required>
+          <CsSelect
+            v-model="issueForm.ca_id"
+            :options="issueCaOptions"
+            placeholder="选择签发根 CA"
+            style="width: 100%"
+          />
+        </CsFormItem>
+        <div class="form-grid-2">
+          <CsFormItem label="域名 / 通用名称 (CN)" required>
+            <CsInput v-model="issueForm.domain" placeholder="如 relay.example.com" />
+          </CsFormItem>
+          <CsFormItem label="密钥算法">
+            <CsSelect v-model="issueForm.key_type" :options="keyTypeOptions" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="SAN DNS 备用域名（逗号分隔，可选通配符）">
-          <el-input v-model="issueForm.san_dns" placeholder="如 node-01.local, *.relay.example.com" />
-        </el-form-item>
-        <el-form-item label="SAN IP 备用地址（逗号分隔）">
-          <el-input v-model="issueForm.san_ip" placeholder="如 192.168.1.100, 10.0.0.1" />
-        </el-form-item>
-        <div class="form-row">
-          <el-form-item label="组织名称 (O)" style="flex: 1">
-            <el-input v-model="issueForm.organization" placeholder="选填，如 Internal Nodes" />
-          </el-form-item>
-          <el-form-item label="有效天数" style="width: 140px">
-            <el-input-number v-model="issueForm.valid_days" :min="1" :max="36500" style="width: 100%" />
-          </el-form-item>
+        <CsFormItem label="SAN DNS 备用域名（逗号分隔，可选通配符）">
+          <CsInput v-model="issueForm.san_dns" placeholder="如 node-01.local, *.relay.example.com" />
+        </CsFormItem>
+        <CsFormItem label="SAN IP 备用地址（逗号分隔）">
+          <CsInput v-model="issueForm.san_ip" placeholder="如 192.168.1.100, 10.0.0.1" />
+        </CsFormItem>
+        <div class="form-grid-2">
+          <CsFormItem label="组织名称 (O)">
+            <CsInput v-model="issueForm.organization" placeholder="选填，如 Internal Nodes" />
+          </CsFormItem>
+          <CsFormItem label="有效天数">
+            <CsInputNumber v-model="issueForm.valid_days" :min="1" :max="36500" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="备注说明">
-          <el-input v-model="issueForm.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
+        <CsFormItem label="备注说明">
+          <CsInput v-model="issueForm.remark" placeholder="选填" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="issueOpen = false">取消</el-button>
-        <el-button type="primary" :loading="issueSaving" @click="saveIssue">立即签发</el-button>
+        <CsButton @click="issueOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="issueSaving" @click="saveIssue">立即签发</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 弹窗 2: 生成自签证书（高级全面自定义） ===== -->
-    <el-dialog v-model="ssOpen" title="生成自签证书（全面自定义）" width="620px" :append-to-body="true">
-      <div class="ss-note">
+    <CsModal
+      v-model:visible="ssOpen"
+      header="生成自签证书（全面自定义）"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <CsAlert type="info">
         生成具备 IsCA=true 锚点属性的自签证书，主控自动计算 leaf 指纹 Pin（SHA-256）并支持出站节点验证。
-      </div>
-      <el-form label-position="top">
-        <div class="form-row">
-          <el-form-item label="域名 / 服务器标识 (CN)" style="flex: 1">
-            <el-input v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
-          </el-form-item>
-          <el-form-item label="密钥算法" style="width: 200px">
-            <el-select v-model="ssForm.key_type">
-              <el-option v-for="opt in keyTypeOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
-            </el-select>
-          </el-form-item>
+      </CsAlert>
+      <CsForm label-position="top" class="modal-form">
+        <div class="form-grid-2">
+          <CsFormItem label="域名 / 服务器标识 (CN)" required>
+            <CsInput v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
+          </CsFormItem>
+          <CsFormItem label="密钥算法">
+            <CsSelect v-model="ssForm.key_type" :options="keyTypeOptions" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="SAN DNS 备用域名（逗号分隔）">
-          <el-input v-model="ssForm.san_dns" placeholder="如 relay-01.local, *.relay.local" />
-        </el-form-item>
-        <el-form-item label="SAN IP 备用地址（逗号分隔）">
-          <el-input v-model="ssForm.san_ip" placeholder="如 127.0.0.1, 10.0.0.1" />
-        </el-form-item>
-        <div class="form-row">
-          <el-form-item label="组织名称 (O)" style="flex: 1">
-            <el-input v-model="ssForm.organization" placeholder="选填" />
-          </el-form-item>
-          <el-form-item label="有效天数" style="width: 140px">
-            <el-input-number v-model="ssForm.valid_days" :min="1" :max="36500" style="width: 100%" />
-          </el-form-item>
+        <CsFormItem label="SAN DNS 备用域名（逗号分隔）">
+          <CsInput v-model="ssForm.san_dns" placeholder="如 relay-01.local, *.relay.local" />
+        </CsFormItem>
+        <CsFormItem label="SAN IP 备用地址（逗号分隔）">
+          <CsInput v-model="ssForm.san_ip" placeholder="如 127.0.0.1, 10.0.0.1" />
+        </CsFormItem>
+        <div class="form-grid-2">
+          <CsFormItem label="组织名称 (O)">
+            <CsInput v-model="ssForm.organization" placeholder="选填" />
+          </CsFormItem>
+          <CsFormItem label="有效天数">
+            <CsInputNumber v-model="ssForm.valid_days" :min="1" :max="36500" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="备注说明">
-          <el-input v-model="ssForm.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
+        <CsFormItem label="备注说明">
+          <CsInput v-model="ssForm.remark" placeholder="选填" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="ssOpen = false">取消</el-button>
-        <el-button type="success" :loading="ssSaving" @click="saveSelfSigned">生成并保存</el-button>
+        <CsButton @click="ssOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="ssSaving" @click="saveSelfSigned">生成并保存</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 弹窗 3: 生成根 CA ===== -->
-    <el-dialog v-model="genCAOpen" title="生成新根 CA" width="560px" :append-to-body="true">
-      <el-form label-position="top">
-        <el-form-item label="CA 标识名称（唯一）">
-          <el-input v-model="genCAForm.name" placeholder="如 root-ca-prod 或 internal-cluster-ca" />
-        </el-form-item>
-        <div class="form-row">
-          <el-form-item label="通用名称 (CN)" style="flex: 1">
-            <el-input v-model="genCAForm.common_name" placeholder="如 Internal Cluster Root CA" />
-          </el-form-item>
-          <el-form-item label="密钥算法" style="width: 200px">
-            <el-select v-model="genCAForm.key_type">
-              <el-option v-for="opt in keyTypeOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
-            </el-select>
-          </el-form-item>
+    <CsModal
+      v-model:visible="genCAOpen"
+      header="生成新根 CA"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <CsForm label-position="top">
+        <CsFormItem label="CA 标识名称（唯一）" required>
+          <CsInput v-model="genCAForm.name" placeholder="如 root-ca-prod 或 internal-cluster-ca" />
+        </CsFormItem>
+        <div class="form-grid-2">
+          <CsFormItem label="通用名称 (CN)">
+            <CsInput v-model="genCAForm.common_name" placeholder="如 Internal Cluster Root CA" />
+          </CsFormItem>
+          <CsFormItem label="密钥算法">
+            <CsSelect v-model="genCAForm.key_type" :options="keyTypeOptions" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <div class="form-row">
-          <el-form-item label="组织名称 (O)" style="flex: 1">
-            <el-input v-model="genCAForm.organization" placeholder="选填，如 XPanel Cluster" />
-          </el-form-item>
-          <el-form-item label="国家代码 (C)" style="width: 120px">
-            <el-input v-model="genCAForm.country" placeholder="如 CN" maxlength="2" />
-          </el-form-item>
-          <el-form-item label="有效天数" style="width: 120px">
-            <el-input-number v-model="genCAForm.valid_days" :min="30" :max="36500" style="width: 100%" />
-          </el-form-item>
+        <div class="form-grid-3">
+          <CsFormItem label="组织名称 (O)">
+            <CsInput v-model="genCAForm.organization" placeholder="选填，如 XPanel Cluster" />
+          </CsFormItem>
+          <CsFormItem label="国家代码 (C)">
+            <CsInput v-model="genCAForm.country" placeholder="如 CN" :maxlength="2" />
+          </CsFormItem>
+          <CsFormItem label="有效天数">
+            <CsInputNumber v-model="genCAForm.valid_days" :min="30" :max="36500" style="width: 100%" />
+          </CsFormItem>
         </div>
-        <el-form-item label="备注说明">
-          <el-input v-model="genCAForm.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
+        <CsFormItem label="备注说明">
+          <CsInput v-model="genCAForm.remark" placeholder="选填" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="genCAOpen = false">取消</el-button>
-        <el-button type="primary" :loading="genCASaving" @click="saveGenerateCA">立即生成</el-button>
+        <CsButton @click="genCAOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="genCASaving" @click="saveGenerateCA">立即生成</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 弹窗 4: 导入外部 CA ===== -->
-    <el-dialog v-model="importCAOpen" title="导入外部 CA 根证书" width="620px" :append-to-body="true">
-      <el-form label-position="top">
-        <el-form-item label="CA 标识名称（唯一）">
-          <el-input v-model="importCAForm.name" placeholder="如 custom-org-ca" />
-        </el-form-item>
-        <el-form-item label="CA 根证书 PEM（必填）">
-          <el-input v-model="importCAForm.ca_cert_pem" type="textarea" :rows="5" placeholder="-----BEGIN CERTIFICATE-----..." />
-        </el-form-item>
-        <el-form-item label="CA 私钥 PEM（选填；留空则为纯公钥验签 CA，不可签发）">
-          <el-input v-model="importCAForm.ca_key_pem" type="textarea" :rows="4" placeholder="-----BEGIN PRIVATE KEY-----... (可选)" />
-        </el-form-item>
-        <el-form-item label="备注说明">
-          <el-input v-model="importCAForm.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
+    <CsModal
+      v-model:visible="importCAOpen"
+      header="导入外部 CA 根证书"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <CsForm label-position="top">
+        <CsFormItem label="CA 标识名称（唯一）" required>
+          <CsInput v-model="importCAForm.name" placeholder="如 custom-org-ca" />
+        </CsFormItem>
+        <CsFormItem label="CA 根证书 PEM" required>
+          <CsInput
+            v-model="importCAForm.ca_cert_pem"
+            type="textarea"
+            :rows="5"
+            class="pem-input"
+            placeholder="-----BEGIN CERTIFICATE-----..."
+          />
+        </CsFormItem>
+        <CsFormItem label="CA 私钥 PEM" description="选填；留空则为纯公钥验签 CA，不可签发">
+          <CsInput
+            v-model="importCAForm.ca_key_pem"
+            type="textarea"
+            :rows="4"
+            class="pem-input"
+            placeholder="-----BEGIN PRIVATE KEY-----... (可选)"
+          />
+        </CsFormItem>
+        <CsFormItem label="备注说明">
+          <CsInput v-model="importCAForm.remark" placeholder="选填" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="importCAOpen = false">取消</el-button>
-        <el-button type="primary" :loading="importCASaving" @click="saveImportCA">导入 CA</el-button>
+        <CsButton @click="importCAOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="importCASaving" @click="saveImportCA">导入 CA</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 弹窗 5: 查看 / 复制 CA 公钥 ===== -->
-    <el-dialog v-model="viewCAOpen" :title="`CA 根证书公钥（${viewingCA?.name}）`" width="580px" :append-to-body="true">
-      <div v-if="viewingCA">
-        <div style="font-size: 12px; color: var(--x-text-2); margin-bottom: 8px">
-          可直接复制以下根公钥用于客户端验签、出站节点 TLS 校验或下发外部设备：
-        </div>
-        <el-input :model-value="viewingCA.ca_cert_pem" type="textarea" :rows="10" readonly />
+    <CsModal
+      v-model:visible="viewCAOpen"
+      :header="`CA 根证书公钥（${viewingCA?.name || ''}）`"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <div v-if="viewingCA" class="modal-stack">
+        <p class="modal-hint">可直接复制以下根公钥用于客户端验签、出站节点 TLS 校验或下发外部设备：</p>
+        <CsInput :model-value="viewingCA.ca_cert_pem" type="textarea" :rows="10" read-only class="pem-input" />
       </div>
       <template #footer>
-        <el-button @click="viewCAOpen = false">关闭</el-button>
-        <el-button type="primary" @click="copyText(viewingCA?.ca_cert_pem || '', 'CA 根证书公钥')">
-          <el-icon><CopyDocument /></el-icon>&nbsp;复制公钥
-        </el-button>
+        <CsButton @click="closeViewCA">关闭</CsButton>
+        <CsButton
+          variant="primary"
+          icon-name="copy"
+          @click="copyText(viewingCA?.ca_cert_pem || '', 'CA 根证书公钥')"
+        >
+          复制公钥
+        </CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- ===== 弹窗 6: 上传外部证书 / 编辑备注 ===== -->
-    <el-dialog v-model="formOpen" :title="editing ? '编辑证书（' + form.domain + '）' : '上传外部证书'" width="640px" :append-to-body="true">
-      <el-form label-position="top">
-        <el-form-item label="域名（唯一）">
-          <el-input v-model="form.domain" :disabled="!!editing" placeholder="如 cdn.example.com" />
-        </el-form-item>
+    <CsModal
+      v-model:visible="formOpen"
+      :header="editing ? `编辑证书（${form.domain}）` : '上传外部证书'"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <CsForm label-position="top">
+        <CsFormItem label="域名（唯一）" required>
+          <CsInput v-model="form.domain" :disabled="!!editing" placeholder="如 cdn.example.com" />
+        </CsFormItem>
         <template v-if="!editing">
-          <el-form-item label="证书链 PEM（fullchain）">
-            <el-input v-model="form.cert_pem" type="textarea" :rows="5" placeholder="-----BEGIN CERTIFICATE-----..." />
-          </el-form-item>
-          <el-form-item label="私钥 PEM">
-            <el-input v-model="form.key_pem" type="textarea" :rows="5" placeholder="-----BEGIN PRIVATE KEY-----..." />
-          </el-form-item>
+          <CsFormItem label="证书链 PEM（fullchain）" required>
+            <CsInput
+              v-model="form.cert_pem"
+              type="textarea"
+              :rows="5"
+              class="pem-input"
+              placeholder="-----BEGIN CERTIFICATE-----..."
+            />
+          </CsFormItem>
+          <CsFormItem label="私钥 PEM" required>
+            <CsInput
+              v-model="form.key_pem"
+              type="textarea"
+              :rows="5"
+              class="pem-input"
+              placeholder="-----BEGIN PRIVATE KEY-----..."
+            />
+          </CsFormItem>
         </template>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
+        <CsFormItem label="备注">
+          <CsInput v-model="form.remark" placeholder="选填" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <el-button @click="formOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <CsButton @click="formOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </template>
-    </el-dialog>
-  </div>
+    </CsModal>
+
+    <CsConfirmDialog
+      v-model:visible="confirmState.visible"
+      :header="confirmState.header"
+      :warning="confirmState.warning"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      @confirm="runConfirmed"
+    />
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.muted { color: var(--x-text-3); }
-.cell-mono { font-family: var(--x-mono); font-size: 12px; }
-
-.cert-nav-tabs {
-  margin-bottom: 14px;
-}
-
-.ss-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--x-text-2);
-  line-height: 1.6;
-  margin-bottom: 14px;
-  background: var(--x-bg-subtle, #f8fafc);
-  padding: 8px 12px;
-  border-radius: var(--x-radius-sm, 6px);
-  border: 1px dashed var(--x-border, #e2e8f0);
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-}
-
-/* ================= 全局统一证书卡片网格流 ================= */
-.cert-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.cert-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+.cert-tab-body {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .cert-domain {
-      font-weight: 700;
-      font-size: 13.5px;
-      color: var(--x-primary);
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-
-        &.pin-value {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          background: var(--x-bg-subtle, #f8fafc);
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    .el-button {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-    }
-  }
+  gap: 20px;
+  min-inline-size: 0;
 }
 
-.text-ellipsis {
+.cert-loading {
+  padding: 48px 0;
+  text-align: center;
+}
+
+.cert-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.cert-domain {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  overflow-wrap: anywhere;
+}
+
+.cert-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.pin-text {
+  flex: 1 1 auto;
+  min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.cert-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cert-muted {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+}
+
+.form-grid-2,
+.form-grid-3 {
+  display: grid;
+  gap: 0 12px;
+}
+
+.form-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid-3 {
+  grid-template-columns: minmax(0, 1fr) 120px 140px;
+}
+
+.modal-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-form {
+  margin-top: 16px;
+}
+
+.modal-hint {
+  margin: 0;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-gako33, 16px);
+}
+
+.pem-input :deep(textarea) {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 @media (max-width: 640px) {
-  .cert-card-grid {
-    grid-template-columns: 1fr;
-  }
-  .form-row {
-    flex-direction: column;
-    gap: 0;
+  .form-grid-2,
+  .form-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>
