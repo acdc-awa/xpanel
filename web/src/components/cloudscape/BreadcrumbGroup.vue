@@ -34,13 +34,23 @@ function onClick(item: BreadcrumbItem, event: MouseEvent) {
     <ol :class="CS['breadcrumb-group']['breadcrumb-group-list']">
       <li v-for="(item, index) in items" :key="`${index}-${item.text}`" :class="CS['breadcrumb-group'].item">
         <div :class="cx(CS['breadcrumb-group/item'].breadcrumb, index === items.length - 1 && CS['breadcrumb-group/item'].last)">
-          <span v-if="index === items.length - 1" :class="cx(CS['breadcrumb-group/item'].anchor, CS['breadcrumb-group/item'].text)">
+          <span
+            v-if="index === items.length - 1"
+            :class="cx(CS['breadcrumb-group/item'].anchor, CS['breadcrumb-group/item'].text)"
+            aria-current="page"
+          >
+            {{ item.text }}
+          </span>
+          <span
+            v-else-if="!item.href"
+            :class="cx(CS['breadcrumb-group/item'].anchor, CS['breadcrumb-group/item'].text)"
+          >
             {{ item.text }}
           </span>
           <a
             v-else
             :class="cx(CS['breadcrumb-group/item'].anchor, CS['breadcrumb-group/item'].text)"
-            :href="item.href ?? '#'"
+            :href="item.href"
             @click="onClick(item, $event)"
           >
             {{ item.text }}

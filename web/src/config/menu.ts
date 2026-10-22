@@ -24,12 +24,15 @@ export interface SubMenuItem {
   title: string
   path: string
   icon?: Component
+  /** Cloudscape 图标名；管理端外壳使用，用户端仍走 icon 组件。 */
+  iconName?: string
 }
 
 export interface MenuGroup {
   title: string
   path?: string // 单项菜单直接绑定路由
   icon: Component
+  iconName?: string
   children?: SubMenuItem[] // 分组子项
 }
 
@@ -41,46 +44,51 @@ export const adminMenuGroups: MenuGroup[] = [
     title: '仪表盘',
     path: '/admin/dashboard',
     icon: Odometer,
+    iconName: 'view-horizontal',
   },
   {
     title: '服务器与接入点',
     icon: Connection,
+    iconName: 'share',
     children: [
-      { title: '服务器管理', path: '/admin/servers', icon: Monitor },
-      { title: '接入点', path: '/admin/nodes', icon: Share },
-      { title: '出站管理', path: '/admin/outbounds', icon: Promotion },
-      { title: '路由管理', path: '/admin/routing', icon: Connection },
-      { title: '证书管理', path: '/admin/certs', icon: Lock },
+      { title: '服务器管理', path: '/admin/servers', icon: Monitor, iconName: 'multiscreen' },
+      { title: '接入点', path: '/admin/nodes', icon: Share, iconName: 'share' },
+      { title: '出站管理', path: '/admin/outbounds', icon: Promotion, iconName: 'send' },
+      { title: '路由管理', path: '/admin/routing', icon: Connection, iconName: 'map' },
+      { title: '证书管理', path: '/admin/certs', icon: Lock, iconName: 'lock-private' },
     ],
   },
   {
     // 套餐 / 权限组 / 订阅模板 同属「用户能买到什么、看到什么配置」的一条链，放在一组更符合心智。
     title: '订阅与财务',
     icon: Box,
+    iconName: 'ticket',
     children: [
-      { title: '套餐管理', path: '/admin/plans', icon: Box },
-      { title: '权限组管理', path: '/admin/permission-groups', icon: UserFilled },
-      { title: '订阅模板', path: '/admin/sub-templates', icon: Document },
-      { title: '订单记录', path: '/admin/orders', icon: Tickets },
-      { title: '礼品卡管理', path: '/admin/gift-cards', icon: Tickets },
-      { title: '邀请码管理', path: '/admin/invitations', icon: Key },
+      { title: '套餐管理', path: '/admin/plans', icon: Box, iconName: 'grid-view' },
+      { title: '权限组管理', path: '/admin/permission-groups', icon: UserFilled, iconName: 'group' },
+      { title: '订阅模板', path: '/admin/sub-templates', icon: Document, iconName: 'file' },
+      { title: '订单记录', path: '/admin/orders', icon: Tickets, iconName: 'ticket' },
+      { title: '礼品卡管理', path: '/admin/gift-cards', icon: Tickets, iconName: 'ticket' },
+      { title: '邀请码管理', path: '/admin/invitations', icon: Key, iconName: 'key' },
     ],
   },
   {
     title: '用户与运营',
     icon: User,
+    iconName: 'user-profile',
     children: [
-      { title: '用户管理', path: '/admin/users', icon: User },
-      { title: '公告管理', path: '/admin/notices', icon: Bell },
-      { title: '审计日志', path: '/admin/audit', icon: DataAnalysis },
+      { title: '用户管理', path: '/admin/users', icon: User, iconName: 'user-profile' },
+      { title: '公告管理', path: '/admin/notices', icon: Bell, iconName: 'notification' },
+      { title: '审计日志', path: '/admin/audit', icon: DataAnalysis, iconName: 'list-view' },
     ],
   },
   {
     title: '系统管理',
     icon: Setting,
+    iconName: 'settings',
     children: [
-      { title: '系统配置', path: '/admin/settings', icon: Setting },
-      { title: '数据管理', path: '/admin/data-management', icon: Histogram },
+      { title: '系统配置', path: '/admin/settings', icon: Setting, iconName: 'settings' },
+      { title: '数据管理', path: '/admin/data-management', icon: Histogram, iconName: 'upload-download' },
     ],
   },
 ]

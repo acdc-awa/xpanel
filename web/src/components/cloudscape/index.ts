@@ -18,6 +18,14 @@ export { default as CsPaginationBar } from './PaginationBar.vue'
 export { default as CsGrid } from './Grid'
 export { default as CsColumnLayout } from './ColumnLayout'
 export { default as CsBreadcrumbGroup } from './BreadcrumbGroup.vue'
+export { default as CsTopNavigation } from './TopNavigation.vue'
+export { default as CsSideNavigation } from './SideNavigation.vue'
+export type { TopNavigationIdentity, TopNavigationUtility } from './top-navigation-utils'
+export type {
+  SideNavigationItem,
+  SideNavigationFollowDetail,
+  SideNavigationChangeDetail,
+} from './side-navigation-utils'
 export { default as CsSegmentedControl } from './SegmentedControl.vue'
 export { default as CsTabs } from './Tabs.vue'
 export { default as CsAlert } from './Alert.vue'

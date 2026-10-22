@@ -12,7 +12,6 @@ import OnlineUsersPanel from './servers/OnlineUsersPanel.vue'
 import {
   CsAlert,
   CsBox,
-  CsBreadcrumbGroup,
   CsButton,
   CsDashboardGrid,
   CsHeader,
@@ -57,12 +56,6 @@ const addDrawerVisible = ref(false)
 // 抽屉监控
 const metricsOpen = ref(false)
 const selectedServer = ref<ServerMatrixItem | null>(null)
-
-// 面包屑
-const breadcrumbs = [
-  { text: '运维监控', href: '#' },
-  { text: '仪表盘' },
-]
 
 // 集群整体健康度计算
 const onlineServersCount = computed(() => dashData.value?.summary.online_servers || 0)
@@ -327,8 +320,6 @@ onUnmounted(() => {
 <template>
   <div class="aws-console-page" :class="{ 'awsui-dark-mode': theme.isDark }">
     <CsSpaceBetween direction="vertical" size="l">
-      <CsBreadcrumbGroup :items="breadcrumbs" />
-
       <CsHeader
         variant="h1"
         description="实时监控节点健康状态、全网吞吐速率、运营营收与用量指标；拖拽卡片左上角手柄可调整位置，右下角可缩放，窄屏单列时卡片自动展开。"

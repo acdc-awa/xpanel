@@ -66,6 +66,7 @@ const emit = defineEmits<{
 }>()
 
 const slots = useSlots()
+const inputRef = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
 const passwordVisible = ref(false)
 const isTextarea = computed(() => props.type === 'textarea')
 const hasValue = computed(() => props.modelValue !== '' && props.modelValue !== null && props.modelValue !== undefined)
@@ -107,11 +108,18 @@ function clear() {
   emit('change', { value: '' })
   emit('clear')
 }
+
+defineExpose({
+  focus: () => inputRef.value?.focus(),
+  select: () => inputRef.value?.select(),
+  blur: () => inputRef.value?.blur(),
+})
 </script>
 
 <template>
   <div v-if="isTextarea" :class="[CS.textarea.root, 'cs-input-root']">
     <textarea
+      ref="inputRef"
       :class="
         cx(
           CS.textarea.textarea,
@@ -141,6 +149,7 @@ function clear() {
       <slot name="icon"><Icon v-if="prefixIcon" :name="prefixIcon" /></slot>
     </span>
     <input
+      ref="inputRef"
       :class="inputClasses"
       :type="effectiveType"
       :value="modelValue"
