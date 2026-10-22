@@ -5,7 +5,7 @@ import { Plus, Refresh, Edit, Delete, Check, Aim, Connection, Grid, Share, Loadi
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
 import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
-import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
+import ServerSettingsModal from './servers/ServerSettingsModal.vue'
 import TopologyCanvas from '@/components/topology/TopologyCanvas.vue'
 import {
   deleteServerRoutingRule,
@@ -235,6 +235,19 @@ const drawerServer = ref<ServerItem | null>(null)
 function openServer(serverId: number) {
   drawerServer.value = servers.value.find((s) => s.id === serverId) ?? null
   drawerOpen.value = true
+}
+
+async function onSettingsChanged() {
+  await Promise.all([loadTopology(), loadServers()])
+  if (drawerServer.value) {
+    drawerServer.value = servers.value.find((s) => s.id === drawerServer.value!.id) ?? drawerServer.value
+  }
+}
+
+async function onSettingsRemoved() {
+  drawerOpen.value = false
+  drawerServer.value = null
+  await Promise.all([loadTopology(), loadServers()])
 }
 
 function openInboundCreateForServer(serverId: number) {
@@ -524,12 +537,13 @@ onMounted(async () => {
       />
     </template>
 
-    <!-- 双击画布盒子 → 节点管理详情弹窗 -->
-    <ServerNodeDrawer
+    <!-- 双击画布盒子 → 服务器设置弹窗 -->
+    <ServerSettingsModal
+      v-if="drawerOpen"
       v-model="drawerOpen"
       :server="drawerServer"
-      @removed="loadTopology"
-      @changed="loadTopology"
+      @removed="onSettingsRemoved"
+      @changed="onSettingsChanged"
     />
   </div>
 </template>
