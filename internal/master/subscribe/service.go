@@ -90,6 +90,11 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 		parts = append(parts, fmt.Sprintf("uuid: %s", dto.Auth.UUID))
 		parts = append(parts, "udp: true")
 
+		// vlessenc：服务端 decryption 派生的客户端 encryption，缺了会退化成明文 VLESS。
+		if dto.Auth.Encryption != "" && dto.Auth.Encryption != "none" {
+			parts = append(parts, fmt.Sprintf("encryption: %s", dto.Auth.Encryption))
+		}
+
 		// flow: 仅 TCP 传输可用且有效（插件已决议，含自动 vision 与 none 抑制）
 		network := dto.Transport.Network
 		if network == "tcp" && dto.Auth.Flow != "" {
@@ -131,12 +136,8 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 		if network == "xhttp" {
 			parts = append(parts, "network: xhttp")
 			parts = append(parts, "alpn: [h2]")
-			if dto.Transport.Mode != "" {
-				hostField := ""
-				if dto.Transport.Host != "" {
-					hostField = fmt.Sprintf(", host: %s", dto.Transport.Host)
-				}
-				parts = append(parts, fmt.Sprintf("xhttp-opts: { mode: %s, path: %s%s }", dto.Transport.Mode, dto.Transport.Path, hostField))
+			if opts := renderXHTTPOpts(dto.Transport); opts != "" {
+				parts = append(parts, fmt.Sprintf("xhttp-opts: { %s }", opts))
 			}
 		} else {
 			parts = append(parts, "network: tcp")
@@ -170,6 +171,23 @@ func formatClashNode(dto *contracts.ProxyNodeDTO) string {
 			// Hysteria 2 走 QUIC，本就不支持 uTLS ClientHello 指纹模拟。
 		}
 		parts = append(parts, "alpn: [h3]")
+		// 服务端 finalmask 投影出来的客户端参数：obfs 不同步会直接连不上。
+		opts := hy2Opts(dto)
+		parts = append(parts, hy2ObfsYAML(opts)...)
+		if opts != nil {
+			if up := protocols.Hy2BandwidthToMihomo(opts[protocols.Hy2OptBwUp]); up != "" {
+				parts = append(parts, fmt.Sprintf("up: %s", yamlQuote(up)))
+			}
+			if down := protocols.Hy2BandwidthToMihomo(opts[protocols.Hy2OptBwDown]); down != "" {
+				parts = append(parts, fmt.Sprintf("down: %s", yamlQuote(down)))
+			}
+			if ports := opts[protocols.Hy2OptPorts]; ports != "" {
+				parts = append(parts, fmt.Sprintf("ports: %s", yamlQuote(ports)))
+				if interval := opts[protocols.Hy2OptHopInterval]; interval != "" {
+					parts = append(parts, fmt.Sprintf("hop-interval: %s", yamlQuote(interval)))
+				}
+			}
+		}
 		return fmt.Sprintf("    - { %s }", strings.Join(parts, ", "))
 
 	case "socks", "socks5":

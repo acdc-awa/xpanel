@@ -35,7 +35,7 @@ func ParseLink(rawURL string) (*contracts.ProxyNodeDTO, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("代理链接不能为空")
 	}
-	u, err := url.Parse(rawURL)
+	u, hopPorts, err := parseURLWithHopPort(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("解析 URL 失败: %w", err)
 	}
@@ -46,7 +46,68 @@ func ParseLink(rawURL string) (*contracts.ProxyNodeDTO, error) {
 	if p == nil {
 		return nil, fmt.Errorf("暂不支持协议 scheme %q 的代理链接", u.Scheme)
 	}
-	return p.ParseLink(u)
+	dto, err := p.ParseLink(u)
+	if err != nil || dto == nil || hopPorts == "" {
+		return dto, err
+	}
+	// 端口跳跃集合由外层预解析补回（插件只看到首个端口）。
+	if dto.Transport == nil {
+		dto.Transport = &contracts.TransportOptions{}
+	}
+	if dto.Transport.Opts == nil {
+		dto.Transport.Opts = make(map[string]string)
+	}
+	dto.Transport.Opts[Hy2OptPorts] = hopPorts
+	return dto, nil
+}
+
+// parseURLWithHopPort 兼容 hysteria2 的端口跳跃链接：authority 的端口位置是集合
+// （如 host:443,5000-6000），标准 url.Parse 会因端口非数字而失败。
+// 解析失败时截出首个端口交给标准解析，集合同样返回给调用方。
+func parseURLWithHopPort(rawURL string) (*url.URL, string, error) {
+	if u, err := url.Parse(rawURL); err == nil {
+		return u, "", nil
+	}
+	scheme, rest, ok := strings.Cut(rawURL, "://")
+	if !ok {
+		return nil, "", fmt.Errorf("无效 URL: %s", rawURL)
+	}
+	ls := strings.ToLower(scheme)
+	if ls != "hysteria2" && ls != "hy2" {
+		_, err := url.Parse(rawURL)
+		return nil, "", err
+	}
+	end := strings.IndexAny(rest, "/?#")
+	authority, tail := rest, ""
+	if end >= 0 {
+		authority, tail = rest[:end], rest[end:]
+	}
+	at := strings.LastIndex(authority, "@")
+	userinfo, hostPort := "", authority
+	if at >= 0 {
+		userinfo, hostPort = authority[:at+1], authority[at+1:]
+	}
+	colon := strings.LastIndex(hostPort, ":")
+	if colon < 0 {
+		return nil, "", fmt.Errorf("端口跳跃链接缺少端口: %s", rawURL)
+	}
+	host, ports := hostPort[:colon], hostPort[colon+1:]
+	if !strings.ContainsAny(ports, ",-") {
+		_, err := url.Parse(rawURL)
+		return nil, "", err
+	}
+	first := ports
+	if i := strings.IndexAny(ports, ",-"); i > 0 {
+		first = ports[:i]
+	}
+	if first == "" {
+		return nil, "", fmt.Errorf("端口跳跃链接端口非法: %s", ports)
+	}
+	u, err := url.Parse(scheme + "://" + userinfo + host + ":" + first + tail)
+	if err != nil {
+		return nil, "", err
+	}
+	return u, ports, nil
 }
 
 // RenderOutbound 将统一中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。

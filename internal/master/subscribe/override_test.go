@@ -71,8 +71,8 @@ func TestBuildNodeDTO_CaddyTLSReverseProxy(t *testing.T) {
 	if !strings.Contains(clashYAML, "network: xhttp") {
 		t.Errorf("Clash YAML 缺少 network: xhttp:\n%s", clashYAML)
 	}
-	if !strings.Contains(clashYAML, "path: /my-vless-xhttp") {
-		t.Errorf("Clash YAML 缺少 path: /my-vless-xhttp:\n%s", clashYAML)
+	if !strings.Contains(clashYAML, "path: '/my-vless-xhttp'") {
+		t.Errorf("Clash YAML 缺少 path: '/my-vless-xhttp':\n%s", clashYAML)
 	}
 
 	// 3. 验证 Base64 输出格式

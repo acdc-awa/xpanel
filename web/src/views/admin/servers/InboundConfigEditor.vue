@@ -33,6 +33,7 @@ import type {
 } from './inbound/types'
 import TcpTransport from './inbound/transports/TcpTransport.vue'
 import XhttpTransport from './inbound/transports/XhttpTransport.vue'
+import HysteriaFinalMask from './inbound/transports/HysteriaFinalMask.vue'
 import SockoptSettings from './inbound/transports/SockoptSettings.vue'
 import RealitySecurity from './inbound/securities/RealitySecurity.vue'
 import TlsSecurity from './inbound/securities/TlsSecurity.vue'
@@ -40,6 +41,7 @@ import VlessSettings from './inbound/protocols/VlessSettings.vue'
 import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
 import HysteriaSettings from './inbound/protocols/HysteriaSettings.vue'
 import BusinessSettings from './inbound/common/BusinessSettings.vue'
+import { validateHysteria, validateXhttp } from './inbound/validate'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -68,6 +70,8 @@ export interface InboundEditorChangePayload {
   targetInboundId?: number
   targetAddress?: string
   targetPort?: number
+  /** 表单级校验错误（如 xhttp 区间非法、xmux 互斥冲突）；父组件保存前须拦截。 */
+  validationError?: string
 }
 
 export interface InboundEditorEmits {
@@ -193,6 +197,25 @@ const dokodemoForm = ref<DokodemoConfig>({
 
 const hysteriaForm = ref<HysteriaConfig>({
   udp_idle_timeout: 60,
+  obfs_type: 'none',
+  obfs_password: '',
+  obfs_min_packet: 512,
+  obfs_max_packet: 1200,
+  bw_up: '',
+  bw_down: '',
+  port_hop_mode: 'intervalRemote',
+  port_hop_ports: '',
+  port_hop_interval: '',
+  masquerade: {
+    type: '404',
+    dir: '',
+    url: '',
+    rewriteHost: false,
+    xForwarded: false,
+    insecure: false,
+    content: '',
+    statusCode: undefined,
+  },
 })
 
 // 传输层状态对象
@@ -207,7 +230,25 @@ const xhttpForm = ref<XhttpConfig>({
   mode: 'auto',
   path: '/xhttp-stream',
   host: '',
-  acceptProxyProtocol: false,
+  xPaddingBytes: '',
+  sessionIDPlacement: '',
+  sessionIDKey: '',
+  sessionIDLength: '',
+  sessionIDTable: '',
+  paddingObfsMode: false,
+  paddingKey: '',
+  paddingHeader: '',
+  paddingPlacement: '',
+  paddingMethod: '',
+  noSSEHeader: false,
+  scMaxBufferedPosts: undefined,
+  scStreamUpServerSecs: '',
+  serverMaxHeaderBytes: undefined,
+  xmuxEnabled: false,
+  xmuxMaxConnections: '3',
+  xmuxMaxConcurrency: '',
+  xmuxMaxRequestTimes: '600-900',
+  xmuxMaxReusableSecs: '1800-3000',
 })
 
 // 安全层状态对象
@@ -260,6 +301,12 @@ const sniffingForm = reactive({
   metadataOnly: false,
   routeOnly: false,
 })
+// sniffing 下表单未覆盖的键（如 domainsExcluded），保存时原样回写。
+const sniffingExtra = ref<Record<string, any>>({})
+
+// 表单未覆盖的 streamSettings 顶层键（如 VLESS finalmask、externalProxy 等）。
+// 编辑保存时原样回写，避免手改配置被静默丢弃。
+const streamExtra = ref<Record<string, any>>({})
 
 // 对外接入层列表
 const layers = ref<AccessLayer[]>([])
@@ -288,21 +335,19 @@ const allowedSecurities = computed<InboundSecurity[]>(() => {
   return ['none', 'tls', 'reality']
 })
 
+// Tab 顺序严格对应入站 JSON 的结构：
+// 顶层四字段 → settings → streamSettings(传输 + finalmask + sockopt) → streamSettings(security)
+// → sniffing → 面板业务字段（不属于 xray 配置）→ 原始 JSON。
 const visibleTabs = computed(() => {
-  const tabs = [
-    { key: 'basic', label: '基础网络' },
-    { key: 'protocol', label: '协议参数' },
+  return [
+    { key: 'basic', label: '基础' },
+    { key: 'settings', label: 'settings' },
+    { key: 'transport', label: '传输' },
+    { key: 'security', label: '安全' },
+    { key: 'sniffing', label: '嗅探' },
+    { key: 'business', label: '业务与订阅' },
+    { key: 'advanced', label: '原始 JSON' },
   ]
-  if (localProtocol.value === 'vless') {
-    tabs.push({ key: 'transport', label: '底层传输' })
-  }
-  tabs.push({ key: 'security', label: '安全加密' })
-  if (localInboundType.value === 'user') {
-    tabs.push({ key: 'share', label: '订阅与接入' })
-  }
-  tabs.push({ key: 'tuning', label: '调优与嗅探' })
-  tabs.push({ key: 'advanced', label: '底层 JSON' })
-  return tabs
 })
 
 const allowVisionFlow = computed(() => {
@@ -333,6 +378,8 @@ function enforceCapabilityMatrix() {
 
 function onProtocolChange(proto: any) {
   const p = String(proto) as InboundProtocol
+  // 切协议后旧协议的流层附加键不再适用（例如 vless 的 finalmask 不属于 hy2 表单）。
+  if (p !== localProtocol.value) streamExtra.value = {}
   localProtocol.value = p
   if (p === 'hysteria') {
     localNetwork.value = 'hysteria'
@@ -381,9 +428,9 @@ async function autoGenRealityKey() {
 // -----------------------------------------------------------------------------
 function buildSettingsJSON(): string {
   if (localProtocol.value === 'dokodemo-door') {
+    // 目标由派生 freedom 出站的 redirect 承担（字段声明明确禁止 settings.address/port），
+    // 入站 settings 只保留转发网络与 followRedirect。
     return JSON.stringify({
-      address: dokodemoForm.value.target_address || '',
-      port: dokodemoForm.value.target_port || 0,
       network: dokodemoForm.value.network || 'tcp,udp',
       followRedirect: false,
     })
@@ -481,16 +528,148 @@ function buildSockoptObject(): Record<string, any> | undefined {
   return Object.keys(so).length > 0 ? so : undefined
 }
 
+// buildHysteriaMasquerade 生成 hysteriaSettings.masquerade。
+// 404 是内核默认值，不写以保持配置干净；其余类型原样写入。
+function buildHysteriaMasquerade(): Record<string, any> | undefined {
+  const m = hysteriaForm.value.masquerade
+  if (!m || m.type === '404') return undefined
+  const out: Record<string, any> = { ...(m.extra || {}), type: m.type }
+  switch (m.type) {
+    case 'file':
+      out.dir = m.dir.trim()
+      break
+    case 'proxy':
+      out.url = m.url.trim()
+      if (m.rewriteHost) out.rewriteHost = true
+      if (m.xForwarded) out.xForwarded = true
+      if (m.insecure) out.insecure = true
+      break
+    case 'string':
+      out.content = m.content
+      if (m.statusCode) out.statusCode = m.statusCode
+      break
+  }
+  return out
+}
+
+// buildHysteriaFinalMask 由表单生成 streamSettings.finalmask。
+// udphop 是纯客户端能力（xray 服务端 WrapPacketConnServer 直接报 "udphop: client only"），
+// 这里仍写入 DB 作为订阅/机间出站的单源，生成服务端配置时由 sanitize 剥离。
+function buildHysteriaFinalMask(): Record<string, any> | undefined {
+  const fm: Record<string, any> = { ...(hysteriaForm.value.finalmaskExtra || {}) }
+  const udp: any[] = []
+
+  // 保留手改 JSON 里表单不认识的 udp 条目（rand/filter/自定义 mask 等）。
+  const extraUdp = fm.udp
+  if (Array.isArray(extraUdp)) {
+    for (const item of extraUdp) {
+      const type = String(item?.type || '').toLowerCase()
+      if (type !== 'salamander' && type !== 'udphop') udp.push(item)
+    }
+  }
+  delete fm.udp
+
+  const obfs = hysteriaForm.value.obfs_type
+  if (obfs !== 'none' && hysteriaForm.value.obfs_password) {
+    const settings: Record<string, any> = { password: hysteriaForm.value.obfs_password }
+    if (obfs === 'gecko') {
+      // Int32Range 只接受 "min-max" 字符串或整数；对象会被 xray 拒绝加载。
+      settings.packetSize = `${hysteriaForm.value.obfs_min_packet}-${hysteriaForm.value.obfs_max_packet}`
+    }
+    udp.push({ type: 'salamander', settings })
+  }
+
+  const ports = hysteriaForm.value.port_hop_ports.trim()
+  if (ports) {
+    const hop: Record<string, any> = {
+      mode: hysteriaForm.value.port_hop_mode || 'intervalRemote',
+      remotePorts: ports,
+    }
+    const interval = hysteriaForm.value.port_hop_interval.trim()
+    if (hysteriaForm.value.port_hop_mode === 'intervalRemote' && interval) hop.interval = interval
+    udp.push({ type: 'udphop', settings: hop })
+  }
+
+  if (udp.length > 0) fm.udp = udp
+
+  const up = hysteriaForm.value.bw_up.trim()
+  const down = hysteriaForm.value.bw_down.trim()
+  if (up || down) {
+    const qp: Record<string, any> = { ...((fm.quicParams as Record<string, any>) || {}) }
+    if (up) qp.brutalUp = up
+    else delete qp.brutalUp
+    if (down) qp.brutalDown = down
+    else delete qp.brutalDown
+    fm.quicParams = qp
+  } else if (fm.quicParams) {
+    // 表单清空带宽时同步清掉这两个键，其余自定义 QUIC 参数保留。
+    const qp = { ...(fm.quicParams as Record<string, any>) }
+    delete qp.brutalUp
+    delete qp.brutalDown
+    if (Object.keys(qp).length > 0) fm.quicParams = qp
+    else delete fm.quicParams
+  }
+
+  return Object.keys(fm).length > 0 ? fm : undefined
+}
+
+// buildXhttpSettings 由表单生成 xhttpSettings。表单没覆盖的键（headers/extra/downloadSettings/
+// uplink*/seq* 等）从 rawExtra 原样回写，避免编辑保存后静默丢失手改配置。
+function buildXhttpSettings(): Record<string, any> {
+  const x: Record<string, any> = { ...(xhttpForm.value.rawExtra || {}) }
+  x.mode = xhttpForm.value.mode || 'auto'
+  x.path = xhttpForm.value.path || '/'
+  if (xhttpForm.value.host) x.host = xhttpForm.value.host
+  else delete x.host
+
+  const setOrDelete = (key: string, val: string | number | boolean | undefined) => {
+    if (val === undefined || val === '' || val === false) delete x[key]
+    else x[key] = val
+  }
+
+  setOrDelete('xPaddingBytes', xhttpForm.value.xPaddingBytes.trim())
+  setOrDelete('sessionIDPlacement', xhttpForm.value.sessionIDPlacement)
+  setOrDelete('sessionIDKey', xhttpForm.value.sessionIDKey.trim())
+  setOrDelete('sessionIDLength', xhttpForm.value.sessionIDLength.trim())
+  setOrDelete('sessionIDTable', xhttpForm.value.sessionIDTable.trim())
+  setOrDelete('xPaddingObfsMode', xhttpForm.value.paddingObfsMode)
+  setOrDelete('xPaddingKey', xhttpForm.value.paddingKey.trim())
+  setOrDelete('xPaddingHeader', xhttpForm.value.paddingHeader.trim())
+  setOrDelete('xPaddingPlacement', xhttpForm.value.paddingPlacement)
+  setOrDelete('xPaddingMethod', xhttpForm.value.paddingMethod)
+  setOrDelete('noSSEHeader', xhttpForm.value.noSSEHeader)
+  setOrDelete('scMaxBufferedPosts', xhttpForm.value.scMaxBufferedPosts)
+  setOrDelete('scStreamUpServerSecs', xhttpForm.value.scStreamUpServerSecs.trim())
+  setOrDelete('serverMaxHeaderBytes', xhttpForm.value.serverMaxHeaderBytes)
+
+  if (xhttpForm.value.xmuxEnabled) {
+    const xmux: Record<string, any> = {}
+    const put = (key: string, raw: string) => {
+      const v = raw.trim()
+      if (v) xmux[key] = v
+    }
+    put('maxConnections', xhttpForm.value.xmuxMaxConnections)
+    put('maxConcurrency', xhttpForm.value.xmuxMaxConcurrency)
+    put('hMaxRequestTimes', xhttpForm.value.xmuxMaxRequestTimes)
+    put('hMaxReusableSecs', xhttpForm.value.xmuxMaxReusableSecs)
+    x.xmux = xmux
+  } else {
+    delete x.xmux
+  }
+  return x
+}
+
 function buildStreamSettingsJSON(): string {
   if (localProtocol.value === 'dokodemo-door') {
     const s: Record<string, any> = {
-      network: dokodemoForm.value.network || 'tcp,udp',
+      ...(streamExtra.value || {}),
       security: 'none',
+      // 面板私有键（xray 不识别）：直通派生 freedom 出站是否向目标发送 PPv2，
+      // 由后端 TunnelSendProxyProtocol 消费；接收侧见 tcpSettings.acceptProxyProtocol。
       proxy_protocol: dokodemoForm.value.proxy_protocol !== false,
     }
-    if (tcpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
-      s.acceptProxyProtocol = true
-      s.tcpSettings = { acceptProxyProtocol: true }
+    if (tcpForm.value.acceptProxyProtocol) {
+      s.tcpSettings = { ...(s.tcpSettings as Record<string, any> || {}), acceptProxyProtocol: true }
     }
     const so = buildSockoptObject()
     if (so) s.sockopt = so
@@ -499,33 +678,40 @@ function buildStreamSettingsJSON(): string {
 
   if (localProtocol.value === 'hysteria') {
     const t = buildTlsSettingsObject(['h3'])
+    // Hysteria 2 走 QUIC：服务端 ALPN 必须是 h3（留空内核才补 h3）。
+    // 表单里的 ALPN 在 hy2 下被禁用，这里强制覆盖，顺带修复历史上写成 h2,http/1.1 的配置。
+    t.alpn = ['h3']
     const s: Record<string, any> = {
+      ...(streamExtra.value || {}),
       network: 'hysteria',
       security: 'tls',
       tlsSettings: t,
       hysteriaSettings: {
+        ...(hysteriaForm.value.hysteriaSettingsExtra || {}),
         version: 2,
         udpIdleTimeout: hysteriaForm.value.udp_idle_timeout || 60,
       },
     }
+    const masq = buildHysteriaMasquerade()
+    if (masq) s.hysteriaSettings.masquerade = masq
+    const fm = buildHysteriaFinalMask()
+    if (fm) s.finalmask = fm
     const so = buildSockoptObject()
     if (so) s.sockopt = so
     return JSON.stringify(s)
   }
 
   const s: Record<string, any> = {
+    ...(streamExtra.value || {}),
     network: localNetwork.value,
     security: localTlsType.value,
   }
 
-  if (tcpForm.value.acceptProxyProtocol || xhttpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
-    s.acceptProxyProtocol = true
-  }
+  // PROXY Protocol 只对 tcp 入站生效（xhttp 无此字段）；接收侧统一写 tcpSettings /
+  // sockopt，不再产出 xray 不认识的顶层 acceptProxyProtocol。
 
   if (localNetwork.value === 'xhttp') {
-    s.xhttpSettings = { mode: xhttpForm.value.mode || 'auto', path: xhttpForm.value.path || '/' }
-    if (xhttpForm.value.host) s.xhttpSettings.host = xhttpForm.value.host
-    if (xhttpForm.value.acceptProxyProtocol) s.xhttpSettings.acceptProxyProtocol = true
+    s.xhttpSettings = buildXhttpSettings()
   } else if (localNetwork.value === 'tcp') {
     const tcpSettings: Record<string, any> = {}
     if (tcpForm.value.header_type !== 'none') {
@@ -570,12 +756,16 @@ function buildStreamSettingsJSON(): string {
 
 function buildSniffingJSON(): string {
   if (!sniffingForm.enabled) return ''
-  return JSON.stringify({
-    enabled: true,
-    destOverride: sniffingForm.destOverride,
-    metadataOnly: sniffingForm.metadataOnly,
-    routeOnly: sniffingForm.routeOnly,
-  })
+  const known = new Set(['enabled', 'destOverride', 'metadataOnly', 'routeOnly'])
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(sniffingExtra.value || {})) {
+    if (!known.has(k)) out[k] = v
+  }
+  out.enabled = true
+  out.destOverride = sniffingForm.destOverride
+  out.metadataOnly = sniffingForm.metadataOnly
+  out.routeOnly = sniffingForm.routeOnly
+  return JSON.stringify(out)
 }
 
 function syncFormToJson() {
@@ -591,15 +781,25 @@ function syncFormToJson() {
     port: localPort.value,
     listen: localListen.value || '0.0.0.0',
     protocol: localProtocol.value,
-    settings_json: JSON.parse(settingsJson),
-    stream_settings: JSON.parse(streamJson),
-    sniffing: sniffJson ? JSON.parse(sniffJson) : null,
+    settings: JSON.parse(settingsJson),
+    streamSettings: JSON.parse(streamJson),
+    ...(sniffJson ? { sniffing: JSON.parse(sniffJson) } : {}),
   }, null, 2)
   jsonError.value = ''
 
   emit('update:modelValue', rawJsonText.value)
   emitChange(settingsJson, streamJson, sniffJson)
   isInternalUpdating.value = false
+}
+
+function formValidationError(): string {
+  if (localProtocol.value === 'hysteria') {
+    return validateHysteria(hysteriaForm.value).join('；')
+  }
+  if (localProtocol.value === 'vless' && localNetwork.value === 'xhttp') {
+    return validateXhttp(xhttpForm.value).join('；')
+  }
+  return ''
 }
 
 function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: string) {
@@ -630,7 +830,39 @@ function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: stri
     targetInboundId: dokodemoForm.value.target_inbound_id,
     targetAddress: dokodemoForm.value.target_address,
     targetPort: dokodemoForm.value.target_port,
+    validationError: formValidationError(),
   })
+}
+
+// jsonRangeToString 把 xray 的 Int32Range 各种存量形态（数字/字符串/{from,to}）统一成
+// 表单使用的 "a-b" 字符串；无法识别时返回空串。
+function jsonRangeToString(v: any): string {
+  if (typeof v === 'number') return String(v)
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object') {
+    const from = v.from ?? v.From
+    const to = v.to ?? v.To
+    if (typeof from === 'number' && typeof to === 'number') {
+      return from === to ? String(from) : `${from}-${to}`
+    }
+  }
+  return ''
+}
+
+function packetSizeOf(v: any): { min: number; max: number } | null {
+  if (v && typeof v === 'object') {
+    const min = Number(v.from ?? v.From ?? 0)
+    const max = Number(v.to ?? v.To ?? 0)
+    if (min > 0 && max > 0) return { min, max }
+    return null
+  }
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  const parts = s.split('-').map((x) => Number(x.trim()))
+  if (!Number.isFinite(parts[0])) return null
+  const min = parts[0]
+  const max = parts.length > 1 ? parts[1] : parts[0]
+  return min > 0 && max > 0 ? { min, max } : null
 }
 
 function parseJsonToForm(str: string) {
@@ -639,19 +871,24 @@ function parseJsonToForm(str: string) {
     const parsed = JSON.parse(str)
     jsonError.value = ''
 
+    // 平台模型兼容两种形态：
+    //   - 新形态（与 xray 一致）：settings / streamSettings / sniffing；
+    //   - 旧形态（面板 DB 字段名）：settings_json / stream_settings。
+    // 面板业务字段统一从 _panel 读取，兼容旧形态直接平铺在顶层。
+    const panel: any = parsed._panel && typeof parsed._panel === 'object' ? parsed._panel : parsed
+
     let s: any = parsed
-    if (parsed.settings_json && typeof parsed.settings_json === 'string') {
+    const settingsRaw: any = parsed.settings ?? parsed.settings_json
+    if (typeof settingsRaw === 'string') {
       try {
-        s = JSON.parse(parsed.settings_json)
+        s = JSON.parse(settingsRaw)
       } catch { /* ignore */ }
-    } else if (parsed.settings_json && typeof parsed.settings_json === 'object') {
-      s = parsed.settings_json
-    } else if (parsed.settings && typeof parsed.settings === 'object') {
-      s = parsed.settings
+    } else if (settingsRaw && typeof settingsRaw === 'object') {
+      s = settingsRaw
     }
 
     let streamObj: Record<string, any> = {}
-    const ssRaw: any = parsed.stream_settings ?? parsed.streamSettings
+    const ssRaw: any = parsed.streamSettings ?? parsed.stream_settings
     if (typeof ssRaw === 'string') {
       try {
         streamObj = JSON.parse(ssRaw)
@@ -671,11 +908,13 @@ function parseJsonToForm(str: string) {
     } else if (props.protocol) {
       localProtocol.value = props.protocol as InboundProtocol
     }
-    if (parsed.network && typeof parsed.network === 'string') {
-      localNetwork.value = parsed.network as InboundNetwork
+    const panelNetwork = panel.network ?? parsed.network ?? streamObj.network
+    if (typeof panelNetwork === 'string' && panelNetwork) {
+      localNetwork.value = panelNetwork as InboundNetwork
     }
-    if (parsed.tls_type && typeof parsed.tls_type === 'string') {
-      localTlsType.value = parsed.tls_type as InboundSecurity
+    const panelTlsType = panel.tls_type ?? parsed.tls_type
+    if (typeof panelTlsType === 'string' && panelTlsType) {
+      localTlsType.value = panelTlsType as InboundSecurity
     } else if (streamObj.security) {
       localTlsType.value = streamObj.security as InboundSecurity
     }
@@ -691,27 +930,27 @@ function parseJsonToForm(str: string) {
     if (typeof parsed.port === 'number') localPort.value = parsed.port
     if (parsed.tag && typeof parsed.tag === 'string') localTag.value = parsed.tag
     if (typeof parsed.listen === 'string') localListen.value = parsed.listen
-    if (typeof parsed.remark === 'string') localRemark.value = parsed.remark
-    if (typeof parsed.traffic_reset === 'string') localTrafficReset.value = parsed.traffic_reset
+    if (typeof panel.remark === 'string') localRemark.value = panel.remark
+    if (typeof panel.traffic_reset === 'string') localTrafficReset.value = panel.traffic_reset
 
-    if (typeof parsed.flow === 'string') vlessForm.value.flow = parsed.flow
-    if (typeof parsed.ratio === 'number') localRatio.value = parsed.ratio
-    if (typeof parsed.total_gb === 'number') localTotalGB.value = parsed.total_gb
-    if (typeof parsed.expiry_time === 'string' && parsed.expiry_time) localExpiryTime.value = parsed.expiry_time
-    if (typeof parsed.share_addr_strategy === 'string') localShareStrategy.value = parsed.share_addr_strategy
-    if (typeof parsed.share_addr === 'string') localShareAddr.value = parsed.share_addr
-    if (typeof parsed.share_port === 'number') localSharePort.value = parsed.share_port
-    if (typeof parsed.share_security === 'string') localShareSecurity.value = parsed.share_security
-    if (typeof parsed.share_sni === 'string') localShareSni.value = parsed.share_sni
-    if (typeof parsed.share_host === 'string') localShareHost.value = parsed.share_host
-    if (typeof parsed.share_path === 'string') localSharePath.value = parsed.share_path
-    if (typeof parsed.share_allow_insecure === 'boolean') localShareAllowInsecure.value = parsed.share_allow_insecure
-    if (typeof parsed.layer_id === 'number') localLayerId.value = parsed.layer_id
+    if (typeof panel.flow === 'string') vlessForm.value.flow = panel.flow
+    if (typeof panel.ratio === 'number') localRatio.value = panel.ratio
+    if (typeof panel.total_gb === 'number') localTotalGB.value = panel.total_gb
+    if (typeof panel.expiry_time === 'string' && panel.expiry_time) localExpiryTime.value = panel.expiry_time
+    if (typeof panel.share_addr_strategy === 'string') localShareStrategy.value = panel.share_addr_strategy
+    if (typeof panel.share_addr === 'string') localShareAddr.value = panel.share_addr
+    if (typeof panel.share_port === 'number') localSharePort.value = panel.share_port
+    if (typeof panel.share_security === 'string') localShareSecurity.value = panel.share_security
+    if (typeof panel.share_sni === 'string') localShareSni.value = panel.share_sni
+    if (typeof panel.share_host === 'string') localShareHost.value = panel.share_host
+    if (typeof panel.share_path === 'string') localSharePath.value = panel.share_path
+    if (typeof panel.share_allow_insecure === 'boolean') localShareAllowInsecure.value = panel.share_allow_insecure
+    if (typeof panel.layer_id === 'number') localLayerId.value = panel.layer_id
 
     if (parsed.protocol === 'hysteria' || localProtocol.value === 'hysteria') {
       localProtocol.value = 'hysteria'
       localInboundType.value = 'user'
-    } else if (parsed.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
+    } else if (panel.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
       localInboundType.value = 'tunnel'
       localProtocol.value = 'dokodemo-door'
     } else {
@@ -719,24 +958,147 @@ function parseJsonToForm(str: string) {
       localProtocol.value = 'vless'
     }
 
+    // streamSettings 里表单未覆盖的顶层键原样保留：
+    // vless/dokodemo 的 finalmask、externalProxy 等目前没有表单，但手改后保存不能丢。
+    const streamKnown = new Set([
+      'network', 'security', 'sockopt', 'tlsSettings', 'realitySettings',
+    ])
+    if (localProtocol.value === 'vless') {
+      for (const k of ['tcpSettings', 'xhttpSettings', 'fingerprint', 'acceptProxyProtocol']) streamKnown.add(k)
+    } else if (localProtocol.value === 'dokodemo-door') {
+      for (const k of ['tcpSettings', 'acceptProxyProtocol', 'proxy_protocol', 'proxyProtocol']) streamKnown.add(k)
+    } else {
+      for (const k of ['hysteriaSettings', 'finalmask']) streamKnown.add(k)
+    }
+    const streamExtraObj: Record<string, any> = {}
+    for (const [k, v] of Object.entries(streamObj)) {
+      if (!streamKnown.has(k)) streamExtraObj[k] = v
+    }
+    streamExtra.value = streamExtraObj
+
     // 协议层回显
     if (localProtocol.value === 'hysteria') {
       const hySettings = streamObj.hysteriaSettings
+      const fm = streamObj.finalmask && typeof streamObj.finalmask === 'object' ? streamObj.finalmask : null
+      const fmExtra: Record<string, any> = {}
+      let obfsType: HysteriaConfig['obfs_type'] = 'none'
+      let obfsPassword = ''
+      let minPacket = 512
+      let maxPacket = 1200
+      let hopPorts = ''
+      let hopInterval = ''
+      let hopMode: HysteriaConfig['port_hop_mode'] = 'intervalRemote'
+      if (fm) {
+        for (const [k, v] of Object.entries(fm)) {
+          if (k !== 'udp' && k !== 'quicParams') fmExtra[k] = v
+        }
+        const udp = Array.isArray(fm.udp) ? fm.udp : []
+        const unknownUdp: any[] = []
+        for (const item of udp) {
+          const type = String(item?.type || '').toLowerCase()
+          const settings = (item?.settings && typeof item.settings === 'object') ? item.settings : {}
+          if (type === 'salamander') {
+            obfsPassword = String(settings.password ?? '')
+            const ps = packetSizeOf(settings.packetSize)
+            if (ps) {
+              obfsType = 'gecko'
+              minPacket = ps.min
+              maxPacket = ps.max
+            } else {
+              obfsType = 'salamander'
+            }
+          } else if (type === 'udphop') {
+            const mode = String(settings.mode ?? '').toLowerCase()
+            // 只有目标端口跳跃能下发订阅；intervalLocal 只跳源端口，保留在 extra 里不映射。
+            if (mode.includes('intervalremote') || mode.includes('perconnremote')) {
+              hopPorts = String(settings.remotePorts ?? '')
+              hopInterval = jsonRangeToString(settings.interval)
+              hopMode = mode.includes('perconnremote') ? 'perConnRemote' : 'intervalRemote'
+            } else {
+              unknownUdp.push(item)
+            }
+          } else {
+            unknownUdp.push(item)
+          }
+        }
+        if (unknownUdp.length > 0) fmExtra.udp = unknownUdp
+        const qp = fm.quicParams && typeof fm.quicParams === 'object' ? { ...fm.quicParams } : null
+        if (qp) {
+          delete qp.brutalUp
+          delete qp.brutalDown
+          if (Object.keys(qp).length > 0) fmExtra.quicParams = qp
+        }
+      }
+      const qp = fm?.quicParams && typeof fm.quicParams === 'object' ? fm.quicParams : {}
+
+      // hysteriaSettings 下表单不认识的键（含旧配置）原样回写，避免保存丢配置。
+      const hyExtra: Record<string, any> = {}
+      const hyKnown = new Set(['version', 'udpIdleTimeout', 'auth', 'masquerade'])
+      if (hySettings && typeof hySettings === 'object') {
+        for (const [k, v] of Object.entries(hySettings)) {
+          if (!hyKnown.has(k)) hyExtra[k] = v
+        }
+      }
+
+      // 伪装站点回显
+      const mq = hySettings?.masquerade && typeof hySettings.masquerade === 'object'
+        ? hySettings.masquerade
+        : null
+      const mqKnown = new Set(['type', 'dir', 'url', 'rewriteHost', 'xForwarded', 'insecure', 'content', 'statusCode'])
+      const mqExtra: Record<string, any> = {}
+      if (mq) {
+        for (const [k, v] of Object.entries(mq)) {
+          if (!mqKnown.has(k)) mqExtra[k] = v
+        }
+      }
+      const mqType = String(mq?.type ?? '404').toLowerCase()
+      const masquerade: HysteriaConfig['masquerade'] = {
+        type: (mqType === 'file' || mqType === 'proxy' || mqType === 'string' ? mqType : '404'),
+        dir: String(mq?.dir ?? ''),
+        url: String(mq?.url ?? ''),
+        rewriteHost: !!mq?.rewriteHost,
+        xForwarded: !!mq?.xForwarded,
+        insecure: !!mq?.insecure,
+        content: String(mq?.content ?? ''),
+        statusCode: typeof mq?.statusCode === 'number' ? mq.statusCode : undefined,
+        extra: Object.keys(mqExtra).length > 0 ? mqExtra : undefined,
+      }
+
       hysteriaForm.value = {
         udp_idle_timeout: typeof hySettings?.udpIdleTimeout === 'number' ? hySettings.udpIdleTimeout : 60,
+        obfs_type: obfsType,
+        obfs_password: obfsPassword,
+        obfs_min_packet: minPacket,
+        obfs_max_packet: maxPacket,
+        bw_up: String(qp.brutalUp ?? ''),
+        bw_down: String(qp.brutalDown ?? ''),
+        port_hop_mode: hopMode,
+        port_hop_ports: hopPorts,
+        port_hop_interval: hopInterval,
+        finalmaskExtra: Object.keys(fmExtra).length > 0 ? fmExtra : undefined,
+        masquerade,
+        hysteriaSettingsExtra: Object.keys(hyExtra).length > 0 ? hyExtra : undefined,
       }
     } else if (localProtocol.value === 'dokodemo-door') {
+      const hasTargetPanel = typeof panel.target_inbound_id === 'number' ||
+        typeof panel.target_address === 'string' ||
+        typeof panel.target_port === 'number'
+      const targetInboundId = hasTargetPanel ? panel.target_inbound_id : dokodemoForm.value.target_inbound_id
+      const targetAddress = hasTargetPanel ? (panel.target_address || '') : dokodemoForm.value.target_address
+      const targetPort = hasTargetPanel ? (panel.target_port || 0) : dokodemoForm.value.target_port
       dokodemoForm.value = {
-        target_mode: parsed.target_inbound_id ? 'inbound' : (s?.address || parsed.target_address || s?.port || parsed.target_port ? 'manual' : 'draft'),
-        target_inbound_id: parsed.target_inbound_id,
-        target_address: s?.address || parsed.target_address || '',
-        target_port: s?.port || parsed.target_port || 0,
+        target_mode: hasTargetPanel
+          ? (targetInboundId ? 'inbound' : (s?.address || targetAddress || s?.port || targetPort ? 'manual' : 'draft'))
+          : dokodemoForm.value.target_mode,
+        target_inbound_id: targetInboundId,
+        target_address: s?.address || targetAddress,
+        target_port: s?.port || targetPort,
         network: s?.network || 'tcp,udp',
         proxy_protocol: streamObj.proxy_protocol !== false && streamObj.proxyProtocol !== false,
       }
     } else {
       vlessForm.value = {
-        flow: parsed.flow || '',
+        flow: typeof panel.flow === 'string' ? panel.flow : vlessForm.value.flow,
         decryption: parsedDec,
         fallbacks: Array.isArray(s?.fallbacks)
           ? s.fallbacks.map((f: any) => ({
@@ -750,8 +1112,8 @@ function parseJsonToForm(str: string) {
       }
     }
 
-    // 传输层回显
-    const ap = !!streamObj.acceptProxyProtocol || !!tcpSettings?.acceptProxyProtocol || !!xhttpSettings?.acceptProxyProtocol
+    // 传输层回显（xhttpSettings.acceptProxyProtocol 是历史误存字段，xray 不识别，不再回显）
+    const ap = !!streamObj.acceptProxyProtocol || !!tcpSettings?.acceptProxyProtocol
     if (tcpSettings && typeof tcpSettings === 'object') {
       const req = tcpSettings.header?.request
       tcpForm.value = {
@@ -764,14 +1126,46 @@ function parseJsonToForm(str: string) {
       tcpForm.value.acceptProxyProtocol = ap
     }
     if (xhttpSettings && typeof xhttpSettings === 'object') {
+      const known = new Set([
+        'mode', 'path', 'host',
+        'xPaddingBytes', 'sessionIDPlacement', 'sessionIDKey', 'sessionIDLength', 'sessionIDTable',
+        'xPaddingObfsMode', 'xPaddingKey', 'xPaddingHeader', 'xPaddingPlacement', 'xPaddingMethod',
+        'noSSEHeader', 'scMaxBufferedPosts', 'scStreamUpServerSecs', 'serverMaxHeaderBytes', 'xmux',
+        // 旧键名由 sanitize 提升到新键，不要留在 rawExtra 里重复写回。
+        'sessionPlacement', 'sessionKey',
+      ])
+      const rawExtra: Record<string, any> = {}
+      for (const [k, v] of Object.entries(xhttpSettings)) {
+        if (!known.has(k)) rawExtra[k] = v
+      }
+      const xmux = xhttpSettings.xmux && typeof xhttpSettings.xmux === 'object' ? xhttpSettings.xmux : null
+      const xmuxEnabled = !!xmux && Object.keys(xmux).length > 0
       xhttpForm.value = {
         mode: xhttpSettings.mode || 'auto',
         path: xhttpSettings.path || '/',
         host: xhttpSettings.host || '',
-        acceptProxyProtocol: ap,
+        xPaddingBytes: jsonRangeToString(xhttpSettings.xPaddingBytes),
+        // 旧键名 sessionPlacement / sessionKey（xray-core #6258 前）也要能回显。
+        sessionIDPlacement: (xhttpSettings.sessionIDPlacement || xhttpSettings.sessionPlacement || '') as XhttpConfig['sessionIDPlacement'],
+        sessionIDKey: xhttpSettings.sessionIDKey || xhttpSettings.sessionKey || '',
+        sessionIDLength: jsonRangeToString(xhttpSettings.sessionIDLength),
+        sessionIDTable: String(xhttpSettings.sessionIDTable ?? ''),
+        paddingObfsMode: !!xhttpSettings.xPaddingObfsMode,
+        paddingKey: String(xhttpSettings.xPaddingKey ?? ''),
+        paddingHeader: String(xhttpSettings.xPaddingHeader ?? ''),
+        paddingPlacement: (xhttpSettings.xPaddingPlacement || '') as XhttpConfig['paddingPlacement'],
+        paddingMethod: (xhttpSettings.xPaddingMethod || '') as XhttpConfig['paddingMethod'],
+        noSSEHeader: !!xhttpSettings.noSSEHeader,
+        scMaxBufferedPosts: typeof xhttpSettings.scMaxBufferedPosts === 'number' ? xhttpSettings.scMaxBufferedPosts : undefined,
+        scStreamUpServerSecs: jsonRangeToString(xhttpSettings.scStreamUpServerSecs),
+        serverMaxHeaderBytes: typeof xhttpSettings.serverMaxHeaderBytes === 'number' ? xhttpSettings.serverMaxHeaderBytes : undefined,
+        xmuxEnabled,
+        xmuxMaxConnections: xmuxEnabled ? (jsonRangeToString(xmux.maxConnections) || '3') : '3',
+        xmuxMaxConcurrency: xmuxEnabled ? jsonRangeToString(xmux.maxConcurrency) : '',
+        xmuxMaxRequestTimes: xmuxEnabled ? (jsonRangeToString(xmux.hMaxRequestTimes) || '600-900') : '600-900',
+        xmuxMaxReusableSecs: xmuxEnabled ? (jsonRangeToString(xmux.hMaxReusableSecs) || '1800-3000') : '1800-3000',
+        rawExtra: Object.keys(rawExtra).length > 0 ? rawExtra : undefined,
       }
-    } else {
-      xhttpForm.value.acceptProxyProtocol = ap
     }
 
     // 安全层回显
@@ -807,7 +1201,7 @@ function parseJsonToForm(str: string) {
         }
       }
       tlsForm.value = {
-        cert_id: parsed.cert_id || 0,
+        cert_id: typeof panel.cert_id === 'number' ? panel.cert_id : tlsForm.value.cert_id,
         server_name: tlsSettings.serverName || '',
         alpn: Array.isArray(tlsSettings.alpn) ? tlsSettings.alpn.join(',') : '',
         cert_file: certFile,
@@ -871,6 +1265,14 @@ function parseJsonToForm(str: string) {
       sniffingForm.destOverride = Array.isArray(sniffObj.destOverride) ? sniffObj.destOverride : ['http', 'tls', 'quic']
       sniffingForm.metadataOnly = !!sniffObj.metadataOnly
       sniffingForm.routeOnly = !!sniffObj.routeOnly
+      const sniffKnown = new Set(['enabled', 'destOverride', 'metadataOnly', 'routeOnly'])
+      const sniffExtra: Record<string, any> = {}
+      for (const [k, v] of Object.entries(sniffObj)) {
+        if (!sniffKnown.has(k)) sniffExtra[k] = v
+      }
+      sniffingExtra.value = sniffExtra
+    } else {
+      sniffingExtra.value = {}
     }
 
     enforceCapabilityMatrix()
@@ -1012,7 +1414,6 @@ function applyCaddyOffloadPreset() {
   }
   xhttpForm.value.mode = 'auto'
   tcpForm.value.acceptProxyProtocol = false
-  xhttpForm.value.acceptProxyProtocol = false
 
   if (props.serverId) {
     const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
@@ -1122,57 +1523,226 @@ watch(
     <!-- 表单视图容器 -->
     <div class="form-body">
       <el-form label-position="top">
-        <!-- ==================== 1. 基础配置 Tab ==================== -->
+        <!-- ==================== 1. 基础 Tab：只有入站 JSON 的四个顶层字段 ==================== -->
         <div v-show="activeTab === 'basic'" class="tab-pane">
-          <!-- 微卡片 1：网络监听必填 -->
           <div class="x-micro-card">
             <div class="x-micro-card__head">
               <div class="head-title">
                 <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span>网络监听与基础参数</span>
+                <span>入站顶层字段</span>
               </div>
-              <div class="head-meta">基础网络层</div>
+              <div class="head-meta">listen / port / tag / protocol</div>
             </div>
             <div class="x-micro-card__body">
               <div class="form-grid-2">
-                <el-form-item label="入站标签 (Tag)">
+                <el-form-item label="监听地址 (listen)">
+                  <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="font-mono-num" />
+                </el-form-item>
+
+                <el-form-item label="端口 (port)">
+                  <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
+                </el-form-item>
+
+                <el-form-item label="唯一标识 (tag)">
                   <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
                 </el-form-item>
 
-                <el-form-item label="备注 (Remark)">
-                  <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
-                </el-form-item>
-
-                <el-form-item label="代理协议">
+                <el-form-item label="协议 (protocol)">
                   <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
                     <el-option label="VLESS" value="vless" />
                     <el-option label="Hysteria 2" value="hysteria" />
                     <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
                   </el-select>
                 </el-form-item>
+              </div>
+            </div>
+          </div>
+        </div>
 
-                <el-form-item label="监听端口">
-                  <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
-                </el-form-item>
+        <!-- ==================== 2. settings（协议参数） Tab ==================== -->
+        <div v-show="activeTab === 'settings'" class="tab-pane">
+          <div v-if="localProtocol !== 'dokodemo-door'" class="compact-tip gray">
+            <el-icon><InfoFilled /></el-icon>
+            <span>settings.users 由绑定的接入点动态注入，这里只维护协议级参数。</span>
+          </div>
+          <VlessSettings
+            v-if="localProtocol === 'vless'"
+            v-model="vlessForm"
+            :inbound-type="localInboundType"
+            :internal-u-u-i-d="localInternalUUID"
+            :inbound-id="props.inboundId"
+            :allow-vision="allowVisionFlow"
+          />
+          <HysteriaSettings
+            v-else-if="localProtocol === 'hysteria'"
+            v-model="hysteriaForm"
+            :inbound-type="localInboundType"
+            :internal-u-u-i-d="localInternalUUID"
+            :inbound-id="props.inboundId"
+          />
+          <DokodemoSettings
+            v-else-if="localProtocol === 'dokodemo-door'"
+            v-model="dokodemoForm"
+            :current-inbound-id="props.inboundId"
+            :listen-port="localPort"
+            :listen-address="localListen"
+          />
+        </div>
 
-                <el-form-item label="监听地址" style="grid-column: span 2">
-                  <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="font-mono-num" />
-                </el-form-item>
+        <!-- ==================== 3. 传输层 Tab：streamSettings 非 security 部分 ==================== -->
+        <div v-show="activeTab === 'transport'" class="tab-pane">
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+                <span>传输方式 (streamSettings.network)</span>
+              </div>
+              <div class="head-meta">网络流封装</div>
+            </div>
+            <div class="x-micro-card__body">
+              <el-form-item v-if="localProtocol === 'vless'" label="传输协议类型" style="margin-bottom: 0">
+                <el-radio-group v-model="localNetwork" size="small" @change="onNetworkChange">
+                  <el-radio-button value="tcp">TCP (RAW 推荐)</el-radio-button>
+                  <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <div v-else class="compact-tip blue">
+                <el-icon><InfoFilled /></el-icon>
+                <span v-if="localProtocol === 'hysteria'">Hysteria 协议（protocol=hysteria，代理协议）与 hysteria 传输（network=hysteria，魔改 QUIC）是两层；这里固定使用后者，加密固定为 TLS。</span>
+                <span v-else>Dokodemo-door 固定使用 raw (tcp) 传输，监听与目标由 settings 决定。</span>
+              </div>
+              <div v-if="localProtocol === 'vless'" class="compact-tip gray" style="margin-top: 10px">
+                <el-icon><InfoFilled /></el-icon>
+                <span>finalmask 等未提供表单的 streamSettings 键可在「原始 JSON」中编辑，本表单会原样保留。</span>
               </div>
             </div>
           </div>
 
-          <!-- 微卡片 2：计费与配额策略 -->
+          <div class="compact-tip gray">
+            <el-icon><InfoFilled /></el-icon>
+            <span>
+              层级顺序（由内向外）：协议 settings → 传输 network → 安全 security →
+              finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。
+            </span>
+          </div>
+
+          <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
+          <XhttpTransport
+            v-else-if="localProtocol === 'vless' && localNetwork === 'xhttp'"
+            v-model="xhttpForm"
+          />
+          <HysteriaFinalMask v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
+
+          <SockoptSettings v-model="sockoptForm" />
+        </div>
+
+        <!-- ==================== 4. 安全层 Tab：streamSettings.security ==================== -->
+        <div v-show="activeTab === 'security'" class="tab-pane">
           <div class="x-micro-card">
             <div class="x-micro-card__head">
               <div class="head-title">
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>计费策略与流量配额</span>
+                <span>安全加密协议 (streamSettings.security)</span>
               </div>
-              <div class="head-meta">用量与生命周期</div>
+              <div class="head-meta">TLS / 伪装认证</div>
+            </div>
+            <div class="x-micro-card__body">
+              <el-form-item label="安全协议类型" style="margin-bottom: 0">
+                <el-radio-group v-model="localTlsType" size="small" @change="onSecurityChange">
+                  <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无加密 (none)</el-radio-button>
+                  <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">标准 TLS</el-radio-button>
+                  <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">REALITY 伪装</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+            </div>
+          </div>
+
+          <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
+            <el-icon><InfoFilled /></el-icon>
+            <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
+          </div>
+
+          <TlsSecurity
+            v-if="localTlsType === 'tls'"
+            v-model="tlsForm"
+            :alpn-fixed="localProtocol === 'hysteria' ? 'h3' : ''"
+            @update:cert-id="(id) => emit('update:certId', id)"
+          />
+          <RealitySecurity
+            v-else-if="localTlsType === 'reality'"
+            v-model="realityForm"
+            v-model:fingerprint="realityFingerprint"
+          />
+          <div v-else-if="localTlsType === 'none'" class="x-micro-card">
+            <div class="x-micro-card__body">
+              <div class="compact-tip gray">
+                <el-icon><InfoFilled /></el-icon>
+                <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 5. 嗅探 Tab：inbound.sniffing ==================== -->
+        <div v-show="activeTab === 'sniffing'" class="tab-pane">
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-violet-500"></span>
+                <span>流量嗅探 (sniffing)</span>
+              </div>
+              <div class="head-meta">
+                <el-switch
+                  v-model="sniffingForm.enabled"
+                  active-text="启用流量嗅探"
+                  size="small"
+                />
+              </div>
+            </div>
+            <div v-if="sniffingForm.enabled" class="x-micro-card__body">
+              <div class="form-grid-2">
+                <el-form-item label="嗅探目标协议" style="grid-column: span 2">
+                  <el-checkbox-group v-model="sniffingForm.destOverride">
+                    <el-checkbox value="http" label="HTTP 域名" />
+                    <el-checkbox value="tls" label="TLS SNI" />
+                    <el-checkbox value="quic" label="QUIC" />
+                  </el-checkbox-group>
+                </el-form-item>
+
+                <el-form-item label="仅提取元数据 (metadataOnly)">
+                  <el-switch
+                    v-model="sniffingForm.metadataOnly"
+                    active-text="仅提取不覆盖连接"
+                  />
+                </el-form-item>
+
+                <el-form-item label="仅用于路由 (routeOnly)">
+                  <el-switch
+                    v-model="sniffingForm.routeOnly"
+                    active-text="仅供出站路由分流决策"
+                  />
+                </el-form-item>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 6. 业务与订阅 Tab（面板字段，不写入 xray 配置） ==================== -->
+        <div v-show="activeTab === 'business'" class="tab-pane">
+          <div class="x-micro-card">
+            <div class="x-micro-card__head">
+              <div class="head-title">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>备注与计费策略</span>
+              </div>
+              <div class="head-meta">面板业务字段</div>
             </div>
             <div class="x-micro-card__body">
               <div class="form-grid-2">
+                <el-form-item label="备注 (Remark)" style="grid-column: span 2">
+                  <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
+                </el-form-item>
+
                 <el-form-item label="流量倍率">
                   <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" class="font-mono-num" />
                 </el-form-item>
@@ -1202,107 +1772,9 @@ watch(
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- ==================== 2. 协议参数 Tab ==================== -->
-        <div v-show="activeTab === 'protocol'" class="tab-pane">
-          <VlessSettings
-            v-if="localProtocol === 'vless'"
-            v-model="vlessForm"
-            :inbound-type="localInboundType"
-            :internal-u-u-i-d="localInternalUUID"
-            :inbound-id="props.inboundId"
-            :allow-vision="allowVisionFlow"
-          />
-          <HysteriaSettings
-            v-else-if="localProtocol === 'hysteria'"
-            v-model="hysteriaForm"
-            :inbound-type="localInboundType"
-            :internal-u-u-i-d="localInternalUUID"
-            :inbound-id="props.inboundId"
-          />
-          <DokodemoSettings
-            v-else-if="localProtocol === 'dokodemo-door'"
-            v-model="dokodemoForm"
-            :current-inbound-id="props.inboundId"
-            :listen-port="localPort"
-            :listen-address="localListen"
-          />
-        </div>
-
-        <!-- ==================== 3. 传输层 Tab (仅限 VLESS) ==================== -->
-        <div v-if="localProtocol === 'vless'" v-show="activeTab === 'transport'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-                <span>底层传输协议 (Transport Protocol)</span>
-              </div>
-              <div class="head-meta">网络流封装</div>
-            </div>
-            <div class="x-micro-card__body">
-              <el-form-item label="传输协议类型" style="margin-bottom: 0">
-                <el-radio-group v-model="localNetwork" size="small" @change="onNetworkChange">
-                  <el-radio-button value="tcp">TCP (RAW 推荐)</el-radio-button>
-                  <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </div>
-          </div>
-
-          <TcpTransport v-if="localNetwork === 'tcp'" v-model="tcpForm" />
-          <XhttpTransport v-else-if="localNetwork === 'xhttp'" v-model="xhttpForm" />
-        </div>
-
-        <!-- ==================== 4. 安全层 Tab ==================== -->
-        <div v-show="activeTab === 'security'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>安全加密协议 (Security Layer)</span>
-              </div>
-              <div class="head-meta">TLS / 伪装认证</div>
-            </div>
-            <div class="x-micro-card__body">
-              <el-form-item label="安全协议类型" style="margin-bottom: 0">
-                <el-radio-group v-model="localTlsType" size="small" @change="onSecurityChange">
-                  <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无加密 (none)</el-radio-button>
-                  <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">标准 TLS</el-radio-button>
-                  <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">REALITY 伪装</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </div>
-          </div>
-
-          <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
-            <el-icon><InfoFilled /></el-icon>
-            <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
-          </div>
-
-          <TlsSecurity
-            v-if="localTlsType === 'tls'"
-            v-model="tlsForm"
-            @update:cert-id="(id) => emit('update:certId', id)"
-          />
-          <RealitySecurity
-            v-else-if="localTlsType === 'reality'"
-            v-model="realityForm"
-            v-model:fingerprint="realityFingerprint"
-          />
-          <div v-else-if="localTlsType === 'none'" class="x-micro-card">
-            <div class="x-micro-card__body">
-              <div class="compact-tip gray">
-                <el-icon><InfoFilled /></el-icon>
-                <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== 5. 订阅与分享 Tab (仅用户入站) ==================== -->
-        <div v-if="localInboundType === 'user'" v-show="activeTab === 'share'" class="tab-pane">
           <BusinessSettings
+            v-if="localInboundType === 'user'"
             :inbound-type="localInboundType"
             :layer-id="localLayerId"
             :layers="layers"
@@ -1332,55 +1804,7 @@ watch(
           />
         </div>
 
-        <!-- ==================== 6. 调优与嗅探 Tab ==================== -->
-        <div v-show="activeTab === 'tuning'" class="tab-pane">
-          <!-- 流量嗅探微卡片 -->
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-violet-500"></span>
-                <span>流量嗅探 (Sniffing)</span>
-              </div>
-              <div class="head-meta">
-                <el-switch
-                  v-model="sniffingForm.enabled"
-                  active-text="启用流量嗅探"
-                  size="small"
-                />
-              </div>
-            </div>
-            <div v-if="sniffingForm.enabled" class="x-micro-card__body">
-              <div class="form-grid-2">
-                <el-form-item label="嗅探目标协议" style="grid-column: span 2">
-                  <el-checkbox-group v-model="sniffingForm.destOverride">
-                    <el-checkbox value="http" label="HTTP 域名" />
-                    <el-checkbox value="tls" label="TLS SNI" />
-                    <el-checkbox value="quic" label="QUIC" />
-                  </el-checkbox-group>
-                </el-form-item>
-
-                <el-form-item label="仅提取元数据 (MetadataOnly)">
-                  <el-switch
-                    v-model="sniffingForm.metadataOnly"
-                    active-text="仅提取不覆盖连接"
-                  />
-                </el-form-item>
-
-                <el-form-item label="仅用于路由 (RouteOnly)">
-                  <el-switch
-                    v-model="sniffingForm.routeOnly"
-                    active-text="仅供出站路由分流决策"
-                  />
-                </el-form-item>
-              </div>
-            </div>
-          </div>
-
-          <!-- Socket 底层网络配置组件 -->
-          <SockoptSettings v-model="sockoptForm" />
-        </div>
-
-        <!-- ==================== 7. 高级配置 Tab (原始 Config JSON 编辑器) ==================== -->
+        <!-- ==================== 7. 原始 JSON Tab ==================== -->
         <div v-show="activeTab === 'advanced'" class="tab-pane">
           <div class="x-micro-card">
             <div class="x-micro-card__head">
@@ -1401,6 +1825,16 @@ watch(
               </div>
             </div>
             <div class="x-micro-card__body">
+              <div class="compact-tip gray" style="margin-bottom: 10px">
+                <el-icon><InfoFilled /></el-icon>
+                <span>
+                  这是面板存储的投影源（服务端与订阅共用）。生成服务端配置时会剥离
+                  fingerprint、realitySettings.publicKey、tlsSettings.allowInsecure、
+                  xhttpSettings.xmux / downloadSettings / noGRPCHeader 等客户端字段；
+                  订阅侧仍使用它们。直通的 streamSettings.proxy_protocol 是面板私有键
+                  （供派生 freedom 出站发送 PPv2），不会写进节点配置。
+                </span>
+              </div>
               <div class="json-editor-wrap">
                 <CodeEditor
                   :model-value="rawJsonText"

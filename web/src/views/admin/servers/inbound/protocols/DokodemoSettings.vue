@@ -78,7 +78,7 @@ const targetNeedsPPWarning = computed(() => {
   if (!target) return false
   try {
     const ss = JSON.parse(target.stream_settings || '{}')
-    const ap = ss.acceptProxyProtocol === true || ss.tcpSettings?.acceptProxyProtocol === true || ss.xhttpSettings?.acceptProxyProtocol === true
+    const ap = ss.acceptProxyProtocol === true || ss.tcpSettings?.acceptProxyProtocol === true
     return !ap
   } catch {
     return false

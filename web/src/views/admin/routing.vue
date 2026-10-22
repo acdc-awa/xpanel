@@ -1,31 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { Plus, Refresh, Edit, Delete, Check, Aim, Connection, Grid, Share, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import BaseCard from '@/components/base/BaseCard.vue'
-import OutboundConfigEditor from './servers/OutboundConfigEditor.vue'
 import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
 import ServerNodeDrawer from './servers/ServerNodeDrawer.vue'
 import TopologyCanvas from '@/components/topology/TopologyCanvas.vue'
 import {
-  deleteServerOutbound,
   deleteServerRoutingRule,
-  getInbounds,
   getServerOutbounds,
   getServerRoutingRules,
-  getServers,
   getTopology,
   updateServer,
-  updateServerOutbound,
   updateServerRoutingRule,
-  type ServerItem,
   type ServerOutbound,
   type ServerRoutingRule,
+  type ServerItem,
   type TopologyData,
-  type InboundItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { useServerInbounds, useServerScope } from '@/composables/useServerScope'
 
 const route = useRoute()
 const router = useRouter()
@@ -42,40 +37,17 @@ onMounted(() => {
 })
 onUnmounted(() => mq?.removeEventListener('change', onMq))
 
-const servers = ref<ServerItem[]>([])
-const serverFilter = ref<number | undefined>(undefined)
-const serverLoading = ref(false)
-
-const currentServer = computed(() => servers.value.find((s) => s.id === serverFilter.value) ?? null)
-
-async function loadServers() {
-  serverLoading.value = true
-  try {
-    const { data } = await getServers()
-    if (data.code === 0) {
-      servers.value = data.data.items
-      // 已选服务器被移除时回落（l4_relay 类型已于 2026-08-24 退役，无需再排除）
-      if (serverFilter.value && !servers.value.some((s) => s.id === serverFilter.value)) {
-        serverFilter.value = undefined
-      }
-      if (!serverFilter.value) serverFilter.value = servers.value[0]?.id
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载服务器失败'))
-  } finally {
-    serverLoading.value = false
-  }
-}
+const { servers, serverFilter, currentServer, serverLoading, loadServers, syncServerQuery } =
+  useServerScope()
+const { inboundTags, ownerTagOf, loadServerInbounds } = useServerInbounds(serverFilter)
 
 // ---- 默认出口 & 路由匹配策略（随服务器切换） ----
 // 出站域名解析策略（freedom settings.domainStrategy）不在此处：它是出站级属性，
-// 唯一入口是下方各出站卡片的编辑面板，卡片正面只读展示。
+// 唯一入口是出站管理页的编辑面板。
 const defaultOutboundTag = ref('direct')
 const routingDomainStrategy = ref('AsIs')
 const defaultSaving = ref(false)
-const activeTab = ref('outbounds')
+const activeTab = ref<'rules' | 'settings'>('rules')
 
 watch(currentServer, (s) => {
   if (s) {
@@ -84,29 +56,28 @@ watch(currentServer, (s) => {
   }
 })
 
-export type EffectiveOutbound = Partial<ServerOutbound> & {
-  id: number
-  server_id: number
-  tag: string
-  protocol: string
-  enabled: boolean
-  /** 派生自四层直通（C2 起是库内真行）：目标与生命周期跟随直通，本页只读 */
-  owner_inbound_id?: number
-  ownerInboundTag?: string
-}
-
-export type EffectiveRoutingRule = Partial<ServerRoutingRule> & {
-  id: number
-  server_id: number
-  inbound_tag?: string
-  outbound_tag: string
-  enabled: boolean
+type EffectiveRoutingRule = ServerRoutingRule & {
   /** 派生自四层直通：可编辑（改指向/加条件/调优先级），不可删除 */
-  owner_inbound_id?: number
   ownerInboundTag?: string
 }
 
-const outboundTags = computed(() => displayOutbounds.value.map((o) => o.tag))
+// 出站列表只作为路由规则与默认出口的选项来源；出站对象的增删改在「出站管理」页。
+const outbounds = ref<ServerOutbound[]>([])
+const outboundTags = computed(() => outbounds.value.map((o) => o.tag))
+
+async function loadOutboundOptions() {
+  if (!serverFilter.value) {
+    outbounds.value = []
+    return
+  }
+  try {
+    const { data } = await getServerOutbounds(serverFilter.value)
+    if (data.code === 0) outbounds.value = data.data.items
+    else ElMessage.error(data.message)
+  } catch (e) {
+    ElMessage.error(errMsg(e, '加载出站选项失败'))
+  }
+}
 
 async function saveDefaultOutbound() {
   if (!currentServer.value) return
@@ -133,133 +104,24 @@ async function saveDefaultOutbound() {
   }
 }
 
-// ---- 出站 ----
-const outbounds = ref<ServerOutbound[]>([])
-const outboundsLoading = ref(false)
-const outboundEditorOpen = ref(false)
-const outboundEditing = ref<ServerOutbound | null>(null)
-
-async function loadOutbounds() {
-  if (!serverFilter.value) return
-  outboundsLoading.value = true
-  try {
-    const { data } = await getServerOutbounds(serverFilter.value)
-    if (data.code === 0) outbounds.value = data.data.items
-    else ElMessage.error(data.message)
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载出站失败'))
-  } finally {
-    outboundsLoading.value = false
-  }
-}
-
-function openOutboundCreate() {
-  outboundEditing.value = null
-  outboundEditorOpen.value = true
-}
-
-function openOutboundEdit(row: any) {
-  outboundEditing.value = row
-  outboundEditorOpen.value = true
-}
-
-async function toggleOutbound(row: any) {
-  if (!serverFilter.value) return
-  try {
-    const { data } = await updateServerOutbound(serverFilter.value, row.id, { enabled: !row.enabled })
-    if (data.code === 0) {
-      ElMessage.success(data.data.outbound.enabled ? '已启用' : '已停用')
-      loadOutbounds()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
-  }
-}
-
-async function removeOutbound(row: any) {
-  if (!serverFilter.value) return
-  try {
-    await ElMessageBox.confirm(`确认删除出站「${row.tag}」？`, '删除出站', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteServerOutbound(serverFilter.value, row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      loadOutbounds()
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-function isBlockCN(row: any): boolean {
-  if (row.protocol !== 'freedom') return false
-  try {
-    const s = JSON.parse(row.settings_json || '{}')
-    return !!s.block_cn
-  } catch {
-    return false
-  }
-}
-
-// 出站域名解析策略（freedom settings.domainStrategy）：唯一入口在出站编辑器，卡片正面只读展示实际生效值
-function freedomDS(row: any): string {
-  if (row.protocol !== 'freedom') return ''
-  try {
-    const s = JSON.parse(row.settings_json || '{}')
-    return s.domainStrategy || 'AsIs'
-  } catch {
-    return 'AsIs'
-  }
-}
-
 // ---- 路由规则 ----
 const routingRules = ref<ServerRoutingRule[]>([])
 const routingLoading = ref(false)
 const ruleEditorOpen = ref(false)
 const ruleEditing = ref<ServerRoutingRule | null>(null)
-const serverInbounds = ref<InboundItem[]>([])
-const inboundTags = ref<string[]>([])
-// owner_inbound_id → 直通入站 tag（派生行在列表里的归属提示；C2 起派生行是库内真行，不再现场合成）
-const ownerTagOf = computed<Record<number, string>>(() => {
-  const m: Record<number, string> = {}
-  for (const i of serverInbounds.value) m[Number(i.id)] = i.tag
-  return m
-})
-
-const displayOutbounds = computed<EffectiveOutbound[]>(() =>
-  outbounds.value.map((o) => ({
-    ...o,
-    ownerInboundTag: o.owner_inbound_id ? ownerTagOf.value[o.owner_inbound_id] || '' : '',
-  })),
-)
 
 const displayRoutingRules = computed<EffectiveRoutingRule[]>(() =>
   routingRules.value.map((r) => ({
     ...r,
     ownerInboundTag: r.owner_inbound_id ? ownerTagOf.value[r.owner_inbound_id] || '' : '',
-  })),
+  }))
 )
 
-async function loadInboundTags() {
-  if (!serverFilter.value) return
-  try {
-    const { data } = await getInbounds(serverFilter.value)
-    if (data.code === 0) {
-      serverInbounds.value = data.data.items
-      inboundTags.value = data.data.items.map((i) => i.tag)
-    }
-  } catch {
-    /* 标签加载失败不阻塞 */
-  }
-}
-
 async function loadRouting() {
-  if (!serverFilter.value) return
+  if (!serverFilter.value) {
+    routingRules.value = []
+    return
+  }
   routingLoading.value = true
   try {
     const { data } = await getServerRoutingRules(serverFilter.value)
@@ -321,28 +183,30 @@ function parseTagList(val?: string): string[] {
   return val.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
 }
 
-// ---- 服务器切换：重载表格数据 ----
+function goOutbounds() {
+  router.push({
+    path: '/admin/outbounds',
+    query: serverFilter.value ? { server_id: String(serverFilter.value) } : {},
+  })
+}
+
+// ---- 服务器切换：重载表格数据（保留 view/tab 等其他 query） ----
+let initialized = false
 watch(serverFilter, (v) => {
-  router.replace({ query: v ? { server_id: v } : {} })
+  if (!initialized) return
+  syncServerQuery()
   if (!v) {
     outbounds.value = []
     routingRules.value = []
-    inboundTags.value = []
-    serverInbounds.value = []
-    return
   }
-  loadOutbounds()
+  loadOutboundOptions()
   loadRouting()
-  loadInboundTags()
+  loadServerInbounds()
 })
 
-function reloadTable() {
-  loadServers()
-  if (serverFilter.value) {
-    loadOutbounds()
-    loadRouting()
-    loadInboundTags()
-  }
+async function reloadTable() {
+  await loadServers()
+  await Promise.all([loadOutboundOptions(), loadRouting(), loadServerInbounds()])
 }
 
 // ---- T8：画布视图 ----
@@ -377,12 +241,20 @@ function openInboundCreateForServer(serverId: number) {
   openServer(serverId)
 }
 
+// 画布里的「新建出站」已归属独立页面：带上服务器上下文跳转，由出站页自动打开新建弹窗。
 function openOutboundCreateForServer(serverId: number) {
-  serverFilter.value = serverId
-  openOutboundCreate()
+  router.push({ path: '/admin/outbounds', query: { server_id: String(serverId), create: '1' } })
 }
 
 onMounted(async () => {
+  // 旧深链兼容：出站 Tab 已拆成独立页面。
+  if (route.query.tab === 'outbounds') {
+    const query: LocationQueryRaw = { ...route.query }
+    delete query.tab
+    router.replace({ path: '/admin/outbounds', query })
+    return
+  }
+
   const q = Number(route.query.server_id)
   if (q > 0) {
     serverFilter.value = q
@@ -395,10 +267,12 @@ onMounted(async () => {
   } else if (isMobile.value) {
     viewMode.value = 'table'
   }
-  if (route.query.tab && typeof route.query.tab === 'string') {
-    activeTab.value = route.query.tab
-  }
+  if (route.query.tab === 'settings') activeTab.value = 'settings'
+
   await loadServers()
+  await Promise.all([loadOutboundOptions(), loadRouting(), loadServerInbounds()])
+  initialized = true
+  syncServerQuery()
   if (viewMode.value === 'canvas') {
     await loadTopology()
   }
@@ -450,113 +324,8 @@ onMounted(async () => {
     <template v-if="viewMode === 'table'">
       <BaseCard>
         <el-tabs v-model="activeTab">
-          <!-- Tab 1: 出站通道 -->
-          <el-tab-pane name="outbounds" :label="isMobile ? '出站通道' : '出站通道 (Outbounds)'">
-            <div class="tab-toolbar">
-              <el-button size="small" :disabled="!serverFilter" @click="loadOutbounds"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-              <el-button size="small" type="primary" :disabled="!serverFilter" @click="openOutboundCreate"><el-icon><Plus /></el-icon>&nbsp;新增出站</el-button>
-            </div>
-
-            <div v-if="outboundsLoading" style="padding: 36px 0; text-align: center">
-              <el-icon class="is-loading" style="font-size: 24px; color: var(--x-primary)"><Loading /></el-icon>
-            </div>
-
-            <div v-else-if="displayOutbounds.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
-              该服务器暂无出站通道，点击右上角「新增出站」
-            </div>
-
-            <!-- 全局统一出站卡片网格流 (自适应 1~4 列) -->
-            <div v-else class="routing-card-grid">
-              <div v-for="row in displayOutbounds" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
-                <div class="card-head">
-                  <div class="head-title">
-                    <span class="tag-badge">{{ row.tag }}</span>
-                    <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10px">系统内置·直通</span>
-                    <span v-else-if="row.tag === defaultOutboundTag" class="x-chip green" style="font-size: 10px">默认出口</span>
-                    <span v-if="row.tag === 'direct' || row.tag === 'blocked'" class="x-chip gray" style="font-size: 10px">系统内置</span>
-                    <span v-if="isBlockCN(row)" class="x-chip red" style="font-size: 10px">阻断回国</span>
-                  </div>
-                  <el-switch :model-value="row.enabled" :disabled="row.tag === 'direct' || !!row.owner_inbound_id" size="small" @change="toggleOutbound(row)" />
-                </div>
-
-                <div class="card-grid">
-                  <div class="grid-item">
-                    <span class="item-label">出站协议</span>
-                    <div class="item-value">
-                      <span v-if="row.protocol === 'freedom'" class="x-chip green" style="font-size: 10.5px">直连 (freedom)</span>
-                      <span v-else-if="row.protocol === 'vless'" class="x-chip purple" style="font-size: 10.5px">VLESS 链</span>
-                      <span v-else-if="row.protocol === 'hysteria'" class="x-chip blue" style="font-size: 10.5px">Hysteria 2</span>
-                      <span v-else-if="row.protocol === 'socks'" class="x-chip orange" style="font-size: 10.5px">SOCKS5</span>
-                      <span v-else-if="row.protocol === 'http'" class="x-chip teal" style="font-size: 10.5px">HTTP(S)</span>
-                      <span v-else-if="row.protocol === 'blackhole'" class="x-chip red" style="font-size: 10.5px">黑洞 (blackhole)</span>
-                      <span v-else-if="row.protocol === 'custom'" class="x-chip yellow" style="font-size: 10.5px">原生 JSON</span>
-                      <span v-else class="x-chip blue" style="font-size: 10.5px">{{ row.protocol }}</span>
-                    </div>
-                  </div>
-                  <div class="grid-item">
-                    <span class="item-label">连接与引用</span>
-                    <div class="item-value">
-                      <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10.5px">
-                        直通「{{ row.ownerInboundTag || ('#' + row.owner_inbound_id) }}」
-                      </span>
-                      <span v-else-if="row.inbound_ref" class="x-chip orange" style="font-size: 10.5px">
-                        引用入站 #{{ row.inbound_ref }}
-                      </span>
-                      <span v-else-if="row.outbound_json" class="x-chip gray" style="font-size: 10.5px">
-                        自定义透传
-                      </span>
-                      <span v-else-if="row.tag === 'direct'" class="muted font-11">服务器直连互联网</span>
-                      <span v-else-if="row.tag === 'blocked'" class="muted font-11">黑洞丢弃阻断</span>
-                      <span v-else class="muted font-11">自主直连</span>
-                    </div>
-                  </div>
-                  <div v-if="row.send_through" class="grid-item">
-                    <span class="item-label">发送出口 IP</span>
-                    <div class="item-value cell-mono font-11">{{ row.send_through }}</div>
-                  </div>
-                  <div v-if="row.protocol === 'freedom'" class="grid-item">
-                    <span class="item-label">域名解析策略</span>
-                    <div class="item-value">
-                      <span class="cell-mono font-11">{{ freedomDS(row) }}</span>
-                      <el-tooltip content="该 freedom 出站在连接阶段对目标域名的解析方式。在此出站的「编辑出站」面板内修改。" placement="top">
-                        <span class="help-q" style="margin-left: 4px">?</span>
-                      </el-tooltip>
-                    </div>
-                  </div>
-                  <div class="grid-item">
-                    <span class="item-label">优先级</span>
-                    <div class="item-value cell-mono font-11">{{ row.priority ?? 0 }}</div>
-                  </div>
-                  <div v-if="row.remark" class="grid-item full-width">
-                    <span class="item-label">备注说明</span>
-                    <div class="item-value font-11 muted">{{ row.remark }}</div>
-                  </div>
-                </div>
-
-                <div class="card-foot-actions">
-                  <template v-if="row.owner_inbound_id">
-                    <span class="muted font-11" style="flex: 1; text-align: center; line-height: 30px">
-                      随四层直通「{{ row.ownerInboundTag || ('#' + row.owner_inbound_id) }}」自动维护，目标在通道页/入站页修改
-                    </span>
-                  </template>
-                  <template v-else>
-                    <el-button size="small" type="primary" plain @click="openOutboundEdit(row)">
-                      <el-icon><Edit /></el-icon>&nbsp;编辑出站
-                    </el-button>
-                    <el-tooltip v-if="row.tag === 'direct' || row.tag === 'blocked'" content="系统内置出站不可删除" placement="top">
-                      <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
-                    </el-tooltip>
-                    <el-button v-else size="small" type="danger" plain @click="removeOutbound(row)">
-                      <el-icon><Delete /></el-icon>&nbsp;删除
-                    </el-button>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </el-tab-pane>
-
-          <!-- Tab 2: 路由规则管理 -->
-          <el-tab-pane name="rules" :label="isMobile ? '分流规则' : '路由分流规则 (Routing Rules)'">
+          <!-- Tab 1: 路由规则管理 -->
+          <el-tab-pane name="rules" :label="isMobile ? '路由规则' : '路由规则 (Routing Rules)'">
             <div class="tab-toolbar">
               <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
               <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
@@ -570,7 +339,7 @@ onMounted(async () => {
               该服务器暂无路由规则，点击右上角「新增规则」
             </div>
 
-            <!-- 全局统一分流规则卡片网格流 (自适应 1~4 列) -->
+            <!-- 全局统一路由规则卡片网格流 (自适应 1~4 列) -->
             <div v-else class="routing-card-grid">
               <div v-for="row in displayRoutingRules" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
                 <div class="card-head">
@@ -653,7 +422,7 @@ onMounted(async () => {
             </div>
           </el-tab-pane>
 
-          <!-- Tab 3: 全局策略管理 -->
+          <!-- Tab 2: 全局策略管理 -->
           <el-tab-pane name="settings" :label="isMobile ? '全局策略' : '全局策略 (Global Settings)'">
             <div v-if="!currentServer" class="table-empty" style="text-align: center; padding: 40px 0">
               请在顶部工具栏选择目标服务器
@@ -680,7 +449,11 @@ onMounted(async () => {
                   </el-select>
                   <div class="setting-sub">
                     <span v-if="outboundTags.length > 0" class="muted">当前选用出站通道：<code class="cell-mono">{{ defaultOutboundTag }}</code></span>
-                    <span v-else class="text-danger" style="font-size: 12px">暂无可用出站通道，请先在「出站通道」Tab 添加出站</span>
+                    <span v-else class="text-danger" style="font-size: 12px">
+                      暂无可用出站通道，请先在
+                      <el-link type="primary" :underline="false" @click="goOutbounds">出站管理</el-link>
+                      添加出站
+                    </span>
                   </div>
                 </div>
               </div>
@@ -700,7 +473,7 @@ onMounted(async () => {
                     <el-option label="IPOnDemand（按需解析 IP，遇到 IP 规则时立即解析）" value="IPOnDemand" />
                   </el-select>
                   <div class="setting-sub">
-                    <span class="muted">注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站卡片内设置。</span>
+                    <span class="muted">注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站管理页的出站卡片内设置。</span>
                   </div>
                 </div>
               </div>
@@ -715,15 +488,6 @@ onMounted(async () => {
           </el-tab-pane>
         </el-tabs>
       </BaseCard>
-
-      <!-- 出站编辑器（自管 dialog） -->
-      <OutboundConfigEditor
-        v-if="outboundEditorOpen"
-        :server-id="serverFilter ?? 0"
-        :outbound="outboundEditing"
-        @saved="loadOutbounds"
-        @close="outboundEditorOpen = false"
-      />
 
       <!-- 路由规则编辑器（自管 dialog） -->
       <RoutingRuleEditor
@@ -835,12 +599,6 @@ onMounted(async () => {
   font-size: 12.5px;
   color: var(--x-text-2);
 }
-.tag-badge {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-weight: 600;
-  color: var(--x-primary);
-  font-size: 13px;
-}
 .table-empty {
   padding: 30px 0;
   color: var(--x-text-3);
@@ -860,14 +618,6 @@ onMounted(async () => {
   border-radius: 4px;
   color: var(--x-text);
   white-space: nowrap;
-}
-.chip-more {
-  font-size: 11px;
-  color: var(--x-primary);
-  background: var(--x-primary-soft);
-  padding: 1px 5px;
-  border-radius: 4px;
-  cursor: pointer;
 }
 
 // Global Settings Tab
@@ -941,7 +691,7 @@ onMounted(async () => {
   margin-top: 24px;
 }
 
-/* ================= 全局统一出站/分流规则卡片网格流 ================= */
+/* ================= 全局统一路由规则卡片网格流 ================= */
 .routing-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -1100,4 +850,3 @@ onMounted(async () => {
   max-width: var(--x-wide-max, 1800px);
 }
 </style>
-

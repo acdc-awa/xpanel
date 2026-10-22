@@ -1,6 +1,7 @@
 package protocols
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -77,9 +78,6 @@ func (VLESSPlugin) ServerUsers(users []protocol.User, _ *contracts.InboundSpec) 
 		if u.Flow != "" {
 			c["flow"] = u.Flow
 		}
-		if u.Limit > 0 {
-			c["limit"] = u.Limit
-		}
 		clients = append(clients, c)
 	}
 	return "clients", clients, nil
@@ -146,10 +144,10 @@ func (p VLESSPlugin) ProjectClient(in *contracts.ClientProjectionInput) (*contra
 // 角色差异（名字/地址/端口、凭证、抹平下发）由调用方在此之上覆写。
 func (p VLESSPlugin) projectBase(spec *contracts.InboundSpec, sec string) *contracts.ProxyNodeDTO {
 	dto := &contracts.ProxyNodeDTO{
-		ID:         spec.ID,
-		Protocol:   "vless",
-		Transport:  &contracts.TransportOptions{Network: spec.Network},
-		Security:   &contracts.SecurityOptions{Type: sec},
+		ID:        spec.ID,
+		Protocol:  "vless",
+		Transport: &contracts.TransportOptions{Network: spec.Network},
+		Security:  &contracts.SecurityOptions{Type: sec},
 	}
 	// 指纹为客户端角色字段（streamSettings.fingerprint），仅 TLS 类安全层消费，空兜底 chrome。
 	fp := spec.Fingerprint
@@ -206,7 +204,17 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 	dto.Name = in.Name
 	dto.ServerHost = in.Host
 	dto.ServerPort = in.Port
-	dto.Auth = &contracts.ClientCredentialDTO{UUID: in.UserUUID}
+	// vlessenc：服务端 settings.decryption 派生客户端 encryption；派生失败说明密钥非法，
+	// 与其下发一个必然不通的节点，不如按参数不足跳过（调用方会记日志）。
+	encryption := "none"
+	if dec, _ := spec.Settings["decryption"].(string); VlessEncEnabled(dec) {
+		enc, err := VlessEncClientFromDecryption(dec)
+		if err != nil {
+			return nil
+		}
+		encryption = enc
+	}
+	dto.Auth = &contracts.ClientCredentialDTO{UUID: in.UserUUID, Encryption: encryption}
 	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）
 	dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
 
@@ -396,6 +404,11 @@ func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 		if dto.Transport.Mode != "" {
 			q.Set("mode", dto.Transport.Mode)
 		}
+		// 进阶参数：链接通道只能通过 extra=<xray SplitHTTPConfig JSON> 承载
+		// （mihomo 的转换器解析它并翻译成 xhttp-opts；YAML 导出走另一条路径）。
+		if extra := xhttpExtraJSON(dto.Transport); extra != "" {
+			q.Set("extra", extra)
+		}
 	case "ws":
 		if dto.Transport.Path != "" {
 			q.Set("path", dto.Transport.Path)
@@ -469,6 +482,9 @@ func (VLESSPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
 			Encryption: "none",
 			Extra:      make(map[string]any),
 		},
+	}
+	if enc := q.Get("encryption"); enc != "" {
+		dto.Auth.Encryption = enc
 	}
 
 	// 提取 SNI 与 Fingerprint
@@ -660,4 +676,44 @@ func (VLESSPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, 
 
 	item["streamSettings"] = ss
 	return item, nil
+}
+
+// xhttpExtraJSON 把 DTO 里的 xhttp 进阶参数还原成 xray SplitHTTPConfig 形态的 JSON，
+// 供订阅链接的 extra= 参数使用（mihomo 的链接转换器会读它并翻译成 xhttp-opts）。
+// host/path/mode 由 query 单独承载，不重复写入；数值型字段还原为数字。
+func xhttpExtraJSON(t *contracts.TransportOptions) string {
+	if t == nil || len(t.Opts) == 0 {
+		return ""
+	}
+	merged := make(map[string]any, len(t.Opts))
+	if raw := t.Opts["extra"]; raw != "" {
+		var m map[string]any
+		if json.Unmarshal([]byte(raw), &m) == nil {
+			for k, v := range m {
+				merged[k] = v
+			}
+		}
+	}
+	for k, raw := range t.Opts {
+		if k == "extra" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(raw), &v); err == nil {
+			merged[k] = v
+		} else {
+			merged[k] = raw
+		}
+	}
+	delete(merged, "host")
+	delete(merged, "path")
+	delete(merged, "mode")
+	if len(merged) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(merged)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

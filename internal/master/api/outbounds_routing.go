@@ -528,6 +528,17 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 		return
 	}
 
+	// 删除当前默认出口时必须回退：否则 servers.default_outbound_tag 悬空，
+	// 生成配置找不到该 tag，xray 退回 outbounds[0]（顺序不确定）。
+	// direct 是系统保留出站且不可删除，回退目标始终有效。
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err == nil && srv.DefaultOutboundTag == ob.Tag {
+		if err := d.DB.Model(&models.Server{}).Where("id = ?", id).Update("default_outbound_tag", "direct").Error; err != nil {
+			util.ServerError(c, "重置默认出口失败")
+			return
+		}
+	}
+
 	if err := d.DB.Where("id = ? AND server_id = ?", outboundID, id).Delete(&models.ServerOutbound{}).Error; err != nil {
 		util.ServerError(c, "删除出站规则失败")
 		return
@@ -602,7 +613,6 @@ func (d *Deps) wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOut
 	}
 	return false
 }
-
 
 // AdminGetServerRoutingRules GET /api/v1/admin/servers/:id/routing
 func (d *Deps) AdminGetServerRoutingRules(c *gin.Context) {

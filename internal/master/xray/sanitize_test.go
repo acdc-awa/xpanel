@@ -159,13 +159,13 @@ func TestSanitizeStreamSettings(t *testing.T) {
 					t.Error("sessionPlacement should be lifted to sessionIDPlacement")
 				}
 				if _, ok := x["sessionKey"]; ok {
-					t.Error("sessionKey should be lifted to sessionID")
+					t.Error("sessionKey should be lifted to sessionIDKey")
 				}
 				if v, _ := x["sessionIDPlacement"].(string); v != "middle" {
 					t.Errorf("sessionIDPlacement=%q, want middle", v)
 				}
-				if v, _ := x["sessionID"].(string); v != "mykey" {
-					t.Errorf("sessionID=%q, want mykey", v)
+				if v, _ := x["sessionIDKey"].(string); v != "mykey" {
+					t.Errorf("sessionIDKey=%q, want mykey", v)
 				}
 				if x["path"] != "/x" {
 					t.Error("unrelated keys should be preserved")
@@ -304,5 +304,139 @@ func TestStripInboundClientOnlyTLS(t *testing.T) {
 	stripInboundClientOnlyTLS(onlyVerify)
 	if _, ok := onlyVerify["tlsSettings"].(map[string]any)["certificates"]; ok {
 		t.Fatal("certificates should be deleted when only verify entries exist")
+	}
+}
+
+// 入站生成时剥离 udphop（仅客户端实现）；出站侧必须保留，否则端口跳跃失效。
+func TestStripInboundClientOnlyMasks(t *testing.T) {
+	stream := map[string]any{
+		"security": "tls",
+		"finalmask": map[string]any{
+			"udp": []any{
+				map[string]any{"type": "salamander", "settings": map[string]any{"password": "pw"}},
+				map[string]any{"type": "udphop", "settings": map[string]any{"mode": "intervalRemote", "remotePorts": "20000-30000"}},
+			},
+		},
+	}
+	stripInboundClientOnlyMasks(stream)
+	udp := stream["finalmask"].(map[string]any)["udp"].([]any)
+	if len(udp) != 1 || udp[0].(map[string]any)["type"] != "salamander" {
+		t.Fatalf("udphop 应被剥离、salamander 保留，got %v", udp)
+	}
+
+	// 只有 udphop 时删掉整个 udp 键。
+	onlyHop := map[string]any{
+		"finalmask": map[string]any{
+			"udp": []any{map[string]any{"type": "udphop", "settings": map[string]any{"mode": "intervalRemote"}}},
+		},
+	}
+	stripInboundClientOnlyMasks(onlyHop)
+	if _, ok := onlyHop["finalmask"].(map[string]any)["udp"]; ok {
+		t.Fatal("空 udp 应删除")
+	}
+
+	// 反向验证：通用 sanitizeStreamSettings 是入站/出站共用的，不能在这里剥离。
+	raw := `{"network":"hysteria","security":"tls","finalmask":{"udp":[{"type":"udphop","settings":{"mode":"intervalRemote","remotePorts":"20000-30000"}}]}}`
+	var m map[string]any
+	if err := json.Unmarshal([]byte(sanitizeStreamSettings(raw)), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := m["finalmask"].(map[string]any)["udp"]; !ok {
+		t.Fatal("sanitizeStreamSettings 共用于出站，不得剥离 udphop")
+	}
+}
+
+// 入站生成时剥离 xhttpSettings 里只被客户端 dialer 消费的字段；
+// 服务端实际消费的键必须保留。
+func TestStripInboundClientOnlyXHTTP(t *testing.T) {
+	stream := map[string]any{
+		"network":  "xhttp",
+		"security": "tls",
+		"xhttpSettings": map[string]any{
+			"path":                 "/stream",
+			"mode":                 "auto",
+			"host":                 "example.com",
+			"xmux":                 map[string]any{"maxConnections": "3"},
+			"downloadSettings":     map[string]any{"network": "xhttp"},
+			"noGRPCHeader":         true,
+			"uplinkHTTPMethod":     "PUT",
+			"uplinkChunkSize":      "4096-8192",
+			"scMinPostsIntervalMs": "10-20",
+			"scMaxEachPostBytes":   "1000000",
+			"scMaxBufferedPosts":   30,
+			"scStreamUpServerSecs": "20-80",
+			"serverMaxHeaderBytes": 4096,
+			"sessionIDPlacement":   "header",
+			"uplinkDataPlacement":  "body",
+		},
+	}
+	stripInboundClientOnlyXHTTP(stream)
+	x := stream["xhttpSettings"].(map[string]any)
+	for _, k := range []string{"xmux", "downloadSettings", "noGRPCHeader", "uplinkHTTPMethod", "uplinkChunkSize", "scMinPostsIntervalMs"} {
+		if _, ok := x[k]; ok {
+			t.Errorf("client-only xhttp key %q should be stripped", k)
+		}
+	}
+	for _, k := range []string{"path", "mode", "host", "scMaxEachPostBytes", "scMaxBufferedPosts", "scStreamUpServerSecs", "serverMaxHeaderBytes", "sessionIDPlacement", "uplinkDataPlacement"} {
+		if _, ok := x[k]; !ok {
+			t.Errorf("server-consumed xhttp key %q should be kept", k)
+		}
+	}
+}
+
+// 入站生成时剥离 REALITY 的客户端侧字段；服务端字段必须保留。
+func TestStripInboundClientOnlyReality(t *testing.T) {
+	stream := map[string]any{
+		"realitySettings": map[string]any{
+			"privateKey":    "sk",
+			"dest":          "example.com:443",
+			"serverNames":   []any{"example.com"},
+			"shortIds":      []any{"abcd"},
+			"publicKey":     "pk",
+			"password":      "pk",
+			"spiderX":       "/",
+			"serverName":    "example.com",
+			"shortId":       "abcd",
+			"fingerprint":   "chrome",
+			"mldsa65Verify": "verify",
+		},
+	}
+	stripInboundClientOnlyReality(stream)
+	r := stream["realitySettings"].(map[string]any)
+	for _, k := range []string{"publicKey", "password", "spiderX", "serverName", "shortId", "fingerprint", "mldsa65Verify"} {
+		if _, ok := r[k]; ok {
+			t.Errorf("client-only reality key %q should be stripped", k)
+		}
+	}
+	for _, k := range []string{"privateKey", "dest", "serverNames", "shortIds"} {
+		if _, ok := r[k]; !ok {
+			t.Errorf("server-consumed reality key %q should be kept", k)
+		}
+	}
+}
+
+// TLS 的客户端角色字段（uTLS 指纹 / ECH 客户端配置 / 系统根池开关）不得进入服务端配置。
+func TestStripInboundClientOnlyTLS_ClientOnlyExtras(t *testing.T) {
+	stream := map[string]any{
+		"tlsSettings": map[string]any{
+			"fingerprint":      "chrome",
+			"echConfigList":    "AEX...",
+			"useSystemCA":      true,
+			"alpn":             []any{"h2"},
+			"rejectUnknownSni": true,
+			"minVersion":       "1.2",
+		},
+	}
+	stripInboundClientOnlyTLS(stream)
+	tls := stream["tlsSettings"].(map[string]any)
+	for _, k := range []string{"fingerprint", "echConfigList", "useSystemCA"} {
+		if _, ok := tls[k]; ok {
+			t.Errorf("client-only tls key %q should be stripped", k)
+		}
+	}
+	for _, k := range []string{"alpn", "rejectUnknownSni", "minVersion"} {
+		if _, ok := tls[k]; !ok {
+			t.Errorf("server-consumed tls key %q should be kept", k)
+		}
 	}
 }

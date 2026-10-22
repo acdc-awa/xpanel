@@ -127,8 +127,9 @@ func TestFieldSets_DialectTraps(t *testing.T) {
 		{vless, "stream.fingerprint", "client-fingerprint", "mihomo fingerprint 是证书 pin，uTLS 必须用 client-fingerprint"},
 		{vless, "stream.tlsSettings.pinnedPeerCertSha256", "fingerprint", "pin 在 mihomo 叫 fingerprint"},
 		{vless, "stream.xhttpSettings.sessionIDPlacement", "xhttp-opts.session-placement", "session 键在 mihomo 是连字符命名"},
-		{vless, "stream.xhttpSettings.xmux", "xhttp-opts.reuse-settings", "xmux 在 mihomo 改名且默认值相反"},
-		{hy, "stream.finalmask.udp", "obfs / obfs-password", "hysteria obfs 容器位置不同"},
+		{vless, "stream.xhttpSettings.xmux", "xhttp-opts.reuse-settings", "xmux 在 mihomo 改名，且两端默认复用行为不等价"},
+		{hy, "stream.finalmask.udp", "obfs / obfs-password / obfs-min-packet-size / obfs-max-packet-size / ports / hop-interval", "hysteria obfs 容器位置不同，gecko 变体需拆到 min/max 包长；端口跳跃同在此数组"},
+		{hy, "stream.finalmask.quicParams", "down / up（方向交叉）", "服务端 brutalUp 是客户端下行、brutalDown 是客户端上行，不能同名直传"},
 	}
 	for _, tc := range cases {
 		d, ok := findDialect(tc.set, tc.path)

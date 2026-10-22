@@ -62,7 +62,7 @@ type TLSCertSpec struct {
 type SockoptSpec struct {
 	Mark                 int    `json:"mark,omitempty"`
 	TCPFastOpen          any    `json:"tcpFastOpen,omitempty"` // bool 或 int
-	TProxy               string `json:"tproxy,omitempty"`     // off / tproxy / redirect
+	TProxy               string `json:"tproxy,omitempty"`      // off / tproxy / redirect
 	AcceptProxyProtocol  bool   `json:"acceptProxyProtocol,omitempty"`
 	DomainStrategy       string `json:"domainStrategy,omitempty"`
 	TCPCongestion        string `json:"tcpCongestion,omitempty"`
@@ -153,6 +153,20 @@ func decodeStreamInto(spec *InboundSpec, raw string, strict bool) error {
 	}
 	spec.Stream = m
 	spec.Network, _ = m["network"].(string)
+	// xray 26.x 起 method/rawSettings 是 network/tcpSettings 的正式别名。
+	if spec.Network == "" {
+		spec.Network, _ = m["method"].(string)
+	}
+	if spec.Network == "raw" {
+		spec.Network = "tcp"
+	}
+	// 下游（PROXY Protocol 规范化、直通）只认 tcpSettings；补一份别名供它们读取，
+	// 原始 rawSettings 仍保留给 xray（两者语义相同）。
+	if _, ok := m["tcpSettings"]; !ok {
+		if rs, ok := m["rawSettings"]; ok {
+			m["tcpSettings"] = rs
+		}
+	}
 	spec.Security, _ = m["security"].(string)
 	spec.Fingerprint, _ = m["fingerprint"].(string)
 
@@ -340,4 +354,3 @@ func decodeTLSCerts(v any) []TLSCertSpec {
 	}
 	return res
 }
-

@@ -96,7 +96,7 @@ func TestDeclaredOrContainer_RejectsUndeclared(t *testing.T) {
 	if !ok {
 		t.Fatal("vless 缺少字段声明")
 	}
-	if !declaredOrContainer(fs, "stream.xhttpSettings.sessionID") {
+	if !declaredOrContainer(fs, "stream.xhttpSettings.sessionIDKey") {
 		t.Error("已声明的字段被误判为未声明")
 	}
 	if declaredOrContainer(fs, "stream.xhttpSettings.notARealField") {

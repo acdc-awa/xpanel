@@ -59,7 +59,7 @@ func TestBuildClash_Gaps(t *testing.T) {
 		"skip-cert-verify: true",        // E allowInsecure 透传
 		"network: xhttp",                // xhttp
 		"alpn: [h2]",                    // B xhttp 显式 alpn
-		"host: h.example.com",           // D xhttp host
+		"host: 'h.example.com'",         // D xhttp host（字符串统一加引号）
 		"cp.cloudflare.com/generate_204", // F url-test 地址
 	} {
 		if !strings.Contains(yaml, want) {

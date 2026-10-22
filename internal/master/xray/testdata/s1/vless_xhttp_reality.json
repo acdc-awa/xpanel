@@ -41,12 +41,9 @@
           "host": "h.example.com",
           "mode": "auto",
           "path": "/xp",
-          "sessionID": "k1",
+          "sessionIDKey": "k1",
           "sessionIDPlacement": "path",
-          "xPaddingBytes": "100-1000",
-          "xmux": {
-            "maxConcurrency": "16-32"
-          }
+          "xPaddingBytes": "100-1000"
         }
       },
       "tag": "vless-xhttp"

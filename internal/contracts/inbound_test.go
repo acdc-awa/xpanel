@@ -125,6 +125,22 @@ func TestDecodeStream_Lenient(t *testing.T) {
 	}
 }
 
+func TestDecodeStream_Aliases(t *testing.T) {
+	// method/rawSettings 是 network/tcpSettings 的正式别名；raw 归一为内部名 tcp。
+	spec := decodeStream(`{"method":"raw","rawSettings":{"acceptProxyProtocol":true}}`)
+	if spec.Network != "tcp" {
+		t.Fatalf("method=raw 应归一为 tcp, got %q", spec.Network)
+	}
+	if _, ok := spec.Stream["tcpSettings"]; !ok {
+		t.Fatalf("rawSettings 应补一份 tcpSettings 别名: %+v", spec.Stream)
+	}
+	// network 优先于 method。
+	spec = decodeStream(`{"network":"xhttp","method":"raw"}`)
+	if spec.Network != "xhttp" {
+		t.Fatalf("network 应优先, got %q", spec.Network)
+	}
+}
+
 func TestDecodeInboundStrict(t *testing.T) {
 	// 合法输入与宽松解码结果一致
 	raw := &models.Inbound{

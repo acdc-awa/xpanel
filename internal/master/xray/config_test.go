@@ -1581,6 +1581,7 @@ func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
 	}{
 		{"无键缺省（首跳）", "", false},
 		{"ensure 写入 acceptProxyProtocol", `{"acceptProxyProtocol":true}`, true},
+		{"tcpSettings.acceptProxyProtocol（新形态）", `{"tcpSettings":{"acceptProxyProtocol":true}}`, true},
 		{"通道私有键 proxy_protocol", `{"proxy_protocol":true}`, true},
 		{"显式 false 不开启", `{"proxy_protocol":false}`, false},
 	}
@@ -1637,7 +1638,62 @@ func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
 	}
 }
 
-// TestGenerateConfig_TunnelInbound_ManualExternal 测试手动外部 IP:Port 的直通管道
+// TestGenerateConfig_TunnelInbound_NetworkFromSettings 转发网络属于 dokodemo 的
+// settings.network；streamSettings.network 不是合法的传输名（旧面板曾把 "tcp,udp"
+// 写进去），只在缺少 settings.network 时作为存量兼容回退。
+func TestGenerateConfig_TunnelInbound_NetworkFromSettings(t *testing.T) {
+	targetID := uint64(212)
+	cases := []struct {
+		name     string
+		settings string
+		stream   string
+		wantNet  string
+	}{
+		{"settings.network 优先", `{"network":"udp"}`, `{"network":"tcp,udp"}`, "udp"},
+		{"仅 settings.network", `{"network":"tcp"}`, "", "tcp"},
+		{"存量 stream.network 回退", "", `{"network":"udp"}`, "udp"},
+		{"都缺省 tcp,udp", "", "", "tcp,udp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tunnelInb := models.Inbound{
+				ID:              112,
+				ServerID:        1,
+				Tag:             "tunnel-net",
+				Protocol:        models.ProtocolDokodemo,
+				Port:            10003,
+				Type:            models.InboundTypeTunnel,
+				TargetInboundID: &targetID,
+				SettingsJSON:    tc.settings,
+				StreamSettings:  tc.stream,
+				Enabled:         true,
+			}
+			ctx := &xray.GenerateContext{
+				RefTargets: map[uint64]xray.RefTarget{
+					targetID: {
+						Inbound:    models.Inbound{ID: targetID, ServerID: 2, Tag: "vless-in-444", Port: 444, Protocol: "vless"},
+						ServerHost: "exit-node.example.com",
+					},
+				},
+			}
+			raw, err := xray.Generate([]models.Inbound{tunnelInb}, nil, nil, nil, ctx, "", "")
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			var root map[string]any
+			if err := json.Unmarshal(raw, &root); err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+			inbounds := root["inbounds"].([]any)
+			inb := asObject(t, inbounds[0], "inbounds[0]")
+			settings := asObject(t, inb["settings"], "settings")
+			if settings["network"] != tc.wantNet {
+				t.Errorf("settings.network = %v, want %v", settings["network"], tc.wantNet)
+			}
+		})
+	}
+}
+
 func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
 	tunnelInb := models.Inbound{
 		ID:            102,
@@ -1817,21 +1873,21 @@ func TestGenerate_MultiplexedInboundAndZeroSkip(t *testing.T) {
 	realitySK := "uOF-_qWw55cTMdM8CbaDieJg6HiKUV2g7BOj1GIvf04"
 	realityPK := "7_G5gW_8n9rV1wA6jO_iXQ7G9uN2m4vK0lQ3wE5rT6Y"
 	inbLanding := models.Inbound{
-		ID:       10,
-		ServerID: 2,
-		Tag:      "landing-vless",
-		Protocol: "vless",
-		Port:     8443,
-		Enabled:  true,
+		ID:             10,
+		ServerID:       2,
+		Tag:            "landing-vless",
+		Protocol:       "vless",
+		Port:           8443,
+		Enabled:        true,
 		StreamSettings: `{"network":"tcp","security":"reality","realitySettings":{"dest":"1.1.1.1:443","serverNames":["gateway.example.com"],"privateKey":"` + realitySK + `","shortIds":["abcd1234"],"publicKey":"` + realityPK + `"}}`,
 	}
 	inbEmpty := models.Inbound{
-		ID:       11,
-		ServerID: 2,
-		Tag:      "empty-vless",
-		Protocol: "vless",
-		Port:     9443,
-		Enabled:  true,
+		ID:             11,
+		ServerID:       2,
+		Tag:            "empty-vless",
+		Protocol:       "vless",
+		Port:           9443,
+		Enabled:        true,
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 
@@ -2066,5 +2122,44 @@ func TestGenerateConfig_ChannelTunnel(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("xray -test 校验通道配置失败: %v, out: %s", err, string(out))
 		}
+	}
+}
+
+// Hysteria 入站生成时必须剥离 udphop（客户端专用），否则服务端监听直接失败；
+// 同数组里的 salamander 必须保留。DB 原文保留供订阅投影（另有单元测试覆盖）。
+func TestGenerateConfig_HysteriaStripsClientOnlyUDPHop(t *testing.T) {
+	inbounds := []models.Inbound{{
+		ID: 601, ServerID: 1, Tag: "hy2-hop", Protocol: models.ProtocolHysteria, Port: 44321,
+		StreamSettings: `{"network":"hysteria","security":"tls","tlsSettings":{"alpn":["h3"]},` +
+			`"hysteriaSettings":{"version":2},"finalmask":{"udp":[` +
+			`{"type":"salamander","settings":{"password":"pw","packetSize":"1200-1400"}},` +
+			`{"type":"udphop","settings":{"mode":"intervalRemote","remotePorts":"20000-30000"}}],` +
+			`"quicParams":{"brutalUp":"100 mbps","brutalDown":"50 mbps"}}}`,
+		Enabled: true,
+	}}
+	users := map[string][]protocol.User{
+		"hy2-hop": {{UUID: "auth-1", Email: "u1.i601@panel.local"}},
+	}
+
+	rawCfg, err := xray.Generate(inbounds, nil, nil, users, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(rawCfg, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	in := asObject(t, asArray(t, parsed["inbounds"], "inbounds")[0], "inbounds[0]")
+	stream := asObject(t, in["streamSettings"], "streamSettings")
+	fm, ok := stream["finalmask"].(map[string]any)
+	if !ok {
+		t.Fatal("finalmask 丢失：salamander 混淆必须保留")
+	}
+	udp, _ := fm["udp"].([]any)
+	if len(udp) != 1 {
+		t.Fatalf("udp 条目数 = %d, want 1（只保留 salamander）: %v", len(udp), udp)
+	}
+	if typ := udp[0].(map[string]any)["type"]; typ != "salamander" {
+		t.Fatalf("保留的 mask = %v, want salamander", typ)
 	}
 }

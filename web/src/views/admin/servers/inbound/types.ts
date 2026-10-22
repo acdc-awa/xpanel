@@ -5,8 +5,45 @@ export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'none'
 export type InboundType = 'user' | 'forward' | 'tunnel'
 
+export type Hy2ObfsType = 'none' | 'salamander' | 'gecko'
+export type Hy2MasqType = '404' | 'file' | 'proxy' | 'string'
+export type Hy2HopMode = 'intervalRemote' | 'perConnRemote'
+
+export interface HysteriaMasquerade {
+  type: Hy2MasqType
+  dir: string
+  url: string
+  rewriteHost: boolean
+  xForwarded: boolean
+  insecure: boolean
+  content: string
+  statusCode?: number
+  // 表单未覆盖的 masquerade 键（headers 等）原样回写。
+  extra?: Record<string, any>
+}
+
 export interface HysteriaConfig {
   udp_idle_timeout?: number
+  // finalmask.udp[type=salamander]
+  obfs_type: Hy2ObfsType
+  obfs_password: string
+  // gecko 分片区间（xray packetSize 是 "min-max" 字符串）
+  obfs_min_packet: number
+  obfs_max_packet: number
+  // finalmask.quicParams：服务端方向（brutalUp=服务端上行=客户端下行）
+  bw_up: string
+  bw_down: string
+  // finalmask.udp[type=udphop]：仅客户端消费，生成服务端配置时会被剥离
+  port_hop_mode: Hy2HopMode
+  port_hop_ports: string
+  port_hop_interval: string
+  // 手改 JSON 里其他 finalmask 条目（rand/tcp/filter、未知 udp 类型、自定义 quicParams），
+  // 表单只编辑自己认识的字段，其余原样回写，避免保存时静默丢配置。
+  finalmaskExtra?: Record<string, any>
+  // 服务端伪装站点；mihomo 侧无对应字段（纯服务端能力）。
+  masquerade: HysteriaMasquerade
+  // hysteriaSettings 下表单未覆盖的键，原样回写。
+  hysteriaSettingsExtra?: Record<string, any>
 }
 
 export interface TcpConfig {
@@ -16,11 +53,39 @@ export interface TcpConfig {
   acceptProxyProtocol: boolean
 }
 
+export type XhttpPlacement = '' | 'path' | 'cookie' | 'header' | 'query'
+export type XhttpPaddingPlacement = '' | 'cookie' | 'header' | 'query' | 'queryInHeader'
+export type XhttpPaddingMethod = '' | 'repeat-x' | 'tokenish'
+
 export interface XhttpConfig {
   mode: 'auto' | 'packet-up' | 'stream-up' | 'stream-one'
   path: string
   host: string
-  acceptProxyProtocol: boolean
+  // 区间类字段在 xray 里是 Int32Range：只接受 "a-b" 字符串或整数，写成 {from,to} 会拒绝加载。
+  xPaddingBytes: string
+  sessionIDPlacement: XhttpPlacement
+  sessionIDKey: string
+  sessionIDLength: string
+  sessionIDTable: string
+  paddingObfsMode: boolean
+  paddingKey: string
+  paddingHeader: string
+  paddingPlacement: XhttpPaddingPlacement
+  paddingMethod: XhttpPaddingMethod
+  noSSEHeader: boolean
+  scMaxBufferedPosts?: number
+  scStreamUpServerSecs: string
+  serverMaxHeaderBytes?: number
+  // xray 的 xmux 留空即由内核补 maxConnections=3 等默认值；显式写时必须整组写全。
+  xmuxEnabled: boolean
+  xmuxMaxConnections: string
+  xmuxMaxConcurrency: string
+  xmuxMaxRequestTimes: string
+  xmuxMaxReusableSecs: string
+  // 表单未覆盖的 xhttpSettings 键（headers/extra/downloadSettings/uplink*/seq* 等）原样回写。
+  rawExtra?: Record<string, any>
+  // xray 的 xhttp 传输没有 acceptProxyProtocol（只有 tcp/ws/httpupgrade/sockopt 有），
+  // 不再提供该开关；需要接收 PROXY Protocol 时用安全层的 sockopt 统一配置。
 }
 
 export interface TlsConfig {

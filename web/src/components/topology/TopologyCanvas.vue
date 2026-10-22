@@ -889,17 +889,24 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
     try {
       srcSS = JSON.parse(srcInb.stream_settings || '{}')
     } catch {}
+    // 转发网络属于 dokodemo 的 settings.network；streamSettings.network 不是合法传输名。
+    let srcSettings: Record<string, any> = {}
+    try {
+      srcSettings = JSON.parse(srcInb.settings_json || '{}')
+    } catch {}
     srcSS.proxy_protocol = enablePP
-    if (!srcSS.network) {
-      srcSS.network = 'tcp,udp'
+    if (!srcSettings.network) {
+      srcSettings.network = 'tcp,udp'
     }
+    // 目标住在派生 freedom 出站的 redirect；settings.address/port 被字段声明禁止。
+    delete srcSettings.address
+    delete srcSettings.port
 
     if (enablePP && !targetAcceptsPP) {
       let ss: Record<string, any> = {}
       try {
         ss = JSON.parse(tgtInb.stream_settings || '{}')
       } catch {}
-      ss.acceptProxyProtocol = true
       if (!ss.tcpSettings || typeof ss.tcpSettings !== 'object') {
         ss.tcpSettings = {}
       }
@@ -911,6 +918,7 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
       target_inbound_id: targetInboundId,
       target_address: '',
       target_port: 0,
+      settings_json: JSON.stringify(srcSettings),
       stream_settings: JSON.stringify(srcSS),
     })
     if (res.code === 0) {
@@ -1204,41 +1212,42 @@ function openEditInbound(inb: InboundItem) {
 function inboundEditorModelValue(): string {
   if (!inboundEditingItem.value) return '{}'
   const inb = inboundEditingItem.value
-  let network = 'tcp'
-  let tlsType = 'reality'
+  let settingsObj: Record<string, any> = {}
+  let streamObj: Record<string, any> = {}
+  let sniffObj: Record<string, any> | undefined
   try {
-    const ss = JSON.parse(inb.stream_settings || '{}')
-    network = ss.network || network
-    tlsType = ss.security || tlsType
+    settingsObj = JSON.parse(inb.settings_json || '{}')
+    streamObj = JSON.parse(inb.stream_settings || '{}')
+    sniffObj = inb.sniffing ? JSON.parse(inb.sniffing) : undefined
   } catch {}
   return JSON.stringify({
     tag: inb.tag,
     port: inb.port,
     listen: inb.listen,
     protocol: inb.protocol || 'vless',
-    network,
-    tls_type: tlsType,
-    flow: inb.flow || '',
-    settings_json: inb.settings_json,
-    stream_settings: inb.stream_settings,
-    sniffing: inb.sniffing,
-    ratio: inb.ratio,
-    total_gb: inb.total_gb ?? 0,
-    expiry_time: inb.expiry_time ?? null,
-    type: inb.type || 'user',
-    target_inbound_id: inb.target_inbound_id,
-    target_address: inb.target_address,
-    target_port: inb.target_port,
-    cert_id: inb.cert_id || 0,
-    share_addr_strategy: inb.share_addr_strategy,
-    share_addr: inb.share_addr,
-    share_port: inb.share_port,
-    share_security: inb.share_security,
-    share_sni: inb.share_sni,
-    share_host: inb.share_host,
-    share_path: inb.share_path,
-    share_allow_insecure: inb.share_allow_insecure,
-    layer_id: inb.layer_id || 0,
+    settings: settingsObj,
+    streamSettings: streamObj,
+    ...(sniffObj ? { sniffing: sniffObj } : {}),
+    _panel: {
+      flow: inb.flow || '',
+      ratio: inb.ratio,
+      total_gb: inb.total_gb ?? 0,
+      expiry_time: inb.expiry_time ?? null,
+      type: inb.type || 'user',
+      target_inbound_id: inb.target_inbound_id,
+      target_address: inb.target_address,
+      target_port: inb.target_port,
+      cert_id: inb.cert_id || 0,
+      share_addr_strategy: inb.share_addr_strategy,
+      share_addr: inb.share_addr,
+      share_port: inb.share_port,
+      share_security: inb.share_security,
+      share_sni: inb.share_sni,
+      share_host: inb.share_host,
+      share_path: inb.share_path,
+      share_allow_insecure: inb.share_allow_insecure,
+      layer_id: inb.layer_id || 0,
+    },
   })
 }
 
@@ -1254,6 +1263,10 @@ async function handleSaveInbound() {
   }
   if (!c.tag.trim() || !c.port) {
     ElMessage.warning('请填写标签与端口')
+    return
+  }
+  if (c.validationError) {
+    ElMessage.warning(`请先修正配置：${c.validationError}`)
     return
   }
   inboundSaving.value = true

@@ -31,6 +31,12 @@ export const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '接入点' },
       },
       {
+        path: 'outbounds',
+        name: 'admin.outbounds',
+        component: () => import('@/views/admin/outbounds.vue'),
+        meta: { title: '出站管理' },
+      },
+      {
         path: 'routing',
         name: 'admin.routing',
         component: () => import('@/views/admin/routing.vue'),

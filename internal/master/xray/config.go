@@ -789,6 +789,11 @@ func buildInbound(inb *models.Inbound, usersByTag map[string][]protocol.User, ct
 		stream = sanitizeStreamMap(stream)
 		// 服务端入站不消费客户端校验证书/根池的字段，生成前剥离，避免脏配置透传。
 		stripInboundClientOnlyTLS(stream)
+		stripInboundClientOnlyReality(stream)
+		// udphop 只存在于客户端实现；服务端带它会在监听阶段报 "udphop: client only"。
+		stripInboundClientOnlyMasks(stream)
+		// xmux / downloadSettings 等只被客户端 dialer 消费；入站 DB 保留给订阅，生成侧剥离。
+		stripInboundClientOnlyXHTTP(stream)
 	}
 
 	// 入站认证用户/凭据动态装配
@@ -960,18 +965,31 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 
 	network := "tcp,udp"
 	wantAcceptPP := false
+	// settings.network 是 xray dokodemo-door 的正式位置；stream.network 仅为兼容
+	// 旧版面板把转发网络写进 streamSettings 的存量数据。
+	if spec.Settings != nil {
+		if n, _ := spec.Settings["network"].(string); n != "" {
+			network = n
+		}
+	}
 	if spec.Stream != nil {
-		if net, _ := spec.Stream["network"].(string); net != "" {
-			network = net
+		if n, _ := spec.Stream["network"].(string); n != "" && (spec.Settings == nil || spec.Settings["network"] == nil) {
+			network = n
 		}
 		// 接收侧 PROXY Protocol（发送侧见 TunnelSendProxyProtocol）：
-		// - ensureTargetAcceptProxyProtocol 在上游管道指向本入站时写入顶层 acceptProxyProtocol；
+		// - ensureTargetAcceptProxyProtocol 写入 tcpSettings.acceptProxyProtocol（新形态）；
+		// - 存量数据可能还带顶层 acceptProxyProtocol；
 		// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
 		// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
 		// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
 		// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
 		if ap, _ := spec.Stream["acceptProxyProtocol"].(bool); ap {
 			wantAcceptPP = true
+		}
+		if tcpS, ok := spec.Stream["tcpSettings"].(map[string]any); ok {
+			if ap, _ := tcpS["acceptProxyProtocol"].(bool); ap {
+				wantAcceptPP = true
+			}
 		}
 		if pp, _ := spec.Stream["proxy_protocol"].(bool); pp {
 			wantAcceptPP = true

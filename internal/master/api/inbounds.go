@@ -954,15 +954,15 @@ func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
 	if ssMap == nil {
 		ssMap = make(map[string]any)
 	}
-	app, _ := ssMap["acceptProxyProtocol"].(bool)
 	var tcpS map[string]any
 	if t, ok := ssMap["tcpSettings"].(map[string]any); ok {
 		tcpS = t
 	}
 	tcpApp, _ := tcpS["acceptProxyProtocol"].(bool)
 
-	if !app || !tcpApp {
-		ssMap["acceptProxyProtocol"] = true
+	// 接收侧语义的正式位置是 tcpSettings.acceptProxyProtocol；顶层键是旧版面板的
+	// 私有写法（xray 不识别，生成前会被规范化），这里只保留存量数据、不再新写。
+	if !tcpApp {
 		if tcpS == nil {
 			tcpS = make(map[string]any)
 			ssMap["tcpSettings"] = tcpS

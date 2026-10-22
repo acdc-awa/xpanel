@@ -284,8 +284,9 @@ func TestEnsureTargetAcceptProxyProtocol(t *testing.T) {
 	db.First(&updatedLanding, landing.ID)
 	var ss map[string]any
 	json.Unmarshal([]byte(updatedLanding.StreamSettings), &ss)
-	if app, _ := ss["acceptProxyProtocol"].(bool); !app {
-		t.Fatalf("Landing inbound acceptProxyProtocol should be set to true automatically, got: %s", updatedLanding.StreamSettings)
+	tcpS, _ := ss["tcpSettings"].(map[string]any)
+	if app, _ := tcpS["acceptProxyProtocol"].(bool); !app {
+		t.Fatalf("Landing inbound tcpSettings.acceptProxyProtocol should be set to true automatically, got: %s", updatedLanding.StreamSettings)
 	}
 }
 
@@ -418,7 +419,8 @@ func TestAdminUpdateInbound_TunnelProxyProtocolOption(t *testing.T) {
 	db.First(&landingAfterNoPP, landing.ID)
 	var ssNoPP map[string]any
 	_ = json.Unmarshal([]byte(landingAfterNoPP.StreamSettings), &ssNoPP)
-	if ssNoPP["acceptProxyProtocol"] == true {
+	tcpNoPP, _ := ssNoPP["tcpSettings"].(map[string]any)
+	if tcpNoPP["acceptProxyProtocol"] == true {
 		t.Fatalf("当直通管道 proxy_protocol: false 时，落地入站不应被强制开启 acceptProxyProtocol")
 	}
 
@@ -440,12 +442,12 @@ func TestAdminUpdateInbound_TunnelProxyProtocolOption(t *testing.T) {
 	db.First(&landingAfterPP, landing.ID)
 	var ssPP map[string]any
 	_ = json.Unmarshal([]byte(landingAfterPP.StreamSettings), &ssPP)
-	if ssPP["acceptProxyProtocol"] != true {
-		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应开启 top-level acceptProxyProtocol")
+	if ssPP["acceptProxyProtocol"] == true {
+		t.Fatalf("顶层 acceptProxyProtocol 是旧版私有键，不应再由 ensure 写入")
 	}
 	tcpSettings, _ := ssPP["tcpSettings"].(map[string]any)
 	if tcpSettings == nil || tcpSettings["acceptProxyProtocol"] != true {
-		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应同时开启 tcpSettings.acceptProxyProtocol，以供前端编辑回显")
+		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应开启 tcpSettings.acceptProxyProtocol")
 	}
 }
 

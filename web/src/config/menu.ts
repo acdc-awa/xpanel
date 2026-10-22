@@ -48,6 +48,7 @@ export const adminMenuGroups: MenuGroup[] = [
     children: [
       { title: '服务器管理', path: '/admin/servers', icon: Monitor },
       { title: '接入点', path: '/admin/nodes', icon: Share },
+      { title: '出站管理', path: '/admin/outbounds', icon: Promotion },
       { title: '路由管理', path: '/admin/routing', icon: Connection },
       { title: '证书管理', path: '/admin/certs', icon: Lock },
     ],

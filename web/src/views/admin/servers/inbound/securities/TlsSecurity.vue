@@ -6,6 +6,8 @@ import type { TlsConfig } from '../types'
 
 const props = defineProps<{
   modelValue: TlsConfig
+  /** 固定 ALPN（Hysteria 2 必须是 h3）：非空时禁用输入并强制该值。 */
+  alpnFixed?: string
 }>()
 
 const emit = defineEmits<{
@@ -93,11 +95,15 @@ function onCertChange(val: any) {
 
           <el-form-item label="ALPN (逗号分隔)">
             <el-input
-              :model-value="modelValue.alpn"
-              placeholder="h2,http/1.1"
+              :model-value="props.alpnFixed || modelValue.alpn"
+              :disabled="!!props.alpnFixed"
+              :placeholder="props.alpnFixed || 'h2,http/1.1'"
               class="font-mono-num"
               @input="(v: string) => updateField('alpn', v)"
             />
+            <div v-if="props.alpnFixed" class="field-hint">
+              Hysteria 2 走 QUIC，服务端 ALPN 必须为 {{ props.alpnFixed }}（填其它值会导致握手 no application protocol）。
+            </div>
           </el-form-item>
 
           <el-form-item label="证书文件路径 (Cert File)">

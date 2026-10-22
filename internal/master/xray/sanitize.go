@@ -114,6 +114,10 @@ func stripInboundClientOnlyTLS(stream map[string]any) {
 	delete(tls, "disableSystemRoot")
 	delete(tls, "pinnedPeerCertSha256")
 	delete(tls, "verifyPeerCertByName")
+	// 以下同样是客户端角色字段：uTLS 指纹、ECH 客户端配置、系统根池开关。
+	delete(tls, "fingerprint")
+	delete(tls, "echConfigList")
+	delete(tls, "useSystemCA")
 
 	certs, ok := tls["certificates"].([]any)
 	if !ok {
@@ -133,6 +137,24 @@ func stripInboundClientOnlyTLS(stream map[string]any) {
 		return
 	}
 	tls["certificates"] = kept
+}
+
+// stripInboundClientOnlyReality 删除 realitySettings 里只被客户端消费的字段。
+//
+// 服务端只读 privateKey / dest / serverNames / shortIds / minClientVer / maxClientVer /
+// maxTimeDiff / mldsa65Seed / limitFallback*；publicKey、password、spiderX、单数
+// serverName/shortId、fingerprint、mldsa65Verify 都属于客户端侧（DB 原文保留给订阅）。
+func stripInboundClientOnlyReality(stream map[string]any) {
+	r, ok := stream["realitySettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, k := range []string{
+		"publicKey", "password", "spiderX",
+		"serverName", "shortId", "fingerprint", "mldsa65Verify",
+	} {
+		delete(r, k)
+	}
 }
 
 // deleteNestedKey 删除 m[key] 下的 subKey（如果 m[key] 是一个 map）。
@@ -168,6 +190,60 @@ func dropEmptyRandPackets(v any) {
 	}
 }
 
+// stripInboundClientOnlyMasks 剥离只对客户端有意义的 finalmask 条目。
+//
+// Hysteria 端口跳跃（udphop）只有客户端实现：服务端监听时
+// finalmask/udphop 直接返回 "udphop: client only"，而 `xray -test` 不会发现，
+// 结果就是配置「校验通过但起不来」。DB 原文保留供订阅/机间出站投影，生成服务端配置时剥离。
+// 出站配置（客户端角色）不能剥离，所以本函数只允许在入站生成链路调用。
+func stripInboundClientOnlyMasks(stream map[string]any) {
+	fm, ok := stream["finalmask"].(map[string]any)
+	if !ok {
+		return
+	}
+	udp, ok := fm["udp"].([]any)
+	if !ok {
+		return
+	}
+	kept := make([]any, 0, len(udp))
+	for _, item := range udp {
+		if m, ok := item.(map[string]any); ok {
+			if typ, _ := m["type"].(string); strings.EqualFold(strings.TrimSpace(typ), "udphop") {
+				continue
+			}
+		}
+		kept = append(kept, item)
+	}
+	if len(kept) == 0 {
+		delete(fm, "udp")
+	} else {
+		fm["udp"] = kept
+	}
+}
+
+// stripInboundClientOnlyXHTTP 删除 xhttpSettings 里只被客户端 dialer 消费的字段。
+//
+// 这些字段进入站 DB 是为了订阅 / 机间出站投影（客户端角色），但服务端 hub 完全不读；
+// 透传只会让服务端配置出现无效键。服务端实际消费的是 host/path/mode/headers/
+// xPadding*/noSSEHeader/scMaxEachPostBytes/scMaxBufferedPosts/scStreamUpServerSecs/
+// sessionID*/seq*/uplinkData*/serverMaxHeaderBytes。
+func stripInboundClientOnlyXHTTP(stream map[string]any) {
+	x, ok := stream["xhttpSettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, k := range []string{
+		"xmux",                 // 客户端连接复用参数
+		"downloadSettings",     // 客户端下行独立参数
+		"noGRPCHeader",         // 客户端上行请求体格式
+		"uplinkHTTPMethod",     // 客户端上行 HTTP 方法
+		"uplinkChunkSize",      // 客户端上行分片
+		"scMinPostsIntervalMs", // 客户端上发间隔
+	} {
+		delete(x, k)
+	}
+}
+
 // liftXhttpSessionKeys 将 xhttpSettings 下的旧键名提升为新键名（xray-core #6258）。
 func liftXhttpSessionKeys(stream map[string]any) {
 	xhttp, ok := stream["xhttpSettings"].(map[string]any)
@@ -180,6 +256,6 @@ func liftXhttpSessionKeys(stream map[string]any) {
 	}
 	if v, ok := xhttp["sessionKey"]; ok {
 		delete(xhttp, "sessionKey")
-		xhttp["sessionID"] = v
+		xhttp["sessionIDKey"] = v
 	}
 }
