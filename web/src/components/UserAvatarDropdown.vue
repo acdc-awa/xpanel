@@ -12,6 +12,8 @@ import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
   currentPortal?: 'client' | 'admin'
+  /** 菜单头部的补充信息（管理端用于显示版本号/在线态）。 */
+  footnote?: string
 }>()
 
 const auth = useAuthStore()
@@ -72,6 +74,7 @@ async function handleLogout() {
     <div class="user-menu-header">
       <div class="u-name">{{ auth.username }}</div>
       <CsBadge :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
+      <div v-if="footnote" class="u-footnote">{{ footnote }}</div>
     </div>
 
     <ul class="user-menu-list" role="menu">
@@ -123,6 +126,13 @@ async function handleLogout() {
   line-height: var(--line-height-body-m-5xw6xo, 20px);
   font-weight: 700;
   color: var(--color-text-body-default-b2us04, #0f141a);
+  overflow-wrap: anywhere;
+}
+
+.u-footnote {
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  line-height: var(--line-height-body-s-abys8r, 16px);
+  color: var(--color-text-body-secondary-66ygbb, #424650);
   overflow-wrap: anywhere;
 }
 

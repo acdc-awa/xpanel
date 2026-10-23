@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Icon from './Icon.vue'
+import ExpandableSection from './ExpandableSection.vue'
 import { CS } from './classes'
 import { cx } from './utils'
 import {
@@ -145,6 +146,7 @@ function toggle() {
   </template>
 
   <template v-else-if="item.type === 'section'">
+    <!-- 折叠轨里 section 表头隐藏，只把子项提升成图标列表（官方 collapsed 语义）。 -->
     <li v-if="collapsed" :class="[listItemClasses, cs['list-item--group']]">
       <ul :class="sideNavListClasses('section', { collapsed: true, withIcons })">
         <SideNavigationItem
@@ -161,19 +163,18 @@ function toggle() {
       </ul>
     </li>
     <li v-else :class="[listItemClasses, cs['list-item--group']]">
-      <div :class="cx(cs.section, cs.refresh)">
-        <button
-          type="button"
-          class="cs-sidenav-section-header"
-          :aria-expanded="isExpanded"
-          @click="toggle"
-        >
+      <ExpandableSection
+        :class="cx(cs.section, cs.refresh)"
+        variant="footer"
+        disable-content-paddings
+        :expanded="isExpanded"
+        expand-icon-position="start"
+        @change="toggle"
+      >
+        <template #header>
           <span :class="cx(cs['section-header'], cs['label-text'])">{{ item.text }}</span>
-          <span class="cs-sidenav-chevron" :class="{ 'is-expanded': isExpanded }">
-            <Icon name="angle-down" />
-          </span>
-        </button>
-        <ul v-if="isExpanded" :class="sideNavListClasses('section', { withIcons })">
+        </template>
+        <ul :class="sideNavListClasses('section', { withIcons })">
           <SideNavigationItem
             v-for="(child, index) in item.items"
             :key="index"
@@ -186,7 +187,7 @@ function toggle() {
             @change="(detail) => emit('change', detail)"
           />
         </ul>
-      </div>
+      </ExpandableSection>
     </li>
   </template>
 
@@ -313,8 +314,7 @@ function toggle() {
 </template>
 
 <style scoped lang="scss">
-.cs-sidenav-group-header,
-.cs-sidenav-section-header {
+.cs-sidenav-group-header {
   display: flex;
   align-items: center;
   inline-size: 100%;
@@ -326,11 +326,6 @@ function toggle() {
   text-align: start;
   cursor: pointer;
   color: inherit;
-}
-
-.cs-sidenav-section-header {
-  min-block-size: 28px;
-  padding-block: 4px;
 }
 
 .cs-sidenav-group-trigger {
@@ -352,8 +347,7 @@ function toggle() {
   transform: rotate(180deg);
 }
 
-.cs-sidenav-group-header:focus-within,
-.cs-sidenav-section-header:focus-visible {
+.cs-sidenav-group-header:focus-within {
   outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
   outline-offset: -2px;
   border-radius: var(--border-radius-side-navigation-item-umkj1e, 8px);

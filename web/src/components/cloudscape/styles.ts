@@ -23,6 +23,10 @@ import './vendor/components/breadcrumb-group/item/styles.scoped.css'
 import './vendor/components/top-navigation/styles.scoped.css'
 import './vendor/components/side-navigation/styles.scoped.css'
 import './vendor/components/link/styles.scoped.css'
+// AppLayout 只取 visual-refresh 一套：它是单 CSS grid（nav / breadcrumbs / header / main
+// 平铺），classic 那套 68 行样式依赖 Drawer/SplitPanel 的 JS 行内尺寸，脱离 JS 不自洽。
+// drawers / tools / split-panel 的 CSS 本项目不用，故不引入。
+import './vendor/components/app-layout/visual-refresh/styles.scoped.css'
 import './vendor/components/segmented-control/styles.scoped.css'
 import './vendor/components/tabs/styles.scoped.css'
 import './vendor/components/alert/styles.scoped.css'

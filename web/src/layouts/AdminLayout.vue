@@ -8,6 +8,7 @@ import { useThemeStore } from '@/stores/theme'
 import { getSystemStatus } from '@/api/admin'
 import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
 import {
+  CsAppLayout,
   CsBreadcrumbGroup,
   CsDrawer,
   CsIconButton,
@@ -18,6 +19,7 @@ import {
   type SideNavigationChangeDetail,
   type SideNavigationFollowDetail,
   type SideNavigationItem,
+  type TopNavigationIdentity,
   type TopNavigationUtility,
 } from '@/components/cloudscape'
 
@@ -28,38 +30,18 @@ const router = useRouter()
 const route = useRoute()
 const pageTitle = computed(() => (route.meta.title as string) ?? '')
 
-// 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
-const isCollapsed = ref(localStorage.getItem('admin_sidebar_collapsed') === '1')
+// 导航开合（官方 AppLayout 语义：开 = 固定列，关 = 完全收起 + 左侧圆钮）。
+// 持久化沿用旧 key，值为 '1' 表示收起。
+const storedCollapsed = localStorage.getItem('admin_sidebar_collapsed')
+const navigationOpen = ref(storedCollapsed !== '1')
 
-// 悬停展开状态（靠近展开，远离收起）
-const isHovered = ref(false)
-let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
-
-// 是否当前处于视觉展开状态（固定展开 OR 悬停展开）
-const isEffectiveExpanded = computed(() => !isCollapsed.value || isHovered.value)
-
-function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value
-  isHovered.value = false
-  localStorage.setItem('admin_sidebar_collapsed', isCollapsed.value ? '1' : '0')
+function setNavigationOpen(value: boolean) {
+  navigationOpen.value = value
+  localStorage.setItem('admin_sidebar_collapsed', value ? '0' : '1')
 }
 
-function handleMouseEnter() {
-  if (hoverLeaveTimer) {
-    clearTimeout(hoverLeaveTimer)
-    hoverLeaveTimer = null
-  }
-  if (isCollapsed.value) {
-    isHovered.value = true
-  }
-}
-
-function handleMouseLeave() {
-  if (isCollapsed.value) {
-    hoverLeaveTimer = setTimeout(() => {
-      isHovered.value = false
-    }, 140)
-  }
+function toggleNavigation() {
+  setNavigationOpen(!navigationOpen.value)
 }
 
 // 侧边栏搜索过滤
@@ -111,6 +93,9 @@ watch(searchQuery, (query) => {
   }
 })
 
+// 分组用官方 section：表头是纯文本折叠节，不再把组头当成链接。
+// 与官方控制台一致，导航项不带图标——SideNavigation 的 `list--with-icons`
+// 会按「图标在行首」重算内边距，和 section 表头的负边距叠加后会撑出容器。
 function toNavItems(groups: MenuGroup[]): SideNavigationItem[] {
   return groups.map((group) => {
     if (!group.children || group.children.length === 0) {
@@ -118,19 +103,16 @@ function toNavItems(groups: MenuGroup[]): SideNavigationItem[] {
         type: 'link',
         text: group.title,
         href: group.path ?? '/admin/dashboard',
-        icon: group.iconName,
       }
     }
     return {
-      type: 'expandable-link-group',
+      type: 'section',
       text: group.title,
-      icon: group.iconName,
       expanded: expandedGroups.value.has(group.title),
       items: group.children.map((child) => ({
         type: 'link' as const,
         text: child.title,
         href: child.path,
-        icon: child.iconName,
       })),
     }
   })
@@ -140,7 +122,7 @@ const navItems = computed(() => toNavItems(filteredMenuGroups.value))
 const mobileNavItems = computed(() => toNavItems(adminMenuGroups))
 
 function onNavChange(detail: SideNavigationChangeDetail) {
-  if (detail.item.type !== 'expandable-link-group') return
+  if (detail.item.type !== 'section') return
   const next = new Set(expandedGroups.value)
   if (detail.expanded) next.add(detail.item.text)
   else next.delete(detail.item.text)
@@ -152,7 +134,6 @@ function onNavFollow(detail: SideNavigationFollowDetail, event: MouseEvent) {
   if (!detail.href || detail.href === '#') return
   void router.push(detail.href)
   if (isMobile.value) drawerOpen.value = false
-  if (isCollapsed.value) isHovered.value = false
 }
 
 function handleSearchKeydown(e: KeyboardEvent) {
@@ -163,13 +144,11 @@ function handleSearchKeydown(e: KeyboardEvent) {
       if (firstGroup.path) {
         router.push(firstGroup.path)
         searchQuery.value = ''
-        if (isCollapsed.value) isHovered.value = false
         searchInputRef.value?.blur()
       }
     } else if (firstGroup.children[0]?.path) {
       router.push(firstGroup.children[0].path)
       searchQuery.value = ''
-      if (isCollapsed.value) isHovered.value = false
       searchInputRef.value?.blur()
     }
   } else if (e.key === 'Escape') {
@@ -178,27 +157,20 @@ function handleSearchKeydown(e: KeyboardEvent) {
   }
 }
 
-function handleCollapsedSearchClick() {
-  if (isCollapsed.value) {
-    isHovered.value = true
-  }
-  nextTick(() => {
-    searchInputRef.value?.focus()
-  })
-}
-
-// 全局快捷键监听 (Ctrl/Cmd + B 切换固定/折叠, Ctrl/Cmd + K 聚焦搜索)
+// 全局快捷键：Ctrl/Cmd+B 开合导航；Ctrl/Cmd+K 打开导航并聚焦搜索
 function handleGlobalKeydown(e: KeyboardEvent) {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
   const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey
 
   if (isCtrlOrCmd && e.key.toLowerCase() === 'b') {
     e.preventDefault()
-    toggleCollapse()
+    toggleNavigation()
   } else if (isCtrlOrCmd && e.key.toLowerCase() === 'k') {
     e.preventDefault()
-    if (isCollapsed.value) {
-      isHovered.value = true
+    if (isMobile.value) {
+      drawerOpen.value = true
+    } else {
+      setNavigationOpen(true)
     }
     nextTick(() => {
       searchInputRef.value?.focus()
@@ -207,11 +179,11 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-// 路由切换：收起悬停浮层，并展开当前页所在的菜单组
+// 路由切换：上报页面变化后展开所在分组
 watch(
   () => route.path,
   (path) => {
-    if (isCollapsed.value) isHovered.value = false
+    if (isMobile.value) drawerOpen.value = false
     const group = groupForPath(path)
     if (group) expandedGroups.value = new Set([...expandedGroups.value, group.title])
   }
@@ -226,6 +198,13 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   }
   return []
 })
+
+const topbarIdentity = computed<TopNavigationIdentity>(() => ({
+  href: '/admin/dashboard',
+  title: site.appName || 'Xray 管理面板',
+  logo: site.logo ? { src: site.logo, alt: site.appName || '' } : undefined,
+  mark: site.logo ? undefined : 'X',
+}))
 
 const topbarUtilities = computed<TopNavigationUtility[]>(() => [
   {
@@ -249,9 +228,9 @@ function goDashboard() {
   void router.push('/admin/dashboard')
 }
 
-// 响应式分级：<768px 手机端进入抽屉；768px~1024px (Pad端) 自动折叠侧栏为 Mini Dock
-// 媒体查询对象与初值都在 setup 阶段同步建立：原实现把赋值放在 onMounted，
-// 手机端首帧 isMobile 仍是 false，会先画一帧 236px 固定侧栏再消失（首屏位置跳一次）
+const contentType = computed(() => (route.path === '/admin/dashboard' ? 'dashboard' : 'default'))
+
+// 响应式分级：<768px 手机端走抽屉；768px~1024px (Pad端) 默认收起导航
 const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 767.98px)') : null
 const tabletMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
 
@@ -264,16 +243,18 @@ const onMobileMq = (e: MediaQueryListEvent | MediaQueryList) => {
 }
 
 const onTabletMq = (e: MediaQueryListEvent | MediaQueryList) => {
-  // 如果是 Pad 端且用户未手动固定展开，则默认保持折叠模式
   if (e.matches && localStorage.getItem('admin_sidebar_collapsed') === null) {
-    isCollapsed.value = true
+    navigationOpen.value = false
   }
 }
 
 // 页脚版本号：取后端 ldflags 注入的真实 panel_version
 const panelVersion = ref('')
+const accountFootnote = computed(() =>
+  panelVersion.value ? `${auth.username} · ${panelVersion.value}` : auth.username
+)
+
 onMounted(async () => {
-  // 初值已同步求值过，这里只订阅变化并补一次 Pad 端默认折叠策略
   if (tabletMq) onTabletMq(tabletMq)
   mobileMq?.addEventListener('change', onMobileMq)
   tabletMq?.addEventListener('change', onTabletMq)
@@ -282,11 +263,10 @@ onMounted(async () => {
     const { data } = await getSystemStatus()
     if (data.code === 0) panelVersion.value = data.data.panel_version
   } catch {
-    /* 版本获取失败静默，页脚仅显示用户名 */
+    /* 版本获取失败静默，菜单只显示用户名 */
   }
 })
 onUnmounted(() => {
-  if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
   mobileMq?.removeEventListener('change', onMobileMq)
   tabletMq?.removeEventListener('change', onTabletMq)
   window.removeEventListener('keydown', handleGlobalKeydown)
@@ -294,84 +274,72 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="admin-layout">
-    <!-- 桌面端侧栏：固定展开 / Mini Dock 悬停展开 -->
-    <aside
-      v-if="!isMobile"
-      class="admin-aside"
-      :class="{
-        collapsed: isCollapsed,
-        'is-hovered': isHovered,
-        'is-expanded': isEffectiveExpanded,
-      }"
-      @mouseenter="handleMouseEnter"
-      @mouseleave="handleMouseLeave"
+  <div class="admin-shell">
+    <!-- 全宽顶栏：品牌 + 页面标题 + 全局工具 -->
+    <CsTopNavigation
+      class="admin-topbar"
+      :identity="topbarIdentity"
+      :utilities="topbarUtilities"
+      visual-context="top-navigation"
+      @identity-follow="goDashboard"
     >
-      <div class="admin-aside-header">
-        <div
-          v-if="isEffectiveExpanded"
-          class="admin-logo"
-          :title="site.appName || 'Xray 管理面板'"
-          @click="goDashboard"
-        >
-          <div class="admin-logo-icon-wrap">
-            <img v-if="site.logo" :src="site.logo" class="admin-logo-img" alt="logo" />
-            <span v-else class="admin-logo-mark">X</span>
-          </div>
-          <span class="admin-logo-text">{{ site.appName || 'Xray 管理面板' }}</span>
-        </div>
-
-        <CsIconButton
-          class="sidebar-toggle-btn"
-          icon-name="side-bar"
-          size="normal"
-          :label="isCollapsed ? '固定侧边栏 (Ctrl+B)' : '折叠侧边栏，靠近可自动展开 (Ctrl+B)'"
-          @click.stop="toggleCollapse"
-        />
-      </div>
-
-      <div class="admin-menu-search">
-        <div v-if="isEffectiveExpanded" class="admin-search-box">
-          <CsInput
-            ref="searchInputRef"
-            v-model="searchQuery"
-            type="search"
-            prefix-icon="search"
-            clearable
-            placeholder="搜索管理菜单..."
-            aria-label="搜索管理菜单"
-            @keydown="handleSearchKeydown"
+      <template #title>
+        <div class="admin-title-wrap">
+          <CsIconButton
+            v-if="isMobile"
+            icon-name="menu"
+            size="normal"
+            label="打开导航菜单"
+            @click="drawerOpen = true"
           />
-          <kbd v-if="!searchQuery" class="shortcut-badge">Ctrl K</kbd>
+          <span class="admin-title">{{ pageTitle }}</span>
         </div>
-        <CsIconButton
-          v-else
-          icon-name="search"
-          size="normal"
-          label="搜索菜单 (Ctrl+K)"
-          @click="handleCollapsedSearchClick"
-        />
-      </div>
+      </template>
+      <template #utility-extra>
+        <UserAvatarDropdown current-portal="admin" :footnote="accountFootnote" />
+      </template>
+    </CsTopNavigation>
 
-      <div class="admin-menu">
+    <CsAppLayout
+      :navigation-open="navigationOpen"
+      :navigation-width="236"
+      :header-height="56"
+      :navigation-hide="isMobile"
+      :content-type="contentType"
+      @update:navigation-open="setNavigationOpen"
+    >
+      <template #navigation>
         <CsSideNavigation
+          v-if="!isMobile"
           :items="navItems"
           :active-href="route.path"
-          :collapsed="!isEffectiveExpanded"
           @follow="onNavFollow"
           @change="onNavChange"
-        />
-      </div>
+        >
+          <template #items-control>
+            <div class="admin-nav-search">
+              <CsInput
+                ref="searchInputRef"
+                v-model="searchQuery"
+                type="search"
+                prefix-icon="search"
+                clearable
+                placeholder="搜索管理菜单..."
+                aria-label="搜索管理菜单"
+                @keydown="handleSearchKeydown"
+              />
+              <kbd v-if="!searchQuery" class="shortcut-badge">Ctrl K</kbd>
+            </div>
+          </template>
+        </CsSideNavigation>
+      </template>
 
-      <div class="admin-aside-foot">
-        <span class="status-dot-wrap" :title="`${auth.username} · 在线`">
-          <span class="status-pulse-dot" />
-        </span>
-        <span class="foot-text">
-          {{ auth.username }}<template v-if="panelVersion"> · {{ panelVersion }}</template>
-        </span>
-      </div>
-    </aside>
+      <template v-if="!isMobile && breadcrumbs.length > 0" #breadcrumbs>
+        <CsBreadcrumbGroup :items="breadcrumbs" />
+      </template>
+
+      <router-view />
+    </CsAppLayout>
 
     <!-- 移动端抽屉 -->
     <CsDrawer
@@ -382,6 +350,17 @@ onUnmounted(() => {
       disable-content-paddings
     >
       <div class="admin-drawer-body">
+        <div class="admin-nav-search admin-drawer-search">
+          <CsInput
+            v-model="searchQuery"
+            type="search"
+            prefix-icon="search"
+            clearable
+            placeholder="搜索管理菜单..."
+            aria-label="搜索管理菜单"
+            @keydown="handleSearchKeydown"
+          />
+        </div>
         <div class="admin-drawer-nav">
           <CsSideNavigation
             :items="mobileNavItems"
@@ -390,199 +369,64 @@ onUnmounted(() => {
             @change="onNavChange"
           />
         </div>
-        <div class="admin-aside-foot">
-          <span class="status-dot-wrap">
-            <span class="status-pulse-dot" />
-          </span>
-          <span class="foot-text">
-            {{ auth.username }}<template v-if="panelVersion"> · {{ panelVersion }}</template>
-          </span>
-        </div>
       </div>
     </CsDrawer>
-
-    <!-- 主工作区 -->
-    <div class="admin-main" :class="{ collapsed: isCollapsed && !isMobile }">
-      <CsTopNavigation class="admin-topbar" :utilities="topbarUtilities" visual-context="none">
-        <template #left>
-          <div class="admin-topbar-left">
-            <CsIconButton
-              v-if="isMobile"
-              class="admin-hamburger"
-              icon-name="menu"
-              size="normal"
-              label="打开导航菜单"
-              @click="drawerOpen = true"
-            />
-            <span class="admin-topbar-title">{{ pageTitle }}</span>
-          </div>
-        </template>
-        <template #utility-extra>
-          <UserAvatarDropdown current-portal="admin" />
-        </template>
-      </CsTopNavigation>
-
-      <main class="admin-content">
-        <div v-if="breadcrumbs.length > 0" class="admin-breadcrumbs">
-          <CsBreadcrumbGroup :items="breadcrumbs" />
-        </div>
-        <router-view />
-      </main>
-    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
-.admin-layout {
+.admin-shell {
   display: flex;
-  min-height: 100vh;
+  flex-direction: column;
+  min-block-size: 100vh;
   background: var(--color-background-layout-main-y4565g, #ffffff);
 }
 
-/* 侧边栏主体：宽度/过渡/层级沿用与 ClientLayout 共享的布局 token。
-   颜色、边框、字号一律使用 Cloudscape 语义 token。 */
-.admin-aside {
-  width: var(--x-sidebar-w, 236px);
-  background: var(--color-background-container-content-mjfil9, #ffffff);
-  border-inline-end: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
-  position: fixed;
-  inset-block: 0;
-  inset-inline-start: 0;
-  block-size: 100vh;
-  display: flex;
-  flex-direction: column;
-  z-index: var(--x-z-sidebar, 80);
-  transition:
-    width var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1)),
-    box-shadow 0.24s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  /* 官方 SideNavigation collapsed 模式下用这个变量计算列表内边距 */
-  --awsui-navigation-collapsed-width-ka4djm: var(--x-sidebar-w-mini, 58px);
-
-  &.collapsed {
-    width: var(--x-sidebar-w-mini, 58px);
-
-    &.is-hovered {
-      width: var(--x-sidebar-w, 236px);
-      z-index: var(--x-z-sidebar-hover, 200);
-      box-shadow: 8px 0 32px rgba(0, 0, 0, 0.12);
-    }
-
-    &:not(.is-hovered) {
-      .admin-aside-header {
-        padding-inline: 0;
-        justify-content: center;
-      }
-
-      .admin-menu-search {
-        justify-content: center;
-        padding-inline: 0;
-      }
-
-      .admin-aside-foot {
-        padding-inline: 0;
-        justify-content: center;
-      }
-
-      .status-dot-wrap {
-        margin-inline-end: 0;
-      }
-
-      .foot-text {
-        display: none;
-      }
-    }
-  }
-}
-
-/* 顶部品牌与折叠按钮栏 */
-.admin-aside-header {
-  block-size: var(--x-topbar-h, 56px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-inline: 14px 12px;
-  border-block-end: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+/* 顶栏横跨全宽并常驻；AppLayout 以 --awsui-header-height 为下边界 */
+.admin-topbar {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--x-z-sticky, 10);
   flex: none;
-  overflow: hidden;
-  transition: padding 0.24s var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
 }
 
-.admin-logo {
+.admin-title-wrap {
   display: flex;
   align-items: center;
-  cursor: pointer;
-  overflow: hidden;
-  user-select: none;
+  gap: var(--space-xs-m9b7jf, 8px);
   min-inline-size: 0;
-  flex: 1;
+  margin-inline-start: var(--space-m-n8iq8o, 16px);
+  /* 官方 padding-box 是 space-between：让标题紧贴品牌、把剩余空间让给右侧工具区 */
+  margin-inline-end: auto;
+  padding-inline-start: var(--space-m-n8iq8o, 16px);
+  border-inline-start: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
 }
 
-.admin-logo-icon-wrap {
-  inline-size: 30px;
-  block-size: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  margin-inline-end: 10px;
-}
-
-.admin-logo-mark {
-  inline-size: 28px;
-  block-size: 28px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: linear-gradient(135deg, #6366f1, #a855f7);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 800;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
-}
-
-.admin-logo-img {
-  inline-size: 28px;
-  block-size: 28px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  object-fit: contain;
-  background: var(--color-background-container-header-irktp5, #ffffff);
-}
-
-.admin-logo-text {
+.admin-title {
+  font-size: var(--font-size-heading-xs-yrvp79, 14px);
   font-weight: 700;
-  font-size: var(--font-size-body-m-tq5a14, 14px);
-  line-height: var(--line-height-body-m-5xw6xo, 20px);
   color: var(--color-text-body-default-b2us04, #0f141a);
   white-space: nowrap;
-  letter-spacing: -0.2px;
-  max-inline-size: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-inline-size: 0;
 }
 
-.sidebar-toggle-btn {
-  flex: none;
-  inline-size: 30px;
-  block-size: 30px;
-  color: var(--color-text-body-secondary-66ygbb, #424650);
+/* 窄屏只保留汉堡，页面标题让位（面包屑已在内容区承担定位职责）。 */
+@media (max-width: 559.98px) {
+  .admin-title {
+    display: none;
+  }
+
+  .admin-title-wrap {
+    margin-inline-start: var(--space-xs-m9b7jf, 8px);
+    padding-inline-start: var(--space-xs-m9b7jf, 8px);
+  }
 }
 
-/* 侧边快捷搜索栏 */
-.admin-menu-search {
-  padding: 8px 10px 4px;
-  flex: none;
-  display: flex;
-}
-
-.admin-search-box {
+.admin-nav-search {
   position: relative;
   inline-size: 100%;
-
-  :deep(.cs-input-root) {
-    inline-size: 100%;
-  }
 }
 
 .shortcut-badge {
@@ -602,151 +446,16 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* 侧边菜单区 */
-.admin-menu {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 6px 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-divider-default-diwd4w, #c6c6cd) transparent;
-  // 常驻预留滚动条槽位，避免折叠/展开切换时文字右边缘跳动
-  scrollbar-gutter: stable;
-
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--color-border-divider-default-diwd4w, #c6c6cd);
-    border-radius: 4px;
-  }
-}
-
-/* 底部状态栏 */
-.admin-aside-foot {
-  block-size: 42px;
-  padding-inline: 14px;
-  border-block-start: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
-  color: var(--color-text-body-secondary-66ygbb, #424650);
-  font-size: var(--font-size-body-s-89y7qg, 12px);
-  display: flex;
-  align-items: center;
-  flex: none;
-  background: var(--color-background-container-header-irktp5, #ffffff);
-  user-select: none;
-  overflow: hidden;
-  transition: padding 0.24s var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
-}
-
-.status-dot-wrap {
-  inline-size: 24px;
-  block-size: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  margin-inline-end: 8px;
-}
-
-.status-pulse-dot {
-  inline-size: 7px;
-  block-size: 7px;
-  border-radius: 50%;
-  background: var(--color-background-status-success-1woffs, #10b981);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
-  flex: none;
-}
-
-.foot-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-inline-size: 0;
-}
-
-/* 主内容区自适应过渡 */
-.admin-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  transition: margin-left var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
-
-  @media (min-width: 768px) {
-    margin-inline-start: var(--x-sidebar-w, 236px);
-  }
-
-  @media (max-width: 767.98px) {
-    margin-inline-start: 0;
-  }
-
-  &.collapsed {
-    @media (min-width: 768px) {
-      margin-inline-start: var(--x-sidebar-w-mini, 58px);
-    }
-  }
-}
-
-.admin-topbar {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: var(--x-z-sticky, 10);
-  flex: none;
-}
-
-.admin-topbar-title {
-  font-size: var(--font-size-heading-xs-yrvp79, 14px);
-  font-weight: 700;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-inline-size: 0;
-}
-
-.admin-topbar-left {
-  display: flex;
-  align-items: center;
-  min-inline-size: 0;
-}
-
-.admin-hamburger {
-  margin-inline-end: 8px;
-}
-
-.admin-content {
-  flex: 1;
-  // 正文内边距的唯一来源：.x-page 已不再叠加 padding。
-  // 三档单调递减，拖拽窗口跨断点时不出现「左右跳」
-  padding: 20px 24px 32px;
-
-  @media (max-width: 900px) {
-    padding: 18px 20px 28px;
-  }
-
-  @media (max-width: 767.98px) {
-    padding: 14px 12px 24px;
-  }
-}
-
-.admin-breadcrumbs {
-  max-inline-size: var(--x-content-max, 1320px);
-  margin-inline: auto;
-  padding-block-end: 12px;
-
-  @media (max-width: 767.98px) {
-    display: none;
-  }
-}
-
 .admin-drawer-body {
   display: flex;
   flex-direction: column;
   min-block-size: 100%;
   padding-block: 8px;
+}
+
+.admin-drawer-search {
+  padding-inline: var(--space-m-n8iq8o, 16px);
+  padding-block-end: var(--space-xs-m9b7jf, 8px);
 }
 
 .admin-drawer-nav {

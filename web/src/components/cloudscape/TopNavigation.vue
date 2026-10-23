@@ -106,10 +106,12 @@ function onIdentityClick(event: MouseEvent) {
                 :src="identity.logo.src"
                 :alt="identity.logo.alt || ''"
               />
-              <span v-if="identity.title" :class="cs.title">{{ identity.title }}</span>
+              <span v-else-if="identity.mark" class="cs-topnav-mark" aria-hidden="true">{{ identity.mark }}</span>
+              <span v-if="identity.title" :class="cx(cs.title, 'cs-topnav-name')">{{ identity.title }}</span>
             </a>
           </slot>
         </div>
+        <slot name="title" />
 
         <div
           v-if="$slots.search"
@@ -143,5 +145,27 @@ function onIdentityClick(event: MouseEvent) {
   display: flex;
   align-items: center;
   padding-inline: var(--space-m-n8iq8o, 16px);
+}
+
+/* 没有图片 logo 时的字母标记，与旧外壳的渐变徽标保持同一观感。 */
+.cs-topnav-mark {
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-body-s-89y7qg, 12px);
+  font-weight: 800;
+  flex: none;
+}
+
+/* 窄屏优先保品牌图标与右侧工具，品牌名让位给页面标题/操作。 */
+@media (max-width: 430px) {
+  .cs-topnav-name {
+    display: none;
+  }
 }
 </style>

@@ -13,6 +13,10 @@ const props = withDefaults(
     headerDescription?: string
     headerCounter?: string | number
     disableContentPaddings?: boolean
+    /** 展开图标在标题前还是标题后（官方 __expandIconPosition） */
+    expandIconPosition?: 'start' | 'end'
+    /** 只保留标题、不渲染展开图标（官方 __hideExpandIcon） */
+    hideExpandIcon?: boolean
   }>(),
   {
     header: undefined,
@@ -22,6 +26,8 @@ const props = withDefaults(
     headerDescription: undefined,
     headerCounter: undefined,
     disableContentPaddings: false,
+    expandIconPosition: 'start',
+    hideExpandIcon: false,
   }
 )
 
@@ -33,6 +39,8 @@ const emit = defineEmits<{
 const innerExpanded = ref(props.defaultExpanded)
 const isControlled = computed(() => props.expanded !== undefined)
 const isExpanded = computed(() => (isControlled.value ? Boolean(props.expanded) : innerExpanded.value))
+const iconAtEnd = computed(() => props.expandIconPosition === 'end')
+const cs = CS['expandable-section']
 
 watch(
   () => props.expanded,
@@ -60,26 +68,39 @@ const wrapperClasses = computed(() =>
 
 <template>
   <div :class="CS['expandable-section'].root">
-    <div :class="wrapperClasses">
-      <div :class="CS['expandable-section'].header">
-        <div :class="CS['expandable-section']['header-wrapper']">
+    <!-- 官方把 wrapper-* 类挂在 header 上，content 是其兄弟节点。
+         若把两者包进同一个 wrapper，side-navigation 的「表头 hover 底色」会染整块内容。 -->
+    <div :class="cx(cs.header, wrapperClasses)">
+      <div :class="cs['header-content']">
+        <div :class="cx(cs['header-wrapper'], iconAtEnd && cs['header-icon-end'])">
           <button
             type="button"
-            :class="cx(CS['expandable-section']['expand-button'], CS['expandable-section']['click-target'], CS['expandable-section'].focusable)"
+            :class="
+              cx(
+                cs['expand-button'],
+                cs['header-button'],
+                cs['click-target'],
+                cs.focusable,
+                iconAtEnd && cs['header-button-icon-end']
+              )
+            "
             :aria-expanded="isExpanded ? 'true' : 'false'"
             @click="toggle"
           >
-            <span :class="CS['expandable-section']['icon-container']">
-              <Icon
-                name="angle-down"
-                :class="cx(CS['expandable-section'].icon, isExpanded && CS['expandable-section'].expanded)"
-              />
+            <span v-if="!hideExpandIcon && !iconAtEnd" :class="cs['icon-container']">
+              <Icon name="angle-down" :class="cx(cs.icon, isExpanded && cs.expanded)" />
             </span>
-            <span :class="CS['expandable-section']['header-text']">{{ header }}</span>
-            <span v-if="headerCounter !== undefined" :class="CS['expandable-section']['header-counter']">{{ headerCounter }}</span>
+            <span :class="cs['header-text']">
+              <slot name="header">{{ header }}</slot>
+            </span>
+            <span v-if="headerCounter !== undefined" :class="cs['header-counter']">{{ headerCounter }}</span>
+            <span v-if="!hideExpandIcon && iconAtEnd" :class="cx(cs['icon-container'], cs['icon-container-end'])">
+              <Icon name="angle-down" :class="cx(cs.icon, isExpanded && cs.expanded)" />
+            </span>
           </button>
         </div>
       </div>
+    </div>
       <div
         v-show="isExpanded"
         :class="
@@ -114,7 +135,6 @@ const wrapperClasses = computed(() =>
           </div>
         </div>
       </div>
-    </div>
   </div>
 </template>
 

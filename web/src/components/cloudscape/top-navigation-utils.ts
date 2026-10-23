@@ -2,6 +2,8 @@ export interface TopNavigationIdentity {
   title?: string
   href: string
   logo?: { src: string; alt?: string }
+  /** 没有图片 logo 时显示的字母标记（单字符）。 */
+  mark?: string
 }
 
 export interface TopNavigationUtilityBase {
