@@ -18,6 +18,7 @@ import CodeEditor from '@/components/CodeEditor.vue'
 import {
   createServerOutbound,
   getInbounds,
+  getServerOutbounds,
   getServers,
   updateServerOutbound,
   type ServerItem,
@@ -167,8 +168,31 @@ async function loadRefTargets() {
   }
 }
 
-function parseExisting() {
+/**
+ * 画布（/admin/topology）只给出站行下发轻量字段，不含 settings_json / outbound_json。
+ * 直接拿它回填会让基础出口按默认值展示、自定义 JSON 退化成引用形态，保存即覆盖真实配置；
+ * 所以行里没有载荷列时按 id 回查一次完整出站。出站列表页传的已是完整行，不会多一次请求。
+ */
+const loadedOutbound = ref<ServerOutbound | null>(null)
+
+async function loadFullOutbound() {
   const ob = props.outbound
+  if (!ob?.id) return
+  // 类型上 settings_json 是必填，这里按运行时值判断「调用方是否真的传了载荷列」
+  const raw = ob as unknown as Record<string, unknown>
+  if (raw.settings_json !== undefined || raw.outbound_json !== undefined) return
+  try {
+    const { data } = await getServerOutbounds(props.serverId)
+    if (data.code === 0) {
+      loadedOutbound.value = data.data.items.find((o) => o.id === ob.id) ?? null
+    }
+  } catch {
+    /* 回查失败退回轻量行：载荷列缺失时保存会被后端形状校验拦下，不会静默覆盖 */
+  }
+}
+
+function parseExisting() {
+  const ob = loadedOutbound.value ?? props.outbound
   if (!ob) return
 
   form.tag = ob.tag
@@ -398,7 +422,7 @@ function handleClose() {
 }
 
 onMounted(async () => {
-  await loadRefTargets()
+  await Promise.all([loadRefTargets(), loadFullOutbound()])
   parseExisting()
   visible.value = true
 })

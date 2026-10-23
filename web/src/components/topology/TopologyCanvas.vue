@@ -2,8 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   VueFlow,
-  Handle,
-  Position,
   MarkerType,
   type Connection,
   type Edge,
@@ -16,30 +14,41 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
-import { FullScreen, MagicStick, RefreshRight, Plus, CopyDocument, Setting, Delete, Edit } from '@element-plus/icons-vue'
+import { FullScreen, MagicStick, RefreshRight, Plus } from '@element-plus/icons-vue'
 import {
-  createServerRoutingRule,
   deleteServerOutbound,
   deleteServerRoutingRule,
+  deleteLayer,
   getTopologyLayout,
   saveTopologyLayout,
   updateInbound,
-  createInbound,
-  deleteInbound,
   updateServerOutbound,
   setAccessPointTarget,
   getPermissionGroups,
-  createLayer,
-  updateLayer,
-  deleteLayer,
   type TopologyData,
-  type InboundPayload,
 } from '@/api/admin'
 import type { InboundItem, ServerOutbound, PermissionGroup, UserAccessPoint, AccessLayer } from '@/api/types'
 import { errMsg } from '@/api/http'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
-import InboundConfigEditor, { type InboundEditorChangePayload } from '@/views/admin/servers/InboundConfigEditor.vue'
 import AccessPointDialog from '@/views/admin/servers/AccessPointDialog.vue'
+import ServerBoxNode from './nodes/ServerBoxNode.vue'
+import APBoxNode from './nodes/APBoxNode.vue'
+import {
+  DEFAULT_BOX_W,
+  HEADER_H,
+  ROW_H,
+  CAP_HED,
+  COL_HED,
+  boxRulePath,
+  refEdgePath,
+  type BoxData,
+  type BoxOutbound,
+} from './model'
+
+import LayerDialog from './dialogs/LayerDialog.vue'
+import BindInboundDialog from './dialogs/BindInboundDialog.vue'
+import RuleDialog from './dialogs/RuleDialog.vue'
+import InboundDialog from './dialogs/InboundDialog.vue'
 
 const props = defineProps<{
   topology: TopologyData | null
@@ -54,34 +63,6 @@ const emit = defineEmits<{
 }>()
 
 // ---- 节点/边构建 ----
-interface BoxOutbound {
-  id: string // 一律为 DB 出站 id 的数字字符串，或者草稿直通: 'draft-tunnel-' + inb.id
-  tag: string
-  protocol: string
-  inbound_ref?: number | null
-  virtual?: boolean
-  owner_inbound_id?: number
-  has_payload?: boolean
-  isDraftTunnel?: boolean
-  server_id?: number
-}
-
-interface BoxData {
-  server: TopologyData['servers'][number]
-  inbounds: TopologyData['inbounds']
-  outbounds: BoxOutbound[]
-  layers: AccessLayer[]
-  boxWidth?: number // 用户拉伸的盒子宽度（未拉伸 = 默认 440）
-}
-
-function isOutboundDraft(out: any): boolean {
-  if (out.isDraftTunnel) return true
-  // 引用目标、派生行、direct 虚拟行、或已配置载荷（基础 settings / 自定义 JSON）都不是草稿。
-  if (out.inbound_ref || out.owner_inbound_id || out.virtual || out.has_payload) return false
-  if (out.protocol === 'freedom' || out.protocol === 'blackhole') return false
-  return true
-}
-
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
 const flowRef = ref<{
@@ -235,10 +216,6 @@ async function saveLayoutToCloud() {
   }
 }
 
-const ROW_H = 40
-const HEADER_H = 48
-const DEFAULT_BOX_W = 440
-
 function getBoxWidth(serverId: number | string): number {
   const id = typeof serverId === 'string' && serverId.startsWith('server-') ? serverId : `server-${serverId}`
   return boxWidths.get(id) ?? DEFAULT_BOX_W
@@ -254,38 +231,6 @@ function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, o
 
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
   return boxPositions.get(`server-${s.id}`) ?? { x: 40 + idx * 520, y: 24 }
-}
-
-function typeInfo(t?: string) {
-  if (t === 'tunnel') return { cls: 'tunnel', text: '直通' }
-  if (t === 'forward') return { cls: 'forward', text: '代理' }
-  if (t === 'channel') return { cls: 'channel', text: '通道' }
-  return { cls: '', text: '' }
-}
-
-// 提取入站协议与端口摘要标签（主协议名：VLESS / HY2 / TUNNEL）
-function inboundSummary(inb: TopologyData['inbounds'][number]) {
-  let proto = 'VLESS'
-  let cls = 'vless'
-  const p = (inb.protocol || '').toLowerCase()
-  if (p === 'hysteria') {
-    proto = 'HY2'
-    cls = 'hy2'
-  } else if (p === 'dokodemo-door' || inb.type === 'tunnel') {
-    proto = 'TUNNEL'
-    cls = 'tunnel'
-  } else if (p === 'vless') {
-    proto = 'VLESS'
-    cls = 'vless'
-  } else if (p) {
-    proto = p.toUpperCase()
-    cls = 'other'
-  }
-  return {
-    port: inb.port,
-    proto,
-    cls,
-  }
 }
 
 // 对外接入层：入站列先渲染层胶囊（显式端点点位），后渲染未挂层原生行。
@@ -323,8 +268,6 @@ function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
 
 // 入站列显示布局：返回每行中心 Y（相对盒顶，含 HEADER_H）与列总高（顶到底含底部内边距）。
 // 层胶囊头部开销 CAP_HED 对齐 CSS（容器上边距 6 + 头 ~26 + 头下间距 6），行距近似 ROW_H=40。
-const CAP_HED = 38
-const COL_HED = 38 // 列头 32 + 行首间距 6
 function inboundColumnRows(serverId: number): { rows: { id: number; centerY: number }[]; colH: number } {
   const data = props.topology
   const rows: { id: number; centerY: number }[] = []
@@ -360,31 +303,6 @@ function copyLayerCaddyfile(layer: AccessLayer) {
   lines.push(`}`)
   navigator.clipboard.writeText(lines.join('\n'))
   ElMessage.success(`已复制 ${layer.host} 的 Caddyfile 配置片段`)
-}
-
-// 盒内路由线：S 形贝塞尔
-function boxRulePath(sx: number, sy: number, tx: number, ty: number) {
-  const mx = (sx + tx) / 2
-  return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`
-}
-
-// 跨盒引用线：平滑 S 形贝塞尔走线（水平引出，避免急坠与折角）。
-// 有意不做阻挡检测：原「规避绕行」算法（52a7c38）已移除，多盒同列堆叠时跨盒连线
-// 允许直穿中间盒子，属视觉取舍；如需防穿盒参考该历史实现。
-function refEdgePath(sx: number, sy: number, tx: number, ty: number) {
-  const dx = tx - sx
-  const dy = ty - sy
-  if (dx >= 40) {
-    const seg = Math.min(24, dx * 0.15)
-    const ax = sx + seg
-    const bx = tx - seg
-    // arc 钳制在半距内，防止横向轻微错位（dx≈40~130）时控制点交叉打出小回环
-    const arc = Math.min(Math.max(40, (bx - ax) * 0.35), (bx - ax) / 2)
-    return `M ${sx} ${sy} L ${ax} ${sy} C ${ax + arc} ${sy}, ${bx - arc} ${ty}, ${bx} ${ty} L ${tx} ${ty}`
-  }
-  // 反向/同列特殊走线：右侧引出 -> 绕背 S 弧度 -> 左侧接入
-  const offset = Math.max(60, Math.abs(dy) * 0.4, Math.abs(dx) * 0.3)
-  return `M ${sx} ${sy} C ${sx + offset} ${sy}, ${tx - offset} ${ty}, ${tx} ${ty}`
 }
 
 // 按 tag_orders 排序列出服务器出站项
@@ -984,86 +902,34 @@ function openEditAccessPoint(ap: UserAccessPoint) {
   apDialogOpen.value = true
 }
 
-function groupName(id: number) {
-  return permissionGroups.value.find((g) => g.id === id)?.name ?? `组#${id}`
-}
-
 // 目标落地服务器候选（全部 Xray 托管节点；l4_relay 已于 2026-08-24 退役）
 const availableXrayServers = computed(() => props.topology?.servers || [])
 
-// ---- 对外接入层管理弹窗（显式订阅端点分组）----
+// ---- 对外接入层弹窗（组件与表单在 dialogs/LayerDialog.vue）----
 const layerDialogOpen = ref(false)
-const layerSaving = ref(false)
 const layerEditing = ref<AccessLayer | null>(null)
 const layerServerId = ref(0)
-const layerForm = reactive({
-  name: '',
-  host: '',
-  port: 443,
-  security: 'tls',
-  remark: '',
-})
 
 function openCreateLayer(serverId: number) {
   layerServerId.value = serverId
   layerEditing.value = null
-  layerForm.name = ''
-  layerForm.host = ''
-  layerForm.port = 443
-  layerForm.security = 'tls'
-  layerForm.remark = ''
   layerDialogOpen.value = true
 }
 
 function openEditLayer(layer: AccessLayer) {
   layerServerId.value = layer.server_id
   layerEditing.value = layer
-  layerForm.name = layer.name
-  layerForm.host = layer.host
-  layerForm.port = layer.port
-  layerForm.security = layer.security
-  layerForm.remark = layer.remark || ''
   layerDialogOpen.value = true
 }
 
-async function saveLayer() {
-  if (!layerForm.name.trim() || !layerForm.host.trim()) {
-    ElMessage.warning('请填写层名称与对外 Host')
-    return
-  }
-  layerSaving.value = true
-  try {
-    const payload = {
-      name: layerForm.name.trim(),
-      host: layerForm.host.trim(),
-      port: layerForm.port || 443,
-      security: layerForm.security,
-      remark: layerForm.remark,
-    }
-    const { data } = layerEditing.value
-      ? await updateLayer(layerServerId.value, layerEditing.value.id, payload)
-      : await createLayer(layerServerId.value, payload)
-    if (data.code === 0) {
-      ElMessage.success(layerEditing.value ? '对外层已更新' : '对外层已创建')
-      layerDialogOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
-  } finally {
-    layerSaving.value = false
-  }
-}
-
+// 画布胶囊上的「删除」快捷入口与弹窗底部按钮共用这一个删除流程
 async function handleDeleteLayer(layer: AccessLayer) {
   try {
-    await ElMessageBox.confirm(`删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅地址改为入站自身分享地址。`, '删除对外层', {
-      type: 'warning',
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅地址改为入站自身分享地址。`,
+      '删除对外层',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
   } catch {
     return
   }
@@ -1081,12 +947,10 @@ async function handleDeleteLayer(layer: AccessLayer) {
   }
 }
 
-// ---- 入站挂载对外层 ----
+// ---- 入站挂载对外层（组件在 dialogs/BindInboundDialog.vue）----
 const bindDialogOpen = ref(false)
 const bindServerId = ref(0)
 const bindLayerId = ref(0)
-const bindInboundId = ref(0 as number | undefined)
-const bindSaving = ref(false)
 
 const availableBindInbounds = computed(() => {
   if (!props.topology) return []
@@ -1096,34 +960,11 @@ const availableBindInbounds = computed(() => {
 function openBindInbound(layer: AccessLayer) {
   bindServerId.value = layer.server_id
   bindLayerId.value = layer.id
-  bindInboundId.value = undefined
   if (availableBindInbounds.value.length === 0) {
     ElMessage.info('该服务器暂无可挂载的入站（已全部挂层）')
     return
   }
   bindDialogOpen.value = true
-}
-
-async function confirmBindInbound() {
-  if (!bindInboundId.value) {
-    ElMessage.warning('请选择要挂载的入站')
-    return
-  }
-  bindSaving.value = true
-  try {
-    const { data } = await updateInbound(bindInboundId.value, { layer_id: bindLayerId.value })
-    if (data.code === 0) {
-      ElMessage.success('入站已挂载到对外层')
-      bindDialogOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '挂载失败'))
-  } finally {
-    bindSaving.value = false
-  }
 }
 
 async function unbindInbound(inb: InboundItem) {
@@ -1176,174 +1017,28 @@ function handleOutboundSaved() {
   emit('changed')
 }
 
-// ---- 入站新建/编辑弹窗（直接在画布中唤起） ----
+// ---- 入站新建/编辑弹窗（组件在 dialogs/InboundDialog.vue）----
 const inboundCreateOpen = ref(false)
 const inboundCreateServerId = ref(0)
 const inboundEditingItem = ref<InboundItem | null>(null)
-const inboundFormType = ref('user')
-const inboundFormCertId = ref(0)
-const inboundChangePayload = ref<InboundEditorChangePayload | null>(null)
-const inboundSaving = ref(false)
 
 function openCreateInbound(serverId: number) {
   inboundCreateServerId.value = serverId
   inboundEditingItem.value = null
-  inboundFormType.value = 'user'
-  inboundFormCertId.value = 0
-  inboundChangePayload.value = null
   inboundCreateOpen.value = true
 }
 
 function openEditInbound(inb: InboundItem) {
   inboundCreateServerId.value = inb.server_id
   inboundEditingItem.value = inb
-  inboundFormType.value = inb.type || 'user'
-  inboundFormCertId.value = inb.cert_id || 0
-  inboundChangePayload.value = null
   inboundCreateOpen.value = true
 }
 
-function inboundEditorModelValue(): string {
-  if (!inboundEditingItem.value) return '{}'
-  const inb = inboundEditingItem.value
-  let settingsObj: Record<string, any> = {}
-  let streamObj: Record<string, any> = {}
-  let sniffObj: Record<string, any> | undefined
-  try {
-    settingsObj = JSON.parse(inb.settings_json || '{}')
-    streamObj = JSON.parse(inb.stream_settings || '{}')
-    sniffObj = inb.sniffing ? JSON.parse(inb.sniffing) : undefined
-  } catch {}
-  return JSON.stringify({
-    tag: inb.tag,
-    port: inb.port,
-    listen: inb.listen,
-    protocol: inb.protocol || 'vless',
-    settings: settingsObj,
-    streamSettings: streamObj,
-    ...(sniffObj ? { sniffing: sniffObj } : {}),
-    _panel: {
-      flow: inb.flow || '',
-      ratio: inb.ratio,
-      total_gb: inb.total_gb ?? 0,
-      expiry_time: inb.expiry_time ?? null,
-      type: inb.type || 'user',
-      target_inbound_id: inb.target_inbound_id,
-      target_address: inb.target_address,
-      target_port: inb.target_port,
-      cert_id: inb.cert_id || 0,
-      share_addr_strategy: inb.share_addr_strategy,
-      share_addr: inb.share_addr,
-      share_port: inb.share_port,
-      share_security: inb.share_security,
-      share_sni: inb.share_sni,
-      share_host: inb.share_host,
-      share_path: inb.share_path,
-      share_allow_insecure: inb.share_allow_insecure,
-      layer_id: inb.layer_id || 0,
-    },
-  })
-}
-
-function onInboundEditorChange(payload: InboundEditorChangePayload) {
-  inboundChangePayload.value = payload
-}
-
-async function handleSaveInbound() {
-  const c = inboundChangePayload.value
-  if (!c) {
-    ElMessage.warning('请先在表单中编辑入站配置')
-    return
-  }
-  if (!c.tag.trim() || !c.port) {
-    ElMessage.warning('请填写标签与端口')
-    return
-  }
-  if (c.validationError) {
-    ElMessage.warning(`请先修正配置：${c.validationError}`)
-    return
-  }
-  inboundSaving.value = true
-  try {
-    const payload: Partial<InboundPayload> = {
-      server_id: inboundCreateServerId.value,
-      tag: c.tag,
-      protocol: c.protocol,
-      port: c.port,
-      listen: c.listen,
-      settings_json: c.settingsJson,
-      stream_settings: c.streamSettings,
-      sniffing: c.sniffing || undefined,
-      ratio: c.ratio,
-      total_gb: c.total_gb,
-      expiry_time: (c.expiry_time && c.expiry_time.trim()) ? c.expiry_time : null,
-      type: c.type || inboundFormType.value,
-      target_inbound_id: c.targetInboundId || 0,
-      target_address: c.targetAddress || '',
-      target_port: c.targetPort || 0,
-      flow: c.flow || undefined,
-      cert_id: inboundFormCertId.value || undefined,
-      share_addr_strategy: c.shareAddrStrategy || undefined,
-      share_addr: c.shareAddr || undefined,
-      share_port: c.sharePort || undefined,
-      share_security: c.shareSecurity || undefined,
-      share_sni: c.shareSni || undefined,
-      share_host: c.shareHost || undefined,
-      share_path: c.sharePath || undefined,
-      share_allow_insecure: c.shareAllowInsecure,
-      layer_id: c.layerId || undefined,
-    }
-    const { data } = inboundEditingItem.value
-      ? await updateInbound(inboundEditingItem.value.id, payload)
-      : await createInbound(payload as InboundPayload)
-    if (data.code === 0) {
-      ElMessage.success(inboundEditingItem.value ? '入站已保存' : '入站已创建')
-      inboundCreateOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, inboundEditingItem.value ? '保存入站失败' : '创建入站失败'))
-  } finally {
-    inboundSaving.value = false
-  }
-}
-
-async function handleDeleteInbound(inb: InboundItem) {
-  try {
-    await ElMessageBox.confirm(`删除入站「${inb.tag}」？`, '删除入站', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteInbound(inb.id)
-    if (data.code === 0) {
-      ElMessage.success('入站已删除')
-      inboundCreateOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
-// ---- 交互：路由规则弹窗 ----
+// ---- 交互：路由规则弹窗（组件在 dialogs/RuleDialog.vue）----
 const ruleOpen = ref(false)
-const ruleSaving = ref(false)
-const ruleForm = reactive({
-  serverId: 0,
-  inboundTag: '',
-  outboundTag: '',
-  domain: '',
-  ip: '',
-  protocol: '',
-  port: '',
-  network: '',
-  priority: 0,
-})
+const ruleServerId = ref(0)
+const ruleInboundTag = ref('')
+const ruleOutboundTag = ref('')
 
 function openRuleDialog(inboundId: number, outboundId: number) {
   const data = props.topology!
@@ -1354,43 +1049,10 @@ function openRuleDialog(inboundId: number, outboundId: number) {
     ElMessage.warning('路由规则只能在同一服务器内（入站 → 出站）')
     return
   }
-  ruleForm.serverId = inb.server_id
-  ruleForm.inboundTag = inb.tag
-  ruleForm.outboundTag = out.tag
-  ruleForm.domain = ''
-  ruleForm.ip = ''
-  ruleForm.protocol = ''
-  ruleForm.port = ''
-  ruleForm.network = ''
-  ruleForm.priority = 0
+  ruleServerId.value = inb.server_id
+  ruleInboundTag.value = inb.tag
+  ruleOutboundTag.value = out.tag
   ruleOpen.value = true
-}
-
-async function saveRule() {
-  ruleSaving.value = true
-  try {
-    const { data } = await createServerRoutingRule(ruleForm.serverId, {
-      inbound_tag: ruleForm.inboundTag,
-      outbound_tag: ruleForm.outboundTag,
-      domain: ruleForm.domain || undefined,
-      ip: ruleForm.ip || undefined,
-      protocol: ruleForm.protocol || undefined,
-      port: ruleForm.port || undefined,
-      network: ruleForm.network || undefined,
-      priority: ruleForm.priority,
-    })
-    if (data.code === 0) {
-      ElMessage.success('路由规则已创建')
-      ruleOpen.value = false
-      emit('changed')
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '创建规则失败'))
-  } finally {
-    ruleSaving.value = false
-  }
 }
 
 // ---- 交互：删线 ----
@@ -1837,376 +1499,37 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
       <!-- 用户接入点独立小盒（订阅入口；右侧端点拖线指向目标入站） -->
       <template #node-apbox="nodeProps">
-        <div
-          class="ap-node"
-          :class="{ unlinked: !nodeProps.data.ap.target_type, disabled: !nodeProps.data.ap.enabled }"
-          @click.stop="openEditAccessPoint(nodeProps.data.ap)"
-        >
-          <!-- 右侧源端点：拖线至目标入站（inb-tgt） -->
-          <Handle
-            type="source"
-            :id="`ap-src-${nodeProps.data.ap.id}`"
-            :position="Position.Right"
-            :connectable="editable"
-            class="ep ap-src-handle"
-            title="拖线至目标用户入站"
-          />
-
-          <div class="ap-node-head">
-            <span class="ap-icon">🌐</span>
-            <span class="ap-name-text" :title="nodeProps.data.ap.name">{{ nodeProps.data.ap.name }}</span>
-            <span v-if="!nodeProps.data.ap.enabled" class="x-chip gray" style="font-size: 10px; padding: 1px 4px">禁用</span>
-          </div>
-
-          <div class="ap-node-perms">
-            <template v-if="nodeProps.data.ap.permission_group_ids && nodeProps.data.ap.permission_group_ids.length > 0">
-              <span
-                v-for="gid in nodeProps.data.ap.permission_group_ids.slice(0, 3)"
-                :key="gid"
-                class="x-chip blue"
-                style="font-size: 10px; padding: 1px 5px"
-              >
-                {{ groupName(gid) }}
-              </span>
-              <span v-if="nodeProps.data.ap.permission_group_ids.length > 3" class="x-chip gray" style="font-size: 10px">
-                +{{ nodeProps.data.ap.permission_group_ids.length - 3 }}
-              </span>
-            </template>
-            <span v-else class="x-chip orange" style="font-size: 10px">未授权（全员不可见）</span>
-          </div>
-
-          <!-- 管道消费的实时端点展示 -->
-          <div v-if="nodeProps.data.ap.resolved_host" class="ap-resolved-text">
-            <span class="ap-dot online" />
-            <code class="cell-mono">{{ nodeProps.data.ap.resolved_host }}:{{ nodeProps.data.ap.resolved_port }}</code>
-            <span class="x-chip" :class="nodeProps.data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'purple'" style="font-size: 10px">
-              {{ nodeProps.data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (nodeProps.data.ap.resolved_protocol?.toUpperCase() || 'VLESS') }}
-            </span>
-          </div>
-          <div v-else class="ap-resolved-text waiting">
-            <span class="ap-dot offline" />
-            <span style="font-size: 11px">待连线：从右侧端点拖出</span>
-          </div>
-
-          <div v-if="nodeProps.data.ap.resolved_target_desc" class="ap-desc-text" :title="nodeProps.data.ap.resolved_target_desc">
-            直连 ➜ {{ nodeProps.data.ap.resolved_target_desc }}
-          </div>
-        </div>
+        <APBoxNode
+          :data="nodeProps.data"
+          :editable="!!editable"
+          :permission-groups="permissionGroups"
+          @edit="openEditAccessPoint"
+        />
       </template>
 
       <template #node-serverbox="nodeProps">
-        <!-- 标准 Xray 节点服务器卡片 -->
-        <div
-          class="server-box"
-          :class="{ offline: nodeProps.data.server.status !== 1 }"
-          :style="{ width: (nodeProps.data.boxWidth || DEFAULT_BOX_W) + 'px' }"
-        >
-          <div
-            v-show="nodeProps.selected"
-            class="custom-resizer-right"
-            @mousedown.stop.prevent="startBoxResize($event, nodeProps.data)"
-          />
-          <div class="sb-head">
-            <div class="sb-head-left">
-              <span class="status-dot" :class="nodeProps.data.server.status === 1 ? 'online' : 'offline'" />
-              <span class="name" :title="nodeProps.data.server.name">{{ nodeProps.data.server.name }}</span>
-              <span v-if="nodeProps.data.server.status !== 1" class="offline-badge">离线</span>
-              <span class="host" :title="nodeProps.data.server.host">{{ nodeProps.data.server.host }}</span>
-            </div>
-            <div class="sb-head-right">
-              <button
-                v-if="editable"
-                class="sb-detail-btn nodrag"
-                title="根据内部路由规则自动对齐出入站顺序，减少连线交叉"
-                @click.stop="autoAlignServerTags(nodeProps.data.server.id)"
-                @dblclick.stop
-              >
-                <el-icon><MagicStick /></el-icon>&nbsp;整理
-              </button>
-              <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', nodeProps.data.server.id)">
-                <el-icon><Setting /></el-icon>&nbsp;详情
-              </button>
-            </div>
-          </div>
-
-          <div class="sb-cols">
-            <!-- 入站列：包含 Caddy 认知层容器与常规入站 -->
-            <div class="sb-col">
-              <div class="sb-col-head">
-                <span class="sb-title">入站 (Inbound)</span>
-                <div class="sb-head-actions">
-                  <button
-                    v-if="editable"
-                    class="sb-add-btn layer-add-btn"
-                    title="新建对外接入层（订阅地址分组：内部实现对外不可见）"
-                    @click.stop="openCreateLayer(nodeProps.data.server.id)"
-                  >
-                    <el-icon><Plus /></el-icon>&nbsp;层
-                  </button>
-                  <button
-                    v-if="editable"
-                    class="sb-add-btn"
-                    title="为该服务器新建入站"
-                    @click.stop="openCreateInbound(nodeProps.data.server.id)"
-                  >
-                    <el-icon><Plus /></el-icon>&nbsp;入站
-                  </button>
-                </div>
-              </div>
-
-              <template v-if="nodeProps.data.inbounds.length > 0">
-                <!-- 1. 对外接入层胶囊（显式端点点位；挂载入站行，端点语义全由层决议） -->
-                <div
-                  v-for="g in layerGroupsOf(nodeProps.data.server.id)"
-                  :key="`layer-${g.layer.id}`"
-                  class="layer-capsule"
-                >
-                  <div class="layer-capsule-head">
-                    <div class="layer-title">
-                      <span class="layer-icon">🌐</span>
-                      <span class="layer-name" :title="g.layer.name">{{ g.layer.name }}</span>
-                      <code class="layer-endpoint">{{ g.layer.host }}:{{ g.layer.port }}</code>
-                      <span class="layer-sec" :class="g.layer.security">
-                        {{ g.layer.security === 'tls' ? 'TLS' : '明文' }}
-                      </span>
-                    </div>
-                    <div class="layer-actions">
-                      <button
-                        class="layer-copy-btn"
-                        title="一键复制该层的 Caddyfile 反代配置片段"
-                        @click.stop="copyLayerCaddyfile(g.layer)"
-                      >
-                        <el-icon><CopyDocument /></el-icon>&nbsp;Caddyfile
-                      </button>
-                      <button
-                        v-if="editable"
-                        class="layer-act-btn"
-                        title="将本机未挂层入站挂载到该层"
-                        @click.stop="openBindInbound(g.layer)"
-                      >
-                        <el-icon><Plus /></el-icon>&nbsp;挂载
-                      </button>
-                      <button v-if="editable" class="layer-act-btn" title="编辑对外层" @click.stop="openEditLayer(g.layer)">
-                        <el-icon><Setting /></el-icon>
-                      </button>
-                      <button
-                        v-if="editable"
-                        class="layer-act-btn danger"
-                        title="删除对外层（挂载入站回退原生行）"
-                        @click.stop="handleDeleteLayer(g.layer)"
-                      >
-                        <el-icon><Delete /></el-icon>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="layer-capsule-body">
-                    <div v-if="g.inbounds.length === 0" class="sb-empty layer-empty">暂无挂载入站</div>
-                    <div
-                      v-for="(inb, inbIdx) in g.inbounds"
-                      :key="inb.id"
-                      class="sb-row layer-subrow clickable"
-                      title="点击编辑入站"
-                      @click="openEditInbound(inb)"
-                    >
-                      <Handle
-                        type="target"
-                        :id="`inb-tgt-${inb.id}`"
-                        :position="Position.Left"
-                        :connectable="editable"
-                        class="ep ext-tgt"
-                      />
-                      <span
-                        v-if="typeInfo(inb.type).text"
-                        class="type-tag"
-                        :class="typeInfo(inb.type).cls"
-                        :title="`类型：${typeInfo(inb.type).text}`"
-                      >
-                        {{ typeInfo(inb.type).text }}
-                      </span>
-                      <span v-if="inb.share_path" class="path-badge" :title="`反代至 127.0.0.1:${inb.port}`">
-                        {{ inb.share_path }}
-                      </span>
-                      <span class="port-badge">:{{ inb.port }}</span>
-                      <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
-                      <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-                      <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
-                      <button
-                        v-if="editable"
-                        class="layer-unbind-btn"
-                        title="移出对外层（回退直连端点）"
-                        @click.stop="unbindInbound(inb)"
-                      >
-                        ×
-                      </button>
-                      <div v-if="editable && g.inbounds.length > 1" class="tag-order-actions">
-                        <button
-                          class="order-btn nodrag"
-                          :disabled="inbIdx === 0"
-                          title="上移入站"
-                          @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
-                          @dblclick.stop
-                        >▲</button>
-                        <button
-                          class="order-btn nodrag"
-                          :disabled="inbIdx === g.inbounds.length - 1"
-                          title="下移入站"
-                          @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
-                          @dblclick.stop
-                        >▼</button>
-                      </div>
-                      <Handle
-                        type="source"
-                        :id="`inb-src-${inb.id}`"
-                        :position="Position.Right"
-                        :connectable="editable"
-                        class="ep in-ep"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 2. 未挂层原生入站行（直连端点，ShareAddrStrategy 决定对外地址） -->
-                <div
-                  v-for="(inb, inbIdx) in nativeInboundsOf(nodeProps.data.server.id)"
-                  :key="inb.id"
-                  class="sb-row clickable"
-                  title="点击编辑入站"
-                  @click="openEditInbound(inb)"
-                >
-                  <Handle
-                    type="target"
-                    :id="`inb-tgt-${inb.id}`"
-                    :position="Position.Left"
-                    :connectable="editable"
-                    class="ep ext-tgt"
-                  />
-                  <span
-                    v-if="typeInfo(inb.type).text"
-                    class="type-tag"
-                    :class="typeInfo(inb.type).cls"
-                    :title="`类型：${typeInfo(inb.type).text}`"
-                  >
-                    {{ typeInfo(inb.type).text }}
-                  </span>
-                  <span class="port-badge">:{{ inb.port }}</span>
-                  <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
-                  <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-                  <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
-
-                  <div v-if="editable && nativeInboundsOf(nodeProps.data.server.id).length > 1" class="tag-order-actions">
-                    <button
-                      class="order-btn nodrag"
-                      :disabled="inbIdx === 0"
-                      title="上移入站"
-                      @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'up')"
-                      @dblclick.stop
-                    >▲</button>
-                    <button
-                      class="order-btn nodrag"
-                      :disabled="inbIdx === nativeInboundsOf(nodeProps.data.server.id).length - 1"
-                      title="下移入站"
-                      @click.stop="moveInboundOrder(nodeProps.data.server.id, inb.id, 'down')"
-                      @dblclick.stop
-                    >▼</button>
-                  </div>
-
-                  <Handle
-                    type="source"
-                    :id="`inb-src-${inb.id}`"
-                    :position="Position.Right"
-                    :connectable="editable"
-                    class="ep in-ep"
-                  />
-                </div>
-              </template>
-              <div v-else class="sb-empty">暂无入站</div>
-            </div>
-
-            <!-- 出站列：盒内点（中线右）= 收盒内规则；边缘外点（右缘）= 发引用线；direct 仅右缘绿点收线 -->
-            <div class="sb-col">
-              <div class="sb-col-head">
-                <span class="sb-title">出站 (Outbound)</span>
-                <button
-                  v-if="editable"
-                  class="sb-add-btn"
-                  title="为该服务器新建出站"
-                  @click.stop="openCreateOutbound(nodeProps.data.server.id)"
-                >
-                  <el-icon><Plus /></el-icon>&nbsp;出站
-                </button>
-              </div>
-
-              <template v-if="nodeProps.data.outbounds.length > 0">
-                <div
-                  v-for="(out, outIdx) in nodeProps.data.outbounds"
-                  :key="out.id"
-                  class="sb-row"
-                  :class="{ 'direct-row': out.virtual, clickable: !out.virtual }"
-                  :title="out.virtual ? '' : '点击编辑出站'"
-                  @click="!out.virtual && openEditOutbound(out)"
-                >
-                  <!-- 左侧内端接口（所有出站包括 direct 均有，接收盒内路由规则） -->
-                  <Handle
-                    type="target"
-                    :id="`out-tgt-${out.id}`"
-                    :position="Position.Left"
-                    :connectable="editable"
-                    class="ep in-ep"
-                  />
-                  <span
-                    class="tag out-tag clickable"
-                    :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : isOutboundDraft(out) ? 'draft' : ''"
-                    :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : isOutboundDraft(out) ? `待连线出站「${out.tag}」（拖拽右侧端点至目标入站完成绑定）` : `出站「${out.tag}」`"
-                  >
-                    {{ out.isDraftTunnel ? '🔗 ' + out.tag : isOutboundDraft(out) ? '⚠️ ' + out.tag : out.tag }}
-                  </span>
-                  <span v-if="out.isDraftTunnel" class="out-proto-badge draft" title="草稿直通：拖拽右侧端点至落地入站建立管道">待连线</span>
-                  <span v-else-if="out.owner_inbound_id" class="out-proto-badge tunnel">LINK</span>
-                  <span v-else-if="out.inbound_ref" class="out-proto-badge ref">InboundRef</span>
-                  <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
-                  <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
-                  <span v-else-if="isOutboundDraft(out)" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
-                  <span v-else-if="out.protocol === 'custom'" class="out-proto-badge" title="自定义 Xray 出站 JSON">JSON</span>
-                  <span v-else class="out-proto-badge">{{ out.protocol }}</span>
-                  <el-icon v-if="!out.virtual" class="row-edit-icon" title="编辑出站"><Edit /></el-icon>
-
-                  <div v-if="editable && nodeProps.data.outbounds.length > 1" class="tag-order-actions">
-                    <button
-                      class="order-btn nodrag"
-                      :disabled="outIdx === 0"
-                      title="上移出站"
-                      @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'up')"
-                      @dblclick.stop
-                    >▲</button>
-                    <button
-                      class="order-btn nodrag"
-                      :disabled="outIdx === nodeProps.data.outbounds.length - 1"
-                      title="下移出站"
-                      @click.stop="moveOutboundOrder(nodeProps.data.server.id, out.id, 'down')"
-                      @dblclick.stop
-                    >▼</button>
-                  </div>
-
-                  <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
-                  <Handle
-                    v-if="!out.virtual"
-                    type="source"
-                    :id="`out-src-${out.id}`"
-                    :position="Position.Right"
-                    :connectable="editable"
-                    class="ep ext-src"
-                  />
-                  <span
-                    v-else
-                    class="ep direct-ep-dot"
-                    title="直连出口（freedom）"
-                  />
-                </div>
-              </template>
-              <div v-else class="sb-empty">暂无出站</div>
-            </div>
-          </div>
-        </div>
+        <ServerBoxNode
+          :data="nodeProps.data"
+          :selected="!!nodeProps.selected"
+          :editable="!!editable"
+          :layer-groups="layerGroupsOf(nodeProps.data.server.id)"
+          :native-inbounds="nativeInboundsOf(nodeProps.data.server.id)"
+          @open-server="emit('open-server', $event)"
+          @edit-inbound="openEditInbound"
+          @create-inbound="openCreateInbound"
+          @edit-outbound="openEditOutbound"
+          @create-outbound="openCreateOutbound"
+          @create-layer="openCreateLayer"
+          @edit-layer="openEditLayer"
+          @delete-layer="handleDeleteLayer"
+          @bind-layer="openBindInbound"
+          @unbind-inbound="unbindInbound"
+          @copy-caddyfile="copyLayerCaddyfile"
+          @move-inbound-order="moveInboundOrder"
+          @move-outbound-order="moveOutboundOrder"
+          @auto-align="autoAlignServerTags"
+          @resize-start="startBoxResize"
+        />
       </template>
     </VueFlow>
     <div v-else class="topology-empty">
@@ -2233,160 +1556,39 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       @deleted="emit('changed')"
     />
 
-    <!-- 入站新建/编辑弹窗（直接在拓扑画布中呼出） -->
-    <el-dialog
-      v-model="inboundCreateOpen"
-      :title="inboundEditingItem ? '编辑入站' : '为服务器新建入站'"
-      :width="'min(1080px, 92vw)'"
-      append-to-body
-      destroy-on-close
-    >
-      <InboundConfigEditor
-        :key="inboundEditingItem ? `edit-${inboundEditingItem.id}` : `create-${inboundCreateServerId}`"
-        :server-id="inboundCreateServerId"
-        :inbound-id="inboundEditingItem?.id || 0"
-        :inbound-type="inboundFormType"
-        :saved-inbound-type="inboundEditingItem?.type || ''"
-        :target-inbound-id="inboundEditingItem?.target_inbound_id"
-        :target-address="inboundEditingItem?.target_address || ''"
-        :target-port="inboundEditingItem?.target_port || 0"
-        :protocol="inboundEditingItem?.protocol || 'vless'"
-        :cert-id="inboundFormCertId"
-        :model-value="inboundEditorModelValue()"
-        @change="onInboundEditorChange"
-        @update:inbound-type="(v: string) => (inboundFormType = v)"
-        @update:cert-id="(v: number) => (inboundFormCertId = v || 0)"
-      />
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
-          <div>
-            <el-button
-              v-if="inboundEditingItem"
-              type="danger"
-              plain
-              @click="handleDeleteInbound(inboundEditingItem)"
-            >
-              删除入站
-            </el-button>
-          </div>
-          <div style="display: flex; gap: 8px">
-            <el-button @click="inboundCreateOpen = false">取消</el-button>
-            <el-button type="primary" :loading="inboundSaving" @click="handleSaveInbound">
-              {{ inboundEditingItem ? '保存入站' : '创建入站' }}
-            </el-button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
+    <!-- 入站新建/编辑弹窗 -->
+    <InboundDialog
+      v-model:visible="inboundCreateOpen"
+      :server-id="inboundCreateServerId"
+      :inbound="inboundEditingItem"
+      @changed="emit('changed')"
+    />
 
     <!-- 路由规则弹窗 -->
-    <el-dialog v-model="ruleOpen" title="新建路由规则（拖线）" width="540px" append-to-body>
-      <el-form label-position="top">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-          <el-form-item label="入站（源）">
-            <el-input :model-value="ruleForm.inboundTag" disabled />
-          </el-form-item>
-          <el-form-item label="出站（目标）">
-            <el-input :model-value="ruleForm.outboundTag" disabled />
-          </el-form-item>
-        </div>
+    <RuleDialog
+      v-model:visible="ruleOpen"
+      :server-id="ruleServerId"
+      :inbound-tag="ruleInboundTag"
+      :outbound-tag="ruleOutboundTag"
+      @changed="emit('changed')"
+    />
 
-        <div class="rule-presets">
-          <span class="preset-label">快捷填充:</span>
-          <el-tag size="small" class="preset-btn" @click="ruleForm.domain = 'geosite:cn'">国内域名 (geosite:cn)</el-tag>
-          <el-tag size="small" class="preset-btn" @click="ruleForm.ip = 'geoip:cn,geoip:private'">国内/内网 IP</el-tag>
-          <el-tag size="small" class="preset-btn" @click="ruleForm.protocol = 'http,tls'">HTTP/TLS 嗅探</el-tag>
-          <el-tag size="small" class="preset-btn" @click="ruleForm.port = '80,443'">Web 端口 (80,443)</el-tag>
-        </div>
-
-        <p class="muted tip">匹配字段选填；留空 = 该入站全部流量走目标出站</p>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px">
-          <el-form-item label="域名匹配"><el-input v-model="ruleForm.domain" placeholder="如 google.com（逗号分隔）" /></el-form-item>
-          <el-form-item label="IP 匹配"><el-input v-model="ruleForm.ip" placeholder="如 8.8.8.0/24" /></el-form-item>
-          <el-form-item label="协议（嗅探）"><el-input v-model="ruleForm.protocol" placeholder="如 tcp,http（逗号分隔）" /></el-form-item>
-          <el-form-item label="端口"><el-input v-model="ruleForm.port" placeholder="如 443,80" /></el-form-item>
-          <el-form-item label="网络"><el-input v-model="ruleForm.network" placeholder="如 tcp / udp" /></el-form-item>
-          <el-form-item label="优先级"><el-input-number v-model="ruleForm.priority" :min="0" style="width: 100%" /></el-form-item>
-        </div>
-      </el-form>
-      <template #footer>
-        <el-button @click="ruleOpen = false">取消</el-button>
-        <el-button type="primary" :loading="ruleSaving" @click="saveRule">创建规则</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 对外接入层新建/编辑弹窗（显式订阅端点分组） -->
-    <el-dialog
-      v-model="layerDialogOpen"
-      :title="layerEditing ? '编辑对外接入层' : '新建对外接入层'"
-      width="540px"
-      append-to-body
-    >
-      <el-form label-position="top">
-        <el-alert
-          title="对外接入层定义订阅对外的 host/port/安全层。挂载的入站在订阅与画布中一律消费本层端点；内部实现（直连 TLS / Caddy 反代 / CDN）对客户端不可见。未挂层入站沿用自身分享地址（直连端点）。"
-          type="info"
-          :closable="false"
-          style="margin-bottom: 16px"
-        />
-        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
-          <el-form-item label="层名称" required>
-            <el-input v-model="layerForm.name" placeholder="如 HK 443 反代层" />
-          </el-form-item>
-          <el-form-item label="对外安全层">
-            <el-select v-model="layerForm.security" style="width: 100%">
-              <el-option label="TLS（反代/CDN 卸载，默认）" value="tls" />
-              <el-option label="明文 none" value="none" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
-          <el-form-item label="对外 Host" required>
-            <el-input v-model="layerForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
-          </el-form-item>
-          <el-form-item label="对外 Port">
-            <el-input-number v-model="layerForm.port" :min="1" :max="65535" style="width: 100%" />
-          </el-form-item>
-        </div>
-        <el-form-item label="备注说明" style="margin-bottom: 0">
-          <el-input v-model="layerForm.remark" placeholder="选填，如 Caddy 前置 / CDN / 直连域名" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <div>
-            <el-button v-if="layerEditing" type="danger" plain @click="handleDeleteLayer(layerEditing)">
-              删除对外层
-            </el-button>
-          </div>
-          <div>
-            <el-button @click="layerDialogOpen = false">取消</el-button>
-            <el-button type="primary" :loading="layerSaving" @click="saveLayer">保存</el-button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
+    <!-- 对外接入层新建/编辑弹窗 -->
+    <LayerDialog
+      v-model:visible="layerDialogOpen"
+      :server-id="layerServerId"
+      :layer="layerEditing"
+      @changed="emit('changed')"
+      @delete="handleDeleteLayer"
+    />
 
     <!-- 入站挂载对外层弹窗 -->
-    <el-dialog v-model="bindDialogOpen" title="挂载入站到对外层" width="480px" append-to-body>
-      <el-form label-position="top">
-        <el-form-item label="选择本机未挂层入站">
-          <el-select v-model="bindInboundId" placeholder="选择入站" style="width: 100%">
-            <el-option
-              v-for="inb in availableBindInbounds"
-              :key="inb.id"
-              :label="`${inb.tag} (:${inb.port})`"
-              :value="inb.id"
-            />
-          </el-select>
-        </el-form-item>
-        <p class="muted tip">挂载后订阅对外端点由该层决议（host/port/security），path 沿用入站 share_path。</p>
-      </el-form>
-      <template #footer>
-        <el-button @click="bindDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="bindSaving" @click="confirmBindInbound">挂载</el-button>
-      </template>
-    </el-dialog>
+    <BindInboundDialog
+      v-model:visible="bindDialogOpen"
+      :layer-id="bindLayerId"
+      :candidates="availableBindInbounds"
+      @changed="emit('changed')"
+    />
   </div>
 </template>
 
@@ -2499,832 +1701,6 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       opacity: 0.85;
       transform: translateY(-1px);
     }
-  }
-}
-
-/* ---- ServerBox 自定义节点 ---- */
-.server-box {
-  width: 440px;
-  min-width: 340px;
-  position: relative;
-  background: rgba(24, 33, 47, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  font-size: 12px;
-  color: #e2e8f0;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  overflow: visible;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  contain: paint;
-  transform: translateZ(0);
-
-  &.offline {
-    border-color: rgba(239, 68, 68, 0.25);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-    .sb-head {
-      background: linear-gradient(180deg, rgba(239, 68, 68, 0.1) 0%, transparent 100%);
-    }
-  }
-
-  .sb-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 16px;
-    height: 48px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
-    border-radius: 16px 16px 0 0;
-
-    .sb-head-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .sb-head-right {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex: none;
-    }
-
-    .sb-detail-btn {
-      display: inline-flex;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 6px;
-      color: #cbd5e1;
-      font-size: 11px;
-      padding: 3px 8px;
-      cursor: pointer;
-      transition: all 0.2s;
-      &:hover {
-        background: rgba(56, 189, 248, 0.2);
-        border-color: #38bdf8;
-        color: #38bdf8;
-      }
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex: none;
-      &.online {
-        background: #34d399;
-        box-shadow: 0 0 8px #34d399;
-      }
-      &.offline {
-        background: #ef4444;
-        box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
-      }
-    }
-    .name {
-      font-weight: 600;
-      font-size: 14px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 140px;
-      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-    }
-    .offline-badge {
-      font-size: 10px;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      font-weight: 500;
-    }
-    .host {
-      color: #94a3b8;
-      font-size: 11px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 140px;
-    }
-  }
-
-  /* 四层直通管道卡片：横贯整机宽度 (Full-width Tunnel Card) */
-  .sb-tunnels-wrap {
-    padding: 0 16px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .tunnel-card {
-    position: relative;
-    background: linear-gradient(90deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.75) 100%);
-    border: 1px solid rgba(6, 182, 212, 0.35);
-    border-radius: 10px;
-    padding: 6px 10px;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-
-    &:hover {
-      border-color: rgba(6, 182, 212, 0.6);
-      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.2);
-    }
-
-    .tunnel-card-content {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      width: 100%;
-    }
-
-    .tunnel-entry {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex: none;
-    }
-
-    .tunnel-badge {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 6px;
-      border-radius: 8px;
-      background: rgba(6, 182, 212, 0.2);
-      color: #22d3ee;
-      border: 1px solid rgba(6, 182, 212, 0.4);
-    }
-
-    .tunnel-tag {
-      font-weight: 600;
-      font-size: 12px;
-      color: #f1f5f9;
-      max-width: 100px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .tunnel-pipe {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      flex: 1;
-      min-width: 0;
-
-      .pipe-line {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px dashed rgba(148, 163, 184, 0.3);
-        font-size: 10.5px;
-        color: #94a3b8;
-        &.is-active {
-          border-style: solid;
-          border-color: rgba(6, 182, 212, 0.4);
-          background: rgba(6, 182, 212, 0.1);
-          color: #67e8f9;
-        }
-      }
-
-      .pipe-proto {
-        font-size: 9.5px;
-        font-weight: 700;
-        padding: 0 4px;
-        border-radius: 3px;
-        background: rgba(56, 189, 248, 0.2);
-        color: #38bdf8;
-      }
-
-      .pipe-target-info {
-        font-size: 10px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-        .target-desc {
-          color: #38bdf8;
-          font-weight: 500;
-        }
-        .target-draft {
-          color: #fbbf24;
-        }
-      }
-    }
-
-    .tunnel-actions {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex: none;
-
-      .tunnel-btn {
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        color: #cbd5e1;
-        border-radius: 4px;
-        padding: 2px 5px;
-        font-size: 11px;
-        cursor: pointer;
-        transition: all 0.15s;
-        &:hover {
-          background: rgba(56, 189, 248, 0.2);
-          border-color: #38bdf8;
-          color: #38bdf8;
-        }
-        &.danger:hover {
-          background: rgba(239, 68, 68, 0.2);
-          border-color: #ef4444;
-          color: #ef4444;
-        }
-      }
-    }
-  }
-
-  .sb-cols {
-    display: flex;
-    gap: 36px;
-    justify-content: space-between;
-    padding: 0 16px 16px;
-    width: 100%;
-    box-sizing: border-box;
-
-    .sb-col {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-items: flex-start;
-    }
-    .sb-col:last-child {
-      align-items: flex-end;
-      .sb-col-head {
-        flex-direction: row-reverse;
-      }
-      .sb-title {
-        text-align: right;
-      }
-    }
-    .sb-col-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      height: 32px;
-      padding: 6px 4px 2px;
-      box-sizing: border-box;
-    }
-    .sb-title {
-      color: #94a3b8;
-      font-size: 12px;
-      letter-spacing: 0.5px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .sb-add-btn {
-      display: inline-flex;
-      align-items: center;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      border-radius: 4px;
-      color: #38bdf8;
-      font-size: 11px;
-      padding: 2px 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-      &:hover {
-        background: rgba(56, 189, 248, 0.25);
-        border-color: #38bdf8;
-        transform: translateY(-1px);
-      }
-    }
-  }
-
-  /* 对外接入层胶囊（显式订阅端点分组；挂载入站行） */
-  .sb-head-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: none;
-  }
-  .layer-add-btn {
-    background: rgba(45, 212, 191, 0.12);
-    border-color: rgba(45, 212, 191, 0.25);
-    color: #2dd4bf;
-    &:hover {
-      background: rgba(45, 212, 191, 0.25);
-      border-color: #2dd4bf;
-    }
-  }
-  .layer-capsule {
-    width: 100%;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(45, 212, 191, 0.25);
-    border-radius: 12px;
-    padding: 6px 8px 8px;
-    box-sizing: border-box;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-
-    .layer-capsule-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      padding: 2px 4px 4px;
-      border-bottom: 1px dashed rgba(45, 212, 191, 0.2);
-      flex-wrap: wrap;
-
-      .layer-title {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: #2dd4bf;
-        min-width: 0;
-      }
-      .layer-icon {
-        flex: none;
-      }
-      .layer-name {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 90px;
-      }
-      .layer-endpoint {
-        font-family: monospace;
-        font-size: 10.5px;
-        color: #a5f3fc;
-        background: rgba(45, 212, 191, 0.1);
-        padding: 0 5px;
-        border-radius: 4px;
-        flex: none;
-      }
-      .layer-sec {
-        font-size: 9px;
-        padding: 1px 5px;
-        border-radius: 4px;
-        font-weight: 600;
-        flex: none;
-        &.tls {
-          background: rgba(45, 212, 191, 0.15);
-          color: #2dd4bf;
-          border: 1px solid rgba(45, 212, 191, 0.3);
-        }
-        &.none {
-          background: rgba(148, 163, 184, 0.15);
-          color: #94a3b8;
-          border: 1px solid rgba(148, 163, 184, 0.3);
-        }
-      }
-      .layer-actions {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex: none;
-      }
-      .layer-copy-btn,
-      .layer-act-btn {
-        display: inline-flex;
-        align-items: center;
-        background: rgba(45, 212, 191, 0.15);
-        border: 1px solid rgba(45, 212, 191, 0.35);
-        border-radius: 4px;
-        color: #2dd4bf;
-        font-size: 10.5px;
-        padding: 1px 6px;
-        cursor: pointer;
-        transition: all 0.15s;
-        &:hover {
-          background: rgba(45, 212, 191, 0.3);
-          border-color: #2dd4bf;
-        }
-      }
-      .layer-act-btn.danger {
-        background: rgba(248, 113, 113, 0.15);
-        border-color: rgba(248, 113, 113, 0.35);
-        color: #f87171;
-        &:hover {
-          background: rgba(248, 113, 113, 0.3);
-          border-color: #f87171;
-        }
-      }
-    }
-
-    .layer-capsule-body {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .layer-subrow {
-      background: rgba(45, 212, 191, 0.06);
-      border-color: rgba(45, 212, 191, 0.15);
-      &:hover {
-        background: rgba(45, 212, 191, 0.12);
-        border-color: rgba(45, 212, 191, 0.3);
-      }
-    }
-    .layer-unbind-btn {
-      flex: none;
-      width: 16px;
-      height: 16px;
-      line-height: 14px;
-      text-align: center;
-      border-radius: 50%;
-      font-size: 12px;
-      color: #94a3b8;
-      background: rgba(148, 163, 184, 0.15);
-      border: 1px solid rgba(148, 163, 184, 0.3);
-      cursor: pointer;
-      padding: 0;
-      transition: all 0.15s;
-      &:hover {
-        color: #f87171;
-        background: rgba(248, 113, 113, 0.2);
-        border-color: #f87171;
-      }
-    }
-    .layer-empty {
-      font-style: italic;
-    }
-  }
-
-  .path-badge {
-    font-size: 10px;
-    color: #2dd4bf;
-    font-family: monospace;
-    background: rgba(45, 212, 191, 0.15);
-    padding: 1px 5px;
-    border-radius: 4px;
-    border: 1px solid rgba(45, 212, 191, 0.25);
-    flex: none;
-  }
-
-  .sb-row {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 8px;
-    height: 34px;
-    max-width: 100%;
-    box-sizing: border-box;
-    background: rgba(15, 23, 42, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 17px;
-    transition: all 0.2s;
-
-    &:hover {
-      background: rgba(15, 23, 42, 0.85);
-      border-color: rgba(255, 255, 255, 0.15);
-    }
-
-    .tag {
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 110px;
-      &.clickable {
-        cursor: pointer;
-        &:hover {
-          color: #38bdf8;
-          text-decoration: underline;
-        }
-      }
-    }
-    .out-tag {
-      font-weight: 600;
-      color: #93c5fd;
-      &.clickable {
-        cursor: pointer;
-        &:hover {
-          text-decoration: underline;
-        }
-      }
-      &.tunnel {
-        color: #c084fc;
-      }
-      &.ref {
-        color: #fbbf24;
-      }
-      &.direct {
-        color: #34d399;
-      }
-      &.draft {
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
-        padding: 1px 6px;
-        border-radius: 6px;
-      }
-    }
-    &.direct-row {
-      background: rgba(52, 211, 153, 0.1);
-      border-color: rgba(52, 211, 153, 0.2);
-    }
-    &.clickable {
-      cursor: pointer;
-      transition: background 0.15s ease;
-      &:hover {
-        background: var(--x-bg-hover, rgba(59, 130, 246, 0.08));
-        .row-edit-icon {
-          opacity: 0.85;
-        }
-      }
-    }
-
-    .row-edit-icon {
-      font-size: 11px;
-      opacity: 0;
-      margin-left: 3px;
-      color: var(--x-text-3);
-      transition: opacity 0.15s ease;
-      flex: none;
-    }
-
-    .port-badge {
-      font-size: 11px;
-      font-weight: 600;
-      color: #38bdf8;
-      font-family: monospace;
-      flex: none;
-    }
-
-    .proto-badge {
-      font-size: 9px;
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex: none;
-      &.vless {
-        background: rgba(59, 130, 246, 0.12);
-        color: #60a5fa;
-        border: 1px solid rgba(59, 130, 246, 0.25);
-      }
-      &.hy2 {
-        background: rgba(20, 184, 166, 0.15);
-        color: #2dd4bf;
-        border: 1px solid rgba(20, 184, 166, 0.3);
-      }
-      &.mixed {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
-      }
-      &.tunnel {
-        background: rgba(249, 115, 22, 0.15);
-        color: #fb923c;
-        border: 1px solid rgba(249, 115, 22, 0.3);
-      }
-      &.other {
-        background: rgba(148, 163, 184, 0.15);
-        color: #cbd5e1;
-      }
-      &.sec {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
-      }
-      &.net {
-        background: rgba(56, 189, 248, 0.12);
-        color: #7dd3fc;
-      }
-    }
-
-    .out-proto-badge {
-      font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex: none;
-      background: rgba(148, 163, 184, 0.15);
-      color: #cbd5e1;
-      &.tunnel {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
-      }
-      &.ref {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px solid rgba(251, 191, 36, 0.3);
-      }
-      &.direct {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.3);
-      }
-      &.blocked {
-        background: rgba(248, 113, 113, 0.15);
-        color: #f87171;
-        border: 1px solid rgba(248, 113, 113, 0.3);
-      }
-      &.draft {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
-      }
-    }
-
-    .type-tag {
-      flex: none;
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 10px;
-      font-weight: 600;
-      &.user {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-      }
-      &.relay {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-      }
-      &.tunnel {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-      }
-      &.forward {
-        background: rgba(56, 189, 248, 0.15);
-        color: #38bdf8;
-      }
-      &.channel {
-        background: rgba(244, 114, 182, 0.15);
-        color: #f472b6;
-      }
-    }
-
-    .tag-order-actions {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 1px;
-      opacity: 0;
-      transition: opacity 0.15s;
-      flex: none;
-      margin-left: auto;
-      z-index: 4;
-      .order-btn {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: #94a3b8;
-        // 原来 7px / 8px 行高 / 10px 高：低于不少环境的最小字号下限
-        // （部分 Android WebView 与国产套壳浏览器强制 12px），会被撑破按钮；
-        // 提到 10px 后即使被强制放大到 12px 也仍在 14px 盒内
-        font-size: 10px;
-        line-height: 12px;
-        padding: 0 4px;
-        min-width: 14px;
-        height: 14px;
-        cursor: pointer;
-        border-radius: var(--x-radius-2xs, 4px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        &:hover:not(:disabled) {
-          color: #38bdf8;
-          border-color: #38bdf8;
-          background: rgba(56, 189, 248, 0.15);
-        }
-        &:disabled {
-          opacity: 0.15;
-          cursor: not-allowed;
-          border-color: transparent;
-          background: transparent;
-        }
-      }
-    }
-    &:hover .tag-order-actions,
-    .tag-order-actions:focus-within {
-      opacity: 1;
-    }
-  }
-
-
-
-
-  .sb-empty {
-    padding: 4px 10px;
-    color: #64748b;
-    font-size: 11px;
-    height: 34px;
-    display: flex;
-    align-items: center;
-    background: rgba(15, 23, 42, 0.3);
-    border-radius: 17px;
-    border: 1px dashed rgba(255, 255, 255, 0.05);
-  }
-}
-
-/* 用户接入点独立小盒（订阅入口；右侧源端点拖线指向管道目标） */
-.ap-node {
-  position: relative;
-  width: 280px;
-  background: rgba(24, 33, 47, 0.95);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 14px;
-  padding: 12px 14px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.35),
-    0 2px 12px rgba(56, 189, 248, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: border-color 0.2s, box-shadow 0.2s;
-  contain: paint;
-  transform: translateZ(0);
-
-  &:hover {
-    border-color: rgba(56, 189, 248, 0.6);
-    box-shadow:
-      0 6px 24px rgba(0, 0, 0, 0.35),
-      0 4px 18px rgba(56, 189, 248, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  }
-  &.unlinked {
-    border-style: dashed;
-    border-color: rgba(251, 191, 36, 0.45);
-    box-shadow:
-      0 6px 24px rgba(0, 0, 0, 0.35),
-      0 2px 10px rgba(251, 191, 36, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  }
-  &.disabled {
-    opacity: 0.6;
-    filter: grayscale(0.4);
-  }
-
-  .ap-node-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .ap-icon {
-    font-size: 14px;
-    flex: none;
-  }
-  .ap-name-text {
-    font-size: 13px;
-    font-weight: 700;
-    color: #f1f5f9;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-  }
-  .ap-node-perms {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-  .ap-resolved-text {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11.5px;
-    color: #38bdf8;
-    &.waiting {
-      color: #fbbf24;
-    }
-  }
-  .ap-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex: none;
-    &.online {
-      background: #10b981;
-      box-shadow: 0 0 6px #10b981;
-    }
-    &.offline {
-      background: #fbbf24;
-      box-shadow: 0 0 4px #fbbf24;
-    }
-  }
-  .ap-desc-text {
-    font-size: 10.5px;
-    color: #94a3b8;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }
 
