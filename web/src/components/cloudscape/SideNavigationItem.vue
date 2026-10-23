@@ -128,7 +128,13 @@ function toggle() {
         </span>
         <span :class="cx(cs['link-text-wrapper'], collapsed && cs['link-text-wrapper--collapsed'])">
           <span
-            :class="cx(cs['link-text-wrapper-content'], variant === 'root' && 'cs-nav-root-link-text')"
+            :class="
+              cx(
+                cs['link-text-wrapper-content'],
+                variant === 'root' && 'cs-nav-root-link-text',
+                variant === 'root' && !isActiveLink && 'cs-nav-root-link-text--idle'
+              )
+            "
           >
             {{ item.text }}
             <span v-if="item.external" :class="cs['external-icon']" aria-hidden="true">
@@ -361,5 +367,11 @@ function toggle() {
   font-size: var(--font-size-expandable-heading-04ofyn, 16px);
   font-weight: var(--font-weight-heading-s-mu75ca, 700);
   letter-spacing: var(--letter-spacing-heading-s-kfu48f, -0.005em);
+}
+
+/* 侧栏链接默认色是 #424650（次要灰），分组标题是 heading 黑；根级单项要跟标题同色，
+   但激活态仍走链接蓝，所以只在非激活时覆盖。 */
+.cs-nav-root-link-text--idle {
+  color: var(--color-text-heading-default-e3tuze, #0f141a);
 }
 </style>
