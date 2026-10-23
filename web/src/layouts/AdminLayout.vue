@@ -28,7 +28,6 @@ const site = useSiteStore()
 const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
-const pageTitle = computed(() => (route.meta.title as string) ?? '')
 
 // 导航开合（官方 AppLayout 语义：开 = 固定列，关 = 完全收起 + 左侧圆钮）。
 // 持久化沿用旧 key，值为 '1' 表示收起。
@@ -166,7 +165,7 @@ function handleSearchKeydown(e: KeyboardEvent) {
   }
 }
 
-// 全局快捷键：Ctrl/Cmd+B 开合导航；Ctrl/Cmd+K 打开导航并聚焦搜索
+// 全局快捷键：Ctrl/Cmd+B 开合导航；Ctrl/Cmd+K 聚焦菜单搜索
 function handleGlobalKeydown(e: KeyboardEvent) {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
   const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey
@@ -176,11 +175,8 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     toggleNavigation()
   } else if (isCtrlOrCmd && e.key.toLowerCase() === 'k') {
     e.preventDefault()
-    if (isMobile.value) {
-      drawerOpen.value = true
-    } else {
-      setNavigationOpen(true)
-    }
+    // 桌面端搜索框常驻顶栏；移动端搜索在抽屉里，需要先打开抽屉
+    if (isMobile.value) drawerOpen.value = true
     nextTick(() => {
       searchInputRef.value?.focus()
       searchInputRef.value?.select()
@@ -284,7 +280,7 @@ onUnmounted(() => {
 
 <template>
   <div class="admin-shell">
-    <!-- 全宽顶栏：品牌 + 页面标题 + 全局工具 -->
+    <!-- 全宽顶栏：品牌 + 菜单搜索 + 全局工具 -->
     <CsTopNavigation
       class="admin-topbar"
       :identity="topbarIdentity"
@@ -292,9 +288,20 @@ onUnmounted(() => {
       visual-context="top-navigation"
       @identity-follow="goDashboard"
     >
-      <template #title>
-        <div class="admin-title-wrap">
-          <span class="admin-title">{{ pageTitle }}</span>
+      <template #search>
+        <!-- 窄屏顶栏放不下搜索框，改用抽屉内的搜索（Ctrl+K 会打开抽屉） -->
+        <div v-if="!isMobile" class="admin-nav-search admin-topbar-search">
+          <CsInput
+            ref="searchInputRef"
+            v-model="searchQuery"
+            type="search"
+            prefix-icon="search"
+            clearable
+            placeholder="搜索管理菜单..."
+            aria-label="搜索管理菜单"
+            @keydown="handleSearchKeydown"
+          />
+          <kbd v-if="!searchQuery" class="shortcut-badge">Ctrl K</kbd>
         </div>
       </template>
       <template #utility-extra>
@@ -328,23 +335,7 @@ onUnmounted(() => {
           :header="{ text: site.appName || '管理面板', href: '/admin/dashboard' }"
           @follow="onNavFollow"
           @change="onNavChange"
-        >
-          <template #items-control>
-            <div class="admin-nav-search">
-              <CsInput
-                ref="searchInputRef"
-                v-model="searchQuery"
-                type="search"
-                prefix-icon="search"
-                clearable
-                placeholder="搜索管理菜单..."
-                aria-label="搜索管理菜单"
-                @keydown="handleSearchKeydown"
-              />
-              <kbd v-if="!searchQuery" class="shortcut-badge">Ctrl K</kbd>
-            </div>
-          </template>
-        </CsSideNavigation>
+        />
       </template>
 
       <router-view />
@@ -397,49 +388,6 @@ onUnmounted(() => {
   inset-block-start: 0;
   z-index: 1100;
   flex: none;
-}
-
-.admin-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs-m9b7jf, 8px);
-  min-inline-size: 0;
-  margin-inline-start: var(--space-m-n8iq8o, 16px);
-  /* 官方 padding-box 是 space-between：让标题紧贴品牌、把剩余空间让给右侧工具区 */
-  margin-inline-end: auto;
-  padding-inline-start: var(--space-m-n8iq8o, 16px);
-  border-inline-start: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
-}
-
-/* 顶栏路径区：面包屑紧贴品牌，剩余空间让给右侧工具区。 */
-.admin-title-wrap {
-  display: flex;
-  align-items: center;
-  min-inline-size: 0;
-  margin-inline-end: auto;
-  margin-inline-start: var(--space-m-n8iq8o, 16px);
-  overflow: hidden;
-}
-
-.admin-title {
-  font-size: var(--font-size-heading-xs-yrvp79, 14px);
-  font-weight: 700;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-inline-size: 0;
-}
-
-/* 窄屏只保留汉堡，页面标题让位（面包屑已在顶栏路径区承担定位职责）。 */
-@media (max-width: 559.98px) {
-  .admin-title {
-    display: none;
-  }
-
-  .admin-title-wrap {
-    margin-inline-start: var(--space-xs-m9b7jf, 8px);
-  }
 }
 
 .admin-nav-search {
