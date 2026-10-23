@@ -44,6 +44,15 @@ function toggleNavigation() {
   setNavigationOpen(!navigationOpen.value)
 }
 
+// 顶栏汉堡：桌面切换侧栏展开/收起，移动端打开抽屉（与官方控制台一致）
+function onNavToggleClick() {
+  if (isMobile.value) {
+    drawerOpen.value = true
+    return
+  }
+  toggleNavigation()
+}
+
 // 侧边栏搜索过滤
 const searchQuery = ref('')
 const searchInputRef = ref<{ focus: () => void; select: () => void; blur: () => void } | null>(null)
@@ -283,16 +292,18 @@ onUnmounted(() => {
       visual-context="top-navigation"
       @identity-follow="goDashboard"
     >
+      <template #prefix>
+        <CsIconButton
+          icon-name="menu"
+          size="normal"
+          :label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
+          @click="onNavToggleClick"
+        />
+      </template>
       <template #title>
-        <div class="admin-title-wrap">
-          <CsIconButton
-            v-if="isMobile"
-            icon-name="menu"
-            size="normal"
-            label="打开导航菜单"
-            @click="drawerOpen = true"
-          />
-          <span class="admin-title">{{ pageTitle }}</span>
+        <div class="admin-path">
+          <CsBreadcrumbGroup v-if="!isMobile && breadcrumbs.length" :items="breadcrumbs" />
+          <span v-else class="admin-title">{{ pageTitle }}</span>
         </div>
       </template>
       <template #utility-extra>
@@ -306,6 +317,8 @@ onUnmounted(() => {
       :header-height="56"
       :navigation-hide="isMobile"
       :content-type="contentType"
+      navigation-toggle="external"
+      :reserve-navigation-toggle-row="false"
       @update:navigation-open="setNavigationOpen"
     >
       <template #navigation>
@@ -313,6 +326,7 @@ onUnmounted(() => {
           v-if="!isMobile"
           :items="navItems"
           :active-href="route.path"
+          :header="{ text: site.appName || '管理面板', href: '/admin/dashboard' }"
           @follow="onNavFollow"
           @change="onNavChange"
         >
@@ -332,10 +346,6 @@ onUnmounted(() => {
             </div>
           </template>
         </CsSideNavigation>
-      </template>
-
-      <template v-if="!isMobile && breadcrumbs.length > 0" #breadcrumbs>
-        <CsBreadcrumbGroup :items="breadcrumbs" />
       </template>
 
       <router-view />
@@ -402,6 +412,16 @@ onUnmounted(() => {
   border-inline-start: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
 }
 
+/* 顶栏路径区：面包屑紧贴品牌，剩余空间让给右侧工具区。 */
+.admin-path {
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  margin-inline-end: auto;
+  margin-inline-start: var(--space-s-kll7oj, 12px);
+  overflow: hidden;
+}
+
 .admin-title {
   font-size: var(--font-size-heading-xs-yrvp79, 14px);
   font-weight: 700;
@@ -412,15 +432,14 @@ onUnmounted(() => {
   min-inline-size: 0;
 }
 
-/* 窄屏只保留汉堡，页面标题让位（面包屑已在内容区承担定位职责）。 */
+/* 窄屏只保留汉堡，页面标题让位（面包屑已在顶栏路径区承担定位职责）。 */
 @media (max-width: 559.98px) {
   .admin-title {
     display: none;
   }
 
-  .admin-title-wrap {
+  .admin-path {
     margin-inline-start: var(--space-xs-m9b7jf, 8px);
-    padding-inline-start: var(--space-xs-m9b7jf, 8px);
   }
 }
 

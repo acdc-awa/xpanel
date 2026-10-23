@@ -31,6 +31,18 @@ const props = withDefaults(
     contentType?: 'default' | 'dashboard' | 'table' | 'cards'
     maxContentWidth?: number
     disableContentPaddings?: boolean
+    /**
+     * 导航开合按钮由谁提供：
+     * - `panel`（默认）：官方语义，收起时在左侧留出 36px 圆形按钮；
+     * - `external`：调用方在自己的顶栏里放了开合按钮（如 AWS 控制台的汉堡），
+     *   这里不再渲染圆形按钮，也不预留左侧 gutter。
+     */
+    navigationToggle?: 'panel' | 'external'
+    /**
+     * 是否在导航内容顶部预留 44px 给悬浮的收起按钮。
+     * 调用方若给 SideNavigation 传了 header（收起按钮会与 header 同行），传 false。
+     */
+    reserveNavigationToggleRow?: boolean
     navigationLabel?: string
     navigationCloseLabel?: string
     navigationToggleLabel?: string
@@ -43,6 +55,8 @@ const props = withDefaults(
     contentType: 'default',
     maxContentWidth: undefined,
     disableContentPaddings: false,
+    navigationToggle: 'panel',
+    reserveNavigationToggleRow: true,
     navigationLabel: '主导航',
     navigationCloseLabel: '收起导航',
     navigationToggleLabel: '打开导航',
@@ -71,6 +85,11 @@ const contentFirstChild = computed(() => {
 
 const hasContentGapLeft = computed(() => props.navigationOpen || props.navigationHide)
 const hasRightTogglesGutter = computed(() => false)
+/** 左侧 36px 圆形开合按钮只在「面板自管」且收起时出现。 */
+const showPanelToggle = computed(() => props.navigationToggle === 'panel' && !props.navigationOpen)
+const hasLeftTogglesGutter = computed(
+  () => showPanelToggle.value && !props.navigationHide && Boolean(slots.navigation)
+)
 
 const layoutClasses = computed(() =>
   cx(
@@ -82,7 +101,7 @@ const layoutClasses = computed(() =>
     hasContentGapLeft.value && cs['has-content-gap-left'],
     cs['has-content-gap-right'],
     Boolean(props.maxContentWidth && props.maxContentWidth > 0) && cs['has-max-content-width'],
-    !props.navigationHide && !props.navigationOpen && Boolean(slots.navigation) && cs['has-left-toggles-gutter'],
+    hasLeftTogglesGutter.value && cs['has-left-toggles-gutter'],
     hasRightTogglesGutter.value && cs['has-right-toggles-gutter'],
     props.disableContentPaddings && cs['disable-content-paddings']
   )
@@ -120,6 +139,7 @@ function closeNavigation() {
 
     <div v-if="hasNavigation" :class="[cs['navigation-container'], 'cs-app-nav-container']" :style="navigationStyle">
       <nav
+        v-if="navigationToggle === 'panel'"
         :class="cx(cs['show-navigation'], navigationOpen && cs['is-navigation-open'])"
         :aria-hidden="navigationOpen"
       >
@@ -148,7 +168,10 @@ function closeNavigation() {
         :aria-label="navigationLabel"
         :aria-hidden="!navigationOpen"
       >
-        <div :class="cx(cs['content-container'], cs['animated-content'], 'cs-nav-content')">
+        <div
+          :class="cx(cs['content-container'], cs['animated-content'], 'cs-nav-content')"
+          :style="{ paddingBlockStart: reserveNavigationToggleRow ? '44px' : '0px' }"
+        >
           <div :class="[cs['hide-navigation'], 'cs-nav-close']">
             <Button
               variant="icon"
@@ -198,14 +221,10 @@ function closeNavigation() {
   border-radius: 4px;
 }
 
-/* 收起按钮是绝对定位（官方 top 15px / right 16px），而导航内容（搜索框）同样定位在
-   面板顶部且 DOM 顺序更靠后，z-index 为 auto 时会把按钮压在下面。这里抬高层级，
-   并在内容顶部留出按钮行的高度，避免两者重叠。 */
+/* 收起按钮是绝对定位（官方 top 15px / right 16px），导航内容若从面板顶部开始，
+   z-index 为 auto 时会被后出现的定位元素压住（搜索框的 relative 容器）。
+   这里把按钮抬到内容之上；顶部留白由 reserveNavigationToggleRow 决定。 */
 .cs-nav-close {
   z-index: 2;
-}
-
-.cs-nav-content {
-  padding-block-start: 44px;
 }
 </style>
