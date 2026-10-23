@@ -27,6 +27,10 @@ import './vendor/components/link/styles.scoped.css'
 // 平铺），classic 那套 68 行样式依赖 Drawer/SplitPanel 的 JS 行内尺寸，脱离 JS 不自洽。
 // drawers / tools / split-panel 的 CSS 本项目不用，故不引入。
 import './vendor/components/app-layout/visual-refresh/styles.scoped.css'
+// 应用栏（universal toolbar）：站点顶栏之下、横跨全宽的「汉堡 + 面包屑」条。
+// 取自官方 visual-refresh-toolbar 变体，只用到 toolbar 与 trigger-button 两块。
+import './vendor/components/app-layout/visual-refresh-toolbar/toolbar/styles.scoped.css'
+import './vendor/components/app-layout/visual-refresh-toolbar/toolbar/trigger-button/styles.scoped.css'
 import './vendor/components/segmented-control/styles.scoped.css'
 import './vendor/components/tabs/styles.scoped.css'
 import './vendor/components/alert/styles.scoped.css'

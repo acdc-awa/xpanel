@@ -9,9 +9,9 @@ import { getSystemStatus } from '@/api/admin'
 import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
 import {
   CsAppLayout,
+  CsAppToolbar,
   CsBreadcrumbGroup,
   CsDrawer,
-  CsIconButton,
   CsInput,
   CsSideNavigation,
   CsTopNavigation,
@@ -292,24 +292,23 @@ onUnmounted(() => {
       visual-context="top-navigation"
       @identity-follow="goDashboard"
     >
-      <template #prefix>
-        <CsIconButton
-          icon-name="menu"
-          size="normal"
-          :label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
-          @click="onNavToggleClick"
-        />
-      </template>
       <template #title>
-        <div class="admin-path">
-          <CsBreadcrumbGroup v-if="!isMobile && breadcrumbs.length" :items="breadcrumbs" />
-          <span v-else class="admin-title">{{ pageTitle }}</span>
+        <div class="admin-title-wrap">
+          <span class="admin-title">{{ pageTitle }}</span>
         </div>
       </template>
       <template #utility-extra>
         <UserAvatarDropdown current-portal="admin" :footnote="accountFootnote" />
       </template>
     </CsTopNavigation>
+
+    <!-- 应用栏：汉堡 + 面包屑，横跨全宽（官方 universal toolbar） -->
+    <CsAppToolbar
+      :navigation-label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
+      @navigation-click="onNavToggleClick"
+    >
+      <CsBreadcrumbGroup v-if="!isMobile && breadcrumbs.length" :items="breadcrumbs" />
+    </CsAppToolbar>
 
     <CsAppLayout
       :navigation-open="navigationOpen"
@@ -396,7 +395,7 @@ onUnmounted(() => {
 .admin-topbar {
   position: sticky;
   inset-block-start: 0;
-  z-index: var(--x-z-sticky, 10);
+  z-index: 1100;
   flex: none;
 }
 
@@ -413,12 +412,12 @@ onUnmounted(() => {
 }
 
 /* 顶栏路径区：面包屑紧贴品牌，剩余空间让给右侧工具区。 */
-.admin-path {
+.admin-title-wrap {
   display: flex;
   align-items: center;
   min-inline-size: 0;
   margin-inline-end: auto;
-  margin-inline-start: var(--space-s-kll7oj, 12px);
+  margin-inline-start: var(--space-m-n8iq8o, 16px);
   overflow: hidden;
 }
 
@@ -438,7 +437,7 @@ onUnmounted(() => {
     display: none;
   }
 
-  .admin-path {
+  .admin-title-wrap {
     margin-inline-start: var(--space-xs-m9b7jf, 8px);
   }
 }

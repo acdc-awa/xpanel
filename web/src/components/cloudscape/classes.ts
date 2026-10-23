@@ -1435,5 +1435,19 @@ export const CS: Record<string, Record<string, string>> = {
     "trigger-button-styles": "awsui_trigger-button-styles_hyvsj_16epy_977",
     "trigger": "awsui_trigger_hyvsj_16epy_977",
     "trigger-wrapper": "awsui_trigger-wrapper_hyvsj_16epy_1069"
+  },
+  // 官方 visual-refresh-toolbar 的「应用栏」：站点顶栏之下、横跨全宽的第二条 bar。
+  // 只取本项目实际渲染的区域（nav / breadcrumbs / drawers）。
+  "app-toolbar": {
+    "universal-toolbar": "awsui_universal-toolbar_1kzri_7i1bc_13",
+    "toolbar-container": "awsui_toolbar-container_1kzri_7i1bc_124",
+    "universal-toolbar-nav": "awsui_universal-toolbar-nav_1kzri_7i1bc_144",
+    "universal-toolbar-breadcrumbs": "awsui_universal-toolbar-breadcrumbs_1kzri_7i1bc_149",
+    "universal-toolbar-drawers": "awsui_universal-toolbar-drawers_1kzri_7i1bc_158"
+  },
+  "app-toolbar/trigger": {
+    "trigger": "awsui_trigger_lpshu_1aod4_9",
+    "custom": "awsui_custom_lpshu_1aod4_15",
+    "default": "awsui_default_lpshu_1aod4_24"
   }
 }

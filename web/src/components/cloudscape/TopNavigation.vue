@@ -90,16 +90,9 @@ function onIdentityClick(event: MouseEvent) {
     <header :class="rootClasses">
       <div :class="cs['padding-box']">
         <div
-          v-if="$slots.left || $slots.prefix || identity"
-          :class="
-            cx(
-              cs.identity,
-              !identity?.logo && cs['no-logo'],
-              $slots.prefix && 'cs-identity-with-prefix'
-            )
-          "
+          v-if="$slots.left || identity"
+          :class="cx(cs.identity, !identity?.logo && cs['no-logo'])"
         >
-          <slot name="prefix" />
           <slot name="left">
             <a
               v-if="identity"
@@ -176,11 +169,4 @@ function onIdentityClick(event: MouseEvent) {
   }
 }
 
-/* 顶栏内置开合按钮时，汉堡与品牌要在同一行。 */
-.cs-identity-with-prefix {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs-m9b7jf, 8px);
-  min-inline-size: 0;
-}
 </style>

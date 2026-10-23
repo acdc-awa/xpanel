@@ -21,6 +21,7 @@ export { default as CsBreadcrumbGroup } from './BreadcrumbGroup.vue'
 export { default as CsTopNavigation } from './TopNavigation.vue'
 export { default as CsSideNavigation } from './SideNavigation.vue'
 export { default as CsAppLayout } from './AppLayout.vue'
+export { default as CsAppToolbar } from './AppToolbar.vue'
 export type { TopNavigationIdentity, TopNavigationUtility } from './top-navigation-utils'
 export type {
   SideNavigationItem,
