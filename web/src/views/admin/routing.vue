@@ -1,9 +1,35 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
-import { Plus, Refresh, Edit, Delete, Check, Aim, Connection, Grid, Share, Loading } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
-import BaseCard from '@/components/base/BaseCard.vue'
+import {
+  ElMessage,
+  ElMessageBox,
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsCard,
+  CsCardFact,
+  CsCardFacts,
+  CsCardGrid,
+  CsContainer,
+  CsEmpty,
+  CsHeader,
+  CsIcon,
+  CsLink,
+  CsLoading,
+  CsPage,
+  CsSegmentedControl,
+  CsSelect,
+  CsSpaceBetween,
+  CsStatusIndicator,
+  CsTabs,
+  CsToggle,
+  CsToolbar,
+  CsTooltip,
+  type SegmentedOption,
+  type TabItem,
+} from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
 import ServerSettingsModal from './servers/ServerSettingsModal.vue'
 import TopologyCanvas from '@/components/topology/TopologyCanvas.vue'
@@ -41,6 +67,17 @@ const { servers, serverFilter, currentServer, serverLoading, loadServers, syncSe
   useServerScope()
 const { inboundTags, ownerTagOf, loadServerInbounds } = useServerInbounds(serverFilter)
 
+const serverOptions = computed(() =>
+  servers.value.map((s) => ({ label: `${s.name} (${s.host})`, value: s.id }))
+)
+
+// CsSelect / CsSegmentedControl 的 v-model 类型是 string | number，这里显式收窄。
+function onServerFilterChange(value: string | number | (string | number)[] | '') {
+  const raw = Array.isArray(value) ? value[0] : value
+  const id = Number(raw)
+  serverFilter.value = Number.isFinite(id) && id > 0 ? id : undefined
+}
+
 // ---- 默认出口 & 路由匹配策略（随服务器切换） ----
 // 出站域名解析策略（freedom settings.domainStrategy）不在此处：它是出站级属性，
 // 唯一入口是出站管理页的编辑面板。
@@ -48,6 +85,38 @@ const defaultOutboundTag = ref('direct')
 const routingDomainStrategy = ref('AsIs')
 const defaultSaving = ref(false)
 const activeTab = ref<'rules' | 'settings'>('rules')
+
+const tabItems: TabItem[] = [
+  { id: 'rules', label: '路由规则 (Routing Rules)' },
+  { id: 'settings', label: '全局策略 (Global Settings)' },
+]
+
+const viewOptions: SegmentedOption[] = [
+  { id: 'canvas', text: '拓扑画布', iconName: 'share' },
+  { id: 'table', text: '表格视图', iconName: 'grid-view' },
+]
+
+const domainStrategyOptions = [
+  { label: 'AsIs（保持原样，仅按客户端原始请求匹配）', value: 'AsIs' },
+  { label: 'IPIfNonMatch（先域名后 IP，域名未命中则解析 IP 再次匹配）', value: 'IPIfNonMatch' },
+  { label: 'IPOnDemand（按需解析 IP，遇到 IP 规则时立即解析）', value: 'IPOnDemand' },
+]
+
+function onViewChange(detail: { selectedId: string | number }) {
+  viewMode.value = detail.selectedId === 'canvas' ? 'canvas' : 'table'
+}
+
+function onTabChange(detail: { activeTabId: string }) {
+  activeTab.value = detail.activeTabId === 'settings' ? 'settings' : 'rules'
+}
+
+function onDefaultOutboundChange(value: string | number | (string | number)[] | '') {
+  defaultOutboundTag.value = Array.isArray(value) ? String(value[0] ?? '') : String(value)
+}
+
+function onDomainStrategyChange(value: string | number | (string | number)[] | '') {
+  routingDomainStrategy.value = Array.isArray(value) ? String(value[0] ?? '') : String(value)
+}
 
 watch(currentServer, (s) => {
   if (s) {
@@ -64,6 +133,7 @@ type EffectiveRoutingRule = ServerRoutingRule & {
 // 出站列表只作为路由规则与默认出口的选项来源；出站对象的增删改在「出站管理」页。
 const outbounds = ref<ServerOutbound[]>([])
 const outboundTags = computed(() => outbounds.value.map((o) => o.tag))
+const outboundOptions = computed(() => outboundTags.value.map((t) => ({ label: t, value: t })))
 
 async function loadOutboundOptions() {
   if (!serverFilter.value) {
@@ -293,214 +363,211 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="x-page routing-page">
+  <CsPage>
     <!-- 顶部工具栏 -->
-    <div class="x-toolbar">
-      <div class="x-toolbar-left">
-        <template v-if="viewMode === 'table'">
-          <el-select v-model="serverFilter" placeholder="选择目标服务器" style="width: 220px" :loading="serverLoading">
-            <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.host})`" :value="s.id" />
-          </el-select>
-          <el-button @click="reloadTable">
-            <el-icon><Refresh /></el-icon>&nbsp;刷新
-          </el-button>
-        </template>
-        <template v-else>
-          <div class="canvas-badge">
-            <span class="x-status-dot online" />
-            <span style="font-weight: 600; font-size: 13.5px">全局可视化拓扑画布</span>
-            <span class="muted" style="font-size: 12px; margin-left: 4px">（共 {{ topology?.servers?.length || 0 }} 个服务器）</span>
-          </div>
-          <el-button size="small" @click="loadTopology">
-            <el-icon><Refresh /></el-icon>&nbsp;刷新拓扑
-          </el-button>
-        </template>
-      </div>
+    <CsToolbar>
+      <template v-if="viewMode === 'table'">
+        <CsSelect
+          :model-value="serverFilter ?? null"
+          :options="serverOptions"
+          :loading="serverLoading"
+          placeholder="选择目标服务器"
+          aria-label="选择目标服务器"
+          class="server-filter"
+          @change="onServerFilterChange"
+        />
+        <CsButton icon-name="refresh" @click="reloadTable">刷新</CsButton>
+      </template>
+      <template v-else>
+        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+          <CsStatusIndicator type="success" text="全局可视化拓扑画布" />
+          <span class="cs-text-secondary">（共 {{ topology?.servers?.length || 0 }} 个服务器）</span>
+        </CsSpaceBetween>
+        <CsButton icon-name="refresh" @click="loadTopology">刷新拓扑</CsButton>
+      </template>
 
-      <div style="display: flex; gap: 12px; align-items: center">
-        <el-radio-group v-model="viewMode" size="default">
-          <el-radio-button value="canvas">
-            <span style="display: inline-flex; align-items: center; gap: 4px">
-              <el-icon><Share /></el-icon>拓扑画布
-            </span>
-          </el-radio-button>
-          <el-radio-button value="table">
-            <span style="display: inline-flex; align-items: center; gap: 4px">
-              <el-icon><Grid /></el-icon>表格视图
-            </span>
-          </el-radio-button>
-        </el-radio-group>
-      </div>
-    </div>
+      <template #actions>
+        <CsSegmentedControl :model-value="viewMode" :options="viewOptions" label="视图" @change="onViewChange" />
+      </template>
+    </CsToolbar>
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <BaseCard>
-        <el-tabs v-model="activeTab">
+      <CsContainer>
+        <CsTabs :model-value="activeTab" :tabs="tabItems" @change="onTabChange">
           <!-- Tab 1: 路由规则管理 -->
-          <el-tab-pane name="rules" :label="isMobile ? '路由规则' : '路由规则 (Routing Rules)'">
-            <div class="tab-toolbar">
-              <el-button size="small" :disabled="!serverFilter" @click="loadRouting"><el-icon><Refresh /></el-icon>&nbsp;刷新</el-button>
-              <el-button size="small" type="primary" :disabled="!serverFilter" @click="openRuleCreate"><el-icon><Plus /></el-icon>&nbsp;新增规则</el-button>
-            </div>
+          <template v-if="activeTab === 'rules'">
+            <CsSpaceBetween size="s">
+              <CsToolbar>
+                <template #actions>
+                  <CsButton :disabled="!serverFilter" icon-name="refresh" @click="loadRouting">刷新</CsButton>
+                  <CsButton
+                    variant="primary"
+                    :disabled="!serverFilter"
+                    icon-name="add-plus"
+                    @click="openRuleCreate"
+                  >
+                    新增规则
+                  </CsButton>
+                </template>
+              </CsToolbar>
 
-            <div v-if="routingLoading" style="padding: 36px 0; text-align: center">
-              <el-icon class="is-loading" style="font-size: 24px; color: var(--x-primary)"><Loading /></el-icon>
-            </div>
+              <CsLoading :loading="routingLoading" min-height="200px">
+                <CsEmpty
+                  v-if="displayRoutingRules.length === 0"
+                  description="该服务器暂无路由规则，点击右上角「新增规则」"
+                  icon-name="list-view"
+                />
 
-            <div v-else-if="displayRoutingRules.length === 0" style="text-align: center; padding: 36px 0; color: var(--x-text-3); font-size: 13px">
-              该服务器暂无路由规则，点击右上角「新增规则」
-            </div>
+                <CsCardGrid v-else>
+                  <CsCard v-for="row in displayRoutingRules" :key="row.id">
+                    <template #header>
+                      <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                        <span class="cs-text-secondary">目标出站：</span>
+                        <CsBadge color="blue">{{ row.outbound_tag }}</CsBadge>
+                        <CsBadge v-if="row.owner_inbound_id" color="grey">系统内置·直通</CsBadge>
+                      </CsSpaceBetween>
+                    </template>
 
-            <!-- 全局统一路由规则卡片网格流 (自适应 1~4 列) -->
-            <div v-else class="routing-card-grid">
-              <div v-for="row in displayRoutingRules" :key="row.id" class="routing-card" :class="{ disabled: !row.enabled }">
-                <div class="card-head">
-                  <div class="head-title">
-                    <span style="font-weight: 600; font-size: 12px; color: var(--x-text-3)">目标出站：</span>
-                    <span class="x-chip purple" style="font-weight: 700; font-size: 11px">{{ row.outbound_tag }}</span>
-                    <span v-if="row.owner_inbound_id" class="x-chip cyan" style="font-size: 10px; margin-left: 6px">系统内置·直通</span>
-                  </div>
-                  <el-switch :model-value="row.enabled" :disabled="!!row.owner_inbound_id" size="small" @change="toggleRule(row)" />
-                </div>
+                    <template #actions>
+                      <CsToggle
+                        :model-value="row.enabled"
+                        :disabled="!!row.owner_inbound_id"
+                        aria-label="启用此路由规则"
+                        @change="toggleRule(row)"
+                      />
+                    </template>
 
-                <div class="card-grid">
-                  <div class="grid-item full-width">
-                    <span class="item-label">域名规则 (Domain)</span>
-                    <div class="item-value">
-                      <template v-if="parseTagList(row.domain).length">
-                        <div class="chip-container">
+                    <CsCardFacts>
+                      <CsCardFact full-width label="域名规则 (Domain)">
+                        <div v-if="parseTagList(row.domain).length" class="chip-container">
                           <code v-for="(item, idx) in parseTagList(row.domain)" :key="idx" class="rule-chip">
                             {{ item }}
                           </code>
                         </div>
-                      </template>
-                      <span v-else class="muted font-11">—</span>
-                    </div>
-                  </div>
-                  <div class="grid-item full-width">
-                    <span class="item-label">IP 规则 (IP)</span>
-                    <div class="item-value">
-                      <template v-if="parseTagList(row.ip).length">
-                        <div class="chip-container">
+                        <span v-else class="cs-text-secondary">—</span>
+                      </CsCardFact>
+
+                      <CsCardFact full-width label="IP 规则 (IP)">
+                        <div v-if="parseTagList(row.ip).length" class="chip-container">
                           <code v-for="(item, idx) in parseTagList(row.ip)" :key="idx" class="rule-chip">
                             {{ item }}
                           </code>
                         </div>
-                      </template>
-                      <span v-else class="muted font-11">—</span>
-                    </div>
-                  </div>
-                  <div class="grid-item">
-                    <span class="item-label">入站来源</span>
-                    <div class="item-value cell-mono font-11">
-                      <span>{{ row.inbound_tag || '全部入站' }}</span>
-                    </div>
-                  </div>
-                  <div class="grid-item">
-                    <span class="item-label">端口 / 协议</span>
-                    <div class="item-value">
-                      <template>
-                        <span v-if="row.port" class="cell-mono font-11">{{ row.port }}</span>
-                        <span v-else class="muted font-11">全部端口</span>
-                        <span v-for="p in parseTagList(row.protocol)" :key="p" class="x-chip blue" style="margin-left: 4px; font-size: 10px">
-                          {{ p }}
-                        </span>
-                      </template>
-                    </div>
-                  </div>
-                  <div class="grid-item">
-                    <span class="item-label">规则优先级</span>
-                    <div class="item-value cell-mono font-11">{{ row.priority ?? 0 }}</div>
-                  </div>
-                </div>
+                        <span v-else class="cs-text-secondary">—</span>
+                      </CsCardFact>
 
-                <div class="card-foot-actions">
-                  <el-button size="small" type="primary" plain @click="openRuleEdit(row)">
-                    <el-icon><Edit /></el-icon>&nbsp;编辑规则
-                  </el-button>
-                  <template v-if="row.owner_inbound_id">
-                    <el-tooltip
-                      :content="`随四层直通「${row.ownerInboundTag || ('#' + row.owner_inbound_id)}」自动维护，不可删除；要停用请停用或删除该直通`"
-                      placement="top"
-                    >
-                      <span><el-button size="small" type="danger" disabled><el-icon><Delete /></el-icon>&nbsp;删除</el-button></span>
-                    </el-tooltip>
-                  </template>
-                  <el-button v-else size="small" type="danger" plain @click="removeRule(row)">
-                    <el-icon><Delete /></el-icon>&nbsp;删除
-                  </el-button>
-                </div>
-              </div>
-            </div>
-          </el-tab-pane>
+                      <CsCardFact label="入站来源" :value="row.inbound_tag || '全部入站'" mono />
+                      <CsCardFact label="规则优先级" :value="row.priority ?? 0" mono />
+
+                      <CsCardFact label="端口 / 协议">
+                        <div class="chip-container">
+                          <span v-if="row.port" class="cs-text-mono">{{ row.port }}</span>
+                          <span v-else class="cs-text-secondary">全部端口</span>
+                          <CsBadge v-for="p in parseTagList(row.protocol)" :key="p" color="blue">{{ p }}</CsBadge>
+                        </div>
+                      </CsCardFact>
+                    </CsCardFacts>
+
+                    <template #footer>
+                      <div class="card-foot-actions">
+                        <CsButton icon-name="edit" @click="openRuleEdit(row)">编辑规则</CsButton>
+                        <CsTooltip
+                          v-if="row.owner_inbound_id"
+                          :content="`随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可删除；要停用请停用或删除该直通`"
+                        >
+                          <span><CsButton variant="danger-outline" icon-name="remove" disabled>删除</CsButton></span>
+                        </CsTooltip>
+                        <CsButton v-else variant="danger-outline" icon-name="remove" @click="removeRule(row)">
+                          删除
+                        </CsButton>
+                      </div>
+                    </template>
+                  </CsCard>
+                </CsCardGrid>
+              </CsLoading>
+            </CsSpaceBetween>
+          </template>
 
           <!-- Tab 2: 全局策略管理 -->
-          <el-tab-pane name="settings" :label="isMobile ? '全局策略' : '全局策略 (Global Settings)'">
-            <div v-if="!currentServer" class="table-empty" style="text-align: center; padding: 40px 0">
-              请在顶部工具栏选择目标服务器
-            </div>
-            <div v-else class="global-settings-container">
-              <div class="settings-intro">
-                <div class="intro-title">服务器全局路由与出口策略</div>
-                <div class="intro-desc">
-                  配置「{{ currentServer.name }}」的默认兜底出口与路由匹配策略。保存后系统将自动重新编译并推送配置到节点。
-                </div>
-              </div>
+          <template v-else>
+            <CsEmpty v-if="!currentServer" description="请在顶部工具栏选择目标服务器" />
 
-              <div class="setting-block">
-                <div class="setting-head">
-                  <span class="setting-icon"><el-icon><Aim /></el-icon></span>
-                  <span class="setting-title">默认兜底出口 (Default Outbound)</span>
-                  <el-tooltip content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。" placement="top">
-                    <span class="help-q">?</span>
-                  </el-tooltip>
-                </div>
-                <div class="setting-body">
-                  <el-select v-model="defaultOutboundTag" style="width: 100%; max-width: 460px" :disabled="outboundTags.length === 0">
-                    <el-option v-for="t in outboundTags" :key="t" :label="t" :value="t" />
-                  </el-select>
-                  <div class="setting-sub">
-                    <span v-if="outboundTags.length > 0" class="muted">当前选用出站通道：<code class="cell-mono">{{ defaultOutboundTag }}</code></span>
-                    <span v-else class="text-danger" style="font-size: 12px">
-                      暂无可用出站通道，请先在
-                      <el-link type="primary" :underline="false" @click="goOutbounds">出站管理</el-link>
-                      添加出站
-                    </span>
-                  </div>
-                </div>
-              </div>
+            <CsSpaceBetween v-else size="l">
+              <CsHeader
+                variant="h2"
+                :description="`配置「${currentServer.name}」的默认兜底出口与路由匹配策略。保存后系统将自动重新编译并推送配置到节点。`"
+              >
+                服务器全局路由与出口策略
+              </CsHeader>
 
-              <div class="setting-block">
-                <div class="setting-head">
-                  <span class="setting-icon"><el-icon><Connection /></el-icon></span>
-                  <span class="setting-title">路由匹配策略 (DomainStrategy)</span>
-                  <el-tooltip content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。" placement="top">
-                    <span class="help-q">?</span>
-                  </el-tooltip>
-                </div>
-                <div class="setting-body">
-                  <el-select v-model="routingDomainStrategy" style="width: 100%; max-width: 460px">
-                    <el-option label="AsIs（保持原样，仅按客户端原始请求匹配）" value="AsIs" />
-                    <el-option label="IPIfNonMatch（先域名后 IP，域名未命中则解析 IP 再次匹配）" value="IPIfNonMatch" />
-                    <el-option label="IPOnDemand（按需解析 IP，遇到 IP 规则时立即解析）" value="IPOnDemand" />
-                  </el-select>
-                  <div class="setting-sub">
-                    <span class="muted">注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站管理页的出站卡片内设置。</span>
-                  </div>
-                </div>
-              </div>
+              <CsContainer>
+                <template #header>
+                  <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                    <CsIcon name="status-info" size="small" />
+                    <span>默认兜底出口 (Default Outbound)</span>
+                    <TipIcon
+                      content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。"
+                    />
+                  </CsSpaceBetween>
+                </template>
 
-              <div class="setting-actions">
-                <el-button type="primary" :loading="defaultSaving" @click="saveDefaultOutbound">
-                  <el-icon><Check /></el-icon>&nbsp;保存全局策略
-                </el-button>
-                <span class="muted font-11" style="margin-left: 12px">修改后自动重新编译并推送配置</span>
+                <CsSpaceBetween size="xs">
+                  <CsSelect
+                    :model-value="defaultOutboundTag"
+                    :options="outboundOptions"
+                    :disabled="outboundTags.length === 0"
+                    aria-label="默认兜底出口"
+                    @change="onDefaultOutboundChange"
+                  />
+                  <span v-if="outboundTags.length > 0" class="cs-text-secondary">
+                    当前选用出站通道：<code class="cs-text-mono">{{ defaultOutboundTag }}</code>
+                  </span>
+                  <CsAlert v-else type="warning">
+                    暂无可用出站通道，请先在 <CsLink @follow="goOutbounds">出站管理</CsLink> 添加出站
+                  </CsAlert>
+                </CsSpaceBetween>
+              </CsContainer>
+
+              <CsContainer>
+                <template #header>
+                  <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                    <CsIcon name="share" size="small" />
+                    <span>路由匹配策略 (DomainStrategy)</span>
+                    <TipIcon
+                      content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。"
+                    />
+                  </CsSpaceBetween>
+                </template>
+
+                <CsSpaceBetween size="xs">
+                  <CsSelect
+                    :model-value="routingDomainStrategy"
+                    :options="domainStrategyOptions"
+                    aria-label="路由匹配策略"
+                    @change="onDomainStrategyChange"
+                  />
+                  <span class="cs-text-secondary">
+                    注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站管理页的出站卡片内设置。
+                  </span>
+                </CsSpaceBetween>
+              </CsContainer>
+
+              <div class="settings-actions">
+                <CsButton
+                  variant="primary"
+                  :loading="defaultSaving"
+                  icon-name="check"
+                  @click="saveDefaultOutbound"
+                >
+                  保存全局策略
+                </CsButton>
+                <span class="cs-text-secondary">修改后自动重新编译并推送配置</span>
               </div>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </BaseCard>
+            </CsSpaceBetween>
+          </template>
+        </CsTabs>
+      </CsContainer>
 
       <!-- 路由规则编辑器（自管 dialog） -->
       <RoutingRuleEditor
@@ -520,12 +587,12 @@ onMounted(async () => {
         <div class="canvas-tip">
           <span class="tip-pill"><span class="legend-solid" /> 实线 InboundRef 引用</span>
           <span class="tip-pill"><span class="legend-dash" /> 虚线 路由规则</span>
-          <span class="muted" style="font-size: 12px; margin-left: 6px">点击连线可删除；拖拽把手可建线；双击卡片管理服务器</span>
+          <span class="cs-text-secondary">点击连线可删除；拖拽把手可建线；双击卡片管理服务器</span>
         </div>
-        <div style="display: flex; gap: 10px; align-items: center">
-          <span style="font-size: 13px; color: var(--x-text-2)">编辑模式</span>
-          <el-switch v-model="canvasEdit" />
-        </div>
+        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+          <span>编辑模式</span>
+          <CsToggle v-model="canvasEdit" aria-label="编辑模式" />
+        </CsSpaceBetween>
       </div>
       <TopologyCanvas
         :topology="topology"
@@ -545,77 +612,12 @@ onMounted(async () => {
       @removed="onSettingsRemoved"
       @changed="onSettingsChanged"
     />
-  </div>
+  </CsPage>
 </template>
 
 <style scoped lang="scss">
-.tab-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.canvas-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-
-  .x-status-dot.online {
-    animation: none;
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
-  }
-}
-.canvas-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  background: var(--x-card-bg, #fff);
-  border: 1px solid var(--x-border);
-  padding: 8px 14px;
-  border-radius: var(--x-radius);
-}
-.canvas-tip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.tip-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--x-text-2);
-  background: var(--x-bg);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.legend-solid {
-  display: inline-block;
-  width: 12px;
-  height: 2px;
-  background: var(--x-primary);
-}
-.legend-dash {
-  display: inline-block;
-  width: 12px;
-  height: 2px;
-  border-top: 2px dashed #e6a23c;
-}
-.muted {
-  color: var(--x-text-3);
-}
-.text-danger {
-  color: var(--el-color-danger);
-}
-.cell-mono {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 12.5px;
-  color: var(--x-text-2);
-}
-.table-empty {
-  padding: 30px 0;
-  color: var(--x-text-3);
+.server-filter {
+  inline-size: 220px;
 }
 .chip-container {
   display: flex;
@@ -624,243 +626,71 @@ onMounted(async () => {
   align-items: center;
 }
 .rule-chip {
-  font-family: var(--x-font-mono, monospace);
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
   font-size: 11px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
+  background: var(--color-background-container-content-mjfil9, #fff);
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   padding: 1px 6px;
   border-radius: 4px;
-  color: var(--x-text);
   white-space: nowrap;
 }
-
-// Global Settings Tab
-.global-settings-container {
-  padding: 8px 4px 20px;
-}
-.settings-intro {
-  margin-bottom: 20px;
-  .intro-title {
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--x-text-1, #1e293b);
-  }
-  .intro-desc {
-    font-size: 12px;
-    color: var(--x-text-3, #64748b);
-    margin-top: 4px;
-    line-height: 1.5;
-  }
-}
-.setting-block {
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius, 8px);
-  padding: 16px 18px;
-  margin-bottom: 16px;
-  max-width: 620px;
-}
-.setting-head {
+.card-foot-actions {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 10px;
 }
-.setting-icon {
+.settings-actions {
   display: flex;
   align-items: center;
-  color: var(--x-primary);
-  font-size: 16px;
+  gap: 12px;
 }
-.setting-title {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--x-text-1);
+
+.canvas-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--color-background-container-content-mjfil9, #fff);
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+  padding: 10px 16px;
+  border-radius: 8px;
 }
-.help-q {
+.canvas-tip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tip-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--x-border);
-  color: var(--x-text-3);
-  font-size: 10px;
-  cursor: help;
-  margin-left: auto;
+  gap: 5px;
+  font-size: 12px;
+  background: var(--color-background-container-content-mjfil9, #fff);
+  padding: 2px 8px;
+  border-radius: 4px;
 }
-.setting-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.legend-solid {
+  display: inline-block;
+  inline-size: 12px;
+  block-size: 2px;
+  background: var(--color-text-link-default-qabnuk, #0972d3);
 }
-.setting-sub {
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-.setting-actions {
-  display: flex;
-  align-items: center;
-  margin-top: 24px;
-}
-
-/* ================= 全局统一路由规则卡片网格流 ================= */
-.routing-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-}
-
-.routing-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e5e7eb);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-    box-shadow: var(--x-shadow-md);
-    transform: translateY(-1px);
-  }
-
-  &.disabled {
-    opacity: 0.75;
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  }
-
-  .card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--x-border, #e5e7eb);
-
-    .head-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-  }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 0;
-
-    .grid-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      &.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .item-label {
-        font-size: 11px;
-        color: var(--x-text-3, #9ca3af);
-      }
-
-      .item-value {
-        font-size: 12.5px;
-        color: var(--x-text, #1f2937);
-        font-weight: 500;
-      }
-    }
-  }
-
-  .card-foot-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--x-border-light, #f1f5f9);
-    margin-top: 6px;
-
-    .el-button {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-      padding: 6px 8px;
-      height: 30px;
-    }
-  }
-}
-
-@media (max-width: 640px) {
-  .routing-card-grid {
-    grid-template-columns: 1fr;
-  }
+.legend-dash {
+  display: inline-block;
+  inline-size: 12px;
+  block-size: 2px;
+  border-block-start: 2px dashed var(--color-text-status-warning-fabq6h, #e6a23c);
 }
 
 @media (max-width: 768px) {
-  .x-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-
-    .x-toolbar-left {
-      width: 100%;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
-
-      .el-select {
-        width: 100% !important;
-      }
-    }
-
-    .el-radio-group {
-      width: 100%;
-      display: flex;
-
-      .el-radio-button {
-        flex: 1;
-
-        :deep(.el-radio-button__inner) {
-          width: 100%;
-          display: flex;
-          justify-content: center;
-        }
-      }
-    }
+  .server-filter {
+    inline-size: 100%;
   }
-
   .canvas-bar {
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
-
-    .canvas-tip {
-      flex-wrap: wrap;
-    }
   }
-
-  :deep(.el-tabs__header) {
-    margin-bottom: 12px;
-  }
-  :deep(.el-tabs__nav-wrap) {
-    padding: 0 !important;
-  }
-  :deep(.el-tabs__nav-prev),
-  :deep(.el-tabs__nav-next) {
-    display: none !important;
-  }
-  :deep(.el-tabs__item) {
-    padding: 0 14px !important;
-    font-size: 13.5px !important;
-  }
-}
-
-.routing-page {
-  max-width: var(--x-wide-max, 1800px);
 }
 </style>

@@ -1,7 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Check, MagicStick } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import {
+  ElMessage,
+  CsAlert,
+  CsButton,
+  CsCheckboxGroup,
+  CsColumnLayout,
+  CsContainer,
+  CsExpandableSection,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsSelect,
+  CsSpaceBetween,
+  CsToggle,
+  type CheckboxGroupOption,
+} from '@/components/cloudscape'
 import {
   createServerRoutingRule,
   updateServerRoutingRule,
@@ -50,10 +67,25 @@ const form = reactive<RoutingRuleForm>({
 const jsonError = ref('')
 
 // 协议嗅探多选 → 逗号分隔字符串
-const selectedProtocols = ref<string[]>([])
+const selectedProtocols = ref<Array<string | number>>([])
 
-function onProtocolsChange(vals: any) {
-  form.protocol = (vals as string[]).join(',')
+const protocolOptions: CheckboxGroupOption[] = [
+  { value: 'bittorrent', label: 'BitTorrent (BT)' },
+  { value: 'http', label: 'HTTP' },
+  { value: 'tls', label: 'TLS' },
+]
+
+const networkOptions = [
+  { label: 'TCP', value: 'tcp' },
+  { label: 'UDP', value: 'udp' },
+  { label: 'TCP, UDP', value: 'tcp,udp' },
+]
+
+const inboundTagOptions = computed(() => (props.inboundTags ?? []).map((tag) => ({ label: tag, value: tag })))
+const outboundTagOptions = computed(() => (props.outboundTags ?? []).map((tag) => ({ label: tag, value: tag })))
+
+function onProtocolsChange(vals: Array<string | number>) {
+  form.protocol = vals.map(String).join(',')
 }
 
 // ===== 常用规则预设 =====
@@ -206,352 +238,207 @@ const selectedInboundTags = computed<string[]>({
     const raw = form.inbound_tag || ''
     return raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : []
   },
-  set: () => {},
+  set: (vals) => {
+    form.inbound_tag = vals.join(',')
+  },
 })
-
-function onInboundTagsChange(vals: string[]) {
-  form.inbound_tag = vals.join(',')
-}
 
 function onClosed() {
   emit('close')
 }
 </script>
 <template>
-  <el-dialog
-    :model-value="visible"
-    :title="rule ? `编辑路由规则 · ${rule.outbound_tag}` : '新增路由规则'"
-    width="780px"
-    @closed="onClosed"
+  <CsModal
+    v-model:visible="visible"
+    :header="rule ? `编辑路由规则 · ${rule.outbound_tag}` : '新增路由规则'"
+    size="large"
+    scrollable
+    @close="onClosed"
   >
-    <!-- 顶部四层直通派生规则提示 -->
-    <div v-if="isDerived" style="margin-bottom: 14px">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="四层直通派生转发规则"
-        description="本规则由四层直通入站自动派生维护。来源入站与启用状态自动跟随直通本身（已锁定）；您可调整优先级（以便在直通前插入过滤规则）或调整目标出口。"
-      />
-    </div>
+    <CsSpaceBetween size="l">
+      <!-- 顶部四层直通派生规则提示 -->
+      <CsAlert v-if="isDerived" type="info" header="四层直通派生转发规则">
+        本规则由四层直通入站自动派生维护。来源入站与启用状态自动跟随直通本身（已锁定）；您可调整优先级（以便在直通前插入过滤规则）或调整目标出口。
+      </CsAlert>
 
-    <!-- 顶部常用预设胶囊栏（仅非直通派生规则展示） -->
-    <div v-else class="preset-section">
-      <div class="preset-title">
-        <el-icon><MagicStick /></el-icon>&nbsp;常用规则一键预设：
-      </div>
-      <div class="preset-chips">
-        <button
-          v-for="p in PRESET_RULES"
-          :key="p.name"
-          type="button"
-          class="preset-chip"
-          @click="applyPreset(p)"
-        >
-          <span>{{ p.name }}</span>
-        </button>
-      </div>
-    </div>
-
-    <el-form label-position="top" class="rule-form">
-      <div class="dual-panel-grid">
-        <!-- ===== 左栏：入站匹配条件 ===== -->
-        <div class="x-micro-card">
-          <div class="x-micro-card-head">
-            <div class="x-micro-card-title">
-              <span class="x-dot cyan"></span>
-              <span>1. 流量匹配条件 (Match Criteria)</span>
-            </div>
+      <!-- 顶部常用预设（仅非直通派生规则展示） -->
+      <div v-else class="preset-section">
+        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+          <span class="preset-title"><CsIcon name="suggestions" size="small" /> 常用规则一键预设</span>
+          <div class="preset-actions">
+            <CsButton v-for="p in PRESET_RULES" :key="p.name" @click="applyPreset(p)">{{ p.name }}</CsButton>
           </div>
+        </CsSpaceBetween>
+      </div>
 
-          <div class="panel-form-stack">
-            <el-form-item label="协议嗅探 Protocol">
-              <el-checkbox-group v-model="selectedProtocols" @change="onProtocolsChange">
-                <el-checkbox label="bittorrent">BitTorrent (BT)</el-checkbox>
-                <el-checkbox label="http">HTTP</el-checkbox>
-                <el-checkbox label="tls">TLS</el-checkbox>
-              </el-checkbox-group>
-            </el-form-item>
+      <CsForm label-position="top">
+        <CsSpaceBetween size="l">
+          <CsColumnLayout :columns="2">
+            <!-- ===== 左栏：入站匹配条件 ===== -->
+            <CsContainer header="1. 流量匹配条件 (Match Criteria)">
+              <CsSpaceBetween size="m">
+                <CsFormItem label="协议嗅探 Protocol">
+                  <CsCheckboxGroup
+                    v-model="selectedProtocols"
+                    :options="protocolOptions"
+                    @change="onProtocolsChange"
+                  />
+                </CsFormItem>
 
-            <el-form-item label="域名匹配 Domain（每行一条）">
-              <el-input
-                v-model="form.domain"
-                type="textarea"
-                :rows="3"
-                class="code-textarea font-mono-num"
-                placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com"
+                <CsFormItem label="域名匹配 Domain（每行一条）">
+                  <CsInput
+                    v-model="form.domain"
+                    type="textarea"
+                    :rows="3"
+                    class="cs-text-mono"
+                    placeholder="geosite:cn&#10;geosite:netflix&#10;*.example.com"
+                  />
+                </CsFormItem>
+
+                <CsFormItem label="IP 段匹配 IP（每行一条）">
+                  <CsInput
+                    v-model="form.ip"
+                    type="textarea"
+                    :rows="3"
+                    class="cs-text-mono"
+                    placeholder="geoip:private&#10;geoip:cn&#10;8.8.8.8"
+                  />
+                </CsFormItem>
+
+                <CsColumnLayout :columns="2">
+                  <CsFormItem label="目标端口 Port">
+                    <CsInput v-model="form.port" class="cs-text-mono" placeholder="如 443 或 80,443" />
+                  </CsFormItem>
+                  <CsFormItem label="传输层网络">
+                    <CsSelect v-model="form.network" :options="networkOptions" clearable placeholder="全部网络" />
+                  </CsFormItem>
+                </CsColumnLayout>
+
+                <CsFormItem label="限定来源入站 InboundTag">
+                  <CsSelect
+                    v-model="selectedInboundTags"
+                    :options="inboundTagOptions"
+                    :disabled="isDerived"
+                    multiple
+                    filterable
+                    allow-create
+                    placeholder="默认匹配全部入站流量"
+                  />
+                  <span v-if="isDerived" class="cs-text-secondary field-hint">
+                    直通派生规则的来源入站由直通入站本身维护，已锁定不可更改
+                  </span>
+                </CsFormItem>
+              </CsSpaceBetween>
+            </CsContainer>
+
+            <!-- ===== 右栏：路由目标与控制 ===== -->
+            <CsSpaceBetween size="m">
+              <CsContainer header="2. 转发目标与属性 (Target)">
+                <template #actions>
+                  <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                    <span class="cs-text-secondary">生效此规则</span>
+                    <CsToggle v-model="form.enabled" :disabled="isDerived" />
+                  </CsSpaceBetween>
+                </template>
+
+                <CsSpaceBetween size="m">
+                  <CsFormItem label="目标出站出口 (OutboundTag)">
+                    <CsSelect
+                      v-model="form.outbound_tag"
+                      :options="outboundTagOptions"
+                      filterable
+                      allow-create
+                      placeholder="请选择转发到的出站"
+                    />
+                  </CsFormItem>
+
+                  <CsFormItem label="规则优先级 (Priority)">
+                    <CsInputNumber v-model="form.priority" :min="0" />
+                    <span class="cs-text-secondary field-hint">数字越小越先被 Xray 规则链评估匹配</span>
+                  </CsFormItem>
+
+                  <CsFormItem label="规则备注说明">
+                    <CsInput v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
+                  </CsFormItem>
+                </CsSpaceBetween>
+              </CsContainer>
+
+              <CsAlert type="info" header="规则判定顺序">
+                Xray 从上至下按 Priority 优先级顺序检索规则，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。
+              </CsAlert>
+            </CsSpaceBetween>
+          </CsColumnLayout>
+
+          <!-- ===== 高级：自定义 Rule JSON ===== -->
+          <CsExpandableSection
+            variant="container"
+            header="高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）"
+          >
+            <CsSpaceBetween size="xs">
+              <CodeEditor
+                v-model="form.rule_json"
+                language="json"
+                height="150px"
+                :placeholder="RULE_JSON_PLACEHOLDER"
               />
-            </el-form-item>
-
-            <el-form-item label="IP 段匹配 IP（每行一条）">
-              <el-input
-                v-model="form.ip"
-                type="textarea"
-                :rows="3"
-                class="code-textarea font-mono-num"
-                placeholder="geoip:private&#10;geoip:cn&#10;8.8.8.8"
-              />
-            </el-form-item>
-
-            <div class="form-grid-2">
-              <el-form-item label="目标端口 Port">
-                <el-input v-model="form.port" class="font-mono-num" placeholder="如 443 或 80,443" />
-              </el-form-item>
-              <el-form-item label="传输层网络">
-                <el-select v-model="form.network" style="width: 100%" clearable placeholder="全部网络">
-                  <el-option label="TCP" value="tcp" />
-                  <el-option label="UDP" value="udp" />
-                  <el-option label="TCP, UDP" value="tcp,udp" />
-                </el-select>
-              </el-form-item>
-            </div>
-
-            <el-form-item label="限定来源入站 InboundTag" style="margin-bottom: 0">
-              <el-select
-                v-model="selectedInboundTags"
-                style="width: 100%"
-                :disabled="isDerived"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="默认匹配全部入站流量"
-                @change="onInboundTagsChange"
-              >
-                <el-option v-for="t in inboundTags ?? []" :key="t" :label="t" :value="t" />
-              </el-select>
-              <span v-if="isDerived" class="muted" style="font-size: 11px; margin-top: 3px; display: block">
-                直通派生规则的来源入站由直通入站本身维护，已锁定不可更改
+              <span class="cs-text-secondary json-hint">
+                填写后配置生成器将直接透传此 JSON 对象（自动补全 <code>type:"field"</code> 与 outboundTag）。
               </span>
-            </el-form-item>
-          </div>
-        </div>
+            </CsSpaceBetween>
+          </CsExpandableSection>
 
-        <!-- ===== 右栏：路由目标与控制 ===== -->
-        <div style="display: flex; flex-direction: column; gap: 14px;">
-          <div class="x-micro-card">
-            <div class="x-micro-card-head">
-              <div class="x-micro-card-title">
-                <span class="x-dot purple"></span>
-                <span>2. 转发目标与属性 (Target)</span>
-              </div>
-              <div class="card-head-action">
-                <span class="action-label">生效此规则</span>
-                <el-switch v-model="form.enabled" :disabled="isDerived" />
-              </div>
-            </div>
-
-            <div class="panel-form-stack">
-              <el-form-item label="目标出站出口 (OutboundTag)">
-                <el-select
-                  v-model="form.outbound_tag"
-                  style="width: 100%"
-                  filterable
-                  allow-create
-                  default-first-option
-                  placeholder="请选择转发到的出站"
-                >
-                  <el-option v-for="t in outboundTags ?? []" :key="t" :label="t" :value="t" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="规则优先级 (Priority)">
-                <el-input-number v-model="form.priority" :min="0" class="font-mono-num" style="width: 100%" />
-                <span class="muted" style="font-size: 11px; margin-top: 3px; display: block">
-                  数字越小越先被 Xray 规则链评估匹配
-                </span>
-              </el-form-item>
-
-              <el-form-item label="规则备注说明">
-                <el-input v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
-              </el-form-item>
-            </div>
-          </div>
-
-          <div class="compact-tip">
-            💡 <b>规则判定顺序：</b> Xray 从上至下按 Priority 优先级顺序检索规则，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。
-          </div>
-        </div>
-      </div>
-
-      <!-- ===== 高级：自定义 Rule JSON ===== -->
-      <details class="json-collapse">
-        <summary class="collapse-summary">
-          <span>高级自定义：原始 Rule JSON（填写后直接透传覆盖上方表单）</span>
-        </summary>
-        <div style="margin-top: 10px">
-          <CodeEditor
-            v-model="form.rule_json"
-            language="json"
-            height="150px"
-            :placeholder="RULE_JSON_PLACEHOLDER"
-          />
-          <p class="muted" style="font-size: 11.5px; margin: 4px 0 0">
-            填写后配置生成器将直接透传此 JSON 对象（自动补全 <code>type:"field"</code> 与 outboundTag）。
-          </p>
-        </div>
-      </details>
-
-      <el-alert v-if="jsonError" type="error" :closable="false" :title="jsonError" style="margin-top: 12px" />
-    </el-form>
+          <CsAlert v-if="jsonError" type="error">{{ jsonError }}</CsAlert>
+        </CsSpaceBetween>
+      </CsForm>
+    </CsSpaceBetween>
 
     <template #footer>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span class="muted" style="font-size: 12px">保存后主控自动编译并推送到服务器</span>
-        <div style="display: flex; gap: 10px">
-          <el-button @click="visible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="save">
-            <el-icon><Check /></el-icon>&nbsp;保存规则
-          </el-button>
-        </div>
+      <div class="modal-footer">
+        <span class="cs-text-secondary footer-hint">保存后主控自动编译并推送到服务器</span>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="visible = false">取消</CsButton>
+          <CsButton variant="primary" :loading="saving" icon-name="check" @click="save">保存规则</CsButton>
+        </CsSpaceBetween>
       </div>
     </template>
-  </el-dialog>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
 .preset-section {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  background: var(--x-card-bg, #fff);
-  border: 1px solid var(--x-border, #e2e8f0);
+  background: var(--color-background-container-content-mjfil9, #fff);
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   border-radius: 8px;
-  padding: 8px 12px;
-  margin-bottom: 14px;
+  padding: 12px 16px;
 }
 .preset-title {
-  display: flex;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--x-primary, #3b82f6);
-  white-space: nowrap;
-}
-.preset-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.preset-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: var(--x-subcard-bg, #f8fafc);
-  border: 1px solid var(--x-border, #e2e8f0);
-  border-radius: 20px;
-  font-size: 11.5px;
-  color: var(--x-text-2, #334155);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  &:hover {
-    border-color: var(--x-primary, #3b82f6);
-    color: var(--x-primary, #3b82f6);
-    background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
-  }
+  gap: 6px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-
-.dual-panel-grid {
-  display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  gap: 14px;
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-@media (max-width: 680px) {
-  .dual-panel-grid {
-    grid-template-columns: 1fr;
-  }
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
 }
-
-/* 规范业务分组微卡片 */
-.x-micro-card {
-  background: var(--x-card-bg, #fff);
-  border: 1px solid var(--x-border, #e2e8f0);
-  border-radius: 8px;
-  padding: 14px 16px;
-  transition: border-color 0.15s ease;
-  &:hover {
-    border-color: var(--x-border-hover, #cbd5e1);
-  }
+.json-hint {
+  display: block;
+  font-size: 12px;
 }
-.x-micro-card-head {
+.modal-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed var(--x-border, #e2e8f0);
+  gap: 16px;
 }
-.x-micro-card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--x-text-1, #0f172a);
-}
-.card-head-action {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.action-label {
+.footer-hint {
   font-size: 12px;
-  color: var(--x-text-2, #334155);
-}
-
-.x-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  &.cyan { background: #06b6d4; box-shadow: 0 0 6px rgba(6, 182, 212, 0.5); }
-  &.purple { background: #8b5cf6; box-shadow: 0 0 6px rgba(139, 92, 246, 0.5); }
-}
-
-.panel-form-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.form-grid-2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 14px;
-}
-
-.code-textarea {
-  font-family: var(--x-font-mono, monospace);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.compact-tip {
-  font-size: 11.5px;
-  color: var(--x-text-2, #334155);
-  line-height: 1.5;
-  background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
-  border-left: 3px solid var(--x-primary, #3b82f6);
-  padding: 8px 12px;
-  border-radius: 0 6px 6px 0;
-}
-
-.json-collapse {
-  margin-top: 14px;
-  border: 1px dashed var(--x-border, #e2e8f0);
-  border-radius: 8px;
-  padding: 8px 12px;
-}
-.collapse-summary {
-  font-size: 12px;
-  color: var(--x-text-2, #334155);
-  cursor: pointer;
-  user-select: none;
-  font-weight: 500;
-}
-.muted {
-  color: var(--x-text-3, #94a3b8);
 }
 </style>
