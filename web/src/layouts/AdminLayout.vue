@@ -328,6 +328,7 @@ onUnmounted(() => {
       :navigation-hide="isMobile"
       :content-type="contentType"
       navigation-toggle="external"
+      :reserve-navigation-toggle-row="false"
       @update:navigation-open="setNavigationOpen"
     >
       <template #navigation>

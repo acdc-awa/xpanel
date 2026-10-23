@@ -127,7 +127,9 @@ function toggle() {
           <Icon :name="item.icon" />
         </span>
         <span :class="cx(cs['link-text-wrapper'], collapsed && cs['link-text-wrapper--collapsed'])">
-          <span :class="cs['link-text-wrapper-content']">
+          <span
+            :class="cx(cs['link-text-wrapper-content'], variant === 'root' && 'cs-nav-root-link-text')"
+          >
             {{ item.text }}
             <span v-if="item.external" :class="cs['external-icon']" aria-hidden="true">
               <Icon name="external" />
@@ -351,5 +353,13 @@ function toggle() {
   outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
   outline-offset: -2px;
   border-radius: var(--border-radius-side-navigation-item-umkj1e, 8px);
+}
+
+/* 根级单项（如「仪表盘」）与分组标题同级：用官方 expandable heading 的字号/字重，
+   避免单项看起来比分类标题小一号。 */
+.cs-nav-root-link-text {
+  font-size: var(--font-size-expandable-heading-04ofyn, 16px);
+  font-weight: var(--font-weight-heading-s-mu75ca, 700);
+  letter-spacing: var(--letter-spacing-heading-s-kfu48f, -0.005em);
 }
 </style>
