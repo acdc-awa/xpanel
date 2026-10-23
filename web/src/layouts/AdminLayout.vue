@@ -196,12 +196,14 @@ watch(
 
 const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   const path = route.path
+  // 根级固定为「管理页面」；分组有独立页面时是二级，否则是三级的中间级。
+  const root: BreadcrumbItem = { text: '管理页面', href: '/admin/dashboard' }
   for (const group of adminMenuGroups) {
-    if (group.path === path) return []
+    if (group.path === path) return [root, { text: group.title }]
     const child = group.children?.find((item) => item.path === path)
-    if (child) return [{ text: group.title }, { text: child.title }]
+    if (child) return [root, { text: group.title }, { text: child.title }]
   }
-  return []
+  return [root]
 })
 
 const topbarIdentity = computed<TopNavigationIdentity>(() => ({
@@ -311,6 +313,8 @@ onUnmounted(() => {
 
     <!-- 应用栏：汉堡 + 面包屑，横跨全宽（官方 universal toolbar） -->
     <CsAppToolbar
+      :height="40"
+      :sticky-top="57"
       :navigation-label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
       @navigation-click="onNavToggleClick"
     >
@@ -324,7 +328,6 @@ onUnmounted(() => {
       :navigation-hide="isMobile"
       :content-type="contentType"
       navigation-toggle="external"
-      :reserve-navigation-toggle-row="false"
       @update:navigation-open="setNavigationOpen"
     >
       <template #navigation>
@@ -332,7 +335,6 @@ onUnmounted(() => {
           v-if="!isMobile"
           :items="navItems"
           :active-href="route.path"
-          :header="{ text: site.appName || '管理面板', href: '/admin/dashboard' }"
           @follow="onNavFollow"
           @change="onNavChange"
         />
