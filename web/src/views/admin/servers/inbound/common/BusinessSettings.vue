@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { QuestionFilled, Plus, Delete, MagicStick, CopyDocument } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import { computed } from 'vue'
+import {
+  CsAlert,
+  CsButton,
+  CsContainer,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsSelect,
+  CsTooltip,
+  ElMessage,
+} from '@/components/cloudscape'
 import type { AccessLayer } from '@/api/types'
 
-defineProps<{
+const props = defineProps<{
   inboundType: string
   layerId: number
   layers: AccessLayer[]
@@ -40,187 +51,165 @@ function copyText(txt: string, label = '内容') {
   navigator.clipboard.writeText(txt)
   ElMessage.success(`已复制 ${label}`)
 }
+
+const layerOptions = computed(() => [
+  { label: '不使用（直连端点）', value: 0 },
+  ...props.layers.map((layer) => ({
+    label: `${layer.name} (${layer.host}:${layer.port} ${layer.security === 'tls' ? 'TLS' : '明文'})`,
+    value: layer.id,
+  })),
+])
+
+const shareStrategyOptions = [
+  { label: '跟随服务器 IP / 域名', value: 'node' },
+  { label: '自定义域名或 IP', value: 'custom' },
+]
+
+const shareSecurityOptions = [
+  { label: 'auto (跟随传输层配置)', value: 'auto' },
+  { label: 'tls (强制要求 TLS)', value: 'tls' },
+  { label: 'none (明文传输)', value: 'none' },
+]
 </script>
 
 <template>
   <div class="business-settings-box">
     <!-- 微卡片 1: 对外接入层绑定 -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-          <span>对外接入层绑定 (Access Layer)</span>
-          <el-tooltip content="用于向客户端分发订阅时解析的连接地址与参数。若挂载对外接入层，则 host/port/安全层由该层决议。" placement="top">
-            <el-icon class="help-icon"><QuestionFilled /></el-icon>
-          </el-tooltip>
+    <CsContainer header="对外接入层绑定 (Access Layer)">
+      <template #info>
+        <CsTooltip content="用于向客户端分发订阅时解析的连接地址与参数。若挂载对外接入层，则 host/port/安全层由该层决议。">
+          <CsIcon name="status-info" />
+        </CsTooltip>
+      </template>
+      <template #actions>
+        <CsButton variant="primary" icon-name="gen-ai" :disabled="!serverId" @click="emit('apply-caddy-preset')">
+          应用前置反代预设
+        </CsButton>
+      </template>
+      <CsFormItem label="挂载接入层">
+        <div class="layer-row">
+          <CsSelect
+            :model-value="layerId || undefined"
+            :options="layerOptions"
+            :disabled="!serverId"
+            placeholder="选择对外层（直连请留空）"
+            clearable
+            style="flex: 1; min-width: 240px"
+            @update:model-value="(v: any) => emit('update:layerId', Number(v || 0))"
+          />
+          <CsButton icon-name="add-plus" :disabled="!serverId" @click="emit('open-layer-quick')">新建对外层</CsButton>
+          <CsButton
+            icon-name="remove"
+            variant="danger-outline"
+            :disabled="!serverId || !layerId"
+            :loading="layerDeleting"
+            @click="emit('delete-layer')"
+          >
+            删除该层
+          </CsButton>
         </div>
-        <div class="head-meta">
-          <el-button size="small" type="primary" plain :disabled="!serverId" @click="emit('apply-caddy-preset')">
-            <el-icon><MagicStick /></el-icon>&nbsp;应用前置反代预设
-          </el-button>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <el-form-item label="挂载接入层">
-          <div style="display: flex; gap: 10px; width: 100%; align-items: center; flex-wrap: wrap">
-            <el-select
-              :model-value="layerId || undefined"
-              style="flex: 1; min-width: 240px"
-              :disabled="!serverId"
-              placeholder="选择对外层（直连请留空）"
-              clearable
-              @update:model-value="(v: any) => emit('update:layerId', Number(v || 0))"
-            >
-              <el-option :value="0" label="不使用（直连端点）" />
-              <el-option
-                v-for="l in layers"
-                :key="l.id"
-                :value="l.id"
-                :label="`${l.name} (${l.host}:${l.port} ${l.security === 'tls' ? 'TLS' : '明文'})`"
-              />
-            </el-select>
-            <el-button :disabled="!serverId" :icon="Plus" @click="emit('open-layer-quick')">新建对外层</el-button>
-            <el-button
-              :disabled="!serverId || !layerId"
-              :loading="layerDeleting"
-              :icon="Delete"
-              type="danger"
-              plain
-              @click="emit('delete-layer')"
-            >
-              删除该层
-            </el-button>
-          </div>
-        </el-form-item>
-
-        <el-alert
-          v-if="layerId > 0"
-          type="success"
-          :closable="false"
-          style="margin-top: 10px"
-          title="已挂载对外接入层"
-          description="订阅中的连接 host、port 和安全层将自动取自该层。下方自定义地址组已自动失效，仅 SNI/Path 等覆写项继续生效。"
-        />
-      </div>
-    </div>
+      </CsFormItem>
+      <CsAlert v-if="layerId > 0" type="success" class="alert-gap">
+        已挂载对外接入层：订阅中的连接 host、port 和安全层将自动取自该层。下方自定义地址组已自动失效，仅 SNI/Path 等覆写项继续生效。
+      </CsAlert>
+    </CsContainer>
 
     <!-- 微卡片 2: 订阅下发覆写与自定义参数 -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>订阅下发参数覆写 (Subscription Overrides)</span>
-        </div>
-        <div class="head-meta">
-          <span>下发至客户端的连接配置</span>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <div class="form-grid-2">
-          <template v-if="!layerId">
-            <el-form-item label="分享地址策略">
-              <el-select
-                :model-value="shareStrategy"
-                style="width: 100%"
-                @update:model-value="(v: string) => emit('update:shareStrategy', v)"
-              >
-                <el-option label="跟随服务器 IP / 域名" value="node" />
-                <el-option label="自定义域名或 IP" value="custom" />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="订阅安全层 (TLS)">
-              <el-select
-                :model-value="shareSecurity"
-                style="width: 100%"
-                @update:model-value="(v: string) => emit('update:shareSecurity', v)"
-              >
-                <el-option label="auto (跟随传输层配置)" value="auto" />
-                <el-option label="tls (强制要求 TLS)" value="tls" />
-                <el-option label="none (明文传输)" value="none" />
-              </el-select>
-            </el-form-item>
-
-            <template v-if="shareStrategy === 'custom'">
-              <el-form-item label="自定义分享地址 (Host)">
-                <el-input
-                  :model-value="shareAddr"
-                  placeholder="如 cdn.example.com"
-                  class="font-mono-num"
-                  @input="(v: string) => emit('update:shareAddr', v)"
-                />
-              </el-form-item>
-              <el-form-item label="自定义分享端口 (Port)">
-                <el-input-number
-                  :model-value="sharePort"
-                  :min="0"
-                  :max="65535"
-                  placeholder="0 = 默认入站端口"
-                  class="font-mono-num"
-                  style="width: 100%"
-                  @update:model-value="(v: any) => emit('update:sharePort', Number(v || 0))"
-                />
-              </el-form-item>
-            </template>
-          </template>
-
-          <el-form-item label="客户端覆写 SNI">
-            <el-input
-              :model-value="shareSni"
-              placeholder="留空默认跟随服务器配置"
-              class="font-mono-num"
-              @input="(v: string) => emit('update:shareSni', v)"
+    <CsContainer header="订阅下发参数覆写 (Subscription Overrides)" class="section-gap">
+      <template #actions>
+        <span class="cs-text-secondary">下发至客户端的连接配置</span>
+      </template>
+      <div class="form-grid-2">
+        <template v-if="!layerId">
+          <CsFormItem label="分享地址策略">
+            <CsSelect
+              :model-value="shareStrategy"
+              :options="shareStrategyOptions"
+              style="width: 100%"
+              @update:model-value="(v: any) => emit('update:shareStrategy', String(v))"
             />
-          </el-form-item>
+          </CsFormItem>
 
-          <el-form-item label="客户端覆写 HTTP Host">
-            <el-input
-              :model-value="shareHost"
-              placeholder="留空默认跟随传输配置"
-              class="font-mono-num"
-              @input="(v: string) => emit('update:shareHost', v)"
+          <CsFormItem label="订阅安全层 (TLS)">
+            <CsSelect
+              :model-value="shareSecurity"
+              :options="shareSecurityOptions"
+              style="width: 100%"
+              @update:model-value="(v: any) => emit('update:shareSecurity', String(v))"
             />
-          </el-form-item>
+          </CsFormItem>
 
-          <el-form-item label="客户端覆写分流 Path">
-            <el-input
-              :model-value="sharePath"
-              placeholder="留空默认跟随传输路径"
-              class="font-mono-num"
-              @input="(v: string) => emit('update:sharePath', v)"
-            />
-          </el-form-item>
-
-          <el-form-item label="客户端证书校验">
-            <div style="padding-top: 4px">
-              <el-switch
-                :model-value="shareAllowInsecure"
-                active-text="跳过客户端证书校验 (allowInsecure)"
-                @update:model-value="(v: any) => emit('update:shareAllowInsecure', Boolean(v))"
+          <template v-if="shareStrategy === 'custom'">
+            <CsFormItem label="自定义分享地址 (Host)">
+              <CsInput
+                :model-value="shareAddr"
+                placeholder="如 cdn.example.com"
+                class="mono"
+                @update:model-value="(v: string) => emit('update:shareAddr', v)"
               />
-            </div>
-          </el-form-item>
-        </div>
+            </CsFormItem>
+            <CsFormItem label="自定义分享端口 (Port)">
+              <CsInputNumber
+                :model-value="sharePort"
+                :min="0"
+                :max="65535"
+                placeholder="0 = 默认入站端口"
+                class="mono"
+                style="width: 100%"
+                @update:model-value="(v: number | null) => emit('update:sharePort', Number(v || 0))"
+              />
+            </CsFormItem>
+          </template>
+        </template>
+
+        <CsFormItem label="客户端覆写 SNI">
+          <CsInput
+            :model-value="shareSni"
+            placeholder="留空默认跟随服务器配置"
+            class="mono"
+            @update:model-value="(v: string) => emit('update:shareSni', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="客户端覆写 HTTP Host">
+          <CsInput
+            :model-value="shareHost"
+            placeholder="留空默认跟随传输配置"
+            class="mono"
+            @update:model-value="(v: string) => emit('update:shareHost', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="客户端覆写分流 Path">
+          <CsInput
+            :model-value="sharePath"
+            placeholder="留空默认跟随传输路径"
+            class="mono"
+            @update:model-value="(v: string) => emit('update:sharePath', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="客户端证书校验">
+          <div class="toggle-pad">
+            <CsToggle
+              :model-value="shareAllowInsecure"
+              label="跳过客户端证书校验 (allowInsecure)"
+              @update:model-value="(v: boolean) => emit('update:shareAllowInsecure', v)"
+            />
+          </div>
+        </CsFormItem>
       </div>
-    </div>
+    </CsContainer>
 
     <!-- 微卡片 3: Caddyfile 片段参考 -->
-    <div v-if="caddySnippet" class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-cyan-500"></span>
-          <span>Caddyfile 反向代理配置参考</span>
-        </div>
-        <div class="head-meta">
-          <el-button size="small" text type="primary" @click="copyText(caddySnippet, 'Caddyfile 配置')">
-            <el-icon><CopyDocument /></el-icon>&nbsp;复制 Caddyfile 片段
-          </el-button>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <pre class="caddy-code"><code>{{ caddySnippet }}</code></pre>
-      </div>
-    </div>
+    <CsContainer v-if="caddySnippet" header="Caddyfile 反向代理配置参考" class="section-gap">
+      <template #actions>
+        <CsButton variant="link" icon-name="copy" @click="copyText(caddySnippet, 'Caddyfile 配置')">
+          复制 Caddyfile 片段
+        </CsButton>
+      </template>
+      <pre class="caddy-code"><code>{{ caddySnippet }}</code></pre>
+    </CsContainer>
   </div>
 </template>
 
@@ -230,27 +219,41 @@ function copyText(txt: string, label = '内容') {
   flex-direction: column;
 }
 
-:deep(.el-form-item) {
-  margin-bottom: 0;
+.section-gap {
+  margin-top: 16px;
 }
 
-.help-icon {
-  color: var(--x-text-3);
-  font-size: 13px;
-  margin-left: 4px;
-  cursor: help;
-  &:hover { color: var(--x-primary); }
+.alert-gap {
+  margin-top: 10px;
+}
+
+.layer-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toggle-pad {
+  padding-top: 4px;
+}
+
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .caddy-code {
-  background: var(--x-code-bg, #0f172a);
-  color: var(--x-code-text, #e2e8f0);
-  border-radius: var(--x-radius-xs, 6px);
+  background: var(--color-background-input-default-1u0v1p, #ffffff);
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  border: 1px solid var(--color-border-input-default-jtkw9d, #8c8c94);
+  border-radius: 8px;
   padding: 12px 14px;
-  font-family: var(--x-font-mono);
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
   font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;
-  border: 1px solid var(--x-border);
+  margin: 0;
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CsContainer, CsFormItem, CsInput, CsSelect, CsToggle } from '@/components/cloudscape'
 import type { TcpConfig } from '../types'
 
 const props = defineProps<{
@@ -15,67 +16,67 @@ function updateField<K extends keyof TcpConfig>(key: K, val: TcpConfig[K]) {
     [key]: val,
   })
 }
+
+const headerTypeOptions = [
+  { label: 'none (无伪装，直通)', value: 'none' },
+  { label: 'http (HTTP 头部混淆)', value: 'http' },
+]
 </script>
 
 <template>
-  <div class="x-micro-card">
-    <div class="x-micro-card__head">
-      <div class="head-title">
-        <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-        <span>TCP (RAW) 传输流配置</span>
-      </div>
-      <div class="head-meta">
-        标准传输模式
-      </div>
-    </div>
-    <div class="x-micro-card__body">
-      <div class="form-grid-2">
-        <el-form-item label="TCP 伪装类型 (Header)">
-          <el-select
-            :model-value="modelValue.header_type"
-            style="width: 100%"
-            @update:model-value="(v: 'none' | 'http') => updateField('header_type', v)"
-          >
-            <el-option label="none (无伪装，直通)" value="none" />
-            <el-option label="http (HTTP 头部混淆)" value="http" />
-          </el-select>
-        </el-form-item>
+  <CsContainer header="TCP (RAW) 传输流配置">
+    <template #actions>
+      <span class="cs-text-secondary">标准传输模式</span>
+    </template>
+    <div class="form-grid-2">
+      <CsFormItem label="TCP 伪装类型 (Header)">
+        <CsSelect
+          :model-value="modelValue.header_type"
+          :options="headerTypeOptions"
+          style="width: 100%"
+          @update:model-value="(v: any) => updateField('header_type', String(v) as TcpConfig['header_type'])"
+        />
+      </CsFormItem>
 
-        <el-form-item label="前置反向代理 (Proxy Protocol)">
-          <div style="padding-top: 4px">
-            <el-switch
-              :model-value="modelValue.acceptProxyProtocol"
-              active-text="接收 Proxy Protocol v1/v2"
-              @update:model-value="(v: any) => updateField('acceptProxyProtocol', Boolean(v))"
-            />
-          </div>
-        </el-form-item>
+      <CsFormItem label="前置反向代理 (Proxy Protocol)">
+        <div class="toggle-pad">
+          <CsToggle
+            :model-value="modelValue.acceptProxyProtocol"
+            label="接收 Proxy Protocol v1/v2"
+            @update:model-value="(v: boolean) => updateField('acceptProxyProtocol', v)"
+          />
+        </div>
+      </CsFormItem>
 
-        <template v-if="modelValue.header_type === 'http'">
-          <el-form-item label="HTTP Request Host">
-            <el-input
-              :model-value="modelValue.request_host"
-              placeholder="如 example.com"
-              class="font-mono-num"
-              @input="(v: string) => updateField('request_host', v)"
-            />
-          </el-form-item>
-          <el-form-item label="HTTP Request Path">
-            <el-input
-              :model-value="modelValue.request_path"
-              placeholder="/"
-              class="font-mono-num"
-              @input="(v: string) => updateField('request_path', v)"
-            />
-          </el-form-item>
-        </template>
-      </div>
+      <template v-if="modelValue.header_type === 'http'">
+        <CsFormItem label="HTTP Request Host">
+          <CsInput
+            :model-value="modelValue.request_host"
+            placeholder="如 example.com"
+            class="mono"
+            @update:model-value="(v: string) => updateField('request_host', v)"
+          />
+        </CsFormItem>
+        <CsFormItem label="HTTP Request Path">
+          <CsInput
+            :model-value="modelValue.request_path"
+            placeholder="/"
+            class="mono"
+            @update:model-value="(v: string) => updateField('request_path', v)"
+          />
+        </CsFormItem>
+      </template>
     </div>
-  </div>
+  </CsContainer>
 </template>
 
 <style scoped lang="scss">
-:deep(.el-form-item) {
-  margin-bottom: 0;
+.toggle-pad {
+  padding-top: 4px;
+}
+
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 </style>

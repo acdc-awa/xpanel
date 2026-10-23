@@ -1,12 +1,26 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import {
-  Check,
-  Warning,
-  MagicStick,
-  InfoFilled,
-} from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsCheckboxGroup,
+  CsContainer,
+  CsDatePicker,
+  CsForm,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsSegmentedControl,
+  CsSelect,
+  CsTabs,
+  CsToggle,
+  ElMessage,
+  ElMessageBox,
+} from '@/components/cloudscape'
+import type { CheckboxGroupOption, SegmentedOption, TabItem } from '@/components/cloudscape'
 import {
   getLayers,
   createLayer,
@@ -338,17 +352,61 @@ const allowedSecurities = computed<InboundSecurity[]>(() => {
 // Tab 顺序严格对应入站 JSON 的结构：
 // 顶层四字段 → settings → streamSettings(传输 + finalmask + sockopt) → streamSettings(security)
 // → sniffing → 面板业务字段（不属于 xray 配置）→ 原始 JSON。
-const visibleTabs = computed(() => {
+const visibleTabs = computed<TabItem[]>(() => {
   return [
-    { key: 'basic', label: '基础' },
-    { key: 'settings', label: 'settings' },
-    { key: 'transport', label: '传输' },
-    { key: 'security', label: '安全' },
-    { key: 'sniffing', label: '嗅探' },
-    { key: 'business', label: '业务与订阅' },
-    { key: 'advanced', label: '原始 JSON' },
+    { id: 'basic', label: '基础' },
+    { id: 'settings', label: 'settings' },
+    { id: 'transport', label: '传输' },
+    { id: 'security', label: '安全' },
+    { id: 'sniffing', label: '嗅探' },
+    { id: 'business', label: '业务与订阅' },
+    { id: 'advanced', label: '原始 JSON' },
   ]
 })
+
+const protocolOptions = [
+  { label: 'VLESS', value: 'vless' },
+  { label: 'Hysteria 2', value: 'hysteria' },
+  { label: 'Dokodemo-door (四层直通/端口转发)', value: 'dokodemo-door' },
+]
+
+const trafficResetOptions = [
+  { label: '不重置 (never)', value: 'never' },
+  { label: '每日重置 (daily)', value: 'daily' },
+  { label: '每周重置 (weekly)', value: 'weekly' },
+  { label: '每月重置 (monthly)', value: 'monthly' },
+]
+
+const layerSecurityOptions = [
+  { label: 'TLS (默认)', value: 'tls' },
+  { label: '明文 (none)', value: 'none' },
+]
+
+const sniffingTargetOptions: CheckboxGroupOption[] = [
+  { value: 'http', label: 'HTTP 域名' },
+  { value: 'tls', label: 'TLS SNI' },
+  { value: 'quic', label: 'QUIC' },
+]
+
+// 传输层与安全层的分段控件选项：只列出当前协议允许的取值。
+const networkOptions = computed<SegmentedOption[]>(() =>
+  allowedNetworks.value.map((network) => ({
+    id: network,
+    text: network === 'tcp' ? 'TCP (RAW 推荐)' : 'xhttp (SplitHTTP)',
+  }))
+)
+
+const securityOptions = computed<SegmentedOption[]>(() =>
+  allowedSecurities.value.map((security) => ({
+    id: security,
+    text:
+      security === 'none'
+        ? '无加密 (none)'
+        : security === 'tls'
+          ? '标准 TLS'
+          : 'REALITY 伪装',
+  }))
+)
 
 const allowVisionFlow = computed(() => {
   return localProtocol.value === 'vless' &&
@@ -367,7 +425,7 @@ function enforceCapabilityMatrix() {
     vlessForm.value.flow = ''
   }
   // 保证当前激活的 Tab 必须在可见列表中
-  if (!visibleTabs.value.some((t) => t.key === activeTab.value)) {
+  if (!visibleTabs.value.some((t) => t.id === activeTab.value)) {
     activeTab.value = 'basic'
   }
 }
@@ -396,14 +454,14 @@ function onProtocolChange(proto: any) {
   syncFormToJson()
 }
 
-function onNetworkChange(net: any) {
-  localNetwork.value = String(net || 'tcp') as InboundNetwork
+function onNetworkChange(detail: { selectedId: string | number }) {
+  localNetwork.value = String(detail?.selectedId || 'tcp') as InboundNetwork
   enforceCapabilityMatrix()
   syncFormToJson()
 }
 
-function onSecurityChange(sec: any) {
-  localTlsType.value = String(sec || 'none') as InboundSecurity
+function onSecurityChange(detail: { selectedId: string | number }) {
+  localTlsType.value = String(detail?.selectedId || 'none') as InboundSecurity
   if (localTlsType.value === 'reality' && !realityForm.value.private_key) {
     autoGenRealityKey()
   }
@@ -1511,60 +1569,44 @@ watch(
 
 <template>
   <div class="inbound-editor">
-    <!-- 顶部导航：各层配置 Tab 与 高级配置 (JSON) -->
-    <div class="editor-top-nav">
-      <el-radio-group v-model="activeTab" size="small" class="category-tabs">
-        <el-radio-button v-for="t in visibleTabs" :key="t.key" :value="t.key">
-          {{ t.label }}
-        </el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <!-- 表单视图容器 -->
-    <div class="form-body">
-      <el-form label-position="top">
+    <CsTabs v-model="activeTab" :tabs="visibleTabs" aria-label="入站配置分类">
+      <div class="form-body">
         <!-- ==================== 1. 基础 Tab：只有入站 JSON 的四个顶层字段 ==================== -->
         <div v-show="activeTab === 'basic'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span>入站顶层字段</span>
-              </div>
-              <div class="head-meta">listen / port / tag / protocol</div>
+          <CsContainer header="入站顶层字段">
+            <template #actions>
+              <span class="cs-text-secondary">listen / port / tag / protocol</span>
+            </template>
+            <div class="form-grid-2">
+              <CsFormItem label="监听地址 (listen)">
+                <CsInput v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="mono" />
+              </CsFormItem>
+
+              <CsFormItem label="端口 (port)">
+                <CsInputNumber v-model="localPort" :min="1" :max="65535" style="width: 100%" class="mono" />
+              </CsFormItem>
+
+              <CsFormItem label="唯一标识 (tag)">
+                <CsInput v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
+              </CsFormItem>
+
+              <CsFormItem label="协议 (protocol)">
+                <CsSelect
+                  v-model="localProtocol"
+                  :options="protocolOptions"
+                  style="width: 100%"
+                  @change="onProtocolChange"
+                />
+              </CsFormItem>
             </div>
-            <div class="x-micro-card__body">
-              <div class="form-grid-2">
-                <el-form-item label="监听地址 (listen)">
-                  <el-input v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="font-mono-num" />
-                </el-form-item>
-
-                <el-form-item label="端口 (port)">
-                  <el-input-number v-model="localPort" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
-                </el-form-item>
-
-                <el-form-item label="唯一标识 (tag)">
-                  <el-input v-model="localTag" placeholder="如 Tokyo-01-VLESS" />
-                </el-form-item>
-
-                <el-form-item label="协议 (protocol)">
-                  <el-select v-model="localProtocol" style="width: 100%" @change="onProtocolChange">
-                    <el-option label="VLESS" value="vless" />
-                    <el-option label="Hysteria 2" value="hysteria" />
-                    <el-option label="Dokodemo-door (四层直通/端口转发)" value="dokodemo-door" />
-                  </el-select>
-                </el-form-item>
-              </div>
-            </div>
-          </div>
+          </CsContainer>
         </div>
 
         <!-- ==================== 2. settings（协议参数） Tab ==================== -->
         <div v-show="activeTab === 'settings'" class="tab-pane">
-          <div v-if="localProtocol !== 'dokodemo-door'" class="compact-tip gray">
-            <el-icon><InfoFilled /></el-icon>
-            <span>settings.users 由绑定的接入点动态注入，这里只维护协议级参数。</span>
-          </div>
+          <CsAlert v-if="localProtocol !== 'dokodemo-door'" type="info">
+            settings.users 由绑定的接入点动态注入，这里只维护协议级参数。
+          </CsAlert>
           <VlessSettings
             v-if="localProtocol === 'vless'"
             v-model="vlessForm"
@@ -1591,40 +1633,30 @@ watch(
 
         <!-- ==================== 3. 传输层 Tab：streamSettings 非 security 部分 ==================== -->
         <div v-show="activeTab === 'transport'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-                <span>传输方式 (streamSettings.network)</span>
-              </div>
-              <div class="head-meta">网络流封装</div>
-            </div>
-            <div class="x-micro-card__body">
-              <el-form-item v-if="localProtocol === 'vless'" label="传输协议类型" style="margin-bottom: 0">
-                <el-radio-group v-model="localNetwork" size="small" @change="onNetworkChange">
-                  <el-radio-button value="tcp">TCP (RAW 推荐)</el-radio-button>
-                  <el-radio-button v-if="allowedNetworks.includes('xhttp')" value="xhttp">xhttp (SplitHTTP)</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-              <div v-else class="compact-tip blue">
-                <el-icon><InfoFilled /></el-icon>
-                <span v-if="localProtocol === 'hysteria'">Hysteria 协议（protocol=hysteria，代理协议）与 hysteria 传输（network=hysteria，魔改 QUIC）是两层；这里固定使用后者，加密固定为 TLS。</span>
-                <span v-else>Dokodemo-door 固定使用 raw (tcp) 传输，监听与目标由 settings 决定。</span>
-              </div>
-              <div v-if="localProtocol === 'vless'" class="compact-tip gray" style="margin-top: 10px">
-                <el-icon><InfoFilled /></el-icon>
-                <span>finalmask 等未提供表单的 streamSettings 键可在「原始 JSON」中编辑，本表单会原样保留。</span>
-              </div>
-            </div>
-          </div>
+          <CsContainer header="传输方式 (streamSettings.network)">
+            <template #actions>
+              <span class="cs-text-secondary">网络流封装</span>
+            </template>
+            <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
+              <CsSegmentedControl
+                v-model="localNetwork"
+                :options="networkOptions"
+                @change="onNetworkChange"
+              />
+            </CsFormItem>
+            <CsAlert v-else type="info">
+              <span v-if="localProtocol === 'hysteria'">Hysteria 协议（protocol=hysteria，代理协议）与 hysteria 传输（network=hysteria，魔改 QUIC）是两层；这里固定使用后者，加密固定为 TLS。</span>
+              <span v-else>Dokodemo-door 固定使用 raw (tcp) 传输，监听与目标由 settings 决定。</span>
+            </CsAlert>
+            <CsAlert v-if="localProtocol === 'vless'" type="info" class="editor-alert-gap">
+              finalmask 等未提供表单的 streamSettings 键可在「原始 JSON」中编辑，本表单会原样保留。
+            </CsAlert>
+          </CsContainer>
 
-          <div class="compact-tip gray">
-            <el-icon><InfoFilled /></el-icon>
-            <span>
-              层级顺序（由内向外）：协议 settings → 传输 network → 安全 security →
-              finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。
-            </span>
-          </div>
+          <CsAlert type="info">
+            层级顺序（由内向外）：协议 settings → 传输 network → 安全 security →
+            finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。
+          </CsAlert>
 
           <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
           <XhttpTransport
@@ -1638,29 +1670,22 @@ watch(
 
         <!-- ==================== 4. 安全层 Tab：streamSettings.security ==================== -->
         <div v-show="activeTab === 'security'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>安全加密协议 (streamSettings.security)</span>
-              </div>
-              <div class="head-meta">TLS / 伪装认证</div>
-            </div>
-            <div class="x-micro-card__body">
-              <el-form-item label="安全协议类型" style="margin-bottom: 0">
-                <el-radio-group v-model="localTlsType" size="small" @change="onSecurityChange">
-                  <el-radio-button v-if="allowedSecurities.includes('none')" value="none">无加密 (none)</el-radio-button>
-                  <el-radio-button v-if="allowedSecurities.includes('tls')" value="tls">标准 TLS</el-radio-button>
-                  <el-radio-button v-if="allowedSecurities.includes('reality')" value="reality">REALITY 伪装</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </div>
-          </div>
+          <CsContainer header="安全加密协议 (streamSettings.security)">
+            <template #actions>
+              <span class="cs-text-secondary">TLS / 伪装认证</span>
+            </template>
+            <CsFormItem label="安全协议类型">
+              <CsSegmentedControl
+                v-model="localTlsType"
+                :options="securityOptions"
+                @change="onSecurityChange"
+              />
+            </CsFormItem>
+          </CsContainer>
 
-          <div v-if="localProtocol === 'hysteria'" class="compact-tip blue">
-            <el-icon><InfoFilled /></el-icon>
-            <span>Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。</span>
-          </div>
+          <CsAlert v-if="localProtocol === 'hysteria'" type="info">
+            Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。
+          </CsAlert>
 
           <TlsSecurity
             v-if="localTlsType === 'tls'"
@@ -1673,105 +1698,70 @@ watch(
             v-model="realityForm"
             v-model:fingerprint="realityFingerprint"
           />
-          <div v-else-if="localTlsType === 'none'" class="x-micro-card">
-            <div class="x-micro-card__body">
-              <div class="compact-tip gray">
-                <el-icon><InfoFilled /></el-icon>
-                <span>未启用传输层加密 (none)，适用于前置反代或受信任局域网。</span>
-              </div>
-            </div>
-          </div>
+          <CsAlert v-else-if="localTlsType === 'none'" type="info">
+            未启用传输层加密 (none)，适用于前置反代或受信任局域网。
+          </CsAlert>
         </div>
 
         <!-- ==================== 5. 嗅探 Tab：inbound.sniffing ==================== -->
         <div v-show="activeTab === 'sniffing'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-violet-500"></span>
-                <span>流量嗅探 (sniffing)</span>
-              </div>
-              <div class="head-meta">
-                <el-switch
-                  v-model="sniffingForm.enabled"
-                  active-text="启用流量嗅探"
-                  size="small"
+          <CsContainer header="流量嗅探 (sniffing)">
+            <template #actions>
+              <CsToggle v-model="sniffingForm.enabled" label="启用流量嗅探" />
+            </template>
+            <div v-if="sniffingForm.enabled" class="form-grid-2">
+              <CsFormItem label="嗅探目标协议" style="grid-column: span 2">
+                <CsCheckboxGroup
+                  v-model="sniffingForm.destOverride"
+                  :options="sniffingTargetOptions"
                 />
-              </div>
-            </div>
-            <div v-if="sniffingForm.enabled" class="x-micro-card__body">
-              <div class="form-grid-2">
-                <el-form-item label="嗅探目标协议" style="grid-column: span 2">
-                  <el-checkbox-group v-model="sniffingForm.destOverride">
-                    <el-checkbox value="http" label="HTTP 域名" />
-                    <el-checkbox value="tls" label="TLS SNI" />
-                    <el-checkbox value="quic" label="QUIC" />
-                  </el-checkbox-group>
-                </el-form-item>
+              </CsFormItem>
 
-                <el-form-item label="仅提取元数据 (metadataOnly)">
-                  <el-switch
-                    v-model="sniffingForm.metadataOnly"
-                    active-text="仅提取不覆盖连接"
-                  />
-                </el-form-item>
+              <CsFormItem label="仅提取元数据 (metadataOnly)">
+                <CsToggle v-model="sniffingForm.metadataOnly" label="仅提取不覆盖连接" />
+              </CsFormItem>
 
-                <el-form-item label="仅用于路由 (routeOnly)">
-                  <el-switch
-                    v-model="sniffingForm.routeOnly"
-                    active-text="仅供出站路由分流决策"
-                  />
-                </el-form-item>
-              </div>
+              <CsFormItem label="仅用于路由 (routeOnly)">
+                <CsToggle v-model="sniffingForm.routeOnly" label="仅供出站路由分流决策" />
+              </CsFormItem>
             </div>
-          </div>
+          </CsContainer>
         </div>
 
         <!-- ==================== 6. 业务与订阅 Tab（面板字段，不写入 xray 配置） ==================== -->
         <div v-show="activeTab === 'business'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-                <span>备注与计费策略</span>
-              </div>
-              <div class="head-meta">面板业务字段</div>
+          <CsContainer header="备注与计费策略">
+            <template #actions>
+              <span class="cs-text-secondary">面板业务字段</span>
+            </template>
+            <div class="form-grid-2">
+              <CsFormItem label="备注 (Remark)" style="grid-column: span 2">
+                <CsInput v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
+              </CsFormItem>
+
+              <CsFormItem label="流量倍率">
+                <CsInputNumber v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" class="mono" />
+              </CsFormItem>
+
+              <CsFormItem label="流量配额 (GB)">
+                <CsInputNumber v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" class="mono" />
+              </CsFormItem>
+
+              <CsFormItem label="流量重置周期">
+                <CsSelect v-model="localTrafficReset" :options="trafficResetOptions" style="width: 100%" />
+              </CsFormItem>
+
+              <CsFormItem label="到期时间">
+                <CsDatePicker
+                  v-model="localExpiryTime"
+                  type="datetime"
+                  placeholder="留空为永久有效"
+                  style="width: 100%"
+                  value-format="YYYY-MM-DDTHH:mm:ssZ"
+                />
+              </CsFormItem>
             </div>
-            <div class="x-micro-card__body">
-              <div class="form-grid-2">
-                <el-form-item label="备注 (Remark)" style="grid-column: span 2">
-                  <el-input v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
-                </el-form-item>
-
-                <el-form-item label="流量倍率">
-                  <el-input-number v-model="localRatio" :min="0" :step="0.1" :precision="2" style="width: 100%" class="font-mono-num" />
-                </el-form-item>
-
-                <el-form-item label="流量配额 (GB)">
-                  <el-input-number v-model="localTotalGB" :min="0" :step="10" :precision="0" style="width: 100%" class="font-mono-num" />
-                </el-form-item>
-
-                <el-form-item label="流量重置周期">
-                  <el-select v-model="localTrafficReset" style="width: 100%">
-                    <el-option label="不重置 (never)" value="never" />
-                    <el-option label="每日重置 (daily)" value="daily" />
-                    <el-option label="每周重置 (weekly)" value="weekly" />
-                    <el-option label="每月重置 (monthly)" value="monthly" />
-                  </el-select>
-                </el-form-item>
-
-                <el-form-item label="到期时间">
-                  <el-date-picker
-                    v-model="localExpiryTime"
-                    type="datetime"
-                    placeholder="留空为永久有效"
-                    style="width: 100%"
-                    value-format="YYYY-MM-DDTHH:mm:ssZ"
-                  />
-                </el-form-item>
-              </div>
-            </div>
-          </div>
+          </CsContainer>
 
           <BusinessSettings
             v-if="localInboundType === 'user'"
@@ -1806,109 +1796,81 @@ watch(
 
         <!-- ==================== 7. 原始 JSON Tab ==================== -->
         <div v-show="activeTab === 'advanced'" class="tab-pane">
-          <div class="x-micro-card">
-            <div class="x-micro-card__head">
-              <div class="head-title">
-                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-                <span>入站底层配置 (Config JSON)</span>
+          <CsContainer header="入站底层配置 (Config JSON)">
+            <template #actions>
+              <div class="json-status">
+                <CsBadge v-if="!jsonError" color="green">
+                  <CsIcon name="check" /> 语法正确
+                </CsBadge>
+                <CsBadge v-else color="red">
+                  <CsIcon name="status-warning" /> {{ jsonError }}
+                </CsBadge>
+                <CsButton icon-name="gen-ai" @click="formatRawJson">格式化</CsButton>
               </div>
-              <div class="head-meta" style="display: flex; align-items: center; gap: 8px">
-                <el-tag v-if="!jsonError" type="success" size="small">
-                  <el-icon><Check /></el-icon>&nbsp;语法正确
-                </el-tag>
-                <el-tag v-else type="danger" size="small">
-                  <el-icon><Warning /></el-icon>&nbsp;{{ jsonError }}
-                </el-tag>
-                <el-button size="small" plain @click="formatRawJson">
-                  <el-icon><MagicStick /></el-icon>&nbsp;格式化
-                </el-button>
-              </div>
+            </template>
+            <CsAlert type="info" class="editor-alert-gap">
+              这是面板存储的投影源（服务端与订阅共用）。生成服务端配置时会剥离
+              fingerprint、realitySettings.publicKey、tlsSettings.allowInsecure、
+              xhttpSettings.xmux / downloadSettings / noGRPCHeader 等客户端字段；
+              订阅侧仍使用它们。直通的 streamSettings.proxy_protocol 是面板私有键
+              （供派生 freedom 出站发送 PPv2），不会写进节点配置。
+            </CsAlert>
+            <div class="json-editor-wrap">
+              <CodeEditor
+                :model-value="rawJsonText"
+                language="json"
+                height="480px"
+                @update:model-value="onRawJsonInput"
+              />
             </div>
-            <div class="x-micro-card__body">
-              <div class="compact-tip gray" style="margin-bottom: 10px">
-                <el-icon><InfoFilled /></el-icon>
-                <span>
-                  这是面板存储的投影源（服务端与订阅共用）。生成服务端配置时会剥离
-                  fingerprint、realitySettings.publicKey、tlsSettings.allowInsecure、
-                  xhttpSettings.xmux / downloadSettings / noGRPCHeader 等客户端字段；
-                  订阅侧仍使用它们。直通的 streamSettings.proxy_protocol 是面板私有键
-                  （供派生 freedom 出站发送 PPv2），不会写进节点配置。
-                </span>
-              </div>
-              <div class="json-editor-wrap">
-                <CodeEditor
-                  :model-value="rawJsonText"
-                  language="json"
-                  height="480px"
-                  @update:model-value="onRawJsonInput"
-                />
-              </div>
-            </div>
-          </div>
+          </CsContainer>
         </div>
-      </el-form>
-    </div>
+      </div>
+    </CsTabs>
   </div>
 
   <!-- 快捷新建对外接入层弹窗 -->
-  <el-dialog v-model="layerQuickOpen" title="新建对外接入层" width="480px" append-to-body>
-    <el-form label-position="top">
-      <el-alert
-        title="对外接入层定义订阅对外 Host / 端口 / 安全层，创建后将绑定至当前入站。"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 16px"
-      />
-      <el-form-item label="层名称" required>
-        <el-input v-model="layerQuickForm.name" placeholder="如 HK 443 反代层" />
-      </el-form-item>
-      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px">
-        <el-form-item label="对外 Host" required>
-          <el-input v-model="layerQuickForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
-        </el-form-item>
-        <el-form-item label="对外端口">
-          <el-input-number v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" class="font-mono-num" />
-        </el-form-item>
+  <CsModal
+    v-model:visible="layerQuickOpen"
+    header="新建对外接入层"
+    size="medium"
+    :close-on-click-overlay="false"
+  >
+    <CsForm label-position="top">
+      <CsAlert type="info" class="layer-form-alert">
+        对外接入层定义订阅对外 Host / 端口 / 安全层，创建后将绑定至当前入站。
+      </CsAlert>
+      <CsFormItem label="层名称" required>
+        <CsInput v-model="layerQuickForm.name" placeholder="如 HK 443 反代层" />
+      </CsFormItem>
+      <div class="layer-host-grid">
+        <CsFormItem label="对外 Host" required>
+          <CsInput v-model="layerQuickForm.host" placeholder="域名或 IP，如 hk.edge.example.com" />
+        </CsFormItem>
+        <CsFormItem label="对外端口">
+          <CsInputNumber v-model="layerQuickForm.port" :min="1" :max="65535" style="width: 100%" class="mono" />
+        </CsFormItem>
       </div>
-      <el-form-item label="对外安全层" style="margin-bottom: 0">
-        <el-select v-model="layerQuickForm.security" style="width: 100%">
-          <el-option label="TLS (默认)" value="tls" />
-          <el-option label="明文 (none)" value="none" />
-        </el-select>
-      </el-form-item>
-    </el-form>
+      <CsFormItem label="对外安全层">
+        <CsSelect v-model="layerQuickForm.security" :options="layerSecurityOptions" style="width: 100%" />
+      </CsFormItem>
+    </CsForm>
     <template #footer>
-      <el-button @click="layerQuickOpen = false">取消</el-button>
-      <el-button type="primary" :loading="layerQuickSaving" @click="saveLayerQuick">创建并绑定</el-button>
+      <CsButton @click="layerQuickOpen = false">取消</CsButton>
+      <CsButton variant="primary" :loading="layerQuickSaving" @click="saveLayerQuick">创建并绑定</CsButton>
     </template>
-  </el-dialog>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
 .inbound-editor {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.editor-top-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--x-border);
-}
-
-.category-tabs {
-  :deep(.el-radio-button__inner) {
-    font-weight: 500;
-  }
 }
 
 .form-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
 .tab-pane {
@@ -1917,42 +1879,39 @@ watch(
   gap: 12px;
 }
 
-.json-editor-wrap {
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  overflow: hidden;
+/* 等宽数字：只改字形，不缩字号（cs-text-mono 会把字号降到 12px） */
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
-.compact-tip {
+.editor-alert-gap {
+  margin-top: 10px;
+}
+
+.json-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--x-font-xs);
-  padding: 8px 12px;
-  border-radius: var(--x-radius);
-  line-height: var(--x-leading-tight);
+}
 
-  .el-icon {
-    font-size: 14px;
-    flex: none;
-  }
+.json-editor-wrap {
+  margin-top: 12px;
+}
 
-  &.blue {
-    background: var(--x-primary-soft, rgba(59, 130, 246, 0.08));
-    color: var(--x-primary, #3b82f6);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-  }
+.layer-form-alert {
+  margin-bottom: 16px;
+}
 
-  &.orange {
-    background: rgba(245, 158, 11, 0.08);
-    color: #d97706;
-    border: 1px solid rgba(245, 158, 11, 0.25);
-  }
+.layer-host-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0 16px;
+}
 
-  &.gray {
-    background: var(--x-fill-2, rgba(0, 0, 0, 0.03));
-    color: var(--x-text-3, #9ca3af);
-    border: 1px solid var(--x-border-light, #e5e7eb);
+@media (max-width: 640px) {
+  .layer-host-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

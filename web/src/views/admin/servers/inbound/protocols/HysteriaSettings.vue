@@ -1,8 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { QuestionFilled, WarningFilled } from '@element-plus/icons-vue'
+import {
+  CsAlert,
+  CsCheckbox,
+  CsContainer,
+  CsFormItem,
+  CsIcon,
+  CsInput,
+  CsInputNumber,
+  CsSelect,
+  CsTooltip,
+} from '@/components/cloudscape'
 import type { HysteriaConfig, HysteriaMasquerade } from '../types'
 import { validateHysteriaSettings } from '../validate'
+
+const masqueradeOptions = [
+  { label: '404（默认，无伪装）', value: '404' },
+  { label: 'file（本地静态目录）', value: 'file' },
+  { label: 'proxy（反代到目标站点）', value: 'proxy' },
+  { label: 'string（固定响应内容）', value: 'string' },
+]
 
 const props = defineProps<{
   modelValue: HysteriaConfig
@@ -35,131 +52,119 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
 <template>
   <div class="hysteria-settings-box">
     <!-- 协议运行参数（hysteriaSettings） -->
-    <div class="sub-card">
-      <div class="sub-card__title">
-        <span class="dot bg-sky-500"></span>
-        <span>运行参数 (hysteriaSettings)</span>
-      </div>
+    <CsContainer header="运行参数 (hysteriaSettings)">
       <div class="form-grid">
-        <el-form-item>
+        <CsFormItem>
           <template #label>
             <span>UDP 空闲超时 (秒)</span>
-            <el-tooltip content="连接在无数据交换时的超时释放时间，默认 60 秒。" placement="top">
-              <el-icon class="help-icon"><QuestionFilled /></el-icon>
-            </el-tooltip>
+            <CsTooltip content="连接在无数据交换时的超时释放时间，默认 60 秒。">
+              <CsIcon name="status-info" class="help-icon" />
+            </CsTooltip>
           </template>
-          <el-input-number
+          <CsInputNumber
             :model-value="modelValue.udp_idle_timeout ?? 60"
             :min="5"
             :max="600"
             :step="10"
             style="width: 100%"
-            @update:model-value="(v) => updateField('udp_idle_timeout', typeof v === 'number' ? v : 60)"
+            @update:model-value="(v: number | null) => updateField('udp_idle_timeout', typeof v === 'number' ? v : 60)"
           />
-          <div class="field-hint">账号由绑定的接入点动态注入，此处不单独维护用户列表。</div>
-        </el-form-item>
+          <div class="field-hint cs-text-secondary">账号由绑定的接入点动态注入，此处不单独维护用户列表。</div>
+        </CsFormItem>
       </div>
-    </div>
+    </CsContainer>
 
     <!-- 伪装站点（hysteriaSettings.masquerade，纯服务端） -->
-    <div class="sub-card">
-      <div class="sub-card__title">
-        <span class="dot bg-rose-500"></span>
-        <span>伪装站点 (hysteriaSettings.masquerade，仅服务端)</span>
-      </div>
+    <CsContainer header="伪装站点 (hysteriaSettings.masquerade，仅服务端)" class="section-gap">
       <div class="form-grid">
-        <el-form-item label="伪装类型">
-          <el-select
+        <CsFormItem label="伪装类型">
+          <CsSelect
             :model-value="modelValue.masquerade.type"
+            :options="masqueradeOptions"
             style="width: 100%"
-            @update:model-value="(v: any) => updateMasq('type', v)"
-          >
-            <el-option label="404（默认，无伪装）" value="404" />
-            <el-option label="file（本地静态目录）" value="file" />
-            <el-option label="proxy（反代到目标站点）" value="proxy" />
-            <el-option label="string（固定响应内容）" value="string" />
-          </el-select>
-          <div class="field-hint">非 Hysteria 请求（如浏览器直接访问）返回的内容；不影响代理连接</div>
-        </el-form-item>
+            @update:model-value="(v: any) => updateMasq('type', String(v) as HysteriaMasquerade['type'])"
+          />
+          <div class="field-hint cs-text-secondary">非 Hysteria 请求（如浏览器直接访问）返回的内容；不影响代理连接</div>
+        </CsFormItem>
 
-        <el-form-item v-if="modelValue.masquerade.type === 'file'" label="静态目录 (dir)">
-          <el-input
+        <CsFormItem v-if="modelValue.masquerade.type === 'file'" label="静态目录 (dir)">
+          <CsInput
             :model-value="modelValue.masquerade.dir"
             placeholder="/var/www/html"
-            class="font-mono-num"
-            @input="(v: string) => updateMasq('dir', v)"
+            class="mono"
+            @update:model-value="(v: string) => updateMasq('dir', v)"
           />
-        </el-form-item>
+        </CsFormItem>
 
         <template v-if="modelValue.masquerade.type === 'proxy'">
-          <el-form-item label="目标 URL (url)">
-            <el-input
+          <CsFormItem label="目标 URL (url)">
+            <CsInput
               :model-value="modelValue.masquerade.url"
               placeholder="https://example.com 或 unix:/run/app.sock"
-              class="font-mono-num"
-              @input="(v: string) => updateMasq('url', v)"
+              class="mono"
+              @update:model-value="(v: string) => updateMasq('url', v)"
             />
-            <div class="field-hint">支持 http/https；unix: 开头走本地 Unix Socket</div>
-          </el-form-item>
-          <el-form-item label="反代选项">
+            <div class="field-hint cs-text-secondary">支持 http/https；unix: 开头走本地 Unix Socket</div>
+          </CsFormItem>
+          <CsFormItem label="反代选项">
             <div class="inline-row">
-              <el-checkbox
+              <CsCheckbox
                 :model-value="modelValue.masquerade.rewriteHost"
-                @update:model-value="(v: any) => updateMasq('rewriteHost', Boolean(v))"
-              >改写 Host</el-checkbox>
-              <el-checkbox
+                label="改写 Host"
+                @update:model-value="(v: boolean) => updateMasq('rewriteHost', v)"
+              />
+              <CsCheckbox
                 :model-value="modelValue.masquerade.xForwarded"
-                @update:model-value="(v: any) => updateMasq('xForwarded', Boolean(v))"
-              >追加 X-Forwarded</el-checkbox>
-              <el-checkbox
+                label="追加 X-Forwarded"
+                @update:model-value="(v: boolean) => updateMasq('xForwarded', v)"
+              />
+              <CsCheckbox
                 :model-value="modelValue.masquerade.insecure"
-                @update:model-value="(v: any) => updateMasq('insecure', Boolean(v))"
-              >跳过证书校验</el-checkbox>
+                label="跳过证书校验"
+                @update:model-value="(v: boolean) => updateMasq('insecure', v)"
+              />
             </div>
-          </el-form-item>
+          </CsFormItem>
         </template>
 
         <template v-if="modelValue.masquerade.type === 'string'">
-          <el-form-item label="响应内容 (content)">
-            <el-input
+          <CsFormItem label="响应内容 (content)">
+            <CsInput
               :model-value="modelValue.masquerade.content"
               type="textarea"
               :rows="3"
               placeholder="例如一段 HTML"
-              class="font-mono-num"
-              @input="(v: string) => updateMasq('content', v)"
+              class="mono"
+              @update:model-value="(v: string) => updateMasq('content', v)"
             />
-          </el-form-item>
-          <el-form-item label="状态码 (statusCode)">
-            <el-input-number
+          </CsFormItem>
+          <CsFormItem label="状态码 (statusCode)">
+            <CsInputNumber
               :model-value="modelValue.masquerade.statusCode"
               :min="100"
               :max="599"
               :step="1"
               placeholder="默认 200"
               style="width: 100%"
-              class="font-mono-num"
-              @update:model-value="(v: any) => updateMasq('statusCode', v == null ? undefined : Number(v))"
+              class="mono"
+              @update:model-value="(v: number | null) => updateMasq('statusCode', v == null ? undefined : v)"
             />
-          </el-form-item>
+          </CsFormItem>
         </template>
       </div>
-      <div v-if="modelValue.masquerade.type !== '404'" class="compact-notice">
+      <CsAlert v-if="modelValue.masquerade.type !== '404'" type="info" class="notice-gap">
         伪装响应只对「未通过 Hysteria 认证的普通 HTTP 请求」生效；代理流量不受影响。
-      </div>
-    </div>
+      </CsAlert>
+    </CsContainer>
 
-    <div v-if="errors.length" class="form-errors">
-      <div v-for="e in errors" :key="e" class="form-errors__item">
-        <el-icon><WarningFilled /></el-icon>
-        <span>{{ e }}</span>
-      </div>
-    </div>
+    <CsAlert v-if="errors.length" type="error" class="errors-gap">
+      <div v-for="e in errors" :key="e">{{ e }}</div>
+    </CsAlert>
 
     <!-- 紧凑轻量提示 -->
-    <div class="compact-notice">
-      <span>提示：Hysteria 2 采用 UDP (QUIC) 传输并强制 TLS 加密，账号由绑定的接入点动态提供。请在「安全层」绑定有效证书。</span>
-    </div>
+    <CsAlert type="info" class="notice-gap">
+      提示：Hysteria 2 采用 UDP (QUIC) 传输并强制 TLS 加密，账号由绑定的接入点动态提供。请在「安全层」绑定有效证书。
+    </CsAlert>
   </div>
 </template>
 
@@ -169,40 +174,21 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
   flex-direction: column;
 }
 
-.sub-card {
-  background: var(--x-fill-2, #f8fafc);
-  border: 1px solid var(--x-border-light, #e5e7eb);
-  border-radius: var(--x-radius-sm, 8px);
-  padding: 12px 14px 4px;
-  margin-bottom: 12px;
-
-  &:last-of-type {
-    margin-bottom: 8px;
-  }
+.section-gap {
+  margin-top: 16px;
 }
 
-.sub-card__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--x-text-2, #374151);
-  margin-bottom: 10px;
+.notice-gap {
+  margin-top: 4px;
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.errors-gap {
+  margin-top: 10px;
 }
 
-.bg-sky-500 {
-  background: #0ea5e9;
-}
-
-.bg-rose-500 {
-  background: #f43f5e;
+.help-icon {
+  margin-left: 4px;
+  cursor: help;
 }
 
 .inline-row {
@@ -213,56 +199,20 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
 }
 
 .field-hint {
-  font-size: 11px;
-  color: var(--x-text-3);
   margin-top: 4px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
-.compact-notice {
-  font-size: 11.5px;
-  color: var(--x-text-3);
-  line-height: 1.5;
-  background: var(--x-fill-2, rgba(0, 0, 0, 0.02));
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px dashed var(--x-border-light, #e5e7eb);
-  margin-top: 4px;
-  margin-bottom: 8px;
-}
-
-.form-errors {
-  margin-bottom: 10px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgba(245, 108, 108, 0.08);
-  border: 1px dashed rgba(245, 108, 108, 0.45);
-}
-
-.form-errors__item {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 11.5px;
-  color: #d93026;
-  line-height: 1.5;
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 18px;
-
-  :deep(.el-form-item) {
-    margin-bottom: 14px;
-  }
-}
-
-.help-icon {
-  margin-left: 4px;
-  color: var(--x-text-3);
-  vertical-align: middle;
-  cursor: pointer;
 }
 
 @media (max-width: 640px) {

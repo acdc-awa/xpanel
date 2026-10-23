@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Refresh, MagicStick, CopyDocument, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import {
+  CsButton,
+  CsButtonDropdown,
+  CsContainer,
+  CsExpandableSection,
+  CsFormItem,
+  CsIconButton,
+  CsInput,
+  CsInputNumber,
+  CsSelect,
+  ElMessage,
+} from '@/components/cloudscape'
 import { getXrayKeys } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { RealityConfig } from '../types'
@@ -17,13 +27,25 @@ const emit = defineEmits<{
 }>()
 
 const genKeyLoading = ref(false)
-const showAdvanced = ref(false)
 
 const REALITY_PRESETS = [
   { label: 'Cloudflare (www.cloudflare.com:443)', dest: 'www.cloudflare.com:443', sni: 'www.cloudflare.com' },
   { label: 'Amazon AWS (aws.amazon.com:443)', dest: 'aws.amazon.com:443', sni: 'aws.amazon.com' },
   { label: 'Yahoo Japan (www.yahoo.co.jp:443)', dest: 'www.yahoo.co.jp:443', sni: 'www.yahoo.co.jp' },
   { label: 'Docker Registry (registry-1.docker.io:443)', dest: 'registry-1.docker.io:443', sni: 'registry-1.docker.io' },
+]
+
+const presetItems = REALITY_PRESETS.map((preset) => ({ id: preset.dest, text: preset.label }))
+
+const fingerprintOptions = [
+  { label: 'Chrome (推荐)', value: 'chrome' },
+  { label: 'Firefox', value: 'firefox' },
+  { label: 'Safari', value: 'safari' },
+  { label: 'Edge', value: 'edge' },
+  { label: '360', value: '360' },
+  { label: 'QQ', value: 'qq' },
+  { label: 'Random (随机)', value: 'random' },
+  { label: 'Randomized (随机打乱)', value: 'randomized' },
 ]
 
 function updateField<K extends keyof RealityConfig>(key: K, val: RealityConfig[K]) {
@@ -33,7 +55,9 @@ function updateField<K extends keyof RealityConfig>(key: K, val: RealityConfig[K
   })
 }
 
-function applyPreset(preset: { dest: string; sni: string }) {
+function applyPreset(id: string | number) {
+  const preset = REALITY_PRESETS.find((item) => item.dest === String(id))
+  if (!preset) return
   emit('update:modelValue', {
     ...props.modelValue,
     dest: preset.dest,
@@ -82,176 +106,135 @@ function copyText(txt: string, label = '内容') {
 
 <template>
   <div class="reality-box">
-    <!-- 微卡片 1: 伪装目标与客户端指纹 -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>目标伪装与 TLS 模拟 (必填核心)</span>
-        </div>
-        <div class="head-meta">
-          <el-dropdown trigger="click" @command="applyPreset">
-            <el-button size="small" text type="primary">
-              <span>常用目标预设</span>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-for="p in REALITY_PRESETS" :key="p.dest" :command="p">
-                  {{ p.label }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <div class="form-grid-2">
-          <el-form-item label="借壳目标域名与端口 (Dest)">
-            <el-input
-              :model-value="modelValue.dest"
-              placeholder="如 www.cloudflare.com:443"
-              class="font-mono-num"
-              @input="(v: string) => updateField('dest', v)"
+    <CsContainer header="目标伪装与 TLS 模拟 (必填核心)">
+      <template #actions>
+        <CsButtonDropdown
+          :items="presetItems"
+          text="常用目标预设"
+          aria-label="常用目标预设"
+          @select="applyPreset"
+        />
+      </template>
+      <div class="form-grid-2">
+        <CsFormItem label="借壳目标域名与端口 (Dest)">
+          <CsInput
+            :model-value="modelValue.dest"
+            placeholder="如 www.cloudflare.com:443"
+            class="mono"
+            @update:model-value="(v: string) => updateField('dest', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="伪装 SNI (Server Name)">
+          <CsInput
+            :model-value="modelValue.server_name"
+            placeholder="如 www.cloudflare.com"
+            class="mono"
+            @update:model-value="(v: string) => updateField('server_name', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="模拟客户端 TLS 指纹 (Fingerprint)">
+          <CsSelect
+            :model-value="fingerprint || 'chrome'"
+            :options="fingerprintOptions"
+            style="width: 100%"
+            @update:model-value="(v: any) => emit('update:fingerprint', String(v))"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="Short ID (客户端认证短标识)">
+          <div class="inline-row">
+            <CsInput
+              :model-value="modelValue.short_id"
+              placeholder="16 位十六进制字符"
+              class="mono"
+              @update:model-value="(v: string) => updateField('short_id', v)"
             />
-          </el-form-item>
-
-          <el-form-item label="伪装 SNI (Server Name)">
-            <el-input
-              :model-value="modelValue.server_name"
-              placeholder="如 www.cloudflare.com"
-              class="font-mono-num"
-              @input="(v: string) => updateField('server_name', v)"
-            />
-          </el-form-item>
-
-          <el-form-item label="模拟客户端 TLS 指纹 (Fingerprint)">
-            <el-select
-              :model-value="fingerprint || 'chrome'"
-              style="width: 100%"
-              @update:model-value="(v: string) => emit('update:fingerprint', v)"
-            >
-              <el-option label="Chrome (推荐)" value="chrome" />
-              <el-option label="Firefox" value="firefox" />
-              <el-option label="Safari" value="safari" />
-              <el-option label="Edge" value="edge" />
-              <el-option label="360" value="360" />
-              <el-option label="QQ" value="qq" />
-              <el-option label="Random (随机)" value="random" />
-              <el-option label="Randomized (随机打乱)" value="randomized" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="Short ID (客户端认证短标识)">
-            <div style="display: flex; gap: 8px; width: 100%">
-              <el-input
-                :model-value="modelValue.short_id"
-                placeholder="16 位十六进制字符"
-                class="font-mono-num"
-                @input="(v: string) => updateField('short_id', v)"
-              />
-              <el-button title="随机生成 Short ID" @click="genShortId">
-                <el-icon><Refresh /></el-icon>
-              </el-button>
-            </div>
-          </el-form-item>
-        </div>
+            <CsIconButton icon-name="refresh" label="随机生成 Short ID" @click="genShortId" />
+          </div>
+        </CsFormItem>
       </div>
-    </div>
+    </CsContainer>
 
-    <!-- 微卡片 2: x25519 密钥认证体系 -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-          <span>Xray x25519 密钥对认证</span>
-        </div>
-        <div class="head-meta">
-          <el-button type="primary" plain size="small" :loading="genKeyLoading" @click="fetchRealityKeys">
-            <el-icon><MagicStick /></el-icon>&nbsp;重新生成密钥对
-          </el-button>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <div class="form-grid-2">
-          <el-form-item label="服务端私钥 (Private Key)">
-            <el-input
+    <CsContainer header="Xray x25519 密钥对认证" class="section-gap">
+      <template #actions>
+        <CsButton
+          variant="primary"
+          icon-name="gen-ai"
+          :loading="genKeyLoading"
+          @click="fetchRealityKeys"
+        >
+          重新生成密钥对
+        </CsButton>
+      </template>
+      <div class="form-grid-2">
+        <CsFormItem label="服务端私钥 (Private Key)">
+          <div class="inline-row">
+            <CsInput
               :model-value="modelValue.private_key"
               placeholder="x25519 私钥 (仅服务器持有)"
-              class="font-mono-num"
-              @input="(v: string) => updateField('private_key', v)"
-            >
-              <template #append>
-                <el-button v-if="modelValue.private_key" @click="copyText(modelValue.private_key, '私钥')">
-                  <el-icon><CopyDocument /></el-icon>
-                </el-button>
-              </template>
-            </el-input>
-          </el-form-item>
+              class="mono"
+              @update:model-value="(v: string) => updateField('private_key', v)"
+            />
+            <CsIconButton
+              v-if="modelValue.private_key"
+              icon-name="copy"
+              label="复制私钥"
+              @click="copyText(modelValue.private_key, '私钥')"
+            />
+          </div>
+        </CsFormItem>
 
-          <el-form-item label="客户端公钥 (Public Key - 自动下发)">
-            <el-input
+        <CsFormItem label="客户端公钥 (Public Key - 自动下发)">
+          <div class="inline-row">
+            <CsInput
               :model-value="modelValue.public_key"
               placeholder="x25519 公钥 (订阅自动注入)"
-              class="font-mono-num"
-              @input="(v: string) => updateField('public_key', v)"
-            >
-              <template #append>
-                <el-button v-if="modelValue.public_key" @click="copyText(modelValue.public_key, '公钥')">
-                  <el-icon><CopyDocument /></el-icon>
-                </el-button>
-              </template>
-            </el-input>
-          </el-form-item>
-        </div>
+              class="mono"
+              @update:model-value="(v: string) => updateField('public_key', v)"
+            />
+            <CsIconButton
+              v-if="modelValue.public_key"
+              icon-name="copy"
+              label="复制公钥"
+              @click="copyText(modelValue.public_key, '公钥')"
+            />
+          </div>
+        </CsFormItem>
       </div>
-    </div>
+    </CsContainer>
 
-    <!-- 微卡片 3: 客户端版本与时钟容差 (折叠微调) -->
-    <div class="x-micro-card">
-      <div
-        class="x-micro-card__head cursor-pointer select-none"
-        @click="showAdvanced = !showAdvanced"
-      >
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-          <span>客户端版本与时间漂移容差 (选填微调)</span>
-        </div>
-        <div class="head-meta flex items-center gap-1 text-indigo-500">
-          <span>{{ showAdvanced ? '收起配置' : '展开 3 项调优' }}</span>
-          <el-icon><component :is="showAdvanced ? ArrowUp : ArrowDown" /></el-icon>
-        </div>
+    <CsExpandableSection header="客户端版本与时间漂移容差 (选填微调)" class="section-gap">
+      <div class="form-grid-3">
+        <CsFormItem label="最低版本限制 (minClientVer)">
+          <CsInput
+            :model-value="modelValue.min_client_ver"
+            placeholder="留空不限制，如 1.8.0"
+            class="mono"
+            @update:model-value="(v: string) => updateField('min_client_ver', v)"
+          />
+        </CsFormItem>
+        <CsFormItem label="最高版本限制 (maxClientVer)">
+          <CsInput
+            :model-value="modelValue.max_client_ver"
+            placeholder="留空不限制"
+            class="mono"
+            @update:model-value="(v: string) => updateField('max_client_ver', v)"
+          />
+        </CsFormItem>
+        <CsFormItem label="最大允许时钟差 (ms)">
+          <CsInputNumber
+            :model-value="modelValue.max_time_diff"
+            :min="0"
+            style="width: 100%"
+            placeholder="0 = 不限制"
+            class="mono"
+            @update:model-value="(v: number | null) => updateField('max_time_diff', Number(v || 0))"
+          />
+        </CsFormItem>
       </div>
-      <div v-show="showAdvanced" class="x-micro-card__body">
-        <div class="form-grid-3">
-          <el-form-item label="最低版本限制 (minClientVer)">
-            <el-input
-              :model-value="modelValue.min_client_ver"
-              placeholder="留空不限制，如 1.8.0"
-              class="font-mono-num"
-              @input="(v: string) => updateField('min_client_ver', v)"
-            />
-          </el-form-item>
-          <el-form-item label="最高版本限制 (maxClientVer)">
-            <el-input
-              :model-value="modelValue.max_client_ver"
-              placeholder="留空不限制"
-              class="font-mono-num"
-              @input="(v: string) => updateField('max_client_ver', v)"
-            />
-          </el-form-item>
-          <el-form-item label="最大允许时钟差 (ms)">
-            <el-input-number
-              :model-value="modelValue.max_time_diff"
-              :min="0"
-              style="width: 100%"
-              placeholder="0 = 不限制"
-              class="font-mono-num"
-              @update:model-value="(v: any) => updateField('max_time_diff', Number(v || 0))"
-            />
-          </el-form-item>
-        </div>
-      </div>
-    </div>
+    </CsExpandableSection>
   </div>
 </template>
 
@@ -261,7 +244,24 @@ function copyText(txt: string, label = '内容') {
   flex-direction: column;
 }
 
-:deep(.el-form-item) {
-  margin-bottom: 0;
+.section-gap {
+  margin-top: 16px;
+}
+
+.inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.inline-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 </style>

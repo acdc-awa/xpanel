@@ -98,6 +98,19 @@ const selectedValues = computed<(string | number)[]>(() => {
   return [value as string | number]
 })
 
+/**
+ * 触发器与勾选态使用的值：单选的 '' 只有在选项表里确实存在同名默认项时才回显其标签。
+ * Element Plus 用 `value=""` 表达「默认项」（如 xhttp 的默认 path、流控的「不启用」），
+ * 若沿用 selectedValues 会被当成未选择而显示 placeholder。清空按钮仍只看 selectedValues。
+ */
+const displayValues = computed<(string | number)[]>(() => {
+  if (props.multiple) return selectedValues.value
+  const value = props.modelValue
+  if (value === undefined || value === null) return []
+  if (value === '' && !allOptions.value.some((option) => option.value === '')) return []
+  return [value as string | number]
+})
+
 function labelOf(value: string | number): string {
   const found = allOptions.value.find((option) => option.value === value)
   if (found) return found.label ?? String(found.value)
@@ -106,9 +119,9 @@ function labelOf(value: string | number): string {
 }
 
 const triggerText = computed(() => {
-  if (!selectedValues.value.length) return ''
-  if (!props.multiple) return labelOf(selectedValues.value[0])
-  const labels = selectedValues.value.map(labelOf).filter(Boolean)
+  if (!displayValues.value.length) return ''
+  if (!props.multiple) return labelOf(displayValues.value[0])
+  const labels = displayValues.value.map(labelOf).filter(Boolean)
   if (!props.collapseTags || labels.length <= 2) return labels.join('、')
   return `${labels.slice(0, 2).join('、')} +${labels.length - 2}`
 })
@@ -151,7 +164,7 @@ const triggerButtonClasses = computed(() =>
 )
 
 function isSelected(value: string | number) {
-  return selectedValues.value.includes(value)
+  return displayValues.value.includes(value)
 }
 
 function updatePosition() {
@@ -337,7 +350,7 @@ onBeforeUnmount(() => {
       @keydown="onTriggerKeydown"
     >
       <span
-        v-if="!selectedValues.length || !triggerText"
+        v-if="!displayValues.length || !triggerText"
         :class="[CS['select/parts'].placeholder, CS['select/parts'].trigger]"
       >
         {{ placeholder }}

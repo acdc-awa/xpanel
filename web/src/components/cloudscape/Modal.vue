@@ -4,6 +4,7 @@ import Header from './Header.vue'
 import Button from './Button.vue'
 import { CS } from './classes'
 import { cx } from './utils'
+import { lockBodyScroll, unlockBodyScroll } from './modal-scroll-lock'
 
 const props = withDefaults(
   defineProps<{
@@ -46,7 +47,8 @@ const emit = defineEmits<{
 
 const dialogRef = ref<HTMLElement | null>(null)
 const headerId = `modal-header-${Math.random().toString(36).slice(2)}`
-let previousActive: HTMLElement | null = null
+/** 本实例是否持有滚动锁；隐藏实例（visible=false）不得释放别人的锁。 */
+let scrollLocked = false
 
 const rootClasses = computed(() => cx(CS.modal.root, CS.modal.refresh))
 const focusLockClasses = computed(() => cx(CS.modal['focus-lock'], CS.modal['position-center']))
@@ -102,16 +104,17 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 function lockScroll() {
-  previousActive = document.activeElement as HTMLElement | null
-  document.body.style.overflow = 'hidden'
+  if (scrollLocked) return
+  scrollLocked = true
+  lockBodyScroll()
   document.addEventListener('keydown', onKeydown, true)
 }
 
 function unlockScroll() {
-  document.body.style.overflow = ''
+  if (!scrollLocked) return
+  scrollLocked = false
+  unlockBodyScroll()
   document.removeEventListener('keydown', onKeydown, true)
-  previousActive?.focus?.()
-  previousActive = null
 }
 
 watch(

@@ -1,5 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import {
+  CsAlert,
+  CsContainer,
+  CsFormItem,
+  CsInput,
+  CsInputNumber,
+  CsSegmentedControl,
+  CsSelect,
+  CsToggle,
+} from '@/components/cloudscape'
 import { getInbounds, getServers, type InboundItem } from '@/api/admin'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { DokodemoConfig } from '../types'
@@ -17,6 +27,25 @@ const emit = defineEmits<{
 
 const candidateInbounds = ref<InboundItem[]>([])
 const serverMap = ref<Record<number, string>>({})
+
+const targetModeOptions = [
+  { id: 'inbound', text: '指定目标入站' },
+  { id: 'manual', text: '手动指定远程目标' },
+  { id: 'draft', text: '草稿留空' },
+]
+
+const forwardNetworkOptions = [
+  { label: 'TCP + UDP', value: 'tcp,udp' },
+  { label: '仅 TCP', value: 'tcp' },
+  { label: '仅 UDP', value: 'udp' },
+]
+
+const targetInboundOptions = computed(() =>
+  candidateInbounds.value.map((item) => ({
+    value: item.id,
+    label: `[${serverMap.value[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`,
+  }))
+)
 
 async function loadCandidateInbounds() {
   try {
@@ -45,8 +74,8 @@ function updateField<K extends keyof DokodemoConfig>(key: K, val: DokodemoConfig
   })
 }
 
-function onModeChange(mode: any) {
-  const m = String(mode) as 'inbound' | 'manual' | 'draft'
+function onModeChange(detail: { selectedId: string | number }) {
+  const m = String(detail?.selectedId || 'draft') as 'inbound' | 'manual' | 'draft'
   if (m === 'inbound') {
     emit('update:modelValue', {
       ...props.modelValue,
@@ -108,7 +137,7 @@ const targetSummaryText = computed(() => {
       <div class="pipeline-flow">
         <div class="pipeline-node inbound">
           <span class="node-tag">入站监听</span>
-          <span class="node-val font-mono-num" :title="`监听 ${listenAddress || '0.0.0.0'}:${listenPort || 443}`">
+          <span class="node-val mono" :title="`监听 ${listenAddress || '0.0.0.0'}:${listenPort || 443}`">
             {{ listenAddress || '0.0.0.0' }}:{{ listenPort || 443 }}
           </span>
         </div>
@@ -123,7 +152,7 @@ const targetSummaryText = computed(() => {
           :class="{ empty: modelValue.target_mode === 'draft' || (!modelValue.target_inbound_id && !modelValue.target_address) }"
         >
           <span class="node-tag">目标出口</span>
-          <span class="node-val font-mono-num" :title="targetSummaryText">{{ targetSummaryText }}</span>
+          <span class="node-val mono" :title="targetSummaryText">{{ targetSummaryText }}</span>
         </div>
       </div>
       <div class="pipeline-hint">
@@ -132,127 +161,93 @@ const targetSummaryText = computed(() => {
     </div>
 
     <!-- 微卡片 1: 转发目标定义 -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-          <span>转发目标出口 (Target Destination)</span>
-        </div>
-        <div class="head-meta">
-          <el-radio-group :model-value="modelValue.target_mode" size="small" @change="onModeChange">
-            <el-radio-button value="inbound">指定目标入站</el-radio-button>
-            <el-radio-button value="manual">手动指定远程目标</el-radio-button>
-            <el-radio-button value="draft">草稿留空</el-radio-button>
-          </el-radio-group>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <!-- 模式一：指定入站 -->
-        <div v-if="modelValue.target_mode === 'inbound'" class="form-grid-2">
-          <el-form-item label="直通目标入站" style="grid-column: 1 / -1">
-            <el-select
-              :model-value="modelValue.target_inbound_id || undefined"
-              filterable
-              placeholder="选择要直通的目标入站"
-              style="width: 100%"
-              @update:model-value="(v: any) => updateField('target_inbound_id', Number(v || 0))"
-            >
-              <el-option
-                v-for="item in candidateInbounds"
-                :key="item.id"
-                :label="`[${serverMap[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`"
-                :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
-          <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
-            <el-alert
-              type="warning"
-              :closable="false"
-              show-icon
-              title="所选目标入站未启用 Proxy Protocol，无法透传真实客户端 IP。"
-            />
-          </div>
-        </div>
-
-        <!-- 模式二：手动指定 -->
-        <div v-else-if="modelValue.target_mode === 'manual'" class="form-grid-2">
-          <el-form-item label="转发目标地址 (Target Address)">
-            <el-input
-              :model-value="modelValue.target_address"
-              placeholder="远程 IP 或域名，如 1.2.3.4"
-              class="font-mono-num"
-              @input="(v: string) => updateField('target_address', v)"
-            />
-          </el-form-item>
-          <el-form-item label="转发目标端口 (Target Port)">
-            <el-input-number
-              :model-value="modelValue.target_port"
-              :min="1"
-              :max="65535"
-              style="width: 100%"
-              class="font-mono-num"
-              @update:model-value="(v: any) => updateField('target_port', Number(v || 0))"
-            />
-          </el-form-item>
-        </div>
-
-        <!-- 模式三：草稿留空 -->
-        <div v-else class="draft-tip-box">
-          <el-alert
-            type="info"
-            :closable="false"
-            show-icon
-            title="草稿状态：未指定目标地址与端口"
-            description="可在拓扑画布中连线绑定目标入站。"
+    <CsContainer header="转发目标出口 (Target Destination)">
+      <template #actions>
+        <CsSegmentedControl
+          :model-value="modelValue.target_mode"
+          :options="targetModeOptions"
+          @change="onModeChange"
+        />
+      </template>
+      <!-- 模式一：指定入站 -->
+      <div v-if="modelValue.target_mode === 'inbound'" class="form-grid-2">
+        <CsFormItem label="直通目标入站" style="grid-column: 1 / -1">
+          <CsSelect
+            :model-value="modelValue.target_inbound_id || undefined"
+            :options="targetInboundOptions"
+            filterable
+            placeholder="选择要直通的目标入站"
+            style="width: 100%"
+            @update:model-value="(v: any) => updateField('target_inbound_id', Number(v || 0))"
           />
+        </CsFormItem>
+        <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
+          <CsAlert type="warning" header="所选目标入站未启用 Proxy Protocol，无法透传真实客户端 IP。" />
         </div>
       </div>
-    </div>
+
+      <!-- 模式二：手动指定 -->
+      <div v-else-if="modelValue.target_mode === 'manual'" class="form-grid-2">
+        <CsFormItem label="转发目标地址 (Target Address)">
+          <CsInput
+            :model-value="modelValue.target_address"
+            placeholder="远程 IP 或域名，如 1.2.3.4"
+            class="mono"
+            @update:model-value="(v: string) => updateField('target_address', v)"
+          />
+        </CsFormItem>
+        <CsFormItem label="转发目标端口 (Target Port)">
+          <CsInputNumber
+            :model-value="modelValue.target_port"
+            :min="1"
+            :max="65535"
+            style="width: 100%"
+            class="mono"
+            @update:model-value="(v: number | null) => updateField('target_port', Number(v || 0))"
+          />
+        </CsFormItem>
+      </div>
+
+      <!-- 模式三：草稿留空 -->
+      <div v-else>
+        <CsAlert type="info" header="草稿状态：未指定目标地址与端口">
+          可在拓扑画布中连线绑定目标入站。
+        </CsAlert>
+      </div>
+    </CsContainer>
 
     <!-- 微卡片 2: 传输协议与 Proxy Protocol -->
-    <div class="x-micro-card">
-      <div class="x-micro-card__head">
-        <div class="head-title">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>四层传输协议与透传策略</span>
-        </div>
-        <div class="head-meta">
-          <span>直通网络层</span>
-        </div>
-      </div>
-      <div class="x-micro-card__body">
-        <div class="form-grid-2">
-          <el-form-item label="转发传输协议">
-            <el-select
-              :model-value="modelValue.network || 'tcp,udp'"
-              style="width: 100%"
-              @update:model-value="(v: string) => updateField('network', v)"
-            >
-              <el-option label="TCP + UDP" value="tcp,udp" />
-              <el-option label="仅 TCP" value="tcp" />
-              <el-option label="仅 UDP" value="udp" />
-            </el-select>
-          </el-form-item>
+    <CsContainer header="四层传输协议与透传策略" class="section-gap">
+      <template #actions>
+        <span class="cs-text-secondary">直通网络层</span>
+      </template>
+      <div class="form-grid-2">
+        <CsFormItem label="转发传输协议">
+          <CsSelect
+            :model-value="modelValue.network || 'tcp,udp'"
+            :options="forwardNetworkOptions"
+            style="width: 100%"
+            @update:model-value="(v: any) => updateField('network', String(v))"
+          />
+        </CsFormItem>
 
-          <el-form-item>
-            <template #label>
-              <span style="display: inline-flex; align-items: center; gap: 4px">
-                透传真实客户端 IP (Proxy Protocol v2)
-                <TipIcon content="开启后向落地端发送 PROXY Protocol v2 报文。落地端须开启「接收 Proxy Protocol」；若落地为普通外部 Web 服务请关闭此项。" />
-              </span>
-            </template>
-            <div style="padding-top: 4px">
-              <el-switch
-                :model-value="modelValue.proxy_protocol !== false"
-                active-text="发送 PPv2 报文"
-                @update:model-value="(v: any) => updateField('proxy_protocol', Boolean(v))"
-              />
-            </div>
-          </el-form-item>
-        </div>
+        <CsFormItem>
+          <template #label>
+            <span class="label-with-tip">
+              透传真实客户端 IP (Proxy Protocol v2)
+              <TipIcon content="开启后向落地端发送 PROXY Protocol v2 报文。落地端须开启「接收 Proxy Protocol」；若落地为普通外部 Web 服务请关闭此项。" />
+            </span>
+          </template>
+          <div class="toggle-pad">
+            <CsToggle
+              :model-value="modelValue.proxy_protocol !== false"
+              label="发送 PPv2 报文"
+              @update:model-value="(v: boolean) => updateField('proxy_protocol', v)"
+            />
+          </div>
+        </CsFormItem>
       </div>
-    </div>
+    </CsContainer>
   </div>
 </template>
 
@@ -262,14 +257,29 @@ const targetSummaryText = computed(() => {
   flex-direction: column;
 }
 
-:deep(.el-form-item) {
-  margin-bottom: 0;
+.section-gap {
+  margin-top: 16px;
+}
+
+.toggle-pad {
+  padding-top: 4px;
+}
+
+.label-with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mono {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .pipeline-banner {
-  background: var(--x-card-soft, #f8fafc);
-  border: 1px solid var(--x-border, #e2e8f0);
-  border-radius: var(--x-radius, 8px);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  border: 1px solid var(--color-border-card-btvpmf, #e9ebed);
+  border-radius: 8px;
   padding: 12px 14px;
   margin-bottom: 14px;
 }
@@ -283,8 +293,8 @@ const targetSummaryText = computed(() => {
 
 .pipeline-node {
   flex: 1;
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e2e8f0);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  border: 1px solid var(--color-border-card-btvpmf, #e9ebed);
   border-radius: 6px;
   padding: 6px 10px;
   display: flex;
@@ -295,13 +305,13 @@ const targetSummaryText = computed(() => {
   .node-tag {
     font-size: 10px;
     font-weight: 600;
-    color: var(--x-text-3, #94a3b8);
+    color: var(--color-text-body-secondary-66ygbb, #656871);
     text-transform: uppercase;
   }
   .node-val {
     font-size: 11.5px;
     font-weight: 500;
-    color: var(--x-text, #1e293b);
+    color: var(--color-text-body-default-b2us04, #0f141a);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -325,20 +335,16 @@ const targetSummaryText = computed(() => {
 }
 
 .pipeline-arrow {
-  color: var(--x-text-3, #94a3b8);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
   font-size: 12px;
   flex-shrink: 0;
 }
 
 .pipeline-hint {
   font-size: 11px;
-  color: var(--x-text-3, #64748b);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
   margin-top: 8px;
   line-height: 1.4;
-}
-
-.draft-tip-box {
-  margin-bottom: 0;
 }
 
 @media (max-width: 640px) {
