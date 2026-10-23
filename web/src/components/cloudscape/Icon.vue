@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { APP_ICON_DEFINITIONS } from './app-icons'
 import { CS } from './classes'
 import { ICON_DEFINITIONS } from './icons'
 import { cx } from './utils'
@@ -20,7 +21,7 @@ const props = withDefaults(
   }
 )
 
-const definition = computed(() => ICON_DEFINITIONS[props.name])
+const definition = computed(() => APP_ICON_DEFINITIONS[props.name] ?? ICON_DEFINITIONS[props.name])
 
 const classes = computed(() =>
   cx(

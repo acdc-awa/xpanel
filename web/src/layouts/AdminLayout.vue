@@ -216,7 +216,8 @@ const topbarIdentity = computed<TopNavigationIdentity>(() => ({
 const topbarUtilities = computed<TopNavigationUtility[]>(() => [
   {
     type: 'button',
-    iconName: 'light-dark',
+    // 官方图标集没有太阳/月亮，只有恒定的 light-dark 半边圆；这里用面板自用图标随模式切换。
+    iconName: theme.isDark ? 'moon' : 'sun',
     ariaLabel: theme.modeTooltip,
     title: theme.modeTooltip,
     onClick: () => theme.toggle(),
@@ -282,12 +283,12 @@ onUnmounted(() => {
 
 <template>
   <div class="admin-shell">
-    <!-- 全宽顶栏：品牌 + 菜单搜索 + 全局工具 -->
+    <!-- 全宽顶栏：品牌 + 菜单搜索 + 全局工具。官方 top-navigation 上下文会把 token
+         钉成深色（AWS 控制台顶栏恒深），这里不套上下文，改用页面 token 跟着亮/暗主题走。 -->
     <CsTopNavigation
       class="admin-topbar"
       :identity="topbarIdentity"
       :utilities="topbarUtilities"
-      visual-context="top-navigation"
       @identity-follow="goDashboard"
     >
       <template #search>
