@@ -184,7 +184,10 @@ async function loadFullOutbound() {
   try {
     const { data } = await getServerOutbounds(props.serverId)
     if (data.code === 0) {
-      loadedOutbound.value = data.data.items.find((o) => o.id === ob.id) ?? null
+      // 画布把行 id 字符串化后再传进来（拓扑节点按 string 建 key），接口回的是数字，
+      // 必须按字符串比对，否则回查永远落空、弹窗又退回轻量行。
+      const want = String(ob.id)
+      loadedOutbound.value = data.data.items.find((o) => String(o.id) === want) ?? null
     }
   } catch {
     /* 回查失败退回轻量行：载荷列缺失时保存会被后端形状校验拦下，不会静默覆盖 */
