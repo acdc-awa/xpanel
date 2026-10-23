@@ -1,6 +1,23 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import {
+  CsAlert,
+  CsButton,
+  CsColumnLayout,
+  CsContainer,
+  CsForm,
+  CsFormItem,
+  CsInput,
+  CsInputNumber,
+  CsModal,
+  CsSegmentedControl,
+  CsSelect,
+  CsSpaceBetween,
+  CsToggle,
+  ElMessage,
+  ElMessageBox,
+  type SegmentedOption,
+} from '@/components/cloudscape'
 import {
   createAccessPoint,
   updateAccessPoint,
@@ -82,6 +99,18 @@ const selectedInbound = computed(() =>
   effectiveInbounds.value.find((i) => i.id === form.target_inbound_id),
 )
 
+const groupOptions = computed(() => effectiveGroups.value.map((g) => ({ label: g.name, value: g.id })))
+const serverOptions = computed(() =>
+  effectiveServers.value.map((s) => ({ label: `${s.name} (${s.host})`, value: s.id })),
+)
+const inboundOptions = computed(() =>
+  availableInbounds.value.map((i) => ({ label: inboundOptionLabel(i), value: i.id })),
+)
+const targetTypeOptions: SegmentedOption[] = [
+  { id: '', text: '待连线 / 未绑定' },
+  { id: 'inbound', text: '直连落地入站' },
+]
+
 function inboundOptionLabel(inb: InboundItem): string {
   if (inb.type === 'tunnel' || inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'dokodemo-door') {
     return `[四层直通] ${inb.tag} (:${inb.port})`
@@ -91,6 +120,31 @@ function inboundOptionLabel(inb: InboundItem): string {
   }
   const proto = (inb.protocol || 'vless').toUpperCase()
   return `[${proto}] ${inb.tag} (:${inb.port})`
+}
+
+// CsSelect / CsSegmentedControl 的 v-model 类型是 string | number，这里显式收窄回表单类型。
+type SelectValue = string | number | (string | number)[] | ''
+
+function onPermissionGroupsChange(value: SelectValue) {
+  const list = Array.isArray(value) ? value : value === '' ? [] : [value]
+  form.permission_group_ids = list.map((v) => Number(v))
+}
+
+function onTargetServerChange(value: SelectValue) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const id = Number(raw)
+  targetServerId.value = Number.isFinite(id) ? id : 0
+  form.target_inbound_id = undefined
+}
+
+function onTargetInboundChange(value: SelectValue) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const id = Number(raw)
+  form.target_inbound_id = Number.isFinite(id) && id > 0 ? id : undefined
+}
+
+function onTargetTypeChange(detail: { selectedId: string | number }) {
+  form.target_type = detail.selectedId === 'inbound' ? 'inbound' : ''
 }
 
 async function loadAuxDataIfNeeded() {
@@ -242,187 +296,121 @@ async function handleDelete() {
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    :title="isEditing ? '编辑接入点' : '新建接入点'"
-    width="580px"
-    append-to-body
-    destroy-on-close
-  >
-    <el-form label-position="top">
-      <el-alert
-        title="接入点是面向客户端订阅与分发的入口。定义 Tag 名称与开放权限组即可，连接配置沿拓扑链路自动继承（亦可在下方进行高级覆写）。"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 16px"
-      />
+  <CsModal v-model:visible="visible" :header="isEditing ? '编辑接入点' : '新建接入点'" size="medium">
+    <CsForm label-position="top">
+      <CsSpaceBetween size="m">
+        <CsAlert type="info">
+          接入点是面向客户端订阅与分发的入口。定义 Tag 名称与开放权限组即可，连接配置沿拓扑链路自动继承（亦可在下方进行高级覆写）。
+        </CsAlert>
 
-      <div class="ap-row-top">
-        <el-form-item label="接入点 Tag 名称" required style="flex: 2; margin-bottom: 0">
-          <el-input v-model="form.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
-        </el-form-item>
-        <el-form-item label="启用状态" style="flex: 1; margin-bottom: 0">
-          <el-switch v-model="form.enabled" active-text="启用" inactive-text="禁用" style="margin-top: 4px" />
-        </el-form-item>
-      </div>
+        <CsColumnLayout :columns="2">
+          <CsFormItem label="接入点 Tag 名称" required>
+            <CsInput v-model="form.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
+          </CsFormItem>
+          <CsFormItem label="启用状态">
+            <CsToggle v-model="form.enabled">{{ form.enabled ? '启用' : '禁用' }}</CsToggle>
+          </CsFormItem>
+        </CsColumnLayout>
 
-      <el-form-item label="开放权限组（显式白名单权限控制，勾选可见的权限组）" style="margin-top: 14px">
-        <el-select
-          v-model="form.permission_group_ids"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          placeholder="请勾选可见的权限组"
-          style="width: 100%"
-        >
-          <el-option v-for="g in effectiveGroups" :key="g.id" :label="g.name" :value="g.id" />
-        </el-select>
-      </el-form-item>
-
-      <el-form-item label="目标绑定方式（亦可在拓扑画布上拖拽连线）">
-        <el-radio-group v-model="form.target_type" style="width: 100%">
-          <el-radio-button value="">待连线 / 未绑定</el-radio-button>
-          <el-radio-button value="inbound">直连落地入站</el-radio-button>
-        </el-radio-group>
-      </el-form-item>
-
-      <div v-if="form.target_type === 'inbound'" class="inbound-target-box">
-        <el-form-item label="目标落地服务器" style="margin-bottom: 0">
-          <el-select
-            v-model="targetServerId"
-            placeholder="选择 Xray 服务器"
-            style="width: 100%"
-            @change="form.target_inbound_id = undefined"
-          >
-            <el-option
-              v-for="s in effectiveServers"
-              :key="s.id"
-              :label="`${s.name} (${s.host})`"
-              :value="s.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="目标入站 (Target Inbound)" style="margin-bottom: 0">
-          <el-select v-model="form.target_inbound_id" placeholder="选择目标入站" style="width: 100%">
-            <el-option
-              v-for="inb in availableInbounds"
-              :key="inb.id"
-              :label="inboundOptionLabel(inb)"
-              :value="inb.id"
-            />
-          </el-select>
-        </el-form-item>
-        <div v-if="selectedInbound?.type === 'tunnel'" style="grid-column: 1 / -1; margin-top: 8px">
-          <el-alert
-            type="info"
-            :closable="false"
-            show-icon
-            title="该接入点连接四层直通管道：订阅将自动穿透下游落地入站的安全参数，并以本前置机的地址与端口对外分发。"
+        <CsFormItem label="开放权限组（显式白名单权限控制，勾选可见的权限组）">
+          <CsSelect
+            :model-value="form.permission_group_ids"
+            :options="groupOptions"
+            multiple
+            collapse-tags
+            placeholder="请勾选可见的权限组"
+            aria-label="开放权限组"
+            @change="onPermissionGroupsChange"
           />
-        </div>
-      </div>
+        </CsFormItem>
 
-      <div class="override-box">
-        <div class="override-title">
-          订阅地址覆写
-          <TipIcon content="选填；留空沿链路继承：入站分享地址 / 接入层端点。" />
-        </div>
-        <div class="override-grid">
-          <el-form-item label="自定义连接 Host" style="margin-bottom: 0">
-            <el-input v-model="form.custom_host" placeholder="留空自动继承" />
-          </el-form-item>
-          <el-form-item label="自定义连接 Port" style="margin-bottom: 0">
-            <el-input-number
-              v-model="form.custom_port"
-              :min="0"
-              :max="65535"
-              placeholder="0 自动继承"
-              style="width: 100%"
-            />
-          </el-form-item>
-        </div>
-      </div>
+        <CsFormItem label="目标绑定方式（亦可在拓扑画布上拖拽连线）">
+          <CsSegmentedControl
+            :model-value="form.target_type"
+            :options="targetTypeOptions"
+            label="目标绑定方式"
+            full-width
+            @change="onTargetTypeChange"
+          />
+        </CsFormItem>
 
-      <el-form-item label="备注说明" style="margin-bottom: 0">
-        <el-input v-model="form.remark" placeholder="选填，如 VIP 专享入口" />
-      </el-form-item>
-    </el-form>
+        <CsContainer v-if="form.target_type === 'inbound'">
+          <CsSpaceBetween size="m">
+            <CsColumnLayout :columns="2">
+              <CsFormItem label="目标落地服务器">
+                <CsSelect
+                  :model-value="targetServerId"
+                  :options="serverOptions"
+                  placeholder="选择 Xray 服务器"
+                  aria-label="目标落地服务器"
+                  @change="onTargetServerChange"
+                />
+              </CsFormItem>
+              <CsFormItem label="目标入站 (Target Inbound)">
+                <CsSelect
+                  :model-value="form.target_inbound_id ?? null"
+                  :options="inboundOptions"
+                  placeholder="选择目标入站"
+                  aria-label="目标入站"
+                  @change="onTargetInboundChange"
+                />
+              </CsFormItem>
+            </CsColumnLayout>
+
+            <CsAlert v-if="selectedInbound?.type === 'tunnel'" type="info">
+              该接入点连接四层直通管道：订阅将自动穿透下游落地入站的安全参数，并以本前置机的地址与端口对外分发。
+            </CsAlert>
+          </CsSpaceBetween>
+        </CsContainer>
+
+        <CsContainer>
+          <template #header>
+            <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+              <span>订阅地址覆写</span>
+              <TipIcon content="选填；留空沿链路继承：入站分享地址 / 接入层端点。" />
+            </CsSpaceBetween>
+          </template>
+
+          <CsColumnLayout :columns="2">
+            <CsFormItem label="自定义连接 Host">
+              <CsInput v-model="form.custom_host" placeholder="留空自动继承" />
+            </CsFormItem>
+            <CsFormItem label="自定义连接 Port">
+              <CsInputNumber
+                v-model="form.custom_port"
+                :min="0"
+                :max="65535"
+                placeholder="0 自动继承"
+              />
+            </CsFormItem>
+          </CsColumnLayout>
+        </CsContainer>
+
+        <CsFormItem label="备注说明">
+          <CsInput v-model="form.remark" placeholder="选填，如 VIP 专享入口" />
+        </CsFormItem>
+      </CsSpaceBetween>
+    </CsForm>
 
     <template #footer>
       <div class="dialog-foot">
         <div>
-          <el-button v-if="isEditing" type="danger" plain @click="handleDelete">
-            删除接入点
-          </el-button>
+          <CsButton v-if="isEditing" variant="danger-outline" @click="handleDelete">删除接入点</CsButton>
         </div>
-        <div style="display: flex; gap: 8px">
-          <el-button @click="visible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="handleSave">
-            保存接入点
-          </el-button>
-        </div>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="visible = false">取消</CsButton>
+          <CsButton variant="primary" :loading="saving" @click="handleSave">保存接入点</CsButton>
+        </CsSpaceBetween>
       </div>
     </template>
-  </el-dialog>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
-.ap-row-top {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.inbound-target-box {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 16px;
-  background: var(--x-card-soft);
-  padding: 12px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  border: 1px dashed var(--x-border);
-}
-
-.override-box {
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 16px;
-
-  .override-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--x-text-3);
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .override-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px 16px;
-  }
-}
-
 .dialog-foot {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-@media (max-width: 640px) {
-  .ap-row-top {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .inbound-target-box,
-  .override-box .override-grid {
-    grid-template-columns: 1fr !important;
-  }
+  gap: 16px;
 }
 </style>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { CopyDocument } from '@element-plus/icons-vue'
 import {
   CsAlert,
   CsBadge,
@@ -11,18 +10,30 @@ import {
   CsCardFacts,
   CsCardGrid,
   CsCheckbox,
+  CsColumnLayout,
   CsContainer,
+  CsDatePicker,
   CsEmpty,
+  CsForm,
+  CsFormItem,
+  CsIconButton,
   CsInput,
+  CsInputNumber,
+  CsModal,
   CsPage,
+  CsProgressBar,
   CsSegmentedControl,
+  CsSelect,
+  CsSpaceBetween,
   CsSpinner,
   CsStatusIndicator,
+  CsTable,
   CsToolbar,
   CsTooltip,
   ElMessage,
   ElMessageBox,
   type SegmentedOption,
+  type TableColumn,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerSettingsModal from './servers/ServerSettingsModal.vue'
@@ -421,6 +432,23 @@ interface BatchRow {
   reason?: string
   status: AgentUpgradeStatus | null
 }
+
+const batchColumns: TableColumn[] = [
+  { id: 'name', header: '服务器', key: 'name', minWidth: 140 },
+  { id: 'version', header: '当前版本', width: 110 },
+  { id: 'status', header: '状态', width: 120 },
+  { id: 'progress', header: '进度', minWidth: 200 },
+]
+
+const billingCycleOptions = [
+  { label: '月付', value: '月付' },
+  { label: '季付', value: '季付' },
+  { label: '半年付', value: '半年付' },
+  { label: '年付', value: '年付' },
+  { label: '两年付', value: '两年付' },
+  { label: '三年付', value: '三年付' },
+  { label: '一次性 / 永久', value: '一次性' },
+]
 const batchOpen = ref(false)
 const batchRunning = ref(false)
 const batchRows = ref<BatchRow[]>([])
@@ -435,10 +463,10 @@ function stopBatchPolling() {
 
 onUnmounted(stopBatchPolling)
 
-function progressStatus(phase?: string) {
-  if (phase === 'success') return 'success' as const
-  if (phase === 'failed') return 'exception' as const
-  return undefined
+function progressStatus(phase?: string): 'success' | 'error' | 'in-progress' {
+  if (phase === 'success') return 'success'
+  if (phase === 'failed') return 'error'
+  return 'in-progress'
 }
 
 async function pollBatch() {
@@ -725,176 +753,180 @@ async function batchUpgradeSelected() {
     </CsContainer>
 
     <!-- 新增服务器 -->
-    <el-dialog v-model="createOpen" title="新增服务器" width="680px" @close="closeCreate">
-      <template v-if="!createdResult">
-        <el-form label-position="top">
-          <div class="dialog-cards-stack">
-            <!-- 基础设施 -->
-            <div class="x-micro-card">
-              <div class="card-caption">
-                <span class="caption-dot emerald"></span>
-                <span>基础设施与连接定位</span>
-              </div>
-              <div class="form-grid-2">
-                <el-form-item label="服务器名称" required>
-                  <el-input v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" />
-                </el-form-item>
-                <el-form-item label="主机地址 / 域名" required>
-                  <el-input v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" />
-                </el-form-item>
-              </div>
-              <div class="form-grid-3">
-                <el-form-item label="排序序号">
-                  <el-input-number v-model="createForm.sort_order" :min="0" :step="1" placeholder="越小越靠前" style="width: 100%" />
-                </el-form-item>
-                <el-form-item label="地区位置">
-                  <el-input v-model="createForm.location" placeholder="如 日本 / 广州（选填）" />
-                </el-form-item>
-                <el-form-item label="管理备注">
-                  <el-input v-model="createForm.remark" placeholder="选填" />
-                </el-form-item>
-              </div>
-            </div>
+    <CsModal v-model:visible="createOpen" header="新增服务器" size="large" @close="closeCreate">
+      <CsForm v-if="!createdResult" label-position="top">
+        <CsSpaceBetween size="m">
+          <CsContainer header="基础设施与连接定位">
+            <CsSpaceBetween size="m">
+              <CsColumnLayout :columns="2">
+                <CsFormItem label="服务器名称" required>
+                  <CsInput v-model="createForm.name" placeholder="如 Tokyo-01 / 广州移动 BGP" />
+                </CsFormItem>
+                <CsFormItem label="主机地址 / 域名" required>
+                  <CsInput v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" />
+                </CsFormItem>
+              </CsColumnLayout>
+              <CsColumnLayout :columns="3">
+                <CsFormItem label="排序序号">
+                  <CsInputNumber
+                    v-model="createForm.sort_order"
+                    :min="0"
+                    :step="1"
+                    placeholder="越小越靠前"
+                  />
+                </CsFormItem>
+                <CsFormItem label="地区位置">
+                  <CsInput v-model="createForm.location" placeholder="如 日本 / 广州（选填）" />
+                </CsFormItem>
+                <CsFormItem label="管理备注">
+                  <CsInput v-model="createForm.remark" placeholder="选填" />
+                </CsFormItem>
+              </CsColumnLayout>
+            </CsSpaceBetween>
+          </CsContainer>
 
-            <!-- VPS 续费与资产信息 -->
-            <div class="x-micro-card">
-              <div class="card-caption">
-                <span class="caption-dot blue"></span>
-                <span>VPS 采购与续费资产（选填）</span>
-              </div>
-              <div class="form-grid-2">
-                <el-form-item label="到期日期">
-                  <el-date-picker
+          <CsContainer header="VPS 采购与续费资产（选填）">
+            <CsSpaceBetween size="m">
+              <CsColumnLayout :columns="2">
+                <CsFormItem label="到期日期">
+                  <CsDatePicker
                     v-model="createForm.expire_at"
                     type="date"
-                    placeholder="选择到期日期"
-                    format="YYYY-MM-DD"
                     value-format="YYYY-MM-DD"
-                    style="width: 100%"
+                    placeholder="选择到期日期"
                     clearable
                   />
-                </el-form-item>
-                <el-form-item label="计费周期">
-                  <el-select
+                </CsFormItem>
+                <CsFormItem label="计费周期">
+                  <CsSelect
                     v-model="createForm.billing_cycle"
+                    :options="billingCycleOptions"
                     filterable
                     allow-create
-                    default-first-option
-                    placeholder="选择或输入计费周期"
                     clearable
-                    style="width: 100%"
-                  >
-                    <el-option label="月付" value="月付" />
-                    <el-option label="季付" value="季付" />
-                    <el-option label="半年付" value="半年付" />
-                    <el-option label="年付" value="年付" />
-                    <el-option label="两年付" value="两年付" />
-                    <el-option label="三年付" value="三年付" />
-                    <el-option label="一次性 / 永久" value="一次性" />
-                  </el-select>
-                </el-form-item>
-              </div>
-              <div class="form-grid-2">
-                <el-form-item label="续费价格">
-                  <el-input v-model="createForm.price" placeholder="如 ¥35.00 / $24.99 / 120/年" clearable />
-                </el-form-item>
-                <el-form-item label="IDC 控制台地址">
-                  <el-input v-model="createForm.idc_address" placeholder="控制台网址，如 https://..." clearable />
-                </el-form-item>
-              </div>
-            </div>
-          </div>
-        </el-form>
-      </template>
-      <template v-else>
-        <el-alert type="success" :closable="false" show-icon title="服务器已创建" description="在服务器上以 root 执行以下一键安装命令：" style="margin-bottom: 12px" />
+                    placeholder="选择或输入计费周期"
+                  />
+                </CsFormItem>
+              </CsColumnLayout>
+              <CsColumnLayout :columns="2">
+                <CsFormItem label="续费价格">
+                  <CsInput v-model="createForm.price" placeholder="如 ¥35.00 / $24.99 / 120/年" clearable />
+                </CsFormItem>
+                <CsFormItem label="IDC 控制台地址">
+                  <CsInput v-model="createForm.idc_address" placeholder="控制台网址，如 https://..." clearable />
+                </CsFormItem>
+              </CsColumnLayout>
+            </CsSpaceBetween>
+          </CsContainer>
+        </CsSpaceBetween>
+      </CsForm>
+
+      <CsSpaceBetween v-else size="s">
+        <CsAlert type="success" header="服务器已创建">
+          在服务器上以 root 执行以下一键安装命令：
+        </CsAlert>
         <div class="secret-box">
           <div class="secret-row install-row">
             <span class="k">一键安装</span>
-            <code class="install-cmd font-mono-num">{{ createdResult.install_cmd }}</code>
-            <el-button size="small" text @click="copyText(createdResult.install_cmd, '安装命令')"><el-icon><CopyDocument /></el-icon></el-button>
+            <code class="install-cmd cs-text-mono">{{ createdResult.install_cmd }}</code>
+            <CsIconButton
+              icon-name="copy"
+              label="复制安装命令"
+              @click="copyText(createdResult.install_cmd, '安装命令')"
+            />
           </div>
           <div class="secret-row">
             <span class="k">node_id</span>
-            <code class="font-mono-num">{{ createdResult.node_id }}</code>
-            <el-button size="small" text @click="copyText(createdResult.node_id, 'node_id')"><el-icon><CopyDocument /></el-icon></el-button>
+            <code class="cs-text-mono">{{ createdResult.node_id }}</code>
+            <CsIconButton
+              icon-name="copy"
+              label="复制 node_id"
+              @click="copyText(createdResult.node_id, 'node_id')"
+            />
           </div>
           <div class="secret-row">
             <span class="k">secret</span>
-            <code class="font-mono-num">{{ createdResult.secret }}</code>
-            <el-button size="small" text @click="copyText(createdResult.secret, 'secret')"><el-icon><CopyDocument /></el-icon></el-button>
+            <code class="cs-text-mono">{{ createdResult.secret }}</code>
+            <CsIconButton
+              icon-name="copy"
+              label="复制 secret"
+              @click="copyText(createdResult.secret, 'secret')"
+            />
             <TipIcon
               type="warn"
               content="secret 仅显示这一次；安装完成后回到本页查看在线状态，在服务器详情中生成并下发配置。"
             />
           </div>
         </div>
-      </template>
+      </CsSpaceBetween>
+
       <template #footer>
-        <template v-if="!createdResult">
-          <el-button @click="createOpen = false">取消</el-button>
-          <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
-        </template>
-        <template v-else>
-          <el-button type="primary" @click="closeCreate">完成</el-button>
-        </template>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <template v-if="!createdResult">
+            <CsButton @click="createOpen = false">取消</CsButton>
+            <CsButton variant="primary" :loading="creating" @click="submitCreate">创建</CsButton>
+          </template>
+          <CsButton v-else variant="primary" @click="closeCreate">完成</CsButton>
+        </CsSpaceBetween>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 批量升级总览弹窗 -->
-    <el-dialog
-      v-model="batchOpen"
-      title="批量升级 Agent"
-      width="680px"
-      :close-on-click-modal="false"
+    <CsModal
+      v-model:visible="batchOpen"
+      header="批量升级 Agent"
+      size="large"
+      :close-on-click-overlay="false"
       @close="stopBatchPolling"
     >
-      <el-table :data="batchRows" size="small" max-height="420">
-        <el-table-column prop="name" label="服务器" min-width="140" show-overflow-tooltip />
-        <el-table-column label="当前版本" width="110">
-          <template #default="{ row }"><span class="cell-mono font-12">{{ row.version }}</span></template>
-        </el-table-column>
-        <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="row.skipped" size="small" type="info">已跳过</el-tag>
-            <el-tag
-              v-else-if="row.status"
-              size="small"
-              :type="row.status.phase === 'success' ? 'success' : row.status.phase === 'failed' ? 'danger' : 'primary'"
-            >
-              {{ phaseMeta[row.status.phase]?.label || row.status.phase }}
-            </el-tag>
-            <el-tag v-else size="small" type="info">等待</el-tag>
+      <CsSpaceBetween size="s">
+        <CsTable :items="batchRows" :columns="batchColumns" track-by="id" empty-text="暂无服务器">
+          <template #cell-version="{ item }">
+            <span class="cs-text-mono">{{ item.version }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="进度" min-width="200">
-          <template #default="{ row }">
-            <span v-if="row.skipped" class="muted" style="font-size: 12px">{{ row.reason }}</span>
-            <template v-else-if="row.status">
-              <el-progress
-                :percentage="phaseMeta[row.status.phase]?.percent ?? 0"
-                :status="progressStatus(row.status.phase)"
-                :stroke-width="8"
+          <template #cell-status="{ item }">
+            <CsBadge v-if="item.skipped" color="grey">已跳过</CsBadge>
+            <CsBadge
+              v-else-if="item.status"
+              :color="
+                item.status.phase === 'success'
+                  ? 'green'
+                  : item.status.phase === 'failed'
+                    ? 'red'
+                    : 'blue'
+              "
+            >
+              {{ phaseMeta[item.status.phase]?.label || item.status.phase }}
+            </CsBadge>
+            <CsBadge v-else color="grey">等待</CsBadge>
+          </template>
+          <template #cell-progress="{ item }">
+            <span v-if="item.skipped" class="cs-text-secondary">{{ item.reason }}</span>
+            <template v-else-if="item.status">
+              <CsProgressBar
+                :value="phaseMeta[item.status.phase]?.percent ?? 0"
+                :status="progressStatus(item.status.phase)"
+                :bar-height="8"
               />
-              <div v-if="row.status.error" class="cell-mono" style="font-size: 11px; color: var(--el-color-danger); margin-top: 2px; word-break: break-all">
-                {{ row.status.error }}
-              </div>
-              <div v-else-if="row.status.message" class="muted" style="font-size: 11px; margin-top: 2px">
-                {{ row.status.message }}
+              <div v-if="item.status.error" class="batch-error cs-text-mono">{{ item.status.error }}</div>
+              <div v-else-if="item.status.message" class="batch-message cs-text-secondary">
+                {{ item.status.message }}
               </div>
             </template>
-            <span v-else class="muted" style="font-size: 12px">—</span>
+            <span v-else class="cs-text-secondary">—</span>
           </template>
-        </el-table-column>
-      </el-table>
-      <div style="margin-top: 10px; font-size: 12px; color: var(--x-text-3)">
-        <template v-if="batchRunning">正在升级，进度实时更新…升级完成的服务器将在下一轮心跳后刷新版本号。</template>
-        <template v-else>全部服务器已处理完成；升级完成的服务器版本号将在下一轮心跳后刷新。</template>
-      </div>
+        </CsTable>
+        <p class="batch-hint cs-text-secondary">
+          <template v-if="batchRunning">
+            正在升级，进度实时更新…升级完成的服务器将在下一轮心跳后刷新版本号。
+          </template>
+          <template v-else>全部服务器已处理完成；升级完成的服务器版本号将在下一轮心跳后刷新。</template>
+        </p>
+      </CsSpaceBetween>
       <template #footer>
-        <el-button type="primary" @click="batchOpen = false">关闭</el-button>
+        <CsButton variant="primary" @click="batchOpen = false">关闭</CsButton>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 服务器设置弹窗 -->
     <ServerSettingsModal
@@ -915,7 +947,6 @@ async function batchUpgradeSelected() {
 </template>
 
 <style scoped lang="scss">
-.cell-mono { font-family: var(--x-font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 12.5px; color: var(--x-text-2); }
 
 /* 页面壳：Cloudscape 卡片内只保留必需的布局类 */
 .server-loading {
@@ -965,71 +996,47 @@ async function batchUpgradeSelected() {
   cursor: help;
 }
 
-/* 弹窗微卡片与工控表单栈 */
-.dialog-cards-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.x-micro-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e2e8f0);
-  border-radius: var(--x-radius-sm, 8px);
-  padding: 12px 14px;
-}
-
-.card-caption {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--x-text-1, #1e293b);
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px dashed var(--x-border, #e2e8f0);
-
-  .caption-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    &.emerald { background: #10b981; }
-    &.blue { background: #3b82f6; }
-    &.amber { background: #f59e0b; }
-  }
-}
-
-.form-grid-2 {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
-  }
-}
-
-.form-grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
-  }
-}
-.muted { color: var(--x-text-3); }
+/* 弹窗内的安装凭据块 */
 .secret-box { display: grid; gap: 10px; }
 .install-cmd { font-size: 11.5px; }
 .secret-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--x-primary-soft);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   border-radius: 8px;
   padding: 10px 12px;
-  .k { color: var(--x-text-2); font-size: 12.5px; flex: none; width: 56px; }
-  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--x-primary); word-break: break-all; flex: 1; }
+
+  .k {
+    color: var(--color-text-body-secondary-66ygbb, #656871);
+    font-size: 12.5px;
+    flex: none;
+    inline-size: 56px;
+  }
+
+  code {
+    flex: 1;
+    color: var(--color-text-link-default-qabnuk, #0972d3);
+    word-break: break-all;
+  }
 }
+
+.batch-error {
+  margin-block-start: 2px;
+  font-size: 11px;
+  color: var(--color-text-status-error-ri38gt, #db0000);
+  word-break: break-all;
+}
+.batch-message {
+  margin-block-start: 2px;
+  font-size: 11px;
+}
+.batch-hint {
+  font-size: 12px;
+  margin: 0;
+}
+
 @media (max-width: 768px) {
   .secret-row {
     flex-direction: column;
