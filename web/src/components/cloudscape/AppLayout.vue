@@ -11,8 +11,8 @@
  * 这是官方语义，不是「折叠成图标轨」。
  */
 import { computed, useSlots } from 'vue'
+import Button from './Button.vue'
 import Icon from './Icon.vue'
-import IconButton from './IconButton.vue'
 import { CS } from './classes'
 import { cx } from './utils'
 
@@ -148,12 +148,12 @@ function closeNavigation() {
         :aria-label="navigationLabel"
         :aria-hidden="!navigationOpen"
       >
-        <div :class="cx(cs['content-container'], cs['animated-content'])">
-          <div :class="cs['hide-navigation']">
-            <IconButton
+        <div :class="cx(cs['content-container'], cs['animated-content'], 'cs-nav-content')">
+          <div :class="[cs['hide-navigation'], 'cs-nav-close']">
+            <Button
+              variant="icon"
               icon-name="angle-left"
-              size="normal"
-              :label="navigationCloseLabel"
+              :aria-label="navigationCloseLabel"
               @click="closeNavigation"
             />
           </div>
@@ -196,5 +196,16 @@ function closeNavigation() {
 .cs-app-nav::-webkit-scrollbar-thumb {
   background: var(--color-border-divider-default-diwd4w, #c6c6cd);
   border-radius: 4px;
+}
+
+/* 收起按钮是绝对定位（官方 top 15px / right 16px），而导航内容（搜索框）同样定位在
+   面板顶部且 DOM 顺序更靠后，z-index 为 auto 时会把按钮压在下面。这里抬高层级，
+   并在内容顶部留出按钮行的高度，避免两者重叠。 */
+.cs-nav-close {
+  z-index: 2;
+}
+
+.cs-nav-content {
+  padding-block-start: 44px;
 }
 </style>
