@@ -24,6 +24,62 @@ func sanitizeStreamSettings(raw string) string {
 	return string(result)
 }
 
+// SanitizeOutboundStreamSettings 规范化出站（客户端角色）streamSettings。
+//
+// 出站不能复用入站清洗器：入站会删除 fingerprint/publicKey/spiderX 与
+// hysteriaSettings.auth 这些「只对客户端有意义」的字段，而出站正是客户端。
+// 这里只清掉 xray 已移除或面板私有的键，客户端字段原样保留。
+func SanitizeOutboundStreamSettings(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	var stream map[string]any
+	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
+		return raw // 解析失败则原样保留（让 xray -test 报错）
+	}
+	stream = SanitizeOutboundStreamMap(stream)
+
+	result, err := json.Marshal(stream)
+	if err != nil {
+		return raw
+	}
+	return string(result)
+}
+
+// SanitizeOutboundStreamMap 就地规范化已解析的出站 stream map。
+func SanitizeOutboundStreamMap(stream map[string]any) map[string]any {
+	// 面板专用字段，xray 不识别
+	delete(stream, "externalProxy")
+
+	// 顶层 fingerprint 不是 xray streamSettings 的字段；客户端指纹在
+	// tlsSettings.fingerprint / realitySettings.fingerprint 内，必须保留。
+	delete(stream, "fingerprint")
+
+	// 面板嵌套存储，不进 xray 配置
+	deleteNestedKey(stream, "tlsSettings", "settings")
+	deleteNestedKey(stream, "realitySettings", "settings")
+
+	// cipherSuites 在 xray 里是「: 分隔的 string」；历史前端按数组提交会让整份配置反序列化失败。
+	normalizeCipherSuites(stream)
+
+	// xray v26.6.27 起已移除 tlsSettings.allowInsecure（Build 直接报错），
+	// 客户端同样不能携带；验证改由 pinnedPeerCertSha256 / verifyPeerCertByName 承担。
+	deleteNestedKey(stream, "tlsSettings", "allowInsecure")
+
+	// REALITY + finalmask 组合会导致 xray panic（XTLS/Xray-core#6453）。
+	if security, _ := stream["security"].(string); security == "reality" {
+		delete(stream, "finalmask")
+	}
+
+	// 清理无效的 finalmask 数据（Hysteria 的 obfs/带宽/端口跳跃属于客户端能力，保留）
+	dropEmptyRandPackets(stream["finalmask"])
+
+	// xray-core #6258：session 旧键名提升
+	liftXhttpSessionKeys(stream)
+
+	return stream
+}
+
 // sanitizeStreamMap 就地规范化已解析的 stream map（生成链路直接消费 InboundSpec.Stream 时使用）。
 func sanitizeStreamMap(stream map[string]any) map[string]any {
 

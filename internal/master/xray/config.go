@@ -341,7 +341,8 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !ok {
 			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
 		}
-		if (ob.Protocol == "vless" || ob.Protocol == "hysteria") && target.Inbound.InternalUUID == "" && ob.InternalUUID == "" {
+		if (target.Inbound.Protocol == "vless" || target.Inbound.Protocol == "hysteria") &&
+			target.Inbound.InternalUUID == "" && ob.InternalUUID == "" {
 			return nil, fmt.Errorf("出站 %s 引用的落地入站 %s 未完成内部账户 setup（InternalUUID 为空）", ob.Tag, target.Inbound.Tag)
 		}
 	}
@@ -437,9 +438,10 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if !ob.Enabled {
 			continue
 		}
-		if (ob.Protocol == "vless" || ob.Protocol == "hysteria" || ob.Protocol == "socks" || ob.Protocol == "http") &&
-			ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" && strings.TrimSpace(ob.OutboundJSON) == "" {
-			// 草稿未连线出站（等待管理员在拓扑画布中拖线关联目标入站）：安全跳过注入，避免 Xray 配置校验失败
+		if ob.InboundRef == nil && strings.TrimSpace(ob.SettingsJSON) == "" && strings.TrimSpace(ob.OutboundJSON) == "" &&
+			ob.Protocol != "freedom" && ob.Protocol != "blackhole" {
+			// 草稿未连线出站（等待管理员在拓扑画布/出站编辑器中选择目标入站）：
+			// 安全跳过注入，避免 Xray 配置校验失败。
 			continue
 		}
 		item := make(map[string]any)
@@ -496,7 +498,7 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		}
 		if ob.StreamSettingsJSON != "" {
 			var stream map[string]any
-			if err := json.Unmarshal([]byte(sanitizeStreamSettings(ob.StreamSettingsJSON)), &stream); err == nil {
+			if err := json.Unmarshal([]byte(SanitizeOutboundStreamSettings(ob.StreamSettingsJSON)), &stream); err == nil {
 				item["streamSettings"] = stream
 			}
 		}

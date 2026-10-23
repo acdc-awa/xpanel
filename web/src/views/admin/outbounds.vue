@@ -153,8 +153,16 @@ function freedomDS(row: EffectiveOutbound): string {
 
 type BadgeColor = 'grey' | 'green' | 'blue' | 'red' | 'severity-medium' | 'severity-neutral'
 
-function protocolBadge(protocol: string): { text: string; color: BadgeColor } {
-  switch (protocol) {
+// 引用草稿：非基础协议、没有引用目标、也没配载荷，等待连线。
+function isDraftOutbound(row: EffectiveOutbound): boolean {
+  if (row.owner_inbound_id || row.inbound_ref || row.outbound_json) return false
+  if (row.protocol === 'freedom' || row.protocol === 'blackhole') return false
+  return !row.settings_json && !row.stream_settings_json
+}
+
+function protocolBadge(row: EffectiveOutbound): { text: string; color: BadgeColor } {
+  if (isDraftOutbound(row)) return { text: '待连线', color: 'severity-medium' }
+  switch (row.protocol) {
     case 'freedom':
       return { text: '直连 (freedom)', color: 'green' }
     case 'vless':
@@ -170,7 +178,7 @@ function protocolBadge(protocol: string): { text: string; color: BadgeColor } {
     case 'custom':
       return { text: '原生 JSON', color: 'severity-medium' }
     default:
-      return { text: protocol, color: 'grey' }
+      return { text: row.protocol, color: 'grey' }
   }
 }
 
@@ -182,7 +190,10 @@ function connectionLabel(row: EffectiveOutbound): string {
   if (row.outbound_json) return '自定义透传'
   if (row.tag === 'direct') return '服务器直连互联网'
   if (row.tag === 'blocked') return '黑洞丢弃阻断'
-  return '自主直连'
+  if (row.protocol === 'freedom') return '自主直连'
+  if (row.protocol === 'blackhole') return '黑洞阻断'
+  if (row.settings_json || row.stream_settings_json) return '旧版代理（待转换）'
+  return '待连接入站'
 }
 
 let initialized = false
@@ -268,8 +279,8 @@ onMounted(async () => {
 
           <CsCardFacts>
             <CsCardFact label="出站协议">
-              <CsBadge :color="protocolBadge(row.protocol).color">
-                {{ protocolBadge(row.protocol).text }}
+              <CsBadge :color="protocolBadge(row).color">
+                {{ protocolBadge(row).text }}
               </CsBadge>
             </CsCardFact>
             <CsCardFact label="连接与引用" :value="connectionLabel(row)" />

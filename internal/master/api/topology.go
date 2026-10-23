@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -294,8 +295,9 @@ type topoOutbound struct {
 	ServerID       uint64  `json:"server_id"`
 	Tag            string  `json:"tag"`
 	Protocol       string  `json:"protocol"`
-	InboundRef     *uint64 `json:"inbound_ref"`               // Phase T：引用落地入站
+	InboundRef     *uint64 `json:"inbound_ref"`                // Phase T：引用落地入站
 	OwnerInboundID uint64  `json:"owner_inbound_id,omitempty"` // C2：直通管道派生出口归属
+	HasPayload     bool    `json:"has_payload"`                // 是否已配置载荷（基础 settings / 自定义 JSON）
 	Enabled        bool    `json:"enabled"`
 	Priority       int     `json:"priority"`
 }
@@ -355,7 +357,8 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 			ID: outbounds[i].ID, ServerID: outbounds[i].ServerID,
 			Tag: outbounds[i].Tag, Protocol: outbounds[i].Protocol,
 			InboundRef: outbounds[i].InboundRef, OwnerInboundID: outbounds[i].OwnerInboundID,
-			Enabled: outbounds[i].Enabled, Priority: outbounds[i].Priority,
+			HasPayload: strings.TrimSpace(outbounds[i].OutboundJSON) != "" || strings.TrimSpace(outbounds[i].SettingsJSON) != "",
+			Enabled:    outbounds[i].Enabled, Priority: outbounds[i].Priority,
 		})
 	}
 

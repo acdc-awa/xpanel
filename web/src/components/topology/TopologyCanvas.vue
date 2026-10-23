@@ -61,6 +61,7 @@ interface BoxOutbound {
   inbound_ref?: number | null
   virtual?: boolean
   owner_inbound_id?: number
+  has_payload?: boolean
   isDraftTunnel?: boolean
   server_id?: number
 }
@@ -75,17 +76,10 @@ interface BoxData {
 
 function isOutboundDraft(out: any): boolean {
   if (out.isDraftTunnel) return true
-  if (out.inbound_ref || out.owner_inbound_id || out.virtual || out.outbound_json) return false
+  // 引用目标、派生行、direct 虚拟行、或已配置载荷（基础 settings / 自定义 JSON）都不是草稿。
+  if (out.inbound_ref || out.owner_inbound_id || out.virtual || out.has_payload) return false
   if (out.protocol === 'freedom' || out.protocol === 'blackhole') return false
-  try {
-    const s = JSON.parse(out.settings_json || '{}')
-    if (out.protocol === 'vless') return !s.vnext?.[0]?.address
-    if (out.protocol === 'hysteria') return !s.address
-    if (out.protocol === 'socks' || out.protocol === 'http') return !s.servers?.[0]?.address
-  } catch {
-    return true
-  }
-  return false
+  return true
 }
 
 const nodes = ref<GraphNode[]>([])
@@ -2172,7 +2166,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
                   <span v-else-if="out.virtual" class="out-proto-badge direct">DIRECT</span>
                   <span v-else-if="out.protocol === 'blackhole'" class="out-proto-badge blocked">BLOCKED</span>
                   <span v-else-if="isOutboundDraft(out)" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
-                  <span v-else-if="out.outbound_json" class="out-proto-badge">JSON</span>
+                  <span v-else-if="out.protocol === 'custom'" class="out-proto-badge" title="自定义 Xray 出站 JSON">JSON</span>
                   <span v-else class="out-proto-badge">{{ out.protocol }}</span>
                   <el-icon v-if="!out.virtual" class="row-edit-icon" title="编辑出站"><Edit /></el-icon>
 

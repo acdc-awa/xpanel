@@ -2163,3 +2163,42 @@ func TestGenerateConfig_HysteriaStripsClientOnlyUDPHop(t *testing.T) {
 		t.Fatalf("保留的 mask = %v, want salamander", typ)
 	}
 }
+
+// 旧版外部代理出站（settings_json + stream_settings_json）仍是生成器的兼容路径。
+// 这条路径必须用「出站清洗器」：Hysteria 的 auth 是客户端凭据，不能被入站清洗逻辑删掉。
+func TestGenerateConfig_LegacyHysteriaOutboundKeepsAuth(t *testing.T) {
+	outbounds := []models.ServerOutbound{{
+		ID: 1, ServerID: 1, Tag: "hy-out", Protocol: "hysteria", Enabled: true,
+		SettingsJSON:       `{"version":2,"address":"remote.example.com","port":443}`,
+		StreamSettingsJSON: `{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"remote.example.com","allowInsecure":true,"fingerprint":"chrome"},"hysteriaSettings":{"auth":"secret"}}`,
+	}}
+	rawCfg, err := xray.Generate(nil, outbounds, nil, nil, nil, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(rawCfg, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	var ob map[string]any
+	for _, o := range asArray(t, parsed["outbounds"], "outbounds") {
+		if om, _ := o.(map[string]any); om["tag"] == "hy-out" {
+			ob = om
+		}
+	}
+	if ob == nil {
+		t.Fatal("hy-out outbound not found")
+	}
+	stream := asObject(t, ob["streamSettings"], "streamSettings")
+	hy := asObject(t, stream["hysteriaSettings"], "hysteriaSettings")
+	if hy["auth"] != "secret" {
+		t.Errorf("hysteria auth = %v, want secret（出站清洗不得删除客户端凭据）", hy["auth"])
+	}
+	tls := asObject(t, stream["tlsSettings"], "tlsSettings")
+	if _, has := tls["allowInsecure"]; has {
+		t.Error("tlsSettings.allowInsecure must be stripped (xray 已移除该字段)")
+	}
+	if tls["fingerprint"] != "chrome" {
+		t.Errorf("tlsSettings.fingerprint = %v, want chrome（客户端指纹必须保留）", tls["fingerprint"])
+	}
+}

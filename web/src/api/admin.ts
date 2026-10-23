@@ -885,6 +885,7 @@ export interface TopologyOutbound {
   protocol: string
   inbound_ref?: number | null // Phase T：引用落地入站
   owner_inbound_id?: number // C2：直通管道派生出口归属
+  has_payload?: boolean // 已配置载荷（基础 settings / 自定义 JSON）
   virtual?: boolean // direct 等虚拟出站
   enabled: boolean
   priority: number

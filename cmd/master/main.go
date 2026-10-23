@@ -101,6 +101,11 @@ func main() {
 	if err := models.AutoMigrate(database); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
+	// 出站模型简化：旧版「外部代理节点」行（protocol + settings/stream）折叠为 outbound_json。
+	// 数据迁移、幂等、旧面板兼容，不提升 schema 版本；单行坏数据只跳过不阻断启动。
+	if err := services.MigrateLegacyProxyOutbounds(database); err != nil {
+		log.Fatalf("出站模型迁移失败: %v", err)
+	}
 	// 模板库首次初始化：播种一份「极简基础模板」（settings 标记保证只跑一次，
 	// 播种行与用户自建模板同权，可改名/删除且删除后不会重启复活）。失败不中止启动——
 	// 模板库为空只影响管理端的新建起点，不影响订阅生成。

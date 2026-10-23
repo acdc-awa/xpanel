@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -22,6 +23,74 @@ func validOutboundProtocol(p string) bool {
 		return true
 	}
 	return false
+}
+
+// outboundShape 一次创建/更新后的最终出站载荷。
+// 新模型只允许三种落库形态（外加载荷为空的引用草稿）：
+//   - 基础出口：protocol + settings_json（仅 freedom/blackhole）；
+//   - 引用入站：仅 inbound_ref（载荷列必须为空）；
+//   - 自定义 JSON：仅 outbound_json（protocol 固定 custom）；
+//   - 草稿：非基础协议 + 无任何载荷，等待连线。
+type outboundShape struct {
+	Protocol     string
+	SettingsJSON string
+	StreamJSON   string
+	OutboundJSON string
+	InboundRef   *uint64
+}
+
+// normalizeOutboundShape 校验三形态互斥并归一协议与载荷；msg 非空表示拒绝原因。
+func normalizeOutboundShape(in outboundShape) (outboundShape, string) {
+	proto := strings.ToLower(strings.TrimSpace(in.Protocol))
+	settings := strings.TrimSpace(in.SettingsJSON)
+	stream := strings.TrimSpace(in.StreamJSON)
+	outJSON := strings.TrimSpace(in.OutboundJSON)
+	hasRef := in.InboundRef != nil && *in.InboundRef > 0
+
+	in.Protocol, in.SettingsJSON, in.StreamJSON, in.OutboundJSON = proto, settings, stream, outJSON
+
+	switch {
+	case outJSON != "":
+		var m map[string]any
+		if err := json.Unmarshal([]byte(outJSON), &m); err != nil {
+			return in, "Outbound JSON 格式非法: " + err.Error()
+		}
+		if p, _ := m["protocol"].(string); strings.TrimSpace(p) == "" {
+			return in, "自定义 Outbound JSON 必须包含非空 protocol 字段"
+		}
+		if hasRef {
+			return in, "自定义 JSON 与引用入站不能同时设置"
+		}
+		if settings != "" || stream != "" {
+			return in, "自定义 JSON 模式下无需填写 settings/streamSettings"
+		}
+		if proto == "freedom" || proto == "blackhole" {
+			return in, "基础出口（freedom/blackhole）不支持自定义 JSON"
+		}
+		in.Protocol, in.SettingsJSON, in.StreamJSON = "custom", "", ""
+	case hasRef:
+		if settings != "" || stream != "" {
+			return in, "引用入站模式下无需填写 settings/streamSettings"
+		}
+		if proto == "freedom" || proto == "blackhole" {
+			return in, "基础出口（freedom/blackhole）不支持引用落地入站"
+		}
+		in.SettingsJSON, in.StreamJSON, in.OutboundJSON = "", "", ""
+	case proto == "custom":
+		return in, "自定义 JSON 模式必须填写 outbound_json"
+	case proto == "freedom" || proto == "blackhole":
+		if stream != "" {
+			return in, "基础出口（freedom/blackhole）不支持 streamSettings"
+		}
+		in.OutboundJSON = ""
+	default:
+		// 非基础协议：只允许无载荷草稿；旧版外部代理节点表单已下线。
+		if settings != "" || stream != "" {
+			return in, "外部代理节点表单已下线，请改用自定义 JSON 填写完整 Outbound"
+		}
+		in.OutboundJSON = ""
+	}
+	return in, ""
 }
 
 // serverOutboundTagExists 校验出站 tag 存在（含模板内置 direct/blocked）。
@@ -212,21 +281,29 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	if !util.BindJSON(c, &req) {
 		return
 	}
-	req.OutboundJSON = strings.TrimSpace(req.OutboundJSON)
-	if req.OutboundJSON != "" {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(req.OutboundJSON), &m); err != nil {
-			util.BadRequest(c, "Outbound JSON 格式非法: "+err.Error())
-			return
-		}
-	} else {
+	shape, msg := normalizeOutboundShape(outboundShape{
+		Protocol:     req.Protocol,
+		SettingsJSON: req.SettingsJSON,
+		StreamJSON:   req.StreamSettingsJSON,
+		OutboundJSON: req.OutboundJSON,
+		InboundRef:   req.InboundRef,
+	})
+	if msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
+	req.Protocol = shape.Protocol
+	req.SettingsJSON = shape.SettingsJSON
+	req.StreamSettingsJSON = shape.StreamJSON
+	req.OutboundJSON = shape.OutboundJSON
+	if req.OutboundJSON == "" {
 		// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
 		if err := xray.ValidateOutbound(req.SettingsJSON, req.StreamSettingsJSON); err != nil {
 			util.BadRequest(c, err.Error())
 			return
 		}
 	}
-	// ISSUE-13：tag 非空/同服务器唯一、协议白名单。
+	// ISSUE-13：tag 非空/同服务器唯一。
 	req.Tag = strings.TrimSpace(req.Tag)
 	if req.Tag == "" {
 		util.BadRequest(c, "出站 Tag 不能为空")
@@ -242,20 +319,25 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, "该服务器上已存在同名出站 Tag")
 		return
 	}
-	if !validOutboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
-		return
-	}
-	// InboundRef 校验（引用存在 + 无环）与出站凭据生成
+	// InboundRef 校验（引用存在 + 协议可投影 + 无环）与出站凭据生成
 	var targetInboundID uint64
 	if req.InboundRef != nil && *req.InboundRef > 0 {
 		if msg := d.checkInboundRef(id, *req.InboundRef, 0); msg != "" {
 			util.BadRequest(c, msg)
 			return
 		}
+		var target models.Inbound
+		if err := d.DB.First(&target, *req.InboundRef).Error; err == nil {
+			// 行协议跟随目标入站：列表/画布徽章与草稿判定都以它为准。
+			req.Protocol = target.Protocol
+		}
 		targetInboundID = *req.InboundRef
 	} else {
 		req.InboundRef = nil
+	}
+	if !validOutboundProtocol(req.Protocol) {
+		util.BadRequest(c, "不支持的出站协议: "+req.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
+		return
 	}
 
 	enabled := true
@@ -344,37 +426,87 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		return
 	}
 
-	targetOutboundJSON := ob.OutboundJSON
-	if req.OutboundJSON != nil {
-		targetOutboundJSON = strings.TrimSpace(*req.OutboundJSON)
-	}
-
-	if targetOutboundJSON != "" {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(targetOutboundJSON), &m); err != nil {
-			util.BadRequest(c, "Outbound JSON 格式非法: "+err.Error())
-			return
-		}
-	} else {
-		// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
-		sj := ob.SettingsJSON
-		if req.SettingsJSON != nil {
-			sj = *req.SettingsJSON
-		}
-		ssj := ob.StreamSettingsJSON
-		if req.StreamSettingsJSON != nil {
-			ssj = *req.StreamSettingsJSON
-		}
-		if err := xray.ValidateOutbound(sj, ssj); err != nil {
-			util.BadRequest(c, err.Error())
-			return
-		}
-	}
-
+	// 形态字段（协议/载荷/引用）任一被触碰时，按最终形态做互斥校验并归一。
+	touchesShape := req.Protocol != nil || req.SettingsJSON != nil || req.StreamSettingsJSON != nil ||
+		req.OutboundJSON != nil || req.InboundRef != nil
 	updates := map[string]any{}
-	if req.OutboundJSON != nil {
-		updates["outbound_json"] = strings.TrimSpace(*req.OutboundJSON)
+	if touchesShape {
+		eff := outboundShape{
+			Protocol:     ob.Protocol,
+			SettingsJSON: ob.SettingsJSON,
+			StreamJSON:   ob.StreamSettingsJSON,
+			OutboundJSON: ob.OutboundJSON,
+			InboundRef:   ob.InboundRef,
+		}
+		if req.Protocol != nil {
+			eff.Protocol = *req.Protocol
+		}
+		if req.SettingsJSON != nil {
+			eff.SettingsJSON = *req.SettingsJSON
+		}
+		if req.StreamSettingsJSON != nil {
+			eff.StreamJSON = *req.StreamSettingsJSON
+		}
+		if req.OutboundJSON != nil {
+			eff.OutboundJSON = *req.OutboundJSON
+		}
+		if req.InboundRef != nil {
+			if *req.InboundRef > 0 {
+				eff.InboundRef = req.InboundRef
+			} else {
+				eff.InboundRef = nil
+			}
+		}
+		normalized, msg := normalizeOutboundShape(eff)
+		if msg != "" {
+			util.BadRequest(c, msg)
+			return
+		}
+		eff = normalized
+		if req.Protocol != nil && isReservedOutboundTag(ob.Tag) &&
+			strings.ToLower(strings.TrimSpace(*req.Protocol)) != strings.ToLower(ob.Protocol) {
+			util.BadRequest(c, "系统内置出站不可修改协议")
+			return
+		}
+		// 引用目标：协议可投影 + 无环；行协议跟随目标入站。
+		if eff.InboundRef != nil && *eff.InboundRef > 0 {
+			if msg := d.checkInboundRef(ob.ServerID, *eff.InboundRef, outboundID); msg != "" {
+				util.BadRequest(c, msg)
+				return
+			}
+			var target models.Inbound
+			if err := d.DB.First(&target, *eff.InboundRef).Error; err == nil {
+				eff.Protocol = target.Protocol
+			}
+			if ob.InternalUUID == "" {
+				u, _ := util.NewUUID()
+				updates["internal_uuid"] = u
+			}
+		}
+		if eff.OutboundJSON == "" {
+			// 出站 JSON 有效性 + REALITY 密钥格式预检（01 号文档 §4 第 6 项）
+			if err := xray.ValidateOutbound(eff.SettingsJSON, eff.StreamJSON); err != nil {
+				util.BadRequest(c, err.Error())
+				return
+			}
+		}
+		if !validOutboundProtocol(eff.Protocol) {
+			util.BadRequest(c, "不支持的出站协议: "+eff.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
+			return
+		}
+		updates["protocol"] = eff.Protocol
+		updates["outbound_json"] = eff.OutboundJSON
+		updates["settings_json"] = eff.SettingsJSON
+		updates["stream_settings_json"] = eff.StreamJSON
 	}
+	if req.InboundRef != nil {
+		if *req.InboundRef > 0 {
+			updates["inbound_ref"] = *req.InboundRef
+		} else {
+			updates["inbound_ref"] = nil
+		}
+	}
+
 	if req.Tag != nil {
 		tag := strings.TrimSpace(*req.Tag)
 		if tag == "" {
@@ -399,23 +531,6 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 		updates["tag"] = tag
 	}
-	if req.Protocol != nil {
-		if !validOutboundProtocol(*req.Protocol) {
-			util.BadRequest(c, "不支持的出站协议: "+*req.Protocol+"（支持 freedom/blackhole/vless/socks/http/hysteria/custom）")
-			return
-		}
-		if isReservedOutboundTag(ob.Tag) && *req.Protocol != ob.Protocol {
-			util.BadRequest(c, "系统内置出站不可修改协议")
-			return
-		}
-		updates["protocol"] = *req.Protocol
-	}
-	if req.SettingsJSON != nil {
-		updates["settings_json"] = *req.SettingsJSON
-	}
-	if req.StreamSettingsJSON != nil {
-		updates["stream_settings_json"] = *req.StreamSettingsJSON
-	}
 	if req.SendThrough != nil {
 		updates["send_through"] = *req.SendThrough
 	}
@@ -427,27 +542,6 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		updates["remark"] = *req.Remark
-	}
-
-	// InboundRef 变更（>0 设置 / 0 解除），校验无环并维护凭据
-	if req.InboundRef != nil {
-		if isReservedOutboundTag(ob.Tag) && *req.InboundRef > 0 {
-			util.BadRequest(c, "系统内置直连/黑洞出站不支持设置落地入站引用")
-			return
-		}
-		if *req.InboundRef > 0 {
-			if msg := d.checkInboundRef(ob.ServerID, *req.InboundRef, outboundID); msg != "" {
-				util.BadRequest(c, msg)
-				return
-			}
-			updates["inbound_ref"] = *req.InboundRef
-			if ob.InternalUUID == "" {
-				u, _ := util.NewUUID()
-				updates["internal_uuid"] = u
-			}
-		} else {
-			updates["inbound_ref"] = nil
-		}
 	}
 
 	oldTag := ob.Tag
@@ -572,6 +666,11 @@ func (d *Deps) checkInboundRef(outboundServerID, targetInboundID, excludeOutboun
 	}
 	if !target.Enabled {
 		return "引用的入站已停用"
+	}
+	// 引用出站由目标协议插件投影（vnext / 凭据 / 传输 / 安全）。
+	// socks/http/dokodemo-door 没有客户端投影实现，写进来只会在生成配置时 500。
+	if protocols.Find(target.Protocol) == nil {
+		return "引用的入站协议 " + target.Protocol + " 不支持作为引用目标（当前仅 VLESS / Hysteria 2）"
 	}
 	if d.wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOutboundID) {
 		return "引用将形成转发环路（A→B→A），已拒绝"

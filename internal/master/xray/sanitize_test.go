@@ -440,3 +440,122 @@ func TestStripInboundClientOnlyTLS_ClientOnlyExtras(t *testing.T) {
 		}
 	}
 }
+
+// 出站是客户端角色：清洗时不得删除 fingerprint/publicKey/spiderX/hysteria auth。
+func TestSanitizeOutboundStreamMap_KeepsClientFields(t *testing.T) {
+	raw := `{
+		"network":"hysteria",
+		"security":"tls",
+		"tlsSettings":{
+			"serverName":"example.com",
+			"allowInsecure":true,
+			"fingerprint":"chrome",
+			"pinnedPeerCertSha256":"abc",
+			"disableSystemRoot":true,
+			"settings":{"panel":1},
+			"certificates":[{"certificateFile":"/ca.pem","usage":"verify"}]
+		},
+		"hysteriaSettings":{"version":2,"auth":"secret"},
+		"externalProxy":{"tag":"x"},
+		"fingerprint":"top-level",
+		"finalmask":{"udp":[{"type":"udphop","ports":"1000-2000"}]}
+	}`
+	out := SanitizeOutboundStreamSettings(raw)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatalf("sanitized output is not JSON: %v (%s)", err, out)
+	}
+	if _, ok := m["externalProxy"]; ok {
+		t.Error("externalProxy should be deleted")
+	}
+	if _, ok := m["fingerprint"]; ok {
+		t.Error("top-level fingerprint should be deleted")
+	}
+	tls := m["tlsSettings"].(map[string]any)
+	if _, ok := tls["allowInsecure"]; ok {
+		t.Error("tlsSettings.allowInsecure was removed by xray and must be stripped")
+	}
+	if _, ok := tls["settings"]; ok {
+		t.Error("panel-nested tlsSettings.settings should be deleted")
+	}
+	for _, k := range []string{"fingerprint", "pinnedPeerCertSha256", "disableSystemRoot", "certificates"} {
+		if _, ok := tls[k]; !ok {
+			t.Errorf("client TLS key %q should be kept", k)
+		}
+	}
+	hy := m["hysteriaSettings"].(map[string]any)
+	if got, _ := hy["auth"].(string); got != "secret" {
+		t.Errorf("hysteria auth should be kept, got %q", got)
+	}
+	fm := m["finalmask"].(map[string]any)
+	if _, ok := fm["udp"]; !ok {
+		t.Error("hysteria finalmask udp (client capability) should be kept")
+	}
+}
+
+// 出站 REALITY 必须保留客户端字段；REALITY + finalmask 仍按 panic 防护剔除。
+func TestSanitizeOutboundStreamMap_Reality(t *testing.T) {
+	raw := `{
+		"network":"tcp",
+		"security":"reality",
+		"realitySettings":{
+			"serverName":"example.com",
+			"publicKey":"pk",
+			"password":"pw",
+			"shortId":"0123",
+			"fingerprint":"chrome",
+			"spiderX":"/",
+			"settings":{"panel":1}
+		},
+		"finalmask":{"tcp":[{"type":"noise"}]}
+	}`
+	out := SanitizeOutboundStreamSettings(raw)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatalf("sanitized output is not JSON: %v", err)
+	}
+	r := m["realitySettings"].(map[string]any)
+	for _, k := range []string{"publicKey", "password", "spiderX", "fingerprint", "shortId", "serverName"} {
+		if _, ok := r[k]; !ok {
+			t.Errorf("client reality key %q should be kept", k)
+		}
+	}
+	if _, ok := r["settings"]; ok {
+		t.Error("panel-nested realitySettings.settings should be deleted")
+	}
+	if _, ok := m["finalmask"]; ok {
+		t.Error("finalmask must be dropped for REALITY")
+	}
+}
+
+// 出站 stream 的通用归一：cipherSuites 数组转字符串、xhttp 旧 session 键提升。
+func TestSanitizeOutboundStreamMap_Normalize(t *testing.T) {
+	raw := `{
+		"network":"xhttp",
+		"security":"tls",
+		"tlsSettings":{"cipherSuites":["TLS_AES_128_GCM_SHA256","TLS_AES_256_GCM_SHA384"]},
+		"xhttpSettings":{"sessionPlacement":"path","sessionKey":"sid","mode":"auto"}
+	}`
+	out := SanitizeOutboundStreamSettings(raw)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatalf("sanitized output is not JSON: %v", err)
+	}
+	tls := m["tlsSettings"].(map[string]any)
+	if got, _ := tls["cipherSuites"].(string); got != "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384" {
+		t.Errorf("cipherSuites should be normalized to colon string, got %#v", tls["cipherSuites"])
+	}
+	x := m["xhttpSettings"].(map[string]any)
+	if _, ok := x["sessionPlacement"]; ok {
+		t.Error("old sessionPlacement should be lifted")
+	}
+	if got, _ := x["sessionIDPlacement"].(string); got != "path" {
+		t.Errorf("sessionIDPlacement = %q, want path", got)
+	}
+	if _, ok := x["sessionKey"]; ok {
+		t.Error("old sessionKey should be lifted")
+	}
+	if got, _ := x["sessionIDKey"].(string); got != "sid" {
+		t.Errorf("sessionIDKey = %q, want sid", got)
+	}
+}
