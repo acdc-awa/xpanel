@@ -70,3 +70,6 @@ docs/
 # AI 会话指令文件（AGENTS/CLAUDE）仅本地开发使用，不入库
 /AGENTS.md
 /CLAUDE.md
+
+# 本地临时测试脚本（不入库）
+test.bat

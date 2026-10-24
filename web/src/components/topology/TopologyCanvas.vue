@@ -59,6 +59,7 @@ import {
   snapToGrid,
   boxRulePath,
   refEdgePath,
+  xhttpPathOf,
   type BoxData,
   type BoxOutbound,
 } from './model'
@@ -378,9 +379,14 @@ function copyLayerCaddyfile(layer: AccessLayer) {
   const inbs = layerGroupsOf(layer.server_id).find((g) => g.layer.id === layer.id)?.inbounds ?? []
   const lines = [`# === Caddyfile 示例 (${layer.host}) ===`, `${layer.host} {`]
   for (const inb of inbs) {
-    let path = inb.share_path || '/xhttp'
-    lines.push(`    # 入站 [${inb.tag}] 转发至本地 Xray 端口`)
-    lines.push(`    reverse_proxy ${path} 127.0.0.1:${inb.port}`)
+    // 路径只取 xhttpSettings.path：xray 按 HasPrefix 校验，反代匹配必须与它同值。
+    const path = xhttpPathOf(inb)
+    lines.push(`    # 入站 [${inb.tag}] 转发至本地 Xray 端口 ${inb.port}`)
+    if (path) {
+      lines.push(`    reverse_proxy ${path} 127.0.0.1:${inb.port}`)
+    } else {
+      lines.push('    # 非 xhttp 入站无法按路径分流：请为它使用独立端口或独立域名')
+    }
   }
   lines.push(`}`)
   navigator.clipboard.writeText(lines.join('\n'))

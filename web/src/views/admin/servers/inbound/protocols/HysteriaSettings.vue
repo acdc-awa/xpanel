@@ -23,9 +23,6 @@ const masqueradeOptions = [
 
 const props = defineProps<{
   modelValue: HysteriaConfig
-  inboundType?: string
-  internalUUID?: string
-  inboundId?: number
 }>()
 
 const emit = defineEmits<{

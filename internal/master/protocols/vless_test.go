@@ -104,24 +104,23 @@ func TestVLESSBuildClientNode(t *testing.T) {
 		t.Errorf("reality 缺 SNI 应返回 nil，got %+v", dto)
 	}
 
-	// share 覆写：security none→tls + SNI/Path/Host（Caddy 反代场景）
-	caddy := decodeStream(`{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`)
+	// 入口安全层由接入层传入（EntrySecurity）；客户端只覆写 SNI。
+	// xhttp 的 path/host 全部来自传输设置，没有第二来源。
+	caddy := decodeStream(`{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/my-vless-xhttp","host":"caddy.example.com"}}`)
 	dto = p.BuildClientNode(&contracts.ClientNodeInput{
 		Name: "n3", Host: "caddy.example.com", Port: 443, Spec: caddy,
-		Share: contracts.ShareOverride{
-			Security: "tls", SNI: "caddy.example.com",
-			Host: "caddy.example.com", Path: "/my-vless-xhttp",
-		},
-		UserUUID: "uuid-3",
+		EntrySecurity: "tls",
+		Share:         contracts.ShareOverride{SNI: "caddy.example.com"},
+		UserUUID:      "uuid-3",
 	})
 	if dto == nil {
-		t.Fatal("share 覆写应产出 DTO")
+		t.Fatal("接入层安全层应产出 DTO")
 	}
 	if dto.Security.Type != "tls" || dto.Security.SNI != "caddy.example.com" {
-		t.Errorf("安全覆写未生效: %+v", dto.Security)
+		t.Errorf("接入层安全层/SNI 未生效: %+v", dto.Security)
 	}
 	if dto.Transport.Path != "/my-vless-xhttp" || dto.Transport.Host != "caddy.example.com" || dto.Transport.Mode != "auto" {
-		t.Errorf("xhttp 传输覆写未生效: %+v", dto.Transport)
+		t.Errorf("xhttp 传输参数未生效: %+v", dto.Transport)
 	}
 }
 

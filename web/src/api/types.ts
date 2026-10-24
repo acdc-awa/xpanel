@@ -329,10 +329,7 @@ export interface InboundItem {
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
-  share_security?: string // auto / tls / none（订阅安全层覆写）
   share_sni?: string // 订阅 SNI 覆写
-  share_host?: string // 订阅 HTTP/WS Host 覆写
-  share_path?: string // 订阅 WS/XHTTP Path 覆写
   share_allow_insecure?: boolean // 订阅跳过证书检查
   layer_id?: number // 所属对外接入层（挂层后订阅端点由层决议）
   created_at: string

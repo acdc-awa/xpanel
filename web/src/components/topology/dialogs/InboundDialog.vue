@@ -67,6 +67,8 @@ function editorModelValue(): string {
     streamSettings: streamObj,
     ...(sniffObj ? { sniffing: sniffObj } : {}),
     _panel: {
+      remark: inb.remark || '',
+      traffic_reset: inb.traffic_reset || 'never',
       flow: inb.flow || '',
       ratio: inb.ratio,
       total_gb: inb.total_gb ?? 0,
@@ -79,10 +81,7 @@ function editorModelValue(): string {
       share_addr_strategy: inb.share_addr_strategy,
       share_addr: inb.share_addr,
       share_port: inb.share_port,
-      share_security: inb.share_security,
       share_sni: inb.share_sni,
-      share_host: inb.share_host,
-      share_path: inb.share_path,
       share_allow_insecure: inb.share_allow_insecure,
       layer_id: inb.layer_id || 0,
     },
@@ -108,30 +107,30 @@ async function save() {
     const payload: Partial<InboundPayload> = {
       server_id: props.serverId,
       tag: c.tag,
+      // 这一路径和 nodes.vue 共用同一套终态语义：0 / 空串必须显式送达。
+      remark: c.remark ?? '',
+      traffic_reset: c.traffic_reset || 'never',
       protocol: c.protocol,
       port: c.port,
       listen: c.listen,
       settings_json: c.settingsJson,
       stream_settings: c.streamSettings,
-      sniffing: c.sniffing || undefined,
+      sniffing: c.sniffing,
       ratio: c.ratio,
       total_gb: c.total_gb,
       expiry_time: c.expiry_time && c.expiry_time.trim() ? c.expiry_time : null,
       type: c.type || formType.value,
-      target_inbound_id: c.targetInboundId || 0,
-      target_address: c.targetAddress || '',
-      target_port: c.targetPort || 0,
-      flow: c.flow || undefined,
-      cert_id: formCertId.value || undefined,
-      share_addr_strategy: c.shareAddrStrategy || undefined,
-      share_addr: c.shareAddr || undefined,
-      share_port: c.sharePort || undefined,
-      share_security: c.shareSecurity || undefined,
-      share_sni: c.shareSni || undefined,
-      share_host: c.shareHost || undefined,
-      share_path: c.sharePath || undefined,
+      target_inbound_id: c.targetInboundId ?? 0,
+      target_address: c.targetAddress ?? '',
+      target_port: c.targetPort ?? 0,
+      flow: c.flow,
+      cert_id: formCertId.value,
+      share_addr_strategy: c.shareAddrStrategy || 'node',
+      share_addr: c.shareAddr ?? '',
+      share_port: c.sharePort ?? 0,
+      share_sni: c.shareSni ?? '',
       share_allow_insecure: c.shareAllowInsecure,
-      layer_id: c.layerId || undefined,
+      layer_id: c.layerId ?? 0,
     }
     const { data } = props.inbound
       ? await updateInbound(props.inbound.id, payload)
@@ -186,7 +185,6 @@ async function remove() {
       :server-id="serverId"
       :inbound-id="inbound?.id || 0"
       :inbound-type="formType"
-      :saved-inbound-type="inbound?.type || ''"
       :target-inbound-id="inbound?.target_inbound_id"
       :target-address="inbound?.target_address || ''"
       :target-port="inbound?.target_port || 0"

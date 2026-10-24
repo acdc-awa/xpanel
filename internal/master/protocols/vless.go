@@ -191,13 +191,10 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		return nil
 	}
 
-	// 安全层覆写（ShareSecurity: "" 跟随服务端 / tls / none）
+	// 对外安全层：接入层决议的值优先；不挂层时就是入站自身的传输安全层。
 	sec := spec.Security
-	switch in.Share.Security {
-	case "tls":
-		sec = "tls"
-	case "none":
-		sec = "none"
+	if in.EntrySecurity != "" {
+		sec = in.EntrySecurity
 	}
 
 	dto := p.projectBase(spec, sec)
@@ -233,22 +230,8 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		}
 	}
 
-	// XHTTP 传输参数与覆写（mode 为空且有 path/host 覆写时按 auto 兜底）
-	if spec.Network == "xhttp" {
-		if in.Share.Path != "" {
-			dto.Transport.Path = in.Share.Path
-		}
-		if in.Share.Host != "" {
-			dto.Transport.Host = in.Share.Host
-		}
-		if dto.Transport.Mode == "" && (in.Share.Path != "" || in.Share.Host != "") {
-			dto.Transport.Mode = "auto"
-			if dto.Transport.Path == "" {
-				dto.Transport.Path = "/"
-			}
-		}
-	}
-
+	// xhttp 的 mode / path / host 全部来自入站 streamSettings（与反代同源）：
+	// 不再提供客户端侧覆写，避免出现「反代按 A 路径、xray 只认 B 路径」这类必坏组合。
 	return dto
 }
 
@@ -321,14 +304,15 @@ func (p VLESSPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.P
 		return nil
 	}
 	dto, _ := p.ProjectClient(&contracts.ClientProjectionInput{
-		Role:        contracts.RoleSubscription,
-		Name:        in.Name,
-		Host:        in.Host,
-		Port:        in.Port,
-		Spec:        in.Spec,
-		Share:       in.Share,
-		InboundFlow: in.InboundFlow,
-		UserUUID:    in.UserUUID,
+		Role:          contracts.RoleSubscription,
+		Name:          in.Name,
+		Host:          in.Host,
+		Port:          in.Port,
+		Spec:          in.Spec,
+		Share:         in.Share,
+		EntrySecurity: in.EntrySecurity,
+		InboundFlow:   in.InboundFlow,
+		UserUUID:      in.UserUUID,
 	})
 	return dto
 }

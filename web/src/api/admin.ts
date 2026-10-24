@@ -607,10 +607,7 @@ export interface InboundPayload {
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）
-  share_security?: string // auto / tls / none
   share_sni?: string
-  share_host?: string
-  share_path?: string
   share_allow_insecure?: boolean
   layer_id?: number // 所属对外接入层（0/undefined = 直连；仅同一服务器的层有效）
 }

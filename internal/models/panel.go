@@ -98,12 +98,16 @@ type Inbound struct {
 	ShareAddr         string `gorm:"size:255" json:"share_addr"`                      // 自定义分享地址（域名/IP，不带端口）
 	SharePort         int    `gorm:"default:0" json:"share_port"`                     // 自定义分享端口（0 = 使用入站端口）
 	// 外部反代与订阅覆写字段（与本地物理监听解耦，支持 Caddy/CDN TLS 卸载模式）
-	ShareSecurity      string  `gorm:"size:16;default:auto" json:"share_security"` // auto（跟随stream_settings）/ tls / none
-	ShareSNI           string  `gorm:"size:255" json:"share_sni"`                  // 订阅 SNI 覆写（如反代域名）
-	ShareHost          string  `gorm:"size:255" json:"share_host"`                 // 订阅 HTTP/WS Host 覆写
-	SharePath          string  `gorm:"size:255" json:"share_path"`                 // 订阅 WS/XHTTP Path 覆写
-	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"`  // 订阅是否跳过证书检查
-	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`            // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
+	// Deprecated: 对外安全层由接入层决议（不挂层 = 跟随 streamSettings）；该列仅为存量数据保留，不再读写。
+	ShareSecurity string `gorm:"size:16;default:auto" json:"share_security"`
+	ShareSNI      string `gorm:"size:255" json:"share_sni"` // 订阅 SNI 覆写（如反代域名）
+	// Deprecated: HTTP Host 统一取 streamSettings.xhttpSettings.host；该列仅为存量数据保留，不再读写。
+	ShareHost string `gorm:"size:255" json:"share_host"`
+	// Deprecated: 客户端 path 统一取 streamSettings.xhttpSettings.path（订阅与反代必须同值）；
+	// 该列仅为存量数据保留，不再读写。
+	SharePath          string  `gorm:"size:255" json:"share_path"`
+	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"` // 订阅是否跳过证书检查
+	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`           // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
 	// 入站物理类型形态：user / relay / tunnel
 	Type            string  `gorm:"size:16;default:user" json:"type"`         // user（用户入站）/ relay（内部链式转发入站）/ tunnel（四层直通管道）
 	PreviousType    string  `gorm:"size:16" json:"-"`                         // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）

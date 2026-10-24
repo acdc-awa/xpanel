@@ -73,7 +73,7 @@ async function confirm() {
         <CsSelect v-model="inboundId" :options="options" placeholder="选择入站" />
       </CsFormItem>
       <p class="dlg-hint">
-        挂载后订阅对外端点由该层决议（host/port/security），path 沿用入站 share_path。
+        挂载后订阅对外端点由该层决议（host/port/security）；分流路径取入站传输设置里的 xhttp 路径，反代按同一路径转发到该入站端口。
       </p>
     </CsForm>
 

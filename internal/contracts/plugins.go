@@ -7,13 +7,12 @@ import (
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 )
 
-// ShareOverride 订阅分享覆写（入站 share_* 字段的纯数据快照）。
-// 服务端物理监听与外部反代/订阅视图解耦：覆写只影响客户端可见参数。
+// ShareOverride 客户端可见参数覆写（入站 share_* 字段的纯数据快照）。
+// 只管「客户端连上来时要不要额外声明」：SNI 与跳过证书校验。
+// 地址/端口/安全层由接入层或入站自身决议，传输 path/host 取自 streamSettings，
+// 因此这里不再有 Security / Host / Path。
 type ShareOverride struct {
-	Security      string // "" = 跟随服务端 streamSettings；tls / none 强制覆写
 	SNI           string
-	Host          string
-	Path          string
 	AllowInsecure bool
 }
 
@@ -44,8 +43,8 @@ const (
 
 // LayerSegment 某一层上的协议专有具名段。
 type LayerSegment struct {
-	Layer string    // "settings" | "stream" | "sniffing"
-	Key   string    // "xhttpSettings" / "hysteriaSettings" / "finalmask" / "realitySettings"
+	Layer string // "settings" | "stream" | "sniffing"
+	Key   string // "xhttpSettings" / "hysteriaSettings" / "finalmask" / "realitySettings"
 	Role  FieldRole
 }
 
@@ -76,13 +75,16 @@ type ClientProjectionInput struct {
 	Role EndpointRole // subscription | peer
 
 	// 订阅视角（RoleSubscription）：节点名/对外地址/端口已由订阅服务决议
-	Name        string
-	Host        string
-	Port        int
-	Spec        *InboundSpec  // 入站统一解码结果
-	Share       ShareOverride // 分享覆写
-	InboundFlow string        // 入站级 Flow
-	UserUUID    string        // 用户凭证原料
+	Name  string
+	Host  string
+	Port  int
+	Spec  *InboundSpec  // 入站统一解码结果
+	Share ShareOverride // 客户端可见参数覆写（SNI / 跳过证书校验）
+	// EntrySecurity 对外入口的生效安全层（来自接入层）；"" = 跟随 Spec.Security。
+	// 它不是用户可填的覆写：不挂层时对外安全层就是入站自身的传输安全层。
+	EntrySecurity string
+	InboundFlow   string // 入站级 Flow
+	UserUUID      string // 用户凭证原料
 
 	// 节点互联视角（RolePeer）：中转出站引用的真实目标节点信息
 	RefTarget *RefTarget
@@ -98,10 +100,11 @@ type ClientNodeInput struct {
 	Host string
 	Port int
 
-	Spec        *InboundSpec
-	Share       ShareOverride
-	InboundFlow string
-	UserUUID    string
+	Spec          *InboundSpec
+	Share         ShareOverride
+	EntrySecurity string
+	InboundFlow   string
+	UserUUID      string
 }
 
 // ServerOverrides 协议插件对服务端入站结构的规范化结果（纯数据，不修改入参 spec）。

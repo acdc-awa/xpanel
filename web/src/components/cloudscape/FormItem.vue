@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, useSlots } from 'vue'
 import FormField from './FormField.vue'
 
 const props = withDefaults(
@@ -35,6 +35,7 @@ const position = computed(() => props.labelPosition ?? inheritedPosition)
 const width = computed(() =>
   typeof props.labelWidth === 'number' ? `${props.labelWidth}px` : props.labelWidth
 )
+const slots = useSlots()
 </script>
 
 <template>
@@ -52,6 +53,7 @@ const width = computed(() =>
       :constraint-text="constraintText"
     >
       <template #label><slot name="label">{{ label }}</slot></template>
+      <template v-if="slots.info" #info><slot name="info" /></template>
       <slot />
     </FormField>
   </div>

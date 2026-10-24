@@ -27,8 +27,8 @@ type ProxyNodeDTO struct {
 // TransportOptions 传输层通用扩展点。
 type TransportOptions struct {
 	Network string            // tcp, xhttp, ws, grpc, quic ...
-	Path    string            // 已由 share_path 或传输设置决策
-	Host    string            // HTTP Host 头（已由 share_host 或传输设置决策）
+	Path    string            // 传输设置单一来源（xhttpSettings.path），订阅与反代必须同值
+	Host    string            // HTTP Host 头（xhttpSettings.host 单一来源）
 	Mode    string            // XHTTP mode (auto, stream-up, packet-up)
 	Opts    map[string]string // 附加传输参数
 

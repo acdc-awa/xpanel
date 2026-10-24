@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import {
   CsAlert,
   CsBadge,
@@ -29,6 +29,7 @@ import {
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import CodeEditor from '@/components/CodeEditor.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import type { AccessLayer } from '@/api/types'
 
 // 子组件与类型导入
@@ -55,7 +56,7 @@ import VlessSettings from './inbound/protocols/VlessSettings.vue'
 import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
 import HysteriaSettings from './inbound/protocols/HysteriaSettings.vue'
 import BusinessSettings from './inbound/common/BusinessSettings.vue'
-import { validateHysteria, validateXhttp } from './inbound/validate'
+import { validateHysteriaFinalMask, validateHysteriaSettings, validateXhttp } from './inbound/validate'
 
 export interface InboundEditorChangePayload {
   settingsJson: string
@@ -75,10 +76,7 @@ export interface InboundEditorChangePayload {
   shareAddrStrategy: string
   shareAddr: string
   sharePort: number
-  shareSecurity: string
   shareSni: string
-  shareHost: string
-  sharePath: string
   shareAllowInsecure: boolean
   layerId: number
   targetInboundId?: number
@@ -104,11 +102,7 @@ const props = withDefaults(
     listen?: string
     remark?: string
     trafficReset?: string
-    showBaseFields?: boolean
     inboundType?: string
-    savedInboundType?: string
-    permissionGroupId?: number
-    internalUUID?: string
     inboundId?: number
     targetInboundId?: number
     targetAddress?: string
@@ -116,10 +110,7 @@ const props = withDefaults(
     certId?: number
     serverId?: number
     layerId?: number
-    shareSecurity?: string
     shareSni?: string
-    shareHost?: string
-    sharePath?: string
     shareAllowInsecure?: boolean
   }>(),
   {
@@ -132,11 +123,7 @@ const props = withDefaults(
     listen: '0.0.0.0',
     remark: '',
     trafficReset: 'never',
-    showBaseFields: true,
     inboundType: 'user',
-    savedInboundType: '',
-    permissionGroupId: 0,
-    internalUUID: '',
     inboundId: 0,
     targetInboundId: undefined,
     targetAddress: '',
@@ -144,10 +131,7 @@ const props = withDefaults(
     certId: 0,
     serverId: 0,
     layerId: 0,
-    shareSecurity: 'auto',
     shareSni: '',
-    shareHost: '',
-    sharePath: '',
     shareAllowInsecure: false,
   },
 )
@@ -155,15 +139,13 @@ const props = withDefaults(
 const emit = defineEmits<InboundEditorEmits & {
   (e: 'update:inboundType', value: string): void
   (e: 'update:certId', value: number): void
-  (e: 'internal-uuid-changed', value: string): void
 }>()
 
-// 视图 Tab
-const activeTab = ref('basic')
+// 视图 Tab（默认落在「基础设置」：新建入站的第一件事是填 listen/port/tag/protocol）
+const activeTab = ref('settings')
 
 // 基础物理/业务类型
 const localInboundType = ref(props.inboundType || 'user')
-const localInternalUUID = ref(props.internalUUID || '')
 
 // 核心三维度：协议层、传输层、安全层
 const localProtocol = ref<InboundProtocol>((props.protocol as InboundProtocol) || 'vless')
@@ -186,10 +168,7 @@ const localExpiryTime = ref<string | null>(null)
 const localShareStrategy = ref('node')
 const localShareAddr = ref('')
 const localSharePort = ref(0)
-const localShareSecurity = ref(props.shareSecurity || 'auto')
 const localShareSni = ref(props.shareSni || '')
-const localShareHost = ref(props.shareHost || '')
-const localSharePath = ref(props.sharePath || '')
 const localShareAllowInsecure = ref(props.shareAllowInsecure || false)
 const localLayerId = ref(props.layerId || 0)
 
@@ -288,9 +267,9 @@ const tlsForm = ref<TlsConfig>({
   cipher_suites: '',
   min_version: '1.2',
   max_version: '1.3',
-  allow_insecure: false,
   reject_unknown_sni: false,
   legacy_verify_certs: [],
+  legacy_inline_certs: [],
 })
 
 // 底层 Socket 优化状态
@@ -303,7 +282,6 @@ const sockoptForm = ref<SockoptConfig>({
   tcp_keep_alive_idle: undefined,
   tcp_keep_alive_interval: undefined,
   tcp_user_timeout: undefined,
-  accept_proxy_protocol: false,
   mark: undefined,
   tproxy: 'off',
 })
@@ -322,6 +300,13 @@ const sniffingExtra = ref<Record<string, any>>({})
 // 编辑保存时原样回写，避免手改配置被静默丢弃。
 const streamExtra = ref<Record<string, any>>({})
 
+// 入站 JSON 顶层未建模的键（如 allocate）。手写进「原始 JSON」后，
+// 表单改动触发的重投影不能把它们丢掉。
+const topExtra = ref<Record<string, any>>({})
+
+// settings 里未建模的协议键（clients 由后端注入，不参与保留）。
+const settingsExtra = ref<Record<string, any>>({})
+
 // 对外接入层列表
 const layers = ref<AccessLayer[]>([])
 const layerDeleting = ref(false)
@@ -333,6 +318,9 @@ const layerQuickForm = reactive({ name: '', host: '', port: 443, security: 'tls'
 const rawJsonText = ref('')
 const jsonError = ref('')
 const isInternalUpdating = ref(false)
+// 「原始 JSON」是用户正在编辑的真源：解析完由父组件接收的提示，不能让随后的
+// 深监听把整份文档按表单重投影（否则粘贴进来的未建模键会当场消失）。
+let skipSyncAfterRawInput = false
 
 // -----------------------------------------------------------------------------
 // 能力矩阵联动规则 (Capability Matrix)
@@ -350,18 +338,74 @@ const allowedSecurities = computed<InboundSecurity[]>(() => {
 })
 
 // Tab 顺序严格对应入站 JSON 的结构：
-// 顶层四字段 → settings → streamSettings(传输 + finalmask + sockopt) → streamSettings(security)
-// → sniffing → 面板业务字段（不属于 xray 配置）→ 原始 JSON。
+// 顶层四字段 + 面板计费字段（基础设置）→ settings 里各协议独有的键（协议专属字段）
+// → streamSettings(传输 + finalmask + sockopt) → streamSettings(security)
+// → sniffing → 面板订阅字段（不属于 xray 配置）→ 原始 JSON。
+const TAB_LABELS: Record<string, string> = {
+  settings: '基础设置',
+  protocol: '协议专属字段',
+  transport: '传输设置',
+  security: '安全',
+  sniffing: '嗅探',
+  business: '业务与订阅',
+  advanced: '原始 JSON',
+}
+
 const visibleTabs = computed<TabItem[]>(() => {
-  return [
-    { id: 'basic', label: '基础' },
-    { id: 'settings', label: 'settings' },
-    { id: 'transport', label: '传输' },
-    { id: 'security', label: '安全' },
-    { id: 'sniffing', label: '嗅探' },
-    { id: 'business', label: '业务与订阅' },
-    { id: 'advanced', label: '原始 JSON' },
-  ]
+  const flagged = new Set(validationIssues.value.map((issue) => issue.tab))
+  return ['settings', 'protocol', 'transport', 'security', 'sniffing', 'business', 'advanced'].map((id) => ({
+    id,
+    // 保存门禁的报错要能定位到具体页签，CsTabs 只支持 disabled，这里用标签后缀标记。
+    label: flagged.has(id) ? `${TAB_LABELS[id]} ⚠` : TAB_LABELS[id],
+  }))
+})
+
+// 保存前自检：只覆盖「后端一定会拒绝、或节点一定跑不起来」的硬条件。
+// 每一项都带页签，父组件用拼接后的 validationError 拦截保存。
+const validationIssues = computed<{ tab: string; message: string }[]>(() => {
+  const issues: { tab: string; message: string }[] = []
+  const push = (tab: string, messages: string[]) => {
+    for (const message of messages) {
+      if (message) issues.push({ tab, message })
+    }
+  }
+
+  // 标签 / 端口为空由父组件保存前统一提示（两个入口共用同一句文案），这里只管配置级硬错误。
+  if (localTlsType.value === 'reality') {
+    push('security', [
+      realityForm.value.dest.trim() ? '' : 'REALITY 必须填写借壳目标 (dest)',
+      realityForm.value.server_name.trim() ? '' : 'REALITY 必须填写伪装 SNI (serverNames)',
+      realityForm.value.private_key.trim() ? '' : 'REALITY 必须填写服务端私钥 (privateKey)',
+    ])
+  }
+  if (localTlsType.value === 'tls' && !tlsForm.value.cert_id) {
+    const pairedFiles = Boolean(tlsForm.value.cert_file.trim() && tlsForm.value.key_file.trim())
+    const inlineCerts = (tlsForm.value.legacy_inline_certs || []).length > 0
+    // Hysteria 2 强制 TLS，没有明文回退；vless+xhttp+none 的反代卸载场景不会走到这里。
+    push('security', [pairedFiles || inlineCerts ? '' : 'TLS 入站必须绑定托管证书，或填写成对的证书/私钥文件路径'])
+  }
+
+  if (localProtocol.value === 'hysteria') {
+    push('protocol', validateHysteriaSettings(hysteriaForm.value))
+    push('transport', validateHysteriaFinalMask(hysteriaForm.value))
+  } else if (localProtocol.value === 'vless' && localNetwork.value === 'xhttp') {
+    push('transport', validateXhttp(xhttpForm.value))
+  }
+
+  if (localProtocol.value === 'dokodemo-door') {
+    const target = dokodemoForm.value
+    if (target.target_mode === 'inbound' && !target.target_inbound_id) {
+      push('protocol', ['请选择直通目标入站'])
+    }
+    if (target.target_mode === 'manual') {
+      push('protocol', [
+        target.target_address?.trim() ? '' : '请填写转发目标地址',
+        target.target_port ? '' : '请填写转发目标端口',
+      ])
+    }
+  }
+
+  return issues
 })
 
 const protocolOptions = [
@@ -414,6 +458,17 @@ const allowVisionFlow = computed(() => {
     (localTlsType.value === 'reality' || localTlsType.value === 'tls' || Boolean(vlessForm.value.decryption && vlessForm.value.decryption !== 'none'))
 })
 
+// 只暴露 xray 真正需要的两态：留空 / xtls-rprx-vision。
+// 留空不等于「关闭」：TCP + REALITY 下后端会自动补 vision（resolveVLESSFlow），
+// 显式 none 才是关闭——该值只为存量行保留，界面不再产出。
+const flowOptions = [
+  { label: '默认（留空）', value: '' },
+  { label: 'xtls-rprx-vision', value: 'xtls-rprx-vision' },
+]
+
+// xhttp 不支持 Vision：切走时暂存用户的选择并清空，切回 TCP 时原样还原。
+let flowStashed: string | null = null
+
 function enforceCapabilityMatrix() {
   if (!allowedNetworks.value.includes(localNetwork.value)) {
     localNetwork.value = allowedNetworks.value[0]
@@ -421,12 +476,23 @@ function enforceCapabilityMatrix() {
   if (!allowedSecurities.value.includes(localTlsType.value)) {
     localTlsType.value = allowedSecurities.value[0]
   }
+  if (localProtocol.value === 'vless') {
+    if (localNetwork.value !== 'tcp') {
+      if (vlessForm.value.flow !== '') {
+        flowStashed = vlessForm.value.flow
+        vlessForm.value.flow = ''
+      }
+    } else if (flowStashed !== null) {
+      vlessForm.value.flow = flowStashed
+      flowStashed = null
+    }
+  }
   if (!allowVisionFlow.value && vlessForm.value.flow === 'xtls-rprx-vision') {
     vlessForm.value.flow = ''
   }
   // 保证当前激活的 Tab 必须在可见列表中
   if (!visibleTabs.value.some((t) => t.id === activeTab.value)) {
-    activeTab.value = 'basic'
+    activeTab.value = 'settings'
   }
 }
 
@@ -436,8 +502,11 @@ function enforceCapabilityMatrix() {
 
 function onProtocolChange(proto: any) {
   const p = String(proto) as InboundProtocol
-  // 切协议后旧协议的流层附加键不再适用（例如 vless 的 finalmask 不属于 hy2 表单）。
-  if (p !== localProtocol.value) streamExtra.value = {}
+  if (p === localProtocol.value) return
+  // 切协议后旧协议的流层 / settings 附加键不再适用
+  // （例如 vless 的 finalmask 不属于 hy2 表单，带过去会被写进节点配置）。
+  streamExtra.value = {}
+  settingsExtra.value = {}
   localProtocol.value = p
   if (p === 'hysteria') {
     localNetwork.value = 'hysteria'
@@ -485,10 +554,15 @@ async function autoGenRealityKey() {
 // 序列化与反序列化
 // -----------------------------------------------------------------------------
 function buildSettingsJSON(): string {
+  // 手改 JSON 里表单不认识的协议级键原样回写；clients 由后端按接入点注入，永不保留。
+  const extra: Record<string, any> = { ...(settingsExtra.value || {}) }
+  delete extra.clients
+
   if (localProtocol.value === 'dokodemo-door') {
     // 目标由派生 freedom 出站的 redirect 承担（字段声明明确禁止 settings.address/port），
     // 入站 settings 只保留转发网络与 followRedirect。
     return JSON.stringify({
+      ...extra,
       network: dokodemoForm.value.network || 'tcp,udp',
       followRedirect: false,
     })
@@ -496,12 +570,14 @@ function buildSettingsJSON(): string {
 
   if (localProtocol.value === 'hysteria') {
     return JSON.stringify({
+      ...extra,
       version: 2,
     })
   }
 
   // vless
   const s: Record<string, any> = {
+    ...extra,
     decryption: vlessForm.value.decryption && vlessForm.value.decryption !== 'none' ? vlessForm.value.decryption : 'none',
   }
   if (vlessForm.value.fallbacks.length > 0) {
@@ -535,6 +611,8 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
   }
   // 存量 usage=verify 项原样回写（客户端语义，服务端生成时由后端剥离）。
   certsList.push(...(tlsForm.value.legacy_verify_certs || []))
+  // 内联 PEM 证书表单不编辑，原样回写（否则保存即丢失）。
+  certsList.push(...(tlsForm.value.legacy_inline_certs || []))
   if (certsList.length > 0) {
     t.certificates = certsList
   }
@@ -547,7 +625,6 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
     const suites = tlsForm.value.cipher_suites.split(',').map((x: string) => x.trim()).filter(Boolean)
     if (suites.length > 0) t.cipherSuites = suites.join(':')
   }
-  if (tlsForm.value.allow_insecure) t.allowInsecure = true
   if (tlsForm.value.reject_unknown_sni) t.rejectUnknownSni = true
 
   return t
@@ -573,9 +650,6 @@ function buildSockoptObject(): Record<string, any> | undefined {
   }
   if (sockoptForm.value.tcp_user_timeout !== undefined && sockoptForm.value.tcp_user_timeout !== null) {
     so.tcpUserTimeout = Number(sockoptForm.value.tcp_user_timeout)
-  }
-  if (sockoptForm.value.accept_proxy_protocol) {
-    so.acceptProxyProtocol = true
   }
   if (sockoptForm.value.mark !== undefined && sockoptForm.value.mark !== null) {
     so.mark = Number(sockoptForm.value.mark)
@@ -765,9 +839,8 @@ function buildStreamSettingsJSON(): string {
     security: localTlsType.value,
   }
 
-  // PROXY Protocol 只对 tcp 入站生效（xhttp 无此字段）；接收侧统一写 tcpSettings /
-  // sockopt，不再产出 xray 不认识的顶层 acceptProxyProtocol。
-
+  // PROXY Protocol 只在传输层维护一个开关：tcp 入站写 tcpSettings.acceptProxyProtocol
+  // （xray 运行时会与 sockopt.acceptProxyProtocol 取 OR，所以不再往 sockopt 重复写）。
   if (localNetwork.value === 'xhttp') {
     s.xhttpSettings = buildXhttpSettings()
   } else if (localNetwork.value === 'tcp') {
@@ -781,7 +854,7 @@ function buildStreamSettingsJSON(): string {
       }
       tcpSettings.header = hdr
     }
-    if (tcpForm.value.acceptProxyProtocol || sockoptForm.value.accept_proxy_protocol) {
+    if (tcpForm.value.acceptProxyProtocol) {
       tcpSettings.acceptProxyProtocol = true
     }
     if (Object.keys(tcpSettings).length > 0) {
@@ -835,6 +908,7 @@ function syncFormToJson() {
   const sniffJson = buildSniffingJSON()
 
   rawJsonText.value = JSON.stringify({
+    ...(topExtra.value || {}),
     tag: localTag.value,
     port: localPort.value,
     listen: localListen.value || '0.0.0.0',
@@ -851,13 +925,7 @@ function syncFormToJson() {
 }
 
 function formValidationError(): string {
-  if (localProtocol.value === 'hysteria') {
-    return validateHysteria(hysteriaForm.value).join('；')
-  }
-  if (localProtocol.value === 'vless' && localNetwork.value === 'xhttp') {
-    return validateXhttp(xhttpForm.value).join('；')
-  }
-  return ''
+  return validationIssues.value.map((issue) => issue.message).join('；')
 }
 
 function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: string) {
@@ -872,17 +940,15 @@ function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: stri
     remark: localRemark.value,
     traffic_reset: localTrafficReset.value,
     type: localInboundType.value,
-    flow: vlessForm.value.flow,
+    // Vision 只属于 VLESS；切到 Hysteria/直通后不能把上一次选的值带进库。
+    flow: localProtocol.value === 'vless' ? vlessForm.value.flow : '',
     ratio: localRatio.value,
     total_gb: localTotalGB.value,
     expiry_time: localExpiryTime.value,
     shareAddrStrategy: localShareStrategy.value,
     shareAddr: localShareAddr.value,
     sharePort: localSharePort.value,
-    shareSecurity: localShareSecurity.value,
     shareSni: localShareSni.value,
-    shareHost: localShareHost.value,
-    sharePath: localSharePath.value,
     shareAllowInsecure: localShareAllowInsecure.value,
     layerId: localLayerId.value,
     targetInboundId: dokodemoForm.value.target_inbound_id,
@@ -998,11 +1064,14 @@ function parseJsonToForm(str: string) {
     if (typeof panel.share_addr_strategy === 'string') localShareStrategy.value = panel.share_addr_strategy
     if (typeof panel.share_addr === 'string') localShareAddr.value = panel.share_addr
     if (typeof panel.share_port === 'number') localSharePort.value = panel.share_port
-    if (typeof panel.share_security === 'string') localShareSecurity.value = panel.share_security
     if (typeof panel.share_sni === 'string') localShareSni.value = panel.share_sni
-    if (typeof panel.share_host === 'string') localShareHost.value = panel.share_host
-    if (typeof panel.share_path === 'string') localSharePath.value = panel.share_path
-    if (typeof panel.share_allow_insecure === 'boolean') localShareAllowInsecure.value = panel.share_allow_insecure
+    if (typeof panel.share_allow_insecure === 'boolean') {
+      localShareAllowInsecure.value = panel.share_allow_insecure
+    } else if (tlsSettings?.allowInsecure === true) {
+      // 旧配置把 skip-cert-verify 存在 tlsSettings.allowInsecure（服务端生成时本就剥离），
+      // 统一归到订阅字段，避免同一语义两个来源。
+      localShareAllowInsecure.value = true
+    }
     if (typeof panel.layer_id === 'number') localLayerId.value = panel.layer_id
 
     if (parsed.protocol === 'hysteria' || localProtocol.value === 'hysteria') {
@@ -1171,7 +1240,9 @@ function parseJsonToForm(str: string) {
     }
 
     // 传输层回显（xhttpSettings.acceptProxyProtocol 是历史误存字段，xray 不识别，不再回显）
-    const ap = !!streamObj.acceptProxyProtocol || !!tcpSettings?.acceptProxyProtocol
+    // sockopt.acceptProxyProtocol 是旧版的第二个入口，仅作为回显来源兼容，保存时统一写 tcpSettings。
+    const ap = !!streamObj.acceptProxyProtocol || !!tcpSettings?.acceptProxyProtocol ||
+      !!streamObj.sockopt?.acceptProxyProtocol
     if (tcpSettings && typeof tcpSettings === 'object') {
       const req = tcpSettings.header?.request
       tcpForm.value = {
@@ -1245,15 +1316,19 @@ function parseJsonToForm(str: string) {
       let certFile = ''
       let keyFile = ''
       const legacyVerifyCerts: any[] = []
+      const legacyInlineCerts: any[] = []
       if (Array.isArray(tlsSettings.certificates)) {
         for (const c of tlsSettings.certificates) {
           if (c && typeof c === 'object') {
             if (c.usage === 'verify') {
               // 服务端不消费，仅原样保留，避免存量配置丢字段。
               legacyVerifyCerts.push(c)
-            } else {
+            } else if (c.certificateFile || c.keyFile) {
               if (c.certificateFile) certFile = c.certificateFile
               if (c.keyFile) keyFile = c.keyFile
+            } else if (Array.isArray(c.certificate) || Array.isArray(c.key)) {
+              // 内联 PEM（手写配置）：表单无控件，原样回写。
+              legacyInlineCerts.push(c)
             }
           }
         }
@@ -1270,9 +1345,9 @@ function parseJsonToForm(str: string) {
           : (typeof tlsSettings.cipherSuites === 'string' ? tlsSettings.cipherSuites.split(':').join(',') : ''),
         min_version: tlsSettings.minVersion || '1.2',
         max_version: tlsSettings.maxVersion || '1.3',
-        allow_insecure: !!tlsSettings.allowInsecure,
         reject_unknown_sni: !!tlsSettings.rejectUnknownSni,
         legacy_verify_certs: legacyVerifyCerts,
+        legacy_inline_certs: legacyInlineCerts,
       }
     }
 
@@ -1289,7 +1364,6 @@ function parseJsonToForm(str: string) {
         tcp_keep_alive_idle: typeof sockoptSettings.tcpKeepAliveIdle === 'number' ? sockoptSettings.tcpKeepAliveIdle : undefined,
         tcp_keep_alive_interval: typeof sockoptSettings.tcpKeepAliveInterval === 'number' ? sockoptSettings.tcpKeepAliveInterval : undefined,
         tcp_user_timeout: typeof sockoptSettings.tcpUserTimeout === 'number' ? sockoptSettings.tcpUserTimeout : undefined,
-        accept_proxy_protocol: !!sockoptSettings.acceptProxyProtocol,
         mark: typeof sockoptSettings.mark === 'number' ? sockoptSettings.mark : undefined,
         tproxy: sockoptSettings.tproxy || 'off',
       }
@@ -1303,7 +1377,6 @@ function parseJsonToForm(str: string) {
         tcp_keep_alive_idle: undefined,
         tcp_keep_alive_interval: undefined,
         tcp_user_timeout: undefined,
-        accept_proxy_protocol: false,
         mark: undefined,
         tproxy: 'off',
       }
@@ -1333,6 +1406,42 @@ function parseJsonToForm(str: string) {
       sniffingExtra.value = {}
     }
 
+    // 顶层与 settings 的未建模键原样保留：表单改动触发的重投影不能把它们丢掉。
+    const panelKeys = new Set([
+      '_panel', 'tag', 'port', 'listen', 'protocol',
+      'settings', 'settings_json', 'streamSettings', 'stream_settings', 'sniffing',
+      // 旧形态平铺在顶层的面板字段，不参与回写（share_path 已废弃：path 只取 xhttp 设置）
+      'network', 'tls_type', 'remark', 'traffic_reset', 'flow', 'ratio', 'total_gb',
+      'expiry_time', 'share_addr_strategy', 'share_addr', 'share_port', 'share_security',
+      'share_sni', 'share_host', 'share_path', 'share_allow_insecure', 'layer_id', 'cert_id',
+      'type', 'target_inbound_id', 'target_address', 'target_port',
+    ])
+    const topExtraObj: Record<string, any> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!panelKeys.has(k)) topExtraObj[k] = v
+    }
+    topExtra.value = topExtraObj
+
+    const settingsKnown = localProtocol.value === 'vless'
+      ? new Set(['decryption', 'fallbacks'])
+      : localProtocol.value === 'hysteria'
+        ? new Set(['version'])
+        : new Set(['network', 'followRedirect'])
+    const settingsExtraObj: Record<string, any> = {}
+    let settingsObj: any = null
+    if (typeof settingsRaw === 'string') {
+      try { settingsObj = JSON.parse(settingsRaw) } catch { settingsObj = null }
+    } else if (settingsRaw && typeof settingsRaw === 'object') {
+      settingsObj = settingsRaw
+    }
+    if (settingsObj && typeof settingsObj === 'object') {
+      for (const [k, v] of Object.entries(settingsObj)) {
+        // clients 由后端按接入点注入，保留它只会把旧快照写回库。
+        if (!settingsKnown.has(k) && k !== 'clients') settingsExtraObj[k] = v
+      }
+    }
+    settingsExtra.value = settingsExtraObj
+
     enforceCapabilityMatrix()
   } catch (e: any) {
     jsonError.value = e?.message || 'JSON 语法错误'
@@ -1344,9 +1453,13 @@ function onRawJsonInput(val: string) {
   try {
     JSON.parse(val)
     jsonError.value = ''
+    // 深监听在当前微任务末尾的 flush 里跑；复位必须排在 flush 之后，
+    // 否则标记会先被清掉、watcher 又把整份文档按表单重投影。
+    skipSyncAfterRawInput = true
     isInternalUpdating.value = true
     parseJsonToForm(val)
     isInternalUpdating.value = false
+    nextTick(() => { skipSyncAfterRawInput = false })
     emit('update:modelValue', val)
     emitChange()
   } catch (e: any) {
@@ -1370,9 +1483,16 @@ function formatRawJson() {
 // -----------------------------------------------------------------------------
 const activeLayer = computed(() => layers.value.find((l) => l.id === localLayerId.value) || null)
 
+// 前置反代卸载只对 vless + xhttp + 明文监听成立；REALITY/TCP/Hysteria 下这段 Caddyfile 是错的。
+const caddyOffloadActive = computed(
+  () => localProtocol.value === 'vless' && localNetwork.value === 'xhttp' && localTlsType.value === 'none',
+)
+
 const caddySnippet = computed(() => {
+  if (!caddyOffloadActive.value) return ''
   const domain = activeLayer.value ? activeLayer.value.host : localShareSni.value || localShareAddr.value || 'node.example.com'
-  const path = localSharePath.value || xhttpForm.value.path || '/xhttp-stream'
+  // 反代匹配路径与入站 xhttp 路径必须同值（xray 按 HasPrefix 校验），只有这一个来源。
+  const path = xhttpForm.value.path || '/xhttp-stream'
   const port = localPort.value || 10086
   return `${domain} {\n    # 前置 TLS 解密并反代到本地明文 Xray xhttp 入站\n    reverse_proxy ${path} 127.0.0.1:${port}\n}`
 })
@@ -1460,41 +1580,35 @@ async function saveLayerQuick() {
 }
 
 function applyCaddyOffloadPreset() {
+  // 对外 TLS 只能由接入层声明：不挂层时订阅会跟随入站传输层（这里是 none），必错。
+  if (!props.serverId) {
+    ElMessage.warning('请先选择服务器：前置反代需要一个接入层来声明对外 TLS')
+    return
+  }
   localNetwork.value = 'xhttp'
   localTlsType.value = 'none'
   localListen.value = '127.0.0.1'
   if (localPort.value === 443) {
     localPort.value = 10086
   }
-  if (!localSharePath.value) {
-    localSharePath.value = '/xhttp-stream'
+  if (!xhttpForm.value.path) {
     xhttpForm.value.path = '/xhttp-stream'
   }
   xhttpForm.value.mode = 'auto'
   tcpForm.value.acceptProxyProtocol = false
 
-  if (props.serverId) {
-    const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
-    createLayer(props.serverId, { name: '反代层', host: domain, port: 443, security: 'tls' })
-      .then(({ data }) => {
-        if (data.code === 0) {
-          layers.value = [...layers.value, data.data.layer]
-          localLayerId.value = data.data.layer.id
-          ElMessage.success('已创建对外层「反代层」并绑定（TLS 卸载 + xhttp 传输）')
-        } else {
-          ElMessage.error(data.message)
-        }
-      })
-      .catch((e) => ElMessage.error(errMsg(e, '创建对外层失败')))
-    return
-  }
-  localShareStrategy.value = 'custom'
-  localSharePort.value = 443
-  localShareSecurity.value = 'tls'
-  if (!localShareSni.value && !localShareAddr.value) {
-    localShareAddr.value = 'node.example.com'
-  }
-  ElMessage.success('已应用反代预设')
+  const domain = localShareSni.value || localShareAddr.value || 'node.example.com'
+  createLayer(props.serverId, { name: '反代层', host: domain, port: 443, security: 'tls' })
+    .then(({ data }) => {
+      if (data.code === 0) {
+        layers.value = [...layers.value, data.data.layer]
+        localLayerId.value = data.data.layer.id
+        ElMessage.success('已创建对外层「反代层」并绑定（TLS 卸载 + xhttp 传输）')
+      } else {
+        ElMessage.error(data.message)
+      }
+    })
+    .catch((e) => ElMessage.error(errMsg(e, '创建对外层失败')))
 }
 
 // -----------------------------------------------------------------------------
@@ -1517,10 +1631,7 @@ watch(
     localShareStrategy,
     localShareAddr,
     localSharePort,
-    localShareSecurity,
     localShareSni,
-    localShareHost,
-    localSharePath,
     localShareAllowInsecure,
     localLayerId,
     vlessForm,
@@ -1535,6 +1646,10 @@ watch(
     sockoptForm,
   ],
   () => {
+    if (skipSyncAfterRawInput) {
+      skipSyncAfterRawInput = false
+      return
+    }
     syncFormToJson()
   },
   { deep: true },
@@ -1543,6 +1658,10 @@ watch(
 onMounted(() => {
   if (props.modelValue && props.modelValue !== '{}') {
     parseJsonToForm(props.modelValue)
+  }
+  // 新建 REALITY 入站时先补一对密钥，避免「打开就报错、还要手动点生成」。
+  if (localTlsType.value === 'reality' && !realityForm.value.private_key) {
+    autoGenRealityKey()
   }
   syncFormToJson()
 })
@@ -1571,12 +1690,16 @@ watch(
   <div class="inbound-editor">
     <CsTabs v-model="activeTab" :tabs="visibleTabs" aria-label="入站配置分类">
       <div class="form-body">
-        <!-- ==================== 1. 基础 Tab：只有入站 JSON 的四个顶层字段 ==================== -->
-        <div v-show="activeTab === 'basic'" class="tab-pane">
+        <!-- 保存门禁：把所有硬错误汇总到一处，并标注所属页签 -->
+        <CsAlert v-if="validationIssues.length" type="error" class="validation-summary">
+          <div class="validation-title">保存前需修正</div>
+          <div v-for="(issue, idx) in validationIssues" :key="idx">
+            {{ TAB_LABELS[issue.tab] }}：{{ issue.message }}
+          </div>
+        </CsAlert>
+        <!-- ==================== 1. 基础设置：入站 JSON 顶层四字段 + 面板计费字段 ==================== -->
+        <div v-show="activeTab === 'settings'" class="tab-pane">
           <CsContainer header="入站顶层字段">
-            <template #actions>
-              <span class="cs-text-secondary">listen / port / tag / protocol</span>
-            </template>
             <div class="form-grid-2">
               <CsFormItem label="监听地址 (listen)">
                 <CsInput v-model="localListen" placeholder="默认 0.0.0.0，本地反代填 127.0.0.1" class="mono" />
@@ -1592,7 +1715,7 @@ watch(
 
               <CsFormItem label="协议 (protocol)">
                 <CsSelect
-                  v-model="localProtocol"
+                  :model-value="localProtocol"
                   :options="protocolOptions"
                   style="width: 100%"
                   @change="onProtocolChange"
@@ -1600,140 +1723,8 @@ watch(
               </CsFormItem>
             </div>
           </CsContainer>
-        </div>
 
-        <!-- ==================== 2. settings（协议参数） Tab ==================== -->
-        <div v-show="activeTab === 'settings'" class="tab-pane">
-          <CsAlert v-if="localProtocol !== 'dokodemo-door'" type="info">
-            settings.users 由绑定的接入点动态注入，这里只维护协议级参数。
-          </CsAlert>
-          <VlessSettings
-            v-if="localProtocol === 'vless'"
-            v-model="vlessForm"
-            :inbound-type="localInboundType"
-            :internal-u-u-i-d="localInternalUUID"
-            :inbound-id="props.inboundId"
-            :allow-vision="allowVisionFlow"
-          />
-          <HysteriaSettings
-            v-else-if="localProtocol === 'hysteria'"
-            v-model="hysteriaForm"
-            :inbound-type="localInboundType"
-            :internal-u-u-i-d="localInternalUUID"
-            :inbound-id="props.inboundId"
-          />
-          <DokodemoSettings
-            v-else-if="localProtocol === 'dokodemo-door'"
-            v-model="dokodemoForm"
-            :current-inbound-id="props.inboundId"
-            :listen-port="localPort"
-            :listen-address="localListen"
-          />
-        </div>
-
-        <!-- ==================== 3. 传输层 Tab：streamSettings 非 security 部分 ==================== -->
-        <div v-show="activeTab === 'transport'" class="tab-pane">
-          <CsContainer header="传输方式 (streamSettings.network)">
-            <template #actions>
-              <span class="cs-text-secondary">网络流封装</span>
-            </template>
-            <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
-              <CsSegmentedControl
-                v-model="localNetwork"
-                :options="networkOptions"
-                @change="onNetworkChange"
-              />
-            </CsFormItem>
-            <CsAlert v-else type="info">
-              <span v-if="localProtocol === 'hysteria'">Hysteria 协议（protocol=hysteria，代理协议）与 hysteria 传输（network=hysteria，魔改 QUIC）是两层；这里固定使用后者，加密固定为 TLS。</span>
-              <span v-else>Dokodemo-door 固定使用 raw (tcp) 传输，监听与目标由 settings 决定。</span>
-            </CsAlert>
-            <CsAlert v-if="localProtocol === 'vless'" type="info" class="editor-alert-gap">
-              finalmask 等未提供表单的 streamSettings 键可在「原始 JSON」中编辑，本表单会原样保留。
-            </CsAlert>
-          </CsContainer>
-
-          <CsAlert type="info">
-            层级顺序（由内向外）：协议 settings → 传输 network → 安全 security →
-            finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。
-          </CsAlert>
-
-          <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
-          <XhttpTransport
-            v-else-if="localProtocol === 'vless' && localNetwork === 'xhttp'"
-            v-model="xhttpForm"
-          />
-          <HysteriaFinalMask v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
-
-          <SockoptSettings v-model="sockoptForm" />
-        </div>
-
-        <!-- ==================== 4. 安全层 Tab：streamSettings.security ==================== -->
-        <div v-show="activeTab === 'security'" class="tab-pane">
-          <CsContainer header="安全加密协议 (streamSettings.security)">
-            <template #actions>
-              <span class="cs-text-secondary">TLS / 伪装认证</span>
-            </template>
-            <CsFormItem label="安全协议类型">
-              <CsSegmentedControl
-                v-model="localTlsType"
-                :options="securityOptions"
-                @change="onSecurityChange"
-              />
-            </CsFormItem>
-          </CsContainer>
-
-          <CsAlert v-if="localProtocol === 'hysteria'" type="info">
-            Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。
-          </CsAlert>
-
-          <TlsSecurity
-            v-if="localTlsType === 'tls'"
-            v-model="tlsForm"
-            :alpn-fixed="localProtocol === 'hysteria' ? 'h3' : ''"
-            @update:cert-id="(id) => emit('update:certId', id)"
-          />
-          <RealitySecurity
-            v-else-if="localTlsType === 'reality'"
-            v-model="realityForm"
-            v-model:fingerprint="realityFingerprint"
-          />
-          <CsAlert v-else-if="localTlsType === 'none'" type="info">
-            未启用传输层加密 (none)，适用于前置反代或受信任局域网。
-          </CsAlert>
-        </div>
-
-        <!-- ==================== 5. 嗅探 Tab：inbound.sniffing ==================== -->
-        <div v-show="activeTab === 'sniffing'" class="tab-pane">
-          <CsContainer header="流量嗅探 (sniffing)">
-            <template #actions>
-              <CsToggle v-model="sniffingForm.enabled" label="启用流量嗅探" />
-            </template>
-            <div v-if="sniffingForm.enabled" class="form-grid-2">
-              <CsFormItem label="嗅探目标协议" style="grid-column: span 2">
-                <CsCheckboxGroup
-                  v-model="sniffingForm.destOverride"
-                  :options="sniffingTargetOptions"
-                />
-              </CsFormItem>
-
-              <CsFormItem label="仅提取元数据 (metadataOnly)">
-                <CsToggle v-model="sniffingForm.metadataOnly" label="仅提取不覆盖连接" />
-              </CsFormItem>
-
-              <CsFormItem label="仅用于路由 (routeOnly)">
-                <CsToggle v-model="sniffingForm.routeOnly" label="仅供出站路由分流决策" />
-              </CsFormItem>
-            </div>
-          </CsContainer>
-        </div>
-
-        <!-- ==================== 6. 业务与订阅 Tab（面板字段，不写入 xray 配置） ==================== -->
-        <div v-show="activeTab === 'business'" class="tab-pane">
           <CsContainer header="备注与计费策略">
-            <template #actions>
-              <span class="cs-text-secondary">面板业务字段</span>
-            </template>
             <div class="form-grid-2">
               <CsFormItem label="备注 (Remark)" style="grid-column: span 2">
                 <CsInput v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
@@ -1762,32 +1753,170 @@ watch(
               </CsFormItem>
             </div>
           </CsContainer>
+        </div>
 
+        <!-- ==================== 2. 协议专属字段：settings 里各协议独有的键 ==================== -->
+        <div v-show="activeTab === 'protocol'" class="tab-pane">
+          <VlessSettings v-if="localProtocol === 'vless'" v-model="vlessForm" />
+          <HysteriaSettings
+            v-else-if="localProtocol === 'hysteria'"
+            v-model="hysteriaForm"
+          />
+          <DokodemoSettings
+            v-else-if="localProtocol === 'dokodemo-door'"
+            v-model="dokodemoForm"
+            :current-inbound-id="props.inboundId"
+            :server-id="props.serverId"
+            :listen-port="localPort"
+            :listen-address="localListen"
+          />
+          <div v-if="localProtocol !== 'dokodemo-door'" class="card-note">
+            认证用户由绑定的接入点注入（settings.users），本页只维护协议级参数。
+          </div>
+        </div>
+
+        <!-- ==================== 3. 传输层 Tab：streamSettings 非 security 部分 ==================== -->
+        <div v-show="activeTab === 'transport'" class="tab-pane">
+          <CsContainer header="传输方式 (streamSettings.network)">
+            <template #info>
+              <TipIcon
+                content="层级顺序（由内向外）：协议 settings → 传输 network → 安全 security → finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。finalmask 等未提供表单的键可在「原始 JSON」中编辑，本表单会原样保留。"
+              />
+            </template>
+            <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
+              <CsSegmentedControl
+                v-model="localNetwork"
+                :options="networkOptions"
+                @change="onNetworkChange"
+              />
+            </CsFormItem>
+            <div v-else class="card-note">
+              <template v-if="localProtocol === 'hysteria'">
+                固定使用 hysteria 传输（network=hysteria，魔改 QUIC），加密固定为 TLS。
+              </template>
+              <template v-else>
+                固定使用 raw (tcp) 传输，监听与目标由「协议专属字段」的 settings 决定。
+              </template>
+            </div>
+          </CsContainer>
+
+          <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
+          <XhttpTransport
+            v-else-if="localProtocol === 'vless' && localNetwork === 'xhttp'"
+            v-model="xhttpForm"
+          />
+          <HysteriaFinalMask v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
+
+          <CsContainer
+            v-if="localProtocol === 'vless' && localNetwork === 'tcp'"
+            header="流控 (settings.flow)"
+          >
+            <template #info>
+              <TipIcon
+                content="Vision 属于协议 settings，不属于传输层：它让 TCP 在 TLS 解密后零拷贝转发。留空时只有 TCP + REALITY 会由后端自动补 vision；TCP + TLS / VLESS Encryption 需要手动选择。"
+              />
+            </template>
+            <CsFormItem
+              label="流控算法 (Flow)"
+              :constraint-text="allowVisionFlow ? '' : '当前安全层不支持 Vision：需 TLS、REALITY 或开启 VLESS Encryption。'"
+            >
+              <CsSelect
+                v-model="vlessForm.flow"
+                :options="flowOptions"
+                :disabled="!allowVisionFlow"
+                style="width: 100%"
+              />
+            </CsFormItem>
+          </CsContainer>
+
+          <SockoptSettings v-model="sockoptForm" />
+        </div>
+
+        <!-- ==================== 4. 安全层 Tab：streamSettings.security ==================== -->
+        <div v-show="activeTab === 'security'" class="tab-pane">
+          <CsContainer header="安全加密协议 (streamSettings.security)">
+            <CsFormItem
+              label="安全协议类型"
+              :constraint-text="
+                localProtocol === 'hysteria'
+                  ? 'Hysteria 2 强制启用 TLS/QUIC，不支持明文传输。'
+                  : localTlsType === 'none'
+                    ? '未启用传输层加密 (none)，仅适用于前置反代或受信任局域网。'
+                    : ''
+              "
+            >
+              <CsSegmentedControl
+                v-model="localTlsType"
+                :options="securityOptions"
+                @change="onSecurityChange"
+              />
+            </CsFormItem>
+          </CsContainer>
+
+          <TlsSecurity
+            v-if="localTlsType === 'tls'"
+            v-model="tlsForm"
+            :alpn-fixed="localProtocol === 'hysteria' ? 'h3' : ''"
+            :allow-insecure="localShareAllowInsecure"
+            @update:cert-id="(id) => emit('update:certId', id)"
+            @update:allow-insecure="(v) => localShareAllowInsecure = v"
+          />
+          <RealitySecurity
+            v-else-if="localTlsType === 'reality'"
+            v-model="realityForm"
+            v-model:fingerprint="realityFingerprint"
+          />
+        </div>
+
+        <!-- ==================== 5. 嗅探 Tab：inbound.sniffing ==================== -->
+        <div v-show="activeTab === 'sniffing'" class="tab-pane">
+          <CsContainer header="流量嗅探 (sniffing)">
+            <template #actions>
+              <CsToggle v-model="sniffingForm.enabled" label="启用流量嗅探" />
+            </template>
+            <div v-if="sniffingForm.enabled" class="form-grid-2">
+              <CsFormItem label="嗅探目标协议" style="grid-column: span 2" class="sniff-targets">
+                <CsCheckboxGroup
+                  v-model="sniffingForm.destOverride"
+                  :options="sniffingTargetOptions"
+                />
+              </CsFormItem>
+
+              <CsFormItem label="仅提取元数据 (metadataOnly)">
+                <div class="control-cell">
+                  <CsToggle v-model="sniffingForm.metadataOnly" label="仅提取不覆盖连接" />
+                </div>
+              </CsFormItem>
+
+              <CsFormItem label="仅用于路由 (routeOnly)">
+                <div class="control-cell">
+                  <CsToggle v-model="sniffingForm.routeOnly" label="仅供出站路由分流决策" />
+                </div>
+              </CsFormItem>
+            </div>
+          </CsContainer>
+        </div>
+
+        <!-- ==================== 6. 业务与订阅 Tab（面板字段，不写入 xray 配置） ==================== -->
+        <div v-show="activeTab === 'business'" class="tab-pane">
           <BusinessSettings
             v-if="localInboundType === 'user'"
-            :inbound-type="localInboundType"
+            :can-offload="localProtocol === 'vless'"
             :layer-id="localLayerId"
             :layers="layers"
             :server-id="props.serverId"
             :share-strategy="localShareStrategy"
             :share-addr="localShareAddr"
             :share-port="localSharePort"
-            :share-security="localShareSecurity"
             :share-sni="localShareSni"
-            :share-host="localShareHost"
-            :share-path="localSharePath"
-            :share-allow-insecure="localShareAllowInsecure"
+            :transport-security="localTlsType"
             :caddy-snippet="caddySnippet"
             :layer-deleting="layerDeleting"
             @update:layer-id="(v) => localLayerId = v"
             @update:share-strategy="(v) => localShareStrategy = v"
             @update:share-addr="(v) => localShareAddr = v"
             @update:share-port="(v) => localSharePort = v"
-            @update:share-security="(v) => localShareSecurity = v"
             @update:share-sni="(v) => localShareSni = v"
-            @update:share-host="(v) => localShareHost = v"
-            @update:share-path="(v) => localSharePath = v"
-            @update:share-allow-insecure="(v) => localShareAllowInsecure = v"
             @open-layer-quick="openLayerQuick"
             @delete-layer="deleteLayerFromEditor"
             @apply-caddy-preset="applyCaddyOffloadPreset"
@@ -1797,6 +1926,11 @@ watch(
         <!-- ==================== 7. 原始 JSON Tab ==================== -->
         <div v-show="activeTab === 'advanced'" class="tab-pane">
           <CsContainer header="入站底层配置 (Config JSON)">
+            <template #info>
+              <TipIcon
+                content="这是面板存储的投影源（服务端与订阅共用）。生成服务端配置时会剥离 fingerprint、realitySettings.publicKey、tlsSettings.allowInsecure、xhttpSettings.xmux / downloadSettings / noGRPCHeader 等客户端字段；订阅侧仍使用它们。直通的 streamSettings.proxy_protocol 是面板私有键（供派生 freedom 出站发送 PPv2），不会写进节点配置。"
+              />
+            </template>
             <template #actions>
               <div class="json-status">
                 <CsBadge v-if="!jsonError" color="green">
@@ -1808,13 +1942,6 @@ watch(
                 <CsButton icon-name="gen-ai" @click="formatRawJson">格式化</CsButton>
               </div>
             </template>
-            <CsAlert type="info" class="editor-alert-gap">
-              这是面板存储的投影源（服务端与订阅共用）。生成服务端配置时会剥离
-              fingerprint、realitySettings.publicKey、tlsSettings.allowInsecure、
-              xhttpSettings.xmux / downloadSettings / noGRPCHeader 等客户端字段；
-              订阅侧仍使用它们。直通的 streamSettings.proxy_protocol 是面板私有键
-              （供派生 freedom 出站发送 PPv2），不会写进节点配置。
-            </CsAlert>
             <div class="json-editor-wrap">
               <CodeEditor
                 :model-value="rawJsonText"
@@ -1837,9 +1964,9 @@ watch(
     :close-on-click-overlay="false"
   >
     <CsForm label-position="top">
-      <CsAlert type="info" class="layer-form-alert">
+      <div class="card-note layer-form-alert">
         对外接入层定义订阅对外 Host / 端口 / 安全层，创建后将绑定至当前入站。
-      </CsAlert>
+      </div>
       <CsFormItem label="层名称" required>
         <CsInput v-model="layerQuickForm.name" placeholder="如 HK 443 反代层" />
       </CsFormItem>
@@ -1885,8 +2012,27 @@ watch(
   font-variant-numeric: tabular-nums;
 }
 
-.editor-alert-gap {
-  margin-top: 10px;
+.validation-summary {
+  margin-bottom: 12px;
+}
+
+/* 卡片级说明：与字段级 constraint-text 同一字号/颜色，但不带图标也不占色块 */
+.card-note {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-form-secondary-wt0md2, #656871);
+}
+
+/* 嗅探目标是三个短选项：横向铺满整行，避免左侧堆成一列、右半边全空 */
+.sniff-targets :deep([role='group']) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+}
+
+.validation-title {
+  font-weight: 600;
+  margin-bottom: 2px;
 }
 
 .json-status {

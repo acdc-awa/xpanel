@@ -57,20 +57,17 @@ const dialogClasses = computed(() =>
     CS.modal.dialog,
     CS.modal.refresh,
     CS.modal[props.size],
-    props.scrollable && CS.modal['custom-height']
+    props.scrollable && 'cs-modal-dialog-fit'
   )
 )
-const dialogStyle = computed(() =>
-  props.scrollable ? { '--awsui-modal-custom-height-ka4djm': '88vh' } : undefined
-)
 const containerClasses = computed(() =>
-  cx(CS.modal.container, props.scrollable && CS.modal['custom-height-container'])
+  cx(CS.modal.container, props.scrollable && 'cs-modal-container-fit')
 )
 const contentClasses = computed(() =>
   cx(
     CS.modal.content,
     props.disableContentPaddings && CS.modal['no-paddings'],
-    props.scrollable && CS.modal['custom-height-content']
+    props.scrollable && 'cs-modal-content-fit'
   )
 )
 const footerClasses = computed(() => cx(CS.modal.footer, CS.modal['footer--rounded'], 'cs-modal-footer'))
@@ -153,7 +150,7 @@ onBeforeUnmount(unlockScroll)
       @click.self="closeOnClickOverlay && close()"
     >
       <div :class="focusLockClasses">
-        <div ref="dialogRef" :class="dialogClasses" :style="dialogStyle">
+        <div ref="dialogRef" :class="dialogClasses">
           <div :class="containerClasses">
             <div :class="CS.modal.header">
               <Header variant="h2">
@@ -191,5 +188,32 @@ onBeforeUnmount(unlockScroll)
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/*
+ * scrollable = 「内容超高时内部滚动」，不是把弹窗高度钉死在 88vh。
+ * 官方 custom-height 用的是 block-size: 88vh，短表单会拖出一大块空白；
+ * 这里改成高度自适应 + 上限 88vh，只有超过上限才由内容区滚动。
+ * 官方类都带 :not(#\9)（ID 级特异性），所以容器那条必须 !important。
+ */
+.cs-modal-dialog-fit {
+  display: flex;
+  flex-direction: column;
+  block-size: auto;
+  max-block-size: 88vh;
+}
+
+.cs-modal-container-fit {
+  display: flex !important;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  block-size: auto;
+}
+
+.cs-modal-content-fit {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
 }
 </style>

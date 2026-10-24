@@ -70,7 +70,6 @@ func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 		"server_id": hkSrv.ID, "tag": "xhttp-web", "protocol": "vless", "port": 10086,
 		"listen":              "127.0.0.1",
 		"stream_settings":     `{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`,
-		"share_path":          "/web",
 		"layer_id":            layerID,
 		"share_addr_strategy": "node",
 	}
@@ -106,7 +105,7 @@ func TestAccessLayers_CRUD_Bind_And_Subscribe(t *testing.T) {
 	inbMap := map[uint64]models.Inbound{inbResp.Data.Inbound.ID: {
 		ID: inbResp.Data.Inbound.ID, ServerID: hkSrv.ID, Tag: "xhttp-web", Protocol: "vless",
 		Port: 10086, StreamSettings: `{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/xhttp"}}`,
-		SharePath: "/web", LayerID: &[]uint64{layerID}[0],
+		LayerID: &[]uint64{layerID}[0],
 	}}
 	srvMap := map[uint64]models.Server{hkSrv.ID: hkSrv}
 	apInbID := inbResp.Data.Inbound.ID

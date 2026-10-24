@@ -17,6 +17,8 @@ import type { DokodemoConfig } from '../types'
 const props = defineProps<{
   modelValue: DokodemoConfig
   currentInboundId?: number
+  /** 当前入站所属服务器：目标候选默认只列本机（同服务器）的用户入站。 */
+  serverId?: number
   listenPort?: number
   listenAddress?: string
 }>()
@@ -40,8 +42,37 @@ const forwardNetworkOptions = [
   { label: '仅 UDP', value: 'udp' },
 ]
 
+// 目标候选默认只列「同服务器 + type=user」的入站（最常见的落地形态）。
+// 跨服务器落地与 tunnel 链式目标都是后端真实支持的路径（TunnelTarget 用目标服务器 Host），
+// 默认隐藏、需要显式打开开关，避免把一台机器上的全部入站塞进下拉。
+const showAllTargets = ref(false)
+
+function isUserInbound(item: InboundItem) {
+  // 历史行 type 可能为空，按 user 处理（与列表页口径一致）。
+  return (item.type || 'user') === 'user'
+}
+
+const allCandidates = computed(() =>
+  candidateInbounds.value.filter((item) => isUserInbound(item) || item.type === 'tunnel'),
+)
+
+const defaultCandidates = computed(() => {
+  // 服务器未知（新建入站尚未选服务器）时无法按同服务器过滤，退回全部合法候选。
+  if (!props.serverId) return allCandidates.value
+  return allCandidates.value.filter((item) => item.server_id === props.serverId && isUserInbound(item))
+})
+
+const restrictedCandidates = computed(() => {
+  const defaults = new Set(defaultCandidates.value.map((item) => item.id))
+  return allCandidates.value.filter((item) => !defaults.has(item.id))
+})
+
+const visibleCandidates = computed(() =>
+  showAllTargets.value ? allCandidates.value : defaultCandidates.value,
+)
+
 const targetInboundOptions = computed(() =>
-  candidateInbounds.value.map((item) => ({
+  visibleCandidates.value.map((item) => ({
     value: item.id,
     label: `[${serverMap.value[item.server_id] || '服务器#' + item.server_id}] ${item.tag} (:${item.port} ${item.protocol})`,
   }))
@@ -58,7 +89,15 @@ async function loadCandidateInbounds() {
       serverMap.value = sm
     }
     if (inbRes.data.code === 0) {
-      candidateInbounds.value = inbRes.data.data.items.filter((i) => i.id !== props.currentInboundId)
+      // 目标只能是能承接流量的入站：排除自身与已退役的 forward（旧代理通道）行。
+      candidateInbounds.value = inbRes.data.data.items.filter(
+        (i) => i.id !== props.currentInboundId && i.type !== 'forward',
+      )
+      // 存量目标若落在默认范围外（跨服务器 / tunnel），自动展开，否则下拉回显不出当前值。
+      const current = props.modelValue.target_inbound_id
+      if (current && !defaultCandidates.value.some((i) => i.id === current)) {
+        showAllTargets.value = true
+      }
     }
   } catch {
     /* ignore */
@@ -180,6 +219,25 @@ const targetSummaryText = computed(() => {
             style="width: 100%"
             @update:model-value="(v: any) => updateField('target_inbound_id', Number(v || 0))"
           />
+          <div v-if="!targetInboundOptions.length" class="field-hint cs-text-secondary">
+            本服务器暂无可用目标入站；跨服务器目标需要先打开下方开关。
+          </div>
+        </CsFormItem>
+        <CsFormItem
+          v-if="restrictedCandidates.length"
+          label="候选范围"
+          style="grid-column: 1 / -1"
+        >
+          <div class="toggle-pad">
+            <CsToggle
+              :model-value="showAllTargets"
+              :label="`显示跨服务器 / 链式目标（另有 ${restrictedCandidates.length} 个）`"
+              @update:model-value="(v: boolean) => (showAllTargets = v)"
+            />
+          </div>
+          <div class="field-hint cs-text-secondary">
+            默认只列同服务器的用户入站；跨服务器落地与 tunnel 链式目标是真实支持的路径，打开后一并显示。
+          </div>
         </CsFormItem>
         <div v-if="targetNeedsPPWarning" style="grid-column: 1 / -1">
           <CsAlert type="warning" header="所选目标入站未启用 Proxy Protocol，无法透传真实客户端 IP。" />

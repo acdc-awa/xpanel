@@ -205,36 +205,40 @@ function copyText(txt: string, label = '内容') {
       </div>
     </CsContainer>
 
-    <CsExpandableSection header="客户端版本与时间漂移容差 (选填微调)" class="section-gap">
-      <div class="form-grid-3">
-        <CsFormItem label="最低版本限制 (minClientVer)">
-          <CsInput
-            :model-value="modelValue.min_client_ver"
-            placeholder="留空不限制，如 1.8.0"
-            class="mono"
-            @update:model-value="(v: string) => updateField('min_client_ver', v)"
-          />
-        </CsFormItem>
-        <CsFormItem label="最高版本限制 (maxClientVer)">
-          <CsInput
-            :model-value="modelValue.max_client_ver"
-            placeholder="留空不限制"
-            class="mono"
-            @update:model-value="(v: string) => updateField('max_client_ver', v)"
-          />
-        </CsFormItem>
-        <CsFormItem label="最大允许时钟差 (ms)">
-          <CsInputNumber
-            :model-value="modelValue.max_time_diff"
-            :min="0"
-            style="width: 100%"
-            placeholder="0 = 不限制"
-            class="mono"
-            @update:model-value="(v: number | null) => updateField('max_time_diff', Number(v || 0))"
-          />
-        </CsFormItem>
-      </div>
-    </CsExpandableSection>
+    <!-- 折叠区必须自带容器：ExpandableSection 的 default 变体没有左右内边距，
+         直接放在面板上会让内容贴到页签边缘（与上方卡片对不齐）。 -->
+    <CsContainer class="section-gap" :disable-content-paddings="true">
+      <CsExpandableSection header="客户端版本与时间漂移容差 (选填微调)" variant="container">
+        <div class="form-grid-3">
+          <CsFormItem label="最低版本限制 (minClientVer)">
+            <CsInput
+              :model-value="modelValue.min_client_ver"
+              placeholder="留空不限制，如 1.8.0"
+              class="mono"
+              @update:model-value="(v: string) => updateField('min_client_ver', v)"
+            />
+          </CsFormItem>
+          <CsFormItem label="最高版本限制 (maxClientVer)">
+            <CsInput
+              :model-value="modelValue.max_client_ver"
+              placeholder="留空不限制"
+              class="mono"
+              @update:model-value="(v: string) => updateField('max_client_ver', v)"
+            />
+          </CsFormItem>
+          <CsFormItem label="最大允许时钟差 (ms)">
+            <CsInputNumber
+              :model-value="modelValue.max_time_diff"
+              :min="0"
+              style="width: 100%"
+              placeholder="0 = 不限制"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('max_time_diff', Number(v || 0))"
+            />
+          </CsFormItem>
+        </div>
+      </CsExpandableSection>
+    </CsContainer>
   </div>
 </template>
 
@@ -245,7 +249,7 @@ function copyText(txt: string, label = '内容') {
 }
 
 .section-gap {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .inline-row {

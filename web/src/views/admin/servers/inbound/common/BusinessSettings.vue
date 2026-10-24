@@ -1,32 +1,30 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  CsAlert,
   CsButton,
   CsContainer,
   CsFormItem,
-  CsIcon,
   CsInput,
   CsInputNumber,
+  CsKeyValuePairs,
   CsSelect,
-  CsTooltip,
   ElMessage,
 } from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 import type { AccessLayer } from '@/api/types'
 
 const props = defineProps<{
-  inboundType: string
+  /** 前置 TLS 卸载只对 vless（xhttp 传输）成立；Hysteria/直通显示该按钮只会建出无关的层。 */
+  canOffload: boolean
   layerId: number
   layers: AccessLayer[]
   serverId?: number
   shareStrategy: string
   shareAddr: string
   sharePort: number
-  shareSecurity: string
   shareSni: string
-  shareHost: string
-  sharePath: string
-  shareAllowInsecure: boolean
+  /** 入站自身的传输安全层：不挂接入层时它就是对外安全层 */
+  transportSecurity?: string
   caddySnippet: string
   layerDeleting?: boolean
 }>()
@@ -36,11 +34,7 @@ const emit = defineEmits<{
   (e: 'update:shareStrategy', value: string): void
   (e: 'update:shareAddr', value: string): void
   (e: 'update:sharePort', value: number): void
-  (e: 'update:shareSecurity', value: string): void
   (e: 'update:shareSni', value: string): void
-  (e: 'update:shareHost', value: string): void
-  (e: 'update:sharePath', value: string): void
-  (e: 'update:shareAllowInsecure', value: boolean): void
   (e: 'open-layer-quick'): void
   (e: 'delete-layer'): void
   (e: 'apply-caddy-preset'): void
@@ -60,33 +54,76 @@ const layerOptions = computed(() => [
   })),
 ])
 
+const boundLayer = computed(() => props.layers.find((l) => l.id === props.layerId) || null)
+
+// 与后端 subscribe.BuildNodeDTO 的取值顺序完全一致：
+// 接入层 > 入站自定义地址 > 服务器 Host；分享安全层显式值再覆盖层定义。
+const effectiveEndpoint = computed(() => {
+  const layer = boundLayer.value
+  if (layer) return `${layer.host}:${layer.port}`
+  const port = props.sharePort > 0 ? String(props.sharePort) : '入站端口'
+  if (props.shareStrategy === 'custom' && props.shareAddr.trim()) {
+    return `${props.shareAddr.trim()}:${port}`
+  }
+  return `服务器主机名:${port}`
+})
+
+// 对外安全层不再是可填字段：挂层取层定义，不挂层就是入站传输安全层。
+const effectiveSecurity = computed(() => {
+  const layer = boundLayer.value
+  if (layer) return `${layer.security}（接入层）`
+  return props.transportSecurity ? `${props.transportSecurity}（入站传输层）` : '跟随传输层'
+})
+
+const effectiveSni = computed(() => {
+  if (props.shareSni.trim()) return props.shareSni.trim()
+  const layer = boundLayer.value
+  return layer ? `${layer.host}（接入层）` : '跟随传输层'
+})
+
+// 与后端取值顺序同源的三项结果：纯展示，不再用横幅抢视觉
+const endpointItems = computed(() => [
+  { key: 'endpoint', label: '下发地址', value: effectiveEndpoint.value },
+  { key: 'security', label: '安全层', value: effectiveSecurity.value },
+  { key: 'sni', label: 'SNI', value: effectiveSni.value },
+])
+
 const shareStrategyOptions = [
   { label: '跟随服务器 IP / 域名', value: 'node' },
   { label: '自定义域名或 IP', value: 'custom' },
 ]
 
-const shareSecurityOptions = [
-  { label: 'auto (跟随传输层配置)', value: 'auto' },
-  { label: 'tls (强制要求 TLS)', value: 'tls' },
-  { label: 'none (明文传输)', value: 'none' },
-]
 </script>
 
 <template>
   <div class="business-settings-box">
-    <!-- 微卡片 1: 对外接入层绑定 -->
-    <CsContainer header="对外接入层绑定 (Access Layer)">
+    <!-- 订阅对外入口：接入层（可复用）> 自定义地址 > 服务器主机名，三级取值在同处展示 -->
+    <CsContainer header="订阅对外入口 (Entry Endpoint)">
       <template #info>
-        <CsTooltip content="用于向客户端分发订阅时解析的连接地址与参数。若挂载对外接入层，则 host/port/安全层由该层决议。">
-          <CsIcon name="status-info" />
-        </CsTooltip>
+        <TipIcon content="下发到客户端的地址按「接入层 > 入站自定义地址 > 服务器主机名」逐级取值；客户端覆写只改 SNI；Host 与 Path 取传输页的 xhttp 设置，安全层由接入层决议。" />
       </template>
       <template #actions>
-        <CsButton variant="primary" icon-name="gen-ai" :disabled="!serverId" @click="emit('apply-caddy-preset')">
+        <CsButton
+          v-if="canOffload"
+          variant="primary"
+          icon-name="gen-ai"
+          :disabled="!serverId"
+          @click="emit('apply-caddy-preset')"
+        >
           应用前置反代预设
         </CsButton>
       </template>
-      <CsFormItem label="挂载接入层">
+
+      <CsKeyValuePairs class="endpoint-preview" :items="endpointItems" :columns="3" aria-label="当前下发的客户端入口">
+        <template #value="{ item }">
+          <span :class="item.key === 'endpoint' ? 'mono' : ''">{{ item.value }}</span>
+        </template>
+      </CsKeyValuePairs>
+
+      <CsFormItem label="对外接入层" class="layer-field">
+        <template #info>
+          <TipIcon content="接入层是「多入站共用一个对外入口」的实体（典型场景：一个域名 / 反代端口挂多个入站）。挂载后 host 与 port 由该层决议，下方自定义地址组失效。" />
+        </template>
         <div class="layer-row">
           <CsSelect
             :model-value="layerId || undefined"
@@ -109,33 +146,18 @@ const shareSecurityOptions = [
           </CsButton>
         </div>
       </CsFormItem>
-      <CsAlert v-if="layerId > 0" type="success" class="alert-gap">
-        已挂载对外接入层：订阅中的连接 host、port 和安全层将自动取自该层。下方自定义地址组已自动失效，仅 SNI/Path 等覆写项继续生效。
-      </CsAlert>
-    </CsContainer>
 
-    <!-- 微卡片 2: 订阅下发覆写与自定义参数 -->
-    <CsContainer header="订阅下发参数覆写 (Subscription Overrides)" class="section-gap">
-      <template #actions>
-        <span class="cs-text-secondary">下发至客户端的连接配置</span>
-      </template>
       <div class="form-grid-2">
         <template v-if="!layerId">
           <CsFormItem label="分享地址策略">
+            <template #info>
+              <TipIcon content="node = 用服务器主机名；custom = 用下面的自定义地址（只对当前入站生效）。" />
+            </template>
             <CsSelect
               :model-value="shareStrategy"
               :options="shareStrategyOptions"
               style="width: 100%"
               @update:model-value="(v: any) => emit('update:shareStrategy', String(v))"
-            />
-          </CsFormItem>
-
-          <CsFormItem label="订阅安全层 (TLS)">
-            <CsSelect
-              :model-value="shareSecurity"
-              :options="shareSecurityOptions"
-              style="width: 100%"
-              @update:model-value="(v: any) => emit('update:shareSecurity', String(v))"
             />
           </CsFormItem>
 
@@ -163,45 +185,20 @@ const shareSecurityOptions = [
         </template>
 
         <CsFormItem label="客户端覆写 SNI">
+          <template #info>
+            <TipIcon content="只在 CDN 前置、订阅域名与传输层 serverName 不一致时填写；其余留空，自动跟随接入层 Host 或传输层。不改 Host 与 Path。" />
+          </template>
           <CsInput
             :model-value="shareSni"
-            placeholder="留空默认跟随服务器配置"
+            placeholder="留空跟随接入层 / 传输层"
             class="mono"
             @update:model-value="(v: string) => emit('update:shareSni', v)"
           />
         </CsFormItem>
-
-        <CsFormItem label="客户端覆写 HTTP Host">
-          <CsInput
-            :model-value="shareHost"
-            placeholder="留空默认跟随传输配置"
-            class="mono"
-            @update:model-value="(v: string) => emit('update:shareHost', v)"
-          />
-        </CsFormItem>
-
-        <CsFormItem label="客户端覆写分流 Path">
-          <CsInput
-            :model-value="sharePath"
-            placeholder="留空默认跟随传输路径"
-            class="mono"
-            @update:model-value="(v: string) => emit('update:sharePath', v)"
-          />
-        </CsFormItem>
-
-        <CsFormItem label="客户端证书校验">
-          <div class="toggle-pad">
-            <CsToggle
-              :model-value="shareAllowInsecure"
-              label="跳过客户端证书校验 (allowInsecure)"
-              @update:model-value="(v: boolean) => emit('update:shareAllowInsecure', v)"
-            />
-          </div>
-        </CsFormItem>
       </div>
     </CsContainer>
 
-    <!-- 微卡片 3: Caddyfile 片段参考 -->
+    <!-- 微卡片 2: Caddyfile 片段参考 -->
     <CsContainer v-if="caddySnippet" header="Caddyfile 反向代理配置参考" class="section-gap">
       <template #actions>
         <CsButton variant="link" icon-name="copy" @click="copyText(caddySnippet, 'Caddyfile 配置')">
@@ -227,6 +224,14 @@ const shareSecurityOptions = [
   margin-top: 10px;
 }
 
+.layer-field {
+  margin-top: 12px;
+}
+
+.endpoint-preview {
+  margin-bottom: 4px;
+}
+
 .layer-row {
   display: flex;
   gap: 10px;
@@ -235,8 +240,9 @@ const shareSecurityOptions = [
   flex-wrap: wrap;
 }
 
-.toggle-pad {
-  padding-top: 4px;
+code {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .mono {

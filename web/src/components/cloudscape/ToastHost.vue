@@ -22,14 +22,15 @@ function dismiss(id: string) {
 /*
  * 官方 AppLayout 的 notifications 槽是「内容区顶部留白里的常驻区」；
  * 这里要的是浮在页面之上、滚走也不消失的 toast，所以用 fixed + 顶栏下方偏移。
- * 层级夹在页面内容与 Modal/Dropdown 之间（modal=5000、dropdown=7000），
- * 避免盖住弹窗与下拉。
+ * 层级必须在 Modal(5000) / Drawer(6000) 之上：弹窗里的保存、复制、生成都会弹 toast，
+ * 压在遮罩下面等于没有反馈（实测 elementFromPoint 命中遮罩而不是 toast）。
+ * 仍低于 Select / ButtonDropdown 的 9000，避免下拉选项被 toast 盖住。
  */
 .cs-toast-host {
   position: fixed;
   inset-block-start: calc(var(--x-topbar-h, 56px) + 12px);
   inset-inline: 0;
-  z-index: 4000;
+  z-index: 7000;
   display: flex;
   flex-direction: column;
   align-items: center;

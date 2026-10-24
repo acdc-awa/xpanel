@@ -97,12 +97,15 @@ export interface TlsConfig {
   cipher_suites: string
   min_version: string
   max_version: string
-  // 仅影响用户订阅（skip-cert-verify）。入站服务端不消费。
-  allow_insecure: boolean
+  // 「跳过客户端证书校验」是订阅字段（share_allow_insecure），不放在 TLS 配置里：
+  // 安全层只负责调度它，值由编辑器统一持有，避免同一个语义出现两个开关。
   reject_unknown_sni: boolean
   // 历史遗留：入站曾允许配置 usage=verify 的 CA 证书（服务端不消费）。
   // 控件已移除，仅原样回写，避免存量配置在保存时丢字段。
   legacy_verify_certs: any[]
+  // 手写 JSON 里的内联证书（certificate/key 数组，非文件路径）：表单不编辑，
+  // 但保存时必须原样带回，否则存量配置会被静默清空。
+  legacy_inline_certs: any[]
 }
 
 export interface SockoptConfig {
@@ -114,7 +117,8 @@ export interface SockoptConfig {
   tcp_keep_alive_idle?: number
   tcp_keep_alive_interval?: number
   tcp_user_timeout?: number
-  accept_proxy_protocol: boolean
+  // 接收 PROXY Protocol 只在传输层（tcpSettings.acceptProxyProtocol）维护一个开关，
+  // sockopt 不再重复提供（xray 运行时对两者取 OR，双开关会出现「关不掉」的假象）。
   mark?: number
   tproxy: 'off' | 'tproxy' | 'redirect'
 }

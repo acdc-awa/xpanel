@@ -524,9 +524,9 @@ func ShareAddrOf(srv *models.Server, inb *models.Inbound) (string, int) {
 // BuildNodeDTO 将 Inbound 模型与 Server 模型转换为订阅导出用的 ProxyNodeDTO。
 // 协议知识（传输/安全/flow/凭证派生）由协议插件承担；未注册协议或参数不足返回 nil，
 // 调用方记日志跳过（替代历史上 switch 静默 continue）。
-// layer 非空表示入站挂对外接入层：对外 host/port 由层决议（内部实现——直连 TLS / 反代 / CDN——
-// 对订阅不可见），安全层取层定义（share_security 显式覆写优先），SNI 缺省回落层 Host；
-// 未挂层（layer=nil）沿用 ShareAddrStrategy 直连端点语义。
+// layer 非空表示入站挂对外接入层：对外 host/port/security 由层决议（内部实现——直连 TLS /
+// 反代 / CDN——对订阅不可见），SNI 缺省回落层 Host；未挂层（layer=nil）沿用 ShareAddrStrategy
+// 直连端点语义，对外安全层就是入站自身的传输安全层。
 func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string, layer *models.AccessLayer) *contracts.ProxyNodeDTO {
 	plugin := protocols.Find(inb.Protocol)
 	if plugin == nil {
@@ -534,29 +534,26 @@ func BuildNodeDTO(srv *models.Server, inb *models.Inbound, userUUID string, laye
 		return nil
 	}
 	host, port := ShareAddrOf(srv, inb)
-	sec := inb.ShareSecurity
+	// 对外安全层只由接入层决议；不挂层 = 直连入站，安全层跟随 streamSettings。
+	sec := ""
 	sni := inb.ShareSNI
 	if layer != nil {
 		host = layer.Host
 		port = layer.Port
-		if sec == "" || sec == "auto" {
-			sec = layer.Security
-		}
+		sec = layer.Security
 		if sni == "" {
 			sni = layer.Host
 		}
 	}
 	dto, err := plugin.ProjectClient(&contracts.ClientProjectionInput{
-		Role: contracts.RoleSubscription,
-		Name: NodeName(srv, inb),
-		Host: host,
-		Port: port,
-		Spec: contracts.DecodeInbound(inb),
+		Role:          contracts.RoleSubscription,
+		Name:          NodeName(srv, inb),
+		Host:          host,
+		Port:          port,
+		Spec:          contracts.DecodeInbound(inb),
+		EntrySecurity: sec,
 		Share: contracts.ShareOverride{
-			Security:      sec,
 			SNI:           sni,
-			Host:          inb.ShareHost,
-			Path:          inb.SharePath,
 			AllowInsecure: inb.ShareAllowInsecure,
 		},
 		InboundFlow: inb.Flow,

@@ -8,6 +8,7 @@ import {
   DEFAULT_BOX_W,
   inboundSummary,
   isOutboundDraft,
+  xhttpPathOf,
   typeInfo,
   type BoxData,
   type BoxOutbound,
@@ -175,8 +176,12 @@ useGridHeight(boxEl)
                 >
                   {{ typeInfo(inb.type).text }}
                 </span>
-                <span v-if="inb.share_path" class="path-badge" :title="`反代至 127.0.0.1:${inb.port}`">
-                  {{ inb.share_path }}
+                <span
+                  v-if="xhttpPathOf(inb)"
+                  class="path-badge"
+                  :title="`反代至 127.0.0.1:${inb.port}（路径须与入站 xhttp 设置同值）`"
+                >
+                  {{ xhttpPathOf(inb) }}
                 </span>
                 <span class="port-badge">:{{ inb.port }}</span>
                 <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>

@@ -153,4 +153,22 @@ button {
   text-align: start;
   cursor: pointer;
 }
+
+/*
+ * 官方 header-content 是 flex item 但不拉伸，而按钮宽度是 100%：
+ * 两者叠加会把长标题按内容宽度压缩后换行（实测 828px 的头部里标题只有 237px）。
+ * 让它填满整行，长标题就不会无故折行。
+ */
+[class*='awsui_header-content'] {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+/*
+ * container 变体官方只给了 700 字重、没给字号（它是为「放进容器里」设计的），
+ * 但本项目用它当独立折叠卡片的标题，需要与容器标题同档（16px）。
+ */
+[class*='awsui_wrapper-container'] {
+  font-size: var(--font-size-expandable-heading-04ofyn, 16px);
+}
 </style>

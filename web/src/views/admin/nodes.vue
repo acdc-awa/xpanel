@@ -66,7 +66,6 @@ const serverFormOptions = computed(() =>
 )
 const typeFilterOptions = [
   { label: '用户入站', value: 'user' },
-  { label: '直通通道', value: 'forward' },
   { label: '四层直通', value: 'tunnel' },
 ]
 
@@ -297,10 +296,7 @@ function editorModelValue(): string {
       share_addr_strategy: editing.value.share_addr_strategy,
       share_addr: editing.value.share_addr,
       share_port: editing.value.share_port,
-      share_security: editing.value.share_security,
       share_sni: editing.value.share_sni,
-      share_host: editing.value.share_host,
-      share_path: editing.value.share_path,
       share_allow_insecure: editing.value.share_allow_insecure,
       layer_id: editing.value.layer_id || 0,
     },
@@ -359,32 +355,31 @@ async function save() {
     const payload: InboundPayload = {
       server_id: formServerId.value,
       tag: c.tag,
-      remark: c.remark || undefined,
-      traffic_reset: c.traffic_reset || undefined,
+      // 0 / 空串都是有效终态（解绑、关闭、清空），不能再用 `|| undefined` 吞掉：
+      // 后端收到 nil 会保留旧值，界面显示保存成功但设置没变。
+      remark: c.remark ?? '',
+      traffic_reset: c.traffic_reset || 'never',
       protocol: c.protocol,
       port: c.port,
       listen: c.listen,
       settings_json: c.settingsJson,
       stream_settings: c.streamSettings,
-      sniffing: c.sniffing || undefined,
+      sniffing: c.sniffing,
       ratio: c.ratio,
       total_gb: c.total_gb,
       expiry_time: (c.expiry_time && c.expiry_time.trim()) ? c.expiry_time : null,
       type: c.type || formType.value,
-      target_inbound_id: c.targetInboundId || 0,
-      target_address: c.targetAddress || '',
-      target_port: c.targetPort || 0,
-      cert_id: formCertId.value || undefined,
-      flow: c.flow || undefined,
-      share_addr_strategy: c.shareAddrStrategy || undefined,
-      share_addr: c.shareAddr || undefined,
-      share_port: c.sharePort || undefined,
-      share_security: c.shareSecurity || undefined,
-      share_sni: c.shareSni || undefined,
-      share_host: c.shareHost || undefined,
-      share_path: c.sharePath || undefined,
+      target_inbound_id: c.targetInboundId ?? 0,
+      target_address: c.targetAddress ?? '',
+      target_port: c.targetPort ?? 0,
+      cert_id: formCertId.value,
+      flow: c.flow,
+      share_addr_strategy: c.shareAddrStrategy || 'node',
+      share_addr: c.shareAddr ?? '',
+      share_port: c.sharePort ?? 0,
+      share_sni: c.shareSni ?? '',
       share_allow_insecure: c.shareAllowInsecure,
-      layer_id: c.layerId || 0,
+      layer_id: c.layerId ?? 0,
     }
 
     if (editing.value) {
@@ -679,9 +674,7 @@ function quotaOf(row: any): string {
         :model-value="editorModelValue()"
         :protocol="editing?.protocol || 'vless'"
         :inbound-type="formType"
-        :saved-inbound-type="editing?.type || ''"
         :listen="editing?.listen || '0.0.0.0'"
-        :internal-uuid="editing?.internal_uuid || ''"
         :inbound-id="editing?.id || 0"
         :cert-id="formCertId"
         :server-id="formServerId"
@@ -692,7 +685,6 @@ function quotaOf(row: any): string {
         @change="onInboundEditorChange"
         @update:inbound-type="(v: string) => (formType = v)"
         @update:cert-id="(v: number) => (formCertId = v || 0)"
-        @internal-uuid-changed="load"
       />
 
       <template #footer>

@@ -43,10 +43,7 @@ type inboundView struct {
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`         // node / custom（订阅专用）
 	ShareAddr          string     `json:"share_addr"`                  // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`                  // 自定义分享端口（0 = 使用入站端口）
-	ShareSecurity      string     `json:"share_security"`              // auto / tls / none
 	ShareSNI           string     `json:"share_sni"`                   // 订阅 SNI 覆写
-	ShareHost          string     `json:"share_host"`                  // 订阅 HTTP/WS Host 覆写
-	SharePath          string     `json:"share_path"`                  // 订阅 WS/XHTTP Path 覆写
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`        // 订阅跳过证书校验
 	LayerID            *uint64    `json:"layer_id,omitempty"`          // 所属对外接入层（空/0 = 直连自持端点）
 	Remark             string     `json:"remark,omitempty"`            // 入站备注/通道名称
@@ -79,10 +76,7 @@ type inboundForm struct {
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / custom（订阅专用，listen 已退役）
 	ShareAddr          string     `json:"share_addr"`            // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`            // 自定义分享端口（0 = 使用入站端口）
-	ShareSecurity      string     `json:"share_security"`        // auto / tls / none
 	ShareSNI           string     `json:"share_sni"`
-	ShareHost          string     `json:"share_host"`
-	SharePath          string     `json:"share_path"`
 	ShareAllowInsecure bool       `json:"share_allow_insecure"`
 	LayerID            *uint64    `json:"layer_id"` // 所属对外接入层（nil/0 = 直连；仅同一服务器的层有效）
 }
@@ -97,10 +91,6 @@ func normalizeInboundType(protocol, currentType string) string {
 }
 
 func toInboundView(i *models.Inbound, serverName string) inboundView {
-	sec := i.ShareSecurity
-	if sec == "" {
-		sec = "auto"
-	}
 	return inboundView{
 		ID: i.ID, ServerID: i.ServerID, ServerName: serverName,
 		Tag: i.Tag, Protocol: i.Protocol, Port: i.Port,
@@ -111,9 +101,8 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		Type: i.Type, InternalUUID: i.InternalUUID,
 		TargetInboundID: i.TargetInboundID, TargetAddress: i.TargetAddress, TargetPort: i.TargetPort,
 		CertID: i.CertID, Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
-		SharePort:     i.SharePort,
-		ShareSecurity: sec, ShareSNI: i.ShareSNI, ShareHost: i.ShareHost,
-		SharePath: i.SharePath, ShareAllowInsecure: i.ShareAllowInsecure,
+		SharePort: i.SharePort,
+		ShareSNI:  i.ShareSNI, ShareAllowInsecure: i.ShareAllowInsecure,
 		LayerID: i.LayerID,
 		Remark:  i.Remark, TrafficReset: i.TrafficReset,
 	}
@@ -250,6 +239,8 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 			util.BadRequest(c, "绑定证书不存在")
 			return
 		}
+	} else if req.CertID != nil {
+		req.CertID = nil // 显式 0 = 未绑定，落库保持 NULL（与 layer_id 一致）
 	}
 	if req.LayerID != nil && *req.LayerID != 0 {
 		var layer models.AccessLayer
@@ -287,8 +278,8 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		TargetInboundID: req.TargetInboundID, TargetAddress: req.TargetAddress, TargetPort: req.TargetPort,
 		CertID: req.CertID,
 		Flow:   req.Flow, ShareAddrStrategy: req.ShareAddrStrategy, ShareAddr: req.ShareAddr,
-		SharePort: req.SharePort, ShareSecurity: req.ShareSecurity, ShareSNI: req.ShareSNI,
-		ShareHost: req.ShareHost, SharePath: req.SharePath,
+		SharePort:          req.SharePort,
+		ShareSNI:           req.ShareSNI,
 		ShareAllowInsecure: req.ShareAllowInsecure, LayerID: req.LayerID,
 	}
 	// Type 空 = user（与模型默认一致）
@@ -298,13 +289,6 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	// ShareAddrStrategy 空 = node（与模型默认一致）
 	if inb.ShareAddrStrategy == "" {
 		inb.ShareAddrStrategy = "node"
-	}
-	if inb.ShareSecurity == "" {
-		inb.ShareSecurity = "auto"
-	}
-	if inb.ShareSecurity != "" && !validShareSecurity(inb.ShareSecurity) {
-		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
-		return
 	}
 	// 字段声明交叉规则（S4）：协议强约束与安全层互斥，返回结构化问题便于前端定位。
 	if issues := protocols.ValidateInboundFields(&inb); len(issues) > 0 {
@@ -395,10 +379,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ShareAddrStrategy  *string         `json:"share_addr_strategy"` //
 		ShareAddr          *string         `json:"share_addr"`          //
 		SharePort          *int            `json:"share_port"`          // 0 = 使用入站端口
-		ShareSecurity      *string         `json:"share_security"`      // auto / tls / none
 		ShareSNI           *string         `json:"share_sni"`
-		ShareHost          *string         `json:"share_host"`
-		SharePath          *string         `json:"share_path"`
 		ShareAllowInsecure *bool           `json:"share_allow_insecure"`
 		LayerID            *uint64         `json:"layer_id"` // nil 不更新；显式传 0 解绑回原生
 	}
@@ -503,10 +484,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	if req.SharePort != nil && (*req.SharePort < 0 || *req.SharePort > 65535) {
 		util.BadRequest(c, "分享端口需在 0-65535 之间（0=使用入站端口）")
-		return
-	}
-	if req.ShareSecurity != nil && *req.ShareSecurity != "" && !validShareSecurity(*req.ShareSecurity) {
-		util.BadRequest(c, "订阅安全层覆写仅支持 auto / tls / none")
 		return
 	}
 	if req.Ratio != nil && *req.Ratio < 0 {
@@ -667,17 +644,8 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.SharePort != nil {
 		updates["share_port"] = *req.SharePort
 	}
-	if req.ShareSecurity != nil {
-		updates["share_security"] = *req.ShareSecurity
-	}
 	if req.ShareSNI != nil {
 		updates["share_sni"] = *req.ShareSNI
-	}
-	if req.ShareHost != nil {
-		updates["share_host"] = *req.ShareHost
-	}
-	if req.SharePath != nil {
-		updates["share_path"] = *req.SharePath
 	}
 	if req.ShareAllowInsecure != nil {
 		updates["share_allow_insecure"] = *req.ShareAllowInsecure
@@ -1053,14 +1021,6 @@ func validShareAddrStrategy(s string) bool {
 	return false
 }
 
-func validShareSecurity(s string) bool {
-	switch s {
-	case "auto", "tls", "none":
-		return true
-	}
-	return false
-}
-
 // pushFail 配置生成/待推送失败时向客户端上抛（U19：不再静默打日志返回成功——
 // 变更已入库但节点侧未生效，必须让管理员知道并处理）。
 func pushFail(c *gin.Context, serverID uint64, err error) {
@@ -1112,10 +1072,7 @@ func formToInbound(f *inboundForm) models.Inbound {
 		ShareAddrStrategy:  f.ShareAddrStrategy,
 		ShareAddr:          f.ShareAddr,
 		SharePort:          f.SharePort,
-		ShareSecurity:      f.ShareSecurity,
 		ShareSNI:           f.ShareSNI,
-		ShareHost:          f.ShareHost,
-		SharePath:          f.SharePath,
 		ShareAllowInsecure: f.ShareAllowInsecure,
 		LayerID:            f.LayerID,
 	}

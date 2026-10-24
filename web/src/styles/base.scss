@@ -284,6 +284,19 @@ html.dark .x-chip {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px 14px;
 }
+/* 网格自带行距：表单格自带的 16px 下边距会叠加成 28px，且卡片末行多留一截。
+   双写类名是为了压过 FormItem 组件内 scoped 的同名规则（不依赖样式注入顺序）。 */
+.form-grid-2 > .cs-form-item.cs-form-item,
+.form-grid-3 > .cs-form-item.cs-form-item,
+.form-grid-4 > .cs-form-item.cs-form-item {
+  margin-block-end: 0;
+}
+/* 单控件格（开关 / 单选）与同排输入框垂直居中，避免开关比输入框高一截。 */
+.control-cell {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
 
 @media (max-width: 768px) {
   .form-grid-4 {

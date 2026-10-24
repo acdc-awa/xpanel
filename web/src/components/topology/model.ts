@@ -115,6 +115,21 @@ export function inboundSummary(
   return { port: inb.port, proto, cls }
 }
 
+/**
+ * 入站的 xhttp 路径。这是唯一来源：xray 服务端按 HasPrefix(URL.Path, path) 校验，
+ * 所以反代匹配路径与订阅下发的 path 必须与它完全一致（不再有客户端 path 覆写）。
+ */
+export function xhttpPathOf(inb: TopologyData['inbounds'][number]): string {
+  try {
+    const ss = JSON.parse(inb.stream_settings || '{}')
+    if (ss?.network !== 'xhttp') return ''
+    const p = ss?.xhttpSettings?.path
+    return typeof p === 'string' ? p : ''
+  } catch {
+    return ''
+  }
+}
+
 /** 盒内路由线：S 形贝塞尔。 */
 export function boxRulePath(sx: number, sy: number, tx: number, ty: number): string {
   const mx = (sx + tx) / 2

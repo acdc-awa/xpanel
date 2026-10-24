@@ -1,29 +1,23 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import {
-  CsAlert,
   CsBadge,
   CsButton,
   CsContainer,
   CsFormItem,
-  CsIcon,
   CsIconButton,
   CsInput,
   CsSelect,
-  CsTooltip,
   ElMessage,
 } from '@/components/cloudscape'
 import { getXrayVlessEnc } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import TipIcon from '@/components/base/TipIcon.vue'
 import type { FallbackItem } from '@/api/types'
 import type { VlessConfig } from '../types'
 
 const props = defineProps<{
   modelValue: VlessConfig
-  inboundType?: string
-  internalUUID?: string
-  inboundId?: number
-  allowVision: boolean
 }>()
 
 const emit = defineEmits<{
@@ -31,11 +25,6 @@ const emit = defineEmits<{
 }>()
 
 const veGenLoading = ref(false)
-
-const flowOptions = [
-  { label: '开启 (xtls-rprx-vision 极速)', value: 'xtls-rprx-vision' },
-  { label: '不启用 (none 留空)', value: '' },
-]
 
 const xverOptions = [
   { label: '不发送 (0)', value: 0 },
@@ -94,91 +83,62 @@ function copyText(txt: string, label = '内容') {
 
 <template>
   <div class="vless-settings-box">
-    <!-- 微卡片 1: 流控与协议内解密 -->
-    <CsContainer header="用户流控 (Flow) 与后量子加密 (VLESS Encryption)">
+    <!-- 微卡片 1: 协议内后量子加密（settings.decryption） -->
+    <CsContainer header="后量子加密 (VLESS Encryption)">
       <template #actions>
         <CsBadge color="blue">ML-KEM-768</CsBadge>
       </template>
-      <div class="form-grid-2">
-        <CsFormItem>
-          <template #label>
-            <span>流控算法 (Flow)</span>
-            <CsTooltip content="TCP + REALITY 或 TLS / VLESS Encryption 建议开启 xtls-rprx-vision。">
-              <CsIcon name="status-info" class="help-icon" />
-            </CsTooltip>
-          </template>
-          <CsSelect
-            :model-value="modelValue.flow"
-            :options="flowOptions"
-            :disabled="!allowVision"
-            style="width: 100%"
-            @update:model-value="(v: any) => updateField('flow', String(v))"
+      <CsFormItem
+        label="协议解密密钥 (decryption)"
+        :constraint-text="modelValue.decryption ? '' : '留空为 none。裸 TCP 想用 Vision，必须开启本项加密（或改用 TLS / REALITY）。'"
+      >
+        <template #info>
+          <TipIcon content="服务端用该密钥解密；订阅下发时自动派生对应的客户端 encryption，无需手工填写。" />
+        </template>
+        <div class="inline-row">
+          <CsInput
+            :model-value="modelValue.decryption || ''"
+            placeholder="留空为关闭 (none)"
+            class="mono"
+            @update:model-value="(v: string) => updateField('decryption', v)"
           />
-          <div v-if="!allowVision" class="field-hint cs-text-secondary">
-            Vision 流控仅在 TCP + REALITY / TLS / VLESS Encryption 下生效
-          </div>
-        </CsFormItem>
-
-        <CsFormItem label="协议解密密钥 (decryption)">
-          <div class="inline-row">
-            <CsInput
-              :model-value="modelValue.decryption || ''"
-              placeholder="留空为关闭 (none)"
-              class="mono"
-              @update:model-value="(v: string) => updateField('decryption', v)"
-            />
-            <CsIconButton
-              v-if="modelValue.decryption"
-              icon-name="copy"
-              label="复制密钥"
-              @click="copyText(modelValue.decryption, '密钥')"
-            />
-            <CsButton
-              variant="primary"
-              icon-name="gen-ai"
-              :loading="veGenLoading"
-              @click="fetchVlessencKey"
-            >
-              生成
-            </CsButton>
-          </div>
-        </CsFormItem>
-      </div>
+          <CsIconButton
+            v-if="modelValue.decryption"
+            icon-name="copy"
+            label="复制密钥"
+            @click="copyText(modelValue.decryption, '密钥')"
+          />
+          <CsButton
+            variant="primary"
+            icon-name="gen-ai"
+            :loading="veGenLoading"
+            @click="fetchVlessencKey"
+          >
+            生成
+          </CsButton>
+        </div>
+      </CsFormItem>
     </CsContainer>
 
     <!-- 微卡片 2: 回落规则 (Fallbacks) -->
     <CsContainer header="Web 伪装回落 (Fallbacks - 选填)" class="section-gap">
+      <template #info>
+        <TipIcon content="客户端认证失败时把流量回落到本机 Web 站点，对外看似普通的 HTTPS 访问，用于抵御主动探测。" />
+      </template>
       <template #actions>
         <CsButton icon-name="add-plus" @click="addFallback">添加回落项</CsButton>
       </template>
-      <CsAlert v-if="!modelValue.fallbacks.length" type="info">
-        未配置回落规则。客户端认证失败时直接中断连接（推荐），或添加回落转发至 Web 站点以防探测。
-      </CsAlert>
+      <div v-if="!modelValue.fallbacks.length" class="card-note">
+        未配置回落：认证失败时直接断连（推荐）。需要伪装时再添加。
+      </div>
 
       <div v-else class="fallback-list">
         <div v-for="(fb, idx) in modelValue.fallbacks" :key="idx" class="fallback-item">
-          <div class="fb-grid">
-            <CsFormItem label="SNI (可选)">
-              <CsInput
-                :model-value="fb.name || ''"
-                placeholder="如 site.com"
-                @update:model-value="(v: string) => updateFallback(idx, { name: v })"
-              />
-            </CsFormItem>
-            <CsFormItem label="ALPN">
-              <CsInput
-                :model-value="fb.alpn || ''"
-                placeholder="如 h2"
-                @update:model-value="(v: string) => updateFallback(idx, { alpn: v })"
-              />
-            </CsFormItem>
-            <CsFormItem label="Path 路径">
-              <CsInput
-                :model-value="fb.path || ''"
-                placeholder="如 /"
-                @update:model-value="(v: string) => updateFallback(idx, { path: v })"
-              />
-            </CsFormItem>
+          <div class="fb-head">
+            <span class="fb-title">回落 #{{ idx + 1 }}</span>
+            <CsIconButton icon-name="remove" label="移除回落项" @click="removeFallback(idx)" />
+          </div>
+          <div class="form-grid-3">
             <CsFormItem label="回落目标 (Dest)">
               <CsInput
                 :model-value="fb.dest"
@@ -187,7 +147,40 @@ function copyText(txt: string, label = '内容') {
                 @update:model-value="(v: string) => updateFallback(idx, { dest: v })"
               />
             </CsFormItem>
-            <CsFormItem label="PROXY Protocol">
+            <CsFormItem label="Path 路径">
+              <template #info>
+                <TipIcon content="仅当回落请求的路径匹配时生效；留空匹配所有路径。" />
+              </template>
+              <CsInput
+                :model-value="fb.path || ''"
+                placeholder="如 /"
+                @update:model-value="(v: string) => updateFallback(idx, { path: v })"
+              />
+            </CsFormItem>
+            <CsFormItem label="SNI (可选)">
+              <template #info>
+                <TipIcon content="按请求携带的 SNI 选择回落目标；留空不限定。" />
+              </template>
+              <CsInput
+                :model-value="fb.name || ''"
+                placeholder="如 site.com"
+                @update:model-value="(v: string) => updateFallback(idx, { name: v })"
+              />
+            </CsFormItem>
+            <CsFormItem label="ALPN">
+              <template #info>
+                <TipIcon content="按协商的 ALPN 选择回落目标，如 h2 / http/1.1；留空不限定。" />
+              </template>
+              <CsInput
+                :model-value="fb.alpn || ''"
+                placeholder="如 h2"
+                @update:model-value="(v: string) => updateFallback(idx, { alpn: v })"
+              />
+            </CsFormItem>
+            <CsFormItem label="PROXY Protocol" class="fb-span-2">
+              <template #info>
+                <TipIcon content="向回落目标传递真实来源 IP（v1/v2）；回落目标（如 Nginx）需要支持 PROXY Protocol。" />
+              </template>
               <CsSelect
                 :model-value="fb.xver ?? 0"
                 :options="xverOptions"
@@ -195,9 +188,6 @@ function copyText(txt: string, label = '内容') {
                 @update:model-value="(v: any) => updateFallback(idx, { xver: Number(v) })"
               />
             </CsFormItem>
-          </div>
-          <div class="fb-actions">
-            <CsIconButton icon-name="remove" label="移除回落项" @click="removeFallback(idx)" />
           </div>
         </div>
       </div>
@@ -212,12 +202,7 @@ function copyText(txt: string, label = '内容') {
 }
 
 .section-gap {
-  margin-top: 16px;
-}
-
-.help-icon {
-  margin-left: 4px;
-  cursor: help;
+  margin-top: 12px;
 }
 
 .inline-row {
@@ -232,10 +217,10 @@ function copyText(txt: string, label = '内容') {
   min-width: 0;
 }
 
-.field-hint {
-  margin-top: 4px;
-  font-size: 11px;
-  line-height: 1.35;
+.card-note {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-form-secondary-wt0md2, #656871);
 }
 
 .mono {
@@ -250,36 +235,33 @@ function copyText(txt: string, label = '内容') {
 }
 
 .fallback-item {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
   background: var(--color-background-container-content-mjfil9, #ffffff);
-  padding: 10px 14px;
+  padding: 10px 14px 2px;
   border-radius: 8px;
   border: 1px solid var(--color-border-card-btvpmf, #e9ebed);
 }
 
-.fb-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px 10px;
-  flex: 1;
-}
-
-.fb-actions {
+.fb-head {
   display: flex;
   align-items: center;
-  padding-bottom: 2px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.fb-title {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--color-text-form-secondary-wt0md2, #656871);
+}
+
+.fb-span-2 {
+  grid-column: span 2;
 }
 
 @media (max-width: 640px) {
-  .fallback-item {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .fb-actions {
-    justify-content: flex-end;
+  .fb-span-2 {
+    grid-column: auto;
   }
 }
 </style>

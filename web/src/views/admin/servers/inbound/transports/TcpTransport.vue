@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CsContainer, CsFormItem, CsInput, CsSelect, CsToggle } from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 import type { TcpConfig } from '../types'
 
 const props = defineProps<{
@@ -25,9 +26,6 @@ const headerTypeOptions = [
 
 <template>
   <CsContainer header="TCP (RAW) 传输流配置">
-    <template #actions>
-      <span class="cs-text-secondary">标准传输模式</span>
-    </template>
     <div class="form-grid-2">
       <CsFormItem label="TCP 伪装类型 (Header)">
         <CsSelect
@@ -39,7 +37,10 @@ const headerTypeOptions = [
       </CsFormItem>
 
       <CsFormItem label="前置反向代理 (Proxy Protocol)">
-        <div class="toggle-pad">
+        <template #info>
+          <TipIcon content="前置 Caddy / Nginx 发送 PROXY Protocol 时开启；xray 从连接头解析真实来源 IP。" />
+        </template>
+        <div class="control-cell">
           <CsToggle
             :model-value="modelValue.acceptProxyProtocol"
             label="接收 Proxy Protocol v1/v2"
@@ -71,10 +72,6 @@ const headerTypeOptions = [
 </template>
 
 <style scoped lang="scss">
-.toggle-pad {
-  padding-top: 4px;
-}
-
 .mono {
   font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
   font-variant-numeric: tabular-nums;
