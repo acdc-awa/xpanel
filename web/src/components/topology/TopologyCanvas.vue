@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import {
   VueFlow,
   MarkerType,
+  useVueFlow,
   type Connection,
   type Edge,
   type EdgeMouseEvent,
@@ -38,17 +39,31 @@ import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue
 import AccessPointDialog from '@/views/admin/servers/AccessPointDialog.vue'
 import ServerBoxNode from './nodes/ServerBoxNode.vue'
 import APBoxNode from './nodes/APBoxNode.vue'
+import CanvasRulers from './CanvasRulers.vue'
 import {
-  DEFAULT_BOX_W,
-  HEADER_H,
-  ROW_H,
+  AP_EST_H,
+  AP_W,
+  BOTTOM_PAD,
   CAP_HED,
+  CARD_GAP_X,
+  CARD_GAP_Y,
   COL_HED,
+  DEFAULT_BOX_W,
+  GAP,
+  GRID,
+  HEADER_H,
+  ROW_BOX_H,
+  ROW_H,
+  clampBoxWidth,
+  snapPoint,
+  snapToGrid,
   boxRulePath,
   refEdgePath,
   type BoxData,
   type BoxOutbound,
 } from './model'
+import { findFreeSlot, rectsOverlap, type Rect } from './placement'
+import { useFillViewportHeight } from './useFillViewportHeight'
 
 import LayerDialog from './dialogs/LayerDialog.vue'
 import BindInboundDialog from './dialogs/BindInboundDialog.vue'
@@ -75,6 +90,17 @@ const flowRef = ref<{
   fitView?: (options?: Record<string, unknown>) => void
 } | null>(null)
 const isFullscreen = ref(false)
+const wrapEl = ref<HTMLElement | null>(null)
+
+// 画布高度吃掉视口剩余高度：上方 chrome（顶栏/页头/页签/工具条）随宽度变化，不能写死 calc 偏移
+useFillViewportHeight(wrapEl)
+
+// 画布视口：网格对齐、标尺读数与「新卡片居中」都依赖它。
+// 在渲染 <VueFlow> 的同一组件里调用 useVueFlow 会创建 store 并由 VueFlow 注入复用。
+const { viewport, dimensions, findNode, setCenter } = useVueFlow()
+const minorGridColor = computed(() =>
+  viewport.value.zoom < 0.5 ? 'transparent' : 'rgba(148, 163, 184, 0.055)',
+)
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
 const LAYOUT_KEY = 'topology-layout'
@@ -89,6 +115,8 @@ interface LayoutData {
   positions: Record<string, { x: number; y: number }>
   widths: Record<string, number>
   tag_orders?: Record<string, ServerTagOrder>
+  /** 本地布局版本：2 = 已完成 8pt 归一与新卡落点迁移（仅本地，不上传）。 */
+  version?: number
 }
 
 function loadLayoutLocal(): LayoutData {
@@ -165,8 +193,37 @@ if (localLayout.tag_orders) {
 }
 const layoutDirty = ref(false)
 
+// 存量布局归一：旧版本允许自由像素拖拽，坐标/宽度可能不是 8 的倍数。
+// 打开时一次性吸附（视觉位移 ≤ 4px）并落本地；云端仍由「保存布局」手动提交。
+function normalizeLayout(): boolean {
+  let changed = false
+  for (const [k, p] of boxPositions) {
+    const next = snapPoint(p)
+    if (next.x !== p.x || next.y !== p.y) {
+      boxPositions.set(k, next)
+      changed = true
+    }
+  }
+  for (const [k, w] of boxWidths) {
+    const next = clampBoxWidth(w)
+    if (next !== w) {
+      boxWidths.set(k, next)
+      changed = true
+    }
+  }
+  if (changed) {
+    localLayout.positions = Object.fromEntries(boxPositions)
+    localLayout.widths = Object.fromEntries(boxWidths)
+    saveLayoutLocal(localLayout)
+  }
+  return changed
+}
+normalizeLayout()
+
 // 云端同步：打开时拉取，hash 不一致 → 下载覆盖本地；一致 → 复用本地
 onMounted(async () => {
+  // 兜底：极端情况下 nodes-initialized 不触发（全部节点离屏），也不能让视口停在初始值
+  setTimeout(onNodesInitialized, 1500)
   loadPermissionGroups()
   try {
     const { data } = await getTopologyLayout()
@@ -185,13 +242,19 @@ onMounted(async () => {
     for (const [k, v] of Object.entries(srv.tag_orders ?? {})) {
       if (v) boxTagOrders.set(k, { inbounds: v.inbounds ? [...v.inbounds] : undefined, outbounds: v.outbounds ? [...v.outbounds] : undefined })
     }
+    normalizeLayout()
     localLayout.hash = srv.hash ?? ''
     localLayout.positions = Object.fromEntries(boxPositions)
     localLayout.widths = Object.fromEntries(boxWidths)
     localLayout.tag_orders = Object.fromEntries(boxTagOrders)
     saveLayoutLocal(localLayout)
     layoutDirty.value = false
-    if (props.topology) buildGraph(props.topology)
+    if (props.topology) {
+      const focusId = buildGraph(props.topology)
+      // 云端布局可能和本地完全不同：重新适配一次视口；有待定位卡片时让聚焦接管
+      await nextTick()
+      if (!focusId) flowRef.value?.fitView?.({ padding: 0.15 })
+    }
   } catch {
     /* 拉取失败用本地布局 */
   }
@@ -226,16 +289,27 @@ function getBoxWidth(serverId: number | string): number {
   return boxWidths.get(id) ?? DEFAULT_BOX_W
 }
 
-// 盒高估算（对齐 CSS 渲染附近；仅用于自动排版间距）：
-// 标准盒 = max(入站列高含层胶囊, 出站列高)。
-function estBoxHeight(srv: TopologyData['servers'][number], _inbCount: number, outCount: number) {
-  const inbCol = inboundColumnRows(srv.id).colH
-  const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + 16
-  return Math.max(inbCol, outCol)
+function measuredHeight(id: string): number {
+  const h = findNode(id)?.dimensions?.height ?? 0
+  return h > 0 ? snapToGrid(h) : 0
+}
+
+// 盒高：优先用 Vue Flow 实测尺寸（层胶囊头会换行、挂载行数也不定），
+// 离屏未渲染时退回按行数估算。结果始终落在 8pt 网格上。
+function estBoxHeight(serverId: number, outCount: number): number {
+  const measured = measuredHeight(`server-${serverId}`)
+  if (measured) return measured
+  const inbCol = inboundColumnRows(serverId).colH
+  const outCol = HEADER_H + COL_HED + Math.max(outCount, 1) * ROW_H + BOTTOM_PAD
+  return snapToGrid(Math.max(inbCol, outCol))
+}
+
+function apHeightOf(apId: number): number {
+  return measuredHeight(`ap-${apId}`) || AP_EST_H
 }
 
 function nodePosOf(s: TopologyData['servers'][number], idx: number) {
-  return boxPositions.get(`server-${s.id}`) ?? { x: 40 + idx * 520, y: 24 }
+  return boxPositions.get(`server-${s.id}`) ?? snapPoint({ x: 40 + idx * (DEFAULT_BOX_W + CARD_GAP_X), y: 24 })
 }
 
 // 对外接入层：入站列先渲染层胶囊（显式端点点位），后渲染未挂层原生行。
@@ -272,28 +346,31 @@ function nativeInboundsOf(serverId: number): TopologyData['inbounds'] {
 }
 
 // 入站列显示布局：返回每行中心 Y（相对盒顶，含 HEADER_H）与列总高（顶到底含底部内边距）。
-// 层胶囊头部开销 CAP_HED 对齐 CSS（容器上边距 6 + 头 ~26 + 头下间距 6），行距近似 ROW_H=40。
+// 列内元素以 8px 间距依次排列：层胶囊 = 内边距 8 + 头 32 + 间距 8 + 行；普通行 = 32。
 function inboundColumnRows(serverId: number): { rows: { id: number; centerY: number }[]; colH: number } {
   const data = props.topology
   const rows: { id: number; centerY: number }[] = []
-  if (!data) return { rows, colH: HEADER_H + COL_HED + ROW_H + 16 }
+  if (!data) return { rows, colH: HEADER_H + COL_HED + GAP + ROW_BOX_H + BOTTOM_PAD }
   let y = HEADER_H + COL_HED
   for (const g of layerGroupsOf(serverId)) {
-    y += CAP_HED
+    y += GAP // 列内元素间距
+    y += CAP_HED // 胶囊上内边距 + 头 + 头下间距
     if (g.inbounds.length === 0) {
-      y += ROW_H // 空层仍占一行「暂无挂载」
+      rows.push({ id: -g.layer.id, centerY: y + ROW_BOX_H / 2 })
+      y += ROW_BOX_H + GAP // 空层仍占一行「暂无挂载」
       continue
     }
     for (const inb of g.inbounds) {
-      rows.push({ id: inb.id, centerY: y + ROW_H / 2 })
-      y += ROW_H
+      rows.push({ id: inb.id, centerY: y + ROW_BOX_H / 2 })
+      y += ROW_BOX_H + GAP
     }
   }
   for (const inb of nativeInboundsOf(serverId)) {
-    rows.push({ id: inb.id, centerY: y + ROW_H / 2 })
-    y += ROW_H
+    y += GAP
+    rows.push({ id: inb.id, centerY: y + ROW_BOX_H / 2 })
+    y += ROW_BOX_H
   }
-  return { rows, colH: y + 16 }
+  return { rows, colH: y + BOTTOM_PAD }
 }
 
 // 复制层级 Caddyfile 反代片段（domain = 层 Host；每个挂载入站一个 path → 本地 xray 端口）
@@ -474,7 +551,238 @@ function autoAlignServerTags(serverId: number) {
   ElMessage.success('已自动整理出入站对应走线')
 }
 
-function buildGraph(data: TopologyData) {
+// ---- 布局落点：新卡片放哪、旧卡片怎么迁移 ----
+
+/** 剪掉数据库里已不存在的节点，避免孤儿坐标被反复上传。 */
+function pruneLayout(data: TopologyData): boolean {
+  // 空拓扑（接口异常/加载中）不能当作「全部删除」，否则会清掉布局表
+  if (data.servers.length === 0 && (data.access_points?.length ?? 0) === 0) return false
+  const ids = new Set<string>()
+  for (const s of data.servers) ids.add(`server-${s.id}`)
+  for (const ap of data.access_points ?? []) ids.add(`ap-${ap.id}`)
+  let changed = false
+  for (const k of [...boxPositions.keys()]) {
+    if (!ids.has(k)) {
+      boxPositions.delete(k)
+      changed = true
+    }
+  }
+  for (const k of [...boxWidths.keys()]) {
+    if (!ids.has(k)) {
+      boxWidths.delete(k)
+      changed = true
+    }
+  }
+  for (const k of [...boxTagOrders.keys()]) {
+    if (!ids.has(k)) {
+      boxTagOrders.delete(k)
+      changed = true
+    }
+  }
+  return changed
+}
+
+function viewportCenter(): { x: number; y: number } | null {
+  const d = dimensions.value
+  const z = viewport.value.zoom || 1
+  if (!d?.width || !d?.height) return null
+  return {
+    x: (d.width / 2 - viewport.value.x) / z,
+    y: (d.height / 2 - viewport.value.y) / z,
+  }
+}
+
+function occupiedRects(data: TopologyData): Rect[] {
+  const rects: Rect[] = []
+  for (const s of data.servers) {
+    const p = boxPositions.get(`server-${s.id}`)
+    if (!p) continue
+    const outCount = data.outbounds.filter((o) => o.server_id === s.id && o.protocol !== 'blackhole').length
+    rects.push({ x: p.x, y: p.y, w: getBoxWidth(s.id), h: estBoxHeight(s.id, outCount) })
+  }
+  for (const ap of data.access_points ?? []) {
+    const p = boxPositions.get(`ap-${ap.id}`)
+    if (!p) continue
+    rects.push({ x: p.x, y: p.y, w: AP_W, h: apHeightOf(ap.id) })
+  }
+  return rects
+}
+
+/** 视口中心优先；视口尚未测量时退到现有卡片右侧。 */
+function anchorForNew(data: TopologyData): { x: number; y: number } {
+  const vc = viewportCenter()
+  if (vc) return vc
+  let x = 40
+  let y = 24
+  for (const r of occupiedRects(data)) {
+    x = Math.max(x, r.x + r.w + CARD_GAP_X)
+    y = Math.min(y, r.y)
+  }
+  return { x, y }
+}
+
+function pickPosition(
+  preferred: { x: number; y: number } | null,
+  size: { w: number; h: number },
+  anchor: { x: number; y: number },
+  occupied: Rect[],
+): { x: number; y: number } {
+  if (preferred) {
+    const rect: Rect = { ...preferred, ...size }
+    if (!occupied.some((o) => rectsOverlap(rect, o, 24))) return snapPoint(preferred)
+  }
+  return findFreeSlot({ anchor, size, occupied })
+}
+
+/** 首次进入（没有任何存量布局）时的确定性排列，与「重置排列」保持一致。 */
+function applyDefaultLayout(data: TopologyData) {
+  let apY = 24
+  for (const ap of data.access_points ?? []) {
+    boxPositions.set(`ap-${ap.id}`, snapPoint({ x: 40, y: apY }))
+    apY += apHeightOf(ap.id) + CARD_GAP_Y
+  }
+  const offsetX = 40 + ((data.access_points?.length ?? 0) > 0 ? AP_W + CARD_GAP_X : 0)
+  data.servers.forEach((s, idx) => {
+    boxPositions.set(`server-${s.id}`, snapPoint({ x: offsetX + idx * (DEFAULT_BOX_W + CARD_GAP_X), y: 24 }))
+  })
+}
+
+/**
+ * 给还没有坐标的节点定位置。
+ * 升级后的第一次打开（version < 2）沿用旧版兜底坐标，避免把从未拖动过的卡片
+ * 一次性重排；之后新建的卡片才落到视口中心附近的空位。
+ */
+function ensurePositions(data: TopologyData): string[] {
+  const total = data.servers.length + (data.access_points?.length ?? 0)
+  if (total === 0) return []
+  if (boxPositions.size === 0) {
+    applyDefaultLayout(data)
+    localLayout.positions = Object.fromEntries(boxPositions)
+    localLayout.version = 2
+    saveLayoutLocal(localLayout)
+    return []
+  }
+
+  const migrating = (localLayout.version ?? 1) < 2
+  const anchor = anchorForNew(data)
+  const placed: string[] = []
+
+  data.servers.forEach((s, idx) => {
+    const id = `server-${s.id}`
+    if (boxPositions.has(id)) return
+    const outCount = data.outbounds.filter((o) => o.server_id === s.id && o.protocol !== 'blackhole').length
+    const size = { w: getBoxWidth(s.id), h: estBoxHeight(s.id, outCount) }
+    const legacy = migrating ? snapPoint({ x: 40 + idx * (DEFAULT_BOX_W + CARD_GAP_X), y: 24 }) : null
+    boxPositions.set(id, pickPosition(legacy, size, anchor, occupiedRects(data)))
+    placed.push(id)
+  })
+
+  ;(data.access_points ?? []).forEach((ap, idx) => {
+    const id = `ap-${ap.id}`
+    if (boxPositions.has(id)) return
+    const size = { w: AP_W, h: apHeightOf(ap.id) }
+    const legacy = migrating ? snapPoint({ x: 40, y: 24 + idx * (AP_EST_H + CARD_GAP_Y) }) : null
+    // 已指定目标的接入点优先贴到目标服务器左侧，符合「入口 → 管道」的阅读方向
+    let apAnchor = anchor
+    if (ap.target_type === 'inbound' && ap.target_inbound_id) {
+      const inb = data.inbounds.find((i) => i.id === ap.target_inbound_id)
+      const sp = inb ? boxPositions.get(`server-${inb.server_id}`) : null
+      if (sp) apAnchor = { x: sp.x - AP_W - CARD_GAP_X, y: sp.y }
+    }
+    boxPositions.set(id, pickPosition(legacy, size, apAnchor, occupiedRects(data)))
+    placed.push(id)
+  })
+
+  if (migrating) localLayout.version = 2
+  if (placed.length || migrating) {
+    localLayout.positions = Object.fromEntries(boxPositions)
+    saveLayoutLocal(localLayout)
+    if (placed.length) layoutDirty.value = true
+  }
+  return placed
+}
+
+// ---- 新卡片聚焦：居中 + 短暂高亮 ----
+const FOCUS_KEY = 'topology-focus-id'
+let flashTimer: number | undefined
+let pendingFocusId: string | null = null
+// 首次视口适配由 nodes-initialized 决定：有待定位卡片就居中它，否则 fitView。
+// 不能同时开 fit-view-on-init，否则它会在 setCenter 之后把视口又拉回去。
+let initialViewDone = false
+
+function requestFocus(nodeId: string) {
+  pendingFocusId = nodeId
+  if (initialViewDone) applyPendingFocus()
+}
+
+function applyPendingFocus() {
+  const id = pendingFocusId
+  if (!id) return
+  pendingFocusId = null
+  focusNode(id)
+}
+
+function onNodesInitialized() {
+  if (initialViewDone) return
+  initialViewDone = true
+  nextTick(() => {
+    setTimeout(() => {
+      if (pendingFocusId) applyPendingFocus()
+      else flowRef.value?.fitView?.({ padding: 0.15 })
+    }, 60)
+  })
+}
+
+function focusNode(nodeId: string) {
+  nextTick(() => {
+    setTimeout(() => {
+      const node = (nodes.value as any[]).find((n) => n.id === nodeId)
+      if (!node) return
+      const w = node.dimensions?.width || (nodeId.startsWith('ap-') ? AP_W : DEFAULT_BOX_W)
+      const h = node.dimensions?.height || (nodeId.startsWith('ap-') ? AP_EST_H : 200)
+      setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+        zoom: viewport.value.zoom || 1,
+        duration: 300,
+      })
+      node.class = 'just-created'
+      clearTimeout(flashTimer)
+      flashTimer = window.setTimeout(() => {
+        const n = (nodes.value as any[]).find((x) => x.id === nodeId)
+        if (n) n.class = undefined
+      }, 2200)
+    }, 80)
+  })
+}
+
+/** 优先消费服务器页留下的待定位标记；否则只在新卡片恰好一张时聚焦。 */
+function takeFocusId(placed: string[]): string | null {
+  let saved: string | null = null
+  try {
+    saved = sessionStorage.getItem(FOCUS_KEY)
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+  if (saved) {
+    if (!(nodes.value as any[]).some((n) => n.id === saved)) return null
+    try {
+      sessionStorage.removeItem(FOCUS_KEY)
+    } catch {
+      /* ignore */
+    }
+    return saved
+  }
+  return placed.length === 1 ? placed[0] : null
+}
+
+function buildGraph(data: TopologyData): string | null {
+  if (pruneLayout(data)) {
+    localLayout.positions = Object.fromEntries(boxPositions)
+    localLayout.widths = Object.fromEntries(boxWidths)
+    localLayout.tag_orders = Object.fromEntries(boxTagOrders)
+    saveLayoutLocal(localLayout)
+  }
+  const placedIds = ensurePositions(data)
+
   const inbByServer = new Map<number, TopologyData['inbounds']>()
   for (const inb of data.inbounds) {
     if (!inbByServer.has(inb.server_id)) inbByServer.set(inb.server_id, [])
@@ -531,7 +839,7 @@ function buildGraph(data: TopologyData) {
   const apNodes = (data.access_points || []).map((ap, idx) => ({
     id: `ap-${ap.id}`,
     type: 'apbox',
-    position: boxPositions.get(`ap-${ap.id}`) ?? { x: 40, y: 24 + idx * 170 },
+    position: boxPositions.get(`ap-${ap.id}`) ?? snapPoint({ x: 40, y: 24 + idx * (AP_EST_H + CARD_GAP_Y) }),
     data: { ap },
   }))
 
@@ -603,6 +911,10 @@ function buildGraph(data: TopologyData) {
     })
   }
   edges.value = es
+
+  const focusId = takeFocusId(placedIds)
+  if (focusId) requestFocus(focusId)
+  return focusId
 }
 
 // 行内 Handle 锚在行盒（.sb-row）的左右边缘，而行盒宽度由内容撑开：行内元素增删都会
@@ -1245,7 +1557,7 @@ function startBoxResize(e: MouseEvent, data: BoxData) {
   const startWidth = data.boxWidth || DEFAULT_BOX_W
   const onMouseMove = (moveEvent: MouseEvent) => {
     const deltaX = moveEvent.clientX - startX
-    const w = Math.max(340, Math.min(800, startWidth + deltaX))
+    const w = clampBoxWidth(startWidth + deltaX)
     data.boxWidth = w
     boxWidths.set(nodeId, w)
     localLayout.widths = Object.fromEntries(boxWidths)
@@ -1270,7 +1582,9 @@ function handleNodeDblClick(evt: NodeMouseEvent) {
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
   if (node.position) {
-    boxPositions.set(node.id, { x: node.position.x, y: node.position.y })
+    const pos = snapPoint(node.position)
+    node.position = pos
+    boxPositions.set(node.id, pos)
     localLayout.positions = Object.fromEntries(boxPositions)
     saveLayoutLocal(localLayout)
     layoutDirty.value = true
@@ -1327,19 +1641,17 @@ function autoLayout() {
     layers.get(d)!.push(id)
   }
 
-  // AP 节点固定排在最左侧（第 0 列），占宽 280px + 间距 80px
+  // AP 节点固定排在最左侧（第 0 列），纵向按实测高度推进并吸附到网格
   const aps = data.access_points || []
-  aps.forEach((ap, i) => {
-    boxPositions.set(`ap-${ap.id}`, { x: 40, y: 24 + i * 170 })
-  })
+  let apY = 24
+  for (const ap of aps) {
+    boxPositions.set(`ap-${ap.id}`, snapPoint({ x: 40, y: apY }))
+    apY += apHeightOf(ap.id) + CARD_GAP_Y
+  }
 
   // 各层 X 起点沿用该层最宽盒子尺寸累计推进，杜绝硬编码 520px 导致拉宽盒子时互相压叠穿模
-  const GAP_X = 80
-  const GAP_Y = 32
-  let curX = 40 + (aps.length > 0 ? 280 + GAP_X : 0)
+  let curX = 40 + (aps.length > 0 ? AP_W + CARD_GAP_X : 0)
 
-  const inbCounts = new Map<number, number>()
-  for (const inb of data.inbounds) inbCounts.set(inb.server_id, (inbCounts.get(inb.server_id) || 0) + 1)
   const outCounts = new Map<number, number>()
   for (const out of data.outbounds) {
     if (out.protocol !== 'blackhole') outCounts.set(out.server_id, (outCounts.get(out.server_id) || 0) + 1)
@@ -1351,16 +1663,13 @@ function autoLayout() {
     let curY = 24
     let maxColWidth = DEFAULT_BOX_W
     for (const sid of srvsInLayer) {
-      const srv = data.servers.find((s) => s.id === sid)
-      if (!srv) continue
       const w = getBoxWidth(sid)
       maxColWidth = Math.max(maxColWidth, w)
-      boxPositions.set(`server-${sid}`, { x: curX, y: curY })
-      const inbCount = inbCounts.get(sid) || 0
+      boxPositions.set(`server-${sid}`, snapPoint({ x: curX, y: curY }))
       const outCount = outCounts.get(sid) || 0
-      curY += estBoxHeight(srv, inbCount, outCount) + GAP_Y
+      curY += estBoxHeight(sid, outCount) + CARD_GAP_Y
     }
-    curX += maxColWidth + GAP_X
+    curX = snapToGrid(curX + maxColWidth + CARD_GAP_X)
   }
 
   localLayout.positions = Object.fromEntries(boxPositions)
@@ -1378,10 +1687,14 @@ function autoLayout() {
 function resetLayout() {
   if (!props.topology) return
   const aps = props.topology.access_points || []
-  aps.forEach((ap, i) => boxPositions.set(`ap-${ap.id}`, { x: 40, y: 24 + i * 170 }))
-  const offsetX = 40 + (aps.length > 0 ? 280 + 80 : 0)
+  let apY = 24
+  for (const ap of aps) {
+    boxPositions.set(`ap-${ap.id}`, snapPoint({ x: 40, y: apY }))
+    apY += apHeightOf(ap.id) + CARD_GAP_Y
+  }
+  const offsetX = 40 + (aps.length > 0 ? AP_W + CARD_GAP_X : 0)
   props.topology.servers.forEach((s, idx) => {
-    boxPositions.set(`server-${s.id}`, { x: offsetX + idx * 520, y: 24 })
+    boxPositions.set(`server-${s.id}`, snapPoint({ x: offsetX + idx * (DEFAULT_BOX_W + CARD_GAP_X), y: 24 }))
     boxWidths.set(`server-${s.id}`, DEFAULT_BOX_W)
   })
   boxTagOrders.clear()
@@ -1420,13 +1733,30 @@ function toggleFullscreen() {
 
 onUnmounted(() => {
   document.body.style.overflow = ''
+  clearTimeout(flashTimer)
 })
 
 const hasData = computed(() => !!props.topology && props.topology.servers.length > 0)
+
+// 选中卡片的坐标读数（拖拽时 nodes 里的 position 会实时更新）
+const selectionInfo = computed(() => {
+  const node = (nodes.value as any[]).find((n) => n.selected)
+  if (!node) return null
+  const isAp = String(node.id).startsWith('ap-')
+  return {
+    kind: (isAp ? 'ap' : 'server') as 'ap' | 'server',
+    name: isAp ? (node.data?.ap?.name ?? '') : (node.data?.server?.name ?? ''),
+    x: Math.round(node.position?.x ?? 0),
+    y: Math.round(node.position?.y ?? 0),
+    w: Math.round(node.dimensions?.width || (isAp ? AP_W : getBoxWidth(node.id))),
+    h: Math.round(node.dimensions?.height || (isAp ? AP_EST_H : 0)),
+  }
+})
 </script>
 
 <template>
-  <div class="topology-wrap" :class="{ 'is-fullscreen': isFullscreen }">
+  <!-- 画布是固定深色工作区：挂 awsui-dark-mode 让画布内的 Cloudscape 控件也走暗色令牌 -->
+  <div ref="wrapEl" class="topology-wrap awsui-dark-mode" :class="{ 'is-fullscreen': isFullscreen }">
     <!-- 顶部微型操作栏 -->
     <div class="canvas-top-bar">
       <div class="top-bar-left">
@@ -1435,7 +1765,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
             自动排版
           </CsButton>
           <CsButton icon-name="refresh" aria-label="重置为默认一字排列" @click="resetLayout">
-            重置网格
+            重置排列
           </CsButton>
         </CsSpaceBetween>
         <CsButton
@@ -1475,14 +1805,31 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       :is-valid-connection="isValidConnection"
       :min-zoom="0.15"
       :max-zoom="2"
-      :fit-view-on-init="true"
+      :snap-to-grid="!!editable"
+      :snap-grid="[GRID, GRID]"
       :only-render-visible-elements="true"
+      @nodes-initialized="onNodesInitialized"
       @connect="handleConnect"
       @edge-click="handleEdgeClick"
       @node-double-click="handleNodeDblClick"
       @node-drag-stop="onNodeDragStop"
     >
-      <Background pattern-color="#334155" :gap="28" />
+      <!-- 双层网格：8px 细线 + 80px 主线。offset 必须传 gap/2 —— 库把线画在 tile 的
+           正中，不补偿就会与世界坐标错开半格，卡片边界也就对不上线 -->
+      <Background
+        id="major"
+        variant="lines"
+        :gap="[GRID * 10, GRID * 10]"
+        :offset="[GRID * 5, GRID * 5]"
+        pattern-color="rgba(148, 163, 184, 0.14)"
+      />
+      <Background
+        id="minor"
+        variant="lines"
+        :gap="[GRID, GRID]"
+        :offset="[GRID / 2, GRID / 2]"
+        :pattern-color="minorGridColor"
+      />
 
       <!-- 盒内路由线：入站内点 → 出站内点的 S 形贝塞尔虚线 -->
       <template #edge-boxrule="e">
@@ -1552,6 +1899,14 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       <CsEmpty description="暂无服务器。先到「服务器管理」页新增服务器，再回来拖线连接。" />
     </div>
 
+    <!-- 坐标参照：顶部/左侧标尺 + 世界原点 + 底部选中卡片读数 -->
+    <CanvasRulers
+      v-if="hasData"
+      :viewport="viewport"
+      :dimensions="dimensions"
+      :selection="selectionInfo"
+    />
+
     <!-- 出站新建/编辑弹窗 -->
     <OutboundConfigEditor
       v-if="outboundEditorOpen"
@@ -1610,13 +1965,32 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 
 <style scoped lang="scss">
 .topology-wrap {
-  height: 640px;
+  /* 画布是固定深色工作区，自带一套令牌：两张卡片/连线/工具条共用，不跟随全局亮暗主题 */
+  --topo-radius: 16px;
+  --topo-radius-sm: 12px;
+  --topo-card-bg: rgba(24, 33, 47, 0.95);
+  --topo-card-border: rgba(255, 255, 255, 0.1);
+  --topo-card-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --topo-surface: rgba(15, 23, 42, 0.55);
+  --topo-surface-border: rgba(255, 255, 255, 0.05);
+  --topo-text-1: #e2e8f0;
+  --topo-text-2: #94a3b8;
+  --topo-text-3: #64748b;
+  --topo-accent: #38bdf8;
+  --topo-success: #34d399;
+  --topo-warning: #fbbf24;
+  --topo-danger: #f87171;
+  --topo-teal: #2dd4bf;
+
+  height: var(--topo-fill-h, 640px);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius-sm, 8px);
   overflow: hidden;
   background: #0f172a;
   position: relative;
-  transition: all 0.25s ease-in-out;
+  /* 不把 height 放进过渡：窗口拉伸时逐帧改高度会拖出 250ms 的滞后 */
+  transition: border-radius 0.25s ease-in-out, border-color 0.25s ease-in-out,
+    background-color 0.25s ease-in-out;
 
   &.is-fullscreen {
     position: fixed;
@@ -1641,8 +2015,9 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 /* 顶部微型操作栏 */
 .canvas-top-bar {
   position: absolute;
-  top: 12px;
-  left: 14px;
+  /* 让开 20px 标尺 + 8px 间距，避免工具条压住刻度 */
+  top: 28px;
+  left: 28px;
   right: 14px;
   z-index: 20;
   display: flex;
@@ -1823,6 +2198,23 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
 }
 :deep(.vue-flow__minimap) {
   background: #0f172a;
+}
+
+/* 新卡片定位后的短暂高亮：用 outline 而不是 box-shadow，避免覆盖卡片自身状态阴影 */
+:deep(.vue-flow__node.just-created .server-box),
+:deep(.vue-flow__node.just-created .ap-node) {
+  outline: 2px solid rgba(56, 189, 248, 0.9);
+  outline-offset: 3px;
+  animation: topo-created-glow 1.1s ease-out 2;
+}
+@keyframes topo-created-glow {
+  0%,
+  100% {
+    outline-color: rgba(56, 189, 248, 0.9);
+  }
+  50% {
+    outline-color: rgba(56, 189, 248, 0.15);
+  }
 }
 </style>
 

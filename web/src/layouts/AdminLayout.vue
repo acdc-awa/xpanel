@@ -238,6 +238,9 @@ function goDashboard() {
 
 const contentType = computed(() => (route.path === '/admin/dashboard' ? 'dashboard' : 'default'))
 
+/** 路由级宽度：`meta.contentWidth = 'full'` 用满导航右侧的剩余宽度（画布/大表格用）。 */
+const contentMaxWidth = computed(() => (route.meta.contentWidth === 'full' ? 'full' : undefined))
+
 // 响应式分级：<768px 手机端走抽屉；768px~1024px (Pad端) 默认收起导航
 const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 767.98px)') : null
 const tabletMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
@@ -325,9 +328,10 @@ onUnmounted(() => {
     <CsAppLayout
       :navigation-open="navigationOpen"
       :navigation-width="236"
-      :header-height="56"
+      :header-height="96"
       :navigation-hide="isMobile"
       :content-type="contentType"
+      :max-content-width="contentMaxWidth"
       navigation-toggle="external"
       :reserve-navigation-toggle-row="false"
       @update:navigation-open="setNavigationOpen"

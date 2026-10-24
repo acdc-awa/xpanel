@@ -40,7 +40,8 @@ export const adminRoutes: RouteRecordRaw[] = [
         path: 'routing',
         name: 'admin.routing',
         component: () => import('@/views/admin/routing.vue'),
-        meta: { title: '路由管理' },
+        // 画布需要横向空间：跳过默认 1280/1440/1620 的正文限宽
+        meta: { title: '路由管理', contentWidth: 'full' },
       },
       {
         path: 'plans',

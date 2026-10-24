@@ -29,7 +29,11 @@ const props = withDefaults(
     /** 不渲染导航（移动端走 Drawer 时传 true） */
     navigationHide?: boolean
     contentType?: 'default' | 'dashboard' | 'table' | 'cards'
-    maxContentWidth?: number
+    /**
+     * 内容列最大宽度。传数字按像素限宽；传 `'full'` 用满剩余宽度
+     * （等价官方 `content-type-table` / `cards` 的 100%，仍保留左右 gutter）。
+     */
+    maxContentWidth?: number | 'full'
     disableContentPaddings?: boolean
     /**
      * 导航开合按钮由谁提供：
@@ -83,12 +87,27 @@ const contentFirstChild = computed(() => {
   return 'main'
 })
 
-const hasContentGapLeft = computed(() => props.navigationOpen || props.navigationHide)
 const hasRightTogglesGutter = computed(() => false)
 /** 左侧 36px 圆形开合按钮只在「面板自管」且收起时出现。 */
 const showPanelToggle = computed(() => props.navigationToggle === 'panel' && !props.navigationOpen)
 const hasLeftTogglesGutter = computed(
   () => showPanelToggle.value && !props.navigationHide && Boolean(slots.navigation)
+)
+
+/**
+ * 官方口径是 `navigationOpen || navigationHide`：导航收起时左间距由 36px 圆钮 gutter 承担。
+ * 本项目用 external 开关（汉堡在应用栏）不再渲染圆钮，收起时若照搬官方口径就会 0 间距、
+ * 正文贴到视口左边缘；因此没有圆钮 gutter 时始终保留内容间距。
+ */
+const hasContentGapLeft = computed(
+  () => props.navigationOpen || props.navigationHide || !hasLeftTogglesGutter.value
+)
+
+const isFullContentWidth = computed(() => props.maxContentWidth === 'full')
+const hasMaxContentWidth = computed(
+  () =>
+    isFullContentWidth.value ||
+    (typeof props.maxContentWidth === 'number' && props.maxContentWidth > 0)
 )
 
 const layoutClasses = computed(() =>
@@ -100,7 +119,7 @@ const layoutClasses = computed(() =>
     hasHeader.value && cs['has-header'],
     hasContentGapLeft.value && cs['has-content-gap-left'],
     cs['has-content-gap-right'],
-    Boolean(props.maxContentWidth && props.maxContentWidth > 0) && cs['has-max-content-width'],
+    hasMaxContentWidth.value && cs['has-max-content-width'],
     hasLeftTogglesGutter.value && cs['has-left-toggles-gutter'],
     hasRightTogglesGutter.value && cs['has-right-toggles-gutter'],
     props.disableContentPaddings && cs['disable-content-paddings']
@@ -113,8 +132,12 @@ const layoutStyle = computed(() => ({
   '--awsui-notifications-height-ka4djm': '0px',
   '--awsui-layout-width-ka4djm': '0px',
   '--awsui-main-offset-left-ka4djm': '0px',
-  ...(props.maxContentWidth
-    ? { '--awsui-max-content-width-ka4djm': `${props.maxContentWidth}px` }
+  ...(hasMaxContentWidth.value
+    ? {
+        '--awsui-max-content-width-ka4djm': isFullContentWidth.value
+          ? '100%'
+          : `${props.maxContentWidth}px`,
+      }
     : {}),
 }))
 

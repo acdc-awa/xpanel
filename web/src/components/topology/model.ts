@@ -29,13 +29,43 @@ export interface LayerGroup {
   inbounds: TopologyData['inbounds']
 }
 
+/**
+ * 画布坐标网格：8pt。卡片位置、宽度、自动排版与空位搜索全部以此为最小单位，
+ * 保证卡片边界落在可视网格线上（440 / 280 / 48 / 40 / 32 本来都是 8 的倍数）。
+ */
+export const GRID = 8
 export const DEFAULT_BOX_W = 440
-export const ROW_H = 40
+export const MIN_BOX_W = 344
+export const MAX_BOX_W = 800
+/** 行盒高、行间距与节距（行高 32 + 间距 8）。 */
+export const ROW_BOX_H = 32
+export const GAP = 8
+export const ROW_H = ROW_BOX_H + GAP
 export const HEADER_H = 48
-/** 层胶囊头部开销（容器上边距 6 + 头 ~26 + 头下间距 6），与 CSS 对齐。 */
-export const CAP_HED = 38
-/** 列头开销（列头 32 + 行首间距 6）。 */
-export const COL_HED = 38
+/** 卡片底部内边距。 */
+export const BOTTOM_PAD = 16
+/** 层胶囊头部开销（容器内边距 8 + 头 32 + 头下间距 8），与 CSS 对齐。 */
+export const CAP_HED = 48
+/** 列头盒高（不含列内首个间距）。 */
+export const COL_HED = 32
+/** 卡片之间的默认留白，同时用于自动排版与空位搜索。 */
+export const CARD_GAP_X = 80
+export const CARD_GAP_Y = 32
+/** 接入点卡宽度（APBoxNode.vue）与无实测高度时的保守估算（含描述行）。 */
+export const AP_W = 280
+export const AP_EST_H = 144
+
+export function snapToGrid(v: number): number {
+  return Math.round(v / GRID) * GRID
+}
+
+export function snapPoint(p: { x: number; y: number }): { x: number; y: number } {
+  return { x: snapToGrid(p.x), y: snapToGrid(p.y) }
+}
+
+export function clampBoxWidth(w: number): number {
+  return Math.max(MIN_BOX_W, Math.min(MAX_BOX_W, snapToGrid(w)))
+}
 
 /**
  * 草稿判定：没有任何引用目标、不是派生/虚拟行、也没有载荷的非基础出站。

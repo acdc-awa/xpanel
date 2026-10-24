@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
+import { ref } from 'vue'
 import { CsIcon } from '@/components/cloudscape'
 import type { TopologyData } from '@/api/admin'
 import type { AccessLayer, InboundItem } from '@/api/types'
@@ -12,6 +13,7 @@ import {
   type BoxOutbound,
   type LayerGroup,
 } from '../model'
+import { useGridHeight } from '../useGridHeight'
 
 defineProps<{
   data: BoxData
@@ -38,11 +40,15 @@ const emit = defineEmits<{
   (e: 'auto-align', serverId: number): void
   (e: 'resize-start', evt: MouseEvent, data: BoxData): void
 }>()
+
+const boxEl = ref<HTMLElement | null>(null)
+useGridHeight(boxEl)
 </script>
 
 <template>
   <!-- 标准 Xray 节点服务器卡片 -->
   <div
+    ref="boxEl"
     class="server-box"
     :class="{ offline: data.server.status !== 1 }"
     :style="{ width: (data.boxWidth || DEFAULT_BOX_W) + 'px' }"
@@ -358,14 +364,14 @@ const emit = defineEmits<{
 <style scoped lang="scss">
 .server-box {
   width: 440px;
-  min-width: 340px;
+  min-width: 344px;
   position: relative;
-  background: rgba(24, 33, 47, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  background: var(--topo-card-bg, rgba(24, 33, 47, 0.95));
+  border: 1px solid var(--topo-card-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--topo-radius, 16px);
   font-size: 12px;
-  color: #e2e8f0;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: var(--topo-text-1, #e2e8f0);
+  box-shadow: var(--topo-card-shadow, 0 6px 24px rgba(0, 0, 0, 0.35));
   overflow: visible;
   transition: border-color 0.2s, box-shadow 0.2s;
   contain: paint;
@@ -427,11 +433,11 @@ const emit = defineEmits<{
       border-radius: 50%;
       flex: none;
       &.online {
-        background: #34d399;
-        box-shadow: 0 0 8px #34d399;
+        background: var(--topo-success, #34d399);
+        box-shadow: 0 0 8px var(--topo-success, #34d399);
       }
       &.offline {
-        background: #ef4444;
+        background: var(--topo-danger, #f87171);
         box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
       }
     }
@@ -454,7 +460,7 @@ const emit = defineEmits<{
       font-weight: 500;
     }
     .host {
-      color: #94a3b8;
+      color: var(--topo-text-2, #94a3b8);
       font-size: 11px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -605,7 +611,7 @@ const emit = defineEmits<{
 
   .sb-cols {
     display: flex;
-    gap: 36px;
+    gap: 32px;
     justify-content: space-between;
     padding: 0 16px 16px;
     width: 100%;
@@ -616,7 +622,7 @@ const emit = defineEmits<{
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
       align-items: flex-start;
     }
     .sb-col:last-child {
@@ -638,7 +644,7 @@ const emit = defineEmits<{
       box-sizing: border-box;
     }
     .sb-title {
-      color: #94a3b8;
+      color: var(--topo-text-2, #94a3b8);
       font-size: 12px;
       letter-spacing: 0.5px;
       font-weight: 600;
@@ -683,20 +689,22 @@ const emit = defineEmits<{
     width: 100%;
     background: rgba(15, 23, 42, 0.85);
     border: 1px solid rgba(45, 212, 191, 0.25);
-    border-radius: 12px;
-    padding: 6px 8px 8px;
+    border-radius: var(--topo-radius-sm, 12px);
+    padding: 8px;
     box-sizing: border-box;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 
     .layer-capsule-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      padding: 2px 4px 4px;
+      row-gap: 8px;
+      min-height: 24px;
+      padding: 0 4px 8px;
       border-bottom: 1px dashed rgba(45, 212, 191, 0.2);
       flex-wrap: wrap;
 
@@ -781,7 +789,7 @@ const emit = defineEmits<{
     .layer-capsule-body {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
     }
 
     .layer-subrow {
@@ -832,14 +840,14 @@ const emit = defineEmits<{
     position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 0 8px;
-    height: 34px;
+    height: 32px;
     max-width: 100%;
     box-sizing: border-box;
-    background: rgba(15, 23, 42, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 17px;
+    background: var(--topo-surface, rgba(15, 23, 42, 0.55));
+    border: 1px solid var(--topo-surface-border, rgba(255, 255, 255, 0.05));
+    border-radius: var(--topo-radius, 16px);
     transition: all 0.2s;
 
     &:hover {
@@ -1072,13 +1080,13 @@ const emit = defineEmits<{
 
   .sb-empty {
     padding: 4px 10px;
-    color: #64748b;
+    color: var(--topo-text-3, #64748b);
     font-size: 11px;
-    height: 34px;
+    height: 32px;
     display: flex;
     align-items: center;
     background: rgba(15, 23, 42, 0.3);
-    border-radius: 17px;
+    border-radius: 16px;
     border: 1px dashed rgba(255, 255, 255, 0.05);
   }
 }

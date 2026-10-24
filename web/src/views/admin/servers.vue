@@ -318,6 +318,12 @@ async function submitCreate() {
     })
     if (data.code === 0) {
       createdResult.value = { node_id: data.data.node_id, secret: data.data.secret, install_cmd: data.data.install_cmd }
+      // 下次打开路由画布时定位到这张新卡片（不强制跳页，避免打断安装流程）
+      try {
+        sessionStorage.setItem('topology-focus-id', `server-${data.data.server.id}`)
+      } catch {
+        /* 隐私模式等场景忽略 */
+      }
       createForm.sort_order = 0
       createForm.name = ''
       createForm.host = ''
@@ -823,7 +829,7 @@ async function batchUpgradeSelected() {
 
       <CsSpaceBetween v-else size="s">
         <CsAlert type="success" header="服务器已创建">
-          在服务器上以 root 执行以下一键安装命令：
+          在服务器上以 root 执行以下一键安装命令。进入「路由管理 → 画布」时会自动定位这张新卡片。
         </CsAlert>
         <div class="secret-box">
           <div class="secret-row install-row">
