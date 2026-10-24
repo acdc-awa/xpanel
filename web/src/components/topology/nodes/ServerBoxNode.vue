@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
-import { CopyDocument, Delete, Edit, MagicStick, Plus, Setting } from '@element-plus/icons-vue'
+import { CsIcon } from '@/components/cloudscape'
 import type { TopologyData } from '@/api/admin'
 import type { AccessLayer, InboundItem } from '@/api/types'
 import {
@@ -67,10 +67,10 @@ const emit = defineEmits<{
           @click.stop="emit('auto-align', data.server.id)"
           @dblclick.stop
         >
-          <el-icon><MagicStick /></el-icon>&nbsp;整理
+          <CsIcon name="gen-ai" size="x-small" />&nbsp;整理
         </button>
         <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', data.server.id)">
-          <el-icon><Setting /></el-icon>&nbsp;详情
+          <CsIcon name="settings" size="x-small" />&nbsp;详情
         </button>
       </div>
     </div>
@@ -87,7 +87,7 @@ const emit = defineEmits<{
               title="新建对外接入层（订阅地址分组：内部实现对外不可见）"
               @click.stop="emit('create-layer', data.server.id)"
             >
-              <el-icon><Plus /></el-icon>&nbsp;层
+              <CsIcon name="add-plus" size="x-small" />&nbsp;层
             </button>
             <button
               v-if="editable"
@@ -95,7 +95,7 @@ const emit = defineEmits<{
               title="为该服务器新建入站"
               @click.stop="emit('create-inbound', data.server.id)"
             >
-              <el-icon><Plus /></el-icon>&nbsp;入站
+              <CsIcon name="add-plus" size="x-small" />&nbsp;入站
             </button>
           </div>
         </div>
@@ -122,7 +122,7 @@ const emit = defineEmits<{
                   title="一键复制该层的 Caddyfile 反代配置片段"
                   @click.stop="emit('copy-caddyfile', g.layer)"
                 >
-                  <el-icon><CopyDocument /></el-icon>&nbsp;Caddyfile
+                  <CsIcon name="copy" size="x-small" />&nbsp;Caddyfile
                 </button>
                 <button
                   v-if="editable"
@@ -130,10 +130,10 @@ const emit = defineEmits<{
                   title="将本机未挂层入站挂载到该层"
                   @click.stop="emit('bind-layer', g.layer)"
                 >
-                  <el-icon><Plus /></el-icon>&nbsp;挂载
+                  <CsIcon name="add-plus" size="x-small" />&nbsp;挂载
                 </button>
                 <button v-if="editable" class="layer-act-btn" title="编辑对外层" @click.stop="emit('edit-layer', g.layer)">
-                  <el-icon><Setting /></el-icon>
+                  <CsIcon name="settings" size="x-small" />
                 </button>
                 <button
                   v-if="editable"
@@ -141,7 +141,7 @@ const emit = defineEmits<{
                   title="删除对外层（挂载入站回退原生行）"
                   @click.stop="emit('delete-layer', g.layer)"
                 >
-                  <el-icon><Delete /></el-icon>
+                  <CsIcon name="remove" size="x-small" />
                 </button>
               </div>
             </div>
@@ -175,7 +175,7 @@ const emit = defineEmits<{
                 <span class="port-badge">:{{ inb.port }}</span>
                 <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
                 <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-                <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
+                <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑入站" />
                 <button
                   v-if="editable"
                   class="layer-unbind-btn"
@@ -237,7 +237,7 @@ const emit = defineEmits<{
             <span class="port-badge">:{{ inb.port }}</span>
             <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
             <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-            <el-icon class="row-edit-icon" title="编辑入站"><Edit /></el-icon>
+            <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑入站" />
 
             <div v-if="editable && nativeInbounds.length > 1" class="tag-order-actions">
               <button
@@ -278,7 +278,7 @@ const emit = defineEmits<{
             title="为该服务器新建出站"
             @click.stop="emit('create-outbound', data.server.id)"
           >
-            <el-icon><Plus /></el-icon>&nbsp;出站
+            <CsIcon name="add-plus" size="x-small" />&nbsp;出站
           </button>
         </div>
 
@@ -314,7 +314,7 @@ const emit = defineEmits<{
             <span v-else-if="isOutboundDraft(out)" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
             <span v-else-if="out.protocol === 'custom'" class="out-proto-badge" title="自定义 Xray 出站 JSON">JSON</span>
             <span v-else class="out-proto-badge">{{ out.protocol }}</span>
-            <el-icon v-if="!out.virtual" class="row-edit-icon" title="编辑出站"><Edit /></el-icon>
+            <CsIcon v-if="!out.virtual" class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑出站" />
 
             <div v-if="editable && data.outbounds.length > 1" class="tag-order-actions">
               <button

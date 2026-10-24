@@ -13,8 +13,13 @@ import {
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
-import { FullScreen, MagicStick, RefreshRight, Plus } from '@element-plus/icons-vue'
+import {
+  CsButton,
+  CsEmpty,
+  CsSpaceBetween,
+  ElMessage,
+  ElMessageBox,
+} from '@/components/cloudscape'
 import {
   deleteServerOutbound,
   deleteServerRoutingRule,
@@ -1425,26 +1430,37 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
     <!-- 顶部微型操作栏 -->
     <div class="canvas-top-bar">
       <div class="top-bar-left">
-        <el-button-group size="small">
-          <el-button @click="autoLayout" title="根据拓扑链路（入口→中转→落地）自动分层排版">
-            <el-icon><MagicStick /></el-icon>&nbsp;自动排版
-          </el-button>
-          <el-button @click="resetLayout" title="重置为默认一字排列">
-            <el-icon><RefreshRight /></el-icon>&nbsp;重置网格
-          </el-button>
-        </el-button-group>
-        <el-button v-if="editable" size="small" type="primary" plain @click="openCreateAccessPoint" title="新建接入点（订阅入口）">
-          <el-icon><Plus /></el-icon>&nbsp;接入点
-        </el-button>
-        <el-button size="small" class="fs-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏查看'">
-          <el-icon><FullScreen /></el-icon>&nbsp;{{ isFullscreen ? '退出全屏' : '全屏' }}
-        </el-button>
+        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+          <CsButton icon-name="gen-ai" aria-label="根据拓扑链路（入口→中转→落地）自动分层排版" @click="autoLayout">
+            自动排版
+          </CsButton>
+          <CsButton icon-name="refresh" aria-label="重置为默认一字排列" @click="resetLayout">
+            重置网格
+          </CsButton>
+        </CsSpaceBetween>
+        <CsButton
+          v-if="editable"
+          icon-name="add-plus"
+          variant="primary"
+          aria-label="新建接入点（订阅入口）"
+          @click="openCreateAccessPoint"
+        >
+          接入点
+        </CsButton>
+        <CsButton
+          :icon-name="isFullscreen ? 'exit-full-screen' : 'expand'"
+          class="fs-btn"
+          :aria-label="isFullscreen ? '退出全屏' : '全屏查看'"
+          @click="toggleFullscreen"
+        >
+          {{ isFullscreen ? '退出全屏' : '全屏' }}
+        </CsButton>
       </div>
 
       <!-- 布局未保存提示条 -->
       <div v-if="layoutDirty" class="layout-save-bar">
         <span class="layout-save-tip">布局已修改</span>
-        <el-button size="small" type="primary" @click="saveLayoutToCloud">保存布局</el-button>
+        <CsButton variant="primary" @click="saveLayoutToCloud">保存布局</CsButton>
       </div>
     </div>
 
@@ -1533,7 +1549,7 @@ const hasData = computed(() => !!props.topology && props.topology.servers.length
       </template>
     </VueFlow>
     <div v-else class="topology-empty">
-      <el-empty description="暂无服务器。先到「服务器管理」页新增服务器，再回来拖线连接。" />
+      <CsEmpty description="暂无服务器。先到「服务器管理」页新增服务器，再回来拖线连接。" />
     </div>
 
     <!-- 出站新建/编辑弹窗 -->
