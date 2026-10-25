@@ -1462,7 +1462,7 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 		ID:              101,
 		ServerID:        1,
 		Tag:             "tunnel-10001",
-		Protocol:        models.ProtocolDokodemo,
+		Protocol:        models.ProtocolTunnel,
 		Port:            10001,
 		Type:            models.InboundTypeTunnel,
 		TargetInboundID: &targetID,
@@ -1502,7 +1502,7 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 		t.Fatalf("inbounds count = %d, want >= 2", len(inbounds))
 	}
 	tInb := asObject(t, inbounds[0], "inbounds[0]")
-	if tInb["protocol"] != "dokodemo-door" {
+	if tInb["protocol"] != "tunnel" {
 		t.Errorf("protocol = %v, want dokodemo-door", tInb["protocol"])
 	}
 	settings := asObject(t, tInb["settings"], "settings")
@@ -1591,7 +1591,7 @@ func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
 				ID:              111,
 				ServerID:        1,
 				Tag:             "tunnel-chain",
-				Protocol:        models.ProtocolDokodemo,
+				Protocol:        models.ProtocolTunnel,
 				Port:            10002,
 				Type:            models.InboundTypeTunnel,
 				TargetInboundID: &targetID,
@@ -1660,7 +1660,7 @@ func TestGenerateConfig_TunnelInbound_NetworkFromSettings(t *testing.T) {
 				ID:              112,
 				ServerID:        1,
 				Tag:             "tunnel-net",
-				Protocol:        models.ProtocolDokodemo,
+				Protocol:        models.ProtocolTunnel,
 				Port:            10003,
 				Type:            models.InboundTypeTunnel,
 				TargetInboundID: &targetID,
@@ -1699,7 +1699,7 @@ func TestGenerateConfig_TunnelInbound_ManualExternal(t *testing.T) {
 		ID:            102,
 		ServerID:      1,
 		Tag:           "tunnel-manual",
-		Protocol:      models.ProtocolDokodemo,
+		Protocol:      models.ProtocolTunnel,
 		Port:          10002,
 		Type:          models.InboundTypeTunnel,
 		TargetAddress: "198.51.100.2",
@@ -1746,7 +1746,7 @@ func TestGenerateConfig_TunnelInbound_DraftSkipped(t *testing.T) {
 		ID:       103,
 		ServerID: 1,
 		Tag:      "tunnel-draft",
-		Protocol: models.ProtocolDokodemo,
+		Protocol: models.ProtocolTunnel,
 		Port:     10003,
 		Type:     models.InboundTypeTunnel,
 		// TargetInboundID 和 TargetAddress 均为空
@@ -1783,7 +1783,7 @@ func TestGenerateConfig_Tunnel_XrayTestValidation(t *testing.T) {
 		ID:              104,
 		ServerID:        1,
 		Tag:             "tunnel-edge",
-		Protocol:        models.ProtocolDokodemo,
+		Protocol:        models.ProtocolTunnel,
 		Port:            10004,
 		Type:            models.InboundTypeTunnel,
 		TargetInboundID: &targetID,
@@ -2084,7 +2084,7 @@ func TestGenerateConfig_ChannelTunnel(t *testing.T) {
 		ID:            103,
 		ServerID:      1,
 		Tag:           "chan-103-3306",
-		Protocol:      models.ProtocolDokodemo,
+		Protocol:      models.ProtocolTunnel,
 		Port:          3306,
 		Type:          models.InboundTypeChannel,
 		TargetAddress: "db.remote.com",

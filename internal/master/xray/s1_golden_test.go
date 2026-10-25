@@ -166,7 +166,7 @@ func s1Scenarios() []s1Scenario {
 		{
 			name: "tunnel_linked",
 			inbounds: []models.Inbound{{
-				ID: 301, ServerID: 1, Tag: "tunnel-10001", Protocol: models.ProtocolDokodemo, Port: 10001,
+				ID: 301, ServerID: 1, Tag: "tunnel-10001", Protocol: models.ProtocolTunnel, Port: 10001,
 				Type: models.InboundTypeTunnel, TargetInboundID: func() *uint64 { v := uint64(901); return &v }(),
 				Enabled: true,
 			}},
@@ -179,7 +179,7 @@ func s1Scenarios() []s1Scenario {
 		{
 			name: "tunnel_manual_pp",
 			inbounds: []models.Inbound{{
-				ID: 302, ServerID: 1, Tag: "tunnel-manual", Protocol: models.ProtocolDokodemo, Port: 10002,
+				ID: 302, ServerID: 1, Tag: "tunnel-manual", Protocol: models.ProtocolTunnel, Port: 10002,
 				Type: models.InboundTypeTunnel, TargetAddress: "203.0.113.5", TargetPort: 8443,
 				StreamSettings: `{"network":"tcp","proxy_protocol":true,"proxyProtocol":true}`,
 				Enabled:        true,

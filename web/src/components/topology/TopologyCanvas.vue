@@ -445,7 +445,7 @@ function setServerTagOrder(serverId: number, patch: { inbounds?: number[]; outbo
         server_id: o.server_id,
       }))
       for (const inb of props.topology.inbounds) {
-        if (inb.server_id === serverId && (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door')) {
+        if (inb.server_id === serverId && (inb.type === 'tunnel' || inb.protocol === 'tunnel')) {
           const hasOut = rawOut.some((o) => o.owner_inbound_id === inb.id)
           if (!hasOut) {
             list.push({
@@ -539,7 +539,7 @@ function autoAlignServerTags(serverId: number) {
         matchedOutboundIds.push(targetOut.id)
         usedOutboundIds.add(targetOut.id)
       }
-    } else if (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door') {
+    } else if (inb.type === 'tunnel' || inb.protocol === 'tunnel') {
       const tunnelOut = outbounds.find((o) => o.owner_inbound_id === inb.id && !usedOutboundIds.has(o.id))
       if (tunnelOut) {
         matchedOutboundIds.push(tunnelOut.id)
@@ -811,7 +811,7 @@ function buildGraph(data: TopologyData): string | null {
 
   // 为没有派生出站的四层直通入站注入草稿出站行，供用户从右侧把手拖线直连落地入站
   for (const inb of data.inbounds) {
-    if (inb.type === 'tunnel' || inb.protocol === 'dokodemo-door') {
+    if (inb.type === 'tunnel' || inb.protocol === 'tunnel') {
       const hasOut = data.outbounds.some((o) => o.owner_inbound_id === inb.id)
       if (!hasOut) {
         if (!outByServer.has(inb.server_id)) outByServer.set(inb.server_id, [])
@@ -1124,7 +1124,7 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
     try {
       srcSS = JSON.parse(srcInb.stream_settings || '{}')
     } catch {}
-    // 转发网络属于 dokodemo 的 settings.network；streamSettings.network 不是合法传输名。
+    // 转发网络属于 tunnel 的 settings.network；streamSettings.network 不是合法传输名。
     let srcSettings: Record<string, any> = {}
     try {
       srcSettings = JSON.parse(srcInb.settings_json || '{}')

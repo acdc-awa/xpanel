@@ -66,16 +66,16 @@ func seedEquiv(t *testing.T, db *gorm.DB) uint64 {
 	landingID := landing.ID
 
 	inbounds := []models.Inbound{
-		{ID: 101, ServerID: 1, Tag: "tunnel-manual", Protocol: models.ProtocolDokodemo, Port: 20001,
+		{ID: 101, ServerID: 1, Tag: "tunnel-manual", Protocol: models.ProtocolTunnel, Port: 20001,
 			Type: models.InboundTypeTunnel, TargetAddress: "target.example.com", TargetPort: 3306,
 			StreamSettings: `{"proxy_protocol":true}`, Enabled: true},
-		{ID: 102, ServerID: 1, Tag: "tunnel-linked", Protocol: models.ProtocolDokodemo, Port: 20002,
+		{ID: 102, ServerID: 1, Tag: "tunnel-linked", Protocol: models.ProtocolTunnel, Port: 20002,
 			Type: models.InboundTypeTunnel, TargetInboundID: &landingID,
 			StreamSettings: `{"proxy_protocol":false}`, Enabled: true},
-		{ID: 103, ServerID: 1, Tag: "chan-tunnel-20003", Protocol: models.ProtocolDokodemo, Port: 20003,
+		{ID: 103, ServerID: 1, Tag: "chan-tunnel-20003", Protocol: models.ProtocolTunnel, Port: 20003,
 			Type: models.InboundTypeChannel, TargetAddress: "db.remote.com", TargetPort: 5432,
 			StreamSettings: `{"proxy_protocol":true}`, Enabled: true},
-		{ID: 104, ServerID: 1, Tag: "tunnel-draft", Protocol: models.ProtocolDokodemo, Port: 20004,
+		{ID: 104, ServerID: 1, Tag: "tunnel-draft", Protocol: models.ProtocolTunnel, Port: 20004,
 			Type: models.InboundTypeTunnel, Enabled: true},
 		{ID: 105, ServerID: 1, Tag: "vless-in-443", Protocol: models.ProtocolVless, Port: 443,
 			Type: models.InboundTypeUser, Enabled: true,

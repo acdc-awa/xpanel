@@ -453,7 +453,7 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		// 四层直通管道引用保护：检查其他服务器上的直通管道是否引用本服务器的入站为落地
 		var tunnelRefCnt int64
 		d.DB.Model(&models.Inbound{}).
-			Where("(type = ? OR protocol = ?) AND target_inbound_id IN ? AND server_id != ?", models.InboundTypeTunnel, models.ProtocolDokodemo, inboundIDs, id).
+			Where("(type = ? OR protocol = ?) AND target_inbound_id IN ? AND server_id != ?", models.InboundTypeTunnel, models.ProtocolTunnel, inboundIDs, id).
 			Count(&tunnelRefCnt)
 		if tunnelRefCnt > 0 {
 			util.BadRequest(c, "该服务器入站被 "+strconv.FormatInt(tunnelRefCnt, 10)+" 个其他服务器的四层直通管道引用为落地目标，无法删除，请先解除直通连线")

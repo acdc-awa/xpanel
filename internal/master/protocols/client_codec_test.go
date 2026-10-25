@@ -24,7 +24,7 @@ func runXrayTestHelper(t *testing.T, outbound map[string]any) {
 			map[string]any{
 				"tag":      "in-dummy",
 				"port":     54321,
-				"protocol": "dokodemo-door",
+				"protocol": "tunnel",
 				"settings": map[string]any{
 					"address": "127.0.0.1",
 					"port":    54321,

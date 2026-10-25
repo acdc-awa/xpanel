@@ -103,7 +103,7 @@ func TestAdminDeleteServer_ProtectedByTunnel(t *testing.T) {
 	// srv2 上的 tunnel 引用 srv1 的 landingInb
 	srv2 := models.Server{Name: "edge-srv", Host: "5.6.7.8", NodeID: "n2", Secret: "s2"}
 	require.NoError(t, db.Create(&srv2).Error)
-	tunnelInb := models.Inbound{ServerID: srv2.ID, Tag: "tunnel-edge", Protocol: "dokodemo-door", Port: 10001, Type: models.InboundTypeTunnel, TargetInboundID: &landingInb.ID, Enabled: true}
+	tunnelInb := models.Inbound{ServerID: srv2.ID, Tag: "tunnel-edge", Protocol: "tunnel", Port: 10001, Type: models.InboundTypeTunnel, TargetInboundID: &landingInb.ID, Enabled: true}
 	require.NoError(t, db.Create(&tunnelInb).Error)
 
 	deps := &api.Deps{DB: db}

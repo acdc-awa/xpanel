@@ -40,13 +40,15 @@ const (
 	// users 加 traffic_cycle_id 并回填为 1。计费口径从「period_start >= traffic_cycle_start」
 	// 改为「cycle_id = 用户当前账期」（cycle_id=0 的存量/旧 agent 行零值回退，见 models.CycleUsageSQL）。
 	//
-	// v4（2026-09-29，入站与直通模型统一）：一次升级包含三组结构变更——
+	// v4（2026-09-29，入站与直通模型统一）：一次升级包含以下变更——
 	//  ① 四层直通派生对象落库：server_outbounds 与 server_routing_rules 各加一列 owner_inbound_id
 	//     （0 = 普通行；>0 = 由该四层直通入站自动维护），并把四层直通的派生出站 out-<tag> 与转发规则
 	//     从「生成期现场派生」改为库内真行；
 	//  ② 退役 proxy_channels：Inbound 加 Remark 备注列，存量 ProxyChannel 账本数据
 	//     （配额/重置/账密/状态）平滑迁入底层 Inbound（type='forward'），遗留 type='channel' 归一化为
-	//     'forward'，两套实体与表单合二为一。
+	//     'forward'，两套实体与表单合二为一；
+	//  ③ 协议值统一：inbounds.protocol 的 dokodemo-door 改名为 tunnel（xray 自 v25.8.3 起两者映射到
+	//     同一个 DokodemoConfig，属于别名；生成配置也改写 tunnel），消除面板内两个名字并存。
 	// 注：Mixed / SOCKS5 / HTTP 协议与 ForwardUser 实体已在本版本发布前移除，从未在任何线上库建表。
 	DBSchemaVersion = 4
 

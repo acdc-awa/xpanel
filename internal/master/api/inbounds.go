@@ -83,7 +83,7 @@ type inboundForm struct {
 
 func normalizeInboundType(protocol, currentType string) string {
 	switch protocol {
-	case models.ProtocolDokodemo:
+	case models.ProtocolTunnel:
 		return models.InboundTypeTunnel
 	default:
 		return models.InboundTypeUser
@@ -170,7 +170,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	req.Type = normalizeInboundType(req.Protocol, req.Type)
 	effType := req.Type
 	if effType == models.InboundTypeTunnel {
-		req.Protocol = models.ProtocolDokodemo
+		req.Protocol = models.ProtocolTunnel
 	}
 	if effType != models.InboundTypeTunnel {
 		if err := checkVlessDecryption(req.Protocol, effType, req.SettingsJSON); err != nil {
@@ -180,7 +180,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 	}
 	// U15：创建校验闭环——协议白名单 / tag 非空且同服务器唯一 / CertID 存在性
 	if !validInboundProtocol(req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / dokodemo-door）")
+		util.BadRequest(c, "不支持的协议: "+req.Protocol+"（支持 vless / hysteria / tunnel）")
 		return
 	}
 	// TLS 入站必须有服务端证书来源（托管证书或成对路径），否则节点加载配置直接失败。
@@ -441,7 +441,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	effCertProtocol := effProto
 	if effType == models.InboundTypeTunnel {
-		effCertProtocol = models.ProtocolDokodemo // 直通无安全层，按终态协议判定
+		effCertProtocol = models.ProtocolTunnel // 直通无安全层，按终态协议判定
 	}
 	if err := xray.ValidateTLSCertSource(ss, effCertID, effCertProtocol); err != nil {
 		util.BadRequest(c, err.Error())
@@ -462,7 +462,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / hysteria / dokodemo-door / mixed / socks / http）")
+		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / hysteria / tunnel）")
 		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
@@ -585,9 +585,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if req.Type != nil || req.Protocol != nil {
 		updates["type"] = effType
 		updates["previous_type"] = ""
-		if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolDokodemo && req.Protocol == nil {
-			updates["protocol"] = models.ProtocolDokodemo
-			inb.Protocol = models.ProtocolDokodemo
+		if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolTunnel && req.Protocol == nil {
+			updates["protocol"] = models.ProtocolTunnel
+			inb.Protocol = models.ProtocolTunnel
 		}
 		inb.Type = effType
 	}
@@ -698,7 +698,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	}
 	candidate.Type = effType
 	if effType == models.InboundTypeTunnel {
-		candidate.Protocol = models.ProtocolDokodemo
+		candidate.Protocol = models.ProtocolTunnel
 	}
 	if issues := protocols.ValidateInboundFields(&candidate); len(issues) > 0 {
 		util.BadRequestIssues(c, "入站字段校验未通过", issues)
@@ -784,7 +784,7 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 	}
 	// 四层直通落地保护：被直通管道（tunnel）引用为落地目标的入站禁止删除
 	var tunnelCnt int64
-	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolDokodemo, id).Count(&tunnelCnt)
+	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolTunnel, id).Count(&tunnelCnt)
 	if tunnelCnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(tunnelCnt, 10)+" 个四层直通管道引用为落地目标，无法删除，请先解除直通管道绑定")
 		return
@@ -897,7 +897,7 @@ func (d *Deps) refInboundProtected(c *gin.Context, inbID uint64) bool {
 // tunnelLandingProtected 检查入站是否被已启用的四层直通管道引用为落地目标（P2-7：停用保护）。
 func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
 	var cnt int64
-	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolDokodemo, inbID, true).Count(&cnt)
+	d.DB.Model(&models.Inbound{}).Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?", []string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolTunnel, inbID, true).Count(&cnt)
 	if cnt > 0 {
 		util.BadRequest(c, "该入站被 "+strconv.FormatInt(cnt, 10)+" 个已启用的四层直通管道引用为落地目标，无法停用，请先停用或解除管道连线")
 		return true
@@ -993,12 +993,12 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	return xray.ValidateVlessEncDecryption(dec)
 }
 
-// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 dokodemo-door；Mixed / SOCKS5 / HTTP 已退役）。
+// validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 tunnel；Mixed / SOCKS5 / HTTP 已退役）。
 func validInboundProtocol(p string) bool {
 	if protocols.Find(p) != nil {
 		return true
 	}
-	return p == models.ProtocolDokodemo
+	return p == models.ProtocolTunnel
 }
 
 func validInboundType(t string) bool {

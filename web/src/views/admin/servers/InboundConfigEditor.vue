@@ -43,7 +43,7 @@ import type {
   SockoptConfig,
   RealityConfig,
   VlessConfig,
-  DokodemoConfig,
+  TunnelConfig,
   HysteriaConfig,
 } from './inbound/types'
 import TcpTransport from './inbound/transports/TcpTransport.vue'
@@ -53,7 +53,7 @@ import SockoptSettings from './inbound/transports/SockoptSettings.vue'
 import RealitySecurity from './inbound/securities/RealitySecurity.vue'
 import TlsSecurity from './inbound/securities/TlsSecurity.vue'
 import VlessSettings from './inbound/protocols/VlessSettings.vue'
-import DokodemoSettings from './inbound/protocols/DokodemoSettings.vue'
+import TunnelForward from './inbound/transports/TunnelForward.vue'
 import HysteriaSettings from './inbound/protocols/HysteriaSettings.vue'
 import BusinessSettings from './inbound/common/BusinessSettings.vue'
 import { validateHysteriaFinalMask, validateHysteriaSettings, validateXhttp } from './inbound/validate'
@@ -179,8 +179,9 @@ const vlessForm = ref<VlessConfig>({
   decryption: '',
 })
 
-const dokodemoForm = ref<DokodemoConfig>({
-  target_mode: props.targetInboundId ? 'inbound' : (props.targetAddress || props.targetPort ? 'manual' : 'draft'),
+const tunnelForm = ref<TunnelConfig>({
+  // 草稿 = 引用入站但未选目标（target_mode 不入库，打开时按目标字段反推）。
+  target_mode: props.targetInboundId ? 'inbound' : (props.targetAddress || props.targetPort ? 'manual' : 'inbound'),
   target_inbound_id: props.targetInboundId,
   target_address: props.targetAddress || '',
   target_port: props.targetPort || 0,
@@ -327,13 +328,13 @@ let skipSyncAfterRawInput = false
 // -----------------------------------------------------------------------------
 const allowedNetworks = computed<InboundNetwork[]>(() => {
   if (localProtocol.value === 'hysteria') return ['hysteria']
-  if (localProtocol.value === 'dokodemo-door') return ['tcp']
+  if (localProtocol.value === 'tunnel') return ['tcp']
   return ['tcp', 'xhttp']
 })
 
 const allowedSecurities = computed<InboundSecurity[]>(() => {
   if (localProtocol.value === 'hysteria') return ['tls']
-  if (localProtocol.value === 'dokodemo-door') return ['none']
+  if (localProtocol.value === 'tunnel') return ['none']
   return ['none', 'tls', 'reality']
 })
 
@@ -351,9 +352,18 @@ const TAB_LABELS: Record<string, string> = {
   advanced: '原始 JSON',
 }
 
+// 直通没有安全层、没有业务订阅页（tunnel 恒为 type=tunnel），
+// 目标/转发网络/Proxy Protocol 全部并入传输页，页签只留四页。
+const visibleTabIds = computed<string[]>(() => {
+  if (localProtocol.value === 'tunnel') {
+    return ['settings', 'transport', 'sniffing', 'advanced']
+  }
+  return ['settings', 'protocol', 'transport', 'security', 'sniffing', 'business', 'advanced']
+})
+
 const visibleTabs = computed<TabItem[]>(() => {
   const flagged = new Set(validationIssues.value.map((issue) => issue.tab))
-  return ['settings', 'protocol', 'transport', 'security', 'sniffing', 'business', 'advanced'].map((id) => ({
+  return visibleTabIds.value.map((id) => ({
     id,
     // 保存门禁的报错要能定位到具体页签，CsTabs 只支持 disabled，这里用标签后缀标记。
     label: flagged.has(id) ? `${TAB_LABELS[id]} ⚠` : TAB_LABELS[id],
@@ -392,13 +402,11 @@ const validationIssues = computed<{ tab: string; message: string }[]>(() => {
     push('transport', validateXhttp(xhttpForm.value))
   }
 
-  if (localProtocol.value === 'dokodemo-door') {
-    const target = dokodemoForm.value
-    if (target.target_mode === 'inbound' && !target.target_inbound_id) {
-      push('protocol', ['请选择直通目标入站'])
-    }
+  if (localProtocol.value === 'tunnel') {
+    const target = tunnelForm.value
+    // 引用入站允许留空（草稿），画布连线后自动补全；自定义目标必须填完整。
     if (target.target_mode === 'manual') {
-      push('protocol', [
+      push('transport', [
         target.target_address?.trim() ? '' : '请填写转发目标地址',
         target.target_port ? '' : '请填写转发目标端口',
       ])
@@ -411,7 +419,7 @@ const validationIssues = computed<{ tab: string; message: string }[]>(() => {
 const protocolOptions = [
   { label: 'VLESS', value: 'vless' },
   { label: 'Hysteria 2', value: 'hysteria' },
-  { label: 'Dokodemo-door (四层直通/端口转发)', value: 'dokodemo-door' },
+  { label: 'Tunnel (四层直通/端口转发)', value: 'tunnel' },
 ]
 
 const trafficResetOptions = [
@@ -514,7 +522,7 @@ function onProtocolChange(proto: any) {
     if (localInboundType.value === 'tunnel' || localInboundType.value === 'forward') {
       localInboundType.value = 'user'
     }
-  } else if (p === 'dokodemo-door') {
+  } else if (p === 'tunnel') {
     localInboundType.value = 'tunnel'
   } else if (p === 'vless' && (localInboundType.value === 'tunnel' || localInboundType.value === 'forward')) {
     localInboundType.value = 'user'
@@ -558,12 +566,12 @@ function buildSettingsJSON(): string {
   const extra: Record<string, any> = { ...(settingsExtra.value || {}) }
   delete extra.clients
 
-  if (localProtocol.value === 'dokodemo-door') {
+  if (localProtocol.value === 'tunnel') {
     // 目标由派生 freedom 出站的 redirect 承担（字段声明明确禁止 settings.address/port），
     // 入站 settings 只保留转发网络与 followRedirect。
     return JSON.stringify({
       ...extra,
-      network: dokodemoForm.value.network || 'tcp,udp',
+      network: tunnelForm.value.network || 'tcp,udp',
       followRedirect: false,
     })
   }
@@ -792,13 +800,13 @@ function buildXhttpSettings(): Record<string, any> {
 }
 
 function buildStreamSettingsJSON(): string {
-  if (localProtocol.value === 'dokodemo-door') {
+  if (localProtocol.value === 'tunnel') {
     const s: Record<string, any> = {
       ...(streamExtra.value || {}),
       security: 'none',
       // 面板私有键（xray 不识别）：直通派生 freedom 出站是否向目标发送 PPv2，
       // 由后端 TunnelSendProxyProtocol 消费；接收侧见 tcpSettings.acceptProxyProtocol。
-      proxy_protocol: dokodemoForm.value.proxy_protocol !== false,
+      proxy_protocol: tunnelForm.value.proxy_protocol !== false,
     }
     if (tcpForm.value.acceptProxyProtocol) {
       s.tcpSettings = { ...(s.tcpSettings as Record<string, any> || {}), acceptProxyProtocol: true }
@@ -951,9 +959,9 @@ function emitChange(settingsJson?: string, streamJson?: string, sniffJson?: stri
     shareSni: localShareSni.value,
     shareAllowInsecure: localShareAllowInsecure.value,
     layerId: localLayerId.value,
-    targetInboundId: dokodemoForm.value.target_inbound_id,
-    targetAddress: dokodemoForm.value.target_address,
-    targetPort: dokodemoForm.value.target_port,
+    targetInboundId: tunnelForm.value.target_inbound_id,
+    targetAddress: tunnelForm.value.target_address,
+    targetPort: tunnelForm.value.target_port,
     validationError: formValidationError(),
   })
 }
@@ -1077,22 +1085,22 @@ function parseJsonToForm(str: string) {
     if (parsed.protocol === 'hysteria' || localProtocol.value === 'hysteria') {
       localProtocol.value = 'hysteria'
       localInboundType.value = 'user'
-    } else if (panel.type === 'tunnel' || parsed.protocol === 'dokodemo-door' || localProtocol.value === 'dokodemo-door') {
+    } else if (panel.type === 'tunnel' || parsed.protocol === 'tunnel' || localProtocol.value === 'tunnel') {
       localInboundType.value = 'tunnel'
-      localProtocol.value = 'dokodemo-door'
+      localProtocol.value = 'tunnel'
     } else {
       localInboundType.value = 'user'
       localProtocol.value = 'vless'
     }
 
     // streamSettings 里表单未覆盖的顶层键原样保留：
-    // vless/dokodemo 的 finalmask、externalProxy 等目前没有表单，但手改后保存不能丢。
+    // vless/tunnel 的 finalmask、externalProxy 等目前没有表单，但手改后保存不能丢。
     const streamKnown = new Set([
       'network', 'security', 'sockopt', 'tlsSettings', 'realitySettings',
     ])
     if (localProtocol.value === 'vless') {
       for (const k of ['tcpSettings', 'xhttpSettings', 'fingerprint', 'acceptProxyProtocol']) streamKnown.add(k)
-    } else if (localProtocol.value === 'dokodemo-door') {
+    } else if (localProtocol.value === 'tunnel') {
       for (const k of ['tcpSettings', 'acceptProxyProtocol', 'proxy_protocol', 'proxyProtocol']) streamKnown.add(k)
     } else {
       for (const k of ['hysteriaSettings', 'finalmask']) streamKnown.add(k)
@@ -1206,17 +1214,17 @@ function parseJsonToForm(str: string) {
         masquerade,
         hysteriaSettingsExtra: Object.keys(hyExtra).length > 0 ? hyExtra : undefined,
       }
-    } else if (localProtocol.value === 'dokodemo-door') {
+    } else if (localProtocol.value === 'tunnel') {
       const hasTargetPanel = typeof panel.target_inbound_id === 'number' ||
         typeof panel.target_address === 'string' ||
         typeof panel.target_port === 'number'
-      const targetInboundId = hasTargetPanel ? panel.target_inbound_id : dokodemoForm.value.target_inbound_id
-      const targetAddress = hasTargetPanel ? (panel.target_address || '') : dokodemoForm.value.target_address
-      const targetPort = hasTargetPanel ? (panel.target_port || 0) : dokodemoForm.value.target_port
-      dokodemoForm.value = {
+      const targetInboundId = hasTargetPanel ? panel.target_inbound_id : tunnelForm.value.target_inbound_id
+      const targetAddress = hasTargetPanel ? (panel.target_address || '') : tunnelForm.value.target_address
+      const targetPort = hasTargetPanel ? (panel.target_port || 0) : tunnelForm.value.target_port
+      tunnelForm.value = {
         target_mode: hasTargetPanel
-          ? (targetInboundId ? 'inbound' : (s?.address || targetAddress || s?.port || targetPort ? 'manual' : 'draft'))
-          : dokodemoForm.value.target_mode,
+          ? (targetInboundId ? 'inbound' : (s?.address || targetAddress || s?.port || targetPort ? 'manual' : 'inbound'))
+          : tunnelForm.value.target_mode,
         target_inbound_id: targetInboundId,
         target_address: s?.address || targetAddress,
         target_port: s?.port || targetPort,
@@ -1635,7 +1643,7 @@ watch(
     localShareAllowInsecure,
     localLayerId,
     vlessForm,
-    dokodemoForm,
+    tunnelForm,
     hysteriaForm,
     tcpForm,
     xhttpForm,
@@ -1758,76 +1766,70 @@ watch(
         <!-- ==================== 2. 协议专属字段：settings 里各协议独有的键 ==================== -->
         <div v-show="activeTab === 'protocol'" class="tab-pane">
           <VlessSettings v-if="localProtocol === 'vless'" v-model="vlessForm" />
-          <HysteriaSettings
-            v-else-if="localProtocol === 'hysteria'"
-            v-model="hysteriaForm"
-          />
-          <DokodemoSettings
-            v-else-if="localProtocol === 'dokodemo-door'"
-            v-model="dokodemoForm"
-            :current-inbound-id="props.inboundId"
-            :server-id="props.serverId"
-            :listen-port="localPort"
-            :listen-address="localListen"
-          />
-          <div v-if="localProtocol !== 'dokodemo-door'" class="card-note">
+          <HysteriaSettings v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
+          <div class="card-note">
             认证用户由绑定的接入点注入（settings.users），本页只维护协议级参数。
           </div>
         </div>
 
         <!-- ==================== 3. 传输层 Tab：streamSettings 非 security 部分 ==================== -->
         <div v-show="activeTab === 'transport'" class="tab-pane">
-          <CsContainer header="传输方式 (streamSettings.network)">
-            <template #info>
-              <TipIcon
-                content="层级顺序（由内向外）：协议 settings → 传输 network → 安全 security → finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。finalmask 等未提供表单的键可在「原始 JSON」中编辑，本表单会原样保留。"
-              />
-            </template>
-            <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
-              <CsSegmentedControl
-                v-model="localNetwork"
-                :options="networkOptions"
-                @change="onNetworkChange"
-              />
-            </CsFormItem>
-            <div v-else class="card-note">
-              <template v-if="localProtocol === 'hysteria'">
+          <template v-if="localProtocol !== 'tunnel'">
+            <CsContainer header="传输方式 (streamSettings.network)">
+              <template #info>
+                <TipIcon
+                  content="层级顺序（由内向外）：协议 settings → 传输 network → 安全 security → finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。finalmask 等未提供表单的键可在「原始 JSON」中编辑，本表单会原样保留。"
+                />
+              </template>
+              <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
+                <CsSegmentedControl
+                  v-model="localNetwork"
+                  :options="networkOptions"
+                  @change="onNetworkChange"
+                />
+              </CsFormItem>
+              <div v-else class="card-note">
                 固定使用 hysteria 传输（network=hysteria，魔改 QUIC），加密固定为 TLS。
-              </template>
-              <template v-else>
-                固定使用 raw (tcp) 传输，监听与目标由「协议专属字段」的 settings 决定。
-              </template>
-            </div>
-          </CsContainer>
+              </div>
+            </CsContainer>
 
-          <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
-          <XhttpTransport
-            v-else-if="localProtocol === 'vless' && localNetwork === 'xhttp'"
-            v-model="xhttpForm"
-          />
-          <HysteriaFinalMask v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
+            <TcpTransport v-if="localProtocol === 'vless' && localNetwork === 'tcp'" v-model="tcpForm" />
+            <XhttpTransport
+              v-else-if="localProtocol === 'vless' && localNetwork === 'xhttp'"
+              v-model="xhttpForm"
+            />
+            <HysteriaFinalMask v-else-if="localProtocol === 'hysteria'" v-model="hysteriaForm" />
 
-          <CsContainer
-            v-if="localProtocol === 'vless' && localNetwork === 'tcp'"
-            header="流控 (settings.flow)"
-          >
-            <template #info>
-              <TipIcon
-                content="Vision 属于协议 settings，不属于传输层：它让 TCP 在 TLS 解密后零拷贝转发。留空时只有 TCP + REALITY 会由后端自动补 vision；TCP + TLS / VLESS Encryption 需要手动选择。"
-              />
-            </template>
-            <CsFormItem
-              label="流控算法 (Flow)"
-              :constraint-text="allowVisionFlow ? '' : '当前安全层不支持 Vision：需 TLS、REALITY 或开启 VLESS Encryption。'"
+            <CsContainer
+              v-if="localProtocol === 'vless' && localNetwork === 'tcp'"
+              header="流控 (settings.flow)"
             >
-              <CsSelect
-                v-model="vlessForm.flow"
-                :options="flowOptions"
-                :disabled="!allowVisionFlow"
-                style="width: 100%"
-              />
-            </CsFormItem>
-          </CsContainer>
+              <template #info>
+                <TipIcon
+                  content="Vision 属于协议 settings，不属于传输层：它让 TCP 在 TLS 解密后零拷贝转发。留空时只有 TCP + REALITY 会由后端自动补 vision；TCP + TLS / VLESS Encryption 需要手动选择。"
+                />
+              </template>
+              <CsFormItem
+                label="流控算法 (Flow)"
+                :constraint-text="allowVisionFlow ? '' : '当前安全层不支持 Vision：需 TLS、REALITY 或开启 VLESS Encryption。'"
+              >
+                <CsSelect
+                  v-model="vlessForm.flow"
+                  :options="flowOptions"
+                  :disabled="!allowVisionFlow"
+                  style="width: 100%"
+                />
+              </CsFormItem>
+            </CsContainer>
+          </template>
+
+          <!-- 直通：目标 / 转发网络 / Proxy Protocol 都属于「这条管道的传输语义」，
+               与 sockopt 同页；streamSettings.network 恒为 raw，不再单独展示。 -->
+          <TunnelForward
+            v-if="localProtocol === 'tunnel'"
+            v-model="tunnelForm"
+            :current-inbound-id="props.inboundId"
+          />
 
           <SockoptSettings v-model="sockoptForm" />
         </div>

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import type { PermissionGroup, UserAccessPoint } from '@/api/types'
+import { protocolDisplayName } from '@/utils/protocol'
 import { useGridHeight } from '../useGridHeight'
 
 const props = defineProps<{
@@ -66,7 +67,7 @@ function groupName(id: number): string {
       <span class="ap-dot online" />
       <code class="cell-mono">{{ data.ap.resolved_host }}:{{ data.ap.resolved_port }}</code>
       <span class="ap-chip" :class="data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'purple'">
-        {{ data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (data.ap.resolved_protocol?.toUpperCase() || 'VLESS') }}
+        {{ data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (protocolDisplayName(data.ap.resolved_protocol).toUpperCase() || 'VLESS') }}
       </span>
     </div>
     <div v-else class="ap-resolved-text waiting">

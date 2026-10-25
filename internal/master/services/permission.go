@@ -152,7 +152,7 @@ func loadEnabledAPs(db *gorm.DB) ([]models.UserAccessPoint, map[uint64][]uint64,
 // loadEnabledTunnels 加载启用且配置了有效 target_inbound_id 的 tunnel 入站映射。
 func loadEnabledTunnels(db *gorm.DB) (map[uint64]uint64, error) {
 	var tunnels []models.Inbound
-	if err := db.Where("enabled = ? AND (type = ? OR protocol = ?) AND target_inbound_id IS NOT NULL", true, models.InboundTypeTunnel, models.ProtocolDokodemo).Find(&tunnels).Error; err != nil {
+	if err := db.Where("enabled = ? AND (type = ? OR protocol = ?) AND target_inbound_id IS NOT NULL", true, models.InboundTypeTunnel, models.ProtocolTunnel).Find(&tunnels).Error; err != nil {
 		return nil, err
 	}
 	m := make(map[uint64]uint64, len(tunnels))

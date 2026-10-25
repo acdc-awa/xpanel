@@ -169,7 +169,7 @@ func TestResolveAPSubscription_TunnelPipeline(t *testing.T) {
 		Tag:               "tunnel-10001",
 		Port:              10001,
 		Type:              models.InboundTypeTunnel,
-		Protocol:          models.ProtocolDokodemo,
+		Protocol:          models.ProtocolTunnel,
 		TargetInboundID:   &targetInbID,
 		ShareAddrStrategy: "node",
 		Enabled:           true,
@@ -241,7 +241,7 @@ func TestResolveAPSubscription_TunnelPipeline(t *testing.T) {
 		Tag:      "tunnel-draft",
 		Port:     10002,
 		Type:     models.InboundTypeTunnel,
-		Protocol: models.ProtocolDokodemo,
+		Protocol: models.ProtocolTunnel,
 	}
 	apDraft := models.UserAccessPoint{
 		ID:              2,

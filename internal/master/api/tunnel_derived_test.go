@@ -66,7 +66,7 @@ func ownedRule(t *testing.T, db *gorm.DB, ownerID uint64) *models.ServerRoutingR
 func TestEnsureTunnelDerived_BackfillAndIdempotent(t *testing.T) {
 	d, _ := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-legacy", Protocol: models.ProtocolDokodemo, Port: 20001,
+		ServerID: 1, Tag: "tunnel-legacy", Protocol: models.ProtocolTunnel, Port: 20001,
 		Type: models.InboundTypeTunnel, TargetAddress: "target.example.com", TargetPort: 3306,
 		StreamSettings: `{"proxy_protocol":true}`, Enabled: true,
 	}
@@ -118,7 +118,7 @@ func TestEnsureTunnelDerived_BackfillAndIdempotent(t *testing.T) {
 func TestEnsureTunnelDerived_DraftCleansUp(t *testing.T) {
 	d, _ := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-draft", Protocol: models.ProtocolDokodemo, Port: 20002,
+		ServerID: 1, Tag: "tunnel-draft", Protocol: models.ProtocolTunnel, Port: 20002,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -149,7 +149,7 @@ func TestEnsureTunnelDerived_DraftCleansUp(t *testing.T) {
 func TestEnsureTunnelDerived_TagRenameCascade(t *testing.T) {
 	d, _ := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-old", Protocol: models.ProtocolDokodemo, Port: 20003,
+		ServerID: 1, Tag: "tunnel-old", Protocol: models.ProtocolTunnel, Port: 20003,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -179,7 +179,7 @@ func TestEnsureTunnelDerived_TagRenameCascade(t *testing.T) {
 func TestEnsureTunnelDerived_KeepsAdminEdits(t *testing.T) {
 	d, _ := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-edit", Protocol: models.ProtocolDokodemo, Port: 20004,
+		ServerID: 1, Tag: "tunnel-edit", Protocol: models.ProtocolTunnel, Port: 20004,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -218,7 +218,7 @@ func TestEnsureTunnelDerived_KeepsAdminEdits(t *testing.T) {
 func TestManagedTunnelObjects_Guards(t *testing.T) {
 	d, r := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-guard", Protocol: models.ProtocolDokodemo, Port: 20005,
+		ServerID: 1, Tag: "tunnel-guard", Protocol: models.ProtocolTunnel, Port: 20005,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -285,7 +285,7 @@ func TestManagedTunnelObjects_Guards(t *testing.T) {
 func TestDeleteTunnelInbound_CascadesDerived(t *testing.T) {
 	d, r := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-del", Protocol: models.ProtocolDokodemo, Port: 20006,
+		ServerID: 1, Tag: "tunnel-del", Protocol: models.ProtocolTunnel, Port: 20006,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -314,7 +314,7 @@ func TestDeleteTunnelInbound_CascadesDerived(t *testing.T) {
 func TestDeleteTunnelInbound_AdminRuleStillBlocks(t *testing.T) {
 	d, r := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-keep", Protocol: models.ProtocolDokodemo, Port: 20007,
+		ServerID: 1, Tag: "tunnel-keep", Protocol: models.ProtocolTunnel, Port: 20007,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -341,7 +341,7 @@ func TestEnsureTunnelDerived_TagConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tunnel-clash", Protocol: models.ProtocolDokodemo, Port: 20008,
+		ServerID: 1, Tag: "tunnel-clash", Protocol: models.ProtocolTunnel, Port: 20008,
 		Type: models.InboundTypeTunnel, TargetAddress: "1.2.3.4", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -361,7 +361,7 @@ func TestEnsureTunnelDerived_TagConflict(t *testing.T) {
 func TestEnsureTunnelDerived_ChannelHosted(t *testing.T) {
 	d, _ := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "chan-tunnel-3306", Protocol: models.ProtocolDokodemo, Port: 3306,
+		ServerID: 1, Tag: "chan-tunnel-3306", Protocol: models.ProtocolTunnel, Port: 3306,
 		Type: models.InboundTypeChannel, TargetAddress: "db.remote.com", TargetPort: 3306, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)
@@ -404,7 +404,7 @@ func jsonInt(v uint64) string {
 func TestAdminUpdateServerRoutingRule_DerivedRuleProtection(t *testing.T) {
 	d, r := newTunnelDeps(t)
 	inb := models.Inbound{
-		ServerID: 1, Tag: "tun-protect", Protocol: models.ProtocolDokodemo, Port: 20000,
+		ServerID: 1, Tag: "tun-protect", Protocol: models.ProtocolTunnel, Port: 20000,
 		Type: models.InboundTypeTunnel, TargetAddress: "remote.host", TargetPort: 443, Enabled: true,
 	}
 	seedTunnelInbound(t, d.DB, &inb)

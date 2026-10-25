@@ -34,15 +34,15 @@ const (
 	tunnelDerivedRuleRemark     = "四层直通转发规则（随直通自动维护）"
 )
 
-// IsTunnelInbound 判定入站是否为四层直通：type=tunnel，或通道托管的 dokodemo-door 入站。
+// IsTunnelInbound 判定入站是否为四层直通：type=tunnel，或通道托管的 tunnel 入站。
 // 与生成器（xray.Generate）的判定同源，勿单独改。
 func IsTunnelInbound(inb *models.Inbound) bool {
 	if inb == nil {
 		return false
 	}
 	return inb.Type == models.InboundTypeTunnel ||
-		(inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolDokodemo) ||
-		(inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolDokodemo)
+		(inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolTunnel) ||
+		(inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolTunnel)
 }
 
 // EnsureTunnelDerivedObjects 让该服务器上全部四层直通的派生对象与直通本身对齐（幂等）。

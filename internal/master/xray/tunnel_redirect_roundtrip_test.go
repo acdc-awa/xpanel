@@ -105,7 +105,7 @@ func TestTunnelInbound_RedirectOutbound_DataRoundtrip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tunPort := freeDualProtoPort(t)
 			inbounds := []models.Inbound{{
-				ID: 1, ServerID: 1, Tag: "tunnel-e2e", Protocol: models.ProtocolDokodemo,
+				ID: 1, ServerID: 1, Tag: "tunnel-e2e", Protocol: models.ProtocolTunnel,
 				Port: tunPort, Type: models.InboundTypeTunnel,
 				TargetAddress: "127.0.0.1", TargetPort: echoPort,
 				StreamSettings: tc.stream,
@@ -329,7 +329,7 @@ func TestTunnelRule_AdminRuleCanPrecede(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tunPort := freeDualProtoPort(t)
 			inb := models.Inbound{
-				ID: 1, ServerID: 1, Tag: "tunnel-prio", Protocol: models.ProtocolDokodemo,
+				ID: 1, ServerID: 1, Tag: "tunnel-prio", Protocol: models.ProtocolTunnel,
 				Port: tunPort, Type: models.InboundTypeTunnel,
 				TargetAddress: "127.0.0.1", TargetPort: echoPort,
 				// 关闭 PROXY Protocol v2：本用例只验证"规则顺序"，开着会让目标先收到一个二进制头，

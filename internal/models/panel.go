@@ -129,14 +129,14 @@ type Inbound struct {
 
 // IsTunnel 判断入站是否为四层直通管道（端口转发）。
 func (inb *Inbound) IsTunnel() bool {
-	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeTunnel
+	return inb.Protocol == ProtocolTunnel || inb.Type == InboundTypeTunnel
 }
 
 // IsForwardProxy 判断入站是否为无用户维度的转发入口（四层直通 / 独立通道）。
 // 这类入站 settings 原样透传，不注入 clients；已退役的 Mixed/SOCKS5/HTTP 协议不再匹配，
 // 存量脏数据会落入通用分支并被协议注册表显式拒绝（Fail-closed）。
 func (inb *Inbound) IsForwardProxy() bool {
-	return inb.Protocol == ProtocolDokodemo || inb.Type == InboundTypeForward || inb.Type == InboundTypeTunnel
+	return inb.Protocol == ProtocolTunnel || inb.Type == InboundTypeForward || inb.Type == InboundTypeTunnel
 }
 
 // IsRelay 判断入站是否为内部中转链路（relay）。

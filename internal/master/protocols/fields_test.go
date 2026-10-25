@@ -105,7 +105,7 @@ func TestFieldSets_CoverRegisteredProtocols(t *testing.T) {
 			t.Errorf("已注册协议 %q 缺少字段声明", proto)
 		}
 	}
-	if _, ok := FieldSet("dokodemo-door"); !ok {
+	if _, ok := FieldSet("tunnel"); !ok {
 		t.Error("直通协议 dokodemo-door 缺少字段声明")
 	}
 	if _, ok := FieldSet("vmess"); ok {

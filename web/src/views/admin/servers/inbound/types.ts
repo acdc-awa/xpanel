@@ -1,6 +1,6 @@
 import type { FallbackItem } from '@/api/types'
 
-export type InboundProtocol = 'vless' | 'dokodemo-door' | 'hysteria'
+export type InboundProtocol = 'vless' | 'tunnel' | 'hysteria'
 export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'none'
 export type InboundType = 'user' | 'forward' | 'tunnel'
@@ -141,8 +141,9 @@ export interface VlessConfig {
   decryption?: string
 }
 
-export interface DokodemoConfig {
-  target_mode: 'inbound' | 'manual' | 'draft'
+export interface TunnelConfig {
+  // 草稿不是独立模式：引用入站但未选择目标即草稿。
+  target_mode: 'inbound' | 'manual'
   target_inbound_id?: number
   target_address?: string
   target_port?: number

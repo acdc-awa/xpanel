@@ -258,7 +258,7 @@ func TestBatchInboundAuthorizedGroupIDs_DokodemoProtocolTunnel(t *testing.T) {
 		ID:              301,
 		ServerID:        1,
 		Tag:             "dokodemo-tunnel",
-		Protocol:        models.ProtocolDokodemo,
+		Protocol:        models.ProtocolTunnel,
 		Type:            "", // 故意置空，验证 protocol 识别防御
 		TargetInboundID: &targetID,
 		Enabled:         true,

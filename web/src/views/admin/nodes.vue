@@ -25,6 +25,7 @@ import {
   type TabItem,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
+import { protocolDisplayName } from '@/utils/protocol'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
 import AccessPointDialog from './servers/AccessPointDialog.vue'
 import {
@@ -87,13 +88,13 @@ type BadgeColor =
   | 'severity-neutral'
 
 function inboundChipText(row: InboundItem): string {
-  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'dokodemo-door') return '四层直通'
+  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'tunnel') return '四层直通'
   if (row.protocol === 'hysteria') return 'Hysteria 2'
   return 'VLESS'
 }
 
 function inboundChipColor(row: InboundItem): BadgeColor {
-  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'dokodemo-door') return 'grey'
+  if (row.type === 'tunnel' || row.type === 'forward' || row.type === 'channel' || row.protocol === 'tunnel') return 'grey'
   if (row.protocol === 'hysteria') return 'green'
   return 'blue'
 }
@@ -540,7 +541,7 @@ function quotaOf(row: any): string {
                 <CsCardFact label="所属服务器" :value="serverName(row.server_id)" />
                 <CsCardFact label="协议与端口">
                   <span class="node-card-proto">
-                    <CsBadge color="blue">{{ (row.protocol || '').toUpperCase() }}</CsBadge>
+                    <CsBadge color="blue">{{ protocolDisplayName(row.protocol).toUpperCase() }}</CsBadge>
                     <span class="cs-text-mono">:{{ row.port }}</span>
                   </span>
                 </CsCardFact>

@@ -230,7 +230,7 @@ func TestUserAccessPoints_TunnelTarget_And_Subscribe(t *testing.T) {
 	draftTunnel := models.Inbound{
 		ServerID: edgeSrv.ID,
 		Tag:      "tunnel-draft",
-		Protocol: "dokodemo-door",
+		Protocol: "tunnel",
 		Port:     10001,
 		Type:     models.InboundTypeTunnel,
 		Enabled:  true,
@@ -256,7 +256,7 @@ func TestUserAccessPoints_TunnelTarget_And_Subscribe(t *testing.T) {
 	connectedTunnel := models.Inbound{
 		ServerID:        edgeSrv.ID,
 		Tag:             "tunnel-edge",
-		Protocol:        "dokodemo-door",
+		Protocol:        "tunnel",
 		Port:            10002,
 		Type:            models.InboundTypeTunnel,
 		TargetInboundID: &landingInb.ID,

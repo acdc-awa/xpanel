@@ -668,9 +668,9 @@ func (d *Deps) checkInboundRef(outboundServerID, targetInboundID, excludeOutboun
 		return "引用的入站已停用"
 	}
 	// 引用出站由目标协议插件投影（vnext / 凭据 / 传输 / 安全）。
-	// socks/http/dokodemo-door 没有客户端投影实现，写进来只会在生成配置时 500。
+	// socks/http/tunnel 没有客户端投影实现，写进来只会在生成配置时 500。
 	if protocols.Find(target.Protocol) == nil {
-		return "引用的入站协议 " + target.Protocol + " 不支持作为引用目标（当前仅 VLESS / Hysteria 2）"
+		return "引用的入站协议 " + models.ProtocolDisplayName(target.Protocol) + " 不支持作为引用目标（当前仅 VLESS / Hysteria 2）"
 	}
 	if d.wouldCreateRefCycle(outboundServerID, targetInboundID, excludeOutboundID) {
 		return "引用将形成转发环路（A→B→A），已拒绝"

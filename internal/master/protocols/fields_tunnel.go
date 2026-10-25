@@ -2,9 +2,9 @@ package protocols
 
 import "github.com/acdc-awa/xpanel/internal/contracts"
 
-// dokodemo-door（四层直通）字段声明。该协议没有客户端投影，目标自 C2 起住在
-// 派生 freedom 出站的 redirect 上，入站只监听。
-func dokodemoFieldSet() contracts.ProtocolFieldSet {
+// tunnel（四层直通；xray 协议名 tunnel，dokodemo-door 是其别名）字段声明。
+// 该协议没有客户端投影，目标自 C2 起住在派生 freedom 出站的 redirect 上，入站只监听。
+func tunnelFieldSet() contracts.ProtocolFieldSet {
 	fields := []contracts.FieldDecl{
 		field("endpoint.listen", "监听地址", contracts.ShapeScalar, contracts.CardOptional, contracts.RoleServerOnly, contracts.OriginAdmin),
 		field("endpoint.port", "监听端口", contracts.ShapeScalar, contracts.CardOne, contracts.RoleServerOnly, contracts.OriginAdmin),
@@ -39,7 +39,7 @@ func dokodemoFieldSet() contracts.ProtocolFieldSet {
 	}
 
 	return contracts.ProtocolFieldSet{
-		Protocol: "dokodemo-door",
+		Protocol: "tunnel",
 		Label:    "四层直通",
 		Fields:   fields,
 		Rules:    rules,

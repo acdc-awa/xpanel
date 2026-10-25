@@ -354,8 +354,8 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 			continue
 		}
 		if inb.Type == models.InboundTypeTunnel ||
-			(inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolDokodemo) ||
-			(inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolDokodemo) {
+			(inb.Type == models.InboundTypeChannel && inb.Protocol == models.ProtocolTunnel) ||
+			(inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolTunnel) {
 			// C2（2026-09-28）：直通的派生 freedom 出站（`out-<tag>`）与转发规则已落库为真行
 			// （owner_inbound_id = 该入站），本函数不再现场派生——出站随 Outbounds 参数、规则随
 			// RoutingRules 参数进来，顺序由 Priority 决定（见 mergeRoutingRules）。
@@ -380,10 +380,10 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		}
 		inboundList = append(inboundList, item)
 	}
-	// api 入站：内部 gRPC 通信
+	// api 入站：内部 gRPC 通信（tunnel 是 dokodemo-door 的别名，二者加载同一配置）
 	inboundList = append(inboundList, map[string]any{
 		"tag": "api", "listen": "127.0.0.1", "port": 10085,
-		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
+		"protocol": "tunnel", "settings": map[string]any{"address": "127.0.0.1"},
 	})
 	cfg["inbounds"] = inboundList
 
@@ -955,7 +955,7 @@ func TunnelOutboundSettings(host string, port int, sendProxyProtocol bool) (stri
 	return string(raw), nil
 }
 
-// buildTunnelInbound 生成四层直通管道入站（dokodemo-door，**只监听**）。
+// buildTunnelInbound 生成四层直通管道入站（tunnel，**只监听**）。
 // 目标不写进入站：目标由该直通的 freedom 出站（tag = TunnelOutboundTag(tag)）的 `redirect` 承担
 // （入站 = 哪里听、出站 = 转到哪，两者解耦；该出站自 C2 起是库内真行）。
 // 若既无连线目标又无有效手动外部目标，返回 nil（草稿状态，跳过注入 Xray，防启动报错）。
@@ -967,7 +967,7 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 
 	network := "tcp,udp"
 	wantAcceptPP := false
-	// settings.network 是 xray dokodemo-door 的正式位置；stream.network 仅为兼容
+	// settings.network 是 xray tunnel 入站的正式位置（dokodemo-door 是同一配置的旧别名）；stream.network 仅为兼容
 	// 旧版面板把转发网络写进 streamSettings 的存量数据。
 	if spec.Settings != nil {
 		if n, _ := spec.Settings["network"].(string); n != "" {
@@ -982,7 +982,7 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 		// - ensureTargetAcceptProxyProtocol 写入 tcpSettings.acceptProxyProtocol（新形态）；
 		// - 存量数据可能还带顶层 acceptProxyProtocol；
 		// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
-		// 任一为 true → 生成的 dokodemo 带上 tcpSettings.acceptProxyProtocol，链式管道才能
+		// 任一为 true → 生成的 tunnel 入站带上 tcpSettings.acceptProxyProtocol，链式管道才能
 		// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
 		// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
 		if ap, _ := spec.Stream["acceptProxyProtocol"].(bool); ap {
@@ -1008,7 +1008,7 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 
 	item := map[string]any{
 		"tag":      spec.Tag,
-		"protocol": "dokodemo-door",
+		"protocol": "tunnel",
 		"port":     spec.Port,
 		"settings": settings,
 	}

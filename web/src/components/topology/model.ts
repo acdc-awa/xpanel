@@ -102,7 +102,7 @@ export function inboundSummary(
   if (p === 'hysteria') {
     proto = 'HY2'
     cls = 'hy2'
-  } else if (p === 'dokodemo-door' || inb.type === 'tunnel') {
+  } else if (p === 'tunnel' || inb.type === 'tunnel') {
     proto = 'TUNNEL'
     cls = 'tunnel'
   } else if (p === 'vless') {

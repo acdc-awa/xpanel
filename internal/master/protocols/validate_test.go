@@ -117,28 +117,28 @@ func TestValidateInboundFields_Dokodemo(t *testing.T) {
 	targetID := uint64(99)
 
 	if issues := ValidateInboundFields(&models.Inbound{
-		Protocol: models.ProtocolDokodemo, TargetInboundID: &targetID,
+		Protocol: models.ProtocolTunnel, TargetInboundID: &targetID,
 	}); len(issues) != 0 {
 		t.Fatalf("连线模式不应有问题: %+v", issues)
 	}
 	if issues := ValidateInboundFields(&models.Inbound{
-		Protocol: models.ProtocolDokodemo, TargetAddress: "1.2.3.4", TargetPort: 8443,
+		Protocol: models.ProtocolTunnel, TargetAddress: "1.2.3.4", TargetPort: 8443,
 	}); len(issues) != 0 {
 		t.Fatalf("手动模式不应有问题: %+v", issues)
 	}
 	if issues := ValidateInboundFields(&models.Inbound{
-		Protocol: models.ProtocolDokodemo, TargetInboundID: &targetID, TargetAddress: "1.2.3.4",
+		Protocol: models.ProtocolTunnel, TargetInboundID: &targetID, TargetAddress: "1.2.3.4",
 	}); !hasIssue(issues, "target.address", "forbidden") {
 		t.Errorf("连线模式不应再填地址: %+v", issues)
 	}
 	if issues := ValidateInboundFields(&models.Inbound{
-		Protocol: models.ProtocolDokodemo, TargetAddress: "1.2.3.4", TargetPort: 0,
+		Protocol: models.ProtocolTunnel, TargetAddress: "1.2.3.4", TargetPort: 0,
 	}); len(issues) != 0 {
 		// 无有效目标 = 草稿；mode 为空时目标规则不触发
 		t.Errorf("草稿不应被目标规则误报: %+v", issues)
 	}
 	if issues := ValidateInboundFields(&models.Inbound{
-		Protocol: models.ProtocolDokodemo, TargetAddress: "1.2.3.4", TargetPort: 8443,
+		Protocol: models.ProtocolTunnel, TargetAddress: "1.2.3.4", TargetPort: 8443,
 		SettingsJSON: `{"address":"9.9.9.9"}`,
 	}); !hasIssue(issues, "settings.address", "forbidden") {
 		t.Errorf("入站不得再写 address: %+v", issues)

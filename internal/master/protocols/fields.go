@@ -10,9 +10,9 @@ import (
 // 未注册协议返回 false；调用方应 fail-closed（不猜测字段）。
 
 var fieldSets = map[string]contracts.ProtocolFieldSet{
-	"vless":         vlessFieldSet(),
-	"hysteria":      hysteriaFieldSet(),
-	"dokodemo-door": dokodemoFieldSet(),
+	"vless":    vlessFieldSet(),
+	"hysteria": hysteriaFieldSet(),
+	"tunnel":   tunnelFieldSet(),
 }
 
 // FieldSet 按协议名取字段声明。

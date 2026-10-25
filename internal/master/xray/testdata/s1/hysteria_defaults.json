@@ -43,7 +43,7 @@
     {
       "listen": "127.0.0.1",
       "port": 10085,
-      "protocol": "dokodemo-door",
+      "protocol": "tunnel",
       "settings": {
         "address": "127.0.0.1"
       },

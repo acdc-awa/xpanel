@@ -36,7 +36,7 @@ const (
 	InboundTypeForward = "forward" // 转发代理入站（SOCKS5/HTTP）
 
 	ProtocolVless    = "vless"
-	ProtocolDokodemo = "dokodemo-door"
+	ProtocolTunnel   = "tunnel"
 	ProtocolSocks    = "socks"
 	ProtocolHTTP     = "http"
 	ProtocolMixed    = "mixed"
@@ -51,6 +51,15 @@ const (
 	ChannelStatusExpired  = "expired"
 	ChannelStatusDisabled = "disabled"
 )
+
+// ProtocolDisplayName 协议名 → 面板展示名。
+// 面板自本版起统一使用 tunnel；这里保留 dokodemo-door 的映射，兼容尚未跑完启动迁移的存量行。
+func ProtocolDisplayName(p string) string {
+	if p == "dokodemo-door" {
+		return ProtocolTunnel
+	}
+	return p
+}
 
 // All 返回全部模型，供 AutoMigrate 使用。
 func All() []any {
@@ -124,7 +133,12 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateProxyChannelsToForwardInbounds(db); err != nil {
 		return err
 	}
-	if err := migrateDokodemoInboundsToTunnelType(db); err != nil {
+	// 必须先于类型归一：把存量 protocol='dokodemo-door' 改名为 'tunnel'，
+	// 后面的类型迁移才能用新常量匹配到它们。
+	if err := migrateDokodemoProtocolToTunnel(db); err != nil {
+		return err
+	}
+	if err := migrateTunnelInboundType(db); err != nil {
 		return err
 	}
 	if err := migrateRelayOutboundCredentials(db); err != nil {
@@ -235,13 +249,26 @@ func migrateProxyChannelsToForwardInbounds(db *gorm.DB) error {
 	}).Error
 }
 
-// migrateDokodemoInboundsToTunnelType 幂等修正：将存量 protocol = 'dokodemo-door' 的入站统一补全 type = 'tunnel'。
-func migrateDokodemoInboundsToTunnelType(db *gorm.DB) error {
+// migrateDokodemoProtocolToTunnel 把 v4 之前写入的 xray 协议值 dokodemo-door 统一改名为 tunnel。
+//
+// xray 自 v25.8.3 起把 tunnel 作为 dokodemo-door 的别名（infra/conf/xray.go 中两者映射到同一个
+// DokodemoConfig），面板从本版起只写 tunnel。legacy 字面量只在这里保留，用于迁移存量行。幂等。
+func migrateDokodemoProtocolToTunnel(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&Inbound{}) {
 		return nil
 	}
 	return db.Model(&Inbound{}).
-		Where("protocol = ? AND (type IS NULL OR type = '' OR type != ?)", ProtocolDokodemo, InboundTypeTunnel).
+		Where("protocol = ?", "dokodemo-door").
+		Update("protocol", ProtocolTunnel).Error
+}
+
+// migrateTunnelInboundType 幂等修正：把存量 tunnel 协议入站的 type 统一补全为 tunnel。
+func migrateTunnelInboundType(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Inbound{}) {
+		return nil
+	}
+	return db.Model(&Inbound{}).
+		Where("protocol = ? AND (type IS NULL OR type = '' OR type != ?)", ProtocolTunnel, InboundTypeTunnel).
 		Update("type", InboundTypeTunnel).Error
 }
 

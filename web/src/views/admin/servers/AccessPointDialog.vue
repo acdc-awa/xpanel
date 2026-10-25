@@ -112,7 +112,7 @@ const targetTypeOptions: SegmentedOption[] = [
 ]
 
 function inboundOptionLabel(inb: InboundItem): string {
-  if (inb.type === 'tunnel' || inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'dokodemo-door') {
+  if (inb.type === 'tunnel' || inb.type === 'forward' || inb.type === 'channel' || inb.protocol === 'tunnel') {
     return `[四层直通] ${inb.tag} (:${inb.port})`
   }
   if (inb.protocol === 'hysteria') {

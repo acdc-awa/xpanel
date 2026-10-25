@@ -122,14 +122,14 @@ func TestAdminDeleteInbound_ProtectedByTunnelAndChannel(t *testing.T) {
 	db.Create(&landing)
 
 	tunnel := models.Inbound{
-		ServerID: 1, Tag: "tunnel-in", Protocol: "dokodemo-door", Port: 10001,
+		ServerID: 1, Tag: "tunnel-in", Protocol: "tunnel", Port: 10001,
 		Type: models.InboundTypeTunnel, TargetInboundID: &landing.ID, Enabled: true,
 	}
 	db.Create(&tunnel)
 
 	// 2. Channel 入站（四层直通通道）
 	chanInb := models.Inbound{
-		ServerID: 1, Tag: "chan-tunnel-1080", Protocol: "dokodemo-door", Port: 1080,
+		ServerID: 1, Tag: "chan-tunnel-1080", Protocol: "tunnel", Port: 1080,
 		Type: models.InboundTypeChannel, Enabled: true,
 	}
 	db.Create(&chanInb)
@@ -179,14 +179,14 @@ func TestAdminToggleInbound_ChannelGuardAndTunnelProtection(t *testing.T) {
 	db.Create(&landing)
 
 	tunnel := models.Inbound{
-		ServerID: 2, Tag: "tunnel-in", Protocol: "dokodemo-door", Port: 10001,
+		ServerID: 2, Tag: "tunnel-in", Protocol: "tunnel", Port: 10001,
 		Type: models.InboundTypeTunnel, TargetInboundID: &landing.ID, Enabled: true,
 	}
 	db.Create(&tunnel)
 
 	// 2. Channel 入站（四层直通通道）
 	chanInb := models.Inbound{
-		ServerID: 2, Tag: "chan-tunnel-1080", Protocol: "dokodemo-door", Port: 1080,
+		ServerID: 2, Tag: "chan-tunnel-1080", Protocol: "tunnel", Port: 1080,
 		Type: models.InboundTypeForward, Enabled: true,
 	}
 	db.Create(&chanInb)
@@ -266,7 +266,7 @@ func TestEnsureTargetAcceptProxyProtocol(t *testing.T) {
 	bodyCreate := map[string]any{
 		"server_id":         3,
 		"tag":               "tunnel-auto-pp",
-		"protocol":          "dokodemo-door",
+		"protocol":          "tunnel",
 		"port":              18443,
 		"type":              "tunnel",
 		"target_inbound_id": landing.ID,
@@ -389,7 +389,7 @@ func TestAdminUpdateInbound_TunnelProxyProtocolOption(t *testing.T) {
 	tunnel := models.Inbound{
 		ServerID: 42,
 		Tag:      "tunnel-doko",
-		Protocol: "dokodemo-door",
+		Protocol: "tunnel",
 		Port:     10080,
 		Type:     models.InboundTypeTunnel,
 		Enabled:  true,
@@ -569,7 +569,7 @@ func TestAdminProtocols(t *testing.T) {
 			t.Errorf("%s 字段声明为空", p.FieldSet.Protocol)
 		}
 	}
-	for _, proto := range []string{"vless", "hysteria", "dokodemo-door"} {
+	for _, proto := range []string{"vless", "hysteria", "tunnel"} {
 		if !found[proto] {
 			t.Errorf("缺少协议声明: %s", proto)
 		}

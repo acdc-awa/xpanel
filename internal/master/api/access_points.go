@@ -71,7 +71,7 @@ func buildAccessPointView(
 			}
 			v.ResolvedTargetDesc = fmt.Sprintf("%s · %s", srv.Name, inb.Tag)
 
-			if inb.Type == models.InboundTypeTunnel || (inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolDokodemo) {
+			if inb.Type == models.InboundTypeTunnel || (inb.Type == models.InboundTypeForward && inb.Protocol == models.ProtocolTunnel) {
 				v.IsTunnel = true
 				if inb.TargetInboundID != nil && *inb.TargetInboundID > 0 {
 					if tgtInb, ok := inbMap[*inb.TargetInboundID]; ok {
