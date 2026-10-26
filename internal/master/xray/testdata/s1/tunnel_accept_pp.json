@@ -1,0 +1,105 @@
+{
+  "api": {
+    "services": [
+      "HandlerService",
+      "StatsService",
+      "RoutingService"
+    ],
+    "tag": "api"
+  },
+  "dns": {},
+  "geodata": {
+    "cron": "0 5 * * *"
+  },
+  "inbounds": [
+    {
+      "port": 10003,
+      "protocol": "tunnel",
+      "settings": {
+        "followRedirect": false,
+        "network": "tcp"
+      },
+      "streamSettings": {
+        "tcpSettings": {
+          "acceptProxyProtocol": true
+        }
+      },
+      "tag": "tunnel-accept-pp"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "tunnel",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
+    }
+  ],
+  "log": {
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "AsIs",
+        "finalRules": [
+          {
+            "action": "block",
+            "blockDelay": "0",
+            "ip": [
+              "geoip:private"
+            ]
+          },
+          {
+            "action": "allow"
+          }
+        ]
+      },
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    },
+    {
+      "protocol": "freedom",
+      "settings": {},
+      "tag": "api"
+    }
+  ],
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserDownlink": true,
+        "statsUserOnline": true,
+        "statsUserUplink": true
+      }
+    },
+    "system": {
+      "statsInboundDownlink": true,
+      "statsInboundUplink": true
+    }
+  },
+  "routing": {
+    "rules": [
+      {
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
+      {
+        "outboundTag": "blocked",
+        "protocol": [
+          "bittorrent"
+        ],
+        "type": "field"
+      }
+    ]
+  },
+  "stats": {},
+  "transport": {}
+}

@@ -337,6 +337,12 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 		if !ob.Enabled || ob.InboundRef == nil {
 			continue
 		}
+		// 只有协议型出站才需要凭据校验。freedom / blackhole 是本机出口（四层直通派生的
+		// redirect 出站也带 InboundRef 以便跟随落地地址），不带任何认证字段——把它算进来会让
+		// 「直通 → 普通 VLESS 落地（无内部账号）」这种合法组合直接生成失败。
+		if ob.Protocol == "freedom" || ob.Protocol == "blackhole" {
+			continue
+		}
 		target, ok := ctxTarget(ctx, *ob.InboundRef)
 		if !ok {
 			return nil, fmt.Errorf("出站 %s 引用的入站 %d 不存在", ob.Tag, *ob.InboundRef)
@@ -978,13 +984,11 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 		if n, _ := spec.Stream["network"].(string); n != "" && (spec.Settings == nil || spec.Settings["network"] == nil) {
 			network = n
 		}
-		// 接收侧 PROXY Protocol（发送侧见 TunnelSendProxyProtocol）：
-		// - ensureTargetAcceptProxyProtocol 写入 tcpSettings.acceptProxyProtocol（新形态）；
-		// - 存量数据可能还带顶层 acceptProxyProtocol；
-		// - 通道托管入站的「透传 PROXY Protocol」勾选写的是面板私有键 proxy_protocol。
-		// 任一为 true → 生成的 tunnel 入站带上 tcpSettings.acceptProxyProtocol，链式管道才能
-		// 「上游 freedom 注入 → 本层消费 → freedom 重注入」逐跳透传；首跳管道（无上游指向）
-		// 两键皆缺省，保持关闭——普通用户客户端不发 PROXY 头，开了会拒绝直连。
+		// 接收侧 PROXY Protocol：唯一入口是 tcpSettings.acceptProxyProtocol（顶层
+		// acceptProxyProtocol 是旧版面板写法，规范化后同样落进 tcpSettings）。
+		// 面板私有键 proxy_protocol / proxyProtocol 是**发送侧**语义（由派生 freedom 出站的
+		// proxyProtocol: 2 承担），不能拿来打开接收侧——首跳客户端不发 PP 头，开了会吞掉请求；
+		// 而链式管道中「谁接收」由保存直通时的落地配对写入，不靠发送键推导。
 		if ap, _ := spec.Stream["acceptProxyProtocol"].(bool); ap {
 			wantAcceptPP = true
 		}
@@ -992,12 +996,6 @@ func buildTunnelInbound(inb *models.Inbound, spec *contracts.InboundSpec, ctx *G
 			if ap, _ := tcpS["acceptProxyProtocol"].(bool); ap {
 				wantAcceptPP = true
 			}
-		}
-		if pp, _ := spec.Stream["proxy_protocol"].(bool); pp {
-			wantAcceptPP = true
-		}
-		if pp, _ := spec.Stream["proxyProtocol"].(bool); pp {
-			wantAcceptPP = true
 		}
 	}
 

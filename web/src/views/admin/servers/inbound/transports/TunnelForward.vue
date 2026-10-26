@@ -207,7 +207,7 @@ const referenceHint = computed(() => {
 
         <CsFormItem label="透传真实客户端 IP" style="grid-column: 1 / -1">
           <template #info>
-            <TipIcon content="开启后由派生的 freedom 出站向目标发送 PROXY Protocol v2 报文；落地端须开启「接收 Proxy Protocol」。该值是面板私有键 streamSettings.proxy_protocol，不会写进节点配置的 xray 字段。" />
+            <TipIcon content="开启后由派生的 freedom 出站向目标发送 PROXY Protocol v2 报文。目标为面板内入站时，其接收侧会随本开关自动同步；目标为外部地址时需在目标侧自行开启接收。该值是面板私有键 streamSettings.proxy_protocol，不会写进节点配置的 xray 字段。" />
           </template>
           <CsToggle
             :model-value="modelValue.proxy_protocol !== false"

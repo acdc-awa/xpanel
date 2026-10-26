@@ -449,6 +449,72 @@ func TestAdminUpdateInbound_TunnelProxyProtocolOption(t *testing.T) {
 	if tcpSettings == nil || tcpSettings["acceptProxyProtocol"] != true {
 		t.Fatalf("当直通管道 proxy_protocol: true 时，落地入站应开启 tcpSettings.acceptProxyProtocol")
 	}
+
+	// 3. 再关掉发送侧：落地必须同步清除接收侧，否则链路会按 PP 解析而吞掉裸连接
+	raw, _ = json.Marshal(bodyNoPP)
+	req = httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", tunnel.ID), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("关闭直通管道 PP 失败: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var landingAfterOff models.Inbound
+	db.First(&landingAfterOff, landing.ID)
+	var ssOff map[string]any
+	_ = json.Unmarshal([]byte(landingAfterOff.StreamSettings), &ssOff)
+	tcpOff, _ := ssOff["tcpSettings"].(map[string]any)
+	if tcpOff["acceptProxyProtocol"] == true {
+		t.Fatalf("发送侧关闭后，落地入站应清除 tcpSettings.acceptProxyProtocol，实际仍为 true")
+	}
+}
+
+// TestSyncTargetProxyProtocolUnion 落地接收侧取「指向它的已启用直通」的并集：
+// 只要还有一条发 PP 的管道就必须开启；最后一条关闭/停用后才清掉。
+func TestSyncTargetProxyProtocolUnion(t *testing.T) {
+	db := apiTestDB(t)
+	landing := models.Inbound{
+		ServerID: 1, Tag: "landing-union", Protocol: "vless", Port: 44321,
+		Type: models.InboundTypeUser, StreamSettings: `{"network":"tcp","security":"none"}`, Enabled: true,
+	}
+	db.Create(&landing)
+
+	ppOn := models.Inbound{
+		ServerID: 1, Tag: "pipe-on", Protocol: models.ProtocolTunnel, Port: 10081,
+		Type: models.InboundTypeTunnel, Enabled: true,
+		StreamSettings: `{"proxy_protocol":true}`, TargetInboundID: &landing.ID,
+	}
+	ppOff := models.Inbound{
+		ServerID: 1, Tag: "pipe-off", Protocol: models.ProtocolTunnel, Port: 10082,
+		Type: models.InboundTypeTunnel, Enabled: true,
+		StreamSettings: `{"proxy_protocol":false}`, TargetInboundID: &landing.ID,
+	}
+	db.Create(&ppOn)
+	db.Create(&ppOff)
+
+	d := &Deps{DB: db}
+	readAccept := func() bool {
+		var got models.Inbound
+		db.First(&got, landing.ID)
+		var ss map[string]any
+		_ = json.Unmarshal([]byte(got.StreamSettings), &ss)
+		tcp, _ := ss["tcpSettings"].(map[string]any)
+		v, _ := tcp["acceptProxyProtocol"].(bool)
+		return v
+	}
+
+	d.syncTargetProxyProtocolByID(landing.ID)
+	if !readAccept() {
+		t.Fatalf("有一条发送 PP 的启用管道时，落地应接收 PP")
+	}
+
+	// 关掉发送的那条，只剩不发 PP 的管道 → 接收侧必须清掉
+	db.Model(&models.Inbound{}).Where("id = ?", ppOn.ID).Update("enabled", false)
+	d.syncTargetProxyProtocolByID(landing.ID)
+	if readAccept() {
+		t.Fatalf("只剩不发 PP 的管道时，落地不应继续接收 PP")
+	}
 }
 
 func TestFormToInbound_PreservesTargetFields(t *testing.T) {

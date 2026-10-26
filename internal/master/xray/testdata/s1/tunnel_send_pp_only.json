@@ -19,12 +19,7 @@
         "followRedirect": false,
         "network": "tcp"
       },
-      "streamSettings": {
-        "tcpSettings": {
-          "acceptProxyProtocol": true
-        }
-      },
-      "tag": "tunnel-manual"
+      "tag": "tunnel-send-pp"
     },
     {
       "listen": "127.0.0.1",

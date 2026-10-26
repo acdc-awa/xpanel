@@ -177,11 +177,22 @@ func s1Scenarios() []s1Scenario {
 			},
 		},
 		{
-			name: "tunnel_manual_pp",
+			name: "tunnel_send_pp_only",
 			inbounds: []models.Inbound{{
-				ID: 302, ServerID: 1, Tag: "tunnel-manual", Protocol: models.ProtocolTunnel, Port: 10002,
+				ID: 302, ServerID: 1, Tag: "tunnel-send-pp", Protocol: models.ProtocolTunnel, Port: 10002,
 				Type: models.InboundTypeTunnel, TargetAddress: "203.0.113.5", TargetPort: 8443,
+				// 发送侧私有键：只影响派生 freedom 出站，不得落进入站的 streamSettings。
 				StreamSettings: `{"network":"tcp","proxy_protocol":true,"proxyProtocol":true}`,
+				Enabled:        true,
+			}},
+		},
+		{
+			name: "tunnel_accept_pp",
+			inbounds: []models.Inbound{{
+				ID: 303, ServerID: 1, Tag: "tunnel-accept-pp", Protocol: models.ProtocolTunnel, Port: 10003,
+				Type: models.InboundTypeTunnel, TargetAddress: "203.0.113.5", TargetPort: 8443,
+				// 接收侧唯一入口：tcpSettings.acceptProxyProtocol。
+				StreamSettings: `{"network":"tcp","tcpSettings":{"acceptProxyProtocol":true}}`,
 				Enabled:        true,
 			}},
 		},

@@ -452,6 +452,58 @@ func TestGenerateConfig_InboundRefUnsetupFails(t *testing.T) {
 	}
 }
 
+// TestGenerateConfig_TunnelDerivedFreedomSkipsCredentialPrecheck 四层直通派生的 freedom redirect
+// 出站同样带 InboundRef（用于跟随落地地址），但它不携带任何认证凭据：引用普通 VLESS 落地
+// （无 InternalUUID）时必须照常生成，不能被「落地未 setup」预检拦下。
+func TestGenerateConfig_TunnelDerivedFreedomSkipsCredentialPrecheck(t *testing.T) {
+	target := models.Inbound{
+		ID: 99, ServerID: 2, Tag: "landing-plain", Protocol: "vless", Port: 443,
+		Type: models.InboundTypeUser, // InternalUUID 空：普通落地，不走 relay 内部账号
+	}
+	ref := target.ID
+	ctx := &xray.GenerateContext{
+		RefTargets: map[uint64]xray.RefTarget{target.ID: {Inbound: target, ServerHost: "10.0.0.5"}},
+	}
+	entry := models.Inbound{
+		ID: 1, ServerID: 1, Tag: "entry", Protocol: models.ProtocolTunnel, Port: 10080,
+		Type: models.InboundTypeTunnel, TargetInboundID: &ref, Enabled: true,
+	}
+	ob := models.ServerOutbound{
+		ID: 2, ServerID: 1, Tag: "out-entry", Protocol: "freedom", InboundRef: &ref, Enabled: true,
+		SettingsJSON: `{"redirect":"10.0.0.5:443","proxyProtocol":2}`,
+	}
+	raw, err := xray.Generate([]models.Inbound{entry}, []models.ServerOutbound{ob}, nil, nil, ctx, "", "")
+	if err != nil {
+		t.Fatalf("直通引用普通 VLESS 落地不应报错: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	outs, _ := root["outbounds"].([]any)
+	var found bool
+	for _, o := range outs {
+		m, _ := o.(map[string]any)
+		if m["tag"] != "out-entry" {
+			continue
+		}
+		found = true
+		if m["protocol"] != "freedom" {
+			t.Errorf("protocol = %v, want freedom", m["protocol"])
+		}
+		settings, _ := m["settings"].(map[string]any)
+		if settings["redirect"] != "10.0.0.5:443" {
+			t.Errorf("redirect = %v, want 10.0.0.5:443", settings["redirect"])
+		}
+		if fmt.Sprintf("%v", settings["proxyProtocol"]) != "2" {
+			t.Errorf("proxyProtocol = %v, want 2", settings["proxyProtocol"])
+		}
+	}
+	if !found {
+		t.Fatalf("派生 freedom 出站 out-entry 缺失")
+	}
+}
+
 func TestGenerateConfig_CertPathInjection(t *testing.T) {
 	certID := uint64(7)
 	inb := models.Inbound{
@@ -1567,11 +1619,10 @@ func TestGenerateConfig_TunnelInbound_Linked(t *testing.T) {
 	}
 }
 
-// TestGenerateConfig_TunnelInbound_AcceptProxyProtocol 链式直通管道的接收侧 PROXY Protocol（2026-09-25）：
-// 存储里被 ensure 写入顶层 acceptProxyProtocol、或通道勾选写私有键 proxy_protocol 的管道入站，
-// 生成的 dokodemo 须带 tcpSettings.acceptProxyProtocol（上游 freedom 注入 → 本层消费 → 重注入，
-// 链式场景否则落地收到双重 PROXY 头）；两键皆缺省的首跳管道不得带 streamSettings
-// （普通用户客户端不发 PROXY 头，接收侧开启会拒绝直连）。
+// TestGenerateConfig_TunnelInbound_AcceptProxyProtocol 直通管道的接收侧 PROXY Protocol：
+// 唯一入口是 acceptProxyProtocol（tcpSettings 内为正式位置，顶层为旧版写法）。
+// 面板私有键 proxy_protocol / proxyProtocol 是**发送侧**语义（派生 freedom 出站的 proxyProtocol: 2），
+// 绝不能拿来打开接收侧——首跳客户端不发 PP 头，开了会把请求吞掉。
 func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
 	targetID := uint64(211)
 	cases := []struct {
@@ -1580,9 +1631,10 @@ func TestGenerateConfig_TunnelInbound_AcceptProxyProtocol(t *testing.T) {
 		wantAccept bool
 	}{
 		{"无键缺省（首跳）", "", false},
-		{"ensure 写入 acceptProxyProtocol", `{"acceptProxyProtocol":true}`, true},
+		{"ensure 写入顶层 acceptProxyProtocol（存量）", `{"acceptProxyProtocol":true}`, true},
 		{"tcpSettings.acceptProxyProtocol（新形态）", `{"tcpSettings":{"acceptProxyProtocol":true}}`, true},
-		{"通道私有键 proxy_protocol", `{"proxy_protocol":true}`, true},
+		{"发送侧私有键 proxy_protocol 不打开接收", `{"proxy_protocol":true}`, false},
+		{"发送侧私有键 proxyProtocol 不打开接收", `{"proxyProtocol":true}`, false},
 		{"显式 false 不开启", `{"proxy_protocol":false}`, false},
 	}
 	for _, tc := range cases {

@@ -314,10 +314,9 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 			return
 		}
 	}
-	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
-	// 仅当直通出站确实发送 PROXY Protocol（TunnelSendProxyProtocol 为 true）时才确保落地入站开启
-	if ensureTarget != nil && xray.TunnelSendProxyProtocol(&inb) {
-		d.ensureTargetAcceptProxyProtocol(ensureTarget)
+	// P2-8 配对：主记录落库后按「指向该落地的已启用直通」重算接收侧开关（开、关都同步）。
+	if ensureTarget != nil {
+		d.syncTargetProxyProtocolByID(ensureTarget.ID)
 	}
 	// GORM 零值陷阱：Ratio 带 default:1，Create 时显式 0（免费入站）会被当零值
 	// 跳过而落成列默认 1，需补一次显式写（更新路径走 map 赋值无此问题）。
@@ -354,6 +353,11 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if err := d.DB.First(&inb, id).Error; err != nil {
 		util.Fail(c, 404, "入站不存在")
 		return
+	}
+	// 目标变更/解绑时要把旧落地的接收侧开关也重算一次，否则旧落地会永久带着 acceptProxyProtocol。
+	prevTargetID := uint64(0)
+	if inb.TargetInboundID != nil {
+		prevTargetID = *inb.TargetInboundID
 	}
 	var req struct {
 		Tag                *string         `json:"tag"`
@@ -727,10 +731,17 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if services.IsTunnelInbound(&inb) {
 		d.ensureTunnelDerived(inb.ServerID)
 	}
-	// P2-8 配对：全部校验通过且主记录落库后再给落地入站开 acceptProxyProtocol
-	// 仅当直通出站确实发送 PROXY Protocol（TunnelSendProxyProtocol 为 true）时才确保落地入站开启
-	if ensureTarget != nil && xray.TunnelSendProxyProtocol(&inb) {
-		d.ensureTargetAcceptProxyProtocol(ensureTarget)
+	// P2-8 配对：按「指向该落地的已启用直通」重算接收侧开关（开、关都同步）。
+	// 目标变更/解绑时旧落地也要重算，否则旧落地会永久带着 acceptProxyProtocol。
+	curTargetID := uint64(0)
+	if inb.TargetInboundID != nil {
+		curTargetID = *inb.TargetInboundID
+	}
+	if curTargetID != 0 {
+		d.syncTargetProxyProtocolByID(curTargetID)
+	}
+	if prevTargetID != 0 && prevTargetID != curTargetID {
+		d.syncTargetProxyProtocolByID(prevTargetID)
 	}
 	// 分级推送：仅当存在影响 Xray 运行期配置的核心字段改动时，才向节点重推配置与重载；
 	// 纯计费倍率、备注、周期、配额或订阅分享门面修改仅写库，跳过下发推送。
@@ -837,6 +848,10 @@ func (d *Deps) AdminDeleteInbound(c *gin.Context) {
 		util.ServerError(c, "删除失败")
 		return
 	}
+	// 删除后没有管道再指向这个落地，接收侧开关要重算（否则落地会永久按 PP 解析而拒绝直连）。
+	if inb.TargetInboundID != nil {
+		d.syncTargetProxyProtocolByID(*inb.TargetInboundID)
+	}
 	if inb.ID > 0 {
 		if err := d.enqueueConfig(inb.ServerID); err != nil {
 			pushFail(c, inb.ServerID, err)
@@ -873,6 +888,10 @@ func (d *Deps) AdminToggleInbound(c *gin.Context) {
 	// C2：直通停用/启用要连带派生出口与转发规则的 enabled（历史上它们只随启用入站生成）
 	if services.IsTunnelInbound(&inb) {
 		d.ensureTunnelDerived(inb.ServerID)
+		// 停用后这条管道不再发送 PPv2，落地的接收侧开关要跟着重算（启用时反之）。
+		if inb.TargetInboundID != nil {
+			d.syncTargetProxyProtocolByID(*inb.TargetInboundID)
+		}
 	}
 	if err := d.enqueueConfig(inb.ServerID); err != nil {
 		pushFail(c, inb.ServerID, err)
@@ -905,17 +924,35 @@ func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
 	return false
 }
 
-// ensureTargetAcceptProxyProtocol 确保直通管道的目标落地入站开启 acceptProxyProtocol（P2-8）。
-// 失败只记日志不回滚主操作：落地侧没开 PROXY Protocol 时链路会拒绝连接，日志是唯一排查线索。
-func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
-	if targetInb == nil {
+// syncTargetProxyProtocol 把落地入站的「接收侧 PROXY Protocol」与指向它的直通管道对齐（P2-8）。
+// 判定取并集：只要还有一条**已启用**且会发送 PPv2 的直通指向该落地，接收侧就必须开启；
+// 全部关闭/解绑/停用后要清掉——否则关掉发送侧后落地仍按 PP 解析，链路必然断（2026-10-26
+// 端到端验证复现）。多管道共用一个落地时取「或」，后保存的一条不会把另一条关掉。
+// 只改 tcpSettings.acceptProxyProtocol（xray 的正式位置）；失败只记日志不回滚主操作。
+func (d *Deps) syncTargetProxyProtocol(targetInb *models.Inbound) {
+	if targetInb == nil || targetInb.ID == 0 {
 		return
 	}
+	var pipes []models.Inbound
+	if err := d.DB.Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?",
+		[]string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolTunnel, targetInb.ID, true).
+		Find(&pipes).Error; err != nil {
+		log.Printf("syncTargetProxyProtocol: 查询指向落地入站 %d(%s) 的直通管道失败，跳过同步: %v", targetInb.ID, targetInb.Tag, err)
+		return
+	}
+	want := false
+	for i := range pipes {
+		if xray.TunnelSendProxyProtocol(&pipes[i]) {
+			want = true
+			break
+		}
+	}
+
 	var ssMap map[string]any
 	if targetInb.StreamSettings != "" {
 		if err := json.Unmarshal([]byte(targetInb.StreamSettings), &ssMap); err != nil {
 			// 存量数据非法时不能整体覆写（会丢掉原 TLS/REALITY 配置），跳过并留痕
-			log.Printf("ensureTargetAcceptProxyProtocol: 入站 %d(%s) streamSettings 非法 JSON，跳过 PROXY Protocol 配对: %v", targetInb.ID, targetInb.Tag, err)
+			log.Printf("syncTargetProxyProtocol: 入站 %d(%s) streamSettings 非法 JSON，跳过 PROXY Protocol 配对: %v", targetInb.ID, targetInb.Tag, err)
 			return
 		}
 	}
@@ -928,28 +965,46 @@ func (d *Deps) ensureTargetAcceptProxyProtocol(targetInb *models.Inbound) {
 	}
 	tcpApp, _ := tcpS["acceptProxyProtocol"].(bool)
 
-	// 接收侧语义的正式位置是 tcpSettings.acceptProxyProtocol；顶层键是旧版面板的
-	// 私有写法（xray 不识别，生成前会被规范化），这里只保留存量数据、不再新写。
-	if !tcpApp {
-		if tcpS == nil {
-			tcpS = make(map[string]any)
-			ssMap["tcpSettings"] = tcpS
+	// 顶层键是旧版面板的私有写法（xray 不识别，生成前会被规范化），这里只保留存量数据、不再新写。
+	if tcpApp != want {
+		if want {
+			if tcpS == nil {
+				tcpS = make(map[string]any)
+				ssMap["tcpSettings"] = tcpS
+			}
+			tcpS["acceptProxyProtocol"] = true
+		} else {
+			delete(tcpS, "acceptProxyProtocol")
+			if len(tcpS) == 0 {
+				delete(ssMap, "tcpSettings")
+			}
 		}
-		tcpS["acceptProxyProtocol"] = true
 		newSS, err := json.Marshal(ssMap)
 		if err != nil {
-			log.Printf("ensureTargetAcceptProxyProtocol: 入站 %d(%s) streamSettings 序列化失败: %v", targetInb.ID, targetInb.Tag, err)
+			log.Printf("syncTargetProxyProtocol: 入站 %d(%s) streamSettings 序列化失败: %v", targetInb.ID, targetInb.Tag, err)
 			return
 		}
 		targetInb.StreamSettings = string(newSS)
 		if err := d.DB.Model(targetInb).Update("stream_settings", targetInb.StreamSettings).Error; err != nil {
-			log.Printf("ensureTargetAcceptProxyProtocol: 落地入站 %d(%s) 写库失败，该落地将拒绝 PROXY Protocol 连接: %v", targetInb.ID, targetInb.Tag, err)
+			log.Printf("syncTargetProxyProtocol: 落地入站 %d(%s) 写库失败，PROXY Protocol 接收侧与直通管道不一致: %v", targetInb.ID, targetInb.Tag, err)
 			return
 		}
 		if err := d.enqueueConfig(targetInb.ServerID); err != nil {
-			log.Printf("ensureTargetAcceptProxyProtocol: 落地入站 %d 所在服务器 %d 配置推送失败，落地侧改动待下次全量推送生效: %v", targetInb.ID, targetInb.ServerID, err)
+			log.Printf("syncTargetProxyProtocol: 落地入站 %d 所在服务器 %d 配置推送失败，落地侧改动待下次全量推送生效: %v", targetInb.ID, targetInb.ServerID, err)
 		}
 	}
+}
+
+// syncTargetProxyProtocolByID 按落地入站 ID 重新读取后同步（删除/停用直通时内存里的目标可能是旧快照）。
+func (d *Deps) syncTargetProxyProtocolByID(targetID uint64) {
+	if targetID == 0 {
+		return
+	}
+	var target models.Inbound
+	if err := d.DB.First(&target, targetID).Error; err != nil {
+		return
+	}
+	d.syncTargetProxyProtocol(&target)
 }
 
 // AdminXrayKeys GET /api/v1/admin/xray/keys —— REALITY x25519 + shortId 一键生成。
