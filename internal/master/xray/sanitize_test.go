@@ -173,6 +173,59 @@ func TestSanitizeStreamSettings(t *testing.T) {
 			},
 		},
 		{
+			name: "force hysteria alpn to h3",
+			in:   `{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"hy.example.com","alpn":["h2","http/1.1"],"minVersion":"1.2","maxVersion":"1.2","cipherSuites":"TLS_AES_128_GCM_SHA256"}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				tls := m["tlsSettings"].(map[string]any)
+				alpn, _ := tls["alpn"].([]any)
+				if len(alpn) != 1 || alpn[0] != "h3" {
+					t.Errorf("hysteria alpn 必须强制为 [h3]，got %v", tls["alpn"])
+				}
+				for _, k := range []string{"minVersion", "maxVersion", "cipherSuites"} {
+					if _, ok := tls[k]; ok {
+						t.Errorf("hysteria 的 %s 对 QUIC 无意义且可能致命，应删除", k)
+					}
+				}
+				if tls["serverName"] != "hy.example.com" {
+					t.Error("其它 tlsSettings 字段应保留")
+				}
+			},
+		},
+		{
+			name: "force hysteria alpn with method alias",
+			in:   `{"method":"hysteria","security":"tls","tlsSettings":{"alpn":["h2"]}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				tls := m["tlsSettings"].(map[string]any)
+				alpn, _ := tls["alpn"].([]any)
+				if len(alpn) != 1 || alpn[0] != "h3" {
+					t.Errorf("method=hysteria 时 alpn 也必须强制为 [h3]，got %v", tls["alpn"])
+				}
+			},
+		},
+		{
+			name: "keep non-hysteria alpn",
+			in:   `{"network":"tcp","security":"tls","tlsSettings":{"alpn":["h2","http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"TLS_AES_128_GCM_SHA256"}}`,
+			want: func(t *testing.T, out string) {
+				var m map[string]any
+				json.Unmarshal([]byte(out), &m)
+				tls := m["tlsSettings"].(map[string]any)
+				alpn, _ := tls["alpn"].([]any)
+				if len(alpn) != 2 || alpn[0] != "h2" {
+					t.Errorf("非 hysteria 传输的 alpn 不应被改动，got %v", tls["alpn"])
+				}
+				if tls["minVersion"] != "1.2" || tls["maxVersion"] != "1.3" {
+					t.Error("非 hysteria 传输的 TLS 版本范围不应被删除")
+				}
+				if tls["cipherSuites"] != "TLS_AES_128_GCM_SHA256" {
+					t.Error("非 hysteria 传输的 cipherSuites 不应被删除")
+				}
+			},
+		},
+		{
 			name: "full sanitize - all rules together",
 			in: `{
 				"network":"tcp",

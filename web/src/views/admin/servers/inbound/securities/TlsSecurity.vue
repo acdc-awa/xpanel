@@ -16,6 +16,8 @@ const props = defineProps<{
   modelValue: TlsConfig
   /** 固定 ALPN（Hysteria 2 必须是 h3）：非空时禁用输入并强制该值。 */
   alpnFixed?: string
+  /** QUIC 传输（Hysteria 2）：只支持 TLS 1.3，版本范围与加密套件无意义。 */
+  quic?: boolean
   /** 订阅是否跳过证书校验（面板字段 share_allow_insecure，唯一真源）。 */
   allowInsecure?: boolean
 }>()
@@ -143,39 +145,44 @@ function onCertChange(val: any) {
     <!-- 折叠区必须自带容器：ExpandableSection 的 default 变体没有左右内边距，
          直接放在面板上会让内容贴到页签边缘（与上方卡片对不齐）。 -->
     <CsContainer class="section-gap" :disable-content-paddings="true">
-      <CsExpandableSection header="服务端 TLS 策略（选填调优）" variant="container">
+      <CsExpandableSection
+        :header="props.quic ? '服务端 TLS 策略（QUIC 仅 TLS 1.3）' : '服务端 TLS 策略（选填调优）'"
+        variant="container"
+      >
         <div class="form-grid-2">
-          <CsFormItem label="TLS 协议版本范围">
-            <div class="version-row">
-              <CsSelect
-                :model-value="modelValue.min_version"
-                :options="tlsVersionOptions"
-                placeholder="最低版本"
-                clearable
-                style="width: 50%"
-                @update:model-value="(v: any) => updateField('min_version', String(v))"
-              />
-              <CsSelect
-                :model-value="modelValue.max_version"
-                :options="tlsVersionOptions"
-                placeholder="最高版本"
-                clearable
-                style="width: 50%"
-                @update:model-value="(v: any) => updateField('max_version', String(v))"
-              />
-            </div>
-          </CsFormItem>
+          <template v-if="!props.quic">
+            <CsFormItem label="TLS 协议版本范围">
+              <div class="version-row">
+                <CsSelect
+                  :model-value="modelValue.min_version"
+                  :options="tlsVersionOptions"
+                  placeholder="最低版本"
+                  clearable
+                  style="width: 50%"
+                  @update:model-value="(v: any) => updateField('min_version', String(v))"
+                />
+                <CsSelect
+                  :model-value="modelValue.max_version"
+                  :options="tlsVersionOptions"
+                  placeholder="最高版本"
+                  clearable
+                  style="width: 50%"
+                  @update:model-value="(v: any) => updateField('max_version', String(v))"
+                />
+              </div>
+            </CsFormItem>
 
-          <CsFormItem label="加密套件 (Cipher Suites)">
-            <CsInput
-              :model-value="modelValue.cipher_suites"
-              placeholder="留空使用标准套件；多个用逗号分隔"
-              class="mono"
-              @update:model-value="(v: string) => updateField('cipher_suites', v)"
-            />
-          </CsFormItem>
+            <CsFormItem label="加密套件 (Cipher Suites)">
+              <CsInput
+                :model-value="modelValue.cipher_suites"
+                placeholder="留空使用标准套件；多个用逗号分隔"
+                class="mono"
+                @update:model-value="(v: string) => updateField('cipher_suites', v)"
+              />
+            </CsFormItem>
+          </template>
 
-          <CsFormItem label="拒绝未知 SNI 握手">
+          <CsFormItem label="拒绝未知 SNI 握手" :class="{ 'span-two': props.quic }">
             <div class="control-cell">
               <CsToggle
                 :model-value="modelValue.reject_unknown_sni"
@@ -218,6 +225,10 @@ function onCertChange(val: any) {
 
 .section-gap {
   margin-top: 12px;
+}
+
+.span-two {
+  grid-column: span 2;
 }
 
 .version-row {

@@ -13,6 +13,7 @@ import {
 } from '@/components/cloudscape'
 import type { HysteriaConfig, HysteriaMasquerade } from '../types'
 import { validateHysteriaSettings } from '../validate'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const masqueradeOptions = [
   { label: '404（默认，无伪装）', value: '404' },
@@ -66,13 +67,15 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
             style="width: 100%"
             @update:model-value="(v: number | null) => updateField('udp_idle_timeout', typeof v === 'number' ? v : 60)"
           />
-          <div class="field-hint cs-text-secondary">账号由绑定的接入点动态注入，此处不单独维护用户列表。</div>
         </CsFormItem>
       </div>
     </CsContainer>
 
     <!-- 伪装站点（hysteriaSettings.masquerade，纯服务端） -->
     <CsContainer header="伪装站点 (hysteriaSettings.masquerade，仅服务端)" class="section-gap">
+      <template #info>
+        <TipIcon content="伪装响应只对「未通过 Hysteria 认证的普通 HTTP 请求」生效；代理流量不受影响。" />
+      </template>
       <div class="form-grid">
         <CsFormItem label="伪装类型">
           <CsSelect
@@ -81,7 +84,6 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
             style="width: 100%"
             @update:model-value="(v: any) => updateMasq('type', String(v) as HysteriaMasquerade['type'])"
           />
-          <div class="field-hint cs-text-secondary">非 Hysteria 请求（如浏览器直接访问）返回的内容；不影响代理连接</div>
         </CsFormItem>
 
         <CsFormItem v-if="modelValue.masquerade.type === 'file'" label="静态目录 (dir)">
@@ -149,18 +151,10 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
           </CsFormItem>
         </template>
       </div>
-      <CsAlert v-if="modelValue.masquerade.type !== '404'" type="info" class="notice-gap">
-        伪装响应只对「未通过 Hysteria 认证的普通 HTTP 请求」生效；代理流量不受影响。
-      </CsAlert>
     </CsContainer>
 
     <CsAlert v-if="errors.length" type="error" class="errors-gap">
       <div v-for="e in errors" :key="e">{{ e }}</div>
-    </CsAlert>
-
-    <!-- 紧凑轻量提示 -->
-    <CsAlert type="info" class="notice-gap">
-      提示：Hysteria 2 采用 UDP (QUIC) 传输并强制 TLS 加密，账号由绑定的接入点动态提供。请在「安全层」绑定有效证书。
     </CsAlert>
   </div>
 </template>
@@ -173,10 +167,6 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
 
 .section-gap {
   margin-top: 16px;
-}
-
-.notice-gap {
-  margin-top: 4px;
 }
 
 .errors-gap {

@@ -111,6 +111,10 @@ func TestHysteriaNormalizeServer(t *testing.T) {
 		if hy["version"] != 2 || hy["udpIdleTimeout"] != 60 {
 			t.Errorf("hysteriaSettings 默认值错误: %+v", hy)
 		}
+		tls, _ := ov.Stream["tlsSettings"].(map[string]any)
+		if alpn, _ := tls["alpn"].([]any); len(alpn) != 1 || alpn[0] != "h3" {
+			t.Errorf("tlsSettings.alpn 必须强制为 [h3]，got %+v", tls["alpn"])
+		}
 	})
 
 	t.Run("合并已有并剥离 auth", func(t *testing.T) {
@@ -133,6 +137,38 @@ func TestHysteriaNormalizeServer(t *testing.T) {
 		}
 		if _, has := spec.Stream["hysteriaSettings"].(map[string]any)["auth"]; !has {
 			t.Error("入参 spec.Stream 被修改")
+		}
+	})
+
+	t.Run("保留已有 tlsSettings 并覆盖 alpn", func(t *testing.T) {
+		spec := &contracts.InboundSpec{
+			Protocol: "hysteria",
+			Stream: map[string]any{
+				"tlsSettings": map[string]any{
+					"serverName": "hy.example.com",
+					"alpn":       []any{"h2", "http/1.1"},
+					"certificates": []any{
+						map[string]any{"certificateFile": "/c.pem", "keyFile": "/k.pem"},
+					},
+				},
+			},
+		}
+		ov, err := (HysteriaPlugin{}).NormalizeServer(spec)
+		if err != nil {
+			t.Fatalf("NormalizeServer: %v", err)
+		}
+		tls, _ := ov.Stream["tlsSettings"].(map[string]any)
+		if tls["serverName"] != "hy.example.com" {
+			t.Errorf("已有 tlsSettings 字段应保留: %+v", tls)
+		}
+		if _, has := tls["certificates"]; !has {
+			t.Errorf("certificates 不得丢失: %+v", tls)
+		}
+		if alpn, _ := tls["alpn"].([]any); len(alpn) != 1 || alpn[0] != "h3" {
+			t.Errorf("alpn 必须覆盖为 [h3]，got %+v", tls["alpn"])
+		}
+		if alpn, _ := spec.Stream["tlsSettings"].(map[string]any)["alpn"].([]any); len(alpn) != 2 {
+			t.Error("入参 spec.Stream 的 alpn 不应被修改")
 		}
 	})
 

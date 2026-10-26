@@ -8,6 +8,9 @@ export type InboundType = 'user' | 'forward' | 'tunnel'
 export type Hy2ObfsType = 'none' | 'salamander' | 'gecko'
 export type Hy2MasqType = '404' | 'file' | 'proxy' | 'string'
 export type Hy2HopMode = 'intervalRemote' | 'perConnRemote'
+// 空串 = 自动：服务端上下行带宽都填了才会走 brutal，否则 BBR。
+export type Hy2Congestion = '' | 'bbr' | 'reno' | 'brutal' | 'force-brutal'
+export type Hy2BbrProfile = '' | 'conservative' | 'standard' | 'aggressive'
 
 export interface HysteriaMasquerade {
   type: Hy2MasqType
@@ -33,6 +36,20 @@ export interface HysteriaConfig {
   // finalmask.quicParams：服务端方向（brutalUp=服务端上行=客户端下行）
   bw_up: string
   bw_down: string
+  // finalmask.quicParams 高级调参；留空/自动 = 内核默认。
+  // 这些字段只作用于本机服务端 QUIC 栈，不随订阅下发（brutalUp/Down 除外）。
+  congestion: Hy2Congestion
+  bbr_profile: Hy2BbrProfile
+  max_idle_timeout?: number
+  max_incoming_streams?: number
+  init_stream_receive_window?: number
+  max_stream_receive_window?: number
+  init_connection_receive_window?: number
+  max_connection_receive_window?: number
+  disable_path_mtu_discovery: boolean
+  disable_gso: boolean
+  disable_stateless_reset: boolean
+  brutal_disable_loss_compensation: boolean
   // finalmask.udp[type=udphop]：仅客户端消费，生成服务端配置时会被剥离
   port_hop_mode: Hy2HopMode
   port_hop_ports: string

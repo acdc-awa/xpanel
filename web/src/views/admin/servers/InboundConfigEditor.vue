@@ -197,6 +197,18 @@ const hysteriaForm = ref<HysteriaConfig>({
   obfs_max_packet: 1200,
   bw_up: '',
   bw_down: '',
+  congestion: '',
+  bbr_profile: '',
+  max_idle_timeout: undefined,
+  max_incoming_streams: undefined,
+  init_stream_receive_window: undefined,
+  max_stream_receive_window: undefined,
+  init_connection_receive_window: undefined,
+  max_connection_receive_window: undefined,
+  disable_path_mtu_discovery: false,
+  disable_gso: false,
+  disable_stateless_reset: false,
+  brutal_disable_loss_compensation: false,
   port_hop_mode: 'intervalRemote',
   port_hop_ports: '',
   port_hop_interval: '',
@@ -639,6 +651,9 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
 }
 
 function buildSockoptObject(): Record<string, any> | undefined {
+  // Hysteria 走 UDP/QUIC：sockopt 没有有效消费方（TCP 项全部无意义），
+  // 表单已隐藏，生成侧也不写，避免把上一次 VLESS 的 TCP 调优带进配置。
+  if (localProtocol.value === 'hysteria') return undefined
   if (!sockoptForm.value.enabled) return undefined
   const so: Record<string, any> = {}
   if (sockoptForm.value.tcp_fast_open) {
@@ -732,23 +747,40 @@ function buildHysteriaFinalMask(): Record<string, any> | undefined {
 
   if (udp.length > 0) fm.udp = udp
 
-  const up = hysteriaForm.value.bw_up.trim()
-  const down = hysteriaForm.value.bw_down.trim()
-  if (up || down) {
-    const qp: Record<string, any> = { ...((fm.quicParams as Record<string, any>) || {}) }
-    if (up) qp.brutalUp = up
-    else delete qp.brutalUp
-    if (down) qp.brutalDown = down
-    else delete qp.brutalDown
-    fm.quicParams = qp
-  } else if (fm.quicParams) {
-    // 表单清空带宽时同步清掉这两个键，其余自定义 QUIC 参数保留。
-    const qp = { ...(fm.quicParams as Record<string, any>) }
-    delete qp.brutalUp
-    delete qp.brutalDown
-    if (Object.keys(qp).length > 0) fm.quicParams = qp
-    else delete fm.quicParams
+  // quicParams 一次性重建：先保留手改 JSON 里的未知键，再覆盖表单认识的字段。
+  // 留空/auto 的字段必须显式删除，否则切换回默认值后旧值会残留。
+  const qp: Record<string, any> = { ...((fm.quicParams as Record<string, any>) || {}) }
+  const setQpString = (key: string, raw: string) => {
+    const v = (raw || '').trim()
+    if (v) qp[key] = v
+    else delete qp[key]
   }
+  const setQpNumber = (key: string, v: number | undefined) => {
+    if (typeof v === 'number' && Number.isFinite(v)) qp[key] = v
+    else delete qp[key]
+  }
+  const setQpBool = (key: string, on: boolean) => {
+    if (on) qp[key] = true
+    else delete qp[key]
+  }
+
+  setQpString('brutalUp', hysteriaForm.value.bw_up)
+  setQpString('brutalDown', hysteriaForm.value.bw_down)
+  setQpString('congestion', hysteriaForm.value.congestion)
+  setQpString('bbrProfile', hysteriaForm.value.bbr_profile)
+  setQpNumber('maxIdleTimeout', hysteriaForm.value.max_idle_timeout)
+  setQpNumber('maxIncomingStreams', hysteriaForm.value.max_incoming_streams)
+  setQpNumber('initStreamReceiveWindow', hysteriaForm.value.init_stream_receive_window)
+  setQpNumber('maxStreamReceiveWindow', hysteriaForm.value.max_stream_receive_window)
+  setQpNumber('initConnectionReceiveWindow', hysteriaForm.value.init_connection_receive_window)
+  setQpNumber('maxConnectionReceiveWindow', hysteriaForm.value.max_connection_receive_window)
+  setQpBool('disablePathMTUDiscovery', hysteriaForm.value.disable_path_mtu_discovery)
+  setQpBool('disableGSO', hysteriaForm.value.disable_gso)
+  setQpBool('disableStatelessReset', hysteriaForm.value.disable_stateless_reset)
+  setQpBool('brutalDisableLossCompensation', hysteriaForm.value.brutal_disable_loss_compensation)
+
+  if (Object.keys(qp).length > 0) fm.quicParams = qp
+  else delete fm.quicParams
 
   return Object.keys(fm).length > 0 ? fm : undefined
 }
@@ -821,6 +853,11 @@ function buildStreamSettingsJSON(): string {
     // Hysteria 2 走 QUIC：服务端 ALPN 必须是 h3（留空内核才补 h3）。
     // 表单里的 ALPN 在 hy2 下被禁用，这里强制覆盖，顺带修复历史上写成 h2,http/1.1 的配置。
     t.alpn = ['h3']
+    // QUIC 只跑 TLS 1.3：版本范围与加密套件对握手不生效；
+    // maxVersion 写成 1.2 还会直接握手失败，所以生成侧一律不写这两个键。
+    delete t.minVersion
+    delete t.maxVersion
+    delete t.cipherSuites
     const s: Record<string, any> = {
       ...(streamExtra.value || {}),
       network: 'hysteria',
@@ -1157,10 +1194,19 @@ function parseJsonToForm(str: string) {
           }
         }
         if (unknownUdp.length > 0) fmExtra.udp = unknownUdp
+        // 表单认识的 quicParams 键单独回显，其余（自定义调参）原样保留。
         const qp = fm.quicParams && typeof fm.quicParams === 'object' ? { ...fm.quicParams } : null
         if (qp) {
-          delete qp.brutalUp
-          delete qp.brutalDown
+          for (const k of [
+            'brutalUp', 'brutalDown', 'congestion', 'bbrProfile',
+            'maxIdleTimeout', 'maxIncomingStreams',
+            'initStreamReceiveWindow', 'maxStreamReceiveWindow',
+            'initConnectionReceiveWindow', 'maxConnectionReceiveWindow',
+            'disablePathMTUDiscovery', 'disableGSO', 'disableStatelessReset',
+            'brutalDisableLossCompensation',
+          ]) {
+            delete qp[k]
+          }
           if (Object.keys(qp).length > 0) fmExtra.quicParams = qp
         }
       }
@@ -1199,6 +1245,16 @@ function parseJsonToForm(str: string) {
         extra: Object.keys(mqExtra).length > 0 ? mqExtra : undefined,
       }
 
+      const rawCongestion = String(qp.congestion ?? '').toLowerCase()
+      const congestion = (['bbr', 'reno', 'brutal', 'force-brutal'].includes(rawCongestion)
+        ? rawCongestion
+        : '') as HysteriaConfig['congestion']
+      const rawBbrProfile = String(qp.bbrProfile ?? '').toLowerCase()
+      const bbrProfile = (['conservative', 'standard', 'aggressive'].includes(rawBbrProfile)
+        ? rawBbrProfile
+        : '') as HysteriaConfig['bbr_profile']
+      const numOf = (v: any) => (typeof v === 'number' ? v : undefined)
+
       hysteriaForm.value = {
         udp_idle_timeout: typeof hySettings?.udpIdleTimeout === 'number' ? hySettings.udpIdleTimeout : 60,
         obfs_type: obfsType,
@@ -1207,6 +1263,18 @@ function parseJsonToForm(str: string) {
         obfs_max_packet: maxPacket,
         bw_up: String(qp.brutalUp ?? ''),
         bw_down: String(qp.brutalDown ?? ''),
+        congestion,
+        bbr_profile: bbrProfile,
+        max_idle_timeout: numOf(qp.maxIdleTimeout),
+        max_incoming_streams: numOf(qp.maxIncomingStreams),
+        init_stream_receive_window: numOf(qp.initStreamReceiveWindow),
+        max_stream_receive_window: numOf(qp.maxStreamReceiveWindow),
+        init_connection_receive_window: numOf(qp.initConnectionReceiveWindow),
+        max_connection_receive_window: numOf(qp.maxConnectionReceiveWindow),
+        disable_path_mtu_discovery: qp.disablePathMTUDiscovery === true,
+        disable_gso: qp.disableGSO === true,
+        disable_stateless_reset: qp.disableStatelessReset === true,
+        brutal_disable_loss_compensation: qp.brutalDisableLossCompensation === true,
         port_hop_mode: hopMode,
         port_hop_ports: hopPorts,
         port_hop_interval: hopInterval,
@@ -1778,7 +1846,11 @@ watch(
             <CsContainer header="传输方式 (streamSettings.network)">
               <template #info>
                 <TipIcon
-                  content="层级顺序（由内向外）：协议 settings → 传输 network → 安全 security → finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。finalmask 等未提供表单的键可在「原始 JSON」中编辑，本表单会原样保留。"
+                  :content="
+                    localProtocol === 'hysteria'
+                      ? '层级顺序：协议 settings → hysteria 传输 → TLS → finalmask（QUIC 调参）。'
+                      : '层级顺序（由内向外）：协议 settings → 传输 network → 安全 security → finalmask（加密完成后的外层伪装 / QUIC 调参）→ sockopt（最底层 socket 行为）。finalmask 等未提供表单的键可在「原始 JSON」中编辑，本表单会原样保留。'
+                  "
                 />
               </template>
               <CsFormItem v-if="localProtocol === 'vless'" label="传输协议类型">
@@ -1831,7 +1903,8 @@ watch(
             :current-inbound-id="props.inboundId"
           />
 
-          <SockoptSettings v-model="sockoptForm" />
+          <!-- Hysteria 走 UDP/QUIC，sockopt 的 TCP 项全部无效、UDP 项也无实际收益，整页隐藏。 -->
+          <SockoptSettings v-if="localProtocol !== 'hysteria'" v-model="sockoptForm" />
         </div>
 
         <!-- ==================== 4. 安全层 Tab：streamSettings.security ==================== -->
@@ -1859,6 +1932,7 @@ watch(
             v-if="localTlsType === 'tls'"
             v-model="tlsForm"
             :alpn-fixed="localProtocol === 'hysteria' ? 'h3' : ''"
+            :quic="localProtocol === 'hysteria'"
             :allow-insecure="localShareAllowInsecure"
             @update:cert-id="(id) => emit('update:certId', id)"
             @update:allow-insecure="(v) => localShareAllowInsecure = v"

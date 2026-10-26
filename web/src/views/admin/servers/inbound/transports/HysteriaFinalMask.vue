@@ -3,13 +3,16 @@ import { computed } from 'vue'
 import {
   CsAlert,
   CsContainer,
+  CsExpandableSection,
   CsFormItem,
   CsInput,
   CsInputNumber,
   CsSelect,
+  CsToggle,
 } from '@/components/cloudscape'
 import type { HysteriaConfig } from '../types'
 import { validateHysteriaFinalMask } from '../validate'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const props = defineProps<{
   modelValue: HysteriaConfig
@@ -38,15 +41,25 @@ const portHopModeOptions = [
   { label: 'intervalRemote（定时换目标端口）', value: 'intervalRemote' },
   { label: 'perConnRemote（每个连接随机端口）', value: 'perConnRemote' },
 ]
+
+const congestionOptions = [
+  { label: '自动（按带宽决定）', value: '' },
+  { label: 'brutal（需带宽协商）', value: 'brutal' },
+  { label: 'force-brutal（强制，不协商）', value: 'force-brutal' },
+  { label: 'bbr', value: 'bbr' },
+  { label: 'reno', value: 'reno' },
+]
+
+const bbrProfileOptions = [
+  { label: '自动（standard）', value: '' },
+  { label: 'conservative（保守）', value: 'conservative' },
+  { label: 'standard（标准）', value: 'standard' },
+  { label: 'aggressive（激进）', value: 'aggressive' },
+]
 </script>
 
 <template>
   <div class="hysteria-finalmask-box">
-    <CsAlert type="info">
-      finalmask 不属于 hysteria 协议本身：它在协议组装与 TLS 加密完成后作用于外层字节 /
-      数据包。salamander 与 gecko 是外层混淆，quicParams 是 QUIC 调参，udphop 只改客户端目标端口。
-    </CsAlert>
-
     <!-- 混淆（finalmask.udp[type=salamander]） -->
     <CsContainer header="混淆 (finalmask.udp[type=salamander])" class="section-gap">
       <div class="form-grid">
@@ -58,7 +71,7 @@ const portHopModeOptions = [
             @update:model-value="(v: any) => updateField('obfs_type', String(v) as HysteriaConfig['obfs_type'])"
           />
           <div class="field-hint cs-text-secondary">
-            xray 服务端写 salamander + packetSize 即等价于 mihomo 的 gecko；开启后订阅必须同源下发，否则客户端连不上。
+            开启后订阅必须同源下发；写 packetSize 即等价于 mihomo 的 gecko。
           </div>
         </CsFormItem>
 
@@ -102,6 +115,9 @@ const portHopModeOptions = [
 
     <!-- 带宽（finalmask.quicParams.brutal*） -->
     <CsContainer header="带宽限制 (finalmask.quicParams.brutal)" class="section-gap">
+      <template #info>
+        <TipIcon content="服务端声明的是「允许客户端选用的最大 Brutal 速率」；两侧数值需同源下发到订阅，客户端带宽以最小值为准。" />
+      </template>
       <div class="form-grid">
         <CsFormItem label="服务端上行 (brutalUp)">
           <CsInput
@@ -123,13 +139,142 @@ const portHopModeOptions = [
           <div class="field-hint cs-text-secondary">服务端接收方向 = 客户端上行；上下行都填写才会启用 Brutal，否则退回 BBR</div>
         </CsFormItem>
       </div>
-      <CsAlert type="info" class="notice-gap">
-        服务端声明的是「允许客户端选用的最大 Brutal 速率」；两侧数值需同源下发到订阅，客户端带宽以最小值为准。
-      </CsAlert>
+    </CsContainer>
+
+    <!-- QUIC 调参（finalmask.quicParams），与带宽同属一个对象 -->
+    <CsContainer class="section-gap" :disable-content-paddings="true">
+      <CsExpandableSection
+        header="QUIC 参数（高级，finalmask.quicParams）"
+        header-description="仅作用于本机服务端 QUIC 栈，留空使用 xray 默认值"
+        variant="container"
+      >
+        <div class="form-grid">
+          <CsFormItem label="拥塞控制 (congestion)">
+            <CsSelect
+              :model-value="modelValue.congestion"
+              :options="congestionOptions"
+              style="width: 100%"
+              @update:model-value="(v: any) => updateField('congestion', String(v ?? '') as HysteriaConfig['congestion'])"
+            />
+            <div class="field-hint cs-text-secondary">
+              自动：上下行带宽都填了走 brutal，否则 BBR；force-brutal 需要上行带宽且不与客户端协商。
+            </div>
+          </CsFormItem>
+
+          <CsFormItem label="BBR 档位 (bbrProfile)">
+            <CsSelect
+              :model-value="modelValue.bbr_profile"
+              :options="bbrProfileOptions"
+              style="width: 100%"
+              @update:model-value="(v: any) => updateField('bbr_profile', String(v ?? '') as HysteriaConfig['bbr_profile'])"
+            />
+            <div class="field-hint cs-text-secondary">仅在拥塞控制为 bbr（或自动回落到 BBR）时生效。</div>
+          </CsFormItem>
+
+          <CsFormItem label="最大空闲超时 (maxIdleTimeout，秒)">
+            <CsInputNumber
+              :model-value="modelValue.max_idle_timeout"
+              :min="4"
+              :max="120"
+              :step="1"
+              placeholder="默认 30"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('max_idle_timeout', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+
+          <CsFormItem label="对端入流上限 (maxIncomingStreams)">
+            <CsInputNumber
+              :model-value="modelValue.max_incoming_streams"
+              :min="8"
+              :step="128"
+              placeholder="默认 1024"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('max_incoming_streams', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+
+          <CsFormItem label="初始流接收窗口 (initStreamReceiveWindow)">
+            <CsInputNumber
+              :model-value="modelValue.init_stream_receive_window"
+              :min="16384"
+              :step="1048576"
+              placeholder="默认 8388608"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('init_stream_receive_window', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+
+          <CsFormItem label="最大流接收窗口 (maxStreamReceiveWindow)">
+            <CsInputNumber
+              :model-value="modelValue.max_stream_receive_window"
+              :min="16384"
+              :step="1048576"
+              placeholder="默认 8388608"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('max_stream_receive_window', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+
+          <CsFormItem label="初始连接接收窗口 (initConnectionReceiveWindow)">
+            <CsInputNumber
+              :model-value="modelValue.init_connection_receive_window"
+              :min="16384"
+              :step="1048576"
+              placeholder="默认 20971520"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('init_connection_receive_window', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+
+          <CsFormItem label="最大连接接收窗口 (maxConnectionReceiveWindow)">
+            <CsInputNumber
+              :model-value="modelValue.max_connection_receive_window"
+              :min="16384"
+              :step="1048576"
+              placeholder="默认 20971520"
+              style="width: 100%"
+              class="mono"
+              @update:model-value="(v: number | null) => updateField('max_connection_receive_window', v == null ? undefined : v)"
+            />
+          </CsFormItem>
+        </div>
+
+        <div class="toggle-grid">
+          <CsToggle
+            :model-value="modelValue.disable_path_mtu_discovery"
+            label="禁用路径 MTU 探测"
+            @update:model-value="(v: boolean) => updateField('disable_path_mtu_discovery', v)"
+          />
+          <CsToggle
+            :model-value="modelValue.brutal_disable_loss_compensation"
+            label="关闭 Brutal 丢包补偿"
+            @update:model-value="(v: boolean) => updateField('brutal_disable_loss_compensation', v)"
+          />
+          <CsToggle
+            :model-value="modelValue.disable_gso"
+            label="关闭 UDP GSO"
+            @update:model-value="(v: boolean) => updateField('disable_gso', v)"
+          />
+          <CsToggle
+            :model-value="modelValue.disable_stateless_reset"
+            label="关闭 QUIC Stateless Reset"
+            @update:model-value="(v: boolean) => updateField('disable_stateless_reset', v)"
+          />
+        </div>
+      </CsExpandableSection>
     </CsContainer>
 
     <!-- 端口跳跃（finalmask.udp[type=udphop]，仅客户端消费） -->
     <CsContainer header="端口跳跃 (finalmask.udp[type=udphop]，仅下发客户端)" class="section-gap">
+      <template #info>
+        <TipIcon content="仅客户端消费，生成服务端配置时自动剥离；需先在服务器防火墙 / NAT 把端口段转发到本入站监听端口。" />
+      </template>
       <div class="form-grid">
         <CsFormItem label="跳跃方式 (mode)">
           <CsSelect
@@ -138,7 +283,7 @@ const portHopModeOptions = [
             style="width: 100%"
             @update:model-value="(v: any) => updateField('port_hop_mode', String(v) as HysteriaConfig['port_hop_mode'])"
           />
-          <div class="field-hint cs-text-secondary">两种都能映射到 mihomo 的 ports；intervalLocal 只跳源端口，面板不提供</div>
+          <div class="field-hint cs-text-secondary">映射到 mihomo 的 ports；intervalLocal（只跳源端口）面板不提供</div>
         </CsFormItem>
 
         <CsFormItem label="目标端口集合">
@@ -148,7 +293,7 @@ const portHopModeOptions = [
             class="mono"
             @update:model-value="(v: string) => updateField('port_hop_ports', v)"
           />
-          <div class="field-hint cs-text-secondary">支持 "20000-30000" 或 "20000-30000,40000"；节点本身仍只监听配置的端口</div>
+          <div class="field-hint cs-text-secondary">支持 20000-30000 或 20000-30000,40000；节点仍只监听配置端口</div>
         </CsFormItem>
 
         <CsFormItem v-if="modelValue.port_hop_mode === 'intervalRemote'" label="跳跃间隔 (秒)">
@@ -158,14 +303,9 @@ const portHopModeOptions = [
             class="mono"
             @update:model-value="(v: string) => updateField('port_hop_interval', v)"
           />
-          <div class="field-hint cs-text-secondary">最小 5 秒；mihomo 与 xray 客户端都接受区间写法</div>
+          <div class="field-hint cs-text-secondary">最小 5 秒，支持 10-20 区间写法</div>
         </CsFormItem>
       </div>
-      <CsAlert type="info" class="notice-gap">
-        端口跳跃只改变客户端发往的目标端口，xray 服务端不支持 udphop（写入节点配置会导致监听失败）。
-        面板会把它从生成的服务端配置中剥离，仅保留给订阅与机间出站。
-        请先在服务器防火墙 / NAT 把该端口段转发到本入站监听端口。
-      </CsAlert>
     </CsContainer>
 
     <CsAlert v-if="errors.length" type="error" class="errors-gap">
@@ -182,10 +322,6 @@ const portHopModeOptions = [
 
 .section-gap {
   margin-top: 16px;
-}
-
-.notice-gap {
-  margin-top: 4px;
 }
 
 .errors-gap {
@@ -209,8 +345,16 @@ const portHopModeOptions = [
   gap: 0 18px;
 }
 
+.toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin-top: 4px;
+}
+
 @media (max-width: 640px) {
-  .form-grid {
+  .form-grid,
+  .toggle-grid {
     grid-template-columns: 1fr;
   }
 }

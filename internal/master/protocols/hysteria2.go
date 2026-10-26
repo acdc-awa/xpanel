@@ -75,11 +75,25 @@ func (HysteriaPlugin) NormalizeServer(spec *contracts.InboundSpec) (*contracts.S
 		hy["version"] = 2
 		delete(hy, "auth")
 	}
+
+	// QUIC/HTTP3 的 ALPN 只能是 h3：客户端 http3 会无条件把 ALPN 改成 h3，
+	// 服务端若显式写成 h2,http/1.1（常规 TLS 的默认值）握手会直接
+	// no application protocol。这里合并已有 tlsSettings 后强制覆盖。
+	tls := map[string]any{}
+	if existing, ok := spec.Stream["tlsSettings"].(map[string]any); ok {
+		tls = make(map[string]any, len(existing)+1)
+		for k, v := range existing {
+			tls[k] = v
+		}
+	}
+	tls["alpn"] = []any{"h3"}
+
 	return &contracts.ServerOverrides{
 		Settings: settings,
 		Stream: map[string]any{
 			"network":          "hysteria",
 			"security":         "tls",
+			"tlsSettings":      tls,
 			"hysteriaSettings": hy,
 		},
 	}, nil

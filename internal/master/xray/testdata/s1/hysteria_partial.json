@@ -33,6 +33,9 @@
         "network": "hysteria",
         "security": "tls",
         "tlsSettings": {
+          "alpn": [
+            "h3"
+          ],
           "serverName": "hy.example.com"
         }
       },

@@ -36,7 +36,12 @@
           "version": 2
         },
         "network": "hysteria",
-        "security": "tls"
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": [
+            "h3"
+          ]
+        }
       },
       "tag": "hy2"
     },

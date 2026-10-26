@@ -107,6 +107,11 @@ func sanitizeStreamMap(stream map[string]any) map[string]any {
 	// Hysteria: 服务端 streamSettings 不保留客户端 auth 共享密码
 	deleteNestedKey(stream, "hysteriaSettings", "auth")
 
+	// Hysteria 走 QUIC/HTTP3，ALPN 只能是 h3。存量/手改配置若写成 h2,http/1.1，
+	// 客户端（http3 强制 h3）会握手失败（no application protocol），这里兜底修正；
+	// NormalizeServer 已在保存链路做过一次，生成链路再保一次。
+	forceHysteriaTLS(stream)
+
 	// REALITY + finalmask 组合会导致 xray panic（XTLS/Xray-core#6453）
 	if security, _ := stream["security"].(string); security == "reality" {
 		delete(stream, "finalmask")
@@ -211,6 +216,33 @@ func stripInboundClientOnlyReality(stream map[string]any) {
 	} {
 		delete(r, k)
 	}
+}
+
+// forceHysteriaTLS 修正 Hysteria 传输的 TLS 配置。
+//
+// hysteria 传输建立在 HTTP/3 之上：客户端 http3 会无条件把 ALPN 覆盖为 h3，
+// 服务端若显式声明其它值（例如常规 TLS 默认的 h2,http/1.1）会导致
+// no application protocol。留空时内核本来也会补 h3，这里统一写死，
+// 避免存量数据和「原始 JSON」入口把配置写坏。
+//
+// QUIC 只支持 TLS 1.3：minVersion/maxVersion 与 cipherSuites 对握手中不生效，
+// 而 maxVersion 写成 1.2 还会直接失败，所以生成侧一并删除。
+func forceHysteriaTLS(stream map[string]any) {
+	network, _ := stream["method"].(string)
+	if strings.TrimSpace(network) == "" {
+		network, _ = stream["network"].(string)
+	}
+	if !strings.EqualFold(strings.TrimSpace(network), "hysteria") {
+		return
+	}
+	tls, ok := stream["tlsSettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	tls["alpn"] = []any{"h3"}
+	delete(tls, "minVersion")
+	delete(tls, "maxVersion")
+	delete(tls, "cipherSuites")
 }
 
 // deleteNestedKey 删除 m[key] 下的 subKey（如果 m[key] 是一个 map）。

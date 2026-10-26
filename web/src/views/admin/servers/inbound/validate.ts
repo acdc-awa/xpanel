@@ -143,6 +143,30 @@ export function validateHysteriaFinalMask(c: HysteriaConfig): string[] {
   if ((up && !down) || (!up && down)) {
     errs.push('Hysteria 2 带宽：上行与下行需同时填写才会启用 Brutal（只填一侧会退回 BBR）')
   }
+  if (c.congestion === 'force-brutal' && !up) {
+    errs.push('QUIC 拥塞控制：force-brutal 必须同时填写服务端上行带宽')
+  }
+
+  // 取值范围来自 xray 的 QuicParamsConfig.Build()：
+  // maxIdleTimeout 4–120、maxIncomingStreams ≥8、接收窗口 ≥16384。
+  const rangeErr = (v: number | undefined, min: number, max: number | undefined, label: string) => {
+    if (v === undefined || v === null) return ''
+    if (!Number.isInteger(v) || v < min || (max !== undefined && v > max)) {
+      return max === undefined ? `${label}：必须是不小于 ${min} 的整数` : `${label}：必须是 ${min}–${max} 之间的整数`
+    }
+    return ''
+  }
+  const pushRange = (v: number | undefined, min: number, max: number | undefined, label: string) => {
+    const m = rangeErr(v, min, max, label)
+    if (m) errs.push(m)
+  }
+  pushRange(c.max_idle_timeout, 4, 120, 'QUIC 最大空闲超时')
+  pushRange(c.max_incoming_streams, 8, undefined, 'QUIC 入流上限')
+  pushRange(c.init_stream_receive_window, 16384, undefined, 'QUIC 初始流接收窗口')
+  pushRange(c.max_stream_receive_window, 16384, undefined, 'QUIC 最大流接收窗口')
+  pushRange(c.init_connection_receive_window, 16384, undefined, 'QUIC 初始连接接收窗口')
+  pushRange(c.max_connection_receive_window, 16384, undefined, 'QUIC 最大连接接收窗口')
+
   const ports = (c.port_hop_ports || '').trim()
   if (ports) {
     if (!parsePortList(ports)) {
