@@ -233,6 +233,9 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.POST("/permission-groups", d.AdminCreatePermissionGroup)
 			admin.PUT("/permission-groups/:id", d.AdminUpdatePermissionGroup)
 			admin.PUT("/permission-groups/:id/access-points", d.AdminSetPermissionGroupAccessPoints)
+			// 订阅模板绑定：PUT 绑定模板（活引用），DELETE 转为自定义（空键）
+			admin.PUT("/permission-groups/:id/sub-template", d.AdminBindPermissionGroupSubTemplate)
+			admin.DELETE("/permission-groups/:id/sub-template", d.AdminClearPermissionGroupSubTemplate)
 			admin.DELETE("/permission-groups/:id", d.AdminDeletePermissionGroup)
 			admin.POST("/permission-groups/:id/preview-template", d.AdminPreviewPermissionGroupTemplate)
 			admin.GET("/sub-templates", d.AdminListSubTemplates)

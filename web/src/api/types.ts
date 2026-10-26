@@ -540,7 +540,11 @@ export interface PermissionGroup {
   id: number
   name: string
   remark: string
-  clash_template?: string // 自定义 Clash/Mihomo 模板
+  clash_template?: string // 组内自定义模板（绑定时为模板快照，未绑定时为生效内容）
+  sub_template_id?: number | null // 绑定的模板库条目；空 = 自定义（空键）
+  sub_template_name?: string // 绑定模板名（悬挂绑定为空）
+  template_mode?: 'custom' | 'bound' // 空键状态
+  template_source?: 'bound' | 'custom' | 'default' // 实际内容来源
   access_point_count?: number
   access_point_ids?: number[] // 组内优先级序（订阅输出同序）
   access_point_names?: string[]

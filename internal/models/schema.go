@@ -55,10 +55,15 @@ const (
 	//     套餐删除改为归档（plans.deleted_at）：默认列表与商城隐藏，管理端可查看/恢复；
 	//     订单自带套餐快照（orders.plan_name / plan_snapshot），套餐归档或改名后历史订单仍可读；
 	//     traffic_logs 增加 server_id（入库时按上报节点写入），并回填存量行。
+	//  ⑤ 订阅模板绑定（2026-10-26 追加，并入本步）：permission_groups 加 sub_template_id（nullable +
+	//     索引）。NULL = 自定义（空键，生效内容读 clash_template）；非空 = 绑定模板库条目
+	//     （SubTemplate.Content 活引用）。纯加列、不回填：存量组全部保持自定义，订阅输出不变；
+	//     删除被引用模板时由应用层把模板当前内容落回 clash_template 再清空绑定（无数据库外键/级联）。
+	//     只影响订阅生成，不涉及配置下发；也不改变 v4 已定的 Min=4 口径。
 	// 注：Mixed / SOCKS5 / HTTP 协议与 ForwardUser 实体已在本版本发布前移除，从未在任何线上库建表。
 	//
 	// v4 是一整步**未发版**升级（生产库仍在 v3）：本步在开发期曾拆记 v4 / v5 / v6，各批都未单独
-	// 发版，故按「不让运维面对跳号」的既有口径合并为单步 v3 → v4（见 UPGRADE.md §4.6 / §4.8）。
+	// 发版，故按「不让运维面对跳号」的既有口径合并为单步 v3 → v4（见 UPGRADE.md §4.6 / §4.8 / §4.9）。
 	DBSchemaVersion = 4
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。

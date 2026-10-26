@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -62,6 +63,9 @@ type permissionGroupView struct {
 	AccessPointCount int      `json:"access_point_count"`
 	AccessPointIDs   []uint64 `json:"access_point_ids"` // 组内优先级序（sort_order ASC, 绑定 ID ASC）
 	AccessPointNames []string `json:"access_point_names"`
+	SubTemplateName  string   `json:"sub_template_name,omitempty"` // 绑定模板名（悬挂绑定为空）
+	TemplateMode     string   `json:"template_mode"`               // custom（空键/自定义）| bound（绑定模板库）
+	TemplateSource   string   `json:"template_source"`             // bound | custom | default（实际内容来源）
 }
 
 // AdminPermissionGroups GET /api/v1/admin/permission-groups
@@ -90,6 +94,22 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 		apNameMap[ap.ID] = ap.Name
 	}
 
+	// 绑定模板批量取（避免 N+1）：只需要名字与内容做来源判定，悬挂绑定由解析器降级为自定义。
+	tplMap := map[uint64]*models.SubTemplate{}
+	tplIDs := make([]uint64, 0, len(list))
+	for i := range list {
+		if id := list[i].SubTemplateID; id != nil && *id > 0 {
+			tplIDs = append(tplIDs, *id)
+		}
+	}
+	if len(tplIDs) > 0 {
+		var tpls []models.SubTemplate
+		_ = d.DB.Where("id IN ?", tplIDs).Find(&tpls)
+		for i := range tpls {
+			tplMap[tpls[i].ID] = &tpls[i]
+		}
+	}
+
 	items := make([]permissionGroupView, 0, len(list))
 	for _, g := range list {
 		apIDs := make([]uint64, 0)
@@ -100,11 +120,19 @@ func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 				apNames = append(apNames, name)
 			}
 		}
+		var bound *models.SubTemplate
+		if g.SubTemplateID != nil {
+			bound = tplMap[*g.SubTemplateID]
+		}
+		res := subscribe.ResolveTemplateFromRows(&g, bound)
 		items = append(items, permissionGroupView{
 			PermissionGroup:  g,
 			AccessPointCount: len(groupAPMap[g.ID]),
 			AccessPointIDs:   apIDs,
 			AccessPointNames: apNames,
+			SubTemplateName:  res.TemplateName,
+			TemplateMode:     res.Mode,
+			TemplateSource:   res.Source,
 		})
 	}
 	util.OK(c, gin.H{"items": items})
@@ -196,12 +224,95 @@ func (d *Deps) AdminUpdatePermissionGroup(c *gin.Context) {
 	}
 	if req.ClashTemplate != nil {
 		updates["clash_template"] = *req.ClashTemplate
+		// 组编辑器保存即视为本地覆盖：解除绑定，转为自定义（空键）。
+		// 只改名称/备注（不带 clash_template）时保持绑定不变。
+		if g.SubTemplateID != nil {
+			updates["sub_template_id"] = nil
+		}
 	}
 	if len(updates) > 0 {
 		if err := d.DB.Model(&g).Updates(updates).Error; err != nil {
 			util.BadRequest(c, "更新失败（名称可能重复）")
 			return
 		}
+		// 回读：响应里要带最新的 sub_template_id/时间戳，而不是更新前的快照。
+		if err := d.DB.First(&g, id).Error; err != nil {
+			util.ServerError(c, "读取更新后的权限组失败")
+			return
+		}
+	}
+	util.OK(c, gin.H{"group": g})
+}
+
+// AdminBindPermissionGroupSubTemplate PUT /api/v1/admin/permission-groups/:id/sub-template
+// 权限组绑定订阅模板库条目（活引用）：所有绑定组随模板内容更新。
+// 同时把模板当前内容写入组内副本，作为解绑/删除/回滚时的兜底快照。
+func (d *Deps) AdminBindPermissionGroupSubTemplate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的权限组 ID")
+		return
+	}
+	var g models.PermissionGroup
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "权限组不存在")
+		return
+	}
+	var req struct {
+		SubTemplateID uint64 `json:"sub_template_id" binding:"required"`
+	}
+	if !util.BindJSON(c, &req) {
+		return
+	}
+	var tpl models.SubTemplate
+	if err := d.DB.First(&tpl, req.SubTemplateID).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "订阅模板不存在")
+		return
+	}
+	if strings.TrimSpace(tpl.Content) == "" {
+		util.BadRequest(c, "模板内容为空，无法绑定")
+		return
+	}
+	if err := d.DB.Model(&g).Updates(map[string]any{
+		"sub_template_id": tpl.ID,
+		"clash_template":  tpl.Content, // 兜底快照：解绑/删模板/旧面板回滚时仍可读
+	}).Error; err != nil {
+		util.ServerError(c, "绑定订阅模板失败")
+		return
+	}
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.ServerError(c, "读取绑定后的权限组失败")
+		return
+	}
+	util.OK(c, gin.H{"group": g})
+}
+
+// AdminClearPermissionGroupSubTemplate DELETE /api/v1/admin/permission-groups/:id/sub-template
+// 权限组转为自定义（空键）：先把当前生效内容落进组内副本，再清空绑定——
+// 解绑瞬间订阅输出不变，之后模板库改动不再影响该组。
+func (d *Deps) AdminClearPermissionGroupSubTemplate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的权限组 ID")
+		return
+	}
+	var g models.PermissionGroup
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "权限组不存在")
+		return
+	}
+	res := subscribe.ResolvePermissionGroupTemplate(d.DB, &g)
+	updates := map[string]any{"sub_template_id": nil}
+	if res.Content != "" {
+		updates["clash_template"] = res.Content
+	}
+	if err := d.DB.Model(&g).Updates(updates).Error; err != nil {
+		util.ServerError(c, "转为自定义模板失败")
+		return
+	}
+	if err := d.DB.First(&g, id).Error; err != nil {
+		util.ServerError(c, "读取解绑后的权限组失败")
+		return
 	}
 	util.OK(c, gin.H{"group": g})
 }
@@ -222,8 +333,10 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 	var req struct {
 		Template string `json:"template"`
 	}
+	// body 未提供模板时按唯一口径解析（绑定模板优先 → 组内副本 → 内置默认）。
+	res := subscribe.ResolvePermissionGroupTemplate(d.DB, &g)
 	if err := c.ShouldBindJSON(&req); err != nil {
-		req.Template = g.ClashTemplate
+		req.Template = res.Content
 	}
 
 	// AP 单点授权：查询该权限组可见的启用接入点，沿管道解析生成节点（与订阅同规则）
@@ -248,6 +361,9 @@ func (d *Deps) AdminPreviewPermissionGroupTemplate(c *gin.Context) {
 		"proxy_count":     len(names),
 		"proxy_names":     names,
 		"is_sample_nodes": isSampleNodes,
+		"template_mode":   res.Mode,
+		"template_source": res.Source,
+		"template_name":   res.TemplateName,
 	})
 }
 

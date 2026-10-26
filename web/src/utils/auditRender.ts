@@ -534,6 +534,20 @@ function renderPermissionGroups(ctx: Ctx) {
     ctx.view.summary = buildSummary(ctx, '预览权限组订阅模板')
     return
   }
+  // 模板绑定：PUT = 绑定模板库条目，DELETE = 转为自定义（空键）
+  if (a.endsWith('.sub-template')) {
+    if (ctx.method === 'DELETE') {
+      ctx.view.summary = buildSummary(ctx, '转为自定义订阅模板', nameOf(ctx))
+    } else {
+      const id = ctx.body['sub_template_id']
+      ctx.view.summary = buildSummary(
+        ctx,
+        '绑定订阅模板',
+        nameOf(ctx) + (typeof id === 'number' ? `（模板 #${id}）` : '')
+      )
+    }
+    return
+  }
   const del = ctx.method === 'DELETE'
   const nm = nameOf(ctx)
   const hasTpl = 'clash_template' in ctx.body
@@ -549,7 +563,7 @@ function renderPermissionGroups(ctx: Ctx) {
   }
 }
 
-// 订阅模板库（素材库 CRUD；content 是大段 YAML，只计数不铺开，避免审计详情被正文淹没）
+// 订阅模板库 CRUD（content 是大段 YAML，只计数不铺开，避免审计详情被正文淹没）
 const subTemplateDict: Dict = {
   name: { label: '模板名称' },
   content: { label: '模板内容', fmt: (v: unknown) => `${(typeof v === 'string' ? v : '').length} 字符`, hidden: true },

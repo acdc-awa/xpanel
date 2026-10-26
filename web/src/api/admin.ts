@@ -767,6 +767,9 @@ export interface TemplatePreviewResult {
   proxy_count: number
   proxy_names: string[]
   is_sample_nodes: boolean
+  template_mode?: 'custom' | 'bound'
+  template_source?: 'bound' | 'custom' | 'default'
+  template_name?: string
 }
 
 export function previewPermissionGroupTemplate(id: number, template: string) {
@@ -775,16 +778,30 @@ export function previewPermissionGroupTemplate(id: number, template: string) {
   })
 }
 
+// 绑定订阅模板库条目（活引用）：绑定后该组订阅跟随模板内容更新。
+export function bindPermissionGroupSubTemplate(id: number, subTemplateId: number) {
+  return http.put<ApiResp<{ group: PermissionGroup }>>(`/admin/permission-groups/${id}/sub-template`, {
+    sub_template_id: subTemplateId,
+  })
+}
+
+// 转为自定义（空键）：服务端先把当前模板内容落进组内副本，再清空绑定。
+export function clearPermissionGroupSubTemplate(id: number) {
+  return http.delete<ApiResp<{ group: PermissionGroup }>>(`/admin/permission-groups/${id}/sub-template`)
+}
+
 export function deletePermissionGroup(id: number) {
   return http.delete<ApiResp<{ ok: boolean }>>(`/admin/permission-groups/${id}`)
 }
 
-// ===== 命名订阅模板库（保存多份模板，权限组编辑器快速载入） =====
+// ===== 命名订阅模板库（可绑定给多个权限组） =====
 
 export interface SubTemplate {
   id: number
   name: string
   content: string
+  usage_count?: number // 绑定该模板的权限组数量
+  group_names?: string[] // 绑定该模板的权限组名
   created_at: string
   updated_at: string
 }
@@ -802,7 +819,7 @@ export function updateSubTemplate(id: number, payload: { name: string; content: 
 }
 
 export function deleteSubTemplate(id: number) {
-  return http.delete<ApiResp<{ deleted: boolean }>>(`/admin/sub-templates/${id}`)
+  return http.delete<ApiResp<{ deleted: boolean; detached_group_count?: number }>>(`/admin/sub-templates/${id}`)
 }
 
 export function getXrayKeys() {

@@ -142,12 +142,12 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	ua := strings.ToLower(c.GetHeader("User-Agent"))
 	forceBase64 := c.Query("format") == "base64"
 
-	// 权限组自定义 Clash 模板
+	// 权限组订阅模板：绑定模板优先 → 组内副本 → 内置默认（唯一解析入口）
 	var clashTemplate string
 	if permGroupID > 0 {
 		var pg models.PermissionGroup
 		if err := d.DB.First(&pg, permGroupID).Error; err == nil {
-			clashTemplate = pg.ClashTemplate
+			clashTemplate = subscribe.ResolvePermissionGroupTemplate(d.DB, &pg).Content
 		}
 	}
 	panelHost := c.Request.Host

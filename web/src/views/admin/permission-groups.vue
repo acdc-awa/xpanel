@@ -170,8 +170,15 @@ function openTemplates(row: PermissionGroup) {
   router.push({ path: '/admin/sub-templates', query: { group: String(row.id) } })
 }
 
-function hasTemplate(row: PermissionGroup) {
-  return !!(row.clash_template && row.clash_template.trim())
+// 模板状态三态：绑定模板库（活引用）/ 组内自定义副本 / 系统默认。
+// template_mode/template_source 由后端按唯一口径解析（悬挂绑定会显示为自定义）。
+function templateBadge(row: PermissionGroup) {
+  if (row.template_mode === 'bound') return `绑定「${row.sub_template_name || '模板'}」`
+  return row.template_source === 'custom' ? '自定义模板' : '系统默认'
+}
+
+function templateBadgeColor(row: PermissionGroup): 'blue' | 'grey' {
+  return row.template_mode === 'bound' || row.template_source === 'custom' ? 'blue' : 'grey'
 }
 
 async function remove(row: any) {
@@ -197,7 +204,7 @@ async function remove(row: any) {
 <template>
   <CsPage>
     <CsToolbar>
-      <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的「订阅模板」或模板徽标即可前往编辑。" />
+      <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的模板徽标即可前往编辑、绑定模板库或转为自定义。" />
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增权限组</CsButton>
       </template>
@@ -223,12 +230,10 @@ async function remove(row: any) {
             <button
               type="button"
               class="pg-template-flag"
-              title="订阅模板已独立成页，点击前往编辑"
+              title="点击前往「订阅模板」页调整模板或绑定"
               @click="openTemplates(row)"
             >
-              <CsBadge :color="hasTemplate(row) ? 'blue' : 'grey'">
-                {{ hasTemplate(row) ? '自定义模板' : '系统默认' }}
-              </CsBadge>
+              <CsBadge :color="templateBadgeColor(row)">{{ templateBadge(row) }}</CsBadge>
             </button>
           </template>
 
