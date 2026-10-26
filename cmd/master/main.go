@@ -158,8 +158,9 @@ func main() {
 	trafficSvc.StartTrafficResetCron(context.Background())
 	trafficSvc.StartRetentionCron(context.Background())
 	orderSvc := billing.NewOrderService(billingStore)
-	// 自动续费（2026-09-04）：到期前 1h 窗口 / 流量耗尽双触发，复用 PayWithBalance 全语义
-	billing.NewAutoRenewService(database, orderSvc).StartCron(context.Background())
+	// 订阅周期处置：到期自动续费/到期退订（每分钟）+ 流量耗尽自动续费（每 5 分钟）
+	autoRenewSvc := billing.NewAutoRenewService(database, orderSvc)
+	autoRenewSvc.StartCron(context.Background())
 	auditSvc := &services.AuditService{DB: database}
 
 	// Stage 5：进程内同步事件总线（订阅者在 Publish 调用栈内执行，失败仅记日志）。
@@ -199,6 +200,12 @@ func main() {
 
 	// Stage 5 事件订阅：订单支付成功 → 热更新用户到所有在线节点（原 api 层直调 Hub 的收口）。
 	eventBus.Subscribe(contracts.EventOrderPaid, func(ctx context.Context, ev contracts.DomainEvent) error {
+		hub.SyncUsersToAll()
+		return nil
+	})
+
+	// 到期退订（清空套餐/权限组）→ 立即把用户从在线节点摘除，不必等 1 小时校准。
+	eventBus.Subscribe(contracts.EventSubscriptionCleared, func(ctx context.Context, ev contracts.DomainEvent) error {
 		hub.SyncUsersToAll()
 		return nil
 	})

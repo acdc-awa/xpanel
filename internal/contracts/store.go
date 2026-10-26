@@ -30,13 +30,17 @@ type BillingStore interface {
 	// 用户（资金视角）
 	LockUser(ctx context.Context, id uint64) (*models.User, error) // 行锁读取（方言接缝内消化）
 	UpdateBalance(ctx context.Context, userID uint64, newBalanceCents int64) error
-	// UpdateSubscription 顺延套餐：购买即跟随套餐权限组（2026-09-17 拍板），
+	// UpdateSubscription 写入套餐并重算周期：购买即跟随套餐权限组（2026-09-17 拍板），
 	// 实现须清空用户的 permission_group_id（自定义列），使生效组回落到套餐快照 plan_group_id。
 	// 不得写入 plan.PermissionGroupID——那会把「与套餐同值的假自定义」固化下来，
 	// 此后管理员改套餐权限组时该用户因「自定义优先」不再跟随（面板显示为「(自定义)」）。
 	// plan 提供本次购买/续费的套餐实体，快照三列（plan_traffic_bytes/plan_device_limit/plan_group_id）
 	// 在同一事务内按其当前值写入（2026-09-01 Xboard 式隔离：分配即快照）。
 	UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error
+	// ClearSubscription 到期退订：plan_id=0、快照三列归零、permission_group_id=0。
+	// 不改 expire_at（保留过去的到期时间，既留审计痕迹也作二重拦截），
+	// 不动账期/余额/自动续费开关/device_limit（用户自定义字段）。
+	ClearSubscription(ctx context.Context, userID uint64) error
 
 	// 订单
 	FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) // 无记录返回 nil,nil

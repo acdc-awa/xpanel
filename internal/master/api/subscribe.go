@@ -45,7 +45,12 @@ func (d *Deps) Subscribe(c *gin.Context) {
 	// 过期/超量用户不注入任何节点配置，订阅也应拒绝拉取，避免客户端持有失效配置）。
 	// 2026-09-01 快照化：额度读用户行快照列（不再 join plan，套餐下架不影响存量额度判定）。
 	if user.ExpireAt != nil && time.Now().After(*user.ExpireAt) {
-		util.Fail(c, 403, "订阅已过期，请续费后使用")
+		// 到期退订后 plan_id 已归零：此时没有可「续费」的套餐，提示重新订购。
+		if user.PlanID == 0 {
+			util.Fail(c, 403, "套餐已到期，请重新订购套餐")
+		} else {
+			util.Fail(c, 403, "订阅已过期，请续费后使用")
+		}
 		return
 	}
 	if quota := user.EffectiveTrafficBytes(); quota > 0 {
@@ -59,7 +64,7 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			return
 		}
 		if up+down >= quota {
-			util.Fail(c, 403, "流量已用尽，请购买新套餐")
+			util.Fail(c, 403, "流量已用尽，订购套餐后可重置流量")
 			return
 		}
 	}

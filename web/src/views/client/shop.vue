@@ -312,7 +312,7 @@ async function confirmPay() {
         <!-- 购买语义提示（与后端计时长规则一致）：一律作废重算 -->
         <el-alert type="warning" :closable="false" show-icon class="purchase-notice">
           购买提示：支付成功后立即生效——现有套餐剩余时长（如有）将作废，新套餐自购买时刻起重新计时
-          {{ selectedPlan.duration_days }} 天，流量周期同步重置；续费与切换均按此规则。
+          {{ selectedPlan.duration_days }} 天，已用流量与计费周期同步重置；续费与切换均按此规则。
         </el-alert>
 
         <!-- 账户余额支付方式 -->

@@ -58,7 +58,7 @@ func (s *BillingStore) UpdateBalance(ctx context.Context, userID uint64, newBala
 		Update("balance_cents", newBalanceCents).Error
 }
 
-// UpdateSubscription 顺延套餐并切换流量账期。
+// UpdateSubscription 写入套餐并重算流量账期。
 //
 // 账期归属（审计 F3）：递增 traffic_cycle_id 是「新周期从 0 起算」的**唯一依据**——节点按
 // 该 ID 给采集到的增量打标，计费/配额按 `traffic_logs.cycle_id = 用户当前账期` 归属，因此
@@ -96,6 +96,22 @@ func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, pl
 		return err
 	}
 	return models.ZeroBilledInCycleBucket(s.with(ctx), userID, aligned)
+}
+
+// ClearSubscription 到期退订：清空套餐关系与生效权限组。
+//
+// 只写 plan_id / 快照三列 / permission_group_id，expire_at 保持原值——到期时间本身
+// 既是审计痕迹，也是「无套餐 + 管理员手工分组」组合下的二重拦截（否则不会有人被拦）。
+// 账期与余额不动：历史用量仍按原账期留痕，下次购买时由 UpdateSubscription 统一递增。
+func (s *BillingStore) ClearSubscription(ctx context.Context, userID uint64) error {
+	updates := map[string]any{
+		"plan_id":             0,
+		"permission_group_id": 0,
+	}
+	for k, v := range models.ClearPlanSnapshotColumns() {
+		updates[k] = v
+	}
+	return s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error
 }
 
 func (s *BillingStore) FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) {

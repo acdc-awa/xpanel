@@ -35,8 +35,10 @@ type User struct {
 	PlanTrafficBytes int64  `gorm:"default:0" json:"plan_traffic_bytes"` // 流量额度快照（字节，0=不限）
 	PlanDeviceLimit  int    `gorm:"default:0" json:"plan_device_limit"`  // 设备限制快照（0=不限）
 	PlanGroupID      uint64 `gorm:"default:0" json:"plan_group_id"`      // 权限组快照（0=不绑定）
-	// 自动续费双开关（2026-09-04）：到期前 1 小时窗口 / 流量耗尽时分别触发，
-	// 触发即按当前持有套餐调用 PayWithBalance（同现有购买语义：作废重算+流量重置）。
+	// 自动续费双开关（2026-09-04，2026-10-26 改到期语义）：触发即按当前持有套餐调用
+	// PayWithBalance（购买语义：作废重算+流量重置）。AutoRenewExpire 在到期时刻生效——
+	// 扣款成功即续期，业务性拒绝（余额不足/停续/套餐不存在）或未开启则自动退订
+	// （plan_id=0 + 快照与权限组归零，见 BillingStore.ClearSubscription）。
 	AutoRenewExpire  bool `gorm:"default:false" json:"auto_renew_expire"`
 	AutoRenewExhaust bool `gorm:"default:false" json:"auto_renew_exhaust"`
 	MustChangePwd    bool   `gorm:"default:false" json:"must_change_pwd"`

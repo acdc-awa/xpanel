@@ -995,7 +995,7 @@ function cardMenuItems(row: AdminUser) {
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
-                  <div class="cs-text-secondary" style="font-size: 11.5px">到期前 1 小时内用余额续购当前套餐</div>
+                  <div class="cs-text-secondary" style="font-size: 11.5px">到期时用余额自动续费，失败则自动取消套餐</div>
                 </div>
                 <CsToggle v-model="userEditForm.auto_renew_expire" />
               </div>

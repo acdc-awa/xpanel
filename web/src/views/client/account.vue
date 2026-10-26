@@ -353,14 +353,14 @@ async function onLogout() {
           <div class="x-card-head">
             <span style="display: inline-flex; align-items: center; gap: 6px">
               <el-icon><RefreshRight /></el-icon>&nbsp;自动续费
-              <TipIcon content="续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算，已用流量随之清零重算；余额不足时不会扣费。" />
+              <TipIcon content="续费按购买规则执行：现有剩余时长作废，新周期自支付时刻起重新计算，已用流量随之清零重算。到期自动续费失败（余额不足或套餐已停止续费）时不会扣费，并自动取消当前套餐。" />
             </span>
           </div>
           <div class="x-card-body">
             <div class="autorenew-row">
               <div class="autorenew-info">
                 <div class="autorenew-title">到期自动续费</div>
-                <div class="muted" style="font-size: 12px">套餐到期前 1 小时内自动使用余额续费当前套餐</div>
+                <div class="muted" style="font-size: 12px">套餐到期时自动使用余额续费当前套餐，失败则自动取消当前套餐</div>
               </div>
               <el-switch
                 :model-value="autoRenewExpire"

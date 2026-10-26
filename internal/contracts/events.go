@@ -78,3 +78,16 @@ type OrderPaidEvent struct {
 
 // EventName 实现 DomainEvent。
 func (OrderPaidEvent) EventName() string { return EventOrderPaid }
+
+// EventSubscriptionCleared 到期退订事件名（清空套餐与权限组后发布）。
+const EventSubscriptionCleared = "billing.subscription_cleared"
+
+// SubscriptionClearedEvent 到期退订事件：一轮扫描内被清空的用户 ID 批量上报，
+// 订阅方据此做一次全节点用户同步（避免逐用户重复广播）。
+type SubscriptionClearedEvent struct {
+	UserIDs []uint64
+	At      time.Time
+}
+
+// EventName 实现 DomainEvent。
+func (SubscriptionClearedEvent) EventName() string { return EventSubscriptionCleared }

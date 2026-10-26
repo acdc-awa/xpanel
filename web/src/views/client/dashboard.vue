@@ -53,7 +53,9 @@ const usedText = computed(() => formatBytes(usedBytes.value))
 
 const expireText = computed(() => {
   const t = auth.user?.expire_at
-  if (!t) return auth.user?.plan_id ? '永久有效' : '未开通套餐'
+  // 到期退订后 plan_id 归零、expire_at 保留过去的到期时间：提示「已到期」而非「未开通」。
+  if (!auth.user?.plan_id) return isExpired.value ? '已到期' : '未开通套餐'
+  if (!t) return '永久有效'
   return formatDate(t)
 })
 
@@ -63,8 +65,19 @@ const isExpired = computed(() => {
   return !!t && new Date(t).getTime() < Date.now()
 })
 
+const isPlanActive = computed(() => {
+  if (!auth.user?.plan_id) return false
+  if (isExpired.value) return false
+  return true
+})
+
+// 流量耗尽：套餐仍在有效期（到期时间未过），只是本周期额度已用尽。
+const isExhausted = computed(
+  () => isPlanActive.value && totalBytes.value > 0 && usedBytes.value >= totalBytes.value,
+)
+
 const daysLeft = computed(() => {
-  if (!auth.user?.expire_at) return null
+  if (!isPlanActive.value || !auth.user?.expire_at) return null
   const exp = new Date(auth.user.expire_at).getTime()
   const now = Date.now()
   const diff = Math.ceil((exp - now) / (1000 * 60 * 60 * 24))
@@ -74,12 +87,6 @@ const daysLeft = computed(() => {
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
   return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
-})
-
-const isPlanActive = computed(() => {
-  if (!auth.user?.plan_id) return false
-  if (isExpired.value) return false
-  return true
 })
 
 onMounted(async () => {
@@ -183,12 +190,26 @@ function viewNotice(n: NoticeItem) {
     <div class="x-dash-grid">
       <!-- 左侧主栏：用量卡片 + 快捷操作 -->
       <div>
-        <!-- 到期/未开通 CTA 横幅 -->
-        <div v-if="isExpired" class="dash-alert danger">
+        <!-- 到期/流量耗尽/未开通 CTA 横幅 -->
+        <div v-if="isExpired && auth.user?.plan_id" class="dash-alert danger">
           <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>当前套餐已到期，节点转发已暂停，请及时续费</span>
+          <span>当前套餐已到期，节点转发已暂停。请续费或重新订购套餐以恢复使用</span>
           <router-link to="/shop">
-            <el-button size="small" type="primary" round>立即续费</el-button>
+            <el-button size="small" type="primary" round>前往续费/订购</el-button>
+          </router-link>
+        </div>
+        <div v-else-if="isExpired" class="dash-alert danger">
+          <el-icon><WarningFilled /></el-icon>&nbsp;
+          <span>当前套餐已到期并已自动取消，节点转发已暂停。请重新订购套餐以恢复使用</span>
+          <router-link to="/shop">
+            <el-button size="small" type="primary" round>前往订购</el-button>
+          </router-link>
+        </div>
+        <div v-else-if="isExhausted" class="dash-alert danger">
+          <el-icon><WarningFilled /></el-icon>&nbsp;
+          <span>当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用</span>
+          <router-link to="/shop">
+            <el-button size="small" type="primary" round>前往续费/订购</el-button>
           </router-link>
         </div>
         <div v-else-if="!auth.user?.plan_id" class="dash-alert">

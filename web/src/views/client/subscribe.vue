@@ -8,6 +8,7 @@ import {
   View,
   RefreshRight,
   ShoppingBag,
+  WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import QRCode from 'qrcode'
@@ -29,6 +30,13 @@ const hasPlan = computed(() => {
   const exp = auth.user?.expire_at
   return !(exp && new Date(exp).getTime() < Date.now())
 })
+
+// 流量耗尽：套餐仍在有效期（plan_id 保留），只是本周期额度用尽 —— 订阅会拒绝下发。
+const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
+const totalBytes = computed(() => auth.user?.total_bytes ?? 0)
+const isExhausted = computed(
+  () => hasPlan.value && totalBytes.value > 0 && usedBytes.value >= totalBytes.value,
+)
 
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
@@ -173,12 +181,21 @@ const clashApps: ClientApp[] = [
       <p class="sub-desc">适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。</p>
     </div>
 
+    <!-- 流量耗尽提示：套餐仍在有效期，仅本周期额度用尽，订阅内容暂停下发 -->
+    <div v-if="isExhausted" class="sub-alert danger">
+      <el-icon><WarningFilled /></el-icon>
+      <span>当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用。</span>
+      <router-link to="/shop">
+        <el-button size="small" type="primary" round>前往续费/订购</el-button>
+      </router-link>
+    </div>
+
     <!-- 无套餐空状态友好引导 -->
     <div v-if="!hasPlan" class="x-card empty-sub-card">
       <el-icon class="empty-sub-icon"><ShoppingBag /></el-icon>
       <h3 class="empty-sub-title">当前无有效套餐</h3>
       <p class="empty-sub-desc">
-        您当前未订购套餐或套餐已到期，开通/续费后系统将自动为您下发订阅地址并分配全球节点线路。
+        您当前未订购套餐或套餐已到期，重新订购后系统将自动为您下发订阅地址并分配全球节点线路。
       </p>
       <router-link to="/shop">
         <el-button type="primary" size="large" round class="glow-btn">
@@ -327,6 +344,23 @@ const clashApps: ClientApp[] = [
     font-size: 13px;
     margin-top: 4px;
     line-height: 1.5;
+  }
+}
+
+.sub-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--x-radius);
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fb7185;
+
+  > span {
+    flex: 1;
   }
 }
 

@@ -32,9 +32,43 @@ func NewOrderService(store contracts.BillingStore) *OrderService {
 // payIdempotentWindow 余额直付幂等窗口：同用户+同套餐在此窗口内已支付则直接复用订单，防重放双扣款。
 const payIdempotentWindow = 30 * time.Second
 
-// PayWithBalance 用户使用账户余额直接支付套餐（原子扣款、生成已支付订单、顺延套餐、记流水）。
+// 支付门控哨兵错误：自动续费 cron 据此区分「业务性拒绝」（余额不足/停续/套餐不存在，
+// 可安全退订）与「瞬时错误」（数据库抖动等，下一轮重试，不得误清套餐）。
+// 文案与对外提示保持一致，API 仍按 err.Error() 展示。
+var (
+	ErrPlanNotFound        = errors.New("套餐不存在")
+	ErrUserNotFound        = errors.New("用户不存在")
+	ErrInsufficientBalance = errors.New("账户余额不足，请先充值")
+	ErrPlanRenewalStopped  = errors.New("该套餐已停止续费")
+	ErrPlanNotPurchasable  = errors.New("该套餐已停售")
+	// ErrPlanChanged 自动续费期间用户套餐已被改动：调用方跳过，下一轮按新套餐重新判定。
+	ErrPlanChanged = errors.New("套餐已变更")
+)
+
+// IsRenewalRejection 是否为可确定的业务性拒绝（调用方据此决定到期退订）。
+// ErrPlanChanged 不算：套餐刚被改动时应重试而不是退订。
+func IsRenewalRejection(err error) bool {
+	return errors.Is(err, ErrPlanNotFound) ||
+		errors.Is(err, ErrUserNotFound) ||
+		errors.Is(err, ErrInsufficientBalance) ||
+		errors.Is(err, ErrPlanRenewalStopped) ||
+		errors.Is(err, ErrPlanNotPurchasable)
+}
+
+// PayWithBalance 用户使用账户余额直接支付套餐（原子扣款、生成已支付订单、重算套餐周期、记流水）。
 // 幂等：同用户+同套餐在 payIdempotentWindow 内已有 paid 订单 → 直接返回该订单（不重复扣款）。
 func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, error) {
+	return s.pay(userID, planID, false)
+}
+
+// RenewWithBalance 自动续费专用：仅当用户当前仍持有 planID 时扣款。
+// 扫描到扣款之间用户可能已改套餐（手动购买/管理员调整），按旧套餐扣款会把它当成新购卖出
+// 并覆盖刚生效的新套餐；此时返回 ErrPlanChanged 让调用方跳过，下一轮按新套餐重新判定。
+func (s *OrderService) RenewWithBalance(userID, planID uint64) (*models.Order, error) {
+	return s.pay(userID, planID, true)
+}
+
+func (s *OrderService) pay(userID, planID uint64, renewalOnly bool) (*models.Order, error) {
 	var order *models.Order
 	paid := false // 本次是否真实扣款（幂等复用旧订单不算新支付，不发布事件）
 	ctx := context.Background()
@@ -42,7 +76,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		plan, err := tx.GetPlan(ctx, planID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("套餐不存在")
+				return ErrPlanNotFound
 			}
 			return err
 		}
@@ -51,7 +85,12 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		// 方言差异在 pkg/db.LockForUpdate 收口：SQLite 由单连接池串行兜底，MySQL 真实行锁。
 		user, err := tx.LockUser(ctx, userID)
 		if err != nil {
-			return errors.New("用户不存在")
+			return ErrUserNotFound
+		}
+
+		// 自动续费路径：锁内确认持有关系未变（否则会把旧套餐当新购卖出）。
+		if renewalOnly && user.PlanID != planID {
+			return ErrPlanChanged
 		}
 
 		// 销售两属性兜底门控（2026-09-03 替代 enabled；商店列表已按身份过滤，此处防手搓请求）：
@@ -60,10 +99,10 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		isRenewal := user.PlanID > 0 && user.PlanID == planID
 		if isRenewal {
 			if !plan.Renewable {
-				return errors.New("该套餐已停止续费")
+				return ErrPlanRenewalStopped
 			}
 		} else if !plan.Purchasable {
-			return errors.New("该套餐已停售")
+			return ErrPlanNotPurchasable
 		}
 
 		// 幂等：窗口内已支付同套餐 → 直接复用。
@@ -79,7 +118,7 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		}
 
 		if user.BalanceCents < plan.PriceCents {
-			return errors.New("账户余额不足，请先充值")
+			return ErrInsufficientBalance
 		}
 
 		now := time.Now()
@@ -148,6 +187,34 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 		}
 	}
 	return order, nil
+}
+
+// ClearExpiredSubscription 到期退订（幂等）：清空套餐、快照与生效权限组。
+//
+// 必须在行锁内复核「仍持有套餐且已到期」才写库：用户可能在本轮扫描出候选后完成支付
+// （expire_at 已推进到未来）或管理员刚换了套餐，此时直接调用方看到的旧候选清空会吞掉
+// 已付费用的权益。复核不通过返回 false，调用方按「无需处理」对待。
+func (s *OrderService) ClearExpiredSubscription(userID uint64) (bool, error) {
+	cleared := false
+	ctx := context.Background()
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		user, err := tx.LockUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if user.PlanID == 0 || user.ExpireAt == nil || time.Now().Before(*user.ExpireAt) {
+			return nil
+		}
+		if err := tx.ClearSubscription(ctx, userID); err != nil {
+			return err
+		}
+		cleared = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return cleared, nil
 }
 
 // ListByUser 用户订单列表。
