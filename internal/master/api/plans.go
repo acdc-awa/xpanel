@@ -13,29 +13,37 @@ import (
 )
 
 type planView struct {
-	ID                uint64    `json:"id"`
-	Name              string    `json:"name"`
-	Description       string    `json:"description"`
-	PriceCents        int64     `json:"price_cents"`
-	TrafficGB         int64     `json:"traffic_gb"`
-	DurationDays      int       `json:"duration_days"`
-	DeviceLimit       int       `json:"device_limit"`        // 0=不限
-	PermissionGroupID uint64    `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
-	SortOrder         int       `json:"sort_order"`          // 商城展示排序（越小越靠前）
-	IsFeatured        bool      `json:"is_featured"`         // 商城「热门推荐」标记
-	Purchasable       bool      `json:"purchasable"`         // 可新购（商店展示并允许非持有者购买）
-	Renewable         bool      `json:"renewable"`           // 可续费（持有者余额直付顺延）
-	CreatedAt         time.Time `json:"created_at"`
+	ID                uint64     `json:"id"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description"`
+	PriceCents        int64      `json:"price_cents"`
+	TrafficGB         int64      `json:"traffic_gb"`
+	DurationDays      int        `json:"duration_days"`
+	DeviceLimit       int        `json:"device_limit"`        // 0=不限
+	PermissionGroupID uint64     `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
+	SortOrder         int        `json:"sort_order"`          // 商城展示排序（越小越靠前）
+	IsFeatured        bool       `json:"is_featured"`         // 商城「热门推荐」标记
+	Purchasable       bool       `json:"purchasable"`         // 可新购（商店展示并允许非持有者购买）
+	Renewable         bool       `json:"renewable"`           // 可续费（持有者余额直付顺延）
+	Archived          bool       `json:"archived"`            // 已归档（默认列表不返回，需 include_archived）
+	ArchivedAt        *time.Time `json:"archived_at"`         // 归档时刻（未归档为 null）
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 func toPlanView(p *models.Plan) planView {
+	var archivedAt *time.Time
+	if p.DeletedAt.Valid {
+		t := p.DeletedAt.Time
+		archivedAt = &t
+	}
 	return planView{
 		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays:      p.DurationDays,
 		DeviceLimit:       p.DeviceLimit,
 		PermissionGroupID: p.PermissionGroupID,
 		SortOrder:         p.SortOrder, IsFeatured: p.IsFeatured,
-		Purchasable: p.Purchasable, Renewable: p.Renewable, CreatedAt: p.CreatedAt,
+		Purchasable: p.Purchasable, Renewable: p.Renewable,
+		Archived: p.DeletedAt.Valid, ArchivedAt: archivedAt, CreatedAt: p.CreatedAt,
 	}
 }
 
@@ -65,10 +73,15 @@ func toPublicPlanView(p *models.Plan) publicPlanView {
 }
 
 // AdminPlans GET /api/v1/admin/plans
+// 默认只返回未归档套餐；?include_archived=1 时连同已归档一起返回（管理端「显示已归档」）。
 func (d *Deps) AdminPlans(c *gin.Context) {
+	q := d.DB
+	if c.Query("include_archived") == "1" || c.Query("include_archived") == "true" {
+		q = q.Unscoped()
+	}
 	var list []models.Plan
 	// 与商城同序（sort_order 优先），管理端所见即用户端展示顺序
-	if err := d.DB.Order("sort_order ASC, id ASC").Find(&list).Error; err != nil {
+	if err := q.Order("sort_order ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -251,31 +264,69 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})
 }
 
-// AdminDeletePlan DELETE /api/v1/admin/plans/:id
-// 2026-08-14 U6：有用户/订单引用时拒绝删除（防悬挂 plan_id 与流量限额失效）。
+// AdminDeletePlan DELETE /api/v1/admin/plans/:id —— 归档套餐（2026-10-25 删除语义改造）。
+//
+// 与旧行为的区别：
+//   - 仍拒绝「有用户持有」：那是活着的计费关系，必须先把用户迁走；
+//   - 不再因「存在订单」拒绝：订单自带套餐名与配置快照，套餐归档不会让旧账变空白；
+//   - 物理行保留（软删除），默认列表/商城不可见，?include_archived=1 可查看并经
+//     POST /plans/:id/restore 恢复。
+//
+// 归档前先把 purchasable/renewable 置 false：即便旧面板（不识别 deleted_at）接管数据库，
+// 也不会把这个套餐重新上架。
 func (d *Deps) AdminDeletePlan(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		util.BadRequest(c, "无效的 ID")
 		return
 	}
+	var plan models.Plan
+	if err := d.DB.First(&plan, id).Error; err != nil {
+		util.BadRequest(c, "套餐不存在或已归档")
+		return
+	}
 	var userCnt int64
 	d.DB.Model(&models.User{}).Where("plan_id = ?", id).Count(&userCnt)
 	if userCnt > 0 {
-		util.BadRequest(c, "该套餐有 "+strconv.FormatInt(userCnt, 10)+" 个用户持有，无法删除（可先关闭「可新购/可续费」下架）")
+		util.BadRequest(c, "该套餐有 "+strconv.FormatInt(userCnt, 10)+" 个用户持有，无法归档（请先为用户更换套餐）")
 		return
 	}
-	var orderCnt int64
-	d.DB.Model(&models.Order{}).Where("plan_id = ?", id).Count(&orderCnt)
-	if orderCnt > 0 {
-		util.BadRequest(c, "该套餐存在订单记录，无法删除（可先关闭「可新购/可续费」下架）")
+	if err := d.DB.Model(&plan).Updates(map[string]any{"purchasable": false, "renewable": false}).Error; err != nil {
+		util.ServerError(c, "归档失败")
 		return
 	}
-	if err := d.DB.Delete(&models.Plan{}, id).Error; err != nil {
-		util.ServerError(c, "删除失败")
+	if err := d.DB.Delete(&plan).Error; err != nil {
+		util.ServerError(c, "归档失败")
 		return
 	}
-	util.OK(c, gin.H{"deleted": id})
+	util.OK(c, gin.H{"deleted": id, "archived": true})
+}
+
+// AdminRestorePlan POST /api/v1/admin/plans/:id/restore —— 取消归档。
+// 恢复后仍是停售/停续状态，需由管理员按需重新开启销售属性（避免恢复即上架）。
+func (d *Deps) AdminRestorePlan(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的 ID")
+		return
+	}
+	res := d.DB.Unscoped().Model(&models.Plan{}).
+		Where("id = ? AND deleted_at IS NOT NULL", id).
+		Update("deleted_at", nil)
+	if res.Error != nil {
+		util.ServerError(c, "恢复失败")
+		return
+	}
+	if res.RowsAffected == 0 {
+		util.BadRequest(c, "套餐不存在或未归档")
+		return
+	}
+	var plan models.Plan
+	if err := d.DB.First(&plan, id).Error; err != nil {
+		util.ServerError(c, "恢复失败")
+		return
+	}
+	util.OK(c, gin.H{"plan": toPlanView(&plan)})
 }
 
 // PublicPlans GET /api/v1/plans —— 商店套餐列表（身份感知过滤，2026-09-03 销售两属性）：

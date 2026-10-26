@@ -142,7 +142,7 @@ const deleting = ref(false)
 async function removeServer() {
   try {
     await ElMessageBox.confirm(
-      `确认删除服务器「${props.server.name}」？关联的入站、待推送配置与上报数据将一并删除，该服务器的 Agent 将无法再连接。`,
+      `确认删除服务器「${props.server.name}」？该服务器将从列表与拓扑中移除，关联的入站、待推送配置与上报数据一并清除，Agent 将无法再连接。历史流量仍保留在统计中并标注「已删除」。`,
       '删除服务器',
       { type: 'error' },
     )

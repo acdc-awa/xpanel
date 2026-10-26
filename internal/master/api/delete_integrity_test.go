@@ -83,9 +83,14 @@ func TestAdminDeleteServerCascadesAccessLayer(t *testing.T) {
 	var n int64
 	require.NoError(t, db.Model(&models.AccessLayer{}).Where("server_id = ?", srv.ID).Count(&n).Error)
 	assert.Zero(t, n, "对外接入层应随服务器级联删除")
+	// 2026-10-25：servers 行改为软删除——常规查询不可见，但物理行必须保留，
+	// 否则历史 traffic_logs 失去服务器归集锚点、SQLite 还可能复用旧主键。
 	var srvN int64
 	require.NoError(t, db.Model(&models.Server{}).Where("id = ?", srv.ID).Count(&srvN).Error)
-	assert.Zero(t, srvN)
+	assert.Zero(t, srvN, "归档服务器不应出现在常规查询中")
+	var archived models.Server
+	require.NoError(t, db.Unscoped().First(&archived, srv.ID).Error, "服务器行必须保留")
+	assert.True(t, archived.DeletedAt.Valid, "服务器行应标记为已归档")
 }
 
 // 删除完整性回归：删服务器受其他服务器直通管道（tunnel）引用保护。

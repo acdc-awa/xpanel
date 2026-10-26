@@ -199,6 +199,9 @@ func compactTrafficHour(db *gorm.DB, h time.Time, protect map[uint64]bool) error
 			billedUp, down2 int64
 			createdAt       time.Time
 			periodEnd       time.Time
+			// serverID 归因：同组取第一个非零值。唯一键不含 server_id，仅 inbound_id=0 的
+			// 跨服极端场景可能合并到不同服务器，取先到者（见 models.TrafficLog.ServerID）。
+			serverID uint64
 		}
 
 		groups := make(map[groupKey]*agg, len(rows))
@@ -224,6 +227,9 @@ func compactTrafficHour(db *gorm.DB, h time.Time, protect map[uint64]bool) error
 			if rows[i].PeriodEnd.After(g.periodEnd) {
 				g.periodEnd = rows[i].PeriodEnd
 			}
+			if g.serverID == 0 && rows[i].ServerID != 0 {
+				g.serverID = rows[i].ServerID
+			}
 		}
 		if mergeCount == 0 {
 			return nil // 该小时全为受保护行，无可合并
@@ -247,6 +253,7 @@ func compactTrafficHour(db *gorm.DB, h time.Time, protect map[uint64]bool) error
 		for k, g := range groups {
 			merged = append(merged, models.TrafficLog{
 				UserID:      k.userID,
+				ServerID:    g.serverID,
 				InboundID:   k.inboundID,
 				CycleID:     k.cycleID,
 				UpBytes:     g.up,

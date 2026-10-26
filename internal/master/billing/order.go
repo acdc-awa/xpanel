@@ -93,6 +93,8 @@ func (s *OrderService) PayWithBalance(userID, planID uint64) (*models.Order, err
 			OrderNo:       orderNo,
 			UserID:        userID,
 			PlanID:        planID,
+			PlanName:      plan.Name,
+			PlanSnapshot:  models.PlanOrderSnapshot(plan),
 			AmountCents:   plan.PriceCents,
 			PaymentMethod: models.PaymentMethodBalance,
 			Status:        models.OrderPaid,

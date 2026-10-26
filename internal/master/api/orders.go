@@ -34,9 +34,14 @@ func (d *Deps) toOrderView(o *models.Order) orderView {
 	if err := d.DB.First(&user, o.UserID).Error; err == nil {
 		v.Username = user.Username
 	}
-	var plan models.Plan
-	if err := d.DB.First(&plan, o.PlanID).Error; err == nil {
-		v.PlanName = plan.Name
+	// 套餐名优先用订单快照（2026-10-25）：套餐可归档，归档行在常规查询里不可见，
+	// 实时 JOIN 会拿不到名称。旧订单若快照为空，仍回落实时查询与迁移前的行为一致。
+	v.PlanName = o.PlanName
+	if v.PlanName == "" {
+		var plan models.Plan
+		if err := d.DB.Unscoped().First(&plan, o.PlanID).Error; err == nil {
+			v.PlanName = plan.Name
+		}
 	}
 	return v
 }

@@ -964,8 +964,10 @@ export function saveTopologyLayout(payload: TopologyLayout) {
 
 // ===== P5 套餐 / 订单 / 审计 / 入站授权 =====
 
-export function getPlans() {
-  return http.get<ApiResp<{ items: Plan[] }>>('/admin/plans')
+export function getPlans(includeArchived = false) {
+  return http.get<ApiResp<{ items: Plan[] }>>('/admin/plans', {
+    params: includeArchived ? { include_archived: 1 } : undefined,
+  })
 }
 
 export function createPlan(payload: Partial<Plan>) {
@@ -977,7 +979,11 @@ export function updatePlan(id: number, payload: Partial<Plan> & { sync_users?: b
 }
 
 export function deletePlan(id: number) {
-  return http.delete<ApiResp<{ deleted: number }>>(`/admin/plans/${id}`)
+  return http.delete<ApiResp<{ deleted: number; archived?: boolean }>>(`/admin/plans/${id}`)
+}
+
+export function restorePlan(id: number) {
+  return http.post<ApiResp<{ plan: Plan }>>(`/admin/plans/${id}/restore`)
 }
 
 export function getOrders(page = 1, size = 20, status?: string, keyword?: string) {

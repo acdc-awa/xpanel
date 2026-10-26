@@ -260,7 +260,8 @@ func (d *Deps) AdminDeletePermissionGroup(c *gin.Context) {
 		return
 	}
 	var cnt int64
-	d.DB.Model(&models.Plan{}).Where("permission_group_id = ?", id).Count(&cnt)
+	// 含已归档套餐：恢复后仍会引用该权限组，归档不等于解绑。
+	d.DB.Unscoped().Model(&models.Plan{}).Where("permission_group_id = ?", id).Count(&cnt)
 	if cnt > 0 {
 		util.BadRequest(c, "该权限组正被套餐绑定，请先解绑")
 		return

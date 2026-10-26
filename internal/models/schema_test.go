@@ -103,12 +103,16 @@ func TestSchemaCompatRejectsRollbackToV1(t *testing.T) {
 // traffic_ack、节点发完即删 ⇒ 流量记账静默停摆、配额判定不再累积。
 func TestDeclareSchemaMinCompatibleBlocksOlderPanelBeforeMigration(t *testing.T) {
 	db := newSchemaTestDB(t)
-	// 前置：模拟一个已被上一版面板迁移过的生产库——settings 表存在且 min_compatible 记录为低一版。
-	// 必须这样铺，否则「无 settings 表 ⇒ CheckSchemaCompat 直接放行」的早返回会掩盖真正要测的路径。
+	// 前置：模拟一个已被上一版面板迁移过的生产库——settings 表存在且 min_compatible 记录为
+	// 当前最低兼容版本的下界之下。必须这样铺，否则「无 settings 表 ⇒ CheckSchemaCompat 直接放行」
+	// 的早返回会掩盖真正要测的路径。
+	//
+	// 注意：这里用 DBMinCompatibleVersion-1 表示「低于本面板最低兼容线的旧面板」
+	// （当前 Min = 4，即模拟一个 v3 面板）。不要写死 3，Min 提升时断言要跟着走。
 	if err := db.AutoMigrate(&Setting{}); err != nil {
 		t.Fatalf("migrate settings: %v", err)
 	}
-	if err := upsertSetting(db, settingSchemaMinCompatible, strconv.Itoa(DBSchemaVersion-1)); err != nil {
+	if err := upsertSetting(db, settingSchemaMinCompatible, strconv.Itoa(DBMinCompatibleVersion-1)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := CheckSchemaCompat(db); err != nil {
@@ -119,18 +123,21 @@ func TestDeclareSchemaMinCompatibleBlocksOlderPanelBeforeMigration(t *testing.T)
 	}
 
 	// 关键断言：此刻**尚未执行 AutoMigrate**，模拟「声明已落、迁移未跑完（或跑到一半失败、进程被杀）」
-	// 的窗口。旧面板（schema 低一版）必须已被拒绝——这正是修复前不成立的断言。
-	if err := checkSchemaCompat(db, DBSchemaVersion-1); err == nil {
+	// 的窗口。低于最低兼容版本的旧面板必须已被拒绝——这正是修复前不成立的断言。
+	if err := checkSchemaCompat(db, DBMinCompatibleVersion-1); err == nil {
 		t.Fatal("声明之后、迁移之前旧面板就必须被拒绝；否则自动回滚上来的旧面板会带病启动")
 	}
-	// 本面板自己仍放行，保证声明后能幂等续跑完迁移
+	// 最低兼容版本与当前版本自己都放行，保证声明后能幂等续跑完迁移
+	if err := checkSchemaCompat(db, DBMinCompatibleVersion); err != nil {
+		t.Fatalf("最低兼容版本应放行（声明不得锁死自己）: %v", err)
+	}
 	if err := checkSchemaCompat(db, DBSchemaVersion); err != nil {
-		t.Fatalf("同版本应放行（声明不得锁死自己）: %v", err)
+		t.Fatalf("当前版本应放行: %v", err)
 	}
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := checkSchemaCompat(db, DBSchemaVersion-1); err == nil {
+	if err := checkSchemaCompat(db, DBMinCompatibleVersion-1); err == nil {
 		t.Fatal("迁移完成后旧面板仍须被拒绝")
 	}
 }

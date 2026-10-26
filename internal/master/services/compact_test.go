@@ -178,9 +178,9 @@ func TestCompactNodeReportsTieredDownsample(t *testing.T) {
 	db := newCompactTestDB(t)
 	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
 
-	recent := now.Add(-2 * time.Hour)  // 龄 2h → 1 分钟桶
-	middle := now.Add(-8 * time.Hour)  // 龄 8h → 10 分钟桶
-	old := now.Add(-72 * time.Hour)    // 龄 72h → 10 分钟桶（不再是 1 小时）
+	recent := now.Add(-2 * time.Hour) // 龄 2h → 1 分钟桶
+	middle := now.Add(-8 * time.Hour) // 龄 8h → 10 分钟桶
+	old := now.Add(-72 * time.Hour)   // 龄 72h → 10 分钟桶（不再是 1 小时）
 
 	rows := []models.NodeReport{
 		// 近 6h：同分钟两行 → 1
@@ -576,5 +576,36 @@ func TestCompactTrafficHourKeepsCycleAttribution(t *testing.T) {
 	}
 	if kept[0].CycleID != 1 || kept[1].CycleID != 2 {
 		t.Fatalf("账期标记被改写: %d/%d, want 1/2", kept[0].CycleID, kept[1].CycleID)
+	}
+}
+
+// 压缩合并必须保留服务器归因（2026-10-25）：同组取第一个非零 server_id，
+// 否则历史流量在压缩后会重新失去按服务器归集的能力。
+func TestCompactTrafficLogsPreservesServerID(t *testing.T) {
+	db := newCompactTestDB(t)
+	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)
+	now := h.Add(2 * time.Hour)
+	rows := []models.TrafficLog{
+		{UserID: 1, ServerID: 0, InboundID: 7, UpBytes: 10, DownBytes: 1, PeriodStart: h.Add(1 * time.Minute)},
+		{UserID: 1, ServerID: 9, InboundID: 7, UpBytes: 20, DownBytes: 2, PeriodStart: h.Add(2 * time.Minute)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, _, err := CompactTrafficLogs(db, now); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	var merged []models.TrafficLog
+	if err := db.Where("user_id = ? AND inbound_id = ?", 1, 7).Find(&merged).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(merged) != 1 {
+		t.Fatalf("merged rows = %d, want 1", len(merged))
+	}
+	if merged[0].ServerID != 9 {
+		t.Fatalf("server_id = %d, want 9（组内非零值应被保留）", merged[0].ServerID)
+	}
+	if merged[0].UpBytes != 30 || merged[0].DownBytes != 3 {
+		t.Fatalf("merged bytes = %d/%d, want 30/3", merged[0].UpBytes, merged[0].DownBytes)
 	}
 }

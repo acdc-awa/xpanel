@@ -35,11 +35,14 @@ function updateChart() {
 
   let pieData: { name: string; value: number; percent?: number }[] = []
   if (ctx.dashData.value?.server_rank?.length) {
-    pieData = ctx.dashData.value.server_rank.map((s) => ({
-      name: s.name || `节点#${s.server_id}`,
-      value: parseFloat((s.total_bytes / 1073741824).toFixed(2)),
-      percent: s.percent,
-    }))
+    pieData = ctx.dashData.value.server_rank.map((s) => {
+      const base = s.name || `节点#${s.server_id}`
+      return {
+        name: s.deleted ? `${base}（已删除）` : base,
+        value: parseFloat((s.total_bytes / 1073741824).toFixed(2)),
+        percent: s.percent,
+      }
+    })
   }
 
   const isNarrow = chartRef.value.clientWidth < 420

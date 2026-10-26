@@ -189,6 +189,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.POST("/plans", d.AdminCreatePlan)
 			admin.PUT("/plans/:id", d.AdminUpdatePlan)
 			admin.DELETE("/plans/:id", d.AdminDeletePlan)
+			admin.POST("/plans/:id/restore", d.AdminRestorePlan)
 			admin.GET("/orders", d.AdminOrders)
 			admin.GET("/audit-logs", d.AdminAuditLogs)
 			admin.POST("/backup", d.AdminCreateBackup)

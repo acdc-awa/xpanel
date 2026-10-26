@@ -423,7 +423,12 @@ func (d *Deps) AdminResetSecret(c *gin.Context) {
 	})
 }
 
-// AdminDeleteServer DELETE /api/v1/admin/servers/:id —— 删除服务器并级联清理入站/授权/待推送配置/节点上报。
+// AdminDeleteServer DELETE /api/v1/admin/servers/:id —— 归档服务器并级联清理入站/授权/待推送配置/节点上报。
+//
+// 2026-10-25 起 servers 行改为软删除（保留名称与 ID），其余关联数据仍硬删除：
+//   - 服务器从列表/拓扑/接入点候选/节点认证中消失，已下线的 Agent 无法再连接；
+//   - 历史 traffic_logs 靠 server_id 继续归集到该服务器，仪表盘标注「已删除」；
+//   - 保留行可避免 SQLite 复用旧主键，导致新服务器继承旧服务器的历史流量。
 func (d *Deps) AdminDeleteServer(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {

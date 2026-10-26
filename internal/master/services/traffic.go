@@ -46,8 +46,8 @@ const SettingTrafficDailyTZBackfilled = "traffic_daily_tz_backfilled"
 
 // TrafficService 处理节点流量上报与聚合。
 type TrafficService struct {
-	DB                         *gorm.DB
-	now                        func() time.Time // 可注入时钟（测试用）
+	DB                        *gorm.DB
+	now                       func() time.Time // 可注入时钟（测试用）
 	OnInboundLifecycleChanged func(serverID uint64)
 }
 
@@ -239,40 +239,41 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 						// 无具体前台用户条目，将增量作为 UserID=0 写入 traffic_logs，使仪表盘服务器分布与排行按时间窗口统计该服务器承载流量。
 						// 普通用户入站（user）与转发代理入站（forward）已有具体用户明细落库，此处不写 traffic_logs，防全站双计。
 						if inb.Type == models.InboundTypeRelay || inb.Type == models.InboundTypeTunnel {
-						row := models.TrafficLog{
-							UserID:      0,
-							InboundID:   inboundID,
-							UpBytes:     e.UpBytes,
-							DownBytes:   e.DownBytes,
-							BilledUp:    0,
-							BilledDown:  0,
-							PeriodStart: periodStart,
-							PeriodEnd:   periodEnd,
-							CycleID:     0,
+							row := models.TrafficLog{
+								UserID:      0,
+								ServerID:    serverID,
+								InboundID:   inboundID,
+								UpBytes:     e.UpBytes,
+								DownBytes:   e.DownBytes,
+								BilledUp:    0,
+								BilledDown:  0,
+								PeriodStart: periodStart,
+								PeriodEnd:   periodEnd,
+								CycleID:     0,
+							}
+							var doUpdates clause.Set
+							if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+								doUpdates = clause.Assignments(map[string]any{
+									"up_bytes":   gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
+									"down_bytes": gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
+									"period_end": gorm.Expr("VALUES(period_end)"),
+								})
+							} else {
+								doUpdates = clause.Assignments(map[string]any{
+									"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
+									"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
+									"period_end": gorm.Expr("excluded.period_end"),
+								})
+							}
+							if err := tx.Clauses(clause.OnConflict{
+								Columns: []clause.Column{
+									{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
+								},
+								DoUpdates: doUpdates,
+							}).Create(&row).Error; err != nil {
+								return err
+							}
 						}
-						var doUpdates clause.Set
-						if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
-							doUpdates = clause.Assignments(map[string]any{
-								"up_bytes":   gorm.Expr("traffic_logs.up_bytes + VALUES(up_bytes)"),
-								"down_bytes": gorm.Expr("traffic_logs.down_bytes + VALUES(down_bytes)"),
-								"period_end": gorm.Expr("VALUES(period_end)"),
-							})
-						} else {
-							doUpdates = clause.Assignments(map[string]any{
-								"up_bytes":   gorm.Expr("up_bytes + excluded.up_bytes"),
-								"down_bytes": gorm.Expr("down_bytes + excluded.down_bytes"),
-								"period_end": gorm.Expr("excluded.period_end"),
-							})
-						}
-						if err := tx.Clauses(clause.OnConflict{
-							Columns: []clause.Column{
-								{Name: "user_id"}, {Name: "inbound_id"}, {Name: "period_start"}, {Name: "cycle_id"},
-							},
-							DoUpdates: doUpdates,
-						}).Create(&row).Error; err != nil {
-							return err
-						}
-					}
 					}
 				}
 				continue
@@ -297,6 +298,7 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 					}
 					row := models.TrafficLog{
 						UserID:      0,
+						ServerID:    serverID,
 						InboundID:   relayInboundID,
 						UpBytes:     e.UpBytes,
 						DownBytes:   e.DownBytes,
@@ -364,6 +366,7 @@ func (s *TrafficService) Save(tr protocol.TrafficReportPayload, serverID uint64)
 			// cycle_id 进唯一键：同小时桶内跨账期的两行必须能共存（否则旧账期增量会被并进新账期）。
 			row := models.TrafficLog{
 				UserID:      userID,
+				ServerID:    serverID,  // 上报节点（删除服务器后历史仍可按服务器归集）
 				InboundID:   inboundID, // tag 或统计键反解出的归账入站（未知按 0）
 				UpBytes:     e.UpBytes,
 				DownBytes:   e.DownBytes,

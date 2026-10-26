@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,6 +128,13 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := backfillTrafficCycleIDs(db); err != nil {
 		return err
 	}
+	// v4 追加（2026-10-25，并入同一未发版批次）：流量明细自带上报服务器、订单自带套餐名快照。
+	if err := backfillTrafficServerIDs(db); err != nil {
+		return err
+	}
+	if err := backfillOrderPlanNames(db); err != nil {
+		return err
+	}
 	if err := migratePlanSaleFlags(db); err != nil {
 		return err
 	}
@@ -149,6 +157,81 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	return migrateUserSubscribeTokens(db)
+}
+
+// backfillTrafficServerIDs 为存量流量明细回填上报服务器（v4，2026-10-25 追加）。
+//
+// 为什么需要：dashboard 的服务器流量分布原先靠 traffic_logs JOIN inbounds 反查 server_id，
+// 服务器删除会级联删入站，历史明细随即失去归属。新写入的行在入库时直接写 server_id，
+// 存量行需要一次性回填。
+//
+// 边界：入站已被删除的旧行无法推断归属，回填后仍为 0（与升级前「被 JOIN 排除」的行为一致）。
+// 回填按主键区间分批（每批 5 万行）并把进度写入 settings，进程中断后从断点续跑；
+// 完成后写版本标记，后续启动不再扫描。
+func backfillTrafficServerIDs(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&TrafficLog{}) || !db.Migrator().HasTable(&Inbound{}) {
+		return nil
+	}
+	const (
+		cursorKey = "traffic_server_id_backfill_cursor"
+		doneKey   = "traffic_server_id_backfill_version"
+		batchSize = 50000
+	)
+	if readSettingValue(db, doneKey) == "1" {
+		return nil
+	}
+	var maxID uint64
+	if err := db.Model(&TrafficLog{}).Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error; err != nil {
+		return fmt.Errorf("读取流量明细最大 ID 失败: %w", err)
+	}
+	if maxID == 0 {
+		return upsertSetting(db, doneKey, "1")
+	}
+	var start uint64
+	if v := readSettingValue(db, cursorKey); v != "" {
+		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			start = n
+		}
+	}
+	for start <= maxID {
+		end := start + batchSize
+		// COALESCE 兜住「入站已删」：子查询 NULL 时保持 0，不写 NULL（列 NOT NULL）。
+		if err := db.Exec(`UPDATE traffic_logs SET server_id = COALESCE(
+				(SELECT i.server_id FROM inbounds i WHERE i.id = traffic_logs.inbound_id), 0)
+			WHERE id >= ? AND id < ? AND server_id = 0 AND inbound_id > 0`, start, end).Error; err != nil {
+			return fmt.Errorf("回填 traffic_logs.server_id（id %d-%d）失败: %w", start, end, err)
+		}
+		start = end
+		if err := upsertSetting(db, cursorKey, strconv.FormatUint(start, 10)); err != nil {
+			return err
+		}
+	}
+	if err := upsertSetting(db, doneKey, "1"); err != nil {
+		return err
+	}
+	log.Printf("models: traffic_logs.server_id 回填完成（最大 ID %d）", maxID)
+	return nil
+}
+
+// backfillOrderPlanNames 为存量订单回填套餐名（v4，2026-10-25 追加）。
+//
+// 套餐改为归档后不再物理删除，但仍不能让订单展示依赖实时 JOIN（归档套餐在常规查询里不可见）。
+// 存量订单的 plan_name 为空，这里按 plan_id 一次性补齐；新订单在下单时写入。
+// 归档套餐行仍在 plans 表里，子查询可正常取到名称。幂等。
+func backfillOrderPlanNames(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Order{}) || !db.Migrator().HasTable(&Plan{}) {
+		return nil
+	}
+	const doneKey = "order_plan_name_backfill_version"
+	if readSettingValue(db, doneKey) == "1" {
+		return nil
+	}
+	if err := db.Exec(`UPDATE orders SET plan_name = COALESCE(
+			(SELECT p.name FROM plans p WHERE p.id = orders.plan_id), '')
+		WHERE (plan_name IS NULL OR plan_name = '') AND plan_id > 0`).Error; err != nil {
+		return fmt.Errorf("回填 orders.plan_name 失败: %w", err)
+	}
+	return upsertSetting(db, doneKey, "1")
 }
 
 // migrateRelayOutboundCredentials 将存量 relay 入站的 internal_uuid 回填到引用它的 server_outbounds.internal_uuid，

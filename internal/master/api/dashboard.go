@@ -80,6 +80,8 @@ type ServerTrafficItem struct {
 	DownBytes  int64   `json:"down_bytes"`
 	TotalBytes int64   `json:"total_bytes"`
 	Percent    float64 `json:"percent"`
+	// Deleted 该服务器已归档（从服务器列表移除），但历史流量仍保留在统计中。
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 type UserTrafficRankItem struct {
@@ -307,8 +309,11 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	}
 
 	// 4. 服务器健康度矩阵 & 实时速率（优先读取 Hub 纯内存快照，0 磁盘 I/O）
+	// 健康度矩阵只用未归档服务器；名称映射另取含归档的全量（历史流量需要显示已删除服务器的名字）。
 	var servers []models.Server
 	d.DB.Order("sort_order ASC, id ASC").Find(&servers)
+	var allServers []models.Server
+	d.DB.Unscoped().Order("sort_order ASC, id ASC").Find(&allServers)
 
 	var liveMetrics map[uint64]*nodegate.NodeMetricsSnapshot
 	if d.Hub != nil {
@@ -419,10 +424,12 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	// 累计值，被周期性清零、且无时间维度，无法回答「哪个时间段用了多少」——原先文案
 	// 只写「累计承载占比」，与重置语义自相矛盾。现与排行榜共用 rank_period 时间窗。
 	//
-	// 归集口径：traffic_logs.inbound_id → inbounds.server_id（原始字节不乘倍率）。
+	// 归集口径（2026-10-25 起）：优先用 traffic_logs.server_id（入库时按上报节点写入），
+	// 仅迁移前的旧行（server_id=0）回退 inbounds.server_id，故改用 LEFT JOIN。
+	// 服务器删除会级联删入站，靠 server_id 才能让历史流量继续归集到已归档服务器。
 	// 包含前台用户流量（user_id > 0）与内部链式转发流量（relay 入站，user_id = 0），
 	// 准确反映该服务器承载的中转/落地流量总量。
-	// 已知边界：inbound_id=0 的明细无法归属服务器（agent 未带 tag 且统计键未注入入站维度），由 JOIN 排除。
+	// 仍无法归属的只有「迁移前旧行且入站已不存在」：server_id=0 且 join 不到入站，由 WHERE 排除。
 	type serverAggRow struct {
 		ServerID  uint64 `gorm:"column:server_id"`
 		UpBytes   int64  `gorm:"column:up_bytes"`
@@ -430,23 +437,26 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	}
 	var serverRows []serverAggRow
 	d.DB.Raw(`
-		SELECT i.server_id AS server_id,
+		SELECT COALESCE(NULLIF(l.server_id, 0), i.server_id) AS server_id,
 		       COALESCE(SUM(l.up_bytes), 0)   AS up_bytes,
 		       COALESCE(SUM(l.down_bytes), 0) AS down_bytes
 		FROM traffic_logs l
-		JOIN inbounds i ON i.id = l.inbound_id
+		LEFT JOIN inbounds i ON i.id = l.inbound_id
 		WHERE l.period_start >= ? AND l.period_start < ?
-		GROUP BY i.server_id`, rankWin.StartUTC, rankWin.EndUTC).Scan(&serverRows)
+		  AND (l.server_id > 0 OR i.id IS NOT NULL)
+		GROUP BY COALESCE(NULLIF(l.server_id, 0), i.server_id)`, rankWin.StartUTC, rankWin.EndUTC).Scan(&serverRows)
 
 	aggByServer := make(map[uint64]serverAggRow, len(serverRows))
-	var grandTotalBytes int64
 	for _, r := range serverRows {
 		aggByServer[r.ServerID] = r
-		grandTotalBytes += r.UpBytes + r.DownBytes
 	}
 
-	serverTrafficMap := make(map[uint64]*ServerTrafficItem, len(servers))
-	for _, s := range servers {
+	// 先建条目并累计分母，再统一回填百分比：只统计「能在本面板找到服务器行」的流量，
+	// 避免分母混入无法展示的 server_id（例如手工删库留下的孤儿）导致占比合计 < 100%。
+	serverTrafficMap := make(map[uint64]*ServerTrafficItem, len(allServers))
+	var grandTotalBytes int64
+	for i := range allServers {
+		s := &allServers[i]
 		r := aggByServer[s.ID]
 		item := &ServerTrafficItem{
 			ServerID:   s.ID,
@@ -455,21 +465,33 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			UpBytes:    r.UpBytes,
 			DownBytes:  r.DownBytes,
 			TotalBytes: r.UpBytes + r.DownBytes,
+			Deleted:    s.DeletedAt.Valid,
 		}
-		if grandTotalBytes > 0 {
+		grandTotalBytes += item.TotalBytes
+		serverTrafficMap[s.ID] = item
+	}
+	if grandTotalBytes > 0 {
+		for _, item := range serverTrafficMap {
 			item.Percent = float64(item.TotalBytes) / float64(grandTotalBytes) * 100
 		}
-		serverTrafficMap[s.ID] = item
-		// 排行只收有流量的服务器（分布饼图仍保留全量，避免图例/占比数学被改写）
+	}
+
+	for i := range allServers {
+		s := &allServers[i]
+		item := serverTrafficMap[s.ID]
+		if item == nil {
+			continue
+		}
+		// 排行只收有流量的服务器（含已归档的，历史流量要能翻到）
 		if item.TotalBytes > 0 {
 			data.ServerRank = append(data.ServerRank, *item)
 		}
-	}
-	// 分布按 ServerID 排序固定顺序：Go map 遍历随机，否则前端饼图按索引着色会每次刷新变颜色
-	for _, s := range servers {
-		if item, ok := serverTrafficMap[s.ID]; ok {
-			data.ServerBreakdown = append(data.ServerBreakdown, *item)
+		// 未归档服务器保留全量（含 0 流量）；已归档服务器只在窗口内有流量时出现，
+		// 避免图例被历史条目撑大。
+		if s.DeletedAt.Valid && item.TotalBytes == 0 {
+			continue
 		}
+		data.ServerBreakdown = append(data.ServerBreakdown, *item)
 	}
 	// 排行按用量倒序（并列时按 ServerID 稳定）
 	sort.Slice(data.ServerRank, func(i, j int) bool {
@@ -637,7 +659,11 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	var recentOrders []models.Order
 	d.DB.Order("id DESC").Limit(5).Find(&recentOrders)
 	for _, ord := range recentOrders {
-		pName := planMap[ord.PlanID]
+		// 订单自带套餐名快照（2026-10-25）：套餐归档后 planMap 里查不到，仍要显示原名称。
+		pName := ord.PlanName
+		if pName == "" {
+			pName = planMap[ord.PlanID]
+		}
 		if pName == "" {
 			pName = fmt.Sprintf("套餐 #%d", ord.PlanID)
 		}

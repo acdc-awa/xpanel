@@ -499,3 +499,123 @@ func TestAdminDashboardRealtime(t *testing.T) {
 	}
 }
 
+// 服务器删除后历史流量仍按服务器归集（2026-10-25）。
+// 这是删除语义改造的核心回归：旧实现用 traffic_logs JOIN inbounds，服务器一删入站随之消失，
+// 明细被 INNER JOIN 过滤；新实现读 traffic_logs.server_id，必须仍能看到「已删除」条目。
+func TestAdminDashboardKeepsDeletedServerTraffic(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := models.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.Create(&models.Setting{Key: "business_timezone", Value: "UTC"}).Error; err != nil {
+		t.Fatalf("seed timezone: %v", err)
+	}
+
+	srv := models.Server{Name: "退场机", Host: "1.2.3.4", NodeID: "node-retired", Secret: "s"}
+	if err := db.Create(&srv).Error; err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	inb := models.Inbound{ServerID: srv.ID, Tag: "in-retired", Protocol: "vless", Type: models.InboundTypeUser, Port: 443, Enabled: true}
+	if err := db.Create(&inb).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	now := time.Now().UTC()
+	periodStart := now.Truncate(time.Hour)
+	if err := db.Create(&models.TrafficLog{
+		UserID: 1, ServerID: srv.ID, InboundID: inb.ID,
+		UpBytes: 1024, DownBytes: 2048,
+		PeriodStart: periodStart, PeriodEnd: now,
+	}).Error; err != nil {
+		t.Fatalf("create traffic log: %v", err)
+	}
+	// 迁移前旧行：server_id=0，只能靠 LEFT JOIN inbounds 回退归集。
+	if err := db.Create(&models.TrafficLog{
+		UserID: 2, ServerID: 0, InboundID: inb.ID,
+		UpBytes: 100, DownBytes: 200,
+		PeriodStart: periodStart, PeriodEnd: now,
+	}).Error; err != nil {
+		t.Fatalf("create legacy traffic log: %v", err)
+	}
+
+	deps := &Deps{DB: db}
+	fetchDashboard := func() DashboardData {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard?rank_period=today", nil)
+		deps.AdminDashboard(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("dashboard = %d, body=%s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Data DashboardData `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return resp.Data
+	}
+	findItem := func(items []ServerTrafficItem) *ServerTrafficItem {
+		for i := range items {
+			if items[i].ServerID == srv.ID {
+				return &items[i]
+			}
+		}
+		return nil
+	}
+
+	// 删除前：新行按 server_id 归集、旧行按入站回退，两者都计入。
+	beforeData := fetchDashboard()
+	beforeItem := findItem(beforeData.ServerBreakdown)
+	if beforeItem == nil || beforeItem.TotalBytes != 3372 {
+		t.Fatalf("删除前分布 = %+v, want 3372（server_id 行 + 旧行回退）", beforeData.ServerBreakdown)
+	}
+	if beforeItem.Deleted {
+		t.Fatal("未删除服务器不应标记 deleted")
+	}
+
+	delW := httptest.NewRecorder()
+	delC, _ := gin.CreateTestContext(delW)
+	delC.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/servers/1", nil)
+	delC.Params = gin.Params{{Key: "id", Value: "1"}}
+	deps.AdminDeleteServer(delC)
+	if delW.Code != http.StatusOK {
+		t.Fatalf("delete server = %d, body=%s", delW.Code, delW.Body.String())
+	}
+
+	resp := fetchDashboard()
+
+	item := findItem(resp.ServerBreakdown)
+	if item == nil {
+		t.Fatalf("已删除服务器的流量未出现在分布中: %+v", resp.ServerBreakdown)
+	}
+	if !item.Deleted {
+		t.Fatal("已删除服务器应标记 deleted=true")
+	}
+	// 删除后旧行（server_id=0 且入站已不存在）无法再归集，只剩新行 3072。
+	if item.TotalBytes != 3072 {
+		t.Fatalf("total_bytes = %d, want 3072（删除服务器不应丢 server_id 历史）", item.TotalBytes)
+	}
+	if item.Percent != 100 {
+		t.Fatalf("percent = %v, want 100（唯一服务器应占 100%%）", item.Percent)
+	}
+
+	foundRank := false
+	for _, r := range resp.ServerRank {
+		if r.ServerID == srv.ID && r.Deleted {
+			foundRank = true
+		}
+	}
+	if !foundRank {
+		t.Fatalf("已删除服务器未进入排行: %+v", resp.ServerRank)
+	}
+
+	// 健康度矩阵仍只列活跃服务器：归档服务器不能以「离线卡片」形式复活。
+	for _, m := range resp.ServerMatrix {
+		if m.ID == srv.ID {
+			t.Fatal("归档服务器不应出现在健康度矩阵")
+		}
+	}
+}

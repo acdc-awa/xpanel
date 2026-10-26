@@ -25,16 +25,18 @@ import {
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
-import { createPlan, deletePlan, getPermissionGroups, getPlans, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
+import { createPlan, deletePlan, getPermissionGroups, getPlans, restorePlan, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
 const list = ref<Plan[]>([])
 const loading = ref(false)
+// 默认只看在售/下架中的套餐；已归档套餐只在显式打开时出现（2026-10-25 删除语义改造）
+const showArchived = ref(false)
 
 async function load() {
   loading.value = true
   try {
-    const { data } = await getPlans()
+    const { data } = await getPlans(showArchived.value)
     if (data.code === 0) list.value = data.data.items
     else ElMessage.error(data.message)
   } catch (e) {
@@ -211,18 +213,37 @@ function groupNameOf(id?: number) {
 
 async function remove(row: any) {
   try {
-    await ElMessageBox.confirm(`确认删除套餐「${row.name}」？`, '删除套餐', { type: 'error' })
+    await ElMessageBox.confirm(
+      `确认归档套餐「${row.name}」？归档后不再出现在套餐列表与商城，历史订单与统计保留；可在「显示已归档」中恢复。`,
+      '归档套餐',
+      { type: 'warning' },
+    )
   } catch {
     return
   }
   try {
     const { data } = await deletePlan(row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      ElMessage.success('已归档')
       load()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    ElMessage.error(errMsg(e, '归档失败'))
+  }
+}
+
+// 取消归档：恢复后仍是停售/停续状态，需再按需开启
+async function restore(row: any) {
+  try {
+    const { data } = await restorePlan(row.id)
+    if (data.code === 0) {
+      ElMessage.success('已恢复（仍为停售/停续，请按需开启）')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '恢复失败'))
   }
 }
 </script>
@@ -230,6 +251,7 @@ async function remove(row: any) {
 <template>
   <CsPage>
     <CsToolbar>
+      <CsCheckbox v-model="showArchived" @change="load">显示已归档</CsCheckbox>
       <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增套餐</CsButton>
@@ -245,38 +267,50 @@ async function remove(row: any) {
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，价格作为卡片主指标 -->
       <CsCardGrid v-else>
-        <CsCard v-for="row in list" :key="row.id">
+        <CsCard v-for="row in list" :key="row.id" :class="{ 'plan-card--archived': row.archived }">
           <template #header>
-            <button type="button" class="plan-name" title="点击编辑套餐" @click="openEdit(row)">
+            <button
+              type="button"
+              class="plan-name"
+              :title="row.archived ? '已归档，恢复后可编辑' : '点击编辑套餐'"
+              :disabled="row.archived"
+              @click="openEdit(row)"
+            >
               {{ row.name }}
             </button>
             <div class="plan-meta">
               <span class="plan-id">#{{ row.id }}</span>
-              <button
-                type="button"
-                class="plan-flag"
-                title="可新购：商店展示并允许非持有者购买，点击切换"
-                @click="toggleFlag(row, 'purchasable')"
-              >
-                <CsBadge :color="row.purchasable ? 'green' : 'grey'">
-                  {{ row.purchasable ? '可新购' : '停售' }}
-                </CsBadge>
-              </button>
-              <button
-                type="button"
-                class="plan-flag"
-                title="可续费：持有者余额直付顺延，点击切换"
-                @click="toggleFlag(row, 'renewable')"
-              >
-                <CsBadge :color="row.renewable ? 'blue' : 'grey'">
-                  {{ row.renewable ? '可续费' : '停续' }}
-                </CsBadge>
-              </button>
-              <CsBadge v-if="row.is_featured" color="severity-medium">热门推荐</CsBadge>
+              <CsBadge v-if="row.archived" color="grey">已归档</CsBadge>
+              <template v-else>
+                <button
+                  type="button"
+                  class="plan-flag"
+                  title="可新购：商店展示并允许非持有者购买，点击切换"
+                  @click="toggleFlag(row, 'purchasable')"
+                >
+                  <CsBadge :color="row.purchasable ? 'green' : 'grey'">
+                    {{ row.purchasable ? '可新购' : '停售' }}
+                  </CsBadge>
+                </button>
+                <button
+                  type="button"
+                  class="plan-flag"
+                  title="可续费：持有者余额直付顺延，点击切换"
+                  @click="toggleFlag(row, 'renewable')"
+                >
+                  <CsBadge :color="row.renewable ? 'blue' : 'grey'">
+                    {{ row.renewable ? '可续费' : '停续' }}
+                  </CsBadge>
+                </button>
+                <CsBadge v-if="row.is_featured" color="severity-medium">热门推荐</CsBadge>
+              </template>
             </div>
           </template>
           <template #actions>
-            <span class="plan-price" :class="{ 'plan-price--muted': !row.purchasable && !row.renewable }">
+            <span
+              class="plan-price"
+              :class="{ 'plan-price--muted': row.archived || (!row.purchasable && !row.renewable) }"
+            >
               {{ priceLabel(row.price_cents) }}
             </span>
           </template>
@@ -292,8 +326,13 @@ async function remove(row: any) {
           </CsCardFacts>
 
           <template #footer>
-            <CsButton icon-name="edit" @click="openEdit(row)">编辑套餐</CsButton>
-            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
+            <template v-if="row.archived">
+              <CsButton icon-name="refresh" @click="restore(row)">恢复套餐</CsButton>
+            </template>
+            <template v-else>
+              <CsButton icon-name="edit" @click="openEdit(row)">编辑套餐</CsButton>
+              <CsButton icon-name="remove" @click="remove(row)">归档</CsButton>
+            </template>
           </template>
         </CsCard>
       </CsCardGrid>
@@ -405,6 +444,14 @@ async function remove(row: any) {
   &:hover {
     color: var(--color-text-link-default-qabnuk, #006ce0);
   }
+
+  &:disabled {
+    cursor: default;
+
+    &:hover {
+      color: inherit;
+    }
+  }
 }
 
 .plan-meta {
@@ -444,6 +491,11 @@ async function remove(row: any) {
 
 .plan-price--muted {
   color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.plan-card--archived {
+  opacity: 0.72;
+  background: var(--color-background-cell-shaded-twxsbz);
 }
 
 .card-desc-box {

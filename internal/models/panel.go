@@ -1,8 +1,11 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ServerTypeXray 托管 Xray-core 计算节点（默认服务器类型；l4_relay 已于 2026-08-24 退役）。
@@ -54,8 +57,14 @@ type Server struct {
 	// 解析归类后返回。
 	OnlineIPs  string     `gorm:"type:text" json:"-"`
 	LastSeenAt *time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// DeletedAt 归档标记（2026-10-25）：删服务器改为软删除——入站/出站/路由/待推配置/上报数据
+	// 仍硬删（运维面保持干净），但 servers 行保留。原因有二：
+	//  ① traffic_logs 需要按服务器归集历史（删除前的明细不能因 INNER JOIN 入站而丢）；
+	//  ② SQLite 的整数主键会复用已删除的最大 rowid，保留行可避免新服务器继承旧服务器历史。
+	// GORM 自动把归档行从服务器列表/拓扑/接入点候选/节点认证等常规查询中过滤掉。
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // HasAgentCap 节点是否声明了某项能力（空值 = 旧 agent，恒 false）。
@@ -166,23 +175,55 @@ type Plan struct {
 	// purchasable=商店展示并允许新购（非持有者）；renewable=持有者续费顺延。
 	// 商店身份感知过滤：非持有者只见 purchasable，持有者额外见自己可续费的套餐；
 	// 支付接口按同一矩阵兜底（持有查 renewable，非持有查 purchasable）。
-	Purchasable bool      `gorm:"default:false" json:"purchasable"`
-	Renewable   bool      `gorm:"default:false" json:"renewable"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Purchasable bool `gorm:"default:false" json:"purchasable"`
+	Renewable   bool `gorm:"default:false" json:"renewable"`
+	// DeletedAt 归档标记（2026-10-25）：删除套餐改为归档——默认列表与商城不可见，
+	// 管理端可「显示已归档」查看并恢复；历史订单靠 Order.PlanName/PlanSnapshot 自持可读信息。
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// PlanOrderSnapshot 订单上的套餐快照（JSON）。下单时点固化，套餐归档/改名后旧订单仍可
+// 展示「当时买的是什么」。仅作历史可读性用途，不参与计费判定（计费读用户行快照）。
+func PlanOrderSnapshot(p *Plan) string {
+	if p == nil {
+		return ""
+	}
+	b, err := json.Marshal(struct {
+		ID                uint64 `json:"id"`
+		Name              string `json:"name"`
+		PriceCents        int64  `json:"price_cents"`
+		TrafficGB         int64  `json:"traffic_gb"`
+		DurationDays      int    `json:"duration_days"`
+		DeviceLimit       int    `json:"device_limit"`
+		PermissionGroupID uint64 `json:"permission_group_id"`
+	}{
+		ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
+		DurationDays: p.DurationDays, DeviceLimit: p.DeviceLimit, PermissionGroupID: p.PermissionGroupID,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // Order 订单（余额直付即时生效：paid）。人工确认收款已去除（2026-08-14 方向④）。
 type Order struct {
-	ID            uint64     `gorm:"primaryKey" json:"id"`
-	OrderNo       string     `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
-	UserID        uint64     `gorm:"index;not null" json:"user_id"`
-	PlanID        uint64     `gorm:"index;not null" json:"plan_id"`
-	AmountCents   int64      `gorm:"not null" json:"amount_cents"`
-	PaymentMethod string     `gorm:"size:32;default:balance;index" json:"payment_method"` // balance（唯一）
-	Status        string     `gorm:"size:16;default:paid;index" json:"status"`            // paid（唯一）
-	CreatedAt     time.Time  `json:"created_at"`
-	PaidAt        *time.Time `json:"paid_at"`
+	ID            uint64 `gorm:"primaryKey" json:"id"`
+	OrderNo       string `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
+	UserID        uint64 `gorm:"index;not null" json:"user_id"`
+	PlanID        uint64 `gorm:"index;not null" json:"plan_id"`
+	AmountCents   int64  `gorm:"not null" json:"amount_cents"`
+	PaymentMethod string `gorm:"size:32;default:balance;index" json:"payment_method"` // balance（唯一）
+	Status        string `gorm:"size:16;default:paid;index" json:"status"`            // paid（唯一）
+	// 套餐快照（2026-10-25）：套餐可归档，历史订单不能依赖实时 JOIN plans 取名称。
+	// PlanName 用于列表展示；PlanSnapshot 固化下单时点的名称/价格/流量/时长/设备数/权限组。
+	// 存量订单由 backfillOrderPlanNames 回填名称，快照留空（属一次性迁移前的历史行）。
+	PlanName     string     `gorm:"size:64" json:"plan_name"`
+	PlanSnapshot string     `gorm:"type:text" json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+	PaidAt       *time.Time `json:"paid_at"`
 }
 
 // TrafficLog 节点上报的流量明细（按 用户×入站×周期）。
@@ -192,8 +233,12 @@ type Order struct {
 // billed_* 为计费口径（套餐配额判定/自动续费触发/订阅用量展示），落库时按
 // (用户生效组, 服务器) 生效入站倍率折算；历史行由一次性迁移按 1:1 回填。
 type TrafficLog struct {
-	ID          uint64    `gorm:"primaryKey" json:"id"`
-	UserID      uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:1;not null" json:"user_id"`
+	ID     uint64 `gorm:"primaryKey" json:"id"`
+	UserID uint64 `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:1;not null" json:"user_id"`
+	// ServerID 上报节点（2026-10-25）：入库时按连接身份写入，而不是靠 inbound_id 反查。
+	// 服务器删除会级联删入站，历史明细若只挂 inbound_id 就再也无法按服务器归集；
+	// 同时它也避免 SQLite 主键复用导致的历史误归集。0 = 迁移前旧行且入站已不存在（无法重建）。
+	ServerID    uint64    `gorm:"default:0" json:"server_id"`
 	InboundID   uint64    `gorm:"uniqueIndex:idx_traffic_uid_inb_period_cycle,priority:2;index" json:"inbound_id"`
 	UpBytes     int64     `gorm:"not null" json:"up_bytes"`
 	DownBytes   int64     `gorm:"not null" json:"down_bytes"`

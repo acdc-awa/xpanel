@@ -77,6 +77,8 @@ export interface ServerTrafficItem {
   down_bytes: number
   total_bytes: number
   percent: number
+  /** 服务器已归档：不在服务器列表，但历史流量仍计入统计 */
+  deleted?: boolean
 }
 
 export interface UserTrafficRankItem {
@@ -271,6 +273,10 @@ export interface Plan {
   permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
   sort_order?: number // 商城展示排序（越小越靠前）
   is_featured?: boolean // 商城「热门推荐」标记
+  /** 已归档：默认列表不返回，需 include_archived */
+  archived?: boolean
+  /** 归档时刻（未归档为 null） */
+  archived_at?: string | null
   created_at: string
 }
 

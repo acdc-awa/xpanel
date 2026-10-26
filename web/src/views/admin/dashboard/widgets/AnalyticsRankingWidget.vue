@@ -133,7 +133,10 @@ const orderColumns: TableColumn[] = [
             </span>
           </template>
           <template #cell-node-main="{ row }">
-            <span class="user-main-name">{{ row.name || `服务器#${row.server_id}` }}</span>
+            <span class="user-main-name">
+              {{ row.name || `服务器#${row.server_id}` }}
+              <span v-if="row.deleted" class="deleted-tag">已删除</span>
+            </span>
             <div class="user-sub-email tabular-num">{{ row.location || '—' }}</div>
           </template>
           <template #cell-node-percent="{ row }">
@@ -296,6 +299,19 @@ const orderColumns: TableColumn[] = [
 .money-gain {
   color: var(--color-text-status-success-1i2jf8, #1d8102);
   font-weight: 700;
+}
+
+.deleted-tag {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: 1px;
+  background: var(--color-background-container-header-irktp5, #f2f3f3);
+  color: var(--color-text-status-inactive-fqjc97, #879596);
 }
 
 .aws-order-status {
