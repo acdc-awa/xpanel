@@ -27,10 +27,14 @@ const (
 	SettingCaptchaType      = "captcha_type"
 	SettingTurnstileSiteKey = "turnstile_site_key"
 	SettingTurnstileSecret  = "turnstile_secret_key"
-	DefaultCaptchaType      = "turnstile"
-	turnstileHTTPTimeout    = 10 * time.Second
-	turnstileTokenTTL       = 10 * time.Minute // 一次性消费窗口
-	captchaMaxEntries       = 10000            // 消费表上限（异常流量下不无限增长）
+	// SettingTurnstileSecretConfigured 是只读虚拟字段：只表示 secret 是否已配置，绝不回显明文。
+	SettingTurnstileSecretConfigured = "turnstile_secret_key_configured"
+	// SettingTurnstileSecretClear 是写入指令：值为 "1" 时清除已保存的 secret（本身不落库）。
+	SettingTurnstileSecretClear = "turnstile_secret_key_clear"
+	DefaultCaptchaType          = "turnstile"
+	turnstileHTTPTimeout        = 10 * time.Second
+	turnstileTokenTTL           = 10 * time.Minute // 一次性消费窗口
+	captchaMaxEntries           = 10000            // 消费表上限（异常流量下不无限增长）
 )
 
 // turnstileVerifyEndpoint siteverify 地址；测试可指向 httptest 服务以脱离网络。
@@ -63,30 +67,65 @@ func LoadCaptchaConfig(db *gorm.DB) CaptchaConfig {
 	return cfg
 }
 
-// CaptchaSettings 读取验证分组全部键（设置页「安全」tab 展示；secret 仅管理端可见）。
+// CaptchaSettings 读取验证分组（设置页「安全」tab 展示）。
+// secret 是只写字段：这里只回显「是否已配置」，明文永不出库。
 func CaptchaSettings(db *gorm.DB) map[string]string {
-	keys := []string{SettingCaptchaEnable, SettingCaptchaType, SettingTurnstileSiteKey, SettingTurnstileSecret}
-	out := make(map[string]string, len(keys))
-	for _, k := range keys {
-		out[k] = GetSetting(db, k)
+	out := map[string]string{
+		SettingCaptchaEnable:    GetSetting(db, SettingCaptchaEnable),
+		SettingCaptchaType:      GetSetting(db, SettingCaptchaType),
+		SettingTurnstileSiteKey: GetSetting(db, SettingTurnstileSiteKey),
 	}
+	configured := "0"
+	if strings.TrimSpace(GetSetting(db, SettingTurnstileSecret)) != "" {
+		configured = "1"
+	}
+	out[SettingTurnstileSecretConfigured] = configured
 	return out
 }
 
 // SaveCaptchaSettings 保存验证分组（captcha_enable 规范化为 1/0；空串=默认关）。
+// secret 只写不读：空值表示「保持原密钥不变」，避免前端拿不到明文时把已保存的密钥覆盖为空；
+// 清除必须显式传 turnstile_secret_key_clear=1。未知键直接拒绝，防止借该分组写任意设置。
 func SaveCaptchaSettings(db *gorm.DB, vals map[string]string) error {
-	for k, v := range vals {
+	for k := range vals {
 		switch k {
-		case SettingCaptchaEnable:
-			if v != "" && v != "0" && v != "1" {
-				return errors.New("验证开关仅接受 1（开）/ 0（关）")
-			}
-		case SettingTurnstileSecret, SettingTurnstileSiteKey:
-			if len(v) > 500 {
-				return errors.New("密钥过长")
-			}
+		case SettingCaptchaEnable, SettingCaptchaType, SettingTurnstileSiteKey,
+			SettingTurnstileSecret, SettingTurnstileSecretClear:
+		default:
+			return errors.New("未知设置项：" + k)
 		}
-		if err := SetSetting(db, k, v); err != nil {
+	}
+	if v, ok := vals[SettingCaptchaEnable]; ok {
+		if v != "" && v != "0" && v != "1" {
+			return errors.New("验证开关仅接受 1（开）/ 0（关）")
+		}
+		if err := SetSetting(db, SettingCaptchaEnable, v); err != nil {
+			return err
+		}
+	}
+	if v, ok := vals[SettingCaptchaType]; ok {
+		if err := SetSetting(db, SettingCaptchaType, v); err != nil {
+			return err
+		}
+	}
+	if v, ok := vals[SettingTurnstileSiteKey]; ok {
+		if len(v) > 500 {
+			return errors.New("密钥过长")
+		}
+		if err := SetSetting(db, SettingTurnstileSiteKey, v); err != nil {
+			return err
+		}
+	}
+	if v, ok := vals[SettingTurnstileSecretClear]; ok && v == "1" {
+		if err := SetSetting(db, SettingTurnstileSecret, ""); err != nil {
+			return err
+		}
+	}
+	if v, ok := vals[SettingTurnstileSecret]; ok && v != "" {
+		if len(v) > 500 {
+			return errors.New("密钥过长")
+		}
+		if err := SetSetting(db, SettingTurnstileSecret, v); err != nil {
 			return err
 		}
 	}

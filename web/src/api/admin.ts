@@ -305,7 +305,12 @@ export interface CaptchaGroup {
   captcha_enable: string
   captcha_type: string
   turnstile_site_key: string
-  turnstile_secret_key: string
+  /** 只写不读：后端不会回显明文；表单留空表示「保持原密钥不变」。 */
+  turnstile_secret_key?: string
+  /** 只读：secret 是否已配置（"1"/"0"）。 */
+  turnstile_secret_key_configured?: string
+  /** 写入指令：值为 "1" 时清除已保存的 secret。 */
+  turnstile_secret_key_clear?: string
 }
 
 // 节点上报周期（秒；agent_settings 消息下发到在线节点，保存即时生效）
@@ -328,11 +333,20 @@ export interface SiteSettings {
   timezone?: TimezoneGroup
 }
 
+// 保存时各分组按需提交（分组内的字段也可省略，例如 secret 留空=保持原值）
+export interface SiteSettingsUpdate {
+  site?: Partial<SiteGroup>
+  captcha?: Partial<CaptchaGroup>
+  agent?: Partial<AgentGroup>
+  retention?: Record<string, string>
+  timezone?: Partial<TimezoneGroup>
+}
+
 export function getSettings() {
   return http.get<ApiResp<SiteSettings>>('/admin/settings')
 }
 
-export function updateSettings(payload: Partial<SiteSettings>) {
+export function updateSettings(payload: SiteSettingsUpdate) {
   return http.put<ApiResp<SiteSettings>>('/admin/settings', payload)
 }
 

@@ -20,6 +20,7 @@ import {
   CsKeyValuePairs,
   CsLoading,
   CsModal,
+  CsOption,
   CsPage,
   CsSelect,
   CsSpinner,
@@ -122,7 +123,10 @@ const emptyCaptcha = (): CaptchaGroup => ({
   captcha_enable: '0',
   captcha_type: 'turnstile',
   turnstile_site_key: '',
+  // secret 只写不读：表单里只存本次新输入的明文，后端从不回显
   turnstile_secret_key: '',
+  turnstile_secret_key_configured: '0',
+  turnstile_secret_key_clear: '',
 })
 const emptyAgent = (): AgentGroup => ({
   agent_report_interval: '60',
@@ -139,6 +143,31 @@ const form = reactive({
   agent: emptyAgent(),
   timezone: emptyTimezone(),
 })
+
+// secret 只写不读：GET 只回显「是否已配置」，保存时留空 = 保持原值，清除需显式指令
+const secretConfigured = computed(() => form.captcha.turnstile_secret_key_configured === '1')
+const secretClearing = computed(() => form.captcha.turnstile_secret_key_clear === '1')
+function markSecretClear() {
+  form.captcha.turnstile_secret_key = ''
+  form.captcha.turnstile_secret_key_clear = '1'
+}
+function undoSecretClear() {
+  form.captcha.turnstile_secret_key_clear = ''
+}
+// 只提交需要变更的 secret 字段：未输入新值时不发，避免把已配置的密钥覆盖成空
+function captchaPayload(): Record<string, string> {
+  const payload: Record<string, string> = {
+    captcha_enable: form.captcha.captcha_enable,
+    captcha_type: form.captcha.captcha_type,
+    turnstile_site_key: form.captcha.turnstile_site_key,
+  }
+  if (form.captcha.turnstile_secret_key_clear === '1') {
+    payload.turnstile_secret_key_clear = '1'
+  } else if (form.captcha.turnstile_secret_key) {
+    payload.turnstile_secret_key = form.captcha.turnstile_secret_key
+  }
+  return payload
+}
 
 // 时区候选：优先浏览器支持的完整 IANA 列表，缺失时回退常用清单（select 支持过滤/自定义输入）。
 const timezoneOptions = computed<string[]>(() => {
@@ -187,10 +216,11 @@ function boolSetting(get: () => string, set: (v: string) => void) {
     set: (v) => set(v ? '1' : '0'),
   })
 }
-const stopRegister = boolSetting(
-  () => form.site.stop_register,
-  (v) => (form.site.stop_register = v),
-)
+// 注册准入：库内是 stop_register（1=停止注册），界面按「开放注册」正向表达，避免双重否定
+const openRegister = computed<boolean>({
+  get: () => form.site.stop_register !== '1',
+  set: (v) => (form.site.stop_register = v ? '0' : '1'),
+})
 const subCleanUa = boolSetting(
   () => form.site.sub_clean_ua,
   (v) => (form.site.sub_clean_ua = v),
@@ -901,13 +931,15 @@ async function save() {
   try {
     const { data } = await updateSettings({
       site: { ...form.site },
-      captcha: { ...form.captcha },
+      captcha: captchaPayload(),
       agent: { ...form.agent },
       timezone: { ...form.timezone },
     })
     if (data.code === 0) {
       ElMessage.success('设置已保存并立即全站生效')
       setDisplayTimezone(form.timezone.display_timezone)
+      // 用服务端回写重置验证分组：清掉本次输入的 secret，并刷新「已配置」状态
+      Object.assign(form.captcha, emptyCaptcha(), data.data.captcha)
       siteStore.applyConfig({
         ...form.site,
         stop_register: form.site.stop_register === '1',
@@ -1086,11 +1118,11 @@ async function save() {
             <CsFormItem>
               <template #label>
                 用户注册准入
-                <TipIcon content="关闭后，新用户无法通过前端注册页开户；开放注册状态下仍可受邀请码机制限制。" />
+                <TipIcon content="开启后，新用户可通过前端注册页开户（仍受邀请码机制限制）；关闭后禁止新用户注册。" />
               </template>
-              <CsToggle v-model="stopRegister">
+              <CsToggle v-model="openRegister">
   <template #default>
-    {{ stopRegister ? '已关闭（禁止新用户注册）' : '开放注册（需邀请码）' }}
+    {{ openRegister ? '开放注册（需邀请码）' : '已关闭（禁止新用户注册）' }}
   </template>
 </CsToggle>
             </CsFormItem>
@@ -1265,9 +1297,23 @@ async function save() {
             <CsFormItem>
               <template #label>
                 Turnstile Secret Key
-                <TipIcon content="服务端与 Cloudflare 校验使用的通信私钥，请妥善保管，仅管理员可见。" />
+                <TipIcon content="服务端与 Cloudflare 校验使用的私钥。只写不读：保存后不再回显，留空表示保持原密钥不变。" />
               </template>
-              <CsInput v-model="form.captcha.turnstile_secret_key" type="password" show-password placeholder="0x4B...（请勿泄露）" />
+              <div class="secret-row">
+                <CsInput
+                  v-model="form.captcha.turnstile_secret_key"
+                  class="secret-input"
+                  type="password"
+                  show-password
+                  :disabled="secretClearing"
+                  :placeholder="secretConfigured ? '已配置（留空保持不变）' : '0x4B...（Cloudflare 控制台获取）'"
+                />
+                <CsBadge v-if="secretClearing" color="red">保存后清除</CsBadge>
+                <CsBadge v-else-if="secretConfigured" color="green">已配置</CsBadge>
+                <CsBadge v-else color="grey">未配置</CsBadge>
+                <CsButton v-if="secretConfigured && !secretClearing" @click="markSecretClear">清除</CsButton>
+                <CsButton v-else-if="secretClearing" @click="undoSecretClear">撤销</CsButton>
+              </div>
             </CsFormItem>
             <CsAlert type="info">
               在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。
@@ -1316,7 +1362,7 @@ async function save() {
                 <TipIcon content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。" />
               </template>
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
-                <CsSelect v-model="form.timezone.display_timezone" style="width: 300px">
+                <CsSelect v-model="form.timezone.display_timezone" filterable style="width: 300px">
                   <CsOption label="跟随浏览器" value="browser" />
                   <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
                 </CsSelect>
@@ -2117,6 +2163,19 @@ async function save() {
       color: var(--color-text-body-secondary-66ygbb);
       font-size: 11.5px;
     }
+  }
+}
+
+/* Secret 只写不读：输入框与前端的「已配置/清除」状态同一行 */
+.secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  .secret-input {
+    flex: 1 1 260px;
+    min-width: 0;
   }
 }
 </style>

@@ -40,6 +40,36 @@ const maxScale = ref(5)
 const rotation = ref(0) // 0, 90, 180, 270
 const offsetX = ref(0)
 const offsetY = ref(0)
+// 圆角（占裁剪框边长的百分比，0–50；50% 即正圆）。导出时烘焙进 PNG 的透明角里。
+const cornerRadius = ref(0)
+const cropRadius = computed(() => radiusForSide(cropBoxSize.value))
+const formatRadius = (value: number) => `${value}%`
+
+function radiusForSide(side: number): number {
+  return (side * cornerRadius.value) / 100
+}
+
+/** 往当前路径追加圆角矩形（调用方负责 beginPath）；老浏览器走 arcTo 兜底。 */
+function traceRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius: number
+) {
+  const r = Math.max(0, Math.min(radius, Math.min(w, h) / 2))
+  if (typeof (ctx as any).roundRect === 'function') {
+    ;(ctx as any).roundRect(x, y, w, h, r)
+    return
+  }
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
 
 const isDragging = ref(false)
 const dragStart = { x: 0, y: 0 }
@@ -262,6 +292,22 @@ function draw() {
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(imgObj.value, -imgObj.value.width / 2, -imgObj.value.height / 2)
   ctx.restore()
+
+  // 圆角预览：把裁剪框内的四个角清成透明（露出舞台底色），
+  // 与导出结果的圆角口径一致；半径 0 时 path 为空，不会有任何像素被清掉。
+  const radius = cropRadius.value
+  if (radius > 0) {
+    const box = cropBoxSize.value
+    const origin = (stageSize.value - box) / 2
+    ctx.save()
+    ctx.setTransform(dpr.value, 0, 0, dpr.value, 0, 0)
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.beginPath()
+    ctx.rect(origin, origin, box, box)
+    traceRoundedRect(ctx, origin, origin, box, box, radius)
+    ctx.fill('evenodd')
+    ctx.restore()
+  }
 }
 
 function generateCroppedDataUrl(): string {
@@ -275,6 +321,11 @@ function generateCroppedDataUrl(): string {
 
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
+
+  // 圆角裁切：透明角直接烘焙进导出的 PNG
+  ctx.beginPath()
+  traceRoundedRect(ctx, 0, 0, size, size, radiusForSide(size))
+  ctx.clip()
 
   const ratio = size / cropBoxSize.value
   ctx.translate(size / 2 + offsetX.value * ratio, size / 2 + offsetY.value * ratio)
@@ -293,9 +344,14 @@ function updatePreview() {
 
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height)
+  ctx.save()
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.scale(dpr.value, dpr.value)
+
+  ctx.beginPath()
+  traceRoundedRect(ctx, 0, 0, PREVIEW_SIZE, PREVIEW_SIZE, radiusForSide(PREVIEW_SIZE))
+  ctx.clip()
 
   const ratio = PREVIEW_SIZE / cropBoxSize.value
   ctx.save()
@@ -303,6 +359,8 @@ function updatePreview() {
   ctx.rotate((rotation.value * Math.PI) / 180)
   ctx.scale(scale.value * ratio, scale.value * ratio)
   ctx.drawImage(imgObj.value, -imgObj.value.width / 2, -imgObj.value.height / 2)
+  ctx.restore()
+  // 外层 restore 同时解除圆角裁剪，避免下次重绘时旧裁剪区（旧半径）继续生效
   ctx.restore()
 
   // 计算输出 Base64 大小
@@ -348,7 +406,11 @@ function handleConfirm() {
         <div class="cropper-mask">
           <div
             class="crop-box"
-            :style="{ width: cropBoxSize + 'px', height: cropBoxSize + 'px' }"
+            :style="{
+              width: cropBoxSize + 'px',
+              height: cropBoxSize + 'px',
+              borderRadius: cropRadius + 'px',
+            }"
           >
             <div class="crop-grid">
               <span class="grid-line h1" />
@@ -373,6 +435,20 @@ function handleConfirm() {
             @change="() => { draw(); updatePreview() }"
           />
           <CsIcon name="zoom-in" class="ctrl-icon" />
+        </div>
+
+        <div class="radius-slider-row">
+          <span class="ctrl-label">圆角</span>
+          <CsSlider
+            v-model="cornerRadius"
+            :min="0"
+            :max="50"
+            :step="1"
+            aria-label="圆角弧度"
+            :value-formatter="formatRadius"
+            @change="() => { draw(); updatePreview() }"
+          />
+          <span class="ctrl-value">{{ Math.round(cornerRadius) }}%</span>
         </div>
 
         <div class="action-btn-row">
@@ -485,7 +561,8 @@ function handleConfirm() {
   gap: 12px;
 }
 
-.zoom-slider-row {
+.zoom-slider-row,
+.radius-slider-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -494,6 +571,21 @@ function handleConfirm() {
   .ctrl-icon {
     color: var(--x-text-2, #64748b);
     flex: none;
+  }
+
+  .ctrl-label {
+    flex: none;
+    font-size: 12px;
+    color: var(--x-text-2, #64748b);
+  }
+
+  .ctrl-value {
+    flex: none;
+    min-width: 32px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--x-text-2, #64748b);
+    text-align: end;
   }
 
   /* 官方类名带哈希后缀，必须是属性选择器才能命中 */
@@ -531,8 +623,13 @@ function handleConfirm() {
 .preview-canvas {
   width: 32px;
   height: 32px;
-  border-radius: var(--x-radius-xs, 6px);
-  background: #fff;
+  /* 棋盘格衬底：让烘焙进 PNG 的透明圆角可见 */
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%),
+    linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%);
+  background-position: 0 0, 4px 4px;
+  background-size: 8px 8px;
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 

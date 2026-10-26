@@ -8,8 +8,8 @@ import (
 )
 
 // AdminSettings GET /api/v1/admin/settings —— 站点设置读取（分组式，17 号 P0 ①）。
-// 返回分组：site（站点）/ captcha（人机验证，管理端专属，含 secret）/ agent（节点上报周期）/
-// retention（数据保留天数，数据管理页）。
+// 返回分组：site（站点）/ captcha（人机验证，secret 只写不读：仅回显是否已配置）/
+// agent（节点上报周期）/ retention（数据保留天数，数据管理页）。
 // 2026-08-24 四端口拆分：web_base 与订阅端口退役（端口走 env/配置，web_base 由域名分流取代）。
 func (d *Deps) AdminSettings(c *gin.Context) {
 	site := map[string]string{}

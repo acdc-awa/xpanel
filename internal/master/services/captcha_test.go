@@ -212,3 +212,48 @@ func TestLoadCaptchaConfig(t *testing.T) {
 		t.Fatalf("enabled config not loaded: %+v", cfg)
 	}
 }
+
+// TestCaptchaSettingsNeverEchoesSecret secret 只写不读：读取只能拿到「已配置」标记。
+func TestCaptchaSettingsNeverEchoesSecret(t *testing.T) {
+	db := captchaTestDB(t)
+	got := CaptchaSettings(db)
+	if _, leaked := got[SettingTurnstileSecret]; leaked {
+		t.Fatal("CaptchaSettings 不得回显 secret 明文")
+	}
+	if got[SettingTurnstileSecretConfigured] != "1" {
+		t.Fatalf("已配置 secret 应回显 configured=1，got %q", got[SettingTurnstileSecretConfigured])
+	}
+}
+
+// TestSaveCaptchaSettingsSecretWriteOnly 空值保持原密钥、显式清除才删除、未知键拒绝。
+func TestSaveCaptchaSettingsSecretWriteOnly(t *testing.T) {
+	db := captchaTestDB(t)
+
+	// 前端拿不到明文，保存其它项时 secret 字段为空 —— 必须保留原值。
+	if err := SaveCaptchaSettings(db, map[string]string{
+		SettingCaptchaEnable:    "1",
+		SettingTurnstileSecret:  "",
+		SettingTurnstileSiteKey: "site-key",
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if got := GetSetting(db, SettingTurnstileSecret); got != "test-secret" {
+		t.Fatalf("空 secret 不应覆盖原值，got %q", got)
+	}
+
+	// 显式清除。
+	if err := SaveCaptchaSettings(db, map[string]string{SettingTurnstileSecretClear: "1"}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got := GetSetting(db, SettingTurnstileSecret); got != "" {
+		t.Fatalf("显式清除后 secret 应为空，got %q", got)
+	}
+	if got := CaptchaSettings(db)[SettingTurnstileSecretConfigured]; got != "0" {
+		t.Fatalf("清除后 configured 应为 0，got %q", got)
+	}
+
+	// 未知键不得写入。
+	if err := SaveCaptchaSettings(db, map[string]string{"evil_key": "x"}); err == nil {
+		t.Fatal("未知键应被拒绝")
+	}
+}

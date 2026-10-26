@@ -485,4 +485,12 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
 }
+
+/* 选项面板必须有高度上限：时区这类 400+ 项的长列表会直接撑出视口，
+   底部选项既看不到也滚不动。滚动限定在选项区，筛选框保持固定。 */
+.cs-select-dropdown [role='listbox'] {
+  max-height: min(320px, calc(100vh - 160px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 </style>

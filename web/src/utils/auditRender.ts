@@ -92,6 +92,11 @@ function onOff(v: unknown): string {
   return v === true || v === 1 || v === '1' ? '开启' : '关闭'
 }
 
+/** stop_register 是反向开关（1=停止注册），按界面口径展示为「开放注册」时需要取反。 */
+function openRegisterOnOff(v: unknown): string {
+  return v === true || v === 1 || v === '1' ? '关闭' : '开启'
+}
+
 function yesNoEnable(on: string, off: string): Fmt {
   return (v) => (v === true || v === 1 || v === '1' ? on : off)
 }
@@ -575,7 +580,7 @@ const siteDict: Dict = {
   sub_strict_ua: { label: '严格客户端模式', fmt: onOff },
   sub_blocked_ua: { label: '封禁 UA 关键词' },
   tos_url: { label: '服务条款地址', mono: true },
-  stop_register: { label: '关闭注册', fmt: onOff },
+  stop_register: { label: '开放注册', fmt: openRegisterOnOff },
   currency: { label: '货币代码' },
   currency_symbol: { label: '货币符号' },
 }
