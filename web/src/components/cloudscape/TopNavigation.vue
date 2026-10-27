@@ -162,11 +162,7 @@ function onIdentityClick(event: MouseEvent) {
   flex: none;
 }
 
-/* 窄屏优先保品牌图标与右侧工具，品牌名让位给页面标题/操作。 */
-@media (max-width: 430px) {
-  .cs-topnav-name {
-    display: none;
-  }
-}
+/* 站点标题在所有宽度都保留：移动端抽屉改为从应用栏下沿展开后，顶栏成了唯一常驻的
+   品牌位置，不能再让位（vendor 的 title 规则已带 nowrap + ellipsis，极窄时自动收缩）。 */
 
 </style>

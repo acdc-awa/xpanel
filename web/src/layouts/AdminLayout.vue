@@ -46,7 +46,8 @@ function toggleNavigation() {
 // 顶栏汉堡：桌面切换侧栏展开/收起，移动端打开抽屉（与官方控制台一致）
 function onNavToggleClick() {
   if (isMobile.value) {
-    drawerOpen.value = true
+    // 抽屉从应用栏下沿展开，汉堡本身不被遮罩盖住，所以同一个按钮要能收起
+    drawerOpen.value = !drawerOpen.value
     return
   }
   toggleNavigation()
@@ -343,7 +344,9 @@ onUnmounted(() => {
     <CsAppToolbar
       :height="TOOLBAR_HEIGHT"
       :sticky-top="topbarHeight"
-      :navigation-label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
+      :navigation-label="
+        isMobile ? (drawerOpen ? '关闭导航菜单' : '打开导航菜单') : navigationOpen ? '收起导航' : '展开导航'
+      "
       @navigation-click="onNavToggleClick"
     >
       <CsBreadcrumbGroup v-if="!isMobile && breadcrumbs.length" :items="breadcrumbs" />
@@ -373,12 +376,16 @@ onUnmounted(() => {
       <router-view />
     </CsAppLayout>
 
-    <!-- 移动端抽屉 -->
+    <!-- 移动端抽屉：从应用栏下沿展开（不遮挡顶栏 / toolbar），与官方控制台一致。
+         站点名常驻顶栏，抽屉顶部不再有标题行；关闭靠汉堡（同一个按钮切换）、
+         点遮罩或 Esc。 -->
     <CsDrawer
       v-model:visible="drawerOpen"
       placement="start"
       :size="280"
-      :header="site.appName || '导航'"
+      :top-offset="appHeaderHeight"
+      header="导航"
+      hide-header
       disable-content-paddings
     >
       <div class="admin-drawer-body">
