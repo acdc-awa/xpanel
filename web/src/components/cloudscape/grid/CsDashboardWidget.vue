@@ -35,16 +35,54 @@ const emit = defineEmits<{
 const rootRef = ref<HTMLDivElement | null>(null)
 
 /**
- * 卡片实际宽度决定标题是否与操作区分行：最宽的操作区（服务器筛选框 227px）
- * 加上标题最小可读宽度约需 500px，低于这个宽度就分行，避免标题被挤成竖排。
+ * 卡片实际宽度决定是否进入窄卡片模式（标题单行省略、副标题计数让位）。
+ * 窄卡片里操作区是否留在第一行，再由下面的实测宽度单独决定。
  */
 const narrowHeader = ref(false)
 const NARROW_HEADER_WIDTH = 500
 let sizeObserver: ResizeObserver | null = null
 
+const headerRef = ref<HTMLElement | null>(null)
+const handleRef = ref<HTMLElement | null>(null)
+const settingsRef = ref<HTMLElement | null>(null)
+const menuRef = ref<HTMLElement | null>(null)
+
+/**
+ * 窄卡片里操作区不一定都要落到第二行：粒度选择器降级成的下拉只有 90px 左右，
+ * 和标题、更多菜单排一行完全放得下。只有操作区本身很宽（服务器筛选框、
+ * 未降级的分段控件）时才换行——把标题压到不足 80px 还不如让操作区独占一行。
+ */
+const settingsInline = ref(true)
+const TITLE_MIN_WIDTH = 80
+/** 超过这个宽度的操作区视为「宽控件」，窄卡片里始终独占一行。 */
+const COMPACT_ACTIONS_WIDTH = 120
+/** handle→标题 4 + 标题→操作区 8 + 操作区→更多菜单 8 */
+const HEADER_INLINE_GAPS = 20
+
 function syncNarrowHeader() {
-  const width = rootRef.value?.clientWidth ?? 0
-  if (width > 0) narrowHeader.value = width < NARROW_HEADER_WIDTH
+  const root = rootRef.value
+  const header = headerRef.value
+  if (!root || !header) return
+  const width = root.clientWidth
+  if (width <= 0) return
+  narrowHeader.value = width < NARROW_HEADER_WIDTH
+  if (!narrowHeader.value) {
+    settingsInline.value = true
+    return
+  }
+  const style = getComputedStyle(header)
+  const contentWidth =
+    header.clientWidth -
+    (Number.parseFloat(style.paddingLeft) || 0) -
+    (Number.parseFloat(style.paddingRight) || 0)
+  const chromeWidth =
+    (handleRef.value?.offsetWidth ?? 0) +
+    (settingsRef.value?.offsetWidth ?? 0) +
+    (menuRef.value?.offsetWidth ?? 0)
+  const actionsWidth = settingsRef.value?.offsetWidth ?? 0
+  settingsInline.value =
+    actionsWidth <= COMPACT_ACTIONS_WIDTH &&
+    contentWidth - chromeWidth >= TITLE_MIN_WIDTH + HEADER_INLINE_GAPS
 }
 
 const settle = useSettleMeasure(syncNarrowHeader)
@@ -118,8 +156,18 @@ const headerClass = computed(() => CSB['board-item'].header)
           class="dashboard-widget-container"
         >
           <template #header>
-            <div :class="cx(headerClass, 'cs-widget-header', narrowHeader && 'cs-widget-header-narrow')">
-              <div :class="cx(CSB['board-item'].fixed, CSB['board-item'].handle)">
+            <div
+              ref="headerRef"
+              :class="
+                cx(
+                  headerClass,
+                  'cs-widget-header',
+                  narrowHeader && 'cs-widget-header-narrow',
+                  narrowHeader && settingsInline && 'cs-widget-header-inline'
+                )
+              "
+            >
+              <div ref="handleRef" :class="cx(CSB['board-item'].fixed, CSB['board-item'].handle)">
                 <span
                   class="awsui-drag-handle"
                   :class="CSB['internal/drag-handle'].handle"
@@ -133,10 +181,13 @@ const headerClass = computed(() => CSB['board-item'].header)
                   {{ title }}
                 </Header>
               </div>
-              <div :class="cx(CSB['board-item'].fixed, CSB['board-item'].settings, 'widget-settings')">
+              <div
+                ref="settingsRef"
+                :class="cx(CSB['board-item'].fixed, CSB['board-item'].settings, 'widget-settings')"
+              >
                 <slot name="actions" />
               </div>
-              <div class="widget-menu">
+              <div ref="menuRef" class="widget-menu">
                 <ButtonDropdown
                   icon-only
                   icon-name="ellipsis"
@@ -221,9 +272,24 @@ const headerClass = computed(() => CSB['board-item'].header)
 
 .cs-widget-header-narrow .widget-settings {
   order: 3;
-  flex: 0 1 auto !important;
+  flex: 0 0 auto !important;
   max-inline-size: 100%;
   margin-inline-start: auto !important;
+}
+
+/* 操作区足够窄（下拉/粒度选择器）时留在标题同一行：标题让出宽度并省略，
+   更多菜单仍固定在最右。只有放不下（筛选框）才走上面的第二行。 */
+.cs-widget-header-narrow.cs-widget-header-inline .cs-widget-title {
+  flex: 1 1 0 !important;
+}
+
+.cs-widget-header-narrow.cs-widget-header-inline .widget-settings {
+  order: 2;
+  margin-inline-start: 8px !important;
+}
+
+.cs-widget-header-narrow.cs-widget-header-inline .widget-menu {
+  order: 3;
 }
 
 /* 筛选框按可用宽度收缩，否则它会带着输入框的固有宽度把操作区撑到卡片外 */
