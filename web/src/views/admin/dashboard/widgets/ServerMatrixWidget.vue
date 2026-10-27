@@ -9,6 +9,7 @@ import {
   CsProgressBar,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
+import { useSettleMeasure } from '@/components/cloudscape/grid/useSettleMeasure'
 import { formatDateTime } from '@/utils/timezone'
 import type { ServerMatrixItem } from '@/api/types'
 import type { DashboardContext } from '../types'
@@ -64,17 +65,23 @@ function syncCompactLayout() {
   }
 }
 
+const settle = useSettleMeasure(syncCompactLayout)
+
 onMounted(() => {
   syncCompactLayout()
   if (bodyRef.value && typeof ResizeObserver !== 'undefined') {
     bodyObserver = new ResizeObserver(syncCompactLayout)
     bodyObserver.observe(bodyRef.value)
   }
+  // 外壳定宽/GridStack 排版晚于挂载，ResizeObserver 在部分切换路径里只回调第一次
+  settle.start()
+  window.addEventListener('resize', settle.start)
 })
 
 onUnmounted(() => {
   bodyObserver?.disconnect()
   bodyObserver = null
+  window.removeEventListener('resize', settle.start)
 })
 
 function cpuPercent(row: ServerMatrixItem): number {

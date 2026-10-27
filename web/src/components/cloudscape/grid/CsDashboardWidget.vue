@@ -6,6 +6,7 @@ import Header from '../Header.vue'
 import ButtonDropdown from '../ButtonDropdown.vue'
 import { CSB } from '../board-classes'
 import { cx } from '../utils'
+import { useSettleMeasure } from './useSettleMeasure'
 
 const props = withDefaults(
   defineProps<{
@@ -46,6 +47,8 @@ function syncNarrowHeader() {
   if (width > 0) narrowHeader.value = width < NARROW_HEADER_WIDTH
 }
 
+const settle = useSettleMeasure(syncNarrowHeader)
+
 interface GridContext {
   registerItem: (el: HTMLElement) => void
   unregisterItem: (el: HTMLElement) => void
@@ -76,11 +79,15 @@ onMounted(() => {
     sizeObserver = new ResizeObserver(syncNarrowHeader)
     sizeObserver.observe(rootRef.value)
   }
+  // 外壳定宽/GridStack 排版都晚于挂载，且 ResizeObserver 在部分切换路径里只回调第一次
+  settle.start()
+  window.addEventListener('resize', settle.start)
 })
 
 onUnmounted(() => {
   sizeObserver?.disconnect()
   sizeObserver = null
+  window.removeEventListener('resize', settle.start)
   if (rootRef.value) gridContext?.unregisterItem(rootRef.value)
 })
 
@@ -128,6 +135,8 @@ const headerClass = computed(() => CSB['board-item'].header)
               </div>
               <div :class="cx(CSB['board-item'].fixed, CSB['board-item'].settings, 'widget-settings')">
                 <slot name="actions" />
+              </div>
+              <div class="widget-menu">
                 <ButtonDropdown
                   icon-only
                   icon-name="ellipsis"
@@ -170,6 +179,13 @@ const headerClass = computed(() => CSB['board-item'].header)
   flex-wrap: nowrap;
 }
 
+.widget-menu {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  margin-inline-start: 8px;
+}
+
 /* 官方 Board 的 header 是不换行的 flex：操作区（筛选框/粒度选择器）的固定宽度
    会把标题压到只剩一两个字宽，中文于是逐字竖排、整行高达 200px+。
    窄卡片（按实测宽度 < 500）时标题独占第一行、操作区落到第二行。
@@ -180,11 +196,31 @@ const headerClass = computed(() => CSB['board-item'].header)
 }
 
 .cs-widget-header-narrow .cs-widget-title {
-  flex: 1 1 calc(100% - 36px) !important;
+  order: 1;
+  flex: 1 1 calc(100% - 84px) !important;
   min-inline-size: 0;
 }
 
+/* 窄卡片里标题只占一行：长标题省略而不是折成两三层把 header 撑高；
+   副标题计数（实时采样 / N 实例）是补充信息，窄卡片里先让位给主标题。 */
+.cs-widget-header-narrow .cs-widget-title :deep(h2) {
+  display: block !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-widget-header-narrow .cs-widget-title :deep([class*='awsui_counter_']) {
+  display: none;
+}
+
+.cs-widget-header-narrow .widget-menu {
+  order: 2;
+  margin-inline-start: 8px;
+}
+
 .cs-widget-header-narrow .widget-settings {
+  order: 3;
   flex: 0 1 auto !important;
   max-inline-size: 100%;
   margin-inline-start: auto !important;

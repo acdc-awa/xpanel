@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { CsDashboardWidget } from '@/components/cloudscape'
+import { useSettleMeasure } from '@/components/cloudscape/grid/useSettleMeasure'
 import { formatBytes } from '@/utils/format'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
@@ -74,17 +75,23 @@ function syncColumnCount() {
   }
 }
 
+const settle = useSettleMeasure(syncColumnCount)
+
 onMounted(() => {
   syncColumnCount()
   if (wrapRef.value && typeof ResizeObserver !== 'undefined') {
     wrapObserver = new ResizeObserver(syncColumnCount)
     wrapObserver.observe(wrapRef.value)
   }
+  // 外壳定宽/GridStack 排版晚于挂载，ResizeObserver 在部分切换路径里只回调第一次
+  settle.start()
+  window.addEventListener('resize', settle.start)
 })
 
 onUnmounted(() => {
   wrapObserver?.disconnect()
   wrapObserver = null
+  window.removeEventListener('resize', settle.start)
 })
 </script>
 
