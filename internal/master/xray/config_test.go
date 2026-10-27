@@ -954,7 +954,8 @@ func clientFlowOf(t *testing.T, streamJSON, userFlow string) (string, bool) {
 // 有值 → clients[0].flow 输出；空 → 不输出 flow 字段。
 // （入站级流控三态：空=自动 / xtls-rprx-vision=全开 / none=禁自动——的计算与测试在服务层）
 // TestGenerateConfig_VLESSInboundVlessEnc vlessenc 安全层：relay 入站 settings_json.decryption
-// 保留（不再强制 none），stream 层 security none + tcp → 客户端自动 vision。
+// 保留（不再强制 none），且**不产出 flow**——vlessenc 与 XTLS 不搭配（XTLS 只在 TCP+TLS/REALITY
+// 下能直拷加密数据，vlessenc 下只能穿透 Encryption）。此处原断言「自动 vision」属误配。
 func TestGenerateConfig_VLESSInboundVlessEnc(t *testing.T) {
 	dec := "mlkem768x25519plus.native.600s." + goldenMlkemSeed
 	inb := models.Inbound{
@@ -978,8 +979,8 @@ func TestGenerateConfig_VLESSInboundVlessEnc(t *testing.T) {
 	}
 	clients := asArray(t, settings["clients"], "clients")
 	c0 := asObject(t, clients[0], "clients[0]")
-	if c0["flow"] != "xtls-rprx-vision" {
-		t.Errorf("vlessenc + tcp + security none 应自动 vision: %v", c0["flow"])
+	if c0["flow"] != nil {
+		t.Errorf("vlessenc 不应带 flow（与 XTLS 不搭配）: %v", c0["flow"])
 	}
 }
 
@@ -1043,8 +1044,8 @@ func TestGenerateConfig_InboundRefVlessEnc(t *testing.T) {
 	if u0["encryption"] != wantEnc {
 		t.Errorf("encryption 派生失败:\n got %v\nwant %s", u0["encryption"], wantEnc)
 	}
-	if u0["flow"] != "xtls-rprx-vision" {
-		t.Errorf("vlessenc 目标 + tcp 应自动 vision: %v", u0["flow"])
+	if u0["flow"] != nil {
+		t.Errorf("vlessenc 目标不应带 flow（与 XTLS 不搭配）: %v", u0["flow"])
 	}
 	stream := asObject(t, ob["streamSettings"], "streamSettings")
 	if stream["security"] != "none" {

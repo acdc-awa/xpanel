@@ -472,10 +472,12 @@ const securityOptions = computed<SegmentedOption[]>(() =>
   }))
 )
 
+// XTLS 只在 TCP+TLS/REALITY 下能直接对拷加密后的数据；VLESS Encryption 下只能「穿透
+// Encryption」，所以 vlessenc 不参与 vision 门控（后端同样不给 vlessenc 产出 flow）。
 const allowVisionFlow = computed(() => {
   return localProtocol.value === 'vless' &&
     localNetwork.value === 'tcp' &&
-    (localTlsType.value === 'reality' || localTlsType.value === 'tls' || Boolean(vlessForm.value.decryption && vlessForm.value.decryption !== 'none'))
+    (localTlsType.value === 'reality' || localTlsType.value === 'tls')
 })
 
 // 只暴露 xray 真正需要的两态：留空 / xtls-rprx-vision。
@@ -1878,12 +1880,12 @@ watch(
             >
               <template #info>
                 <TipIcon
-                  content="Vision 属于协议 settings，不属于传输层：它让 TCP 在 TLS 解密后零拷贝转发。留空时只有 TCP + REALITY 会由后端自动补 vision；TCP + TLS / VLESS Encryption 需要手动选择。"
+                  content="Vision 属于协议 settings，不属于传输层：它让 TCP 在 TLS 解密后零拷贝转发。留空时只有 TCP + REALITY 会由后端自动补 vision；TCP + TLS 需要手动选择。VLESS Encryption 与 XTLS 不搭配（没有可直拷的底层 TLS，只能穿透 Encryption），因此不提供该选项。"
                 />
               </template>
               <CsFormItem
                 label="流控算法 (Flow)"
-                :constraint-text="allowVisionFlow ? '' : '当前安全层不支持 Vision：需 TLS、REALITY 或开启 VLESS Encryption。'"
+                :constraint-text="allowVisionFlow ? '' : '当前安全层不支持 Vision：仅 TCP + TLS / REALITY 可用（VLESS Encryption 下只能穿透 Encryption）。'"
               >
                 <CsSelect
                   v-model="vlessForm.flow"

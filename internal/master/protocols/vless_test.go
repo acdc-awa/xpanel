@@ -25,26 +25,32 @@ func TestVLESSDescriptor(t *testing.T) {
 }
 
 // TestVLESSResolveFlow flow 决议（生成侧盖戳与订阅侧同源）：
-// 入站级 none 禁用自动注入 → 空 + tcp+reality 自动 vision → 其余透传。
+// 入站级 none 禁用自动注入 → 空 + tcp+reality 自动 vision → vlessenc 一律不产出 → 其余透传。
 func TestVLESSResolveFlow(t *testing.T) {
+	const validDec = "mlkem768x25519plus.native.600s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	p := VLESSPlugin{}
 	cases := []struct {
 		name     string
 		network  string
 		security string
+		dec      string
 		inbFlow  string
 		want     string
 	}{
-		{"自动: tcp+reality", "tcp", "reality", "", "xtls-rprx-vision"},
-		{"自动: 非 reality 不注入", "tcp", "tls", "", ""},
-		{"自动: xhttp+reality 不注入", "xhttp", "reality", "", ""},
-		{"入站级开启", "tcp", "reality", "xtls-rprx-vision", "xtls-rprx-vision"},
-		{"入站级开启(tls 透传)", "tcp", "tls", "xtls-rprx-vision", "xtls-rprx-vision"},
-		{"入站级 none 禁用", "tcp", "reality", "none", ""},
-		{"入站级 none + 非 reality", "tcp", "tls", "none", ""},
+		{"自动: tcp+reality", "tcp", "reality", "", "", "xtls-rprx-vision"},
+		{"自动: 非 reality 不注入", "tcp", "tls", "", "", ""},
+		{"自动: xhttp+reality 不注入", "xhttp", "reality", "", "", ""},
+		{"入站级开启", "tcp", "reality", "", "xtls-rprx-vision", "xtls-rprx-vision"},
+		{"入站级开启(tls 透传)", "tcp", "tls", "", "xtls-rprx-vision", "xtls-rprx-vision"},
+		{"入站级 none 禁用", "tcp", "reality", "", "none", ""},
+		{"入站级 none + 非 reality", "tcp", "tls", "", "none", ""},
+		// vlessenc 与 XTLS 不搭配：即使显式开了 vision 也按空处理（两端同源，不会失配）
+		{"vlessenc 不自动注入", "tcp", "none", validDec, "", ""},
+		{"vlessenc 覆盖显式 vision", "tcp", "none", validDec, "xtls-rprx-vision", ""},
+		{"vlessenc + reality 不注入", "tcp", "reality", validDec, "", ""},
 	}
 	for _, c := range cases {
-		spec := &contracts.InboundSpec{Network: c.network, Security: c.security}
+		spec := &contracts.InboundSpec{Network: c.network, Security: c.security, Settings: map[string]any{"decryption": c.dec}}
 		if got := p.ResolveFlow(spec, c.inbFlow); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
@@ -164,5 +170,37 @@ func TestVLESSProjectPeer(t *testing.T) {
 	}
 	if dto.Security.Reality == nil || dto.Security.Reality.PublicKey != "peer-pbk" || dto.Security.Reality.ShortID != "cd34" {
 		t.Errorf("reality 选项未正确提取: %+v", dto.Security.Reality)
+	}
+}
+
+// TestVLESSProjectPeer_VlessEncNoFlow vlessenc 落地：参照出站必须派生 encryption 但**不带 flow**。
+// 反向验证：若把 vlessEncActive 判断从 ProjectClient 里去掉，本用例会拿到 xtls-rprx-vision。
+func TestVLESSProjectPeer_VlessEncNoFlow(t *testing.T) {
+	const validDec = "mlkem768x25519plus.native.600s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	p := VLESSPlugin{}
+	inb := models.Inbound{
+		ID:             102,
+		Tag:            "relay-enc",
+		Protocol:       "vless",
+		Port:           8443,
+		InternalUUID:   "internal-uuid-enc",
+		SettingsJSON:   `{"decryption":"` + validDec + `"}`,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+	}
+	dto, err := p.ProjectClient(&contracts.ClientProjectionInput{
+		Role:      contracts.RolePeer,
+		RefTarget: &contracts.RefTarget{Inbound: inb, ServerHost: "peer-exit.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectClient(peer) 失败: %v", err)
+	}
+	if dto == nil || dto.Auth == nil {
+		t.Fatal("ProjectClient(peer) 返回空 DTO")
+	}
+	if dto.Auth.Encryption == "" || dto.Auth.Encryption == "none" {
+		t.Errorf("vlessenc 落地应派生客户端 encryption，got %q", dto.Auth.Encryption)
+	}
+	if dto.Auth.Flow != "" {
+		t.Errorf("vlessenc 落地不应带 flow，got %q", dto.Auth.Flow)
 	}
 }

@@ -91,19 +91,37 @@ func (p VLESSPlugin) ServerClients(users []protocol.User, spec *contracts.Inboun
 
 // ResolveFlow 用户 flow 决议（生成侧盖戳与订阅侧同源，入参为入站自身的传输/安全）。
 func (VLESSPlugin) ResolveFlow(spec *contracts.InboundSpec, inboundFlow string) string {
+	if vlessEncActive(spec) {
+		return ""
+	}
 	return resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
 }
 
 // ResolveRelayFlow 机间中继凭据的 flow：在 ResolveFlow 之上，tcp 且
-// tls / vlessenc 同样自动 vision（中继链路必须带流控，普通用户不自动注入）。
+// reality / tls 同样自动 vision（中继链路必须带流控，普通用户不自动注入）。
 func (VLESSPlugin) ResolveRelayFlow(spec *contracts.InboundSpec, inboundFlow string) string {
+	if vlessEncActive(spec) {
+		return ""
+	}
 	flow := resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
-	dec, _ := spec.Settings["decryption"].(string)
 	if flow == "" && spec.Network == "tcp" &&
-		(spec.Security == "reality" || spec.Security == "tls" || VlessEncEnabled(dec)) {
+		(spec.Security == "reality" || spec.Security == "tls") {
 		flow = "xtls-rprx-vision"
 	}
 	return flow
+}
+
+// vlessEncActive 判断入站是否启用 VLESS Encryption（settings.decryption 非空且非 none）。
+// vlessenc 与 XTLS 不搭配：XTLS 只在 TCP+TLS/REALITY 下能直接对拷加密后的数据，
+// vlessenc 下没有可对拷的底层 TLS，只能是「仅穿透 Encryption」——此时带 flow 不但拿不到
+// XTLS 的收益，还会把两条链路锁死在同一个 flow 上。故启用 vlessenc 时一律不产出 flow，
+// 显式配置的 xtls-rprx-vision 也按空处理（生成侧与订阅侧同源，两端不会失配）。
+func vlessEncActive(spec *contracts.InboundSpec) bool {
+	if spec == nil {
+		return false
+	}
+	dec, _ := spec.Settings["decryption"].(string)
+	return VlessEncEnabled(dec)
 }
 
 // resolveVLESSFlow flow 决议规则：
@@ -212,8 +230,11 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		encryption = enc
 	}
 	dto.Auth = &contracts.ClientCredentialDTO{UUID: in.UserUUID, Encryption: encryption}
-	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）
-	dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
+	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）；vlessenc 下不产出 flow。
+	dto.Auth.Flow = ""
+	if !vlessEncActive(spec) {
+		dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
+	}
 
 	switch sec {
 	case "tls":
@@ -261,7 +282,9 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 	}
 
 	flow := ""
-	if spec.Network == "tcp" && (spec.Security == "reality" || spec.Security == "tls" || VlessEncEnabled(dec)) {
+	// vlessenc 下不带 flow（见 vlessEncActive 注释）：中继链路两端都由本规则决议，不会失配。
+	if !vlessEncActive(spec) && spec.Network == "tcp" &&
+		(spec.Security == "reality" || spec.Security == "tls") {
 		flow = "xtls-rprx-vision"
 	}
 

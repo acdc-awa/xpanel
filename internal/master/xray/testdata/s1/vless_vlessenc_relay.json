@@ -19,7 +19,6 @@
         "clients": [
           {
             "email": "relay-ve-relay@panel.local",
-            "flow": "xtls-rprx-vision",
             "id": "22222222-2222-2222-2222-222222222222"
           }
         ],

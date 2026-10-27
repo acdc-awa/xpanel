@@ -78,7 +78,9 @@ func TestVLESSResolveRelayFlow(t *testing.T) {
 	}{
 		{"tcp+reality 自动 vision", "tcp", "reality", "", "", "xtls-rprx-vision"},
 		{"tcp+tls 中继自动 vision", "tcp", "tls", "", "", "xtls-rprx-vision"},
-		{"tcp+vlessenc 中继自动 vision", "tcp", "none", validDec, "", "xtls-rprx-vision"},
+		// vlessenc 与 XTLS 不搭配：中继链路同样不注入（此前误把它算作 vision 可用场景）
+		{"tcp+vlessenc 不注入 vision", "tcp", "none", validDec, "", ""},
+		{"tcp+vlessenc 覆盖显式 vision", "tcp", "none", validDec, "xtls-rprx-vision", ""},
 		{"tcp+none 无 flow", "tcp", "none", "", "", ""},
 		{"中继覆盖显式 none（历史行为）", "tcp", "tls", "", "none", "xtls-rprx-vision"},
 		{"显式 flow 原样保留", "tcp", "none", "", "xtls-rprx-vision", "xtls-rprx-vision"},
