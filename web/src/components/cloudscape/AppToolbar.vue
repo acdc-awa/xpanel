@@ -46,7 +46,7 @@ const style = computed(() => ({
 
 <template>
   <div :class="[cs['universal-toolbar'], 'cs-app-toolbar']" :style="style">
-    <div :class="cs['toolbar-container']">
+    <div :class="cx(cs['toolbar-container'], !slots.tools && 'cs-toolbar-no-drawers')">
       <nav :class="cs['universal-toolbar-nav']">
         <button
           type="button"
@@ -75,5 +75,12 @@ const style = computed(() => ({
   block-size: var(--cs-app-toolbar-height, 56px);
   inset-block-start: var(--cs-app-toolbar-top, 56px);
   border-block-end: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
+}
+
+/* vendor 的网格固定留了第 4 列（抽屉），没有 tools 插槽时它是空 1fr，
+   面包屑只能拿到 3/4 宽度。没有抽屉就把这一列去掉（vendor 规则带 :not(#\9)
+   的 ID 特异性，只能 !important 覆盖）。 */
+.cs-toolbar-no-drawers {
+  grid-template-columns: min-content min-content minmax(0, 3fr) !important;
 }
 </style>

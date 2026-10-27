@@ -226,7 +226,7 @@ const topbarUtilities = computed<TopNavigationUtility[]>(() => [
     iconName: 'user-profile',
     text: '切换至用户端视图',
     title: '切换至用户端视图',
-    collapseAt: 'narrow',
+    // 窄屏只收文字、图标常驻：手机上没有别处能进用户端
     onClick: () => void router.push('/dashboard'),
   },
 ])
@@ -346,7 +346,8 @@ onUnmounted(() => {
       "
       @navigation-click="onNavToggleClick"
     >
-      <CsBreadcrumbGroup v-if="!isMobile && breadcrumbs.length" :items="breadcrumbs" />
+      <!-- 面包屑在移动端也保留：抽屉已不遮应用栏，这里就是当前位置的唯一提示 -->
+      <CsBreadcrumbGroup v-if="breadcrumbs.length" :items="breadcrumbs" />
     </CsAppToolbar>
 
     <CsAppLayout
