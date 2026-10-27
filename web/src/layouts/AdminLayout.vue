@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adminMenuGroups, type MenuGroup } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -241,6 +241,21 @@ const contentType = computed(() => (route.path === '/admin/dashboard' ? 'dashboa
 /** 路由级宽度：`meta.contentWidth = 'full'` 用满导航右侧的剩余宽度（画布/大表格用）。 */
 const contentMaxWidth = computed(() => (route.meta.contentWidth === 'full' ? 'full' : undefined))
 
+// 顶栏高度不能写死：TopNavigation 按自身宽度分宽/中/窄三档，padding-box 分别是
+// 56 / 48 / 40px（外加 1px 分隔线），窄屏比桌面矮 16px。应用栏的 sticky 起点
+// 与 AppLayout 的顶偏移都跟着实际渲染高度走，否则窄屏会在两条 bar 之间露出缝隙。
+const TOOLBAR_HEIGHT = 40
+const topbarRef = ref<ComponentPublicInstance | null>(null)
+const topbarHeight = ref(57)
+const appHeaderHeight = computed(() => topbarHeight.value + TOOLBAR_HEIGHT)
+let topbarObserver: ResizeObserver | null = null
+
+function syncTopbarHeight() {
+  const el = topbarRef.value?.$el as HTMLElement | undefined
+  const height = el?.offsetHeight ?? 0
+  if (height > 0) topbarHeight.value = height
+}
+
 // 响应式分级：<768px 手机端走抽屉；768px~1024px (Pad端) 默认收起导航
 const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 767.98px)') : null
 const tabletMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
@@ -270,6 +285,12 @@ onMounted(async () => {
   mobileMq?.addEventListener('change', onMobileMq)
   tabletMq?.addEventListener('change', onTabletMq)
   window.addEventListener('keydown', handleGlobalKeydown)
+  syncTopbarHeight()
+  const topbarEl = topbarRef.value?.$el as HTMLElement | undefined
+  if (topbarEl && typeof ResizeObserver !== 'undefined') {
+    topbarObserver = new ResizeObserver(syncTopbarHeight)
+    topbarObserver.observe(topbarEl)
+  }
   try {
     const { data } = await getSystemStatus()
     if (data.code === 0) panelVersion.value = data.data.panel_version
@@ -281,6 +302,8 @@ onUnmounted(() => {
   mobileMq?.removeEventListener('change', onMobileMq)
   tabletMq?.removeEventListener('change', onTabletMq)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  topbarObserver?.disconnect()
+  topbarObserver = null
 })
 </script>
 
@@ -289,6 +312,7 @@ onUnmounted(() => {
     <!-- 全宽顶栏：品牌 + 菜单搜索 + 全局工具。官方 top-navigation 上下文会把 token
          钉成深色（AWS 控制台顶栏恒深），这里不套上下文，改用页面 token 跟着亮/暗主题走。 -->
     <CsTopNavigation
+      ref="topbarRef"
       class="admin-topbar"
       :identity="topbarIdentity"
       :utilities="topbarUtilities"
@@ -317,8 +341,8 @@ onUnmounted(() => {
 
     <!-- 应用栏：汉堡 + 面包屑，横跨全宽（官方 universal toolbar） -->
     <CsAppToolbar
-      :height="40"
-      :sticky-top="57"
+      :height="TOOLBAR_HEIGHT"
+      :sticky-top="topbarHeight"
       :navigation-label="isMobile ? '打开导航菜单' : navigationOpen ? '收起导航' : '展开导航'"
       @navigation-click="onNavToggleClick"
     >
@@ -328,7 +352,7 @@ onUnmounted(() => {
     <CsAppLayout
       :navigation-open="navigationOpen"
       :navigation-width="236"
-      :header-height="96"
+      :header-height="appHeaderHeight"
       :navigation-hide="isMobile"
       :content-type="contentType"
       :max-content-width="contentMaxWidth"
