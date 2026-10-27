@@ -8,6 +8,7 @@ export interface BoxOutbound {
   tag: string
   protocol: string
   inbound_ref?: number | null
+  send_proxy_protocol?: boolean
   virtual?: boolean
   owner_inbound_id?: number
   has_payload?: boolean

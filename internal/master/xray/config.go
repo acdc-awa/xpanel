@@ -334,8 +334,26 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 
 	// 预检：InboundRef 出站或其引用的落地入站必须持有认证凭据
 	for _, ob := range outbounds {
-		if !ob.Enabled || ob.InboundRef == nil {
+		if !ob.Enabled {
 			continue
+		}
+		if ob.SendProxyProtocol && ob.InboundRef == nil {
+			return nil, fmt.Errorf("出站 %s 开启了 PROXY Protocol，但未引用落地入站", ob.Tag)
+		}
+		if ob.InboundRef == nil {
+			continue
+		}
+		// 出站级 PROXY Protocol 只对「TCP 引用型出站」成立：自定义 JSON 会覆盖用户手写的
+		// sockopt，Hysteria 2 走 QUIC/UDP 根本没有 PP 头可加。两者都 fail-closed，
+		// 否则开关看着是开的、实际发不出去，落地按 REQUIRE 解析时整条链路必然断。
+		if ob.SendProxyProtocol {
+			if strings.TrimSpace(ob.OutboundJSON) != "" {
+				return nil, fmt.Errorf("出站 %s 是自定义 JSON，不支持 PROXY Protocol 开关（会覆盖手写 sockopt）", ob.Tag)
+			}
+			if target, ok := ctxTarget(ctx, *ob.InboundRef); ok && target.Inbound.Protocol != "vless" {
+				return nil, fmt.Errorf("出站 %s 的落地入站 %s 协议为 %s，PROXY Protocol 仅支持 VLESS（TCP）",
+					ob.Tag, target.Inbound.Tag, models.ProtocolDisplayName(target.Inbound.Protocol))
+			}
 		}
 		// 只有协议型出站才需要凭据校验。freedom / blackhole 是本机出口（四层直通派生的
 		// redirect 出站也带 InboundRef 以便跟随落地地址），不带任何认证字段——把它算进来会让
@@ -430,6 +448,7 @@ func Generate(inbounds []models.Inbound, outbounds []models.ServerOutbound, rout
 func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext, defaultTag string) ([]any, error) {
 	seen := make(map[string]int) // tag → index in list
 	list := make([]any, 0)
+	hops := make([]any, 0) // 出站级 PROXY Protocol 派生的 freedom（生成期内联，不落库）
 	if arr, ok := tmpl.([]any); ok {
 		for _, item := range arr {
 			if m, ok := item.(map[string]any); ok {
@@ -511,6 +530,15 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		if ob.SendThrough != "" {
 			item["sendThrough"] = ob.SendThrough
 		}
+		// 出站级 PROXY Protocol：派生 freedom 承担 PP 报文，本体用 dialerProxy 走它。
+		// 派生对象不落库（无路由语义），在列表构建完成后统一追加，避免与模板同 tag 的覆盖分支互相干扰。
+		if ob.SendProxyProtocol {
+			hop, err := applyProxyProtocolHop(item, ob)
+			if err != nil {
+				return nil, err
+			}
+			hops = append(hops, hop)
+		}
 		// vless 出站 users 兜底注入 encryption:"none"（xray 校验强制，见 01 号文档 §2.2）
 		normalizeVlessOutbound(item)
 		// freedom 出站面板开关（block_cn）拆分为 finalRules，面板键不透传给 xray
@@ -524,6 +552,17 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 			seen[tag] = len(list)
 		}
 		list = append(list, item)
+	}
+
+	// 派生 PP 出站统一追加（tag 撞名一律报错，绝不静默覆盖用户出站）
+	for _, hop := range hops {
+		hopItem, _ := hop.(map[string]any)
+		hopTag, _ := hopItem["tag"].(string)
+		if _, exists := seen[hopTag]; exists || hopTag == "" {
+			return nil, fmt.Errorf("派生 PROXY Protocol 出站 tag %q 已被占用，请检查是否有同名出站", hopTag)
+		}
+		seen[hopTag] = len(list)
+		list = append(list, hopItem)
 	}
 
 	// 默认出口置顶：xray 路由未命中时使用 outbounds[0] 作为默认出口
@@ -541,6 +580,49 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 	}
 
 	return list, nil
+}
+
+// ProxyProtocolHopTag 出站级 PROXY Protocol 发送所用的派生 freedom 出站 tag。
+// 生成期内联、不落库：它没有路由语义（永远不是规则目标），只作为 sockopt.dialerProxy 的
+// 拨号层。`pp-` 因此是保留前缀——用户出站 tag 不允许使用，路由规则也无法指向它。
+func ProxyProtocolHopTag(outboundTag string) string { return "pp-" + outboundTag }
+
+// ProxyProtocolHopSettingsJSON 派生 freedom 的 settings：目标由调用方（dialerProxy 的 dest）
+// 决定，这里只加 PP 头与兜底放行。allow 不可省——freedom 内建策略会阻断私网/回环目标，
+// 落地在局域网时会被直接 blackhole（2026-10-27 实测复现）。
+const ProxyProtocolHopSettingsJSON = `{"proxyProtocol":2,"finalRules":[{"action":"allow"}]}`
+
+// applyProxyProtocolHop 为开启了开关的引用型出站注入 sockopt.dialerProxy，并返回需要追加的
+// 派生 freedom。任何不满足前置条件的组合都报错（fail-closed），不静默降级：
+// 开关开着却发不出 PP，落地按 REQUIRE 解析时整条链路必然断。
+func applyProxyProtocolHop(item map[string]any, ob models.ServerOutbound) (map[string]any, error) {
+	tag, _ := item["tag"].(string)
+	if tag == "" {
+		return nil, fmt.Errorf("出站 %d 缺少 tag，无法配置 PROXY Protocol", ob.ID)
+	}
+	ss, _ := item["streamSettings"].(map[string]any)
+	if ss == nil {
+		ss = make(map[string]any)
+		item["streamSettings"] = ss
+	}
+	if network, _ := ss["network"].(string); network != "" && network != "tcp" {
+		return nil, fmt.Errorf("出站 %s 的传输层是 %s，PROXY Protocol 仅支持 TCP", tag, network)
+	}
+	sockopt, _ := ss["sockopt"].(map[string]any)
+	if sockopt == nil {
+		sockopt = make(map[string]any)
+		ss["sockopt"] = sockopt
+	}
+	if existing, _ := sockopt["dialerProxy"].(string); existing != "" {
+		return nil, fmt.Errorf("出站 %s 已自带 sockopt.dialerProxy=%q，与 PROXY Protocol 开关冲突，请先清空该项", tag, existing)
+	}
+	hopTag := ProxyProtocolHopTag(tag)
+	sockopt["dialerProxy"] = hopTag
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(ProxyProtocolHopSettingsJSON), &settings); err != nil {
+		return nil, err
+	}
+	return map[string]any{"tag": hopTag, "protocol": "freedom", "settings": settings}, nil
 }
 
 // ctxTarget 从 GenerateContext 取引用目标（nil ctx 安全）。

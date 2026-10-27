@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/protocols"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
@@ -118,7 +119,8 @@ type outboundForm struct {
 	Enabled            *bool   `json:"enabled"`
 	Priority           *int    `json:"priority"`
 	Remark             string  `json:"remark"`
-	InboundRef         *uint64 `json:"inbound_ref"` // Phase T：引用落地入站（vnext 自动构造）
+	InboundRef         *uint64 `json:"inbound_ref"`         // Phase T：引用落地入站（vnext 自动构造）
+	SendProxyProtocol  *bool   `json:"send_proxy_protocol"` // 引用型出站向落地发送 PPv2
 }
 
 // routingRuleForm 路由规则创建/修改表单
@@ -140,6 +142,41 @@ type routingRuleForm struct {
 func isReservedOutboundTag(tag string) bool {
 	t := strings.ToLower(strings.TrimSpace(tag))
 	return t == "direct" || t == "blocked"
+}
+
+// isDerivedProxyProtocolTag 判断 tag 是否落在出站级 PROXY Protocol 的派生命名空间。
+// 派生 freedom（pp-<tag>）在生成期内联、不落库、不画卡、也不存在路由规则能指向它
+// （规则落库前要校验出站存在），所以用户出站不得占用该前缀，否则生成时会撞名报错。
+func isDerivedProxyProtocolTag(tag string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(tag)), "pp-")
+}
+
+// validateSendProxyProtocol 校验出站级 PP 开关的前置条件，返回空串表示通过。
+// 只允许「引用 VLESS（tcp）落地入站的引用型出站」开启：自定义 JSON 会覆盖用户手写的
+// sockopt，Hysteria 2 走 QUIC/UDP 没有 PP 头可加，XHTTP 落地不解析 PP 头。
+func (d *Deps) validateSendProxyProtocol(send bool, inboundRef *uint64, outboundJSON string) string {
+	if !send {
+		return ""
+	}
+	if inboundRef == nil || *inboundRef == 0 {
+		return "PROXY Protocol 只适用于引用落地入站的出站"
+	}
+	if strings.TrimSpace(outboundJSON) != "" {
+		return "自定义 JSON 出站不支持 PROXY Protocol（会覆盖手写的 sockopt）"
+	}
+	var target models.Inbound
+	if err := d.DB.First(&target, *inboundRef).Error; err != nil {
+		return "引用的入站不存在"
+	}
+	if target.Protocol != models.ProtocolVless {
+		return "PROXY Protocol 仅支持 VLESS 落地入站（Hysteria 2 走 QUIC/UDP，不承载 PP 头）"
+	}
+	if stream := contracts.DecodeInbound(&target).Stream; stream != nil {
+		if n, _ := stream["network"].(string); n != "" && n != "tcp" {
+			return "落地入站 " + target.Tag + " 的传输层是 " + n + "，PROXY Protocol 仅支持 TCP"
+		}
+	}
+	return ""
 }
 
 // tunnelOwnerDesc 描述派生行的归属直通（用于拒绝文案）。找不到入站时退化为基础文案。
@@ -313,6 +350,10 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		util.BadRequest(c, "direct 与 blocked 为系统内置预留出站，不可重复手动创建")
 		return
 	}
+	if isDerivedProxyProtocolTag(req.Tag) {
+		util.BadRequest(c, "pp- 为 PROXY Protocol 派生出站的保留前缀，请更换出站 Tag")
+		return
+	}
 	var tagCnt int64
 	d.DB.Model(&models.ServerOutbound{}).Where("server_id = ? AND tag = ?", id, req.Tag).Count(&tagCnt)
 	if tagCnt > 0 {
@@ -348,6 +389,16 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 	if req.Priority != nil {
 		priority = *req.Priority
 	}
+	sendPP := req.SendProxyProtocol != nil && *req.SendProxyProtocol
+	if msg := d.validateSendProxyProtocol(sendPP, req.InboundRef, req.OutboundJSON); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
+	// 保存前先做「同落地口径一致」校验：落地接收侧是单条监听器，PP 开关必须与其它发送侧相同。
+	if msg := d.checkProxyProtocolAgreement(targetInboundID, sendPP, 0, "本出站"); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
 
 	ob := models.ServerOutbound{
 		ServerID:           id,
@@ -357,6 +408,7 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		StreamSettingsJSON: req.StreamSettingsJSON,
 		OutboundJSON:       req.OutboundJSON,
 		SendThrough:        req.SendThrough,
+		SendProxyProtocol:  sendPP,
 		Enabled:            enabled,
 		Priority:           priority,
 		Remark:             req.Remark,
@@ -375,8 +427,9 @@ func (d *Deps) AdminCreateServerOutbound(c *gin.Context) {
 		pushFail(c, id, err)
 		return
 	}
-	// 跨服联动推送落地机
+	// 跨服联动推送落地机：接收侧 PROXY Protocol 需随本出站的开关一起对齐
 	if targetInboundID > 0 {
+		d.syncTargetProxyProtocolByID(targetInboundID)
 		var targetInb models.Inbound
 		if err := d.DB.First(&targetInb, targetInboundID).Error; err == nil {
 			_ = d.enqueueConfig(targetInb.ServerID)
@@ -420,7 +473,8 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		Enabled            *bool   `json:"enabled"`
 		Priority           *int    `json:"priority"`
 		Remark             *string `json:"remark"`
-		InboundRef         *uint64 `json:"inbound_ref"` // nil=不变；0=解除引用；>0=设置引用
+		InboundRef         *uint64 `json:"inbound_ref"`         // nil=不变；0=解除引用；>0=设置引用
+		SendProxyProtocol  *bool   `json:"send_proxy_protocol"` // 引用型出站向落地发送 PPv2
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -507,6 +561,42 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 	}
 
+	// 出站级 PROXY Protocol：按更新后的最终形态校验（开关/引用/启用状态都可能被本次请求改动）。
+	effRef := ob.InboundRef
+	if req.InboundRef != nil {
+		if *req.InboundRef > 0 {
+			v := *req.InboundRef
+			effRef = &v
+		} else {
+			effRef = nil
+		}
+	}
+	effPP := ob.SendProxyProtocol
+	if req.SendProxyProtocol != nil {
+		effPP = *req.SendProxyProtocol
+	}
+	effEnabled := ob.Enabled
+	if req.Enabled != nil {
+		effEnabled = *req.Enabled
+	}
+	effOutboundJSON := ob.OutboundJSON
+	if req.OutboundJSON != nil {
+		effOutboundJSON = *req.OutboundJSON
+	}
+	if msg := d.validateSendProxyProtocol(effPP, effRef, effOutboundJSON); msg != "" {
+		util.BadRequest(c, msg)
+		return
+	}
+	if effRef != nil && effEnabled {
+		if msg := d.checkProxyProtocolAgreement(*effRef, effPP, outboundID, "本出站"); msg != "" {
+			util.BadRequest(c, msg)
+			return
+		}
+	}
+	if req.SendProxyProtocol != nil {
+		updates["send_proxy_protocol"] = effPP
+	}
+
 	if req.Tag != nil {
 		tag := strings.TrimSpace(*req.Tag)
 		if tag == "" {
@@ -521,6 +611,10 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		// 若当前是非内置出站，禁止重命名为预留 Tag
 		if !isReservedOutboundTag(ob.Tag) && isReservedOutboundTag(tag) {
 			util.BadRequest(c, "不可将出站 Tag 修改为系统预留名称（direct/blocked）")
+			return
+		}
+		if isDerivedProxyProtocolTag(tag) {
+			util.BadRequest(c, "pp- 为 PROXY Protocol 派生出站的保留前缀，请更换出站 Tag")
 			return
 		}
 		var tagCnt int64
@@ -566,23 +660,36 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 	}
 
-	// 联动推送：若引用发生变化，重推旧目标服务器与新目标服务器配置
-	if req.InboundRef != nil {
-		pushedServers := map[uint64]bool{id: true}
-		if oldRef != nil && *oldRef > 0 && (*req.InboundRef == 0 || *oldRef != *req.InboundRef) {
-			var oldTarget models.Inbound
-			if err := d.DB.First(&oldTarget, *oldRef).Error; err == nil && !pushedServers[oldTarget.ServerID] {
-				_ = d.enqueueConfig(oldTarget.ServerID)
-				pushedServers[oldTarget.ServerID] = true
+	// 联动推送：引用 / PP 开关 / 启用状态任一变化，都要重算落地接收侧并重推落地机。
+	// 落地入站的生成结果还依赖「谁在引用它」（机间凭据），所以即使接收侧没变也要推一次。
+	if req.InboundRef != nil || req.SendProxyProtocol != nil || req.Enabled != nil {
+		oldTargetID := uint64(0)
+		if oldRef != nil {
+			oldTargetID = *oldRef
+		}
+		newTargetID := uint64(0)
+		if effRef != nil {
+			newTargetID = *effRef
+		}
+		pushed := map[uint64]bool{id: true}
+		pushLanding := func(targetID uint64) {
+			if targetID == 0 {
+				return
+			}
+			var t models.Inbound
+			if err := d.DB.First(&t, targetID).Error; err != nil {
+				return
+			}
+			d.syncTargetProxyProtocolByID(targetID)
+			if !pushed[t.ServerID] {
+				_ = d.enqueueConfig(t.ServerID)
+				pushed[t.ServerID] = true
 			}
 		}
-		if *req.InboundRef > 0 && (oldRef == nil || *oldRef != *req.InboundRef) {
-			var newTarget models.Inbound
-			if err := d.DB.First(&newTarget, *req.InboundRef).Error; err == nil && !pushedServers[newTarget.ServerID] {
-				_ = d.enqueueConfig(newTarget.ServerID)
-				pushedServers[newTarget.ServerID] = true
-			}
+		if oldTargetID != newTargetID {
+			pushLanding(oldTargetID)
 		}
+		pushLanding(newTargetID)
 	}
 
 	d.DB.First(&ob, outboundID)
@@ -644,6 +751,9 @@ func (d *Deps) AdminDeleteServerOutbound(c *gin.Context) {
 		}
 	}
 	if ob.InboundRef != nil && *ob.InboundRef > 0 {
+		// 删除后重算落地接收侧：本出站不再作为发送侧，其它发送侧全关时
+		// acceptProxyProtocol 必须清掉，否则落地会按 PP 解析普通连接。
+		d.syncTargetProxyProtocolByID(*ob.InboundRef)
 		var targetInb models.Inbound
 		if err := d.DB.First(&targetInb, *ob.InboundRef).Error; err == nil {
 			_ = d.enqueueConfig(targetInb.ServerID)

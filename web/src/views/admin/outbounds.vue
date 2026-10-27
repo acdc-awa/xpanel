@@ -264,6 +264,7 @@ onMounted(async () => {
               <CsBadge v-if="row.owner_inbound_id" color="blue">系统内置·直通</CsBadge>
               <CsBadge v-else-if="row.tag === defaultOutboundTag" color="green">默认出口</CsBadge>
               <CsBadge v-if="row.tag === 'direct' || row.tag === 'blocked'" color="grey">系统内置</CsBadge>
+              <CsBadge v-if="row.send_proxy_protocol" color="blue">PPv2</CsBadge>
               <CsBadge v-if="isBlockCN(row)" color="red">阻断回国</CsBadge>
             </div>
           </template>

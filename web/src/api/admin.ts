@@ -912,6 +912,7 @@ export interface TopologyOutbound {
   tag: string
   protocol: string
   inbound_ref?: number | null // Phase T：引用落地入站
+  send_proxy_protocol?: boolean // 引用型出站向落地发送 PROXY Protocol v2（画布显示 PPv2 徽标）
   owner_inbound_id?: number // C2：直通管道派生出口归属
   has_payload?: boolean // 已配置载荷（基础 settings / 自定义 JSON）
   virtual?: boolean // direct 等虚拟出站

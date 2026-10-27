@@ -15,6 +15,7 @@ import {
   ElMessage,
 } from '@/components/cloudscape'
 import CodeEditor from '@/components/CodeEditor.vue'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createServerOutbound,
   getInbounds,
@@ -104,6 +105,18 @@ const refInboundOptions = computed(() => {
 const refTarget = computed(() => allInbounds.value.find((i) => i.id === refInboundId.value) || null)
 const refTargetServer = computed(() => servers.value.find((s) => s.id === refServerId.value) || null)
 const refTargetMissing = computed(() => refInboundId.value > 0 && !refTarget.value)
+// PROXY Protocol 只对 VLESS（TCP）落地成立：Hysteria 2 走 QUIC/UDP，XHTTP 落地不解析 PP 头。
+const ppApplicable = computed(() => {
+  const t = refTarget.value
+  if (!t || t.protocol !== 'vless') return false
+  try {
+    const s = JSON.parse(t.stream_settings || '{}')
+    return !s.network || s.network === 'tcp'
+  } catch {
+    // 存量坏 JSON 交给后端校验拦截，这里放行避免误禁用
+    return true
+  }
+})
 
 function inboundLabel(i: InboundItem) {
   let net = 'tcp/none'
@@ -131,6 +144,8 @@ const form = reactive({
   response_type: 'none',
   // 自定义 JSON
   outbound_json: '',
+  // 引用入站：向落地发送 PROXY Protocol v2
+  send_proxy_protocol: false,
 })
 
 const OUTBOUND_JSON_PLACEHOLDER = `{
@@ -204,6 +219,7 @@ function parseExisting() {
   form.priority = ob.priority ?? 0
   form.remark = ob.remark || ''
   form.send_through = ob.send_through || ''
+  form.send_proxy_protocol = !!ob.send_proxy_protocol
 
   // 1. 自定义 JSON
   if (ob.outbound_json) {
@@ -294,12 +310,15 @@ function onBasicProtocolChange(v: any) {
 function onRefServerChange(v: any) {
   refServerId.value = Number(v) || 0
   refInboundId.value = 0
+  form.send_proxy_protocol = false
 }
 
 function onRefInboundChange(v: any) {
   refInboundId.value = Number(v) || 0
   const target = refTarget.value
   if (target) form.protocol = target.protocol
+  // 换到非 VLESS 落地时开关没有意义，直接复位，避免留下一个发不出去的开关。
+  if (!ppApplicable.value) form.send_proxy_protocol = false
 }
 
 function buildBasicSettingsJSON(): string {
@@ -351,6 +370,10 @@ async function save() {
     ElMessage.warning('direct 与 blocked 为系统内置预留出站，请使用其他 Tag')
     return
   }
+  if (lowerTag.startsWith('pp-')) {
+    ElMessage.warning('pp- 为 PROXY Protocol 派生出站的保留前缀，请更换出站 Tag')
+    return
+  }
 
   if (mode.value === 'custom') {
     if (!validateCustomJSON()) return
@@ -369,6 +392,10 @@ async function save() {
       ElMessage.warning('引用目标仅支持 VLESS / Hysteria 2 入站')
       return
     }
+    if (form.send_proxy_protocol && !ppApplicable.value) {
+      ElMessage.warning('PROXY Protocol 仅支持 VLESS + TCP 落地（Hysteria 2 走 QUIC/UDP，XHTTP 不解析 PP 头）')
+      return
+    }
   }
 
   const payload: any = {
@@ -377,6 +404,7 @@ async function save() {
     enabled: form.enabled,
     priority: form.priority ?? 0,
     remark: form.remark || '',
+    send_proxy_protocol: mode.value === 'inbound_ref' && !!form.send_proxy_protocol,
   }
 
   if (mode.value === 'basic') {
@@ -567,6 +595,18 @@ onMounted(async () => {
             留空保存后，到「路由 → 拓扑画布」把本出站拖到目标服务器的入站即可；也可以直接在上方选择目标。
           </template>
         </CsAlert>
+
+        <div class="switch-row" style="margin-top: 12px">
+          <CsToggle
+            :model-value="form.send_proxy_protocol && ppApplicable"
+            :disabled="!ppApplicable"
+            label="向落地发送 PROXY Protocol v2 报文"
+            @update:model-value="(v: boolean) => (form.send_proxy_protocol = v)"
+          />
+          <TipIcon
+            content="开启后由派生的 freedom 出站向落地发送 PROXY Protocol v2，携带客户端真实 IP；落地入站的接收侧会自动打开。仅 VLESS（TCP）落地支持——Hysteria 2 走 QUIC/UDP，不承载 PP 头。同一落地的所有链路必须开关一致。"
+          />
+        </div>
       </CsContainer>
 
       <!-- 自定义 JSON -->

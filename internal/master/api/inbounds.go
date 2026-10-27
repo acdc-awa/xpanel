@@ -924,28 +924,102 @@ func (d *Deps) tunnelLandingProtected(c *gin.Context, inbID uint64) bool {
 	return false
 }
 
-// syncTargetProxyProtocol 把落地入站的「接收侧 PROXY Protocol」与指向它的直通管道对齐（P2-8）。
-// 判定取并集：只要还有一条**已启用**且会发送 PPv2 的直通指向该落地，接收侧就必须开启；
-// 全部关闭/解绑/停用后要清掉——否则关掉发送侧后落地仍按 PP 解析，链路必然断（2026-10-26
-// 端到端验证复现）。多管道共用一个落地时取「或」，后保存的一条不会把另一条关掉。
+// ppSender 指向同一落地入站的发送侧（直通管道或引用型出站）及其 PP 发送开关。
+// 落地入站的接收侧是单条 TCP 监听器、REQUIRE 对每条连接生效，所以同一落地的所有
+// 发送侧必须口径一致——有一条发 PP、另一条不发，后者必然连接失败。
+type ppSender struct {
+	Kind string // 展示用：「直通管道」/「出站引用」
+	Tag  string
+	Send bool
+}
+
+// landingPPSenders 收集指向某个落地入站的全部**已启用**发送侧。excludeOutboundID 用于
+// 更新出站时排除自身（0 = 不排除）。查询失败返回 error：调用方必须区分「没有发送侧」
+// 与「读不到发送侧」——后者绝不能据此清掉落地已有的接收开关。
+func (d *Deps) landingPPSenders(targetInboundID, excludeOutboundID uint64) ([]ppSender, error) {
+	if targetInboundID == 0 {
+		return nil, nil
+	}
+	out := make([]ppSender, 0, 4)
+	var pipes []models.Inbound
+	if err := d.DB.Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?",
+		[]string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolTunnel, targetInboundID, true).
+		Find(&pipes).Error; err != nil {
+		return nil, fmt.Errorf("查询指向落地入站 %d 的直通管道失败: %w", targetInboundID, err)
+	}
+	for i := range pipes {
+		out = append(out, ppSender{Kind: "直通管道", Tag: pipes[i].Tag, Send: xray.TunnelSendProxyProtocol(&pipes[i])})
+	}
+	q := d.DB.Where("inbound_ref = ? AND enabled = ?", targetInboundID, true)
+	if excludeOutboundID > 0 {
+		q = q.Where("id != ?", excludeOutboundID)
+	}
+	var outs []models.ServerOutbound
+	if err := q.Find(&outs).Error; err != nil {
+		return nil, fmt.Errorf("查询指向落地入站 %d 的引用出站失败: %w", targetInboundID, err)
+	}
+	for i := range outs {
+		out = append(out, ppSender{Kind: "出站引用", Tag: outs[i].Tag, Send: outs[i].SendProxyProtocol})
+	}
+	return out, nil
+}
+
+// checkProxyProtocolAgreement 校验「本发送侧的 PP 开关」与「其余指向同一落地的发送侧」是否一致。
+// 返回空串表示一致（或没有其它发送侧，由本侧单独决定落地口径）；非空 = 拒绝原因。
+// 这是保存时的唯一判定入口：不引入额外的冲突类型，只做一次布尔比对。
+// 查询失败按「无法判定」放行（不阻断主操作），落地侧由 syncTargetProxyProtocol 的告警兜底。
+func (d *Deps) checkProxyProtocolAgreement(targetInboundID uint64, selfSend bool, excludeOutboundID uint64, selfDesc string) string {
+	if targetInboundID == 0 {
+		return ""
+	}
+	peers, err := d.landingPPSenders(targetInboundID, excludeOutboundID)
+	if err != nil {
+		log.Printf("checkProxyProtocolAgreement: %v（跳过一致性校验）", err)
+		return ""
+	}
+	for _, peer := range peers {
+		if peer.Send == selfSend {
+			continue
+		}
+		if peer.Send {
+			return "该落地入站已被" + peer.Kind + "「" + peer.Tag + "」要求按 PROXY Protocol v2 接收：" +
+				selfDesc + "必须同时开启 PROXY Protocol，否则落地会按 PP 解析本链路的连接而必然失败"
+		}
+		return "该落地入站已被" + peer.Kind + "「" + peer.Tag + "」按普通 TCP 连接（不发 PROXY Protocol）：" +
+			selfDesc + "不能单独开启 PROXY Protocol，否则落地会把它当作普通 TCP 解析而必然失败"
+	}
+	return ""
+}
+
+// syncTargetProxyProtocol 把落地入站的「接收侧 PROXY Protocol」与指向它的发送侧对齐（P2-8）。
+// 发送侧 = 已启用且会发送 PPv2 的直通管道（streamSettings.proxy_protocol，缺省=开）
+// 与已启用且开启开关的引用型出站（server_outbounds.send_proxy_protocol），取「或」。
+// 只要还有一条发送侧发 PP，接收侧就必须保持开启；全部关闭/解绑/停用后要清掉——否则关掉
+// 发送侧后落地仍按 PP 解析，链路必然断（2026-10-26 端到端验证复现）。多条发送侧共用一个
+// 落地时取「或」，后保存的一条不会把另一条关掉。
 // 只改 tcpSettings.acceptProxyProtocol（xray 的正式位置）；失败只记日志不回滚主操作。
 func (d *Deps) syncTargetProxyProtocol(targetInb *models.Inbound) {
 	if targetInb == nil || targetInb.ID == 0 {
 		return
 	}
-	var pipes []models.Inbound
-	if err := d.DB.Where("(type IN ? OR protocol = ?) AND target_inbound_id = ? AND enabled = ?",
-		[]string{models.InboundTypeTunnel, models.InboundTypeForward}, models.ProtocolTunnel, targetInb.ID, true).
-		Find(&pipes).Error; err != nil {
-		log.Printf("syncTargetProxyProtocol: 查询指向落地入站 %d(%s) 的直通管道失败，跳过同步: %v", targetInb.ID, targetInb.Tag, err)
+	senders, err := d.landingPPSenders(targetInb.ID, 0)
+	if err != nil {
+		log.Printf("syncTargetProxyProtocol: %v，跳过同步", err)
 		return
 	}
 	want := false
-	for i := range pipes {
-		if xray.TunnelSendProxyProtocol(&pipes[i]) {
+	// 口径不一致时落地必然有链路连不上，这里留一条告警便于定位（保存路径已先行拒绝新增的不一致）。
+	var dissent string
+	for _, s := range senders {
+		if s.Send {
 			want = true
-			break
+		} else if dissent == "" {
+			dissent = s.Kind + "「" + s.Tag + "」"
 		}
+	}
+	if want && dissent != "" {
+		log.Printf("syncTargetProxyProtocol: 落地入站 %d(%s) 的发送侧口径不一致——已开启接收侧，但 %s 不会发送 PP，该链路将连接失败",
+			targetInb.ID, targetInb.Tag, dissent)
 	}
 
 	var ssMap map[string]any

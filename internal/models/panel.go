@@ -374,6 +374,10 @@ type ServerOutbound struct {
 	// OutboundJSON 原生完整 Xray 出站 JSON（非空时优先直接透传并校验，对标 RuleJSON）
 	OutboundJSON string `gorm:"type:text" json:"outbound_json,omitempty"`
 	SendThrough  string `gorm:"size:64" json:"send_through,omitempty"`
+	// SendProxyProtocol 引用型出站是否向落地发送 PROXY Protocol v2（携带客户端真实 IP）。
+	// 生成期派生一个不落库的 freedom（tag = pp-<tag>）承担 PP 报文，本行自身注入
+	// sockopt.dialerProxy 指向它；落地入站的接收侧由 syncTargetProxyProtocol 同步。
+	SendProxyProtocol bool `gorm:"not null;default:false" json:"send_proxy_protocol"`
 	// Phase T 拓扑化：引用目标入站（落地），vnext 由生成器自动构造；空 = 沿用透传 settings_json
 	InboundRef *uint64 `gorm:"index" json:"inbound_ref,omitempty"`
 	// InboundRef 跨机链式出站的专属机间认证凭据（主控同步生成 UUIDv4）

@@ -325,6 +325,11 @@ useGridHeight(boxEl)
             <span v-else-if="isOutboundDraft(out)" class="out-proto-badge draft" title="草稿出站：请拖拽右侧端点至目标入站完成绑定">待连线</span>
             <span v-else-if="out.protocol === 'custom'" class="out-proto-badge" title="自定义 Xray 出站 JSON">JSON</span>
             <span v-else class="out-proto-badge">{{ out.protocol }}</span>
+            <span
+              v-if="out.send_proxy_protocol && out.inbound_ref && !out.owner_inbound_id"
+              class="out-proto-badge pp"
+              title="该出站通过派生的 freedom 向落地发送 PROXY Protocol v2，携带客户端真实 IP"
+            >PPv2</span>
             <CsIcon v-if="!out.virtual" class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑出站" />
 
             <div v-if="editable && data.outbounds.length > 1" class="tag-order-actions">
@@ -1004,6 +1009,11 @@ useGridHeight(boxEl)
         background: rgba(251, 191, 36, 0.15);
         color: #fbbf24;
         border: 1px dashed rgba(251, 191, 36, 0.4);
+      }
+      &.pp {
+        background: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
       }
     }
 

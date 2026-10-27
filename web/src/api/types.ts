@@ -492,6 +492,7 @@ export interface ServerOutbound {
   priority: number
   remark: string
   inbound_ref?: number // Phase T：引用落地入站
+  send_proxy_protocol?: boolean // 引用型出站向落地发送 PROXY Protocol v2（生成期派生 pp-<tag>）
   tls_verify_mode?: string // 节点间 TLS 验证方式: '' (自动), 'ca' (托管CA), 'pin' (指纹Pin)
   owner_inbound_id?: number // C2：>0 = 由该四层直通入站自动维护（目标只能在通道页/入站页改）
   created_at: string

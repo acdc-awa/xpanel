@@ -417,6 +417,8 @@ type topoOutbound struct {
 	HasPayload     bool    `json:"has_payload"`                // 是否已配置载荷（基础 settings / 自定义 JSON）
 	Enabled        bool    `json:"enabled"`
 	Priority       int     `json:"priority"`
+	// 出站级 PROXY Protocol：开启后生成器内联派生 pp-<tag> freedom 并向落地发 PPv2（画布上显示为徽标）
+	SendProxyProtocol bool `json:"send_proxy_protocol"`
 }
 
 // topoRule 画布路由规则轻量视图。
@@ -476,6 +478,7 @@ func (d *Deps) AdminTopology(c *gin.Context) {
 			InboundRef: outbounds[i].InboundRef, OwnerInboundID: outbounds[i].OwnerInboundID,
 			HasPayload: strings.TrimSpace(outbounds[i].OutboundJSON) != "" || strings.TrimSpace(outbounds[i].SettingsJSON) != "",
 			Enabled:    outbounds[i].Enabled, Priority: outbounds[i].Priority,
+			SendProxyProtocol: outbounds[i].SendProxyProtocol,
 		})
 	}
 

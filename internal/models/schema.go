@@ -60,6 +60,10 @@ const (
 	//     （SubTemplate.Content 活引用）。纯加列、不回填：存量组全部保持自定义，订阅输出不变；
 	//     删除被引用模板时由应用层把模板当前内容落回 clash_template 再清空绑定（无数据库外键/级联）。
 	//     只影响订阅生成，不涉及配置下发；也不改变 v4 已定的 Min=4 口径。
+	//  ⑥ 出站级 PROXY Protocol 发送开关（2026-10-27 追加，并入本步）：server_outbounds 加
+	//     send_proxy_protocol（not null default false）。纯加列、不回填：存量出站全部关闭，
+	//     生成结果与升级前逐字节一致。开启后由生成器内联派生一个不落库的 freedom（pp-<tag>）
+	//     并通过 sockopt.dialerProxy 接入，属于纯生成期编排，不影响任何其它表。
 	// 注：Mixed / SOCKS5 / HTTP 协议与 ForwardUser 实体已在本版本发布前移除，从未在任何线上库建表。
 	//
 	// v4 是一整步**未发版**升级（生产库仍在 v3）：本步在开发期曾拆记 v4 / v5 / v6，各批都未单独
