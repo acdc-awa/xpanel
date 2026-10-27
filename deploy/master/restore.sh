@@ -44,6 +44,9 @@ cp "$DATA_DIR/panel.db-shm" "$DATA_DIR/panel.db.pre-restore-shm" 2>/dev/null || 
 
 echo "==> 替换数据库（备份在宿主 data/backups，直接拷贝）"
 cp "$BACKUP_FILE" "$DATA_DIR/panel.db"
+# 旧库的 WAL/SHM 属于被替换掉的数据库：必须一并清除，避免旧 WAL 内容混入恢复后的库。
+# 原三件套已在上一步另存为 panel.db.pre-restore*，需要时可手工找回。
+rm -f "$DATA_DIR/panel.db-wal" "$DATA_DIR/panel.db-shm"
 
 echo "==> 启动服务"
 docker compose start master
