@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adminMenuGroups, type MenuGroup } from '@/config/menu'
-import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
 import { getSystemStatus } from '@/api/admin'
@@ -23,7 +22,6 @@ import {
   type TopNavigationUtility,
 } from '@/components/cloudscape'
 
-const auth = useAuthStore()
 const site = useSiteStore()
 const theme = useThemeStore()
 const router = useRouter()
@@ -277,9 +275,8 @@ const onTabletMq = (e: MediaQueryListEvent | MediaQueryList) => {
 
 // 页脚版本号：取后端 ldflags 注入的真实 panel_version
 const panelVersion = ref('')
-const accountFootnote = computed(() =>
-  panelVersion.value ? `${auth.username} · ${panelVersion.value}` : auth.username
-)
+// 菜单头部已经显示账号，脚注只补版本号，避免同一行重复账号
+const accountFootnote = computed(() => panelVersion.value)
 
 onMounted(async () => {
   if (tabletMq) onTabletMq(tabletMq)

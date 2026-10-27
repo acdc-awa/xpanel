@@ -72,13 +72,15 @@ async function handleLogout() {
     </template>
 
     <div class="user-menu-header">
-      <div class="u-name">{{ auth.username }}</div>
-      <CsBadge :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
-      <div v-if="footnote" class="u-footnote">{{ footnote }}</div>
+      <div class="u-name" :title="auth.username">{{ auth.username }}</div>
+      <div class="u-sub">
+        <CsBadge :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
+        <span v-if="footnote" class="u-footnote">{{ footnote }}</span>
+      </div>
     </div>
 
     <ul class="user-menu-list" role="menu">
-      <li v-for="item in menuItems" :key="item.id">
+      <li v-for="item in menuItems" :key="item.id" :class="{ 'is-separator': item.id === 'logout' }">
         <button type="button" class="user-menu-item" role="menuitem" @click="onSelect(item.id)">
           <CsIcon :name="item.iconName" size="normal" />
           <span>{{ item.text }}</span>
@@ -112,34 +114,57 @@ async function handleLogout() {
   }
 }
 
+/* CsPopover 自带 12px 内边距；头部用负边距做通栏（分隔线到面板边缘），内部再补回 12px */
 .user-menu-header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xxs-3o1yoq, 4px);
-  padding-block: var(--space-xs-m9b7jf, 8px) var(--space-s-kll7oj, 12px);
-  padding-inline: var(--space-s-kll7oj, 12px);
+  gap: 6px;
+  margin: -12px -12px 0;
+  padding: 12px;
   border-block-end: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
 }
 
 .u-name {
+  min-inline-size: 0;
   font-size: var(--font-size-body-m-tq5a14, 14px);
   line-height: var(--line-height-body-m-5xw6xo, 20px);
   font-weight: 700;
   color: var(--color-text-body-default-b2us04, #0f141a);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 角色徽标与版本号同行；徽标只按内容宽度（父级是 row，不会被拉成整条） */
+.u-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs-m9b7jf, 8px);
+  min-inline-size: 0;
 }
 
 .u-footnote {
+  min-inline-size: 0;
   font-size: var(--font-size-body-s-89y7qg, 12px);
   line-height: var(--line-height-body-s-abys8r, 16px);
   color: var(--color-text-body-secondary-66ygbb, #424650);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* 通栏：hover 底色贴到面板两侧，与官方下拉菜单一致 */
 .user-menu-list {
   list-style: none;
-  margin: 0;
-  padding: var(--space-xxs-3o1yoq, 4px);
+  margin: 0 -12px -12px;
+  padding: 6px;
+}
+
+/* 退出登录前的分隔线（列表项的上下内边距由 li 承担，线才不会贴着文字） */
+.user-menu-list li.is-separator {
+  margin-block-start: 4px;
+  padding-block-start: 4px;
+  border-block-start: 1px solid var(--color-border-divider-default-diwd4w, #c6c6cd);
 }
 
 .user-menu-item {
@@ -162,6 +187,10 @@ async function handleLogout() {
   &:focus-visible {
     background: var(--color-background-dropdown-item-hover-pvfsrg, #f2f3f3);
     outline: none;
+  }
+
+  &:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--color-border-item-focused-sewkzn, #006ce0);
   }
 }
 </style>
