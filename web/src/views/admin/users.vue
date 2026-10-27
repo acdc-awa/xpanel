@@ -262,7 +262,6 @@ const userEditForm = reactive({
   role: 'user' as 'admin' | 'user',
   plan_id: 0,
   permission_group_id: 0,
-  device_limit: 0,
   expire_at: '',
   password: '',
   remark: '',
@@ -289,7 +288,6 @@ function openDetail(row: any) {
   userEditForm.role = row.role || 'user'
   userEditForm.plan_id = row.plan_id || 0
   userEditForm.permission_group_id = row.permission_group_id || 0
-  userEditForm.device_limit = row.device_limit || 0
   userEditForm.expire_at = row.expire_at || ''
   userEditForm.password = ''
   userEditForm.remark = row.remark || ''
@@ -317,7 +315,6 @@ async function saveUserConfig() {
       role: userEditForm.role,
       plan_id: userEditForm.plan_id,
       permission_group_id: userEditForm.permission_group_id,
-      device_limit: userEditForm.device_limit,
       expire_at: userEditForm.expire_at || null,
       password: userEditForm.password.trim() || undefined,
       remark: userEditForm.remark,
@@ -346,7 +343,6 @@ const newUserForm = reactive({
   password: '',
   plan_id: 0,
   permission_group_id: 0,
-  device_limit: 0,
   expire_at: '',
   remark: '',
 })
@@ -365,7 +361,6 @@ async function submitNewUser() {
       password: newUserForm.password,
       plan_id: newUserForm.plan_id || undefined,
       permission_group_id: newUserForm.permission_group_id || undefined,
-      device_limit: newUserForm.device_limit || undefined,
       expire_at: newUserForm.expire_at || undefined,
       remark: newUserForm.remark.trim() || undefined,
     }
@@ -376,7 +371,6 @@ async function submitNewUser() {
       newUserForm.password = ''
       newUserForm.plan_id = 0
       newUserForm.permission_group_id = 0
-      newUserForm.device_limit = 0
       newUserForm.expire_at = ''
       newUserForm.remark = ''
       load()
@@ -559,7 +553,7 @@ function exportCSV() {
     ElMessage.warning('没有可导出的用户')
     return
   }
-  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '设备限制', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
+  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
   const lines = rows.map((u: any) =>
     [
       u.id,
@@ -570,7 +564,6 @@ function exportCSV() {
       u.status === 1 ? '正常' : '禁用',
       planName(u.plan_id),
       userGroupDisplay(u).name,
-      u.effective_device_limit || 0,
       u.balance_cents || 0,
       u.used_bytes || 0,
       u.total_bytes || 0,
@@ -795,11 +788,6 @@ function cardMenuItems(row: AdminUser) {
             <CsCardFact label="账户余额" mono>
               <span class="balance-value">¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}</span>
             </CsCardFact>
-            <CsCardFact
-              label="设备限制"
-              mono
-              :value="row.is_custom_device_limit ? `${row.effective_device_limit} 台 (自定义)` : (row.effective_device_limit && row.effective_device_limit > 0) ? `${row.effective_device_limit} 台` : '不限'"
-            />
           </CsCardFacts>
 
           <div class="user-traffic">
@@ -945,17 +933,6 @@ function cardMenuItems(row: AdminUser) {
               />
             </CsFormItem>
 
-            <CsFormItem label="设备限制（台，0=跟随套餐）">
-              <CsInputNumber
-                v-model="userEditForm.device_limit"
-                :controls="false"
-                :min="0"
-                :precision="0"
-                placeholder="0"
-                style="width: 100%"
-              />
-            </CsFormItem>
-
             <CsFormItem label="重置密码（留空不修改）">
               <CsInput v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
             </CsFormItem>
@@ -1043,16 +1020,6 @@ function cardMenuItems(row: AdminUser) {
             </CsFormItem>
             <CsFormItem label="权限组（选填）">
               <CsSelect v-model="newUserForm.permission_group_id" style="width: 100%" placeholder="跟随套餐" :options="newUserGroupOptions" />
-            </CsFormItem>
-            <CsFormItem label="设备限制（台，0=跟随套餐）">
-              <CsInputNumber
-                v-model="newUserForm.device_limit"
-                :controls="false"
-                :min="0"
-                :precision="0"
-                placeholder="0"
-                style="width: 100%"
-              />
             </CsFormItem>
           </div>
           <CsFormItem label="到期时间（选填）">

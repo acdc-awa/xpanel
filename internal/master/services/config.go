@@ -202,12 +202,11 @@ func (s *ConfigService) GetValidUsers(serverID uint64) (map[string][]protocol.Us
 	return res, nil
 }
 
-// validUser 过滤后的用户候选：用户实体 + 预计算的生效权限组/设备限制/已用流量。
+// validUser 过滤后的用户候选：用户实体 + 预计算的生效权限组/已用流量。
 // 预计算目的：避免 protoUsersFor 在用户×入站维度反复查库（ISSUE-10）。
 type validUser struct {
 	User             models.User
 	GroupID          uint64
-	DeviceLimit      int
 	UsedBytes        int64
 	PlanTrafficBytes int64
 	// CycleID 当前账期 ID（审计 F3）：随用户列表下发到节点，节点据此在采集时刻给增量打标。
@@ -248,7 +247,6 @@ func (s *ConfigService) protoUsersFor(validUsers []validUser, inb *models.Inboun
 			Email: xray.UserEmailFor(&u, inb.ID), // 按 (用户, 入站) 注入统计键，流量回收可精确归账入站与倍率
 			Flow:  userFlow,
 			Level: 0,
-			Limit: vu.DeviceLimit,
 			// 账期 ID（审计 F3）：节点收到与本地记录不同的值即视为发生周期切换，
 			// 立刻采集一次把切换前的增量按旧账期封账。
 			CycleID: vu.CycleID,
@@ -328,7 +326,6 @@ func (s *ConfigService) filterValidUsers() ([]validUser, error) {
 		}
 
 		vu := validUser{User: u}
-		vu.DeviceLimit = u.EffectiveDeviceLimit()
 		vu.GroupID = u.EffectiveGroupID()
 		vu.PlanTrafficBytes = u.EffectiveTrafficBytes()
 		vu.CycleID = u.TrafficCycleID

@@ -39,7 +39,7 @@ type BillingStore interface {
 	UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error
 	// ClearSubscription 到期退订：plan_id=0、快照三列归零、permission_group_id=0。
 	// 不改 expire_at（保留过去的到期时间，既留审计痕迹也作二重拦截），
-	// 不动账期/余额/自动续费开关/device_limit（用户自定义字段）。
+	// 不动账期/余额/自动续费开关（设备限制字段已于 2026-10-27 下线）。
 	ClearSubscription(ctx context.Context, userID uint64) error
 
 	// 订单

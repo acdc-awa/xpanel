@@ -52,22 +52,17 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		// 套餐内用量扣减，不代表真实流量；真实流量统计在 dashboard/入站计数（原始口径）。
 		up, down, _ := d.Traffic.UserBilled(u.ID)
 		used := up + down
-		// 快照化（2026-09-01）：total/生效组/生效设备限制读用户行快照列（用户自定义优先），
+		// 快照化（2026-09-01）：total/生效组读用户行快照列（用户自定义优先），
 		// 不再实时 join plans——与生成/订阅/用户侧同口径。
 		totalBytes := u.EffectiveTrafficBytes()
 		effectiveGroupID := u.EffectiveGroupID()
-		effectiveLimit := u.EffectiveDeviceLimit()
-		isCustomLimit := u.DeviceLimit > 0
 		list = append(list, gin.H{
 			"id": u.ID, "username": u.Username, "email": u.Email,
 			"uuid": u.UUID, "remark": u.Remark,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
-			"permission_group_id":    u.PermissionGroupID,
-			"effective_group_id":     effectiveGroupID,
-			"device_limit":           u.DeviceLimit,
-			"effective_device_limit": effectiveLimit,
-			"is_custom_device_limit": isCustomLimit,
-			"expire_at":              u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
+			"permission_group_id": u.PermissionGroupID,
+			"effective_group_id":  effectiveGroupID,
+			"expire_at":           u.ExpireAt, "balance_cents": u.BalanceCents, "created_at": u.CreatedAt,
 			"up_bytes": up, "down_bytes": down,
 			"used_bytes": used, "total_bytes": totalBytes,
 		})
@@ -184,7 +179,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		Password          string     `json:"password" binding:"required,min=8"`
 		PlanID            uint64     `json:"plan_id"`
 		PermissionGroupID uint64     `json:"permission_group_id"`
-		DeviceLimit       int        `json:"device_limit"`
 		ExpireAt          *time.Time `json:"expire_at"`
 		Remark            string     `json:"remark"`
 	}
@@ -228,7 +222,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		SubscribeToken:    token,
 		PlanID:            req.PlanID,
 		PermissionGroupID: req.PermissionGroupID,
-		DeviceLimit:       req.DeviceLimit,
 		ExpireAt:          utcPtr(req.ExpireAt),
 		Remark:            strings.TrimSpace(req.Remark),
 	}
@@ -281,7 +274,6 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		Role              *string    `json:"role"`                                    // "admin" | "user"
 		PlanID            *uint64    `json:"plan_id"`
 		PermissionGroupID *uint64    `json:"permission_group_id"` // 0=跟随套餐
-		DeviceLimit       *int       `json:"device_limit"`        // 0=跟随套餐
 		ExpireAt          *time.Time `json:"expire_at"`
 		Status            *int       `json:"status"`
 		Password          *string    `json:"password"`
@@ -364,9 +356,6 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			}
 		}
 		updates["permission_group_id"] = *req.PermissionGroupID
-	}
-	if req.DeviceLimit != nil {
-		updates["device_limit"] = *req.DeviceLimit
 	}
 	if req.Remark != nil {
 		updates["remark"] = strings.TrimSpace(*req.Remark)

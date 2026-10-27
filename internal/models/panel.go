@@ -161,13 +161,15 @@ func (inb *Inbound) CanServeAccessPoint() bool {
 
 // Plan 套餐。
 type Plan struct {
-	ID                uint64 `gorm:"primaryKey" json:"id"`
-	Name              string `gorm:"size:64;not null" json:"name"`
-	Description       string `gorm:"type:text" json:"description"` // 自定义文案/套餐特性说明
-	PriceCents        int64  `gorm:"not null" json:"price_cents"`  // 价格（分）
-	TrafficGB         int64  `gorm:"not null" json:"traffic_gb"`
-	DurationDays      int    `gorm:"not null" json:"duration_days"`
-	DeviceLimit       int    `gorm:"default:0" json:"device_limit"`              // 最大在线设备数（0=不限）
+	ID           uint64 `gorm:"primaryKey" json:"id"`
+	Name         string `gorm:"size:64;not null" json:"name"`
+	Description  string `gorm:"type:text" json:"description"` // 自定义文案/套餐特性说明
+	PriceCents   int64  `gorm:"not null" json:"price_cents"`  // 价格（分）
+	TrafficGB    int64  `gorm:"not null" json:"traffic_gb"`
+	DurationDays int    `gorm:"not null" json:"duration_days"`
+	// DeviceLimit 已下线（2026-10-27）：Xray 无设备数限制能力，字段不再对外暴露、
+	// 不参与订阅/配置生成。列与快照写入保留，仅为数据可回滚（业务只写不读）。
+	DeviceLimit       int    `gorm:"default:0" json:"-"`
 	PermissionGroupID uint64 `gorm:"index;default:0" json:"permission_group_id"` // 绑定权限组（0=不绑定）
 	SortOrder         int    `gorm:"default:0" json:"sort_order"`                // 商城展示排序（越小越靠前；同值按价格升序）
 	IsFeatured        bool   `gorm:"default:false" json:"is_featured"`           // 商城「热门推荐」标记（多选时仅排最前的生效）
@@ -196,11 +198,10 @@ func PlanOrderSnapshot(p *Plan) string {
 		PriceCents        int64  `json:"price_cents"`
 		TrafficGB         int64  `json:"traffic_gb"`
 		DurationDays      int    `json:"duration_days"`
-		DeviceLimit       int    `json:"device_limit"`
 		PermissionGroupID uint64 `json:"permission_group_id"`
 	}{
 		ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
-		DurationDays: p.DurationDays, DeviceLimit: p.DeviceLimit, PermissionGroupID: p.PermissionGroupID,
+		DurationDays: p.DurationDays, PermissionGroupID: p.PermissionGroupID,
 	})
 	if err != nil {
 		return ""
@@ -218,7 +219,7 @@ type Order struct {
 	PaymentMethod string `gorm:"size:32;default:balance;index" json:"payment_method"` // balance（唯一）
 	Status        string `gorm:"size:16;default:paid;index" json:"status"`            // paid（唯一）
 	// 套餐快照（2026-10-25）：套餐可归档，历史订单不能依赖实时 JOIN plans 取名称。
-	// PlanName 用于列表展示；PlanSnapshot 固化下单时点的名称/价格/流量/时长/设备数/权限组。
+	// PlanName 用于列表展示；PlanSnapshot 固化下单时点的名称/价格/流量/时长/权限组。
 	// 存量订单由 backfillOrderPlanNames 回填名称，快照留空（属一次性迁移前的历史行）。
 	PlanName     string     `gorm:"size:64" json:"plan_name"`
 	PlanSnapshot string     `gorm:"type:text" json:"-"`

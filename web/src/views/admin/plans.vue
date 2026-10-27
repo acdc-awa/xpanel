@@ -67,7 +67,6 @@ const form = reactive({
   price_yuan: 25,
   traffic_gb: 200,
   duration_days: 30,
-  device_limit: 0,
   permission_group_id: 0,
   sort_order: 0,
   is_featured: false,
@@ -79,7 +78,6 @@ const saving = ref(false)
 
 const defaultPlanDesc = `包含 $TRAFFIC$ 高速流量
 有效期 $DURATION$ 天
-$DEVICE_LIMIT$
 全量优质节点与中转链路授权
 全面兼容 Mihomo / Clash 生态`
 
@@ -121,7 +119,6 @@ function openCreate() {
     price_yuan: 25,
     traffic_gb: 200,
     duration_days: 30,
-    device_limit: 0,
     permission_group_id: 0,
     sort_order: 0,
     is_featured: false,
@@ -141,7 +138,6 @@ function openEdit(row: any) {
     price_yuan: Number((row.price_cents / 100).toFixed(2)),
     traffic_gb: row.traffic_gb,
     duration_days: row.duration_days,
-    device_limit: row.device_limit || 0,
     permission_group_id: row.permission_group_id || 0,
     sort_order: row.sort_order || 0,
     is_featured: !!row.is_featured,
@@ -165,7 +161,6 @@ async function save() {
       price_cents: Math.round(form.price_yuan * 100),
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
-      device_limit: form.device_limit,
       permission_group_id: form.permission_group_id || undefined,
       sort_order: form.sort_order,
       is_featured: form.is_featured,
@@ -320,7 +315,6 @@ async function restore(row: any) {
           <CsCardFacts>
             <CsCardFact label="包含流量" :value="trafficLabel(row.traffic_gb)" mono />
             <CsCardFact label="有效期" :value="`${row.duration_days} 天`" mono />
-            <CsCardFact label="设备限制" :value="row.device_limit ? `${row.device_limit} 台` : '不限设备'" />
             <CsCardFact label="展示排序" :value="`#${row.sort_order ?? 0}`" mono />
             <CsCardFact label="权限组" :value="groupNameOf(row.permission_group_id)" full-width />
           </CsCardFacts>
@@ -350,16 +344,13 @@ async function restore(row: any) {
             <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$DURATION$')">
               $DURATION$ (周期)
             </CsBadge>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$DEVICE_LIMIT$')">
-              $DEVICE_LIMIT$ (设备限制)
-            </CsBadge>
           </div>
           <CsInput
             ref="descInputRef"
             v-model="form.description"
             type="textarea"
             :rows="5"
-            placeholder="如：&#10;包含 $TRAFFIC$ 高速流量&#10;有效期 $DURATION$ 天&#10;$DEVICE_LIMIT$&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
+            placeholder="如：&#10;包含 $TRAFFIC$ 高速流量&#10;有效期 $DURATION$ 天&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
           />
         </CsFormItem>
         <div class="form-grid-2">
@@ -371,9 +362,6 @@ async function restore(row: any) {
           </CsFormItem>
           <CsFormItem label="流量配额（GB）">
             <CsInputNumber v-model="form.traffic_gb" :min="1" style="width: 100%" />
-          </CsFormItem>
-          <CsFormItem label="并发设备上限（台，0 为不限）">
-            <CsInputNumber v-model="form.device_limit" :min="0" style="width: 100%" />
           </CsFormItem>
           <CsFormItem label="展示排序（越小越靠前）">
             <CsInputNumber v-model="form.sort_order" :min="0" :step="10" style="width: 100%" />
@@ -415,7 +403,7 @@ async function restore(row: any) {
             <CsCheckbox v-model="form.sync_users">同步存量用户</CsCheckbox>
             <TipIcon
               type="warn"
-              content="默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。勾选后立即把新的额度 / 设备限制 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。"
+              content="默认关闭：本次修改仅影响新购买 / 续费，存量用户按购买时的快照额度与权限组继续使用，直到下次分配或续费。勾选后立即把新的额度 / 权限组应用到当前所有订阅用户并同步至服务器（超量用户会被即时踢下线）。"
             />
           </div>
         </CsFormItem>

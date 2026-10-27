@@ -28,7 +28,7 @@ func TestAdminUpdatePlanSnapshotIsolation(t *testing.T) {
 	require.NoError(t, db.Create(&models.PermissionGroup{ID: 9, Name: "g9"}).Error)
 	deps := &api.Deps{DB: db} // Hub/Config 为 nil → TriggerUserChange 为安全空操作
 
-	plan := models.Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: 5, Purchasable: true, Renewable: true}
+	plan := models.Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, PermissionGroupID: 5, Purchasable: true, Renewable: true}
 	require.NoError(t, db.Create(&plan).Error)
 	user := models.User{Username: "a@x.com", Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", PlanID: plan.ID}
 	user.ApplyPlanSnapshot(&plan)
@@ -46,20 +46,18 @@ func TestAdminUpdatePlanSnapshotIsolation(t *testing.T) {
 	}
 
 	// 1) 不勾 sync_users：改小额度 → 存量用户快照不变（隔离）
-	w := doUpdate(map[string]any{"traffic_gb": 10, "device_limit": 1, "permission_group_id": 9})
+	w := doUpdate(map[string]any{"traffic_gb": 10, "permission_group_id": 9})
 	require.Equal(t, http.StatusOK, w.Code, "更新应成功: %s", w.Body.String())
 	var after models.User
 	require.NoError(t, db.First(&after, user.ID).Error)
 	assert.Equal(t, int64(100)*1024*1024*1024, after.PlanTrafficBytes, "不勾同步时快照额度不得变")
-	assert.Equal(t, 3, after.PlanDeviceLimit, "不勾同步时设备限制快照不得变")
 	assert.Equal(t, uint64(5), after.PlanGroupID, "不勾同步时权限组快照不得变")
 
 	// 2) 勾 sync_users=true：批量重快照 → 存量用户按新套餐值生效
-	w = doUpdate(map[string]any{"traffic_gb": 10, "device_limit": 1, "permission_group_id": 9, "sync_users": true})
+	w = doUpdate(map[string]any{"traffic_gb": 10, "permission_group_id": 9, "sync_users": true})
 	require.Equal(t, http.StatusOK, w.Code, "同步更新应成功: %s", w.Body.String())
 	require.NoError(t, db.First(&after, user.ID).Error)
 	assert.Equal(t, int64(10)*1024*1024*1024, after.PlanTrafficBytes, "勾选同步后快照额度应为新值")
-	assert.Equal(t, 1, after.PlanDeviceLimit, "勾选同步后设备限制快照应为新值")
 	assert.Equal(t, uint64(9), after.PlanGroupID, "勾选同步后权限组快照应为新值")
 }
 
@@ -152,14 +150,14 @@ func TestAdminUpdateUserSnapshotOnlyOnPlanChange(t *testing.T) {
 		return w
 	}
 
-	// 1) 同 plan_id 重复提交（仅改设备数）→ 快照不得被重写
-	w := doUpdateUser(map[string]any{"plan_id": p1.ID, "device_limit": 1})
+	// 1) 同 plan_id 重复提交（仅改备注）→ 快照不得被重写
+	w := doUpdateUser(map[string]any{"plan_id": p1.ID, "remark": "仅改备注"})
 	require.Equal(t, http.StatusOK, w.Code, "同套餐编辑应成功: %s", w.Body.String())
 	var after models.User
 	require.NoError(t, db.First(&after, user.ID).Error)
 	assert.Equal(t, uint64(5), after.PlanGroupID, "同套餐编辑不得重写权限组快照")
 	assert.Equal(t, int64(100)*1024*1024*1024, after.PlanTrafficBytes, "同套餐编辑不得重写流量快照")
-	assert.Equal(t, 1, after.DeviceLimit, "同套餐编辑其他字段应正常生效")
+	assert.Equal(t, "仅改备注", after.Remark, "同套餐编辑其他字段应正常生效")
 
 	// 2) 换绑套餐 → 按新套餐值重新快照
 	w = doUpdateUser(map[string]any{"plan_id": p2.ID})

@@ -17,13 +17,15 @@ type User struct {
 	Role           string     `gorm:"size:16;default:user;index" json:"role"`
 	Status         int        `gorm:"default:1;index" json:"status"`
 	SubscribeToken string     `gorm:"size:64;uniqueIndex" json:"-"`
-	PlanID              uint64     `gorm:"index" json:"plan_id"`
-	ExpireAt            *time.Time `json:"expire_at"`
-	BalanceCents        int64      `gorm:"default:0;not null" json:"balance_cents"`     // 账户余额（分）
-	DeviceLimit         int        `gorm:"default:0" json:"device_limit"`              // 自定义设备数限制（0=继承套餐）
-	PermissionGroupID   uint64     `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
-	Remark              string     `gorm:"size:255" json:"remark"`                     // 管理员备注（仅管理端可见；用户侧 userView 与节点同步均不带）
-	TrafficCycleStart   time.Time  `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后；恒为 UTC 整点，见 TrafficCycleAlign）
+	PlanID         uint64     `gorm:"index" json:"plan_id"`
+	ExpireAt       *time.Time `json:"expire_at"`
+	BalanceCents   int64      `gorm:"default:0;not null" json:"balance_cents"` // 账户余额（分）
+	// DeviceLimit 已下线（2026-10-27）：Xray 无法按设备/连接掐断，字段不再对外暴露、
+	// 也不再参与配置生成/订阅/判定。列与快照写入保留，仅为数据可回滚（业务只写不读）。
+	DeviceLimit       int       `gorm:"default:0" json:"-"`
+	PermissionGroupID uint64    `gorm:"index;default:0" json:"permission_group_id"` // 所属权限组（0=未分组）
+	Remark            string    `gorm:"size:255" json:"remark"`                     // 管理员备注（仅管理端可见；用户侧 userView 与节点同步均不带）
+	TrafficCycleStart time.Time `json:"traffic_cycle_start"`                        // 当前计费周期起点（流量只算此后；恒为 UTC 整点，见 TrafficCycleAlign）
 	// TrafficCycleID 当前账期 ID（≥1，审计 F3）：每次切换周期（购买/续费/重置）递增。
 	// 节点按此 ID 给采集到的增量打标（见 protocol.TrafficEntry.CycleID），计费/配额按
 	// 「traffic_logs.cycle_id = 本值」归属——切换后新周期天然从 0 起算（无需清零桶），
@@ -33,7 +35,7 @@ type User struct {
 	// 判定链（filterValidUsers/订阅/展示/超额处置）只读快照、不实时 join plans——
 	// 套餐编辑默认零影响存量用户（仅新购/续费生效），勾选「同步存量用户」才批量重快照。
 	PlanTrafficBytes int64  `gorm:"default:0" json:"plan_traffic_bytes"` // 流量额度快照（字节，0=不限）
-	PlanDeviceLimit  int    `gorm:"default:0" json:"plan_device_limit"`  // 设备限制快照（0=不限）
+	PlanDeviceLimit  int    `gorm:"default:0" json:"-"`                  // 设备限制快照（字段已下线；只写不读，列保留）
 	PlanGroupID      uint64 `gorm:"default:0" json:"plan_group_id"`      // 权限组快照（0=不绑定）
 	// 自动续费双开关（2026-09-04，2026-10-26 改到期语义）：触发即按当前持有套餐调用
 	// PayWithBalance（购买语义：作废重算+流量重置）。AutoRenewExpire 在到期时刻生效——
@@ -41,15 +43,15 @@ type User struct {
 	// （plan_id=0 + 快照与权限组归零，见 BillingStore.ClearSubscription）。
 	AutoRenewExpire  bool `gorm:"default:false" json:"auto_renew_expire"`
 	AutoRenewExhaust bool `gorm:"default:false" json:"auto_renew_exhaust"`
-	MustChangePwd    bool   `gorm:"default:false" json:"must_change_pwd"`
+	MustChangePwd    bool `gorm:"default:false" json:"must_change_pwd"`
 	// 会话吊销版本号（改密/重置密码/封禁后 bump；JWT claims 携带，refresh 时校验）
 	TokenVersion uint32 `gorm:"default:0" json:"-"`
 	// TOTP 2FA（2026-08-14 方向③）：secret AES 加密存储；BackupCodes 为 bcrypt 哈希 JSON 数组
-	TotpSecret      string     `gorm:"size:512" json:"-"`
-	TotpEnabled     bool       `gorm:"default:false" json:"totp_enabled"`
-	TotpFailedCount int        `gorm:"default:0" json:"-"`
-	TotpLockedUntil *time.Time `json:"-"`
-	BackupCodes     string     `gorm:"type:text" json:"-"`
+	TotpSecret      string         `gorm:"size:512" json:"-"`
+	TotpEnabled     bool           `gorm:"default:false" json:"totp_enabled"`
+	TotpFailedCount int            `gorm:"default:0" json:"-"`
+	TotpLockedUntil *time.Time     `json:"-"`
+	BackupCodes     string         `gorm:"type:text" json:"-"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
@@ -65,14 +67,6 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 // EffectiveTrafficBytes 套餐流量额度快照（字节，0=不限）。
 func (u *User) EffectiveTrafficBytes() int64 { return u.PlanTrafficBytes }
-
-// EffectiveDeviceLimit 生效设备限制（用户自定义优先，fallback 快照；0=不限）。
-func (u *User) EffectiveDeviceLimit() int {
-	if u.DeviceLimit > 0 {
-		return u.DeviceLimit
-	}
-	return u.PlanDeviceLimit
-}
 
 // EffectiveGroupID 生效权限组（用户显式分组优先，fallback 快照；0=未分组）。
 func (u *User) EffectiveGroupID() uint64 {

@@ -72,14 +72,12 @@ function fmtGb(gb: number) {
 function getPlanFeatures(plan: Plan): string[] {
   const defaultTemplate = `包含 $TRAFFIC$ 高速流量
 有效期 $DURATION$ 天
-$DEVICE_LIMIT$
 全量优质节点与中转链路
 全面兼容 Mihomo / Clash 生态`
 
   const rawText = plan.description?.trim() ? plan.description : defaultTemplate
   const trafficStr = fmtGb(plan.traffic_gb)
   const durationStr = `${plan.duration_days} 天`
-  const deviceStr = plan.device_limit > 0 ? `同时在线 ${plan.device_limit} 台设备` : '不限同时在线设备数'
 
   return rawText
     .split('\n')
@@ -89,8 +87,10 @@ $DEVICE_LIMIT$
       line
         .replace(/(\$TRAFFIC\$|\{traffic\}|\{\{traffic\}\})/gi, trafficStr)
         .replace(/(\$DURATION\$|\{duration\}|\{\{duration\}\}|\$DAYS\$|\{days\})/gi, durationStr)
-        .replace(/(\$DEVICE_LIMIT\$|\{device_limit\}|\{\{device_limit\}\}|\$DEVICES\$|\{devices\})/gi, deviceStr),
+        // 设备限制已下线：存量文案残留的占位符清空，避免整行露出裸 token
+        .replace(/(\$DEVICE_LIMIT\$|\{device_limit\}|\{\{device_limit\}\}|\$DEVICES\$|\{devices\})/gi, ''),
     )
+    .filter((line) => line !== '')
 }
 
 async function load() {

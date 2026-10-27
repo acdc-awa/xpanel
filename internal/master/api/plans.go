@@ -19,7 +19,6 @@ type planView struct {
 	PriceCents        int64      `json:"price_cents"`
 	TrafficGB         int64      `json:"traffic_gb"`
 	DurationDays      int        `json:"duration_days"`
-	DeviceLimit       int        `json:"device_limit"`        // 0=不限
 	PermissionGroupID uint64     `json:"permission_group_id"` // 0=未绑定；购买后按权限组动态授权入站
 	SortOrder         int        `json:"sort_order"`          // 商城展示排序（越小越靠前）
 	IsFeatured        bool       `json:"is_featured"`         // 商城「热门推荐」标记
@@ -39,7 +38,6 @@ func toPlanView(p *models.Plan) planView {
 	return planView{
 		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays:      p.DurationDays,
-		DeviceLimit:       p.DeviceLimit,
 		PermissionGroupID: p.PermissionGroupID,
 		SortOrder:         p.SortOrder, IsFeatured: p.IsFeatured,
 		Purchasable: p.Purchasable, Renewable: p.Renewable,
@@ -55,8 +53,7 @@ type publicPlanView struct {
 	PriceCents   int64     `json:"price_cents"`
 	TrafficGB    int64     `json:"traffic_gb"`
 	DurationDays int       `json:"duration_days"`
-	DeviceLimit  int       `json:"device_limit"` // 0=不限
-	IsFeatured   bool      `json:"is_featured"`  // 商城「热门推荐」标记（前端据此挂徽标）
+	IsFeatured   bool      `json:"is_featured"` // 商城「热门推荐」标记（前端据此挂徽标）
 	Purchasable  bool      `json:"purchasable"`
 	Renewable    bool      `json:"renewable"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -66,7 +63,6 @@ func toPublicPlanView(p *models.Plan) publicPlanView {
 	return publicPlanView{
 		ID: p.ID, Name: p.Name, Description: p.Description, PriceCents: p.PriceCents, TrafficGB: p.TrafficGB,
 		DurationDays: p.DurationDays,
-		DeviceLimit:  p.DeviceLimit,
 		IsFeatured:   p.IsFeatured,
 		Purchasable:  p.Purchasable, Renewable: p.Renewable, CreatedAt: p.CreatedAt,
 	}
@@ -100,7 +96,6 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		PriceCents        int64  `json:"price_cents" binding:"required,min=0"`
 		TrafficGB         int64  `json:"traffic_gb" binding:"required,min=1"`
 		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
-		DeviceLimit       int    `json:"device_limit"`
 		PermissionGroupID uint64 `json:"permission_group_id"` // 0=不绑定
 		SortOrder         int    `json:"sort_order"`          // 展示排序（越小越靠前）
 		IsFeatured        bool   `json:"is_featured"`         // 「热门推荐」标记
@@ -130,7 +125,6 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 	plan := models.Plan{
 		Name: req.Name, Description: req.Description, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
 		DurationDays:      req.DurationDays,
-		DeviceLimit:       req.DeviceLimit,
 		PermissionGroupID: req.PermissionGroupID, SortOrder: req.SortOrder, IsFeatured: req.IsFeatured,
 		Purchasable: purchasable, Renewable: renewable,
 	}
@@ -160,14 +154,13 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		PriceCents        *int64  `json:"price_cents"`
 		TrafficGB         *int64  `json:"traffic_gb"`
 		DurationDays      *int    `json:"duration_days"`
-		DeviceLimit       *int    `json:"device_limit"`
 		PermissionGroupID *uint64 `json:"permission_group_id"` // 显式 0 解绑
 		SortOrder         *int    `json:"sort_order"`
 		IsFeatured        *bool   `json:"is_featured"`
 		Purchasable       *bool   `json:"purchasable"` // 可新购（商店展示并允许非持有者购买）
 		Renewable         *bool   `json:"renewable"`   // 可续费（持有者余额直付顺延）
 		// SyncUsers「同步存量用户」（2026-09-01 快照化）：默认 false——套餐编辑只影响新购/续费
-		// （存量用户按快照用到自己到期为止）；勾选后把新的额度/设备限制/权限组快照批量覆盖到
+		// （存量用户按快照用到自己到期为止）；勾选后把新的额度/权限组快照批量覆盖到
 		// 该套餐全部用户，并触发热更同步（立即踢除超量用户）。
 		SyncUsers *bool `json:"sync_users"`
 	}
@@ -202,10 +195,6 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 		util.BadRequest(c, "套餐时长至少为 1 天")
 		return
 	}
-	if req.DeviceLimit != nil && *req.DeviceLimit < 0 {
-		util.BadRequest(c, "设备限制不能为负数（0=不限）")
-		return
-	}
 	if req.SortOrder != nil && *req.SortOrder < 0 {
 		util.BadRequest(c, "排序值不能为负数")
 		return
@@ -225,9 +214,6 @@ func (d *Deps) AdminUpdatePlan(c *gin.Context) {
 	}
 	if req.DurationDays != nil {
 		updates["duration_days"] = *req.DurationDays
-	}
-	if req.DeviceLimit != nil {
-		updates["device_limit"] = *req.DeviceLimit
 	}
 	if req.PermissionGroupID != nil {
 		updates["permission_group_id"] = *req.PermissionGroupID

@@ -361,7 +361,6 @@ export function updateUser(
     role?: 'admin' | 'user'
     plan_id?: number
     permission_group_id?: number
-    device_limit?: number
     expire_at?: string | null
     status?: number
     password?: string
@@ -1059,7 +1058,6 @@ export function createUser(payload: {
   password: string
   plan_id?: number
   permission_group_id?: number
-  device_limit?: number
   expire_at?: string | null
   remark?: string
 }) {

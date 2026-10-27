@@ -132,12 +132,6 @@ function enumLabel(v: unknown): string {
   return PROTOCOL_LABELS[s.toLowerCase()] ?? s
 }
 
-function deviceLimit(v: unknown): string {
-  const n = Number(v)
-  if (!Number.isFinite(n) || n <= 0) return '不限'
-  return `${n} 台`
-}
-
 function groupRef(v: unknown): string {
   const n = Number(v)
   if (!Number.isFinite(n) || n <= 0) return '不绑定'
@@ -283,7 +277,6 @@ const plansDict: Dict = {
   price_cents: { label: '价格', fmt: money },
   traffic_gb: { label: '流量', fmt: gb },
   duration_days: { label: '有效期', fmt: days },
-  device_limit: { label: '设备限制', fmt: deviceLimit },
   permission_group_id: { label: '绑定权限组', fmt: groupRef },
   sort_order: { label: '商城排序' },
   is_featured: { label: '热门推荐', fmt: boolFmt },

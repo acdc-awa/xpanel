@@ -29,11 +29,6 @@ const balanceYuan = computed(() => {
   return (cents / 100).toFixed(2)
 })
 
-const deviceLimitText = computed(() => {
-  const lim = auth.user?.device_limit || auth.user?.effective_device_limit || 0
-  return lim > 0 ? `同时在线 ${lim} 台设备` : '不限同时在线设备数'
-})
-
 // plan_name 由 /user/me 等接口返回；套餐已删时为空，回退显示编号
 const planLabel = computed(() => {
   if (auth.user?.plan_name) return `已购套餐 ${auth.user.plan_name}`
@@ -229,7 +224,6 @@ function viewNotice(n: NoticeItem) {
             </div>
             <div class="hero-top-right">
               <span class="x-chip gray cell-mono">余额 ¥{{ balanceYuan }}</span>
-              <span class="x-chip gray">{{ deviceLimitText }}</span>
               <span v-if="daysLeft !== null" class="x-chip gray">剩余 {{ daysLeft }} 天</span>
             </div>
           </div>

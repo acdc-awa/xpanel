@@ -17,7 +17,7 @@ func TestPayWithBalanceSnapshotsPlanOnOrder(t *testing.T) {
 
 	plan := models.Plan{
 		Name: "快照套餐", PriceCents: 1200, TrafficGB: 200, DurationDays: 30,
-		DeviceLimit: 3, PermissionGroupID: 7, Purchasable: true, Renewable: true,
+		PermissionGroupID: 7, Purchasable: true, Renewable: true,
 	}
 	if err := db.Create(&plan).Error; err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -42,8 +42,7 @@ func TestPayWithBalanceSnapshotsPlanOnOrder(t *testing.T) {
 		t.Fatalf("order.plan_name = %q, want 快照套餐", order.PlanName)
 	}
 	if !strings.Contains(order.PlanSnapshot, `"traffic_gb":200`) ||
-		!strings.Contains(order.PlanSnapshot, `"duration_days":30`) ||
-		!strings.Contains(order.PlanSnapshot, `"device_limit":3`) {
+		!strings.Contains(order.PlanSnapshot, `"duration_days":30`) {
 		t.Fatalf("plan_snapshot 不完整: %s", order.PlanSnapshot)
 	}
 	var snap struct {

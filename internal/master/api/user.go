@@ -24,7 +24,7 @@ func (d *Deps) Me(c *gin.Context) {
 }
 
 // userView 构造用户资料视图（登录/注册响应与 /user/me 同源，避免首屏数据失真）。
-// ISSUE-16：补齐余额/流量/订阅 token/设备限制/权限组字段。
+// ISSUE-16：补齐余额/流量/订阅 token/权限组字段。
 // 订阅对外根地址/入口路径仅在登录态下发（前端拼接订阅链接用；公开面不暴露订阅端点）。
 func (d *Deps) userView(user *models.User) gin.H {
 	// 快照化（2026-09-01）：total_bytes 读用户行快照列，不再随套餐编辑实时漂移；
@@ -44,8 +44,6 @@ func (d *Deps) userView(user *models.User) gin.H {
 		up, down, _ = d.Traffic.UserBilled(user.ID)
 	}
 	effectiveGroupID := user.EffectiveGroupID()
-	effectiveLimit := user.EffectiveDeviceLimit()
-	isCustomLimit := user.DeviceLimit > 0
 
 	site := map[string]string{}
 	if d.Site != nil {
@@ -53,32 +51,29 @@ func (d *Deps) userView(user *models.User) gin.H {
 	}
 
 	return gin.H{
-		"id":                     user.ID,
-		"username":               user.Username,
-		"email":                  user.Email,
-		"role":                   user.Role,
-		"status":                 user.Status,
-		"plan_id":                user.PlanID,
-		"plan_name":              planName,
-		"expire_at":              user.ExpireAt,
-		"balance_cents":          user.BalanceCents,
-		"subscribe_token":        user.SubscribeToken,
-		"subscribe_url":          site[services.SettingSubscribeURL],
-		"subscribe_path":         site[services.SettingSubscribePath],
-		"created_at":             user.CreatedAt,
-		"up_bytes":               up,
-		"down_bytes":             down,
-		"used_bytes":             up + down,
-		"total_bytes":            totalBytes,
-		"must_change_pwd":        user.MustChangePwd,
-		"totp_enabled":           user.TotpEnabled,
-		"auto_renew_expire":      user.AutoRenewExpire,
-		"auto_renew_exhaust":     user.AutoRenewExhaust,
-		"device_limit":           user.DeviceLimit,
-		"effective_device_limit": effectiveLimit,
-		"is_custom_device_limit": isCustomLimit,
-		"permission_group_id":    user.PermissionGroupID,
-		"effective_group_id":     effectiveGroupID,
+		"id":                  user.ID,
+		"username":            user.Username,
+		"email":               user.Email,
+		"role":                user.Role,
+		"status":              user.Status,
+		"plan_id":             user.PlanID,
+		"plan_name":           planName,
+		"expire_at":           user.ExpireAt,
+		"balance_cents":       user.BalanceCents,
+		"subscribe_token":     user.SubscribeToken,
+		"subscribe_url":       site[services.SettingSubscribeURL],
+		"subscribe_path":      site[services.SettingSubscribePath],
+		"created_at":          user.CreatedAt,
+		"up_bytes":            up,
+		"down_bytes":          down,
+		"used_bytes":          up + down,
+		"total_bytes":         totalBytes,
+		"must_change_pwd":     user.MustChangePwd,
+		"totp_enabled":        user.TotpEnabled,
+		"auto_renew_expire":   user.AutoRenewExpire,
+		"auto_renew_exhaust":  user.AutoRenewExhaust,
+		"permission_group_id": user.PermissionGroupID,
+		"effective_group_id":  effectiveGroupID,
 	}
 }
 

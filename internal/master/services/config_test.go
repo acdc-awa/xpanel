@@ -172,7 +172,7 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	if err := db.Create(&g2).Error; err != nil {
 		t.Fatal(err)
 	}
-	planA := models.Plan{Name: "planA", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, DeviceLimit: 3, PermissionGroupID: g2.ID, Purchasable: true, Renewable: true}
+	planA := models.Plan{Name: "planA", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, PermissionGroupID: g2.ID, Purchasable: true, Renewable: true}
 	if err := db.Create(&planA).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -206,10 +206,10 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	_ = db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g1.ID, AccessPointID: ap1.ID})
 	_ = db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: g2.ID, AccessPointID: ap2.ID})
 
-	// 用户：u1 显式组1（设备限制 2）；u2 套餐→组2（继承限制 3）；u3 无组；u4 已过期
+	// 用户：u1 显式组1；u2 套餐→组2；u3 无组；u4 已过期
 	expired := time.Now().Add(-24 * time.Hour)
 	users := []models.User{
-		{Username: "u1", Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: g1.ID, DeviceLimit: 2},
+		{Username: "u1", Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: g1.ID},
 		{Username: "u2", Email: "u2@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanID: planA.ID},
 		{Username: "u3", Email: "u3@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive},
 		{Username: "u4", Email: "u4@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive, PermissionGroupID: g1.ID, ExpireAt: &expired},
@@ -223,7 +223,6 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	users[1].ApplyPlanSnapshot(&planA)
 	if err := db.Model(&users[1]).Updates(map[string]any{
 		"plan_traffic_bytes": users[1].PlanTrafficBytes,
-		"plan_device_limit":  users[1].PlanDeviceLimit,
 		"plan_group_id":      users[1].PlanGroupID,
 	}).Error; err != nil {
 		t.Fatal(err)
@@ -235,7 +234,7 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// in1：仅 u1，自动 vision，限制 2
+	// in1：仅 u1，自动 vision
 	got := m["in1"]
 	if len(got) != 1 || got[0].UUID != users[0].UUID {
 		t.Fatalf("in1 users = %+v, want only u1", got)
@@ -243,20 +242,14 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	if got[0].Flow != "xtls-rprx-vision" {
 		t.Errorf("in1 flow = %q, want 自动 vision", got[0].Flow)
 	}
-	if got[0].Limit != 2 {
-		t.Errorf("in1 limit = %d, want 2（用户级）", got[0].Limit)
-	}
 
-	// in2：仅 u2，none 禁自动 → flow 空，限制继承套餐 3
+	// in2：仅 u2，none 禁自动 → flow 空
 	got = m["in2"]
 	if len(got) != 1 || got[0].UUID != users[1].UUID {
 		t.Fatalf("in2 users = %+v, want only u2", got)
 	}
 	if got[0].Flow != "" {
 		t.Errorf("in2 flow = %q, want 空（none 禁自动）", got[0].Flow)
-	}
-	if got[0].Limit != 3 {
-		t.Errorf("in2 limit = %d, want 3（套餐继承）", got[0].Limit)
 	}
 
 	// in3：无接入点指向 → 默认不对任何人开放（0 个用户）

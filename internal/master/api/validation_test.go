@@ -56,7 +56,6 @@ func TestAdminUpdatePlanRejectsNegativeValues(t *testing.T) {
 		`{"price_cents":-1}`,
 		`{"traffic_gb":-5}`,
 		`{"duration_days":-1}`,
-		`{"device_limit":-3}`,
 	} {
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/plans/"+id, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -267,7 +266,7 @@ func TestAdminPlanDescriptionCreateAndUpdate(t *testing.T) {
 	r.PUT("/api/v1/admin/plans/:id", d.AdminUpdatePlan)
 
 	// Create with description
-	createBody := `{"name":"VIP Plan","description":"Line 1\nLine 2","price_cents":5000,"traffic_gb":100,"duration_days":30,"device_limit":5}`
+	createBody := `{"name":"VIP Plan","description":"Line 1\nLine 2","price_cents":5000,"traffic_gb":100,"duration_days":30}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plans", strings.NewReader(createBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

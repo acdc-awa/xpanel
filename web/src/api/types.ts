@@ -15,9 +15,6 @@ export interface UserInfo {
   status: number
   plan_id: number
   plan_name?: string
-  device_limit?: number
-  effective_device_limit?: number
-  is_custom_device_limit?: boolean
   permission_group_id?: number
   effective_group_id?: number
   expire_at: string | null
@@ -195,9 +192,6 @@ export interface AdminUser {
   plan_id: number
   permission_group_id?: number
   effective_group_id?: number
-  device_limit: number
-  effective_device_limit?: number
-  is_custom_device_limit?: boolean
   expire_at: string | null
   balance_cents?: number
   created_at: string
@@ -267,7 +261,6 @@ export interface Plan {
   price_cents: number
   traffic_gb: number
   duration_days: number
-  device_limit: number
   purchasable: boolean // 可新购（商店展示并允许非持有者购买）
   renewable: boolean // 可续费（持有者余额直付顺延）
   permission_group_id?: number // Phase T：绑定权限组（套餐自动授权）
