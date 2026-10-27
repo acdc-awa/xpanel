@@ -41,6 +41,7 @@ const isDragging = ref(false)
 const currentColumn = ref<number>(props.column || 6)
 let resizeObserver: ResizeObserver | null = null
 let responsiveAdjusting = false
+let settleTimer: number | null = null
 
 /** 单列（移动端）走整页纵向流：卡片按内容展开，不提供拖拽/缩放。 */
 const isMobileStack = computed(() => currentColumn.value === 2 && props.column > 2)
@@ -160,6 +161,15 @@ function updateResponsiveColumns(width: number) {
   }
 }
 
+/**
+ * 按容器最终宽度校正列数。ResizeObserver 在部分外壳（窄屏抽屉切换）里只会回调第一次，
+ * 视口拉宽后不再触发；window resize 兜底，两者都走这一个入口。
+ */
+function syncColumnsFromLayout() {
+  const width = rootContainerRef.value?.clientWidth || window.innerWidth
+  if (width > 0) updateResponsiveColumns(width)
+}
+
 onMounted(() => {
   if (!gridContainerRef.value) return
 
@@ -228,9 +238,25 @@ onMounted(() => {
     })
     resizeObserver.observe(rootContainerRef.value)
   }
+
+  // 首屏兜底：管理端外壳在窄视口要等抽屉/侧栏切换那一帧才定宽，挂载时读到的宽度
+  // 可能还是桌面档（读成 4 列），而 ResizeObserver 只在宽度「再次变化」时回调，
+  // 于是窄屏首屏停在 4 列、卡片被压成 30px。这里补两帧主动按最终宽度校正一次。
+  requestAnimationFrame(() => {
+    syncColumnsFromLayout()
+    requestAnimationFrame(syncColumnsFromLayout)
+  })
+  // 外壳宽度可能在首帧之后还要再等一次媒体查询/抽屉动画，补一发延时校正
+  settleTimer = window.setTimeout(syncColumnsFromLayout, 300)
+  window.addEventListener('resize', syncColumnsFromLayout)
 })
 
 onUnmounted(() => {
+  if (settleTimer !== null) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  window.removeEventListener('resize', syncColumnsFromLayout)
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null

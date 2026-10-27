@@ -77,7 +77,9 @@ function getPlanFeatures(plan: Plan): string[] {
 
   const rawText = plan.description?.trim() ? plan.description : defaultTemplate
   const trafficStr = fmtGb(plan.traffic_gb)
-  const durationStr = `${plan.duration_days} 天`
+  // 占位符只替换数值：模板与后台默认文案都在占位符后写了「天」，
+  // 这里再拼单位会渲染成「有效期 30 天 天」
+  const durationStr = `${plan.duration_days}`
 
   return rawText
     .split('\n')
@@ -454,7 +456,8 @@ async function confirmPay() {
 
 .pricing-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  /* auto-fill 而非 auto-fit：套餐少时按固定列宽铺排，避免单套餐被拉成整行宽卡片 */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 18px;
 }
 

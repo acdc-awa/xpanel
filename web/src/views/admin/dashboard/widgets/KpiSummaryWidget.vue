@@ -51,69 +51,82 @@ function formatCompactRate(bytesPerSec: number): string {
     :min-h="layoutItem.minH"
     @refresh="ctx.refreshDashboard"
   >
-    <div class="kpi-grid">
-      <div class="kpi-tile">
-        <div class="kpi-label">今日营收</div>
-        <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
-        <div class="kpi-sub">已核销 {{ dashData?.summary.today_used_cards_count || 0 }} 张礼品卡</div>
-      </div>
-
-      <div class="kpi-tile">
-        <div class="kpi-label">本月营收</div>
-        <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.month_revenue_cents || 0) / 100).toFixed(2) }}</div>
-        <div class="kpi-sub">累计 ¥ {{ ((dashData?.summary.total_revenue_cents || 0) / 100).toFixed(2) }}</div>
-      </div>
-
-      <div class="kpi-tile">
-        <div class="kpi-label">今日流量</div>
-        <div class="kpi-value">{{ formatBytes(dashData?.summary.today_traffic_total || 0) }}</div>
-        <div class="kpi-sub">
-          上行 {{ formatBytes(dashData?.summary.today_traffic_up || 0) }} · 下行
-          {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}
+    <div class="kpi-wrap">
+      <div class="kpi-grid">
+        <div class="kpi-tile">
+          <div class="kpi-label">今日营收</div>
+          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
+          <div class="kpi-sub">已核销 {{ dashData?.summary.today_used_cards_count || 0 }} 张礼品卡</div>
         </div>
-      </div>
 
-      <div class="kpi-tile">
-        <div class="kpi-label">实时网络吞吐</div>
-        <div class="kpi-value">
-          {{ formatBandwidth((dashData?.summary.realtime_rx_rate || 0) + (dashData?.summary.realtime_tx_rate || 0)) }}
+        <div class="kpi-tile">
+          <div class="kpi-label">本月营收</div>
+          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.month_revenue_cents || 0) / 100).toFixed(2) }}</div>
+          <div class="kpi-sub">累计 ¥ {{ ((dashData?.summary.total_revenue_cents || 0) / 100).toFixed(2) }}</div>
         </div>
-        <div class="kpi-sub">
-          下行 {{ formatCompactRate(dashData?.summary.realtime_rx_rate || 0) }} · 上行
-          {{ formatCompactRate(dashData?.summary.realtime_tx_rate || 0) }}
-        </div>
-      </div>
 
-      <div class="kpi-tile">
-        <div class="kpi-label">服务器在线</div>
-        <div class="kpi-value">{{ onlineServersCount }}<span class="kpi-unit"> / {{ totalServersCount }}</span></div>
-        <div class="kpi-progress">
-          <div class="kpi-progress-track">
-            <div class="kpi-progress-fill" :class="{ 'is-warning': !isClusterHealthy }" :style="{ width: `${onlineServersRatio}%` }"></div>
+        <div class="kpi-tile">
+          <div class="kpi-label">今日流量</div>
+          <div class="kpi-value">{{ formatBytes(dashData?.summary.today_traffic_total || 0) }}</div>
+          <div class="kpi-sub">
+            ↑ {{ formatBytes(dashData?.summary.today_traffic_up || 0) }} · ↓
+            {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}
           </div>
-          <span class="kpi-sub">{{ onlineServersRatio }}%</span>
         </div>
-      </div>
 
-      <div class="kpi-tile">
-        <div class="kpi-label">用户与订单</div>
-        <div class="kpi-value">{{ dashData?.summary.active_users || 0 }}<span class="kpi-unit"> / {{ dashData?.summary.total_users || 0 }}</span></div>
-        <div class="kpi-sub">今日 {{ dashData?.summary.today_orders || 0 }} 单 · 累计 {{ dashData?.summary.total_orders || 0 }} 单</div>
+        <div class="kpi-tile">
+          <div class="kpi-label">实时网络吞吐</div>
+          <div class="kpi-value">
+            {{ formatBandwidth((dashData?.summary.realtime_rx_rate || 0) + (dashData?.summary.realtime_tx_rate || 0)) }}
+          </div>
+          <div class="kpi-sub">
+            ↓ {{ formatCompactRate(dashData?.summary.realtime_rx_rate || 0) }} · ↑
+            {{ formatCompactRate(dashData?.summary.realtime_tx_rate || 0) }}
+          </div>
+        </div>
+
+        <div class="kpi-tile">
+          <div class="kpi-label">服务器在线</div>
+          <div class="kpi-value">{{ onlineServersCount }}<span class="kpi-unit"> / {{ totalServersCount }}</span></div>
+          <div class="kpi-progress">
+            <div class="kpi-progress-track">
+              <div class="kpi-progress-fill" :class="{ 'is-warning': !isClusterHealthy }" :style="{ width: `${onlineServersRatio}%` }"></div>
+            </div>
+            <span class="kpi-sub">{{ onlineServersRatio }}%</span>
+          </div>
+        </div>
+
+        <div class="kpi-tile">
+          <div class="kpi-label">用户与订单</div>
+          <div class="kpi-value">{{ dashData?.summary.active_users || 0 }}<span class="kpi-unit"> / {{ dashData?.summary.total_users || 0 }}</span></div>
+          <div class="kpi-sub">今日 {{ dashData?.summary.today_orders || 0 }} 单 · 累计 {{ dashData?.summary.total_orders || 0 }} 单</div>
+        </div>
       </div>
     </div>
   </CsDashboardWidget>
 </template>
 
 <style scoped lang="scss">
+/* 一行 6 项：卡片默认全宽（w=6/6），6 列均分才装得下。桌面 gridstack 的高度是
+   固定的（h=3），一旦换行第 2 行就会被卡片内滚动条藏起来 —— 所以这里不换行，
+   用 minmax(0,1fr) 允许列收缩 + 文本省略。 */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
-  min-height: 100%;
-  width: 100%;
   align-content: start;
+  width: 100%;
+  height: 100%;
   box-sizing: border-box;
 }
+
+.kpi-wrap {
+  height: 100%;
+  min-height: 0;
+}
+
+/* 单列移动端的换行与窄屏兜底规则见文件末尾的全局块（scoped 块里的选择器
+   带不上祖先类，且 @container 会被 CSS 管线丢弃） */
 
 .kpi-tile {
   background: var(--color-background-container-content-mjfil9, #ffffff);
@@ -180,6 +193,28 @@ function formatCompactRate(bytesPerSec: number): string {
 
   &.is-warning {
     background: var(--color-text-status-warning-fabq6h, #b7791f);
+  }
+}
+</style>
+
+<!-- 非 scoped：需要命中 CsDashboardGrid 挂在祖先上的 .is-mobile-stack，
+     scoped 块里的选择器带不上祖先类。
+     注：@container 在本项目 CSS 管线里会被整块丢掉（@media 不受影响），故窄屏兜底用媒体查询 -->
+<style lang="scss">
+/* 单列移动端（CsDashboardGrid 的 is-mobile-stack）卡片按内容撑高，这时才允许换行 */
+.is-mobile-stack .kpi-wrap .kpi-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  height: auto;
+}
+
+/* 窄屏兜底：管理端在窄视口首次挂载时可能还没切到单列（is-mobile-stack 未生效），
+   此时 6 列会被压到 30px；按视口退成 2 列保证可读 */
+@media (max-width: 767.98px) {
+  .kpi-wrap .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    height: auto;
   }
 }
 </style>

@@ -144,6 +144,32 @@ const form = reactive({
   timezone: emptyTimezone(),
 })
 
+// 图片类字段：上传后存的是几十 KB 的 data URI，直接绑到输入框会把输入框变成一条乱码。
+// 输入框只承担「粘贴图片 URL」这一种编辑；内联 Base64 用缩略图 + 提示表达，
+// 要换图走右侧按钮，要清空走「恢复默认 / 清空」。
+function imageField(key: 'logo' | 'favicon') {
+  const isInline = () => form.site[key].startsWith('data:')
+  const url = computed({
+    get: () => (isInline() ? '' : form.site[key]),
+    set: (v: string) => {
+      form.site[key] = v.trim()
+    },
+  })
+  const placeholder = computed(() =>
+    isInline()
+      ? key === 'logo'
+        ? '已上传本地图片，粘贴 URL 可替换'
+        : '已上传本地图标，粘贴 URL 可替换'
+      : key === 'logo'
+        ? '可粘贴图片 URL 或点击右侧上传本地图片'
+        : '可粘贴 Favicon URL 或点击右侧上传本地图标'
+  )
+  return { inline: computed(isInline), url, placeholder }
+}
+
+const { url: logoUrl, placeholder: logoPlaceholder } = imageField('logo')
+const { url: faviconUrl, placeholder: faviconPlaceholder } = imageField('favicon')
+
 // secret 只写不读：GET 只回显「是否已配置」，保存时留空 = 保持原值，清除需显式指令
 const secretConfigured = computed(() => form.captcha.turnstile_secret_key_configured === '1')
 const secretClearing = computed(() => form.captcha.turnstile_secret_key_clear === '1')
@@ -1013,9 +1039,12 @@ async function save() {
                 <TipIcon content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。" />
               </template>
               <div class="upload-row">
+                <span v-if="form.site.logo" class="upload-thumb">
+                  <img :src="form.site.logo" alt="站点 LOGO 预览" />
+                </span>
                 <CsInput
-                  v-model="form.site.logo"
-                  placeholder="可粘贴图片 URL / Base64 或点击右侧上传本地图片"
+                  v-model="logoUrl"
+                  :placeholder="logoPlaceholder"
                   clearable
                 />
                 <CsButton :icon-name="'upload'" @click="logoInputRef?.click()">
@@ -1041,9 +1070,12 @@ async function save() {
                 <TipIcon content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。" />
               </template>
               <div class="upload-row">
+                <span v-if="form.site.favicon" class="upload-thumb is-small">
+                  <img :src="form.site.favicon" alt="Favicon 预览" />
+                </span>
                 <CsInput
-                  v-model="form.site.favicon"
-                  placeholder="可粘贴 Favicon URL / Base64 或点击右侧上传本地图标"
+                  v-model="faviconUrl"
+                  :placeholder="faviconPlaceholder"
                   clearable
                 />
                 <CsButton :icon-name="'upload'" @click="faviconInputRef?.click()">
@@ -1927,6 +1959,31 @@ async function save() {
   :deep(.cs-input-root) {
     flex: 1 1 200px;
     min-width: 180px;
+  }
+
+  .upload-thumb {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+    border-radius: 8px;
+    background: var(--color-background-container-content-mjfil9, #ffffff);
+
+    &.is-small {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+    }
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
   }
 }
 

@@ -143,6 +143,13 @@ function userGroupDisplay(u: any) {
   return { name: '未分配权限组', type: 'info', custom: false }
 }
 
+// 「未分配权限组」是告警态而不是健康态：绿色只留给「已继承套餐权限组」
+function userGroupBadgeColor(u: any): 'blue' | 'green' | 'grey' {
+  const d = userGroupDisplay(u)
+  if (d.custom) return 'blue'
+  return d.type === 'success' ? 'green' : 'grey'
+}
+
 // ---- 调整余额（仅保留表格右键或独立调账备用） ----
 const adjustOpen = ref(false)
 const adjustUser = ref<AdminUser | null>(null)
@@ -781,7 +788,7 @@ function cardMenuItems(row: AdminUser) {
               <CsBadge color="blue">{{ planName(row.plan_id) }}</CsBadge>
             </CsCardFact>
             <CsCardFact label="所属权限组">
-              <CsBadge :color="userGroupDisplay(row).custom ? 'blue' : 'green'">
+              <CsBadge :color="userGroupBadgeColor(row)">
                 {{ userGroupDisplay(row).name }}
               </CsBadge>
             </CsCardFact>
