@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Master） - 节点（Agent） - 用户端」三层架构：主控负责 Web 管理界面、配置生成、订阅服务与节点编排；节点 Agent 托管 Xray-core 进程，经 WebSocket 长连接接收配置下发、上报心跳与流量；用户端通过订阅链接获取节点信息。系统支持 VLESS 协议下 TCP / XHTTP / WS 传输与 REALITY / TLS / vlessenc 安全层的组合配置，并提供可视化拓扑编排、权限组订阅模板、余额与礼品卡计费等运营能力。
+XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Master） - 节点（Agent） - 用户端」三层架构：主控负责 Web 管理界面、配置生成、订阅服务与节点编排；节点 Agent 托管 Xray-core 进程，经 WebSocket 长连接接收配置下发、上报心跳与流量；用户端通过订阅链接获取节点信息。系统支持 VLESS（TCP / XHTTP）与 Hysteria 2（QUIC）入站、REALITY / TLS / VLESS Encryption 安全层，以及四层直通（tunnel）与 PROXY Protocol v2 透传，并提供可视化拓扑编排、权限组订阅模板、余额与礼品卡计费等运营能力。
 
 > **仓库结构**：面板（本仓库）与节点 Agent（[XPanel-Node](https://github.com/acdc-awa/XPanel-Node)）为两个独立仓库。Agent 二进制经 GitHub Actions 发布到 XPanel-Node Releases（linux/amd64 + arm64，附 sha256 校验），节点安装与自升级均从 Releases 拉取；通信协议包（`pkg/protocol`）单源托管于 XPanel-Node，本仓库经 go.mod 引入。
 
@@ -31,7 +31,7 @@ XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Mast
 │                           Master 主控控制面 (Docker)                         │
 │                                                                             │
 │  ┌────────────────────────┐  ┌─────────────────────────┐  ┌──────────────┐  │
-│  │ Vue3 + Element Plus    │  │ Gin REST API + JWT 鉴权 │  │ 节点 WS 网关  │  │
+│  │ Vue3 + Cloudscape      │  │ Gin REST API + JWT 鉴权 │  │ 节点 WS 网关  │  │
 │  │ 管理端 & 用户端 SPA     │  │ 订阅服务 (Clash / VLESS) │  │ (WSS 长连接) │  │
 │  └────────────────────────┘  └─────────────────────────┘  └──────────────┘  │
 └──────────────────────────────────────┬──────────────────────────────────────┘
@@ -53,8 +53,9 @@ XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Mast
 ## 核心特性
 
 ### 传输与安全
-- **VLESS 多传输层**：TCP（推荐搭配 REALITY + Vision）、XHTTP（适配 CDN 与反代分流）、WS；
-- **入站安全层可配置**：REALITY / TLS / vlessenc（Xray 内建加密，适用无 TLS 场景）/ none 四选一；
+- **协议**：VLESS（TCP 推荐搭配 REALITY + Vision；XHTTP 适配 CDN 与反代分流）与 Hysteria 2（QUIC），另支持四层直通（tunnel）承接任意 TCP/UDP 转发；
+- **入站安全层可配置**：REALITY / TLS / VLESS Encryption（vlessenc，Xray 内建加密，适用无 TLS 场景）/ none；
+- **四层直通与 PROXY Protocol v2**：直通入站只做监听，目标与转发规则落库为可排序的普通出站/规则；出站可开启 PROXY Protocol v2 向落地透传真实客户端 IP；
 - **物理监听与对外暴露解耦**：节点本地仅监听 `127.0.0.1` 明文，TLS 终止由外部反向代理承担，订阅侧自动覆写分享地址（`ShareSecurity` / `ShareSNI` / `ShareHost` / `SharePath`）。
 
 ### 可视化拓扑编排
@@ -249,8 +250,8 @@ docker compose exec master /app/master reset-admin -email admin@example.com
 
 ```bash
 # 方式 A（推荐）：管理后台 → 系统设置 → 「检查更新 / 应用更新」
-# 自动下载 release 并强制校验 sha256，替换后进程退出由容器自动拉起新版本，
-# 新版本启动失败时自动回滚上一版本。更新前请先手动备份。
+# 自动下载 release 并强制校验 sha256，替换后进程退出由容器自动拉起新版本；
+# 新版本启动失败时 entrypoint 会自动回滚上一个二进制。更新前请先手动备份数据库。
 
 # 方式 B：重新运行安装脚本（覆盖 master 与 web/dist，保留配置与数据）
 cd /opt/xray-panel && bash install.sh
@@ -262,7 +263,14 @@ tar -xzf xpanel-master-<ver>-linux-amd64.tar.gz -C /opt/xray-panel
 docker compose restart master
 ```
 
-升级只替换 `master` 二进制与 `web/dist`，`configs/config.yaml` 与 `data/` 不受影响；回滚 = 用上一版文件覆盖同名路径后 `docker compose restart master`。
+升级只替换 `master` 二进制与 `web/dist`，`configs/config.yaml` 与 `data/` 不受影响；但**数据库 schema 是有版本的**，跨不兼容版本（如 v0.2.0 的 v3 → v4）升级后**不能只回退二进制**——旧面板读到新库会被启动护栏拒绝并退出。完整回退必须同时换回升级前的数据库备份：
+
+1. `docker compose stop master`；
+2. 用升级前的备份覆盖 `data/panel.db`，并删除 `data/panel.db-wal`、`data/panel.db-shm`；
+3. 换回上一版 `master` 与 `web/dist`；
+4. `docker compose start master`。
+
+面板内的「备份列表恢复」只能把**数据**退回到某个时点（启动的仍是当前版本，会再次迁移到 v4），不能把面板版本退回去。
 
 ### 节点维护命令
 
@@ -332,9 +340,9 @@ npm run build        # 生产构建（含类型检查）
 |---|---|---|
 | 后端框架 | Go 1.26 + Gin | 单二进制分发，低资源占用 |
 | 持久层 | GORM + SQLite（默认） | 开发与生产均默认 SQLite（WAL 模式），MySQL 驱动保留可选 |
-| 协议引擎 | Xray-core v26.10.21（锁定版本） | 仅 VLESS 协议，传输层 TCP / XHTTP / WS |
+| 协议引擎 | Xray-core v26.10.21（锁定版本） | VLESS（TCP / XHTTP）+ Hysteria 2（QUIC）+ 四层直通（tunnel） |
 | 前端框架 | Vue 3.5 + Vite + TypeScript | 组合式 API，Pinia 状态管理 |
-| UI 组件库 | Element Plus + SCSS | 深色/浅色主题适配 |
+| UI 组件库 | Cloudscape 移植组件库（`Cs*`，Element Plus 残留） | 深色/浅色主题适配 |
 | 拓扑画布 | @vue-flow/core | 自定义节点、动态避让连线、DAG 自动排版 |
 | 反向代理 | 用户自备（Caddy 2 / Nginx 等） | TLS 终止与域名/路径分流由用户部署的反代承担，仓库提供参考模板 |
 | 安全与认证 | JWT (HMAC-SHA256) + Argon2id + TOTP | 无状态鉴权、会话版本吊销、两步验证 |
