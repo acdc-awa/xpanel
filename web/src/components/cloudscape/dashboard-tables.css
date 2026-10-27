@@ -24,3 +24,37 @@
 .cs-cloudscape-table thead th {
   white-space: nowrap;
 }
+
+/*
+ * 官方把表格 wrapper 的滚动条整体隐藏（桌面端另有一条粘性横向滚动条，
+ * 这里没有实现）。仪表盘的紧凑表放在可缩放的小卡片里，窄卡片下滚动条一隐
+ * 就完全看不出还能横滑——恢复一条细滚动条作为可发现的滑动入口。
+ * vendor 规则带 :not(#\9)，只能 !important 覆盖。
+ */
+.cs-cloudscape-table.awsui-context-compact-table [class*='awsui_wrapper_'] {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--color-text-status-inactive-fqjc97, #879596) transparent !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.cs-cloudscape-table.awsui-context-compact-table [class*='awsui_wrapper_']::-webkit-scrollbar {
+  display: block !important;
+  block-size: 10px;
+  inline-size: 10px;
+}
+
+.cs-cloudscape-table.awsui-context-compact-table [class*='awsui_wrapper_']::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cs-cloudscape-table.awsui-context-compact-table [class*='awsui_wrapper_']::-webkit-scrollbar-thumb {
+  background-color: var(--color-text-status-inactive-fqjc97, #879596);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+.cs-cloudscape-table.awsui-context-compact-table [class*='awsui_wrapper_']::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-body-secondary-66ygbb, #656871);
+}

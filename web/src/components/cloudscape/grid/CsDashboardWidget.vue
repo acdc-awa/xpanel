@@ -33,6 +33,19 @@ const emit = defineEmits<{
 
 const rootRef = ref<HTMLDivElement | null>(null)
 
+/**
+ * 卡片实际宽度决定标题是否与操作区分行：最宽的操作区（服务器筛选框 227px）
+ * 加上标题最小可读宽度约需 500px，低于这个宽度就分行，避免标题被挤成竖排。
+ */
+const narrowHeader = ref(false)
+const NARROW_HEADER_WIDTH = 500
+let sizeObserver: ResizeObserver | null = null
+
+function syncNarrowHeader() {
+  const width = rootRef.value?.clientWidth ?? 0
+  if (width > 0) narrowHeader.value = width < NARROW_HEADER_WIDTH
+}
+
 interface GridContext {
   registerItem: (el: HTMLElement) => void
   unregisterItem: (el: HTMLElement) => void
@@ -56,10 +69,18 @@ const menuItems = [
 ]
 
 onMounted(() => {
-  if (rootRef.value) gridContext?.registerItem(rootRef.value)
+  if (!rootRef.value) return
+  gridContext?.registerItem(rootRef.value)
+  syncNarrowHeader()
+  if (typeof ResizeObserver !== 'undefined') {
+    sizeObserver = new ResizeObserver(syncNarrowHeader)
+    sizeObserver.observe(rootRef.value)
+  }
 })
 
 onUnmounted(() => {
+  sizeObserver?.disconnect()
+  sizeObserver = null
   if (rootRef.value) gridContext?.unregisterItem(rootRef.value)
 })
 
@@ -90,7 +111,7 @@ const headerClass = computed(() => CSB['board-item'].header)
           class="dashboard-widget-container"
         >
           <template #header>
-            <div :class="headerClass">
+            <div :class="cx(headerClass, 'cs-widget-header', narrowHeader && 'cs-widget-header-narrow')">
               <div :class="cx(CSB['board-item'].fixed, CSB['board-item'].handle)">
                 <span
                   class="awsui-drag-handle"
@@ -100,7 +121,7 @@ const headerClass = computed(() => CSB['board-item'].header)
                   <Icon name="drag-indicator" />
                 </span>
               </div>
-              <div :class="cx(CSB['board-item'].flexible, CSB['board-item']['header-content'])">
+              <div :class="cx(CSB['board-item'].flexible, CSB['board-item']['header-content'], 'cs-widget-title')">
                 <Header variant="h2" :counter="badge">
                   {{ title }}
                 </Header>
@@ -147,6 +168,38 @@ const headerClass = computed(() => CSB['board-item'].header)
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
+}
+
+/* 官方 Board 的 header 是不换行的 flex：操作区（筛选框/粒度选择器）的固定宽度
+   会把标题压到只剩一两个字宽，中文于是逐字竖排、整行高达 200px+。
+   窄卡片（按实测宽度 < 500）时标题独占第一行、操作区落到第二行。
+   vendor 规则带 :not(#\9)（ID 级特异性），只能 !important 覆盖。 */
+.cs-widget-header-narrow {
+  flex-wrap: wrap !important;
+  row-gap: 2px !important;
+}
+
+.cs-widget-header-narrow .cs-widget-title {
+  flex: 1 1 calc(100% - 36px) !important;
+  min-inline-size: 0;
+}
+
+.cs-widget-header-narrow .widget-settings {
+  flex: 0 1 auto !important;
+  max-inline-size: 100%;
+  margin-inline-start: auto !important;
+}
+
+/* 筛选框按可用宽度收缩，否则它会带着输入框的固有宽度把操作区撑到卡片外 */
+.widget-settings :deep([class*='compact-filter']) {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  max-inline-size: 260px;
+}
+
+.widget-settings :deep([class*='compact-filter'] input) {
+  inline-size: 100% !important;
+  min-inline-size: 0;
 }
 
 .widget-body {

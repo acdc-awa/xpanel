@@ -97,8 +97,8 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div :class="CS.tabs.root">
-    <div :class="CS.tabs.tabs">
+  <div :class="[CS.tabs.root, 'cs-tabs-root']">
+    <div :class="[CS.tabs.tabs, 'cs-tabs-body']">
       <div :class="cx(CS.tabs['tabs-header'], CS.tabs.refresh, CS.tabs['tabs-header-with-divider'])">
         <div :class="CS.tabs['tab-header-scroll-container']">
           <!-- 官方实现：只有表头溢出时才渲染左右翻页按钮（窄屏 7 个页签会用到） -->

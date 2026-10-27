@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { CsDashboardWidget } from '@/components/cloudscape'
 import { formatBytes } from '@/utils/format'
 import type { DashboardContext } from '../types'
@@ -36,6 +36,56 @@ function formatCompactRate(bytesPerSec: number): string {
   if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)} G`
   return `${mbps.toFixed(2)} M`
 }
+
+/**
+ * 列数按卡片实际宽度算，而不是按视口：卡片在桌面也能被拖窄，
+ * 写死 6 列会把「实时网络吞吐 0.00 Mbps」这类值挤成省略号。
+ */
+const wrapRef = ref<HTMLElement | null>(null)
+const columnCount = ref(6)
+const wrapWidth = ref(0)
+let wrapObserver: ResizeObserver | null = null
+
+/** 6 列但每列较窄时收紧字号，避免「0.00 Mbps」被省略号截断。 */
+const dense = computed(() => columnCount.value === 6 && wrapWidth.value > 0 && wrapWidth.value < 860)
+
+/** 单块指标卡（含间距）的经验高度；用于判断固定高度的卡片能放下几行。 */
+const TILE_ROW_HEIGHT = 87
+const SIX_COLUMN_MIN_WIDTH = 700
+
+function resolveColumnCount(width: number, height: number): number {
+  let columns = width >= 940 ? 6 : width >= 540 ? 3 : width >= 250 ? 2 : 1
+  // 固定高度的卡片放不下多行时，宁可一排 6 项（≥700px 才保证数值不被省略），
+  // 也不要把第二行藏进卡片内滚动条。
+  if (columns < 6 && width >= SIX_COLUMN_MIN_WIDTH && height > 0) {
+    const rows = Math.ceil(6 / columns)
+    const maxRows = Math.max(1, Math.floor((height + 8) / TILE_ROW_HEIGHT))
+    if (maxRows < rows) columns = 6
+  }
+  return columns
+}
+
+function syncColumnCount() {
+  const width = wrapRef.value?.clientWidth ?? 0
+  const height = wrapRef.value?.clientHeight ?? 0
+  if (width > 0) {
+    wrapWidth.value = width
+    columnCount.value = resolveColumnCount(width, height)
+  }
+}
+
+onMounted(() => {
+  syncColumnCount()
+  if (wrapRef.value && typeof ResizeObserver !== 'undefined') {
+    wrapObserver = new ResizeObserver(syncColumnCount)
+    wrapObserver.observe(wrapRef.value)
+  }
+})
+
+onUnmounted(() => {
+  wrapObserver?.disconnect()
+  wrapObserver = null
+})
 </script>
 
 <template>
@@ -51,8 +101,8 @@ function formatCompactRate(bytesPerSec: number): string {
     :min-h="layoutItem.minH"
     @refresh="ctx.refreshDashboard"
   >
-    <div class="kpi-wrap">
-      <div class="kpi-grid">
+    <div ref="wrapRef" class="kpi-wrap" :class="{ 'kpi-dense': dense }">
+      <div class="kpi-grid" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
         <div class="kpi-tile">
           <div class="kpi-label">今日营收</div>
           <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
@@ -195,26 +245,35 @@ function formatCompactRate(bytesPerSec: number): string {
     background: var(--color-text-status-warning-fabq6h, #b7791f);
   }
 }
+
+.kpi-dense {
+  .kpi-grid {
+    gap: 8px;
+  }
+
+  .kpi-tile {
+    padding: 9px 8px;
+    gap: 1px;
+  }
+
+  .kpi-value {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .kpi-label,
+  .kpi-sub {
+    font-size: 10.5px;
+    line-height: 14px;
+  }
+}
 </style>
 
 <!-- 非 scoped：需要命中 CsDashboardGrid 挂在祖先上的 .is-mobile-stack，
-     scoped 块里的选择器带不上祖先类。
-     注：@container 在本项目 CSS 管线里会被整块丢掉（@media 不受影响），故窄屏兜底用媒体查询 -->
+     scoped 块里的选择器带不上祖先类。 -->
 <style lang="scss">
-/* 单列移动端（CsDashboardGrid 的 is-mobile-stack）卡片按内容撑高，这时才允许换行 */
+/* 单列移动端（CsDashboardGrid 的 is-mobile-stack）卡片按内容撑高；列数由组件内的测量决定 */
 .is-mobile-stack .kpi-wrap .kpi-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
   height: auto;
-}
-
-/* 窄屏兜底：管理端在窄视口首次挂载时可能还没切到单列（is-mobile-stack 未生效），
-   此时 6 列会被压到 30px；按视口退成 2 列保证可读 */
-@media (max-width: 767.98px) {
-  .kpi-wrap .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    height: auto;
-  }
 }
 </style>

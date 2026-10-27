@@ -72,6 +72,9 @@ onMounted(() => {
   if (typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(() => measure())
     if (rootRef.value) observer.observe(rootRef.value)
+    // 图例/轴标题是异步随数据出现的，根元素高度不变但绘图区会被压矮；
+    // 只观察根元素会沿用图例出现前的高度，把横轴标签画到图例上。
+    if (plotAreaRef.value) observer.observe(plotAreaRef.value)
   }
 })
 

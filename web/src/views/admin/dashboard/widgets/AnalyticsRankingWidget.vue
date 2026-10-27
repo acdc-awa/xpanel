@@ -66,11 +66,20 @@ const orderColumns: TableColumn[] = [
   { id: 'order-amount', header: '金额', width: 80 },
   { id: 'order-status', header: '状态', width: 80 },
 ]
+
+/**
+ * 列宽合计作为表格最小宽度：不设时 table 会把每列挤到几十像素（文字逐字换行），
+ * 既难读也永远不会产生横向滚动。设了之后窄卡片里由表格自带的 wrapper 横向滚动。
+ */
+function columnsMinWidth(columns: TableColumn[]): number {
+  return columns.reduce((sum, column) => sum + Number(column.width ?? column.minWidth ?? 120), 0)
+}
 </script>
 
 <template>
   <CsDashboardWidget
     id="analytics-ranking"
+    title="数据洞察与业务流水"
     no-padding
     :x="layoutItem.x"
     :y="layoutItem.y"
@@ -92,7 +101,11 @@ const orderColumns: TableColumn[] = [
       <div class="tabs-header-wrapper">
         <CsTabs v-model="activeTab" :tabs="dashboardTabs" disable-content-paddings>
           <!-- 1. 用户流量排行 -->
-          <div v-if="activeTab === 'users'" class="ranking-tab-content">
+          <div
+            v-if="activeTab === 'users'"
+            class="ranking-tab-content"
+            :style="{ '--analytics-table-min-width': `${columnsMinWidth(userColumns)}px` }"
+          >
         <CsTable
           compact
           :items="rankSource?.user_rank || []"
@@ -120,7 +133,11 @@ const orderColumns: TableColumn[] = [
       </div>
 
       <!-- 2. 节点流量排行 -->
-      <div v-else-if="activeTab === 'nodes'" class="ranking-tab-content">
+      <div
+        v-else-if="activeTab === 'nodes'"
+        class="ranking-tab-content"
+        :style="{ '--analytics-table-min-width': `${columnsMinWidth(nodeColumns)}px` }"
+      >
         <CsTable
           compact
           :items="rankSource?.server_rank || []"
@@ -151,7 +168,11 @@ const orderColumns: TableColumn[] = [
       </div>
 
       <!-- 3. 最近礼品卡核销 -->
-      <div v-else-if="activeTab === 'cards'" class="ranking-tab-content">
+      <div
+        v-else-if="activeTab === 'cards'"
+        class="ranking-tab-content"
+        :style="{ '--analytics-table-min-width': `${columnsMinWidth(cardColumns)}px` }"
+      >
         <CsTable
           compact
           :items="rankSource?.recent_gift_cards || []"
@@ -175,7 +196,11 @@ const orderColumns: TableColumn[] = [
       </div>
 
       <!-- 4. 最近套餐订单 -->
-      <div v-else-if="activeTab === 'orders'" class="ranking-tab-content">
+      <div
+        v-else-if="activeTab === 'orders'"
+        class="ranking-tab-content"
+        :style="{ '--analytics-table-min-width': `${columnsMinWidth(orderColumns)}px` }"
+      >
         <CsTable
           compact
           :items="rankSource?.recent_orders || []"
@@ -208,6 +233,42 @@ const orderColumns: TableColumn[] = [
 .tabs-header-wrapper {
   width: 100%;
   padding: 0 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 卡片是固定高度时让页签内容撑满剩余空间：否则表格只按内容高度渲染，
+   卡片下半截全是空白，纵向可读的行数也被浪费。 */
+:deep(.cs-tabs-root) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.cs-tabs-body) {
+  flex: 1;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: column;
+}
+
+:deep([class*='tabs-content-wrapper']) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:deep([class*='tabs-content-active']) {
+  flex: 1;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .ranking-tab-container {
@@ -232,6 +293,16 @@ const orderColumns: TableColumn[] = [
   display: flex;
   flex-direction: column;
   overflow: auto;
+}
+
+/* 窄卡片里页签标签不要折成两行：交给 CsTabs 的左右翻页按钮横向滚动 */
+.ranking-tab-container :deep([class*='tabs-tab-label']) {
+  white-space: nowrap;
+}
+
+/* 列宽合计作为表格下限，窄卡片里由 CsTable 自带的 wrapper 横向滚动 */
+.ranking-tab-content :deep(table) {
+  min-inline-size: var(--analytics-table-min-width, 0);
 }
 
 .user-plan {
@@ -289,6 +360,7 @@ const orderColumns: TableColumn[] = [
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
+  white-space: nowrap;
   background: var(--color-background-container-header-irktp5, #f2f3f3);
   color: var(--color-text-body-default-b2us04, #0f141a);
   padding: 1px 5px;
