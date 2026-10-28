@@ -509,6 +509,14 @@ const rootClasses = computed(() =>
 
 const plotTotalHeight = computed(() => plotHeight.value + bottomLabelsHeight.value)
 
+/**
+ * 加载/空状态没有 SVG，绘图区会塌成一行高；非 fitHeight 时按声明高度预留，
+ * 否则每次刷新卡片都先收缩再弹回（放进弹窗/卡片时尤其明显）。
+ */
+const plotAreaStyle = computed(() =>
+  props.fitHeight ? undefined : { minHeight: `${plotTotalHeight.value}px` }
+)
+
 function isDimmed(seriesTitle: string) {
   return hoveredSeriesTitle.value !== null && hoveredSeriesTitle.value !== seriesTitle
 }
@@ -525,7 +533,7 @@ function seriesClass(seriesTitle: string) {
     <div v-if="yTitle" :class="[CHART.cartesian['axis-label'], CHART.cartesian['axis-label--y'], 'cs-chart-axis-title']">
       {{ yTitle }}
     </div>
-    <div ref="plotAreaRef" class="cs-chart-plot-area">
+    <div ref="plotAreaRef" class="cs-chart-plot-area" :style="plotAreaStyle">
       <Spinner v-if="loading" size="normal" />
       <div v-else-if="series.length === 0 || !hasData" :class="cx(CHART.status.empty, 'cs-chart-empty')">
         {{ emptyText }}
@@ -735,7 +743,7 @@ function seriesClass(seriesTitle: string) {
     </div>
 
     <ChartLegend
-      v-if="!hideLegend && hasData && !loading"
+      v-if="!hideLegend && hasData"
       :items="legendItems"
       :legend-title="legendTitle"
       :highlighted-title="hoveredSeriesTitle"

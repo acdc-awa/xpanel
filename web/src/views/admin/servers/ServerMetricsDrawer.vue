@@ -5,7 +5,7 @@ import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
-import { CsButton, CsLineChart, CsSegmentedControl } from '@/components/cloudscape'
+import { CsButton, CsContainer, CsHeader, CsLineChart, CsModal, CsSegmentedControl } from '@/components/cloudscape'
 import type { LineSeries, SegmentedOption } from '@/components/cloudscape'
 
 const props = defineProps<{
@@ -19,9 +19,17 @@ const emit = defineEmits<{
 }>()
 
 const range = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('1h')
+/**
+ * 图表占位开关：只在「当前没有可展示曲线」时打开（首开、切档、手动刷新）。
+ * 15s 轮询走静默路径，不动它 —— 否则每次轮询曲线都会被 spinner 顶掉再画回来，
+ * 看起来就像整张图被重新渲染了一遍。
+ */
 const loading = ref(false)
+/** 仍在飞行中的「非静默」请求数：并发时由最后一个结束的人负责关掉占位。 */
+let visiblePending = 0
+/** 请求序号：只用来丢弃过期响应（切档后回来的旧档数据），不参与占位开关。 */
+let requestSeq = 0
 const metricsData = ref<ServerMetricsData | null>(null)
-const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
 
 /** 各档时间跨度（小时），用于坐标轴按跨度切换日期/时刻格式。 */
 const RANGE_SPAN_HOURS: Record<string, number> = { '1h': 1, '6h': 6, '24h': 24, '7d': 168, '30d': 720 }
@@ -138,24 +146,34 @@ function onRangeChange(detail: { selectedId: string | number }) {
   range.value = detail.selectedId as typeof range.value
 }
 
-function updateMobileState() {
-  isMobile.value = window.innerWidth <= 768
-}
-
-async function loadData() {
+/**
+ * 拉取监控数据。
+ * @param background 后台轮询：保留当前曲线原地更新，不显示加载态、失败不弹提示（下一轮会重试）。
+ */
+async function loadData(background = false) {
   if (!props.serverId) return
-  loading.value = true
+  // 手动刷新/切档期间跳过这一轮轮询：既省一次请求，也避免两个请求互相判过期。
+  if (background && visiblePending > 0) return
+  const seq = ++requestSeq
+  if (!background) {
+    visiblePending += 1
+    loading.value = true
+  }
   try {
     const { data } = await getServerMetrics(props.serverId, range.value)
+    if (seq !== requestSeq) return
     if (data.code === 0) {
       metricsData.value = data.data
-    } else {
+    } else if (!background) {
       ElMessage.error(data.message)
     }
   } catch (e: any) {
-    ElMessage.error(errMsg(e, '加载监控数据失败'))
+    if (seq === requestSeq && !background) ElMessage.error(errMsg(e, '加载监控数据失败'))
   } finally {
-    loading.value = false
+    if (!background) {
+      visiblePending = Math.max(0, visiblePending - 1)
+      loading.value = visiblePending > 0
+    }
   }
 }
 
@@ -163,9 +181,8 @@ watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      updateMobileState()
       loadData()
-      refreshTimer = setInterval(loadData, 15000)
+      refreshTimer = setInterval(() => loadData(true), 15000)
     } else {
       if (refreshTimer) clearInterval(refreshTimer)
       refreshTimer = null
@@ -177,24 +194,30 @@ watch(range, () => {
   loadData()
 })
 
+// 换了一台服务器就别再显示上一台残留的曲线（弹窗关闭期间 serverId 也会变）。
+watch(
+  () => props.serverId,
+  () => {
+    metricsData.value = null
+    if (props.modelValue) loadData()
+  },
+)
+
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    :title="`性能监控 · ${serverName}`"
-    :width="isMobile ? '94vw' : '820px'"
-    top="5vh"
-    align-center
-    destroy-on-close
-    class="server-metrics-dialog"
-    @update:model-value="emit('update:modelValue', $event)"
+  <CsModal
+    :visible="modelValue"
+    :header="`性能监控 · ${serverName}`"
+    size="large"
+    scrollable
+    @update:visible="emit('update:modelValue', $event)"
   >
-    <div class="metrics-modal-body" v-loading="loading">
-      <!-- 顶栏时间范围切换 -->
+    <div class="metrics-modal-body">
+      <!-- 顶栏时间范围切换：官方口径是工具栏行，四条曲线共用，不套卡片 -->
       <div class="range-toolbar">
         <div class="range-tabs">
           <CsSegmentedControl
@@ -204,17 +227,18 @@ onUnmounted(() => {
             @change="onRangeChange"
           />
         </div>
-        <CsButton :loading="loading" @click="loadData">刷新</CsButton>
+        <!-- 传 event 会被当成 background 参数，必须显式调用 -->
+        <CsButton :loading="loading" @click="loadData()">刷新</CsButton>
       </div>
 
-      <!-- 四张指标卡片 -->
       <div class="charts-grid">
         <!-- 1. 网络 I/O 带宽 -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="title">网络吞吐速率 (Network Bandwidth)</div>
-            <div class="sub">物理网卡动态聚合速率 (Mbps)</div>
-          </div>
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2" description="物理网卡动态聚合速率 (Mbps)">
+              网络吞吐速率 (Network Bandwidth)
+            </CsHeader>
+          </template>
           <CsLineChart
             class="chart-box"
             :series="netSeries"
@@ -225,14 +249,15 @@ onUnmounted(() => {
             aria-label="网络吞吐速率 (Network Bandwidth)"
             empty-text="暂无监控数据"
           />
-        </div>
+        </CsContainer>
 
         <!-- 2. CPU 负载 -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="title">CPU 使用率 (CPU Utilization)</div>
-            <div class="sub">系统全核综合利用百分比 (%)</div>
-          </div>
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2" description="系统全核综合利用百分比 (%)">
+              CPU 使用率 (CPU Utilization)
+            </CsHeader>
+          </template>
           <CsLineChart
             class="chart-box"
             :series="cpuSeries"
@@ -243,14 +268,15 @@ onUnmounted(() => {
             aria-label="CPU 使用率 (CPU Utilization)"
             empty-text="暂无监控数据"
           />
-        </div>
+        </CsContainer>
 
         <!-- 3. 内存与磁盘 -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="title">内存与磁盘空间占用 (Memory & Storage)</div>
-            <div class="sub">系统物理内存与根分区挂载负载 (%)</div>
-          </div>
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2" description="系统物理内存与根分区挂载负载 (%)">
+              内存与磁盘空间占用 (Memory & Storage)
+            </CsHeader>
+          </template>
           <CsLineChart
             class="chart-box"
             :series="memSeries"
@@ -261,14 +287,15 @@ onUnmounted(() => {
             aria-label="内存与磁盘空间占用 (Memory & Storage)"
             empty-text="暂无监控数据"
           />
-        </div>
+        </CsContainer>
 
         <!-- 4. 在线连接数 -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="title">当前在线连接数 (Active Clients)</div>
-            <div class="sub">服务器实时心跳活跃连接设备统计</div>
-          </div>
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2" description="服务器实时心跳活跃连接设备统计">
+              当前在线连接数 (Active Clients)
+            </CsHeader>
+          </template>
           <CsLineChart
             class="chart-box"
             :series="userSeries"
@@ -279,24 +306,17 @@ onUnmounted(() => {
             aria-label="当前在线连接数 (Active Clients)"
             empty-text="暂无监控数据"
           />
-        </div>
+        </CsContainer>
       </div>
     </div>
-  </el-dialog>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
-:deep(.el-dialog__body) {
-  // 高度上限统一由全局 .el-dialog 的 max-height:85vh + body 弹性滚动控制。
-  // 这里以前写 76vh、移动端又写 calc(85vh - 70px)，同一弹窗不同入口高度不同。
-  overflow-x: hidden;
-  padding: 14px 18px 20px;
-}
-
 .metrics-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .range-toolbar {
@@ -305,10 +325,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 14px;
-  background: var(--x-bg, #f8fafc);
-  border: 1px solid var(--x-border, #e6e8f0);
-  border-radius: var(--x-radius, 10px);
 }
 
 /* 分段控件在剩余空间里横向滚动，刷新按钮保持完整宽度不被挤压。 */
@@ -329,31 +345,7 @@ onUnmounted(() => {
 .charts-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.chart-card {
-  background: var(--x-card, #ffffff);
-  border: 1px solid var(--x-border, #e6e8f0);
-  border-radius: var(--x-radius, 10px);
-  padding: 14px 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.chart-header {
-  margin-bottom: 6px;
-}
-
-.chart-header .title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--x-text, #1e2333);
-}
-
-.chart-header .sub {
-  font-size: 11.5px;
-  color: var(--x-text-2, #6b7280);
-  margin-top: 2px;
+  gap: 16px;
 }
 
 /* 图表自身按 `height` 绘制 SVG，这里只负责宽度；固定高度会把图例挤出卡片。 */
@@ -362,29 +354,16 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  :deep(.el-dialog__body) {
-    padding: 10px 12px 16px !important;
-  }
-
   .metrics-modal-body {
     gap: 12px;
   }
 
-  .range-toolbar {
+  .charts-grid {
     gap: 8px;
-    padding: 8px 10px;
   }
 
-  .chart-card {
-    padding: 10px 8px;
-
-    .chart-header .title {
-      font-size: 13px;
-    }
-
-    .chart-header .sub {
-      font-size: 11px;
-    }
+  .range-toolbar {
+    gap: 8px;
   }
 
   .chart-box {
