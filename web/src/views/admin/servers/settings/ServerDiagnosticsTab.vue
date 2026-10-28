@@ -149,47 +149,46 @@ watch(
 
 <template>
   <div class="server-tab-stack">
-    <div class="server-diag-switch">
-      <CsSegmentedControl :model-value="mode" :options="modeOptions" label="诊断内容" @update:model-value="onModeChange" />
-    </div>
-
-    <CsContainer v-if="mode === 'logs'" header="运行日志">
-      <template #actions>
+    <CsContainer>
+      <!-- 模式切换与工具条同一行：卡片不再重复一遍模式名，避免「运行日志」出现两次 -->
+      <div class="server-diag-toolbar">
+        <CsSegmentedControl :model-value="mode" :options="modeOptions" label="诊断内容" @update:model-value="onModeChange" />
         <div class="server-diag-actions">
-          <CsSelect
-            :model-value="logLines"
-            :options="lineOptions"
-            class="server-diag-lines"
-            aria-label="日志行数"
-            @update:model-value="onLinesChange"
-          />
-          <CsToggle v-model="logReverse" label="最新在最前" />
-          <CsButton icon-name="refresh" :loading="logLoading" @click="loadLogs">刷新</CsButton>
-          <CsButton icon-name="copy" :disabled="!logContent" @click="copyLogs">复制</CsButton>
+          <template v-if="mode === 'logs'">
+            <CsSelect
+              :model-value="logLines"
+              :options="lineOptions"
+              class="server-diag-lines"
+              aria-label="日志行数"
+              @update:model-value="onLinesChange"
+            />
+            <CsToggle v-model="logReverse" label="最新在最前" />
+            <CsButton icon-name="refresh" :loading="logLoading" @click="loadLogs">刷新</CsButton>
+            <CsButton icon-name="copy" :disabled="!logContent" @click="copyLogs">复制</CsButton>
+          </template>
+          <template v-else>
+            <CsButton icon-name="refresh" :loading="cfgLoading" @click="loadConfig">刷新</CsButton>
+            <CsButton icon-name="copy" :disabled="!cfgText" @click="copyConfig">复制配置</CsButton>
+            <TipIcon
+              content="此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送至服务器）。展示内容已对用户 UUID 脱敏，复制时保留原文。"
+            />
+          </template>
         </div>
+      </div>
+
+      <template v-if="mode === 'logs'">
+        <div v-if="logLoading && !logContent" class="server-diag-loading">
+          <CsSpinner size="large" />
+        </div>
+        <pre v-else ref="logPreRef" class="server-log-view">{{ displayedLogContent }}</pre>
       </template>
 
-      <div v-if="logLoading && !logContent" class="server-diag-loading">
-        <CsSpinner size="large" />
-      </div>
-      <pre v-else ref="logPreRef" class="server-log-view">{{ displayedLogContent }}</pre>
-    </CsContainer>
-
-    <CsContainer v-else header="配置预览">
-      <template #actions>
-        <div class="server-diag-actions">
-          <CsButton icon-name="refresh" :loading="cfgLoading" @click="loadConfig">刷新</CsButton>
-          <CsButton icon-name="copy" :disabled="!cfgText" @click="copyConfig">复制配置</CsButton>
-          <TipIcon
-            content="此配置为主控根据当前入站、出站、路由规则与有效用户实时渲染的目标 Xray 配置（业务变更系统会自动同步推送至服务器）。展示内容已对用户 UUID 脱敏，复制时保留原文。"
-          />
+      <template v-else>
+        <div v-if="cfgLoading && !cfgText" class="server-diag-loading">
+          <CsSpinner size="large" />
         </div>
+        <pre v-else class="server-cfg-view">{{ maskUUIDs(cfgText) || '正在计算并加载配置预览…' }}</pre>
       </template>
-
-      <div v-if="cfgLoading && !cfgText" class="server-diag-loading">
-        <CsSpinner size="large" />
-      </div>
-      <pre v-else class="server-cfg-view">{{ maskUUIDs(cfgText) || '正在计算并加载配置预览…' }}</pre>
     </CsContainer>
   </div>
 </template>
@@ -201,9 +200,13 @@ watch(
   gap: 16px;
 }
 
-.server-diag-switch {
+.server-diag-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .server-diag-actions {

@@ -5,27 +5,18 @@ import {
   CsBadge,
   CsButton,
   CsContainer,
-  CsKeyValuePairs,
   CsStatusIndicator,
   CsTooltip,
   ElMessage,
-  type KeyValuePair,
 } from '@/components/cloudscape'
 import { getInbounds, serverCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
-import { formatExpireDate, getExpiryStatus, isUrl, normalizeUrl } from '@/utils/vps'
+import { pushStateChip, pushStateSummary, xrayChip } from '@/utils/server-status'
 
-type BadgeColor =
-  | 'grey'
-  | 'green'
-  | 'blue'
-  | 'red'
-  | 'severity-critical'
-  | 'severity-high'
-  | 'severity-medium'
-  | 'severity-low'
-  | 'severity-neutral'
+// 概览只回答「这台机器现在怎么样」：在线/进程/配置同步/接入点。
+// 名称、地址、地区、到期、计费这些可编辑的资产字段一律只在「设置」页签出现，
+// 服务器身份摘要放在弹窗标题下（ServerSettingsModal），这里不再回放第二份。
 
 const props = defineProps<{
   server: ServerItem
@@ -42,9 +33,13 @@ const inboundsLoaded = ref(false)
 
 const statusData = ref<CommandResult<any> | null>(null)
 const statusLoading = ref(false)
-const statusLoaded = ref(false)
 
 const status = computed(() => (statusData.value?.data ?? null) as any)
+const offline = computed(() => props.server.status !== 1)
+
+const pushChip = computed(() => pushStateChip(props.server))
+const pushSummary = computed(() => pushStateSummary(props.server))
+const xray = computed(() => xrayChip(props.server))
 
 function fmtTime(t: string | null | undefined) {
   if (!t) return '—'
@@ -62,100 +57,16 @@ function formatUptime(sec: number) {
   return `${m} 分`
 }
 
-function xrayStateText(state: string) {
-  switch (state) {
-    case 'running':
-      return '运行中'
-    case 'restarting':
-      return '启动失败，自动重试中'
-    case 'failed':
-      return '启动失败，已停止自动拉起'
-    case 'stopped':
-      return '未启动'
-    default:
-      return state
-  }
-}
-
-const xrayChip = computed<{ color: BadgeColor; text: string }>(() => {
-  const s = props.server.xray_state
-  if (s === 'failed') return { color: 'red', text: '启动失败（已停止重试）' }
-  if (s === 'restarting') return { color: 'severity-medium', text: '启动失败，重试中' }
-  if (props.server.xray_running) return { color: 'green', text: '运行中' }
-  return { color: 'red', text: '未运行' }
-})
-
-const pushChip = computed<{ color: BadgeColor; text: string }>(() => {
-  const st =
-    props.server.push_state ||
-    (props.server.config_status === 'pushed'
-      ? 'synced'
-      : props.server.config_status === 'pending'
-        ? 'pending'
-        : 'none')
-  switch (st) {
-    case 'drift':
-      return { color: 'red', text: '磁盘偏离' }
-    case 'rejected':
-      return { color: 'red', text: '推送被拒' }
-    case 'synced':
-      return { color: 'green', text: 'SYNCED' }
-    case 'pending':
-      return { color: 'severity-medium', text: '待推送' }
-    default:
-      return { color: 'grey', text: '未投递' }
-  }
-})
-
-const expiry = computed(() => getExpiryStatus(props.server.expire_at))
-
-function expiryColor(cls: string): BadgeColor {
-  if (cls === 'red') return 'red'
-  if (cls === 'deep-orange' || cls === 'orange' || cls === 'yellow') return 'severity-medium'
-  return 'grey'
-}
-
-const statusStateText = computed(() => {
-  const s = status.value
-  if (!s?.xray_state) return ''
-  const label = xrayStateText(s.xray_state)
-  return s.xray_restart_failures ? `${label}（连续失败 ${s.xray_restart_failures} 次）` : label
-})
-
 const processText = computed(() => {
+  if (offline.value) return '服务器离线，无法查询实时进程'
   const s = status.value
-  if (!s) return statusLoading.value ? '加载中…' : '—'
+  if (!s) return statusLoading.value ? '加载中…' : '未获取到进程信息'
   const parts: string[] = []
   if (s.pid) parts.push(`PID ${s.pid}`)
   if (s.uptime_sec !== undefined && s.uptime_sec !== null) parts.push(`已运行 ${formatUptime(s.uptime_sec)}`)
   if (s.started_at) parts.push(`启动于 ${fmtTime(s.started_at)}`)
   if (s.config_path) parts.push(s.config_path)
-  return parts.join(' · ') || '—'
-})
-
-const runtimeItems: KeyValuePair[] = [
-  { key: 'status', label: '通信状态' },
-  { key: 'xray', label: 'Xray 进程' },
-  { key: 'agent', label: 'Agent 版本' },
-  { key: 'xrayVersion', label: 'Xray 内核' },
-  { key: 'heartbeat', label: '最后心跳' },
-  { key: 'inbounds', label: '托管接入点' },
-  { key: 'process', label: '实时进程' },
-  { key: 'node', label: 'Node ID' },
-]
-
-const networkItems: KeyValuePair[] = [
-  { key: 'host', label: '主机地址 Host' },
-  { key: 'location', label: '所在地区' },
-  { key: 'expire', label: '到期日' },
-  { key: 'billing', label: '计费与价格' },
-]
-
-const assetItems = computed<KeyValuePair[]>(() => {
-  const items: KeyValuePair[] = []
-  if (props.server.idc_address) items.push({ key: 'idc', label: 'IDC 控制台' })
-  if (props.server.remark) items.push({ key: 'remark', label: '备注说明' })
-  return items
+  return parts.join(' · ') || '未获取到进程信息'
 })
 
 async function loadInbounds() {
@@ -172,6 +83,12 @@ async function loadInbounds() {
 }
 
 async function loadStatus() {
+  // 离线节点的 get_status 只会被网关直接拒掉（502「服务器离线」），
+  // 自动查询会在每次打开弹窗时弹一个必然失败的 toast，这里直接跳过。
+  if (offline.value) {
+    statusData.value = null
+    return
+  }
   statusLoading.value = true
   try {
     const { data } = await serverCommand(props.server.id, 'get_status')
@@ -181,7 +98,6 @@ async function loadStatus() {
     ElMessage.error(errMsg(e, '查询状态失败'))
   } finally {
     statusLoading.value = false
-    statusLoaded.value = true
   }
 }
 
@@ -190,27 +106,22 @@ function refresh() {
   void loadInbounds()
 }
 
-async function copyText(text: string, label: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
-  } catch {
-    ElMessage.warning('复制失败，请手动复制')
-  }
-}
-
 watch(
-  () => [props.active, props.server.id] as const,
-  ([active, id], previous) => {
+  () => [props.active, props.server.id, props.server.status] as const,
+  ([active, id, status], previous) => {
     if (previous && previous[1] !== id) {
       inbounds.value = []
       statusData.value = null
       inboundsLoaded.value = false
-      statusLoaded.value = false
+    }
+    // 在线状态变化（掉线/恢复）后旧进程信息即失效：清空后转在线时会自动补查一次。
+    if (previous && previous[2] !== status) {
+      statusData.value = null
     }
     if (!active) return
     if (!inboundsLoaded.value) void loadInbounds()
-    if (!statusLoaded.value) void loadStatus()
+    // 离线期间不查实时进程；节点转在线后自动补一次。
+    if (status === 1 && !statusData.value) void loadStatus()
   },
   { immediate: true },
 )
@@ -218,66 +129,72 @@ watch(
 
 <template>
   <div class="server-tab-stack">
-    <CsContainer header="运行时与通信">
+    <CsContainer header="运行状态">
       <template #actions>
-        <div class="server-tab-actions">
-          <CsStatusIndicator
-            :type="server.status === 1 ? 'success' : 'stopped'"
-            :text="server.status === 1 ? '在线' : '离线'"
-          />
-          <CsBadge :color="pushChip.color">{{ pushChip.text }}</CsBadge>
-          <CsButton icon-name="refresh" :loading="statusLoading" @click="refresh">刷新状态</CsButton>
-        </div>
+        <CsTooltip v-if="offline" content="服务器离线，无法查询实时进程">
+          <CsButton icon-name="refresh" disabled>刷新状态</CsButton>
+        </CsTooltip>
+        <CsButton v-else icon-name="refresh" :loading="statusLoading" @click="refresh">刷新状态</CsButton>
       </template>
 
-      <CsKeyValuePairs :items="runtimeItems" :columns="2" aria-label="运行时与通信">
-        <template #value="{ item }">
-          <template v-if="item.key === 'status'">
+      <div class="server-status-band">
+        <div class="server-status-cell">
+          <span class="server-status-label">通信状态</span>
+          <span class="server-status-value">
             <CsStatusIndicator
-              :type="server.status === 1 ? 'success' : 'stopped'"
-              :text="server.status === 1 ? '在线' : '离线'"
+              :type="offline ? 'stopped' : 'success'"
+              :text="offline ? '离线' : '在线'"
             />
-          </template>
-          <template v-else-if="item.key === 'xray'">
-            <span class="server-tab-inline">
-              <CsBadge :color="xrayChip.color">{{ xrayChip.text }}</CsBadge>
-              <span v-if="statusStateText" class="server-tab-muted">{{ statusStateText }}</span>
-            </span>
-          </template>
-          <template v-else-if="item.key === 'agent'">
-            <span class="cs-text-mono">{{ server.agent_version || '—' }}</span>
-          </template>
-          <template v-else-if="item.key === 'xrayVersion'">
-            <span class="cs-text-mono">{{ server.xray_version || '—' }}</span>
-          </template>
-          <template v-else-if="item.key === 'heartbeat'">
-            <span class="cs-text-mono">{{ fmtTime(server.last_seen_at) }}</span>
-          </template>
-          <template v-else-if="item.key === 'inbounds'">
-            <span class="server-tab-inline">
-              <span class="cs-text-mono">{{ inboundsLoading && !inboundsLoaded ? '…' : inbounds.length }}</span>
-              <span>个入站</span>
-              <CsButton variant="inline-link" @click="emit('open-inbounds')">前往管理</CsButton>
-            </span>
-          </template>
-          <template v-else-if="item.key === 'process'">
-            <span class="cs-text-mono server-tab-wrap">{{ processText }}</span>
-          </template>
-          <template v-else-if="item.key === 'node'">
-            <span class="server-tab-inline">
-              <span class="cs-text-mono server-tab-wrap">{{ server.node_id }}</span>
-              <CsButton
-                variant="inline-icon"
-                icon-name="copy"
-                aria-label="复制 Node ID"
-                @click="copyText(server.node_id, 'Node ID')"
-              />
-            </span>
-          </template>
-        </template>
-      </CsKeyValuePairs>
+          </span>
+          <span class="server-status-sub">最后心跳 {{ fmtTime(server.last_seen_at) }}</span>
+        </div>
 
-      <div v-if="server.xray_last_error || server.config_drift || (server.config_status === 'pending' && server.push_error)" class="server-tab-alerts">
+        <div class="server-status-cell">
+          <span class="server-status-label">Xray 进程</span>
+          <span class="server-status-value">
+            <CsTooltip :content="xray.tip">
+              <CsBadge :color="xray.color">{{ xray.text }}</CsBadge>
+            </CsTooltip>
+          </span>
+        </div>
+
+        <div class="server-status-cell">
+          <span class="server-status-label">配置同步</span>
+          <span class="server-status-value">
+            <CsTooltip :content="pushChip.tip">
+              <CsBadge :color="pushChip.color">{{ pushChip.text }}</CsBadge>
+            </CsTooltip>
+          </span>
+          <span class="server-status-sub">{{ pushSummary }}</span>
+        </div>
+
+        <div class="server-status-cell">
+          <span class="server-status-label">托管接入点</span>
+          <span class="server-status-value">
+            <span class="server-status-count">{{ inboundsLoading && !inboundsLoaded ? '…' : inbounds.length }}</span>
+            <span class="server-status-unit">个</span>
+            <CsButton variant="inline-link" @click="emit('open-inbounds')">前往管理</CsButton>
+          </span>
+        </div>
+      </div>
+
+      <div class="server-meta">
+        <div class="server-meta-row">
+          <span class="server-status-label">Agent 版本</span>
+          <span class="cs-text-mono server-meta-value">{{ server.agent_version || '—' }}</span>
+          <span class="server-status-label">Xray 内核</span>
+          <span class="cs-text-mono server-meta-value">{{ server.xray_version || '—' }}</span>
+        </div>
+        <div class="server-meta-row">
+          <span class="server-status-label">实时进程</span>
+          <span class="cs-text-mono server-meta-value server-process-value">{{ processText }}</span>
+        </div>
+      </div>
+
+      <div
+        v-if="server.xray_last_error || server.config_drift || (server.config_status === 'pending' && server.push_error)"
+        class="server-tab-alerts"
+      >
         <CsAlert
           v-if="server.xray_last_error"
           :type="server.xray_state === 'failed' ? 'error' : 'warning'"
@@ -302,86 +219,6 @@ watch(
         </CsAlert>
       </div>
     </CsContainer>
-
-    <CsContainer header="网络接入与 VPS 资产">
-      <CsKeyValuePairs :items="networkItems" :columns="2" aria-label="网络接入与 VPS 资产">
-        <template #value="{ item }">
-          <template v-if="item.key === 'host'">
-            <span class="server-tab-inline">
-              <span class="cs-text-mono server-tab-wrap">{{ server.host }}</span>
-              <CsButton
-                variant="inline-icon"
-                icon-name="copy"
-                aria-label="复制主机地址"
-                @click="copyText(server.host, '主机地址')"
-              />
-            </span>
-          </template>
-          <template v-else-if="item.key === 'location'">
-            <CsBadge v-if="server.location" color="blue">{{ server.location }}</CsBadge>
-            <span v-else class="server-tab-muted">—</span>
-          </template>
-          <template v-else-if="item.key === 'expire'">
-            <span v-if="expiry" class="server-tab-inline">
-              <span class="cs-text-mono">{{ formatExpireDate(server.expire_at) }}</span>
-              <CsTooltip :content="expiry.tip">
-                <CsBadge :color="expiryColor(expiry.cls)">{{ expiry.text }}</CsBadge>
-              </CsTooltip>
-            </span>
-            <span v-else class="server-tab-muted">—</span>
-          </template>
-          <template v-else-if="item.key === 'billing'">
-            <span class="server-tab-inline">
-              <span v-if="server.price" class="cs-text-mono server-tab-price">{{ server.price }}</span>
-              <CsBadge v-if="server.billing_cycle" color="grey">{{ server.billing_cycle }}</CsBadge>
-              <span v-if="!server.price && !server.billing_cycle" class="server-tab-muted">—</span>
-            </span>
-          </template>
-        </template>
-      </CsKeyValuePairs>
-
-      <CsKeyValuePairs v-if="assetItems.length" :items="assetItems" :columns="1" class="server-tab-kv-extra" aria-label="VPS 资产补充信息">
-        <template #value="{ item }">
-          <template v-if="item.key === 'idc'">
-            <span class="server-tab-inline">
-              <CsButton
-                v-if="isUrl(server.idc_address!)"
-                variant="inline-link"
-                icon-name="external"
-                :href="normalizeUrl(server.idc_address!)"
-                target="_blank"
-              >{{ server.idc_address }}</CsButton>
-              <span v-else class="cs-text-mono server-tab-wrap">{{ server.idc_address }}</span>
-              <CsButton
-                variant="inline-icon"
-                icon-name="copy"
-                aria-label="复制 IDC 地址"
-                @click="copyText(server.idc_address!, 'IDC 控制台')"
-              />
-            </span>
-          </template>
-          <template v-else-if="item.key === 'remark'">
-            <span class="server-tab-remark">{{ server.remark }}</span>
-          </template>
-        </template>
-      </CsKeyValuePairs>
-    </CsContainer>
-
-    <CsContainer header="节点通信凭据">
-      <CsKeyValuePairs :items="[{ key: 'node', label: 'Node ID' }]" :columns="1" aria-label="节点通信凭据">
-        <template #value>
-          <span class="server-tab-inline">
-            <span class="cs-text-mono server-tab-wrap">{{ server.node_id }}</span>
-            <CsButton
-              variant="inline-icon"
-              icon-name="copy"
-              aria-label="复制 Node ID"
-              @click="copyText(server.node_id, 'Node ID')"
-            />
-          </span>
-        </template>
-      </CsKeyValuePairs>
-    </CsContainer>
   </div>
 </template>
 
@@ -392,38 +229,89 @@ watch(
   gap: 16px;
 }
 
-.server-tab-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+/* 状态带：4 个同等权重的「主」字段，用格子线分隔，与下方次要信息（KV/进程行）拉开层级。
+   用 gap + 背景色画分隔线，2 列降级时也不会出现缺边或重边。 */
+.server-status-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-border-divider-default-diwd4w, #dedee3);
 }
 
-.server-tab-inline {
+.server-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 0;
+  padding: 12px 16px;
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+}
+
+.server-status-label {
+  font-size: var(--font-size-body-s, 12px);
+  line-height: var(--line-height-body-s, 16px);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-status-value {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  max-inline-size: 100%;
-}
-
-.server-tab-wrap {
-  overflow-wrap: anywhere;
-}
-
-.server-tab-muted {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  font-size: 12.5px;
-}
-
-.server-tab-price {
+  gap: 6px;
+  font-size: var(--font-size-body-m, 14px);
+  line-height: var(--line-height-body-m, 20px);
   font-weight: 600;
-  color: var(--color-text-link-default-qabnuk, #0972d3);
 }
 
-.server-tab-remark {
+.server-status-count {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 18px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.server-status-unit {
+  font-size: var(--font-size-body-s, 12px);
+  font-weight: 400;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-status-sub {
+  font-size: 12px;
+  line-height: 16px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   overflow-wrap: anywhere;
+}
+
+/* 次要信息：版本与进程细节，小字灰标签 + 默认色等宽值，明确低于状态带一级。 */
+.server-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+}
+
+.server-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-inline-size: 0;
+}
+
+.server-meta-value {
+  margin-inline-end: 14px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.server-process-value {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .server-tab-alerts {
@@ -433,7 +321,9 @@ watch(
   margin-top: 16px;
 }
 
-.server-tab-kv-extra {
-  margin-top: 12px;
+@media (max-width: 720px) {
+  .server-status-band {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

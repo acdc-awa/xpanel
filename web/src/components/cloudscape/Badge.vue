@@ -3,9 +3,20 @@ import { computed } from 'vue'
 import { CS } from './classes'
 import { cx } from './utils'
 
+export type BadgeColor =
+  | 'grey'
+  | 'green'
+  | 'blue'
+  | 'red'
+  | 'severity-critical'
+  | 'severity-high'
+  | 'severity-medium'
+  | 'severity-low'
+  | 'severity-neutral'
+
 const props = withDefaults(
   defineProps<{
-    color?: 'grey' | 'green' | 'blue' | 'red' | 'severity-critical' | 'severity-high' | 'severity-medium' | 'severity-low' | 'severity-neutral'
+    color?: BadgeColor
   }>(),
   { color: 'grey' }
 )

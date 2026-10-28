@@ -5,18 +5,21 @@ import {
   CsButton,
   CsContainer,
   CsDatePicker,
+  CsExpandableSection,
   CsForm,
   CsFormItem,
   CsInput,
   CsInputNumber,
-  CsKeyValuePairs,
   CsSelect,
   ElMessage,
   ElMessageBox,
-  type KeyValuePair,
 } from '@/components/cloudscape'
 import { deleteServer, resetServerSecret, updateServer, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
+
+// 设置页只做编辑：名称/地址/地区/备注、VPS 资产、节点通信凭据、危险操作。
+// 保存动作由弹窗 footer 承载（ServerSettingsModal），所以这里不放大按钮 ——
+// 否则按钮挂在某一张卡上，会让人误以为只保存那张卡的字段。
 
 const props = defineProps<{
   server: ServerItem
@@ -72,10 +75,31 @@ function resetForm() {
 // 弹窗关闭即卸载，重新打开时按 server 重新初始化；页签往返不重置，避免丢掉未保存的输入。
 watch(() => props.server.id, resetForm, { immediate: true })
 
+function norm(v: unknown) {
+  return v === undefined || v === null ? '' : String(v)
+}
+
+/** 表单与服务器快照的差异，用于 footer 的「有未保存的修改」与保存按钮可用性。 */
+const dirty = computed(
+  () =>
+    norm(form.name) !== norm(props.server.name) ||
+    norm(form.host) !== norm(props.server.host) ||
+    norm(form.sort_order) !== norm(props.server.sort_order ?? 0) ||
+    norm(form.location) !== norm(props.server.location) ||
+    norm(form.remark) !== norm(props.server.remark) ||
+    norm(form.expire_at) !== norm(props.server.expire_at) ||
+    norm(form.billing_cycle) !== norm(props.server.billing_cycle) ||
+    norm(form.price) !== norm(props.server.price) ||
+    norm(form.idc_address) !== norm(props.server.idc_address),
+)
+
 async function save() {
   errors.name = form.name.trim() ? '' : '请填写服务器名称'
   errors.host = form.host.trim() ? '' : '请填写主机地址'
-  if (errors.name || errors.host) return
+  if (errors.name || errors.host) {
+    ElMessage.warning('请先补全服务器名称与主机地址')
+    return
+  }
 
   saving.value = true
   try {
@@ -103,6 +127,8 @@ async function save() {
     saving.value = false
   }
 }
+
+defineExpose({ save, saving, dirty })
 
 const secretInfo = ref<{ node_id: string; secret: string; install_cmd?: string } | null>(null)
 const resetting = ref(false)
@@ -165,22 +191,17 @@ async function removeServer() {
   }
 }
 
-const secretItems = computed<KeyValuePair[]>(() => {
+const secretItems = computed(() => {
   if (!secretInfo.value) return []
-  const items: KeyValuePair[] = [
-    { key: 'node_id', label: 'node_id' },
-    { key: 'secret', label: 'secret' },
+  const items = [
+    { key: 'node_id', label: 'node_id', value: secretInfo.value.node_id },
+    { key: 'secret', label: 'secret', value: secretInfo.value.secret },
   ]
-  if (secretInfo.value.install_cmd) items.push({ key: 'install_cmd', label: '一键安装指令' })
+  if (secretInfo.value.install_cmd) {
+    items.push({ key: 'install_cmd', label: '一键安装指令', value: secretInfo.value.install_cmd })
+  }
   return items
 })
-
-function secretValue(key: string | undefined) {
-  if (!secretInfo.value || !key) return ''
-  if (key === 'node_id') return secretInfo.value.node_id
-  if (key === 'secret') return secretInfo.value.secret
-  return secretInfo.value.install_cmd ?? ''
-}
 
 async function copyText(text: string, label: string) {
   try {
@@ -194,7 +215,7 @@ async function copyText(text: string, label: string) {
 
 <template>
   <div class="server-tab-stack">
-    <CsContainer header="基础设施与连接定位">
+    <CsContainer header="基础信息">
       <CsForm>
         <div class="server-form-grid">
           <CsFormItem label="服务器名称" required :error="errors.name">
@@ -203,26 +224,33 @@ async function copyText(text: string, label: string) {
           <CsFormItem label="主机地址 / 域名" required :error="errors.host">
             <CsInput v-model="form.host" placeholder="如 tokyo01.example.com / 120.232.x.x" autocomplete="off" />
           </CsFormItem>
-          <CsFormItem label="排序序号">
-            <CsInputNumber
-              :model-value="form.sort_order"
-              :min="0"
-              :step="1"
-              placeholder="越小越靠前"
-              @update:model-value="(v: number | null) => (form.sort_order = v ?? 0)"
-            />
-          </CsFormItem>
           <CsFormItem label="地区位置">
             <CsInput v-model="form.location" placeholder="如 日本 / 广州（选填）" />
           </CsFormItem>
-          <CsFormItem label="管理备注" class="server-form-span-2">
+          <CsFormItem label="管理备注">
             <CsInput v-model="form.remark" placeholder="选填" />
           </CsFormItem>
         </div>
       </CsForm>
+
+      <CsExpandableSection header="更多设置" class="server-more-settings">
+        <CsForm>
+          <div class="server-form-grid">
+            <CsFormItem label="排序序号" description="越小越靠前，用于服务器列表与画布内的排列">
+              <CsInputNumber
+                :model-value="form.sort_order"
+                :min="0"
+                :step="1"
+                placeholder="越小越靠前"
+                @update:model-value="(v: number | null) => (form.sort_order = v ?? 0)"
+              />
+            </CsFormItem>
+          </div>
+        </CsForm>
+      </CsExpandableSection>
     </CsContainer>
 
-    <CsContainer header="VPS 采购与续费资产">
+    <CsContainer header="VPS 采购与续费资产（选填）">
       <CsForm>
         <div class="server-form-grid">
           <CsFormItem label="到期日期">
@@ -252,46 +280,57 @@ async function copyText(text: string, label: string) {
           </CsFormItem>
         </div>
       </CsForm>
-      <div class="server-form-actions">
-        <CsButton variant="primary" :loading="saving" @click="save">保存修改</CsButton>
+    </CsContainer>
+
+    <CsContainer header="节点通信凭据">
+      <div class="server-cred-row">
+        <div class="server-cred-copy">
+          <strong>Node ID</strong>
+          <p>Agent 与主控握手时使用的节点标识，随服务器创建生成、重装 Agent 时沿用。</p>
+        </div>
+        <div class="server-cred-value">
+          <span class="cs-text-mono server-wrap">{{ server.node_id }}</span>
+          <CsButton
+            variant="inline-icon"
+            icon-name="copy"
+            aria-label="复制 Node ID"
+            @click="copyText(server.node_id, 'Node ID')"
+          />
+        </div>
+      </div>
+
+      <div class="server-cred-row">
+        <div class="server-cred-copy">
+          <strong>重置通信密钥</strong>
+          <p>旧密钥立即失效，需要在服务器 /etc/xray-agent/config.yml 中更新 secret 后重启 Agent。</p>
+        </div>
+        <CsButton variant="danger-outline" :loading="resetting" @click="resetSecret">重置密钥</CsButton>
+      </div>
+
+      <div v-if="secretInfo" class="server-secret">
+        <CsAlert type="warning" header="新密钥已生成（仅显示这一次）">
+          请更新服务器 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务；或重新执行下方安装命令。
+        </CsAlert>
+        <div v-for="item in secretItems" :key="item.key" class="server-secret-row">
+          <span class="server-cred-label">{{ item.label }}</span>
+          <span class="cs-text-mono server-secret-value">{{ item.value }}</span>
+          <CsButton
+            variant="inline-icon"
+            icon-name="copy"
+            :aria-label="`复制 ${item.label}`"
+            @click="copyText(item.value, item.label)"
+          />
+        </div>
       </div>
     </CsContainer>
 
     <CsContainer header="危险操作">
-      <div class="server-danger">
-        <div class="server-danger-row">
-          <div class="server-danger-copy">
-            <strong>重置通信密钥</strong>
-            <p>旧密钥立即失效，需要在服务器 /etc/xray-agent/config.yml 中更新 secret 后重启 Agent。</p>
-          </div>
-          <CsButton variant="danger-outline" :loading="resetting" @click="resetSecret">重置密钥</CsButton>
+      <div class="server-danger-row">
+        <div class="server-cred-copy">
+          <strong>删除服务器</strong>
+          <p>关联的入站、待推送配置与上报数据将一并删除，该服务器的 Agent 将无法再连接。</p>
         </div>
-        <div class="server-danger-row">
-          <div class="server-danger-copy">
-            <strong>删除服务器</strong>
-            <p>关联的入站、待推送配置与上报数据将一并删除，该服务器的 Agent 将无法再连接。</p>
-          </div>
-          <CsButton variant="danger" :loading="deleting" @click="removeServer">删除服务器</CsButton>
-        </div>
-
-        <div v-if="secretInfo" class="server-secret">
-          <CsAlert type="warning" header="新密钥已生成（仅显示这一次）">
-            请更新服务器 /etc/xray-agent/config.yml 中的 secret 后重启 xray-agent 服务；或重新执行下方安装命令。
-          </CsAlert>
-          <CsKeyValuePairs :items="secretItems" :columns="1" aria-label="新密钥">
-            <template #value="{ item }">
-              <span class="server-tab-inline">
-                <span class="cs-text-mono server-secret-value">{{ secretValue(item.key) }}</span>
-                <CsButton
-                  variant="inline-icon"
-                  icon-name="copy"
-                  :aria-label="`复制 ${item.label}`"
-                  @click="copyText(secretValue(item.key), item.label)"
-                />
-              </span>
-            </template>
-          </CsKeyValuePairs>
-        </div>
+        <CsButton variant="danger" :loading="deleting" @click="removeServer">删除服务器</CsButton>
       </div>
     </CsContainer>
   </div>
@@ -310,29 +349,17 @@ async function copyText(text: string, label: string) {
   gap: 16px 20px;
 }
 
-.server-form-span-2 {
-  grid-column: 1 / -1;
-}
-
 @media (max-width: 640px) {
   .server-form-grid {
     grid-template-columns: 1fr;
   }
 }
 
-.server-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 18px;
+.server-more-settings {
+  margin-top: 8px;
 }
 
-.server-danger {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.server-danger-row {
+.server-cred-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -340,11 +367,12 @@ async function copyText(text: string, label: string) {
   padding: 12px 0;
 }
 
-.server-danger-row + .server-danger-row {
+.server-cred-row + .server-cred-row,
+.server-secret {
   border-top: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
 }
 
-.server-danger-copy {
+.server-cred-copy {
   min-inline-size: 0;
 
   strong {
@@ -359,21 +387,43 @@ async function copyText(text: string, label: string) {
   }
 }
 
+.server-cred-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.server-cred-label {
+  font-size: 12.5px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-wrap {
+  overflow-wrap: anywhere;
+}
+
+.server-danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px 0;
+}
+
 .server-secret {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 4px;
   padding-top: 12px;
-  border-top: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
 }
 
-.server-tab-inline {
-  display: inline-flex;
-  flex-wrap: wrap;
+.server-secret-row {
+  display: flex;
   align-items: center;
   gap: 8px;
-  max-inline-size: 100%;
+  min-inline-size: 0;
 }
 
 .server-secret-value {

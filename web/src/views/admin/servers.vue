@@ -34,6 +34,7 @@ import {
   ElMessageBox,
   type SegmentedOption,
   type TableColumn,
+  type BadgeColor,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerSettingsModal from './servers/ServerSettingsModal.vue'
@@ -53,6 +54,7 @@ import { errMsg } from '@/api/http'
 import { compareVersion } from '@/utils/version'
 import { formatDateTime } from '@/utils/timezone'
 import { getExpiryStatus, formatExpireDate, normalizeUrl, isUrl } from '@/utils/vps'
+import { pushStateChip, xrayAlertChip } from '@/utils/server-status'
 
 const router = useRouter()
 
@@ -104,16 +106,6 @@ const onlineCount = computed(() => list.value.filter((s) => s.status === 1).leng
 const offlineCount = computed(() => list.value.filter((s) => s.status !== 1).length)
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'expiring'
-type BadgeColor =
-  | 'grey'
-  | 'green'
-  | 'blue'
-  | 'red'
-  | 'severity-critical'
-  | 'severity-high'
-  | 'severity-medium'
-  | 'severity-low'
-  | 'severity-neutral'
 
 const statusFilter = ref<StatusFilter>('all')
 
@@ -241,44 +233,9 @@ function fmtTime(t: string | null) {
   return formatDateTime(t, '—')
 }
 
-// 列表里的 xray 异常徽标：failed/restarting 才显示（正常态不加噪音）。
-// 配色与节点抽屉一致（failed 红、restarting 橙）；节点离线时状态是"离线前最后一次上报"，
-// 显式加「上次」前缀并在提示里说明，避免被当成实时状态。
-function xrayAlertChip(row: any) {
-  const s = row?.xray_state
-  const stale = row?.status !== 1
-  if (s !== 'failed' && s !== 'restarting') return { show: false, cls: '', text: '', tip: '' }
-  const reason = row.xray_last_error || '原因未知'
-  return {
-    show: true,
-    cls: s === 'failed' ? 'red' : 'orange',
-    text: `${stale ? '上次 ' : ''}${s === 'failed' ? 'Xray 启动失败' : 'Xray 重试中'}`,
-    tip: `xray ${s === 'failed' ? '连续启动失败，已停止自动拉起' : '启动失败，自动重试中'}：${reason}${
-      stale ? '（服务器离线，此为离线前最后状态）' : ''
-    }`,
-  }
-}
+// 列表里的 Xray / 配置同步徽标统一走 utils/server-status（与设置弹窗同一份文案与配色），
+// 页面内不再各写一套 chip 逻辑。
 
-// pushChip 配置同步状态芯片（四态 + 磁盘偏离）。状态由后端 push_state 给出，前端只做呈现。
-function pushChip(row: any) {
-  const st = row?.push_state || (row?.config_status === 'pushed' ? 'synced' : row?.config_status === 'pending' ? 'pending' : 'none')
-  switch (st) {
-    case 'drift':
-      return {
-        cls: 'red',
-        text: '磁盘偏离',
-        tip: `节点磁盘上的配置与主控记录不一致（节点哈希 ${(row.xray_disk_hash || '').slice(0, 12) || '未上报'}…）。可能被手工改过、落盘失败或节点回退过配置，重新生成并推送一次即可对齐。`,
-      }
-    case 'rejected':
-      return { cls: 'red', text: '推送被拒', tip: `节点拒绝该配置：${row.push_error || '原因未知'}（已尝试 ${row.push_attempts || 0} 次）` }
-    case 'synced':
-      return { cls: 'green', text: '已同步', tip: '' }
-    case 'pending':
-      return { cls: 'orange', text: '待推送', tip: row.push_error ? `尚未应用：${row.push_error}（已尝试 ${row.push_attempts || 0} 次）` : '' }
-    default:
-      return { cls: 'gray', text: '未投递', tip: '' }
-  }
-}
 
 // ---- 新增服务器 ----
 const createOpen = ref(false)
@@ -668,7 +625,7 @@ async function batchUpgradeSelected() {
                 </CsBadge>
               </CsTooltip>
               <CsTooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
-                <CsBadge :color="badgeColorOf(xrayAlertChip(row).cls)" class="server-chip-help">
+                <CsBadge :color="xrayAlertChip(row).color" class="server-chip-help">
                   {{ xrayAlertChip(row).text }}
                 </CsBadge>
               </CsTooltip>
@@ -676,10 +633,10 @@ async function batchUpgradeSelected() {
           </template>
 
           <template #actions>
-            <CsTooltip v-if="pushChip(row).tip" :content="pushChip(row).tip" placement="top">
-              <CsBadge :color="badgeColorOf(pushChip(row).cls)">{{ pushChip(row).text }}</CsBadge>
+            <CsTooltip v-if="pushStateChip(row).tip" :content="pushStateChip(row).tip" placement="top">
+              <CsBadge :color="pushStateChip(row).color">{{ pushStateChip(row).text }}</CsBadge>
             </CsTooltip>
-            <CsBadge v-else :color="badgeColorOf(pushChip(row).cls)">{{ pushChip(row).text }}</CsBadge>
+            <CsBadge v-else :color="pushStateChip(row).color">{{ pushStateChip(row).text }}</CsBadge>
           </template>
 
           <CsCardFacts :columns="2">

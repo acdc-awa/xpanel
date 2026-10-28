@@ -10,6 +10,8 @@ const props = withDefaults(
   defineProps<{
     visible: boolean
     header?: string
+    /** 标题下方的一行说明（官方 Modal 的 header 接受 ReactNode，这里只留纯文本摘要位）。 */
+    description?: string
     size?: 'small' | 'medium' | 'large' | 'x-large' | 'xx-large' | 'max'
     /** 内容超出视口时固定弹窗高度，让内容区自身滚动（折叠表单类长弹窗用）。 */
     scrollable?: boolean
@@ -29,6 +31,7 @@ const props = withDefaults(
   }>(),
   {
     header: undefined,
+    description: undefined,
     size: 'medium',
     scrollable: false,
     hideDismissButton: false,
@@ -153,7 +156,7 @@ onBeforeUnmount(unlockScroll)
         <div ref="dialogRef" :class="dialogClasses">
           <div :class="containerClasses">
             <div :class="CS.modal.header">
-              <Header variant="h2">
+              <Header variant="h2" :description="description">
                 <span :id="headerId" :class="CS.modal['header--text']">{{ header }}</span>
                 <template v-if="!hideDismissButton" #actions>
                   <Button

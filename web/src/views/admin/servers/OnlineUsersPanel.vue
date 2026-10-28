@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { CsBadge, CsButton, CsEmpty, CsSpinner } from '@/components/cloudscape'
+import { CsBadge, CsButton, CsContainer, CsEmpty, CsSpinner } from '@/components/cloudscape'
 import { getServerOnlineIPs, type OnlineUserIPItem } from '@/api/admin'
 import TipIcon from '@/components/base/TipIcon.vue'
 
 // 节点在线用户面板（agent 心跳的连接级实时快照）：
-// 服务器设置弹窗与仪表盘在线设备弹窗共用；serverId 变化即自动加载。
-const props = defineProps<{ serverId: number }>()
+// 服务器设置弹窗（boxed）与仪表盘在线设备弹窗共用；serverId 变化即自动加载。
+const props = withDefaults(
+  defineProps<{
+    serverId: number
+    /** 外面已经是裸内容区（如仪表盘弹窗）时用默认值；设置弹窗里套一层卡片，刷新/说明进卡片头。 */
+    boxed?: boolean
+  }>(),
+  { boxed: false },
+)
+
+const ONLINE_TIP =
+  '当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。列表为空表示当前无人在线，或服务器 Agent 版本过旧未上报。'
 
 const onlineUsers = ref<OnlineUserIPItem[]>([])
 const onlineLoading = ref(false)
@@ -50,22 +60,24 @@ defineExpose({ reload: loadOnlineUsers })
 </script>
 
 <template>
-  <div>
-    <div class="online-toolbar">
+  <!-- 同一份内容按宿主切换外壳：设置弹窗里套卡片（刷新/说明在卡片头），仪表盘弹窗里保持裸内容区。 -->
+  <component :is="boxed ? CsContainer : 'div'" :header="boxed ? '在线用户' : undefined">
+    <template v-if="boxed" #actions>
       <CsButton icon-name="refresh" :loading="onlineLoading" @click="loadOnlineUsers">刷新</CsButton>
-      <TipIcon
-        content="当前持有活跃连接的用户与其连接来源 IP，随连接建立/断开实时变化（空闲保持的连接也计为在线）。列表为空表示当前无人在线，或服务器 Agent 版本过旧未上报。"
-      />
+    </template>
+    <template v-if="boxed" #info>
+      <TipIcon :content="ONLINE_TIP" />
+    </template>
+
+    <div v-if="!boxed" class="online-toolbar">
+      <CsButton icon-name="refresh" :loading="onlineLoading" @click="loadOnlineUsers">刷新</CsButton>
+      <TipIcon :content="ONLINE_TIP" />
     </div>
 
     <div v-if="onlineLoading && onlineUsers.length === 0" class="online-loading">
       <CsSpinner size="large" />
     </div>
-    <CsEmpty
-      v-else-if="onlineUsers.length === 0"
-      icon-name="user-profile"
-      description="当前没有在线用户"
-    />
+    <CsEmpty v-else-if="onlineUsers.length === 0" icon-name="user-profile" description="当前没有在线用户" />
     <div v-else class="online-list">
       <div v-for="u in onlineUsers" :key="u.email" class="online-row">
         <div class="online-user">
@@ -79,7 +91,7 @@ defineExpose({ reload: loadOnlineUsers })
         </div>
       </div>
     </div>
-  </div>
+  </component>
 </template>
 
 <style scoped lang="scss">

@@ -28,6 +28,7 @@ import {
 import { errMsg } from '@/api/http'
 import { compareVersion } from '@/utils/version'
 import { formatDateTime } from '@/utils/timezone'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 type VersionSubject = 'agent' | 'xray'
 
@@ -350,14 +351,20 @@ onUnmounted(() => {
 
 <template>
   <div class="server-tab-stack">
-    <CsContainer header="Agent 与 Xray 内核">
+    <CsContainer header="版本切换">
+      <template #info>
+        <TipIcon content="Agent 与内核版本相互独立，切换其中一个不会改动另一个。" />
+      </template>
       <template #actions>
         <CsSegmentedControl :model-value="subject" :options="subjectOptions" label="版本对象" @update:model-value="onSubjectChange" />
       </template>
 
-      <div class="server-version-current">
-        <span class="server-version-label">当前{{ subjectLabel }}</span>
-        <span class="cs-text-mono">{{ current || '未知（旧 Agent 未上报）' }}</span>
+      <div class="server-version-flow">
+        <span class="server-version-label">当前</span>
+        <CsBadge color="grey">{{ current || '未知（旧 Agent 未上报）' }}</CsBadge>
+        <span class="server-version-arrow">→</span>
+        <span class="server-version-label">目标</span>
+        <CsBadge :color="risk ? 'severity-medium' : 'blue'">{{ target || '未选择' }}</CsBadge>
       </div>
 
       <CsForm>
@@ -391,7 +398,7 @@ onUnmounted(() => {
       <CsAlert
         v-else
         type="info"
-        :header="`将${actionLabel}${subjectLabel}：${current || '未知'} → ${target || '未选择'}`"
+        :header="`将${actionLabel} ${subjectLabel}`"
         class="server-version-alert"
       >
         {{
@@ -411,9 +418,6 @@ onUnmounted(() => {
         >{{ actionLabel }}</CsButton>
       </div>
       <p v-if="server.status !== 1" class="server-version-hint">服务器离线，无法切换版本。</p>
-      <p v-else class="server-version-hint">
-        {{ subject === 'agent' ? 'Agent 与内核版本相互独立，切换 Agent 不会改动 Xray。' : 'Agent 与内核版本相互独立，切换内核不会改动 Agent。' }}
-      </p>
     </CsContainer>
 
     <CsContainer v-if="upgradeStatus" header="切换进度">
@@ -445,18 +449,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.server-version-current {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
-  border-radius: 8px;
-  background: var(--color-background-container-content-mjfil9, #ffffff);
-  font-size: 13px;
 }
 
 .server-version-label {
