@@ -64,6 +64,10 @@ const (
 	//     send_proxy_protocol（not null default false）。纯加列、不回填：存量出站全部关闭，
 	//     生成结果与升级前逐字节一致。开启后由生成器内联派生一个不落库的 freedom（pp-<tag>）
 	//     并通过 sockopt.dialerProxy 接入，属于纯生成期编排，不影响任何其它表。
+	//  ⑦ 审计日志模块分类（2026-10-28 追加，并入本步）：audit_logs 加 category（默认 ''，带索引），
+	//     写入时由 models.AuditCategory 单源判定；存量行由启动迁移按 action 回填（幂等）。
+	//     纯加列，不回填语义变化；列表筛选从「按 action 前缀 LIKE」改为按列精确匹配，
+	//     旧面板读该列无副作用（不认识但不会写坏），故不改变 v4 已定的 Min=4 口径。
 	// 注：Mixed / SOCKS5 / HTTP 协议与 ForwardUser 实体已在本版本发布前移除，从未在任何线上库建表。
 	//
 	// v4 是一整步**未发版**升级（生产库仍在 v3）：本步在开发期曾拆记 v4 / v5 / v6，各批都未单独

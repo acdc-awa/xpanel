@@ -133,7 +133,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		v1.GET("/plans", middleware.AuthOptional(d.JWT, d.DB), d.PublicPlans)
 
 		// 管理端（需 admin 角色）
-		admin := v1.Group("/admin", adminMiddleware(d)...)
+		admin := v1.Group("/admin", adminMiddleware(d, 0)...)
 		{
 			admin.GET("/dashboard", d.AdminDashboard)
 			admin.GET("/dashboard/realtime", d.AdminDashboardRealtime)
@@ -260,23 +260,29 @@ func registerAPI(r *gin.Engine, d *Deps) {
 
 	// 备份上传：体积上限远高于 v1 的 10MB（备份可达数十 MB），故不挂在 v1 分组下，
 	// 单独用同一套 admin 鉴权链 + 放大的 BodyLimit 注册（路径 /api/v1/admin/backup/upload）。
-	upload := r.Group("/api/v1/admin/backup",
-		append(adminMiddleware(d), middleware.BodyLimit(backup.MaxUploadBytes))...)
+	upload := r.Group("/api/v1/admin/backup", adminMiddleware(d, backup.MaxUploadBytes)...)
 	upload.POST("/upload", d.AdminUploadBackup)
 
 	// registerAPI 不设 NoRoute：未匹配路径统一由 registerSPA 的 fallback 处理（守卫拒绝 API/WS 路径）
 }
 
-// adminMiddleware 管理端统一鉴权/审计链（含写限流）。抽成函数以便备份上传分组（放宽 body 上限）
-// 与常规 admin 分组复用同一套语义。
-func adminMiddleware(d *Deps) []gin.HandlerFunc {
-	return []gin.HandlerFunc{
+// adminMiddleware 管理端统一鉴权/审计链（含写限流）。
+// bodyLimit > 0 时在 Audit 之前施加请求体上限：Audit 会 io.ReadAll 读取整个 body，
+// 若顺序反过来（先 Audit 后 BodyLimit），放大后的上限对审计读取不生效，
+// 管理员会话可造成内存放大（2026-10-28 审查 P3-2）。
+func adminMiddleware(d *Deps, bodyLimit int64) []gin.HandlerFunc {
+	handlers := []gin.HandlerFunc{
 		middleware.AuthRequired(d.JWT, d.DB),
 		middleware.RequireRole("admin"),
+	}
+	if bodyLimit > 0 {
+		handlers = append(handlers, middleware.BodyLimit(bodyLimit))
+	}
+	return append(handlers,
 		middleware.Audit(d.DB),
 		middleware.RequirePwdChanged(d.DB),
 		middleware.RateLimitWrite(120, time.Minute),
-	}
+	)
 }
 
 // registerSPA 注册前端 SPA 静态托管与 history 路由 fallback。

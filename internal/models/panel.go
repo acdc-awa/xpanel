@@ -302,13 +302,17 @@ type NodeReport struct {
 
 // AuditLog 审计日志（管理员操作、登录、订单确认等）。
 type AuditLog struct {
-	ID           uint64    `gorm:"primaryKey" json:"id"`
-	OperatorType string    `gorm:"size:16;index" json:"operator_type"` // admin / user / system
-	OperatorID   uint64    `gorm:"index" json:"operator_id"`
-	Action       string    `gorm:"size:64;index" json:"action"`
-	Detail       string    `gorm:"type:text" json:"detail"`
-	IP           string    `gorm:"size:64" json:"ip"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           uint64 `gorm:"primaryKey" json:"id"`
+	OperatorType string `gorm:"size:16;index" json:"operator_type"` // admin / user / system
+	OperatorID   uint64 `gorm:"index" json:"operator_id"`
+	Action       string `gorm:"size:64;index" json:"action"`
+	// Category 模块分类（servers/users/billing/inbounds/settings/auth/other）。
+	// 写入时由 AuditCategory 单源判定并落库，列表筛选直接按列匹配；
+	// 存量行由启动迁移回填（见 BackfillAuditCategories）。
+	Category  string    `gorm:"size:16;index;default:''" json:"category"`
+	Detail    string    `gorm:"type:text" json:"detail"`
+	IP        string    `gorm:"size:64" json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // PendingConfig 服务器待推送的 Xray 配置（每服务器一条最新；节点离线时保留，上线后自动补推）。

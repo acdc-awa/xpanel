@@ -27,22 +27,10 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		q = q.Where("action = ?", act)
 	}
 
-	// 2. 模块分类筛选（按 action 前缀划分）
-	switch strings.TrimSpace(c.Query("category")) {
-	case "servers":
-		q = q.Where("action LIKE 'servers.%' OR action = 'servers'")
-	case "users":
-		q = q.Where("action LIKE 'users.%' OR action = 'users' OR action LIKE 'invitations.%' OR action = 'invitations'")
-	case "billing":
-		q = q.Where("action LIKE 'plans.%' OR action = 'plans' OR action LIKE 'orders.%' OR action = 'orders' OR action LIKE 'gift-cards.%' OR action = 'gift-cards'")
-	case "inbounds":
-		// 订阅模板（sub-templates）与权限组同域：模板的生效位置就是权限组，归在同一分类便于对照查看。
-		q = q.Where("action LIKE 'inbounds.%' OR action = 'inbounds' OR action LIKE 'certs.%' OR action = 'certs' OR action LIKE 'access-points.%' OR action = 'access-points' OR action LIKE 'permission-groups.%' OR action = 'permission-groups' OR action LIKE 'sub-templates.%' OR action = 'sub-templates'")
-	case "settings":
-		// notice.%（单数）为 2026-09-04 手动打点退役前的存量 action，保留可筛
-		q = q.Where("action LIKE 'settings.%' OR action = 'settings' OR action LIKE 'notices.%' OR action = 'notices' OR action LIKE 'notice.%' OR action LIKE 'backup.%' OR action = 'backup' OR action LIKE 'topology.%' OR action LIKE 'topology-layout.%'")
-	case "auth":
-		q = q.Where("action LIKE 'auth.%' OR action = 'auth'")
+	// 2. 模块分类筛选：按写入时落库的 category 列精确匹配（单源见 models.AuditCategory）。
+	// 旧版按 action 前缀 LIKE（每个分类一长串 OR）已退役；存量行由启动迁移回填分类。
+	if cat := strings.TrimSpace(c.Query("category")); cat != "" {
+		q = q.Where("category = ?", cat)
 	}
 
 	// 3. 关键词跨字段模糊搜索 (action / detail / ip)
@@ -110,17 +98,32 @@ func (d *Deps) AdminAuditLogs(c *gin.Context) {
 		OperatorID       uint64    `json:"operator_id"`
 		OperatorUsername string    `json:"operator_username"`
 		Action           string    `json:"action"`
+		Category         string    `json:"category"`
+		CategoryLabel    string    `json:"category_label"`
 		Detail           string    `json:"detail"`
 		IP               string    `json:"ip"`
 		CreatedAt        time.Time `json:"created_at"`
 	}
 	items := make([]view, 0, len(list))
 	for _, l := range list {
+		// 防御：回填前/异常行为空分类时按 action 现算，保证前端分类角标不缺失。
+		cat := auditCategoryOr(l.Category, l.Action)
 		items = append(items, view{
 			ID: l.ID, OperatorType: l.OperatorType, OperatorID: l.OperatorID,
 			OperatorUsername: usernameByOp[l.OperatorID],
-			Action:           l.Action, Detail: l.Detail, IP: l.IP, CreatedAt: l.CreatedAt,
+			Action:           l.Action,
+			Category:         cat,
+			CategoryLabel:    models.AuditCategoryLabel(cat),
+			Detail:           l.Detail, IP: l.IP, CreatedAt: l.CreatedAt,
 		})
 	}
 	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": items})
+}
+
+// auditCategoryOr 优先使用落库分类；空值（旧行/异常）按 action 现算，不返回空分类。
+func auditCategoryOr(category, action string) string {
+	if category != "" {
+		return category
+	}
+	return models.AuditCategory(action)
 }

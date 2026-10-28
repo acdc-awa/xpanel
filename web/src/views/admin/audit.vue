@@ -85,11 +85,31 @@ interface RowView {
   categoryColor: 'primary' | 'success' | 'warning' | 'danger' | 'info'
   title: string
 }
+
+// 分类展示口径由后端单源给出（category + category_label）；颜色按模块固定。
+// 旧数据（无 category 字段）回退到 action 推导的 getActionMeta，保证历史记录不丢角标。
+const CATEGORY_META: Record<string, { color: RowView['categoryColor'] }> = {
+  servers: { color: 'primary' },
+  users: { color: 'success' },
+  billing: { color: 'warning' },
+  inbounds: { color: 'info' },
+  settings: { color: 'danger' },
+  auth: { color: 'info' },
+  other: { color: 'info' },
+}
+
 const rows = computed<RowView[]>(() =>
   list.value.map((row) => {
     const view = renderAudit(row.action, row.detail)
     const meta = getActionMeta(row.action, view.method, row.detail)
-    return { row, view, categoryName: meta.categoryName, categoryColor: meta.categoryColor, title: meta.title }
+    const categoryMeta = row.category ? CATEGORY_META[row.category] : undefined
+    return {
+      row,
+      view,
+      categoryName: row.category_label || meta.categoryName,
+      categoryColor: categoryMeta?.color ?? meta.categoryColor,
+      title: meta.title,
+    }
   }),
 )
 
@@ -134,6 +154,7 @@ function fmtTime(t: string) {
           <CsOption label="入站证书" value="inbounds" />
           <CsOption label="系统设置" value="settings" />
           <CsOption label="身份认证" value="auth" />
+          <CsOption label="其他" value="other" />
         </CsSelect>
         <CsSelect v-model="operatorType" placeholder="操作人类型" clearable style="width: 140px" @change="onFilterChange">
           <CsOption label="全部类型" value="" />

@@ -182,7 +182,20 @@ func (d *Deps) ResetPassword(c *gin.Context) {
 		return
 	}
 	if err := d.OTP.ResetPassword(c.Request.Context(), req.Email, req.Code, req.Password); err != nil {
-		util.BadRequest(c, err.Error())
+		// 统一文案防枚举：邮箱不存在 / 未开启 TOTP / 验证码错误在外部必须返回同一句话，
+		// 否则该接口就是「邮箱是否注册 + 是否开启 2FA」的批量探测 oracle（2026-10-28 审查 P2-1）。
+		// 锁定态单独保留：它只会在账号存在且已连续失败后出现，此时账号存在性已被攻击者自己探明。
+		switch {
+		case errors.Is(err, services.ErrTOTPLocked):
+			util.BadRequest(c, err.Error())
+		case errors.Is(err, services.ErrResetInvalid),
+			errors.Is(err, services.ErrTOTPNotEnabled),
+			errors.Is(err, services.ErrTOTPCodeInvalid),
+			errors.Is(err, services.ErrBackupInvalid):
+			util.BadRequest(c, "邮箱或验证码错误")
+		default:
+			util.ServerError(c, "密码重置失败，请稍后重试")
+		}
 		return
 	}
 	util.OK(c, gin.H{"ok": true, "message": "密码已重置，请重新登录"})

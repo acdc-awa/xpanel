@@ -817,8 +817,18 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     return { categoryName: '用户', categoryColor: 'success', title }
   }
 
-  // 3. 财务与套餐
-  if (act.startsWith('plans') || act.startsWith('orders') || act.startsWith('gift-cards') || act.startsWith('billing')) {
+  // 3. 财务与套餐（含用户侧手动打点：余额支付 / 礼品卡 / 自动续费）
+  if (
+    act.startsWith('plans') ||
+    act.startsWith('orders') ||
+    act.startsWith('gift-cards') ||
+    act.startsWith('billing') ||
+    act === 'order.pay_balance' ||
+    act === 'gift_card.redeem' ||
+    act === 'user.auto_renew' ||
+    act === 'auto_renew' ||
+    act === 'subscription_expired'
+  ) {
     let title = '财务套餐'
     if (act.startsWith('plans')) {
       title = act === 'plans' ? '创建套餐' : isDel ? '删除套餐' : '修改套餐'
@@ -828,51 +838,103 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
       else title = '订单处理'
     } else if (act.startsWith('gift-cards')) {
       title = isDel ? '删除礼品卡' : '批量生成礼品卡'
+    } else if (act === 'order.pay_balance') {
+      title = '余额支付订单'
+    } else if (act === 'gift_card.redeem') {
+      title = '兑换礼品卡'
+    } else if (act === 'user.auto_renew') {
+      title = '修改自动续费设置'
+    } else if (act === 'auto_renew') {
+      title = '自动续费'
+    } else if (act === 'subscription_expired') {
+      title = '套餐到期退订'
     }
     return { categoryName: '财务', categoryColor: 'warning', title }
   }
 
   // 4. 入站与证书（含权限组与订阅模板：订阅模板的生效位置就是权限组，同域归置便于对照查看）
-  if (act.startsWith('inbounds') || act.startsWith('certs') || act.startsWith('access-points') || act.startsWith('permission-groups') || act.startsWith('sub-templates')) {
+  if (
+    act.startsWith('inbounds') ||
+    act.startsWith('certs') ||
+    act.startsWith('ca-certs') ||
+    act.startsWith('access-points') ||
+    act.startsWith('permission-groups') ||
+    act.startsWith('sub-templates') ||
+    act.startsWith('xray') ||
+    act.startsWith('protocols')
+  ) {
     let title = '入站证书'
     if (act.startsWith('inbounds')) {
       if (act.endsWith('.toggle')) title = '启停入站'
       else if (act.includes('setup-internal') || act.includes('rotate-internal')) title = '轮换内部中继账户'
       else if (isDel) title = '删除入站'
       else title = act === 'inbounds' ? '新建入站' : '修改入站'
+    } else if (act.startsWith('ca-certs')) {
+      if (isDel) title = '删除 CA 证书'
+      else if (act.includes('.issue')) title = '由 CA 签发证书'
+      else if (act.includes('generate')) title = '生成 CA 证书'
+      else title = '配置 CA 证书'
     } else if (act.startsWith('certs')) {
       if (act.includes('self-signed')) title = '签发自签名证书'
-      else title = isDel ? '删除证书' : method === 'POST' ? '上传证书' : '更新证书'
+      else if (act.includes('reissue')) title = '重新签发证书'
+      else if (isDel) title = '删除证书'
+      else if (method === 'POST') title = '上传证书'
+      else title = '更新证书'
     } else if (act.startsWith('access-points')) {
       title = isDel ? '删除接入点' : '配置自定义接入点'
     } else if (act.startsWith('permission-groups')) {
       title = isDel ? '删除权限组' : '配置权限组'
     } else if (act.startsWith('sub-templates')) {
       title = isDel ? '删除订阅模板' : method === 'POST' ? '新建订阅模板' : '修改订阅模板'
+    } else if (act.startsWith('xray')) {
+      title = act.includes('preview-config') ? '预览 Xray 配置' : 'Xray 工具操作'
+    } else if (act.startsWith('protocols')) {
+      title = '协议能力查询'
     }
     return { categoryName: '入站证书', categoryColor: 'info', title }
   }
 
   // 5. 系统设置与运维
-  if (act.startsWith('settings') || act.startsWith('notices') || act.startsWith('backup') || act.startsWith('topology') || act.startsWith('update')) {
+  if (
+    act.startsWith('settings') ||
+    act.startsWith('notices') ||
+    act.startsWith('notice.') ||
+    act.startsWith('backup') ||
+    act.startsWith('topology') ||
+    act.startsWith('data') ||
+    act.startsWith('update') ||
+    act.startsWith('system')
+  ) {
     let title = '系统设置'
     if (act.startsWith('settings')) title = '修改全局系统设置'
-    else if (act.startsWith('notices')) {
+    else if (act.startsWith('notices') || act.startsWith('notice.')) {
       if (act.endsWith('.toggle')) title = '切换公告状态'
       else title = isDel ? '删除系统公告' : '发布/编辑系统公告'
-    } else if (act.startsWith('backup')) title = '创建系统数据备份'
+    } else if (act.startsWith('backup.create') || act === 'backup') title = '创建数据备份'
+    else if (act.startsWith('backup.upload')) title = '上传备份文件'
+    else if (act.startsWith('backup.restore')) title = '恢复数据备份'
+    else if (act.startsWith('backup.rotate')) title = '清理过期备份'
+    else if (act.startsWith('backup')) title = '备份操作'
     else if (act.startsWith('topology')) title = '保存拓扑布局'
+    else if (act === 'data.logs.cleanup') title = '清理历史日志'
+    else if (act === 'data.vacuum') title = '压缩数据库'
+    else if (act === 'data.compact') title = '合并日志表'
+    else if (act.startsWith('data')) title = '数据运维'
     else if (act.startsWith('update')) title = '面板自更新'
+    else if (act.startsWith('system')) title = '系统状态查询'
     return { categoryName: '系统', categoryColor: 'danger', title }
   }
 
-  // 6. 认证登录
-  if (act.startsWith('auth')) {
-    return {
-      categoryName: '认证',
-      categoryColor: 'info',
-      title: act === 'auth.login' ? '账号登录' : '身份认证操作',
-    }
+  // 6. 认证登录（含 2FA 与订阅凭据重置）
+  if (act.startsWith('auth') || act.startsWith('otp.') || act === 'subscribe.reset_token') {
+    let title = '身份认证操作'
+    if (act === 'auth.login') title = '账号登录'
+    else if (act === 'auth.login_2fa') title = '两步验证登录'
+    else if (act === 'auth.change_password') title = '修改密码'
+    else if (act === 'otp.enable') title = '开启两步验证'
+    else if (act === 'otp.disable') title = '关闭两步验证'
+    else if (act === 'subscribe.reset_token') title = '重置订阅凭据'
+    return { categoryName: '认证', categoryColor: 'info', title }
   }
 
   return { categoryName: '操作', categoryColor: 'info', title: act }

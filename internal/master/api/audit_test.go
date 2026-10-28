@@ -23,10 +23,10 @@ func setupAuditTestDB(t *testing.T) *gorm.DB {
 
 	now := time.Now()
 	logs := []models.AuditLog{
-		{ID: 1, OperatorType: "admin", OperatorID: 1, Action: "servers.1.command", Detail: `{"type":"restart_xray"}`, IP: "1.1.1.1", CreatedAt: now.Add(-10 * time.Minute)},
-		{ID: 2, OperatorType: "admin", OperatorID: 1, Action: "users.2", Detail: `{"email":"test@example.com"}`, IP: "1.1.1.2", CreatedAt: now.Add(-5 * time.Minute)},
-		{ID: 3, OperatorType: "admin", OperatorID: 2, Action: "plans.1", Detail: `{"name":"VIP Plan"}`, IP: "2.2.2.2", CreatedAt: now.Add(-2 * time.Minute)},
-		{ID: 4, OperatorType: "system", OperatorID: 0, Action: "auth.login", Detail: `login success`, IP: "3.3.3.3", CreatedAt: now.Add(-1 * time.Minute)},
+		{ID: 1, OperatorType: "admin", OperatorID: 1, Action: "servers.1.command", Category: models.AuditCategory("servers.1.command"), Detail: `{"type":"restart_xray"}`, IP: "1.1.1.1", CreatedAt: now.Add(-10 * time.Minute)},
+		{ID: 2, OperatorType: "admin", OperatorID: 1, Action: "users.2", Category: models.AuditCategory("users.2"), Detail: `{"email":"test@example.com"}`, IP: "1.1.1.2", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: 3, OperatorType: "admin", OperatorID: 2, Action: "plans.1", Category: models.AuditCategory("plans.1"), Detail: `{"name":"VIP Plan"}`, IP: "2.2.2.2", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: 4, OperatorType: "system", OperatorID: 0, Action: "auth.login", Category: models.AuditCategory("auth.login"), Detail: `login success`, IP: "3.3.3.3", CreatedAt: now.Add(-1 * time.Minute)},
 	}
 	for _, l := range logs {
 		assert.NoError(t, db.Create(&l).Error)

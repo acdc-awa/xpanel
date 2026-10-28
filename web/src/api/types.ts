@@ -295,6 +295,10 @@ export interface AuditLog {
   operator_id: number
   operator_username?: string // 后端批量补齐；system 类型为空
   action: string
+  /** 模块分类（servers/users/billing/inbounds/settings/auth/other），后端单源判定 */
+  category?: string
+  /** 分类展示名（服务器/用户/财务/…），后端给出，前端不再自行映射 */
+  category_label?: string
   detail: string
   ip: string
   created_at: string

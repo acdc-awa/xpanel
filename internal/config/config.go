@@ -44,6 +44,12 @@ type App struct {
 	SubPort     int    `yaml:"sub_port"`      // 订阅独立端口（0=禁用订阅服务）
 	PublicURL   string `yaml:"public_url"`    // 面板公网地址（如 https://panel.example.com），用于生成节点一键安装命令
 	WSPublicURL string `yaml:"ws_public_url"` // 节点 WebSocket 对外地址（如 wss://ws.example.com/node/ws；空=默认面板域名 + /node/ws）
+	// TrustedProxies 可信反向代理的 IP/CIDR 列表。
+	// 只有直连对端（TCP RemoteAddr）命中该列表时，才采信 X-Forwarded-For / X-Real-IP；
+	// 否则一律使用 RemoteAddr（公网直连无法伪造 IP）。默认仅信任本机回环——
+	// 反代与面板同机（Caddy/Nginx → 127.0.0.1）时开箱可用；反代为容器/另一台机器时
+	// 需显式加入其网段，否则限流与审计只能看到反代地址。空列表 = 不信任任何转发头。
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 type DB struct {
@@ -71,7 +77,12 @@ type Admin struct {
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
 func Default() *Config {
 	return &Config{
-		App:    App{Name: "xray-panel", Env: "dev", Port: 18080, WSPort: 18082, SubPort: 6000},
+		App: App{
+			Name: "xray-panel", Env: "dev", Port: 18080, WSPort: 18082, SubPort: 6000,
+			// 反代与面板同机时对端恒为回环；默认信任回环既安全（公网无法伪造 RemoteAddr）
+			// 又不用改配置。反代在容器/另一台机器时须在 config.yaml 显式追加其网段。
+			TrustedProxies: []string{"127.0.0.1/32", "::1/128"},
+		},
 		DB:     DB{Driver: "sqlite", DSN: "./data/panel.db"},
 		JWT:    JWT{Secret: "", AccessTTL: 2 * time.Hour, RefreshTTL: 7 * 24 * time.Hour},
 		Backup: Backup{Enabled: true, Schedule: "0 3 * * *", Keep: 14, Dir: "./data/backups"},

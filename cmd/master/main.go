@@ -55,6 +55,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
+	// 可信反代网段：决定是否采信 X-Forwarded-For（限流/审计/人机验证的客户端 IP 来源）。
+	// 无效条目直接拒绝启动——配置写错时静默退回 RemoteAddr 会让真实 IP 全部丢失，
+	// 比启动失败更难排查；自检路径同样校验，确保坏配置在替换二进制前被拦下。
+	if err := util.SetTrustedProxies(cfg.App.TrustedProxies); err != nil {
+		log.Fatalf("app.trusted_proxies 配置无效: %v", err)
+	}
 
 	// 冒烟自检（面板内更新用）：仅验证配置可加载，退出码 0=通过。
 	// 刻意不连库不带任何副作用——新二进制执行本检查时旧进程仍在运行，

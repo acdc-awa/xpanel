@@ -18,6 +18,16 @@
 #
 # 分流规则（保持此顺序，否则 /node/ws 会被默认处理吞掉）：
 #   /node/ws（节点 WS 网关）必须先于默认反代匹配。
+#
+# 客户端 IP（重要）：面板只在「TCP 直连对端命中 config.yaml 的 app.trusted_proxies」时
+# 才采信 X-Forwarded-For。默认只信任回环，两种常见部署需要显式配置：
+#   - 面板跑在 Docker 里、Caddy 在宿主机：容器看到的来源是 Docker 网桥网关（常见 172.18.0.1），
+#     把它加入 app.trusted_proxies（docker network inspect 确认），否则限流与审计只看到网关；
+#   - Caddy 是容器/另一台机器：把 Caddy 的地址/网段加入 app.trusted_proxies。
+# 下面的 header_up 让 Caddy 用真实对端覆盖（而不是追加）XFF，并删掉客户端可伪造的
+# CF-Connecting-IP。Cloudflare 前置时：在全局块配置官方 CF 网段，并改写成
+#   header_up X-Forwarded-For {client_ip}   # 需 Caddy ≥ 2.8（client_ip_headers CF-Connecting-IP）
+# 同时在 config.yaml 的 trusted_proxies 里也加入同样的 CF 网段，面板才能还原真实客户端。
 
 {$SITE_ADDRESS} {
 	encode zstd gzip
@@ -25,17 +35,27 @@
 	# 节点 WebSocket 网关（必须先匹配，其余全部交给面板端口）
 	@ws path /node/ws
 	handle @ws {
-		reverse_proxy 127.0.0.1:18082
+		reverse_proxy 127.0.0.1:18082 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -CF-Connecting-IP
+		}
 	}
 
 	# 其余全部 → 面板端口（SPA 前端 + /api/* + /healthz /readyz）
 	handle {
-		reverse_proxy 127.0.0.1:18080
+		reverse_proxy 127.0.0.1:18080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -CF-Connecting-IP
+		}
 	}
 }
 
 # 订阅域名：整域交给订阅端口（TLS 由你的 Caddy 终止；端口仅认 subscribe_path 入口）
+# 订阅限流同样按客户端 IP 计数，故这里也必须覆盖 XFF。
 {$SUB_SITE_ADDRESS} {
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:6000
+	reverse_proxy 127.0.0.1:6000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up -CF-Connecting-IP
+	}
 }

@@ -177,7 +177,7 @@ docker run -d --name caddy \
 - 使用 Nginx 等其他反代时，参照模板注释中的分流规则自行编写（`/node/ws` 规则必须先于默认反代匹配）；
 - 反代与面板同机时保持 `BIND_ADDR=127.0.0.1`，反代容器通过 `host.docker.internal` 或宿主机网卡访问各端口。
 
-> **安全提示（客户端 IP 识别）**：面板按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For` → `RemoteAddr` 的优先级识别客户端 IP，用于登录/订阅限流、审计日志与人机验证。请保持「面板端口仅绑定 127.0.0.1 + 反代前置」的部署形态——切勿将面板端口直接暴露公网，否则客户端 IP 可被伪造，基于 IP 的限流将失效。
+> **安全提示（客户端 IP 识别）**：面板只在 **TCP 直连对端命中 `config.yaml` 的 `app.trusted_proxies`** 时才采信 `X-Forwarded-For`（`CF-Connecting-IP` / `X-Real-IP` 不再直接信任），否则一律使用 `RemoteAddr`。默认只信任回环；**Docker 部署时面板在容器内、反代在宿主机，面板看到的来源是 Docker 网桥网关（常见 `172.18.0.1`），必须把该地址加入 `trusted_proxies`**（`docker network inspect` 确认），否则所有请求会被视为同一 IP，限流共享且审计只记网关地址。反代侧还需用真实对端**覆盖**（而非追加）XFF（参考 `Caddyfile` 中的 `header_up X-Forwarded-For {remote_host}`）。切勿把面板端口直接暴露公网；即便如此，客户端自报的转发头也不会再影响限流、审计与人机验证的 IP 口径。
 
 ### 第五步：获取初始管理员密码
 

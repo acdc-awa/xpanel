@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -29,23 +30,50 @@ const (
 // sensitiveContains 包含匹配即脱敏（覆盖 turnstile_secret 等组合键名）；
 // privatekey 覆盖 REALITY 驼峰 privateKey（入站编辑器经 stream_settings 提交，
 // 下划线形态 private_key 由 sensitiveExact 兜底）；
-// sensitiveExact 精确匹配脱敏（key/code 单列，避免 sub_deny_code 之类误伤）。
+// pass/auth 是 Hysteria（users[].auth）与 HTTP/SOCKS（accounts[].pass）的用户凭据；
+// uuid 对应用户连接凭据；sensitiveExact 精确匹配脱敏（key/code 单列，
+// 避免 sub_deny_code 之类误伤——keyword/keys 同理）。
 var (
-	sensitiveContains = []string{"password", "secret", "token", "privatekey"}
-	sensitiveExact    = map[string]bool{"key": true, "code": true, "key_pem": true, "private_key": true}
+	sensitiveContains = []string{"password", "passwd", "secret", "token", "privatekey", "passphrase"}
+	sensitiveExact    = map[string]bool{
+		"key": true, "code": true, "key_pem": true, "private_key": true,
+		"pass": true, "auth": true, "uuid": true,
+	}
 )
 
-// sensitiveKeys 旧版正则脱敏字段（body_raw 回退路径沿用）。
-var sensitiveKeys = []string{"password", "token", "secret", "key", "code", "turnstile_token"}
+// sensitiveKeys 旧版正则脱敏字段（body_raw 回退路径沿用；无路径上下文，故不收 id）。
+var sensitiveKeys = []string{
+	"password", "passwd", "token", "secret", "key", "code", "turnstile_token",
+	"pass", "auth", "uuid", "ca_key_pem", "private_key", "key_pem",
+}
 
-func isSensitiveKey(k string) bool {
+// isSensitiveKey 判断字段是否应脱敏。parent 是「包含该字段的对象所属的键名」，
+// 用于路径感知规则（仅 clients[].id 这类上下文才把 id 当凭据）。
+func isSensitiveKey(k, parent string) bool {
 	lk := strings.ToLower(k)
+	if sensitiveExact[lk] {
+		return true
+	}
 	for _, w := range sensitiveContains {
 		if strings.Contains(lk, w) {
 			return true
 		}
 	}
-	return sensitiveExact[lk]
+	// 任意 *_key / *key（含 privateKey、api_key、public_key）：统一按密钥处理。
+	// 宁可过度脱敏，也不让私钥片段进入审计（审计会被导出/备份/投递）。
+	if strings.HasSuffix(lk, "key") {
+		return true
+	}
+	// 私钥 PEM：键名同时含 key 与 pem（ca_key_pem / tls_key_pem）。
+	// 证书本身（ca_pem / cert_pem）不含 key，保持可读。
+	if strings.Contains(lk, "key") && strings.Contains(lk, "pem") {
+		return true
+	}
+	// VLESS 客户端凭据：clients[].id 是用户 UUID。其它 id 是业务主键，脱敏会毁掉审计可读性。
+	if lk == "id" && strings.EqualFold(parent, "clients") {
+		return true
+	}
+	return false
 }
 
 // redactBody 对请求体做敏感字段脱敏 + 限长（仅用于 body 非 JSON 的回退路径）。
@@ -88,16 +116,17 @@ func redactKey(s, key string) string {
 }
 
 // auditSanitize 递归脱敏 + 大文本摘要化，返回可 JSON 序列化结构。
-func auditSanitize(v any, depth int) any {
+// parent 是「包含当前映射的字段名」，仅用于路径感知规则（clients[].id）。
+func auditSanitize(v any, depth int, parent string) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			if isSensitiveKey(k) {
+			if isSensitiveKey(k, parent) {
 				out[k] = "***"
 				continue
 			}
-			out[k] = auditSanitize(val, depth)
+			out[k] = auditSanitize(val, depth, k)
 		}
 		return out
 	case []any:
@@ -106,7 +135,7 @@ func auditSanitize(v any, depth int) any {
 		}
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = auditSanitize(val, depth)
+			out[i] = auditSanitize(val, depth, parent)
 		}
 		return out
 	case string:
@@ -118,19 +147,31 @@ func auditSanitize(v any, depth int) any {
 
 // auditSanitizeString 对字符串值：嵌套 JSON 剥一层解析（供翻译层读协议/传输等子字段）；
 // 超长文本摘要化（__text 标记：预览 + 行数 + 字符数）。
+// 无法解析的超长 JSON 串不给预览——内部可能含 clients[].id / auth 等凭据，
+// 而按 key 脱敏只在解析成功时生效。
 func auditSanitizeString(s string, depth int) any {
-	if depth < 2 {
-		trimmed := strings.TrimSpace(s)
-		if len(trimmed) > 1 && (trimmed[0] == '{' || trimmed[0] == '[') && len(s) <= auditNestedMax {
-			var parsed any
-			if json.Unmarshal([]byte(s), &parsed) == nil {
-				return auditSanitize(parsed, depth+1)
-			}
+	trimmed := strings.TrimSpace(s)
+	jsonLike := len(trimmed) > 1 && (trimmed[0] == '{' || trimmed[0] == '[')
+	// 最多剥三层字符串化 JSON（body → settings_json → 子配置），再深只做摘要，
+	// 避免恶意深层嵌套带来的解析递归。
+	if depth < 3 && jsonLike && len(s) <= auditNestedMax {
+		var parsed any
+		if json.Unmarshal([]byte(s), &parsed) == nil {
+			return auditSanitize(parsed, depth+1, "")
 		}
 	}
 	runes := []rune(s)
 	if len(runes) <= auditTextThreshold {
 		return s
+	}
+	if jsonLike {
+		return map[string]any{
+			"__text": map[string]any{
+				"lines":         strings.Count(s, "\n") + 1,
+				"chars":         len(runes),
+				"redacted_blob": true,
+			},
+		}
 	}
 	return map[string]any{
 		"__text": map[string]any{
@@ -217,7 +258,7 @@ func buildAuditDetail(c *gin.Context, body []byte, status int, target string) st
 	if trimmed := bytes.TrimSpace(body); len(trimmed) > 0 {
 		var parsed any
 		if json.Unmarshal(trimmed, &parsed) == nil {
-			env["body"] = auditSanitize(parsed, 0)
+			env["body"] = auditSanitize(parsed, 0, "")
 		} else {
 			env["body_raw"] = redactBody(trimmed)
 		}
@@ -229,12 +270,24 @@ func buildAuditDetail(c *gin.Context, body []byte, status int, target string) st
 	if len(out) <= auditDetailCap {
 		return string(out)
 	}
-	// 超限降级：body 收敛为脱敏原文串（≤500 字符），保持 envelope 本身可解析
-	env["body"] = map[string]any{"__raw": redactBody(body)}
+	// 超限降级：只保留 envelope 骨架 + body 顶层字段名，绝不回退原始 body。
+	// 原始 body 里的嵌套 JSON 是转义形态（\"id\":），按 key 的正则脱敏匹配不到，
+	// 回退原文会重新把凭据写进审计（2026-10-28 审查 P2-2）。
+	delete(env, "body_raw")
+	if b, ok := env["body"].(map[string]any); ok {
+		keys := make([]string, 0, len(b))
+		for k := range b {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		env["body"] = map[string]any{"__truncated": true, "keys": keys}
+	} else {
+		delete(env, "body")
+	}
 	if out2, err2 := json.Marshal(env); err2 == nil {
 		return string(out2)
 	}
-	return redactBody(body)
+	return ""
 }
 
 // Audit 自动审计中间件（J16，Xboard RequestLog 模式）：
@@ -267,6 +320,7 @@ func Audit(db *gorm.DB) gin.HandlerFunc {
 			OperatorType: "admin",
 			OperatorID:   uid,
 			Action:       action,
+			Category:     models.AuditCategory(action),
 			Detail:       buildAuditDetail(c, body, c.Writer.Status(), target),
 			IP:           util.ClientIPFromContext(c),
 		})

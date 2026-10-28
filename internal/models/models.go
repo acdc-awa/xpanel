@@ -152,6 +152,11 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateRelayOutboundCredentials(db); err != nil {
 		return err
 	}
+	// 审计日志模块分类回填（v4 追加，纯加列）：旧行按 action 映射到 servers/users/...，
+	// 写入方此后直接填列；幂等，无存量空分类时为空操作。
+	if err := BackfillAuditCategories(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err

@@ -275,7 +275,12 @@ const caddySnippet = computed(() => {
   return `${subHostName.value} {
     # 订阅整域反代至独立订阅端口（端口见 .env 的 APP_SUB_PORT，默认 6000）
     encode zstd gzip
-    reverse_proxy localhost:6000
+    reverse_proxy localhost:6000 {
+        # 面板只在 TCP 对端命中 app.trusted_proxies 时采信 XFF。
+        # 这里用真实对端「覆盖」客户端自报的 XFF，并删除可伪造的 CF 头。
+        header_up X-Forwarded-For {remote_host}
+        header_up -CF-Connecting-IP
+    }
 }`
 })
 
@@ -290,9 +295,11 @@ const nginxSnippet = computed(() => {
         proxy_pass http://127.0.0.1:6000;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # 覆盖（不要用 $proxy_add_x_forwarded_for 追加）：客户端自报的 XFF 不可信。
+        # 若前面还有 Cloudflare，先用 ngx_http_realip_module 把 $remote_addr 还原为真实客户端。
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+        proxy_set_header CF-Connecting-IP "";
     }
 }`
 })
@@ -1273,7 +1280,7 @@ async function save() {
             </CsFormItem>
 
             <!-- 反代配置代码片段展示 -->
-            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">生产反向代理配置参考 (含 Cloudflare 真实 IP 透传)</CsBox>
+            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">生产反向代理配置参考（覆盖客户端 IP 头，防伪造）</CsBox>
             <div class="proxy-snippet-box">
               <div class="snippet-header">
                 <span>Caddyfile 配置示例（推荐）</span>
@@ -1634,10 +1641,13 @@ async function save() {
 
               <!-- 客户端 IP 来源说明 -->
               <CsAlert type="warning" header="客户端真实 IP 识别架构">
-                面板按 <code>CF-Connecting-IP</code> → <code>X-Real-IP</code> → <code>X-Forwarded-For</code> →
-                <code>RemoteAddr</code> 的优先级识别真实客户端 IP，用于登录/订阅限流、审计日志与人机验证。
-                请保持「面板端口绑定 127.0.0.1 + 反向代理（Caddy/Nginx）前置」的部署形态：反代会覆盖/追加可信的 IP
-                头，限流与审计才能按真实 IP 生效。切勿将面板端口直接暴露公网，否则攻击者可伪造 IP 头绕过按 IP 的限流。
+                面板只信任来自 <code>app.trusted_proxies</code> 列表内地址的 <code>X-Forwarded-For</code>：
+                直连对端不在列表时一律使用 <code>RemoteAddr</code>，客户端自报的
+                <code>X-Forwarded-For</code> / <code>CF-Connecting-IP</code> 不会影响限流、审计与人机验证。
+                默认仅信任回环；Docker 部署时面板在容器内、反代在宿主机，来源通常是 Docker 网桥网关
+                （用 <code>docker network inspect</code> 确认，常见 <code>172.18.0.1</code>），需把它加入
+                <code>trusted_proxies</code>，否则所有请求会被视为同一 IP。反代侧还须以真实对端覆盖 XFF
+                （Caddy：<code>header_up X-Forwarded-For {remote_host}</code>）。切勿把面板端口直接暴露公网。
               </CsAlert>
 
               <CsToolbar class="system-refresh-bar">

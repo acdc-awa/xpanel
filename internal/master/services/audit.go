@@ -22,6 +22,7 @@ func (s *AuditService) Log(opType string, opID uint64, action, detail, ip string
 		OperatorType: opType,
 		OperatorID:   opID,
 		Action:       action,
+		Category:     models.AuditCategory(action),
 		Detail:       detail,
 		IP:           ip,
 		CreatedAt:    time.Now(),

@@ -66,6 +66,23 @@ func escapeSingleQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
+// sanitizeNodeName 清洗接入点名称：去掉控制字符、把换行/制表折叠为空格。
+// 名称会进入 Clash 节点名与 VLESS 分享链接的 #fragment，控制字符会污染 YAML 结构
+// 或客户端显示（2026-10-28 审查 P3-3）。单引号由 escapeSingleQuote 单独处理。
+func sanitizeNodeName(s string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
 // formatClashNode 生成单行紧凑 Flow 映射的 VLESS 节点 YAML（遵循 mihomo/Clash 官方规范，移除冗余字段）。
 // 导出器为哑渲染器：flow 等协议语义已由插件决议进 DTO，此处只做格式映射；
 // 新协议的 Clash 分支在此按 dto.Protocol 扩展。
@@ -632,7 +649,11 @@ func ResolveAPSubscription(ap *models.UserAccessPoint, srvMap map[uint64]models.
 		dto.ServerPort = entryPort
 	}
 
-	dto.Name = ap.Name
+	if name := sanitizeNodeName(ap.Name); name != "" {
+		dto.Name = name
+	} else {
+		dto.Name = "未命名节点"
+	}
 	if ap.CustomHost != "" {
 		dto.ServerHost = ap.CustomHost
 	}

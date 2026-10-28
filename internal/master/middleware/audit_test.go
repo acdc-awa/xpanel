@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -130,7 +131,70 @@ func TestAuditNonJSONBodyFallback(t *testing.T) {
 	assert.NotContains(t, env["body_raw"], "abc")
 }
 
-// DELETE 无 body：信封含真实路径与参数；GET 不记审计。
+// 凭据类字段全覆盖：私钥 PEM、Hysteria auth、HTTP/SOCKS pass、VLESS 客户端 UUID、
+// 用户 UUID；公钥/CA 证书保持可读（2026-10-28 审查 P2-2）。
+func TestAuditSanitizeCredentialMatrix(t *testing.T) {
+	db := setupAuditMWDB(t)
+	log := auditRequest(t, db, http.MethodPost, "/api/v1/admin/inbounds", "/api/v1/admin/inbounds",
+		`{"ca_key_pem":"-----BEGIN EC PRIVATE KEY-----\nCAKEYMARK","ca_pem":"PUBLICCA","public_key":"PUBKEY",`+
+			`"uuid":"USERUUIDMARK",`+
+			`"settings_json":"{\"users\":[{\"auth\":\"HYSECRETMARK\",\"email\":\"a@b.c\"}],\"clients\":[{\"id\":\"VLESSUUIDMARK\",\"email\":\"u@x\"}],\"accounts\":[{\"user\":\"u\",\"pass\":\"PASSMARK\"}]}"}`)
+
+	var env map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(log.Detail), &env))
+	body := env["body"].(map[string]any)
+
+	assert.Equal(t, "***", body["ca_key_pem"], "CA 私钥 PEM 不得明文落审计")
+	assert.Equal(t, "***", body["uuid"], "用户连接凭据 UUID 不得明文落审计")
+	assert.Equal(t, "***", body["public_key"], "密钥类字段统一脱敏")
+	assert.Equal(t, "PUBLICCA", body["ca_pem"], "CA 证书本身是公开材料，保持可读")
+
+	settings, ok := body["settings_json"].(map[string]any)
+	assert.True(t, ok, "settings_json 应被解析为对象")
+	users := settings["users"].([]any)
+	assert.Equal(t, "***", users[0].(map[string]any)["auth"], "Hysteria 用户密码不得明文落审计")
+	clients := settings["clients"].([]any)
+	assert.Equal(t, "***", clients[0].(map[string]any)["id"], "VLESS clients[].id（UUID）不得明文落审计")
+	accounts := settings["accounts"].([]any)
+	assert.Equal(t, "***", accounts[0].(map[string]any)["pass"], "HTTP/SOCKS 用户密码不得明文落审计")
+
+	for _, marker := range []string{"CAKEYMARK", "USERUUIDMARK", "HYSECRETMARK", "VLESSUUIDMARK", "PASSMARK"} {
+		assert.NotContains(t, log.Detail, marker, "脱敏标记 %s 不应出现在审计 detail", marker)
+	}
+}
+
+// 超长 JSON 串无法解析时不给原文预览；信封整体超限时只保留字段名，绝不回退原始 body。
+func TestAuditOversizeNeverFallsBackToRawBody(t *testing.T) {
+	db := setupAuditMWDB(t)
+
+	// 1) 超过 auditNestedMax 的 JSON 串：给 redacted_blob 元信息，不含内部凭据。
+	bigBlob := `{"clients":[{"id":"BIGBLOBUUID","email":"u@x"}],"pad":"` + strings.Repeat("x", 5000) + `"}`
+	blobJSON, _ := json.Marshal(bigBlob)
+	log := auditRequest(t, db, http.MethodPost, "/api/v1/admin/inbounds", "/api/v1/admin/inbounds",
+		`{"tag":"a","settings_json":`+string(blobJSON)+`}`)
+	assert.NotContains(t, log.Detail, "BIGBLOBUUID")
+	assert.Contains(t, log.Detail, "redacted_blob")
+
+	// 2) 信封超过 auditDetailCap：body 降级为字段名列表，原始值（含凭据）全部消失。
+	db2 := setupAuditMWDB(t)
+	fields := make([]string, 0, 13)
+	fields = append(fields, `"password":"OVERSIZEPASS"`)
+	for i := 0; i < 12; i++ {
+		fields = append(fields, `"f`+strconv.Itoa(i)+`":"`+strings.Repeat("v", 300)+`"`)
+	}
+	bigBody := `{` + strings.Join(fields, ",") + `}`
+	log2 := auditRequest(t, db2, http.MethodPost, "/api/v1/admin/inbounds", "/api/v1/admin/inbounds", bigBody)
+	var env map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(log2.Detail), &env))
+	body, ok := env["body"].(map[string]any)
+	assert.True(t, ok, "body 应为对象，实际 detail=%s", log2.Detail)
+	assert.Equal(t, true, body["__truncated"])
+	assert.NotContains(t, log2.Detail, "OVERSIZEPASS")
+	keys, ok := body["keys"].([]any)
+	assert.True(t, ok)
+	assert.Contains(t, keys, "password")
+}
+
 func TestAuditDeleteEnvelopeAndSkipGET(t *testing.T) {
 	db := setupAuditMWDB(t)
 	log := auditRequest(t, db, http.MethodDelete, "/api/v1/admin/users/:id", "/api/v1/admin/users/9", "")

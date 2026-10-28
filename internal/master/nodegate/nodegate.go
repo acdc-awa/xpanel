@@ -291,17 +291,20 @@ func (h *Hub) ServeWS(c *gin.Context) {
 }
 
 // authenticate 校验 node_id + secret。
+// 节点不存在与密钥错误统一文案：WS 认证端点无需账号即可访问，分开提示等于给出
+// 「node_id 是否存在」的探测 oracle（2026-10-28 审查 P3-1）。
 func (h *Hub) authenticate(a protocol.AuthPayload) (*models.Server, error) {
+	errAuthFailed := errors.New("服务器认证失败")
 	var server models.Server
 	if err := h.DB.Where("node_id = ?", a.NodeID).First(&server).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("服务器不存在")
+			return nil, errAuthFailed
 		}
 		return nil, errors.New("数据库错误")
 	}
 	// 无认证端点上的密钥比较必须恒定时间，防按字节猜解的时序侧信道。
 	if subtle.ConstantTimeCompare([]byte(util.HashSecret(a.Secret)), []byte(server.Secret)) != 1 {
-		return nil, errors.New("服务器密钥错误")
+		return nil, errAuthFailed
 	}
 	return &server, nil
 }
@@ -1141,6 +1144,7 @@ func (h *Hub) raiseXrayAlarm(serverID uint64, prevState string, hb protocol.Hear
 	_ = h.DB.Create(&models.AuditLog{
 		OperatorType: "system",
 		Action:       action,
+		Category:     models.AuditCategory(action),
 		Detail:       detail,
 		CreatedAt:    time.Now(),
 	}).Error

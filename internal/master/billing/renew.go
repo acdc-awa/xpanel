@@ -207,6 +207,7 @@ func (s *AutoRenewService) auditRenew(userID, planID uint64, orderNo, reason str
 	s.DB.Create(&models.AuditLog{
 		OperatorType: "system",
 		Action:       "auto_renew",
+		Category:     models.AuditCategory("auto_renew"),
 		Detail:       detail,
 	})
 }
@@ -222,6 +223,7 @@ func (s *AutoRenewService) auditClear(r expiredUser, reason string) {
 	s.DB.Create(&models.AuditLog{
 		OperatorType: "system",
 		Action:       "subscription_expired",
+		Category:     models.AuditCategory("subscription_expired"),
 		Detail:       detail,
 	})
 }

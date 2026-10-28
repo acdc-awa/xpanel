@@ -13,6 +13,18 @@ app:
   sub_port: 6000      # 订阅独立端口（0=禁用订阅服务）
   # public_url: https://panel.example.com   # 面板公网地址；设置后节点「一键安装命令」用 wss://，留空则按请求 Host + ws://
   # ws_public_url: wss://ws.example.com/node/ws   # 节点 WS 对外地址（可独立域名/任意路径）；留空=面板域名 + /node/ws
+  # 可信反向代理（决定是否采信 X-Forwarded-For；登录/订阅限流、审计日志与人机验证的客户端 IP 都取自它）。
+  # 只有 TCP 直连对端命中下列 IP/CIDR 时才使用转发头；否则一律用 RemoteAddr——公网客户端自报
+  # X-Forwarded-For / CF-Connecting-IP 不再生效。默认仅信任回环（反代与面板同机时开箱可用）。
+  # ⚠️ Docker 部署（面板在容器内、反代在宿主机）：面板看到的来源通常是 Docker 网桥网关而不是回环，
+  #    必须把网关地址加入列表（docker compose 默认网络约 172.18.0.1，用 `docker network inspect`
+  #    确认后写 - 172.18.0.1/32；整段网桥也可写 - 172.18.0.0/16）。否则所有请求会被视为同一 IP，
+  #    限流共享、审计只记网关地址。
+  # Cloudflare 前置时把 CF 回源网段也列入，并在反代侧把真实客户端覆盖写入 X-Forwarded-For
+  # （见 deploy/master/Caddyfile 注释）。空列表（trusted_proxies: []）= 完全不信转发头，只认 TCP 对端。
+  trusted_proxies:
+    - 127.0.0.1/32
+    - ::1/128
 
 db:
   driver: sqlite      # sqlite | mysql（开发默认 sqlite，生产用 mysql）
