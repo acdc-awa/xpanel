@@ -157,6 +157,12 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := BackfillAuditCategories(db); err != nil {
 		return err
 	}
+	// 服务器排序值归一（v4 追加，纯数据且向后兼容）：把存量重复/稀疏的 sort_order
+	// 压成 0..N-1。排序键仍是 (sort_order, id)，可见顺序与归一前逐台一致；
+	// 幂等——已是稠密值时零写入。2026-10-28 起排序唯一入口是页面拖拽，序号不再手填。
+	if err := normalizeServerSortOrder(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
@@ -358,6 +364,50 @@ func migrateTunnelInboundType(db *gorm.DB) error {
 	return db.Model(&Inbound{}).
 		Where("protocol = ? AND (type IS NULL OR type = '' OR type != ?)", ProtocolTunnel, InboundTypeTunnel).
 		Update("type", InboundTypeTunnel).Error
+}
+
+// normalizeServerSortOrder 把 servers.sort_order 归一为稠密的 0..N-1（2026-10-28）。
+//
+// 为什么需要：排序从此只由页面拖拽维护，而存量库的 sort_order 大多仍是默认 0（重复值），
+// 也可能被人手工改成稀疏序号。重复值本身不影响展示（列表/仪表盘都按 sort_order, id 取数），
+// 但会让「新服务器追加到末尾」和「重排后写 0..N-1」之间出现一段语义不一致的过渡态。
+//
+// 安全性：源顺序就是 (sort_order, id)，归一后写 0..N-1 保持同一顺序——可见顺序逐台不变，
+// 旧面板按原排序键读取也完全一致，因此不构成需要提升 DBMinCompatibleVersion 的不兼容变更。
+// 幂等：已是稠密值时一行都不写；软删除的服务器不参与（它们不出现在任何列表里）。
+func normalizeServerSortOrder(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Server{}) {
+		return nil
+	}
+	type sortRow struct {
+		ID        uint64
+		SortOrder int
+	}
+	var rows []sortRow
+	if err := db.Model(&Server{}).
+		Select("id", "sort_order").
+		Order("sort_order ASC, id ASC").
+		Scan(&rows).Error; err != nil {
+		return fmt.Errorf("读取服务器排序失败: %w", err)
+	}
+	var dirty []sortRow
+	for i, row := range rows {
+		if row.SortOrder != i {
+			dirty = append(dirty, sortRow{ID: row.ID, SortOrder: i})
+		}
+	}
+	if len(dirty) == 0 {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, row := range dirty {
+			if err := tx.Model(&Server{}).Where("id = ?", row.ID).
+				UpdateColumn("sort_order", row.SortOrder).Error; err != nil {
+				return fmt.Errorf("归一服务器排序失败: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // backfillTrafficBilled 流量计费两列一次性回填（2026-09-06 倍率计费）：

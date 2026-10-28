@@ -1,4 +1,4 @@
-import type { BadgeColor } from '@/components/cloudscape'
+import type { BadgeColor, StatusType } from '@/components/cloudscape'
 
 // 服务器状态芯片的唯一实现：服务器列表卡片与服务器设置弹窗共用。
 // 状态本身由后端推导（push_state / xray_state），这里只负责文案、配色与提示，
@@ -137,4 +137,27 @@ export function xrayAlertChip(src: ServerStatusSource): AlertChip {
   }
   const chip = xrayChip(src)
   return { ...chip, show: true, text: src.status === 1 ? chip.text : `上次 ${chip.text}` }
+}
+
+/**
+ * 把 chip 的 Badge 配色映射成 CsStatusIndicator 的 type。
+ * 卡片状态条用「圆点 + 文案」而不是实心徽标，正常态才不会三块绿色堆在一起；
+ * 配色语义仍以 chip 为唯一来源（red=异常、severity-medium=待处理、grey=未启用）。
+ */
+export function indicatorTypeOf(color: BadgeColor): StatusType {
+  switch (color) {
+    case 'red':
+    case 'severity-critical':
+    case 'severity-high':
+      return 'error'
+    case 'severity-medium':
+    case 'severity-low':
+      return 'warning'
+    case 'green':
+      return 'success'
+    case 'blue':
+      return 'info'
+    default:
+      return 'stopped'
+  }
 }

@@ -3,58 +3,55 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   CsAlert,
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
   CsCardGrid,
   CsCheckbox,
   CsColumnLayout,
   CsContainer,
   CsDatePicker,
+  CsDrawer,
   CsEmpty,
   CsForm,
   CsFormItem,
+  CsHeader,
   CsIconButton,
   CsInput,
-  CsInputNumber,
   CsModal,
   CsPage,
-  CsProgressBar,
   CsSegmentedControl,
   CsSelect,
   CsSpaceBetween,
   CsSpinner,
-  CsStatusIndicator,
-  CsTable,
   CsToolbar,
-  CsTooltip,
   ElMessage,
   ElMessageBox,
   type SegmentedOption,
-  type TableColumn,
-  type BadgeColor,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
+import ServerCard from './servers/ServerCard.vue'
+import BatchActionModal, {
+  type BatchActionItem,
+  type BatchActionKind,
+  type BatchActionRequest,
+} from './servers/BatchActionModal.vue'
+import XrayUpgradeDialog from './servers/XrayUpgradeDialog.vue'
 import ServerSettingsModal from './servers/ServerSettingsModal.vue'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 import {
-  batchUpgradeServers,
   createServer,
   getAgentLatestVersion,
-  getBatchUpgradeStatus,
   getInbounds,
   getServers,
-  serverCommand,
-  type AgentUpgradeStatus,
+  getServerUpgradeStatuses,
+  getXrayVersions,
+  reorderServers,
+  runServerCommand,
+  type CommandDispatchResult,
   type ServerItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { compareVersion } from '@/utils/version'
-import { formatDateTime } from '@/utils/timezone'
-import { getExpiryStatus, formatExpireDate, normalizeUrl, isUrl } from '@/utils/vps'
-import { pushStateChip, xrayAlertChip } from '@/utils/server-status'
+import { getExpiryStatus } from '@/utils/vps'
 
 const router = useRouter()
 
@@ -150,33 +147,9 @@ function onStatusFilterChange(value: string | number) {
   statusFilter.value = value as StatusFilter
 }
 
-/** 页面原有的 x-chip 配色语义映射到 Cloudscape Badge。 */
-function badgeColorOf(cls: string): BadgeColor {
-  switch (cls) {
-    case 'red':
-      return 'red'
-    case 'green':
-    case 'emerald':
-      return 'green'
-    case 'blue':
-      return 'blue'
-    case 'orange':
-    case 'deep-orange':
-    case 'yellow':
-    case 'amber':
-      return 'severity-medium'
-    default:
-      return 'grey'
-  }
-}
-
-function expiryBadgeColor(row: ServerItem): BadgeColor {
-  const st = getExpiryStatus(row.expire_at)
-  return st ? badgeColorOf(st.cls) : 'grey'
-}
-
-// ---- 官方 Agent 最新版本感知与比对 ----
+// ---- 官方版本感知（Agent / Xray） ----
 const latestAgentVersion = ref('')
+const latestXrayVersion = ref('')
 const fetchingLatestAgent = ref(false)
 
 async function loadLatestAgentVersion(refresh = false) {
@@ -193,14 +166,15 @@ async function loadLatestAgentVersion(refresh = false) {
   }
 }
 
-function getAgentVersionStatus(currentVer: string) {
-  if (!currentVer) return { type: 'unknown', label: '未知' }
-  if (!latestAgentVersion.value) return { type: 'normal', label: '' }
-  const cmp = compareVersion(currentVer, latestAgentVersion.value)
-  if (cmp < 0) {
-    return { type: 'outdated', label: `有新版 ${latestAgentVersion.value}` }
+async function loadLatestXrayVersion() {
+  try {
+    const { data } = await getXrayVersions()
+    if (data.code === 0 && data.data?.latest_version) {
+      latestXrayVersion.value = data.data.latest_version
+    }
+  } catch {
+    // 静默降级：没有参考版本时不显示「有新版」角标
   }
-  return { type: 'latest', label: '最新' }
 }
 
 async function load() {
@@ -225,23 +199,14 @@ async function load() {
   }
   loadInboundCounts()
   loadLatestAgentVersion()
+  loadLatestXrayVersion()
 }
 onMounted(load)
-
-function fmtTime(t: string | null) {
-  if (!t) return '—'
-  return formatDateTime(t, '—')
-}
-
-// 列表里的 Xray / 配置同步徽标统一走 utils/server-status（与设置弹窗同一份文案与配色），
-// 页面内不再各写一套 chip 逻辑。
-
 
 // ---- 新增服务器 ----
 const createOpen = ref(false)
 const createForm = reactive({
   server_type: 'xray' as 'xray',
-  sort_order: 0,
   name: '',
   host: '',
   location: '',
@@ -263,7 +228,6 @@ async function submitCreate() {
   try {
     const { data } = await createServer({
       server_type: createForm.server_type,
-      sort_order: createForm.sort_order,
       name: createForm.name,
       host: createForm.host,
       location: createForm.location,
@@ -281,7 +245,6 @@ async function submitCreate() {
       } catch {
         /* 隐私模式等场景忽略 */
       }
-      createForm.sort_order = 0
       createForm.name = ''
       createForm.host = ''
       createForm.location = ''
@@ -313,7 +276,6 @@ async function copyText(text: string, label: string) {
 function closeCreate() {
   createOpen.value = false
   createdResult.value = null
-  createForm.sort_order = 0
   createForm.name = ''
   createForm.host = ''
   createForm.location = ''
@@ -339,26 +301,11 @@ function onSettingsRemoved() {
   load()
 }
 
-// ---- 重启 ----
-async function restartXray(row: any) {
-  try {
-    await ElMessageBox.confirm(`确认重启服务器「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await serverCommand(row.id, 'restart_xray')
-    if (data.code === 0 && data.data.ok) ElMessage.success('已重启')
-    else ElMessage.error(data.data.error || '重启失败')
-  } catch (e) {
-    ElMessage.error(errMsg(e, '重启失败'))
-  }
-}
-
-// ---- 批量升级 Agent ----
+// ---- 单选 / 多选 ----
 const selectedIds = ref<number[]>([])
+const selectMode = ref(false)
+const selectedServers = computed(() => list.value.filter((s) => selectedIds.value.includes(s.id)))
+const selectedOfflineCount = computed(() => selectedServers.value.filter((s) => s.status !== 1).length)
 const allSelected = computed(
   () => filtered.value.length > 0 && filtered.value.every((s) => selectedIds.value.includes(s.id)),
 )
@@ -375,97 +322,195 @@ function toggleSelectAll(val: boolean) {
   selectedIds.value = val ? filtered.value.map((s) => s.id) : []
 }
 
-// phase → 展示文案 / 进度百分比（批量总览行内进度条）
-const phaseMeta: Record<string, { label: string; percent: number }> = {
-  starting: { label: '排队中', percent: 5 },
-  checking: { label: '检查版本', percent: 15 },
-  downloading: { label: '下载资源', percent: 50 },
-  verifying: { label: '校验完整性', percent: 70 },
-  replacing: { label: '替换二进制', percent: 85 },
-  restarting: { label: '重启生效', percent: 95 },
-  success: { label: '升级成功', percent: 100 },
-  failed: { label: '升级失败', percent: 100 },
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  selectedIds.value = []
+  actionDrawerOpen.value = false
 }
 
-interface BatchRow {
-  id: number
-  name: string
-  version: string
-  skipped: boolean
-  reason?: string
-  status: AgentUpgradeStatus | null
+// ---- 移动端：批量操作收进底部操作栏 + 抽屉 ----
+// 桌面把三个批量按钮放在列表标题行；768 以下标题行放不下，改为常驻底部操作栏，
+// 具体操作在抽屉里统一呈现（升级 Agent / 升级 Xray / 重启 Xray 都是「对所选服务器下发」同一语义）。
+const isMobile = ref(false)
+const actionDrawerOpen = ref(false)
+const drawerTopOffset = ref(0)
+let mobileMq: MediaQueryList | null = null
+
+const onMobileMq = () => {
+  isMobile.value = window.matchMedia('(max-width: 768px)').matches || window.innerWidth <= 768
+  if (!isMobile.value) actionDrawerOpen.value = false
 }
 
-const batchColumns: TableColumn[] = [
-  { id: 'name', header: '服务器', key: 'name', minWidth: 140 },
-  { id: 'version', header: '当前版本', width: 110 },
-  { id: 'status', header: '状态', width: 120 },
-  { id: 'progress', header: '进度', minWidth: 200 },
-]
+onMounted(() => {
+  mobileMq = window.matchMedia('(max-width: 768px)')
+  onMobileMq()
+  mobileMq.addEventListener('change', onMobileMq)
+  // matchMedia 为主；再挂 resize 兜住不派发 change 的嵌入环境（IAB/WebView）
+  window.addEventListener('resize', onMobileMq)
+})
+onUnmounted(() => {
+  mobileMq?.removeEventListener('change', onMobileMq)
+  window.removeEventListener('resize', onMobileMq)
+})
 
-const billingCycleOptions = [
-  { label: '月付', value: '月付' },
-  { label: '季付', value: '季付' },
-  { label: '半年付', value: '半年付' },
-  { label: '年付', value: '年付' },
-  { label: '两年付', value: '两年付' },
-  { label: '三年付', value: '三年付' },
-  { label: '一次性 / 永久', value: '一次性' },
-]
-const batchOpen = ref(false)
-const batchRunning = ref(false)
-const batchRows = ref<BatchRow[]>([])
-let batchTimer: any = null
+/** 抽屉停在应用栏下沿：与 AdminLayout 的移动端导航抽屉同一口径（读 AppLayout 下发的 header 高度）。 */
+function openActionDrawer() {
+  const page = document.querySelector('.cs-page')
+  const raw = page ? getComputedStyle(page).getPropertyValue('--awsui-header-height-ka4djm') : ''
+  drawerTopOffset.value = parseInt(raw, 10) || 0
+  actionDrawerOpen.value = true
+}
 
-function stopBatchPolling() {
-  if (batchTimer) {
-    clearInterval(batchTimer)
-    batchTimer = null
+/** 抽屉里点操作：先关抽屉再开对应流程，避免两层浮层叠加。 */
+function runBatchFromDrawer(fn: () => void) {
+  actionDrawerOpen.value = false
+  fn()
+}
+
+const MAX_BATCH = 100
+
+/** 后端 binding 上限 100；超了直接拦住，不让请求白跑一趟。 */
+function tooMany(): boolean {
+  if (selectedIds.value.length > MAX_BATCH) {
+    ElMessage.warning(`一次最多操作 ${MAX_BATCH} 台服务器`)
+    return true
   }
+  return false
 }
 
-onUnmounted(stopBatchPolling)
+// ---- 排序（拖拽）----
+// 唯一写入点：拖完一次性提交全量顺序，dashboard 的服务器监测按同一个 sort_order 取数。
+// 筛选/搜索/多选时禁用——那几种状态下「插到哪」没有确定语义。
+const canReorder = computed(
+  () =>
+    !selectMode.value &&
+    !keyword.value.trim() &&
+    statusFilter.value === 'all' &&
+    !filterExpiring.value &&
+    list.value.length > 1,
+)
 
-function progressStatus(phase?: string): 'success' | 'error' | 'in-progress' {
-  if (phase === 'success') return 'success'
-  if (phase === 'failed') return 'error'
-  return 'in-progress'
+let draggingId: number | null = null
+let orderSnapshot: ServerItem[] = []
+let savingOrder = false
+let scrollTimer: number | null = null
+let scrollStep = 0
+
+function cardElOf(target: EventTarget | null): HTMLElement | null {
+  return (target as HTMLElement | null)?.closest('[data-server-id]') as HTMLElement | null
 }
 
-async function pollBatch() {
-  const activeIds = batchRows.value.filter((r) => !r.skipped).map((r) => r.id)
-  if (!activeIds.length) {
-    stopBatchPolling()
-    batchRunning.value = false
+function onDragStart(e: DragEvent) {
+  if (!canReorder.value || !(e.target as HTMLElement | null)?.closest('[data-drag-handle]')) {
+    e.preventDefault()
     return
   }
-  try {
-    const { data } = await getBatchUpgradeStatus(activeIds)
-    if (data.code === 0) {
-      const statuses = data.data.statuses || {}
-      for (const row of batchRows.value) {
-        if (row.skipped) continue
-        const st = statuses[String(row.id)]
-        if (st) row.status = st
-      }
-      const allDone = batchRows.value
-        .filter((r) => !r.skipped)
-        .every((r) => r.status && (r.status.phase === 'success' || r.status.phase === 'failed'))
-      if (allDone) {
-        stopBatchPolling()
-        batchRunning.value = false
-        load()
-        setTimeout(load, 15000)
-      }
-    }
-  } catch {
-    // 忽略轮询抖动
+  const card = cardElOf(e.target)
+  if (!card) return
+  draggingId = Number(card.getAttribute('data-server-id'))
+  orderSnapshot = [...list.value]
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(draggingId))
+    // 整卡跟随鼠标，而不是只拖一个小抓手
+    e.dataTransfer.setDragImage(card, 24, 24)
   }
 }
 
-async function batchUpgradeSelected() {
-  const selected = list.value.filter((s) => selectedIds.value.includes(s.id))
-  if (!selected.length) return
+function onDragOver(e: DragEvent) {
+  if (draggingId === null) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  updateAutoScroll(e.clientY)
+  const card = cardElOf(e.target)
+  if (!card) return
+  const targetId = Number(card.getAttribute('data-server-id'))
+  if (!targetId || targetId === draggingId) return
+  const from = list.value.findIndex((s) => s.id === draggingId)
+  if (from < 0) return
+  const rect = card.getBoundingClientRect()
+  const after = e.clientX > rect.left + rect.width / 2
+  const next = [...list.value]
+  const [moved] = next.splice(from, 1)
+  let insertAt = next.findIndex((s) => s.id === targetId)
+  if (insertAt < 0) return
+  if (after) insertAt += 1
+  next.splice(insertAt, 0, moved)
+  // 只在顺序真的变了才赋值，避免每次 dragover 都触发整树渲染
+  if (next.some((s, i) => s.id !== list.value[i]?.id)) list.value = next
+}
+
+function onDrop(e: DragEvent) {
+  if (draggingId === null) return
+  e.preventDefault()
+  void persistOrder()
+}
+
+function onDragEnd() {
+  stopAutoScroll()
+  draggingId = null
+  void persistOrder()
+}
+
+async function persistOrder() {
+  if (savingOrder) return
+  const ids = list.value.map((s) => s.id)
+  if (ids.join(',') === orderSnapshot.map((s) => s.id).join(',')) return
+  savingOrder = true
+  try {
+    const { data } = await reorderServers(ids)
+    if (data.code !== 0) throw new Error(data.message || '保存排序失败')
+  } catch (e) {
+    list.value = orderSnapshot
+    ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
+  } finally {
+    savingOrder = false
+    orderSnapshot = [...list.value]
+  }
+}
+
+function updateAutoScroll(clientY: number) {
+  const edge = 24
+  scrollStep = clientY < edge ? -14 : clientY > window.innerHeight - edge ? 14 : 0
+  if (scrollStep && scrollTimer === null) {
+    scrollTimer = window.setInterval(() => window.scrollBy(0, scrollStep), 16)
+  } else if (!scrollStep) {
+    stopAutoScroll()
+  }
+}
+
+function stopAutoScroll() {
+  if (scrollTimer !== null) {
+    clearInterval(scrollTimer)
+    scrollTimer = null
+  }
+  scrollStep = 0
+}
+
+onUnmounted(stopAutoScroll)
+
+// ---- 批量动作 ----
+const batchVisible = ref(false)
+const batchKind = ref<BatchActionKind>('agent')
+const batchItems = ref<BatchActionItem[]>([])
+const batchRequest = ref<BatchActionRequest | null>(null)
+
+function openBatch(kind: BatchActionKind, items: BatchActionItem[], request: BatchActionRequest) {
+  batchKind.value = kind
+  batchItems.value = items
+  batchRequest.value = request
+  batchVisible.value = true
+}
+
+function onBatchFinished() {
+  load()
+  // Agent 升级完成后要等重启与下一次心跳，版本号才会刷新
+  setTimeout(load, 15000)
+}
+
+async function batchAgentUpgrade() {
+  if (!selectedIds.value.length || tooMany()) return
+  const selected = selectedServers.value
   const latest = latestAgentVersion.value
   const outdated = selected.filter((s) => latest && s.agent_version && compareVersion(s.agent_version, latest) < 0)
   const unknown = selected.filter((s) => !s.agent_version)
@@ -484,91 +529,147 @@ async function batchUpgradeSelected() {
   } catch {
     return
   }
+  openBatch(
+    'agent',
+    selected.map((s) => ({ id: s.id, name: s.name, version: s.agent_version || '未知' })),
+    { ids: selected.map((s) => s.id), type: 'upgrade_agent', target: latest || undefined, force: false },
+  )
+}
 
-  batchRows.value = selected.map((s) => ({
-    id: s.id,
-    name: s.name,
-    version: s.agent_version || '未知',
-    skipped: false,
-    status: { phase: 'starting', message: '提交中…', ts: Math.floor(Date.now() / 1000) } as AgentUpgradeStatus,
-  }))
-  batchOpen.value = true
-  batchRunning.value = true
-  stopBatchPolling()
-  batchTimer = setInterval(pollBatch, 1500)
+// ---- 批量升级 Xray：先选版本，再走统一进度弹窗 ----
+const xrayDialogOpen = ref(false)
 
+function openXrayUpgrade() {
+  if (!selectedIds.value.length || tooMany()) return
+  xrayDialogOpen.value = true
+}
+
+function startXrayUpgrade(target: string) {
+  xrayDialogOpen.value = false
+  if (!selectedIds.value.length) return
+  const selected = selectedServers.value
+  openBatch(
+    'xray',
+    selected.map((s) => ({ id: s.id, name: s.name, version: s.xray_version || '未知' })),
+    { ids: selected.map((s) => s.id), type: 'upgrade_xray', target },
+  )
+}
+
+async function batchRestartXray() {
+  if (!selectedIds.value.length || tooMany()) return
+  const selected = selectedServers.value
+  const offline = selected.filter((s) => s.status !== 1).length
+  const lines = [
+    `已选 ${selected.length} 台服务器，将并行下发重启指令。`,
+    offline ? `其中 ${offline} 台离线，将自动跳过。` : '全部服务器当前在线。',
+    '重启会短暂中断该节点上的 Xray（约 1-2 秒）。',
+  ]
   try {
-    const { data } = await batchUpgradeServers({
-      ids: selected.map((s) => s.id),
-      target: latest || undefined,
-      force: false,
+    await ElMessageBox.confirm(lines.join('\n'), '批量重启 Xray', {
+      type: 'warning',
+      confirmButtonText: '开始重启',
+      cancelButtonText: '取消',
     })
+  } catch {
+    return
+  }
+  openBatch(
+    'restart',
+    selected.map((s) => ({ id: s.id, name: s.name, version: s.xray_version || '—' })),
+    { ids: selected.map((s) => s.id), type: 'restart_xray' },
+  )
+}
+
+// ---- 单台重启：派发后短轮询，终态再提示 ----
+async function restartXray(row: ServerItem) {
+  try {
+    await ElMessageBox.confirm(`确认重启服务器「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await runServerCommand<CommandDispatchResult>({ ids: [row.id], type: 'restart_xray' })
     if (data.code !== 0) {
       ElMessage.error(data.message)
-      stopBatchPolling()
-      batchRunning.value = false
-      batchOpen.value = false
       return
     }
-    const skippedMap = new Map(data.data.skipped.map((s) => [s.id, s.reason]))
-    const dispatchedSet = new Set(data.data.dispatched.map((d) => d.id))
-    for (const row of batchRows.value) {
-      if (skippedMap.has(row.id)) {
-        row.skipped = true
-        row.reason = skippedMap.get(row.id)
-        row.status = null
-      } else if (!dispatchedSet.has(row.id)) {
-        row.skipped = true
-        row.reason = '未派发'
-        row.status = null
-      }
+    const skip = data.data.skipped?.[0]
+    if (skip) {
+      ElMessage.error(`重启失败：${skip.reason}`)
+      return
     }
-    pollBatch()
+    const result = await waitRestart(row.id)
+    if (result.ok) ElMessage.success(result.message || '已重启')
+    else ElMessage.error(result.message || '重启失败')
+    load()
   } catch (e) {
-    stopBatchPolling()
-    batchRunning.value = false
-    batchOpen.value = false
-    ElMessage.error(errMsg(e, '批量升级提交失败'))
+    ElMessage.error(errMsg(e, '重启失败'))
   }
 }
+
+async function waitRestart(id: number): Promise<{ ok: boolean; message?: string }> {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    try {
+      const { data } = await getServerUpgradeStatuses([id])
+      const st = data.data?.statuses?.[String(id)]
+      if (st && st.kind === 'restart') {
+        if (st.phase === 'success') return { ok: true, message: st.message }
+        if (st.phase === 'failed') return { ok: false, message: st.error || st.message }
+      }
+    } catch {
+      /* 轮询抖动忽略 */
+    }
+  }
+  return { ok: true, message: '指令已下发，稍后刷新查看' }
+}
+
+const billingCycleOptions = [
+  { label: '月付', value: '月付' },
+  { label: '季付', value: '季付' },
+  { label: '半年付', value: '半年付' },
+  { label: '年付', value: '年付' },
+  { label: '两年付', value: '两年付' },
+  { label: '三年付', value: '三年付' },
+  { label: '一次性 / 永久', value: '一次性' },
+]
 
 </script>
 
 <template>
-  <CsPage>
+  <CsPage :class="{ 'servers-page--action-bar': selectMode && isMobile }">
     <CsToolbar>
       <CsInput
         v-model="keyword"
+        class="server-search"
         placeholder="搜索名称 / 地址 / 地区"
         prefix-icon="search"
         clearable
-        style="width: 240px"
+        :style="isMobile ? undefined : 'width: 240px'"
         aria-label="搜索服务器"
       />
-      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
-      <CsCheckbox
-        :model-value="allSelected"
-        :indeterminate="selectedIds.length > 0 && !allSelected"
-        :disabled="filtered.length === 0"
-        @change="(v: boolean) => toggleSelectAll(!!v)"
-      >全选</CsCheckbox>
-      <template v-if="selectedIds.length">
-        <CsBadge color="blue"><span class="cs-text-mono">已选 {{ selectedIds.length }} 台</span></CsBadge>
-        <CsButton icon-name="upload" @click="batchUpgradeSelected">批量升级</CsButton>
-        <CsButton variant="link" @click="selectedIds = []">取消选择</CsButton>
-      </template>
-      <CsTooltip v-if="latestAgentVersion" content="官方最新 Agent 版本，点击刷新最新版本检测" placement="top">
-        <CsButton
-          variant="inline-link"
-          icon-name="refresh"
-          :loading="fetchingLatestAgent"
-          @click="loadLatestAgentVersion(true)"
-        >
-          <span class="cs-text-mono">官方最新: {{ latestAgentVersion }}</span>
-        </CsButton>
-      </CsTooltip>
+      <CsButton v-if="isMobile" class="server-refresh-inline" variant="icon" icon-name="refresh" aria-label="刷新服务器列表" @click="load" />
+      <CsButton v-else icon-name="refresh" @click="load">刷新</CsButton>
+      <!-- 「多选 / 取消多选」与全选、已选计数都在列表标题行（见 CsContainer #actions），
+           工具栏只放搜索、刷新与新增。官方最新版本也只在卡片状态条里提示（Agent/Xray 有新版）。
+           窄屏的新增按钮放在主行末尾：`#actions` 是独立 flex 项，留着会另起一行只剩一个按钮。 -->
+      <CsButton
+        v-if="!selectMode && isMobile"
+        class="server-add-inline"
+        variant="primary"
+        icon-name="add-plus"
+        aria-label="新增服务器"
+        @click="createOpen = true"
+      />
       <template #actions>
-        <CsButton variant="primary" icon-name="add-plus" @click="createOpen = true">新增服务器</CsButton>
+        <CsButton
+          v-if="!selectMode && !isMobile"
+          variant="primary"
+          icon-name="add-plus"
+          @click="createOpen = true"
+        >新增服务器</CsButton>
       </template>
     </CsToolbar>
 
@@ -580,14 +681,44 @@ async function batchUpgradeSelected() {
       </template>
     </CsAlert>
 
-    <CsContainer header="服务器列表">
-      <template #actions>
-        <CsSegmentedControl
-          :model-value="statusFilter"
-          :options="statusFilterOptions"
-          label="按状态筛选服务器"
-          @update:model-value="onStatusFilterChange"
-        />
+    <CsContainer>
+      <!-- 标题行：左侧标题 + 紧贴标题的「多选 / 取消多选」（多选态再加全选与蓝色计数），
+           右侧常态放状态筛选、多选态放三个批量动作（窄屏改由底部操作栏 + 抽屉承载）。
+           注意：CsContainer 的 #actions 只挂在它自带的默认标题上，一旦传入 #header 就整块不渲染，
+           所以右侧控件必须写在这一行里，不能再用 #actions。 -->
+      <template #header>
+        <div class="server-list-head">
+          <span class="server-list-title"><CsHeader variant="h2">服务器列表</CsHeader></span>
+          <CsButton
+            :variant="selectMode ? 'primary' : 'normal'"
+            icon-name="check"
+            @click="toggleSelectMode"
+          >{{ selectMode ? '取消多选' : '多选' }}</CsButton>
+          <template v-if="selectMode && !isMobile">
+            <CsCheckbox
+              :model-value="allSelected"
+              :indeterminate="selectedIds.length > 0 && !allSelected"
+              :disabled="filtered.length === 0"
+              @change="(v: boolean) => toggleSelectAll(!!v)"
+            >全选</CsCheckbox>
+            <span class="server-selected-count">已选 {{ selectedIds.length }} 台服务器</span>
+          </template>
+
+          <div v-if="!selectMode || !isMobile" class="server-list-tools">
+            <CsSegmentedControl
+              v-if="!selectMode"
+              :model-value="statusFilter"
+              :options="statusFilterOptions"
+              label="按状态筛选服务器"
+              @update:model-value="onStatusFilterChange"
+            />
+            <div v-else-if="!isMobile" class="server-select-actions">
+              <CsButton icon-name="upload" :disabled="!selectedIds.length" @click="batchAgentUpgrade">升级 Agent</CsButton>
+              <CsButton icon-name="upload" :disabled="!selectedIds.length" @click="openXrayUpgrade">升级 Xray</CsButton>
+              <CsButton icon-name="refresh" :disabled="!selectedIds.length" @click="batchRestartXray">重启 Xray</CsButton>
+            </div>
+          </div>
+        </div>
       </template>
 
       <div v-if="loading" class="server-loading"><CsSpinner size="large" /></div>
@@ -598,120 +729,31 @@ async function batchUpgradeSelected() {
         :description="keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」'"
       />
 
-      <CsCardGrid v-else>
-        <CsCard v-for="row in filtered" :key="row.id">
-          <template #header>
-            <div class="server-card-head">
-              <CsCheckbox
-                :model-value="selectedIds.includes(row.id)"
-                :aria-label="`选择 ${row.name}`"
-                @change="(v: boolean) => toggleSelect(row.id, !!v)"
-                @click.stop
-              />
-              <CsBadge color="grey"><span class="cs-text-mono">#{{ row.sort_order ?? 0 }}</span></CsBadge>
-              <CsStatusIndicator
-                :type="row.status === 1 ? 'success' : 'stopped'"
-                :text="row.status === 1 ? '在线' : '离线'"
-              />
-              <CsButton variant="link" class="server-name" @click="openSettings(row)">{{ row.name }}</CsButton>
-              <CsBadge v-if="row.location" color="blue">{{ row.location }}</CsBadge>
-              <CsTooltip
-                v-if="getExpiryStatus(row.expire_at)"
-                :content="getExpiryStatus(row.expire_at)!.tip"
-                placement="top"
-              >
-                <CsBadge :color="expiryBadgeColor(row)" class="server-chip-help">
-                  {{ getExpiryStatus(row.expire_at)!.text }}
-                </CsBadge>
-              </CsTooltip>
-              <CsTooltip v-if="xrayAlertChip(row).show" :content="xrayAlertChip(row).tip" placement="top">
-                <CsBadge :color="xrayAlertChip(row).color" class="server-chip-help">
-                  {{ xrayAlertChip(row).text }}
-                </CsBadge>
-              </CsTooltip>
-            </div>
-          </template>
-
-          <template #actions>
-            <CsTooltip v-if="pushStateChip(row).tip" :content="pushStateChip(row).tip" placement="top">
-              <CsBadge :color="pushStateChip(row).color">{{ pushStateChip(row).text }}</CsBadge>
-            </CsTooltip>
-            <CsBadge v-else :color="pushStateChip(row).color">{{ pushStateChip(row).text }}</CsBadge>
-          </template>
-
-          <CsCardFacts :columns="2">
-            <CsCardFact label="服务器地址 / 域名" full-width>
-              <CsButton
-                variant="inline-link"
-                icon-name="copy"
-                class="server-host"
-                @click="copyText(row.host, '服务器地址')"
-              >
-                <span class="cs-text-mono">{{ row.host }}</span>
-              </CsButton>
-            </CsCardFact>
-
-            <CsCardFact label="Agent">
-              <span class="server-inline">
-                <span class="cs-text-mono">{{ row.agent_version || 'v—' }}</span>
-                <CsBadge v-if="getAgentVersionStatus(row.agent_version).type === 'latest'" color="green">最新</CsBadge>
-                <CsBadge
-                  v-else-if="getAgentVersionStatus(row.agent_version).type === 'outdated'"
-                  color="severity-medium"
-                  :title="`官方最新版本 ${latestAgentVersion}`"
-                >有新版</CsBadge>
-              </span>
-            </CsCardFact>
-
-            <CsCardFact label="Xray">
-              <span class="cs-text-mono">{{ row.xray_version || '—' }}</span>
-            </CsCardFact>
-
-            <CsCardFact label="接入点">
-              <CsButton variant="inline-link" @click="goInbounds(row)">
-                <span class="cs-text-mono">{{ inboundCount(row.id) }}</span> 个入站
-              </CsButton>
-            </CsCardFact>
-
-            <CsCardFact label="心跳" mono :value="row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—'" />
-
-            <CsCardFact
-              v-if="row.expire_at || row.billing_cycle || row.price || row.idc_address"
-              label="VPS 资产"
-              full-width
-            >
-              <div class="server-asset">
-                <span
-                  v-if="row.expire_at"
-                  class="cs-text-mono"
-                  :style="getExpiryStatus(row.expire_at)?.isUrgent ? { color: getExpiryStatus(row.expire_at)!.color, fontWeight: 600 } : {}"
-                  :title="getExpiryStatus(row.expire_at)?.tip || `到期日：${formatExpireDate(row.expire_at)}`"
-                >{{ formatExpireDate(row.expire_at) }}</span>
-                <CsBadge v-if="row.billing_cycle" color="grey">{{ row.billing_cycle }}</CsBadge>
-                <span v-if="row.price" class="cs-text-mono server-price">{{ row.price }}</span>
-                <CsButton
-                  v-if="row.idc_address && isUrl(row.idc_address)"
-                  variant="inline-link"
-                  icon-name="external"
-                  :href="normalizeUrl(row.idc_address)"
-                  target="_blank"
-                >IDC 控制台</CsButton>
-                <CsButton
-                  v-else-if="row.idc_address"
-                  variant="inline-link"
-                  icon-name="copy"
-                  @click="copyText(row.idc_address, 'IDC 地址')"
-                >{{ row.idc_address }}</CsButton>
-              </div>
-            </CsCardFact>
-          </CsCardFacts>
-
-          <template #footer>
-            <CsButton icon-name="settings" @click="openSettings(row)">设置</CsButton>
-            <CsButton icon-name="refresh" @click="restartXray(row)">重启</CsButton>
-            <CsButton icon-name="view-horizontal" @click="openMetrics(row)">监控</CsButton>
-          </template>
-        </CsCard>
+      <CsCardGrid
+        v-else
+        :min-width="360"
+        @dragstart="onDragStart"
+        @dragover="onDragOver"
+        @drop="onDrop"
+        @dragend="onDragEnd"
+      >
+        <ServerCard
+          v-for="row in filtered"
+          :key="row.id"
+          :server="row"
+          :selected="selectedIds.includes(row.id)"
+          :select-mode="selectMode"
+          :can-reorder="canReorder"
+          :latest-agent-version="latestAgentVersion"
+          :latest-xray-version="latestXrayVersion"
+          :inbound-count="inboundCount(row.id)"
+          @toggle-select="toggleSelect(row.id, !selectedIds.includes(row.id))"
+          @open-settings="openSettings(row)"
+          @restart="restartXray(row)"
+          @metrics="openMetrics(row)"
+          @go-inbounds="goInbounds(row)"
+          @copy-text="copyText"
+        />
       </CsCardGrid>
     </CsContainer>
 
@@ -729,15 +771,7 @@ async function batchUpgradeSelected() {
                   <CsInput v-model="createForm.host" placeholder="如 tokyo01.example.com / 120.232.x.x" />
                 </CsFormItem>
               </CsColumnLayout>
-              <CsColumnLayout :columns="3">
-                <CsFormItem label="排序序号">
-                  <CsInputNumber
-                    v-model="createForm.sort_order"
-                    :min="0"
-                    :step="1"
-                    placeholder="越小越靠前"
-                  />
-                </CsFormItem>
+              <CsColumnLayout :columns="2">
                 <CsFormItem label="地区位置">
                   <CsInput v-model="createForm.location" placeholder="如 日本 / 广州（选填）" />
                 </CsFormItem>
@@ -834,62 +868,22 @@ async function batchUpgradeSelected() {
       </template>
     </CsModal>
 
-    <!-- 批量升级总览弹窗 -->
-    <CsModal
-      v-model:visible="batchOpen"
-      header="批量升级 Agent"
-      size="large"
-      :close-on-click-overlay="false"
-      @close="stopBatchPolling"
-    >
-      <CsSpaceBetween size="s">
-        <CsTable :items="batchRows" :columns="batchColumns" track-by="id" empty-text="暂无服务器">
-          <template #cell-version="{ item }">
-            <span class="cs-text-mono">{{ item.version }}</span>
-          </template>
-          <template #cell-status="{ item }">
-            <CsBadge v-if="item.skipped" color="grey">已跳过</CsBadge>
-            <CsBadge
-              v-else-if="item.status"
-              :color="
-                item.status.phase === 'success'
-                  ? 'green'
-                  : item.status.phase === 'failed'
-                    ? 'red'
-                    : 'blue'
-              "
-            >
-              {{ phaseMeta[item.status.phase]?.label || item.status.phase }}
-            </CsBadge>
-            <CsBadge v-else color="grey">等待</CsBadge>
-          </template>
-          <template #cell-progress="{ item }">
-            <span v-if="item.skipped" class="cs-text-secondary">{{ item.reason }}</span>
-            <template v-else-if="item.status">
-              <CsProgressBar
-                :value="phaseMeta[item.status.phase]?.percent ?? 0"
-                :status="progressStatus(item.status.phase)"
-                :bar-height="8"
-              />
-              <div v-if="item.status.error" class="batch-error cs-text-mono">{{ item.status.error }}</div>
-              <div v-else-if="item.status.message" class="batch-message cs-text-secondary">
-                {{ item.status.message }}
-              </div>
-            </template>
-            <span v-else class="cs-text-secondary">—</span>
-          </template>
-        </CsTable>
-        <p class="batch-hint cs-text-secondary">
-          <template v-if="batchRunning">
-            正在升级，进度实时更新…升级完成的服务器将在下一轮心跳后刷新版本号。
-          </template>
-          <template v-else>全部服务器已处理完成；升级完成的服务器版本号将在下一轮心跳后刷新。</template>
-        </p>
-      </CsSpaceBetween>
-      <template #footer>
-        <CsButton variant="primary" @click="batchOpen = false">关闭</CsButton>
-      </template>
-    </CsModal>
+    <!-- 批量动作进度（Agent 升级 / Xray 升级 / Xray 重启共用） -->
+    <BatchActionModal
+      v-model:visible="batchVisible"
+      :kind="batchKind"
+      :items="batchItems"
+      :request="batchRequest"
+      @finished="onBatchFinished"
+    />
+
+    <!-- Xray 版本选择（批量升级） -->
+    <XrayUpgradeDialog
+      v-model:visible="xrayDialogOpen"
+      :count="selectedIds.length"
+      :offline-count="selectedOfflineCount"
+      @start="startXrayUpgrade"
+    />
 
     <!-- 服务器设置弹窗 -->
     <ServerSettingsModal
@@ -906,6 +900,58 @@ async function batchUpgradeSelected() {
       :server-id="metricsServer?.id || 0"
       :server-name="metricsServer?.name || ''"
     />
+
+    <!-- 移动端多选：常驻底部操作栏（蓝色计数 + 全选 + 批量操作入口） -->
+    <div v-if="selectMode && isMobile" class="server-action-bar">
+      <span class="server-selected-count">已选 {{ selectedIds.length }} 台服务器</span>
+      <CsButton variant="inline-link" :disabled="filtered.length === 0" @click="toggleSelectAll(!allSelected)">
+        {{ allSelected ? '取消全选' : '全选' }}
+      </CsButton>
+      <CsButton variant="primary" :disabled="selectedIds.length === 0" @click="openActionDrawer">批量操作</CsButton>
+    </div>
+
+    <!-- 移动端批量操作抽屉：三个动作语义相同（对所选服务器下发指令），统一成一份操作栏 -->
+    <CsDrawer
+      v-model:visible="actionDrawerOpen"
+      header="批量操作"
+      placement="end"
+      :size="320"
+      :top-offset="drawerTopOffset"
+    >
+      <div class="server-action-list">
+        <p class="server-action-summary">
+          已选 <strong>{{ selectedIds.length }}</strong> 台服务器<span v-if="selectedOfflineCount > 0">，其中离线 {{ selectedOfflineCount }} 台</span>。
+          离线与无需变更的服务器会自动跳过。
+        </p>
+        <button
+          type="button"
+          class="server-action-item"
+          :disabled="selectedIds.length === 0"
+          @click="runBatchFromDrawer(batchAgentUpgrade)"
+        >
+          <span class="server-action-title">升级 Agent</span>
+          <span class="server-action-desc">升级到官方最新 Agent 版本</span>
+        </button>
+        <button
+          type="button"
+          class="server-action-item"
+          :disabled="selectedIds.length === 0"
+          @click="runBatchFromDrawer(openXrayUpgrade)"
+        >
+          <span class="server-action-title">升级 Xray</span>
+          <span class="server-action-desc">选择目标内核版本，可降级或重装</span>
+        </button>
+        <button
+          type="button"
+          class="server-action-item"
+          :disabled="selectedIds.length === 0"
+          @click="runBatchFromDrawer(batchRestartXray)"
+        >
+          <span class="server-action-title">重启 Xray</span>
+          <span class="server-action-desc">只重启内核进程，不重新下发配置</span>
+        </button>
+      </div>
+    </CsDrawer>
   </CsPage>
 </template>
 
@@ -917,46 +963,163 @@ async function batchUpgradeSelected() {
   text-align: center;
 }
 
-.server-card-head {
+/* 搜索框：桌面固定 240px；窄屏与其余控件共处一行，搜索让出宽度先收缩 */
+.server-search {
+  flex: 1 1 200px;
+  min-inline-size: 0;
+}
+
+/* 注意：窄屏的刷新与新增两个图标按钮都要靠右，只能**一个**元素吃 auto 外边距。
+   两处都写会把剩余空白摊成两段（搜索↔刷新、刷新↔新增），三个控件被拉散。 */
+@media (max-width: 768px) {
+  /* .cs-toolbar-main 默认按内容宽度收缩，搜索框的 flex-grow 无处可长，
+     结果刷新与新增挤在搜索框右侧、整行右侧留空。窄屏让它占满一行。 */
+  :deep(.cs-toolbar-main) {
+    flex: 1 1 auto;
+  }
+
+  /* #actions 的槽在窄屏是空的（新增按钮改到主行内），但空壳仍占一个 gap，
+     会让最右的「+」离视口边缘差 12px；空壳直接不参与布局。 */
+  :deep(.cs-toolbar-actions:empty) {
+    display: none;
+  }
+
+  .server-search {
+    /* basis 只决定换行判定（换行按 basis 算，不按收缩后的实际宽度）：
+       工具栏此时只剩 搜索 + 刷新 28 + 新增 32 两项按钮，320 宽（可用 265）也排得进一行。
+       上限与桌面同宽：整行拉满会让搜索框过宽，留白由下面的 auto 外边距吃掉。 */
+    flex: 1 1 120px;
+    max-inline-size: 240px;
+  }
+
+  /* 搜索被限宽后，剩余空间给刷新按钮左侧，两个图标按钮保持贴右边 */
+  .server-refresh-inline {
+    margin-inline-start: auto;
+  }
+
+  /* 原生 input 的 min-width:auto 会把它顶回 ~129px（默认 20 字符），放开才能在 320 下继续收缩 */
+  .server-search :deep(input) {
+    min-inline-size: 0;
+  }
+}
+
+/* 底部操作栏出现时给页面留出高度，最后一张卡片不被压住 */
+.servers-page--action-bar {
+  padding-block-end: 64px;
+}
+
+.server-action-bar {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  /* 计数与两个动作整体靠右：底栏左侧留给页面内容，拇指操作区在右下 */
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: var(--color-background-container-content-mjfil9, #fff);
+  border-block-start: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* 已选计数：蓝色文字，不做徽标/状态卡 */
+.server-selected-count {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--color-text-link-default-qabnuk, #0972d3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 标题行：标题 + 紧贴标题的多选开关（官方标题不带外边距，这里只补横向间距） */
+.server-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-inline-size: 0;
+
+  /* 官方 Header 根节点自带 width:100%：外面套一层只占内容宽的壳，否则它会独占整行把按钮挤到第二行 */
+  .server-list-title {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-inline-size: 0;
+  }
+}
+
+/* 标题行右侧：常态是状态筛选，多选态是三个批量动作。撑到行尾，窄到放不下时整组换行仍靠右。 */
+.server-list-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  margin-inline-start: auto;
   min-inline-size: 0;
 }
 
-.server-name {
-  font-size: 15px;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.server-host {
-  max-inline-size: 100%;
-  overflow-wrap: anywhere;
-}
-
-.server-inline {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.server-asset {
+.server-action-list {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.server-price {
-  font-weight: 600;
+.server-action-summary {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-action-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  inline-size: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-item-card-hcapa2, #c6c6cd);
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-text-link-default-qabnuk, #0972d3);
+    background: var(--color-background-button-normal-hover-1ajrtx, rgba(9, 114, 211, 0.06));
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.server-action-title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 700;
   color: var(--color-text-link-default-qabnuk, #0972d3);
 }
 
-.server-chip-help {
-  cursor: help;
+.server-action-desc {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-select-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-select-hint {
+  margin-inline-end: 4px;
+  font-size: 13px;
 }
 
 /* 弹窗内的安装凭据块 */
@@ -983,21 +1146,6 @@ async function batchUpgradeSelected() {
     color: var(--color-text-link-default-qabnuk, #0972d3);
     word-break: break-all;
   }
-}
-
-.batch-error {
-  margin-block-start: 2px;
-  font-size: 11px;
-  color: var(--color-text-status-error-ri38gt, #db0000);
-  word-break: break-all;
-}
-.batch-message {
-  margin-block-start: 2px;
-  font-size: 11px;
-}
-.batch-hint {
-  font-size: 12px;
-  margin: 0;
 }
 
 @media (max-width: 768px) {

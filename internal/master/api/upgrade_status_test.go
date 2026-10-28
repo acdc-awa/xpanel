@@ -128,11 +128,11 @@ func TestAdminBatchUpgradeSkipsOffline(t *testing.T) {
 	hub := nodegate.NewHub(nil, nil, nil)
 	deps := &Deps{DB: db, Hub: hub}
 	r := gin.New()
-	r.POST("/servers/batch-upgrade", deps.AdminBatchUpgradeServers)
+	r.POST("/servers/command", deps.AdminServerCommand)
 
-	body := `{"ids":[` + fmt.Sprint(id1) + `,` + fmt.Sprint(id2) + `,99999],"target":"v9.9.9"}`
+	body := `{"ids":[` + fmt.Sprint(id1) + `,` + fmt.Sprint(id2) + `,99999],"type":"upgrade_agent","target":"v9.9.9"}`
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/servers/batch-upgrade", strings.NewReader(body)))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/servers/command", strings.NewReader(body)))
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {

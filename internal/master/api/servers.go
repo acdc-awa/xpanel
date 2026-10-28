@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -210,7 +211,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		IDCURL                string          `json:"idc_url" binding:"max=255"` // 兼容别名
 		DefaultOutboundTag    string          `json:"default_outbound_tag"`
 		RoutingDomainStrategy string          `json:"routing_domain_strategy"`
-		SortOrder             int             `json:"sort_order"`
+		SortOrder             *int            `json:"sort_order"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
@@ -231,6 +232,13 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 	if st == "" {
 		st = models.ServerTypeXray
 	}
+	// 未显式指定排序时追加到末尾：启动时已把存量排序值压成 0..N-1，MAX+1 即 N。
+	sortOrder := 0
+	if req.SortOrder != nil {
+		sortOrder = *req.SortOrder
+	} else {
+		sortOrder = nextServerSortOrder(d.DB)
+	}
 	nodeID := "node-" + util.RandomID(6)
 	secret, err := util.NewNodeSecret()
 	if err != nil {
@@ -250,7 +258,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		Price:                 strings.TrimSpace(req.Price),
 		IDCAddress:            idcAddr,
 		Status:                0,
-		SortOrder:             req.SortOrder,
+		SortOrder:             sortOrder,
 		DefaultOutboundTag:    req.DefaultOutboundTag,
 		RoutingDomainStrategy: req.RoutingDomainStrategy,
 	}
@@ -504,211 +512,282 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 	util.OK(c, gin.H{"deleted": id})
 }
 
-// AdminServerCommand POST /api/v1/admin/servers/:id/command
-// body: {"type":"push_config|restart_xray|get_status|get_logs|upgrade_agent", "config_json": "...", "lines": 100}
-func (d *Deps) AdminServerCommand(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "无效的 ID")
-		return
+// ---- 统一服务器指令入口 ----
+//
+// POST /api/v1/admin/servers/command
+// body: {"ids":[1,2,3],"type":"...","target":"vX","force":false,"config_json":"...","lines":100}
+//
+// 动作类（upgrade_agent / upgrade_xray / restart_xray）支持 1..100 台：逐台预检后立即返回
+// dispatched/skipped，实际下发走 goroutine（升级要等节点拉完二进制，最长 5 分钟），
+// 进度统一经 GET /servers/upgrade-status?ids= 轮询（kind 区分 agent / xray / restart）。
+// 查询与推送类（get_status / get_logs / push_config）只接受单台，同步返回节点回执。
+
+// commandItem 已通过预检、等待下发的服务器。
+type commandItem struct {
+	ID    uint64 `json:"id"`
+	Name  string `json:"name"`
+	Force bool   `json:"-"` // 逐台判定的强制位（降级/重装），不对外暴露
+}
+
+// commandSkip 被预检跳过的服务器与原因。
+type commandSkip struct {
+	ID     uint64 `json:"id"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+func dedupeIDs(ids []uint64) []uint64 {
+	if len(ids) == 0 {
+		return nil
 	}
+	seen := make(map[uint64]bool, len(ids))
+	out := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// isActionCommand 是否是「下发即返回、进度靠轮询」的动作类指令。
+func isActionCommand(msgType string) bool {
+	switch msgType {
+	case protocol.MsgUpgradeAgent, protocol.MsgUpgradeXray, protocol.MsgRestartXray:
+		return true
+	}
+	return false
+}
+
+// upgradeKind 进度对象标识：agent（默认）| xray | restart。restart 只由主控写入，
+// agent 侧永远不发；旧主控忽略该字段，故不构成协议变更。
+func upgradeKind(msgType string) string {
+	switch msgType {
+	case protocol.MsgUpgradeXray:
+		return "xray"
+	case protocol.MsgRestartXray:
+		return "restart"
+	}
+	return "agent"
+}
+
+func actionLabel(msgType string, force bool) string {
+	switch msgType {
+	case protocol.MsgUpgradeXray:
+		if force {
+			return "Xray 内核重装/降级"
+		}
+		return "Xray 内核升级"
+	case protocol.MsgRestartXray:
+		return "重启"
+	}
+	if force {
+		return "Agent 回滚"
+	}
+	return "Agent 自升级"
+}
+
+func (d *Deps) AdminServerCommand(c *gin.Context) {
 	var req struct {
-		Type       string `json:"type" binding:"required"`
-		ConfigJSON string `json:"config_json"`
-		Lines      int    `json:"lines"`
-		Target     string `json:"target"`
-		Force      bool   `json:"force"`
+		IDs        []uint64 `json:"ids" binding:"required,min=1,max=100"`
+		Type       string   `json:"type" binding:"required"`
+		ConfigJSON string   `json:"config_json"`
+		Lines      int      `json:"lines"`
+		Target     string   `json:"target"`
+		Force      bool     `json:"force"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
 	}
-
-	var payload any
-	var actionName, target string
-	switch req.Type {
-	case protocol.MsgPushConfig:
-		if req.ConfigJSON == "" {
-			util.BadRequest(c, "push_config 需要 config_json")
+	ids := dedupeIDs(req.IDs)
+	if len(ids) == 0 {
+		util.BadRequest(c, "请至少选择一台服务器")
+		return
+	}
+	if isActionCommand(req.Type) {
+		if d.Hub == nil {
+			util.ServerError(c, "节点网关未初始化")
 			return
 		}
-		payload = protocol.PushConfigPayload{ConfigJSON: req.ConfigJSON}
-	case protocol.MsgRestartXray:
-		payload = nil
-	case protocol.MsgGetStatus:
-		payload = nil
-	case protocol.MsgGetLogs:
-		payload = protocol.GetLogsPayload{Lines: req.Lines}
-	case protocol.MsgUpgradeAgent:
-		target = strings.TrimSpace(req.Target)
-		if target != "" && !agentTagPattern.MatchString(target) {
-			util.BadRequest(c, "目标版本号格式不正确（示例：v0.1.15）")
+		target, dispatched, skipped, err := d.dispatchAction(c.Request.Context(), ids, req.Type, req.Target, req.Force)
+		if err != nil {
+			util.Fail(c, 400, err.Error())
 			return
+		}
+		util.OK(c, gin.H{"target": target, "dispatched": dispatched, "skipped": skipped})
+		return
+	}
+	// 查询/推送类维持单台同步语义：各自的 payload 不同，批量没有意义，
+	// 也避免一次请求被最慢的节点拖住。
+	if len(ids) != 1 {
+		util.BadRequest(c, "该指令一次只能操作一台服务器")
+		return
+	}
+	d.runCommandSync(c, ids[0], req.Type, req.ConfigJSON, req.Lines)
+}
+
+// dispatchAction 预检 → 标记排队 → 逐台下发，返回目标版本、派发与被跳过清单。
+func (d *Deps) dispatchAction(ctx context.Context, ids []uint64, msgType, rawTarget string, force bool) (string, []commandItem, []commandSkip, error) {
+	target := strings.TrimSpace(rawTarget)
+	switch msgType {
+	case protocol.MsgUpgradeAgent:
+		if target != "" && !agentTagPattern.MatchString(target) {
+			return "", nil, nil, fmt.Errorf("目标版本号格式不正确（示例：v0.1.15）")
 		}
 		if target == "" {
-			if latest, _, err := d.GetCachedAgentLatestVersion(c.Request.Context(), false); err == nil && latest != "" {
+			if latest, _, err := d.GetCachedAgentLatestVersion(ctx, false); err == nil {
 				target = latest
 			}
 		}
-
-		// 对比节点当前版本与目标版本：未指定 force 时若当前已是最新或更高，直接返回
-		var srv models.Server
-		actionName = "自升级"
-		if err := d.DB.First(&srv, id).Error; err == nil {
-			if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) > 0 {
-				actionName = "回滚"
+		if target == "" {
+			return "", nil, nil, fmt.Errorf("无法确定目标版本（官方最新版本查询失败，可稍后重试）")
+		}
+	case protocol.MsgUpgradeXray:
+		if target != "" && !agentTagPattern.MatchString(target) {
+			return "", nil, nil, fmt.Errorf("Xray 版本号格式不正确（示例：v26.10.21）")
+		}
+		// 目标留空时尽量替调用方解析到官方最新；解析失败也不阻塞（节点自己会查）。
+		if target == "" && !force {
+			if versions, _, err := d.GetCachedXrayVersions(ctx, false); err == nil && len(versions) > 0 {
+				target = versions[0]
 			}
-			if req.Force {
-				actionName = "回滚"
-				// <= v0.1.16 的旧 agent 未知 force 字段且硬编码 Compare>=0 拒绝，无法在线执行回滚
+		}
+	}
+
+	dispatched := make([]commandItem, 0, len(ids))
+	skipped := make([]commandSkip, 0)
+	for _, id := range ids {
+		var srv models.Server
+		if err := d.DB.First(&srv, id).Error; err != nil {
+			skipped = append(skipped, commandSkip{ID: id, Reason: "服务器不存在"})
+			continue
+		}
+		if !d.Hub.IsOnline(id) {
+			skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "服务器离线"})
+			continue
+		}
+		effForce := force
+		switch msgType {
+		case protocol.MsgUpgradeAgent:
+			if !force && srv.AgentVersion != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
+				skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "已是最新版本 " + srv.AgentVersion})
+				continue
+			}
+			if force {
+				// 在线回滚只有 v0.1.17+ 支持（旧 agent 未知 force 字段且硬编码拒绝回滚）。
 				if srv.AgentVersion != "" && srv.AgentVersion != "dev" && CompareAgentVersion(srv.AgentVersion, "v0.1.17") < 0 {
-					util.Fail(c, 400, fmt.Sprintf("服务器当前 Agent 版本 %s 不支持在线回滚（需 v0.1.17 及以上版本），请在服务器执行 xray-agent rollback 或重新运行安装脚本", srv.AgentVersion))
-					return
+					skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "当前 Agent " + srv.AgentVersion + " 不支持在线回滚（需 v0.1.17 及以上）"})
+					continue
 				}
 				if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) == 0 {
-					util.Fail(c, 400, fmt.Sprintf("服务器当前已是版本 %s，无需回滚", srv.AgentVersion))
-					return
+					skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "当前已是版本 " + srv.AgentVersion + "，无需回滚"})
+					continue
 				}
 			}
-			if !req.Force && srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
-				util.OK(c, gin.H{
-					"ok":   true,
-					"data": fmt.Sprintf("服务器当前已是最新版本 %s（目标 %s），无需升级", srv.AgentVersion, target),
-				})
-				return
+		case protocol.MsgUpgradeXray:
+			if srv.XrayVersion != "" && target != "" {
+				switch CompareAgentVersion(srv.XrayVersion, target) {
+				case 0:
+					if !force {
+						skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "已是目标内核 " + srv.XrayVersion})
+						continue
+					}
+					effForce = true // 同版本重装
+				case 1:
+					effForce = true // 显式选择更旧的内核 = 有意降级
+				}
 			}
 		}
-		if d.Hub != nil {
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "starting",
-				Target:  target,
-				Message: fmt.Sprintf("正在向服务器下发%s指令…", actionName),
-				TS:      time.Now().Unix(),
-			})
-		}
-		payload = protocol.UpgradeAgentPayload{Target: target, Force: req.Force}
+		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
+			Phase:   "starting",
+			Target:  target,
+			Message: "已加入队列，等待下发" + actionLabel(msgType, effForce) + "指令…",
+			Kind:    upgradeKind(msgType),
+			TS:      time.Now().Unix(),
+		})
+		dispatched = append(dispatched, commandItem{ID: id, Name: srv.Name, Force: effForce})
+	}
+
+	for _, it := range dispatched {
+		go d.runAction(it, msgType, target)
+	}
+	return target, dispatched, skipped, nil
+}
+
+// runAction 单台下发与终态落库。升级要等节点从 GitHub 拉完二进制，用专用长超时。
+func (d *Deps) runAction(it commandItem, msgType, target string) {
+	var payload any
+	timeout := nodegate.AskTimeout
+	switch msgType {
+	case protocol.MsgUpgradeAgent:
+		payload = protocol.UpgradeAgentPayload{Target: target, Force: it.Force}
+		timeout = nodegate.UpgradeAskTimeout
 	case protocol.MsgUpgradeXray:
-		target = strings.TrimSpace(req.Target)
-		if target != "" && !agentTagPattern.MatchString(target) {
-			util.BadRequest(c, "Xray 版本号格式不正确（示例：v26.10.21）")
+		payload = protocol.UpgradeXrayPayload{Target: target, Force: it.Force}
+		timeout = nodegate.UpgradeAskTimeout
+	}
+	res, err := d.Hub.Ask(it.ID, msgType, payload, timeout)
+	kind := upgradeKind(msgType)
+	label := actionLabel(msgType, it.Force)
+	if err != nil {
+		d.Hub.SetUpgradeStatus(it.ID, &protocol.UpgradeProgressPayload{
+			Phase: "failed", Target: target, Message: label + "指令超时或失败", Error: err.Error(), Kind: kind, TS: time.Now().Unix(),
+		})
+		return
+	}
+	msg := label + "完成"
+	if s, ok := res.Data.(string); ok && s != "" {
+		msg = s
+	}
+	if !res.OK {
+		d.Hub.SetUpgradeStatus(it.ID, &protocol.UpgradeProgressPayload{
+			Phase: "failed", Target: target, Message: label + "失败", Error: res.Error, Kind: kind, TS: time.Now().Unix(),
+		})
+		return
+	}
+	// 回滚请求被节点当成「已是最新/无需操作」时不能报成功（旧 agent 会静默 no-op）。
+	if msgType == protocol.MsgUpgradeAgent && it.Force &&
+		(strings.Contains(msg, "已是最新版本") || strings.Contains(msg, "无需升级") || strings.Contains(msg, "无需操作")) {
+		d.Hub.SetUpgradeStatus(it.ID, &protocol.UpgradeProgressPayload{
+			Phase: "failed", Target: target, Message: label + "失败", Error: "服务器未执行回滚操作（" + msg + "）", Kind: kind, TS: time.Now().Unix(),
+		})
+		return
+	}
+	d.Hub.SetUpgradeStatus(it.ID, &protocol.UpgradeProgressPayload{
+		Phase: "success", Target: target, Message: msg, Kind: kind, TS: time.Now().Unix(),
+	})
+}
+
+// runCommandSync 单台同步指令（查询/推送），保持原有回执语义。
+func (d *Deps) runCommandSync(c *gin.Context, id uint64, msgType, configJSON string, lines int) {
+	if d.Hub == nil {
+		util.ServerError(c, "节点网关未初始化")
+		return
+	}
+	var payload any
+	switch msgType {
+	case protocol.MsgPushConfig:
+		if configJSON == "" {
+			util.BadRequest(c, "push_config 需要 config_json")
 			return
 		}
-		actionName = "Xray 内核升级"
-		// 自由升降级：显式目标低于当前 = 降级、等于当前 = 强制重装，两种情况都必须带 force
-		// （agent 对「目标不高于当前」的请求默认跳过）。主控在这里统一置位，调用方不必理解协议细节。
-		if target != "" {
-			var xraySrv models.Server
-			if err := d.DB.First(&xraySrv, id).Error; err == nil && xraySrv.XrayVersion != "" {
-				switch CompareAgentVersion(target, xraySrv.XrayVersion) {
-				case -1:
-					req.Force = true
-					actionName = "Xray 内核降级"
-				case 0:
-					req.Force = true
-					actionName = "Xray 内核重装"
-				}
-			}
-		} else if req.Force {
-			actionName = "Xray 内核重装"
-		}
-		if d.Hub != nil {
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "starting",
-				Target:  target,
-				Message: fmt.Sprintf("正在向服务器下发%s指令…", actionName),
-				Kind:    "xray",
-				TS:      time.Now().Unix(),
-			})
-		}
-		payload = protocol.UpgradeXrayPayload{Target: target, Force: req.Force}
+		payload = protocol.PushConfigPayload{ConfigJSON: configJSON}
+	case protocol.MsgGetStatus:
+		payload = nil
+	case protocol.MsgGetLogs:
+		payload = protocol.GetLogsPayload{Lines: lines}
 	default:
 		util.BadRequest(c, "不支持的指令类型")
 		return
 	}
-
-	// 自升级/内核升级的回执要等节点从 GitHub 拉完二进制才发，用专用的长超时
-	askTimeout := nodegate.AskTimeout
-	if req.Type == protocol.MsgUpgradeAgent || req.Type == protocol.MsgUpgradeXray {
-		askTimeout = nodegate.UpgradeAskTimeout
-	}
-	res, err := d.Hub.Ask(id, req.Type, payload, askTimeout)
+	res, err := d.Hub.Ask(id, msgType, payload, nodegate.AskTimeout)
 	if err != nil {
-		if (req.Type == protocol.MsgUpgradeAgent || req.Type == protocol.MsgUpgradeXray) && d.Hub != nil {
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "failed",
-				Target:  target,
-				Message: actionName + "指令超时或失败",
-				Error:   err.Error(),
-				Kind:    upgradeKind(req.Type),
-				TS:      time.Now().Unix(),
-			})
-		}
 		util.Fail(c, 502, "指令失败: "+err.Error())
 		return
 	}
-	if req.Type == protocol.MsgUpgradeXray && d.Hub != nil {
-		if !res.OK {
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "failed",
-				Target:  target,
-				Message: actionName + "失败",
-				Error:   res.Error,
-				Kind:    "xray",
-				TS:      time.Now().Unix(),
-			})
-			util.OK(c, gin.H{"ok": false, "error": res.Error, "data": res.Data})
-			return
-		}
-		msg := actionName + "完成"
-		if s, ok := res.Data.(string); ok && s != "" {
-			msg = s
-		}
-		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-			Phase:   "success",
-			Target:  target,
-			Message: msg,
-			Kind:    "xray",
-			TS:      time.Now().Unix(),
-		})
-	}
-	if req.Type == protocol.MsgUpgradeAgent && d.Hub != nil {
-		isRollback := req.Force || actionName == "回滚"
-		msg := actionName + "完成"
-		if s, ok := res.Data.(string); ok && s != "" {
-			msg = s
-		}
-		// 若为回滚，但节点回复"已是最新版本"或"无需操作"，说明节点未实际执行回滚，不得报告成功
-		noOp := isRollback && (strings.Contains(msg, "已是最新版本") || strings.Contains(msg, "无需升级") || strings.Contains(msg, "无需操作"))
-		if !res.OK || noOp {
-			errMsg := res.Error
-			if noOp && errMsg == "" {
-				errMsg = "服务器未执行回滚操作（" + msg + "）"
-			}
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase:   "failed",
-				Target:  target,
-				Message: actionName + "失败",
-				Error:   errMsg,
-				TS:      time.Now().Unix(),
-			})
-			util.OK(c, gin.H{"ok": false, "error": errMsg, "data": res.Data})
-			return
-		}
-		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-			Phase:   "success",
-			Target:  target,
-			Message: msg,
-			TS:      time.Now().Unix(),
-		})
-	}
 	util.OK(c, gin.H{"ok": res.OK, "error": res.Error, "data": res.Data})
-}
-
-// upgradeKind 升级进度对象标识：agent（默认）| xray。
-func upgradeKind(msgType string) string {
-	if msgType == protocol.MsgUpgradeXray {
-		return "xray"
-	}
-	return "agent"
 }
 
 // AdminGetServerUpgradeStatus GET /api/v1/admin/servers/:id/upgrade-status
@@ -745,100 +824,68 @@ func (d *Deps) AdminGetUpgradeStatuses(c *gin.Context) {
 	util.OK(c, gin.H{"statuses": d.Hub.GetUpgradeStatuses(ids)})
 }
 
-// AdminBatchUpgradeServers POST /api/v1/admin/servers/batch-upgrade
-// body: {"ids":[...], "target":"v0.1.x", "force":false}
-// 预检（不存在/离线/已最新直接跳过并说明原因）后立即返回，逐节点 goroutine 异步执行升级指令；
-// 节点自行下载二进制并上报 MsgUpgradeProgress，进度经 GET /servers/upgrade-status 聚合轮询。
-func (d *Deps) AdminBatchUpgradeServers(c *gin.Context) {
+// AdminReorderServers PUT /api/v1/admin/servers/order
+// body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order）。
+// 只允许整表重排：ids 必须恰好覆盖当前全部未归档服务器，否则说明页面数据已过期。
+func (d *Deps) AdminReorderServers(c *gin.Context) {
 	var req struct {
-		IDs    []uint64 `json:"ids" binding:"required,min=1,max=100"`
-		Target string   `json:"target"`
-		Force  bool     `json:"force"`
+		IDs []uint64 `json:"ids" binding:"required,min=1,max=500"`
 	}
 	if !util.BindJSON(c, &req) {
 		return
 	}
-	if d.Hub == nil {
-		util.ServerError(c, "节点网关未初始化")
+	var allIDs []uint64
+	if err := d.DB.Model(&models.Server{}).Order("sort_order ASC, id ASC").Pluck("id", &allIDs).Error; err != nil {
+		util.ServerError(c, "查询失败")
 		return
 	}
-	target := strings.TrimSpace(req.Target)
-	if target == "" {
-		if latest, _, err := d.GetCachedAgentLatestVersion(c.Request.Context(), false); err == nil && latest != "" {
-			target = latest
+	if !validOrder(req.IDs, allIDs) {
+		util.Fail(c, 400, "排序列表已过期（服务器数量已变化），请刷新后重试")
+		return
+	}
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		for i, id := range req.IDs {
+			// UpdateColumn 跳过钩子与 updated_at：调整排序不算业务修改。
+			if err := tx.Model(&models.Server{}).Where("id = ?", id).UpdateColumn("sort_order", i).Error; err != nil {
+				return err
+			}
 		}
-	}
-	if target == "" {
-		util.ServerError(c, "无法确定目标版本（官方最新版本查询失败，可稍后重试）")
+		return nil
+	}); err != nil {
+		util.ServerError(c, "保存排序失败")
 		return
 	}
+	util.OK(c, gin.H{"ordered": len(req.IDs)})
+}
 
-	type batchItem struct {
-		ID   uint64 `json:"id"`
-		Name string `json:"name"`
+// validOrder 判断 ids 是否是 all 的一个完整排列（无缺、无多、无重复）。
+func validOrder(ids, all []uint64) bool {
+	if len(ids) == 0 || len(ids) != len(all) {
+		return false
 	}
-	type batchSkip struct {
-		ID     uint64 `json:"id"`
-		Name   string `json:"name"`
-		Reason string `json:"reason"`
-	}
-	var dispatch []batchItem
-	var skipped []batchSkip
-	seen := make(map[uint64]bool, len(req.IDs))
-	for _, id := range req.IDs {
+	seen := make(map[uint64]bool, len(ids))
+	for _, id := range ids {
 		if seen[id] {
-			continue
+			return false
 		}
 		seen[id] = true
-		var srv models.Server
-		if err := d.DB.First(&srv, id).Error; err != nil {
-			skipped = append(skipped, batchSkip{ID: id, Reason: "服务器不存在"})
-			continue
-		}
-		if !d.Hub.IsOnline(id) {
-			skipped = append(skipped, batchSkip{ID: id, Name: srv.Name, Reason: "服务器离线"})
-			continue
-		}
-		if !req.Force && srv.AgentVersion != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
-			skipped = append(skipped, batchSkip{ID: id, Name: srv.Name, Reason: "已是最新版本 " + srv.AgentVersion})
-			continue
-		}
-		d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-			Phase:   "starting",
-			Target:  target,
-			Message: "已加入批量升级队列，等待下发自升级指令…",
-			TS:      time.Now().Unix(),
-		})
-		dispatch = append(dispatch, batchItem{ID: id, Name: srv.Name})
 	}
-
-	for _, it := range dispatch {
-		go func(id uint64) {
-			// 回执要等节点从 GitHub 拉完二进制才发（同单台升级的专用长超时）
-			res, err := d.Hub.Ask(id, protocol.MsgUpgradeAgent, protocol.UpgradeAgentPayload{Target: target, Force: req.Force}, nodegate.UpgradeAskTimeout)
-			if err != nil {
-				d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-					Phase: "failed", Target: target, Message: "升级指令超时或失败", Error: err.Error(), TS: time.Now().Unix(),
-				})
-				return
-			}
-			if !res.OK {
-				d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-					Phase: "failed", Target: target, Message: "升级失败", Error: res.Error, TS: time.Now().Unix(),
-				})
-				return
-			}
-			msg := "升级完成"
-			if s, ok := res.Data.(string); ok && s != "" {
-				msg = s
-			}
-			d.Hub.SetUpgradeStatus(id, &protocol.UpgradeProgressPayload{
-				Phase: "success", Target: target, Message: msg, TS: time.Now().Unix(),
-			})
-		}(it.ID)
+	for _, id := range all {
+		if !seen[id] {
+			return false
+		}
 	}
+	return true
+}
 
-	util.OK(c, gin.H{"target": target, "dispatched": dispatch, "skipped": skipped})
+// nextServerSortOrder 新建服务器的默认排序 = 当前最大值 + 1（追加末尾）。
+// 存量重复值下同样安全：MAX 之后的序号一定排在所有已有序号之后。
+func nextServerSortOrder(db *gorm.DB) int {
+	var maxOrder int
+	if err := db.Model(&models.Server{}).Select("COALESCE(MAX(sort_order), -1)").Scan(&maxOrder).Error; err != nil {
+		return 0
+	}
+	return maxOrder + 1
 }
 
 // AdminGetServerConfigPreview GET /api/v1/admin/servers/:id/config-preview

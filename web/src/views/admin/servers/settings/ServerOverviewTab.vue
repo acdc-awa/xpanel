@@ -9,7 +9,7 @@ import {
   CsTooltip,
   ElMessage,
 } from '@/components/cloudscape'
-import { getInbounds, serverCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
+import { getInbounds, runServerCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
 import { pushStateChip, pushStateSummary, xrayChip } from '@/utils/server-status'
@@ -91,7 +91,7 @@ async function loadStatus() {
   }
   statusLoading.value = true
   try {
-    const { data } = await serverCommand(props.server.id, 'get_status')
+    const { data } = await runServerCommand<CommandResult>({ ids: [props.server.id], type: 'get_status' })
     statusData.value = data.data
   } catch (e) {
     statusData.value = null

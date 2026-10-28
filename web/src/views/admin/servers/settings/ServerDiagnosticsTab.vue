@@ -10,7 +10,7 @@ import {
   ElMessage,
   type SegmentedOption,
 } from '@/components/cloudscape'
-import { getServerConfigPreview, serverCommand, type ServerItem } from '@/api/admin'
+import { getServerConfigPreview, runServerCommand, type CommandResult, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { maskUUIDs } from '@/utils/mask'
 import TipIcon from '@/components/base/TipIcon.vue'
@@ -62,7 +62,7 @@ async function scrollToBottom() {
 async function loadLogs() {
   logLoading.value = true
   try {
-    const { data } = await serverCommand(props.server.id, 'get_logs', { lines: logLines.value })
+    const { data } = await runServerCommand<CommandResult>({ ids: [props.server.id], type: 'get_logs', lines: logLines.value })
     logContent.value = (data.data.data as string) || ''
     await scrollToBottom()
   } catch (e) {

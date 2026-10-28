@@ -5,11 +5,9 @@ import {
   CsButton,
   CsContainer,
   CsDatePicker,
-  CsExpandableSection,
   CsForm,
   CsFormItem,
   CsInput,
-  CsInputNumber,
   CsSelect,
   ElMessage,
   ElMessageBox,
@@ -44,7 +42,6 @@ const billingOptions = [
 const form = reactive({
   name: '',
   host: '',
-  sort_order: 0,
   location: '',
   remark: '',
   expire_at: '' as string | null,
@@ -60,7 +57,6 @@ function resetForm() {
   Object.assign(form, {
     name: props.server.name ?? '',
     host: props.server.host ?? '',
-    sort_order: props.server.sort_order ?? 0,
     location: props.server.location ?? '',
     remark: props.server.remark ?? '',
     expire_at: props.server.expire_at || null,
@@ -84,7 +80,6 @@ const dirty = computed(
   () =>
     norm(form.name) !== norm(props.server.name) ||
     norm(form.host) !== norm(props.server.host) ||
-    norm(form.sort_order) !== norm(props.server.sort_order ?? 0) ||
     norm(form.location) !== norm(props.server.location) ||
     norm(form.remark) !== norm(props.server.remark) ||
     norm(form.expire_at) !== norm(props.server.expire_at) ||
@@ -105,7 +100,6 @@ async function save() {
   try {
     const { data } = await updateServer(props.server.id, {
       server_type: 'xray',
-      sort_order: form.sort_order ?? 0,
       name: form.name,
       host: form.host,
       location: form.location,
@@ -232,22 +226,6 @@ async function copyText(text: string, label: string) {
           </CsFormItem>
         </div>
       </CsForm>
-
-      <CsExpandableSection header="更多设置" class="server-more-settings">
-        <CsForm>
-          <div class="server-form-grid">
-            <CsFormItem label="排序序号" description="越小越靠前，用于服务器列表与画布内的排列">
-              <CsInputNumber
-                :model-value="form.sort_order"
-                :min="0"
-                :step="1"
-                placeholder="越小越靠前"
-                @update:model-value="(v: number | null) => (form.sort_order = v ?? 0)"
-              />
-            </CsFormItem>
-          </div>
-        </CsForm>
-      </CsExpandableSection>
     </CsContainer>
 
     <CsContainer header="VPS 采购与续费资产（选填）">
@@ -353,10 +331,6 @@ async function copyText(text: string, label: string) {
   .server-form-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.server-more-settings {
-  margin-top: 8px;
 }
 
 .server-cred-row {

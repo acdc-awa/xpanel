@@ -141,7 +141,6 @@ function fmtTime(t: string | null) {
       <ul v-if="compactLayout" :class="['server-cards', tightMetrics && 'is-tight']">
         <li v-for="row in filteredServerMatrix" :key="row.id" class="server-card">
           <div class="sc-top">
-            <span class="aws-sort-badge">#{{ row.sort_order ?? 0 }}</span>
             <span class="sc-name" :title="row.name">{{ row.name }}</span>
             <CsStatusIndicator
               class="sc-status"
@@ -212,7 +211,6 @@ function fmtTime(t: string | null) {
           <!-- 1. 节点与地址 -->
           <template #cell-name="{ row }">
             <div class="server-name-cell">
-              <span class="aws-sort-badge">#{{ row.sort_order ?? 0 }}</span>
               <span class="server-name">{{ row.name }}</span>
             </div>
             <div class="server-subhost tabular-num">{{ row.host }}</div>
@@ -451,17 +449,6 @@ function fmtTime(t: string | null) {
 .tabular-num {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
-}
-
-.aws-sort-badge {
-  flex: 0 0 auto;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  background: var(--color-background-container-header-irktp5, #f2f3f3);
-  padding: 1px 4px;
-  border-radius: 4px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
 }
 
 .server-name-cell {

@@ -203,7 +203,6 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/users/:id/balance":                  {model: &models.User{}, field: "email"},
 	"/api/v1/admin/users/:id/subscribe-token/reset":    {model: &models.User{}, field: "email"},
 	"/api/v1/admin/servers/:id":                        {model: &models.Server{}, field: "name"},
-	"/api/v1/admin/servers/:id/command":                {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/servers/:id/reset-secret":           {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/servers/:id/generate-config":        {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/inbounds/:id":                       {model: &models.Inbound{}, field: "tag"},

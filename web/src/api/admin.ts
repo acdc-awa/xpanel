@@ -491,15 +491,44 @@ export function resetServerSecret(id: number) {
   return http.post<ApiResp<{ node_id: string; secret: string; install_cmd?: string }>>(`/admin/servers/${id}/reset-secret`)
 }
 
-export function serverCommand(
-  id: number,
-  type: 'push_config' | 'restart_xray' | 'get_status' | 'get_logs',
-  extra?: { config_json?: string; lines?: number },
-) {
-  return http.post<ApiResp<CommandResult>>(`/admin/servers/${id}/command`, {
-    type,
-    ...extra,
-  })
+/** 全量重排：ids 必须覆盖当前全部服务器（顺序即新 sort_order），页面数据过期时后端返回 400。 */
+export function reorderServers(ids: number[]) {
+  return http.put<ApiResp<{ ordered: number }>>('/admin/servers/order', { ids })
+}
+
+// ---- 服务器指令（单台与批量共用同一端点） ----
+
+export type ServerCommandType = 'upgrade_agent' | 'upgrade_xray' | 'restart_xray' | 'push_config' | 'get_status' | 'get_logs'
+
+export interface ServerCommandPayload {
+  ids: number[]
+  type: ServerCommandType
+  target?: string
+  force?: boolean
+  config_json?: string
+  lines?: number
+}
+
+export interface CommandDispatchSkip {
+  id: number
+  name?: string
+  reason: string
+}
+
+export interface CommandDispatchResult {
+  target: string
+  dispatched: { id: number; name: string }[]
+  skipped: CommandDispatchSkip[]
+}
+
+/**
+ * 统一的服务器指令入口：单台传 `ids:[id]`，批量传多个 id。
+ * - 动作类（升级 Agent / 升级 Xray / 重启 Xray）立即返回派发清单，实际结果经
+ *   `getServerUpgradeStatuses()` 轮询；节点下载二进制可能耗时数分钟，所以不能同步等。
+ * - 查询/推送类（get_status / get_logs / push_config）只接受单台，同步返回节点回执。
+ */
+export function runServerCommand<T = CommandResult | CommandDispatchResult>(payload: ServerCommandPayload) {
+  return http.post<ApiResp<T>>('/admin/servers/command', payload)
 }
 
 export interface AgentVersionInfo {
@@ -515,27 +544,17 @@ export function getAgentLatestVersion(refresh = false) {
   })
 }
 
-// 升级节点 Agent：节点侧要从 GitHub Releases 下载二进制（主控侧等待回执最长 5 分钟），
-// 全局 axios 超时仅 10s，必须单独放宽（略大于主控的 UpgradeAskTimeout）
-export function upgradeAgent(id: number, payload?: { target?: string; force?: boolean }) {
-  return http.post<ApiResp<CommandResult>>(
-    `/admin/servers/${id}/command`,
-    { type: 'upgrade_agent', ...(payload || {}) },
-    { timeout: 320000 },
-  )
-}
-
 export interface AgentUpgradeStatus {
   phase: 'starting' | 'checking' | 'downloading' | 'verifying' | 'replacing' | 'restarting' | 'failed' | 'success'
   target?: string
   message: string
   error?: string
   ts: number
-  // 升级对象：agent（默认）| xray。两者共用同一个状态槽，界面据此显示对应文案。
-  kind?: 'agent' | 'xray'
+  // 操作对象：agent（默认/空）| xray | restart。三者共用同一个状态槽，界面据此显示对应文案。
+  kind?: 'agent' | 'xray' | 'restart'
 }
 
-export function getAgentUpgradeStatus(id: number) {
+export function getServerUpgradeStatus(id: number) {
   return http.get<ApiResp<{ status: AgentUpgradeStatus | null }>>(`/admin/servers/${id}/upgrade-status`)
 }
 
@@ -563,33 +582,7 @@ export function getAgentVersions(refresh = false) {
   })
 }
 
-// 切换节点内核：升级/降级/重装共用；节点要下载 zip 并重启内核，超时同 Agent 升级
-export function upgradeXray(id: number, payload: { target: string; force?: boolean }) {
-  return http.post<ApiResp<CommandResult>>(
-    `/admin/servers/${id}/command`,
-    { type: 'upgrade_xray', ...payload },
-    { timeout: 320000 },
-  )
-}
-
-// ---- 批量升级 Agent ----
-
-export interface BatchUpgradeSkip {
-  id: number
-  name?: string
-  reason: string
-}
-
-// 批量升级：预检（离线/已最新直接跳过）后立即返回派发结果，升级在后台异步执行，
-// 进度经 getBatchUpgradeStatus 轮询（无需放宽超时）。
-export function batchUpgradeServers(payload: { ids: number[]; target?: string; force?: boolean }) {
-  return http.post<ApiResp<{ target: string; dispatched: { id: number; name: string }[]; skipped: BatchUpgradeSkip[] }>>(
-    '/admin/servers/batch-upgrade',
-    payload,
-  )
-}
-
-export function getBatchUpgradeStatus(ids?: number[]) {
+export function getServerUpgradeStatuses(ids?: number[]) {
   return http.get<ApiResp<{ statuses: Record<string, AgentUpgradeStatus> }>>('/admin/servers/upgrade-status', {
     params: ids?.length ? { ids: ids.join(',') } : undefined,
   })

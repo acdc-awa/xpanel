@@ -17,12 +17,12 @@ import {
   type StepsStatus,
 } from '@/components/cloudscape'
 import {
-  getAgentUpgradeStatus,
   getAgentVersions,
+  getServerUpgradeStatus,
   getXrayVersions,
-  upgradeAgent,
-  upgradeXray,
+  runServerCommand,
   type AgentUpgradeStatus,
+  type CommandDispatchResult,
   type ServerItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -59,7 +59,6 @@ const upgradeKind = ref<VersionSubject>('agent')
 const upgradeIsRollback = ref(false)
 const rollbackTarget = ref('')
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
 function normVersionTag(v: string) {
   const s = (v || '').trim()
@@ -212,7 +211,7 @@ function stopPolling() {
 
 async function pollStatus() {
   try {
-    const { data } = await getAgentUpgradeStatus(props.server.id)
+    const { data } = await getServerUpgradeStatus(props.server.id)
     if (data?.data?.status) {
       upgradeStatus.value = data.data.status
       if (data.data.status.phase === 'success') {
@@ -292,31 +291,41 @@ async function apply() {
 
   try {
     const force = cmp === null || cmp >= 0
-    const { data } =
-      kind === 'agent' ? await upgradeAgent(props.server.id, { target: t, force }) : await upgradeXray(props.server.id, { target: t, force })
-    if (data.code === 0 && data.data.ok) {
-      upgradeStatus.value = {
-        phase: 'success',
-        target: t,
-        message: (data.data.data as string) || `${subjectLabel.value}已切换完成`,
-        ts: Math.floor(Date.now() / 1000),
-        kind,
-      }
-      stopPolling()
-      emit('changed')
-      if (refreshTimer) clearTimeout(refreshTimer)
-      refreshTimer = setTimeout(() => emit('changed'), 15000)
-    } else {
+    // 与批量共用同一个指令端点：这里只是 ids 长度为 1。派发后立即返回，
+    // 真实进度由上面的 1.5s 轮询（GET upgrade-status）补齐，不再同步等 5 分钟。
+    const { data } = await runServerCommand<CommandDispatchResult>({
+      ids: [props.server.id],
+      type: kind === 'agent' ? 'upgrade_agent' : 'upgrade_xray',
+      target: t,
+      force,
+    })
+    if (data.code !== 0) {
       upgradeStatus.value = {
         phase: 'failed',
         target: t,
-        message: `${subjectLabel.value}切换失败`,
-        error: data.data?.error || data.message || `${subjectLabel.value}切换失败`,
+        message: `${subjectLabel.value}切换请求被拒绝`,
+        error: data.message || `${subjectLabel.value}切换失败`,
         ts: Math.floor(Date.now() / 1000),
         kind,
       }
       stopPolling()
+      return
     }
+    const skip = data.data.skipped?.[0]
+    if (skip) {
+      // 预检跳过（离线 / 已是最新 / 不支持在线回滚）：本次没有下发，按失败呈现原因
+      upgradeStatus.value = {
+        phase: 'failed',
+        target: t,
+        message: skip.reason,
+        error: skip.reason,
+        ts: Math.floor(Date.now() / 1000),
+        kind,
+      }
+      stopPolling()
+      return
+    }
+    // 已派发：保持 starting，由轮询写入真实阶段
   } catch (e: any) {
     upgradeStatus.value = {
       phase: 'failed',
@@ -343,10 +352,7 @@ watch(
   { immediate: true },
 )
 
-onUnmounted(() => {
-  stopPolling()
-  if (refreshTimer) clearTimeout(refreshTimer)
-})
+onUnmounted(stopPolling)
 </script>
 
 <template>
