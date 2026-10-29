@@ -3,11 +3,11 @@
 <div align="center">
 
 **主控 - 节点 - 用户三层架构的代理节点管理面板**
-*Go 1.26 + Vue 3.5 + Xray-core v26.10.21*
+*Go 1.26 + Vue 3.5 + Xray-core v26.10.29*
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Vue Version](https://img.shields.io/badge/Vue-3.5+-4FC08D?style=flat&logo=vuedotjs)](https://vuejs.org)
-[![Xray-core](https://img.shields.io/badge/Xray--core-v26.10.21-red?style=flat)](https://github.com/XTLS/Xray-core)
+[![Xray-core](https://img.shields.io/badge/Xray--core-v26.10.29-red?style=flat)](https://github.com/XTLS/Xray-core)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://docker.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -43,7 +43,7 @@ XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Mast
 │ ┌─────────────────────┐ │                         │ ┌─────────────────────┐ │
 │ │ xray-agent 守护进程  │ │                         │ │ xray-agent 守护进程 │ │
 │ ├─────────────────────┤ │                         | ├─────────────────────┤ │
-│ │ Xray-core v26.10.21  │ │                         │ │ Xray-core v26.10.21  │ │
+│ │ Xray-core v26.10.29  │ │                         │ │ Xray-core v26.10.29  │ │
 │ └─────────────────────┘ │                         | └─────────────────────┘ │
 └─────────────────────────┘                         └─────────────────────────┘
 ```
@@ -218,7 +218,7 @@ bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/downlo
 脚本自动完成：
 
 - 从 [XPanel-Node Releases](https://github.com/acdc-awa/XPanel-Node/releases) 下载 `xray-agent` 二进制（自动匹配 amd64/arm64，按 release `checksums.txt` 强制 sha256 校验）；
-- 下载并配置锁定的 Xray-core v26.10.21（官方 Releases + 校验）；
+- 下载并配置锁定的 Xray-core v26.10.29（官方 Releases + 校验）；
 - 配置 systemd 守护进程并启动，与主控建立 WSS 长连接后自动上线。
 
 节点侧同样支持离线与镜像参数：`--agent-file` / `--xray-file`（本地文件安装）、`--agent-mirror`（GitHub 代理前缀）、`--agent-version`（钉版本）、`--force-config`（重置节点配置）等，直连 GitHub 超时时脚本也会自动切换内置镜像源。
@@ -292,7 +292,7 @@ xray-agent uninstall    # 卸载 Agent 及相关组件
 
 - Go 1.26+
 - Node.js 22+ 与 npm（CI 同版本）
-- Xray-core v26.10.21（配置验证用，建议使用[官方二进制](https://github.com/XTLS/Xray-core/releases)）
+- Xray-core v26.10.29（配置验证用，建议使用[官方二进制](https://github.com/XTLS/Xray-core/releases)）
 
 ### 仓库与工作区
 
@@ -340,7 +340,7 @@ npm run build        # 生产构建（含类型检查）
 |---|---|---|
 | 后端框架 | Go 1.26 + Gin | 单二进制分发，低资源占用 |
 | 持久层 | GORM + SQLite（默认） | 开发与生产均默认 SQLite（WAL 模式），MySQL 驱动保留可选 |
-| 协议引擎 | Xray-core v26.10.21（锁定版本） | VLESS（TCP / XHTTP）+ Hysteria 2（QUIC）+ 四层直通（tunnel） |
+| 协议引擎 | Xray-core v26.10.29（锁定版本） | VLESS（TCP / XHTTP）+ Hysteria 2（QUIC）+ 四层直通（tunnel） |
 | 前端框架 | Vue 3.5 + Vite + TypeScript | 组合式 API，Pinia 状态管理 |
 | UI 组件库 | Cloudscape 移植组件库（`Cs*`，Element Plus 残留） | 深色/浅色主题适配 |
 | 拓扑画布 | @vue-flow/core | 自定义节点、动态避让连线、DAG 自动排版 |

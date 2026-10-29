@@ -620,7 +620,7 @@ onMounted(async () => {
         <CsAlert type="info" header="原样透传" style="margin-top: 12px">
           面板只覆盖出站 <code>tag</code> 与 <code>sendThrough</code>，并为 VLESS 缺省补
           <code>encryption: "none"</code>，其余字段不做改写。字段语法与版本兼容性由 Xray 校验兜底；
-          请按当前内核（26.10.21）的字段名填写。
+          请按当前内核的字段名填写。
         </CsAlert>
       </CsContainer>
     </CsForm>
