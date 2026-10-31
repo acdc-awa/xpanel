@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import { getDashboard, getDashboardRealtime } from '@/api/admin'
 import type { RankPeriod } from '@/api/admin'
@@ -16,6 +16,7 @@ import {
   CsDashboardGrid,
   CsHeader,
   CsModal,
+  CsSelect,
   CsSpaceBetween,
   CsStatusIndicator,
   loadSavedLayout,
@@ -161,9 +162,64 @@ let realtimeInFlight = false
 let rankingInFlight = false
 let rankingReloadQueued = false
 
-const REALTIME_POLL_INTERVAL_MS = 3000
 const POLL_INTERVAL_MS = 30000
-const POLL_HINT = '实时网速与监控矩阵每 3 秒刷新（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。'
+
+// 实时刷新间隔是「这台浏览器」的偏好，不入库、不联动节点心跳：
+// 数据新鲜度上限由 agent 心跳周期决定（设置页 agent_heartbeat_interval，默认 5s），
+// 刷新快于心跳只会重复读到同一份内存快照，故允许调大或关闭。
+const REALTIME_INTERVAL_STORAGE_KEY = 'dashboard_realtime_interval'
+const DEFAULT_REALTIME_INTERVAL_MS = 3000
+const REALTIME_INTERVAL_OPTIONS = [
+  { label: '3 秒', value: 3000 },
+  { label: '5 秒', value: 5000 },
+  { label: '10 秒', value: 10000 },
+  { label: '30 秒', value: 30000 },
+  { label: '关闭', value: 0 },
+]
+
+function isRealtimeInterval(v: number) {
+  return REALTIME_INTERVAL_OPTIONS.some((o) => o.value === v)
+}
+
+function loadSavedRealtimeInterval(): number {
+  try {
+    const raw = localStorage.getItem(REALTIME_INTERVAL_STORAGE_KEY)
+    if (!raw) return DEFAULT_REALTIME_INTERVAL_MS
+    const n = Number(raw)
+    return isRealtimeInterval(n) ? n : DEFAULT_REALTIME_INTERVAL_MS
+  } catch {
+    return DEFAULT_REALTIME_INTERVAL_MS
+  }
+}
+
+const realtimeInterval = ref<number>(loadSavedRealtimeInterval())
+
+function setRealtimeInterval(v: string | number | (string | number)[]) {
+  const n = Number(Array.isArray(v) ? v[0] : v)
+  realtimeInterval.value = isRealtimeInterval(n) ? n : 0
+}
+
+const realtimeIntervalLabel = computed(
+  () => REALTIME_INTERVAL_OPTIONS.find((o) => o.value === realtimeInterval.value)?.label || '',
+)
+
+const refreshHint = computed(() => `最后同步：${lastUpdatedTime.value || '—'}`)
+
+const pollHint = computed(() =>
+  realtimeInterval.value
+    ? `实时网速与监控矩阵每 ${realtimeIntervalLabel.value}拉取一次（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。数据新鲜度由节点心跳周期决定（默认 5 秒一帧），刷新快于心跳不会得到更新的数据。`
+    : '实时高频刷新已关闭（30 秒统计仍会同步实时网速与监控矩阵）；可随时在右上角重新开启或手动点「刷新数据」。',
+)
+
+watch(realtimeInterval, (v) => {
+  try {
+    localStorage.setItem(REALTIME_INTERVAL_STORAGE_KEY, String(v))
+  } catch {
+    /* 隐私模式等无法写入时保持内存值 */
+  }
+  startRealtimeTimer()
+  if (v) loadRealtime() // 切换后立刻给一次新数据，不必等下一个周期
+})
 
 /**
  * 排行卡片的数据始终对应 rankingPeriod，不随饼图粒度变化：
@@ -274,11 +330,20 @@ async function loadRealtime() {
   }
 }
 
-function startPolling() {
-  stopPolling()
+function startRealtimeTimer() {
+  if (realtimeTimer) {
+    clearInterval(realtimeTimer)
+    realtimeTimer = null
+  }
+  if (!realtimeInterval.value) return
   realtimeTimer = setInterval(() => {
     if (!document.hidden) loadRealtime()
-  }, REALTIME_POLL_INTERVAL_MS)
+  }, realtimeInterval.value)
+}
+
+function startPolling() {
+  stopPolling()
+  startRealtimeTimer()
 
   autoRefreshTimer = setInterval(() => {
     if (!document.hidden) load({ silent: true })
@@ -320,10 +385,7 @@ onUnmounted(() => {
 <template>
   <div class="aws-console-page" :class="{ 'awsui-dark-mode': theme.isDark }">
     <CsSpaceBetween direction="vertical" size="l">
-      <CsHeader
-        variant="h1"
-        description="实时监控节点健康状态、全网吞吐速率、运营营收与用量指标；拖拽卡片左上角手柄可调整位置，右下角可缩放，窄屏单列时卡片自动展开。"
-      >
+      <CsHeader variant="h1">
         运维监控大盘
         <template #info>
           <CsStatusIndicator
@@ -333,17 +395,31 @@ onUnmounted(() => {
         </template>
 
         <template #actions>
-          <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-            <CsBox variant="span" color="text-body-secondary" font-size="body-s" :title="POLL_HINT">
-              最后同步：{{ lastUpdatedTime || '—' }} · 3s 实时 / 30s 统计
+          <div class="dashboard-actions">
+            <CsBox
+              class="dashboard-actions-hint"
+              variant="span"
+              color="text-body-secondary"
+              font-size="body-s"
+              :title="pollHint"
+            >
+              {{ refreshHint }}
             </CsBox>
-            <CsButton icon-name="refresh" :loading="loading" @click="load()">刷新数据</CsButton>
-            <CsButton icon-name="add-plus" @click="addDrawerVisible = true">添加小组件</CsButton>
-            <CsButton icon-name="undo" @click="handleResetLayout">重置布局</CsButton>
-            <router-link to="/admin/servers" custom v-slot="{ navigate }">
-              <CsButton variant="primary" @click="navigate">管理服务器</CsButton>
-            </router-link>
-          </CsSpaceBetween>
+            <div class="realtime-interval">
+              <span class="realtime-interval-label">实时刷新</span>
+              <CsSelect
+                :model-value="realtimeInterval"
+                :options="REALTIME_INTERVAL_OPTIONS"
+                aria-label="实时刷新间隔"
+                @change="setRealtimeInterval"
+              />
+            </div>
+            <div class="dashboard-actions-buttons">
+              <CsButton class="dashboard-action" icon-name="refresh" :loading="loading" @click="load()">刷新数据</CsButton>
+              <CsButton class="dashboard-action" icon-name="add-plus" @click="addDrawerVisible = true">添加小组件</CsButton>
+              <CsButton class="dashboard-action" icon-name="undo" @click="handleResetLayout">重置布局</CsButton>
+            </div>
+          </div>
         </template>
       </CsHeader>
 
@@ -419,5 +495,46 @@ onUnmounted(() => {
 
 :deep(a) {
   color: var(--color-text-link-default-qabnuk, #006ce0);
+}
+
+/* CsSelect 根节点固定 inline-size:100%，间隔选择器需要按内容收窄 */
+.realtime-interval {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.realtime-interval-label {
+  font-size: 12px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  white-space: nowrap;
+}
+
+.realtime-interval :deep(.cs-select) {
+  inline-size: 96px;
+}
+
+/* 操作区：桌面与提示文案同排，窄屏纵向堆叠 */
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 操作按钮自成一个横向组，宽度随内容，只有放不下时才换行 */
+.dashboard-actions-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .dashboard-actions {
+    inline-size: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>
