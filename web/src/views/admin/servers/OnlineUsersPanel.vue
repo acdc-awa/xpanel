@@ -82,8 +82,7 @@ defineExpose({ reload: loadOnlineUsers })
       <div v-for="u in onlineUsers" :key="u.email" class="online-row">
         <div class="online-user">
           <CsBadge :color="kindColor(u.kind)">{{ kindText(u.kind) }}</CsBadge>
-          <span class="online-name">{{ u.kind === 'user' && u.name ? u.name : u.email }}</span>
-          <span v-if="u.kind === 'user' && u.name" class="online-email">{{ u.email }}</span>
+          <span class="online-name">{{ u.email }}</span>
           <span v-if="u.ips.length > 1" class="online-count">× {{ u.ips.length }}</span>
         </div>
         <div class="online-ips">
@@ -133,7 +132,6 @@ defineExpose({ reload: loadOnlineUsers })
   font-weight: 500;
 }
 
-.online-email,
 .online-count {
   font-size: 12px;
   font-weight: 400;

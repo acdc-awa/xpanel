@@ -23,11 +23,11 @@ const ctx = inject<DashboardContext>('adminDashboardContext')!
 const dashData = ctx.dashData
 
 const serverColumns: TableColumn[] = [
-  { id: 'name', header: '服务器 / 域名', minWidth: 130 },
-  { id: 'status', header: '状态', width: 130 },
+  { id: 'name', header: '服务器', minWidth: 96 },
+  { id: 'status', header: '状态', width: 96 },
   { id: 'load', header: '负载 (CPU / 内存)', width: 150 },
-  { id: 'rate', header: '速率 / 在线', minWidth: 135 },
-  { id: 'actions', header: '历史数据', width: 72, align: 'center' },
+  { id: 'rate', header: '速率 / 在线', minWidth: 118 },
+  { id: 'actions', header: '历史', width: 52, align: 'center' },
 ]
 
 /** 窄卡片下让表格保持可读列宽并横向滚动，而不是把每列压到逐字换行。 */
@@ -141,7 +141,7 @@ function fmtTime(t: string | null) {
       <ul v-if="compactLayout" :class="['server-cards', tightMetrics && 'is-tight']">
         <li v-for="row in filteredServerMatrix" :key="row.id" class="server-card">
           <div class="sc-top">
-            <span class="sc-name" :title="row.name">{{ row.name }}</span>
+            <span class="sc-name" :title="row.host || row.name">{{ row.name }}</span>
             <CsStatusIndicator
               class="sc-status"
               :status="row.status === 1 ? 'online' : 'offline'"
@@ -157,8 +157,7 @@ function fmtTime(t: string | null) {
             />
           </div>
           <div class="sc-host tabular-num" :title="row.host">
-            {{ row.host }}
-            <span class="sc-heartbeat">· 心跳 {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}</span>
+            <span class="sc-heartbeat">心跳 {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}</span>
           </div>
           <div class="sc-metrics tabular-num">
             <div class="aws-load-row">
@@ -208,19 +207,18 @@ function fmtTime(t: string | null) {
           track-by="id"
           empty-text="暂无服务器"
         >
-          <!-- 1. 节点与地址 -->
+          <!-- 1. 节点（主机地址放进 title，列宽让给状态与负载） -->
           <template #cell-name="{ row }">
-            <div class="server-name-cell">
+            <div class="server-name-cell" :title="row.host || row.name">
               <span class="server-name">{{ row.name }}</span>
             </div>
-            <div class="server-subhost tabular-num">{{ row.host }}</div>
           </template>
 
           <!-- 2. 状态与心跳 -->
           <template #cell-status="{ row }">
             <CsStatusIndicator
               :status="row.status === 1 ? 'online' : 'offline'"
-              :text="row.status === 1 ? '在线 (Normal)' : '离线 (Offline)'"
+              :text="row.status === 1 ? '在线' : '离线'"
               :pulse="row.status === 1"
             />
             <div class="server-heartbeat tabular-num">
@@ -314,6 +312,22 @@ function fmtTime(t: string | null) {
   :deep(table) {
     min-width: var(--server-table-min-width, 0);
   }
+}
+
+/*
+ * CsTable 自带 wrapper 是 overflow-x: auto，它的横向滚动条挂在表格最底部：
+ * 服务器一多就得先把纵向滚到底才能左右滑。关掉 wrapper 的滚动，把两轴都交给
+ * 外层 .table-container（高度受卡片约束），滚动条就固定在卡片可视区底边。
+ * 官方 wrapper 规则带 :not(#\9)、dashboard-tables.css 又用 !important 恢复了
+ * 滚动条，这里多带一层祖先提高特异性并用 !important 覆盖。
+ */
+.matrix-body .table-container :deep([class*='awsui_wrapper_']) {
+  overflow: visible !important;
+  scrollbar-width: none !important;
+}
+
+.matrix-body .table-container :deep([class*='awsui_wrapper_'])::-webkit-scrollbar {
+  display: none !important;
 }
 
 /* 窄卡片：逐台信息卡。操作按钮在右上角，不随横向滚动跑出视野。 */
@@ -455,17 +469,16 @@ function fmtTime(t: string | null) {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 
   .server-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-weight: 700;
     color: var(--color-text-body-default-b2us04, #0f141a);
   }
-}
-
-.server-subhost {
-  font-size: 11px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  margin-top: 1px;
 }
 
 .server-heartbeat {
