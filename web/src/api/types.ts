@@ -589,3 +589,23 @@ export interface NoticePayload {
   status?: number
   sort_order?: number
 }
+
+/** 管理端提醒（派生模型：后端每次按当前状态现算，不落库）。 */
+export interface AdminNotificationItem {
+  key: string
+  category: 'server' | 'version'
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  title: string
+  detail: string
+  action_path: string
+  action_label: string
+  due_at?: string
+  /** 条件状态指纹：忽略之后条件变化时会重新出现。 */
+  fingerprint: string
+}
+
+export interface AdminNotificationsResult {
+  items: AdminNotificationItem[]
+  total: number
+  generated_at: string
+}

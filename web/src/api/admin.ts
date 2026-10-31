@@ -18,6 +18,7 @@ import type {
   Plan,
   NoticeItem,
   NoticePayload,
+  AdminNotificationsResult,
   ServerOutbound,
   ServerRoutingRule,
   AccessLayer,
@@ -201,6 +202,17 @@ export interface SystemStatus {
 
 export function getSystemStatus() {
   return http.get<ApiResp<SystemStatus>>('/admin/system/status')
+}
+
+// ===== 管理端提醒（顶栏铃铛）：派生 + 忽略 =====
+
+export function getNotifications() {
+  return http.get<ApiResp<AdminNotificationsResult>>('/admin/notifications')
+}
+
+/** 「已读 = 删掉」：记录忽略指纹，条件升级时该条会重新出现。 */
+export function dismissNotification(key: string) {
+  return http.delete<ApiResp<{ dismissed: boolean }>>(`/admin/notifications/${encodeURIComponent(key)}`)
 }
 
 // ===== 面板内更新（容器形态自更新：下载校验替换后容器自重启） =====

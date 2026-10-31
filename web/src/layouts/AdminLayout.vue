@@ -7,6 +7,7 @@ import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
 import { getSystemStatus } from '@/api/admin'
 import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
+import NotificationBell from '@/components/NotificationBell.vue'
 import {
   CsAppLayout,
   CsAppToolbar,
@@ -334,6 +335,8 @@ onUnmounted(() => {
         </div>
       </template>
       <template #utility-extra>
+        <NotificationBell />
+        <span class="topbar-divider" aria-hidden="true" />
         <UserAvatarDropdown current-portal="admin" :footnote="accountFootnote" />
       </template>
     </CsTopNavigation>
@@ -466,5 +469,16 @@ onUnmounted(() => {
   flex: 1;
   min-block-size: 0;
   overflow-y: auto;
+}
+
+/* 铃铛与头像之间的竖线：与官方 utility-wrapper::after 同几何
+   （1px 宽、上下各 12px、divider 同色），避免自创一套分隔样式。 */
+.topbar-divider {
+  flex: none;
+  align-self: stretch;
+  inline-size: 1px;
+  margin-block: 12px;
+  margin-inline: 12px;
+  background: var(--color-border-divider-default-diwd4w, #c6c6cd);
 }
 </style>

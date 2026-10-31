@@ -138,6 +138,9 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			// scope=full（缺省，重聚合）/ realtime（纯内存，高频轮询）
 			admin.GET("/dashboard", d.AdminDashboard)
 			admin.GET("/system/status", d.AdminSystemStatus)
+			// 管理端提醒：派生（不落库）+ 忽略记录；前端顶栏铃铛轮询。
+			admin.GET("/notifications", d.AdminListNotifications)
+			admin.DELETE("/notifications/:key", d.AdminDismissNotification)
 			admin.GET("/update/check", d.AdminUpdateCheck)
 			admin.GET("/update/status", d.AdminUpdateStatus)
 			admin.GET("/update/releases", d.AdminUpdateReleases)

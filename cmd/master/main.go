@@ -236,6 +236,9 @@ func main() {
 	otpSvc := services.NewOTPService(database, cfg, jwtSecret)
 	deps := &api.Deps{DB: database, Cfg: cfg, JWT: jwtMgr, Auth: authSvc, OTP: otpSvc, Hub: hub, Traffic: trafficSvc, Order: orderSvc, Audit: auditSvc, Config: configSvc, Site: siteSvc, GiftCard: giftCardSvc, Backup: backupSvc}
 	api.PanelVersion = Version
+	// 版本探测（面板/Agent 最新 release）：后台每 10 分钟一轮，请求路径只读缓存。
+	// 探测会把「资产是否齐备」一并校验，避免在 release 资产上传完成前提示一个升不上去的版本。
+	api.StartVersionProbe(context.Background(), deps)
 	subServer := api.NewSubscribeServer(deps)
 	deps.SubServer = subServer
 	hub.CertPusher = deps.ReconcileServerCerts

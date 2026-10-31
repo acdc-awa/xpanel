@@ -76,6 +76,7 @@ func All() []any {
 		&UserAccessPoint{}, &PermissionGroupAccessPoint{},
 		&Notice{},
 		&SubTemplate{},
+		&NotificationDismissal{},
 	}
 }
 
