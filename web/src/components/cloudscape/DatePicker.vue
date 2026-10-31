@@ -171,13 +171,20 @@ function onUpdate(raw: string) {
 }
 
 /* 原生 date/datetime-local 会忽略 placeholder，这里用覆盖层统一成 Cloudscape 输入框观感；
-   聚焦后恢复原生分段文本，保证仍可正常编辑。 */
-.cs-date-picker-wrap.is-empty :deep(input:not(:focus)) {
+   聚焦后恢复原生分段文本，保证仍可正常编辑。
+   两个坑：
+   1) vendor 的 input 颜色规则带 :not(#\9) 的 id 级特异性，scoped 的 color 压不过它，
+      空值时原生 yyyy/mm/dd 会一直露出来和覆盖层重叠；-webkit-text-fill-color 优先级更高
+      且 vendor 未使用，用它把分段文本藏掉（日历图标是图片，不受影响）。
+   2) Chromium 的日期输入把焦点交给内部 shadow 编辑器，宿主 input 自身不匹配 :focus，
+      只有祖先的 :focus-within 能感知，所以这里一律用 :focus-within 判断。 */
+.cs-date-picker-wrap.is-empty:not(:focus-within) :deep(input) {
+  -webkit-text-fill-color: transparent;
   color: transparent;
 }
 
-/* Chromium 的日期输入分段由伪元素绘制，仅设置 input 的 color 不会隐藏 */
-.cs-date-picker-wrap.is-empty :deep(input:not(:focus)::-webkit-datetime-edit) {
+.cs-date-picker-wrap.is-empty:not(:focus-within) :deep(input::-webkit-datetime-edit) {
+  -webkit-text-fill-color: transparent;
   color: transparent;
 }
 
@@ -189,5 +196,10 @@ function onUpdate(raw: string) {
   font-size: 14px;
   color: var(--color-text-form-default-8bb22s, #687078);
   pointer-events: none;
+}
+
+/* 聚焦时原生分段文本（yy/mm/dd）会重新显形，覆盖层必须同时让位，否则两段字叠在一起 */
+.cs-date-picker-wrap:focus-within .cs-date-picker-placeholder {
+  display: none;
 }
 </style>
