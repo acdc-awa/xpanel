@@ -10,8 +10,7 @@ import { onUnmounted, ref, type Ref } from 'vue'
  */
 export const BP = {
   small: 480,
-  phone: 640,
-  cloudscapeNarrow: 688,
+  cloudscape: 688.98,
   twoPane: 900,
   tabletMax: 767.98,
   tabletMin: 768,
@@ -22,7 +21,6 @@ export const BP = {
 
 export const MQ = {
   small: `(max-width: ${BP.small}px)`,
-  phone: `(max-width: ${BP.phone}px)`,
   tablet: `(max-width: ${BP.tabletMax}px)`,
   content: `(max-width: ${BP.contentMax}px)`,
 } as const

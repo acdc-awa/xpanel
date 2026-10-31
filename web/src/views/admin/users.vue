@@ -1226,7 +1226,7 @@ function cardMenuItems(row: AdminUser) {
 
 .form-grid-2 {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 0 16px;
 }
 
@@ -1484,7 +1484,7 @@ function cardMenuItems(row: AdminUser) {
   }
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .user-traffic {
     padding: 8px 10px;
   }

@@ -272,19 +272,24 @@ html.dark .x-chip {
 }
 
 // 通用响应式表单网格系统 (Form Grids)
+//
+// 列数按「可用宽度」自动收，不用视口断点：侧栏 236px 在 768 消失、内容宽度
+// 因此跳变 ~245px，视口宽度无法表达表单实际有多宽（768–870 区间视口够宽、
+// 内容只剩 470–570，两列会把输入框压到 ~230）。auto-fit + min 列宽让表单
+// 跟着自己的容器走：能放下几列就排几列，窄到放不下自动落成一列。
 .form-grid-2 {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 12px 16px;
 }
 .form-grid-3 {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 12px 16px;
 }
 .form-grid-4 {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
   gap: 10px 14px;
 }
 /* 网格自带行距：表单格自带的 16px 下边距会叠加成 28px，且卡片末行多留一截。
@@ -299,19 +304,6 @@ html.dark .x-chip {
   display: flex;
   align-items: center;
   min-height: 32px;
-}
-
-@media (max-width: $bp-tablet-max) {
-  .form-grid-4 {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-}
-@media (max-width: $bp-phone) {
-  .form-grid-2,
-  .form-grid-3,
-  .form-grid-4 {
-    grid-template-columns: 1fr !important;
-  }
 }
 
 // 客户端共用 (Fluid 响应式容器)
@@ -568,7 +560,7 @@ html.dark .x-chip {
   // 贴边抽屉不做圆角（显式声明，避免以后误以为是漏写）
   border-radius: 0 !important;
 
-  @media (max-width: $bp-phone) {
+  @media (max-width: $bp-tablet-max) {
     // 用 100% 而不是 100vw：.el-drawer 是 .el-overlay（position:fixed）内的
     // position:absolute，100% 天然不含经典滚动条宽度，100vw 会宽出约 15px
     width: 100% !important;
@@ -597,7 +589,7 @@ html.dark .x-chip {
   }
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .el-dialog {
     max-width: calc(100vw - 32px) !important;
     margin: auto !important;

@@ -530,7 +530,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .dashboard-actions {
     inline-size: 100%;
     flex-direction: column;

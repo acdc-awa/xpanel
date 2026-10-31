@@ -327,7 +327,7 @@ async function copyText(text: string, label: string) {
   gap: 16px 20px;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .server-form-grid {
     grid-template-columns: 1fr;
   }

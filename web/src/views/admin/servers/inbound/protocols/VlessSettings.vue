@@ -259,7 +259,7 @@ function copyText(txt: string, label = '内容') {
   grid-column: span 2;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .fb-span-2 {
     grid-column: auto;
   }

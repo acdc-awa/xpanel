@@ -202,7 +202,7 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
   gap: 0 18px;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .form-grid {
     grid-template-columns: 1fr;
   }

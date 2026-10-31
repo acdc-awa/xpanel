@@ -154,7 +154,7 @@ async function save() {
   font-size: 12.5px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .dlg-grid {
     grid-template-columns: 1fr;
   }

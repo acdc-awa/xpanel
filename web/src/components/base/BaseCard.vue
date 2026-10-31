@@ -41,7 +41,7 @@ defineProps<{
     border-bottom: 1px solid var(--x-border);
     min-height: 48px;
 
-    @media (max-width: $bp-phone) {
+    @media (max-width: $bp-tablet-max) {
       padding: 10px 14px;
       min-height: 42px;
     }
@@ -66,7 +66,7 @@ defineProps<{
   &__body {
     padding: 16px 18px;
 
-    @media (max-width: $bp-phone) {
+    @media (max-width: $bp-tablet-max) {
       padding: 12px 14px;
     }
   }

@@ -1027,7 +1027,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
   line-height: 16px;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .form-grid-2,
   .form-grid-3 {
     grid-template-columns: minmax(0, 1fr);

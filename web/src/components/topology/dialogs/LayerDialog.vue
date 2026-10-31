@@ -162,7 +162,7 @@ function requestDelete() {
   display: flex;
   gap: 8px;
 }
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .dlg-grid-2-1 {
     grid-template-columns: 1fr;
   }

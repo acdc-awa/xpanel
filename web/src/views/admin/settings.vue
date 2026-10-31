@@ -1705,11 +1705,8 @@ async function save() {
 <style scoped lang="scss">
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 0 16px;
-  @media (max-width: $bp-phone) {
-    grid-template-columns: 1fr;
-  }
 }
 /* 系统状态页签的内容宽度上限（原 v-loading 容器上的 max-width） */
 .system-pane {
@@ -1932,7 +1929,7 @@ async function save() {
   line-height: 1.4;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .update-action-banner {
     flex-direction: column;
     align-items: stretch;

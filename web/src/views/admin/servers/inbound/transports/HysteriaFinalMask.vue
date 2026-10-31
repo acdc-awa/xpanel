@@ -352,7 +352,7 @@ const bbrProfileOptions = [
   margin-top: 4px;
 }
 
-@media (max-width: $bp-phone) {
+@media (max-width: $bp-tablet-max) {
   .form-grid,
   .toggle-grid {
     grid-template-columns: 1fr;
