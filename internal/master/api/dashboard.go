@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -176,8 +177,21 @@ type RecentOrderItem struct {
 	PaidAt        *time.Time `json:"paid_at"`
 }
 
-// AdminDashboard GET /api/v1/admin/dashboard
+// AdminDashboard GET /api/v1/admin/dashboard?scope=full|realtime
+//
+// 同一路由承载两种取数范围（2026-10-31 端点统一）：
+//   - scope=full（缺省）：完整报表，重聚合 SQL，供 30s 低频轮询；
+//   - scope=realtime：仅实时网速/在线数与服务器矩阵，一条 servers 查询 + 内存快照，
+//     供 3s 高频轮询。
+//
+// 两种 scope 的响应结构不同（full=DashboardData，realtime 为平铺的 DashboardRealtimeData），
+// 这是刻意的：realtime 不返回任何需要聚合的字段，避免高频请求拖着重 SQL 跑。
+// days / rank_period 参数只对 full 生效。
 func (d *Deps) AdminDashboard(c *gin.Context) {
+	if strings.EqualFold(c.Query("scope"), "realtime") {
+		d.adminDashboardRealtime(c)
+		return
+	}
 	now := time.Now()
 	// 按天口径以业务时区切分（跨地域部署的「今日/本月」一致）；绑定查询统一转 UTC——
 	// SQLite 以带偏移文本存储并按字面量比较，混入非 UTC 偏移会得到错误的区间结果。
@@ -683,8 +697,10 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	util.OK(c, data)
 }
 
-// AdminDashboardRealtime GET /api/v1/admin/dashboard/realtime —— 高频轻量实时网速接口（纯内存组装，耗时 < 0.1ms）。
-func (d *Deps) AdminDashboardRealtime(c *gin.Context) {
+// adminDashboardRealtime AdminDashboard 的 scope=realtime 分支：高频轻量实时网速
+// （一条 servers 查询 + 内存快照组装；handler 注释里的 <0.1ms 指快照组装本身）。
+// 由 AdminDashboard 统一路由，不再单独暴露 URL。
+func (d *Deps) adminDashboardRealtime(c *gin.Context) {
 	var servers []models.Server
 	if err := d.DB.Select("id, name, host, node_id, location, status, last_seen_at").Order("sort_order ASC, id ASC").Find(&servers).Error; err != nil {
 		util.ServerError(c, "查询服务器失败")

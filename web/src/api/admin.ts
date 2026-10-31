@@ -46,6 +46,10 @@ export type {
 /** 仪表盘流量口径：今日 / 近 7 天 / 本月（驱动排行榜与服务器流量分布，三者同源）。 */
 export type RankPeriod = 'today' | '7d' | '30d' | 'month'
 
+/**
+ * 仪表盘完整报表（scope=full，缺省）：重聚合 SQL，低频轮询（30s）。
+ * days / rank_period 只对本端点生效。
+ */
 export function getDashboard(days?: 3 | 7 | 30, rankPeriod?: RankPeriod) {
   const params: Record<string, string | number> = {}
   if (days) params.days = days
@@ -53,9 +57,14 @@ export function getDashboard(days?: 3 | 7 | 30, rankPeriod?: RankPeriod) {
   return http.get<ApiResp<DashboardData>>('/admin/dashboard', { params })
 }
 
-/** 仪表盘高频轻量实时指标（纯内存组装，0 复杂 SQL 聚合）。 */
+/**
+ * 仪表盘高频轻量实时指标：与完整报表同一端点，用 scope=realtime 只取内存快照
+ * （一条 servers 查询 + 网关内存，不含任何聚合），高频轮询（默认 3s）。
+ */
 export function getDashboardRealtime() {
-  return http.get<ApiResp<DashboardRealtimeData>>('/admin/dashboard/realtime')
+  return http.get<ApiResp<DashboardRealtimeData>>('/admin/dashboard', {
+    params: { scope: 'realtime' },
+  })
 }
 
 export interface BackupItem {

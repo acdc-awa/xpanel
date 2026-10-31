@@ -135,8 +135,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 		// 管理端（需 admin 角色）
 		admin := v1.Group("/admin", adminMiddleware(d, 0)...)
 		{
+			// scope=full（缺省，重聚合）/ realtime（纯内存，高频轮询）
 			admin.GET("/dashboard", d.AdminDashboard)
-			admin.GET("/dashboard/realtime", d.AdminDashboardRealtime)
 			admin.GET("/system/status", d.AdminSystemStatus)
 			admin.GET("/update/check", d.AdminUpdateCheck)
 			admin.GET("/update/status", d.AdminUpdateStatus)

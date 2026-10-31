@@ -451,9 +451,9 @@ func TestAdminDashboardRealtime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard/realtime", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard?scope=realtime", nil)
 	d := &Deps{DB: db, Hub: h}
-	d.AdminDashboardRealtime(c)
+	d.AdminDashboard(c)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())
