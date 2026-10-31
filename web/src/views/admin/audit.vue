@@ -220,7 +220,7 @@ function fmtTime(t: string) {
           </template>
 
           <template #actions>
-            <code class="audit-ip">{{ rv.row.ip || '—' }}</code>
+            <code class="audit-ip" :title="rv.row.ip || undefined">{{ rv.row.ip || '—' }}</code>
           </template>
 
           <div class="audit-summary" :title="rv.view.summary">{{ rv.view.summary || '—' }}</div>
@@ -228,7 +228,7 @@ function fmtTime(t: string) {
           <div v-if="rv.view.fields.length" class="audit-fields">
             <div v-for="(f, i) in rv.view.fields.slice(0, CARD_FIELD_LIMIT)" :key="i" class="audit-field-row">
               <span class="af-label">{{ f.label }}</span>
-              <span class="af-value" :class="{ 'af-value--mono': f.mono }">{{ f.value }}</span>
+              <span class="af-value" :class="{ 'af-value--mono': f.mono }" :title="f.value">{{ f.value }}</span>
             </div>
           </div>
 
@@ -352,11 +352,21 @@ function fmtTime(t: string) {
 }
 
 .audit-ip {
+  display: block;
+  max-inline-size: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: var(--font-size-body-s, 12px);
   line-height: 16px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   white-space: nowrap;
+}
+
+/* 正文封顶：字段再多也不让单张卡片无限长，超出部分靠「展开 / 原文」看完整内容 */
+:deep(.cs-card__body) {
+  max-block-size: 240px;
+  overflow: hidden;
 }
 
 /* 翻译视图：摘要一句话 */
@@ -398,8 +408,14 @@ function fmtTime(t: string) {
 
   .af-value {
     flex: 1 1 auto;
+    min-width: 0;
     color: var(--color-text-body-default-b2us04, #0f141a);
     overflow-wrap: anywhere;
+    /* 单字段最多两行，避免一段长 JSON / 长地址把整张卡片撑高 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .af-value--mono {

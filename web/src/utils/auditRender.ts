@@ -207,6 +207,12 @@ function pushValue(view: AuditView, label: string, v: unknown, fmt?: Fmt, mono?:
   }
   const s = fmt ? fmt(v) : stringifyShort(v)
   if (s === '') return
+  // 对象/数组序列化后可能很长（如拓扑布局数据），塞进字段行会把卡片撑得很高；
+  // 与长字符串同口径转成可点击的预览 chip，完整内容在详情弹窗里看。
+  if (!fmt && typeof v !== 'string' && s.length > 256) {
+    pushChip(view, label, chipFromString(s))
+    return
+  }
   view.fields.push({ label, value: s, mono: mono ?? (!fmt && typeof v !== 'string') })
 }
 
