@@ -37,9 +37,10 @@ type BillingStore interface {
 	// plan 提供本次购买/续费的套餐实体，快照三列（plan_traffic_bytes/plan_device_limit/plan_group_id）
 	// 在同一事务内按其当前值写入（2026-09-01 Xboard 式隔离：分配即快照）。
 	UpdateSubscription(ctx context.Context, userID uint64, plan *models.Plan, expireAt, cycleStart time.Time) error
-	// ClearSubscription 到期退订：plan_id=0、快照三列归零、permission_group_id=0。
+	// ClearSubscription 到期退订：plan_id=0、快照三列归零、permission_group_id=0，
+	// 并把当前账期用量归零（traffic_cycle_id + 1、周期起点对齐整点、清无账期标记的整点桶）。
 	// 不改 expire_at（保留过去的到期时间，既留审计痕迹也作二重拦截），
-	// 不动账期/余额/自动续费开关（设备限制字段已于 2026-10-27 下线）。
+	// 不动余额/自动续费开关（设备限制字段已于 2026-10-27 下线）。
 	ClearSubscription(ctx context.Context, userID uint64) error
 
 	// 订单

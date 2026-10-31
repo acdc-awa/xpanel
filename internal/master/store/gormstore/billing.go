@@ -98,20 +98,30 @@ func (s *BillingStore) UpdateSubscription(ctx context.Context, userID uint64, pl
 	return models.ZeroBilledInCycleBucket(s.with(ctx), userID, aligned)
 }
 
-// ClearSubscription 到期退订：清空套餐关系与生效权限组。
+// ClearSubscription 到期退订：清空套餐关系与生效权限组，并把流量用量归零。
 //
-// 只写 plan_id / 快照三列 / permission_group_id，expire_at 保持原值——到期时间本身
+// 写 plan_id / 快照三列 / permission_group_id，expire_at 保持原值——到期时间本身
 // 既是审计痕迹，也是「无套餐 + 管理员手工分组」组合下的二重拦截（否则不会有人被拦）。
-// 账期与余额不动：历史用量仍按原账期留痕，下次购买时由 UpdateSubscription 统一递增。
+//
+// 用量归零与购买/续费/管理员重置同语义（models/traffic_cycle.go 不变量）：递增
+// traffic_cycle_id 让新账期从 0 起算，同一事务内对齐周期起点并清零该整点桶内
+// cycle_id = 0 的计费字节（旧 agent 行只能按时间轴回退归属）。旧账期的明细行一律保留，
+// 历史用量按原账期留痕，仅「当前账期已用量」归零。余额不动。
 func (s *BillingStore) ClearSubscription(ctx context.Context, userID uint64) error {
+	aligned := models.TrafficCycleAlign(time.Now())
 	updates := map[string]any{
 		"plan_id":             0,
 		"permission_group_id": 0,
+		"traffic_cycle_start": aligned,
+		"traffic_cycle_id":    gorm.Expr("traffic_cycle_id + 1"),
 	}
 	for k, v := range models.ClearPlanSnapshotColumns() {
 		updates[k] = v
 	}
-	return s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error
+	if err := s.with(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		return err
+	}
+	return models.ZeroBilledInCycleBucket(s.with(ctx), userID, aligned)
 }
 
 func (s *BillingStore) FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) {

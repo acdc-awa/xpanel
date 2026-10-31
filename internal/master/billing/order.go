@@ -189,7 +189,7 @@ func (s *OrderService) pay(userID, planID uint64, renewalOnly bool) (*models.Ord
 	return order, nil
 }
 
-// ClearExpiredSubscription 到期退订（幂等）：清空套餐、快照与生效权限组。
+// ClearExpiredSubscription 到期退订（幂等）：清空套餐、快照与生效权限组，并归零当前账期用量。
 //
 // 必须在行锁内复核「仍持有套餐且已到期」才写库：用户可能在本轮扫描出候选后完成支付
 // （expire_at 已推进到未来）或管理员刚换了套餐，此时直接调用方看到的旧候选清空会吞掉

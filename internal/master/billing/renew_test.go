@@ -81,6 +81,20 @@ func loadRenewUser(t *testing.T, db *gorm.DB, id uint64) models.User {
 	return u
 }
 
+// cycleUsed 读生产口径的当前账期已用量（与 UserBilled/配额判定同源谓词）。
+func cycleUsed(t *testing.T, db *gorm.DB, userID uint64) int64 {
+	t.Helper()
+	var used int64
+	if err := db.Raw(`
+		SELECT COALESCE(SUM(`+models.CycleUsageSQL+`), 0) AS used
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		WHERE u.id = ?`, userID).Scan(&used).Error; err != nil {
+		t.Fatalf("sum cycle usage user=%d: %v", userID, err)
+	}
+	return used
+}
+
 func auditCount(t *testing.T, db *gorm.DB, action string) int64 {
 	t.Helper()
 	var n int64
@@ -162,10 +176,14 @@ func TestAutoRenewService(t *testing.T) {
 		t.Fatalf("未到期不应续费/退订: balance=%d plan=%d", after2.BalanceCents, after2.PlanID)
 	}
 
-	// ③ 已到期 + 开关关 → 退订（含手动分配的权限组一并清空）
+	// ③ 已到期 + 开关关 → 退订（含手动分配的权限组一并清空、当前账期用量归零）
 	uid3 := mkRenewUser(t, db, "switchoff", plan.ID, ptrTime(now.Add(-time.Minute)), 10_000, false, false)
 	if err := db.Model(&models.User{}).Where("id = ?", uid3).Update("permission_group_id", 11).Error; err != nil {
 		t.Fatalf("set permission group: %v", err)
+	}
+	mkTrafficLog(t, db, uid3, 4096)
+	if got := cycleUsed(t, db, uid3); got != 4096 {
+		t.Fatalf("退订前当前账期用量应为 4096，实际 %d", got)
 	}
 	before3 := loadRenewUser(t, db, uid3)
 	svc.RunExpiryOnce(ctx)
@@ -176,6 +194,23 @@ func TestAutoRenewService(t *testing.T) {
 	}
 	if after3.ExpireAt == nil || !after3.ExpireAt.Equal(*before3.ExpireAt) {
 		t.Fatalf("退订应保留到期时间作二重拦截，实际 %v", after3.ExpireAt)
+	}
+	// 用量归零走账期递增（与购买/管理员重置同语义）：当前账期 0，旧账期明细仍留痕。
+	if after3.TrafficCycleID != before3.TrafficCycleID+1 {
+		t.Fatalf("退订后账期应递增: %d → %d", before3.TrafficCycleID, after3.TrafficCycleID)
+	}
+	if got := cycleUsed(t, db, uid3); got != 0 {
+		t.Fatalf("退订后当前账期用量应归零，实际 %d", got)
+	}
+	if !after3.TrafficCycleStart.Equal(models.TrafficCycleAlign(after3.TrafficCycleStart)) {
+		t.Fatalf("退订后流量周期起点未对齐整点: %v", after3.TrafficCycleStart)
+	}
+	var logCount int64
+	if err := db.Model(&models.TrafficLog{}).Where("user_id = ?", uid3).Count(&logCount).Error; err != nil {
+		t.Fatalf("count traffic logs: %v", err)
+	}
+	if logCount != 1 {
+		t.Fatalf("旧账期明细应保留（仅当前账期归零），实际 %d 条", logCount)
 	}
 
 	// ④ 已到期 + 开关开 + 余额不足 → 不扣款 + 退订
