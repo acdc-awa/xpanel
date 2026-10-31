@@ -16,7 +16,13 @@ export default defineConfig({
   },
   css: {
     preprocessorOptions: {
-      scss: { api: 'modern' },
+      scss: {
+        api: 'modern',
+        // 断点变量集中在 src/styles/breakpoints.scss，注入到每个 scss 文件开头：
+        // 组件内直接写 $bp-phone 等，不必逐个 @use
+        loadPaths: [fileURLToPath(new URL('./src/styles', import.meta.url))],
+        additionalData: "@use 'breakpoints' as *;\n",
+      },
     },
   },
   build: {

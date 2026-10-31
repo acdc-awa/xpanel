@@ -729,7 +729,7 @@ async function remove(row: NoticeItem) {
   opacity: 0.85;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .md-editor-split {
     grid-template-columns: 1fr;
   }

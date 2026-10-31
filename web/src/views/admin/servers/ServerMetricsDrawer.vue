@@ -353,7 +353,7 @@ onUnmounted(() => {
   width: 100%;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .metrics-modal-body {
     gap: 12px;
   }

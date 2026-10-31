@@ -30,7 +30,7 @@ withDefaults(
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-@media (max-width: 480px) {
+@media (max-width: $bp-small) {
   .cs-card-facts--cols-2 {
     grid-template-columns: minmax(0, 1fr);
   }

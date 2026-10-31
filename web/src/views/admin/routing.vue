@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
+import { MQ, useMediaQuery } from '@/utils/media'
 import {
   ElMessage,
   ElMessageBox,
@@ -51,17 +52,7 @@ import { useServerInbounds, useServerScope } from '@/composables/useServerScope'
 const route = useRoute()
 const router = useRouter()
 
-const isMobile = ref(false)
-let mq: MediaQueryList | null = null
-const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
-  isMobile.value = e.matches
-}
-onMounted(() => {
-  mq = window.matchMedia('(max-width: 768px)')
-  onMq(mq)
-  mq.addEventListener('change', onMq)
-})
-onUnmounted(() => mq?.removeEventListener('change', onMq))
+const isMobile = useMediaQuery(MQ.tablet)
 
 const { servers, serverFilter, currentServer, serverLoading, loadServers, syncServerQuery } =
   useServerScope()
@@ -684,7 +675,7 @@ onMounted(async () => {
   border-block-start: 2px dashed var(--color-text-status-warning-fabq6h, #e6a23c);
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .server-filter {
     inline-size: 100%;
   }

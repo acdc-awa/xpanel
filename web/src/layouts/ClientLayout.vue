@@ -6,6 +6,7 @@ import { clientMenus } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
+import { MQ } from '@/utils/media'
 import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
 
 const auth = useAuthStore()
@@ -18,7 +19,7 @@ const pageTitle = computed(() => (route.meta.title as string) || '用户中心')
 
 // 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
 // Pad 平板屏幕（< 1024px）默认折叠为 mini dock；宽屏可读取用户缓存
-const collapseMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
+const collapseMq = typeof window !== 'undefined' ? window.matchMedia(MQ.content) : null
 const storedCollapsed = typeof localStorage !== 'undefined' ? localStorage.getItem('client_sidebar_collapsed') : null
 const isCollapsed = ref(storedCollapsed !== null ? storedCollapsed === '1' : collapseMq?.matches ?? false)
 
@@ -291,7 +292,7 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   transition: width var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1)), background-color 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
 
-  @media (max-width: 767.98px) {
+  @media (max-width: $bp-tablet-max) {
     display: none;
   }
 
@@ -510,11 +511,11 @@ onUnmounted(() => {
   // 与侧栏宽度过渡同一时长同一曲线，消除折叠过程中交界处的露缝/重叠闪烁
   transition: margin-left var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
 
-  @media (min-width: 768px) {
+  @media (min-width: $bp-tablet-min) {
     margin-left: var(--x-sidebar-w, 236px);
   }
 
-  @media (max-width: 767.98px) {
+  @media (max-width: $bp-tablet-max) {
     margin-left: 0;
     // 与 .client-tabbar 的 height 同源，原来写死 60px 而 tabbar 实际 54px，多留 6px 空白
     padding-bottom: calc(var(--x-tabbar-h, 54px) + env(safe-area-inset-bottom, 0px));
@@ -522,7 +523,7 @@ onUnmounted(() => {
 }
 
 .client-layout.is-collapsed .client-main {
-  @media (min-width: 768px) {
+  @media (min-width: $bp-tablet-min) {
     margin-left: var(--x-sidebar-w-mini, 58px);
   }
 }
@@ -541,7 +542,7 @@ onUnmounted(() => {
   z-index: var(--x-z-sidebar, 80);
   transition: background-color 0.24s ease, border-color 0.24s ease;
 
-  @media (max-width: 767.98px) {
+  @media (max-width: $bp-tablet-max) {
     display: none;
   }
 
@@ -627,7 +628,7 @@ onUnmounted(() => {
   top: 0;
   z-index: var(--x-z-sidebar, 80);
 
-  @media (min-width: 768px) {
+  @media (min-width: $bp-tablet-min) {
     display: none;
   }
 
@@ -685,7 +686,7 @@ onUnmounted(() => {
   flex: 1;
   padding: 20px 24px;
 
-  @media (max-width: 767.98px) {
+  @media (max-width: $bp-tablet-max) {
     padding: 12px 10px 20px;
   }
 }
@@ -712,7 +713,7 @@ onUnmounted(() => {
   padding-bottom: env(safe-area-inset-bottom, 0px);
   transition: background-color 0.24s ease, border-color 0.24s ease;
 
-  @media (min-width: 768px) {
+  @media (min-width: $bp-tablet-min) {
     display: none;
   }
 }

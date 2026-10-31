@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { MQ } from '@/utils/media'
 import { adminMenuGroups, type MenuGroup } from '@/config/menu'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
@@ -256,8 +257,8 @@ function syncTopbarHeight() {
 }
 
 // 响应式分级：<768px 手机端走抽屉；768px~1024px (Pad端) 默认收起导航
-const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 767.98px)') : null
-const tabletMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023.98px)') : null
+const mobileMq = typeof window !== 'undefined' ? window.matchMedia(MQ.tablet) : null
+const tabletMq = typeof window !== 'undefined' ? window.matchMedia(MQ.content) : null
 
 const isMobile = ref(mobileMq?.matches ?? false)
 const drawerOpen = ref(false)

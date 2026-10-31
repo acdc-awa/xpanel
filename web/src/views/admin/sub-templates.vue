@@ -1186,7 +1186,7 @@ async function saveAsFromEditor() {
 }
 
 /* ===== 移动端：改为上下堆叠 ===== */
-@media (max-width: 900px) {
+@media (max-width: $bp-two-pane) {
   .tpl-layout {
     grid-template-columns: 1fr;
   }

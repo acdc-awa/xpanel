@@ -1,3 +1,6 @@
+// 通过 @use 加载的 partial 不会拿到 vite 的 additionalData 前缀，这里显式引入断点变量
+@use 'breakpoints' as *;
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body {
@@ -298,12 +301,12 @@ html.dark .x-chip {
   min-height: 32px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .form-grid-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .form-grid-2,
   .form-grid-3,
   .form-grid-4 {
@@ -565,7 +568,7 @@ html.dark .x-chip {
   // 贴边抽屉不做圆角（显式声明，避免以后误以为是漏写）
   border-radius: 0 !important;
 
-  @media (max-width: 640px) {
+  @media (max-width: $bp-phone) {
     // 用 100% 而不是 100vw：.el-drawer 是 .el-overlay（position:fixed）内的
     // position:absolute，100% 天然不含经典滚动条宽度，100vw 会宽出约 15px
     width: 100% !important;
@@ -594,7 +597,7 @@ html.dark .x-chip {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .el-dialog {
     max-width: calc(100vw - 32px) !important;
     margin: auto !important;
@@ -736,7 +739,7 @@ html.dark .x-chip {
   display: none;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .desktop-table-view {
     display: none !important;
   }

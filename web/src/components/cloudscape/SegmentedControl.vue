@@ -108,7 +108,7 @@ function onSelectChange(value: string | number | (string | number)[] | '') {
   display: none;
 }
 
-@media (max-width: 688px) {
+@media (max-width: $bp-cloudscape-narrow) {
   .cs-segmented-select {
     display: block;
   }

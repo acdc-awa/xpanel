@@ -1,0 +1,38 @@
+// 响应式断点单一来源。
+//
+// CSS 侧：本文件的变量由 vite.config.ts 的 css.preprocessorOptions.scss.additionalData
+//         注入到每个 .scss / <style lang="scss"> 开头，直接写 $bp-* 即可，不需要 @use。
+// JS 侧：src/utils/media.ts 里是同一组数字（媒体查询无法引用 CSS 变量），
+//         两处必须同步改 —— 改了这里就去改那里。
+//
+// 约定：
+// - max 侧用 .98 结尾、min 侧用整数，保证正好落在断点上时只有一侧命中。
+// - 只有核心四档参与「布局形态切换」。其余专项档必须写明唯一用途，且只允许一处使用；
+//   想再加一档先问是不是能并进核心四档。
+
+// ===== 核心四档 =====
+
+// 手机：表单多列坍缩为单列、弹窗与抽屉满宽
+$bp-phone: 640px;
+
+// 平板竖屏：表格切卡片流、工具栏竖排、管理端导航改抽屉
+$bp-tablet-max: 767.98px;
+$bp-tablet-min: 768px;
+
+// 内容双栏：侧栏默认折叠、页面双栏布局起算
+$bp-content-max: 1023.98px;
+$bp-content-min: 1024px;
+
+// 宽屏：内容比例与间距微调
+$bp-wide: 1280px;
+
+// ===== 专项档 =====
+
+// 极小屏：客户端统计卡内边距与字号（375px 下两列每列仅约 170px）
+$bp-small: 480px;
+
+// 订阅模板页双栏（列表 + 编辑器）折叠为上下堆叠，不适用于其它页面
+$bp-two-pane: 900px;
+
+// Cloudscape 设计系统的 narrow 分界（vendor 用 688/689），我们主动对齐它的组件
+$bp-cloudscape-narrow: 688px;

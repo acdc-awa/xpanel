@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { BP, MQ } from '@/utils/media'
 import { useRouter } from 'vue-router'
 import {
   CsAlert,
@@ -337,12 +338,12 @@ const drawerTopOffset = ref(0)
 let mobileMq: MediaQueryList | null = null
 
 const onMobileMq = () => {
-  isMobile.value = window.matchMedia('(max-width: 768px)').matches || window.innerWidth <= 768
+  isMobile.value = window.matchMedia(MQ.tablet).matches || window.innerWidth <= BP.tabletMin
   if (!isMobile.value) actionDrawerOpen.value = false
 }
 
 onMounted(() => {
-  mobileMq = window.matchMedia('(max-width: 768px)')
+  mobileMq = window.matchMedia(MQ.tablet)
   onMobileMq()
   mobileMq.addEventListener('change', onMobileMq)
   // matchMedia 为主；再挂 resize 兜住不派发 change 的嵌入环境（IAB/WebView）
@@ -971,7 +972,7 @@ const billingCycleOptions = [
 
 /* 注意：窄屏的刷新与新增两个图标按钮都要靠右，只能**一个**元素吃 auto 外边距。
    两处都写会把剩余空白摊成两段（搜索↔刷新、刷新↔新增），三个控件被拉散。 */
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   /* .cs-toolbar-main 默认按内容宽度收缩，搜索框的 flex-grow 无处可长，
      结果刷新与新增挤在搜索框右侧、整行右侧留空。窄屏让它占满一行。 */
   :deep(.cs-toolbar-main) {
@@ -1148,7 +1149,7 @@ const billingCycleOptions = [
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .secret-row {
     flex-direction: column;
     align-items: flex-start;

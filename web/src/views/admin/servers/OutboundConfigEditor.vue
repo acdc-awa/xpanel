@@ -667,9 +667,4 @@ onMounted(async () => {
 :deep(.cs-form-item) {
   margin-bottom: 16px;
 }
-@media (max-width: 720px) {
-  .form-grid-2 {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

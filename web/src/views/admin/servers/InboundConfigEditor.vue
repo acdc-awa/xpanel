@@ -2133,7 +2133,7 @@ watch(
   gap: 0 16px;
 }
 
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .layer-host-grid {
     grid-template-columns: 1fr;
   }

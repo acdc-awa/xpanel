@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { MQ, useMediaQuery } from '@/utils/media'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
@@ -63,18 +64,8 @@ const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
 
-const isMobile = ref(false)
-let mq: MediaQueryList | null = null
-const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
-  isMobile.value = e.matches
-}
-onMounted(() => {
-  mq = window.matchMedia('(max-width: 768px)')
-  onMq(mq)
-  mq.addEventListener('change', onMq)
-})
+const isMobile = useMediaQuery(MQ.tablet)
 onUnmounted(() => {
-  mq?.removeEventListener('change', onMq)
   window.clearTimeout(searchTimer)
 })
 
@@ -1256,11 +1247,6 @@ function cardMenuItems(row: AdminUser) {
   gap: 8px;
 }
 
-@media (max-width: 720px) {
-  .form-grid-2 {
-    grid-template-columns: 1fr;
-  }
-}
 .secret-box {
   background: var(--color-background-cell-shaded-twxsbz);
   border-radius: var(--border-radius-input-k1q34z);
@@ -1466,7 +1452,7 @@ function cardMenuItems(row: AdminUser) {
   gap: 8px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   /* 窄屏工具栏整体竖排：搜索独占一行，操作按钮两列等分 */
   .cs-toolbar {
     flex-direction: column;
@@ -1498,7 +1484,7 @@ function cardMenuItems(row: AdminUser) {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .user-traffic {
     padding: 8px 10px;
   }

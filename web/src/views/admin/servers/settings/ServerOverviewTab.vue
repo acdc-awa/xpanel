@@ -321,7 +321,7 @@ watch(
   margin-top: 16px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: $bp-tablet-max) {
   .server-status-band {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

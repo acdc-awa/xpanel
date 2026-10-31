@@ -167,7 +167,7 @@ function onIdentityClick(event: MouseEvent) {
 
 /* 窄屏三枚工具按钮（主题 / 用户端 / 头像是并排的）：vendor 给的 16px 两侧内边距
    在手机上太奢侈，收到 10px 才不会把品牌名挤成省略号。 */
-@media (max-width: 559.98px) {
+@media (max-width: $bp-phone) {
   :deep([class*='utility-wrapper']) {
     padding-inline: 10px !important;
   }

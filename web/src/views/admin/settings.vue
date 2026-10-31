@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { MQ, useMediaQuery } from '@/utils/media'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ImageCropperDialog from '@/components/ImageCropperDialog.vue'
 import {
@@ -62,17 +63,7 @@ import { errMsg } from '@/api/http'
 import { setDisplayTimezone, effectiveTimezoneLabel, formatDateTime } from '@/utils/timezone'
 import { useSiteStore } from '@/stores/site'
 
-const isMobile = ref(false)
-let mq: MediaQueryList | null = null
-const onMq = (e: MediaQueryListEvent | MediaQueryList) => {
-  isMobile.value = e.matches
-}
-onMounted(() => {
-  mq = window.matchMedia('(max-width: 768px)')
-  onMq(mq)
-  mq.addEventListener('change', onMq)
-})
-onUnmounted(() => mq?.removeEventListener('change', onMq))
+const isMobile = useMediaQuery(MQ.tablet)
 
 const siteStore = useSiteStore()
 const activeTab = ref('site')
@@ -1716,7 +1707,7 @@ async function save() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
-  @media (max-width: 640px) {
+  @media (max-width: $bp-phone) {
     grid-template-columns: 1fr;
   }
 }
@@ -1941,7 +1932,7 @@ async function save() {
   line-height: 1.4;
 }
 
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .update-action-banner {
     flex-direction: column;
     align-items: stretch;

@@ -144,7 +144,7 @@ function requestDelete() {
   </CsModal>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .dlg-grid {
   display: grid;
   gap: 0 16px;
@@ -162,7 +162,7 @@ function requestDelete() {
   display: flex;
   gap: 8px;
 }
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .dlg-grid-2-1 {
     grid-template-columns: 1fr;
   }

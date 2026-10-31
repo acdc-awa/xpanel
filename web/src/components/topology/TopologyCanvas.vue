@@ -2224,7 +2224,7 @@ const selectionInfo = computed(() => {
 }
 </style>
 
-<style>
+<style lang="scss">
 /* 连线层必须压在节点层之上，这不是笔误：
    1) type:'boxrule' 的边两端都在同一个节点上（source=server-N/inb-src-X，
       target=server-N/out-tgt-Y），画的就是服务器卡片内部的「入站行 → 出站行」路由虚线。
@@ -2373,7 +2373,7 @@ const selectionInfo = computed(() => {
   stroke-width: 3.2;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $bp-tablet-max) {
   .server-box,
   .ap-node {
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;

@@ -131,7 +131,7 @@ async function save() {
   </CsModal>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .dlg-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -154,7 +154,7 @@ async function save() {
   font-size: 12.5px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
-@media (max-width: 640px) {
+@media (max-width: $bp-phone) {
   .dlg-grid {
     grid-template-columns: 1fr;
   }
