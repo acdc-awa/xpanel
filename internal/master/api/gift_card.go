@@ -165,14 +165,29 @@ func (d *Deps) AdminBatchCreateGiftCards(c *gin.Context) {
 	})
 }
 
-// AdminDeleteGiftCard DELETE /api/v1/admin/gift-cards/:id —— 删除/作废礼品卡。
+// AdminDeleteGiftCard DELETE /api/v1/admin/gift-cards/:id —— 作废礼品卡（软作废，保留记录）。
 func (d *Deps) AdminDeleteGiftCard(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		util.BadRequest(c, "无效的 ID")
 		return
 	}
-	if err := d.GiftCard.DisableOrDelete(id); err != nil {
+	if err := d.GiftCard.Disable(id); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
+	util.OK(c, gin.H{"id": id, "status": models.GiftCardDisabled})
+}
+
+// AdminPurgeGiftCard DELETE /api/v1/admin/gift-cards/:id/purge —— 彻底删除（仅未使用/已作废）。
+// 单独一条路由而不是 query 参数：action 由路径推导，审计里能区分「作废」与「彻底删除」。
+func (d *Deps) AdminPurgeGiftCard(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的 ID")
+		return
+	}
+	if err := d.GiftCard.Purge(id); err != nil {
 		util.BadRequest(c, err.Error())
 		return
 	}

@@ -38,9 +38,14 @@ export function batchCreateGiftCards(payload: {
   return http.post<ApiResp<{ items: GiftCard[]; count: number }>>('/admin/gift-cards', payload)
 }
 
-// 管理端：删除/作废礼品卡
-export function deleteGiftCard(id: number) {
-  return http.delete<ApiResp<{ deleted: number }>>(`/admin/gift-cards/${id}`)
+// 管理端：作废礼品卡（软作废，记录保留，兑换时提示「该卡密已作废」）
+export function voidGiftCard(id: number) {
+  return http.delete<ApiResp<{ id: number; status: string }>>(`/admin/gift-cards/${id}`)
+}
+
+// 管理端：彻底删除礼品卡（仅未使用/已作废；已使用的卡必须留痕）
+export function purgeGiftCard(id: number) {
+  return http.delete<ApiResp<{ deleted: number }>>(`/admin/gift-cards/${id}/purge`)
 }
 
 // 管理端：调整用户余额

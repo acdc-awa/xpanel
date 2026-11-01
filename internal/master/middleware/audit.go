@@ -278,6 +278,7 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/ca-certs/:id":                       {model: &models.CACert{}, field: "name"},
 	"/api/v1/admin/ca-certs/:id/issue":                 {model: &models.CACert{}, field: "name"},
 	"/api/v1/admin/gift-cards/:id":                     {model: &models.GiftCard{}, field: "name"},
+	"/api/v1/admin/gift-cards/:id/purge":               {model: &models.GiftCard{}, field: "name"},
 	"/api/v1/admin/permission-groups/:id":              {model: &models.PermissionGroup{}, field: "name"},
 	"/api/v1/admin/permission-groups/:id/sub-template": {model: &models.PermissionGroup{}, field: "name"},
 	"/api/v1/admin/permission-groups/:id/access-points": {

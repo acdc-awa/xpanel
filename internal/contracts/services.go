@@ -151,7 +151,8 @@ type SiteService interface {
 type GiftCardService interface {
 	AdminAdjustBalance(adminID, targetUserID uint64, deltaCents int64, remark string) (int64, error)
 	BatchGenerate(adminID uint64, count int, name string, faceValueCents int64, expiresAt *time.Time) ([]models.GiftCard, error)
-	DisableOrDelete(cardID uint64) error
+	Disable(cardID uint64) error
+	Purge(cardID uint64) error
 	ListBalanceLogs(userID uint64, page, size int) ([]models.BalanceLog, int64, error)
 	ListCards(page, size int, status, search string) ([]models.GiftCard, int64, error)
 	Redeem(userID uint64, code string) (*models.GiftCard, int64, error)

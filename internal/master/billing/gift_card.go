@@ -162,15 +162,36 @@ func (s *GiftCardService) ListCards(page, size int, status, search string) ([]mo
 	})
 }
 
-// DisableOrDelete 作废或删除礼品卡（未使用的删除或标记作废）。
-func (s *GiftCardService) DisableOrDelete(cardID uint64) error {
+// Disable 作废礼品卡：置 status=disabled 并保留记录。
+//
+// 作废必须是软作废：硬删除会让卡密从历史里彻底消失（谁生成的、什么时候作废的都查不到），
+// 也让「已作废」筛选与「该卡密已作废」的兑换提示永远走不到。
+// 已兑换的卡不能作废（余额已经发出去了，作废只会造成账实不符）；重复作废幂等。
+func (s *GiftCardService) Disable(cardID uint64) error {
+	ctx := context.Background()
+	card, err := s.store.GetGiftCard(ctx, cardID)
+	if err != nil {
+		return errors.New("礼品卡不存在")
+	}
+	switch card.Status {
+	case models.GiftCardUsed:
+		return errors.New("已使用的礼品卡不可作废")
+	case models.GiftCardDisabled:
+		return nil
+	}
+	return s.store.DisableGiftCard(ctx, cardID)
+}
+
+// Purge 彻底删除礼品卡（管理员确认后的第二动作）：只允许未使用/已作废。
+// 已兑换的卡必须留痕——余额流水仍指向它，删掉就断了账。
+func (s *GiftCardService) Purge(cardID uint64) error {
 	ctx := context.Background()
 	card, err := s.store.GetGiftCard(ctx, cardID)
 	if err != nil {
 		return errors.New("礼品卡不存在")
 	}
 	if card.Status == models.GiftCardUsed {
-		return errors.New("已使用的礼品卡不可删除或作废")
+		return errors.New("已使用的礼品卡不可删除")
 	}
 	return s.store.DeleteGiftCard(ctx, cardID)
 }

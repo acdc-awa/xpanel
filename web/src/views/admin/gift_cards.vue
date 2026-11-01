@@ -29,7 +29,8 @@ import {
 import {
   getAdminGiftCards,
   batchCreateGiftCards,
-  deleteGiftCard,
+  voidGiftCard,
+  purgeGiftCard,
 } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { GiftCard } from '@/api/types'
@@ -145,15 +146,42 @@ function copyAllCreated() {
   copyText(codes, '全部卡密')
 }
 
-// ---- 删除/作废 ----
-async function remove(row: any) {
+// ---- 作废 / 彻底删除 ----
+async function voidCard(row: any) {
   try {
-    await ElMessageBox.confirm(`确认作废/删除卡密「${row.code}」？`, '作废卡密', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `确认作废卡密「${row.code}」？作废后不可兑换，记录保留可追溯。`,
+      '作废卡密',
+      { type: 'warning' },
+    )
   } catch {
     return
   }
   try {
-    const { data } = await deleteGiftCard(row.id)
+    const { data } = await voidGiftCard(row.id)
+    if (data.code === 0) {
+      ElMessage.success('已作废')
+      load()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '作废失败'))
+  }
+}
+
+async function purgeCard(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认彻底删除卡密「${row.code}」？删除后不可恢复，历史记录一并消失。`,
+      '彻底删除',
+      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const { data } = await purgeGiftCard(row.id)
     if (data.code === 0) {
       ElMessage.success('已删除')
       load()
@@ -246,8 +274,9 @@ function isExpired(row: GiftCard) {
 
           <template #footer>
             <CsButton icon-name="copy" @click="copyText(row.code, '卡密')">复制卡密</CsButton>
-            <CsButton icon-name="remove" :disabled="row.status === 'used'" @click="remove(row)">
-              作废/删除
+            <CsButton v-if="row.status === 'unused'" icon-name="remove" @click="voidCard(row)">作废</CsButton>
+            <CsButton v-else-if="row.status === 'disabled'" icon-name="remove" @click="purgeCard(row)">
+              彻底删除
             </CsButton>
           </template>
         </CsCard>

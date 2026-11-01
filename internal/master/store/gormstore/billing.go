@@ -180,6 +180,11 @@ func (s *BillingStore) GetGiftCard(ctx context.Context, id uint64) (*models.Gift
 	return &card, nil
 }
 
+func (s *BillingStore) DisableGiftCard(ctx context.Context, id uint64) error {
+	return s.with(ctx).Model(&models.GiftCard{}).Where("id = ?", id).
+		Update("status", models.GiftCardDisabled).Error
+}
+
 func (s *BillingStore) DeleteGiftCard(ctx context.Context, id uint64) error {
 	return s.with(ctx).Delete(&models.GiftCard{}, id).Error
 }

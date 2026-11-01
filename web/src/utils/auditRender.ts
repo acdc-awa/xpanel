@@ -351,7 +351,7 @@ function renderPlans(ctx: Ctx) {
 
 function renderGiftCards(ctx: Ctx) {
   if (ctx.method === 'DELETE') {
-    ctx.view.summary = buildSummary(ctx, '删除礼品卡')
+    ctx.view.summary = buildSummary(ctx, ctx.action.endsWith('.purge') ? '彻底删除礼品卡' : '作废礼品卡')
     return
   }
   const count = Number(ctx.body['count']) || 0
@@ -897,7 +897,7 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
       else if (d.includes('cancel') || act.includes('cancel')) title = '取消订单'
       else title = '订单处理'
     } else if (act.startsWith('gift-cards')) {
-      title = isDel ? '删除礼品卡' : '批量生成礼品卡'
+      title = act.endsWith('.purge') ? '彻底删除礼品卡' : isDel ? '作废礼品卡' : '批量生成礼品卡'
     } else if (act === 'order.pay_balance') {
       title = '余额支付订单'
     } else if (act === 'gift_card.redeem') {

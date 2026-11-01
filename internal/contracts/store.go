@@ -53,6 +53,7 @@ type BillingStore interface {
 	LockGiftCardByCode(ctx context.Context, code string) (*models.GiftCard, error) // 行锁读取
 	MarkGiftCardUsed(ctx context.Context, id, userID uint64, at time.Time) error
 	GetGiftCard(ctx context.Context, id uint64) (*models.GiftCard, error)
+	DisableGiftCard(ctx context.Context, id uint64) error
 	DeleteGiftCard(ctx context.Context, id uint64) error
 	ListGiftCards(ctx context.Context, q GiftCardQuery) ([]models.GiftCard, int64, error)
 

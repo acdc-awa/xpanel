@@ -297,3 +297,65 @@ func TestOrder_PayWithBalance_PublishesEvent(t *testing.T) {
 		t.Fatalf("支付失败不应发布事件, got %d", len(pub.events))
 	}
 }
+
+// 作废是软作废：状态置 disabled、记录保留；已兑换的卡不能作废；重复作废幂等。
+func TestGiftCard_DisableKeepsRecord(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewGiftCardService(gormstore.NewBillingStore(db))
+
+	user := models.User{
+		Email:          "carduser@test.local",
+		UUID:           "99999999-2222-3333-4444-555555555555",
+		SubscribeToken: "subtoken999999999999999999999999999999999999999999999999999999999999",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user failed: %v", err)
+	}
+	cards, err := svc.BatchGenerate(1, 2, "作废批次", 1000, nil)
+	if err != nil {
+		t.Fatalf("BatchGenerate failed: %v", err)
+	}
+
+	// 1. 未使用的卡作废 → 行仍在，状态 disabled
+	if err := svc.Disable(cards[0].ID); err != nil {
+		t.Fatalf("Disable failed: %v", err)
+	}
+	var got models.GiftCard
+	if err := db.First(&got, cards[0].ID).Error; err != nil {
+		t.Fatalf("作废后行必须保留: %v", err)
+	}
+	if got.Status != models.GiftCardDisabled {
+		t.Fatalf("作废后状态应为 disabled, got %s", got.Status)
+	}
+	// 重复作废幂等
+	if err := svc.Disable(cards[0].ID); err != nil {
+		t.Fatalf("重复作废应幂等: %v", err)
+	}
+	// 作废的卡不可兑换（文案走「已作废」分支）
+	if _, _, err := svc.Redeem(user.ID, cards[0].Code); err == nil || err.Error() != "该卡密已作废" {
+		t.Fatalf("作废卡兑换应报已作废, got %v", err)
+	}
+
+	// 2. 已兑换的卡不能作废
+	if _, _, err := svc.Redeem(user.ID, cards[1].Code); err != nil {
+		t.Fatalf("Redeem failed: %v", err)
+	}
+	if err := svc.Disable(cards[1].ID); err == nil {
+		t.Fatal("已使用的卡不应允许作废")
+	}
+	if err := svc.Purge(cards[1].ID); err == nil {
+		t.Fatal("已使用的卡不应允许彻底删除")
+	}
+
+	// 3. 彻底删除只对未使用/已作废开放
+	if err := svc.Purge(cards[0].ID); err != nil {
+		t.Fatalf("已作废的卡应可彻底删除: %v", err)
+	}
+	var n int64
+	if err := db.Model(&models.GiftCard{}).Where("id = ?", cards[0].ID).Count(&n).Error; err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("彻底删除后行应消失, got %d", n)
+	}
+}
