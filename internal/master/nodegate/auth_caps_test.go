@@ -74,6 +74,9 @@ func TestServeWSAuthOKAdvertisesTrafficAck(t *testing.T) {
 		t.Fatalf("auth_ok 必须声明 %s（否则节点降级为发完即删），实际 payload=%s",
 			protocol.CapTrafficAck, string(msg.Payload))
 	}
+
+	// 收尾：auth_ok 之后 ServeWS 还要写在线状态、起后台推送，等网关注销再让测试返回。
+	closeWSAndWait(t, h, ws, srv.ID)
 }
 
 // TestServeWSAuthBadRejectsWrongSecret 认证失败仍回 bad_auth（能力声明不得影响失败路径）。

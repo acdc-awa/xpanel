@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
@@ -27,12 +28,33 @@ func newTestHub(t *testing.T) *Hub {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = sqlDB.Close() }) // Windows 文件锁：必须在 TempDir 清理前关闭
-	return &Hub{
-		DB:      db,
-		conns:   make(map[uint64]*Conn),
-		pending: make(map[string]*pendingReq),
+	// 用真实 NewHub：它有 quit 通道与 watchdog，Cleanup 里才能按「先停 Hub、再关库」收尾。
+	// ServeWS 在回 auth_ok 之后仍会写在线状态并起若干后台推送，若不先停就开清理，这些收尾
+	// 会与 t.TempDir 的 RemoveAll 并发——Linux CI 上偶发
+	// "TempDir RemoveAll cleanup: directory not empty"（2026-11-01 打 tag 时命中）。
+	h := NewHub(db, nil, nil)
+	t.Cleanup(func() {
+		h.Shutdown()
+		_ = sqlDB.Close() // Windows 文件锁：必须在 TempDir 清理前关闭
+	})
+	return h
+}
+
+// closeWSAndWait 关掉客户端连接并等网关注销它。
+//
+// readPump 退出的顺序在「在线状态落库」之后，所以一旦注销，ServeWS 里的同步写就已完成；
+// 只剩被取消的后台推送在跑。测试直接 return 而不等的话，t.TempDir 清理会与这些收尾并发。
+func closeWSAndWait(t *testing.T, h *Hub, ws *websocket.Conn, serverID uint64) {
+	t.Helper()
+	_ = ws.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !h.IsOnline(serverID) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("网关未在 3s 内注销连接（server=%d）", serverID)
 }
 
 // newTestConn 构造测试连接（WS 可为 nil，closeSafe 对 nil 容错）。

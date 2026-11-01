@@ -39,12 +39,8 @@ func TestServeWSMetricsLaneWire(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	h := &Hub{
-		DB:            db,
-		conns:         make(map[uint64]*Conn),
-		pending:       make(map[string]*pendingReq),
-		latestMetrics: make(map[uint64]*NodeMetricsSnapshot),
-	}
+	h := NewHub(db, nil, nil)
+	t.Cleanup(h.Shutdown)
 	srv := models.Server{NodeID: "node-metrics", Secret: util.HashSecret("sec"), Name: "m"}
 	if err := db.Create(&srv).Error; err != nil {
 		t.Fatal(err)
@@ -110,6 +106,9 @@ func TestServeWSMetricsLaneWire(t *testing.T) {
 		return m.Mem == 4096 && m.CPU == 12.5 && m.RxRate == 2048 &&
 			len(m.UserRates) == 1 && m.OnlineUsers == 1
 	})
+
+	// 收尾：等网关注销连接，避免清理与在线落库/后台推送并发（见 closeWSAndWait）。
+	closeWSAndWait(t, h, ws, srv.ID)
 }
 
 // waitMetrics 等网关异步处理帧（读循环在另一个 goroutine），超时前轮询内存快照。
