@@ -75,7 +75,10 @@ async function loadRates() {
     const { data } = await getServerUserRates(props.serverId)
     if (data.code !== 0) return
     rates.value = data.data.rates ?? []
-    rateInbounds.value = data.data.inbounds ?? []
+    // 入站下拉的选项只在集合真的变化时才替换：每 3 秒无条件赋新数组会让 CsOption 子树
+    // 重建，正在展开的下拉会被收起（管理员点开筛选框、下一次轮询就关掉）。
+    const next = data.data.inbounds ?? []
+    if (!sameInbounds(next, rateInbounds.value)) rateInbounds.value = next
     rateSupported.value = Boolean(data.data.supported)
     sampledAt.value = data.data.sampled_at ?? 0
     // 选中的入站可能已经没人用了：回到「全部」，否则面板会一直空着
@@ -89,6 +92,18 @@ async function loadRates() {
 
 async function reload() {
   await Promise.all([loadOnlineUsers(), loadRates()])
+}
+
+/** 入站选项集合是否一致（id + 展示名），用于避免无谓的数组替换。 */
+function sameInbounds(
+  a: { id: number; tag: string; name: string }[],
+  b: { id: number; tag: string; name: string }[],
+) {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].tag !== b[i].tag || a[i].name !== b[i].name) return false
+  }
+  return true
 }
 
 function startPoll() {
@@ -141,6 +156,11 @@ interface Row extends OnlineUserIPItem {
  * 面板行：在线用户 × 速率。
  * 选中某一入站时只保留在该入站有速率的用户（没走这个入站的人与这次观察无关）；
  * 有速率数据时整列表按上下行合计降序，没有速率行的用户排在末尾并保持原顺序（sort 稳定）。
+ *
+ * 反过来也要兜住：有速率但不在在线名单里的用户同样要出行。xray 的 OnlineMap 不记录
+ * 回环来源（AddIP 对 127.0.0.1/[::1] 直接返回），纯本机/回环转发时在线名单恒为空——
+ * 只看在线名单会出现「明明在跑流量，面板却写着当前没有在线用户」。这类行没有来源 IP，
+ * IP 区留空。
  */
 const rows = computed<Row[]>(() => {
   const list: Row[] = onlineUsers.value.map((u) => ({
@@ -148,6 +168,20 @@ const rows = computed<Row[]>(() => {
     rate: u.user_id ? rateByUser.value.get(u.user_id) : undefined,
   }))
   if (!rateSupported.value) return list
+
+  const seen = new Set(onlineUsers.value.map((u) => u.user_id).filter((id): id is number => !!id))
+  for (const [userId, agg] of rateByUser.value) {
+    if (seen.has(userId)) continue
+    const sample = rates.value.find((r) => r.user_id === userId)
+    list.push({
+      email: sample?.email ?? `#${userId}`,
+      kind: 'user',
+      user_id: userId,
+      ips: [],
+      rate: agg,
+    })
+  }
+
   const filtered = inboundFilter.value ? list.filter((u) => u.rate) : list
   return filtered.sort((a, b) => totalOf(b) - totalOf(a))
 })
