@@ -1347,6 +1347,7 @@ function cardMenuItems(row: AdminUser) {
   color: inherit;
   text-align: start;
   cursor: pointer;
+  min-width: 0;
   overflow-wrap: anywhere;
 
   &:hover {
