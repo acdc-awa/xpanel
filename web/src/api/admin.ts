@@ -444,6 +444,10 @@ export interface ServerItem {
   routing_domain_strategy: string // 路由域名策略（路由匹配阶段）
   agent_version: string // 节点心跳上报的 agent 版本（旧 agent 为空）
   xray_version?: string // 节点心跳上报的 xray 内核版本（旧 agent 为空）
+  // 连接数快照（-1 = 从未上报；0 是合法值）
+  conn_tcp_established: number // TCP 已建立连接数
+  conn_tcp_total: number // TCP 表项总数（不含 LISTEN）
+  conn_udp: number // UDP 绑定 socket 数（不是会话数）
   expire_at?: string // VPS 到期日（YYYY-MM-DD，空串=未设置）
   billing_cycle?: string // 计费周期（月付/季付/年付等）
   price?: string // 续费价格

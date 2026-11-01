@@ -46,6 +46,10 @@ type serverView struct {
 	RoutingDomainStrategy string     `json:"routing_domain_strategy"`   // 路由域名策略（路由匹配阶段）
 	AgentVersion          string     `json:"agent_version"`             // 节点心跳上报的 agent 版本（旧 agent 为空）
 	XrayVersion           string     `json:"xray_version,omitempty"`    // 节点心跳上报的 xray 内核版本（旧 agent 为空）
+	// 连接数快照（-1 = 从未上报，前端展示为「—」；0 是合法值）
+	ConnTCPEstablished int `json:"conn_tcp_established"`
+	ConnTCPTotal       int `json:"conn_tcp_total"`
+	ConnUDP            int `json:"conn_udp"`
 	XrayRunning           bool       `json:"xray_running"`              // 节点心跳上报的 xray 进程运行状态
 	XrayState             string     `json:"xray_state,omitempty"`      // running / restarting / failed / stopped（旧 agent 为空）
 	XrayLastError         string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
@@ -80,6 +84,9 @@ func toServerView(s *models.Server) serverView {
 		RoutingDomainStrategy: s.RoutingDomainStrategy,
 		AgentVersion:          s.AgentVersion,
 		XrayVersion:           s.XrayVersion,
+		ConnTCPEstablished:    s.ConnTCPEstablished,
+		ConnTCPTotal:          s.ConnTCPTotal,
+		ConnUDP:               s.ConnUDP,
 		XrayRunning:           s.XrayRunning,
 		XrayState:             s.XrayState,
 		XrayLastError:         s.XrayLastError,

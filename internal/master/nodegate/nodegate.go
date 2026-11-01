@@ -72,7 +72,9 @@ type NodeMetricsSnapshot struct {
 	RxBytes     uint64                   `json:"rx_bytes"`
 	TxBytes     uint64                   `json:"tx_bytes"`
 	XrayRunning bool                     `json:"xray_running"`
-	ReportedAt  time.Time                `json:"reported_at"`
+	// Conns 连接数快照（心跳 payload 原样引用；nil = 该节点不上报，不展示）。
+	Conns      *protocol.ConnStatsPayload `json:"conns,omitempty"`
+	ReportedAt time.Time                  `json:"reported_at"`
 }
 
 // Conn 一条节点连接。
@@ -689,6 +691,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		RxBytes:     hb.RxBytes,
 		TxBytes:     hb.TxBytes,
 		XrayRunning: hb.XrayRunning,
+		Conns:       hb.Conns,
 		ReportedAt:  now,
 	}
 	h.metricsMu.Lock()
@@ -731,6 +734,11 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	}
 	if hb.XrayVersion != "" { // 旧 agent 不上报内核版本，不覆盖已有值
 		updates["xray_version"] = hb.XrayVersion
+	}
+	if hb.Conns != nil { // 旧 agent / 非 Linux 节点不上报连接数，不覆盖已有值
+		updates["conn_tcp_established"] = hb.Conns.TCPEstablished
+		updates["conn_tcp_total"] = hb.Conns.TCPTotal
+		updates["conn_udp"] = hb.Conns.UDP
 	}
 	prevXrayState := conn.lastXrayState
 	stateChanged := false

@@ -63,6 +63,17 @@ const heartbeat = computed(() =>
   props.server.last_seen_at ? formatDateTime(props.server.last_seen_at, '—').slice(5, 16) : '—',
 )
 
+// 连接数：-1 = 从未上报（旧 agent / 非 Linux 节点），展示为 —，不能显示成「0 个连接」
+const hasConns = computed(() => (props.server.conn_tcp_established ?? -1) >= 0)
+const connsText = computed(() => {
+  if (!hasConns.value) return '—'
+  return `TCP ${props.server.conn_tcp_established} · UDP ${props.server.conn_udp}`
+})
+const connsTip = computed(() => {
+  if (!hasConns.value) return '该节点尚未上报连接数（需要 agent 升级）'
+  return `TCP 已建立 ${props.server.conn_tcp_established}，连接表共 ${props.server.conn_tcp_total}（含 TIME_WAIT 等残留，不含 LISTEN）；UDP 为绑定的 socket 数，不是会话数`
+})
+
 const hasAsset = computed(
   () =>
     Boolean(props.server.expire_at) ||
@@ -176,6 +187,12 @@ function onRootClick() {
         <span class="server-meta-item">
           <span class="server-label">Xray</span>
           <span class="cs-text-mono server-meta-value">{{ server.xray_version || '—' }}</span>
+        </span>
+        <span class="server-meta-item">
+          <CsTooltip :content="connsTip">
+            <span class="server-label">连接</span>
+            <span class="cs-text-mono server-meta-value server-meta-conns">{{ connsText }}</span>
+          </CsTooltip>
         </span>
         <span class="server-meta-item">
           <span class="server-label">接入点</span>
@@ -378,6 +395,11 @@ function onRootClick() {
 .server-meta-value {
   font-size: 14px;
   line-height: 18px;
+}
+
+/* Tooltip 触发层是 inline-flex 容器，父级 .server-meta-item 的 gap 进不到内部 */
+.server-meta-conns {
+  margin-inline-start: 8px;
 }
 
 .server-inbound-link {

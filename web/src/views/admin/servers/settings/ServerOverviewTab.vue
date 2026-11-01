@@ -57,8 +57,14 @@ function formatUptime(sec: number) {
   return `${m} 分`
 }
 
-const processText = computed(() => {
-  if (offline.value) return '服务器离线，无法查询实时进程'
+// 连接数（-1 = 从未上报：旧 agent 或非 Linux 节点），此时整行不展示，避免显示成「0 个连接」
+const hasConns = computed(() => (props.server.conn_tcp_established ?? -1) >= 0)
+const connsText = computed(
+  () =>
+    `TCP 已建立 ${props.server.conn_tcp_established} · TCP 连接表 ${props.server.conn_tcp_total} · UDP socket ${props.server.conn_udp}`,
+)
+
+const processText = computed(() => {  if (offline.value) return '服务器离线，无法查询实时进程'
   const s = status.value
   if (!s) return statusLoading.value ? '加载中…' : '未获取到进程信息'
   const parts: string[] = []
@@ -188,6 +194,10 @@ watch(
         <div class="server-meta-row">
           <span class="server-status-label">实时进程</span>
           <span class="cs-text-mono server-meta-value server-process-value">{{ processText }}</span>
+        </div>
+        <div v-if="hasConns" class="server-meta-row">
+          <span class="server-status-label">连接数</span>
+          <span class="cs-text-mono server-meta-value">{{ connsText }}</span>
         </div>
       </div>
 
