@@ -119,7 +119,6 @@ function columnsMinWidth(columns: TableColumn[]): number {
           </template>
           <template #cell-user-main="{ row }">
             <span class="user-main-name">{{ row.email }}</span>
-            <div class="user-sub-email tabular-num">{{ row.email || '—' }}</div>
           </template>
           <template #cell-user-plan="{ row }">
             <span class="user-plan">{{ row.plan_name }}</span>

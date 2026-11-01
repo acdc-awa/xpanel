@@ -755,7 +755,6 @@ function cardMenuItems(row: AdminUser) {
                 {{ row.status === 1 ? '正常' : '已封禁' }}
               </CsBadge>
             </div>
-            <div class="user-email">{{ row.email || '—' }}</div>
             <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
           </template>
 
@@ -1368,15 +1367,6 @@ function cardMenuItems(row: AdminUser) {
   font-size: var(--font-size-body-s, 12px);
   line-height: 16px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.user-email {
-  margin-block-start: 4px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  overflow-wrap: anywhere;
 }
 
 .user-remark {
