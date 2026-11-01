@@ -300,6 +300,32 @@ export function getServerOnlineIPs(id: number) {
   return http.get<ApiResp<{ online_users: number; users: OnlineUserIPItem[] }>>(`/admin/servers/${id}/online-ips`)
 }
 
+/** 单条（用户, 入站）瞬时速率（快车道 metrics 帧，纯内存）。 */
+export interface UserRateItem {
+  email: string
+  stats_email: string
+  user_id?: number
+  /** 0 = 旧统计键（user-<uid>@panel.local）反解不出入站 */
+  inbound_id: number
+  inbound_tag: string
+  inbound_name: string
+  up: number
+  down: number
+}
+
+export interface UserRatesData {
+  /** false = 节点从未发过快车道帧（旧 agent），前端隐藏速率列与入站筛选 */
+  supported: boolean
+  /** 速率帧到达时刻（unix 秒）；0 = 无 */
+  sampled_at: number
+  inbounds: { id: number; tag: string; name: string }[]
+  rates: UserRateItem[]
+}
+
+export function getServerUserRates(id: number) {
+  return http.get<ApiResp<UserRatesData>>(`/admin/servers/${id}/user-rates`)
+}
+
 // ===== 站点设置（设置页，批7 分组式：site/captcha） =====
 
 export interface SiteGroup {
@@ -338,6 +364,8 @@ export interface CaptchaGroup {
 export interface AgentGroup {
   agent_report_interval: string
   agent_heartbeat_interval: string
+  /** 快车道实时指标周期（CPU / 网速 / 连接数 / 每用户速率），默认 3s */
+  agent_metrics_interval: string
 }
 
 // 时区：business_timezone 决定按天口径（今日/每日汇总），display_timezone 决定前端展示（browser=跟随浏览器）

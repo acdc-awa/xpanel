@@ -122,6 +122,7 @@ const emptyCaptcha = (): CaptchaGroup => ({
 const emptyAgent = (): AgentGroup => ({
   agent_report_interval: '60',
   agent_heartbeat_interval: '5',
+  agent_metrics_interval: '3',
 })
 const emptyTimezone = (): TimezoneGroup => ({
   business_timezone: 'Asia/Shanghai',
@@ -220,6 +221,12 @@ const agentHeartbeatSec = computed<number>({
   get: () => Number(form.agent.agent_heartbeat_interval) || 5,
   set: (v) => {
     form.agent.agent_heartbeat_interval = String(v ?? 5)
+  },
+})
+const agentMetricsSec = computed<number>({
+  get: () => Number(form.agent.agent_metrics_interval) || 3,
+  set: (v) => {
+    form.agent.agent_metrics_interval = String(v ?? 3)
   },
 })
 
@@ -1367,6 +1374,13 @@ async function save() {
                 <TipIcon content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。" />
               </template>
               <CsInputNumber v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
+            </CsFormItem>
+            <CsFormItem>
+              <template #label>
+                实时指标周期（秒）
+                <TipIcon content="服务器上报 CPU / 实时网速 / 连接数 / 每用户上下行速率的频率（独立于状态心跳的快车道）。默认 3 秒；只更新主控内存，不写数据库。周期越短，「在线用户」面板里的速率刷新越快，但每帧体积随在线人数线性增长（1000 人在线约 24KB/s）。" />
+              </template>
+              <CsInputNumber v-model="agentMetricsSec" :min="2" :max="1800" :step="1" style="width: 220px" />
             </CsFormItem>
             <CsAlert type="info">
               配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。

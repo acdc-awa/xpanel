@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,19 +43,19 @@ type serverView struct {
 	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
 	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
 	PushLastTryAt         *time.Time `json:"push_last_try_at,omitempty"`
-	DefaultOutboundTag    string     `json:"default_outbound_tag"`      // 路由默认出口
-	RoutingDomainStrategy string     `json:"routing_domain_strategy"`   // 路由域名策略（路由匹配阶段）
-	AgentVersion          string     `json:"agent_version"`             // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayVersion           string     `json:"xray_version,omitempty"`    // 节点心跳上报的 xray 内核版本（旧 agent 为空）
+	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
+	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
+	AgentVersion          string     `json:"agent_version"`           // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayVersion           string     `json:"xray_version,omitempty"`  // 节点心跳上报的 xray 内核版本（旧 agent 为空）
 	// 连接数快照（-1 = 从未上报，前端展示为「—」；0 是合法值）
-	ConnTCPEstablished int `json:"conn_tcp_established"`
-	ConnTCPTotal       int `json:"conn_tcp_total"`
-	ConnUDP            int `json:"conn_udp"`
-	XrayRunning           bool       `json:"xray_running"`              // 节点心跳上报的 xray 进程运行状态
-	XrayState             string     `json:"xray_state,omitempty"`      // running / restarting / failed / stopped（旧 agent 为空）
-	XrayLastError         string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
-	XrayErrorAt           *time.Time `json:"xray_error_at,omitempty"`   // 该原因的观测时刻
-	XrayFailures          int        `json:"xray_failures,omitempty"`   // 连续启动失败次数（成功后归零）
+	ConnTCPEstablished int        `json:"conn_tcp_established"`
+	ConnTCPTotal       int        `json:"conn_tcp_total"`
+	ConnUDP            int        `json:"conn_udp"`
+	XrayRunning        bool       `json:"xray_running"`              // 节点心跳上报的 xray 进程运行状态
+	XrayState          string     `json:"xray_state,omitempty"`      // running / restarting / failed / stopped（旧 agent 为空）
+	XrayLastError      string     `json:"xray_last_error,omitempty"` // 最近一次启动失败原因（含退出码与 xray 原始报错）
+	XrayErrorAt        *time.Time `json:"xray_error_at,omitempty"`   // 该原因的观测时刻
+	XrayFailures       int        `json:"xray_failures,omitempty"`   // 连续启动失败次数（成功后归零）
 	// 配置对账（2026-09-21）：节点上报的两个内容哈希 + 后端推导的面板状态。
 	// XrayDiskHash = 节点磁盘配置的 sha256；XrayRunningHash = 节点当前跑着的那份配置的 sha256
 	// （xray 只在启动时读一次配置，热更落盘只改磁盘、不改它）。两者不等是热更落盘后的正常
@@ -1321,4 +1322,129 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 	}
 
 	util.OK(c, gin.H{"online_users": len(entries), "users": entries})
+}
+
+// userRateEntry 单条（用户, 入站）瞬时速率（2026-11-01 快车道）。
+type userRateEntry struct {
+	Email       string  `json:"email"`       // 展示邮箱：面板用户回填真实邮箱，其余为统计键原样
+	StatsEmail  string  `json:"stats_email"` // 统计键 u<uid>.i<iid>@panel.local
+	UserID      uint64  `json:"user_id,omitempty"`
+	InboundID   uint64  `json:"inbound_id"`   // 0 = 旧统计键（user-<uid>@panel.local）无法反解入站
+	InboundTag  string  `json:"inbound_tag"`  // 入站 xray tag（已删除的入站为空）
+	InboundName string  `json:"inbound_name"` // 入站名称（Remark），空则前端退回 tag
+	Up          float64 `json:"up"`           // 字节/秒
+	Down        float64 `json:"down"`
+}
+
+// userRateInbound 速率快照里出现过的入站（供前端筛选下拉）。
+type userRateInbound struct {
+	ID   uint64 `json:"id"`
+	Tag  string `json:"tag"`
+	Name string `json:"name"`
+}
+
+// AdminServerUserRates GET /api/v1/admin/servers/:id/user-rates —— 节点在线用户的实时上下行速率。
+//
+// 纯内存读（网关最新快照），不向节点发起任何 RPC；速率不落库，故 sampled_at 是该帧的到达
+// 时刻而非查询时刻。supported=false 表示节点从未发过快车道帧（旧 agent），前端据此隐藏
+// 速率列与入站筛选，面板行为退回今天的样子。
+func (d *Deps) AdminServerUserRates(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		util.BadRequest(c, "无效的 ID")
+		return
+	}
+	var srv models.Server
+	if err := d.DB.First(&srv, id).Error; err != nil {
+		util.Fail(c, 404, "服务器不存在")
+		return
+	}
+
+	var rates []protocol.UserRatePayload
+	supported := false
+	sampledAt := int64(0)
+	if d.Hub != nil {
+		if m, ok := d.Hub.GetLatestMetrics(id); ok && m != nil {
+			rates = m.UserRates
+			if !m.MetricsAt.IsZero() {
+				supported = true
+				sampledAt = m.MetricsAt.Unix()
+			}
+		}
+	}
+
+	entries := make([]userRateEntry, 0, len(rates))
+	inboundIDs := make(map[uint64]struct{}, len(rates))
+	userIDs := make(map[uint64]struct{}, len(rates))
+	for _, r := range rates {
+		e := userRateEntry{Email: r.Email, StatsEmail: r.Email, Up: r.Up, Down: r.Down}
+		if uid, iid, ok := xray.ParseUserEmailAny(r.Email); ok {
+			e.UserID = uid
+			e.InboundID = iid
+			userIDs[uid] = struct{}{}
+			if iid > 0 {
+				inboundIDs[iid] = struct{}{}
+			}
+		}
+		entries = append(entries, e)
+	}
+
+	// 回填真实邮箱与入站名称：统计键是合成格式，直接展示 u1.i3@panel.local 对管理员没有意义。
+	if len(userIDs) > 0 {
+		ids := make([]uint64, 0, len(userIDs))
+		for uid := range userIDs {
+			ids = append(ids, uid)
+		}
+		var users []models.User
+		d.DB.Select("id, email").Where("id IN ?", ids).Find(&users)
+		byID := make(map[uint64]string, len(users))
+		for _, u := range users {
+			byID[u.ID] = u.Email
+		}
+		for i := range entries {
+			if entries[i].UserID == 0 {
+				continue
+			}
+			if email, ok := byID[entries[i].UserID]; ok && email != "" {
+				entries[i].Email = email
+			}
+		}
+	}
+
+	var inbounds []userRateInbound
+	if len(inboundIDs) > 0 {
+		ids := make([]uint64, 0, len(inboundIDs))
+		for iid := range inboundIDs {
+			ids = append(ids, iid)
+		}
+		var list []models.Inbound
+		d.DB.Select("id, tag, remark").Where("id IN ?", ids).Find(&list)
+		byID := make(map[uint64]models.Inbound, len(list))
+		for _, inb := range list {
+			byID[inb.ID] = inb
+		}
+		for i := range entries {
+			if inb, ok := byID[entries[i].InboundID]; ok {
+				entries[i].InboundTag = inb.Tag
+				entries[i].InboundName = inb.Remark
+			}
+		}
+		for iid := range inboundIDs {
+			inb := byID[iid]
+			inbounds = append(inbounds, userRateInbound{ID: iid, Tag: inb.Tag, Name: inb.Remark})
+		}
+		sort.Slice(inbounds, func(i, j int) bool {
+			if inbounds[i].Name != inbounds[j].Name {
+				return inbounds[i].Name < inbounds[j].Name
+			}
+			return inbounds[i].Tag < inbounds[j].Tag
+		})
+	}
+
+	util.OK(c, gin.H{
+		"supported":  supported,
+		"sampled_at": sampledAt,
+		"inbounds":   inbounds,
+		"rates":      entries,
+	})
 }

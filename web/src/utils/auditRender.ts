@@ -655,6 +655,7 @@ const captchaDict: Dict = {
 const agentDict: Dict = {
   agent_report_interval: { label: '流量上报周期', fmt: seconds },
   agent_heartbeat_interval: { label: '状态心跳周期', fmt: seconds },
+  agent_metrics_interval: { label: '实时指标周期', fmt: seconds },
 }
 
 function renderSettings(ctx: Ctx) {

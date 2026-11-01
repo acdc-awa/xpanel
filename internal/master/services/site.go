@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,9 @@ const (
 	// 缩短上报周期可加快超额/到期用户的踢除时效（配合事件驱动处置，最坏延迟≈上报周期）。
 	SettingAgentReportInterval    = "agent_report_interval"    // 流量上报周期（秒，默认 60）
 	SettingAgentHeartbeatInterval = "agent_heartbeat_interval" // 节点状态心跳周期（秒，默认 5）
+	// SettingAgentMetricsInterval 快车道实时指标周期（秒，2026-11-01）：CPU/网速/连接数/
+	// 每用户速率单独走 metrics 帧，默认 3。旧 agent 忽略该设置，继续按 yaml 兜底。
+	SettingAgentMetricsInterval = "agent_metrics_interval"
 )
 
 // SiteKeys 站点分组全部键（设置页「站点」tab；SetSiteGroup 白名单）。
@@ -110,6 +114,13 @@ func AgentReportIntervalSec(db *gorm.DB) int {
 // AgentHeartbeatIntervalSec 节点状态心跳周期（秒；缺省 5，clamp 3–1800）。
 func AgentHeartbeatIntervalSec(db *gorm.DB) int {
 	return clampIntervalSecWithMin(GetSetting(db, SettingAgentHeartbeatInterval), 5, 3)
+}
+
+// AgentMetricsIntervalSec 节点快车道实时指标周期（秒；缺省 3，clamp 2–1800）。
+// 下限 2 而不是 1：这一档已在 3s 量级给出近实时观感，压到 1s 只会成倍放大
+// 每用户的速率行体积与主控反序列化开销。
+func AgentMetricsIntervalSec(db *gorm.DB) int {
+	return clampIntervalSecWithMin(GetSetting(db, SettingAgentMetricsInterval), 3, 2)
 }
 
 // clampIntervalSecWithMin 解析秒数设置：空/非法回退默认值，并收敛到 [minVal, 1800] 区间。
@@ -259,23 +270,27 @@ func AgentSettingsGroup(db *gorm.DB) map[string]string {
 	return map[string]string{
 		SettingAgentReportInterval:    strconv.Itoa(AgentReportIntervalSec(db)),
 		SettingAgentHeartbeatInterval: strconv.Itoa(AgentHeartbeatIntervalSec(db)),
+		SettingAgentMetricsInterval:   strconv.Itoa(AgentMetricsIntervalSec(db)),
 	}
 }
 
-// SaveAgentSettingsGroup 保存「节点上报」分组（仅接受白名单键，值域 5–1800 秒）。
+// SaveAgentSettingsGroup 保存「节点上报」分组（仅接受白名单键）。
+// 各键下限不同：上报 5s（每轮要落盘 + 写库）、心跳 3s、实时指标 2s。
 func SaveAgentSettingsGroup(db *gorm.DB, vals map[string]string) error {
-	allowed := map[string]bool{
-		SettingAgentReportInterval:    true,
-		SettingAgentHeartbeatInterval: true,
+	allowed := map[string]int{
+		SettingAgentReportInterval:    5,
+		SettingAgentHeartbeatInterval: 3,
+		SettingAgentMetricsInterval:   2,
 	}
 	parsed := map[string]string{}
 	for k, v := range vals {
-		if !allowed[k] {
+		minSec, ok := allowed[k]
+		if !ok {
 			return errors.New("未知设置键: " + k)
 		}
 		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < 5 || n > 1800 {
-			return errors.New("周期需为 5–1800 秒的整数")
+		if err != nil || n < minSec || n > 1800 {
+			return fmt.Errorf("周期需为 %d–1800 秒的整数", minSec)
 		}
 		parsed[k] = strconv.Itoa(n)
 	}

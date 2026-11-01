@@ -73,8 +73,13 @@ type NodeMetricsSnapshot struct {
 	TxBytes     uint64                   `json:"tx_bytes"`
 	XrayRunning bool                     `json:"xray_running"`
 	// Conns 连接数快照（心跳 payload 原样引用；nil = 该节点不上报，不展示）。
-	Conns      *protocol.ConnStatsPayload `json:"conns,omitempty"`
-	ReportedAt time.Time                  `json:"reported_at"`
+	Conns *protocol.ConnStatsPayload `json:"conns,omitempty"`
+	// UserRates 每（用户, 入站）瞬时速率（2026-11-01，仅快车道携带；nil = 旧 agent 不上报）。
+	// 只在内存里，不落库：与 CPU/内存实时值同口径，历史曲线不进 node_reports。
+	UserRates []protocol.UserRatePayload `json:"user_rates,omitempty"`
+	// MetricsAt 最近一帧快车道指标的到达时刻（零值 = 从未收到过快车道数据）。
+	MetricsAt  time.Time `json:"metrics_at"`
+	ReportedAt time.Time `json:"reported_at"`
 }
 
 // Conn 一条节点连接。
@@ -101,6 +106,9 @@ type Conn struct {
 	lastXrayState string
 	// lastDiskHash 上次上报的磁盘配置哈希（内存缓存，用于避免高频心跳每帧查库判断偏离）。
 	lastDiskHash string
+	// metricsLane 该连接是否走快车道（收到过首帧 metrics 即置位）：置位后心跳只写慢字段，
+	// 实时字段（CPU/网速）一律以快车道为准，避免心跳里缺失的零值把快车道读数覆盖掉。
+	metricsLane atomic.Bool
 
 	// 1 分钟落库采样窗口内的聚合指标跟踪（避免单点采样漏采瞬时尖峰）：
 	windowRxRateMax float64
@@ -264,7 +272,7 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	// 旧节点忽略 caps；本字段是新节点防重复计量的开关，不能省。
 	_ = h.writeRaw(ws, protocol.MsgAuthOK, msg.ID, protocol.AuthOKPayload{
 		OK:   true,
-		Caps: []string{protocol.CapTrafficAck},
+		Caps: []string{protocol.CapTrafficAck, protocol.CapMetricsSplit},
 	})
 	_ = ws.SetReadDeadline(time.Time{})
 
@@ -360,6 +368,7 @@ func (h *Hub) unregister(conn *Conn) {
 				m.OnlineUsers = 0
 				m.OnlineIPs = nil
 				m.XrayRunning = false
+				m.UserRates = nil
 			}
 		}
 		h.metricsMu.Unlock()
@@ -384,6 +393,7 @@ func (h *Hub) GetLatestMetrics(serverID uint64) (*NodeMetricsSnapshot, bool) {
 		cp.OnlineUsers = 0
 		cp.OnlineIPs = nil
 		cp.XrayRunning = false
+		cp.UserRates = nil // 离线不给死节点展示冻结的速率
 	}
 	return &cp, true
 }
@@ -402,6 +412,7 @@ func (h *Hub) GetAllLatestMetrics() map[uint64]*NodeMetricsSnapshot {
 				cp.OnlineUsers = 0
 				cp.OnlineIPs = nil
 				cp.XrayRunning = false
+				cp.UserRates = nil
 			}
 			res[id] = &cp
 		}
@@ -454,6 +465,8 @@ func (h *Hub) readPump(conn *Conn) {
 		switch msg.Type {
 		case protocol.MsgHeartbeat:
 			h.handleHeartbeat(conn, msg)
+		case protocol.MsgMetrics:
+			h.handleMetrics(conn, msg)
 		case protocol.MsgResult:
 			h.handleResult(msg)
 		case protocol.MsgTrafficReport:
@@ -676,49 +689,40 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		hb.OnlineIPs = nil
 	}
 
-	// 1. 无论是否到达 DB 抽稀落库间隔，每一帧心跳都无条件立即更新纯内存快照（0 磁盘 I/O）
-	snapshot := &NodeMetricsSnapshot{
-		ServerID:    conn.ServerID,
-		CPU:         hb.CPU,
-		Mem:         hb.Mem,
-		MemTotal:    uint64(hb.MemTotal),
-		Disk:        hb.Disk,
-		DiskTotal:   uint64(hb.DiskTotal),
-		OnlineUsers: onlineUsers,
-		OnlineIPs:   hb.OnlineIPs,
-		RxRate:      hb.RxRate,
-		TxRate:      hb.TxRate,
-		RxBytes:     hb.RxBytes,
-		TxBytes:     hb.TxBytes,
-		XrayRunning: hb.XrayRunning,
-		Conns:       hb.Conns,
-		ReportedAt:  now,
-	}
-	h.metricsMu.Lock()
-	if h.latestMetrics == nil {
-		h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
-	}
-	h.latestMetrics[conn.ServerID] = snapshot
-	h.metricsMu.Unlock()
+	// 1. 每一帧心跳都无条件立即更新纯内存快照的**慢字段**（0 磁盘 I/O）。
+	//    就地更新而不是整结构替换：快车道的 CPU/网速/速率不能被慢帧的零值清空。
+	metricsLane := conn.metricsLane.Load()
+	h.upsertMetrics(conn.ServerID, func(m *NodeMetricsSnapshot) {
+		m.Mem = hb.Mem
+		m.MemTotal = uint64(hb.MemTotal)
+		m.Disk = hb.Disk
+		m.DiskTotal = uint64(hb.DiskTotal)
+		m.OnlineUsers = onlineUsers
+		m.OnlineIPs = hb.OnlineIPs
+		m.XrayRunning = hb.XrayRunning
+		// 连接数两车道都携带（服务器列表读 servers 表的三个列，需要在慢车道上也落库）；
+		// nil = 旧 agent / 非 Linux 节点没上报，不能覆盖快车道已有的值。
+		if hb.Conns != nil {
+			m.Conns = hb.Conns
+		}
+		m.ReportedAt = now
+		if !metricsLane {
+			// 旧 agent / 未协商快车道：实时字段仍由心跳承载（拆分前行为，逐字节一致）
+			m.CPU = hb.CPU
+			m.RxRate = hb.RxRate
+			m.TxRate = hb.TxRate
+			m.RxBytes = hb.RxBytes
+			m.TxBytes = hb.TxBytes
+		}
+	})
 
-	// 2. 窗口聚合：累积 1 分钟内的峰值与总量（避免点采样漏采瞬时尖峰）
-	if hb.RxRate > conn.windowRxRateMax {
-		conn.windowRxRateMax = hb.RxRate
+	// 2. 窗口聚合：累积 1 分钟内的峰值与总量（避免点采样漏采瞬时尖峰）。
+	//    走快车道的连接上 CPU/网速只由快帧贡献，心跳这里只聚合慢字段——
+	//    否则心跳里缺失的零值会把均值/峰值拉低。
+	if !metricsLane {
+		h.recordFastWindow(conn, hb.CPU, hb.RxRate, hb.TxRate, hb.RxBytes, hb.TxBytes)
 	}
-	if hb.TxRate > conn.windowTxRateMax {
-		conn.windowTxRateMax = hb.TxRate
-	}
-	if onlineUsers > conn.windowUsersMax {
-		conn.windowUsersMax = onlineUsers
-	}
-	conn.windowCPUSum += hb.CPU
-	conn.windowCPUCount++
-	conn.windowMemLast = hb.Mem
-	conn.windowMemTotal = uint64(hb.MemTotal)
-	conn.windowDiskLast = hb.Disk
-	conn.windowDiskTotal = uint64(hb.DiskTotal)
-	conn.windowRxBytes = hb.RxBytes
-	conn.windowTxBytes = hb.TxBytes
+	h.recordSlowWindow(conn, hb.Mem, uint64(hb.MemTotal), hb.Disk, uint64(hb.DiskTotal), onlineUsers)
 
 	// 3. 构建 servers 表更新字段
 	updates := map[string]any{
@@ -800,23 +804,45 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 
 	// 4. node_reports 采样落库（见 nodeReportSampleInterval）：
 	// 监控指标行按固定间隔（默认 1 分钟）抽稀，写入窗口内的真实峰值与均值，零额外存储增长。
+	h.flushNodeReport(conn, now)
+}
+
+// recordFastWindow 快车道窗口聚合：CPU 均值累加、网速峰值、末次累计字节。
+func (h *Hub) recordFastWindow(conn *Conn, cpu, rxRate, txRate float64, rxBytes, txBytes uint64) {
+	if rxRate > conn.windowRxRateMax {
+		conn.windowRxRateMax = rxRate
+	}
+	if txRate > conn.windowTxRateMax {
+		conn.windowTxRateMax = txRate
+	}
+	conn.windowCPUSum += cpu
+	conn.windowCPUCount++
+	conn.windowRxBytes = rxBytes
+	conn.windowTxBytes = txBytes
+}
+
+// recordSlowWindow 慢车道窗口聚合：内存/磁盘末值、在线人数峰值。
+func (h *Hub) recordSlowWindow(conn *Conn, mem float64, memTotal uint64, disk float64, diskTotal uint64, onlineUsers int) {
+	if onlineUsers > conn.windowUsersMax {
+		conn.windowUsersMax = onlineUsers
+	}
+	conn.windowMemLast = mem
+	conn.windowMemTotal = memTotal
+	conn.windowDiskLast = disk
+	conn.windowDiskTotal = diskTotal
+}
+
+// flushNodeReport 到采样间隔就落一行 node_reports 并重置窗口（两条车道谁先到点谁写）。
+// 统计口径按字段归属取值：CPU/网速/字节窗口由快车道喂，内存/磁盘/人数窗口由慢车道喂。
+func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
 	if now.Sub(conn.lastReportAt) < nodeReportSampleInterval {
 		return
 	}
 	conn.lastReportAt = now
-	rxRate := hb.RxRate
-	if conn.windowRxRateMax > rxRate {
-		rxRate = conn.windowRxRateMax
-	}
-	txRate := hb.TxRate
-	if conn.windowTxRateMax > txRate {
-		txRate = conn.windowTxRateMax
-	}
-	maxUsers := onlineUsers
-	if conn.windowUsersMax > maxUsers {
-		maxUsers = conn.windowUsersMax
-	}
-	avgCPU := hb.CPU
+	rxRate := conn.windowRxRateMax
+	txRate := conn.windowTxRateMax
+	maxUsers := conn.windowUsersMax
+	avgCPU := 0.0
 	if conn.windowCPUCount > 0 {
 		avgCPU = conn.windowCPUSum / float64(conn.windowCPUCount)
 	}
@@ -824,15 +850,15 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		_ = h.DB.Create(&models.NodeReport{
 			ServerID:    conn.ServerID,
 			CPU:         avgCPU,
-			Mem:         hb.Mem,
-			MemTotal:    uint64(hb.MemTotal),
-			Disk:        hb.Disk,
-			DiskTotal:   uint64(hb.DiskTotal),
+			Mem:         conn.windowMemLast,
+			MemTotal:    conn.windowMemTotal,
+			Disk:        conn.windowDiskLast,
+			DiskTotal:   conn.windowDiskTotal,
 			OnlineUsers: maxUsers,
 			RxRate:      rxRate,
 			TxRate:      txRate,
-			RxBytes:     hb.RxBytes,
-			TxBytes:     hb.TxBytes,
+			RxBytes:     conn.windowRxBytes,
+			TxBytes:     conn.windowTxBytes,
 			ReportedAt:  now,
 		}).Error
 	}
@@ -843,6 +869,50 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	conn.windowCPUSum = 0
 	conn.windowCPUCount = 0
 	conn.windowUsersMax = 0
+}
+
+// upsertMetrics 在内存快照上就地更新指定节点（快/慢车道各写各的字段，互不清空）。
+// 读侧（GetLatestMetrics/GetAllLatestMetrics）在 RLock 下整结构拷贝，因此就地改写安全；
+// 切片字段（OnlineIPs/UserRates）每帧整体替换、从不原地修改，拷贝共享底层数组也不会撕裂。
+func (h *Hub) upsertMetrics(serverID uint64, mutate func(*NodeMetricsSnapshot)) {
+	h.metricsMu.Lock()
+	defer h.metricsMu.Unlock()
+	if h.latestMetrics == nil {
+		h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
+	}
+	m := h.latestMetrics[serverID]
+	if m == nil {
+		m = &NodeMetricsSnapshot{ServerID: serverID}
+		h.latestMetrics[serverID] = m
+	}
+	mutate(m)
+}
+
+// handleMetrics 接收快车道实时指标帧（2026-11-01）：CPU/网速/连接数/每用户速率。
+// 只写内存快照与 1 分钟采样窗口，**不落 servers 表**——慢字段（版本/状态/哈希）仍由
+// 心跳按 30s 节流落库，高频帧不该带来额外的 SQLite 写入。
+func (h *Hub) handleMetrics(conn *Conn, msg *protocol.Message) {
+	var m protocol.MetricsPayload
+	if err := msg.PayloadTo(&m); err != nil {
+		return
+	}
+	now := time.Now()
+	conn.touch()
+	conn.metricsLane.Store(true) // 首帧即宣告本连接走快车道，心跳从此只写慢字段
+
+	h.upsertMetrics(conn.ServerID, func(s *NodeMetricsSnapshot) {
+		s.CPU = m.CPU
+		s.RxRate = m.RxRate
+		s.TxRate = m.TxRate
+		s.RxBytes = m.RxBytes
+		s.TxBytes = m.TxBytes
+		s.XrayRunning = m.XrayRunning
+		s.Conns = m.Conns
+		s.UserRates = m.UserRates
+		s.MetricsAt = now
+	})
+	h.recordFastWindow(conn, m.CPU, m.RxRate, m.TxRate, m.RxBytes, m.TxBytes)
+	h.flushNodeReport(conn, now)
 }
 
 func (h *Hub) handleResult(msg *protocol.Message) {
@@ -1233,6 +1303,7 @@ func (h *Hub) PushAgentSettings(serverID uint64) {
 	payload := protocol.AgentSettingsPayload{
 		ReportIntervalSec:    services.AgentReportIntervalSec(h.DB),
 		HeartbeatIntervalSec: services.AgentHeartbeatIntervalSec(h.DB),
+		MetricsIntervalSec:   services.AgentMetricsIntervalSec(h.DB),
 	}
 	res, err := h.Ask(serverID, protocol.MsgAgentSettings, payload, AskTimeout)
 	if err != nil {
