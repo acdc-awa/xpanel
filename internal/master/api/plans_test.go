@@ -30,7 +30,7 @@ func TestAdminUpdatePlanSnapshotIsolation(t *testing.T) {
 
 	plan := models.Plan{Name: "p1", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, PermissionGroupID: 5, Purchasable: true, Renewable: true}
 	require.NoError(t, db.Create(&plan).Error)
-	user := models.User{Username: "a@x.com", Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", PlanID: plan.ID}
+	user := models.User{Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", PlanID: plan.ID}
 	user.ApplyPlanSnapshot(&plan)
 	require.NoError(t, db.Create(&user).Error)
 
@@ -82,7 +82,7 @@ func TestPublicPlansIdentityFilter(t *testing.T) {
 	mk("D", false, false)     // 双关全闭：全员不可见
 
 	mkUser := func(name string, planID uint64) uint64 {
-		u := models.User{Username: name, Email: name + "@x.com", UUID: "uuid-" + name, PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-" + name, PlanID: planID}
+		u := models.User{Email: name + "@x.com", UUID: "uuid-" + name, PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-" + name, PlanID: planID}
 		require.NoError(t, db.Create(&u).Error)
 		return u.ID
 	}
@@ -134,7 +134,7 @@ func TestAdminUpdateUserSnapshotOnlyOnPlanChange(t *testing.T) {
 	require.NoError(t, db.Where("name = ?", "p1").First(&p1).Error)
 	require.NoError(t, db.Where("name = ?", "p2").First(&p2).Error)
 
-	user := models.User{Username: "a@x.com", Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", PlanID: p1.ID}
+	user := models.User{Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", PlanID: p1.ID}
 	user.ApplyPlanSnapshot(&p1)
 	require.NoError(t, db.Create(&user).Error)
 

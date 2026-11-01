@@ -209,10 +209,10 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	// 用户：u1 显式组1；u2 套餐→组2；u3 无组；u4 已过期
 	expired := time.Now().Add(-24 * time.Hour)
 	users := []models.User{
-		{Username: "u1", Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: g1.ID},
-		{Username: "u2", Email: "u2@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanID: planA.ID},
-		{Username: "u3", Email: "u3@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive},
-		{Username: "u4", Email: "u4@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive, PermissionGroupID: g1.ID, ExpireAt: &expired},
+		{Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: g1.ID},
+		{Email: "u2@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanID: planA.ID},
+		{Email: "u3@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive},
+		{Email: "u4@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive, PermissionGroupID: g1.ID, ExpireAt: &expired},
 	}
 	for i := range users {
 		if err := db.Create(&users[i]).Error; err != nil {
@@ -279,7 +279,7 @@ func TestFilterValidUsersFailsClosedOnUsageQueryError(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := models.User{
-		Username: "exhausted", Email: "e@t.com",
+		Email: "e@t.com",
 		UUID: "55555555-5555-5555-5555-555555555555", SubscribeToken: "te",
 		Status: models.StatusActive, PlanTrafficBytes: 1000,
 	}

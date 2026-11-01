@@ -23,7 +23,7 @@ func TestPayWithBalanceSnapshotsPlanOnOrder(t *testing.T) {
 		t.Fatalf("create plan: %v", err)
 	}
 	user := models.User{
-		Username: "snap@test.local", Email: "snap@test.local", UUID: "uuid-snap",
+		Email: "snap@test.local", UUID: "uuid-snap",
 		SubscribeToken: "tok-snap", BalanceCents: 1_000_000,
 	}
 	if err := db.Create(&user).Error; err != nil {

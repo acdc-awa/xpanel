@@ -87,7 +87,6 @@ type ServerTrafficItem struct {
 
 type UserTrafficRankItem struct {
 	UserID     uint64 `json:"user_id"`
-	Username   string `json:"username"`
 	Email      string `json:"email"`
 	PlanName   string `json:"plan_name"`
 	UpBytes    int64  `json:"up_bytes"`
@@ -161,14 +160,14 @@ type RecentGiftCardItem struct {
 	CodeMasked     string    `json:"code_masked"`
 	Name           string    `json:"name"`
 	FaceValueCents int64     `json:"face_value_cents"`
-	UsedByUsername string    `json:"used_by_username"`
+	UsedByEmail    string    `json:"used_by_email"`
 	UsedAt         time.Time `json:"used_at"`
 }
 
 type RecentOrderItem struct {
 	ID            uint64     `json:"id"`
 	OrderNo       string     `json:"order_no"`
-	Username      string     `json:"username"`
+	Email         string     `json:"email"`
 	PlanName      string     `json:"plan_name"`
 	AmountCents   int64      `json:"amount_cents"`
 	PaymentMethod string     `json:"payment_method"`
@@ -601,7 +600,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	userRankList := make([]UserTrafficRankItem, 0, len(rankIDs))
 	if len(rankIDs) > 0 {
 		var rankUsers []models.User
-		d.DB.Select("id, username, email, plan_id").Where("id IN ?", rankIDs).Find(&rankUsers)
+		d.DB.Select("id, email, plan_id").Where("id IN ?", rankIDs).Find(&rankUsers)
 		for _, u := range rankUsers {
 			pName := planMap[u.PlanID]
 			if pName == "" {
@@ -609,7 +608,6 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			}
 			userRankList = append(userRankList, UserTrafficRankItem{
 				UserID:     u.ID,
-				Username:   u.Username,
 				Email:      u.Email,
 				PlanName:   pName,
 				UpBytes:    userUp[u.ID],
@@ -634,7 +632,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 	var usedCards []models.GiftCard
 	d.DB.Where("status = ?", models.GiftCardUsed).Order("used_at DESC").Limit(5).Find(&usedCards)
 	userMap := make(map[uint64]string)
-	// 只为卡密使用者的用户名取名（原实现全表载入用户仅为此一处，改按需查询）
+	// 只为卡密使用者的邮箱取名（原实现全表载入用户仅为此一处，改按需查询）
 	if len(usedCards) > 0 {
 		ids := make([]uint64, 0, len(usedCards))
 		for _, card := range usedCards {
@@ -644,9 +642,9 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		}
 		if len(ids) > 0 {
 			var usedBy []models.User
-			d.DB.Select("id, username").Where("id IN ?", ids).Find(&usedBy)
+			d.DB.Select("id, email").Where("id IN ?", ids).Find(&usedBy)
 			for _, u := range usedBy {
-				userMap[u.ID] = u.Username
+				userMap[u.ID] = u.Email
 			}
 		}
 	}
@@ -664,7 +662,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 			CodeMasked:     masked,
 			Name:           card.Name,
 			FaceValueCents: card.FaceValueCents,
-			UsedByUsername: userMap[card.UsedBy],
+			UsedByEmail:    userMap[card.UsedBy],
 			UsedAt:         usedTime,
 		})
 	}
@@ -684,7 +682,7 @@ func (d *Deps) AdminDashboard(c *gin.Context) {
 		data.RecentOrders = append(data.RecentOrders, RecentOrderItem{
 			ID:            ord.ID,
 			OrderNo:       ord.OrderNo,
-			Username:      userMap[ord.UserID],
+			Email:         userMap[ord.UserID],
 			PlanName:      pName,
 			AmountCents:   ord.AmountCents,
 			PaymentMethod: ord.PaymentMethod,

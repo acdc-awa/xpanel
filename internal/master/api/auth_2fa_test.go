@@ -34,7 +34,6 @@ func TestTwoFAVerifyRoute(t *testing.T) {
 	uuid, _ := util.NewUUID()
 	subToken, _ := util.RandomHex(32)
 	user := models.User{
-		Username:       "otpuser@example.com",
 		UUID:           uuid,
 		Email:          "otpuser@example.com",
 		SubscribeToken: subToken,

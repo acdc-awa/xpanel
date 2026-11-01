@@ -40,7 +40,7 @@ func mkRenewPlan(t *testing.T, db *gorm.DB, name string, renewable bool, groupID
 // mkRenewUser 建一个持有套餐的用户，并写入与套餐一致的快照三列（用于断言退订后归零）。
 func mkRenewUser(t *testing.T, db *gorm.DB, name string, planID uint64, expire *time.Time, balance int64, expireSwitch, exhaustSwitch bool) uint64 {
 	u := models.User{
-		Username: name, Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name,
+		Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name,
 		BalanceCents: balance, PlanID: planID, ExpireAt: expire,
 		AutoRenewExpire: expireSwitch, AutoRenewExhaust: exhaustSwitch,
 		PlanTrafficBytes: 10 * 1024 * 1024 * 1024,

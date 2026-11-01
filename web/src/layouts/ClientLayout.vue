@@ -147,7 +147,7 @@ onUnmounted(() => {
 
       <!-- 侧边栏底部简明状态 -->
       <div class="client-aside-foot" :class="{ 'is-mini': !isEffectiveExpanded }">
-        <div class="status-dot-wrap" :title="auth.username">
+        <div class="status-dot-wrap" :title="auth.displayName">
           <span class="status-pulse-dot" />
         </div>
         <span v-if="isEffectiveExpanded" class="foot-text">{{ site.appName || 'XrayPanel' }}</span>

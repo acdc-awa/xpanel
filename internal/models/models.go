@@ -106,6 +106,11 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := dropRetiredL4Tables(db); err != nil {
 		return err
 	}
+	// v5：users.username 并入 users.email（删列 + email NOT NULL）。必须早于 AutoMigrate——
+	// 模型里已无 username 字段，AutoMigrate 只管补建不会删列，整表重建要在它之前做完。
+	if err := migrateUsersDropUsername(db); err != nil {
+		return err
+	}
 	if err := db.AutoMigrate(All()...); err != nil {
 		return err
 	}
@@ -156,6 +161,11 @@ func AutoMigrate(db *gorm.DB) error {
 	// 审计日志模块分类回填（v4 追加，纯加列）：旧行按 action 映射到 servers/users/...，
 	// 写入方此后直接填列；幂等，无存量空分类时为空操作。
 	if err := BackfillAuditCategories(db); err != nil {
+		return err
+	}
+	// 审计日志目标/操作人快照回填（v5 追加，纯加列）：从 detail 信封提取
+	// target_type/target_id/target_name/status 与 operator_name，幂等（写 settings 标记）。
+	if err := BackfillAuditTargets(db); err != nil {
 		return err
 	}
 	// 服务器排序值归一（v4 追加，纯数据且向后兼容）：把存量重复/稀疏的 sort_order

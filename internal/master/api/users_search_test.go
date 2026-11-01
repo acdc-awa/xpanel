@@ -33,9 +33,9 @@ func TestAdminUsersKeywordSearch(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.User{}))
 
 	users := []models.User{
-		{Username: "alice@x.com", Email: "alice@x.com", UUID: "aaaaaaaa-1111-1111-1111-111111111111", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", TrafficCycleStart: time.Now()},
-		{Username: "bob@y.com", Email: "bob@y.com", UUID: "bbbbbbbb-2222-2222-2222-222222222222", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-b", TrafficCycleStart: time.Now()},
-		{Username: "carol@x.com", Email: "carol@x.com", UUID: "cccccccc-3333-3333-3333-333333333333", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-c", TrafficCycleStart: time.Now()},
+		{Email: "alice@x.com", UUID: "aaaaaaaa-1111-1111-1111-111111111111", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-a", TrafficCycleStart: time.Now()},
+		{Email: "bob@y.com", UUID: "bbbbbbbb-2222-2222-2222-222222222222", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-b", TrafficCycleStart: time.Now()},
+		{Email: "carol@x.com", UUID: "cccccccc-3333-3333-3333-333333333333", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-c", TrafficCycleStart: time.Now()},
 	}
 	require.NoError(t, db.Create(&users).Error)
 
@@ -52,7 +52,7 @@ func TestAdminUsersKeywordSearch(t *testing.T) {
 			Code int `json:"code"`
 			Data struct {
 				Items []struct {
-					Username string `json:"username"`
+					Email string `json:"email"`
 				} `json:"items"`
 				Total int64 `json:"total"`
 			} `json:"data"`
@@ -61,7 +61,7 @@ func TestAdminUsersKeywordSearch(t *testing.T) {
 		assert.Equal(t, 0, resp.Code, "响应: %s", w.Body.String())
 		names := make([]string, 0, len(resp.Data.Items))
 		for _, it := range resp.Data.Items {
-			names = append(names, it.Username)
+			names = append(names, it.Email)
 		}
 		return resp.Data.Total, names
 	}
@@ -71,7 +71,7 @@ func TestAdminUsersKeywordSearch(t *testing.T) {
 	assert.Equal(t, int64(3), total)
 	assert.Len(t, names, 3)
 
-	// username/email 模糊匹配
+	// email 模糊匹配
 	total, names = fetch("keyword=bob")
 	assert.Equal(t, int64(1), total)
 	assert.Equal(t, []string{"bob@y.com"}, names)

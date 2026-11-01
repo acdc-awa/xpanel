@@ -31,7 +31,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 	base := d.DB.Model(&models.User{})
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		base = base.Where("username LIKE ? OR email LIKE ? OR uuid LIKE ? OR remark LIKE ?", like, like, like, like)
+		base = base.Where("email LIKE ? OR uuid LIKE ? OR remark LIKE ?", like, like, like)
 	}
 
 	var total int64
@@ -57,7 +57,7 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		totalBytes := u.EffectiveTrafficBytes()
 		effectiveGroupID := u.EffectiveGroupID()
 		list = append(list, gin.H{
-			"id": u.ID, "username": u.Username, "email": u.Email,
+			"id": u.ID, "email": u.Email,
 			"uuid": u.UUID, "remark": u.Remark,
 			"role": u.Role, "status": u.Status, "plan_id": u.PlanID,
 			"permission_group_id": u.PermissionGroupID,
@@ -194,7 +194,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		util.BadRequest(c, msg)
 		return
 	}
-	// 与 Register/AdminUpdateUser 对齐：邮箱小写化后作为用户名
+	// 与 Register/AdminUpdateUser 对齐：邮箱统一小写
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	hash, err := argon2id.CreateHash(req.Password, argon2id.DefaultParams)
 	if err != nil {
@@ -213,7 +213,6 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 
 	user := models.User{
-		Username:          email, // 用邮箱直接做用户名
 		Email:             email,
 		UUID:              uuid,
 		PasswordHash:      hash,
@@ -233,7 +232,7 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 		}
 	}
 	if err := d.DB.Create(&user).Error; err != nil {
-		if db.IsUniqueViolation(err, "users.username") {
+		if db.IsUniqueViolation(err, "users.email") {
 			util.BadRequest(c, "邮箱已被使用")
 		} else {
 			util.ServerError(c, "创建失败")
@@ -247,12 +246,11 @@ func (d *Deps) AdminCreateUser(c *gin.Context) {
 	}
 
 	util.OK(c, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
-		"uuid":     user.UUID,
-		"role":     user.Role,
-		"status":   user.Status,
+		"id":     user.ID,
+		"email":  user.Email,
+		"uuid":   user.UUID,
+		"role":   user.Role,
+		"status": user.Status,
 	})
 }
 
@@ -270,7 +268,7 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Email             *string    `json:"email" binding:"omitempty,email,max=128"` // 管理员可改邮箱（=用户名，记审计）
+		Email             *string    `json:"email" binding:"omitempty,email,max=128"` // 管理员可改邮箱（=登录账号，记审计）
 		Role              *string    `json:"role"`                                    // "admin" | "user"
 		PlanID            *uint64    `json:"plan_id"`
 		PermissionGroupID *uint64    `json:"permission_group_id"` // 0=跟随套餐
@@ -294,13 +292,12 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 		// 仅实际变更才处理：前端每次保存都携带 email，同值重复提交不应吊销会话
 		if email != strings.ToLower(strings.TrimSpace(user.Email)) {
 			var cnt int64
-			d.DB.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", email, email, id).Count(&cnt)
+			d.DB.Model(&models.User{}).Where("email = ? AND id != ?", email, id).Count(&cnt)
 			if cnt > 0 {
 				util.BadRequest(c, "邮箱已被使用")
 				return
 			}
 			updates["email"] = email
-			updates["username"] = email // 用户名=邮箱同值
 			// 换登录名即换凭据：吊销该用户全部旧会话（token_version 每请求对 DB 校验，
 			// 下一个请求立即踢出），用户需用新邮箱重新登录；与改密同级别安全动作。
 			// 留痕走中间件审计 envelope（body 带新邮箱；旧→新对比待二期 diff）

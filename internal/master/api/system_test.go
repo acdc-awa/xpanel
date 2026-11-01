@@ -22,7 +22,7 @@ func TestAdminSystemStatus(t *testing.T) {
 	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := db.Create(&models.User{Username: "u1", Email: "u1@t.com", Role: models.RoleUser, Status: models.StatusActive}).Error; err != nil {
+	if err := db.Create(&models.User{Email: "u1@t.com", Role: models.RoleUser, Status: models.StatusActive}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 

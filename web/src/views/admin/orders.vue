@@ -105,7 +105,7 @@ function paymentLabel(row: Order) {
         </CsSelect>
         <CsInput
           v-model="keyword"
-          placeholder="搜索流水号 / 用户名..."
+          placeholder="搜索流水号 / 邮箱..."
           clearable
           prefix-icon="search"
           style="width: 220px"
@@ -145,7 +145,7 @@ function paymentLabel(row: Order) {
           </template>
 
           <CsCardFacts>
-            <CsCardFact label="订购用户" :value="row.username || '—'" />
+            <CsCardFact label="订购用户" :value="row.email || '—'" />
             <CsCardFact label="支付方式" :value="paymentLabel(row)" />
             <CsCardFact label="订单流水号" :value="row.order_no" full-width mono />
             <CsCardFact label="创建时间" :value="fmtTime(row.created_at)" mono />

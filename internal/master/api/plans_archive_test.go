@@ -135,7 +135,7 @@ func TestAdminDeletePlanBlockedByUser(t *testing.T) {
 	plan := models.Plan{Name: "在售套餐", PriceCents: 1000, TrafficGB: 100, DurationDays: 30, Purchasable: true, Renewable: true}
 	require.NoError(t, db.Create(&plan).Error)
 	user := models.User{
-		Username: "holder@test.local", Email: "holder@test.local", UUID: "uuid-holder",
+		Email: "holder@test.local", UUID: "uuid-holder",
 		PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive,
 		SubscribeToken: "tok-holder", PlanID: plan.ID,
 	}

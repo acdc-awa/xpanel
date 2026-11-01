@@ -362,7 +362,7 @@ func TestNeedsTrafficCompactionIgnoresProtectedRows(t *testing.T) {
 	}
 	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)
 	cycle := h.Add(30 * time.Minute)
-	if err := db.Create(&models.User{Username: "u1", PasswordHash: "x", TrafficCycleStart: cycle}).Error; err != nil {
+	if err := db.Create(&models.User{Email: "compact@test.local", PasswordHash: "x", TrafficCycleStart: cycle}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	// 非整点行且其小时 == 用户周期起点小时 → 受保护，不算待压缩
@@ -526,7 +526,7 @@ func TestCompactTrafficHourKeepsCycleAttribution(t *testing.T) {
 	cycleStart := time.Date(2026, 8, 16, 2, 0, 0, 0, time.UTC) // 当前账期起点（整点）
 	h := time.Date(2026, 8, 16, 3, 0, 0, 0, time.UTC)          // 切换之后的小时：不受周期起点保护
 
-	u := models.User{Username: "cycle", Email: "cycle@t.com", UUID: "uuid-cycle",
+	u := models.User{Email: "cycle@t.com", UUID: "uuid-cycle",
 		SubscribeToken: "tok-cycle", Status: models.StatusActive}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatalf("seed user: %v", err)

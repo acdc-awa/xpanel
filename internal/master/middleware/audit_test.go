@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 
+	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
@@ -98,25 +99,59 @@ func TestAuditSanitizeNestedAndSecrets(t *testing.T) {
 	assert.NotContains(t, log.Detail, "REALITYSECRET")
 }
 
-// 超长文本摘要化：__text 标记（预览 200 字符 + 行数 + 字符数），不落全文。
-func TestAuditLargeTextSummarized(t *testing.T) {
+// 大文本（订阅模板/权限组正文）v5 起原样落库：正文要可检索、可取证。
+func TestAuditLargeTextPreserved(t *testing.T) {
 	db := setupAuditMWDB(t)
-	long := strings.Repeat(`line\n`, 60) // JSON 转义后 300 字符、60 个换行
+	long := strings.Repeat(`line`, 60) // 240 字符（原用例的超长文本）
 	log := auditRequest(t, db, http.MethodPut, "/api/v1/admin/permission-groups/:id", "/api/v1/admin/permission-groups/7",
 		`{"name":"g","clash_template":"`+long+`"}`)
 
 	var env map[string]any
 	assert.NoError(t, json.Unmarshal([]byte(log.Detail), &env))
 	body := env["body"].(map[string]any)
-	tpl, ok := body["clash_template"].(map[string]any)
-	assert.True(t, ok, "大文本应为 __text 摘要")
-	mark := tpl["__text"].(map[string]any)
-	assert.Equal(t, float64(61), mark["lines"])
-	assert.Equal(t, float64(300), mark["chars"])
-	assert.Len(t, mark["preview"], 200)
-	// 全文超出预览的部分不应落库
-	tailJSON, _ := json.Marshal(long[250:])
-	assert.NotContains(t, log.Detail, strings.Trim(string(tailJSON), `"`))
+	tpl, ok := body["clash_template"].(string)
+	assert.True(t, ok, "正文应原样保留，实际类型 %T", body["clash_template"])
+	assert.Equal(t, long, tpl)
+}
+
+// base64/data-URI 转 sha256 指纹：既不落 1.4 MB 的 logo，又保留「内容是否被改过」。
+func TestAuditBinaryDigested(t *testing.T) {
+	db := setupAuditMWDB(t)
+	payload := strings.Repeat("A", 2000)
+	log := auditRequest(t, db, http.MethodPut, "/api/v1/admin/settings", "/api/v1/admin/settings",
+		`{"logo":"data:image/png;base64,`+payload+`"}`)
+
+	var env map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(log.Detail), &env))
+	body := env["body"].(map[string]any)
+	bin, ok := body["logo"].(map[string]any)
+	assert.True(t, ok, "data URI 应转成 __binary 摘要")
+	meta := bin["__binary"].(map[string]any)
+	assert.Equal(t, "image/png", meta["type"])
+	assert.Equal(t, float64(1500), meta["bytes"], "bytes 是解码后的字节数")
+	assert.Len(t, meta["sha256"], 64)
+	assert.NotContains(t, log.Detail, payload[:50], "原始 base64 不得落库")
+
+	assert.True(t, isBase64Like(strings.Repeat("QUJD", 400)))
+	assert.False(t, isBase64Like(strings.Repeat("这是一段中文", 100)))
+}
+
+// 数组上限 200，且尾部留一条显式标记说明还有多少项（旧版静默丢弃）。
+func TestAuditArrayCapWithMarker(t *testing.T) {
+	db := setupAuditMWDB(t)
+	items := make([]string, 0, 205)
+	for i := 0; i < 205; i++ {
+		items = append(items, `{"email":"u`+strconv.Itoa(i)+`@x.com"}`)
+	}
+	body := `{"clients":[` + strings.Join(items, ",") + `]}`
+	log := auditRequest(t, db, http.MethodPut, "/api/v1/admin/inbounds/:id", "/api/v1/admin/inbounds/1", body)
+
+	var env map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(log.Detail), &env))
+	arr := env["body"].(map[string]any)["clients"].([]any)
+	assert.Len(t, arr, 201, "超 200 条时保留前 200 条 + 一条标记")
+	mark := arr[200].(map[string]any)["__omitted"].(map[string]any)
+	assert.Equal(t, float64(5), mark["items"])
 }
 
 // body 非 JSON → body_raw 回退（正则脱敏 JSON 形态的敏感键值）。
@@ -163,36 +198,34 @@ func TestAuditSanitizeCredentialMatrix(t *testing.T) {
 	}
 }
 
-// 超长 JSON 串无法解析时不给原文预览；信封整体超限时只保留字段名，绝不回退原始 body。
-func TestAuditOversizeNeverFallsBackToRawBody(t *testing.T) {
+// 超过嵌套上限的 JSON 串不落原文（内部可能含凭据，按 key 脱敏只对可解析对象生效）。
+func TestAuditOversizeJSONNotStoredRaw(t *testing.T) {
 	db := setupAuditMWDB(t)
 
-	// 1) 超过 auditNestedMax 的 JSON 串：给 redacted_blob 元信息，不含内部凭据。
-	bigBlob := `{"clients":[{"id":"BIGBLOBUUID","email":"u@x"}],"pad":"` + strings.Repeat("x", 5000) + `"}`
+	bigBlob := `{"clients":[{"id":"BIGBLOBUUID","email":"u@x"}],"pad":"` + strings.Repeat("x", 40000) + `"}`
 	blobJSON, _ := json.Marshal(bigBlob)
 	log := auditRequest(t, db, http.MethodPost, "/api/v1/admin/inbounds", "/api/v1/admin/inbounds",
 		`{"tag":"a","settings_json":`+string(blobJSON)+`}`)
 	assert.NotContains(t, log.Detail, "BIGBLOBUUID")
-	assert.Contains(t, log.Detail, "redacted_blob")
+	assert.Contains(t, log.Detail, "__omitted")
 
-	// 2) 信封超过 auditDetailCap：body 降级为字段名列表，原始值（含凭据）全部消失。
+	// 信封超过 32 KB：按最长字段优先省略，小字段全部保留，并记录 truncated_fields。
 	db2 := setupAuditMWDB(t)
-	fields := make([]string, 0, 13)
-	fields = append(fields, `"password":"OVERSIZEPASS"`)
-	for i := 0; i < 12; i++ {
-		fields = append(fields, `"f`+strconv.Itoa(i)+`":"`+strings.Repeat("v", 300)+`"`)
+	fields := []string{`"password":"OVERSIZEPASS"`, `"keep":"small-value"`}
+	for i := 0; i < 6; i++ {
+		// 中文不算 base64 字符：确保走「超限省略」而不是二进制摘要
+		fields = append(fields, `"f`+strconv.Itoa(i)+`":"`+strings.Repeat("日志内容", 3000)+`"`)
 	}
 	bigBody := `{` + strings.Join(fields, ",") + `}`
 	log2 := auditRequest(t, db2, http.MethodPost, "/api/v1/admin/inbounds", "/api/v1/admin/inbounds", bigBody)
 	var env map[string]any
 	assert.NoError(t, json.Unmarshal([]byte(log2.Detail), &env))
-	body, ok := env["body"].(map[string]any)
-	assert.True(t, ok, "body 应为对象，实际 detail=%s", log2.Detail)
-	assert.Equal(t, true, body["__truncated"])
+	assert.Equal(t, true, env["__truncated"])
+	assert.NotEmpty(t, env["truncated_fields"])
 	assert.NotContains(t, log2.Detail, "OVERSIZEPASS")
-	keys, ok := body["keys"].([]any)
-	assert.True(t, ok)
-	assert.Contains(t, keys, "password")
+	body := env["body"].(map[string]any)
+	assert.Equal(t, "small-value", body["keep"], "小字段不该被一起丢掉")
+	assert.LessOrEqual(t, len(log2.Detail), auditDetailCap+1024)
 }
 
 func TestAuditDeleteEnvelopeAndSkipGET(t *testing.T) {
@@ -223,7 +256,8 @@ func TestRedactKeyLegacy(t *testing.T) {
 	assert.Equal(t, `{"token":"***"}`, redactKey(`{"token": "abc"}`, "token"))
 }
 
-// 目标名注册表：删除/启停等无 body 上下文的操作，执行前预读实体显示名进 envelope.target。
+// 目标快照：删除/启停等无 body 上下文的操作，执行前预读实体显示名；
+// v5 起类型/主键/显示名落到 audit_logs 的独立列（不再塞进 detail 信封）。
 func TestAuditTargetRegistry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -233,57 +267,111 @@ func TestAuditTargetRegistry(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, db.AutoMigrate(&models.AuditLog{}, &models.Notice{}, &models.User{}))
 		assert.NoError(t, db.Create(&models.Notice{Title: "公告A", Content: "c"}).Error)
-		assert.NoError(t, db.Create(&models.User{Email: "a@x.com", Username: "a@x.com", UUID: "u1", SubscribeToken: "t1"}).Error)
+		assert.NoError(t, db.Create(&models.User{Email: "a@x.com", UUID: "u1", SubscribeToken: "t1"}).Error)
 		return db
 	}
-	getEnvelope := func(t *testing.T, db *gorm.DB) map[string]any {
+	lastLog := func(t *testing.T, db *gorm.DB) models.AuditLog {
 		t.Helper()
 		var log models.AuditLog
-		assert.NoError(t, db.First(&log).Error)
-		var env map[string]any
-		assert.NoError(t, json.Unmarshal([]byte(log.Detail), &env))
-		return env
+		assert.NoError(t, db.Order("id DESC").First(&log).Error)
+		return log
+	}
+	call := func(db *gorm.DB, method, pattern, path, body string) {
+		t.Helper()
+		r := gin.New()
+		r.Use(Audit(db))
+		h := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) }
+		switch method {
+		case http.MethodPost:
+			r.POST(pattern, h)
+		case http.MethodDelete:
+			r.DELETE(pattern, h)
+		}
+		var req *http.Request
+		if body != "" {
+			req = httptest.NewRequest(method, path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req = httptest.NewRequest(method, path, nil)
+		}
+		r.ServeHTTP(httptest.NewRecorder(), req)
 	}
 
 	// DELETE：注册表预读标题（记录删除后仍可读）
 	db := newDB(t)
-	r := gin.New()
-	r.Use(Audit(db))
-	r.DELETE("/api/v1/admin/notices/:id", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/admin/notices/1", nil))
-	env := getEnvelope(t, db)
-	assert.Equal(t, "公告A", env["target"])
+	call(db, http.MethodDelete, "/api/v1/admin/notices/:id", "/api/v1/admin/notices/1", "")
+	got := lastLog(t, db)
+	assert.Equal(t, "notice", got.TargetType)
+	assert.EqualValues(t, 1, got.TargetID)
+	assert.Equal(t, "公告A", got.TargetName)
+	assert.NotContains(t, got.Detail, `"target"`, "目标不再重复写进 detail")
 
 	// toggle：请求体只有字段名，目标名靠注册表
 	db = newDB(t)
-	r = gin.New()
-	r.Use(Audit(db))
-	r.POST("/api/v1/admin/notices/:id/toggle", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices/1/toggle", strings.NewReader(`{"field":"is_popup"}`)))
-	env = getEnvelope(t, db)
-	assert.Equal(t, "公告A", env["target"])
+	call(db, http.MethodPost, "/api/v1/admin/notices/:id/toggle", "/api/v1/admin/notices/1/toggle", `{"field":"is_popup"}`)
+	got = lastLog(t, db)
+	assert.Equal(t, "公告A", got.TargetName)
 
-	// 目标不存在：不报错，envelope 无 target 键
+	// 目标不存在：不报错，只留类型与主键
 	db = newDB(t)
-	r = gin.New()
-	r.Use(Audit(db))
-	r.DELETE("/api/v1/admin/notices/:id", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/admin/notices/999", nil))
-	env = getEnvelope(t, db)
-	_, hasTarget := env["target"]
-	assert.False(t, hasTarget)
+	call(db, http.MethodDelete, "/api/v1/admin/notices/:id", "/api/v1/admin/notices/999", "")
+	got = lastLog(t, db)
+	assert.Equal(t, "notice", got.TargetType)
+	assert.EqualValues(t, 999, got.TargetID)
+	assert.Equal(t, "", got.TargetName)
 
-	// 未注册路由：不产生 target
+	// 创建类（无 :id）：类型来自路径，显示名从 body 推断
 	db = newDB(t)
-	r = gin.New()
+	call(db, http.MethodPost, "/api/v1/admin/notices", "/api/v1/admin/notices", `{"title":"新公告"}`)
+	got = lastLog(t, db)
+	assert.Equal(t, "notice", got.TargetType)
+	assert.EqualValues(t, 0, got.TargetID)
+	assert.Equal(t, "新公告", got.TargetName)
+
+	// 无目标对象的模块：类型留空
+	db = newDB(t)
+	call(db, http.MethodPost, "/api/v1/admin/settings", "/api/v1/admin/settings", `{"site_name":"x"}`)
+	got = lastLog(t, db)
+	assert.Equal(t, "", got.TargetType)
+	assert.Equal(t, "", got.TargetName)
+
+	// status 落列：handler 返回 400 时记为失败，可按结果筛选
+	db = newDB(t)
+	r := gin.New()
 	r.Use(Audit(db))
-	r.POST("/api/v1/admin/notices", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices", strings.NewReader(`{"title":"x"}`)))
-	env = getEnvelope(t, db)
-	_, hasTarget = env["target"]
-	assert.False(t, hasTarget)
+	r.POST("/api/v1/admin/plans", func(c *gin.Context) { c.JSON(http.StatusBadRequest, gin.H{"error": "x"}) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/admin/plans", strings.NewReader(`{"name":"P"}`)))
+	got = lastLog(t, db)
+	assert.Equal(t, http.StatusBadRequest, got.Status)
+	assert.Equal(t, "plan", got.TargetType)
+	assert.Equal(t, "P", got.TargetName)
+}
+
+// 操作人快照：写入时记 users.email 到 operator_name，改邮箱后历史行不变。
+func TestAuditOperatorSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	assert.NoError(t, err)
+	assert.NoError(t, db.AutoMigrate(&models.AuditLog{}, &models.User{}))
+	admin := models.User{Email: "old@panel.local", UUID: "u-adm", SubscribeToken: "t-adm", Role: models.RoleAdmin}
+	assert.NoError(t, db.Create(&admin).Error)
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxClaimsKey, &contracts.JWTClaims{UserID: admin.ID})
+		c.Next()
+	})
+	r.Use(Audit(db))
+	r.POST("/api/v1/admin/plans", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/admin/plans", strings.NewReader(`{"name":"P"}`)))
+
+	var log models.AuditLog
+	assert.NoError(t, db.First(&log).Error)
+	assert.Equal(t, "old@panel.local", log.OperatorName)
+	assert.Equal(t, "admin", log.OperatorType)
+
+	// 管理员改邮箱：历史行仍是写入时的快照
+	assert.NoError(t, db.Model(&models.User{}).Where("id = ?", admin.ID).Update("email", "new@panel.local").Error)
+	assert.NoError(t, db.First(&log).Error)
+	assert.Equal(t, "old@panel.local", log.OperatorName)
 }

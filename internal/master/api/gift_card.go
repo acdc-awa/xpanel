@@ -98,7 +98,7 @@ func (d *Deps) AdminGiftCards(c *gin.Context) {
 		return
 	}
 
-	// 批量补兑换人用户名，前端不再显示裸编号；查询失败静默降级
+	// 批量补兑换人邮箱，前端不再显示裸编号；查询失败静默降级
 	usedIDs := make([]uint64, 0, len(list))
 	seenUsed := make(map[uint64]bool, len(list))
 	for _, card := range list {
@@ -110,19 +110,19 @@ func (d *Deps) AdminGiftCards(c *gin.Context) {
 	nameByUsed := make(map[uint64]string, len(usedIDs))
 	if len(usedIDs) > 0 {
 		var users []models.User
-		if err := d.DB.Select("id", "username").Where("id IN ?", usedIDs).Find(&users).Error; err == nil {
+		if err := d.DB.Select("id", "email").Where("id IN ?", usedIDs).Find(&users).Error; err == nil {
 			for _, u := range users {
-				nameByUsed[u.ID] = u.Username
+				nameByUsed[u.ID] = u.Email
 			}
 		}
 	}
 	type cardView struct {
 		models.GiftCard
-		UsedByUsername string `json:"used_by_username"`
+		UsedByEmail string `json:"used_by_email"`
 	}
 	items := make([]cardView, 0, len(list))
 	for i := range list {
-		items = append(items, cardView{GiftCard: list[i], UsedByUsername: nameByUsed[list[i].UsedBy]})
+		items = append(items, cardView{GiftCard: list[i], UsedByEmail: nameByUsed[list[i].UsedBy]})
 	}
 	util.OK(c, gin.H{
 		"items": items,

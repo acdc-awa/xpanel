@@ -21,18 +21,18 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-// TestAdminDeleteUserHardDeleteRecreate 回归：删除用户必须物理删除（释放 username/email
+// TestAdminDeleteUserHardDeleteRecreate 回归：删除用户必须物理删除（释放 email
 // 等唯一索引槽位）。曾因软删残留（注释写"硬删除"，实现却走 gorm 软删）导致同邮箱重建
-// 撞 "该邮箱已用作用户名"。
+// 撞 "该邮箱已存在"。
 func TestAdminDeleteUserHardDeleteRecreate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.User{}))
 
-	admin := models.User{Username: "root@x.com", Email: "root@x.com", UUID: "dddddddd-4444-4444-4444-444444444444", PasswordHash: "h", Role: models.RoleAdmin, Status: models.StatusActive, SubscribeToken: "tok-root", TrafficCycleStart: time.Now()}
+	admin := models.User{Email: "root@x.com", UUID: "dddddddd-4444-4444-4444-444444444444", PasswordHash: "h", Role: models.RoleAdmin, Status: models.StatusActive, SubscribeToken: "tok-root", TrafficCycleStart: time.Now()}
 	require.NoError(t, db.Create(&admin).Error)
-	target := models.User{Username: "del@x.com", Email: "del@x.com", UUID: "eeeeeeee-5555-5555-5555-555555555555", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-del", TrafficCycleStart: time.Now()}
+	target := models.User{Email: "del@x.com", UUID: "eeeeeeee-5555-5555-5555-555555555555", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "tok-del", TrafficCycleStart: time.Now()}
 	require.NoError(t, db.Create(&target).Error)
 
 	deps := &api.Deps{DB: db, Traffic: stubTraffic{}}
@@ -65,11 +65,11 @@ func TestAdminDeleteUserHardDeleteRecreate(t *testing.T) {
 		Code int `json:"code"`
 		Data struct {
 			ID       uint64 `json:"id"`
-			Username string `json:"username"`
+			Email string `json:"email"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
 	assert.Equal(t, 0, resp.Code)
 	assert.NotEqual(t, target.ID, resp.Data.ID)
-	assert.Equal(t, "del@x.com", resp.Data.Username)
+	assert.Equal(t, "del@x.com", resp.Data.Email)
 }

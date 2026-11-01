@@ -18,7 +18,7 @@ func TestUpdateSubscriptionAlignsCycleAndClearsBoundaryBucket(t *testing.T) {
 	db := store.db
 
 	user := models.User{
-		Username: "cycle@panel.local", Email: "cycle@panel.local",
+		Email: "cycle@panel.local",
 		UUID: "uuid-cycle", PasswordHash: "x", Status: models.StatusActive,
 	}
 	if err := db.Create(&user).Error; err != nil {
@@ -100,7 +100,7 @@ func (s *BillingStore) cycleUsed(ctx context.Context, userID uint64, cycleStart 
 func TestUserBeforeCreateAlignsCycleStart(t *testing.T) {
 	store := setupTestStore(t)
 	u := models.User{
-		Username: "reg@panel.local", Email: "reg@panel.local",
+		Email: "reg@panel.local",
 		UUID: "uuid-reg", PasswordHash: "x", Status: models.StatusActive,
 	}
 	if err := store.db.Create(&u).Error; err != nil {
@@ -129,7 +129,7 @@ func TestUpdateSubscriptionBumpsCycleIDAndKeepsTaggedRows(t *testing.T) {
 	db := store.db
 
 	user := models.User{
-		Username: "cyc@panel.local", Email: "cyc@panel.local",
+		Email: "cyc@panel.local",
 		UUID: "uuid-cyc", PasswordHash: "x", Status: models.StatusActive,
 	}
 	if err := db.Create(&user).Error; err != nil {

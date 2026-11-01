@@ -137,7 +137,6 @@ func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 	// 7. 测试订阅过滤：VIP 用户应订阅到两个接入点
 	exp := time.Now().Add(24 * time.Hour)
 	vipUser := models.User{
-		Username:          "vip_user",
 		Email:             "vip@test.com",
 		UUID:              "11111111-1111-1111-1111-111111111111",
 		Role:              models.RoleUser,
@@ -159,7 +158,6 @@ func TestUserAccessPoints_CRUD_And_Subscribe(t *testing.T) {
 
 	// 8. 普通用户（在 otherGroup）不应订阅到 VIP 专享的接入点
 	normalUser := models.User{
-		Username:          "normal_user",
 		Email:             "normal@test.com",
 		UUID:              "22222222-2222-2222-2222-222222222222",
 		Role:              models.RoleUser,
@@ -196,7 +194,6 @@ func TestUserAccessPoints_TunnelTarget_And_Subscribe(t *testing.T) {
 
 	exp := time.Now().Add(24 * time.Hour)
 	user := models.User{
-		Username:          "tunnel_user",
 		Email:             "tunnel@test.com",
 		UUID:              "33333333-3333-3333-3333-333333333333",
 		Role:              models.RoleUser,

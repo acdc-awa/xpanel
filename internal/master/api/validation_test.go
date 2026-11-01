@@ -164,7 +164,7 @@ func TestAdminCreateUserValidatesRefs(t *testing.T) {
 		t.Fatalf("valid refs => HTTP %d, want 200, resp=%s", w.Code, w.Body.String())
 	}
 	var created models.User
-	if err := db.Where("username = ?", "foo@x.com").First(&created).Error; err != nil {
+	if err := db.Where("email = ?", "foo@x.com").First(&created).Error; err != nil {
 		t.Fatalf("邮箱未小写化落库: %v", err)
 	}
 	if created.PlanID != plan.ID || created.PermissionGroupID != pg.ID {
@@ -182,7 +182,7 @@ func TestAdminUpdateUserValidatesRefs(t *testing.T) {
 	r.PUT("/api/v1/admin/users/:id", d.AdminUpdateUser)
 
 	u := models.User{
-		Username: "u@x.com", Email: "u@x.com",
+		Email: "u@x.com",
 		UUID: "11111111-1111-1111-1111-111111111111", Status: models.StatusActive,
 	}
 	if err := db.Create(&u).Error; err != nil {

@@ -29,7 +29,7 @@ func cycleTestDB(t *testing.T) *gorm.DB {
 
 func cycleTestUser(t *testing.T, db *gorm.DB, name string, cycleID uint64, cycleStart time.Time) models.User {
 	t.Helper()
-	u := models.User{Username: name, Email: name + "@t.com", UUID: "uuid-" + name,
+	u := models.User{Email: name + "@t.com", UUID: "uuid-" + name,
 		SubscribeToken: "tok-" + name, Status: models.StatusActive}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatal(err)

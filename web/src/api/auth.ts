@@ -1,7 +1,7 @@
 import { http } from './http'
 import type { ApiResp, LoginResult } from './types'
 
-// RegisterPayload 注册请求（2026-08-14 方向①：用户名=邮箱必填 + 邀请码必填；方向②：人机验证）。
+// RegisterPayload 注册请求（邮箱即账号，必填；邀请码必填；人机验证见 turnstile_token）。
 export interface RegisterPayload {
   email: string
   password: string
@@ -9,8 +9,8 @@ export interface RegisterPayload {
   turnstile_token?: string
 }
 
-export function login(username: string, password: string, turnstile_token?: string) {
-  return http.post<ApiResp<LoginResult>>('/auth/login', { username, password, turnstile_token })
+export function login(email: string, password: string, turnstile_token?: string) {
+  return http.post<ApiResp<LoginResult>>('/auth/login', { email, password, turnstile_token })
 }
 
 export function register(payload: RegisterPayload) {

@@ -27,7 +27,7 @@ func TestAdminUpdateUserStatusAntiLockout(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Inbound{}, &models.Server{}))
 
 	adminA := models.User{
-		Username: "a@panel.local", Email: "a@panel.local", UUID: "uuid-a",
+		Email: "a@panel.local", UUID: "uuid-a",
 		Role: models.RoleAdmin, Status: models.StatusActive,
 		SubscribeToken: "tok-a", TrafficCycleStart: time.Now(),
 	}
@@ -62,7 +62,7 @@ func TestAdminUpdateUserStatusAntiLockout(t *testing.T) {
 
 	// 3. 双管理员场景：A 先禁用 B（放行），再禁用自己（必须拒绝）
 	adminB := models.User{
-		Username: "b@panel.local", Email: "b@panel.local", UUID: "uuid-b",
+		Email: "b@panel.local", UUID: "uuid-b",
 		Role: models.RoleAdmin, Status: models.StatusActive,
 		SubscribeToken: "tok-b", TrafficCycleStart: time.Now(),
 	}
@@ -93,13 +93,13 @@ func TestAdminSelfBanForbidden(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Inbound{}, &models.Server{}))
 
 	adminA := models.User{
-		Username: "a@panel.local", Email: "a@panel.local", UUID: "uuid-a",
+		Email: "a@panel.local", UUID: "uuid-a",
 		Role: models.RoleAdmin, Status: models.StatusActive,
 		SubscribeToken: "tok-a", TrafficCycleStart: time.Now(),
 	}
 	require.NoError(t, db.Create(&adminA).Error)
 	adminB := models.User{
-		Username: "b@panel.local", Email: "b@panel.local", UUID: "uuid-b",
+		Email: "b@panel.local", UUID: "uuid-b",
 		Role: models.RoleAdmin, Status: models.StatusActive,
 		SubscribeToken: "tok-b", TrafficCycleStart: time.Now(),
 	}

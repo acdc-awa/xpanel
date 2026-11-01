@@ -63,8 +63,8 @@ async function handleLogout() {
       <button
         type="button"
         class="user-avatar-badge"
-        :title="`${auth.username}（${roleLabel}）`"
-        :aria-label="`${auth.username}（${roleLabel}）`"
+        :title="`${auth.displayName}（${roleLabel}）`"
+        :aria-label="`${auth.displayName}（${roleLabel}）`"
         :aria-expanded="menuOpen"
       >
         {{ auth.avatarText }}
@@ -72,7 +72,7 @@ async function handleLogout() {
     </template>
 
     <div class="user-menu-header">
-      <div class="u-name" :title="auth.username">{{ auth.username }}</div>
+      <div class="u-name" :title="auth.displayName">{{ auth.displayName }}</div>
       <div class="u-sub">
         <CsBadge :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
         <span v-if="footnote" class="u-footnote">{{ footnote }}</span>

@@ -404,7 +404,7 @@ async function doToggle(row: any) {
 async function doResetTraffic(row: any) {
   try {
     await ElMessageBox.confirm(
-      `确认重置「${row.username}」的流量周期？重置后其已用流量清零并重新计算限额。`,
+      `确认重置「${row.email}」的流量周期？重置后其已用流量清零并重新计算限额。`,
       '重置流量',
       { type: 'warning' },
     )
@@ -431,7 +431,7 @@ async function doResetTraffic(row: any) {
 
 async function doDelete(row: any) {
   try {
-    await ElMessageBox.confirm(`确定删除用户 ${row.username}？该操作不可逆。`, '删除确认', {
+    await ElMessageBox.confirm(`确定删除用户 ${row.email}？该操作不可逆。`, '删除确认', {
       type: 'error',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
@@ -551,11 +551,10 @@ function exportCSV() {
     ElMessage.warning('没有可导出的用户')
     return
   }
-  const header = ['ID', '用户名', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
+  const header = ['ID', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
   const lines = rows.map((u: any) =>
     [
       u.id,
-      u.username,
       u.email,
       u.uuid,
       u.role,
@@ -696,7 +695,7 @@ function cardMenuItems(row: AdminUser) {
     <CsToolbar>
       <CsInput
         v-model="keyword"
-        placeholder="搜索用户名 / 邮箱 / UUID / 备注"
+        placeholder="搜索邮箱 / UUID / 备注"
         clearable
         prefix-icon="search"
         style="width: 280px"
@@ -742,11 +741,11 @@ function cardMenuItems(row: AdminUser) {
             <div class="user-head">
               <CsCheckbox
                 :model-value="isRowSelected(row)"
-                :aria-label="`选择 ${row.username}`"
+                :aria-label="`选择 ${row.email}`"
                 @change="(val: boolean) => toggleSelectRow(row, !!val)"
               />
               <button type="button" class="user-name" title="点击查看与编辑详情" @click="openDetail(row)">
-                {{ row.username }}
+                {{ row.email }}
               </button>
             </div>
             <div class="user-meta">
@@ -768,7 +767,7 @@ function cardMenuItems(row: AdminUser) {
               <CsToggle
                 :model-value="row.status === 1"
                 :disabled="isSelf(row)"
-                :aria-label="`切换 ${row.username} 的启用状态`"
+                :aria-label="`切换 ${row.email} 的启用状态`"
                 @change="doToggle(row)"
               />
             </CsTooltip>
@@ -839,13 +838,9 @@ function cardMenuItems(row: AdminUser) {
     </CsContainer>
 
     <!-- 用户详情与权限配置弹窗 -->
-    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.username ?? ''}`" size="large" scrollable>
+    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.email ?? ''}`" size="large" scrollable>
       <template v-if="current">
         <div class="user-summary">
-          <div class="sum-item">
-            <span class="sum-label">用户名</span>
-            <span class="sum-value">{{ current.username }}</span>
-          </div>
           <div class="sum-item">
             <span class="sum-label">邮箱</span>
             <span class="sum-value">{{ current.email || '—' }}</span>
@@ -902,10 +897,10 @@ function cardMenuItems(row: AdminUser) {
           <div class="form-grid-2">
             <CsFormItem>
               <template #label>
-                登录邮箱（用户名）
+                登录邮箱
                 <TipIcon
                   type="warn"
-                  content="修改后用户的系统邮箱与登录用户名将同步更新，该用户所有会话将被登出，需用新邮箱重新登录。"
+                  content="邮箱即登录账号。修改后该用户所有会话将被登出，需用新邮箱重新登录。"
                 />
               </template>
               <CsInput v-model="userEditForm.email" placeholder="user@example.com" clearable />
@@ -1081,7 +1076,7 @@ function cardMenuItems(row: AdminUser) {
         <div class="adjust-header">
           <div class="user-meta">
             <span class="k">用户:</span>
-            <span class="v" style="font-weight: 600">{{ adjustUser?.username }}</span>
+            <span class="v" style="font-weight: 600">{{ adjustUser?.email }}</span>
           </div>
           <div class="user-meta">
             <span class="k">当前余额:</span>

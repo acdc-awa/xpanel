@@ -421,7 +421,7 @@ async function onLogout() {
             <div class="form-grid-2">
               <div class="profile-info-item">
                 <span class="p-label">登录账号 / 邮箱</span>
-                <span class="p-val cell-mono">{{ auth.user?.email || auth.username }}</span>
+                <span class="p-val cell-mono">{{ auth.user?.email }}</span>
               </div>
               <div class="profile-info-item">
                 <span class="p-label">权限级别</span>

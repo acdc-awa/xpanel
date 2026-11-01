@@ -576,8 +576,8 @@ func TestUserSubscribeTokenBackfill(t *testing.T) {
 		t.Fatalf("create users table: %v", err)
 	}
 
-	legacy := User{Username: "admin@panel.local", Email: "admin@panel.local", UUID: "uuid-admin", PasswordHash: "h", Role: RoleAdmin, Status: StatusActive}
-	withToken := User{Username: "u@x.com", Email: "u@x.com", UUID: "uuid-user", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "already-set-token"}
+	legacy := User{Email: "admin@panel.local", UUID: "uuid-admin", PasswordHash: "h", Role: RoleAdmin, Status: StatusActive}
+	withToken := User{Email: "u@x.com", UUID: "uuid-user", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "already-set-token"}
 	if err := db.Create(&legacy).Error; err != nil {
 		t.Fatalf("create legacy user: %v", err)
 	}
@@ -640,8 +640,8 @@ func TestPlanSnapshotBackfill(t *testing.T) {
 	if err := db.Create(&plan).Error; err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	withPlan := User{Username: "a@x.com", Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: RoleUser, Status: StatusActive, PlanID: plan.ID, SubscribeToken: "tok-a"}
-	noPlan := User{Username: "b@x.com", Email: "b@x.com", UUID: "uuid-b", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-b"}
+	withPlan := User{Email: "a@x.com", UUID: "uuid-a", PasswordHash: "h", Role: RoleUser, Status: StatusActive, PlanID: plan.ID, SubscribeToken: "tok-a"}
+	noPlan := User{Email: "b@x.com", UUID: "uuid-b", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-b"}
 	if err := db.Create(&withPlan).Error; err != nil {
 		t.Fatalf("create user with plan: %v", err)
 	}
@@ -703,9 +703,9 @@ func TestUserFollowPlanGroupBackfill(t *testing.T) {
 		t.Fatalf("create plan: %v", err)
 	}
 	// dirty：旧购买路径写下的假自定义（自定义列 == 套餐快照）
-	dirty := User{Username: "dirty@x.com", Email: "dirty@x.com", UUID: "uuid-d", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-d", PlanID: plan.ID, PermissionGroupID: 5, PlanGroupID: 5}
+	dirty := User{Email: "dirty@x.com", UUID: "uuid-d", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-d", PlanID: plan.ID, PermissionGroupID: 5, PlanGroupID: 5}
 	// custom：管理员显式设的自定义分组（与套餐快照不同值）——必须保持
-	custom := User{Username: "custom@x.com", Email: "custom@x.com", UUID: "uuid-c", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-c", PlanID: plan.ID, PermissionGroupID: 9, PlanGroupID: 5}
+	custom := User{Email: "custom@x.com", UUID: "uuid-c", PasswordHash: "h", Role: RoleUser, Status: StatusActive, SubscribeToken: "tok-c", PlanID: plan.ID, PermissionGroupID: 9, PlanGroupID: 5}
 	if err := db.Create(&dirty).Error; err != nil {
 		t.Fatalf("create dirty user: %v", err)
 	}

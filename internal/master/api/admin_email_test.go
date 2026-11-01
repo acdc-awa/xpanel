@@ -30,7 +30,6 @@ func setupTestDBForEmail(t *testing.T) (*gorm.DB, *gin.Engine) {
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.AuditLog{}, &models.Inbound{}, &models.Server{}))
 
 	user := models.User{
-		Username:          "user@panel.local",
 		Email:             "user@panel.local",
 		UUID:              "uuid-email-user",
 		Role:              models.RoleUser,
@@ -41,7 +40,6 @@ func setupTestDBForEmail(t *testing.T) (*gorm.DB, *gin.Engine) {
 	}
 	require.NoError(t, db.Create(&user).Error)
 	other := models.User{
-		Username:          "other@panel.local",
 		Email:             "other@panel.local",
 		UUID:              "uuid-email-other",
 		Role:              models.RoleUser,
@@ -72,19 +70,22 @@ func TestAdminUpdateUserEmail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, r := setupTestDBForEmail(t)
 
-	// 1. 实际变更：email+username 双写、token_version+1（吊销旧会话）、中间件落审计
-	// （envelope body 带新邮箱；注册表 target 预读变更前邮箱；旧→新对比待二期 diff）
+	// 1. 实际变更：只写 email、token_version+1（吊销旧会话）、中间件落审计
+	// （envelope body 带新邮箱；目标列 target_name 预读变更前邮箱；旧→新对比待二期 diff）
 	w := putEmail(t, r, 1, "new@panel.local")
 	require.Equal(t, http.StatusOK, w.Code)
 	var u models.User
 	require.NoError(t, db.First(&u, 1).Error)
 	assert.Equal(t, "new@panel.local", u.Email)
-	assert.Equal(t, "new@panel.local", u.Username)
+	assert.Equal(t, "new@panel.local", u.Email)
 	assert.EqualValues(t, 4, u.TokenVersion)
 	var audit models.AuditLog
 	require.NoError(t, db.Where("action = ?", "users.:id").First(&audit).Error)
 	assert.Contains(t, audit.Detail, `"email":"new@panel.local"`)
-	assert.Contains(t, audit.Detail, `"target":"user@panel.local"`, "注册表应预读变更前的旧邮箱")
+	// v5：目标名从 detail 提到独立列，且是执行前预读的快照（变更前的旧邮箱）
+	assert.Equal(t, "user@panel.local", audit.TargetName, "注册表应预读变更前的旧邮箱")
+	assert.Equal(t, "user", audit.TargetType)
+	assert.EqualValues(t, 1, audit.TargetID)
 	assert.Equal(t, "admin", audit.OperatorType)
 
 	// 2. 大小写归一后同值：不吊销会话（token_version 维持 4）。

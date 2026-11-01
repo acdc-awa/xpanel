@@ -16,7 +16,6 @@ type Config struct {
 	DB     DB     `yaml:"db"`
 	JWT    JWT    `yaml:"jwt"`
 	Totp   Totp   `yaml:"totp"`
-	Admin  Admin  `yaml:"admin"`
 	Backup Backup `yaml:"backup"`
 	Update Update `yaml:"update"`
 }
@@ -69,10 +68,9 @@ type Totp struct {
 	EncryptKey string `yaml:"encrypt_key"`
 }
 
-type Admin struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-}
+// Admin 配置段已于 v5（2026-11-01）整体删除：初始管理员固定 admin@panel.local + 随机密码，
+// 之后由管理员在后台自行改邮箱/密码；忘记密码走 reset-admin 子命令。
+// 老部署残留的 admin: 段由非严格 yaml.Unmarshal 静默忽略（不会启动失败）。
 
 // Default 返回内置默认值（config.yaml 缺省时兜底）。
 func Default() *Config {

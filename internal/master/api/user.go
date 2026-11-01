@@ -52,7 +52,6 @@ func (d *Deps) userView(user *models.User) gin.H {
 
 	return gin.H{
 		"id":                  user.ID,
-		"username":            user.Username,
 		"email":               user.Email,
 		"role":                user.Role,
 		"status":              user.Status,

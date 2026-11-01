@@ -138,8 +138,8 @@ func TestAdminDashboardRankWindow(t *testing.T) {
 		}
 	}
 
-	u1 := models.User{Username: "u1", Email: "u1@x.com", UUID: "uuid-1", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "t1"}
-	u2 := models.User{Username: "u2", Email: "u2@x.com", UUID: "uuid-2", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "t2"}
+	u1 := models.User{Email: "u1@x.com", UUID: "uuid-1", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "t1"}
+	u2 := models.User{Email: "u2@x.com", UUID: "uuid-2", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "t2"}
 	for _, u := range []*models.User{&u1, &u2} {
 		if err := db.Create(u).Error; err != nil {
 			t.Fatalf("create user: %v", err)
@@ -179,10 +179,10 @@ func TestAdminDashboardRankWindow(t *testing.T) {
 	if todayData.RankPeriod != "today" || todayData.RankLabel != "今日" {
 		t.Fatalf("today 口径回显错误: period=%q label=%q", todayData.RankPeriod, todayData.RankLabel)
 	}
-	if len(todayData.UserRank) != 2 || todayData.UserRank[0].Username != "u2" || todayData.UserRank[0].TotalBytes != 300 {
+	if len(todayData.UserRank) != 2 || todayData.UserRank[0].Email != "u2@x.com" || todayData.UserRank[0].TotalBytes != 300 {
 		t.Fatalf("today 用户排行错误: %+v", todayData.UserRank)
 	}
-	if todayData.UserRank[1].Username != "u1" || todayData.UserRank[1].TotalBytes != 100 {
+	if todayData.UserRank[1].Email != "u1@x.com" || todayData.UserRank[1].TotalBytes != 100 {
 		t.Fatalf("today 用户排行第二位错误: %+v", todayData.UserRank[1])
 	}
 	// 节点榜：s2=300 > s1=100
@@ -208,7 +208,7 @@ func TestAdminDashboardRankWindow(t *testing.T) {
 	if weekData.RankPeriod != "7d" || weekData.RankLabel != "近 7 天" {
 		t.Fatalf("7d 口径回显错误: period=%q label=%q", weekData.RankPeriod, weekData.RankLabel)
 	}
-	if len(weekData.UserRank) != 2 || weekData.UserRank[0].Username != "u1" || weekData.UserRank[0].TotalBytes != 1100 {
+	if len(weekData.UserRank) != 2 || weekData.UserRank[0].Email != "u1@x.com" || weekData.UserRank[0].TotalBytes != 1100 {
 		t.Fatalf("7d 用户排行错误: %+v", weekData.UserRank)
 	}
 	if len(weekData.ServerRank) == 0 || weekData.ServerRank[0].Name != "节点一" || weekData.ServerRank[0].TotalBytes != 1100 {
@@ -222,7 +222,7 @@ func TestAdminDashboardRankWindow(t *testing.T) {
 	}
 	var gotU1 int64
 	for _, r := range thirtyDayData.UserRank {
-		if r.Username == "u1" {
+		if r.Email == "u1@x.com" {
 			gotU1 = r.TotalBytes
 		}
 	}
@@ -262,7 +262,7 @@ func TestAdminDashboardRankTodayUsesMaxNotSum(t *testing.T) {
 	}
 	now := time.Now()
 	today := now.Format("2006-01-02")
-	u := models.User{Username: "solo", Email: "solo@x.com", UUID: "uuid-s", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "ts"}
+	u := models.User{Email: "solo@x.com", UUID: "uuid-s", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive, SubscribeToken: "ts"}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestAdminDashboardRelayInboundBreakdown(t *testing.T) {
 	}
 
 	// 真实用户 1
-	u1 := models.User{Username: "client1", Email: "c1@test.com", UUID: "uuid-c1", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive}
+	u1 := models.User{Email: "c1@test.com", UUID: "uuid-c1", PasswordHash: "h", Role: models.RoleUser, Status: models.StatusActive}
 	if err := db.Create(&u1).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,6 @@ func newAuthTestEnv(t *testing.T) (*gin.Engine, *services.JWTManager, *gorm.DB, 
 	uuid, _ := util.NewUUID()
 	token, _ := util.RandomHex(32)
 	user := models.User{
-		Username:       "alice@example.com",
 		UUID:           uuid,
 		Email:          "alice@example.com",
 		SubscribeToken: token,
@@ -138,7 +137,6 @@ func TestAuthPending2FAPolicy(t *testing.T) {
 	uuid2, _ := util.NewUUID()
 	token2, _ := util.RandomHex(32)
 	user2 := models.User{
-		Username:       "bob@example.com",
 		UUID:           uuid2,
 		Email:          "bob@example.com",
 		SubscribeToken: token2,

@@ -291,7 +291,7 @@ export function getServerMetrics(id: number, range = '1h') {
 export interface OnlineUserIPItem {
   email: string
   kind: 'user' | 'relay' | 'other' // user=面板用户 / relay=中转内部账户 / other=自定义 email
-  name?: string // kind=user 时的用户名
+  name?: string // kind=user 时的邮箱
   user_id?: number
   ips: string[]
 }
@@ -1044,8 +1044,27 @@ export interface AuditLogQueryParams {
   keyword?: string
   operator_id?: number
   operator_type?: string
+  /** 操作人快照精确匹配（v5：写入时的邮箱） */
+  operator_name?: string
+  /** 目标对象类型（user/server/inbound/...）与主键，v5 新增 */
+  target_type?: string
+  target_id?: number
+  /** HTTP 状态码精确值 */
+  status?: number
+  /** 结果粗筛：status 2xx/3xx = success，>=400 = fail */
+  result?: 'success' | 'fail'
   start_time?: string
   end_time?: string
+}
+
+/** 单条完整日志（列表对 detail 做过 8 KB 截断，被截断时按需拉全文）。 */
+export function getAuditLog(id: number) {
+  return http.get<ApiResp<AuditLog>>(`/admin/audit-logs/${id}`)
+}
+
+/** 按当前筛选导出 CSV（后端上限 50000 行，超限返回 400 提示缩小范围）。 */
+export function exportAuditLogs(params: AuditLogQueryParams) {
+  return http.get<Blob>('/admin/audit-logs/export', { params, responseType: 'blob' })
 }
 
 export function getAuditLogs(page = 1, size = 20, params?: AuditLogQueryParams | string) {
@@ -1060,7 +1079,6 @@ export function getAuditLogs(page = 1, size = 20, params?: AuditLogQueryParams |
 
 export interface CreateUserResult {
   id: number
-  username: string
   email: string
   uuid: string
   role: string

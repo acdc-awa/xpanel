@@ -32,7 +32,6 @@ func TestAdminRoleAntiLockoutProtection(t *testing.T) {
 
 	// 创建初始管理员 A
 	adminA := models.User{
-		Username:          "adminA@panel.local",
 		Email:             "adminA@panel.local",
 		UUID:              "uuid-admin-a",
 		Role:              models.RoleAdmin,
@@ -44,7 +43,6 @@ func TestAdminRoleAntiLockoutProtection(t *testing.T) {
 
 	// 创建普通用户 U
 	userU := models.User{
-		Username:          "userU@panel.local",
 		Email:             "userU@panel.local",
 		UUID:              "uuid-user-u",
 		Role:              models.RoleUser,

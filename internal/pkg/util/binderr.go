@@ -30,7 +30,7 @@ func init() {
 
 // bindFieldNames 常用请求字段的中文名（键为 json tag 名；无 json tag 的字段回退 Go 字段名）。
 var bindFieldNames = map[string]string{
-	"username": "用户名", "email": "邮箱", "password": "密码",
+	"email": "邮箱", "password": "密码",
 	"old_password": "当前密码", "new_password": "新密码", "current_password": "当前密码",
 	"code": "验证码", "token": "令牌",
 	"name": "名称", "title": "标题", "content": "内容", "remark": "备注",

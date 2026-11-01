@@ -91,7 +91,7 @@ func TestAuthorizedEntryServerIDs_APDerived(t *testing.T) {
 
 	group := models.PermissionGroup{Name: "g1"}
 	db.Create(&group)
-	user := models.User{Username: "u1", PermissionGroupID: group.ID}
+	user := models.User{Email: "perm@test.local", PermissionGroupID: group.ID}
 	db.Create(&user)
 
 	// 目标入站：服务器 2
@@ -125,7 +125,6 @@ func TestProtoUsersFor_APDerived(t *testing.T) {
 	db.Create(&group)
 
 	user := models.User{
-		Username:          "active_user",
 		UUID:              "11111111-2222-3333-4444-555555555555",
 		Email:             "active_user@test.local",
 		Status:            models.StatusActive,

@@ -18,7 +18,7 @@ func TestHandleTrafficReportSendsAck(t *testing.T) {
 		&models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}, &models.TrafficBatch{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	u := models.User{Username: "ack", Email: "ack@t.com", UUID: "uuid-ack",
+	u := models.User{Email: "ack@t.com", UUID: "uuid-ack",
 		SubscribeToken: "tok-ack", Status: models.StatusActive}
 	if err := h.DB.Create(&u).Error; err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestHandleTrafficReportNoAckForLegacy(t *testing.T) {
 		&models.UserAccessPoint{}, &models.PermissionGroupAccessPoint{}, &models.TrafficBatch{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	u := models.User{Username: "legacy", Email: "legacy@t.com", UUID: "uuid-legacy",
+	u := models.User{Email: "legacy@t.com", UUID: "uuid-legacy",
 		SubscribeToken: "tok-legacy", Status: models.StatusActive}
 	if err := h.DB.Create(&u).Error; err != nil {
 		t.Fatal(err)

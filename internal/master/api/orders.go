@@ -15,7 +15,7 @@ type orderView struct {
 	ID            uint64     `json:"id"`
 	OrderNo       string     `json:"order_no"`
 	UserID        uint64     `json:"user_id"`
-	Username      string     `json:"username"`
+	Email         string     `json:"email"`
 	PlanID        uint64     `json:"plan_id"`
 	PlanName      string     `json:"plan_name"`
 	AmountCents   int64      `json:"amount_cents"`
@@ -32,7 +32,7 @@ func (d *Deps) toOrderView(o *models.Order) orderView {
 	}
 	var user models.User
 	if err := d.DB.First(&user, o.UserID).Error; err == nil {
-		v.Username = user.Username
+		v.Email = user.Email
 	}
 	// 套餐名优先用订单快照（2026-10-25）：套餐可归档，归档行在常规查询里不可见，
 	// 实时 JOIN 会拿不到名称。旧订单若快照为空，仍回落实时查询与迁移前的行为一致。
@@ -76,12 +76,12 @@ func (d *Deps) AdminOrders(c *gin.Context) {
 		q = q.Where("status = ?", st)
 	}
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
-		// 用子查询匹配用户名/邮箱，避免把命中的用户 ID 全量拉回再拼 IN：
+		// 用子查询匹配邮箱，避免把命中的用户 ID 全量拉回再拼 IN：
 		// 关键词命中大量用户时会生成超长占位符列表（SQLite 变量上限）且多一次往返。
 		pat := "%" + kw + "%"
 		q = q.Where(
-			"(order_no LIKE ? OR user_id IN (SELECT id FROM users WHERE (username LIKE ? OR email LIKE ?) AND deleted_at IS NULL))",
-			pat, pat, pat,
+			"(order_no LIKE ? OR user_id IN (SELECT id FROM users WHERE email LIKE ? AND deleted_at IS NULL))",
+			pat, pat,
 		)
 	}
 	var total int64

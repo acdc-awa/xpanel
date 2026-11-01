@@ -324,11 +324,11 @@ func TestFindViolators(t *testing.T) {
 	gb := int64(1024 * 1024 * 1024)
 	expired := time.Now().Add(-24 * time.Hour)
 	users := []models.User{
-		{Username: "over", Email: "over@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PlanTrafficBytes: 1 * gb},
-		{Username: "under", Email: "under@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanTrafficBytes: 10 * gb},
-		{Username: "expired", Email: "expired@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive, ExpireAt: &expired},
-		{Username: "unlimited", Email: "unlimited@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive},
-		{Username: "disabled", Email: "disabled@t.com", UUID: "55555555-5555-5555-5555-555555555555", SubscribeToken: "t5", Status: models.StatusDisabled, PlanTrafficBytes: gb},
+		{Email: "over@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PlanTrafficBytes: 1 * gb},
+		{Email: "under@t.com", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "t2", Status: models.StatusActive, PlanTrafficBytes: 10 * gb},
+		{Email: "expired@t.com", UUID: "33333333-3333-3333-3333-333333333333", SubscribeToken: "t3", Status: models.StatusActive, ExpireAt: &expired},
+		{Email: "unlimited@t.com", UUID: "44444444-4444-4444-4444-444444444444", SubscribeToken: "t4", Status: models.StatusActive},
+		{Email: "disabled@t.com", UUID: "55555555-5555-5555-5555-555555555555", SubscribeToken: "t5", Status: models.StatusDisabled, PlanTrafficBytes: gb},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		t.Fatal(err)
@@ -449,7 +449,7 @@ func TestSaveBillingRatioAppliesInboundRatio(t *testing.T) {
 	mkAP(inbF.ID, 2)
 
 	mkUser := func(email string, group uint64) models.User {
-		u := models.User{Username: email, Email: email, UUID: "uuid-" + email, SubscribeToken: email, Status: models.StatusActive, PermissionGroupID: group}
+		u := models.User{Email: email, UUID: "uuid-" + email, SubscribeToken: email, Status: models.StatusActive, PermissionGroupID: group}
 		if err := db.Create(&u).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -596,7 +596,7 @@ func TestSaveStatsKeyInboundAttribution(t *testing.T) {
 	mkAP(inbA.ID, 2)
 	mkAP(inbB.ID, 2)
 
-	user := models.User{Username: "mix@t.com", Email: "mix@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: 2}
+	user := models.User{Email: "mix@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: 2}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -836,7 +836,7 @@ func TestSaveRejectsNegativeBytes(t *testing.T) {
 	if err := db.Create(&inb).Error; err != nil {
 		t.Fatal(err)
 	}
-	u := models.User{Username: "neg", Email: "neg@t.com", UUID: "uuid-neg", SubscribeToken: "tok-neg", Status: models.StatusActive}
+	u := models.User{Email: "neg@t.com", UUID: "uuid-neg", SubscribeToken: "tok-neg", Status: models.StatusActive}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -947,7 +947,7 @@ func TestSaveAbortsOnRateQueryFailure(t *testing.T) {
 		if err := db.Create(&models.PermissionGroupAccessPoint{PermissionGroupID: 2, AccessPointID: ap.ID}).Error; err != nil {
 			t.Fatal(err)
 		}
-		u := models.User{Username: "free", Email: "free@t.com", UUID: "uuid-free", SubscribeToken: "tok-free",
+		u := models.User{Email: "free@t.com", UUID: "uuid-free", SubscribeToken: "tok-free",
 			Status: models.StatusActive, PermissionGroupID: 2}
 		if err := db.Create(&u).Error; err != nil {
 			t.Fatal(err)
@@ -1149,8 +1149,8 @@ func TestInterMachineRelayTrafficTracking(t *testing.T) {
 	}
 
 	user := models.User{
-		Username: "comm-user",
-		UUID:     "11111111-1111-1111-1111-111111111111",
+		Email: "comm@test.local",
+		UUID:  "11111111-1111-1111-1111-111111111111",
 	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)

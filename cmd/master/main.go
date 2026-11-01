@@ -155,7 +155,7 @@ func main() {
 		JWT: jwtMgr,
 	}
 
-	ensureAdmin(database, cfg)
+	ensureAdmin(database)
 	ensureUserUUIDs(database)
 	ensureServerDefaultOutbounds(database)
 
@@ -363,10 +363,12 @@ func ensureJWTSecret(database *gorm.DB, cfg *config.Config) string {
 	return secret
 }
 
-// ensureAdmin 首次启动时创建初始管理员。账密不写进 configs 模板：
-// 未指定（或占位弱值）时用户名回退 admin@panel.local、密码自动生成 16 位强随机串并在控制台高亮输出；
-// 显式指定请写入 config.yaml 的 admin.username / admin.password（唯一配置入口，2026-08-30 起环境变量退役）。
-func ensureAdmin(database *gorm.DB, cfg *config.Config) {
+// ensureAdmin 首次启动时创建初始管理员。
+//
+// 账密**不接受配置文件指定**（v5 起删除了 config 的 admin 段）：登录邮箱固定 admin@panel.local，
+// 密码自动生成 16 位强随机串并在控制台高亮输出，首次登录强制改密。要改账号/密码，登录后台即可；
+// 忘记密码用 reset-admin 子命令（它按 email 查库，不读配置）。
+func ensureAdmin(database *gorm.DB) {
 	var cnt int64
 	if err := database.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&cnt).Error; err != nil {
 		log.Fatalf("查询管理员失败: %v", err)
@@ -375,19 +377,8 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		return
 	}
 
-	username := strings.TrimSpace(cfg.Admin.Username)
-	if username == "" {
-		username = "admin@panel.local"
-	}
-
-	rawPassword := strings.TrimSpace(cfg.Admin.Password)
-	isRandom := false
-	// 2026-08-24：模板与 .env.example 不再提供默认账密（留空=随机生成）；
-	// 以下弱值/占位值防御旧配置与照抄示例的部署者。
-	if rawPassword == "" || rawPassword == "admin123" || rawPassword == "admin" || rawPassword == "replace-with-strong-password" {
-		rawPassword = util.GenerateSecurePassword(16)
-		isRandom = true
-	}
+	email := "admin@panel.local"
+	rawPassword := util.GenerateSecurePassword(16)
 
 	hash, err := argon2id.CreateHash(rawPassword, argon2id.DefaultParams)
 	if err != nil {
@@ -402,8 +393,7 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		log.Fatalf("生成管理员 UUID 失败: %v", err)
 	}
 	admin := &models.User{
-		Username:          username,
-		Email:             username,
+		Email:             email,
 		PasswordHash:      hash,
 		Role:              models.RoleAdmin,
 		Status:            models.StatusActive,
@@ -416,22 +406,20 @@ func ensureAdmin(database *gorm.DB, cfg *config.Config) {
 		log.Fatalf("创建初始管理员失败: %v", err)
 	}
 
-	printAdminInitCard(username, rawPassword, isRandom)
+	printAdminInitCard(email, rawPassword)
 }
 
-func printAdminInitCard(username, password string, isRandom bool) {
+func printAdminInitCard(email, password string) {
 	fmt.Println()
 	fmt.Println("==========================================================================")
 	fmt.Println("                   XrayPanel 主控系统首次初始化成功                     ")
 	fmt.Println("==========================================================================")
 	fmt.Printf("   管理后台:       http://127.0.0.1:18080 (或您的反代域名)\n")
-	fmt.Printf("   管理员账号:     %s\n", username)
+	fmt.Printf("   管理员账号:     %s\n", email)
 	fmt.Printf("   初始管理员密码: %s\n", password)
 	fmt.Println("--------------------------------------------------------------------------")
-	if isRandom {
-		fmt.Println("   [安全提示] 初始随机密码仅在控制台显示一次，请妥善保存")
-	}
-	fmt.Println("   [安全提示] 首次登录后系统将强制要求修改密码。")
+	fmt.Println("   初始随机密码仅在控制台显示一次，请妥善保存")
+	fmt.Println("   首次登录后系统将强制要求修改密码。")
 	fmt.Println("==========================================================================")
 	fmt.Println()
 }
@@ -439,14 +427,14 @@ func printAdminInitCard(username, password string, isRandom bool) {
 // handleResetAdmin 执行 reset-admin CLI 子命令，重置管理员密码并递增 token_version 吊销旧会话。
 func handleResetAdmin(database *gorm.DB, args []string) {
 	resetFlags := flag.NewFlagSet("reset-admin", flag.ExitOnError)
-	email := resetFlags.String("email", "", "指定重置的管理员邮箱/用户名（留空自动重置首个管理员）")
+	email := resetFlags.String("email", "", "指定重置的管理员邮箱（留空自动重置首个管理员）")
 	newPassword := resetFlags.String("password", "", "指定新密码（留空自动生成 16 位强随机密码）")
 	_ = resetFlags.Parse(args)
 
 	var admin models.User
 	query := database.Where("role = ?", models.RoleAdmin)
 	if *email != "" {
-		query = query.Where("username = ? OR email = ?", *email, *email)
+		query = query.Where("email = ?", *email)
 	}
 	if err := query.First(&admin).Error; err != nil {
 		fmt.Printf("[错误] 未找到管理员账户 (err=%v)\n", err)
@@ -481,7 +469,7 @@ func handleResetAdmin(database *gorm.DB, args []string) {
 	fmt.Println("==========================================================================")
 	fmt.Println("                        管理员密码重置成功！                              ")
 	fmt.Println("==========================================================================")
-	fmt.Printf("   管理员账号:   %s\n", admin.Username)
+	fmt.Printf("   管理员账号:   %s\n", admin.Email)
 	fmt.Printf("   新密码:       %s\n", finalPassword)
 	fmt.Printf("   会话安全:     已递增 token_version 至 %d，所有旧登录 Token 已全部失效\n", newTokenVersion)
 	fmt.Println("--------------------------------------------------------------------------")
@@ -505,7 +493,7 @@ func ensureUserUUIDs(database *gorm.DB) {
 			continue
 		}
 		if err := database.Model(&u).Update("uuid", uuid).Error; err != nil {
-			log.Printf("补全用户 %s UUID 失败: %v", u.Username, err)
+			log.Printf("补全用户 %s UUID 失败: %v", u.Email, err)
 		}
 	}
 	if len(users) > 0 {

@@ -14,8 +14,8 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 
-	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/models"
 )
 
 // TestAdminServerOnlineIPs_MergeUserAcrossInbounds 在线面板按用户合并去重（2026-09-06）：
@@ -32,7 +32,7 @@ func TestAdminServerOnlineIPs_MergeUserAcrossInbounds(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	user := models.User{Username: "alice", Email: "Alice@T.com", UUID: "11111111-1111-1111-1111-111111111111", PasswordHash: "h", SubscribeToken: "tok", Status: models.StatusActive}
+	user := models.User{Email: "Alice@T.com", UUID: "11111111-1111-1111-1111-111111111111", PasswordHash: "h", SubscribeToken: "tok", Status: models.StatusActive}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +93,8 @@ func TestAdminServerOnlineIPs_MergeUserAcrossInbounds(t *testing.T) {
 		t.Fatal("缺 user 条目")
 	}
 	u := resp.Data.Users[*merged]
-	if u.UserID != user.ID || u.Name != "alice" {
-		t.Fatalf("user 条目 = %+v, want user_id=%d name=alice", u, user.ID)
+	if u.UserID != user.ID || u.Name != "Alice@T.com" {
+		t.Fatalf("user 条目 = %+v, want user_id=%d name=Alice@T.com（v5 起展示名即邮箱）", u, user.ID)
 	}
 	if u.Email != "Alice@T.com" {
 		t.Fatalf("user email = %q, want 回填真实邮箱 Alice@T.com", u.Email)
@@ -197,4 +197,4 @@ func TestAdminServerOnlineIPs_MemoryFirstAndOfflineZero(t *testing.T) {
 	}
 }
 
-// TestAdminServerOnlineIPs_ForwardUserDeduplicationAndName 验证自用代理用户跨协议去重并正确回显用户名
+// TestAdminServerOnlineIPs_ForwardUserDeduplicationAndName 验证自用代理用户跨协议去重并正确回显邮箱

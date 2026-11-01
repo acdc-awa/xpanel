@@ -54,7 +54,6 @@ func mkUser(t *testing.T, db *gorm.DB, name string) models.User {
 	t.Helper()
 	token, _ := util.NewSubscribeToken()
 	u := models.User{
-		Username:       name,
 		Email:          name + "@test.local",
 		UUID:           "00000000-0000-0000-0000-00000000000" + name,
 		SubscribeToken: token,

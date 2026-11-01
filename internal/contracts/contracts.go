@@ -86,7 +86,6 @@ type ClientCredentialDTO struct {
 // UserSummaryDTO 用户状态摘要 DTO。
 type UserSummaryDTO struct {
 	ID          uint64
-	Username    string
 	Email       string
 	UUID        string
 	Status      int // 1: 正常, 0: 禁用

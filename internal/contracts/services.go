@@ -54,7 +54,7 @@ type AuthService interface {
 	ChangePassword(ctx context.Context, userID uint64, oldPwd, newPwd string) error
 	ForgotPassword(ctx context.Context, email string) (bool, error)
 	IssueTokens(user *models.User) (access, refresh string, err error)
-	Login(ctx context.Context, username, password, clientIP string) (*models.User, error)
+	Login(ctx context.Context, email, password, clientIP string) (*models.User, error)
 	Refresh(ctx context.Context, refreshToken string) (string, error)
 	Register(ctx context.Context, req *RegisterRequest) (*models.User, error)
 	ResetSubscribeToken(ctx context.Context, userID uint64) (token string, newUUID string, err error)
@@ -90,9 +90,26 @@ type OrderService interface {
 	PayWithBalance(userID, planID uint64) (*models.Order, error)
 }
 
+// AuditEvent 一条手动打点的审计事件（用户侧登录/注册/改密等）。
+// 管理端写操作由中间件统一记录，不走这里。
+type AuditEvent struct {
+	OperatorType string // admin / user / system
+	OperatorID   uint64
+	OperatorName string // 留空时按 OperatorID 回查 users.email
+	Action       string
+	TargetType   string // 留空时按 action 前缀推导
+	TargetID     uint64
+	TargetName   string
+	Status       int // HTTP 状态码；0 表示不适用
+	Message      string
+	Extra        map[string]any
+	IP           string
+}
+
 // AuditService 审计日志服务接口。
 type AuditService interface {
 	Log(opType string, opID uint64, action, detail, ip string)
+	LogEvent(ev AuditEvent)
 }
 
 // ConfigService 配置生成与待推送服务接口。

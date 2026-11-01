@@ -55,14 +55,14 @@ const nodeColumns = computed<TableColumn[]>(() => [
 
 const cardColumns: TableColumn[] = [
   { id: 'card-code', header: '卡密', minWidth: 110 },
-  { id: 'card-user', header: '使用人', width: 85, key: 'used_by_username' },
+  { id: 'card-user', header: '使用人', width: 85, key: 'used_by_email' },
   { id: 'card-face', header: '面值', width: 90 },
   { id: 'card-time', header: '核销时间', width: 95 },
 ]
 
 const orderColumns: TableColumn[] = [
   { id: 'order-no', header: '订单号', minWidth: 110 },
-  { id: 'order-user', header: '用户', width: 85, key: 'username' },
+  { id: 'order-user', header: '用户', width: 85, key: 'email' },
   { id: 'order-amount', header: '金额', width: 80 },
   { id: 'order-status', header: '状态', width: 80 },
 ]
@@ -118,7 +118,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
             </span>
           </template>
           <template #cell-user-main="{ row }">
-            <span class="user-main-name">{{ row.username }}</span>
+            <span class="user-main-name">{{ row.email }}</span>
             <div class="user-sub-email tabular-num">{{ row.email || '—' }}</div>
           </template>
           <template #cell-user-plan="{ row }">

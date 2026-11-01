@@ -1208,7 +1208,7 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 type onlineIPEntry struct {
 	Email  string   `json:"email"`
 	Kind   string   `json:"kind"`
-	Name   string   `json:"name,omitempty"` // kind=user 时的面板用户名
+	Name   string   `json:"name,omitempty"` // kind=user 时的面板邮箱
 	UserID uint64   `json:"user_id,omitempty"`
 	IPs    []string `json:"ips"`
 }
@@ -1295,7 +1295,7 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 			ids = append(ids, uid)
 		}
 		var users []models.User
-		d.DB.Select("id, username, email").Where("id IN ?", ids).Find(&users)
+		d.DB.Select("id, email").Where("id IN ?", ids).Find(&users)
 		byID := make(map[uint64]models.User, len(users))
 		for _, u := range users {
 			byID[u.ID] = u
@@ -1305,7 +1305,7 @@ func (d *Deps) AdminServerOnlineIPs(c *gin.Context) {
 				continue
 			}
 			if u, ok := byID[entries[i].UserID]; ok {
-				entries[i].Name = u.Username
+				entries[i].Name = u.Email
 				if u.Email != "" {
 					entries[i].Email = u.Email // 统计键是合成格式，展示回填真实邮箱
 				}

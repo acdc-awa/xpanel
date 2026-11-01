@@ -301,18 +301,30 @@ type NodeReport struct {
 }
 
 // AuditLog 审计日志（管理员操作、登录、订单确认等）。
+//
+// v5 起补成「可取证、可搜索、可追溯的审计事件」：
+//   - OperatorName 是写入时的操作人快照（= 当时的 users.email），不再实时 join users——
+//     改邮箱/删用户都不会改写历史（搜索也直接打在这一列上）；
+//   - TargetType/TargetID/TargetName 是目标对象的类型/主键/写入时显示名快照，
+//     支撑「看某个对象的历史」；
+//   - Status 从 detail 信封里提出来单列，便于按成功/失败筛选。
 type AuditLog struct {
 	ID           uint64 `gorm:"primaryKey" json:"id"`
 	OperatorType string `gorm:"size:16;index" json:"operator_type"` // admin / user / system
 	OperatorID   uint64 `gorm:"index" json:"operator_id"`
+	OperatorName string `gorm:"size:128;index" json:"operator_name"`
 	Action       string `gorm:"size:64;index" json:"action"`
 	// Category 模块分类（servers/users/billing/inbounds/settings/auth/other）。
 	// 写入时由 AuditCategory 单源判定并落库，列表筛选直接按列匹配；
 	// 存量行由启动迁移回填（见 BackfillAuditCategories）。
-	Category  string    `gorm:"size:16;index;default:''" json:"category"`
-	Detail    string    `gorm:"type:text" json:"detail"`
-	IP        string    `gorm:"size:64" json:"ip"`
-	CreatedAt time.Time `json:"created_at"`
+	Category   string    `gorm:"size:16;index;default:''" json:"category"`
+	TargetType string    `gorm:"size:32;index;index:idx_audit_logs_target,priority:1" json:"target_type"`
+	TargetID   uint64    `gorm:"index:idx_audit_logs_target,priority:2" json:"target_id"`
+	TargetName string    `gorm:"size:255" json:"target_name"`
+	Status     int       `gorm:"index" json:"status"`
+	Detail     string    `gorm:"type:text" json:"detail"`
+	IP         string    `gorm:"size:64" json:"ip"`
+	CreatedAt  time.Time `gorm:"index" json:"created_at"`
 }
 
 // PendingConfig 服务器待推送的 Xray 配置（每服务器一条最新；节点离线时保留，上线后自动补推）。

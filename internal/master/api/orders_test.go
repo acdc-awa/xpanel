@@ -23,8 +23,8 @@ func setupOrdersTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Plan{}, &models.Order{}))
 
 	users := []models.User{
-		{ID: 1, Username: "alice", Email: "alice@example.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "tok-1"},
-		{ID: 2, Username: "bob", Email: "bob@domain.org", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "tok-2"},
+		{ID: 1, Email: "alice@example.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "tok-1"},
+		{ID: 2, Email: "bob@domain.org", UUID: "22222222-2222-2222-2222-222222222222", SubscribeToken: "tok-2"},
 	}
 	require.NoError(t, db.Create(&users).Error)
 

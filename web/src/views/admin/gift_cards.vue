@@ -238,7 +238,7 @@ function isExpired(row: GiftCard) {
             </CsCardFact>
             <CsCardFact
               label="兑换用户"
-              :value="row.used_by ? (row.used_by_username || `用户 #${row.used_by}`) : '待兑换'"
+              :value="row.used_by ? (row.used_by_email || `用户 #${row.used_by}`) : '待兑换'"
             />
             <CsCardFact label="有效期" :value="row.expires_at ? fmtTime(row.expires_at) : '永久有效'" mono />
             <CsCardFact v-if="row.used_at" label="兑换时间" :value="fmtTime(row.used_at)" mono full-width />

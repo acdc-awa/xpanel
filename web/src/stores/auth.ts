@@ -13,9 +13,10 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isLoggedIn: (s) => !!s.user,
     role: (s): Role | null => s.user?.role ?? null,
-    username: (s) => s.user?.username ?? '',
-    displayName: (s) => s.user?.username ?? '访客',
-    avatarText: (s) => (s.user?.username?.[0] ?? '?').toUpperCase(),
+    // v5 起邮箱即身份（原 username 列已并入 email）
+    email: (s) => s.user?.email ?? '',
+    displayName: (s) => s.user?.email ?? '访客',
+    avatarText: (s) => (s.user?.email?.[0] ?? '?').toUpperCase(),
   },
 
   actions: {
@@ -27,8 +28,8 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /** 登录：返回 'ok'（已签发）或 '2fa'（需二次验证）。turnstileToken 为人机验证 token（captcha 开启时必传）。 */
-    async login(username: string, password: string, turnstileToken?: string): Promise<'ok' | '2fa'> {
-      const { data } = await apiLogin(username, password, turnstileToken)
+    async login(email: string, password: string, turnstileToken?: string): Promise<'ok' | '2fa'> {
+      const { data } = await apiLogin(email, password, turnstileToken)
       if (data.code !== 0) throw new Error(data.message || '登录失败')
       if (data.data.twofa_required) return '2fa'
       this.applyUser(data.data.user!)

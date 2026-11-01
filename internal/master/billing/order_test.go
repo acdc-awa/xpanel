@@ -45,7 +45,7 @@ func TestPayWithBalanceSaleGating(t *testing.T) {
 	retired := mkPlan("双关全闭", false, false)
 
 	mkUser := func(name string, planID uint64) uint64 {
-		u := models.User{Username: name, Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name, BalanceCents: 1_000_000, PlanID: planID}
+		u := models.User{Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name, BalanceCents: 1_000_000, PlanID: planID}
 		if err := db.Create(&u).Error; err != nil {
 			t.Fatalf("create user: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestPayWithBalanceDurationSemantics(t *testing.T) {
 	planB := mkPlan("套餐B", 30)
 
 	mkUser := func(name string, planID uint64, expire *time.Time) uint64 {
-		u := models.User{Username: name, Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name, BalanceCents: 1_000_000, PlanID: planID, ExpireAt: expire}
+		u := models.User{Email: name + "@x.com", UUID: "uuid-" + name, SubscribeToken: "tok-" + name, BalanceCents: 1_000_000, PlanID: planID, ExpireAt: expire}
 		if err := db.Create(&u).Error; err != nil {
 			t.Fatalf("create user: %v", err)
 		}
@@ -191,7 +191,7 @@ func TestPayWithBalanceFollowsPlanPermissionGroup(t *testing.T) {
 	// 用户「已带一个自定义分组」，购买后应被清空（购买即跟随套餐，不再保留自定义）
 	uid := func() uint64 {
 		u := models.User{
-			Username: "buyer", Email: "buyer@x.com", UUID: "uuid-buyer", SubscribeToken: "tok-buyer",
+			Email: "buyer@x.com", UUID: "uuid-buyer", SubscribeToken: "tok-buyer",
 			BalanceCents: 1_000_000, PermissionGroupID: 9,
 		}
 		if err := db.Create(&u).Error; err != nil {

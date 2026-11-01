@@ -48,7 +48,7 @@ func TestAdminResetUserTrafficAlignsCycleAndClearsUsage(t *testing.T) {
 
 	// 存量形态：周期起点不在整点（旧版写入），当前小时桶内已累计计费字节
 	user := models.User{
-		Username: "reset@panel.local", Email: "reset@panel.local",
+		Email: "reset@panel.local",
 		UUID: "uuid-reset", PasswordHash: "x", Status: models.StatusActive,
 		TrafficCycleStart: bucket.Add(-30 * time.Minute),
 	}

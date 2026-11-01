@@ -195,6 +195,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.POST("/plans/:id/restore", d.AdminRestorePlan)
 			admin.GET("/orders", d.AdminOrders)
 			admin.GET("/audit-logs", d.AdminAuditLogs)
+			admin.GET("/audit-logs/export", d.AdminExportAuditLogs)
+			admin.GET("/audit-logs/:id", d.AdminAuditLogDetail)
 			admin.POST("/backup", d.AdminCreateBackup)
 			admin.GET("/backup", d.AdminListBackups)
 			admin.POST("/backup/restore", d.AdminRestoreBackup)

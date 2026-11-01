@@ -43,7 +43,7 @@ func TestGetValidUsersFiltersUnavailableInbounds(t *testing.T) {
 		}
 	}
 	// 三个入站都对同一权限组开放（授权不参与本用例）
-	u := models.User{Username: "u1", Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111",
+	u := models.User{Email: "u1@t.com", UUID: "11111111-1111-1111-1111-111111111111",
 		SubscribeToken: "t1", Status: models.StatusActive, PermissionGroupID: 1}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatal(err)

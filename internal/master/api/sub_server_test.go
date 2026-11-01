@@ -31,7 +31,7 @@ func TestSubscribeServer_Lifecycle(t *testing.T) {
 	}
 
 	// 有效 token 用户（无接入点时订阅返回 404「暂无可用节点」，可据此区分「token 校验通过」）
-	user := models.User{Username: "u@x.com", Email: "u@x.com", UUID: "uuid-1", PasswordHash: "h", SubscribeToken: "tok-valid", Status: models.StatusActive}
+	user := models.User{Email: "u@x.com", UUID: "uuid-1", PasswordHash: "h", SubscribeToken: "tok-valid", Status: models.StatusActive}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}

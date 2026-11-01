@@ -13,7 +13,7 @@ const site = useSiteStore()
 const router = useRouter()
 const route = useRoute()
 
-const form = reactive({ username: '', password: '', turnstile_token: '' })
+const form = reactive({ email: '', password: '', turnstile_token: '' })
 const loading = ref(false)
 const turnstileRef = ref<{ reset: () => void } | null>(null)
 
@@ -35,7 +35,7 @@ function resetCaptcha() {
 }
 
 async function onSubmit() {
-  if (!form.username || !form.password) {
+  if (!form.email || !form.password) {
     ElMessage.warning('请输入邮箱和密码')
     return
   }
@@ -45,7 +45,7 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    const result = await auth.login(form.username.trim(), form.password, form.turnstile_token)
+    const result = await auth.login(form.email.trim(), form.password, form.turnstile_token)
     if (result === '2fa') {
       twofaOpen.value = true
       twofaCode.value = ''
@@ -103,7 +103,7 @@ function gotoHome() {
 
       <el-form label-position="top" size="large" @submit.prevent="onSubmit">
         <el-form-item label="邮箱">
-          <el-input v-model="form.username" placeholder="you@example.com" :prefix-icon="User" autofocus />
+          <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="User" autofocus />
         </el-form-item>
         <el-form-item label="密码">
           <el-input

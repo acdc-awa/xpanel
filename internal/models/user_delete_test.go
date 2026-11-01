@@ -16,7 +16,7 @@ func TestUserSoftDelete(t *testing.T) {
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	u := User{Username: "soft@t.com", Email: "soft@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "tok-soft", Role: RoleUser, Status: StatusActive}
+	u := User{Email: "soft@t.com", UUID: "11111111-1111-1111-1111-111111111111", SubscribeToken: "tok-soft", Role: RoleUser, Status: StatusActive}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatalf("create: %v", err)
 	}

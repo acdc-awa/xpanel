@@ -26,3 +26,11 @@ type Deps struct {
 	Backup    contracts.BackupService
 	SubServer *SubscribeServer
 }
+
+// audit 记录一条审计事件（Audit 未注入时静默跳过，便于测试与精简部署）。
+func (d *Deps) audit(ev contracts.AuditEvent) {
+	if d.Audit == nil {
+		return
+	}
+	d.Audit.LogEvent(ev)
+}

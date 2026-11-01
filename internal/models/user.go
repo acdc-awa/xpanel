@@ -9,10 +9,11 @@ import (
 // User 用户。plan_id / expire_at 是对《系统设计方案》§5 简表的补充，
 // 对应 §4.1「用户详情（当前套餐、剩余流量、到期时间）」。
 type User struct {
-	ID             uint64     `gorm:"primaryKey" json:"id"`
-	Username       string     `gorm:"size:32;uniqueIndex;not null" json:"username"`
-	UUID           string     `gorm:"size:36;uniqueIndex" json:"-"` // VLESS 用户账号（UUID v4）
-	Email          string     `gorm:"size:128;uniqueIndex" json:"email"`
+	ID   uint64 `gorm:"primaryKey" json:"id"`
+	UUID string `gorm:"size:36;uniqueIndex" json:"-"` // VLESS 用户账号（UUID v4）
+	// Email 既是登录账号也是唯一身份显示（v5 起合并了原 username 列）。
+	// 登录、查重、唯一冲突判定、审计操作人一律只看这一列；列上加 NOT NULL（v5 迁移整表重建）。
+	Email          string     `gorm:"size:128;uniqueIndex;not null" json:"email"`
 	PasswordHash   string     `gorm:"size:255;not null" json:"-"`
 	Role           string     `gorm:"size:16;default:user;index" json:"role"`
 	Status         int        `gorm:"default:1;index" json:"status"`

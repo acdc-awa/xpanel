@@ -9,7 +9,6 @@ export type Role = 'admin' | 'user'
 
 export interface UserInfo {
   id: number
-  username: string
   email: string
   role: Role
   status: number
@@ -80,7 +79,6 @@ export interface ServerTrafficItem {
 
 export interface UserTrafficRankItem {
   user_id: number
-  username: string
   email: string
   plan_name: string
   up_bytes: number
@@ -113,14 +111,14 @@ export interface RecentGiftCardItem {
   code_masked: string
   name: string
   face_value_cents: number
-  used_by_username: string
+  used_by_email: string
   used_at: string
 }
 
 export interface RecentOrderItem {
   id: number
   order_no: string
-  username: string
+  email: string
   plan_name: string
   amount_cents: number
   payment_method: string
@@ -183,7 +181,6 @@ export interface ServerMetricsData {
 
 export interface AdminUser {
   id: number
-  username: string
   email: string
   uuid: string
   remark?: string
@@ -234,7 +231,7 @@ export interface GiftCard {
   face_value_cents: number
   status: 'unused' | 'used' | 'disabled'
   used_by: number
-  used_by_username?: string // 后端批量补齐（未兑换为空）
+  used_by_email?: string // 后端批量补齐（未兑换为空）
   used_at: string | null
   expires_at: string | null
   created_by: number
@@ -279,7 +276,7 @@ export interface Order {
   id: number
   order_no: string
   user_id: number
-  username: string
+  email: string
   plan_id: number
   plan_name: string
   amount_cents: number
@@ -293,13 +290,22 @@ export interface AuditLog {
   id: number
   operator_type: string
   operator_id: number
-  operator_username?: string // 后端批量补齐；system 类型为空
+  /** 操作人显示名：写入时快照（邮箱），system 类型为空 */
+  operator_name?: string
   action: string
   /** 模块分类（servers/users/billing/inbounds/settings/auth/other），后端单源判定 */
   category?: string
   /** 分类展示名（服务器/用户/财务/…），后端给出，前端不再自行映射 */
   category_label?: string
+  /** 目标对象类型/主键/写入时显示名快照（无目标对象时为空） */
+  target_type?: string
+  target_id?: number
+  target_name?: string
+  /** HTTP 状态码（从 detail 信封提取，0=旧行未回填） */
+  status?: number
   detail: string
+  /** 列表接口按 8 KB 截断 detail 时为 true，完整内容走 GET /admin/audit-logs/:id */
+  detail_truncated?: boolean
   ip: string
   created_at: string
 }

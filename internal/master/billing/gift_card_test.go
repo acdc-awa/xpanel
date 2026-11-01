@@ -32,7 +32,6 @@ func TestGiftCard_BatchGenerateAndRedeem(t *testing.T) {
 
 	// 1. 创建测试用户
 	user := models.User{
-		Username:       "testuser",
 		Email:          "testuser@test.local",
 		UUID:           "11111111-2222-3333-4444-555555555555",
 		SubscribeToken: "subtoken111111111111111111111111111111111111111111111111111111111111",
@@ -115,7 +114,6 @@ func TestOrder_PayWithBalance(t *testing.T) {
 
 	// 2. 创建初始余额为 5000分 (50元) 的用户
 	user := models.User{
-		Username:       "buyer",
 		Email:          "buyer@test.local",
 		UUID:           "22222222-3333-4444-5555-666666666666",
 		SubscribeToken: "subtoken222222222222222222222222222222222222222222222222222222222222",
@@ -197,7 +195,6 @@ func TestGiftCard_AdminAdjustBalance(t *testing.T) {
 	svc := NewGiftCardService(gormstore.NewBillingStore(db))
 
 	user := models.User{
-		Username:       "adjuser",
 		Email:          "adjuser@test.local",
 		UUID:           "33333333-4444-5555-6666-777777777777",
 		SubscribeToken: "subtoken333333333333333333333333333333333333333333333333333333333333",
@@ -246,7 +243,7 @@ func TestOrder_PayWithBalance_PublishesEvent(t *testing.T) {
 		t.Fatalf("create plan failed: %v", err)
 	}
 	user := models.User{
-		Username: "evt-buyer", Email: "evt@test.local",
+		Email: "evt@test.local",
 		UUID:           "33333333-4444-5555-6666-777777777777",
 		SubscribeToken: "subtoken333333333333333333333333333333333333333333333333333333333333",
 		BalanceCents:   5000,

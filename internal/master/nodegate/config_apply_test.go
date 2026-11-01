@@ -53,7 +53,7 @@ func seedServer(t *testing.T, db *gorm.DB, nodeID, tag string) models.Server {
 	if err := db.Create(&inb).Error; err != nil {
 		t.Fatal(err)
 	}
-	u := models.User{Username: "u-" + nodeID, Email: nodeID + "@t.com", UUID: uuidFor(nodeID),
+	u := models.User{Email: nodeID + "@t.com", UUID: uuidFor(nodeID),
 		SubscribeToken: "t-" + nodeID, Status: models.StatusActive, PermissionGroupID: 1}
 	if err := db.Create(&u).Error; err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestRefreshPendingRewritesStaleContent(t *testing.T) {
 	h, db := newApplyHub(t)
 	srv := seedServer(t, db, "node-1", "in-a")
 	var u models.User
-	if err := db.Where("username = ?", "u-node-1").First(&u).Error; err != nil {
+	if err := db.Where("email = ?", "node-1@t.com").First(&u).Error; err != nil {
 		t.Fatal(err)
 	}
 	var inb models.Inbound
@@ -187,7 +187,7 @@ func TestRefreshPendingRewritesStaleContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 用户随后被封禁（只走热更，不会更新待推内容）
-	if err := db.Model(&models.User{}).Where("username = ?", "u-node-1").Update("status", "disabled").Error; err != nil {
+	if err := db.Model(&models.User{}).Where("email = ?", "node-1@t.com").Update("status", "disabled").Error; err != nil {
 		t.Fatal(err)
 	}
 

@@ -36,7 +36,6 @@ func TestUserAndAdminResetSubscribe(t *testing.T) {
 	origUUID, _ := util.NewUUID()
 	origToken, _ := util.RandomHex(32)
 	user := models.User{
-		Username:       "user_sub@example.com",
 		UUID:           origUUID,
 		Email:          "user_sub@example.com",
 		SubscribeToken: origToken,
@@ -98,8 +97,8 @@ func TestUserAndAdminResetSubscribe(t *testing.T) {
 	if err := db.Where("operator_type = ? AND operator_id = ? AND action = ?", "user", user.ID, "subscribe.reset_token").First(&audit).Error; err != nil {
 		t.Fatalf("应记录用户重置订阅审计日志: %v", err)
 	}
-	if audit.Detail != "重置订阅地址与连接凭据" {
-		t.Fatalf("审计日志详情不符: got %q, want %q", audit.Detail, "重置订阅地址与连接凭据")
+	if !strings.Contains(audit.Detail, "重置订阅地址与连接凭据") {
+		t.Fatalf("审计日志详情不符: got %q, want 含「重置订阅地址与连接凭据」", audit.Detail)
 	}
 
 	midUUID := userAfterUserReset.UUID

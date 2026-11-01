@@ -75,7 +75,16 @@ const (
 	//
 	// v4 是一整步**未发版**升级（生产库仍在 v3）：本步在开发期曾拆记 v4 / v5 / v6，各批都未单独
 	// 发版，故按「不让运维面对跳号」的既有口径合并为单步 v3 → v4（见 UPGRADE.md §4.6 / §4.8 / §4.9）。
-	DBSchemaVersion = 4
+	//
+	// v5（2026-11-01，审计日志重构 + 身份键统一）：
+	//  ① users.username 并入 users.email——删列 + email 改 NOT NULL（SQLite 整表重建），
+	//     登录/查重/展示/唯一冲突判定全部只看 email；存量空邮箱先按 username 回填，仍空的兜底
+	//     user<id>@panel.local；
+	//  ② audit_logs 补审计事件字段：operator_name（写入时快照，替代实时 join users）、
+	//     target_type / target_id / target_name（目标对象）、status（HTTP 状态），
+	//     并给 created_at 与 (target_type,target_id) 加索引；存量行由启动迁移从 detail 信封回填；
+	//  ③ audit detail 上限由 2 KB 提到 32 KB（base64/二进制转 sha256 摘要），正文不再摘要化。
+	DBSchemaVersion = 5
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。
@@ -107,7 +116,12 @@ const (
 	//
 	// 删除语义归档化（2026-10-25）已并入本步，不再单独占用版本号：它自身只是加列 + 回填，
 	// 但与本步一起升级后同样不可回滚到 v3（Min 已由上面的两重依据拉到 4）。
-	DBMinCompatibleVersion = 4
+	//
+	// v5 与 DBSchemaVersion 同步提升，依据是**硬故障**：v5 删掉了 users.username 列，
+	// 旧面板的注册/建用户/改邮箱都会显式写该列（INSERT/UPDATE 报 "no such column"），
+	// 登录也按 username 查询——回滚后整套账号体系直接不可用。不存在「读错但能跑」的中间态，
+	// 故必须 fail-closed。出路：前进到 v5，或停服用升级前备份恢复（见 UPGRADE.md）。
+	DBMinCompatibleVersion = 5
 )
 
 // settings 键（复用既有 settings 键值表，避免新表）。

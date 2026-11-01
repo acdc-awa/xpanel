@@ -39,7 +39,7 @@ func TestResetPasswordUniformMessage(t *testing.T) {
 		uuid, _ := util.NewUUID()
 		token, _ := util.RandomHex(32)
 		u := models.User{
-			Username: email, Email: email, UUID: uuid, SubscribeToken: token,
+			Email: email, UUID: uuid, SubscribeToken: token,
 			Role: models.RoleUser, Status: models.StatusActive,
 		}
 		if err := db.Create(&u).Error; err != nil {

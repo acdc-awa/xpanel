@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,6 +31,11 @@ func (d *Deps) Register(c *gin.Context) {
 		util.Fail(c, code, msg)
 		return
 	}
+	d.audit(services.AuditEvent{
+		OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
+		Action: "auth.register", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+		Status: 200, Message: "注册成功", IP: util.ClientIPFromContext(c),
+	})
 	access, refresh, err := d.Auth.IssueTokens(user)
 	if err != nil {
 		util.ServerError(c, "签发令牌失败")
@@ -44,7 +50,7 @@ func (d *Deps) Register(c *gin.Context) {
 // Login POST /api/v1/auth/login —— 密码校验；已开启 TOTP 的用户返回 twofa_required + 临时 pending token。
 func (d *Deps) Login(c *gin.Context) {
 	var req struct {
-		Username       string `json:"username" binding:"required"`
+		Email          string `json:"email" binding:"required,email,max=128"`
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
@@ -56,9 +62,10 @@ func (d *Deps) Login(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
-	user, err := d.Auth.Login(c.Request.Context(), req.Username, req.Password, util.ClientIPFromContext(c))
+	user, err := d.Auth.Login(c.Request.Context(), req.Email, req.Password, util.ClientIPFromContext(c))
 	if err != nil {
 		code, msg := authError(err)
+		d.auditLoginFailure(c, req.Email, err, code)
 		util.Fail(c, code, msg)
 		return
 	}
@@ -105,15 +112,31 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 	if err := d.OTP.VerifyCode(&user, req.Code); err != nil {
 		if errors.Is(err, services.ErrTOTPCodeInvalid) {
 			if berr := d.OTP.VerifyBackupCode(&user, req.Code); berr != nil {
+				d.audit(services.AuditEvent{
+					OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
+					Action: "auth.2fa_failed", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+					Status: 400, Message: "两步验证失败：验证码错误",
+					Extra: map[string]any{"reason": "invalid_code"}, IP: util.ClientIPFromContext(c),
+				})
 				util.BadRequest(c, "验证码错误")
 				return
 			}
 		} else {
+			d.audit(services.AuditEvent{
+				OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
+				Action: "auth.2fa_failed", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+				Status: 400, Message: "两步验证失败", Extra: map[string]any{"reason": err.Error()},
+				IP: util.ClientIPFromContext(c),
+			})
 			util.BadRequest(c, err.Error())
 			return
 		}
 	}
-	d.Audit.Log("user", user.ID, "auth.login_2fa", "两步验证登录成功", util.ClientIPFromContext(c))
+	d.audit(services.AuditEvent{
+		OperatorType: auditOperatorType(&user), OperatorID: user.ID, OperatorName: user.Email,
+		Action: "auth.login_2fa", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+		Status: 200, Message: "两步验证登录成功", IP: util.ClientIPFromContext(c),
+	})
 	d.finishLogin(c, &user)
 }
 
@@ -136,7 +159,11 @@ func (d *Deps) finishLogin(c *gin.Context, user *models.User) {
 		util.ServerError(c, "签发令牌失败")
 		return
 	}
-	d.Audit.Log("user", user.ID, "auth.login", "登录成功", util.ClientIPFromContext(c))
+	d.audit(services.AuditEvent{
+		OperatorType: auditOperatorType(user), OperatorID: user.ID, OperatorName: user.Email,
+		Action: "auth.login", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+		Status: 200, Message: "登录成功", IP: util.ClientIPFromContext(c),
+	})
 	d.setAuthCookies(c, access, refresh)
 	util.OK(c, gin.H{
 		"user": d.userView(user),
@@ -159,6 +186,13 @@ func (d *Deps) ForgotPassword(c *gin.Context) {
 		return
 	}
 	_, _ = d.Auth.ForgotPassword(c.Request.Context(), req.Email)
+	// 只记「提交了找回密码」：邮箱是否存在属于防枚举信息，不写进审计可检索字段之外的结构
+	d.audit(services.AuditEvent{
+		OperatorType: "user", Action: "auth.forgot", TargetType: "user",
+		OperatorName: strings.ToLower(strings.TrimSpace(req.Email)),
+		TargetName:   strings.ToLower(strings.TrimSpace(req.Email)),
+		Status:       200, Message: "提交了找回密码（验证码方式）", IP: util.ClientIPFromContext(c),
+	})
 	// 统一响应（不区分邮箱是否存在/是否绑定 TOTP）
 	util.OK(c, gin.H{
 		"message": "若该邮箱已注册且已开启两步验证，请使用验证码完成重置；未开启两步验证的账号请联系管理员重置密码",
@@ -198,6 +232,14 @@ func (d *Deps) ResetPassword(c *gin.Context) {
 		}
 		return
 	}
+	resetEmail := strings.ToLower(strings.TrimSpace(req.Email))
+	var resetUser models.User
+	_ = d.DB.Select("id", "email").Where("email = ?", resetEmail).Take(&resetUser).Error
+	d.audit(services.AuditEvent{
+		OperatorType: "user", OperatorID: resetUser.ID, OperatorName: resetEmail,
+		Action: "auth.reset_password", TargetType: "user", TargetID: resetUser.ID, TargetName: resetEmail,
+		Status: 200, Message: "通过邮箱验证码重置了密码", IP: util.ClientIPFromContext(c),
+	})
 	util.OK(c, gin.H{"ok": true, "message": "密码已重置，请重新登录"})
 }
 
@@ -224,9 +266,52 @@ func (d *Deps) Refresh(c *gin.Context) {
 }
 
 // Logout POST /api/v1/auth/logout
+// 该路由不挂鉴权中间件（登出不该因令牌过期而失败），但审计要能定位到人：
+// 尽量从 access_token cookie 解析身份，解析失败就只留 IP。
 func (d *Deps) Logout(c *gin.Context) {
+	if token, err := c.Cookie("access_token"); err == nil && token != "" {
+		if claims, perr := d.JWT.Parse(token); perr == nil {
+			ev := services.AuditEvent{
+				OperatorType: "user", OperatorID: claims.UserID,
+				Action: "auth.logout", TargetType: "user", TargetID: claims.UserID,
+				Status: 200, Message: "退出登录", IP: util.ClientIPFromContext(c),
+			}
+			d.audit(ev)
+		}
+	}
 	d.clearAuthCookies(c)
 	util.OK(c, gin.H{"ok": true})
+}
+
+// auditLoginFailure 记录登录失败（只记邮箱与原因，绝不记密码）。
+// 失败事件与成功事件同等重要：爆破、撞库、账号被扫都能从这里看出来。
+func (d *Deps) auditLoginFailure(c *gin.Context, email string, err error, status int) {
+	reason := "密码错误"
+	switch {
+	case errors.Is(err, services.ErrUserDisabled):
+		reason = "账号已禁用"
+	case errors.Is(err, services.ErrInvalidCreds):
+		reason = "密码错误"
+	case strings.Contains(err.Error(), "次数过多"):
+		reason = "失败次数过多（临时锁定）"
+	default:
+		reason = "登录被拒绝"
+	}
+	who := strings.ToLower(strings.TrimSpace(email))
+	d.audit(services.AuditEvent{
+		OperatorType: "user", OperatorName: who,
+		Action: "auth.login_failed", TargetType: "user", TargetName: who,
+		Status: status, Message: "登录失败：" + reason,
+		Extra: map[string]any{"reason": reason}, IP: util.ClientIPFromContext(c),
+	})
+}
+
+// auditOperatorType 管理员登录记为 admin（此前一律记成 user，管理端登录无从区分）。
+func auditOperatorType(user *models.User) string {
+	if user != nil && user.Role == models.RoleAdmin {
+		return "admin"
+	}
+	return "user"
 }
 
 // setAuthCookies 签发认证 cookie（J19-① 加固）：
@@ -255,7 +340,7 @@ func authError(err error) (int, string) {
 		return 400, err.Error()
 	// 凭据错误与账号禁用统一 401 同文案：不暴露「账号存在但被禁用」的可枚举信号
 	case errors.Is(err, services.ErrInvalidCreds), errors.Is(err, services.ErrUserDisabled):
-		return 401, "用户名或密码错误"
+		return 401, "邮箱或密码错误"
 	case errors.Is(err, services.ErrInvalidRefresh):
 		return 401, err.Error()
 	case errors.Is(err, services.ErrRegisterClosed):

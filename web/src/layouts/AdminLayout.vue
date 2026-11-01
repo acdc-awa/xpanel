@@ -295,7 +295,7 @@ onMounted(async () => {
     const { data } = await getSystemStatus()
     if (data.code === 0) panelVersion.value = data.data.panel_version
   } catch {
-    /* 版本获取失败静默，菜单只显示用户名 */
+    /* 版本获取失败静默，菜单只显示邮箱 */
   }
 })
 onUnmounted(() => {

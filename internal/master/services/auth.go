@@ -17,9 +17,9 @@ import (
 
 // 业务错误（handler 层映射为 HTTP 状态码）
 var (
-	ErrUserExists     = errors.New("用户名或邮箱已存在")
+	ErrUserExists     = errors.New("该邮箱已存在")
 	ErrInviteInvalid  = errors.New("邀请码无效或已使用")
-	ErrInvalidCreds   = errors.New("用户名或密码错误")
+	ErrInvalidCreds   = errors.New("邮箱或密码错误")
 	ErrResetInvalid   = errors.New("邮箱或验证码错误")
 	ErrUserDisabled   = errors.New("账号已被禁用")
 	ErrInvalidRefresh = errors.New("无效的刷新令牌")
@@ -47,8 +47,7 @@ func (s *AuthService) Register(ctx context.Context, req *contracts.RegisterReque
 		}
 
 		var cnt int64
-		if err := tx.Model(&models.User{}).
-			Where("username = ? OR email = ?", email, email).Count(&cnt).Error; err != nil {
+		if err := tx.Model(&models.User{}).Where("email = ?", email).Count(&cnt).Error; err != nil {
 			return err
 		}
 		if cnt > 0 {
@@ -69,7 +68,6 @@ func (s *AuthService) Register(ctx context.Context, req *contracts.RegisterReque
 		}
 
 		user = &models.User{
-			Username:       email, // 用户名=邮箱（同值双写，登录兼容）
 			Email:          email,
 			UUID:           uuid,
 			PasswordHash:   hash,
@@ -160,9 +158,10 @@ func cleanupLoginFailuresLocked(now time.Time) {
 	}
 }
 
-// Login 校验用户名密码与账号状态（失败锁定按 邮箱+IP 组合，单一组合锁定不影响其他来源 IP 登录）。
-func (s *AuthService) Login(ctx context.Context, username, password, clientIP string) (*models.User, error) {
-	key := strings.ToLower(strings.TrimSpace(username)) + "|" + clientIP
+// Login 校验邮箱密码与账号状态（失败锁定按 邮箱+IP 组合，单一组合锁定不影响其他来源 IP 登录）。
+func (s *AuthService) Login(ctx context.Context, email, password, clientIP string) (*models.User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	key := email + "|" + clientIP
 
 	loginFailures.Lock()
 	f, locked := loginFailures.m[key]
@@ -179,7 +178,7 @@ func (s *AuthService) Login(ctx context.Context, username, password, clientIP st
 	loginFailures.Unlock()
 
 	var user models.User
-	if err := s.DB.WithContext(ctx).Where("username = ?", username).First(&user).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrInvalidCreds
 		}
@@ -290,7 +289,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string,
 func (s *AuthService) ForgotPassword(ctx context.Context, email string) (bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var user models.User
-	if err := s.DB.WithContext(ctx).Where("email = ? OR username = ?", email, email).First(&user).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
 		return false, nil // 不存在：统一返回，防枚举
 	}
 	return user.TotpEnabled, nil
@@ -300,7 +299,7 @@ func (s *AuthService) ForgotPassword(ctx context.Context, email string) (bool, e
 func (s *OTPService) ResetPassword(ctx context.Context, email, code, newPwd string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var user models.User
-	if err := s.DB.WithContext(ctx).Where("email = ? OR username = ?", email, email).First(&user).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
 		return ErrResetInvalid
 	}
 	if !user.TotpEnabled {

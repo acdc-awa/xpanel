@@ -51,8 +51,8 @@ func setupNoticesTest(t *testing.T) (*gin.Engine, *gorm.DB, *Deps, string, strin
 	u2, _ := util.NewUUID()
 	sub1, _ := util.RandomHex(32)
 	sub2, _ := util.RandomHex(32)
-	adminUser := models.User{Username: "admin@test.com", UUID: u1, Email: "admin@test.com", SubscribeToken: sub1, Role: models.RoleAdmin, Status: models.StatusActive}
-	normalUser := models.User{Username: "user@test.com", UUID: u2, Email: "user@test.com", SubscribeToken: sub2, Role: models.RoleUser, Status: models.StatusActive}
+	adminUser := models.User{UUID: u1, Email: "admin@test.com", SubscribeToken: sub1, Role: models.RoleAdmin, Status: models.StatusActive}
+	normalUser := models.User{UUID: u2, Email: "user@test.com", SubscribeToken: sub2, Role: models.RoleUser, Status: models.StatusActive}
 	db.Create(&adminUser)
 	db.Create(&normalUser)
 

@@ -46,30 +46,35 @@ func TestEnsureJWTSecret(t *testing.T) {
 	}
 }
 
-func TestEnsureAdmin_RandomPassword(t *testing.T) {
+func TestEnsureAdmin_FixedEmailAndRandomPassword(t *testing.T) {
 	db := setupTestDB(t)
-	cfg := &config.Config{
-		Admin: config.Admin{
-			Username: "admin@test.local",
-			Password: "", // 留空触发自动强随机生成
-		},
-	}
 
-	ensureAdmin(db, cfg)
+	ensureAdmin(db)
 
 	var admin models.User
 	if err := db.Where("role = ?", models.RoleAdmin).First(&admin).Error; err != nil {
 		t.Fatalf("admin not created: %v", err)
 	}
 
-	if admin.Username != "admin@test.local" {
-		t.Errorf("got username %q", admin.Username)
+	// v5 起模板里没有账号，初始管理员固定 admin@panel.local
+	if admin.Email != "admin@panel.local" {
+		t.Errorf("got email %q", admin.Email)
 	}
 	if !admin.MustChangePwd {
 		t.Errorf("must_change_pwd should be true on first auto init")
 	}
 	if admin.PasswordHash == "" {
 		t.Errorf("password hash is empty")
+	}
+
+	// 幂等：已存在管理员时不再新建
+	var cnt int64
+	db.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&cnt)
+	ensureAdmin(db)
+	var after int64
+	db.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&after)
+	if cnt != after {
+		t.Errorf("ensureAdmin 非幂等: %d -> %d", cnt, after)
 	}
 }
 
@@ -107,38 +112,27 @@ func TestEnsureJWTSecretPlaceholderRegenerated(t *testing.T) {
 	}
 }
 
-// TestEnsureAdminPlaceholderPasswordRandomized 照抄 .env.example 占位密码时，
-// 必须自动生成强随机密码而非以占位值作密码（防默认密码攻击）。
-func TestEnsureAdminPlaceholderPasswordRandomized(t *testing.T) {
+// TestEnsureAdminNoDefaultPassword 初始密码不得等于任何历史模板占位值（防默认密码攻击）。
+func TestEnsureAdminNoDefaultPassword(t *testing.T) {
 	db := setupTestDB(t)
-	cfg := &config.Config{
-		Admin: config.Admin{
-			Username: "admin@test.local",
-			Password: "replace-with-strong-password",
-		},
-	}
 
-	ensureAdmin(db, cfg)
+	ensureAdmin(db)
 
 	var admin models.User
 	if err := db.Where("role = ?", models.RoleAdmin).First(&admin).Error; err != nil {
 		t.Fatalf("admin not created: %v", err)
 	}
-	match, err := argon2id.ComparePasswordAndHash("replace-with-strong-password", admin.PasswordHash)
-	if err != nil || match {
-		t.Errorf("占位值不得作为管理员密码（match=%v err=%v）", match, err)
+	for _, weak := range []string{"admin", "admin123", "replace-with-strong-password", "password"} {
+		match, err := argon2id.ComparePasswordAndHash(weak, admin.PasswordHash)
+		if err == nil && match {
+			t.Errorf("占位值 %q 不得作为管理员密码", weak)
+		}
 	}
 }
 
 func TestHandleResetAdmin(t *testing.T) {
 	db := setupTestDB(t)
-	cfg := &config.Config{
-		Admin: config.Admin{
-			Username: "superadmin@panel.com",
-			Password: "OldPassword123!",
-		},
-	}
-	ensureAdmin(db, cfg)
+	ensureAdmin(db)
 
 	var admin models.User
 	db.Where("role = ?", models.RoleAdmin).First(&admin)

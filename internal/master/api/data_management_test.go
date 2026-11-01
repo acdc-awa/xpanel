@@ -50,13 +50,13 @@ func seedLogRows(t *testing.T, db *gorm.DB, now time.Time) {
 	t.Helper()
 	// 用户：u1 计费周期 3 天前；u2 周期为零值（应被安全线推导忽略）
 	if err := db.Create(&models.User{
-		Username: "u1", Email: "u1@t.local", PasswordHash: "x", UUID: "u1-uuid", SubscribeToken: "tok-u1",
+		Email: "u1@t.local", PasswordHash: "x", UUID: "u1-uuid", SubscribeToken: "tok-u1",
 		TrafficCycleStart: now.AddDate(0, 0, -3),
 	}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	if err := db.Create(&models.User{
-		Username: "u2", Email: "u2@t.local", PasswordHash: "x", UUID: "u2-uuid", SubscribeToken: "tok-u2",
+		Email: "u2@t.local", PasswordHash: "x", UUID: "u2-uuid", SubscribeToken: "tok-u2",
 	}).Error; err != nil {
 		t.Fatalf("seed user2: %v", err)
 	}

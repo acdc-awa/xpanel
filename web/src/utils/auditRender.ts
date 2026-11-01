@@ -33,14 +33,26 @@ interface TextMark {
   __text: { preview: string; lines: number; chars: number }
 }
 
+/** v5：二进制（图片/logo/密钥材料）只落 sha256 指纹 */
+interface BinaryMark {
+  __binary: { sha256: string; bytes: number; type?: string }
+}
+
+/** v5：超限裁剪时被省略的字段 */
+interface OmittedMark {
+  __omitted: { chars?: number; items?: number; json?: boolean }
+}
+
 interface Envelope {
   v?: number
   method?: string
   path?: string
   params?: Record<string, string>
   status?: number
-  /** 目标名注册表预读的实体显示名（标题/邮箱/名称/标签） */
+  /** 目标名注册表预读的实体显示名（标题/邮箱/名称/标签）；v5 起改存 AuditLog.target_name 列 */
   target?: string
+  /** 手动打点的中文句子（用户侧登录/注册/改密等） */
+  message?: string
   body?: unknown
   body_raw?: string
   __raw?: string
@@ -54,6 +66,21 @@ function isObj(v: unknown): v is Obj {
 
 function isTextMark(v: unknown): v is TextMark {
   return isObj(v) && isObj(v['__text'])
+}
+
+function isBinaryMark(v: unknown): v is BinaryMark {
+  return isObj(v) && isObj(v['__binary'])
+}
+
+function isOmittedMark(v: unknown): v is OmittedMark {
+  return isObj(v) && isObj(v['__omitted'])
+}
+
+function humanBytes(n: number): string {
+  if (!Number.isFinite(n)) return String(n)
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
+  return `${n} 字节`
 }
 
 // ============================== 值格式化 ==============================
@@ -198,6 +225,26 @@ function pushValue(view: AuditView, label: string, v: unknown, fmt?: Fmt, mono?:
   if (v === undefined || v === null || v === '') return
   if (isTextMark(v)) {
     pushChip(view, label, v.__text)
+    return
+  }
+  if (isBinaryMark(v)) {
+    // 二进制内容只保留指纹：既说明「是什么」，又能比对是否被替换过
+    const meta = v.__binary
+    const type = meta.type ? `${meta.type}, ` : ''
+    view.fields.push({
+      label,
+      value: `${type}${humanBytes(meta.bytes)} · sha256 ${meta.sha256.slice(0, 16)}…`,
+      mono: true,
+    })
+    return
+  }
+  if (isOmittedMark(v)) {
+    const meta = v.__omitted
+    const parts: string[] = []
+    if (typeof meta.chars === 'number') parts.push(`${meta.chars} 字符`)
+    if (typeof meta.items === 'number') parts.push(`${meta.items} 项`)
+    const why = meta.json ? '嵌套 JSON 超长' : '超出单条上限'
+    view.fields.push({ label, value: `已省略（${why}${parts.length ? '，' + parts.join(' / ') : ''}）` })
     return
   }
   if (typeof v === 'string' && (v.length > 256 || v.includes('\n'))) {
@@ -692,7 +739,10 @@ function renderGeneric(ctx: Ctx) {
   pushRemaining(ctx)
 }
 
-export function renderAudit(action: string, detail: string): AuditView {
+/**
+ * @param fallbackTarget 目标显示名（v5 起取 AuditLog.target_name 列；旧数据仍可能带在 detail 里）
+ */
+export function renderAudit(action: string, detail: string, fallbackTarget = ''): AuditView {
   const view: AuditView = { summary: '', fields: [], texts: [], raw: detail || '', method: '' }
   if (!detail) {
     view.summary = '—'
@@ -715,13 +765,17 @@ export function renderAudit(action: string, detail: string): AuditView {
 
   const env = parsed as Envelope
   let params: Record<string, string> = {}
-  let target = ''
+  let target = fallbackTarget || ''
   let body: unknown
 
   if (env.v === 2) {
     view.method = env.method || ''
     params = env.params || {}
-    target = typeof env.target === 'string' ? env.target : ''
+    if (typeof env.target === 'string' && env.target) target = env.target
+    if (typeof env.message === 'string' && env.message) {
+      view.summary = env.message
+      view.texts.length = 0
+    }''
     if (typeof env.__raw === 'string') {
       view.summary = `${action}（详情过长，仅保留原文摘要）`
       view.fields.push({ label: '原文摘要', value: env.__raw, mono: true })

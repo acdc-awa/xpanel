@@ -21,7 +21,6 @@ func DefaultRegistry() *contracts.ExporterRegistry {
 func UserToSummaryDTO(u *models.User) contracts.UserSummaryDTO {
 	return contracts.UserSummaryDTO{
 		ID:         u.ID,
-		Username:   u.Username,
 		Email:      u.Email,
 		UUID:       u.UUID,
 		Status:     u.Status,

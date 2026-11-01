@@ -44,7 +44,6 @@ func loginTestUser(t *testing.T, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	u := models.User{
-		Username:     "user@example.com",
 		Email:        "user@example.com",
 		UUID:         "11111111-1111-1111-1111-111111111111",
 		PasswordHash: hash,
@@ -55,9 +54,9 @@ func loginTestUser(t *testing.T, db *gorm.DB) {
 	}
 }
 
-// TestLoginLockByUsernameAndIP 锁定按 邮箱+IP 组合：同 IP 5 次失败锁住该组合，
+// TestLoginLockByEmailAndIP 锁定按 邮箱+IP 组合：同 IP 5 次失败锁住该组合，
 // 受害者从其他 IP 登录不受影响（P1-4 锁号 DoS 修复）。
-func TestLoginLockByUsernameAndIP(t *testing.T) {
+func TestLoginLockByEmailAndIP(t *testing.T) {
 	resetLoginFailures()
 	db := newAuthTestDB(t)
 	loginTestUser(t, db)
@@ -85,8 +84,8 @@ func TestLoginLockByUsernameAndIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("其他 IP 登录应成功: %v", err)
 	}
-	if u.Username != "user@example.com" {
-		t.Fatalf("返回用户不符: %s", u.Username)
+	if u.Email != "user@example.com" {
+		t.Fatalf("返回用户不符: %s", u.Email)
 	}
 }
 
@@ -112,7 +111,6 @@ func TestResetSubscribeToken(t *testing.T) {
 	origUUID := "11111111-1111-1111-1111-111111111111"
 	origToken := "old-token-1234567890abcdef1234567890abcdef1234567890abcdef12345678"
 	u := models.User{
-		Username:       "reset@example.com",
 		Email:          "reset@example.com",
 		UUID:           origUUID,
 		SubscribeToken: origToken,

@@ -45,10 +45,9 @@ jwt:
 totp:
   encrypt_key: ""
 
-admin:
-  # 账密不预设默认值（防默认密码攻击）：留空=首次启动自动生成 16 位强随机密码（控制台高亮显示）
-  # 显式指定请写入本文件 admin.username / admin.password
-
+# 初始管理员（v5 起不再可配置）：首次启动固定创建 admin@panel.local，
+# 密码自动生成 16 位强随机串并在控制台显示一次，首次登录强制改密；
+# 之后在后台「设置」里自行改邮箱/密码。忘记密码用 `master reset-admin` 子命令。
 
 backup:
   enabled: true            # 定时备份开关
