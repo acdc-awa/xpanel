@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/csv"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -263,26 +264,7 @@ func (d *Deps) AdminExportAuditLogs(c *gin.Context) {
 	w := csv.NewWriter(c.Writer)
 	_ = w.Write([]string{"时间(UTC)", "分类", "操作人", "操作", "目标类型", "目标", "结果", "IP", "详情"})
 	for _, l := range list {
-		cat := auditCategoryOr(l.Category, l.Action)
-		opName := auditOperatorName(l.OperatorName, fallback[l.OperatorID])
-		if opName == "" && l.OperatorID > 0 {
-			opName = fmt.Sprintf("#%d", l.OperatorID)
-		}
-		target := l.TargetName
-		if target == "" && l.TargetID > 0 {
-			target = fmt.Sprintf("#%d", l.TargetID)
-		}
-		_ = w.Write([]string{
-			l.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
-			models.AuditCategoryLabel(cat),
-			opName,
-			l.Action,
-			l.TargetType,
-			target,
-			fmt.Sprintf("%d", l.Status),
-			l.IP,
-			l.Detail,
-		})
+		_ = w.Write(auditCSVRow(l, fallback[l.OperatorID]))
 	}
 	w.Flush()
 
@@ -297,6 +279,35 @@ func (d *Deps) AdminExportAuditLogs(c *gin.Context) {
 		Extra:        map[string]any{"rows": len(list), "query": c.Request.URL.RawQuery},
 		IP:           util.ClientIPFromContext(c),
 	})
+}
+
+// auditCSVRow 单行 CSV。身份列沿用列表口径「名字 #id」：同名/同邮箱重建后只能靠 id 区分，
+// 只写名字会让导出材料在「删了又建」的场景里失去唯一性。
+func auditCSVRow(l models.AuditLog, operatorFallback string) []string {
+	cat := auditCategoryOr(l.Category, l.Action)
+	return []string{
+		l.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+		models.AuditCategoryLabel(cat),
+		auditIdentityCell(auditOperatorName(l.OperatorName, operatorFallback), l.OperatorID),
+		l.Action,
+		l.TargetType,
+		auditIdentityCell(l.TargetName, l.TargetID),
+		strconv.Itoa(l.Status),
+		l.IP,
+		l.Detail,
+	}
+}
+
+// auditIdentityCell 把「显示名 + 主键」拼成一个单元格；没有名字时至少留 #id。
+func auditIdentityCell(name string, id uint64) string {
+	switch {
+	case name == "" && id > 0:
+		return "#" + strconv.FormatUint(id, 10)
+	case name != "" && id > 0:
+		return name + " #" + strconv.FormatUint(id, 10)
+	default:
+		return name
+	}
 }
 
 // auditCategoryOr 优先使用落库分类；空值（旧行/异常）按 action 现算，不返回空分类。

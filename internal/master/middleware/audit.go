@@ -290,6 +290,22 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/invitations/:id":                        {model: &models.InvitationCode{}, field: "code"},
 }
 
+// auditTargetsByType 由路由注册表反推「目标类型 → 实体模型 + 名称列」，
+// 供创建类操作（路径里没有 :id）成功后回查主键。
+var auditTargetsByType = func() map[string]auditTarget {
+	m := make(map[string]auditTarget, len(auditTargets))
+	for path, t := range auditTargets {
+		typ := models.AuditTargetTypeFromPath(path)
+		if typ == "" {
+			continue
+		}
+		if _, ok := m[typ]; !ok {
+			m[typ] = t
+		}
+	}
+	return m
+}()
+
 // auditTargetSnapshot 目标对象的类型/主键/显示名快照。
 type auditTargetSnapshot struct {
 	Type string
@@ -327,6 +343,28 @@ func loadAuditTarget(db *gorm.DB, c *gin.Context, body []byte) auditTargetSnapsh
 	return snap
 }
 
+// fillCreatedTargetID 创建类操作（路径里没有 :id）成功后按显示名回查主键。
+//
+// 新建行的主键只出现在响应体里，而本中间件不缓冲响应，所以用「类型 → 名称列」反查。
+// 名称不唯一（同名套餐/服务器/公告）时不猜：宁可留空，也不把这条日志挂到别人的主键上。
+func fillCreatedTargetID(db *gorm.DB, snap auditTargetSnapshot, status int) uint64 {
+	if snap.ID != 0 || snap.Name == "" || status < 200 || status >= 300 {
+		return snap.ID
+	}
+	t, ok := auditTargetsByType[snap.Type]
+	if !ok {
+		return 0
+	}
+	var ids []uint64
+	err := db.Session(&gorm.Session{Logger: logger.Discard}).
+		Model(t.model).Where(t.field+" = ?", snap.Name).
+		Order("id DESC").Limit(2).Pluck("id", &ids).Error
+	if err != nil || len(ids) != 1 {
+		return 0
+	}
+	return ids[0]
+}
+
 // auditNameFromBody 创建类操作从请求体推断目标显示名（用户=email、服务器/入站/套餐=name/tag…）。
 func auditNameFromBody(body []byte) string {
 	trimmed := bytes.TrimSpace(body)
@@ -347,6 +385,7 @@ func auditNameFromBody(body []byte) string {
 	return ""
 }
 
+// parseUintParam 解析路径里的十进制主键。
 func parseUintParam(s string) (uint64, error) {
 	var n uint64
 	for _, r := range s {
@@ -584,6 +623,7 @@ func Audit(db *gorm.DB) gin.HandlerFunc {
 			action = method
 		}
 		status := c.Writer.Status()
+		target.ID = fillCreatedTargetID(db, target, status)
 		_ = db.Create(&models.AuditLog{
 			OperatorType: "admin",
 			OperatorID:   uid,

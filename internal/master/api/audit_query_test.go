@@ -76,6 +76,29 @@ func TestAuditTargetAndResultFilters(t *testing.T) {
 	assert.Len(t, auditQuery(t, db, "?operator_name=user@x.com"), 1)
 }
 
+// CSV 身份列与列表同口径：名字 + #id（同邮箱重建后只能靠 id 区分）。
+func TestAuditCSVRowIdentity(t *testing.T) {
+	l := models.AuditLog{
+		ID: 9, OperatorType: "admin", OperatorID: 4, OperatorName: "op@x.com",
+		Action: "users.:id", Category: "users", TargetType: "user", TargetID: 43,
+		TargetName: "dup@x.com", Status: 200, Detail: `{"v":2}`, IP: "127.0.0.1",
+	}
+	row := auditCSVRow(l, "")
+	assert.Equal(t, "op@x.com #4", row[2])
+	assert.Equal(t, "dup@x.com #43", row[5])
+	assert.Equal(t, "200", row[6])
+
+	// 没有名字时至少留 #id；两者都空则留空（如 settings 类无目标操作）
+	l.TargetName = ""
+	l.OperatorName = ""
+	assert.Equal(t, "op@x.com #4", auditCSVRow(l, "op@x.com")[2], "回查到的操作人邮箱同样带 #id")
+	assert.Equal(t, "#43", auditCSVRow(l, "")[5])
+	l.OperatorID = 0
+	l.TargetID = 0
+	assert.Equal(t, "", auditCSVRow(l, "")[2])
+	assert.Equal(t, "", auditCSVRow(l, "")[5])
+}
+
 // 列表截断：超过 8 KB 的 detail 缩到 8 KB 并打标记，完整内容走详情接口。
 func TestAuditListDetailTruncated(t *testing.T) {
 	long := ""

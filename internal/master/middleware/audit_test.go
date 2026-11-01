@@ -347,6 +347,45 @@ func TestAuditTargetRegistry(t *testing.T) {
 	assert.Equal(t, "P", got.TargetName)
 }
 
+// 创建类操作（无 :id）：成功后按显示名回查主键，让「同邮箱重建」的两段历史能按 id 区分；
+// 名称不唯一时不猜主键。
+func TestAuditCreateFillsTargetID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	assert.NoError(t, err)
+	assert.NoError(t, db.AutoMigrate(&models.AuditLog{}, &models.User{}, &models.Notice{}))
+	// 同名公告：创建类操作无法确定新行，只能留空
+	assert.NoError(t, db.Create(&models.Notice{Title: "重名", Content: "c"}).Error)
+	assert.NoError(t, db.Create(&models.Notice{Title: "重名", Content: "c"}).Error)
+
+	r := gin.New()
+	r.Use(Audit(db))
+	r.POST("/api/v1/admin/users", func(c *gin.Context) {
+		u := models.User{Email: "new@x.com", UUID: "u-new", SubscribeToken: "t-new"}
+		assert.NoError(t, db.Create(&u).Error)
+		c.JSON(http.StatusOK, gin.H{"id": u.ID})
+	})
+	r.POST("/api/v1/admin/notices", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/admin/users",
+		strings.NewReader(`{"email":"new@x.com"}`)))
+
+	var log models.AuditLog
+	assert.NoError(t, db.Order("id DESC").First(&log).Error)
+	assert.Equal(t, "user", log.TargetType)
+	assert.Equal(t, "new@x.com", log.TargetName)
+	assert.NotZero(t, log.TargetID, "创建成功应回填新行主键")
+	var created models.User
+	assert.NoError(t, db.First(&created, log.TargetID).Error)
+	assert.Equal(t, "new@x.com", created.Email)
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices",
+		strings.NewReader(`{"title":"重名"}`)))
+	var noticeLog models.AuditLog
+	assert.NoError(t, db.Order("id DESC").First(&noticeLog).Error)
+	assert.Equal(t, "notice", noticeLog.TargetType)
+	assert.EqualValues(t, 0, noticeLog.TargetID, "同名目标不猜主键")
+}
+
 // 操作人快照：写入时记 users.email 到 operator_name，改邮箱后历史行不变。
 func TestAuditOperatorSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
