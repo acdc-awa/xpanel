@@ -116,7 +116,7 @@ useGridHeight(boxEl)
           >
             <div class="layer-capsule-head">
               <div class="layer-title">
-                <span class="layer-icon">🌐</span>
+                <CsIcon name="globe" class="layer-icon" />
                 <span class="layer-name" :title="g.layer.name">{{ g.layer.name }}</span>
                 <code class="layer-endpoint">{{ g.layer.host }}:{{ g.layer.port }}</code>
                 <span class="layer-sec" :class="g.layer.security">
@@ -315,7 +315,7 @@ useGridHeight(boxEl)
               :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : isOutboundDraft(out) ? 'draft' : ''"
               :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : isOutboundDraft(out) ? `待连线出站「${out.tag}」（拖拽右侧端点至目标入站完成绑定）` : `出站「${out.tag}」`"
             >
-              {{ out.isDraftTunnel ? '🔗 ' + out.tag : isOutboundDraft(out) ? '⚠️ ' + out.tag : out.tag }}
+              {{ out.tag }}
             </span>
             <span v-if="out.isDraftTunnel" class="out-proto-badge draft" title="草稿直通：拖拽右侧端点至落地入站建立管道">待连线</span>
             <span v-else-if="out.owner_inbound_id" class="out-proto-badge tunnel">LINK</span>
@@ -424,7 +424,7 @@ useGridHeight(boxEl)
       align-items: center;
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 6px;
+      border-radius: 8px;
       color: #cbd5e1;
       font-size: 11px;
       padding: 3px 8px;
@@ -493,7 +493,7 @@ useGridHeight(boxEl)
     position: relative;
     background: linear-gradient(90deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.75) 100%);
     border: 1px solid rgba(6, 182, 212, 0.35);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px 10px;
     box-sizing: border-box;
     transition: all 0.2s ease;
@@ -569,7 +569,7 @@ useGridHeight(boxEl)
         font-size: 9.5px;
         font-weight: 700;
         padding: 0 4px;
-        border-radius: 3px;
+        border-radius: 4px;
         background: rgba(56, 189, 248, 0.2);
         color: #38bdf8;
       }
@@ -901,7 +901,7 @@ useGridHeight(boxEl)
         color: #fbbf24;
         border: 1px dashed rgba(251, 191, 36, 0.4);
         padding: 1px 6px;
-        border-radius: 6px;
+        border-radius: 8px;
       }
     }
     &.direct-row {
@@ -1021,7 +1021,7 @@ useGridHeight(boxEl)
       flex: none;
       font-size: 10px;
       padding: 1px 5px;
-      border-radius: 10px;
+      border-radius: 8px;
       font-weight: 600;
       &.user {
         background: rgba(52, 211, 153, 0.15);

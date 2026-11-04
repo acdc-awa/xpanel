@@ -255,11 +255,11 @@ async function apply() {
   ]
   if (kind === 'agent') {
     if (cmp !== null && cmp > 0) {
-      lines.push('⚠️ 降级风险：更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。')
+      lines.push('降级风险：更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。')
     }
     lines.push('将从 XPanel-Node Releases 下载 Agent 二进制并做 sha256 校验，完成后服务自动重启（短暂离线）。')
   } else if (cmp !== null && cmp > 0) {
-    lines.push('⚠️ 降级风险：Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。')
+    lines.push('降级风险：Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。')
     lines.push('安装失败会自动回滚到原内核；期间 xray 会短暂中断。')
   } else {
     lines.push('节点将从 XTLS/Xray-core Releases 下载并做 SHA-256 校验，完成后重启 xray（短暂中断）。')
@@ -459,7 +459,7 @@ onUnmounted(stopPolling)
 
 .server-version-label {
   color: var(--color-text-body-secondary-66ygbb, #656871);
-  font-size: 12.5px;
+  font-size: 13px;
   flex: none;
 }
 
@@ -490,7 +490,7 @@ onUnmounted(stopPolling)
 
 .server-version-hint {
   margin: 10px 0 0;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }

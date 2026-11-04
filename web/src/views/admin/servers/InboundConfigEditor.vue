@@ -378,7 +378,7 @@ const visibleTabs = computed<TabItem[]>(() => {
   return visibleTabIds.value.map((id) => ({
     id,
     // 保存门禁的报错要能定位到具体页签，CsTabs 只支持 disabled，这里用标签后缀标记。
-    label: flagged.has(id) ? `${TAB_LABELS[id]} ⚠` : TAB_LABELS[id],
+    label: flagged.has(id) ? `${TAB_LABELS[id]}（有误）` : TAB_LABELS[id],
   }))
 })
 

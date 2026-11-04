@@ -350,12 +350,12 @@ async function copyText(text: string, label: string) {
   min-inline-size: 0;
 
   strong {
-    font-size: 13.5px;
+    font-size: 14px;
   }
 
   p {
     margin: 4px 0 0;
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.5;
     color: var(--color-text-body-secondary-66ygbb, #656871);
   }
@@ -369,7 +369,7 @@ async function copyText(text: string, label: string) {
 }
 
 .server-cred-label {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 

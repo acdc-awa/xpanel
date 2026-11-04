@@ -135,14 +135,13 @@ function fmt(v: number): string {
       <template v-if="selection">
         <span class="coord-kind">{{ selection.kind === 'ap' ? '接入点' : '服务器' }}</span>
         <span class="coord-name">{{ selection.name }}</span>
-        <span class="coord-sep">·</span>
         <span class="coord-mono">x {{ selection.x }}</span>
         <span class="coord-mono">y {{ selection.y }}</span>
         <span class="coord-mono">{{ selection.w }} × {{ selection.h }}</span>
       </template>
       <template v-else>
-        <span class="coord-mono">x {{ fmt(worldLeft) }} · y {{ fmt(worldTop) }}</span>
-        <span class="coord-sep">·</span>
+        <span class="coord-mono">x {{ fmt(worldLeft) }}</span>
+        <span class="coord-mono">y {{ fmt(worldTop) }}</span>
         <span class="coord-mono">{{ Math.round(zoom * 100) }}%</span>
       </template>
     </div>
@@ -281,7 +280,7 @@ function fmt(v: number): string {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.16);
   color: #94a3b8;
@@ -295,9 +294,6 @@ function fmt(v: number): string {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #cbd5e1;
-  }
-  .coord-sep {
-    color: #475569;
   }
   .coord-mono {
     color: #7dd3fc;

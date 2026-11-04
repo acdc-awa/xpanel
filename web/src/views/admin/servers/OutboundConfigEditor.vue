@@ -462,7 +462,7 @@ onMounted(async () => {
 <template>
   <CsModal
     :visible="visible"
-    :header="outbound ? `编辑出站 · ${outbound.tag}` : '新增出站'"
+    :header="outbound ? `编辑出站：${outbound.tag}` : '新增出站'"
     size="large"
     scrollable
     @close="handleClose"

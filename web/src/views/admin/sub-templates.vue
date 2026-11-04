@@ -689,7 +689,7 @@ async function saveAsFromEditor() {
 
             <div v-if="groupsLoading" class="list-hint">正在加载…</div>
             <div v-else-if="groups.length === 0" class="list-hint">
-              尚无权限组，请先在「订阅与财务 · 权限组管理」中创建
+              尚无权限组，请先在「订阅与财务 → 权限组管理」中创建
             </div>
             <div v-else-if="filteredGroups.length === 0" class="list-hint">没有匹配的权限组</div>
             <div v-else class="pick-list">
@@ -713,7 +713,7 @@ async function saveAsFromEditor() {
           </CsContainer>
 
           <!-- 右：模板编辑器 -->
-          <CsContainer :header="selectedGroup ? `配置订阅模板 · ${selectedGroup.name}` : '配置订阅模板'">
+          <CsContainer :header="selectedGroup ? `配置订阅模板：${selectedGroup.name}` : '配置订阅模板'">
             <template #actions>
               <CsBadge v-if="editorSyncing" color="grey">加载中</CsBadge>
               <CsBadge v-else-if="groupDirty" color="severity-medium">未保存</CsBadge>
@@ -889,7 +889,7 @@ async function saveAsFromEditor() {
                 <span class="pick-main">
                   <span class="pick-name">{{ tpl.name }}</span>
                   <span class="pick-remark">
-                    {{ (tpl.content || '').length }} 字符 · 更新于 {{ formatDateTime(tpl.updated_at) }}
+                    {{ (tpl.content || '').length }} 字符，更新于 {{ formatDateTime(tpl.updated_at) }}
                   </span>
                 </span>
                 <span v-if="tpl.id === libForm.id && libDirty" class="dirty-mark">未保存</span>
@@ -970,7 +970,7 @@ async function saveAsFromEditor() {
                   </template>
                 </span>
                 <div style="display: flex; gap: 8px">
-                  <CsButton v-if="!libIsNew" icon-name="remove" @click="removeLibrary">删除</CsButton>
+                  <CsButton v-if="!libIsNew" variant="danger-outline" icon-name="remove" @click="removeLibrary">删除</CsButton>
                   <CsButton variant="primary" icon-name="check" :loading="librarySaving" @click="saveLibrary">
                     {{ libIsNew ? '保存到模板库' : '保存修改' }}
                   </CsButton>
@@ -1035,7 +1035,7 @@ async function saveAsFromEditor() {
     white-space: nowrap;
   }
   .pick-remark {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--color-text-body-secondary-66ygbb);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1045,7 +1045,7 @@ async function saveAsFromEditor() {
 /* 列表行里的「未保存」标记；卡片标题栏改用 CsBadge severity-medium */
 .dirty-mark {
   flex: none;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.5;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1061,7 +1061,7 @@ async function saveAsFromEditor() {
 }
 .list-foot {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-body-secondary-66ygbb);
 }
@@ -1079,7 +1079,6 @@ async function saveAsFromEditor() {
 /* ===== 编辑器工具条 ===== */
 .preset-section {
   background: var(--color-background-cell-shaded-twxsbz);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 12px;
@@ -1117,19 +1116,19 @@ async function saveAsFromEditor() {
   background: var(--color-background-container-content-mjfil9);
   border: 1px solid var(--color-border-divider-default-diwd4w);
   padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
+  border-radius: 8px;
+  font-size: 12px;
   color: var(--color-text-body-default-b2us04);
   cursor: pointer;
   transition: all 0.2s ease;
   &:hover {
     border-color: var(--color-text-link-default-qabnuk);
     color: var(--color-text-link-default-qabnuk);
-    background: rgba(99, 102, 241, 0.06);
+    background: rgba(0, 108, 224, 0.06);
   }
   &.code {
     font-family: var(--font-family-monospace-842lr2);
-    font-size: 11px;
+    font-size: 12px;
   }
 }
 /* YAML 校验结果改用 CsAlert；这里只补编辑器与提示条之间的间距 */
@@ -1154,7 +1153,7 @@ async function saveAsFromEditor() {
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--color-text-body-default-b2us04);
   &.warning {
     background: var(--color-background-alert-warning-021z3n);
@@ -1169,9 +1168,9 @@ async function saveAsFromEditor() {
   flex-wrap: wrap;
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 10px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .box-label {
   color: var(--color-text-body-secondary-66ygbb);
@@ -1182,7 +1181,7 @@ async function saveAsFromEditor() {
   border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 4px;
   padding: 1px 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* ===== 移动端：改为上下堆叠 ===== */

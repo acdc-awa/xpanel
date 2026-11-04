@@ -100,7 +100,7 @@ const issueCaOptions = computed(() =>
   caList.value
     .filter((ca) => ca.has_key)
     .map((ca) => ({
-      label: `${ca.name} (${ca.common_name}) · ${ca.key_type}`,
+      label: `${ca.name} (${ca.common_name})，${ca.key_type}`,
       value: ca.id,
     })),
 )
@@ -572,7 +572,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
                   <code class="cert-domain">{{ row.domain }}</code>
                   <div class="cert-badges">
                     <CsBadge v-if="row.ca_id" color="blue">CA: {{ row.ca_name || '托管CA' }}</CsBadge>
-                    <CsBadge v-else-if="row.self_signed" color="green">自签 · 自动 Pin</CsBadge>
+                    <CsBadge v-else-if="row.self_signed" color="green">自签（自动 Pin）</CsBadge>
                     <CsBadge v-else color="grey">外部导入</CsBadge>
                     <CsBadge v-if="row.key_type" color="grey">{{ row.key_type }}</CsBadge>
                   </div>
@@ -644,7 +644,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
                   <code class="cert-domain">{{ ca.name }}</code>
                   <div class="cert-badges">
                     <CsBadge :color="ca.has_key ? 'green' : 'severity-medium'">
-                      {{ ca.has_key ? '完整 · 可签发' : '纯公钥 · 仅验签' }}
+                      {{ ca.has_key ? '完整（可签发）' : '纯公钥（仅验签）' }}
                     </CsBadge>
                     <CsBadge v-if="ca.key_type" color="grey">{{ ca.key_type }}</CsBadge>
                   </div>
@@ -658,7 +658,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
                 <CsCardFact label="通用名称 (CN)" :value="ca.common_name || ca.name" />
                 <CsCardFact
                   label="组织 / 国家"
-                  :value="[ca.organization, ca.country].filter(Boolean).join(' · ') || '—'"
+                  :value="[ca.organization, ca.country].filter(Boolean).join('，') || '—'"
                 />
                 <CsCardFact label="已签发证书">
                   <CsBadge color="grey">{{ ca.issued_count }} 张证书</CsBadge>

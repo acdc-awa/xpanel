@@ -211,7 +211,7 @@ onUnmounted(() => {
 <template>
   <CsModal
     :visible="modelValue"
-    :header="`性能监控 · ${serverName}`"
+    :header="`性能监控：${serverName}`"
     size="large"
     scrollable
     @update:visible="emit('update:modelValue', $event)"

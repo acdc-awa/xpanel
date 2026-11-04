@@ -2,7 +2,7 @@
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { CsDashboardWidget } from '@/components/cloudscape'
 import { useSettleMeasure } from '@/components/cloudscape/grid/useSettleMeasure'
-import { formatBytes } from '@/utils/format'
+import { formatBytes, formatMoney, formatMoneyNumber } from '@/utils/format'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
 
@@ -112,22 +112,22 @@ onUnmounted(() => {
       <div class="kpi-grid" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
         <div class="kpi-tile">
           <div class="kpi-label">今日营收</div>
-          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.today_revenue_cents || 0) / 100).toFixed(2) }}</div>
+          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ formatMoneyNumber(dashData?.summary.today_revenue_cents || 0) }}</div>
           <div class="kpi-sub">已核销 {{ dashData?.summary.today_used_cards_count || 0 }} 张礼品卡</div>
         </div>
 
         <div class="kpi-tile">
           <div class="kpi-label">本月营收</div>
-          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ ((dashData?.summary.month_revenue_cents || 0) / 100).toFixed(2) }}</div>
-          <div class="kpi-sub">累计 ¥ {{ ((dashData?.summary.total_revenue_cents || 0) / 100).toFixed(2) }}</div>
+          <div class="kpi-value"><span class="kpi-unit">¥</span>{{ formatMoneyNumber(dashData?.summary.month_revenue_cents || 0) }}</div>
+          <div class="kpi-sub">累计 {{ formatMoney(dashData?.summary.total_revenue_cents || 0) }}</div>
         </div>
 
         <div class="kpi-tile">
           <div class="kpi-label">今日流量</div>
           <div class="kpi-value">{{ formatBytes(dashData?.summary.today_traffic_total || 0) }}</div>
-          <div class="kpi-sub">
-            ↑ {{ formatBytes(dashData?.summary.today_traffic_up || 0) }} · ↓
-            {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}
+          <div class="kpi-sub kpi-flow">
+            <span>↓ {{ formatBytes(dashData?.summary.today_traffic_down || 0) }}</span>
+            <span>↑ {{ formatBytes(dashData?.summary.today_traffic_up || 0) }}</span>
           </div>
         </div>
 
@@ -136,9 +136,9 @@ onUnmounted(() => {
           <div class="kpi-value">
             {{ formatBandwidth((dashData?.summary.realtime_rx_rate || 0) + (dashData?.summary.realtime_tx_rate || 0)) }}
           </div>
-          <div class="kpi-sub">
-            ↓ {{ formatCompactRate(dashData?.summary.realtime_rx_rate || 0) }} · ↑
-            {{ formatCompactRate(dashData?.summary.realtime_tx_rate || 0) }}
+          <div class="kpi-sub kpi-flow">
+            <span>↓ {{ formatCompactRate(dashData?.summary.realtime_rx_rate || 0) }}</span>
+            <span>↑ {{ formatCompactRate(dashData?.summary.realtime_tx_rate || 0) }}</span>
           </div>
         </div>
 
@@ -156,7 +156,7 @@ onUnmounted(() => {
         <div class="kpi-tile">
           <div class="kpi-label">用户与订单</div>
           <div class="kpi-value">{{ dashData?.summary.active_users || 0 }}<span class="kpi-unit"> / {{ dashData?.summary.total_users || 0 }}</span></div>
-          <div class="kpi-sub">今日 {{ dashData?.summary.today_orders || 0 }} 单 · 累计 {{ dashData?.summary.total_orders || 0 }} 单</div>
+          <div class="kpi-sub kpi-flow"><span>今日 {{ dashData?.summary.today_orders || 0 }} 单</span><span class="kpi-sub-dim">累计 {{ dashData?.summary.total_orders || 0 }} 单</span></div>
         </div>
       </div>
     </div>
@@ -186,8 +186,7 @@ onUnmounted(() => {
    带不上祖先类，且 @container 会被 CSS 管线丢弃） */
 
 .kpi-tile {
-  background: var(--color-background-container-content-mjfil9, #ffffff);
-  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
   border-radius: var(--border-radius-container-33hhdh, 16px);
   padding: 12px 16px;
   display: flex;
@@ -220,12 +219,19 @@ onUnmounted(() => {
 }
 
 .kpi-sub {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  gap: 8px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.kpi-sub-dim {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  opacity: 0.72;
 }
 
 .kpi-progress {
@@ -238,14 +244,14 @@ onUnmounted(() => {
 .kpi-progress-track {
   flex: 1;
   height: 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--color-background-control-disabled-m61b8s, #dedee3);
   overflow: hidden;
 }
 
 .kpi-progress-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--color-text-status-success-1i2jf8, #1d8102);
 
   &.is-warning {
@@ -264,13 +270,13 @@ onUnmounted(() => {
   }
 
   .kpi-value {
-    font-size: 18px;
+    font-size: 16px;
     line-height: 22px;
   }
 
   .kpi-label,
   .kpi-sub {
-    font-size: 10.5px;
+    font-size: 12px;
     line-height: 14px;
   }
 }

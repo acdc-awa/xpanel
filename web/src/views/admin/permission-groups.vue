@@ -254,7 +254,7 @@ async function remove(row: any) {
           <template #footer>
             <CsButton icon-name="file" @click="openTemplates(row)">订阅模板</CsButton>
             <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
-            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
+            <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
           </template>
         </CsCard>
       </CsCardGrid>
@@ -275,7 +275,7 @@ async function remove(row: any) {
     <!-- ===== 组内接入点优先级编辑弹窗 ===== -->
     <CsModal
       v-model:visible="apDialogOpen"
-      :header="`接入点优先级 · ${apTarget?.name || ''}`"
+      :header="`接入点优先级：${apTarget?.name || ''}`"
       size="medium"
       :close-on-click-overlay="false"
     >
@@ -301,7 +301,7 @@ async function remove(row: any) {
           </div>
         </CsFormItem>
 
-        <div v-if="orderedApIds.length === 0" class="cs-text-secondary" style="font-size: 12.5px; padding: 16px 0; text-align: center">
+        <div v-if="orderedApIds.length === 0" class="cs-text-secondary" style="font-size: 13px; padding: 16px 0; text-align: center">
           当前权限组未绑定接入点（订阅将无节点）
         </div>
         <div v-else class="order-list">
@@ -389,7 +389,7 @@ async function remove(row: any) {
   gap: 10px;
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 10px;
 }
 .order-idx {
@@ -398,7 +398,7 @@ async function remove(row: any) {
   border-radius: 50%;
   background: var(--color-background-item-selected-dotkup);
   color: var(--color-text-link-default-qabnuk);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -407,7 +407,7 @@ async function remove(row: any) {
 }
 .order-name {
   flex: 1;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-default-b2us04);
   overflow: hidden;
   text-overflow: ellipsis;

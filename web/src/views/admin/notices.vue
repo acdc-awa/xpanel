@@ -406,9 +406,9 @@ async function persistOrder() {
           </div>
 
           <template #footer>
-            <span class="notice-updated">#{{ row.id }} · {{ formatDate(row.updated_at) }} 更新</span>
+            <span class="notice-updated"><span>#{{ row.id }}</span><span>{{ formatDate(row.updated_at) }} 更新</span></span>
             <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
-            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
+            <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
           </template>
         </CsCard>
       </CsCardGrid>
@@ -638,6 +638,8 @@ async function persistOrder() {
 }
 
 .notice-updated {
+  display: inline-flex;
+  gap: 8px;
   margin-inline-end: auto;
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: var(--font-size-body-s, 12px);
@@ -689,7 +691,7 @@ async function persistOrder() {
 
 .notice-title-input :deep(input) {
   block-size: 40px;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .notice-status-field :deep([role='radiogroup']) {
@@ -706,7 +708,7 @@ async function persistOrder() {
   padding: 5px 8px;
   background: var(--color-background-container-content-mjfil9);
   border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 6px;
+  border-radius: 8px;
   margin-bottom: 10px;
 
   .btn-group {
@@ -740,7 +742,7 @@ async function persistOrder() {
     &:hover {
       background: var(--color-background-cell-shaded-twxsbz);
       color: var(--color-text-link-default-qabnuk);
-      border-color: rgba(99, 102, 241, 0.2);
+      border-color: rgba(0, 108, 224, 0.2);
     }
 
     &.font-bold {
@@ -786,7 +788,7 @@ async function persistOrder() {
   padding: 10px 12px;
   background: var(--color-background-container-content-mjfil9);
   border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 6px;
+  border-radius: 8px;
 
   .preview-empty-hint {
     color: var(--color-text-body-secondary-66ygbb);
@@ -829,7 +831,7 @@ async function persistOrder() {
       transition: all 0.12s ease;
 
       &.cell-active {
-        background: rgba(99, 102, 241, 0.25);
+        background: rgba(0, 108, 224, 0.25);
         border-color: var(--color-text-link-default-qabnuk);
       }
     }

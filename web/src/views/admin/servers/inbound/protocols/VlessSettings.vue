@@ -235,10 +235,9 @@ function copyText(txt: string, label = '内容') {
 }
 
 .fallback-item {
-  background: var(--color-background-container-content-mjfil9, #ffffff);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
   padding: 10px 14px 2px;
   border-radius: 8px;
-  border: 1px solid var(--color-border-card-btvpmf, #e9ebed);
 }
 
 .fb-head {

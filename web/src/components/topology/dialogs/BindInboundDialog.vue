@@ -87,7 +87,7 @@ async function confirm() {
 <style scoped>
 .dlg-hint {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 18px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }

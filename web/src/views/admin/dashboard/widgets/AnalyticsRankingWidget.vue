@@ -8,7 +8,7 @@ import {
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
 import type { RankPeriod } from '@/api/admin'
-import { formatBytes } from '@/utils/format'
+import { formatBytes, formatMoney } from '@/utils/format'
 import { rankPeriodOptions } from '../rank-period'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
@@ -183,7 +183,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
           </template>
           <template #cell-card-face="{ row }">
             <span class="tabular-num money-gain">
-              +¥ {{ (row.face_value_cents / 100).toFixed(2) }}
+              +{{ formatMoney(row.face_value_cents) }}
             </span>
           </template>
           <template #cell-card-time="{ row }">
@@ -210,7 +210,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
             <code class="aws-code-token">{{ row.order_no }}</code>
           </template>
           <template #cell-order-amount="{ row }">
-            <span class="tabular-num font-semibold">¥ {{ (row.amount_cents / 100).toFixed(2) }}</span>
+            <span class="tabular-num font-semibold">{{ formatMoney(row.amount_cents) }}</span>
           </template>
           <template #cell-order-status="{ row }">
             <span
@@ -316,7 +316,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
 }
 
 .rank-badge {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
 
   &.rank-pos-1 {
@@ -335,11 +335,11 @@ function columnsMinWidth(columns: TableColumn[]): number {
 .user-main-name {
   font-weight: 700;
   color: var(--color-text-body-default-b2us04, #0f141a);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .user-sub-email {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   margin-top: 1px;
 }
@@ -352,12 +352,12 @@ function columnsMinWidth(columns: TableColumn[]): number {
 
 .muted-percent {
   color: var(--color-text-body-secondary-66ygbb, #656871);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aws-code-token {
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   background: var(--color-background-container-header-irktp5, #f2f3f3);
@@ -377,7 +377,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
   margin-inline-start: 6px;
   padding: 0 6px;
   border-radius: 4px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 16px;
   vertical-align: 1px;
@@ -386,7 +386,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
 }
 
 .aws-order-status {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 4px;

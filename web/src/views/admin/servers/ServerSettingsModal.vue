@@ -58,7 +58,7 @@ const summary = computed(() => {
   if (s.location) parts.push(s.location)
   const expiry = getExpiryStatus(s.expire_at)
   if (expiry) parts.push(`到期 ${formatExpireDate(s.expire_at)}（${expiry.text}）`)
-  return parts.join(' · ')
+  return parts.join('，')
 })
 
 // 保存动作统一在 footer：表单跨「基础信息 / VPS 资产」两张卡，
@@ -86,7 +86,7 @@ function onRemoved() {
 <template>
   <CsModal
     v-model:visible="visible"
-    :header="server?.name ? `服务器设置 · ${server.name}` : '服务器设置'"
+    :header="server?.name ? `服务器设置：${server.name}` : '服务器设置'"
     :description="summary || undefined"
     size="large"
     scrollable
@@ -137,7 +137,7 @@ function onRemoved() {
 <style scoped lang="scss">
 .server-modal-dirty {
   margin-inline-end: auto;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 </style>

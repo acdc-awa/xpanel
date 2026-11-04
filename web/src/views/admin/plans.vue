@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatMoney } from '@/utils/format'
 import { nextTick, onMounted, reactive, ref } from 'vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
@@ -194,7 +195,7 @@ async function toggleFlag(row: any, flag: 'purchasable' | 'renewable') {
 }
 
 function priceLabel(cents: number) {
-  return `¥ ${(cents / 100).toFixed(2)}`
+  return formatMoney(cents)
 }
 
 function trafficLabel(gb: number) {
@@ -383,13 +384,13 @@ async function restore(row: any) {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%">
             <div style="display: flex; align-items: center; gap: 8px">
               <CsToggle v-model="form.purchasable" />
-              <span style="font-size: 12.5px">可新购</span>
-              <span class="cs-text-secondary" style="font-size: 11.5px">商店展示并允许非持有者购买</span>
+              <span style="font-size: 13px">可新购</span>
+              <span class="cs-text-secondary" style="font-size: 12px">商店展示并允许非持有者购买</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px">
               <CsToggle v-model="form.renewable" />
-              <span style="font-size: 12.5px">可续费</span>
-              <span class="cs-text-secondary" style="font-size: 11.5px">持有者余额直付顺延</span>
+              <span style="font-size: 13px">可续费</span>
+              <span class="cs-text-secondary" style="font-size: 12px">持有者余额直付顺延</span>
             </div>
           </div>
         </CsFormItem>
@@ -469,12 +470,12 @@ async function restore(row: any) {
 }
 
 .plan-price {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  color: var(--color-text-status-success-1i2jf8, #00802f);
+  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
 .plan-price--muted {
@@ -507,13 +508,13 @@ async function restore(row: any) {
 
   .chip-label {
     color: var(--color-text-body-secondary-66ygbb);
-    font-size: 11.5px;
+    font-size: 12px;
   }
 
   .placeholder-tag {
     cursor: pointer;
     font-family: var(--font-family-monospace-842lr2);
-    font-size: 11px;
+    font-size: 12px;
     user-select: none;
     transition: all 0.15s ease;
     &:hover {

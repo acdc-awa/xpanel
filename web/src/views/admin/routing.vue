@@ -618,7 +618,7 @@ onMounted(async () => {
 }
 .rule-chip {
   font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 11px;
+  font-size: 12px;
   background: var(--color-background-container-content-mjfil9, #fff);
   border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   padding: 1px 6px;

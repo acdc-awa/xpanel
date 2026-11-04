@@ -387,7 +387,9 @@ onUnmounted(() => {
     <CsSpaceBetween direction="vertical" size="l">
       <CsHeader variant="h1">
         运维监控大盘
-        <template #info>
+        <!-- 状态放在标题下方而不是 #info：info 是行内插槽，会跟 H1 同字号贴在一起，
+             状态指示器被撑成标题大小、和文字粘连。 -->
+        <template #description>
           <CsStatusIndicator
             :type="pollFailed ? 'warning' : isClusterHealthy ? 'success' : 'warning'"
             :text="pollFailed ? '数据拉取受阻' : isClusterHealthy ? '集群健康运行中' : '部分节点异常'"
@@ -456,7 +458,7 @@ onUnmounted(() => {
 
       <CsModal
         v-model:visible="onlineDialogOpen"
-        :header="onlineServer ? `在线用户名单 · ${onlineServer.name}` : '在线用户名单'"
+        :header="onlineServer ? `在线用户名单：${onlineServer.name}` : '在线用户名单'"
         size="large"
         @close="onlineServer = null"
       >

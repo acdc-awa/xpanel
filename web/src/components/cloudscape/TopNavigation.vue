@@ -152,7 +152,7 @@ function onIdentityClick(event: MouseEvent) {
   inline-size: 28px;
   block-size: 28px;
   border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: linear-gradient(135deg, #6366f1, #a855f7);
+  background: var(--x-primary);
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -164,6 +164,13 @@ function onIdentityClick(event: MouseEvent) {
 
 /* 站点标题在所有宽度都保留：移动端抽屉改为从应用栏下沿展开后，顶栏成了唯一常驻的
    品牌位置，不能再让位（vendor 的 title 规则已带 nowrap + ellipsis，极窄时自动收缩）。 */
+
+/* 390px 下品牌名按 18px 渲染会被挤成「PerlicaClo…」，收到 16px 正好放下全名。 */
+@media (max-width: $bp-small) {
+  .cs-topnav-name {
+    font-size: 16px;
+  }
+}
 
 /* 窄屏三枚工具按钮（主题 / 用户端 / 头像是并排的）：vendor 给的 16px 两侧内边距
    在手机上太奢侈，收到 10px 才不会把品牌名挤成省略号。 */

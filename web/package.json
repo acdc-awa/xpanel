@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "check:tokens": "node scripts/check-cloudscape-tokens.mjs",
-    "check:elmessage": "node scripts/check-elmessage.mjs"
+    "check:elmessage": "node scripts/check-elmessage.mjs",
+    "check:design": "node scripts/check-design.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

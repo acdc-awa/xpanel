@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { formatMoney } from '@/utils/format'
 import { ElMessage } from '@/components/cloudscape'
 import {
   CsBadge,
@@ -140,7 +141,7 @@ function paymentLabel(row: Order) {
           </template>
           <template #actions>
             <span class="order-amount" :class="amountClassOf(row)">
-              ¥ {{ (row.amount_cents / 100).toFixed(2) }}
+              {{ formatMoney(row.amount_cents) }}
             </span>
           </template>
 
@@ -193,7 +194,7 @@ function paymentLabel(row: Order) {
 }
 
 .order-amount {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;

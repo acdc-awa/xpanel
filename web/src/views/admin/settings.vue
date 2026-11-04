@@ -990,13 +990,13 @@ async function save() {
 <template>
   <CsPage>
     <CsToolbar>
-      <CsBox variant="span" font-size="heading-s" font-weight="bold">站点设置</CsBox>
+      <CsBox variant="span" font-size="heading-s" font-weight="bold">系统配置</CsBox>
       <template #actions>
         <CsButton v-if="isConfigTab" variant="primary" :loading="saving" :icon-name="'check'" @click="save">保存配置</CsButton>
       </template>
     </CsToolbar>
 
-    <CsContainer class="settings-card" header="站点配置">
+    <CsContainer class="settings-card">
       <CsLoading :loading="loading">
         <CsTabs v-model="activeTab" :tabs="settingsTabs">
         <!-- ==================== TAB 1: 站点 ==================== -->
@@ -1406,7 +1406,7 @@ async function save() {
             <CsToolbar>
               <CsButton :loading="backupLoading" :icon-name="'refresh'" @click="loadBackups">刷新列表</CsButton>
               <CsBox variant="span" font-size="body-s" color="text-body-secondary">
-                共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}
+                共 {{ backups.length }} 份，占用 {{ fmtSize(backupTotalSize) }}
               </CsBox>
               <TipIcon
                 content="备份文件保存在主控备份目录，按保留策略定期轮转，建议定期下载重要备份离线保存。上传时会先校验完整性与数据库版本再入库。"
@@ -1438,7 +1438,7 @@ async function save() {
                 <div class="row-actions">
                   <CsButton :wrap-text="false" :disabled="backupRestoring" @click="restoreFromBackup(row)">恢复</CsButton>
                   <CsButton :wrap-text="false" icon-name="download" @click="downloadBackup(row.file)">下载</CsButton>
-                  <CsButton :wrap-text="false" icon-name="remove" @click="removeBackup(row)">删除</CsButton>
+                  <CsButton variant="danger-outline" :wrap-text="false" icon-name="remove" @click="removeBackup(row)">删除</CsButton>
                 </div>
               </template>
             </CsTable>
@@ -1456,7 +1456,7 @@ async function save() {
                 <template #value="{ item }">
                   <template v-if="item.key === 'db'">
                     <CsBadge :color="system.db_ok ? 'green' : 'red'">{{ system.db_ok ? '正常' : '异常' }}</CsBadge>
-                    <span style="margin-left: 6px">{{ system.db_driver }} · {{ system.db_latency_ms }}ms</span>
+                    <span style="margin-left: 6px">{{ system.db_driver }}（{{ system.db_latency_ms }}ms）</span>
                   </template>
                   <template v-else-if="item.key === 'version'">
                     <CsBox variant="code">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</CsBox>
@@ -1731,7 +1731,7 @@ async function save() {
   padding: 14px 18px;
   border-radius: var(--border-radius-input-k1q34z);
   background: linear-gradient(135deg, var(--color-background-item-selected-dotkup) 0%, var(--color-background-cell-shaded-twxsbz) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(0, 108, 224, 0.2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1751,7 +1751,7 @@ async function save() {
   gap: 2px;
 
   .ver-tag {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-text-body-secondary-66ygbb);
    -transform: uppercase;
     letter-spacing: 0.5px;
@@ -1814,7 +1814,7 @@ async function save() {
 }
 
 .cur-ver-text {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-default-b2us04);
   code {
     font-family: var(--font-family-monospace-842lr2);
@@ -1828,7 +1828,7 @@ async function save() {
   flex-direction: column;
   gap: 3px;
   .disabled-hint {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--color-text-body-secondary-66ygbb);
   }
 }
@@ -1864,7 +1864,7 @@ async function save() {
   border: none;
   padding: 6px 0;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb);
   transition: color 0.15s ease;
 
@@ -1880,7 +1880,7 @@ async function save() {
   }
 
   .trigger-chevron {
-    font-size: 11px;
+    font-size: 12px;
     transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
   }
 
@@ -1917,7 +1917,7 @@ async function save() {
 
 .hist-warning-note {
   margin: 8px 0 0;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-status-warning-fabq6h);
   display: flex;
   align-items: center;
@@ -1970,7 +1970,7 @@ async function save() {
     &.is-small {
       width: 26px;
       height: 26px;
-      border-radius: 6px;
+      border-radius: 8px;
     }
 
     img {
@@ -1985,7 +1985,6 @@ async function save() {
   margin-top: 8px;
   padding: 14px 16px;
   background: var(--color-background-cell-shaded-twxsbz);
-  border: 1px dashed var(--color-border-divider-default-diwd4w);
   border-radius: var(--border-radius-item-card-default-nurfq3);
 }
 
@@ -2005,7 +2004,7 @@ async function save() {
 }
 
 .preview-item {
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -2014,7 +2013,7 @@ async function save() {
   position: relative;
 
   .preview-tag {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
@@ -2055,7 +2054,7 @@ async function save() {
 .p-logo-img {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 8px;
   object-fit: contain;
   background: rgba(255, 255, 255, 0.08);
   flex: none;
@@ -2064,8 +2063,8 @@ async function save() {
 .p-logo-mark {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
+  border-radius: 8px;
+  background: var(--x-primary);
   color: #fff;
   display: flex;
   align-items: center;
@@ -2084,7 +2083,7 @@ async function save() {
 .p-auth-img {
   width: 38px;
   height: 38px;
-  border-radius: 10px;
+  border-radius: 8px;
   object-fit: contain;
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
@@ -2094,26 +2093,26 @@ async function save() {
 .p-auth-logo {
   width: 38px;
   height: 38px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
+  border-radius: 8px;
+  background: var(--x-primary);
   color: #fff;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 108, 224, 0.3);
 }
 
 .p-auth-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text-body-default-b2us04);
 }
 
 .p-auth-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb);
   margin-top: 1px;
 }
@@ -2121,7 +2120,7 @@ async function save() {
 
 .proxy-snippet-box {
   background: #0f172a;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid #1e293b;
   overflow: hidden;
 
@@ -2165,7 +2164,7 @@ async function save() {
     border-color: var(--color-text-status-info-su6k9n);
     background: var(--color-background-alert-info-lqhdg0);
     .icon-process {
-      font-size: 22px;
+      font-size: 20px;
       color: var(--color-text-status-info-su6k9n);
     }
   }
@@ -2173,7 +2172,7 @@ async function save() {
     border-color: var(--color-text-status-success-1i2jf8);
     background: var(--color-background-alert-success-9dyn87);
     .icon-success {
-      font-size: 22px;
+      font-size: 20px;
       color: var(--color-text-status-success-1i2jf8);
       font-weight: bold;
     }
@@ -2182,7 +2181,7 @@ async function save() {
     border-color: var(--color-text-status-error-ri38gt);
     background: var(--color-background-alert-error-dpj69i);
     .icon-error {
-      font-size: 22px;
+      font-size: 20px;
       color: var(--color-text-status-error-ri38gt);
       font-weight: bold;
     }
@@ -2195,14 +2194,14 @@ async function save() {
     flex: 1;
     .status-msg {
       font-weight: 600;
-      font-size: 13.5px;
+      font-size: 14px;
       color: var(--color-text-body-default-b2us04);
       line-height: 1.5;
     }
     .status-err {
       margin-top: 6px;
       color: var(--color-text-status-error-ri38gt);
-      font-size: 11.5px;
+      font-size: 12px;
       line-height: 1.4;
       word-break: break-all;
       background: var(--color-background-alert-error-dpj69i);
@@ -2212,7 +2211,7 @@ async function save() {
     .status-hint {
       margin-top: 4px;
       color: var(--color-text-body-secondary-66ygbb);
-      font-size: 11.5px;
+      font-size: 12px;
     }
   }
 }

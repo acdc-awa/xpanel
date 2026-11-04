@@ -267,14 +267,14 @@ function close() {
 <style scoped lang="scss">
 .batch-error {
   margin-block-start: 2px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-status-error-ri38gt, #db0000);
   word-break: break-all;
 }
 
 .batch-message {
   margin-block-start: 2px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .batch-hint {

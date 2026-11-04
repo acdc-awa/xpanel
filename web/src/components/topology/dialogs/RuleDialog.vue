@@ -139,7 +139,7 @@ async function save() {
 }
 .dlg-hint {
   margin: 0 0 4px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 18px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
@@ -151,7 +151,7 @@ async function save() {
   margin-bottom: 8px;
 }
 .preset-label {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 @media (max-width: $bp-tablet-max) {

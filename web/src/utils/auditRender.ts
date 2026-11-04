@@ -7,6 +7,7 @@
  *  - 旧版裸 JSON body（不可信 method/params，按 action 语义推断动词）；
  *  - 非 JSON 文本（手动打点的中文句子 / 旧版回退文本）→ 原样展示。
  */
+import { formatMoney, formatSignedMoney } from './format'
 
 export interface AuditField {
   label: string
@@ -89,13 +90,12 @@ type Fmt = (v: unknown) => string
 
 function money(v: unknown): string {
   const n = Number(v)
-  return Number.isFinite(n) ? '¥' + (n / 100).toFixed(2) : String(v)
+  return Number.isFinite(n) ? formatMoney(n) : String(v)
 }
 
 function signedMoney(v: unknown): string {
   const n = Number(v)
-  if (!Number.isFinite(n)) return String(v)
-  return (n >= 0 ? '+' : '') + '¥' + (n / 100).toFixed(2)
+  return Number.isFinite(n) ? formatSignedMoney(n) : String(v)
 }
 
 function gb(v: unknown): string {

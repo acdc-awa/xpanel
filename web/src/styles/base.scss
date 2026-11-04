@@ -19,16 +19,6 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
-// 统一排版字阶通用类
-.text-xs { font-size: var(--x-font-xs, 11px) !important; }
-.text-sm { font-size: var(--x-font-sm, 12px) !important; }
-.text-base { font-size: var(--x-font-base, 13px) !important; }
-.text-md { font-size: var(--x-font-md, 14px) !important; }
-.text-lg { font-size: var(--x-font-lg, 15px) !important; }
-.text-xl { font-size: var(--x-font-xl, 18px) !important; }
-.text-2xl { font-size: var(--x-font-2xl, 22px) !important; }
-.text-3xl { font-size: var(--x-font-3xl, 26px) !important; }
-
 .font-normal { font-weight: var(--x-weight-normal, 400) !important; }
 .font-medium { font-weight: var(--x-weight-medium, 500) !important; }
 .font-semibold { font-weight: var(--x-weight-semibold, 600) !important; }
@@ -61,7 +51,7 @@ a { color: inherit; text-decoration: none; }
   &:hover {
     transform: translateY(-2px);
     box-shadow: var(--x-shadow-md);
-    border-color: rgba(99, 102, 241, 0.25);
+    border-color: rgba(0, 108, 224, 0.25);
   }
 
   &__top {
@@ -71,7 +61,7 @@ a { color: inherit; text-decoration: none; }
     margin-bottom: 8px;
   }
 }
-.x-stat-icon { width: 36px; height: 36px; border-radius: var(--x-radius-sm, 8px); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.x-stat-icon { width: 36px; height: 36px; border-radius: var(--x-radius-sm, 8px); display: flex; align-items: center; justify-content: center; font-size: 16px; }
 .x-stat-icon.purple { background: var(--x-primary-soft); color: var(--x-primary); }
 .x-stat-icon.green { background: var(--x-success-soft); color: var(--x-success); }
 .x-stat-icon.blue { background: var(--x-info-soft); color: var(--x-info); }
@@ -79,10 +69,10 @@ a { color: inherit; text-decoration: none; }
 .x-stat-icon.cyan { background: rgba(6, 182, 212, 0.12); color: #0891b2; }
 .x-stat-icon.amber { background: rgba(245, 158, 11, 0.12); color: #d97706; }
 .x-stat-icon.emerald { background: rgba(16, 185, 129, 0.12); color: #059669; }
-.x-stat-icon.indigo { background: rgba(99, 102, 241, 0.12); color: #4f46e5; }
-.x-stat-value { font-size: var(--x-font-2xl, 22px); font-weight: 700; line-height: 1.25; font-family: var(--x-font-mono); font-variant-numeric: tabular-nums; }
-.x-stat-label { color: var(--x-text-2); font-size: var(--x-font-xs, 11px); font-weight: 500; }
-.x-stat-sub { color: var(--x-text-3); font-size: 10.5px; margin-top: 4px; font-family: var(--x-font-mono); font-variant-numeric: tabular-nums; }
+.x-stat-icon.indigo { background: var(--x-primary-soft); color: var(--x-primary); }
+.x-stat-value { font-size: var(--x-font-lg, 20px); font-weight: 700; line-height: 1.25; font-family: var(--x-font-mono); font-variant-numeric: tabular-nums; }
+.x-stat-label { color: var(--x-text-2); font-size: var(--x-font-xs, 12px); font-weight: 500; }
+.x-stat-sub { color: var(--x-text-3); font-size: 12px; margin-top: 4px; font-family: var(--x-font-mono); font-variant-numeric: tabular-nums; }
 
 // 工具栏
 .x-toolbar {
@@ -144,9 +134,9 @@ a { color: inherit; text-decoration: none; }
 
 // 条形图（占位）
 .x-bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 140px; padding: 10px 4px 0; }
-.x-bar { flex: 1; background: linear-gradient(180deg, #818cf8, #6366f1); border-radius: var(--x-radius-2xs, 4px) var(--x-radius-2xs, 4px) 0 0; min-width: 14px; opacity: 0.9; }
+.x-bar { flex: 1; background: var(--x-primary); border-radius: var(--x-radius-2xs, 4px) var(--x-radius-2xs, 4px) 0 0; min-width: 14px; opacity: 0.9; }
 .x-bar:nth-child(odd) { opacity: 0.6; }
-.x-chart-x { display: flex; gap: 8px; color: var(--x-text-3); font-size: 11px; padding-top: 6px; }
+.x-chart-x { display: flex; gap: 8px; color: var(--x-text-3); font-size: 12px; padding-top: 6px; }
 .x-chart-x span { flex: 1; text-align: center; }
 
 // 提示条
@@ -168,7 +158,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: var(--x-radius-xs, 6px);
+  border-radius: var(--x-radius-xs, 4px);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -207,7 +197,7 @@ html.dark .x-chip {
   transition: border-color 0.18s ease, background 0.18s ease;
 
   &:hover {
-    border-color: rgba(99, 102, 241, 0.35);
+    border-color: rgba(0, 108, 224, 0.35);
   }
 
   .toggle-info {
@@ -217,7 +207,7 @@ html.dark .x-chip {
     min-width: 0;
 
     .toggle-title {
-      font-size: 13.5px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--x-text);
     }
@@ -252,7 +242,7 @@ html.dark .x-chip {
     min-height: 38px;
 
     .head-title {
-      font-size: 12.5px;
+      font-size: 13px;
       font-weight: 600;
       color: var(--x-text);
       display: flex;
@@ -261,7 +251,7 @@ html.dark .x-chip {
     }
 
     .head-meta {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--x-text-3);
     }
   }
@@ -331,13 +321,13 @@ html.dark .x-chip {
   justify-content: space-between;
 }
 .x-card-body { padding: 18px; }
-.x-row-line { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--x-border); font-size: 13.5px; }
+.x-row-line { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--x-border); font-size: 14px; }
 .x-row-line:last-child { border-bottom: none; }
 .x-row-line .k { color: var(--x-text-2); display: flex; align-items: center; }
 .x-row-line .v { font-weight: 500; }
 .x-notice-item { padding: 12px 18px; border-bottom: 1px solid var(--x-border); }
 .x-notice-item:last-child { border-bottom: none; }
-.x-notice-title { font-size: 13.5px; font-weight: 500; }
+.x-notice-title { font-size: 14px; font-weight: 500; }
 .x-notice-date { font-size: 12px; color: var(--x-text-3); margin-top: 3px; font-family: var(--x-font-mono); }
 
 // 响应式
@@ -350,7 +340,7 @@ html.dark .x-chip {
   // 375px 下两列统计卡每列仅约 170px，收紧内边距与字号避免数值被挤压换行
   .x-stat-grid { gap: 8px; }
   .x-stat-card { padding: 14px; }
-  .x-stat-value { font-size: 18px; }
+  .x-stat-value { font-size: 16px; }
 }
 
 @media (min-width: 768px) {
@@ -402,7 +392,7 @@ html.dark .x-chip {
 .el-message-box {
   width: 440px !important;
   max-width: calc(100vw - 32px) !important;
-  border-radius: var(--x-radius-lg, 14px) !important;
+  border-radius: var(--x-radius-lg, 16px) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   border: 1px solid var(--x-border) !important;
   padding: 24px 24px 20px !important;
@@ -453,7 +443,7 @@ html.dark .x-chip {
   .el-message-box__status {
     position: static !important;
     transform: none !important;
-    font-size: 22px !important;
+    font-size: 20px !important;
     margin-top: 1px !important;
   }
 
@@ -479,7 +469,7 @@ html.dark .x-chip {
   // 纵向弹性布局：标题/footer 固定，只有 body 滚动
   display: flex !important;
   flex-direction: column !important;
-  border-radius: var(--x-radius-lg, 14px) !important;
+  border-radius: var(--x-radius-lg, 16px) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   border: 1px solid var(--x-border) !important;
   background: var(--x-card) !important;
@@ -500,7 +490,7 @@ html.dark .x-chip {
   }
 
   .el-dialog__title {
-    font-size: 15.5px !important;
+    font-size: 16px !important;
     font-weight: 700 !important;
     color: var(--x-text);
   }
@@ -634,10 +624,10 @@ html.dark .x-chip {
     &:first-child { margin-top: 0; }
   }
 
-  h1 { font-size: 1.35rem; border-bottom: 1px solid var(--x-border); padding-bottom: 4px; }
-  h2 { font-size: 1.2rem; border-bottom: 1px solid var(--x-border); padding-bottom: 3px; }
-  h3 { font-size: 1.1rem; }
-  h4 { font-size: 1.02rem; }
+  h1 { font-size: 24px; border-bottom: 1px solid var(--x-border); padding-bottom: 4px; }
+  h2 { font-size: 20px; border-bottom: 1px solid var(--x-border); padding-bottom: 3px; }
+  h3 { font-size: 16px; }
+  h4 { font-size: 14px; }
 
   p {
     margin: 0 0 6px 0;
@@ -660,16 +650,16 @@ html.dark .x-chip {
     margin: 8px 0;
     padding: 6px 12px;
     background: var(--x-fill-2, rgba(0, 0, 0, 0.03));
-    border-left: 3.5px solid var(--x-primary, #6366f1);
-    border-radius: 0 var(--x-radius-xs, 6px) var(--x-radius-xs, 6px) 0;
+    border-left: 3.5px solid var(--x-primary, #006ce0);
+    border-radius: 0 var(--x-radius-xs, 4px) var(--x-radius-xs, 4px) 0;
     color: var(--x-text-2);
-    font-size: 13.5px;
+    font-size: 14px;
     p { margin: 0; }
   }
 
   code {
     font-family: var(--x-font-mono, monospace);
-    font-size: 12.5px;
+    font-size: 13px;
     padding: 2px 6px;
     background: var(--x-fill-2, rgba(0, 0, 0, 0.05));
     border-radius: var(--x-radius-2xs, 4px);
@@ -683,13 +673,13 @@ html.dark .x-chip {
     // 写死 #e2e8f0，亮色下是浅底浅字（对比度 ≈1.05:1），公告里的代码块近乎空白
     background: var(--x-code-block-bg, #0f172a);
     color: var(--x-code-block-text, #e2e8f0);
-    border-radius: var(--x-radius-xs, 6px);
+    border-radius: var(--x-radius-xs, 4px);
     overflow-x: auto;
     code {
       padding: 0;
       background: transparent;
       color: inherit;
-      font-size: 12.5px;
+      font-size: 13px;
     }
   }
 
@@ -775,7 +765,7 @@ html.dark .x-chip {
   .mobile-data-card {
     background: var(--x-card, #ffffff);
     border: 1px solid var(--x-border, #e5e7eb);
-    border-radius: var(--x-radius, 12px);
+    border-radius: var(--x-radius, 8px);
     padding: 14px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     transition: all 0.2s ease;
@@ -816,12 +806,12 @@ html.dark .x-chip {
         }
 
         .item-label {
-          font-size: 11px;
+          font-size: 12px;
           color: var(--x-text-3, #9ca3af);
         }
 
         .item-value {
-          font-size: 12.5px;
+          font-size: 13px;
           color: var(--x-text, #1f2937);
           font-weight: 500;
           word-break: break-all;
@@ -851,7 +841,7 @@ html.dark .x-chip {
     min-width: min(320px, 94vw);
     max-width: 94vw !important;
     margin: 16px auto !important;
-    border-radius: var(--x-radius, 12px) !important;
+    border-radius: var(--x-radius, 8px) !important;
 
     // 紧凑型弹窗（如 2FA、确认框）不被过度拉伸
     &.twofa-dialog,
@@ -866,7 +856,7 @@ html.dark .x-chip {
       margin-right: 0 !important;
 
       .el-dialog__title {
-        font-size: 15px !important;
+        font-size: 16px !important;
       }
     }
 
@@ -898,7 +888,7 @@ html.dark .x-chip {
       margin-bottom: 0 !important;
 
       .el-drawer__title {
-        font-size: 15px !important;
+        font-size: 16px !important;
         font-weight: 600 !important;
       }
     }

@@ -251,7 +251,7 @@ function onClosed() {
 <template>
   <CsModal
     v-model:visible="visible"
-    :header="rule ? `编辑路由规则 · ${rule.outbound_tag}` : '新增路由规则'"
+    :header="rule ? `编辑路由规则：${rule.outbound_tag}` : '新增路由规则'"
     size="large"
     scrollable
     @close="onClosed"

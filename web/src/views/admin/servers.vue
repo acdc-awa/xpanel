@@ -1099,7 +1099,7 @@ const billingCycleOptions = [
 }
 
 .server-action-title {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 21px;
   font-weight: 700;
   color: var(--color-text-link-default-qabnuk, #0972d3);
@@ -1125,7 +1125,7 @@ const billingCycleOptions = [
 
 /* 弹窗内的安装凭据块 */
 .secret-box { display: grid; gap: 10px; }
-.install-cmd { font-size: 11.5px; }
+.install-cmd { font-size: 12px; }
 .secret-row {
   display: flex;
   align-items: center;
@@ -1137,7 +1137,7 @@ const billingCycleOptions = [
 
   .k {
     color: var(--color-text-body-secondary-66ygbb, #656871);
-    font-size: 12.5px;
+    font-size: 13px;
     flex: none;
     inline-size: 56px;
   }

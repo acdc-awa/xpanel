@@ -2391,7 +2391,7 @@ const selectionInfo = computed(() => {
   margin: auto 0;
   width: 6px;
   height: 36px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.4);
   z-index: 10;

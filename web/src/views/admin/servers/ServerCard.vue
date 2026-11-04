@@ -67,7 +67,7 @@ const heartbeat = computed(() =>
 const hasConns = computed(() => (props.server.conn_tcp_established ?? -1) >= 0)
 const connsText = computed(() => {
   if (!hasConns.value) return '—'
-  return `TCP ${props.server.conn_tcp_established} · UDP ${props.server.conn_udp}`
+  return `TCP ${props.server.conn_tcp_established}，UDP ${props.server.conn_udp}`
 })
 const connsTip = computed(() => {
   if (!hasConns.value) return '该节点尚未上报连接数（需要 agent 升级）'
@@ -411,7 +411,7 @@ function onRootClick() {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .server-price {

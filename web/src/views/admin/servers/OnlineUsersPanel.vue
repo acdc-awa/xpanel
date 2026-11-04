@@ -356,7 +356,7 @@ defineExpose({ reload })
 
 .online-ip {
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
   background: var(--color-background-container-content-mjfil9, #ffffff);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

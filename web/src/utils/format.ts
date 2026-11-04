@@ -1,7 +1,23 @@
 import { formatDateTime } from './timezone'
 
-export function formatMoney(n: number): string {
-  return `¥${n.toFixed(2)}`
+/** 金额数字部分（分 → `1,460.00`），不带货币符号。
+ *  用于符号与数字分开排版的地方（如 KPI 卡把 ¥ 渲染成小号上标）。 */
+export function formatMoneyNumber(cents: number): string {
+  const n = (Number(cents) || 0) / 100
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/** 金额（分 → `¥1,460.00`）。金额格式的唯一入口：
+ *  符号与数字之间不留空格，固定两位小数，整数部分带千分位。
+ *  见 AGENTS.md「文案规范 · 标点与格式」。 */
+export function formatMoney(cents: number): string {
+  return `¥${formatMoneyNumber(cents)}`
+}
+
+/** 带正负号的金额，用于流水/审计（`+¥12.00` / `-¥12.00`）。 */
+export function formatSignedMoney(cents: number): string {
+  const n = Number(cents) || 0
+  return `${n >= 0 ? '+' : ''}${formatMoney(n)}`
 }
 
 export function formatTraffic(gb: number): string {

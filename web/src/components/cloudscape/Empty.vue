@@ -38,7 +38,7 @@ withDefaults(
 
 .cs-empty-text {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 20px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }

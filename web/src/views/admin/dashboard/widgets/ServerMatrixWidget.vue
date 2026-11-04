@@ -347,9 +347,8 @@ function fmtTime(t: string | null) {
 .server-card {
   min-width: 0;
   padding: 8px 10px 9px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   border-radius: 8px;
-  background: var(--color-background-container-content-mjfil9, #ffffff);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
 }
 
 .sc-top {
@@ -366,7 +365,7 @@ function fmtTime(t: string | null) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 700;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
@@ -377,7 +376,7 @@ function fmtTime(t: string | null) {
 
 .sc-host {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -421,7 +420,7 @@ function fmtTime(t: string | null) {
   gap: 10px;
   margin-top: 6px;
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
 
   .online-users-sub {
     margin-top: 0;
@@ -437,7 +436,7 @@ function fmtTime(t: string | null) {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
 
   .rate-rx {
@@ -445,7 +444,7 @@ function fmtTime(t: string | null) {
   }
 
   .rate-tx {
-    color: var(--color-text-accent-1mglsg, #4338ca);
+    color: var(--color-text-accent-1mglsg, #006ce0);
   }
 }
 
@@ -482,7 +481,7 @@ function fmtTime(t: string | null) {
 }
 
 .server-heartbeat {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-status-inactive-fqjc97, #879596);
   margin-top: 2px;
 }
@@ -491,10 +490,10 @@ function fmtTime(t: string | null) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
 
   .load-lbl {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--color-text-body-secondary-66ygbb, #656871);
     width: 30px;
@@ -506,7 +505,7 @@ function fmtTime(t: string | null) {
   }
 
   .load-val {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     width: 32px;
     text-align: right;
@@ -518,7 +517,7 @@ function fmtTime(t: string | null) {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
 
   .rate-rx {
@@ -526,12 +525,12 @@ function fmtTime(t: string | null) {
   }
 
   .rate-tx {
-    color: var(--color-text-accent-1mglsg, #4338ca);
+    color: var(--color-text-accent-1mglsg, #006ce0);
   }
 }
 
 .online-users-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   margin-top: 2px;
 }

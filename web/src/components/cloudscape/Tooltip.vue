@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 .cs-tooltip {
   max-width: min(360px, calc(100vw - 16px));
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #0f141a;
   color: #ffffff;
   font-size: 12px;

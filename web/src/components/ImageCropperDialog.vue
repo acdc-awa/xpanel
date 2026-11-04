@@ -636,7 +636,7 @@ function handleConfirm() {
 .size-hint {
   display: flex;
   flex-direction: column;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.2;
   color: var(--x-text-3, #94a3b8);
 

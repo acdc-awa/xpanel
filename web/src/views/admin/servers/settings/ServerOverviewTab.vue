@@ -61,7 +61,7 @@ function formatUptime(sec: number) {
 const hasConns = computed(() => (props.server.conn_tcp_established ?? -1) >= 0)
 const connsText = computed(
   () =>
-    `TCP 已建立 ${props.server.conn_tcp_established} · TCP 连接表 ${props.server.conn_tcp_total} · UDP socket ${props.server.conn_udp}`,
+    `TCP 已建立 ${props.server.conn_tcp_established}，连接表 ${props.server.conn_tcp_total}，UDP socket ${props.server.conn_udp}`,
 )
 
 const processText = computed(() => {  if (offline.value) return '服务器离线，无法查询实时进程'
@@ -72,7 +72,7 @@ const processText = computed(() => {  if (offline.value) return '服务器离线
   if (s.uptime_sec !== undefined && s.uptime_sec !== null) parts.push(`已运行 ${formatUptime(s.uptime_sec)}`)
   if (s.started_at) parts.push(`启动于 ${fmtTime(s.started_at)}`)
   if (s.config_path) parts.push(s.config_path)
-  return parts.join(' · ') || '未获取到进程信息'
+  return parts.join('，') || '未获取到进程信息'
 })
 
 async function loadInbounds() {
@@ -278,7 +278,7 @@ watch(
 
 .server-status-count {
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 22px;
   font-variant-numeric: tabular-nums;
 }
@@ -316,7 +316,7 @@ watch(
 
 .server-meta-value {
   margin-inline-end: 14px;
-  font-size: 12.5px;
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
 

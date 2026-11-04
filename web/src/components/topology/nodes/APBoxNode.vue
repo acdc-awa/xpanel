@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { CsIcon } from '@/components/cloudscape'
 import { Handle, Position } from '@vue-flow/core'
 import type { PermissionGroup, UserAccessPoint } from '@/api/types'
 import { protocolDisplayName } from '@/utils/protocol'
@@ -45,7 +46,7 @@ function groupName(id: number): string {
     />
 
     <div class="ap-node-head">
-      <span class="ap-icon">🌐</span>
+      <CsIcon name="globe" class="ap-icon" />
       <span class="ap-name-text" :title="data.ap.name">{{ data.ap.name }}</span>
       <span v-if="!data.ap.enabled" class="ap-chip gray">禁用</span>
     </div>
@@ -76,7 +77,7 @@ function groupName(id: number): string {
     </div>
 
     <div v-if="data.ap.resolved_target_desc" class="ap-desc-text" :title="data.ap.resolved_target_desc">
-      直连 ➜ {{ data.ap.resolved_target_desc }}
+      直连 → {{ data.ap.resolved_target_desc }}
     </div>
   </div>
 </template>
@@ -128,7 +129,6 @@ function groupName(id: number): string {
     min-height: 24px;
   }
   .ap-icon {
-    font-size: 14px;
     flex: none;
   }
   .ap-name-text {
@@ -198,7 +198,7 @@ function groupName(id: number): string {
     align-items: center;
     height: 18px;
     padding: 0 6px;
-    border-radius: 9px;
+    border-radius: 999px;
     border: 1px solid transparent;
     font-size: 10px;
     line-height: 1;

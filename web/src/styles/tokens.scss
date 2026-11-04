@@ -1,9 +1,13 @@
-// 设计 token —— 覆盖 Element Plus 主色为品牌靛紫，亮/暗主题在此统一切换
+// 设计 token —— 管理端交互色统一取 Cloudscape 主色阶，亮/暗主题在此统一切换。
+//
+// 2026-11-04 拍板：主色只保留一套（Cloudscape 蓝）。此前这里挂的是品牌靛紫，
+// 而管理端实际渲染的是 vendor 的 primary 色阶，两套并存且靛紫只残留在渐变里。
+// 现在 --x-primary 指向 vendor 的 primary-600，随亮/暗自动切。
 :root {
   /* ===== 品牌主色 (Brand Primary) ===== */
-  --x-primary: #6366f1;
-  --x-primary-hover: #4f46e5;
-  --x-primary-soft: #eef2ff;
+  --x-primary: var(--color-primary-600-su56h9, #006ce0);
+  --x-primary-hover: var(--color-primary-700-1y7vyc, #004a9e);
+  --x-primary-soft: var(--color-primary-50-hzpado, #f0fbff);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds) ===== */
   --x-bg: #f4f5fb;
@@ -21,21 +25,22 @@
   --x-text-2: #6b7280;
   --x-text-3: #9ca3af;
 
-  /* ===== 字体字号阶梯 (Typography Scale) ===== */
-  --x-font-xs: 11px;     /* 辅助说明、统计副标、状态元数据 */
-  --x-font-sm: 12px;     /* 表格内微注、胶囊标签、小徽章 */
-  --x-font-base: 13px;   /* 表单正文、输入框、常规列表 */
-  --x-font-md: 14px;     /* 主要段落、次级标头、弹窗正文 */
-  --x-font-lg: 15px;     /* 卡片标头、抽屉标头、组别标题 */
-  --x-font-xl: 18px;     /* 弹窗大标、模块总标题 */
-  --x-font-2xl: 22px;    /* 统计卡大数、看板次级 KPI */
-  --x-font-3xl: 26px;    /* 核心 KPI 吞吐大数、核心指标数 */
+  /* ===== 字体字号阶梯 (Typography Scale) =====
+     2026-11-04 收敛为 6 档，与 Cloudscape 的 body-s(12)/body-m(14)/heading-s(16)/
+     heading-l(20)/heading-xl(24) 对齐，13 是中文正文的更紧凑档。硬下限 12px：
+     11px 及以下的辅助文字在 100% 缩放下中文已经发虚。 */
+  --x-font-xs: 12px;     /* 辅助说明、单位、徽标、统计副标、状态元数据 */
+  --x-font-sm: 13px;     /* 表格正文、表单标签、次级文本 */
+  --x-font-base: 14px;   /* 正文、输入值、卡片正文 */
+  --x-font-md: 16px;     /* 区块标题、卡片标题 */
+  --x-font-lg: 20px;     /* 二级标题（Cloudscape heading-l） */
+  --x-font-xl: 24px;     /* 页面标题（Cloudscape heading-xl） */
 
-  /* ===== 行高阶梯 (Line Heights) ===== */
-  --x-leading-tight: 1.25;
-  --x-leading-snug: 1.35;
-  --x-leading-normal: 1.45;
-  --x-leading-relaxed: 1.55;
+  /* ===== 行高阶梯 (Line Heights)：字号越大行高越紧 ===== */
+  --x-leading-tight: 1.25;   /* 20 / 24 */
+  --x-leading-snug: 1.4;     /* 16 */
+  --x-leading-normal: 1.5;   /* 12 / 13 */
+  --x-leading-relaxed: 1.55; /* 14 正文 */
 
   /* ===== 字重阶梯 (Font Weights) ===== */
   --x-weight-normal: 400;
@@ -53,13 +58,16 @@
   --x-info: #3b82f6;
   --x-info-soft: #eff6ff;
 
-  /* ===== 尺寸与圆角 ===== */
-  --x-radius: 12px;
+  /* ===== 尺寸与圆角 =====
+     2026-11-04 收敛为 3 档，与 Cloudscape 的 input/item(8)、container(16) 对齐。
+     嵌套用同心圆角：内 = 外 − 内边距；胶囊（高/2）单独用 999px。 */
+  --x-radius-container: 16px; /* 外层容器 */
+  --x-radius: 8px;            /* 卡片、面板、按钮 */
   --x-radius-sm: 8px;
-  --x-radius-xs: 6px;
+  --x-radius-xs: 4px;         /* 输入、chip、徽标 */
   --x-radius-2xs: 4px;
-  --x-radius-lg: 14px;
-  --el-border-radius-base: 8px;
+  --x-radius-lg: 16px;
+  --x-radius-pill: 999px;
   /* 只声明各端真实存在的等宽字体。'JetBrains Mono' / 'Fira Code' 从未加载，
      留着只会让 Windows 落 Consolas、macOS 落 SF Mono，同串数字宽度不同。 */
   --x-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -85,7 +93,7 @@
   --x-code-bg: #f8fafc;
   --x-code-gutter: #f1f5f9;
   --x-code-text: #1e2333;
-  --x-code-key: #4338ca;     /* 键名 */
+  --x-code-key: #006ce0;     /* 键名 */
   --x-code-string: #0f766e;  /* 字符串 */
   --x-code-number: #b45309;  /* 数字与布尔 */
   --x-code-comment: #94a3b8; /* 注释 */
@@ -93,8 +101,8 @@
   --x-code-invalid: #dc2626; /* 语法错误 */
   --x-code-error-bg: rgba(239, 68, 68, 0.1);
   --x-code-warn-bg: rgba(245, 158, 11, 0.12);
-  --x-code-active-line: rgba(99, 102, 241, 0.06);
-  --x-code-selection: rgba(99, 102, 241, 0.18);
+  --x-code-active-line: rgba(0, 108, 224, 0.06);
+  --x-code-selection: rgba(0, 108, 224, 0.18);
 
   /* Markdown 围栏代码块：两套主题都用深底浅字。此前用 --x-fill-1 当底色而文字写死
      #e2e8f0，亮色下变成浅底浅字（对比度 ≈1.05:1），肉眼近似空白。 */
@@ -108,25 +116,27 @@
   --x-shadow-lg: 0 10px 30px rgba(23, 27, 46, 0.12);
   --x-shadow-xl: 0 20px 25px -5px rgba(23, 27, 46, 0.16);
 
-  /* Element Plus 亮色变量 */
-  --el-color-primary: #6366f1;
-  --el-color-primary-light-3: #8b8cf5;
-  --el-color-primary-light-5: #adaef8;
-  --el-color-primary-light-7: #d0d0fb;
-  --el-color-primary-light-8: #e1e1fc;
-  --el-color-primary-light-9: #f2f2fe;
-  --el-color-primary-dark-2: #4f52c9;
   /* 只声明随系统存在的字体。'Inter' 全项目未加载（无 @font-face / 无 webfont），
      留着会让 Windows 落 Segoe UI、macOS 落 SF Pro，字宽差 5%~8%。 */
   --el-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
+/* 字体单一来源：Cloudscape 组件默认走 Open Sans（它没有中文字形，中文会回退到
+   浏览器默认字体，与数字字宽不同源）。vendor 把这套 token 声明在 body 上（不是
+   :root），所以覆盖也必须落在 body，否则 :root 的值会被 body 的同名声明盖掉。
+   ⚠️ token 名带 vendor 内容哈希，升级 cloudscape vendor 后需重新核对。 */
+body {
+  --font-family-base-c9u5cr: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
 html.dark {
-  /* ===== 品牌主色 (Brand Primary in Dark) ===== */
-  --x-primary: #818cf8;
-  --x-primary-hover: #6366f1;
-  --x-primary-soft: rgba(99, 102, 241, 0.16);
+  /* ===== 品牌主色 (Brand Primary in Dark) =====
+     暗色下 Cloudscape 的 primary-400 是更好的对比档，同样取自 vendor token。 */
+  --x-primary: var(--color-primary-400-x68qyw, #42b4ff);
+  --x-primary-hover: var(--color-primary-300-2rt5tg, #75cfff);
+  --x-primary-soft: var(--color-primary-1000-cr22ew, #001129);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds in Dark) ===== */
   --x-bg: #0b0f19;
@@ -195,10 +205,4 @@ html.dark {
   --el-text-color-regular: #cbd5e1;
   --el-text-color-secondary: #94a3b8;
   --el-text-color-placeholder: #64748b;
-  --el-color-primary: #818cf8;
-  --el-color-primary-light-3: #6366f1;
-  --el-color-primary-light-5: #4f46e5;
-  --el-color-primary-light-7: rgba(99, 102, 241, 0.35);
-  --el-color-primary-light-8: rgba(99, 102, 241, 0.25);
-  --el-color-primary-light-9: rgba(99, 102, 241, 0.16);
 }

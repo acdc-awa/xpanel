@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatMoney, formatMoneyNumber } from '@/utils/format'
 import { onMounted, reactive, ref } from 'vue'
 import {
   CsAlert,
@@ -49,7 +50,7 @@ function fmtTime(t: string | null) {
 }
 
 function fmtMoney(cents: number) {
-  return `¥ ${(cents / 100).toFixed(2)}`
+  return formatMoney(cents)
 }
 
 async function load() {
@@ -274,8 +275,8 @@ function isExpired(row: GiftCard) {
 
           <template #footer>
             <CsButton icon-name="copy" @click="copyText(row.code, '卡密')">复制卡密</CsButton>
-            <CsButton v-if="row.status === 'unused'" icon-name="remove" @click="voidCard(row)">作废</CsButton>
-            <CsButton v-else-if="row.status === 'disabled'" icon-name="remove" @click="purgeCard(row)">
+            <CsButton v-if="row.status === 'unused'" variant="danger-outline" icon-name="remove" @click="voidCard(row)">作废</CsButton>
+            <CsButton v-else-if="row.status === 'disabled'" variant="danger-outline" icon-name="remove" @click="purgeCard(row)">
               彻底删除
             </CsButton>
           </template>
@@ -330,7 +331,7 @@ function isExpired(row: GiftCard) {
     <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium" :close-on-click-overlay="false">
       <CsAlert type="success" style="margin-bottom: 14px">
         本次已成功生成 {{ createdCards.length }} 张面值为 ¥
-        {{ createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0' }}
+        {{ formatMoneyNumber(createdCards[0]?.face_value_cents || 0) }}
         的卡密：
       </CsAlert>
       <CsInput
@@ -371,11 +372,11 @@ function isExpired(row: GiftCard) {
 }
 
 .gift-card-metric {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-status-success-1i2jf8, #00802f);
+  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
 .gift-card-code {

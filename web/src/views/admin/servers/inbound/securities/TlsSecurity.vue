@@ -34,7 +34,7 @@ const certOptions = computed(() =>
   certs.value.map((cert) => ({
     value: cert.id,
     label: `${cert.domain}（到期 ${cert.not_after}）${
-      cert.ca_name ? ` · CA: ${cert.ca_name}` : cert.self_signed ? ' · 自签·自动Pin' : ' · 外部导入'
+      cert.ca_name ? `（CA：${cert.ca_name}）` : cert.self_signed ? '（自签，自动 Pin）' : '（外部导入）'
     }`,
   }))
 )

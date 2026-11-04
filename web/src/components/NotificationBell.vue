@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
 .notif-count {
   min-inline-size: 20px;
   padding-inline: 6px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--color-background-badge-grey-2psh1z, #eff1f2);
   color: var(--color-text-body-secondary-9gdsa4, #5f6b7a);
   font-size: 12px;
@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   gap: 4px;
-  border-radius: 6px;
+  border-radius: 8px;
 
   &:hover {
     background: var(--color-background-dropdown-item-hover-0d9c28, #f0f1f4);
@@ -275,7 +275,7 @@ onBeforeUnmount(() => {
   font: inherit;
   text-align: start;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
 
   &:focus-visible {
     outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
   block-size: 24px;
   margin-block-start: 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--color-text-body-secondary-9gdsa4, #5f6b7a);
   font-size: 16px;

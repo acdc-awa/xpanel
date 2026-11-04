@@ -359,7 +359,7 @@ function fmtTime(t: string) {
 
           <div v-if="rv.view.texts.length" class="audit-text-chips">
             <span v-for="(t, i) in rv.view.texts" :key="i" class="audit-text-chip" :title="t.preview" @click="openDetail(rv.row)">
-              {{ t.title }} · {{ t.meta }}
+              <span>{{ t.title }}</span><span class="chip-meta">{{ t.meta }}</span>
             </span>
           </div>
 
@@ -405,7 +405,7 @@ function fmtTime(t: string) {
             </div>
             <pre class="audit-pre">{{ t.preview }}</pre>
           </div>
-          <div v-if="!currentView.fields.length && !currentView.texts.length" style="color: var(--color-text-body-secondary-66ygbb); font-size: 12.5px; padding: 8px 0">
+          <div v-if="!currentView.fields.length && !currentView.texts.length" style="color: var(--color-text-body-secondary-66ygbb); font-size: 13px; padding: 8px 0">
             无结构化字段，可切到「原文」查看。
           </div>
         </div>
@@ -535,9 +535,8 @@ function fmtTime(t: string) {
 /* 翻译视图：摘要一句话 */
 .audit-summary {
   padding: 8px 10px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
   border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-container-content-mjfil9, #ffffff);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
   font-size: var(--font-size-body-s, 12px);
   line-height: 18px;
   color: var(--color-text-body-default-b2us04, #0f141a);
@@ -587,6 +586,10 @@ function fmtTime(t: string) {
 }
 
 /* 翻译视图：大文本预览 chip（模板/正文/PEM） */
+.audit-text-chip .chip-meta {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
 .audit-text-chips {
   margin-block-start: 10px;
   display: flex;
@@ -595,6 +598,9 @@ function fmtTime(t: string) {
 }
 
 .audit-text-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   font-size: var(--font-size-body-s, 12px);
   line-height: 16px;
   color: var(--color-text-link-default-qabnuk, #006ce0);
@@ -619,7 +625,7 @@ function fmtTime(t: string) {
 
 /* 详情弹窗：翻译视图 */
 .audit-modal-summary {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-body-default-b2us04);
   padding: 2px 0 10px;
@@ -638,7 +644,7 @@ function fmtTime(t: string) {
   display: flex;
   gap: 10px;
   padding: 6px 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 
   &:nth-child(odd) {
@@ -670,7 +676,7 @@ function fmtTime(t: string) {
 
     .mt-meta {
       color: var(--color-text-body-secondary-66ygbb);
-      font-size: 11px;
+      font-size: 12px;
     }
   }
 }
@@ -680,7 +686,7 @@ function fmtTime(t: string) {
   padding: 12px 14px;
   border-radius: 8px;
   font-family: var(--font-family-monospace-842lr2);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--color-text-body-default-b2us04);
   white-space: pre-wrap;

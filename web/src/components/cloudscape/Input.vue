@@ -215,7 +215,7 @@ input[type='password']::-ms-clear {
   inset-inline-end: 0;
   top: 100%;
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 14px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   pointer-events: none;

@@ -51,7 +51,7 @@ import {
 import { adjustUserBalance } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import type { AdminUser } from '@/api/types'
-import { formatBytes } from '@/utils/format'
+import { formatBytes, formatMoney } from '@/utils/format'
 import { formatDateTime } from '@/utils/timezone'
 import { buildSubscribeUrl } from '@/config/site'
 import { useSiteStore } from '@/stores/site'
@@ -782,7 +782,7 @@ function cardMenuItems(row: AdminUser) {
               </CsBadge>
             </CsCardFact>
             <CsCardFact label="账户余额" mono>
-              <span class="balance-value">¥ {{ (((row as any).balance_cents || 0) / 100).toFixed(2) }}</span>
+              <span class="balance-value">{{ formatMoney((row as any).balance_cents || 0) }}</span>
             </CsCardFact>
           </CsCardFacts>
 
@@ -837,7 +837,7 @@ function cardMenuItems(row: AdminUser) {
     </CsContainer>
 
     <!-- 用户详情与权限配置弹窗 -->
-    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.email ?? ''}`" size="large" scrollable :close-on-click-overlay="false">
+    <CsModal v-model:visible="detailOpen" :header="`编辑用户：${current?.email ?? ''}`" size="large" scrollable :close-on-click-overlay="false">
       <template v-if="current">
         <div class="user-summary">
           <div class="sum-item">
@@ -868,7 +868,7 @@ function cardMenuItems(row: AdminUser) {
           <div class="sum-item">
             <span class="sum-label">账户余额</span>
             <span class="sum-value sum-inline">
-              <span class="cs-text-mono balance-text">¥ {{ (((current as any).balance_cents || 0) / 100).toFixed(2) }}</span>
+              <span class="cs-text-mono balance-text">{{ formatMoney((current as any).balance_cents || 0) }}</span>
               <CsButton variant="inline-link" @click="openAdjust(current)">调整余额</CsButton>
             </span>
           </div>
@@ -964,14 +964,14 @@ function cardMenuItems(row: AdminUser) {
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
-                  <div class="cs-text-secondary" style="font-size: 11.5px">到期时用余额自动续费，失败则自动取消套餐</div>
+                  <div class="cs-text-secondary" style="font-size: 12px">到期时用余额自动续费，失败则自动取消套餐</div>
                 </div>
                 <CsToggle v-model="userEditForm.auto_renew_expire" />
               </div>
               <div class="autorenew-admin-row">
                 <div>
                   <div style="font-size: 13px; font-weight: 600">流量耗尽自动续费</div>
-                  <div class="cs-text-secondary" style="font-size: 11.5px">流量用尽后用余额续购（重新计时+清零流量）</div>
+                  <div class="cs-text-secondary" style="font-size: 12px">流量用尽后用余额续购（重新计时+清零流量）</div>
                 </div>
                 <CsToggle v-model="userEditForm.auto_renew_exhaust" />
               </div>
@@ -986,7 +986,7 @@ function cardMenuItems(row: AdminUser) {
             <CsButton :disabled="current ? isSelf(current) : true" @click="toggleFromDetail">
               {{ current?.status === 1 ? '封禁该用户' : '解封该用户' }}
             </CsButton>
-            <CsButton v-if="current && current.role !== 'admin'" @click="deleteFromDetail">删除用户</CsButton>
+            <CsButton v-if="current && current.role !== 'admin'" variant="danger-outline" @click="deleteFromDetail">删除用户</CsButton>
           </div>
           <div class="detail-footer-right">
             <CsButton @click="detailOpen = false">取消</CsButton>
@@ -1080,7 +1080,7 @@ function cardMenuItems(row: AdminUser) {
           <div class="user-meta">
             <span class="k">当前余额:</span>
             <span class="v cs-text-mono" style="font-weight: 700; color: var(--color-text-link-default-qabnuk)">
-              ¥ {{ (((adjustUser as any)?.balance_cents || 0) / 100).toFixed(2) }}
+              {{ formatMoney((adjustUser as any)?.balance_cents || 0) }}
             </span>
           </div>
         </div>
@@ -1178,7 +1178,7 @@ function cardMenuItems(row: AdminUser) {
   white-space: nowrap;
 
   code {
-    font-size: 12.5px;
+    font-size: 13px;
   }
 }
 
@@ -1389,16 +1389,15 @@ function cardMenuItems(row: AdminUser) {
 }
 
 .balance-value {
-  color: var(--color-text-status-success-1i2jf8, #00802f);
+  color: var(--color-text-body-default-b2us04, #0f141a);
   font-weight: 700;
 }
 
 .user-traffic {
   margin-block-start: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
   border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-container-content-mjfil9, #ffffff);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
 }
 
 .traffic-head {
@@ -1465,7 +1464,7 @@ function cardMenuItems(row: AdminUser) {
       margin: 0;
       inline-size: 100%;
       block-size: 32px;
-      font-size: 12.5px;
+      font-size: 13px;
     }
   }
 }

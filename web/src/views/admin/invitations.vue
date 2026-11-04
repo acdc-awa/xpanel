@@ -251,7 +251,7 @@ function fmtTime(t: string | null) {
             <template v-if="row.status === 0 && !isExpired(row)">
               <CsButton icon-name="external" @click="copyRegisterLink(row.code)">复制链接</CsButton>
               <CsButton icon-name="copy" @click="copyCode(row.code)">复制码</CsButton>
-              <CsButton icon-name="remove" @click="revoke(row)">作废</CsButton>
+              <CsButton variant="danger-outline" icon-name="remove" @click="revoke(row)">作废</CsButton>
             </template>
             <span v-else class="inv-card-note">
               {{ row.status === 1 ? '该邀请码已被成功使用' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}

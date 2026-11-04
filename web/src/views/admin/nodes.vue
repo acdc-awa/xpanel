@@ -171,10 +171,10 @@ function groupName(id: number) {
 function apTargetDesc(ap: any): string {
   if (ap.target_type === 'inbound' && ap.target_inbound_tag) {
     if (ap.is_tunnel) {
-      const landing = ap.tunnel_landing_desc ? ` ➔ ${ap.tunnel_landing_desc}` : ''
-      return `直通 ➜ ${ap.target_inbound_tag}${landing}`
+      const landing = ap.tunnel_landing_desc ? ` → ${ap.tunnel_landing_desc}` : ''
+      return `直通 → ${ap.target_inbound_tag}${landing}`
     }
-    return `直连 ➜ ${ap.target_inbound_tag}`
+    return `直连 → ${ap.target_inbound_tag}`
   }
   return '待连线'
 }
@@ -452,13 +452,13 @@ function transportOf(row: any): string {
   }
 }
 
-// 流量/到期摘要：如 "100 GB · 09-30 到期" / "不限 · 永久" / "100 GB · 永久 · 每天重置"
+// 流量/到期摘要：主值 + 括号内细节，如 "100 GB（09-30 到期）" / "不限（永久，每天重置）"
 function quotaOf(row: any): string {
   const gb = typeof row.total_gb === 'number' && row.total_gb > 0 ? `${row.total_gb} GB` : '不限'
   const exp = row.expiry_time ? formatDateOnly(row.expiry_time) + ' 到期' : '永久'
   const resetMap: Record<string, string> = { daily: '每天重置', weekly: '每周重置', monthly: '每月重置' }
-  const rst = row.traffic_reset && resetMap[row.traffic_reset] ? ` · ${resetMap[row.traffic_reset]}` : ''
-  return `${gb} · ${exp}${rst}`
+  const rst = row.traffic_reset && resetMap[row.traffic_reset] ? `，${resetMap[row.traffic_reset]}` : ''
+  return `${gb}（${exp}${rst}）`
 }
 </script>
 
@@ -551,7 +551,7 @@ function quotaOf(row: any): string {
 
               <template #footer>
                 <CsButton icon-name="edit" @click="openEdit(row)">编辑入站</CsButton>
-                <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
+                <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
               </template>
             </CsCard>
           </CsCardGrid>
@@ -632,7 +632,7 @@ function quotaOf(row: any): string {
 
               <template #footer>
                 <CsButton icon-name="edit" @click="openEditAccessPoint(row)">编辑接入点</CsButton>
-                <CsButton icon-name="remove" @click="removeAccessPoint(row)">删除</CsButton>
+                <CsButton variant="danger-outline" icon-name="remove" @click="removeAccessPoint(row)">删除</CsButton>
               </template>
             </CsCard>
           </CsCardGrid>
@@ -654,7 +654,7 @@ function quotaOf(row: any): string {
     <!-- 新增/编辑入站（编辑器本体仍在后续批次迁移） -->
     <CsModal
       v-model:visible="editorOpen"
-      :header="editing ? `编辑入站 · ${editing.tag}` : '新建入站'"
+      :header="editing ? `编辑入站：${editing.tag}` : '新建入站'"
       size="large"
       scrollable
       :close-on-click-overlay="false"

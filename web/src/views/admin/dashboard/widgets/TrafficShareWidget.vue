@@ -61,11 +61,11 @@ function updateChart() {
         const pct = item.percent !== undefined ? item.percent.toFixed(1) : params.percent
         return `<div style="font-weight:700;margin-bottom:4px;color:${titleColor}">${params.name}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
-          <span style="color:${textColor};font-size:11.5px">承载用量</span>
+          <span style="color:${textColor};font-size:12px">承载用量</span>
           <b style="color:${titleColor};font-variant-numeric:tabular-nums">${params.value} GB</b>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:2px">
-          <span style="color:${textColor};font-size:11.5px">全网流量占比</span>
+          <span style="color:${textColor};font-size:12px">全网流量占比</span>
           <b style="color:#006ce0;font-variant-numeric:tabular-nums">${pct}%</b>
         </div>`
       },

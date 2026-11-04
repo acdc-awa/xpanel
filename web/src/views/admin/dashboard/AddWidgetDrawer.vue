@@ -164,6 +164,6 @@ function handleAdd(id: string) {
   color: var(--color-text-status-success-1i2jf8, #1d8102);
   background-color: var(--color-background-status-success-1woffs, #f2f8f0);
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 </style>
