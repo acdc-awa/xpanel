@@ -130,6 +130,12 @@ async function removeOutbound(row: EffectiveOutbound) {
   }
 }
 
+async function onOutboundDeleted() {
+  // 删除默认出口时后端会回退到 direct，顺带刷新服务器以更新「默认出口」徽标；
+  // 引用该出站 tag 的路由规则由后端级联删除，本页无需感知规则列表。
+  await Promise.all([loadOutbounds(), loadServers(), loadServerInbounds()])
+}
+
 function isBlockCN(row: EffectiveOutbound): boolean {
   if (row.protocol !== 'freedom') return false
   try {
@@ -153,11 +159,12 @@ function freedomDS(row: EffectiveOutbound): string {
 
 type BadgeColor = 'grey' | 'green' | 'blue' | 'red' | 'severity-medium' | 'severity-neutral'
 
-// 引用草稿：非基础协议、没有引用目标、也没配载荷，等待连线。
+// 待连线：没有任何引用目标、也没有载荷（基础 settings / 自定义 JSON）。
+// freedom 也要算：以「引用入站」形态保存但还没选目标时，行协议仍是 freedom 且载荷为空。
 function isDraftOutbound(row: EffectiveOutbound): boolean {
   if (row.owner_inbound_id || row.inbound_ref || row.outbound_json) return false
-  if (row.protocol === 'freedom' || row.protocol === 'blackhole') return false
-  return !row.settings_json && !row.stream_settings_json
+  if (row.settings_json || row.stream_settings_json) return false
+  return row.protocol !== 'blackhole'
 }
 
 function protocolBadge(row: EffectiveOutbound): { text: string; color: BadgeColor } {
@@ -188,6 +195,7 @@ function connectionLabel(row: EffectiveOutbound): string {
   }
   if (row.inbound_ref) return `引用入站 #${row.inbound_ref}`
   if (row.outbound_json) return '自定义透传'
+  if (isDraftOutbound(row)) return '待连接入站'
   if (row.tag === 'direct') return '服务器直连互联网'
   if (row.tag === 'blocked') return '黑洞丢弃阻断'
   if (row.protocol === 'freedom') return '自主直连'
@@ -318,6 +326,7 @@ onMounted(async () => {
       :server-id="serverFilter ?? 0"
       :outbound="editing"
       @saved="loadOutbounds"
+      @deleted="onOutboundDeleted"
       @close="editorOpen = false"
     />
   </CsPage>

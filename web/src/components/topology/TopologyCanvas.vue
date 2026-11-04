@@ -55,6 +55,7 @@ import {
   ROW_BOX_H,
   ROW_H,
   clampBoxWidth,
+  isDirectEgress,
   snapPoint,
   snapToGrid,
   boxRulePath,
@@ -436,11 +437,10 @@ function setServerTagOrder(serverId: number, patch: { inbounds?: number[]; outbo
     const data = srvNode.data as BoxData
     if (props.topology) {
       const rawOut = (props.topology.outbounds || []).filter((o) => o.server_id === serverId && o.protocol !== 'blackhole')
-      const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref && !o.owner_inbound_id
       const list: BoxOutbound[] = rawOut.map((o) => ({
         ...o,
         id: String(o.id),
-        virtual: isDirect(o),
+        virtual: isDirectEgress(o),
         owner_inbound_id: o.owner_inbound_id,
         server_id: o.server_id,
       }))
@@ -799,11 +799,10 @@ function buildGraph(data: TopologyData): string | null {
   for (const out of data.outbounds) {
     if (out.protocol === 'blackhole') continue // blocked 保留口不入画布（后端保留，仅供规则引用）
     if (!outByServer.has(out.server_id)) outByServer.set(out.server_id, [])
-    const isDirect = (out.tag === 'direct' || out.protocol === 'freedom') && !out.inbound_ref && !out.owner_inbound_id
     outByServer.get(out.server_id)!.push({
       ...out,
       id: String(out.id),
-      virtual: isDirect,
+      virtual: isDirectEgress(out),
       owner_inbound_id: out.owner_inbound_id,
       server_id: out.server_id,
     })
@@ -1189,7 +1188,14 @@ async function createRef(outboundId: number, inboundId: number) {
     return
   }
   try {
-    const { data: resp } = await updateServerOutbound(out.server_id, out.id, { inbound_ref: inboundId })
+    // 待连线草稿的协议可能还残留 freedom（以「引用入站」形态保存但没选目标），
+    // 而后端禁止 freedom/blackhole 与 inbound_ref 共存；引用行的协议本来就由目标入站决定，
+    // 所以这里显式带上目标协议，让后端按引用形态归一。
+    const payload: { inbound_ref: number; protocol?: string } = { inbound_ref: inboundId }
+    if (out.protocol === 'freedom' || out.protocol === 'blackhole') {
+      payload.protocol = inb.protocol
+    }
+    const { data: resp } = await updateServerOutbound(out.server_id, out.id, payload)
     if (resp.code === 0) {
       ElMessage.success('引用已建立，配置将自动更新')
       emit('changed')
@@ -1321,7 +1327,6 @@ function openCreateOutbound(serverId: number) {
 }
 
 function openEditOutbound(out: TopologyData['outbounds'][number] | BoxOutbound) {
-  if (out.virtual) return
   if (out.owner_inbound_id) {
     const inb = props.topology?.inbounds.find((i) => i.id === out.owner_inbound_id)
     if (inb) {
@@ -1718,8 +1723,7 @@ function resetLayout() {
       b.boxWidth = DEFAULT_BOX_W
       if (props.topology && b.server?.id) {
         const rawOut = (props.topology.outbounds || []).filter((o) => o.server_id === b.server.id && o.protocol !== 'blackhole')
-        const isDirect = (o: TopologyData['outbounds'][number]) => (o.tag === 'direct' || o.protocol === 'freedom') && !o.inbound_ref
-        b.outbounds = rawOut.map((o) => ({ ...o, id: String(o.id), virtual: isDirect(o) }))
+        b.outbounds = rawOut.map((o) => ({ ...o, id: String(o.id), virtual: isDirectEgress(o) }))
       }
     }
   }
@@ -1919,6 +1923,7 @@ const selectionInfo = computed(() => {
       :server-id="outboundServerId"
       :outbound="outboundEditing"
       @saved="handleOutboundSaved"
+      @deleted="handleOutboundSaved"
       @close="outboundEditorOpen = false"
     />
 

@@ -69,7 +69,25 @@ export function clampBoxWidth(w: number): number {
 }
 
 /**
- * 草稿判定：没有任何引用目标、不是派生/虚拟行、也没有载荷的非基础出站。
+ * 直连出口（画布里的 DIRECT 绿色占位行）：系统预留 direct，或用户自建且**已配置载荷**的 freedom。
+ *
+ * 不能只看 protocol==='freedom'——「引用入站」形态在选定目标前，行协议仍是 freedom 且没有任何载荷，
+ * 那是「待连线」草稿，不是直连出口；按 freedom 一刀切会把它画成不可点、不可拖线的绿色 DIRECT 行。
+ */
+export function isDirectEgress(out: {
+  tag?: string
+  protocol?: string
+  inbound_ref?: number | null
+  owner_inbound_id?: number
+  has_payload?: boolean
+}): boolean {
+  if (out.inbound_ref || out.owner_inbound_id) return false
+  if (out.tag === 'direct') return true
+  return out.protocol === 'freedom' && !!out.has_payload
+}
+
+/**
+ * 草稿判定：没有任何引用目标、不是派生/虚拟行、也没有载荷的出站（协议仍是 freedom 的引用草稿也算）。
  * 引用目标、派生行、direct 虚拟行、已配置载荷（基础 settings / 自定义 JSON）都不算草稿。
  */
 export function isOutboundDraft(out: {
@@ -82,7 +100,7 @@ export function isOutboundDraft(out: {
 }): boolean {
   if (out.isDraftTunnel) return true
   if (out.inbound_ref || out.owner_inbound_id || out.virtual || out.has_payload) return false
-  if (out.protocol === 'freedom' || out.protocol === 'blackhole') return false
+  if (out.protocol === 'blackhole') return false
   return true
 }
 

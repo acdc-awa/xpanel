@@ -297,10 +297,10 @@ useGridHeight(boxEl)
           <div
             v-for="(out, outIdx) in data.outbounds"
             :key="out.id"
-            class="sb-row"
-            :class="{ 'direct-row': out.virtual, clickable: !out.virtual }"
-            :title="out.virtual ? '' : '点击编辑出站'"
-            @click="!out.virtual && emit('edit-outbound', out)"
+            class="sb-row clickable"
+            :class="{ 'direct-row': out.virtual }"
+            title="点击编辑出站"
+            @click="emit('edit-outbound', out)"
           >
             <!-- 左侧内端接口（所有出站包括 direct 均有，接收盒内路由规则） -->
             <Handle
@@ -330,7 +330,7 @@ useGridHeight(boxEl)
               class="out-proto-badge pp"
               title="该出站通过派生的 freedom 向落地发送 PROXY Protocol v2，携带客户端真实 IP"
             >PPv2</span>
-            <CsIcon v-if="!out.virtual" class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑出站" />
+            <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑出站" />
 
             <div v-if="editable && data.outbounds.length > 1" class="tag-order-actions">
               <button

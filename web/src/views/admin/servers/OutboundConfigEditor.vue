@@ -13,11 +13,13 @@ import {
   CsSelect,
   CsToggle,
   ElMessage,
+  ElMessageBox,
 } from '@/components/cloudscape'
 import CodeEditor from '@/components/CodeEditor.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createServerOutbound,
+  deleteServerOutbound,
   getInbounds,
   getServerOutbounds,
   getServers,
@@ -35,6 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'saved'): void
+  (e: 'deleted'): void
   (e: 'close'): void
 }>()
 
@@ -45,6 +48,7 @@ type OutboundMode = 'basic' | 'inbound_ref' | 'custom'
 
 const visible = ref(false)
 const saving = ref(false)
+const deleting = ref(false)
 const mode = ref<OutboundMode>('basic')
 const legacyPayload = ref(false)
 
@@ -190,6 +194,14 @@ async function loadRefTargets() {
  */
 const loadedOutbound = ref<ServerOutbound | null>(null)
 
+// 删除只对「已存在、非系统预留、非直通派生」的出站开放。
+// 派生出口（owner_inbound_id）的生命周期归四层直通，删除入口在通道/入站侧。
+const targetOutbound = computed(() => loadedOutbound.value ?? props.outbound ?? null)
+const canDelete = computed(() => {
+  const ob = targetOutbound.value
+  return !!ob?.id && !isSystemReserved.value && !ob.owner_inbound_id
+})
+
 async function loadFullOutbound() {
   const ob = props.outbound
   if (!ob?.id) return
@@ -240,7 +252,14 @@ function parseExisting() {
     return
   }
 
-  // 3. 基础出口
+  // 3. 待连线草稿（无引用目标 + 无载荷）：协议可能还残留 freedom（以「引用入站」形态保存但没选目标），
+  // 必须按引用形态打开，否则会误进「基础出口」模式，一保存就被改写成真的 freedom 直连出口。
+  if (!ob.settings_json && !ob.stream_settings_json && !ob.outbound_json && !ob.inbound_ref) {
+    mode.value = 'inbound_ref'
+    return
+  }
+
+  // 4. 基础出口
   if (ob.protocol === 'freedom' || ob.protocol === 'blackhole') {
     mode.value = 'basic'
     try {
@@ -263,7 +282,7 @@ function parseExisting() {
     return
   }
 
-  // 4. 旧版外部代理行（正常应在启动迁移时折叠为 outbound_json；这里只兜底坏数据/跳过项）
+  // 5. 旧版外部代理行（正常应在启动迁移时折叠为 outbound_json；这里只兜底坏数据/跳过项）
   if (ob.settings_json || ob.stream_settings_json) {
     legacyPayload.value = true
     mode.value = 'custom'
@@ -271,7 +290,7 @@ function parseExisting() {
     return
   }
 
-  // 5. 引用草稿（非基础协议 + 无载荷）
+  // 6. 兜底：其它无载荷行一律按引用形态打开
   mode.value = 'inbound_ref'
 }
 
@@ -452,6 +471,35 @@ function handleClose() {
   emit('close')
 }
 
+async function removeOutbound() {
+  const ob = targetOutbound.value
+  if (!ob?.id || !canDelete.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除出站「${ob.tag}」？引用该出站的路由规则会一并删除；若它是默认出口，将回退为 direct。`,
+      '删除出站',
+      { type: 'error' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    const { data } = await deleteServerOutbound(props.serverId, ob.id)
+    if (data.code === 0) {
+      ElMessage.success('已删除')
+      emit('deleted')
+      handleClose()
+    } else {
+      ElMessage.error(data.message)
+    }
+  } catch (e) {
+    ElMessage.error(errMsg(e, '删除失败'))
+  } finally {
+    deleting.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadRefTargets(), loadFullOutbound()])
   parseExisting()
@@ -628,6 +676,16 @@ onMounted(async () => {
 
     <template #footer>
       <div class="modal-footer-row">
+        <CsButton
+          v-if="canDelete"
+          class="footer-delete"
+          variant="danger-outline"
+          icon-name="remove"
+          :loading="deleting"
+          @click="removeOutbound"
+        >
+          删除出站
+        </CsButton>
         <CsButton variant="link" @click="handleClose">取消</CsButton>
         <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </div>
@@ -664,6 +722,10 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* 破坏性操作靠左，与右侧的主操作（保存）拉开距离 */
+.footer-delete {
+  margin-inline-end: auto;
 }
 :deep(.cs-form-item) {
   margin-bottom: 16px;
