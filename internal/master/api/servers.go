@@ -345,6 +345,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
+	hostChanged := false
 	if req.ServerType != nil && *req.ServerType != "" {
 		updates["server_type"] = *req.ServerType
 	}
@@ -359,6 +360,9 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		if *req.Host == "" {
 			util.BadRequest(c, "服务器地址不能为空")
 			return
+		}
+		if *req.Host != srv.Host {
+			hostChanged = true
 		}
 		updates["host"] = *req.Host
 	}
@@ -401,6 +405,16 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		if err := d.DB.Model(&srv).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新失败")
 			return
+		}
+	}
+	// 服务器地址变化 → 引用本机入站的链式出站、指向本机入站的四层直通，端点（vnext address /
+	// redirect 目标）都是生成期现场读 server.host 派生的，引用方库里不会跟着变，必须重推。
+	// 不过滤本机：直通落地若在本机，它的 redirect 也内嵌了本机新地址。
+	if hostChanged {
+		var inboundIDs []uint64
+		if err := d.DB.Model(&models.Inbound{}).Where("server_id = ?", id).
+			Pluck("id", &inboundIDs).Error; err == nil {
+			d.enqueueDependentServers(inboundIDs, 0)
 		}
 	}
 	d.DB.First(&srv, id)

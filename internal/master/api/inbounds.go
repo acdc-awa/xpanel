@@ -743,7 +743,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	for k := range updates {
 		switch k {
 		case "tag", "protocol", "port", "listen", "settings_json", "stream_settings",
-			"sniffing", "enabled", "type", "internal_uuid", "target_inbound_id",
+			"sniffing", "enabled", "type", "target_inbound_id",
 			"target_address", "target_port", "cert_id", "flow", "layer_id":
 			hasXrayConfigChanges = true
 		}
@@ -765,6 +765,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 		// 解绑/换绑后清理节点上不再被引用的托管证书目录（幂等；旧 agent 自动跳过）。
 		d.SyncServerCerts(inb.ServerID)
+		// 扇出：引用本入站的出站、以本入站为落地的四层直通都在别的服务器上，
+		// 端点（地址/端口/凭据/传输层/证书）是生成期从本入站现场派生的，必须一并重推。
+		// 源服务器已在上面推过，跳过以免对同一台重复下发触发两次 xray 重启。
+		d.enqueueDependentServers([]uint64{inb.ID}, inb.ServerID)
 	}
 	var srv models.Server
 	serverName := ""

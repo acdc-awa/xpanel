@@ -536,21 +536,6 @@ func (h *Hub) enqueueConfig(serverID uint64) {
 	go h.PushPending(serverID)
 }
 
-// enqueueRefOutboundServers 重推所有「出站 InboundRef 指向该入站」的服务器。
-// 供落地入站变更 / 服务器地址变更后的扇出复用（生成期按 InboundRef 现场派生端点，
-// 引用方自身没有可感知的改动，必须显式重推）。
-func (h *Hub) enqueueRefOutboundServers(inboundID uint64) {
-	var obs []models.ServerOutbound
-	if err := h.DB.Select("server_id").Distinct("server_id").
-		Where("inbound_ref = ?", inboundID).Find(&obs).Error; err != nil {
-		log.Printf("nodegate: 查询引用入站 %d 的出站失败: %v", inboundID, err)
-		return
-	}
-	for _, ob := range obs {
-		h.enqueueConfig(ob.ServerID)
-	}
-}
-
 // handleTrafficReport 处理节点流量上报（批次去重 + 落库确认）+ 事件驱动超额/到期处置：
 // 落库后对本帧涉及用户做增量限额判定，命中即热更全节点用户列表（gRPC 秒级移除，
 // 不重启 xray）——「超额后还能跑流量 ~1h」问题的根治路径（2026-09-01），

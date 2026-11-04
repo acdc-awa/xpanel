@@ -251,52 +251,9 @@ func TestRefreshPendingKeepsNewerEdit(t *testing.T) {
 	}
 }
 
-// TestEnqueueRefOutboundServers 转发内部 UUID 轮换后：落地服务器与所有引用方都要重推
-// （旧实现只 Generate 丢弃返回值 + 不扇出，等于空操作，要等下一次每小时校准）。
-func TestEnqueueRefOutboundServers(t *testing.T) {
-	h, db := newApplyHub(t)
-	landing := seedServer(t, db, "node-landing", "relay-in")
-	ref := seedServer(t, db, "node-ref", "in-a")
-	// 引用方：一个出站按 inbound_ref 指向落地入站
-	var inb models.Inbound
-	if err := db.Where("server_id = ? AND tag = ?", landing.ID, "relay-in").First(&inb).Error; err != nil {
-		t.Fatal(err)
-	}
-	// 落地入站需已有内部账户（生成侧会预检 InternalUUID 非空），随后模拟节点轮换它
-	if err := db.Model(&models.Inbound{}).Where("id = ?", inb.ID).
-		Update("internal_uuid", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(&inb, inb.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	ob := models.ServerOutbound{ServerID: ref.ID, Tag: "to-relay", Protocol: "vless", Enabled: true, InboundRef: &inb.ID}
-	if err := db.Create(&ob).Error; err != nil {
-		t.Fatal(err)
-	}
-	// 轮换内部 UUID：落地服务器自己的 relay 入站 clients 与引用方的出站 client id 都要重推
-	if err := db.Model(&models.Inbound{}).Where("id = ?", inb.ID).
-		Update("internal_uuid", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").Error; err != nil {
-		t.Fatal(err)
-	}
-
-	// 与 handleInternalUUIDReport 相同的两步：落地服务器自己重推 + 引用方扇出重推
-	h.enqueueConfig(landing.ID)
-	h.enqueueRefOutboundServers(inb.ID)
-
-	for _, sid := range []uint64{ref.ID, landing.ID} {
-		p, err := h.Config.GetPending(sid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if p == nil {
-			t.Fatalf("引用方 %d 应有待推送内容（扇出缺失会让它一直跑旧 UUID）", sid)
-		}
-		if p.ConfigJSON == "" {
-			t.Fatalf("引用方 %d 的待推内容不得为空", sid)
-		}
-	}
-}
+// TestEnqueueRefOutboundServers 已随 internal_uuid_report 一起移除：
+// 引用方扇出现在统一在 API 层（internal/master/api/config_dependents.go），
+// 覆盖入站更新与服务器地址变更两条触发路径，用例见 api/config_dependents_test.go。
 
 // uuidFor 生成合法且唯一的测试 UUID（users.uuid 有唯一约束）。
 func uuidFor(seed string) string {
