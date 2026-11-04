@@ -299,12 +299,12 @@ async function handleDelete() {
   <CsModal v-model:visible="visible" :header="isEditing ? '编辑接入点' : '新建接入点'" size="medium">
     <CsForm label-position="top">
       <CsSpaceBetween size="m">
-        <CsAlert type="info">
-          接入点是面向客户端订阅与分发的入口。定义 Tag 名称与开放权限组即可，连接配置沿拓扑链路自动继承（亦可在下方进行高级覆写）。
-        </CsAlert>
-
         <CsColumnLayout :columns="2">
-          <CsFormItem label="接入点 Tag 名称" required>
+          <CsFormItem required>
+            <template #label>
+              接入点 Tag 名称
+              <TipIcon content="连接配置沿拓扑链路从上游入站自动继承，下方可对个别项高级覆写。" />
+            </template>
             <CsInput v-model="form.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
           </CsFormItem>
           <CsFormItem label="启用状态">

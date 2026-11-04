@@ -991,9 +991,6 @@ async function save() {
   <CsPage>
     <CsToolbar>
       <CsBox variant="span" font-size="heading-s" font-weight="bold">站点设置</CsBox>
-      <CsBox variant="span" font-size="body-s" color="text-body-secondary">
-        站点品牌、人机验证与订阅入口的统一配置，保存后立即生效。
-      </CsBox>
       <template #actions>
         <CsButton v-if="isConfigTab" variant="primary" :loading="saving" :icon-name="'check'" @click="save">保存配置</CsButton>
       </template>
@@ -1169,17 +1166,6 @@ async function save() {
         <!-- ==================== TAB 2: 订阅与清洗网关 ==================== -->
         <div v-show="activeTab === 'subscribe'">
           <CsForm label-position="top" style="max-width: 820px">
-            <CsAlert
-              header="物理端口隔离与反代解耦"
-              type="info"
-              style="margin-bottom: 20px"
-            >
-              <div style="font-size: 13px; line-height: 1.6">
-                将<b>用户拉取订阅服务</b>与<b>面板 Web 界面 / 管理 API / 服务器长连接</b>物理分离。
-                独立端口仅运行纯净、轻量的订阅生成与清洗引擎，<b>绝不暴露任何后台管理接口或服务器网关</b>，彻底杜绝订阅域名被扫描导致的敏感信息泄露！
-              </div>
-            </CsAlert>
-
             <CsBox variant="div" font-size="heading-s" font-weight="bold">订阅入口与行为参数</CsBox>
             <div class="form-grid">
               <CsFormItem>
@@ -1307,7 +1293,7 @@ async function save() {
             <CsFormItem>
               <template #label>
                 人机验证保护
-                <TipIcon content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。" />
+                <TipIcon content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。开启但未配置有效密钥时将默认阻断验证（Fail-Closed）。" />
               </template>
               <CsToggle v-model="captchaEnable">
   <template #default>
@@ -1352,15 +1338,16 @@ async function save() {
                 <CsButton v-else-if="secretClearing" @click="undoSecretClear">撤销</CsButton>
               </div>
             </CsFormItem>
-            <CsAlert type="info">
-              在 Cloudflare 控制台添加 Turnstile 小部件并配置域名，填入密钥即可。开启状态下若未配置有效密钥将默认阻断验证（Fail-Closed）。
-            </CsAlert>
           </CsForm>
         </div>
 
         <!-- ==================== TAB 3.5: 节点上报 ==================== -->
         <div v-show="activeTab === 'agent'">
           <CsForm label-position="top" style="max-width: 640px">
+            <CsBox variant="div" font-size="heading-s" font-weight="bold">
+              节点上报参数
+              <TipIcon content="保存后通过长连接即时下发至在线服务器生效；离线服务器重连后自动拉取同步，节点本地 agent.yaml 作为兜底。" />
+            </CsBox>
             <CsFormItem>
               <template #label>
                 流量增量上报周期（秒）
@@ -1382,9 +1369,6 @@ async function save() {
               </template>
               <CsInputNumber v-model="agentMetricsSec" :min="2" :max="1800" :step="1" style="width: 220px" />
             </CsFormItem>
-            <CsAlert type="info">
-              配置保存后将通过长连接即时下发至在线服务器生效（离线服务器重连后自动拉取同步）；agent.yaml 的本地配置作为兜底。
-            </CsAlert>
           </CsForm>
         </div>
 
@@ -1394,7 +1378,7 @@ async function save() {
             <CsFormItem>
               <template #label>
                 业务时区（统计切天口径）
-                <TipIcon content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。" />
+                <TipIcon content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。底层数据统一以 UTC 存储绝对时间戳；修改后切换当日历史聚合数据可能有短暂平滑窗口。" />
               </template>
               <CsSelect v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
                 <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
@@ -1413,9 +1397,6 @@ async function save() {
                 <CsBadge color="blue">当前识别：{{ effectiveTimezoneLabel() }}</CsBadge>
               </div>
             </CsFormItem>
-            <CsAlert type="info">
-              底层数据统一以 UTC 存储绝对时间戳。修改业务时区将调整每日 0 点的计算基准，切换当日历史聚合数据可能会有短暂平滑窗口。
-            </CsAlert>
           </CsForm>
         </div>
 
@@ -1427,6 +1408,9 @@ async function save() {
               <CsBox variant="span" font-size="body-s" color="text-body-secondary">
                 共 {{ backups.length }} 份 · 占用 {{ fmtSize(backupTotalSize) }}
               </CsBox>
+              <TipIcon
+                content="备份文件保存在主控备份目录，按保留策略定期轮转，建议定期下载重要备份离线保存。上传时会先校验完整性与数据库版本再入库。"
+              />
               <template #actions>
                 <input
                   ref="backupInputRef"
@@ -1458,9 +1442,6 @@ async function save() {
                 </div>
               </template>
             </CsTable>
-            <CsAlert type="info">
-              备份文件保存在主控备份目录并按配置定期轮转，建议定期下载重要备份离线保存。「上传备份」会先校验完整性与数据库版本再入库；恢复前系统会自动生成安全快照，恢复后将自动重启并需重新登录（凭据以备份库为准）。
-            </CsAlert>
           </div>
         </div>
 
@@ -1563,7 +1544,6 @@ async function save() {
                       <span class="cur-ver-text">
                         当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
                       </span>
-                      <span class="uptodate-hint">系统已安装最新版本，各项组件运行正常。</span>
                     </div>
                   </div>
                 </div>
@@ -1637,23 +1617,22 @@ async function save() {
                     </p>
                   </div>
                 </div>
-
-                <!-- 底部精炼提示条：1 句话核心提示，不再大段平铺 -->
-                <CsAlert type="info">
-                  更新期间面板将短暂离线重启；若新版本启动失败，系统将自动安全回滚至上一版本。
-                </CsAlert>
               </CsContainer>
 
-              <!-- 客户端 IP 来源说明 -->
-              <CsAlert type="warning" header="客户端真实 IP 识别架构">
-                面板只信任来自 <code>app.trusted_proxies</code> 列表内地址的 <code>X-Forwarded-For</code>：
-                直连对端不在列表时一律使用 <code>RemoteAddr</code>，客户端自报的
-                <code>X-Forwarded-For</code> / <code>CF-Connecting-IP</code> 不会影响限流、审计与人机验证。
-                默认仅信任回环；Docker 部署时面板在容器内、反代在宿主机，来源通常是 Docker 网桥网关
-                （用 <code>docker network inspect</code> 确认，常见 <code>172.18.0.1</code>），需把它加入
-                <code>trusted_proxies</code>，否则所有请求会被视为同一 IP。反代侧还须以真实对端覆盖 XFF
-                （Caddy：<code>header_up X-Forwarded-For {remote_host}</code>）。切勿把面板端口直接暴露公网。
-              </CsAlert>
+              <!-- 客户端 IP 来源说明：长参考，默认收起 -->
+              <CsContainer :disable-content-paddings="true">
+                <CsExpandableSection variant="container" header="客户端真实 IP 识别架构">
+                  <p class="ip-source-doc">
+                    面板只信任来自 <code>app.trusted_proxies</code> 列表内地址的 <code>X-Forwarded-For</code>：
+                    直连对端不在列表时一律使用 <code>RemoteAddr</code>，客户端自报的
+                    <code>X-Forwarded-For</code> / <code>CF-Connecting-IP</code> 不会影响限流、审计与人机验证。
+                    默认仅信任回环；Docker 部署时面板在容器内、反代在宿主机，来源通常是 Docker 网桥网关
+                    （用 <code>docker network inspect</code> 确认，常见 <code>172.18.0.1</code>），需把它加入
+                    <code>trusted_proxies</code>，否则所有请求会被视为同一 IP。反代侧还须以真实对端覆盖 XFF
+                    （Caddy：<code>header_up X-Forwarded-For {remote_host}</code>）。切勿把面板端口直接暴露公网。
+                  </p>
+                </CsExpandableSection>
+              </CsContainer>
 
               <CsToolbar class="system-refresh-bar">
                 <template #actions>
@@ -1844,11 +1823,6 @@ async function save() {
   }
 }
 
-.uptodate-hint {
-  font-size: 11.5px;
-  color: var(--color-text-body-secondary-66ygbb);
-}
-
 .disabled-box {
   display: flex;
   flex-direction: column;
@@ -1863,6 +1837,14 @@ async function save() {
    不折断会横向顶出容器 */
 .update-error-lines {
   min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 客户端真实 IP 识别架构：折叠区内的长段落 */
+.ip-source-doc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
 

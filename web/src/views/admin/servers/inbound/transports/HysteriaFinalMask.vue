@@ -63,16 +63,17 @@ const bbrProfileOptions = [
     <!-- 混淆（finalmask.udp[type=salamander]） -->
     <CsContainer header="混淆 (finalmask.udp[type=salamander])" class="section-gap">
       <div class="form-grid">
-        <CsFormItem label="混淆方式 (obfs)">
+        <CsFormItem>
+          <template #label>
+            混淆方式 (obfs)
+            <TipIcon content="开启后订阅必须同源下发；选 gecko 即对应 mihomo 的 packetSize 分片。" />
+          </template>
           <CsSelect
             :model-value="modelValue.obfs_type"
             :options="obfsOptions"
             style="width: 100%"
             @update:model-value="(v: any) => updateField('obfs_type', String(v) as HysteriaConfig['obfs_type'])"
           />
-          <div class="field-hint cs-text-secondary">
-            开启后订阅必须同源下发；写 packetSize 即等价于 mihomo 的 gecko。
-          </div>
         </CsFormItem>
 
         <CsFormItem v-if="modelValue.obfs_type !== 'none'" label="混淆密码 (obfs-password)">
@@ -91,6 +92,7 @@ const bbrProfileOptions = [
               :min="1"
               :max="2048"
               :step="64"
+              placeholder="512"
               style="width: 100%"
               class="mono"
               @update:model-value="(v: number | null) => updateField('obfs_min_packet', Number(v) || 512)"
@@ -103,11 +105,11 @@ const bbrProfileOptions = [
               :min="1"
               :max="2048"
               :step="64"
+              placeholder="512–1200（上限 2048）"
               style="width: 100%"
               class="mono"
               @update:model-value="(v: number | null) => updateField('obfs_max_packet', Number(v) || 1200)"
             />
-            <div class="field-hint cs-text-secondary">默认 512–1200，上限 2048；最小不得大于最大</div>
           </CsFormItem>
         </template>
       </div>
@@ -119,24 +121,30 @@ const bbrProfileOptions = [
         <TipIcon content="服务端声明的是「允许客户端选用的最大 Brutal 速率」；两侧数值需同源下发到订阅，客户端带宽以最小值为准。" />
       </template>
       <div class="form-grid">
-        <CsFormItem label="服务端上行 (brutalUp)">
+        <CsFormItem>
+          <template #label>
+            服务端上行 (brutalUp)
+            <TipIcon content="服务端发出方向 = 客户端下行；单位支持 k/m/g/t 与 mbps/gbps。" />
+          </template>
           <CsInput
             :model-value="modelValue.bw_up"
             placeholder="如 100 mbps，留空不限制"
             class="mono"
             @update:model-value="(v: string) => updateField('bw_up', v)"
           />
-          <div class="field-hint cs-text-secondary">服务端发出方向 = 客户端下行；单位支持 k/m/g/t 与 mbps/gbps</div>
         </CsFormItem>
 
-        <CsFormItem label="服务端下行 (brutalDown)">
+        <CsFormItem>
+          <template #label>
+            服务端下行 (brutalDown)
+            <TipIcon content="服务端接收方向 = 客户端上行；上下行都填写才会启用 Brutal，否则退回 BBR。" />
+          </template>
           <CsInput
             :model-value="modelValue.bw_down"
             placeholder="如 100 mbps，留空不限制"
             class="mono"
             @update:model-value="(v: string) => updateField('bw_down', v)"
           />
-          <div class="field-hint cs-text-secondary">服务端接收方向 = 客户端上行；上下行都填写才会启用 Brutal，否则退回 BBR</div>
         </CsFormItem>
       </div>
     </CsContainer>
@@ -145,30 +153,33 @@ const bbrProfileOptions = [
     <CsContainer class="section-gap" :disable-content-paddings="true">
       <CsExpandableSection
         header="QUIC 参数（高级，finalmask.quicParams）"
-        header-description="仅作用于本机服务端 QUIC 栈，留空使用 xray 默认值"
         variant="container"
       >
         <div class="form-grid">
-          <CsFormItem label="拥塞控制 (congestion)">
+          <CsFormItem>
+            <template #label>
+              拥塞控制 (congestion)
+              <TipIcon content="自动：上下行带宽都填了走 brutal，否则 BBR；force-brutal 需要上行带宽且不与客户端协商。" />
+            </template>
             <CsSelect
               :model-value="modelValue.congestion"
               :options="congestionOptions"
               style="width: 100%"
               @update:model-value="(v: any) => updateField('congestion', String(v ?? '') as HysteriaConfig['congestion'])"
             />
-            <div class="field-hint cs-text-secondary">
-              自动：上下行带宽都填了走 brutal，否则 BBR；force-brutal 需要上行带宽且不与客户端协商。
-            </div>
           </CsFormItem>
 
-          <CsFormItem label="BBR 档位 (bbrProfile)">
+          <CsFormItem>
+            <template #label>
+              BBR 档位 (bbrProfile)
+              <TipIcon content="仅在拥塞控制为 bbr（或自动回落到 BBR）时生效。" />
+            </template>
             <CsSelect
               :model-value="modelValue.bbr_profile"
               :options="bbrProfileOptions"
               style="width: 100%"
               @update:model-value="(v: any) => updateField('bbr_profile', String(v ?? '') as HysteriaConfig['bbr_profile'])"
             />
-            <div class="field-hint cs-text-secondary">仅在拥塞控制为 bbr（或自动回落到 BBR）时生效。</div>
           </CsFormItem>
 
           <CsFormItem label="最大空闲超时 (maxIdleTimeout，秒)">
@@ -273,7 +284,7 @@ const bbrProfileOptions = [
     <!-- 端口跳跃（finalmask.udp[type=udphop]，仅客户端消费） -->
     <CsContainer header="端口跳跃 (finalmask.udp[type=udphop]，仅下发客户端)" class="section-gap">
       <template #info>
-        <TipIcon content="仅客户端消费，生成服务端配置时自动剥离；需先在服务器防火墙 / NAT 把端口段转发到本入站监听端口。" />
+        <TipIcon content="仅客户端消费，生成服务端配置时自动剥离；需先在服务器防火墙 / NAT 把端口段转发到本入站监听端口。节点始终只监听入站配置端口。" />
       </template>
       <div class="form-grid">
         <CsFormItem label="跳跃方式 (mode)">
@@ -283,7 +294,6 @@ const bbrProfileOptions = [
             style="width: 100%"
             @update:model-value="(v: any) => updateField('port_hop_mode', String(v) as HysteriaConfig['port_hop_mode'])"
           />
-          <div class="field-hint cs-text-secondary">映射到 mihomo 的 ports；intervalLocal（只跳源端口）面板不提供</div>
         </CsFormItem>
 
         <CsFormItem label="目标端口集合">
@@ -293,17 +303,15 @@ const bbrProfileOptions = [
             class="mono"
             @update:model-value="(v: string) => updateField('port_hop_ports', v)"
           />
-          <div class="field-hint cs-text-secondary">支持 20000-30000 或 20000-30000,40000；节点仍只监听配置端口</div>
         </CsFormItem>
 
         <CsFormItem v-if="modelValue.port_hop_mode === 'intervalRemote'" label="跳跃间隔 (秒)">
           <CsInput
             :model-value="modelValue.port_hop_interval"
-            placeholder="默认 30，支持如 10-20"
+            placeholder="默认 30，如 10-20"
             class="mono"
             @update:model-value="(v: string) => updateField('port_hop_interval', v)"
           />
-          <div class="field-hint cs-text-secondary">最小 5 秒，支持 10-20 区间写法</div>
         </CsFormItem>
       </div>
     </CsContainer>
@@ -326,12 +334,6 @@ const bbrProfileOptions = [
 
 .errors-gap {
   margin-top: 10px;
-}
-
-.field-hint {
-  margin-top: 4px;
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .mono {

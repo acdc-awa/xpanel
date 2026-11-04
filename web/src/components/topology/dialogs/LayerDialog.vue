@@ -2,7 +2,6 @@
 import { computed, reactive, ref, watch } from 'vue'
 import {
   ElMessage,
-  CsAlert,
   CsButton,
   CsForm,
   CsFormItem,
@@ -14,6 +13,7 @@ import {
 import { createLayer, updateLayer } from '@/api/admin'
 import type { AccessLayer } from '@/api/types'
 import { errMsg } from '@/api/http'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -102,13 +102,12 @@ function requestDelete() {
     size="medium"
   >
     <CsForm label-position="top">
-      <CsAlert type="info">
-        对外接入层定义订阅对外的 host/port/安全层。挂载的入站在订阅与画布中一律消费本层端点；内部实现（直连
-        TLS / Caddy 反代 / CDN）对客户端不可见。未挂层入站沿用自身分享地址（直连端点）。
-      </CsAlert>
-
       <div class="dlg-grid dlg-grid-2-1">
-        <CsFormItem label="层名称" required>
+        <CsFormItem required>
+          <template #label>
+            层名称
+            <TipIcon content="挂载到本层的入站在订阅中统一使用本层的 host / port / 安全层；未挂层的入站沿用自身分享地址。" />
+          </template>
           <CsInput v-model="form.name" placeholder="如 HK 443 反代层" />
         </CsFormItem>
         <CsFormItem label="对外安全层">

@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
-  CsAlert,
   CsBadge,
   CsButton,
   CsCard,
@@ -279,11 +278,12 @@ async function remove(row: any) {
       :header="`接入点优先级 · ${apTarget?.name || ''}`"
       size="medium"
     >
-      <CsAlert type="info" style="margin-bottom: 12px">
-        列表顺序即该权限组订阅中节点的输出顺序（$PROXIES$ 注入与客户端显示同序）。同组调整不影响接入点在其他权限组中的优先级。
-      </CsAlert>
       <CsForm label-position="top">
-        <CsFormItem label="添加接入点（下方列表调整顺序）">
+        <CsFormItem>
+          <template #label>
+            添加接入点（下方列表调整顺序）
+            <TipIcon content="列表顺序即该组订阅中节点的输出顺序（$PROXIES$ 注入与客户端显示同序）；同组调整不影响该接入点在其他组中的优先级。" />
+          </template>
           <div style="display: flex; gap: 8px; width: 100%">
             <CsSelect
               v-model="selectedApId"

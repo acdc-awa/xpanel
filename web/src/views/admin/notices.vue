@@ -411,7 +411,6 @@ async function remove(row: NoticeItem) {
           <div class="md-pane md-preview-pane">
             <div class="md-pane-header">
               <span class="md-pane-title">实时渲染预览</span>
-              <span class="text-muted text-xs">所见即所得</span>
             </div>
             <div
               class="md-preview-body markdown-content"
@@ -422,17 +421,11 @@ async function remove(row: NoticeItem) {
 
         <div class="form-row-grid mt-4">
           <CsFormItem label="置顶显示">
-            <div class="switch-field">
-              <CsToggle v-model="form.is_pinned" />
-              <span class="switch-hint">置顶公告将排在列表最前</span>
-            </div>
+            <CsToggle v-model="form.is_pinned" />
           </CsFormItem>
 
           <CsFormItem label="首页强制弹窗提醒">
-            <div class="switch-field">
-              <CsToggle v-model="form.is_popup" />
-              <span class="switch-hint">用户登录后将自动弹出该公告</span>
-            </div>
+            <CsToggle v-model="form.is_popup" />
           </CsFormItem>
         </div>
 
@@ -618,17 +611,6 @@ async function remove(row: NoticeItem) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-}
-
-.switch-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
-  .switch-hint {
-    font-size: 12px;
-    color: var(--color-text-body-secondary-66ygbb);
-  }
 }
 
 .text-muted {

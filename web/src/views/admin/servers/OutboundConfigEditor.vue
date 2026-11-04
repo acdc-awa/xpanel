@@ -491,7 +491,7 @@ onMounted(async () => {
               placeholder="如 proxy-out / via-japan"
             />
           </CsFormItem>
-          <CsFormItem label="发送 IP (sendThrough)" description="多 IP 服务器可指定出口源地址，留空使用系统默认。">
+          <CsFormItem label="发送 IP (sendThrough)" description="多 IP 服务器可指定出口源地址。">
             <CsInput v-model="form.send_through" class="mono" placeholder="留空使用系统默认 IP" />
           </CsFormItem>
           <CsFormItem label="优先级 Priority" description="数值越小，在 Xray outbounds 数组里越靠前。">
@@ -537,8 +537,8 @@ onMounted(async () => {
                 @update:model-value="(v: any) => (form.domain_strategy = String(v))"
               />
             </CsFormItem>
-            <CsFormItem label="redirect 目标" description="把流量重定向到指定地址（host:port）；留空表示不重定向。">
-              <CsInput v-model="form.redirect" class="mono" placeholder="留空 = 不重定向" />
+            <CsFormItem label="redirect 目标" description="格式 host:port；留空表示不重定向。">
+              <CsInput v-model="form.redirect" class="mono" placeholder="host:port" />
             </CsFormItem>
           </div>
           <div class="switch-row">
@@ -611,17 +611,17 @@ onMounted(async () => {
 
       <!-- 自定义 JSON -->
       <CsContainer v-if="mode === 'custom'" header="自定义 Xray 出站 JSON" style="margin-top: 16px">
+        <template #info>
+          <TipIcon
+            content='面板只覆盖 tag 与 sendThrough，并为 VLESS 缺省补 encryption: "none"，其余字段原样透传。字段语法与版本兼容性由 Xray 校验兜底；请按当前内核的字段名填写。'
+          />
+        </template>
         <CodeEditor
           v-model="form.outbound_json"
           language="json"
           height="320px"
           :placeholder="OUTBOUND_JSON_PLACEHOLDER"
         />
-        <CsAlert type="info" header="原样透传" style="margin-top: 12px">
-          面板只覆盖出站 <code>tag</code> 与 <code>sendThrough</code>，并为 VLESS 缺省补
-          <code>encryption: "none"</code>，其余字段不做改写。字段语法与版本兼容性由 Xray 校验兜底；
-          请按当前内核的字段名填写。
-        </CsAlert>
       </CsContainer>
     </CsForm>
 

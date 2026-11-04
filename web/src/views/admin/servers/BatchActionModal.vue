@@ -254,11 +254,8 @@ function close() {
           <span v-else class="cs-text-secondary">—</span>
         </template>
       </CsTable>
-      <p class="batch-hint cs-text-secondary">
-        <template v-if="running">
-          正在执行，进度实时更新…完成的服务器会在下一次心跳后刷新版本/运行状态。
-        </template>
-        <template v-else>全部服务器已处理完成。</template>
+      <p v-if="running" class="batch-hint cs-text-secondary">
+        正在执行，进度实时更新…完成的服务器会在下一次心跳后刷新版本/运行状态。
       </p>
     </CsSpaceBetween>
     <template #footer>

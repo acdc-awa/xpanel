@@ -103,7 +103,6 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
               class="mono"
               @update:model-value="(v: string) => updateMasq('url', v)"
             />
-            <div class="field-hint cs-text-secondary">支持 http/https；unix: 开头走本地 Unix Socket</div>
           </CsFormItem>
           <CsFormItem label="反代选项">
             <div class="inline-row">
@@ -183,12 +182,6 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 14px;
-}
-
-.field-hint {
-  margin-top: 4px;
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .mono {

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
-  CsAlert,
   CsBadge,
   CsButton,
   CsCard,
@@ -734,9 +733,6 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
       size="medium"
       :close-on-click-overlay="false"
     >
-      <CsAlert type="info">
-        生成具备 IsCA=true 锚点属性的自签证书，主控自动计算 leaf 指纹 Pin（SHA-256）并支持出站节点验证。
-      </CsAlert>
       <CsForm label-position="top" class="modal-form">
         <div class="form-grid-2">
           <CsFormItem label="域名 / 服务器标识 (CN)" required>

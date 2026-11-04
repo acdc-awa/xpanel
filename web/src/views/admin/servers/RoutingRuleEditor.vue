@@ -19,6 +19,7 @@ import {
   CsToggle,
   type CheckboxGroupOption,
 } from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createServerRoutingRule,
   updateServerRoutingRule,
@@ -352,20 +353,19 @@ function onClosed() {
                     />
                   </CsFormItem>
 
-                  <CsFormItem label="规则优先级 (Priority)">
+                  <CsFormItem>
+                    <template #label>
+                      规则优先级 (Priority)
+                      <TipIcon content="数值越小越先匹配。Xray 按优先级从上至下检索，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。" />
+                    </template>
                     <CsInputNumber v-model="form.priority" :min="0" />
-                    <span class="cs-text-secondary field-hint">数字越小越先被 Xray 规则链评估匹配</span>
                   </CsFormItem>
 
-                  <CsFormItem label="规则备注说明">
+                  <CsFormItem label="备注">
                     <CsInput v-model="form.remark" placeholder="如 大陆域名直连 / 屏蔽 BT 下载" />
                   </CsFormItem>
                 </CsSpaceBetween>
               </CsContainer>
-
-              <CsAlert type="info" header="规则判定顺序">
-                Xray 从上至下按 Priority 优先级顺序检索规则，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。
-              </CsAlert>
             </CsSpaceBetween>
           </CsColumnLayout>
 
