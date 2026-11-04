@@ -177,7 +177,7 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 三个入站：inb1→组1（tcp+reality，Flow 空=自动）；inb2→组2（tcp+tls，Flow=none）；
+	// 三个入站：inb1→组1（tcp+reality，Flow 空=无流控，2026-11-04 起不再自动 vision）；inb2→组2（tcp+tls，Flow=none 存量别名）；
 	// inb3→无开放组（Flow=xtls-rprx-vision 显式）
 	reality := `{"network":"tcp","security":"reality","realitySettings":{"dest":"1.2.3.4:443","serverNames":["r.example.com"],"privateKey":"sk","shortIds":["abcd"]}}`
 	tls := `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"t.example.com"}}`
@@ -239,8 +239,8 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 	if len(got) != 1 || got[0].UUID != users[0].UUID {
 		t.Fatalf("in1 users = %+v, want only u1", got)
 	}
-	if got[0].Flow != "xtls-rprx-vision" {
-		t.Errorf("in1 flow = %q, want 自动 vision", got[0].Flow)
+	if got[0].Flow != "" {
+		t.Errorf("in1 flow = %q, want 空（TCP+REALITY 不再自动注入 vision）", got[0].Flow)
 	}
 
 	// in2：仅 u2，none 禁自动 → flow 空
@@ -249,7 +249,7 @@ func TestGetValidUsers_GroupFilterAndFlow(t *testing.T) {
 		t.Fatalf("in2 users = %+v, want only u2", got)
 	}
 	if got[0].Flow != "" {
-		t.Errorf("in2 flow = %q, want 空（none 禁自动）", got[0].Flow)
+		t.Errorf("in2 flow = %q, want 空（none 是空的存量别名）", got[0].Flow)
 	}
 
 	// in3：无接入点指向 → 默认不对任何人开放（0 个用户）

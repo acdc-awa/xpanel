@@ -68,7 +68,7 @@ func vlessFieldSet() contracts.ProtocolFieldSet {
 	fields = append(fields, sockoptFields()...)
 
 	rules := []contracts.Rule{
-		allowRule("flow", "VLESS flow 只接受 vision 或关闭", []string{"", "none", "xtls-rprx-vision"}),
+		allowRule("flow", "VLESS flow 只接受 vision 或无（none 为存量别名）", []string{"", "none", "xtls-rprx-vision"}),
 		rule(contracts.RuleForbids, "settings.encryption",
 			"xray 拒绝入站级 encryption（运行时恒为 none）；客户端 encryption 由 decryption 派生",
 			condNonEmpty("settings.encryption")),

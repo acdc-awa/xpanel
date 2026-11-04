@@ -25,7 +25,8 @@ func TestVLESSDescriptor(t *testing.T) {
 }
 
 // TestVLESSResolveFlow flow 决议（生成侧盖戳与订阅侧同源）：
-// 入站级 none 禁用自动注入 → 空 + tcp+reality 自动 vision → vlessenc 一律不产出 → 其余透传。
+// 空 = 无流控（2026-11-04 起不再按 tcp+reality 自动 vision）→ 显式 vision 透传 →
+// none 是空的存量别名 → vlessenc 一律不产出。
 func TestVLESSResolveFlow(t *testing.T) {
 	const validDec = "mlkem768x25519plus.native.600s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	p := VLESSPlugin{}
@@ -37,12 +38,12 @@ func TestVLESSResolveFlow(t *testing.T) {
 		inbFlow  string
 		want     string
 	}{
-		{"自动: tcp+reality", "tcp", "reality", "", "", "xtls-rprx-vision"},
-		{"自动: 非 reality 不注入", "tcp", "tls", "", "", ""},
-		{"自动: xhttp+reality 不注入", "xhttp", "reality", "", "", ""},
+		{"默认不注入: tcp+reality", "tcp", "reality", "", "", ""},
+		{"默认不注入: tcp+tls", "tcp", "tls", "", "", ""},
+		{"默认不注入: xhttp+reality", "xhttp", "reality", "", "", ""},
 		{"入站级开启", "tcp", "reality", "", "xtls-rprx-vision", "xtls-rprx-vision"},
 		{"入站级开启(tls 透传)", "tcp", "tls", "", "xtls-rprx-vision", "xtls-rprx-vision"},
-		{"入站级 none 禁用", "tcp", "reality", "", "none", ""},
+		{"存量 none 别名", "tcp", "reality", "", "none", ""},
 		{"入站级 none + 非 reality", "tcp", "tls", "", "none", ""},
 		// vlessenc 与 XTLS 不搭配：即使显式开了 vision 也按空处理（两端同源，不会失配）
 		{"vlessenc 不自动注入", "tcp", "none", validDec, "", ""},
@@ -94,8 +95,8 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	if dto == nil {
 		t.Fatal("reality 完整参数应产出 DTO")
 	}
-	if dto.Auth.UUID != "uuid-1" || dto.Auth.Flow != "xtls-rprx-vision" {
-		t.Errorf("凭证/flow 错误: %+v", dto.Auth)
+	if dto.Auth.UUID != "uuid-1" || dto.Auth.Flow != "" {
+		t.Errorf("凭证/flow 错误（空 flow 不应再自动注入 vision）: %+v", dto.Auth)
 	}
 	if dto.Security.SNI != "www.example.com" || dto.Security.Reality == nil ||
 		dto.Security.Reality.PublicKey != "pbk" || dto.Security.Reality.ShortID != "ab12" {

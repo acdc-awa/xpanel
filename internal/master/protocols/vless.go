@@ -89,21 +89,22 @@ func (p VLESSPlugin) ServerClients(users []protocol.User, spec *contracts.Inboun
 	return items
 }
 
-// ResolveFlow 用户 flow 决议（生成侧盖戳与订阅侧同源，入参为入站自身的传输/安全）。
+// ResolveFlow 用户 flow 决议（生成侧盖戳与订阅侧同源）：空 = 无流控，vision 显式开启。
 func (VLESSPlugin) ResolveFlow(spec *contracts.InboundSpec, inboundFlow string) string {
 	if vlessEncActive(spec) {
 		return ""
 	}
-	return resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
+	return resolveVLESSFlow(inboundFlow)
 }
 
-// ResolveRelayFlow 机间中继凭据的 flow：在 ResolveFlow 之上，tcp 且
-// reality / tls 同样自动 vision（中继链路必须带流控，普通用户不自动注入）。
+// ResolveRelayFlow 机间中继凭据的 flow：在 ResolveFlow 之上，tcp + reality/tls 时
+// 即使入站选「无」也补 vision（中继链路两端都由面板生成，恒用同一 flow 不会失配；
+// 该行为不受入站 flow 选项影响，2026-11-04 起普通用户才由「空=自动」改为「空=无」）。
 func (VLESSPlugin) ResolveRelayFlow(spec *contracts.InboundSpec, inboundFlow string) string {
 	if vlessEncActive(spec) {
 		return ""
 	}
-	flow := resolveVLESSFlow(spec.Network, spec.Security, inboundFlow)
+	flow := resolveVLESSFlow(inboundFlow)
 	if flow == "" && spec.Network == "tcp" &&
 		(spec.Security == "reality" || spec.Security == "tls") {
 		flow = "xtls-rprx-vision"
@@ -124,16 +125,18 @@ func vlessEncActive(spec *contracts.InboundSpec) bool {
 	return VlessEncEnabled(dec)
 }
 
-// resolveVLESSFlow flow 决议规则：
-// 显式 none → 空（禁用自动注入，订阅与服务端保持一致否则握手不匹配）；
-// 空 + tcp+reality → 自动 xtls-rprx-vision；其余原样透传。
-// security 允许传入分享覆写后的值（订阅侧），服务端注入传入 streamSettings 原值。
-func resolveVLESSFlow(network, security, inboundFlow string) string {
+// resolveVLESSFlow flow 决议规则（2026-11-04 起）：
+// **空 = 无流控**（不再按 tcp+reality 自动注入 vision）；xtls-rprx-vision 原样透传；
+// 遗留值 none 是「空」的别名（旧语义为显式关闭，结果相同），只为存量行与旧客户端保留。
+//
+// 为什么不能保留「自动」：xray 对 flow 不匹配是双向硬拒绝——客户端发 vision 而服务端账号
+// 没有 flow，报 "is not able to use the flow"；客户端不发 flow 而服务端账号是 vision（TCP/Mux），
+// 报 "is rejected since the client flow is empty"。订阅链接是按需现算的，语义一改链接立刻变，
+// 而服务端配置要等下一次推送——所以存量「本来在跑 vision」的入站已由启动迁移
+// （models.migrateVlessFlowExplicitVision）固化为显式 vision，行为不变。
+func resolveVLESSFlow(inboundFlow string) string {
 	if inboundFlow == "none" {
 		return ""
-	}
-	if inboundFlow == "" && network == "tcp" && security == "reality" {
-		return "xtls-rprx-vision"
 	}
 	return inboundFlow
 }
@@ -230,10 +233,10 @@ func (p VLESSPlugin) projectSubscription(in *contracts.ClientProjectionInput) *c
 		encryption = enc
 	}
 	dto.Auth = &contracts.ClientCredentialDTO{UUID: in.UserUUID, Encryption: encryption}
-	// flow 与服务端注入同源（订阅侧用覆写后的安全类型判定 reality）；vlessenc 下不产出 flow。
+	// flow 与服务端注入同源（空=无流控）；vlessenc 下不产出 flow。
 	dto.Auth.Flow = ""
 	if !vlessEncActive(spec) {
-		dto.Auth.Flow = resolveVLESSFlow(spec.Network, sec, in.InboundFlow)
+		dto.Auth.Flow = resolveVLESSFlow(in.InboundFlow)
 	}
 
 	switch sec {

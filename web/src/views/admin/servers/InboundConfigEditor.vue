@@ -480,11 +480,11 @@ const allowVisionFlow = computed(() => {
     (localTlsType.value === 'reality' || localTlsType.value === 'tls')
 })
 
-// 只暴露 xray 真正需要的两态：留空 / xtls-rprx-vision。
-// 留空不等于「关闭」：TCP + REALITY 下后端会自动补 vision（resolveVLESSFlow），
-// 显式 none 才是关闭——该值只为存量行保留，界面不再产出。
+// 只暴露 xray 真正需要的两态：无流控 / xtls-rprx-vision。
+// 空 = 无 flow（2026-11-04 起不再按 TCP+REALITY 自动补 vision）；存量本来在跑 vision 的
+// 入站已由启动迁移固化为显式值，编辑器里会直接显示 xtls-rprx-vision。
 const flowOptions = [
-  { label: '默认（留空）', value: '' },
+  { label: '无', value: '' },
   { label: 'xtls-rprx-vision', value: 'xtls-rprx-vision' },
 ]
 

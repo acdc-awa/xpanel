@@ -133,9 +133,9 @@ type Inbound struct {
 	Enabled         bool    `gorm:"default:true" json:"enabled"`
 	Remark          string  `gorm:"size:255" json:"remark"` // 入站名称/备注说明 (如独立通道名称等)
 	// 入站级流控（写进生成的 clients，VLESS settings 无顶层 flow，不入 settings_json）：
-	// 空 = 自动（TCP+REALITY 自动注入 xtls-rprx-vision）；
+	// 空 = 无流控（2026-11-04 起；旧语义是 TCP+REALITY 自动注入 vision，存量已由启动迁移固化）；
 	// xtls-rprx-vision = 为该入站用户全部开启；
-	// none = 禁用自动注入。（UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
+	// none = 「空」的存量别名（旧语义为显式关闭），等价于空。（UserInbound per-user 覆盖已随 2026-08-14 批2 冻结删除）
 	Flow      string    `gorm:"size:32" json:"flow"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

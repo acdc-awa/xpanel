@@ -39,7 +39,7 @@ type inboundView struct {
 	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port,omitempty"`       // 手动指定的外部目标端口
 	CertID             *uint64    `json:"cert_id,omitempty"`           // 绑定的证书
-	Flow               string     `json:"flow"`                        // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	Flow               string     `json:"flow"`                        // 入站级流控（空=无流控 / xtls-rprx-vision；none 为存量别名）
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`         // node / custom（订阅专用）
 	ShareAddr          string     `json:"share_addr"`                  // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`                  // 自定义分享端口（0 = 使用入站端口）
@@ -72,7 +72,7 @@ type inboundForm struct {
 	TargetAddress      string     `json:"target_address"`        // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port"`           // 手动指定的外部目标端口
 	CertID             *uint64    `json:"cert_id"`               // 绑定证书（T5 校验存在性）
-	Flow               string     `json:"flow"`                  // 入站级流控（空=自动 / xtls-rprx-vision / none）
+	Flow               string     `json:"flow"`                  // 入站级流控（空=无流控 / xtls-rprx-vision；none 为存量别名）
 	ShareAddrStrategy  string     `json:"share_addr_strategy"`   // node / custom（订阅专用，listen 已退役）
 	ShareAddr          string     `json:"share_addr"`            // 自定义分享地址（订阅专用，域名/IP）
 	SharePort          int        `json:"share_port"`            // 自定义分享端口（0 = 使用入站端口）
@@ -214,7 +214,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		return
 	}
 	if req.Flow != "" && !validInboundFlow(req.Flow) {
-		util.BadRequest(c, "入站流控仅支持空（自动）/ xtls-rprx-vision / none")
+		util.BadRequest(c, "入站流控仅支持空（无流控）/ xtls-rprx-vision")
 		return
 	}
 	if req.ShareAddrStrategy != "" && !validShareAddrStrategy(req.ShareAddrStrategy) {
@@ -481,7 +481,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {
-		util.BadRequest(c, "入站流控仅支持空（自动）/ xtls-rprx-vision / none")
+		util.BadRequest(c, "入站流控仅支持空（无流控）/ xtls-rprx-vision")
 		return
 	}
 	if req.ShareAddrStrategy != nil && *req.ShareAddrStrategy != "" && !validShareAddrStrategy(*req.ShareAddrStrategy) {
@@ -1136,6 +1136,8 @@ func validInboundType(t string) bool {
 	return false
 }
 
+// validInboundFlow 入站级流控白名单：空 = 无流控，xtls-rprx-vision = 开启。
+// none 是「空」的存量别名（旧语义为显式关闭），只为老数据/老客户端保留。
 func validInboundFlow(f string) bool {
 	return f == "xtls-rprx-vision" || f == "none"
 }

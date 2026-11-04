@@ -662,7 +662,7 @@ export interface InboundPayload {
   target_address?: string
   target_port?: number
   cert_id?: number
-  flow?: string // 入站级流控：空=自动 / xtls-rprx-vision / none
+  flow?: string // 入站级流控：空=无流控 / xtls-rprx-vision
   share_addr_strategy?: string // node / custom（订阅专用，listen 已退役）
   share_addr?: string // 自定义分享地址
   share_port?: number // 自定义分享端口（0 = 用入站端口）

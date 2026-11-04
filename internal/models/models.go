@@ -190,6 +190,13 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := normalizePermissionGroupSortOrder(db); err != nil {
 		return err
 	}
+	// VLESS flow 默认语义变更（2026-11-04）：空值由「自动注入 vision」改为「无流控」。
+	// 存量里本来在跑 vision 的入站必须固化为显式值，否则订阅链接立刻掉 flow、
+	// 而服务端账号仍是 vision —— xray 对 flow 不匹配是双向硬拒绝，全部客户端握手失败。
+	// 必须在任何配置生成/推送之前完成，故放在迁移链里（幂等，settings 标记）。
+	if err := migrateVlessFlowExplicitVision(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
@@ -299,6 +306,72 @@ func migrateRelayOutboundCredentials(db *gorm.DB) error {
 	}).Error
 
 	return nil
+}
+
+// migrateVlessFlowExplicitVision 把存量「旧规则下会自动注入 vision」的 VLESS 入站
+// 固化为显式 flow=xtls-rprx-vision（2026-11-04）。
+//
+// 背景：flow 空值的语义从「TCP+REALITY 自动注入 vision」改为「无流控」。存量入站此前跑的
+// 就是 vision；若直接跟随新语义，订阅链接立刻不再带 flow，而服务端配置要等下一次推送才变。
+// xray 对 flow 不匹配是**双向硬拒绝**（客户端发 vision / 服务端无 flow，或反之），
+// 因此在用的客户端会全部握手失败。故一次性把「旧规则命中」的行写成显式值：
+// 生成的配置逐字节不变，用户无需重新订阅；之后新建的入站才默认「无」。
+//
+// 同时把遗留的 flow='none'（旧语义=显式关闭）归正为空，新语义下二者等价。
+// 幂等：settings 标记，只跑一次（否则管理员之后手动改回「无」会被再次覆盖）。
+func migrateVlessFlowExplicitVision(db *gorm.DB) error {
+	const doneKey = "vless_flow_explicit_vision_version"
+	if readSettingValue(db, doneKey) == "1" {
+		return nil
+	}
+	var inbounds []Inbound
+	if err := db.Where("protocol = ?", ProtocolVless).Find(&inbounds).Error; err != nil {
+		return err
+	}
+	for _, inb := range inbounds {
+		switch inb.Flow {
+		case "none":
+			if err := db.Model(&Inbound{}).Where("id = ?", inb.ID).Update("flow", "").Error; err != nil {
+				return err
+			}
+		case "":
+			if !legacyAutoVisionInbound(inb) {
+				continue
+			}
+			if err := db.Model(&Inbound{}).Where("id = ?", inb.ID).
+				Update("flow", "xtls-rprx-vision").Error; err != nil {
+				return err
+			}
+		}
+	}
+	return upsertSetting(db, doneKey, "1")
+}
+
+// legacyAutoVisionInbound 复刻 2026-11-04 之前的自动注入条件：
+// flow 为空 + network=tcp + security=reality + 未启用 VLESS Encryption。
+// 解析失败一律按「不命中」处理（宁可保持空，也不误改用户的显式选择）。
+func legacyAutoVisionInbound(inb Inbound) bool {
+	if inb.Protocol != ProtocolVless || inb.Flow != "" {
+		return false
+	}
+	var stream struct {
+		Network  string `json:"network"`
+		Security string `json:"security"`
+	}
+	if err := json.Unmarshal([]byte(inb.StreamSettings), &stream); err != nil {
+		return false
+	}
+	if stream.Network != "tcp" || stream.Security != "reality" {
+		return false
+	}
+	var settings struct {
+		Decryption string `json:"decryption"`
+	}
+	if err := json.Unmarshal([]byte(inb.SettingsJSON), &settings); err != nil {
+		return false
+	}
+	// vlessenc 启用时即使 flow 为空旧规则也不会注入 vision（见 protocols.vlessEncActive）
+	return settings.Decryption == "" || settings.Decryption == "none"
 }
 
 // migrateProxyChannelsToForwardInbounds 将存量 ProxyChannel 记录平滑整合至底层 Inbound（type='forward'），

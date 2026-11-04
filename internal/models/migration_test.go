@@ -904,3 +904,79 @@ CREATE UNIQUE INDEX idx_pending_certs_server_id ON pending_certs(server_id);
 		t.Errorf("pending 记录数 = %d, want 2", n)
 	}
 }
+
+// TestMigrateVlessFlowExplicitVision 空 flow 语义从「自动注入 vision」改为「无流控」后，
+// 存量本来在跑 vision 的入站必须固化为显式值（xray 对 flow 不匹配是双向硬拒绝），
+// 且只能跑一次——否则管理员之后手动改回「无」会被再次覆盖。
+func TestMigrateVlessFlowExplicitVision(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	// AutoMigrate 末尾会跑整条数据迁移链（含本迁移），先清掉标记与空表才能构造存量场景
+	if err := db.Where("key = ?", "vless_flow_explicit_vision_version").Delete(&Setting{}).Error; err != nil {
+		t.Fatalf("reset marker: %v", err)
+	}
+	db.Where("1 = 1").Delete(&Inbound{})
+	srv := Server{Name: "s", Host: "1.1.1.1", NodeID: "n1", Secret: "x"}
+	if err := db.Create(&srv).Error; err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	reality := `{"network":"tcp","security":"reality"}`
+	tls := `{"network":"tcp","security":"tls"}`
+	encDec := `{"decryption":"mlkem768x25519plus.native.600s.AAAA"}`
+
+	mk := func(tag, stream, settings, flow string) Inbound {
+		inb := Inbound{ServerID: srv.ID, Tag: tag, Protocol: ProtocolVless, Port: 443,
+			StreamSettings: stream, SettingsJSON: settings, Flow: flow,
+			Type: InboundTypeUser, Enabled: true}
+		if err := db.Create(&inb).Error; err != nil {
+			t.Fatalf("create inbound %s: %v", tag, err)
+		}
+		return inb
+	}
+	auto := mk("auto", reality, `{"decryption":"none"}`, "")
+	enc := mk("enc", reality, encDec, "")
+	tlsInb := mk("tls", tls, `{}`, "")
+	legacyNone := mk("legacy-none", reality, `{}`, "none")
+	explicit := mk("explicit", reality, `{}`, "xtls-rprx-vision")
+
+	if err := migrateVlessFlowExplicitVision(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	want := map[uint64]string{
+		auto.ID:       "xtls-rprx-vision", // 旧规则命中的行固化为显式
+		enc.ID:        "",                 // vlessenc 本来就不注入
+		tlsInb.ID:     "",                 // 非 reality 本来就不注入
+		legacyNone.ID: "",                 // 旧 none 归正为空
+		explicit.ID:   "xtls-rprx-vision",
+	}
+	for id, flow := range want {
+		var got Inbound
+		if err := db.First(&got, id).Error; err != nil {
+			t.Fatalf("reload %d: %v", id, err)
+		}
+		if got.Flow != flow {
+			t.Errorf("入站 %s 的 flow = %q, want %q", got.Tag, got.Flow, flow)
+		}
+	}
+
+	// 幂等：管理员把 auto 改回「无」后再跑迁移，不得被覆盖
+	if err := db.Model(&Inbound{}).Where("id = ?", auto.ID).Update("flow", "").Error; err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if err := migrateVlessFlowExplicitVision(db); err != nil {
+		t.Fatalf("migrate again: %v", err)
+	}
+	var got Inbound
+	if err := db.First(&got, auto.ID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Flow != "" {
+		t.Errorf("迁移应只跑一次，手动改回的空 flow 被覆盖为 %q", got.Flow)
+	}
+}
