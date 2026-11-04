@@ -327,8 +327,8 @@ export interface InboundItem {
   expiry_time?: string | null // 入站到期时间（null/缺失=永久）
   traffic_reset?: string // 重置周期 (never / daily / weekly / monthly)
   remark?: string // 备注/通道名称
-  type?: string // user / relay / tunnel / forward
-  internal_uuid?: string // relay 只读（节点生成上报）
+  type?: string // user / tunnel（forward 仅存量）
+  internal_uuid?: string // 历史字段（relay 模型已退役），仅老库兜底展示
   target_inbound_id?: number // 四层直通目标落地入站 ID
   target_address?: string // 手动指定的外部目标地址
   target_port?: number // 手动指定的外部目标端口

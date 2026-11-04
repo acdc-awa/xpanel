@@ -29,12 +29,12 @@ const (
 
 	OrderPaid = "paid" // 订单状态（余额直付即时生效，无 pending/人工确认）
 
-	// Phase T：入站形态（面向终端用户 / 内部链式代理落地 / 四层直通管道 / 独立通道 / 转发代理）
+	// Phase T：入站形态（面向终端用户 / 四层直通管道 / 独立通道 / 转发代理）
 	InboundTypeUser    = "user"    // 进订阅、参与用户授权与 SyncUsers（默认）
-	InboundTypeRelay   = "relay"   // 内部转发入站，被出站 InboundRef 引用，clients 固定为 InternalUUID
+	InboundTypeRelay   = "relay"   // 已退役：仅存量数据兼容（启动迁移归正为 user），新数据不再产生
 	InboundTypeTunnel  = "tunnel"  // 四层直通管道（任意门），流量透明转发到目标入站/外部端点
 	InboundTypeChannel = "channel" // 独立通道入站（端口转发/SOCKS5/HTTP），由 ProxyChannel 托管
-	InboundTypeForward = "forward" // 转发代理入站（SOCKS5/HTTP）
+	InboundTypeForward = "forward" // 转发代理入站（SOCKS5/HTTP），已退役仅存量
 
 	ProtocolVless    = "vless"
 	ProtocolTunnel   = "tunnel"

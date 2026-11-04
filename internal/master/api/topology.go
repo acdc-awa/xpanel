@@ -10,53 +10,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/subscribe"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
-
-// ---- 入站内部账户指令（relay UUID 节点自治） ----
-
-// adminInternalAccount 执行 setup/rotate 指令：本地生成 internal_uuid 并重新生成配置。
-func (d *Deps) adminInternalAccount(c *gin.Context, typ string) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "无效的 ID")
-		return
-	}
-	var inb models.Inbound
-	if err := d.DB.First(&inb, id).Error; err != nil {
-		util.Fail(c, 404, "入站不存在")
-		return
-	}
-	u, err := util.NewUUID()
-	if err != nil {
-		util.ServerError(c, "生成内部 UUID 失败: "+err.Error())
-		return
-	}
-	if err := d.DB.Model(&inb).Update("internal_uuid", u).Error; err != nil {
-		util.ServerError(c, "保存内部 UUID 失败")
-		return
-	}
-	if err := d.enqueueConfig(inb.ServerID); err != nil {
-		pushFail(c, inb.ServerID, err)
-		return
-	}
-	util.OK(c, gin.H{"inbound_id": inb.ID, "internal_uuid": u})
-}
-
-// AdminSetupInternal POST /api/v1/admin/inbounds/:id/setup-internal —— 节点生成并上报内部 UUID（幂等）。
-func (d *Deps) AdminSetupInternal(c *gin.Context) {
-	d.adminInternalAccount(c, protocol.MsgSetupInternalAccount)
-}
-
-// AdminRotateInternal POST /api/v1/admin/inbounds/:id/rotate-internal —— 强制重新生成内部 UUID。
-func (d *Deps) AdminRotateInternal(c *gin.Context) {
-	d.adminInternalAccount(c, protocol.MsgRotateInternalAccount)
-}
 
 type permissionGroupView struct {
 	models.PermissionGroup

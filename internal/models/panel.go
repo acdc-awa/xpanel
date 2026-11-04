@@ -122,10 +122,10 @@ type Inbound struct {
 	SharePath          string  `gorm:"size:255" json:"share_path"`
 	ShareAllowInsecure bool    `gorm:"default:false" json:"share_allow_insecure"` // 订阅是否跳过证书检查
 	LayerID            *uint64 `gorm:"index" json:"layer_id,omitempty"`           // 所属对外接入层（空/0 = 直连自持端点；见 AccessLayer）
-	// 入站物理类型形态：user / relay / tunnel
-	Type            string  `gorm:"size:16;default:user" json:"type"`         // user（用户入站）/ relay（内部链式转发入站）/ tunnel（四层直通管道）
-	PreviousType    string  `gorm:"size:16" json:"-"`                         // 被自动标 relay 前的类型（解绑引用后回退；空 = 保持不动）
-	InternalUUID    string  `gorm:"size:36" json:"internal_uuid,omitempty"`   // relay 入站 UUID（节点生成上报，主控只读）
+	// 入站物理类型形态：user / tunnel（relay / forward 均已退役，仅存量数据保留）
+	Type            string  `gorm:"size:16;default:user" json:"type"`         // user（用户入站）/ tunnel（四层直通管道）；relay 仅存量
+	PreviousType    string  `gorm:"size:16" json:"-"`                         // 历史列（relay 自动标记前的类型），启动迁移已清空
+	InternalUUID    string  `gorm:"size:36" json:"internal_uuid,omitempty"`   // 历史列（relay 模型已退役），仅老库兜底
 	TargetInboundID *uint64 `gorm:"index" json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID（空=待拓扑连线）
 	TargetAddress   string  `gorm:"size:255" json:"target_address,omitempty"` // 手动指定的外部目标地址
 	TargetPort      int     `gorm:"default:0" json:"target_port,omitempty"`   // 手动指定的外部目标端口
@@ -153,13 +153,9 @@ func (inb *Inbound) IsForwardProxy() bool {
 	return inb.Protocol == ProtocolTunnel || inb.Type == InboundTypeForward || inb.Type == InboundTypeTunnel
 }
 
-// IsRelay 判断入站是否为内部中转链路（relay）。
-func (inb *Inbound) IsRelay() bool {
-	return inb.Type == InboundTypeRelay
-}
-
 // CanServeAccessPoint 判断入站端口是否具备对外接入属性（可挂载用户接入点）。
-// 任何非内部中转链路（relay）的入站端口（包括用户接入入站、四层直通、转发代理以及后续添加的任何新协议）均具备对外接入属性。
+// 任何非内部中转链路（relay，已退役、仅存量数据）的入站端口（包括用户接入入站、四层直通、
+// 转发代理以及后续添加的任何新协议）均具备对外接入属性。
 func (inb *Inbound) CanServeAccessPoint() bool {
 	return inb.Type != InboundTypeRelay
 }

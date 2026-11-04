@@ -32,10 +32,6 @@ const (
 	HeartbeatTimeout = 90 * time.Second // 超过此时长无心跳视为失联
 	WriteTimeout     = 10 * time.Second
 	AskTimeout       = 30 * time.Second // 指令等待回执超时（需 > testTimeout + stopGracePeriod + RTT）
-	// SetupInternalAskTimeout setup-internal 指令等待回执超时：节点侧仅幂等读文件或原子写盘，
-	// 刻意短于 AskTimeout 以免管理端保存/创建入站被慢节点拖住；超时由主控生成 UUID 兜底，
-	// 配置以主控 DB 为准，晚到的节点回执被忽略无实际影响。rotate 走管理端显式端点仍用 AskTimeout。
-	SetupInternalAskTimeout = 3 * time.Second
 	// UpgradeAskTimeout 自升级指令等待回执超时：节点需从 GitHub Releases 拉取二进制
 	//（网络慢时可达数分钟），且成功回执在二进制替换完成后才发出。
 	UpgradeAskTimeout = 5 * time.Minute
@@ -471,8 +467,6 @@ func (h *Hub) readPump(conn *Conn) {
 			h.handleResult(msg)
 		case protocol.MsgTrafficReport:
 			h.handleTrafficReport(conn, msg)
-		case protocol.MsgInternalUUIDReport:
-			h.handleInternalUUIDReport(conn, msg)
 		case protocol.MsgUpgradeProgress:
 			h.handleUpgradeProgress(conn, msg)
 		}
@@ -525,33 +519,6 @@ func (h *Hub) handleUpgradeProgress(conn *Conn, msg *protocol.Message) {
 	h.SetUpgradeStatus(conn.ServerID, &p)
 }
 
-// handleInternalUUIDReport 节点侧内部 UUID 变更主动上报（如 CLI 轮换）：
-// 更新入站 internal_uuid，并按 tag 匹配本服务器 relay 入站。
-func (h *Hub) handleInternalUUIDReport(conn *Conn, msg *protocol.Message) {
-	var p protocol.InternalUUIDReportPayload
-	if err := msg.PayloadTo(&p); err != nil {
-		return
-	}
-	if p.Tag == "" || p.UUID == "" {
-		return
-	}
-	var inb models.Inbound
-	err := h.DB.Where("server_id = ? AND tag = ?", conn.ServerID, p.Tag).First(&inb).Error
-	if err != nil || inb.InternalUUID == p.UUID {
-		return
-	}
-	if err := h.DB.Model(&inb).Update("internal_uuid", p.UUID).Error; err == nil && h.Config != nil {
-		// UUID 变更 → 重新生成并**落待推送**再推（旧实现只调 Generate 丢弃返回值就直接
-		// PushPending：有 pending 行时推的是旧内容、没有 pending 行时 PushPending 直接返回，
-		// 整个推送是空操作，要等下一次每小时校准才生效）。
-		h.enqueueConfig(conn.ServerID)
-		// 扇出：引用该落地入站的出站 client id 也随之变了（xray buildRefOutbound 按入站现状
-		// 现场派生 internal_uuid），这些服务器不在上面的重推范围内，必须按 InboundRef 补齐
-		// （与换证联动 reenqueueRelayConfigsForCert 同构）。
-		h.enqueueRefOutboundServers(inb.ID)
-	}
-}
-
 // enqueueConfig 生成 → 落待推送 → 非阻塞推送（与 api.enqueueConfig 同构的网关侧版本）。
 func (h *Hub) enqueueConfig(serverID uint64) {
 	if h.Config == nil || serverID == 0 {
@@ -570,6 +537,8 @@ func (h *Hub) enqueueConfig(serverID uint64) {
 }
 
 // enqueueRefOutboundServers 重推所有「出站 InboundRef 指向该入站」的服务器。
+// 供落地入站变更 / 服务器地址变更后的扇出复用（生成期按 InboundRef 现场派生端点，
+// 引用方自身没有可感知的改动，必须显式重推）。
 func (h *Hub) enqueueRefOutboundServers(inboundID uint64) {
 	var obs []models.ServerOutbound
 	if err := h.DB.Select("server_id").Distinct("server_id").

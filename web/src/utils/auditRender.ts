@@ -496,10 +496,6 @@ function renderInbounds(ctx: Ctx) {
     ctx.view.summary = buildSummary(ctx, '启停入站', nameOf(ctx))
     return
   }
-  if (a.endsWith('.setup-internal') || a.endsWith('.rotate-internal')) {
-    ctx.view.summary = buildSummary(ctx, '轮换内部中继账户', nameOf(ctx))
-    return
-  }
   const del = ctx.method === 'DELETE'
   if (del) ctx.view.summary = buildSummary(ctx, '删除入站', nameOf(ctx))
   else if (ctx.method === 'POST') ctx.view.summary = buildSummary(ctx, '新建入站', nameOf(ctx))
@@ -927,7 +923,6 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     let title = '入站证书'
     if (act.startsWith('inbounds')) {
       if (act.endsWith('.toggle')) title = '启停入站'
-      else if (act.includes('setup-internal') || act.includes('rotate-internal')) title = '轮换内部中继账户'
       else if (isDel) title = '删除入站'
       else title = act === 'inbounds' ? '新建入站' : '修改入站'
     } else if (act.startsWith('ca-certs')) {

@@ -33,8 +33,8 @@ type inboundView struct {
 	TotalGB            int64      `json:"total_gb"`
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
-	Type               string     `json:"type"`                        // user / relay / tunnel / forward
-	InternalUUID       string     `json:"internal_uuid,omitempty"`     // relay 只读（节点上报）
+	Type               string     `json:"type"`                        // user / tunnel（forward 仅存量）
+	InternalUUID       string     `json:"internal_uuid,omitempty"`     // 历史字段（relay 模型已退役），仅老库兜底展示
 	TargetInboundID    *uint64    `json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port,omitempty"`       // 手动指定的外部目标端口
@@ -67,7 +67,7 @@ type inboundForm struct {
 	Ratio              float64    `json:"ratio"`
 	TotalGB            int64      `json:"total_gb"`              // J9：入站总流量上限（GB，0=不限）
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"` // J9：入站到期时间
-	Type               string     `json:"type"`                  // user / relay / tunnel / forward
+	Type               string     `json:"type"`                  // user / tunnel（forward 仅存量）
 	TargetInboundID    *uint64    `json:"target_inbound_id"`     // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address"`        // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port"`           // 手动指定的外部目标端口
@@ -162,7 +162,7 @@ func (d *Deps) AdminCreateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != "" && !validInboundType(req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
+		util.BadRequest(c, "入站类型仅支持 user / tunnel")
 		return
 	}
 
@@ -374,7 +374,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		ExpiryTime         json.RawMessage `json:"expiry_time"` // 三元：字段缺省=不动 / null=清空 / 字符串=设置
 		Enabled            *bool           `json:"enabled"`
 		Type               *string         `json:"type"`
-		InternalUUID       *string         `json:"internal_uuid"`     // 仅节点回执写入（管理员只读展示）
 		TargetInboundID    *uint64         `json:"target_inbound_id"` // nil 不更新；显式传 0 解绑
 		TargetAddress      *string         `json:"target_address"`
 		TargetPort         *int            `json:"target_port"`
@@ -416,7 +415,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	effType := inb.Type
 	if req.Type != nil {
 		if !validInboundType(*req.Type) {
-			util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
+			util.BadRequest(c, "入站类型仅支持 user / tunnel")
 			return
 		}
 		effType = *req.Type
@@ -475,7 +474,7 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		return
 	}
 	if req.Type != nil && !validInboundType(*req.Type) {
-		util.BadRequest(c, "入站类型仅支持 user / relay / tunnel / forward")
+		util.BadRequest(c, "入站类型仅支持 user / tunnel")
 		return
 	}
 	if req.Flow != nil && *req.Flow != "" && !validInboundFlow(*req.Flow) {
@@ -579,11 +578,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			}
 		}
 		updates["enabled"] = *req.Enabled
-	}
-	// 先应用显式 internal_uuid（节点回执路径），再判空补齐——保证 relay + 空 UUID 的终态不存在
-	if req.InternalUUID != nil {
-		updates["internal_uuid"] = *req.InternalUUID
-		inb.InternalUUID = *req.InternalUUID
 	}
 
 	if req.Type != nil || req.Protocol != nil {
@@ -1130,6 +1124,9 @@ func validInboundProtocol(p string) bool {
 	return p == models.ProtocolTunnel
 }
 
+// validInboundType 入站物理类型白名单。
+// relay / forward 已退役：仅作为入参容忍值存在（老库脏数据 / 老前端回传），
+// normalizeInboundType 会立刻归正为 user，不再有任何生成侧语义。
 func validInboundType(t string) bool {
 	switch t {
 	case models.InboundTypeUser, models.InboundTypeRelay, models.InboundTypeTunnel, models.InboundTypeForward:
@@ -1155,19 +1152,6 @@ func validShareAddrStrategy(s string) bool {
 func pushFail(c *gin.Context, serverID uint64, err error) {
 	log.Printf("config push failed (server=%d): %v", serverID, err)
 	util.ServerError(c, "变更已保存，但配置生成失败: "+err.Error())
-}
-
-// ensureInternalUUID 确保入站拥有内部 UUID。
-func (d *Deps) ensureInternalUUID(inb *models.Inbound) error {
-	if inb.InternalUUID != "" {
-		return nil
-	}
-	u, err := util.NewUUID()
-	if err != nil {
-		return fmt.Errorf("生成内部 UUID 失败: %w", err)
-	}
-	inb.InternalUUID = u
-	return nil
 }
 
 // enqueueConfig 入站变更后自动生成配置并待推送。

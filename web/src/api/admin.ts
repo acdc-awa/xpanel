@@ -657,7 +657,7 @@ export interface InboundPayload {
   expiry_time?: string | null
   traffic_reset?: string
   remark?: string
-  type?: string // user / relay / tunnel / forward
+  type?: string // user / tunnel（forward 仅存量）
   target_inbound_id?: number
   target_address?: string
   target_port?: number
@@ -691,10 +691,6 @@ export function deleteInbound(id: number) {
 
 export function toggleInbound(id: number) {
   return http.post<ApiResp<{ id: number; enabled: boolean }>>(`/admin/inbounds/${id}/toggle`)
-}
-
-export function rotateInternalInbound(id: number) {
-  return http.post<ApiResp<{ inbound_id: number; internal_uuid: string }>>(`/admin/inbounds/${id}/rotate-internal`)
 }
 
 // 证书与 CA 根证书体系

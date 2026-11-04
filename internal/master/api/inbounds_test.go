@@ -14,29 +14,6 @@ import (
 	"github.com/acdc-awa/xpanel/internal/models"
 )
 
-func TestEnsureInternalUUID(t *testing.T) {
-	db := apiTestDB(t)
-	d := &Deps{DB: db}
-
-	// 1. 无 UUID 时应生成有效 UUID
-	inb := models.Inbound{ServerID: 1, Tag: "in-1", Type: models.InboundTypeUser}
-	if err := d.ensureInternalUUID(&inb); err != nil {
-		t.Fatalf("ensureInternalUUID: %v", err)
-	}
-	if inb.InternalUUID == "" {
-		t.Error("应自动分配 InternalUUID")
-	}
-
-	// 2. 已有 UUID 时不应被覆盖
-	existingUUID := inb.InternalUUID
-	if err := d.ensureInternalUUID(&inb); err != nil {
-		t.Fatalf("ensureInternalUUID idempotent: %v", err)
-	}
-	if inb.InternalUUID != existingUUID {
-		t.Errorf("已有 UUID 不应被覆盖: old=%s, new=%s", existingUUID, inb.InternalUUID)
-	}
-}
-
 func TestCreateInbound_UnifiedPhysicalInbound(t *testing.T) {
 	db := apiTestDB(t)
 	db.Create(&models.Server{ID: 10, Name: "node-10", Host: "1.2.3.4", NodeID: "n10", Secret: "sec"})

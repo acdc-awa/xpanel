@@ -269,8 +269,6 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/servers/:id/generate-config":        {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/inbounds/:id":                       {model: &models.Inbound{}, field: "tag"},
 	"/api/v1/admin/inbounds/:id/toggle":                {model: &models.Inbound{}, field: "tag"},
-	"/api/v1/admin/inbounds/:id/setup-internal":        {model: &models.Inbound{}, field: "tag"},
-	"/api/v1/admin/inbounds/:id/rotate-internal":       {model: &models.Inbound{}, field: "tag"},
 	"/api/v1/admin/plans/:id":                          {model: &models.Plan{}, field: "name"},
 	"/api/v1/admin/plans/:id/restore":                  {model: &models.Plan{}, field: "name"},
 	"/api/v1/admin/certs/:id":                          {model: &models.Cert{}, field: "domain"},

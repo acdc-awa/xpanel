@@ -221,9 +221,6 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.POST("/gift-cards", d.AdminBatchCreateGiftCards)
 			admin.DELETE("/gift-cards/:id", d.AdminDeleteGiftCard)
 			admin.DELETE("/gift-cards/:id/purge", d.AdminPurgeGiftCard)
-			// Phase T：内部账户指令 / 证书 / 权限组
-			admin.POST("/inbounds/:id/setup-internal", d.AdminSetupInternal)
-			admin.POST("/inbounds/:id/rotate-internal", d.AdminRotateInternal)
 			// 证书与 CA 根证书体系
 			admin.GET("/ca-certs", d.AdminCACerts)
 			admin.POST("/ca-certs", d.AdminCreateCACert)
