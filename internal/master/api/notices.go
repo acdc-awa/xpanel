@@ -6,18 +6,21 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
+// noticeForm 中所有非标题/正文字段都是指针：缺省即「不改」。
+// 编辑弹窗不再包含置顶/弹窗开关（改由列表卡片直接切换），漏传不能把它们清成 false。
 type noticeForm struct {
 	Title     string `json:"title" binding:"required"`
 	Content   string `json:"content" binding:"required"`
-	IsPinned  bool   `json:"is_pinned"`
-	IsPopup   bool   `json:"is_popup"`
+	IsPinned  *bool  `json:"is_pinned"`
+	IsPopup   *bool  `json:"is_popup"`
 	Status    *int   `json:"status"`
-	SortOrder int    `json:"sort_order"`
+	SortOrder *int   `json:"sort_order"`
 }
 
 // AdminListNotices GET /api/v1/admin/notices —— 管理端公告列表。
@@ -34,7 +37,7 @@ func (d *Deps) AdminListNotices(c *gin.Context) {
 	}
 
 	var list []models.Notice
-	if err := q.Order("is_pinned DESC, sort_order DESC, id DESC").Find(&list).Error; err != nil {
+	if err := q.Order("is_pinned DESC, sort_order ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询公告失败")
 		return
 	}
@@ -54,18 +57,34 @@ func (d *Deps) AdminCreateNotice(c *gin.Context) {
 		status = *form.Status
 	}
 
+	// 排序由列表拖拽维护；未显式指定时追加到末尾。
+	sortOrder := nextNoticeSortOrder(d.DB)
+	if form.SortOrder != nil {
+		sortOrder = *form.SortOrder
+	}
+
 	notice := models.Notice{
 		Title:     strings.TrimSpace(form.Title),
 		Content:   form.Content,
-		IsPinned:  form.IsPinned,
-		IsPopup:   form.IsPopup,
+		IsPinned:  form.IsPinned != nil && *form.IsPinned,
+		IsPopup:   form.IsPopup != nil && *form.IsPopup,
 		Status:    status,
-		SortOrder: form.SortOrder,
+		SortOrder: sortOrder,
 	}
 
 	if err := d.DB.Create(&notice).Error; err != nil {
 		util.ServerError(c, "创建公告失败")
 		return
+	}
+
+	// Status 列带 gorm default:1：零值（草稿）在 Create 时会被数据库默认值顶成已发布，
+	// 必须显式回写一次。这与 GORM 的零值省略规则有关，不是业务判断。
+	if status != models.StatusActive {
+		if err := d.DB.Model(&notice).UpdateColumn("status", status).Error; err != nil {
+			util.ServerError(c, "创建公告失败")
+			return
+		}
+		notice.Status = status
 	}
 
 	// 审计由中间件统一落库（envelope body 含标题，不再手动打点）
@@ -94,12 +113,18 @@ func (d *Deps) AdminUpdateNotice(c *gin.Context) {
 
 	notice.Title = strings.TrimSpace(form.Title)
 	notice.Content = form.Content
-	notice.IsPinned = form.IsPinned
-	notice.IsPopup = form.IsPopup
+	if form.IsPinned != nil {
+		notice.IsPinned = *form.IsPinned
+	}
+	if form.IsPopup != nil {
+		notice.IsPopup = *form.IsPopup
+	}
 	if form.Status != nil {
 		notice.Status = *form.Status
 	}
-	notice.SortOrder = form.SortOrder
+	if form.SortOrder != nil {
+		notice.SortOrder = *form.SortOrder
+	}
 
 	if err := d.DB.Save(&notice).Error; err != nil {
 		util.ServerError(c, "更新公告失败")
@@ -179,11 +204,54 @@ func (d *Deps) AdminToggleNotice(c *gin.Context) {
 	util.OK(c, notice)
 }
 
+// AdminReorderNotices PUT /api/v1/admin/notices/order
+// body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order）。
+// 置顶公告始终排在最前，故排序值只需保证组内相对顺序。
+func (d *Deps) AdminReorderNotices(c *gin.Context) {
+	var req struct {
+		IDs []uint64 `json:"ids" binding:"required,min=1,max=500"`
+	}
+	if !util.BindJSON(c, &req) {
+		return
+	}
+	var allIDs []uint64
+	if err := d.DB.Model(&models.Notice{}).Order("id ASC").Pluck("id", &allIDs).Error; err != nil {
+		util.ServerError(c, "查询失败")
+		return
+	}
+	if !validOrder(req.IDs, allIDs) {
+		util.Fail(c, 400, "排序列表已过期（公告数量已变化），请刷新后重试")
+		return
+	}
+	if err := d.DB.Transaction(func(tx *gorm.DB) error {
+		for i, id := range req.IDs {
+			// UpdateColumn 跳过钩子与 updated_at：调整排序不算业务修改。
+			if err := tx.Model(&models.Notice{}).Where("id = ?", id).UpdateColumn("sort_order", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		util.ServerError(c, "保存排序失败")
+		return
+	}
+	util.OK(c, gin.H{"ordered": len(req.IDs)})
+}
+
+// nextNoticeSortOrder 新建公告的默认排序 = 当前最大值 + 1（追加末尾）。
+func nextNoticeSortOrder(db *gorm.DB) int {
+	var maxOrder int
+	if err := db.Model(&models.Notice{}).Select("COALESCE(MAX(sort_order), -1)").Scan(&maxOrder).Error; err != nil {
+		return 0
+	}
+	return maxOrder + 1
+}
+
 // UserListNotices GET /api/v1/user/notices —— 用户端获取已启用的公告列表。
 func (d *Deps) UserListNotices(c *gin.Context) {
 	var list []models.Notice
 	if err := d.DB.Where("status = ?", models.StatusActive).
-		Order("is_pinned DESC, sort_order DESC, id DESC").
+		Order("is_pinned DESC, sort_order ASC, id ASC").
 		Find(&list).Error; err != nil {
 		util.ServerError(c, "获取公告失败")
 		return

@@ -64,6 +64,7 @@ func setupNoticesTest(t *testing.T) (*gin.Engine, *gorm.DB, *Deps, string, strin
 	{
 		adminGroup.GET("/notices", deps.AdminListNotices)
 		adminGroup.POST("/notices", deps.AdminCreateNotice)
+		adminGroup.PUT("/notices/order", deps.AdminReorderNotices)
 		adminGroup.PUT("/notices/:id", deps.AdminUpdateNotice)
 		adminGroup.DELETE("/notices/:id", deps.AdminDeleteNotice)
 		adminGroup.POST("/notices/:id/toggle", deps.AdminToggleNotice)
@@ -181,4 +182,132 @@ func TestNotice_AdminCRUD_And_UserQuery(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("want 1 notice remaining in DB, got %d", count)
 	}
+}
+
+// TestNotice_ReorderAndAppendOrder 覆盖拖拽排序：新建追加末尾、全量重排生效、过期列表被拒。
+func TestNotice_ReorderAndAppendOrder(t *testing.T) {
+	r, _, _, adminToken, _ := setupNoticesTest(t)
+
+	post := func(title string) models.Notice {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"title": title, "content": "x", "status": 1})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices", bytes.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("create %s failed: code=%d body=%s", title, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Data models.Notice `json:"data"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		return resp.Data
+	}
+
+	a := post("A")
+	b := post("B")
+	c := post("C")
+	if a.SortOrder != 0 || b.SortOrder != 1 || c.SortOrder != 2 {
+		t.Fatalf("新建公告应追加到末尾，实际 sort_order = %d/%d/%d", a.SortOrder, b.SortOrder, c.SortOrder)
+	}
+
+	// C 置顶后列表变成 [C, A, B]；拖拽把 B 移到 A 前面，提交全量顺序。
+	reqPin := httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices/"+itoa(c.ID)+"/toggle",
+		bytes.NewReader([]byte(`{"field":"is_pinned"}`)))
+	reqPin.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+	reqPin.Header.Set("Content-Type", "application/json")
+	wPin := httptest.NewRecorder()
+	r.ServeHTTP(wPin, reqPin)
+	if wPin.Code != http.StatusOK {
+		t.Fatalf("pin notice failed: code=%d body=%s", wPin.Code, wPin.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/notices/order",
+		bytes.NewReader([]byte(`{"ids":[`+itoa(c.ID)+`,`+itoa(b.ID)+`,`+itoa(a.ID)+`]}`)))
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reorder failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 用真实的列表接口（带鉴权）核对返回顺序
+	reqL := httptest.NewRequest(http.MethodGet, "/api/v1/admin/notices", nil)
+	reqL.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+	wL := httptest.NewRecorder()
+	r.ServeHTTP(wL, reqL)
+	var listResp struct {
+		Data []models.Notice `json:"data"`
+	}
+	json.Unmarshal(wL.Body.Bytes(), &listResp)
+	list := listResp.Data
+	if len(list) != 3 {
+		t.Fatalf("want 3 notices, got %d", len(list))
+	}
+	want := []string{"C", "B", "A"}
+	for i, title := range want {
+		if list[i].Title != title {
+			t.Fatalf("第 %d 位期望 %s，实际 %s（顺序 %v）", i, title, list[i].Title, titles(list))
+		}
+	}
+
+	// 列表过期（少一个 id）必须被拒，避免部分重排打乱顺序
+	reqBad := httptest.NewRequest(http.MethodPut, "/api/v1/admin/notices/order",
+		bytes.NewReader([]byte(`{"ids":[`+itoa(c.ID)+`]}`)))
+	reqBad.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+	reqBad.Header.Set("Content-Type", "application/json")
+	wBad := httptest.NewRecorder()
+	r.ServeHTTP(wBad, reqBad)
+	if wBad.Code != http.StatusBadRequest {
+		t.Fatalf("过期排序列表应返回 400，实际 %d body=%s", wBad.Code, wBad.Body.String())
+	}
+}
+
+// TestNotice_CreateDraftKeepsStatus 覆盖 GORM default:1 的零值陷阱：
+// 草稿（status=0）在创建时不能被数据库默认值改成已发布，且不能出现在用户端。
+func TestNotice_CreateDraftKeepsStatus(t *testing.T) {
+	r, _, _, adminToken, userToken := setupNoticesTest(t)
+
+	body, _ := json.Marshal(map[string]any{"title": "草稿公告", "content": "x", "status": 0})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/notices", bytes.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: adminToken})
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create draft failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data models.Notice `json:"data"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Data.Status != 0 {
+		t.Fatalf("草稿应保持 status=0，实际 %d", resp.Data.Status)
+	}
+
+	// 用户端看不到草稿
+	reqU := httptest.NewRequest(http.MethodGet, "/api/v1/user/notices", nil)
+	reqU.AddCookie(&http.Cookie{Name: "access_token", Value: userToken})
+	wU := httptest.NewRecorder()
+	r.ServeHTTP(wU, reqU)
+	var listResp struct {
+		Data []models.Notice `json:"data"`
+	}
+	json.Unmarshal(wU.Body.Bytes(), &listResp)
+	if len(listResp.Data) != 0 {
+		t.Fatalf("草稿不应出现在用户端，实际 %d 条", len(listResp.Data))
+	}
+}
+
+func itoa(v uint64) string { return strconv.FormatUint(v, 10) }
+
+func titles(list []models.Notice) []string {
+	out := make([]string, 0, len(list))
+	for _, n := range list {
+		out = append(out, n.Title)
+	}
+	return out
 }

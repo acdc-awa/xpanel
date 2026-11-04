@@ -1161,3 +1161,8 @@ export function deleteAdminNotice(id: number) {
 export function toggleAdminNotice(id: number, field: 'status' | 'is_pinned' | 'is_popup') {
   return http.post<ApiResp<NoticeItem>>(`/admin/notices/${id}/toggle`, { field })
 }
+
+/** 全量重排：ids 必须覆盖当前全部公告（顺序即新 sort_order），页面数据过期时后端返回 400。 */
+export function reorderNotices(ids: number[]) {
+  return http.put<ApiResp<{ ordered: number }>>('/admin/notices/order', { ids })
+}

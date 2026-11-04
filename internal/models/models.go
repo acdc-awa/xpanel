@@ -174,6 +174,12 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := normalizeServerSortOrder(db); err != nil {
 		return err
 	}
+	// 公告排序值归一（与服务器同口径）：旧列表按 (is_pinned DESC, sort_order DESC, id DESC) 展示，
+	// 现改为「置顶优先 + sort_order 升序 = 页面拖拽顺序」。一次性按下标压成 0..N-1，
+	// 升级瞬间的可见顺序与旧版逐条一致；settings 标记保证只跑一次（否则会把之后拖好的顺序再反转）。
+	if err := normalizeNoticeSortOrder(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
@@ -419,6 +425,47 @@ func normalizeServerSortOrder(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+// normalizeNoticeSortOrder 公告排序值一次性归一：旧口径按 (is_pinned DESC, sort_order DESC, id DESC)
+// 展示，新口径是「置顶优先 + sort_order 升序」，即 sort_order 就是页面拖拽后的下标。
+// 按旧口径的可见顺序重写 0..N-1，升级瞬间顺序与旧版逐条一致；之后由拖拽维护。
+// settings 标记保证只跑一次（幂等标记在，重复执行会把管理员后来拖好的顺序再反转）。
+func normalizeNoticeSortOrder(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Notice{}) {
+		return nil
+	}
+	var mark Setting
+	err := db.Where("key = ?", "notice_sort_order_normalized").First(&mark).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	type noticeRow struct {
+		ID uint64
+	}
+	var rows []noticeRow
+	if err := db.Model(&Notice{}).
+		Select("id").
+		Order("is_pinned DESC, sort_order DESC, id DESC").
+		Scan(&rows).Error; err != nil {
+		return fmt.Errorf("读取公告排序失败: %w", err)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		for i, row := range rows {
+			if err := tx.Model(&Notice{}).Where("id = ?", row.ID).
+				UpdateColumn("sort_order", i).Error; err != nil {
+				return fmt.Errorf("归一公告排序失败: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return db.Create(&Setting{Key: "notice_sort_order_normalized", Value: "1"}).Error
 }
 
 // backfillTrafficBilled 流量计费两列一次性回填（2026-09-06 倍率计费）：

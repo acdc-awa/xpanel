@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
   CsBadge,
@@ -8,10 +8,9 @@ import {
   CsCardGrid,
   CsContainer,
   CsEmpty,
-  CsForm,
-  CsFormItem,
+  CsFormField,
+  CsIcon,
   CsInput,
-  CsInputNumber,
   CsModal,
   CsOption,
   CsPage,
@@ -30,6 +29,7 @@ import {
   updateAdminNotice,
   deleteAdminNotice,
   toggleAdminNotice,
+  reorderNotices,
 } from '@/api/admin'
 import type { NoticeItem, NoticePayload } from '@/api/types'
 import { errMsg } from '@/api/http'
@@ -51,6 +51,7 @@ async function load() {
     const { data } = await getAdminNotices(params)
     if (data.code === 0) {
       list.value = data.data
+      orderSnapshot = [...data.data]
     } else {
       ElMessage.error(data.message)
     }
@@ -63,31 +64,20 @@ async function load() {
 
 onMounted(load)
 
-// 编辑与新建弹窗
+// 编辑与新建弹窗（置顶/弹窗/排序都在列表卡片与拖拽里维护，不再进表单）
 const formOpen = ref(false)
 const editing = ref(false)
 const saving = ref(false)
-const form = reactive<NoticePayload & { id: number }>({
+const form = reactive({
   id: 0,
   title: '',
   content: '',
-  is_pinned: false,
-  is_popup: false,
   status: 1,
-  sort_order: 0,
 })
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, {
-    id: 0,
-    title: '',
-    content: '',
-    is_pinned: false,
-    is_popup: false,
-    status: 1,
-    sort_order: 0,
-  })
+  Object.assign(form, { id: 0, title: '', content: '', status: 1 })
   formOpen.value = true
 }
 
@@ -97,10 +87,7 @@ function openEdit(row: NoticeItem) {
     id: row.id,
     title: row.title,
     content: row.content,
-    is_pinned: row.is_pinned,
-    is_popup: row.is_popup,
     status: row.status,
-    sort_order: row.sort_order,
   })
   formOpen.value = true
 }
@@ -155,13 +142,11 @@ async function save() {
 
   saving.value = true
   try {
+    // 只提交表单里有的字段：置顶/弹窗/排序由卡片与拖拽维护，后端缺省即不改。
     const payload: NoticePayload = {
       title: form.title.trim(),
       content: form.content,
-      is_pinned: form.is_pinned,
-      is_popup: form.is_popup,
       status: form.status,
-      sort_order: form.sort_order,
     }
 
     const { data } = editing.value
@@ -169,7 +154,7 @@ async function save() {
       : await createAdminNotice(payload)
 
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '公告已更新' : '公告已发布')
+      ElMessage.success(editing.value ? '公告已保存' : '公告已创建')
       formOpen.value = false
       load()
     } else {
@@ -187,6 +172,11 @@ async function handleToggle(row: NoticeItem, field: 'status' | 'is_pinned' | 'is
     const { data } = await toggleAdminNotice(row.id, field)
     if (data.code === 0) {
       ElMessage.success('状态已更新')
+      // 置顶会改变分组顺序（置顶始终排在最前），必须重新取列表
+      if (field === 'is_pinned') {
+        load()
+        return
+      }
       Object.assign(row, data.data)
     } else {
       ElMessage.error(data.message)
@@ -216,237 +206,322 @@ async function remove(row: NoticeItem) {
     /* 用户取消 */
   }
 }
+
+// ---- 排序（拖拽）----
+// 唯一写入点：拖完一次性提交全量顺序（数组下标即 sort_order）。
+// 搜索/筛选时禁用——那时「插到哪」没有确定语义。
+const canReorder = computed(
+  () => !keyword.value.trim() && statusFilter.value === undefined && list.value.length > 1,
+)
+
+const draggingId = ref<number | null>(null)
+let orderSnapshot: NoticeItem[] = []
+let savingOrder = false
+
+function cardElOf(target: EventTarget | null): HTMLElement | null {
+  return (target as HTMLElement | null)?.closest('[data-notice-id]') as HTMLElement | null
+}
+
+/**
+ * 置顶公告在管理端与用户端都固定排在最前，拖拽只能在自己的分组内换位。
+ * rest 是「已摘掉被拖项」的列表，pinnedCount 即置顶组可用下标的上界。
+ */
+function clampToPinnedGroup(rest: NoticeItem[], insertAt: number, moved: NoticeItem): number {
+  const pinnedCount = rest.filter((n) => n.is_pinned).length
+  return moved.is_pinned ? Math.min(insertAt, pinnedCount) : Math.max(insertAt, pinnedCount)
+}
+
+function onDragStart(e: DragEvent) {
+  if (!canReorder.value || !(e.target as HTMLElement | null)?.closest('[data-drag-handle]')) {
+    e.preventDefault()
+    return
+  }
+  const card = cardElOf(e.target)
+  if (!card) return
+  draggingId.value = Number(card.getAttribute('data-notice-id'))
+  orderSnapshot = [...list.value]
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(draggingId.value))
+    // 整卡跟随鼠标，而不是只拖一个小抓手
+    e.dataTransfer.setDragImage(card, 24, 24)
+  }
+}
+
+function onDragOver(e: DragEvent) {
+  if (draggingId.value === null) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  const card = cardElOf(e.target)
+  if (!card) return
+  const targetId = Number(card.getAttribute('data-notice-id'))
+  if (!targetId || targetId === draggingId.value) return
+  const from = list.value.findIndex((n) => n.id === draggingId.value)
+  if (from < 0) return
+  const rect = card.getBoundingClientRect()
+  const after = e.clientX > rect.left + rect.width / 2
+  const rest = [...list.value]
+  const [moved] = rest.splice(from, 1)
+  let insertAt = rest.findIndex((n) => n.id === targetId)
+  if (insertAt < 0) return
+  if (after) insertAt += 1
+  insertAt = clampToPinnedGroup(rest, insertAt, moved)
+  rest.splice(insertAt, 0, moved)
+  // 只在顺序真的变了才赋值，避免每次 dragover 都触发整树渲染
+  if (rest.some((n, i) => n.id !== list.value[i]?.id)) list.value = rest
+}
+
+function onDrop(e: DragEvent) {
+  if (draggingId.value === null) return
+  e.preventDefault()
+  void persistOrder()
+}
+
+function onDragEnd() {
+  draggingId.value = null
+  void persistOrder()
+}
+
+async function persistOrder() {
+  if (savingOrder) return
+  const ids = list.value.map((n) => n.id)
+  if (ids.join(',') === orderSnapshot.map((n) => n.id).join(',')) return
+  savingOrder = true
+  try {
+    const { data } = await reorderNotices(ids)
+    if (data.code !== 0) throw new Error(data.message || '保存排序失败')
+  } catch (e) {
+    list.value = orderSnapshot
+    ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
+  } finally {
+    savingOrder = false
+    orderSnapshot = [...list.value]
+  }
+}
 </script>
 
 <template>
   <CsPage>
     <CsToolbar>
       <CsInput
-          v-model="keyword"
-          placeholder="搜索公告标题或内容..."
-          clearable
-          prefix-icon="search"
-          style="width: 220px"
-          @keyup.enter="load"
-          @clear="load"
-        />
-        <CsSelect
-          v-model="statusFilter"
-          placeholder="全部状态"
-          clearable
-          style="width: 120px"
-          @change="load"
-        >
-          <CsOption label="已启用" :value="1" />
-          <CsOption label="已隐藏" :value="0" />
-        </CsSelect>
+        v-model="keyword"
+        placeholder="搜索公告标题或内容..."
+        clearable
+        prefix-icon="search"
+        style="width: 220px"
+        @keyup.enter="load"
+        @clear="load"
+      />
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 120px" @change="load">
+        <CsOption label="已发布" :value="1" />
+        <CsOption label="草稿" :value="0" />
+      </CsSelect>
       <CsButton icon-name="refresh" :loading="loading" @click="load">刷新</CsButton>
       <template #actions>
-        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">发布公告</CsButton>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新建公告</CsButton>
       </template>
     </CsToolbar>
 
-    <!-- 表格列表 -->
+    <!-- 卡片列表（拖拽排序，与服务器卡片同一套交互） -->
     <CsContainer header="全站公告列表">
       <div v-if="loading" style="padding: 48px 0; text-align: center">
         <CsSpinner size="large" />
       </div>
 
-      <CsEmpty v-else-if="list.length === 0" icon-name="announcement" description="暂无公告，点击右上角「发布公告」" />
+      <CsEmpty v-else-if="list.length === 0" icon-name="announcement" description="暂无公告，点击右上角「新建公告」" />
 
-      <!-- 公告卡片网格（官方 ItemCard 口径） -->
-      <CsCardGrid v-else>
-        <CsCard v-for="row in list" :key="row.id" :class="{ 'notice-card--off': row.status !== 1 }">
+      <CsCardGrid
+        v-else
+        :min-width="380"
+        @dragstart="onDragStart"
+        @dragover="onDragOver"
+        @drop="onDrop"
+        @dragend="onDragEnd"
+      >
+        <CsCard
+          v-for="row in list"
+          :key="row.id"
+          class="notice-card"
+          :class="{
+            'notice-card--off': row.status !== 1,
+            'notice-card--dragging': draggingId === row.id,
+          }"
+          :data-notice-id="row.id"
+        >
           <template #header>
-            <button
-              type="button"
-              class="notice-name"
-              title="点击编辑公告"
-              @click="openEdit(row as NoticeItem)"
-            >
-              {{ (row as NoticeItem).title }}
-            </button>
-            <div class="notice-meta">
-              <span class="notice-id">#{{ row.id }}</span>
-              <CsBadge v-if="(row as NoticeItem).is_pinned" color="red">置顶</CsBadge>
-              <CsBadge v-if="(row as NoticeItem).is_popup" color="severity-medium">强制弹窗</CsBadge>
+            <div class="notice-head">
+              <span
+                v-if="canReorder"
+                class="notice-drag-handle"
+                draggable="true"
+                data-drag-handle
+                title="拖拽调整公告顺序"
+              >
+                <CsIcon name="drag-indicator" />
+              </span>
+              <button type="button" class="notice-name" title="点击编辑公告" @click="openEdit(row)">
+                {{ row.title }}
+              </button>
+              <CsBadge v-if="row.is_pinned" color="red">置顶</CsBadge>
+              <CsBadge v-if="row.is_popup" color="severity-medium">强制弹窗</CsBadge>
               <CsBadge :color="row.status === 1 ? 'green' : 'grey'">
-                {{ row.status === 1 ? '已启用' : '已隐藏' }}
+                {{ row.status === 1 ? '已发布' : '草稿' }}
               </CsBadge>
             </div>
           </template>
 
           <template #actions>
             <CsTooltip
-              :content="row.status === 1 ? '已启用，点击隐藏' : '已隐藏，点击启用'"
+              :content="row.status === 1 ? '已发布（用户可见），点击转为草稿' : '草稿（仅管理员可见），点击发布'"
               placement="top"
             >
               <CsToggle
-                :model-value="(row as NoticeItem).status === 1"
-                :aria-label="`切换公告 ${(row as NoticeItem).title} 的启用状态`"
-                @change="() => handleToggle(row as NoticeItem, 'status')"
+                :model-value="row.status === 1"
+                :aria-label="`切换公告 ${row.title} 的发布状态`"
+                @change="() => handleToggle(row, 'status')"
               />
             </CsTooltip>
           </template>
 
-          <div class="notice-content-preview">
-            <span class="notice-content-text">{{ (row as NoticeItem).content }}</span>
-          </div>
+          <!-- 渲染后的正文预览（3 行裁切），不是 Markdown 原文 -->
+          <div class="notice-content-preview markdown-content" v-html="renderMarkdown(row.content)" />
 
           <div class="notice-switches">
             <div class="notice-switch-row">
               <span class="switch-label">置顶显示</span>
               <CsToggle
-                :model-value="(row as NoticeItem).is_pinned"
+                :model-value="row.is_pinned"
                 aria-label="切换置顶显示"
-                @change="() => handleToggle(row as NoticeItem, 'is_pinned')"
+                @change="() => handleToggle(row, 'is_pinned')"
               />
             </div>
             <div class="notice-switch-row">
               <span class="switch-label">登录强制弹窗</span>
               <CsToggle
-                :model-value="(row as NoticeItem).is_popup"
+                :model-value="row.is_popup"
                 aria-label="切换登录强制弹窗"
-                @change="() => handleToggle(row as NoticeItem, 'is_popup')"
+                @change="() => handleToggle(row, 'is_popup')"
               />
             </div>
           </div>
 
           <template #footer>
-            <span class="notice-updated">{{ formatDate((row as NoticeItem).updated_at) }} 更新</span>
-            <CsButton icon-name="edit" @click="openEdit(row as NoticeItem)">编辑公告</CsButton>
-            <CsButton icon-name="remove" @click="remove(row as NoticeItem)">删除</CsButton>
+            <span class="notice-updated">#{{ row.id }} · {{ formatDate(row.updated_at) }} 更新</span>
+            <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
+            <CsButton icon-name="remove" @click="remove(row)">删除</CsButton>
           </template>
         </CsCard>
       </CsCardGrid>
     </CsContainer>
 
-    <!-- 发布/编辑公告对话框（支持双栏 Markdown 实时渲染预览与 4x4 表格拾取器） -->
+    <!-- 编辑公告：基础信息 + 双栏 Markdown（左侧源码、右侧渲染预览） -->
     <CsModal
       v-model:visible="formOpen"
-      :header="editing ? '编辑公告' : '发布新公告'"
+      :header="editing ? '编辑公告' : '新建公告'"
       size="x-large"
+      scrollable
+      :close-on-click-overlay="false"
     >
-      <CsForm label-position="top">
-        <CsFormItem label="公告标题" required>
-          <CsInput v-model="form.title" placeholder="如：系统升级维护通知 / 节点新增上线" :maxlength="100" />
-        </CsFormItem>
+      <div class="notice-form">
+        <!-- 基础信息不套容器：一张卡只放一个输入框会撑出一大块空白 -->
+        <div class="notice-base-bar">
+          <CsFormField label="公告标题" required class="notice-title-field">
+            <CsInput
+              v-model="form.title"
+              class="notice-title-input"
+              placeholder="如：系统升级维护通知 / 节点新增上线"
+              :maxlength="100"
+            />
+          </CsFormField>
 
-        <!-- 双栏 Markdown 编辑与实时预览区 -->
-        <div class="md-editor-split">
-          <!-- 左栏：Markdown 源码输入与工整工具条 -->
-          <div class="md-pane md-edit-pane">
-            <div class="md-pane-header">
-              <span class="md-pane-title">Markdown 编辑</span>
-              <span class="text-muted text-xs">快捷工具栏</span>
+          <CsFormField label="状态" class="notice-status-field">
+            <CsRadioGroup v-model="form.status" direction="horizontal">
+              <CsRadio :value="1">发布</CsRadio>
+              <CsRadio :value="0">草稿</CsRadio>
+            </CsRadioGroup>
+          </CsFormField>
+        </div>
+
+        <CsContainer header="公告正文">
+          <!-- 快捷工具栏 -->
+          <div class="md-toolbar-strip">
+            <div class="btn-group">
+              <button type="button" class="tool-btn" title="一级标题" @click="insertMarkdown('# ')">H1</button>
+              <button type="button" class="tool-btn" title="二级标题" @click="insertMarkdown('## ')">H2</button>
+              <button type="button" class="tool-btn" title="三级标题" @click="insertMarkdown('### ')">H3</button>
             </div>
 
-            <!-- 工整独立的快捷按钮工具栏条 -->
-            <div class="md-toolbar-strip">
-              <div class="btn-group">
-                <button type="button" class="tool-btn" title="一级标题" @click="insertMarkdown('# ')">H1</button>
-                <button type="button" class="tool-btn" title="二级标题" @click="insertMarkdown('## ')">H2</button>
-                <button type="button" class="tool-btn" title="三级标题" @click="insertMarkdown('### ')">H3</button>
-              </div>
+            <div class="btn-group">
+              <button type="button" class="tool-btn font-bold" title="粗体" @click="insertMarkdown('**粗体**')">B</button>
+              <button type="button" class="tool-btn font-italic" title="斜体" @click="insertMarkdown('*斜体*')">I</button>
+              <button type="button" class="tool-btn" title="引用块" @click="insertMarkdown('> ')">“</button>
+            </div>
 
-              <div class="btn-group">
-                <button type="button" class="tool-btn font-bold" title="粗体" @click="insertMarkdown('**粗体**')">B</button>
-                <button type="button" class="tool-btn font-italic" title="斜体" @click="insertMarkdown('*斜体*')">I</button>
-                <button type="button" class="tool-btn" title="引用块" @click="insertMarkdown('> ')">“</button>
-              </div>
+            <div class="btn-group">
+              <button type="button" class="tool-btn" title="无序列表" @click="insertMarkdown('- ')">• 列表</button>
+              <button type="button" class="tool-btn" title="行内代码" @click="insertMarkdown('`code`')">`代码`</button>
+              <button type="button" class="tool-btn" title="插入链接" @click="insertMarkdown('[链接文字](url)')">链接</button>
+            </div>
 
-              <div class="btn-group">
-                <button type="button" class="tool-btn" title="无序列表" @click="insertMarkdown('- ')">• 列表</button>
-                <button type="button" class="tool-btn" title="行内代码" @click="insertMarkdown('`code`')">`代码`</button>
-                <button type="button" class="tool-btn" title="插入链接" @click="insertMarkdown('[链接文字](url)')">链接</button>
-              </div>
+            <!-- 4x4 自由表格选择器 -->
+            <CsPopover v-model:visible="tablePopoverOpen" placement="bottom-start" :width="170">
+              <template #reference>
+                <button type="button" class="tool-btn highlight-btn" title="插入表格 (最大 4x4)">
+                  ⊞ 表格 ▾
+                </button>
+              </template>
 
-              <!-- 4x4 自由表格选择器 -->
-              <CsPopover
-                v-model:visible="tablePopoverOpen"
-                placement="bottom-start"
-                :width="170"
-              >
-                <template #reference>
-                  <button type="button" class="tool-btn highlight-btn" title="插入表格 (最大 4x4)">
-                    ⊞ 表格 ▾
-                  </button>
-                </template>
-
-                <div class="table-picker-card">
-                  <div class="table-picker-label">
-                    <span>插入表格：</span>
-                    <strong class="text-primary">{{ hoverRows }} × {{ hoverCols }}</strong>
-                  </div>
-                  <div class="table-grid-4x4">
+              <div class="table-picker-card">
+                <div class="table-picker-label">
+                  <span>插入表格：</span>
+                  <strong class="text-primary">{{ hoverRows }} × {{ hoverCols }}</strong>
+                </div>
+                <div class="table-grid-4x4">
+                  <div v-for="r in 4" :key="'r-' + r" class="grid-row">
                     <div
-                      v-for="r in 4"
-                      :key="'r-' + r"
-                      class="grid-row"
-                    >
-                      <div
-                        v-for="c in 4"
-                        :key="'c-' + c"
-                        class="grid-cell"
-                        :class="{ 'cell-active': r <= hoverRows && c <= hoverCols }"
-                        @mouseenter="onGridHover(r, c)"
-                        @click="insertTable(r, c)"
-                      />
-                    </div>
+                      v-for="c in 4"
+                      :key="'c-' + c"
+                      class="grid-cell"
+                      :class="{ 'cell-active': r <= hoverRows && c <= hoverCols }"
+                      @mouseenter="onGridHover(r, c)"
+                      @click="insertTable(r, c)"
+                    />
                   </div>
                 </div>
-              </CsPopover>
-            </div>
-
-            <CsInput
-              v-model="form.content"
-              type="textarea"
-              :rows="13"
-              placeholder="在此输入 Markdown 源码..."
-              class="md-textarea"
-            />
+              </div>
+            </CsPopover>
           </div>
 
-          <!-- 右栏：实时渲染预览效果 -->
-          <div class="md-pane md-preview-pane">
-            <div class="md-pane-header">
-              <span class="md-pane-title">实时渲染预览</span>
+          <div class="md-editor-split">
+            <div class="md-pane">
+              <span class="md-pane-label">Markdown 源码</span>
+              <CsInput
+                v-model="form.content"
+                type="textarea"
+                :rows="15"
+                placeholder="在此输入 Markdown 源码..."
+                class="md-textarea"
+              />
             </div>
-            <div
-              class="md-preview-body markdown-content"
-              v-html="renderMarkdown(form.content) || '<div class=\'preview-empty-hint\'>在左侧输入内容，此处将实时渲染 Markdown 视觉效果...</div>'"
-            />
+
+            <div class="md-pane">
+              <span class="md-pane-label">预览</span>
+              <div
+                class="md-preview-body markdown-content"
+                v-html="
+                  renderMarkdown(form.content) ||
+                  '<div class=\'preview-empty-hint\'>在左侧输入内容，此处将实时渲染 Markdown 视觉效果...</div>'
+                "
+              />
+            </div>
           </div>
-        </div>
-
-        <div class="form-row-grid mt-4">
-          <CsFormItem label="置顶显示">
-            <CsToggle v-model="form.is_pinned" />
-          </CsFormItem>
-
-          <CsFormItem label="首页强制弹窗提醒">
-            <CsToggle v-model="form.is_popup" />
-          </CsFormItem>
-        </div>
-
-        <div class="form-row-grid">
-          <CsFormItem label="发布状态">
-            <CsRadioGroup v-model="form.status">
-              <CsRadio :value="1">立即发布</CsRadio>
-              <CsRadio :value="0">暂不发布</CsRadio>
-            </CsRadioGroup>
-          </CsFormItem>
-
-          <CsFormItem label="排序权重">
-            <CsInputNumber v-model="form.sort_order" :min="0" :max="9999" />
-          </CsFormItem>
-        </div>
-      </CsForm>
+        </CsContainer>
+      </div>
 
       <template #footer>
         <CsButton @click="formOpen = false">取消</CsButton>
         <CsButton variant="primary" :loading="saving" @click="save">
-          {{ editing ? '保存修改' : '确认发布' }}
+          {{ editing ? '保存修改' : '创建公告' }}
         </CsButton>
       </template>
     </CsModal>
@@ -454,39 +529,175 @@ async function remove(row: NoticeItem) {
 </template>
 
 <style scoped lang="scss">
-.md-editor-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 4px;
-  background: var(--color-background-cell-shaded-twxsbz);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 8px;
-  padding: 12px;
+/* ================= 列表卡片 ================= */
+.notice-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-inline-size: 0;
 }
 
-.md-pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+.notice-drag-handle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  cursor: grab;
 
-  .md-pane-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 6px;
-    margin-bottom: 6px;
-    border-bottom: 1px dashed var(--color-border-divider-default-diwd4w);
+  &:hover {
+    color: var(--color-text-body-default-b2us04, #000716);
+    background: var(--color-background-button-normal-hover-1ajrtx, rgba(0, 7, 22, 0.06));
+  }
 
-    .md-pane-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--color-text-body-default-b2us04);
-    }
+  &:active {
+    cursor: grabbing;
   }
 }
 
-// 独立的紧凑工整工具栏条
+.notice-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 700;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+  }
+}
+
+.notice-content-preview {
+  min-height: 84px;
+  max-height: 120px;
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-container-content-mjfil9, #ffffff);
+  font-size: 13px;
+  line-height: 19px;
+
+  /* 卡片里的预览只要「看起来像正文」，标题/代码块按正文尺寸收一档，避免一行标题吃掉整块裁切高度 */
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
+    margin: 0 0 3px;
+    padding: 0;
+    border: none;
+    font-size: 14px;
+    line-height: 19px;
+  }
+
+  :deep(p) {
+    margin: 0 0 3px;
+  }
+
+  :deep(ul),
+  :deep(ol) {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  :deep(pre) {
+    margin: 3px 0;
+    padding: 6px 8px;
+  }
+}
+
+.notice-switches {
+  margin-block-start: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+.notice-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-label {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.notice-updated {
+  margin-inline-end: auto;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+/*
+ * 官方 item-card footer 会给按钮 `flex: 1 1 0`，两个按钮 + 时间戳挤在一行时
+ * 文字会溢出到相邻按钮上（截图里的「编辑公……」叠字）。这里让按钮按内容宽度排布。
+ */
+.notice-card :deep(.cs-card__footer) {
+  flex-wrap: wrap;
+  row-gap: 8px;
+
+  button {
+    flex: 0 0 auto;
+    padding-inline: 12px !important;
+  }
+}
+
+.notice-card--off {
+  opacity: 0.85;
+}
+
+.notice-card--dragging {
+  opacity: 0.45;
+}
+
+/* ================= 编辑弹窗 ================= */
+.notice-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/*
+ * 基础信息条：不套容器（一张卡只放一个输入框会撑出一大块空白），
+ * 左右内缩 20px 对齐下方卡片内容的起始列。
+ */
+.notice-base-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  padding-inline: 20px;
+  padding-block-start: 4px;
+}
+
+.notice-title-input :deep(input) {
+  block-size: 40px;
+  font-size: 15px;
+}
+
+.notice-status-field :deep([role='radiogroup']) {
+  display: flex;
+  align-items: center;
+  min-block-size: 40px;
+}
+
 .md-toolbar-strip {
   display: flex;
   align-items: center;
@@ -496,7 +707,7 @@ async function remove(row: NoticeItem) {
   background: var(--color-background-container-content-mjfil9);
   border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 
   .btn-group {
     display: flex;
@@ -547,7 +758,45 @@ async function remove(row: NoticeItem) {
   }
 }
 
-// 4x4 网格选择器样式
+/* 两栏等高：右栏预览跟随左侧 textarea 的高度，避免出现一长一短 */
+.md-editor-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.md-pane {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.md-pane-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb);
+}
+
+.md-preview-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--color-background-container-content-mjfil9);
+  border: 1px solid var(--color-border-divider-default-diwd4w);
+  border-radius: 6px;
+
+  .preview-empty-hint {
+    color: var(--color-text-body-secondary-66ygbb);
+    font-size: 13px;
+    padding-top: 50px;
+    text-align: center;
+  }
+}
+
+/* 4x4 网格选择器样式 */
 .table-picker-card {
   padding: 4px;
 
@@ -591,131 +840,13 @@ async function remove(row: NoticeItem) {
   color: var(--color-text-link-default-qabnuk);
 }
 
-.md-preview-body {
-  height: 350px;
-  overflow-y: auto;
-  padding: 12px 14px;
-  background: var(--color-background-container-content-mjfil9);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 6px;
-
-  .preview-empty-hint {
-    color: var(--color-text-body-secondary-66ygbb);
-    font-size: 13px;
-    padding-top: 50px;
-    text-align: center;
-  }
-}
-
-.form-row-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.text-muted {
-  color: var(--color-text-body-secondary-66ygbb);
-}
-
-.text-xs {
-  font-size: 12px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-/* ================= 公告卡片（官方 ItemCard 口径） ================= */
-.notice-name {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  margin: 0;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  text-align: start;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-
-  &:hover {
-    color: var(--color-text-link-default-qabnuk, #006ce0);
-  }
-}
-
-.notice-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 4px;
-}
-
-.notice-id {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.notice-content-preview {
-  padding: 8px 10px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-container-content-mjfil9, #ffffff);
-}
-
-/*
- * 正文截断放在内层：外层负责内边距与边框，内层只留一个 3 行高的裁切盒。
- * 若直接在带 padding 的外层上 overflow:hidden，裁剪边界是 padding box，
- * 第 4 行会从下方内边距里露出来。
- */
-.notice-content-text {
-  display: block;
-  max-height: 54px; /* 3 × 18px 行高 */
-  overflow: hidden;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 18px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  white-space: pre-line;
-}
-
-.notice-switches {
-  margin-block-start: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-}
-
-.notice-switch-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.switch-label {
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.notice-updated {
-  margin-inline-end: auto;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.notice-card--off {
-  opacity: 0.85;
-}
-
 @media (max-width: $bp-tablet-max) {
-  .md-editor-split {
+  .notice-base-bar {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
-  .form-row-grid {
+
+  .md-editor-split {
     grid-template-columns: 1fr;
   }
 }

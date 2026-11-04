@@ -259,6 +259,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.PUT("/topology-layout", d.AdminSaveTopologyLayout)
 			admin.GET("/notices", d.AdminListNotices)
 			admin.POST("/notices", d.AdminCreateNotice)
+			admin.PUT("/notices/order", d.AdminReorderNotices)
 			admin.PUT("/notices/:id", d.AdminUpdateNotice)
 			admin.DELETE("/notices/:id", d.AdminDeleteNotice)
 			admin.POST("/notices/:id/toggle", d.AdminToggleNotice)
