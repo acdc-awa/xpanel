@@ -759,7 +759,7 @@ const billingCycleOptions = [
     </CsContainer>
 
     <!-- 新增服务器 -->
-    <CsModal v-model:visible="createOpen" header="新增服务器" size="large" @close="closeCreate">
+    <CsModal v-model:visible="createOpen" header="新增服务器" size="large" @close="closeCreate" :close-on-click-overlay="false">
       <CsForm v-if="!createdResult" label-position="top">
         <CsSpaceBetween size="m">
           <CsContainer header="基础设施与连接定位">

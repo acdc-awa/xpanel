@@ -466,6 +466,7 @@ onMounted(async () => {
     size="large"
     scrollable
     @close="handleClose"
+    :close-on-click-overlay="false"
   >
     <CsForm variant="embedded" label-position="top">
       <CsAlert v-if="isSystemReserved" type="info" header="系统内置核心出站">

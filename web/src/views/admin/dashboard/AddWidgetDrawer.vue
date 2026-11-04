@@ -35,6 +35,7 @@ function handleAdd(id: string) {
     size="medium"
     @update:visible="(val) => emit('update:visible', val)"
     @close="emit('update:visible', false)"
+    :close-on-click-overlay="false"
   >
     <div class="add-widgets-modal-body">
       <p class="modal-subtext">

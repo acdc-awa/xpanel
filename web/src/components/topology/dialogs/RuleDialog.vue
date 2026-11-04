@@ -81,7 +81,7 @@ async function save() {
 </script>
 
 <template>
-  <CsModal v-model:visible="visibleModel" header="新建路由规则（拖线）" size="medium">
+  <CsModal v-model:visible="visibleModel" header="新建路由规则（拖线）" size="medium" :close-on-click-overlay="false">
     <CsForm label-position="top">
       <div class="dlg-grid">
         <CsFormItem label="入站（源）">

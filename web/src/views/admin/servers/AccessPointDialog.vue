@@ -296,7 +296,7 @@ async function handleDelete() {
 </script>
 
 <template>
-  <CsModal v-model:visible="visible" :header="isEditing ? '编辑接入点' : '新建接入点'" size="medium">
+  <CsModal v-model:visible="visible" :header="isEditing ? '编辑接入点' : '新建接入点'" size="medium" :close-on-click-overlay="false">
     <CsForm label-position="top">
       <CsSpaceBetween size="m">
         <CsColumnLayout :columns="2">

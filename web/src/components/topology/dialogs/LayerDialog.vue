@@ -100,6 +100,7 @@ function requestDelete() {
     v-model:visible="visibleModel"
     :header="layer ? '编辑对外接入层' : '新建对外接入层'"
     size="medium"
+    :close-on-click-overlay="false"
   >
     <CsForm label-position="top">
       <div class="dlg-grid dlg-grid-2-1">

@@ -298,7 +298,7 @@ function isExpired(row: GiftCard) {
     </CsContainer>
 
     <!-- 批量生成弹窗 -->
-    <CsModal v-model:visible="createOpen" header="批量生成礼品卡" size="small">
+    <CsModal v-model:visible="createOpen" header="批量生成礼品卡" size="small" :close-on-click-overlay="false">
       <CsForm label-position="top">
         <CsFormItem label="批次名称 / 备注">
           <CsInput v-model="createForm.name" placeholder="如 新年促销50元礼品卡" />
@@ -327,7 +327,7 @@ function isExpired(row: GiftCard) {
     </CsModal>
 
     <!-- 生成结果弹窗 -->
-    <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium">
+    <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium" :close-on-click-overlay="false">
       <CsAlert type="success" style="margin-bottom: 14px">
         本次已成功生成 {{ createdCards.length }} 张面值为 ¥
         {{ createdCards[0]?.face_value_cents ? (createdCards[0].face_value_cents / 100).toFixed(2) : '0' }}

@@ -255,6 +255,7 @@ function onClosed() {
     size="large"
     scrollable
     @close="onClosed"
+    :close-on-click-overlay="false"
   >
     <CsSpaceBetween size="l">
       <!-- 顶部四层直通派生规则提示 -->

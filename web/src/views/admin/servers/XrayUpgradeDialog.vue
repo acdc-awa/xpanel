@@ -83,7 +83,7 @@ function submit() {
 </script>
 
 <template>
-  <CsModal :visible="visible" header="批量升级 Xray" size="medium" @update:visible="(v: boolean) => !v && close()">
+  <CsModal :visible="visible" header="批量升级 Xray" size="medium" @update:visible="(v: boolean) => !v && close()" :close-on-click-overlay="false">
     <CsSpaceBetween size="m">
       <CsAlert type="info">
         将对 <strong>{{ count }}</strong> 台服务器切换 Xray 内核

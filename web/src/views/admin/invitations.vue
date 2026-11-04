@@ -273,7 +273,7 @@ function fmtTime(t: string | null) {
       </template>
     </CsContainer>
 
-    <CsModal v-model:visible="genOpen" header="生成邀请码" size="small">
+    <CsModal v-model:visible="genOpen" header="生成邀请码" size="small" :close-on-click-overlay="false">
       <template v-if="!generated.length">
         <CsForm label-position="top">
           <CsFormItem label="生成数量">

@@ -67,7 +67,7 @@ async function confirm() {
 </script>
 
 <template>
-  <CsModal v-model:visible="visibleModel" header="挂载入站到对外层" size="medium">
+  <CsModal v-model:visible="visibleModel" header="挂载入站到对外层" size="medium" :close-on-click-overlay="false">
     <CsForm label-position="top">
       <CsFormItem label="选择本机未挂层入站">
         <CsSelect v-model="inboundId" :options="options" placeholder="选择入站" />

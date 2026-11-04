@@ -332,7 +332,7 @@ async function restore(row: any) {
       </CsCardGrid>
     </CsContainer>
 
-    <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium">
+    <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium" :close-on-click-overlay="false">
       <CsForm label-position="top">
         <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 月付 200G" /></CsFormItem>
         <CsFormItem label="套餐文案 / 特性描述（每行一条特性，支持占位符）">

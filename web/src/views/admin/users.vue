@@ -837,7 +837,7 @@ function cardMenuItems(row: AdminUser) {
     </CsContainer>
 
     <!-- 用户详情与权限配置弹窗 -->
-    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.email ?? ''}`" size="large" scrollable>
+    <CsModal v-model:visible="detailOpen" :header="`编辑用户 · ${current?.email ?? ''}`" size="large" scrollable :close-on-click-overlay="false">
       <template v-if="current">
         <div class="user-summary">
           <div class="sum-item">
@@ -997,7 +997,7 @@ function cardMenuItems(row: AdminUser) {
     </CsModal>
 
     <!-- 手动创建用户弹窗 -->
-    <CsModal v-model:visible="newUserOpen" header="新建用户" size="medium" @close="closeNewUser">
+    <CsModal v-model:visible="newUserOpen" header="新建用户" size="medium" @close="closeNewUser" :close-on-click-overlay="false">
       <template v-if="!newUserResult">
         <CsForm label-position="top">
           <CsFormItem label="邮箱">
@@ -1070,7 +1070,7 @@ function cardMenuItems(row: AdminUser) {
     </CsModal>
 
     <!-- 独立余额调账弹窗 -->
-    <CsModal v-model:visible="adjustOpen" header="调整用户余额" size="small">
+    <CsModal v-model:visible="adjustOpen" header="调整用户余额" size="small" :close-on-click-overlay="false">
       <CsForm label-position="top">
         <div class="adjust-header">
           <div class="user-meta">

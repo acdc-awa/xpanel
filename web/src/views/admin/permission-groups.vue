@@ -261,7 +261,7 @@ async function remove(row: any) {
     </CsContainer>
 
     <!-- ===== 权限组基础信息编辑弹窗 ===== -->
-    <CsModal v-model:visible="formOpen" :header="editing ? '编辑权限组' : '新增权限组'" size="medium">
+    <CsModal v-model:visible="formOpen" :header="editing ? '编辑权限组' : '新增权限组'" size="medium" :close-on-click-overlay="false">
       <CsForm label-position="top">
         <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 VIP 1 / 基础套餐组" /></CsFormItem>
         <CsFormItem label="备注说明"><CsInput v-model="form.remark" placeholder="选填，如 普通节点权限组" /></CsFormItem>
@@ -277,6 +277,7 @@ async function remove(row: any) {
       v-model:visible="apDialogOpen"
       :header="`接入点优先级 · ${apTarget?.name || ''}`"
       size="medium"
+      :close-on-click-overlay="false"
     >
       <CsForm label-position="top">
         <CsFormItem>
