@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -202,5 +203,44 @@ func TestInboundUpdateDoesNotRepushUnrelatedServers(t *testing.T) {
 		if p, err := d.Config.GetPending(sid); err != nil || p != nil {
 			t.Errorf("服务器 %d 与该入站无消费关系，不应生成待推送配置: err=%v pending=%v", sid, err, p)
 		}
+	}
+}
+
+// TestServerUpdateRepushesOwnConfigForRoutingDefaults：默认出口 / 解析策略只在生成期读取，
+// 改完必须重推本机（此前只写库，节点一直跑旧值）；与配置无关的字段不得触发重推。
+func TestServerUpdateRepushesOwnConfigForRoutingDefaults(t *testing.T) {
+	d, db := newFanoutDeps(t)
+	s1, _, _, _ := seedRefPair(t, db)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.PUT("/api/v1/admin/servers/:id", d.AdminUpdateServer)
+
+	put := func(payload map[string]any) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/servers/%d", s1.ID), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("更新服务器失败: code=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	// 纯展示字段不触发重推
+	put(map[string]any{"location": "Tokyo"})
+	if p, err := d.Config.GetPending(s1.ID); err != nil || p != nil {
+		t.Fatalf("与生成无关的字段不应产生待推配置: err=%v pending=%v", err, p)
+	}
+
+	// 解析策略真正变化 → 本机重推，且生成内容反映新值
+	put(map[string]any{"routing_domain_strategy": "IPIfNonMatch"})
+	p, err := d.Config.GetPending(s1.ID)
+	if err != nil || p == nil {
+		t.Fatalf("改解析策略后本机应有待推配置: err=%v pending=%v", err, p)
+	}
+	if !strings.Contains(p.ConfigJSON, `"domainStrategy": "IPIfNonMatch"`) {
+		t.Errorf("待推配置应反映新的 routing domainStrategy")
 	}
 }

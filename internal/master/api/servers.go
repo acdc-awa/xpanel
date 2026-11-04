@@ -395,10 +395,19 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	} else if req.IDCURL != nil {
 		updates["idc_address"] = strings.TrimSpace(*req.IDCURL)
 	}
+	// 这两项只在本机配置生成期读取（outbounds[0] 兜底出口 / routing.domainStrategy），
+	// 写库不会自动下发，必须显式重推本机。
+	ownConfigChanged := false
 	if req.DefaultOutboundTag != nil {
+		if *req.DefaultOutboundTag != srv.DefaultOutboundTag {
+			ownConfigChanged = true
+		}
 		updates["default_outbound_tag"] = *req.DefaultOutboundTag
 	}
 	if req.RoutingDomainStrategy != nil {
+		if *req.RoutingDomainStrategy != srv.RoutingDomainStrategy {
+			ownConfigChanged = true
+		}
 		updates["routing_domain_strategy"] = *req.RoutingDomainStrategy
 	}
 	if len(updates) > 0 {
@@ -407,14 +416,24 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 			return
 		}
 	}
+	if ownConfigChanged {
+		if err := d.enqueueConfig(id); err != nil {
+			pushFail(c, id, err)
+			return
+		}
+	}
 	// 服务器地址变化 → 引用本机入站的链式出站、指向本机入站的四层直通，端点（vnext address /
 	// redirect 目标）都是生成期现场读 server.host 派生的，引用方库里不会跟着变，必须重推。
-	// 不过滤本机：直通落地若在本机，它的 redirect 也内嵌了本机新地址。
+	// 不过滤本机：直通落地若在本机，它的 redirect 也内嵌了本机新地址（上面已推过本机时跳过）。
 	if hostChanged {
 		var inboundIDs []uint64
 		if err := d.DB.Model(&models.Inbound{}).Where("server_id = ?", id).
 			Pluck("id", &inboundIDs).Error; err == nil {
-			d.enqueueDependentServers(inboundIDs, 0)
+			exclude := uint64(0)
+			if ownConfigChanged {
+				exclude = id // 本机已在上一段推过，避免一次编辑触发两次 xray 重启
+			}
+			d.enqueueDependentServers(inboundIDs, exclude)
 		}
 	}
 	d.DB.First(&srv, id)
