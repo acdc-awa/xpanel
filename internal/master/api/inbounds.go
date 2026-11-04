@@ -354,6 +354,9 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		util.Fail(c, 404, "入站不存在")
 		return
 	}
+	// 原文快照：下面会就地改写 inb（settings/protocol/type/target 等），而「是否真的改了
+	// Xray 运行期字段」必须与库里旧值比，不能与改写后的内存值比。
+	origInbound := inb
 	// 目标变更/解绑时要把旧落地的接收侧开关也重算一次，否则旧落地会永久带着 acceptProxyProtocol。
 	prevTargetID := uint64(0)
 	if inb.TargetInboundID != nil {
@@ -737,17 +740,11 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 	if prevTargetID != 0 && prevTargetID != curTargetID {
 		d.syncTargetProxyProtocolByID(prevTargetID)
 	}
-	// 分级推送：仅当存在影响 Xray 运行期配置的核心字段改动时，才向节点重推配置与重载；
-	// 纯计费倍率、备注、周期、配额或订阅分享门面修改仅写库，跳过下发推送。
-	hasXrayConfigChanges := false
-	for k := range updates {
-		switch k {
-		case "tag", "protocol", "port", "listen", "settings_json", "stream_settings",
-			"sniffing", "enabled", "type", "target_inbound_id",
-			"target_address", "target_port", "cert_id", "flow", "layer_id":
-			hasXrayConfigChanges = true
-		}
-	}
+	// 分级推送：仅当影响 Xray 运行期配置的字段**真的变了**才重推。
+	// 不能只看请求里出现了哪些键——入站编辑器每次保存都整表回传，只改倍率/额度/备注
+	// 也会带着 port/settings_json 等键进来，按「出现即推送」会把纯计费编辑变成一次冷更
+	// （节点侧 RestartWithConfig 没有内容短路，每次都 Stop+Start）。
+	hasXrayConfigChanges := xrayConfigChanged(origInbound, updates)
 	if ensureTarget != nil {
 		hasXrayConfigChanges = true
 	}

@@ -639,8 +639,11 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 
 	oldTag := ob.Tag
-	// 在 Updates 前捕获旧引用（GORM Updates 会回写 struct 字段，否则解绑后 oldRef 已被置 nil）
+	// 在 Updates 前捕获旧值（GORM Updates 会回写 struct 字段，否则解绑后 oldRef 已被置 nil）
 	oldRef := ob.InboundRef
+	oldPP := ob.SendProxyProtocol
+	oldEnabled := ob.Enabled
+	origOutbound := ob
 	if len(updates) > 0 {
 		if err := d.DB.Model(&ob).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新出站规则失败")
@@ -660,9 +663,14 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 	}
 
-	// 联动推送：引用 / PP 开关 / 启用状态任一变化，都要重算落地接收侧并重推落地机。
-	// 落地入站的生成结果还依赖「谁在引用它」（机间凭据），所以即使接收侧没变也要推一次。
-	if req.InboundRef != nil || req.SendProxyProtocol != nil || req.Enabled != nil {
+	// 联动推送：引用目标 / PP 开关 / 启用状态**真的变了**才重算落地接收侧并重推落地机。
+	// 出站编辑器每次保存都整表回传这三项，按「请求里出现该键」判断会让改个备注也把
+	// 落地机推一遍（远端多一次冷更）。引用目标变化时新旧两处都要重算。
+	// 另外：本次补发了机间凭据（内部 UUID 为空的存量行）时，落地 clients 也会变，必须推。
+	_, uuidGenerated := updates["internal_uuid"]
+	refChanged := (oldRef == nil) != (effRef == nil) ||
+		(oldRef != nil && effRef != nil && *oldRef != *effRef)
+	if refChanged || effPP != oldPP || effEnabled != oldEnabled || uuidGenerated {
 		oldTargetID := uint64(0)
 		if oldRef != nil {
 			oldTargetID = *oldRef
@@ -693,9 +701,12 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 	}
 
 	d.DB.First(&ob, outboundID)
-	if err := d.enqueueConfig(id); err != nil {
-		pushFail(c, id, err)
-		return
+	// 纯门面字段（如备注）改动不重推：节点侧 RestartWithConfig 没有内容短路，多推一次就是一次 Stop+Start。
+	if outboundConfigChanged(origOutbound, updates) {
+		if err := d.enqueueConfig(id); err != nil {
+			pushFail(c, id, err)
+			return
+		}
 	}
 	util.OK(c, gin.H{"outbound": ob})
 }
@@ -996,6 +1007,7 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 		updates["remark"] = *req.Remark
 	}
 
+	origRule := rule // 写前快照：Updates 会回写 struct 字段，推送判定必须与库内旧值比
 	if len(updates) > 0 {
 		if err := d.DB.Model(&rule).Updates(updates).Error; err != nil {
 			util.ServerError(c, "更新路由规则失败")
@@ -1004,9 +1016,12 @@ func (d *Deps) AdminUpdateServerRoutingRule(c *gin.Context) {
 	}
 
 	d.DB.First(&rule, ruleID)
-	if err := d.enqueueConfig(id); err != nil {
-		pushFail(c, id, err)
-		return
+	// 只改备注等门面字段不重推：节点侧 RestartWithConfig 没有内容短路，多推一次就是一次 Stop+Start。
+	if routingRuleConfigChanged(origRule, updates) {
+		if err := d.enqueueConfig(id); err != nil {
+			pushFail(c, id, err)
+			return
+		}
 	}
 	util.OK(c, gin.H{"rule": rule})
 }

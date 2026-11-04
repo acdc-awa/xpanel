@@ -244,3 +244,82 @@ func TestServerUpdateRepushesOwnConfigForRoutingDefaults(t *testing.T) {
 		t.Errorf("待推配置应反映新的 routing domainStrategy")
 	}
 }
+
+// TestUpdateInboundRatioOnlyDoesNotPush：入站编辑器每次保存都整表回传，
+// 只改倍率（或只是 JSON 排版不同）不得触发冷更——节点侧 RestartWithConfig 没有内容短路，
+// 多推一次就是一次 Stop+Start。真正的结构变更仍必须推。
+func TestUpdateInboundRatioOnlyDoesNotPush(t *testing.T) {
+	d, db := newFanoutDeps(t)
+	_, s2, landing, _ := seedRefPair(t, db)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.PUT("/api/v1/admin/inbounds/:id", d.AdminUpdateInbound)
+
+	// 与编辑器一致的整表回传（含 ratio 与全部结构字段）
+	fullForm := func(overrides map[string]any) map[string]any {
+		body := map[string]any{
+			"tag":             "landing",
+			"protocol":        "vless",
+			"port":            44300,
+			"listen":          "",
+			"settings_json":   `{"decryption":"none"}`,
+			"stream_settings": `{"network":"tcp","security":"none"}`,
+			"sniffing":        "",
+			"type":            "user",
+			"ratio":           1,
+		}
+		for k, v := range overrides {
+			body[k] = v
+		}
+		return body
+	}
+	put := func(payload map[string]any) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/inbounds/%d", landing.ID), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("更新入站失败: code=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+	assertNoPending := func(stage string) {
+		t.Helper()
+		for _, sid := range []uint64{landing.ServerID, s2.ID} {
+			if p, err := d.Config.GetPending(sid); err != nil || p != nil {
+				t.Fatalf("%s：服务器 %d 不应产生待推送配置（多推一次=一次 xray 重启）: err=%v pending=%v", stage, sid, err, p)
+			}
+		}
+	}
+
+	// 1) 只改倍率：库里要变，但不重推
+	put(fullForm(map[string]any{"ratio": 3}))
+	assertNoPending("只改倍率")
+	var reloaded models.Inbound
+	if err := db.First(&reloaded, landing.ID).Error; err != nil {
+		t.Fatalf("回读入站: %v", err)
+	}
+	if reloaded.Ratio != 3 {
+		t.Errorf("倍率应已写入，实际 %v", reloaded.Ratio)
+	}
+
+	// 2) 结构字段语义未变、只是排版/键序不同：同样不重推
+	put(fullForm(map[string]any{"settings_json": `{ "decryption" : "none" }`}))
+	assertNoPending("仅 JSON 排版变化")
+
+	// 3) 真正的结构变更（端口）仍必须推，且引用方跟着推
+	put(fullForm(map[string]any{"port": 44305}))
+	pending, err := d.Config.GetPending(landing.ServerID)
+	if err != nil || pending == nil {
+		t.Fatalf("改端口后本机应有待推配置: err=%v pending=%v", err, pending)
+	}
+	refPending, err := d.Config.GetPending(s2.ID)
+	if err != nil || refPending == nil {
+		t.Fatalf("改端口后引用方应有待推配置: err=%v pending=%v", err, refPending)
+	}
+	if vn := pendingVnext(t, refPending.ConfigJSON, "to-landing"); vn == nil || vn["port"] != float64(44305) {
+		t.Errorf("引用方待推配置应指向新端口 44305，实际 %v", vn)
+	}
+}
