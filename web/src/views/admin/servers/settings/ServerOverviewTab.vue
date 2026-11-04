@@ -12,7 +12,7 @@ import {
 import { getInbounds, runServerCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTime } from '@/utils/timezone'
-import { pushStateChip, pushStateSummary, xrayChip } from '@/utils/server-status'
+import { indicatorTypeOf, onlineChip, pushStateChip, pushStateSummary, xrayChip } from '@/utils/server-status'
 
 // 概览只回答「这台机器现在怎么样」：在线/进程/配置同步/接入点。
 // 名称、地址、地区、到期、计费这些可编辑的资产字段一律只在「设置」页签出现，
@@ -37,8 +37,10 @@ const statusLoading = ref(false)
 const status = computed(() => (statusData.value?.data ?? null) as any)
 const offline = computed(() => props.server.status !== 1)
 
+const comm = computed(() => onlineChip(props.server))
 const pushChip = computed(() => pushStateChip(props.server))
-const pushSummary = computed(() => pushStateSummary(props.server))
+// 离线时副标题不能再写「与主控记录一致」（那是离线前的结论），统一说明数据时点。
+const pushSummary = computed(() => (offline.value ? '离线前最后一次上报' : pushStateSummary(props.server)))
 const xray = computed(() => xrayChip(props.server))
 
 function fmtTime(t: string | null | undefined) {
@@ -147,10 +149,9 @@ watch(
         <div class="server-status-cell">
           <span class="server-status-label">通信状态</span>
           <span class="server-status-value">
-            <CsStatusIndicator
-              :type="offline ? 'stopped' : 'success'"
-              :text="offline ? '离线' : '在线'"
-            />
+            <CsTooltip :content="comm.tip">
+              <CsStatusIndicator :type="indicatorTypeOf(comm.color)" :text="comm.text" />
+            </CsTooltip>
           </span>
           <span class="server-status-sub">最后心跳 {{ fmtTime(server.last_seen_at) }}</span>
         </div>

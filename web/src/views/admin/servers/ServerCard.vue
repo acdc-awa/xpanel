@@ -13,7 +13,7 @@ import type { ServerItem } from '@/api/admin'
 import { compareVersion } from '@/utils/version'
 import { formatDateTime } from '@/utils/timezone'
 import { formatExpireDate, getExpiryStatus, isUrl, normalizeUrl } from '@/utils/vps'
-import { indicatorTypeOf, pushStateChip, xrayChip } from '@/utils/server-status'
+import { indicatorTypeOf, onlineChip, pushStateChip, xrayChip } from '@/utils/server-status'
 
 // 服务器卡片：名称 → 状态条 → 地址/心跳/版本 → 操作。
 // 状态文案与配色全部来自 utils/server-status（与设置弹窗同一份），这里只负责排版。
@@ -41,7 +41,7 @@ const emit = defineEmits<{
 
 const dragging = ref(false)
 
-const online = computed(() => props.server.status === 1)
+const comm = computed(() => onlineChip(props.server))
 const xray = computed(() => xrayChip(props.server))
 const push = computed(() => pushStateChip(props.server))
 const expiry = computed(() => getExpiryStatus(props.server.expire_at))
@@ -135,7 +135,9 @@ function onRootClick() {
 
     <!-- 状态条：三项常显 + 待办追加，固定顺序便于扫读 -->
     <div class="server-status-bar">
-      <CsStatusIndicator :type="online ? 'success' : 'stopped'" :text="online ? '在线' : '离线'" />
+      <CsTooltip :content="comm.tip">
+        <CsStatusIndicator :type="indicatorTypeOf(comm.color)" :text="comm.text" />
+      </CsTooltip>
       <span class="server-status-sep" aria-hidden="true" />
       <CsTooltip :content="xray.tip">
         <CsStatusIndicator :type="indicatorTypeOf(xray.color)" :text="xray.text" />

@@ -92,11 +92,16 @@ function memPercent(row: ServerMatrixItem): number {
   return row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0
 }
 
-function loadColor(percent: number): string {
+function loadColor(percent: number, status: number): string {
+  // 离线行的读数是旧值，按严重度上色会让人误以为正在过载，统一退成中性灰。
+  if (status !== 1) return 'var(--color-text-status-inactive-fqjc97)'
   if (percent > 80) return 'var(--color-text-status-error-ri38gt)'
   if (percent > 50) return 'var(--color-text-status-warning-fabq6h)'
   return 'var(--color-text-status-success-1i2jf8)'
 }
+
+/** 离线行的负载 / 速率 / 在线人数都是离线前最后一次上报的值，灰显并给出悬停说明。 */
+const STALE_TIP = '服务器离线，以下为离线前最后一次上报'
 
 function formatBandwidth(bytesPerSec: number): string {
   if (!bytesPerSec || bytesPerSec <= 0) return '0.00 Mbps'
@@ -144,7 +149,7 @@ function fmtTime(t: string | null) {
             <span class="sc-name" :title="row.host || row.name">{{ row.name }}</span>
             <CsStatusIndicator
               class="sc-status"
-              :status="row.status === 1 ? 'online' : 'offline'"
+              :type="row.status === 1 ? 'success' : 'error'"
               :text="row.status === 1 ? '在线' : '离线'"
               :pulse="row.status === 1"
             />
@@ -159,7 +164,11 @@ function fmtTime(t: string | null) {
           <div class="sc-host tabular-num" :title="row.host">
             <span class="sc-heartbeat">心跳 {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}</span>
           </div>
-          <div class="sc-metrics tabular-num">
+          <div
+            class="sc-metrics tabular-num"
+            :class="{ 'is-stale': row.status !== 1 }"
+            :title="row.status !== 1 ? STALE_TIP : undefined"
+          >
             <div class="aws-load-row">
               <span class="load-lbl">CPU</span>
               <CsProgressBar
@@ -167,7 +176,7 @@ function fmtTime(t: string | null) {
                 :value="cpuPercent(row)"
                 :bar-height="5"
                 hide-text
-                :color="loadColor(cpuPercent(row))"
+                :color="loadColor(cpuPercent(row), row.status)"
                 :aria-label="`CPU 使用率 ${cpuPercent(row)}%`"
               />
               <span class="load-val">{{ cpuPercent(row) }}%</span>
@@ -179,20 +188,25 @@ function fmtTime(t: string | null) {
                 :value="memPercent(row)"
                 :bar-height="5"
                 hide-text
-                color="var(--color-text-link-default-qabnuk)"
+                :color="row.status === 1 ? 'var(--color-text-link-default-qabnuk)' : 'var(--color-text-status-inactive-fqjc97)'"
                 :aria-label="`内存使用率 ${memPercent(row)}%`"
               />
               <span class="load-val">{{ row.mem_total ? `${memPercent(row)}%` : '—' }}</span>
             </div>
           </div>
-          <div class="sc-foot tabular-num">
+          <div
+            class="sc-foot tabular-num"
+            :class="{ 'is-stale': row.status !== 1 }"
+            :title="row.status !== 1 ? STALE_TIP : undefined"
+          >
             <span class="sc-rate">
               <span class="rate-rx">↓ {{ formatBandwidth(row.rx_rate) }}</span>
               <span class="rate-tx">↑ {{ formatBandwidth(row.tx_rate) }}</span>
             </span>
-            <span class="online-users-sub">
+            <span v-if="row.status === 1" class="online-users-sub">
               在线：<b class="aws-interactive-link" @click="ctx.openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
             </span>
+            <span v-else class="online-users-sub">在线：—</span>
           </div>
         </li>
         <li v-if="!filteredServerMatrix.length" class="server-cards-empty">暂无服务器</li>
@@ -217,7 +231,7 @@ function fmtTime(t: string | null) {
           <!-- 2. 状态与心跳 -->
           <template #cell-status="{ row }">
             <CsStatusIndicator
-              :status="row.status === 1 ? 'online' : 'offline'"
+              :type="row.status === 1 ? 'success' : 'error'"
               :text="row.status === 1 ? '在线' : '离线'"
               :pulse="row.status === 1"
             />
@@ -228,7 +242,11 @@ function fmtTime(t: string | null) {
 
           <!-- 3. 系统负载 -->
           <template #cell-load="{ row }">
-            <div class="aws-load-row tabular-num">
+            <div
+              class="aws-load-row tabular-num"
+              :class="{ 'is-stale': row.status !== 1 }"
+              :title="row.status !== 1 ? STALE_TIP : undefined"
+            >
               <span class="load-lbl">CPU</span>
               <CsProgressBar
                 class="load-bar"
@@ -236,24 +254,31 @@ function fmtTime(t: string | null) {
                 :bar-height="5"
                 hide-text
                 :color="
-                  row.cpu > 80
-                    ? 'var(--color-text-status-error-ri38gt)'
-                    : row.cpu > 50
-                      ? 'var(--color-text-status-warning-fabq6h)'
-                      : 'var(--color-text-status-success-1i2jf8)'
+                  row.status !== 1
+                    ? 'var(--color-text-status-inactive-fqjc97)'
+                    : row.cpu > 80
+                      ? 'var(--color-text-status-error-ri38gt)'
+                      : row.cpu > 50
+                        ? 'var(--color-text-status-warning-fabq6h)'
+                        : 'var(--color-text-status-success-1i2jf8)'
                 "
                 :aria-label="`CPU 使用率 ${Math.round(row.cpu || 0)}%`"
               />
               <span class="load-val">{{ (row.cpu || 0).toFixed(0) }}%</span>
             </div>
-            <div class="aws-load-row tabular-num" style="margin-top: 3px">
+            <div
+              class="aws-load-row tabular-num"
+              style="margin-top: 3px"
+              :class="{ 'is-stale': row.status !== 1 }"
+              :title="row.status !== 1 ? STALE_TIP : undefined"
+            >
               <span class="load-lbl">MEM</span>
               <CsProgressBar
                 class="load-bar"
                 :value="row.mem_total ? Math.min(100, Math.round((row.mem / row.mem_total) * 100)) : 0"
                 :bar-height="5"
                 hide-text
-                color="var(--color-text-link-default-qabnuk)"
+                :color="row.status === 1 ? 'var(--color-text-link-default-qabnuk)' : 'var(--color-text-status-inactive-fqjc97)'"
                 :aria-label="`内存使用率 ${row.mem_total ? Math.round((row.mem / row.mem_total) * 100) : 0}%`"
               />
               <span class="load-val">{{ row.mem_total ? `${Math.round((row.mem / row.mem_total) * 100)}%` : '—' }}</span>
@@ -262,13 +287,18 @@ function fmtTime(t: string | null) {
 
           <!-- 4. 实时速率与在线设备 -->
           <template #cell-rate="{ row }">
-            <div class="tabular-num rate-dual-line">
+            <div
+              class="tabular-num rate-dual-line"
+              :class="{ 'is-stale': row.status !== 1 }"
+              :title="row.status !== 1 ? STALE_TIP : undefined"
+            >
               <span class="rate-rx">↓ {{ formatBandwidth(row.rx_rate) }}</span>
               <span class="rate-tx">↑ {{ formatBandwidth(row.tx_rate) }}</span>
             </div>
-            <div class="online-users-sub tabular-num">
+            <div v-if="row.status === 1" class="online-users-sub tabular-num">
               在线：<b class="aws-interactive-link" @click="ctx.openOnlineUsers(row as ServerMatrixItem)">{{ row.online_users || 0 }}</b> 人
             </div>
+            <div v-else class="online-users-sub tabular-num is-stale">在线：—</div>
           </template>
 
           <!-- 5. 历史数据 -->
@@ -543,6 +573,15 @@ function fmtTime(t: string | null) {
   &:hover {
     color: var(--color-text-link-hover-n1r6g0, #004a9e);
     border-bottom-style: solid;
+  }
+}
+
+/* 离线行：读数保留（排障要看离线前最后值）但退成次要色，不再像实时数字 */
+.is-stale {
+  .load-val,
+  .rate-rx,
+  .rate-tx {
+    color: var(--color-text-body-secondary-66ygbb, #656871);
   }
 }
 </style>
