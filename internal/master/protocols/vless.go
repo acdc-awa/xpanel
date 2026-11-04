@@ -600,21 +600,7 @@ func (VLESSPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, 
 
 	switch net {
 	case "xhttp":
-		mode := "auto"
-		path := "/"
-		if dto.Transport != nil {
-			if dto.Transport.Mode != "" {
-				mode = dto.Transport.Mode
-			}
-			if dto.Transport.Path != "" {
-				path = dto.Transport.Path
-			}
-		}
-		xh := map[string]any{"mode": mode, "path": path}
-		if dto.Transport != nil && dto.Transport.Host != "" {
-			xh["host"] = dto.Transport.Host
-		}
-		ss["xhttpSettings"] = xh
+		ss["xhttpSettings"] = xhttpOutboundSettings(dto.Transport)
 	case "ws":
 		path := "/"
 		if dto.Transport != nil && dto.Transport.Path != "" {
@@ -683,6 +669,145 @@ func (VLESSPlugin) RenderOutbound(dto *contracts.ProxyNodeDTO) (map[string]any, 
 
 	item["streamSettings"] = ss
 	return item, nil
+}
+
+// xhttpServerOnlyKeys 是 xhttpSettings 里只被服务端 hub 消费的键（见 fields_vless.go 的
+// RoleServerOnly 声明与 xray transport/internet/splithttp/hub.go）。机间出站是客户端角色，
+// 这些键必须剥离：带上它们不会让链路变通，只会把服务端调参混进客户端配置。
+var xhttpServerOnlyKeys = map[string]struct{}{
+	"noSSEHeader":          {},
+	"scMaxBufferedPosts":   {},
+	"scStreamUpServerSecs": {},
+	"serverMaxHeaderBytes": {},
+}
+
+// xhttpObjectKeys 在 DTO.Opts 里以 JSON 字符串存储、xray 侧却是结构体的键，必须还原成对象。
+// 其余键保持字符串：Int32Range 接受 "a-b" 字符串，而把纯数字串还原成数字会破坏
+// sessionIDTable 这类字符表（"0123456789" 会被当成数字）。
+var xhttpObjectKeys = map[string]struct{}{
+	"headers":          {},
+	"xmux":             {},
+	"downloadSettings": {},
+}
+
+// xhttpBoolKeys 在 DTO.Opts 里以 "true"/"false" 字符串存储、xray 侧是 bool 的键。
+var xhttpBoolKeys = map[string]struct{}{
+	"xPaddingObfsMode": {},
+	"noGRPCHeader":     {},
+}
+
+// xhttpOutboundSettings 把中性 DTO 的 xhttp 传输投影成 xray 客户端 xhttpSettings。
+//
+// 服务端的会话/填充/复用参数与客户端必须逐项一致：落地入站要求 sessionIDPlacement=header
+// 而客户端不带，握手就会失败（实测表现为 GET/POST 全 502）。因此这里只剥服务端专属键，
+// 其余进阶参数（xPadding*/sessionID*/seq*/uplink*/scMaxEachPostBytes/xmux/headers/
+// downloadSettings/extra）全部原样投影——与订阅侧 mihomo 翻译同源。
+func xhttpOutboundSettings(t *contracts.TransportOptions) map[string]any {
+	xh := map[string]any{"mode": "auto", "path": "/"}
+	if t == nil {
+		return xh
+	}
+	if t.Mode != "" {
+		xh["mode"] = t.Mode
+	}
+	if t.Path != "" {
+		xh["path"] = t.Path
+	}
+	if t.Host != "" {
+		xh["host"] = t.Host
+	}
+	if len(t.Opts) == 0 {
+		return xh
+	}
+
+	// extra 是 xray 的第二套入口（xhttpSettings.extra 会被解到同一个结构体）：
+	// 先展开，外层同键优先——与 xray Build 的行为一致。
+	merged := make(map[string]any, len(t.Opts))
+	if raw := t.Opts["extra"]; strings.TrimSpace(raw) != "" {
+		var extra map[string]any
+		if err := json.Unmarshal([]byte(raw), &extra); err == nil {
+			for k, v := range extra {
+				switch k {
+				case "host", "path", "mode":
+					continue // 外层优先，xray 也会覆盖
+				}
+				merged[k] = v
+			}
+		}
+	}
+	for k, v := range t.Opts {
+		if k != "extra" {
+			merged[k] = v
+		}
+	}
+
+	for k, v := range merged {
+		if _, serverOnly := xhttpServerOnlyKeys[k]; serverOnly {
+			continue
+		}
+		if _, isBool := xhttpBoolKeys[k]; isBool {
+			if b, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(v))); err == nil {
+				xh[k] = b
+			}
+			continue
+		}
+		if _, isObject := xhttpObjectKeys[k]; isObject {
+			if obj := xhttpObjectValue(v); len(obj) > 0 {
+				xh[k] = obj
+			}
+			continue
+		}
+		if s, ok := xhttpScalarValue(v); ok {
+			xh[k] = s
+		}
+	}
+	return xh
+}
+
+// xhttpObjectValue 把 Opts 里的 JSON 字符串或原始 map 还原成对象；空对象/非法值返回 nil。
+func xhttpObjectValue(v any) map[string]any {
+	switch t := v.(type) {
+	case map[string]any:
+		return t
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" || s == "{}" || s == "null" {
+			return nil
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(s), &parsed); err != nil {
+			return nil
+		}
+		return parsed
+	default:
+		return nil
+	}
+}
+
+// xhttpScalarValue 把 Opts 值转成字符串；数值按整数输出（避免 1e+06 这类形态）。
+func xhttpScalarValue(v any) (string, bool) {
+	switch t := v.(type) {
+	case nil:
+		return "", false
+	case string:
+		if strings.TrimSpace(t) == "" {
+			return "", false
+		}
+		return t, true
+	case bool:
+		return strconv.FormatBool(t), true
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10), true
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64), true
+	default:
+		b, err := json.Marshal(v)
+		if err != nil || string(b) == "null" {
+			return "", false
+		}
+		return string(b), true
+	}
 }
 
 // xhttpExtraJSON 把 DTO 里的 xhttp 进阶参数还原成 xray SplitHTTPConfig 形态的 JSON，
