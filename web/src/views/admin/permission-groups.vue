@@ -27,12 +27,15 @@ import {
   deletePermissionGroup,
   getPermissionGroups,
   getAccessPoints,
+  reorderPermissionGroups,
   setPermissionGroupAccessPoints,
   updatePermissionGroup,
   type PermissionGroup,
 } from '@/api/admin'
 import type { UserAccessPoint } from '@/api/types'
 import { errMsg } from '@/api/http'
+import SortHandle from '@/components/base/SortHandle.vue'
+import { useCardDragSort } from '@/composables/useCardDragSort'
 
 const router = useRouter()
 
@@ -43,8 +46,10 @@ async function load() {
   loading.value = true
   try {
     const { data } = await getPermissionGroups()
-    if (data.code === 0) list.value = data.data.items
-    else ElMessage.error(data.message)
+    if (data.code === 0) {
+      list.value = data.data.items
+      syncSnapshot()
+    } else ElMessage.error(data.message)
   } catch (e) {
     ElMessage.error(errMsg(e, '加载权限组失败'))
   } finally {
@@ -52,6 +57,14 @@ async function load() {
   }
 }
 onMounted(load)
+
+// ---- 排序（拖拽）----
+// 只影响管理端列表与下拉展示顺序；组内接入点优先级仍由编辑器单独维护。
+const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
+  list,
+  idOf: (g) => g.id,
+  persist: reorderPermissionGroups,
+})
 
 // ---- 创建/编辑基础信息 ----
 const formOpen = ref(false)
@@ -217,12 +230,26 @@ async function remove(row: any) {
       <CsEmpty v-else-if="list.length === 0" icon-name="folder-open" description="尚无权限组，点击右上角「新增权限组」" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，模板状态作为卡片角标 -->
-      <CsCardGrid v-else>
-        <CsCard v-for="row in list" :key="row.id">
+      <CsCardGrid
+        v-else
+        @dragstart="onDragStart"
+        @dragover="onDragOver"
+        @drop="onDrop"
+        @dragend="onDragEnd"
+      >
+        <CsCard
+          v-for="row in list"
+          :key="row.id"
+          :class="{ 'pg-card--dragging': draggingId === row.id }"
+          :data-sort-id="row.id"
+        >
           <template #header>
-            <button type="button" class="pg-name" title="点击编辑权限组" @click="openEdit(row)">
-              {{ row.name }}
-            </button>
+            <div class="pg-head">
+              <SortHandle v-if="canReorder" title="拖拽调整权限组顺序" />
+              <button type="button" class="pg-name" title="点击编辑权限组" @click="openEdit(row)">
+                {{ row.name }}
+              </button>
+            </div>
             <div class="pg-id">#{{ row.id }}</div>
           </template>
           <template #actions>
@@ -325,6 +352,17 @@ async function remove(row: any) {
 </template>
 
 <style scoped lang="scss">
+
+.pg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.pg-card--dragging {
+  opacity: 0.45;
+}
 
 .pg-name {
   appearance: none;

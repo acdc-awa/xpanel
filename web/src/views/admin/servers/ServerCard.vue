@@ -4,11 +4,11 @@ import {
   CsBadge,
   CsButton,
   CsCard,
-  CsIcon,
   CsStatusIndicator,
   CsTooltip,
   type BadgeColor,
 } from '@/components/cloudscape'
+import SortHandle from '@/components/base/SortHandle.vue'
 import type { ServerItem } from '@/api/admin'
 import { compareVersion } from '@/utils/version'
 import { formatDateTime } from '@/utils/timezone'
@@ -117,22 +117,17 @@ function onRootClick() {
       'server-card--select-mode': selectMode,
       'server-card--dragging': dragging,
     }"
-    :data-server-id="server.id"
+    :data-sort-id="server.id"
     @click="onRootClick"
   >
     <template #header>
       <div class="server-card-head">
-        <span
+        <SortHandle
           v-if="canReorder"
-          class="server-drag-handle"
-          draggable="true"
-          data-drag-handle
           title="拖拽调整服务器顺序"
           @dragstart="dragging = true"
           @dragend="dragging = false"
-        >
-          <CsIcon name="drag-indicator" />
-        </span>
+        />
         <button type="button" class="server-name" @click.stop="emit('open-settings')">{{ server.name }}</button>
         <CsBadge v-if="server.location" color="blue">{{ server.location }}</CsBadge>
       </div>
@@ -283,26 +278,6 @@ function onRootClick() {
   align-items: center;
   gap: 8px 10px;
   min-inline-size: 0;
-}
-
-.server-drag-handle {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  cursor: grab;
-
-  &:hover {
-    color: var(--color-text-body-default-b2us04, #000716);
-    background: var(--color-background-button-normal-hover-1ajrtx, rgba(0, 7, 22, 0.06));
-  }
-
-  &:active {
-    cursor: grabbing;
-  }
 }
 
 .server-name {

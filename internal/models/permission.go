@@ -15,7 +15,9 @@ type PermissionGroup struct {
 	//   非空 = 绑定模板库条目，生效内容读 SubTemplate.Content（活引用）。
 	// 在组编辑器里保存 ClashTemplate 会自动清空本列（转为自定义）；删除被引用的模板时，
 	// 服务端先把模板当前内容写进 ClashTemplate 再清空本列，保证订阅输出不跳变。
-	SubTemplateID *uint64   `gorm:"index" json:"sub_template_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	SubTemplateID *uint64 `gorm:"index" json:"sub_template_id,omitempty"`
+	// SortOrder 管理端列表展示排序（2026-11-04）：由页面拖拽维护，越小越靠前。
+	SortOrder int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

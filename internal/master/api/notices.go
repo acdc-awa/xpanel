@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -58,7 +57,7 @@ func (d *Deps) AdminCreateNotice(c *gin.Context) {
 	}
 
 	// 排序由列表拖拽维护；未显式指定时追加到末尾。
-	sortOrder := nextNoticeSortOrder(d.DB)
+	sortOrder := nextSortOrder(d.DB, &models.Notice{}, nil)
 	if form.SortOrder != nil {
 		sortOrder = *form.SortOrder
 	}
@@ -208,43 +207,7 @@ func (d *Deps) AdminToggleNotice(c *gin.Context) {
 // body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order）。
 // 置顶公告始终排在最前，故排序值只需保证组内相对顺序。
 func (d *Deps) AdminReorderNotices(c *gin.Context) {
-	var req struct {
-		IDs []uint64 `json:"ids" binding:"required,min=1,max=500"`
-	}
-	if !util.BindJSON(c, &req) {
-		return
-	}
-	var allIDs []uint64
-	if err := d.DB.Model(&models.Notice{}).Order("id ASC").Pluck("id", &allIDs).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	if !validOrder(req.IDs, allIDs) {
-		util.Fail(c, 400, "排序列表已过期（公告数量已变化），请刷新后重试")
-		return
-	}
-	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		for i, id := range req.IDs {
-			// UpdateColumn 跳过钩子与 updated_at：调整排序不算业务修改。
-			if err := tx.Model(&models.Notice{}).Where("id = ?", id).UpdateColumn("sort_order", i).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		util.ServerError(c, "保存排序失败")
-		return
-	}
-	util.OK(c, gin.H{"ordered": len(req.IDs)})
-}
-
-// nextNoticeSortOrder 新建公告的默认排序 = 当前最大值 + 1（追加末尾）。
-func nextNoticeSortOrder(db *gorm.DB) int {
-	var maxOrder int
-	if err := db.Model(&models.Notice{}).Select("COALESCE(MAX(sort_order), -1)").Scan(&maxOrder).Error; err != nil {
-		return 0
-	}
-	return maxOrder + 1
+	reorderAll(c, d.DB, &models.Notice{}, nil, "排序列表已过期（公告数量已变化），请刷新后重试")
 }
 
 // UserListNotices GET /api/v1/user/notices —— 用户端获取已启用的公告列表。

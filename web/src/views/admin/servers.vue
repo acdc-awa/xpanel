@@ -51,6 +51,7 @@ import {
   type ServerItem,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { useCardDragSort } from '@/composables/useCardDragSort'
 import { compareVersion } from '@/utils/version'
 import { getExpiryStatus } from '@/utils/vps'
 
@@ -382,113 +383,15 @@ function tooMany(): boolean {
 // ---- 排序（拖拽）----
 // 唯一写入点：拖完一次性提交全量顺序，dashboard 的服务器监测按同一个 sort_order 取数。
 // 筛选/搜索/多选时禁用——那几种状态下「插到哪」没有确定语义。
-const canReorder = computed(
-  () =>
-    !selectMode.value &&
-    !keyword.value.trim() &&
-    statusFilter.value === 'all' &&
-    !filterExpiring.value &&
-    list.value.length > 1,
+const reorderEnabled = computed(
+  () => !selectMode.value && !keyword.value.trim() && statusFilter.value === 'all' && !filterExpiring.value,
 )
-
-let draggingId: number | null = null
-let orderSnapshot: ServerItem[] = []
-let savingOrder = false
-let scrollTimer: number | null = null
-let scrollStep = 0
-
-function cardElOf(target: EventTarget | null): HTMLElement | null {
-  return (target as HTMLElement | null)?.closest('[data-server-id]') as HTMLElement | null
-}
-
-function onDragStart(e: DragEvent) {
-  if (!canReorder.value || !(e.target as HTMLElement | null)?.closest('[data-drag-handle]')) {
-    e.preventDefault()
-    return
-  }
-  const card = cardElOf(e.target)
-  if (!card) return
-  draggingId = Number(card.getAttribute('data-server-id'))
-  orderSnapshot = [...list.value]
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(draggingId))
-    // 整卡跟随鼠标，而不是只拖一个小抓手
-    e.dataTransfer.setDragImage(card, 24, 24)
-  }
-}
-
-function onDragOver(e: DragEvent) {
-  if (draggingId === null) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  updateAutoScroll(e.clientY)
-  const card = cardElOf(e.target)
-  if (!card) return
-  const targetId = Number(card.getAttribute('data-server-id'))
-  if (!targetId || targetId === draggingId) return
-  const from = list.value.findIndex((s) => s.id === draggingId)
-  if (from < 0) return
-  const rect = card.getBoundingClientRect()
-  const after = e.clientX > rect.left + rect.width / 2
-  const next = [...list.value]
-  const [moved] = next.splice(from, 1)
-  let insertAt = next.findIndex((s) => s.id === targetId)
-  if (insertAt < 0) return
-  if (after) insertAt += 1
-  next.splice(insertAt, 0, moved)
-  // 只在顺序真的变了才赋值，避免每次 dragover 都触发整树渲染
-  if (next.some((s, i) => s.id !== list.value[i]?.id)) list.value = next
-}
-
-function onDrop(e: DragEvent) {
-  if (draggingId === null) return
-  e.preventDefault()
-  void persistOrder()
-}
-
-function onDragEnd() {
-  stopAutoScroll()
-  draggingId = null
-  void persistOrder()
-}
-
-async function persistOrder() {
-  if (savingOrder) return
-  const ids = list.value.map((s) => s.id)
-  if (ids.join(',') === orderSnapshot.map((s) => s.id).join(',')) return
-  savingOrder = true
-  try {
-    const { data } = await reorderServers(ids)
-    if (data.code !== 0) throw new Error(data.message || '保存排序失败')
-  } catch (e) {
-    list.value = orderSnapshot
-    ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
-  } finally {
-    savingOrder = false
-    orderSnapshot = [...list.value]
-  }
-}
-
-function updateAutoScroll(clientY: number) {
-  const edge = 24
-  scrollStep = clientY < edge ? -14 : clientY > window.innerHeight - edge ? 14 : 0
-  if (scrollStep && scrollTimer === null) {
-    scrollTimer = window.setInterval(() => window.scrollBy(0, scrollStep), 16)
-  } else if (!scrollStep) {
-    stopAutoScroll()
-  }
-}
-
-function stopAutoScroll() {
-  if (scrollTimer !== null) {
-    clearInterval(scrollTimer)
-    scrollTimer = null
-  }
-  scrollStep = 0
-}
-
-onUnmounted(stopAutoScroll)
+const { canReorder, onDragStart, onDragOver, onDrop, onDragEnd } = useCardDragSort({
+  list,
+  idOf: (s) => s.id,
+  enabled: reorderEnabled,
+  persist: reorderServers,
+})
 
 // ---- 批量动作 ----
 const batchVisible = ref(false)

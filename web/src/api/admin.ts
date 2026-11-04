@@ -786,6 +786,11 @@ export function getPermissionGroups() {
   return http.get<ApiResp<{ items: PermissionGroup[] }>>('/admin/permission-groups')
 }
 
+/** 全量重排：ids 必须覆盖当前全部权限组（顺序即新 sort_order），页面数据过期时后端返回 400。 */
+export function reorderPermissionGroups(ids: number[]) {
+  return http.put<ApiResp<{ ordered: number }>>('/admin/permission-groups/order', { ids })
+}
+
 export interface PermissionGroupPayload {
   name: string
   remark?: string
@@ -1049,6 +1054,11 @@ export function getPlans(includeArchived = false) {
 
 export function createPlan(payload: Partial<Plan>) {
   return http.post<ApiResp<{ plan: Plan }>>('/admin/plans', payload)
+}
+
+/** 全量重排：ids 必须覆盖当前全部未归档套餐（顺序即新 sort_order = 商城顺序），页面数据过期时后端返回 400。 */
+export function reorderPlans(ids: number[]) {
+  return http.put<ApiResp<{ ordered: number }>>('/admin/plans/order', { ids })
 }
 
 export function updatePlan(id: number, payload: Partial<Plan> & { sync_users?: boolean }) {

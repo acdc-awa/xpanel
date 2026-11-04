@@ -191,6 +191,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.POST("/inbounds/:id/toggle", d.AdminToggleInbound)
 			admin.GET("/plans", d.AdminPlans)
 			admin.POST("/plans", d.AdminCreatePlan)
+			admin.PUT("/plans/order", d.AdminReorderPlans)
 			admin.PUT("/plans/:id", d.AdminUpdatePlan)
 			admin.DELETE("/plans/:id", d.AdminDeletePlan)
 			admin.POST("/plans/:id/restore", d.AdminRestorePlan)
@@ -238,6 +239,7 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			admin.DELETE("/certs/:id", d.AdminDeleteCert)
 			admin.GET("/permission-groups", d.AdminPermissionGroups)
 			admin.POST("/permission-groups", d.AdminCreatePermissionGroup)
+			admin.PUT("/permission-groups/order", d.AdminReorderPermissionGroups)
 			admin.PUT("/permission-groups/:id", d.AdminUpdatePermissionGroup)
 			admin.PUT("/permission-groups/:id/access-points", d.AdminSetPermissionGroupAccessPoints)
 			// 订阅模板绑定：PUT 绑定模板（活引用），DELETE 转为自定义（空键）

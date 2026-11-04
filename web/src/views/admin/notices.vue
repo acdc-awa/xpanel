@@ -9,7 +9,6 @@ import {
   CsContainer,
   CsEmpty,
   CsFormField,
-  CsIcon,
   CsInput,
   CsModal,
   CsOption,
@@ -33,6 +32,8 @@ import {
 } from '@/api/admin'
 import type { NoticeItem, NoticePayload } from '@/api/types'
 import { errMsg } from '@/api/http'
+import SortHandle from '@/components/base/SortHandle.vue'
+import { useCardDragSort } from '@/composables/useCardDragSort'
 import { formatDate } from '@/utils/format'
 import { renderMarkdown } from '@/utils/markdown'
 
@@ -51,7 +52,7 @@ async function load() {
     const { data } = await getAdminNotices(params)
     if (data.code === 0) {
       list.value = data.data
-      orderSnapshot = [...data.data]
+      syncSnapshot()
     } else {
       ElMessage.error(data.message)
     }
@@ -210,94 +211,19 @@ async function remove(row: NoticeItem) {
 // ---- 排序（拖拽）----
 // 唯一写入点：拖完一次性提交全量顺序（数组下标即 sort_order）。
 // 搜索/筛选时禁用——那时「插到哪」没有确定语义。
-const canReorder = computed(
-  () => !keyword.value.trim() && statusFilter.value === undefined && list.value.length > 1,
-)
-
-const draggingId = ref<number | null>(null)
-let orderSnapshot: NoticeItem[] = []
-let savingOrder = false
-
-function cardElOf(target: EventTarget | null): HTMLElement | null {
-  return (target as HTMLElement | null)?.closest('[data-notice-id]') as HTMLElement | null
-}
-
-/**
- * 置顶公告在管理端与用户端都固定排在最前，拖拽只能在自己的分组内换位。
- * rest 是「已摘掉被拖项」的列表，pinnedCount 即置顶组可用下标的上界。
- */
-function clampToPinnedGroup(rest: NoticeItem[], insertAt: number, moved: NoticeItem): number {
-  const pinnedCount = rest.filter((n) => n.is_pinned).length
-  return moved.is_pinned ? Math.min(insertAt, pinnedCount) : Math.max(insertAt, pinnedCount)
-}
-
-function onDragStart(e: DragEvent) {
-  if (!canReorder.value || !(e.target as HTMLElement | null)?.closest('[data-drag-handle]')) {
-    e.preventDefault()
-    return
-  }
-  const card = cardElOf(e.target)
-  if (!card) return
-  draggingId.value = Number(card.getAttribute('data-notice-id'))
-  orderSnapshot = [...list.value]
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(draggingId.value))
-    // 整卡跟随鼠标，而不是只拖一个小抓手
-    e.dataTransfer.setDragImage(card, 24, 24)
-  }
-}
-
-function onDragOver(e: DragEvent) {
-  if (draggingId.value === null) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  const card = cardElOf(e.target)
-  if (!card) return
-  const targetId = Number(card.getAttribute('data-notice-id'))
-  if (!targetId || targetId === draggingId.value) return
-  const from = list.value.findIndex((n) => n.id === draggingId.value)
-  if (from < 0) return
-  const rect = card.getBoundingClientRect()
-  const after = e.clientX > rect.left + rect.width / 2
-  const rest = [...list.value]
-  const [moved] = rest.splice(from, 1)
-  let insertAt = rest.findIndex((n) => n.id === targetId)
-  if (insertAt < 0) return
-  if (after) insertAt += 1
-  insertAt = clampToPinnedGroup(rest, insertAt, moved)
-  rest.splice(insertAt, 0, moved)
-  // 只在顺序真的变了才赋值，避免每次 dragover 都触发整树渲染
-  if (rest.some((n, i) => n.id !== list.value[i]?.id)) list.value = rest
-}
-
-function onDrop(e: DragEvent) {
-  if (draggingId.value === null) return
-  e.preventDefault()
-  void persistOrder()
-}
-
-function onDragEnd() {
-  draggingId.value = null
-  void persistOrder()
-}
-
-async function persistOrder() {
-  if (savingOrder) return
-  const ids = list.value.map((n) => n.id)
-  if (ids.join(',') === orderSnapshot.map((n) => n.id).join(',')) return
-  savingOrder = true
-  try {
-    const { data } = await reorderNotices(ids)
-    if (data.code !== 0) throw new Error(data.message || '保存排序失败')
-  } catch (e) {
-    list.value = orderSnapshot
-    ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
-  } finally {
-    savingOrder = false
-    orderSnapshot = [...list.value]
-  }
-}
+const reorderEnabled = computed(() => !keyword.value.trim() && statusFilter.value === undefined)
+const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
+  list,
+  idOf: (n) => n.id,
+  enabled: reorderEnabled,
+  persist: reorderNotices,
+  // 置顶公告在管理端与用户端都固定排在最前，拖拽只能在自己的分组内换位。
+  // rest 是「已摘掉被拖项」的列表，pinnedCount 即置顶组可用下标的上界。
+  clamp: (rest, insertAt, moved) => {
+    const pinnedCount = rest.filter((n) => n.is_pinned).length
+    return moved.is_pinned ? Math.min(insertAt, pinnedCount) : Math.max(insertAt, pinnedCount)
+  },
+})
 </script>
 
 <template>
@@ -346,19 +272,11 @@ async function persistOrder() {
             'notice-card--off': row.status !== 1,
             'notice-card--dragging': draggingId === row.id,
           }"
-          :data-notice-id="row.id"
+          :data-sort-id="row.id"
         >
           <template #header>
             <div class="notice-head">
-              <span
-                v-if="canReorder"
-                class="notice-drag-handle"
-                draggable="true"
-                data-drag-handle
-                title="拖拽调整公告顺序"
-              >
-                <CsIcon name="drag-indicator" />
-              </span>
+              <SortHandle v-if="canReorder" title="拖拽调整公告顺序" />
               <button type="button" class="notice-name" title="点击编辑公告" @click="openEdit(row)">
                 {{ row.title }}
               </button>
@@ -536,26 +454,6 @@ async function persistOrder() {
   flex-wrap: wrap;
   gap: 8px 10px;
   min-inline-size: 0;
-}
-
-.notice-drag-handle {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  cursor: grab;
-
-  &:hover {
-    color: var(--color-text-body-default-b2us04, #000716);
-    background: var(--color-background-button-normal-hover-1ajrtx, rgba(0, 7, 22, 0.06));
-  }
-
-  &:active {
-    cursor: grabbing;
-  }
 }
 
 .notice-name {

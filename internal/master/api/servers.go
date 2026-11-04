@@ -245,7 +245,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 	if req.SortOrder != nil {
 		sortOrder = *req.SortOrder
 	} else {
-		sortOrder = nextServerSortOrder(d.DB)
+		sortOrder = nextSortOrder(d.DB, &models.Server{}, nil)
 	}
 	nodeID := "node-" + util.RandomID(6)
 	secret, err := util.NewNodeSecret()
@@ -836,64 +836,7 @@ func (d *Deps) AdminGetUpgradeStatuses(c *gin.Context) {
 // body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order）。
 // 只允许整表重排：ids 必须恰好覆盖当前全部未归档服务器，否则说明页面数据已过期。
 func (d *Deps) AdminReorderServers(c *gin.Context) {
-	var req struct {
-		IDs []uint64 `json:"ids" binding:"required,min=1,max=500"`
-	}
-	if !util.BindJSON(c, &req) {
-		return
-	}
-	var allIDs []uint64
-	if err := d.DB.Model(&models.Server{}).Order("sort_order ASC, id ASC").Pluck("id", &allIDs).Error; err != nil {
-		util.ServerError(c, "查询失败")
-		return
-	}
-	if !validOrder(req.IDs, allIDs) {
-		util.Fail(c, 400, "排序列表已过期（服务器数量已变化），请刷新后重试")
-		return
-	}
-	if err := d.DB.Transaction(func(tx *gorm.DB) error {
-		for i, id := range req.IDs {
-			// UpdateColumn 跳过钩子与 updated_at：调整排序不算业务修改。
-			if err := tx.Model(&models.Server{}).Where("id = ?", id).UpdateColumn("sort_order", i).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		util.ServerError(c, "保存排序失败")
-		return
-	}
-	util.OK(c, gin.H{"ordered": len(req.IDs)})
-}
-
-// validOrder 判断 ids 是否是 all 的一个完整排列（无缺、无多、无重复）。
-func validOrder(ids, all []uint64) bool {
-	if len(ids) == 0 || len(ids) != len(all) {
-		return false
-	}
-	seen := make(map[uint64]bool, len(ids))
-	for _, id := range ids {
-		if seen[id] {
-			return false
-		}
-		seen[id] = true
-	}
-	for _, id := range all {
-		if !seen[id] {
-			return false
-		}
-	}
-	return true
-}
-
-// nextServerSortOrder 新建服务器的默认排序 = 当前最大值 + 1（追加末尾）。
-// 存量重复值下同样安全：MAX 之后的序号一定排在所有已有序号之后。
-func nextServerSortOrder(db *gorm.DB) int {
-	var maxOrder int
-	if err := db.Model(&models.Server{}).Select("COALESCE(MAX(sort_order), -1)").Scan(&maxOrder).Error; err != nil {
-		return 0
-	}
-	return maxOrder + 1
+	reorderAll(c, d.DB, &models.Server{}, nil, "排序列表已过期（服务器数量已变化），请刷新后重试")
 }
 
 // AdminGetServerConfigPreview GET /api/v1/admin/servers/:id/config-preview

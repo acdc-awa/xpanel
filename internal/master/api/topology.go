@@ -71,7 +71,7 @@ type permissionGroupView struct {
 // AdminPermissionGroups GET /api/v1/admin/permission-groups
 func (d *Deps) AdminPermissionGroups(c *gin.Context) {
 	var list []models.PermissionGroup
-	if err := d.DB.Order("id ASC").Find(&list).Error; err != nil {
+	if err := d.DB.Order("sort_order ASC, id ASC").Find(&list).Error; err != nil {
 		util.ServerError(c, "查询失败")
 		return
 	}
@@ -186,13 +186,24 @@ func (d *Deps) AdminCreatePermissionGroup(c *gin.Context) {
 	if !util.BindJSON(c, &req) {
 		return
 	}
-	g := models.PermissionGroup{Name: req.Name, Remark: req.Remark}
+	// 排序由列表拖拽维护；新建组追加到末尾。
+	g := models.PermissionGroup{
+		Name:      req.Name,
+		Remark:    req.Remark,
+		SortOrder: nextSortOrder(d.DB, &models.PermissionGroup{}, nil),
+	}
 	if err := d.DB.Create(&g).Error; err != nil {
 		util.BadRequest(c, "创建失败（名称可能重复）")
 		return
 	}
 	d.TriggerUserChange()
 	util.OK(c, gin.H{"group": g})
+}
+
+// AdminReorderPermissionGroups PUT /api/v1/admin/permission-groups/order
+// body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order），仅影响管理端列表展示。
+func (d *Deps) AdminReorderPermissionGroups(c *gin.Context) {
+	reorderAll(c, d.DB, &models.PermissionGroup{}, nil, "排序列表已过期（权限组数量已变化），请刷新后重试")
 }
 
 // AdminUpdatePermissionGroup PUT /api/v1/admin/permission-groups/:id

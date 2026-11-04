@@ -180,6 +180,16 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := normalizeNoticeSortOrder(db); err != nil {
 		return err
 	}
+	// 套餐 / 权限组排序值归一（2026-11-04，纯加列 + 纯数据）：两者的排序也改为页面拖拽维护。
+	//   套餐：按商城现行可见顺序 (sort_order, price_cents, id) 压 0..N-1；
+	//   权限组：新列默认 0，按 (sort_order, id) 压 —— 首次即得到与旧 id 顺序一致的稠密值。
+	// 均幂等（已是稠密值时零写入），可每次启动执行。
+	if err := normalizePlanSortOrder(db); err != nil {
+		return err
+	}
+	if err := normalizePermissionGroupSortOrder(db); err != nil {
+		return err
+	}
 	// 时间归一置于最后：需待全部表建好、各列迁移完成后再统一存量时间口径。
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
@@ -383,29 +393,36 @@ func migrateTunnelInboundType(db *gorm.DB) error {
 		Update("type", InboundTypeTunnel).Error
 }
 
-// normalizeServerSortOrder 把 servers.sort_order 归一为稠密的 0..N-1（2026-10-28）。
+// densifySortOrder 按 orderBy 的可见顺序把模型的 sort_order 压成稠密的 0..N-1。
 //
-// 为什么需要：排序从此只由页面拖拽维护，而存量库的 sort_order 大多仍是默认 0（重复值），
-// 也可能被人手工改成稀疏序号。重复值本身不影响展示（列表/仪表盘都按 sort_order, id 取数），
-// 但会让「新服务器追加到末尾」和「重排后写 0..N-1」之间出现一段语义不一致的过渡态。
+// 为什么需要：排序由页面拖拽维护后，存量库的 sort_order 大多仍是默认 0（重复值），
+// 也可能有人手工改成稀疏序号。重复值本身不影响展示（列表都按 sort_order, id 取数），
+// 但会让「新建追加末尾」和「重排写 0..N-1」之间出现语义不一致的过渡态。
 //
-// 安全性：源顺序就是 (sort_order, id)，归一后写 0..N-1 保持同一顺序——可见顺序逐台不变，
-// 旧面板按原排序键读取也完全一致，因此不构成需要提升 DBMinCompatibleVersion 的不兼容变更。
-// 幂等：已是稠密值时一行都不写；软删除的服务器不参与（它们不出现在任何列表里）。
-func normalizeServerSortOrder(db *gorm.DB) error {
-	if !db.Migrator().HasTable(&Server{}) {
+// 安全性：orderBy 必须就是该表的可见顺序（含全部平局键），归一后写 0..N-1 保持同一顺序，
+// 因此可见顺序不变、旧面板按原排序键读取也一致，不构成需要提升 DBMinCompatibleVersion 的不兼容变更。
+// 幂等：已是稠密值时一行都不写，可每次启动执行。
+// scope 限定参与的行集；传 Unscoped 时更新语句也必须同样放开，否则软删除行会被 WHERE 过滤掉。
+func densifySortOrder(db *gorm.DB, model any, scope func(*gorm.DB) *gorm.DB, orderBy string) error {
+	if !db.Migrator().HasTable(model) {
 		return nil
+	}
+	apply := func(q *gorm.DB) *gorm.DB {
+		if scope != nil {
+			return scope(q)
+		}
+		return q
 	}
 	type sortRow struct {
 		ID        uint64
 		SortOrder int
 	}
 	var rows []sortRow
-	if err := db.Model(&Server{}).
+	if err := apply(db.Model(model)).
 		Select("id", "sort_order").
-		Order("sort_order ASC, id ASC").
+		Order(orderBy).
 		Scan(&rows).Error; err != nil {
-		return fmt.Errorf("读取服务器排序失败: %w", err)
+		return fmt.Errorf("读取排序失败: %w", err)
 	}
 	var dirty []sortRow
 	for i, row := range rows {
@@ -418,13 +435,35 @@ func normalizeServerSortOrder(db *gorm.DB) error {
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, row := range dirty {
-			if err := tx.Model(&Server{}).Where("id = ?", row.ID).
+			if err := apply(tx.Model(model)).Where("id = ?", row.ID).
 				UpdateColumn("sort_order", row.SortOrder).Error; err != nil {
-				return fmt.Errorf("归一服务器排序失败: %w", err)
+				return fmt.Errorf("归一排序失败: %w", err)
 			}
 		}
 		return nil
 	})
+}
+
+// normalizeServerSortOrder 把 servers.sort_order 归一为稠密的 0..N-1（2026-10-28）。
+// 可见顺序即 (sort_order, id)；软删除的服务器不参与（它们不出现在任何列表里）。
+func normalizeServerSortOrder(db *gorm.DB) error {
+	return densifySortOrder(db, &Server{}, nil, "sort_order ASC, id ASC")
+}
+
+// normalizePlanSortOrder 套餐排序值归一（2026-11-04，纯数据）。
+// 源顺序取商城现行可见顺序 (sort_order, price_cents, id)：既保持升级瞬间商城逐条不变，
+// 也顺手消掉管理端（同值回退 id）与商城（同值回退价格）的旧口径差。
+// 已归档套餐一并参与（Unscoped）：它们不阻塞新序号的稠密性，恢复后仍落在原相对位置。
+func normalizePlanSortOrder(db *gorm.DB) error {
+	return densifySortOrder(db, &Plan{},
+		func(q *gorm.DB) *gorm.DB { return q.Unscoped() },
+		"sort_order ASC, price_cents ASC, id ASC")
+}
+
+// normalizePermissionGroupSortOrder 权限组排序值归一（2026-11-04，纯加列）。
+// 新列 sort_order 存量全为 0，同值按 id 回退 —— 首次执行即得到与旧列表 (id ASC) 完全一致的 0..N-1。
+func normalizePermissionGroupSortOrder(db *gorm.DB) error {
+	return densifySortOrder(db, &PermissionGroup{}, nil, "sort_order ASC, id ASC")
 }
 
 // normalizeNoticeSortOrder 公告排序值一次性归一：旧口径按 (is_pinned DESC, sort_order DESC, id DESC)
@@ -432,9 +471,6 @@ func normalizeServerSortOrder(db *gorm.DB) error {
 // 按旧口径的可见顺序重写 0..N-1，升级瞬间顺序与旧版逐条一致；之后由拖拽维护。
 // settings 标记保证只跑一次（幂等标记在，重复执行会把管理员后来拖好的顺序再反转）。
 func normalizeNoticeSortOrder(db *gorm.DB) error {
-	if !db.Migrator().HasTable(&Notice{}) {
-		return nil
-	}
 	var mark Setting
 	err := db.Where("key = ?", "notice_sort_order_normalized").First(&mark).Error
 	if err == nil {
@@ -443,26 +479,7 @@ func normalizeNoticeSortOrder(db *gorm.DB) error {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-
-	type noticeRow struct {
-		ID uint64
-	}
-	var rows []noticeRow
-	if err := db.Model(&Notice{}).
-		Select("id").
-		Order("is_pinned DESC, sort_order DESC, id DESC").
-		Scan(&rows).Error; err != nil {
-		return fmt.Errorf("读取公告排序失败: %w", err)
-	}
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		for i, row := range rows {
-			if err := tx.Model(&Notice{}).Where("id = ?", row.ID).
-				UpdateColumn("sort_order", i).Error; err != nil {
-				return fmt.Errorf("归一公告排序失败: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
+	if err := densifySortOrder(db, &Notice{}, nil, "is_pinned DESC, sort_order DESC, id DESC"); err != nil {
 		return err
 	}
 	return db.Create(&Setting{Key: "notice_sort_order_normalized", Value: "1"}).Error

@@ -44,7 +44,8 @@ func TestServerRoutesCoexist(t *testing.T) {
 	})
 }
 
-func TestValidOrder(t *testing.T) {	cases := []struct {
+func TestValidOrder(t *testing.T) {
+	cases := []struct {
 		name string
 		ids  []uint64
 		all  []uint64
@@ -72,7 +73,7 @@ func TestDedupeIDs(t *testing.T) {
 
 func TestNextServerSortOrder(t *testing.T) {
 	db := orderTestDB(t, "file:mem_next_sort?mode=memory&cache=shared")
-	assert.Equal(t, 0, nextServerSortOrder(db), "空表应返回 0")
+	assert.Equal(t, 0, nextSortOrder(db, &models.Server{}, nil), "空表应返回 0")
 
 	mk := func(name string, sort int) models.Server {
 		s := models.Server{Name: name, Host: "h", NodeID: "node-" + name, Secret: "sec", SortOrder: sort}
@@ -82,11 +83,11 @@ func TestNextServerSortOrder(t *testing.T) {
 	mk("a", 0)
 	mk("b", 3)
 	last := mk("c", 7)
-	assert.Equal(t, 8, nextServerSortOrder(db))
+	assert.Equal(t, 8, nextSortOrder(db, &models.Server{}, nil))
 
 	// 归档（软删除）的服务器不参与：否则新服务器会被已删行顶到中间。
 	require.NoError(t, db.Delete(&models.Server{}, last.ID).Error)
-	assert.Equal(t, 4, nextServerSortOrder(db))
+	assert.Equal(t, 4, nextSortOrder(db, &models.Server{}, nil))
 }
 
 func TestAdminReorderServers(t *testing.T) {

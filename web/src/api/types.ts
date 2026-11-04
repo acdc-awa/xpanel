@@ -552,6 +552,7 @@ export interface PermissionGroup {
   access_point_count?: number
   access_point_ids?: number[] // 组内优先级序（订阅输出同序）
   access_point_names?: string[]
+  sort_order?: number // 管理端列表展示排序（拖拽维护，越小越靠前）
   created_at: string
   updated_at: string
 }

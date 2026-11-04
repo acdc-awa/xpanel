@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { formatMoney } from '@/utils/format'
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import TipIcon from '@/components/base/TipIcon.vue'
+import SortHandle from '@/components/base/SortHandle.vue'
 import {
   CsBadge,
   CsButton,
@@ -26,8 +27,9 @@ import {
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
-import { createPlan, deletePlan, getPermissionGroups, getPlans, restorePlan, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
+import { createPlan, deletePlan, getPermissionGroups, getPlans, reorderPlans, restorePlan, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { useCardDragSort } from '@/composables/useCardDragSort'
 
 const list = ref<Plan[]>([])
 const loading = ref(false)
@@ -38,8 +40,10 @@ async function load() {
   loading.value = true
   try {
     const { data } = await getPlans(showArchived.value)
-    if (data.code === 0) list.value = data.data.items
-    else ElMessage.error(data.message)
+    if (data.code === 0) {
+      list.value = data.data.items
+      syncSnapshot()
+    } else ElMessage.error(data.message)
   } catch (e) {
     ElMessage.error(errMsg(e, '加载套餐失败'))
   } finally {
@@ -47,6 +51,17 @@ async function load() {
   }
 }
 onMounted(load)
+
+// ---- 排序（拖拽）----
+// 顺序即商城展示顺序（sort_order 升序）。已归档套餐不参与重排：后端 order 接口
+// 只收未归档 ID，故「显示已归档」时必须禁用拖拽（混排语义不清）。
+const reorderEnabled = computed(() => !showArchived.value && !loading.value)
+const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
+  list,
+  idOf: (p) => p.id,
+  enabled: reorderEnabled,
+  persist: reorderPlans,
+})
 
 // Phase T：权限组下拉（套餐自动授权）
 const groups = ref<PermissionGroup[]>([])
@@ -69,7 +84,6 @@ const form = reactive({
   traffic_gb: 200,
   duration_days: 30,
   permission_group_id: 0,
-  sort_order: 0,
   is_featured: false,
   purchasable: true, // 可新购：商店展示并允许非持有者购买
   renewable: true, // 可续费：持有者余额直付顺延
@@ -121,7 +135,6 @@ function openCreate() {
     traffic_gb: 200,
     duration_days: 30,
     permission_group_id: 0,
-    sort_order: 0,
     is_featured: false,
     purchasable: true,
     renewable: true,
@@ -140,7 +153,6 @@ function openEdit(row: any) {
     traffic_gb: row.traffic_gb,
     duration_days: row.duration_days,
     permission_group_id: row.permission_group_id || 0,
-    sort_order: row.sort_order || 0,
     is_featured: !!row.is_featured,
     purchasable: !!row.purchasable,
     renewable: !!row.renewable,
@@ -163,7 +175,6 @@ async function save() {
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
       permission_group_id: form.permission_group_id || undefined,
-      sort_order: form.sort_order,
       is_featured: form.is_featured,
       purchasable: form.purchasable,
       renewable: form.renewable,
@@ -262,18 +273,32 @@ async function restore(row: any) {
       <CsEmpty v-else-if="list.length === 0" icon-name="ticket" description="暂无套餐，点击右上角「新增套餐」" />
 
       <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，价格作为卡片主指标 -->
-      <CsCardGrid v-else>
-        <CsCard v-for="row in list" :key="row.id" :class="{ 'plan-card--archived': row.archived }">
+      <CsCardGrid
+        v-else
+        @dragstart="onDragStart"
+        @dragover="onDragOver"
+        @drop="onDrop"
+        @dragend="onDragEnd"
+      >
+        <CsCard
+          v-for="row in list"
+          :key="row.id"
+          :class="{ 'plan-card--archived': row.archived, 'plan-card--dragging': draggingId === row.id }"
+          :data-sort-id="row.id"
+        >
           <template #header>
-            <button
-              type="button"
-              class="plan-name"
-              :title="row.archived ? '已归档，恢复后可编辑' : '点击编辑套餐'"
-              :disabled="row.archived"
-              @click="openEdit(row)"
-            >
-              {{ row.name }}
-            </button>
+            <div class="plan-head">
+              <SortHandle v-if="canReorder" title="拖拽调整套餐顺序（同步商城）" />
+              <button
+                type="button"
+                class="plan-name"
+                :title="row.archived ? '已归档，恢复后可编辑' : '点击编辑套餐'"
+                :disabled="row.archived"
+                @click="openEdit(row)"
+              >
+                {{ row.name }}
+              </button>
+            </div>
             <div class="plan-meta">
               <span class="plan-id">#{{ row.id }}</span>
               <CsBadge v-if="row.archived" color="grey">已归档</CsBadge>
@@ -316,7 +341,6 @@ async function restore(row: any) {
           <CsCardFacts>
             <CsCardFact label="包含流量" :value="trafficLabel(row.traffic_gb)" mono />
             <CsCardFact label="有效期" :value="`${row.duration_days} 天`" mono />
-            <CsCardFact label="展示排序" :value="`#${row.sort_order ?? 0}`" mono />
             <CsCardFact label="权限组" :value="groupNameOf(row.permission_group_id)" full-width />
           </CsCardFacts>
 
@@ -363,9 +387,6 @@ async function restore(row: any) {
           </CsFormItem>
           <CsFormItem label="流量配额（GB）">
             <CsInputNumber v-model="form.traffic_gb" :min="1" style="width: 100%" />
-          </CsFormItem>
-          <CsFormItem label="展示排序（越小越靠前）">
-            <CsInputNumber v-model="form.sort_order" :min="0" :step="10" style="width: 100%" />
           </CsFormItem>
           <CsFormItem label="热门推荐">
             <div style="display: flex; align-items: center; gap: 8px; width: 100%">
@@ -418,6 +439,17 @@ async function restore(row: any) {
 </template>
 
 <style scoped lang="scss">
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.plan-card--dragging {
+  opacity: 0.45;
+}
+
 .plan-name {
   appearance: none;
   border: 0;

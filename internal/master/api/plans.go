@@ -97,7 +97,7 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 		TrafficGB         int64  `json:"traffic_gb" binding:"required,min=1"`
 		DurationDays      int    `json:"duration_days" binding:"required,min=1"`
 		PermissionGroupID uint64 `json:"permission_group_id"` // 0=不绑定
-		SortOrder         int    `json:"sort_order"`          // 展示排序（越小越靠前）
+		SortOrder         *int   `json:"sort_order"`          // 展示排序；缺省追加到末尾（由列表拖拽维护）
 		IsFeatured        bool   `json:"is_featured"`         // 「热门推荐」标记
 		// 销售两属性：缺省 true（新套餐默认全开）；GORM default:false 下 true 非零值必显式写入，
 		// false 落 DB 默认——布尔零值陷阱两向均安全
@@ -122,10 +122,15 @@ func (d *Deps) AdminCreatePlan(c *gin.Context) {
 	if req.Renewable != nil {
 		renewable = *req.Renewable
 	}
+	// 排序由列表拖拽维护；未显式指定时追加到末尾。
+	sortOrder := nextSortOrder(d.DB, &models.Plan{}, nil)
+	if req.SortOrder != nil {
+		sortOrder = *req.SortOrder
+	}
 	plan := models.Plan{
 		Name: req.Name, Description: req.Description, PriceCents: req.PriceCents, TrafficGB: req.TrafficGB,
 		DurationDays:      req.DurationDays,
-		PermissionGroupID: req.PermissionGroupID, SortOrder: req.SortOrder, IsFeatured: req.IsFeatured,
+		PermissionGroupID: req.PermissionGroupID, SortOrder: sortOrder, IsFeatured: req.IsFeatured,
 		Purchasable: purchasable, Renewable: renewable,
 	}
 	if err := d.DB.Create(&plan).Error; err != nil {
@@ -307,12 +312,25 @@ func (d *Deps) AdminRestorePlan(c *gin.Context) {
 		util.BadRequest(c, "套餐不存在或未归档")
 		return
 	}
+	// 恢复即追加到列表末尾：归档期间旧下标可能已被拖拽重排占用，沿用旧值会插进别人中间。
+	if err := d.DB.Model(&models.Plan{}).Where("id = ?", id).
+		UpdateColumn("sort_order", nextSortOrder(d.DB, &models.Plan{}, nil)).Error; err != nil {
+		util.ServerError(c, "恢复失败")
+		return
+	}
 	var plan models.Plan
 	if err := d.DB.First(&plan, id).Error; err != nil {
 		util.ServerError(c, "恢复失败")
 		return
 	}
 	util.OK(c, gin.H{"plan": toPlanView(&plan)})
+}
+
+// AdminReorderPlans PUT /api/v1/admin/plans/order
+// body: {"ids":[...]} —— 全量顺序（数组下标即新 sort_order = 商城展示顺序）。
+// 只收未归档套餐：已归档不出现在商城与管理端默认列表，混排语义不清（前端在「显示已归档」时禁用拖拽）。
+func (d *Deps) AdminReorderPlans(c *gin.Context) {
+	reorderAll(c, d.DB, &models.Plan{}, nil, "排序列表已过期（套餐数量已变化），请刷新后重试")
 }
 
 // PublicPlans GET /api/v1/plans —— 商店套餐列表（身份感知过滤，2026-09-03 销售两属性）：
