@@ -250,11 +250,23 @@ const xhttpForm = ref<XhttpConfig>({
   scMaxBufferedPosts: undefined,
   scStreamUpServerSecs: '',
   serverMaxHeaderBytes: undefined,
+  headers: [],
+  noGRPCHeader: false,
+  scMaxEachPostBytes: '',
+  scMinPostsIntervalMs: '',
+  uplinkHTTPMethod: '',
+  seqPlacement: '',
+  seqKey: '',
+  uplinkDataPlacement: '',
+  uplinkDataKey: '',
+  uplinkChunkSize: '',
   xmuxEnabled: false,
   xmuxMaxConnections: '3',
   xmuxMaxConcurrency: '',
   xmuxMaxRequestTimes: '600-900',
   xmuxMaxReusableSecs: '1800-3000',
+  xmuxCMaxReuseTimes: '',
+  xmuxHKeepAlivePeriod: '',
 })
 
 // 安全层状态对象
@@ -787,13 +799,26 @@ function buildHysteriaFinalMask(): Record<string, any> | undefined {
   return Object.keys(fm).length > 0 ? fm : undefined
 }
 
-// buildXhttpSettings 由表单生成 xhttpSettings。表单没覆盖的键（headers/extra/downloadSettings/
-// uplink*/seq* 等）从 rawExtra 原样回写，避免编辑保存后静默丢失手改配置。
+// XHTTP 的 xmux 里表单没覆盖的子键（未来 xray 新增项），保存时原样带回。
+const xhttpXmuxExtra = ref<Record<string, any>>({})
+const XHTTP_XMUX_KEYS = [
+  'maxConnections',
+  'maxConcurrency',
+  'cMaxReuseTimes',
+  'hMaxRequestTimes',
+  'hMaxReusableSecs',
+  'hKeepAlivePeriod',
+]
+
+// buildXhttpSettings 由表单生成 xhttpSettings。表单没覆盖的键（extra/downloadSettings/h2Params
+// 等）从 rawExtra 原样回写，避免编辑保存后静默丢失手改配置。
+// 分模式参数按当前模式裁剪：xray 对 GET 上行 / header|cookie 上行数据在非 packet-up 下整份拒绝。
 function buildXhttpSettings(): Record<string, any> {
   const x: Record<string, any> = { ...(xhttpForm.value.rawExtra || {}) }
-  x.mode = xhttpForm.value.mode || 'auto'
-  x.path = xhttpForm.value.path || '/'
-  if (xhttpForm.value.host) x.host = xhttpForm.value.host
+  const f = xhttpForm.value
+  x.mode = f.mode || 'auto'
+  x.path = f.path || '/'
+  if (f.host) x.host = f.host
   else delete x.host
 
   const setOrDelete = (key: string, val: string | number | boolean | undefined) => {
@@ -801,31 +826,81 @@ function buildXhttpSettings(): Record<string, any> {
     else x[key] = val
   }
 
-  setOrDelete('xPaddingBytes', xhttpForm.value.xPaddingBytes.trim())
-  setOrDelete('sessionIDPlacement', xhttpForm.value.sessionIDPlacement)
-  setOrDelete('sessionIDKey', xhttpForm.value.sessionIDKey.trim())
-  setOrDelete('sessionIDLength', xhttpForm.value.sessionIDLength.trim())
-  setOrDelete('sessionIDTable', xhttpForm.value.sessionIDTable.trim())
-  setOrDelete('xPaddingObfsMode', xhttpForm.value.paddingObfsMode)
-  setOrDelete('xPaddingKey', xhttpForm.value.paddingKey.trim())
-  setOrDelete('xPaddingHeader', xhttpForm.value.paddingHeader.trim())
-  setOrDelete('xPaddingPlacement', xhttpForm.value.paddingPlacement)
-  setOrDelete('xPaddingMethod', xhttpForm.value.paddingMethod)
-  setOrDelete('noSSEHeader', xhttpForm.value.noSSEHeader)
-  setOrDelete('scMaxBufferedPosts', xhttpForm.value.scMaxBufferedPosts)
-  setOrDelete('scStreamUpServerSecs', xhttpForm.value.scStreamUpServerSecs.trim())
-  setOrDelete('serverMaxHeaderBytes', xhttpForm.value.serverMaxHeaderBytes)
+  setOrDelete('xPaddingBytes', f.xPaddingBytes.trim())
+  setOrDelete('sessionIDPlacement', f.sessionIDPlacement)
+  setOrDelete('sessionIDKey', f.sessionIDKey.trim())
+  setOrDelete('sessionIDLength', f.sessionIDLength.trim())
+  setOrDelete('sessionIDTable', f.sessionIDTable.trim())
+  setOrDelete('xPaddingObfsMode', f.paddingObfsMode)
+  setOrDelete('xPaddingKey', f.paddingKey.trim())
+  setOrDelete('xPaddingHeader', f.paddingHeader.trim())
+  setOrDelete('xPaddingPlacement', f.paddingPlacement)
+  setOrDelete('xPaddingMethod', f.paddingMethod)
+  setOrDelete('noSSEHeader', f.noSSEHeader)
+  setOrDelete('serverMaxHeaderBytes', f.serverMaxHeaderBytes)
 
-  if (xhttpForm.value.xmuxEnabled) {
-    const xmux: Record<string, any> = {}
+  const headers: Record<string, string> = {}
+  for (const h of f.headers || []) {
+    const k = h.key.trim()
+    if (k) headers[k] = h.value
+  }
+  if (Object.keys(headers).length > 0) x.headers = headers
+  else delete x.headers
+
+  // packet-up 专属（auto 也写：服务端 auto 全收，客户端按自己的模式忽略）
+  const packetUp = f.mode === 'packet-up' || f.mode === 'auto'
+  if (packetUp) {
+    setOrDelete('scMaxEachPostBytes', f.scMaxEachPostBytes.trim())
+    setOrDelete('scMinPostsIntervalMs', f.scMinPostsIntervalMs.trim())
+    setOrDelete('scMaxBufferedPosts', f.scMaxBufferedPosts)
+    setOrDelete('uplinkHTTPMethod', f.uplinkHTTPMethod)
+    setOrDelete('seqPlacement', f.seqPlacement)
+    setOrDelete('seqKey', f.seqKey.trim())
+    setOrDelete('uplinkDataPlacement', f.uplinkDataPlacement)
+    setOrDelete('uplinkDataKey', f.uplinkDataKey.trim())
+    setOrDelete('uplinkChunkSize', f.uplinkChunkSize.trim())
+  } else {
+    for (const k of [
+      'scMaxEachPostBytes',
+      'scMinPostsIntervalMs',
+      'scMaxBufferedPosts',
+      'uplinkHTTPMethod',
+      'seqPlacement',
+      'seqKey',
+      'uplinkDataPlacement',
+      'uplinkDataKey',
+      'uplinkChunkSize',
+    ]) {
+      delete x[k]
+    }
+  }
+
+  // stream-up / stream-one 专属
+  const streamUp = f.mode === 'stream-up' || f.mode === 'stream-one' || f.mode === 'auto'
+  if (streamUp) {
+    setOrDelete('noGRPCHeader', f.noGRPCHeader)
+    setOrDelete('scStreamUpServerSecs', f.scStreamUpServerSecs.trim())
+  } else {
+    delete x.noGRPCHeader
+    delete x.scStreamUpServerSecs
+  }
+
+  if (f.xmuxEnabled) {
+    const xmux: Record<string, any> = { ...xhttpXmuxExtra.value }
     const put = (key: string, raw: string) => {
       const v = raw.trim()
       if (v) xmux[key] = v
     }
-    put('maxConnections', xhttpForm.value.xmuxMaxConnections)
-    put('maxConcurrency', xhttpForm.value.xmuxMaxConcurrency)
-    put('hMaxRequestTimes', xhttpForm.value.xmuxMaxRequestTimes)
-    put('hMaxReusableSecs', xhttpForm.value.xmuxMaxReusableSecs)
+    put('maxConnections', f.xmuxMaxConnections)
+    put('maxConcurrency', f.xmuxMaxConcurrency)
+    put('cMaxReuseTimes', f.xmuxCMaxReuseTimes)
+    put('hMaxRequestTimes', f.xmuxMaxRequestTimes)
+    put('hMaxReusableSecs', f.xmuxMaxReusableSecs)
+    // hKeepAlivePeriod 是 int64：写成字符串或 null 都会让 xray 反序列化失败。
+    const ka = f.xmuxHKeepAlivePeriod.trim()
+    const kaNum = Number(ka)
+    if (ka && Number.isInteger(kaNum)) xmux.hKeepAlivePeriod = kaNum
+    else delete xmux.hKeepAlivePeriod
     x.xmux = xmux
   } else {
     delete x.xmux
@@ -1338,6 +1413,8 @@ function parseJsonToForm(str: string) {
         'xPaddingBytes', 'sessionIDPlacement', 'sessionIDKey', 'sessionIDLength', 'sessionIDTable',
         'xPaddingObfsMode', 'xPaddingKey', 'xPaddingHeader', 'xPaddingPlacement', 'xPaddingMethod',
         'noSSEHeader', 'scMaxBufferedPosts', 'scStreamUpServerSecs', 'serverMaxHeaderBytes', 'xmux',
+        'headers', 'noGRPCHeader', 'scMaxEachPostBytes', 'scMinPostsIntervalMs', 'uplinkHTTPMethod',
+        'seqPlacement', 'seqKey', 'uplinkDataPlacement', 'uplinkDataKey', 'uplinkChunkSize',
         // 旧键名由 sanitize 提升到新键，不要留在 rawExtra 里重复写回。
         'sessionPlacement', 'sessionKey',
       ])
@@ -1347,6 +1424,17 @@ function parseJsonToForm(str: string) {
       }
       const xmux = xhttpSettings.xmux && typeof xhttpSettings.xmux === 'object' ? xhttpSettings.xmux : null
       const xmuxEnabled = !!xmux && Object.keys(xmux).length > 0
+      // 表单不认识的 xmux 子键（含未来 xray 新增项）原样保留，保存时再合并回去。
+      xhttpXmuxExtra.value = {}
+      for (const [k, v] of Object.entries(xmux || {})) {
+        if (!XHTTP_XMUX_KEYS.includes(k)) xhttpXmuxExtra.value[k] = v
+      }
+      const formHeaders: Array<{ key: string; value: string }> = []
+      if (xhttpSettings.headers && typeof xhttpSettings.headers === 'object') {
+        for (const [k, v] of Object.entries(xhttpSettings.headers)) {
+          formHeaders.push({ key: k, value: String(v ?? '') })
+        }
+      }
       xhttpForm.value = {
         mode: xhttpSettings.mode || 'auto',
         path: xhttpSettings.path || '/',
@@ -1366,11 +1454,23 @@ function parseJsonToForm(str: string) {
         scMaxBufferedPosts: typeof xhttpSettings.scMaxBufferedPosts === 'number' ? xhttpSettings.scMaxBufferedPosts : undefined,
         scStreamUpServerSecs: jsonRangeToString(xhttpSettings.scStreamUpServerSecs),
         serverMaxHeaderBytes: typeof xhttpSettings.serverMaxHeaderBytes === 'number' ? xhttpSettings.serverMaxHeaderBytes : undefined,
+        headers: formHeaders,
+        noGRPCHeader: !!xhttpSettings.noGRPCHeader,
+        scMaxEachPostBytes: jsonRangeToString(xhttpSettings.scMaxEachPostBytes),
+        scMinPostsIntervalMs: jsonRangeToString(xhttpSettings.scMinPostsIntervalMs),
+        uplinkHTTPMethod: String(xhttpSettings.uplinkHTTPMethod ?? ''),
+        seqPlacement: (xhttpSettings.seqPlacement || '') as XhttpConfig['seqPlacement'],
+        seqKey: String(xhttpSettings.seqKey ?? ''),
+        uplinkDataPlacement: (xhttpSettings.uplinkDataPlacement || '') as XhttpConfig['uplinkDataPlacement'],
+        uplinkDataKey: String(xhttpSettings.uplinkDataKey ?? ''),
+        uplinkChunkSize: jsonRangeToString(xhttpSettings.uplinkChunkSize),
         xmuxEnabled,
         xmuxMaxConnections: xmuxEnabled ? (jsonRangeToString(xmux.maxConnections) || '3') : '3',
         xmuxMaxConcurrency: xmuxEnabled ? jsonRangeToString(xmux.maxConcurrency) : '',
         xmuxMaxRequestTimes: xmuxEnabled ? (jsonRangeToString(xmux.hMaxRequestTimes) || '600-900') : '600-900',
         xmuxMaxReusableSecs: xmuxEnabled ? (jsonRangeToString(xmux.hMaxReusableSecs) || '1800-3000') : '1800-3000',
+        xmuxCMaxReuseTimes: xmuxEnabled ? jsonRangeToString(xmux.cMaxReuseTimes) : '',
+        xmuxHKeepAlivePeriod: xmuxEnabled && xmux.hKeepAlivePeriod !== undefined ? String(xmux.hKeepAlivePeriod) : '',
         rawExtra: Object.keys(rawExtra).length > 0 ? rawExtra : undefined,
       }
     }

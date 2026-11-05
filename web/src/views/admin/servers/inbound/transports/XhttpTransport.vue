@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   CsAlert,
+  CsButton,
   CsContainer,
   CsExpandableSection,
   CsFormItem,
@@ -31,11 +32,24 @@ function updateField<K extends keyof XhttpConfig>(key: K, val: XhttpConfig[K]) {
 
 const errors = computed(() => validateXhttp(props.modelValue))
 
+// packet-up 专属参数：服务端 auto 三种全收，因此 auto 下也要能配。
+const showPacketUp = computed(() => props.modelValue.mode === 'packet-up' || props.modelValue.mode === 'auto')
+// 流式上行参数：packet-up 不产生上行流，隐藏即可（生成侧也按模式裁剪）。
+const showStreamUp = computed(
+  () => props.modelValue.mode === 'stream-up' || props.modelValue.mode === 'stream-one' || props.modelValue.mode === 'auto',
+)
+
+// extra 一旦存在，xray 只认 host/path/mode 三个外层键，其余全部来自 extra。
+const extraActive = computed(() => {
+  const extra = props.modelValue.rawExtra?.extra
+  return !!extra && typeof extra === 'object' && Object.keys(extra).length > 0
+})
+
 const modeOptions = [
-  { label: 'auto (自动协商)', value: 'auto' },
-  { label: 'packet-up (数据报上行)', value: 'packet-up' },
-  { label: 'stream-up (流式上行)', value: 'stream-up' },
-  { label: 'stream-one (单向全双工流)', value: 'stream-one' },
+  { label: 'auto（自动）', value: 'auto' },
+  { label: 'packet-up（分包上行）', value: 'packet-up' },
+  { label: 'stream-up（流式上行）', value: 'stream-up' },
+  { label: 'stream-one（单请求全双工）', value: 'stream-one' },
 ]
 
 const placementOptions = [
@@ -45,10 +59,7 @@ const placementOptions = [
   { label: 'cookie（Cookie）', value: 'cookie' },
 ]
 
-const sessionPlacementOptions = [
-  { label: '默认 (path)', value: '' },
-  ...placementOptions,
-]
+const sessionPlacementOptions = [{ label: '默认 (path)', value: '' }, ...placementOptions]
 
 const paddingPlacementOptions = [
   { label: '默认 (queryInHeader)', value: '' },
@@ -63,12 +74,61 @@ const paddingMethodOptions = [
   { label: 'repeat-x（重复字符）', value: 'repeat-x' },
   { label: 'tokenish（类 token 随机串）', value: 'tokenish' },
 ]
+
+// GET 只允许 packet-up，其它模式写了会让 xray 拒绝整份配置，所以选项按当前模式门控。
+const uplinkMethodOptions = computed(() => {
+  const opts = [
+    { label: '默认 (POST)', value: '' },
+    { label: 'POST', value: 'POST' },
+    { label: 'PUT', value: 'PUT' },
+    { label: 'PATCH', value: 'PATCH' },
+  ]
+  if (props.modelValue.mode === 'packet-up') opts.push({ label: 'GET（仅 packet-up）', value: 'GET' })
+  return opts
+})
+
+const uplinkDataPlacementOptions = computed(() => {
+  const opts = [
+    { label: '默认 (auto)', value: '' },
+    { label: 'body（放请求体）', value: 'body' },
+  ]
+  // header/cookie 仅 packet-up 允许。
+  if (props.modelValue.mode === 'packet-up') {
+    opts.push({ label: 'header（拆分进请求头）', value: 'header' })
+    opts.push({ label: 'cookie（拆分进 Cookie）', value: 'cookie' })
+  }
+  return opts
+})
+
+const headers = computed(() => props.modelValue.headers ?? [])
+
+function setHeader(index: number, field: 'key' | 'value', val: string) {
+  const next = headers.value.map((h, i) => (i === index ? { ...h, [field]: val } : h))
+  updateField('headers', next)
+}
+
+function addHeader() {
+  updateField('headers', [...headers.value, { key: '', value: '' }])
+}
+
+function removeHeader(index: number) {
+  updateField('headers', headers.value.filter((_, i) => i !== index))
+}
 </script>
 
 <template>
   <CsContainer header="xhttp (SplitHTTP) 传输流配置">
+    <CsAlert v-if="extraActive" type="warning" class="alert-gap">
+      已配置 <code>extra</code>：xray 只保留外层的 mode / path / host，其余参数全部以 extra 为准，下方表单里的同类字段不会生效。
+    </CsAlert>
+
     <div class="form-grid-2">
       <CsFormItem label="传输模式 (Mode)">
+        <template #info>
+          <TipIcon
+            content="服务端 auto 同时接受三种模式；选具体模式则只接受它（stream-up 额外接受 stream-one）。客户端 auto 的实际选择：REALITY 用 stream-one（配了 downloadSettings 则 stream-up），其余（含 TLS H2）用 packet-up。"
+          />
+        </template>
         <CsSelect
           :model-value="modelValue.mode"
           :options="modeOptions"
@@ -102,11 +162,149 @@ const paddingMethodOptions = [
       </CsFormItem>
     </div>
 
+    <!-- packet-up：分包上行。服务端只消费 scMaxEachPostBytes / scMaxBufferedPosts。 -->
+    <CsExpandableSection v-if="showPacketUp" header="分包上行 packet-up" class="section-gap">
+      <div class="form-grid-2">
+        <CsFormItem label="单 POST 上限 (scMaxEachPostBytes)">
+          <template #info>
+            <TipIcon content="客户端每个 POST 最多携带的字节数，服务端也按它拒绝超限请求。默认 1000000（1MB），应小于 CDN / 反代允许的最大请求体；可写区间如 500000-1000000 降低指纹。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.scMaxEachPostBytes"
+            placeholder="默认 1000000，或 500000-1000000"
+            class="mono"
+            @update:model-value="(v: string) => updateField('scMaxEachPostBytes', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="上发最小间隔 (scMinPostsIntervalMs)">
+          <template #info>
+            <TipIcon content="仅客户端：同一个代理请求下两个 POST 的最小间隔。默认 30 毫秒，可写区间如 10-50。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.scMinPostsIntervalMs"
+            placeholder="默认 30，或 10-50"
+            class="mono"
+            @update:model-value="(v: string) => updateField('scMinPostsIntervalMs', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="服务端缓冲请求数 (scMaxBufferedPosts)">
+          <template #info>
+            <TipIcon content="仅节点生效：同一代理请求下最多缓存多少个乱序 POST，超限断连。默认 30。" />
+          </template>
+          <CsInputNumber
+            :model-value="modelValue.scMaxBufferedPosts"
+            :min="0"
+            :max="65536"
+            :step="16"
+            placeholder="留空为内核默认"
+            style="width: 100%"
+            class="mono"
+            @update:model-value="(v: number | null) => updateField('scMaxBufferedPosts', v == null ? undefined : v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="上行 HTTP 方法 (uplinkHTTPMethod)">
+          <template #info>
+            <TipIcon content="换成带请求体的方法可减少特征；GET 仅 packet-up 支持，其它模式写了会让 xray 拒绝整份配置。" />
+          </template>
+          <CsSelect
+            :model-value="modelValue.uplinkHTTPMethod"
+            :options="uplinkMethodOptions"
+            style="width: 100%"
+            @update:model-value="(v: any) => updateField('uplinkHTTPMethod', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="序列号位置 (seqPlacement)">
+          <CsInput
+            :model-value="modelValue.seqPlacement"
+            placeholder="留空默认 path"
+            class="mono"
+            @update:model-value="(v: string) => updateField('seqPlacement', v as XhttpConfig['seqPlacement'])"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="序列号键名 (seqKey)">
+          <CsInput
+            :model-value="modelValue.seqKey"
+            placeholder="留空按位置取默认（如 x_seq / X-Seq）"
+            class="mono"
+            @update:model-value="(v: string) => updateField('seqKey', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="上行数据位置 (uplinkDataPlacement)">
+          <template #info>
+            <TipIcon content="把上行数据拆进请求头 / Cookie 可进一步伪装；header 与 cookie 仅 packet-up 支持，非 packet-up 模式写了会让 xray 拒绝整份配置。" />
+          </template>
+          <CsSelect
+            :model-value="modelValue.uplinkDataPlacement"
+            :options="uplinkDataPlacementOptions"
+            style="width: 100%"
+            @update:model-value="(v: any) => updateField('uplinkDataPlacement', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="上行数据键名 (uplinkDataKey)">
+          <CsInput
+            :model-value="modelValue.uplinkDataKey"
+            placeholder="留空按位置取默认（如 X-Data / x_data）"
+            class="mono"
+            @update:model-value="(v: string) => updateField('uplinkDataKey', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="上行分片大小 (uplinkChunkSize)">
+          <template #info>
+            <TipIcon content="仅客户端：数据拆到 header / cookie 时每片的最大字节，最小值 64。官方建议 cookie 用 3072、header 用 4096 一带；可写区间。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.uplinkChunkSize"
+            placeholder="如 3072 或 4096-8192"
+            class="mono"
+            @update:model-value="(v: string) => updateField('uplinkChunkSize', v)"
+          />
+        </CsFormItem>
+      </div>
+    </CsExpandableSection>
+
+    <!-- stream-up / stream-one：流式上行。 -->
+    <CsExpandableSection v-if="showStreamUp" header="流式上行 stream-up / stream-one" class="section-gap">
+      <div class="form-grid-2">
+        <CsFormItem label="关闭 gRPC 伪装头 (noGRPCHeader)">
+          <template #info>
+            <TipIcon content="stream-up / stream-one 的上行默认带 Content-Type: application/grpc 伪装成 gRPC（穿 CF 需要它）；打开本开关则去掉该头。" />
+          </template>
+          <div class="control-cell">
+            <CsToggle
+              :model-value="modelValue.noGRPCHeader"
+              label="不发送 gRPC 内容类型头"
+              @update:model-value="(v: boolean) => updateField('noGRPCHeader', v)"
+            />
+          </div>
+        </CsFormItem>
+
+        <CsFormItem label="上行保活间隔 (scStreamUpServerSecs)">
+          <template #info>
+            <TipIcon content="仅节点生效：上行流每隔这段时间发一次填充字节保活（CF 会掐断 100 秒无数据的下行）。默认 20-80 秒；填 -1 关闭。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.scStreamUpServerSecs"
+            placeholder="默认 20-80；-1 关闭"
+            class="mono"
+            @update:model-value="(v: string) => updateField('scStreamUpServerSecs', v)"
+          />
+        </CsFormItem>
+      </div>
+    </CsExpandableSection>
+
     <CsExpandableSection header="会话标识（两端共享）" class="section-gap">
       <div class="form-grid-2">
         <CsFormItem label="会话 ID 位置 (sessionIDPlacement)">
           <template #info>
-            <TipIcon content="会话 ID 放在请求的哪个部位；两端必须一致。" />
+            <TipIcon content="会话 ID 放在请求的哪个部位；两端必须一致。stream-one 不产生会话 ID。" />
           </template>
           <CsSelect
             :model-value="modelValue.sessionIDPlacement"
@@ -127,7 +325,7 @@ const paddingMethodOptions = [
 
         <CsFormItem label="会话 ID 长度区间 (sessionIDLength)">
           <template #info>
-            <TipIcon content="必须写成字符串「8-16」或单个整数；写成对象会让 xray 拒绝整份配置。" />
+            <TipIcon content="必须写成字符串「8-16」或单个整数；写成对象会让 xray 拒绝整份配置。填了字符表时长度起点必须大于 0。" />
           </template>
           <CsInput
             :model-value="modelValue.sessionIDLength"
@@ -138,9 +336,12 @@ const paddingMethodOptions = [
         </CsFormItem>
 
         <CsFormItem label="会话 ID 字符表 (sessionIDTable)">
+          <template #info>
+            <TipIcon content="可填预置表名（ALPHABET / Alphabet / BASE36 / Base62 / HEX / alphabet / base36 / hex / number）或自定义 ASCII 字符。字符表 + 长度必须能生成 ≥ 2^31 个 ID。" />
+          </template>
           <CsInput
             :model-value="modelValue.sessionIDTable"
-            placeholder="留空默认；可填预置表名或自定义 ASCII 字符"
+            placeholder="留空默认（UUID）"
             class="mono"
             @update:model-value="(v: string) => updateField('sessionIDTable', v)"
           />
@@ -210,6 +411,29 @@ const paddingMethodOptions = [
       </div>
     </CsExpandableSection>
 
+    <!-- 客户端请求头：服务端不消费，生成侧会剥离。 -->
+    <CsExpandableSection header="客户端请求头（headers）" class="section-gap">
+      <div v-if="headers.length" class="kv-rows">
+        <div v-for="(h, i) in headers" :key="i" class="kv-row">
+          <CsInput
+            :model-value="h.key"
+            placeholder="Header 名称"
+            class="mono"
+            @update:model-value="(v: string) => setHeader(i, 'key', v)"
+          />
+          <CsInput
+            :model-value="h.value"
+            placeholder="值"
+            class="mono"
+            @update:model-value="(v: string) => setHeader(i, 'value', v)"
+          />
+          <CsButton variant="icon" icon-name="remove" :aria-label="`删除请求头 ${h.key || i + 1}`" @click="removeHeader(i)" />
+        </div>
+      </div>
+      <CsButton icon-name="add" class="add-header" @click="addHeader">添加请求头</CsButton>
+      <div class="hint">Host 必须填在上方的 Host 字段，写进这里会被 xray 拒绝。</div>
+    </CsExpandableSection>
+
     <!-- 服务端缓冲：只影响节点上的监听器 -->
     <CsExpandableSection header="服务端缓冲（仅节点生效）" class="section-gap">
       <div class="form-grid-2">
@@ -224,28 +448,6 @@ const paddingMethodOptions = [
               @update:model-value="(v: boolean) => updateField('noSSEHeader', v)"
             />
           </div>
-        </CsFormItem>
-
-        <CsFormItem label="最大缓冲请求数 (scMaxBufferedPosts)">
-          <CsInputNumber
-            :model-value="modelValue.scMaxBufferedPosts"
-            :min="0"
-            :max="65536"
-            :step="16"
-            placeholder="留空为内核默认"
-            style="width: 100%"
-            class="mono"
-            @update:model-value="(v: number | null) => updateField('scMaxBufferedPosts', v == null ? undefined : v)"
-          />
-        </CsFormItem>
-
-        <CsFormItem label="上行流保持时长 (scStreamUpServerSecs)">
-          <CsInput
-            :model-value="modelValue.scStreamUpServerSecs"
-            placeholder="如 20-80 或单个整数，留空默认"
-            class="mono"
-            @update:model-value="(v: string) => updateField('scStreamUpServerSecs', v)"
-          />
         </CsFormItem>
 
         <CsFormItem label="最大请求头字节 (serverMaxHeaderBytes)">
@@ -314,6 +516,30 @@ const paddingMethodOptions = [
             @update:model-value="(v: string) => updateField('xmuxMaxReusableSecs', v)"
           />
         </CsFormItem>
+
+        <CsFormItem label="复用次数上限 cMaxReuseTimes">
+          <template #info>
+            <TipIcon content="一条底层连接最多被复用几次；0 或留空表示不限制。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.xmuxCMaxReuseTimes"
+            placeholder="默认 0（不限制），或区间"
+            class="mono"
+            @update:model-value="(v: string) => updateField('xmuxCMaxReuseTimes', v)"
+          />
+        </CsFormItem>
+
+        <CsFormItem label="空闲保活间隔 hKeepAlivePeriod">
+          <template #info>
+            <TipIcon content="H2/H3 空闲时每隔多少秒发保活包；0 为内核默认（H2 45s / H3 10s），-1 关闭。该值不允许写区间。" />
+          </template>
+          <CsInput
+            :model-value="modelValue.xmuxHKeepAlivePeriod"
+            placeholder="默认 0；-1 关闭"
+            class="mono"
+            @update:model-value="(v: string) => updateField('xmuxHKeepAlivePeriod', v)"
+          />
+        </CsFormItem>
       </div>
     </CsExpandableSection>
 
@@ -333,11 +559,38 @@ const paddingMethodOptions = [
   margin-top: 12px;
 }
 
+.alert-gap {
+  margin-bottom: 12px;
+}
+
 .xmux-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.kv-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.add-header {
+  margin-bottom: 4px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--color-text-status-inactive-fqjc97);
 }
 
 .errors-gap {

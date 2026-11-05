@@ -309,26 +309,39 @@ func stripInboundClientOnlyMasks(stream map[string]any) {
 	}
 }
 
-// stripInboundClientOnlyXHTTP 删除 xhttpSettings 里只被客户端 dialer 消费的字段。
+// xhttpInboundClientOnlyKeys 是 xhttpSettings 里只被客户端 dialer 消费的键。
 //
-// 这些字段进入站 DB 是为了订阅 / 机间出站投影（客户端角色），但服务端 hub 完全不读；
-// 透传只会让服务端配置出现无效键。服务端实际消费的是 host/path/mode/headers/
-// xPadding*/noSSEHeader/scMaxEachPostBytes/scMaxBufferedPosts/scStreamUpServerSecs/
-// sessionID*/seq*/uplinkData*/serverMaxHeaderBytes。
+// 它们进入站 DB 是为了订阅 / 机间出站投影（客户端角色），但服务端 hub 完全不读；
+// 透传只会让服务端配置出现无效键。服务端实际消费的是 host/path/mode/xPadding*/
+// noSSEHeader/scMaxEachPostBytes/scMaxBufferedPosts/scStreamUpServerSecs/
+// sessionID*/seq*/uplinkData*/serverMaxHeaderBytes/h2Params。
+var xhttpInboundClientOnlyKeys = []string{
+	"headers",              // 客户端请求头（host 由独立字段承载）
+	"xmux",                 // 客户端连接复用参数
+	"downloadSettings",     // 客户端下行独立连接
+	"noGRPCHeader",         // 客户端上行是否保留 gRPC 伪装头
+	"uplinkHTTPMethod",     // 客户端上行 HTTP 方法
+	"uplinkChunkSize",      // 客户端上行分片
+	"scMinPostsIntervalMs", // 客户端上发间隔
+}
+
+// stripInboundClientOnlyXHTTP 删除服务端配置里不生效的客户端专属 xhttp 字段。
+//
+// extra 是 xray 的第二套入口：只要它存在，除 host/path/mode 外全部以 extra 为准
+// （infra/conf/transport_method.go Build()），所以客户端专属键必须递归清理一次，
+// 否则会随 extra 一起进到节点配置。
 func stripInboundClientOnlyXHTTP(stream map[string]any) {
 	x, ok := stream["xhttpSettings"].(map[string]any)
 	if !ok {
 		return
 	}
-	for _, k := range []string{
-		"xmux",                 // 客户端连接复用参数
-		"downloadSettings",     // 客户端下行独立参数
-		"noGRPCHeader",         // 客户端上行请求体格式
-		"uplinkHTTPMethod",     // 客户端上行 HTTP 方法
-		"uplinkChunkSize",      // 客户端上行分片
-		"scMinPostsIntervalMs", // 客户端上发间隔
-	} {
+	for _, k := range xhttpInboundClientOnlyKeys {
 		delete(x, k)
+	}
+	if extra, ok := x["extra"].(map[string]any); ok {
+		for _, k := range xhttpInboundClientOnlyKeys {
+			delete(extra, k)
+		}
 	}
 }
 

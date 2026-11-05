@@ -106,6 +106,56 @@ func TestRenderOutbound_XHTTPKeepsClientParams(t *testing.T) {
 	runXrayTestHelper(t, out)
 }
 
+// extra 存在时 xray Build() 会用 extra 整体替换配置（只回填外层 host/path/mode），
+// 所以出站投影必须同序：extra 内的同键覆盖顶层。反了会让节点与机间出站跑在不同的
+// padding/session 参数上，表现为落地 502。
+func TestRenderOutbound_XHTTPExtraOverridesTopLevel(t *testing.T) {
+	inbound := models.Inbound{
+		ID: 42, Tag: "xhttp-extra", Protocol: models.ProtocolVless, Port: 2053,
+		SettingsJSON: `{"decryption":"none"}`,
+		StreamSettings: `{"network":"xhttp","security":"tls","xhttpSettings":{` +
+			`"mode":"stream-up","path":"/outer","host":"outer.example.com",` +
+			`"xPaddingBytes":"100-200","sessionIDPlacement":"path",` +
+			`"extra":{"xPaddingBytes":"300-400","sessionIDPlacement":"header","sessionIDKey":"X-S",` +
+			`"path":"/ignored","mode":"packet-up","host":"ignored.example.com"}},` +
+			`"tlsSettings":{"serverName":"h.example.com"}}`,
+	}
+	spec := contracts.DecodeInbound(&inbound)
+	if spec.XHTTP == nil {
+		t.Fatal("夹具未解析出 xhttp 规格")
+	}
+	dto, err := protocols.VLESSPlugin{}.ProjectClient(&contracts.ClientProjectionInput{
+		Role:      contracts.RolePeer,
+		RefTarget: &contracts.RefTarget{Inbound: inbound, ServerHost: "127.0.0.1"},
+		OutboundUUID: "relay-uuid",
+	})
+	if err != nil {
+		t.Fatalf("互联投影失败: %v", err)
+	}
+	out, err := protocols.VLESSPlugin{}.RenderOutbound(dto)
+	if err != nil {
+		t.Fatalf("RenderOutbound 失败: %v", err)
+	}
+	ss, _ := out["streamSettings"].(map[string]any)
+	xh, _ := ss["xhttpSettings"].(map[string]any)
+
+	// extra 覆盖顶层
+	if xh["xPaddingBytes"] != "300-400" {
+		t.Errorf("extra 应覆盖顶层 xPaddingBytes，实际 %#v", xh["xPaddingBytes"])
+	}
+	if xh["sessionIDPlacement"] != "header" || xh["sessionIDKey"] != "X-S" {
+		t.Errorf("extra 应覆盖顶层 session 参数，实际 %#v / %#v", xh["sessionIDPlacement"], xh["sessionIDKey"])
+	}
+	// host/path/mode 始终取外层
+	if xh["mode"] != "stream-up" || xh["path"] != "/outer" || xh["host"] != "outer.example.com" {
+		t.Errorf("host/path/mode 必须取外层，实际 %#v/%#v/%#v", xh["mode"], xh["path"], xh["host"])
+	}
+	if _, bad := xh["extra"]; bad {
+		t.Error("extra 必须展开，不能以 extra 键透传")
+	}
+	runXrayTestHelper(t, out)
+}
+
 // 反向验证：剥键来自服务端专属名单，而不是把参数整体丢掉。
 func TestRenderOutbound_XHTTPStripsOnlyServerKeys(t *testing.T) {
 	dto := &contracts.ProxyNodeDTO{

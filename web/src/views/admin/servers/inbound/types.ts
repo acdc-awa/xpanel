@@ -73,6 +73,8 @@ export interface TcpConfig {
 export type XhttpPlacement = '' | 'path' | 'cookie' | 'header' | 'query'
 export type XhttpPaddingPlacement = '' | 'cookie' | 'header' | 'query' | 'queryInHeader'
 export type XhttpPaddingMethod = '' | 'repeat-x' | 'tokenish'
+// packet-up 专属：上行数据放请求体，或拆进 header / cookie。
+export type XhttpUplinkDataPlacement = '' | 'auto' | 'body' | 'header' | 'cookie'
 
 export interface XhttpConfig {
   mode: 'auto' | 'packet-up' | 'stream-up' | 'stream-one'
@@ -93,13 +95,30 @@ export interface XhttpConfig {
   scMaxBufferedPosts?: number
   scStreamUpServerSecs: string
   serverMaxHeaderBytes?: number
+  // 客户端请求头（不得含 Host：xray 硬拒，host 走独立字段）。
+  headers: Array<{ key: string; value: string }>
+  // stream-up / stream-one：关闭 Content-Type: application/grpc 伪装头。
+  noGRPCHeader: boolean
+  // packet-up：单个 POST 上限与服务端最小上发间隔（区间或整数）。
+  scMaxEachPostBytes: string
+  scMinPostsIntervalMs: string
+  // packet-up：上行 HTTP 方法；GET 只允许 packet-up。
+  uplinkHTTPMethod: string
+  seqPlacement: XhttpPlacement
+  seqKey: string
+  // packet-up：上行数据位置；header/cookie 只允许 packet-up。
+  uplinkDataPlacement: XhttpUplinkDataPlacement
+  uplinkDataKey: string
+  uplinkChunkSize: string
   // xray 的 xmux 留空即由内核补 maxConnections=3 等默认值；显式写时必须整组写全。
   xmuxEnabled: boolean
   xmuxMaxConnections: string
   xmuxMaxConcurrency: string
   xmuxMaxRequestTimes: string
   xmuxMaxReusableSecs: string
-  // 表单未覆盖的 xhttpSettings 键（headers/extra/downloadSettings/uplink*/seq* 等）原样回写。
+  xmuxCMaxReuseTimes: string
+  xmuxHKeepAlivePeriod: string
+  // 表单未覆盖的 xhttpSettings 键（extra/downloadSettings/h2Params 等）原样回写。
   rawExtra?: Record<string, any>
   // xray 的 xhttp 传输没有 acceptProxyProtocol（只有 tcp/ws/httpupgrade/sockopt 有），
   // 不再提供该开关；需要接收 PROXY Protocol 时用安全层的 sockopt 统一配置。

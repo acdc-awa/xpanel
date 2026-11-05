@@ -50,6 +50,10 @@ func condEq(path string, value any) contracts.Condition {
 	return contracts.Condition{Path: path, Op: contracts.CondEq, Value: value}
 }
 
+func condNe(path string, value any) contracts.Condition {
+	return contracts.Condition{Path: path, Op: contracts.CondNe, Value: value}
+}
+
 func condIn(path string, values ...string) contracts.Condition {
 	return contracts.Condition{Path: path, Op: contracts.CondIn, Values: values}
 }

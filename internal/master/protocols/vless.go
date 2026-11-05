@@ -724,23 +724,25 @@ func xhttpOutboundSettings(t *contracts.TransportOptions) map[string]any {
 	}
 
 	// extra 是 xray 的第二套入口（xhttpSettings.extra 会被解到同一个结构体）：
-	// 先展开，外层同键优先——与 xray Build 的行为一致。
+	// xray Build() 在 extra 存在时整体替换 cfg，只把外层 host/path/mode 回填进去，
+	// 因此 extra 内的同键优先于顶层。这里必须同序——反了的话节点按 extra 跑、
+	// 机间出站按顶层跑，两端会话/填充参数会不一致。
 	merged := make(map[string]any, len(t.Opts))
+	for k, v := range t.Opts {
+		if k != "extra" {
+			merged[k] = v
+		}
+	}
 	if raw := t.Opts["extra"]; strings.TrimSpace(raw) != "" {
 		var extra map[string]any
 		if err := json.Unmarshal([]byte(raw), &extra); err == nil {
 			for k, v := range extra {
 				switch k {
 				case "host", "path", "mode":
-					continue // 外层优先，xray 也会覆盖
+					continue // 外层始终生效，extra 内这三个键被 xray 覆盖
 				}
 				merged[k] = v
 			}
-		}
-	}
-	for k, v := range t.Opts {
-		if k != "extra" {
-			merged[k] = v
 		}
 	}
 
@@ -821,14 +823,6 @@ func xhttpExtraJSON(t *contracts.TransportOptions) string {
 		return ""
 	}
 	merged := make(map[string]any, len(t.Opts))
-	if raw := t.Opts["extra"]; raw != "" {
-		var m map[string]any
-		if json.Unmarshal([]byte(raw), &m) == nil {
-			for k, v := range m {
-				merged[k] = v
-			}
-		}
-	}
 	for k, raw := range t.Opts {
 		if k == "extra" {
 			continue
@@ -838,6 +832,15 @@ func xhttpExtraJSON(t *contracts.TransportOptions) string {
 			merged[k] = v
 		} else {
 			merged[k] = raw
+		}
+	}
+	// 与 xray Build() 同序：extra 覆盖顶层同键（host/path/mode 随后统一删除）。
+	if raw := t.Opts["extra"]; raw != "" {
+		var m map[string]any
+		if json.Unmarshal([]byte(raw), &m) == nil {
+			for k, v := range m {
+				merged[k] = v
+			}
 		}
 	}
 	delete(merged, "host")

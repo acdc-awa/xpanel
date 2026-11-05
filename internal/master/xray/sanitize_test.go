@@ -437,6 +437,47 @@ func TestStripInboundClientOnlyXHTTP(t *testing.T) {
 	}
 }
 
+// extra 存在时 xray 以 extra 为准，客户端专属键藏在 extra 里同样会进节点配置。
+func TestStripInboundClientOnlyXHTTP_RecursesIntoExtra(t *testing.T) {
+	stream := map[string]any{
+		"network": "xhttp",
+		"xhttpSettings": map[string]any{
+			"path": "/stream",
+			"mode": "stream-up",
+			"headers": map[string]any{
+				"X-Own": "1",
+			},
+			"extra": map[string]any{
+				"headers":            map[string]any{"X-Own": "1"},
+				"xmux":               map[string]any{"maxConnections": "3"},
+				"downloadSettings":   map[string]any{"network": "xhttp"},
+				"noGRPCHeader":       true,
+				"scMaxEachPostBytes": "1000000",
+				"noSSEHeader":        true,
+			},
+		},
+	}
+	stripInboundClientOnlyXHTTP(stream)
+	x := stream["xhttpSettings"].(map[string]any)
+	if _, ok := x["headers"]; ok {
+		t.Error("headers（客户端请求头）应从服务端配置剥离")
+	}
+	extra, ok := x["extra"].(map[string]any)
+	if !ok {
+		t.Fatal("extra 应保留为对象")
+	}
+	for _, k := range []string{"headers", "xmux", "downloadSettings", "noGRPCHeader"} {
+		if _, ok := extra[k]; ok {
+			t.Errorf("extra.%s 应被剥离", k)
+		}
+	}
+	for _, k := range []string{"scMaxEachPostBytes", "noSSEHeader"} {
+		if _, ok := extra[k]; !ok {
+			t.Errorf("extra.%s 是服务端消费键，必须保留", k)
+		}
+	}
+}
+
 // 入站生成时剥离 REALITY 的客户端侧字段；服务端字段必须保留。
 func TestStripInboundClientOnlyReality(t *testing.T) {
 	stream := map[string]any{

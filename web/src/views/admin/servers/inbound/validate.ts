@@ -101,19 +101,75 @@ export function validateXhttp(c: XhttpConfig): string[] {
   if (c.scMaxBufferedPosts !== undefined && c.scMaxBufferedPosts !== null && c.scMaxBufferedPosts < 0) {
     errs.push('服务端最大缓冲请求数不能为负数')
   }
+  // ---- 分模式参数（以下每条都对应 xray Build() 的硬校验，违反=整份配置被拒） ----
+  push(rangeError(c.scMaxEachPostBytes, '单 POST 最大字节', 1))
+  push(rangeError(c.scMinPostsIntervalMs, 'POST 最小间隔', 0))
+  push(rangeError(c.uplinkChunkSize, '上行分片大小', 64))
+
+  const headerKeys = c.headers.map((h) => h.key.trim()).filter(Boolean)
+  if (headerKeys.some((k) => k.toLowerCase() === 'host')) {
+    errs.push('请求头里不能包含 Host（大小写不敏感），Host 请填到独立的 Host 字段')
+  }
+  const dupHeader = headerKeys.find((k, i) => headerKeys.findIndex((x) => x.toLowerCase() === k.toLowerCase()) !== i)
+  if (dupHeader) errs.push(`请求头重复：${dupHeader}`)
+
+  const method = (c.uplinkHTTPMethod || '').trim().toUpperCase()
+  if (method && !['GET', 'POST', 'PUT', 'PATCH'].includes(method)) {
+    errs.push('上行 HTTP 方法只支持 GET / POST / PUT / PATCH')
+  }
+  if (method === 'GET' && c.mode !== 'packet-up') {
+    errs.push('上行方法 GET 只在 packet-up 模式允许（其它模式 xray 会拒绝整份配置）')
+  }
+  if ((c.uplinkDataPlacement === 'header' || c.uplinkDataPlacement === 'cookie') && c.mode !== 'packet-up') {
+    errs.push('上行数据放 header / cookie 只在 packet-up 模式允许')
+  }
+
+  // 会话 ID 字符表：xray 要求 ID 空间（Σ tableSize^长度）≥ 2^31，且长度起点必须 > 0。
+  const tableRaw = c.sessionIDTable.trim()
+  if (tableRaw) {
+    const table = XHTTP_PREDEFINED_TABLES[tableRaw] ?? tableRaw
+    const len = parseIntRange(c.sessionIDLength)
+    if (!len || len.from <= 0) {
+      errs.push('填写会话 ID 字符表时，长度起点必须大于 0（如 8-16）')
+    } else if (/^[\x00-\x7F]*$/.test(table) && len.to - len.from <= 512) {
+      let space = 0n
+      for (let k = len.from; k <= len.to; k++) space += BigInt(table.length) ** BigInt(k)
+      if (space < 2147483648n) {
+        errs.push('会话 ID 字符表 + 长度组合的 ID 空间不足 2^31，xray 会拒绝（加大长度或字符表）')
+      }
+    }
+  }
+
   if (c.xmuxEnabled) {
     push(rangeError(c.xmuxMaxConnections, 'xmux maxConnections', 0))
     push(rangeError(c.xmuxMaxConcurrency, 'xmux maxConcurrency', 0))
     push(rangeError(c.xmuxMaxRequestTimes, 'xmux hMaxRequestTimes', 0))
     push(rangeError(c.xmuxMaxReusableSecs, 'xmux hMaxReusableSecs', 0))
+    push(rangeError(c.xmuxCMaxReuseTimes, 'xmux cMaxReuseTimes', 0))
     const conn = parseIntRange(c.xmuxMaxConnections)
     const conc = parseIntRange(c.xmuxMaxConcurrency)
     // xray 硬拒：maxConnections 与 maxConcurrency 不能同时 >0。
     if (conn && conc && conn.to > 0 && conc.to > 0) {
       errs.push('xmux：maxConnections 与 maxConcurrency 只能填一个')
     }
+    // hKeepAlivePeriod 是唯一允许负数的项（-1 关闭空闲保活），但必须整数。
+    const ka = c.xmuxHKeepAlivePeriod.trim()
+    if (ka && !/^-?\d+$/.test(ka)) errs.push('xmux hKeepAlivePeriod：必须是整数（-1 表示关闭空闲保活）')
   }
   return errs
+}
+
+// 与 xray splithttp.PredefinedTable 同源（config.go），前端据此估算 ID 空间。
+const XHTTP_PREDEFINED_TABLES: Record<string, string> = {
+  ALPHABET: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  Alphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+  BASE36: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  Base62: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+  HEX: '0123456789ABCDEF',
+  alphabet: 'abcdefghijklmnopqrstuvwxyz',
+  base36: '0123456789abcdefghijklmnopqrstuvwxyz',
+  hex: '0123456789abcdef',
+  number: '0123456789',
 }
 
 // finalmask 部分（obfs / 带宽 / 端口跳跃）——对应 streamSettings.finalmask，
