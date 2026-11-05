@@ -82,14 +82,22 @@ func TestVLESSServerUsers(t *testing.T) {
 	}
 }
 
-// TestVLESSBuildClientNode 订阅 DTO 组装：reality 缺 SNI 返回 nil；share 覆写生效。
-func TestVLESSBuildClientNode(t *testing.T) {
+// TestVLESSProjectClientSubscription 订阅 DTO 组装：reality 缺 SNI 返回 nil；share 覆写生效。
+func TestVLESSProjectClientSubscription(t *testing.T) {
 	p := VLESSPlugin{}
+	project := func(in *contracts.ClientProjectionInput) *contracts.ProxyNodeDTO {
+		in.Role = contracts.RoleSubscription
+		dto, err := p.ProjectClient(in)
+		if err != nil {
+			t.Fatalf("ProjectClient: %v", err)
+		}
+		return dto
+	}
 
 	// reality 完整参数
 	spec := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{
 		"serverNames":["www.example.com"],"publicKey":"pbk","shortIds":["ab12"],"privateKey":"priv","dest":"www.example.com:443"}}`)
-	dto := p.BuildClientNode(&contracts.ClientNodeInput{
+	dto := project(&contracts.ClientProjectionInput{
 		Name: "n1", Host: "h1", Port: 443, Spec: spec, UserUUID: "uuid-1",
 	})
 	if dto == nil {
@@ -105,7 +113,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 
 	// reality 缺 serverName → nil（缺 SNI/公钥不产出订阅节点）
 	bad := decodeStream(`{"network":"tcp","security":"reality","realitySettings":{"publicKey":"pbk"}}`)
-	if dto := p.BuildClientNode(&contracts.ClientNodeInput{
+	if dto := project(&contracts.ClientProjectionInput{
 		Name: "n2", Host: "h2", Port: 443, Spec: bad, UserUUID: "uuid-2",
 	}); dto != nil {
 		t.Errorf("reality 缺 SNI 应返回 nil，got %+v", dto)
@@ -114,7 +122,7 @@ func TestVLESSBuildClientNode(t *testing.T) {
 	// 入口安全层由接入层传入（EntrySecurity）；客户端只覆写 SNI。
 	// xhttp 的 path/host 全部来自传输设置，没有第二来源。
 	caddy := decodeStream(`{"network":"xhttp","security":"none","xhttpSettings":{"mode":"auto","path":"/my-vless-xhttp","host":"caddy.example.com"}}`)
-	dto = p.BuildClientNode(&contracts.ClientNodeInput{
+	dto = project(&contracts.ClientProjectionInput{
 		Name: "n3", Host: "caddy.example.com", Port: 443, Spec: caddy,
 		EntrySecurity: "tls",
 		Share:         contracts.ShareOverride{SNI: "caddy.example.com"},

@@ -263,8 +263,3 @@ export function validateHysteriaSettings(c: HysteriaConfig): string[] {
   }
   return errs
 }
-
-/** 保存门禁：finalmask + hysteriaSettings 一起校验。 */
-export function validateHysteria(c: HysteriaConfig): string[] {
-  return [...validateHysteriaFinalMask(c), ...validateHysteriaSettings(c)]
-}

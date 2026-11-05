@@ -235,24 +235,6 @@ func (p HysteriaPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contr
 	return dto, nil
 }
 
-// BuildClientNode 兼容保留：旧版订阅节点组装输入，内部桥接调用 ProjectClient。
-func (p HysteriaPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.ProxyNodeDTO {
-	if in == nil {
-		return nil
-	}
-	dto, _ := p.ProjectClient(&contracts.ClientProjectionInput{
-		Role:        contracts.RoleSubscription,
-		Name:        in.Name,
-		Host:        in.Host,
-		Port:        in.Port,
-		Spec:        in.Spec,
-		Share:       in.Share,
-		InboundFlow: in.InboundFlow,
-		UserUUID:    in.UserUUID,
-	})
-	return dto
-}
-
 // FormatLink 格式化为标准 hysteria2:// 订阅链接。
 func (HysteriaPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 	if dto == nil || dto.Auth == nil {

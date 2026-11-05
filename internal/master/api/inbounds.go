@@ -435,8 +435,10 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 		}
 	}
 
-	if effProto == models.ProtocolSocks || effProto == models.ProtocolHTTP || effProto == models.ProtocolMixed {
-		util.BadRequest(c, "SOCKS5 / HTTP 入站已退役，不支持的协议: "+effProto)
+	// 协议白名单（按「本次生效的协议」判定）：既拦新建的退役协议（socks/http/mixed），
+	// 也拦对存量退役行的编辑——协议注册表里只有仍在维护的协议。
+	if !validInboundProtocol(effProto) {
+		util.BadRequest(c, "不支持的协议: "+effProto+"（支持 vless / hysteria / tunnel）")
 		return
 	}
 	// TLS 入站必须有服务端证书来源：本次未传 cert_id 时沿用库内既有绑定。
@@ -469,10 +471,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			util.BadRequest(c, "该服务器上已存在同名入站标签")
 			return
 		}
-	}
-	if req.Protocol != nil && !validInboundProtocol(*req.Protocol) {
-		util.BadRequest(c, "不支持的协议: "+*req.Protocol+"（支持 vless / hysteria / tunnel）")
-		return
 	}
 	// ISSUE-13：更新接口补充端口范围 / type / flow / 分享端口等语义校验。
 	if req.Port != nil && (*req.Port < 1 || *req.Port > 65535) {

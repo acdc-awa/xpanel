@@ -528,26 +528,6 @@ func (s *ConfigService) MarkPushedIfSame(id uint64, configJSON string) (bool, er
 	return res.RowsAffected > 0, nil
 }
 
-// MarkPushedByServerIfSame 同 MarkPushedIfSame，按服务器 + 内容匹配标记
-// （供 API 生成下发后的确认路径使用）。
-func (s *ConfigService) MarkPushedByServerIfSame(serverID uint64, configJSON string) (bool, error) {
-	now := time.Now()
-	res := s.DB.Model(&models.PendingConfig{}).
-		Where("server_id = ? AND config_json = ? AND status = ?", serverID, configJSON, "pending").
-		Updates(map[string]any{
-			"status":          "pushed",
-			"pushed_at":       now,
-			"last_error":      "",
-			"attempts":        0,
-			"last_attempt_at": nil,
-			"updated_at":      now,
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
-}
-
 // SavePendingIfSame 仅当待推送内容仍是 expected 时替换为 fresh，返回是否替换成功。
 // 用途：推送前现场重算用户集（见 nodegate.PushPending）与「重算期间又来了新编辑」会互相
 // 覆盖，用内容比较做一次 CAS——替换失败说明 pending 已被更新的编辑覆盖，调用方应改用最新内容。

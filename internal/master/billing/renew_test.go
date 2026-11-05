@@ -267,7 +267,8 @@ func TestAutoRenewService(t *testing.T) {
 	// ⑧ 幂等：整轮再跑一次，不重复扣款、不重复退订
 	renewAuditBefore := auditCount(t, db, "auto_renew")
 	clearAuditBefore := auditCount(t, db, "subscription_expired")
-	svc.RunOnce(ctx)
+	svc.RunExpiryOnce(ctx)
+	svc.RunExhaustOnce(ctx)
 	if got := auditCount(t, db, "auto_renew"); got != renewAuditBefore {
 		t.Fatalf("二次扫描不应重复续费审计: %d → %d", renewAuditBefore, got)
 	}

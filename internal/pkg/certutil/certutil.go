@@ -175,31 +175,6 @@ func ParseCertificate(certPEM string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// ParseCertificateChain 解析证书链
-func ParseCertificateChain(certPEM string) ([]*x509.Certificate, error) {
-	var certs []*x509.Certificate
-	rest := []byte(certPEM)
-	for {
-		block, r := pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		rest = r
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("证书链解析失败: %w", err)
-		}
-		certs = append(certs, cert)
-	}
-	if len(certs) == 0 {
-		return nil, errors.New("未找到有效证书")
-	}
-	return certs, nil
-}
-
 // DetectKeyType 判断公钥类型
 func DetectKeyType(pub crypto.PublicKey) string {
 	switch p := pub.(type) {

@@ -63,12 +63,6 @@ func (s *AutoRenewService) StartCron(ctx context.Context) {
 	}()
 }
 
-// RunOnce 执行一整轮处置（到期 + 耗尽），供测试与手工触发。
-func (s *AutoRenewService) RunOnce(ctx context.Context) {
-	s.RunExpiryOnce(ctx)
-	s.RunExhaustOnce(ctx)
-}
-
 // expiredUser 到期处置候选。
 type expiredUser struct {
 	UserID          uint64

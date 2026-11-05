@@ -216,7 +216,6 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		BillingCycle          string          `json:"billing_cycle" binding:"max=32"`
 		Price                 string          `json:"price" binding:"max=64"`
 		IDCAddress            string          `json:"idc_address" binding:"max=255"`
-		IDCURL                string          `json:"idc_url" binding:"max=255"` // 兼容别名
 		DefaultOutboundTag    string          `json:"default_outbound_tag"`
 		RoutingDomainStrategy string          `json:"routing_domain_strategy"`
 		SortOrder             *int            `json:"sort_order"`
@@ -230,9 +229,6 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		return
 	}
 	idcAddr := strings.TrimSpace(req.IDCAddress)
-	if idcAddr == "" && req.IDCURL != "" {
-		idcAddr = strings.TrimSpace(req.IDCURL)
-	}
 	if req.DefaultOutboundTag == "" {
 		req.DefaultOutboundTag = "direct"
 	}
@@ -336,7 +332,6 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		BillingCycle          *string         `json:"billing_cycle"`
 		Price                 *string         `json:"price"`
 		IDCAddress            *string         `json:"idc_address"`
-		IDCURL                *string         `json:"idc_url"`
 		DefaultOutboundTag    *string         `json:"default_outbound_tag"`
 		RoutingDomainStrategy *string         `json:"routing_domain_strategy"`
 		SortOrder             *int            `json:"sort_order"`
@@ -392,8 +387,6 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.IDCAddress != nil {
 		updates["idc_address"] = strings.TrimSpace(*req.IDCAddress)
-	} else if req.IDCURL != nil {
-		updates["idc_address"] = strings.TrimSpace(*req.IDCURL)
 	}
 	// 这两项只在本机配置生成期读取（outbounds[0] 兜底出口 / routing.domainStrategy），
 	// 写库不会自动下发，必须显式重推本机。

@@ -119,7 +119,6 @@ type ConfigService interface {
 	Preview(serverID uint64, form *models.Inbound) (string, error)
 	GetPending(serverID uint64) (*models.PendingConfig, error)
 	GetValidUsers(serverID uint64) (map[string][]protocol.User, error)
-	MarkPushedByServerIfSame(serverID uint64, configJSON string) (bool, error)
 	MarkPushedIfSame(id uint64, configJSON string) (bool, error)
 	// PreviewUsers 预览用：入站注入用户列表由启用接入点白名单派生（未落库新入站返回空）。
 	PreviewUsers(inb *models.Inbound) []protocol.User

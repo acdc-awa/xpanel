@@ -6,19 +6,15 @@
 :root {
   /* ===== 品牌主色 (Brand Primary) ===== */
   --x-primary: var(--color-primary-600-su56h9, #006ce0);
-  --x-primary-hover: var(--color-primary-700-1y7vyc, #004a9e);
   --x-primary-soft: var(--color-primary-50-hzpado, #f0fbff);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds) ===== */
   --x-bg: #f4f5fb;
   --x-card: #ffffff;
   --x-card-soft: #f8fafc;
-  --x-card-muted: #f1f5f9;
   --x-border: #e6e8f0;
-  --x-border-soft: #f1f5f9;
   --x-fill-1: #f8fafc;
   --x-fill-2: rgba(0, 0, 0, 0.04);
-  --x-sidebar-bg: #171b2e;
 
   /* ===== 文字颜色阶梯 (Typography Colors) ===== */
   --x-text: #1e2333;
@@ -26,21 +22,11 @@
   --x-text-3: #9ca3af;
 
   /* ===== 字体字号阶梯 (Typography Scale) =====
-     2026-11-04 收敛为 6 档，与 Cloudscape 的 body-s(12)/body-m(14)/heading-s(16)/
-     heading-l(20)/heading-xl(24) 对齐，13 是中文正文的更紧凑档。硬下限 12px：
-     11px 及以下的辅助文字在 100% 缩放下中文已经发虚。 */
+     2026-11-04 收敛为 6 档（12/13/14/16/20/24），硬下限 12px：11px 及以下的辅助文字
+     在 100% 缩放下中文已经发虚。这里只声明真正经 token 引用的两档，其余档位由组件
+     按规范直接写 px（`check:design` 校验取值）。 */
   --x-font-xs: 12px;     /* 辅助说明、单位、徽标、统计副标、状态元数据 */
-  --x-font-sm: 13px;     /* 表格正文、表单标签、次级文本 */
-  --x-font-base: 14px;   /* 正文、输入值、卡片正文 */
-  --x-font-md: 16px;     /* 区块标题、卡片标题 */
   --x-font-lg: 20px;     /* 二级标题（Cloudscape heading-l） */
-  --x-font-xl: 24px;     /* 页面标题（Cloudscape heading-xl） */
-
-  /* ===== 行高阶梯 (Line Heights)：字号越大行高越紧 ===== */
-  --x-leading-tight: 1.25;   /* 20 / 24 */
-  --x-leading-snug: 1.4;     /* 16 */
-  --x-leading-normal: 1.5;   /* 12 / 13 */
-  --x-leading-relaxed: 1.55; /* 14 正文 */
 
   /* ===== 字重阶梯 (Font Weights) ===== */
   --x-weight-normal: 400;
@@ -60,14 +46,12 @@
 
   /* ===== 尺寸与圆角 =====
      2026-11-04 收敛为 3 档，与 Cloudscape 的 input/item(8)、container(16) 对齐。
-     嵌套用同心圆角：内 = 外 − 内边距；胶囊（高/2）单独用 999px。 */
-  --x-radius-container: 16px; /* 外层容器 */
+     嵌套用同心圆角：内 = 外 − 内边距。 */
   --x-radius: 8px;            /* 卡片、面板、按钮 */
   --x-radius-sm: 8px;
   --x-radius-xs: 4px;         /* 输入、chip、徽标 */
   --x-radius-2xs: 4px;
   --x-radius-lg: 16px;
-  --x-radius-pill: 999px;
   /* 只声明各端真实存在的等宽字体。'JetBrains Mono' / 'Fira Code' 从未加载，
      留着只会让 Windows 落 Consolas、macOS 落 SF Mono，同串数字宽度不同。 */
   --x-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -83,16 +67,11 @@
   --x-collapse-ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* ===== 层级阶梯（新组件从这里取值，不要写裸数字） ===== */
-  --x-z-sticky: 10;
   --x-z-sidebar: 80;
   --x-z-sidebar-hover: 200;
-  --x-z-chart-tip: 1200;
   --x-z-fullscreen: 1500;
 
   /* ===== 代码编辑器配色（YAML 语法高亮 / 错误标记） ===== */
-  --x-code-bg: #f8fafc;
-  --x-code-gutter: #f1f5f9;
-  --x-code-text: #1e2333;
   --x-code-key: #006ce0;     /* 键名 */
   --x-code-string: #0f766e;  /* 字符串 */
   --x-code-number: #b45309;  /* 数字与布尔 */
@@ -135,19 +114,15 @@ html.dark {
   /* ===== 品牌主色 (Brand Primary in Dark) =====
      暗色下 Cloudscape 的 primary-400 是更好的对比档，同样取自 vendor token。 */
   --x-primary: var(--color-primary-400-x68qyw, #42b4ff);
-  --x-primary-hover: var(--color-primary-300-2rt5tg, #75cfff);
   --x-primary-soft: var(--color-primary-1000-cr22ew, #001129);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds in Dark) ===== */
   --x-bg: #0b0f19;
   --x-card: #131b2e;
   --x-card-soft: #1a233a;
-  --x-card-muted: #212c45;
   --x-border: #1e293b;
-  --x-border-soft: #25334d;
   --x-fill-1: #1a233a;
   --x-fill-2: rgba(255, 255, 255, 0.06);
-  --x-sidebar-bg: #0f1422;
 
   /* ===== 文字阶梯 (Typography Colors in Dark) ===== */
   --x-text: #f8fafc;
@@ -155,9 +130,6 @@ html.dark {
   --x-text-3: #64748b;
 
   /* ===== 代码编辑器配色（暗色） ===== */
-  --x-code-bg: #0f172a;
-  --x-code-gutter: #131b2e;
-  --x-code-text: #e2e8f0;
   --x-code-key: #93c5fd;     /* 键名 */
   --x-code-string: #6ee7b7;  /* 字符串 */
   --x-code-number: #fcd34d;  /* 数字与布尔 */

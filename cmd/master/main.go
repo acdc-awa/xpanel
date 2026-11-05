@@ -173,18 +173,11 @@ func main() {
 	eventBus := contracts.NewEventBus()
 	orderSvc.Events = eventBus
 
-	// 核心驱动注册表（Stage 4）：默认 xray；CORE_DRIVER 环境变量可选注入已注册驱动。
+	// 核心驱动注册表（Stage 4）：当前只注册 xray 一个驱动，取默认即可。
+	// 驱动选择不走环境变量（配置唯一入口见 configs/config.yaml）。
 	driverReg := contracts.NewDriverRegistry()
 	driverReg.Register(xray.NewDriver())
 	coreDriver := driverReg.Default()
-	if name := os.Getenv("CORE_DRIVER"); name != "" {
-		if d := driverReg.Find(name); d != nil {
-			coreDriver = d
-			log.Printf("核心驱动：%s（CORE_DRIVER 注入）", name)
-		} else {
-			log.Printf("CORE_DRIVER=%q 未注册，回退默认驱动 %s", name, coreDriver.Name())
-		}
-	}
 	configSvc := &services.ConfigService{DB: database, Traffic: trafficSvc, Driver: coreDriver}
 	siteSvc := services.NewSiteService(database)
 	giftCardSvc := billing.NewGiftCardService(billingStore)

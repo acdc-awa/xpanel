@@ -103,10 +103,7 @@ func TestSignServerCert_VerifyAgainstCA(t *testing.T) {
 	}
 
 	// 验证 fullchain 包含两张证书
-	chain, err := ParseCertificateChain(leafRes.FullchainPEM)
-	if err != nil {
-		t.Fatalf("ParseCertificateChain failed: %v", err)
-	}
+	chain := parseChainPEM(t, leafRes.FullchainPEM)
 	if len(chain) != 2 {
 		t.Fatalf("Expected 2 certs in fullchain, got %d", len(chain))
 	}
@@ -336,4 +333,30 @@ func TestValidateServerCert(t *testing.T) {
 	if err := ValidateServerCert(weak, "weak.local"); err == nil {
 		t.Error("RSA 1024 应被拒绝")
 	}
+}
+
+// parseChainPEM 解析 PEM 证书链（测试专用：生产侧只签发/校验单张证书，不需要链解析）。
+func parseChainPEM(t *testing.T, certPEM string) []*x509.Certificate {
+	t.Helper()
+	var certs []*x509.Certificate
+	rest := []byte(certPEM)
+	for {
+		block, r := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		rest = r
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatalf("解析证书链失败: %v", err)
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) == 0 {
+		t.Fatal("未找到有效证书")
+	}
+	return certs
 }

@@ -92,8 +92,8 @@ func TestSavePendingOverwriteRace(t *testing.T) {
 	}
 }
 
-// TestMarkPushedByServerIfSame 按 server 维度的同语义回归测试。
-func TestMarkPushedByServerIfSame(t *testing.T) {
+// TestMarkPushedIfSameContentCAS 内容 CAS：被覆盖的旧内容回执不得标记，新内容才标记。
+func TestMarkPushedIfSameContentCAS(t *testing.T) {
 	s := &ConfigService{DB: newTestDB(t)}
 	const cfgA = `{"v":1}`
 	const cfgB = `{"v":2}`
@@ -101,21 +101,25 @@ func TestMarkPushedByServerIfSame(t *testing.T) {
 	if err := s.SavePending(9, cfgA); err != nil {
 		t.Fatal(err)
 	}
-	// 覆盖竞态：cfgB 覆盖 cfgA
+	// 覆盖竞态：cfgB 覆盖 cfgA（同一 server 复用同一行，ID 不变）
 	if err := s.SavePending(9, cfgB); err != nil {
 		t.Fatal(err)
 	}
+	p, err := s.GetPending(9)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// 旧内容回执：不得标记
-	marked, err := s.MarkPushedByServerIfSame(9, cfgA)
+	marked, err := s.MarkPushedIfSame(p.ID, cfgA)
 	if err != nil || marked {
 		t.Fatalf("覆盖后旧内容不应标记成功 (marked=%v err=%v)", marked, err)
 	}
 	// 新内容：标记成功
-	marked, err = s.MarkPushedByServerIfSame(9, cfgB)
+	marked, err = s.MarkPushedIfSame(p.ID, cfgB)
 	if err != nil || !marked {
 		t.Fatalf("新内容应标记成功 (marked=%v err=%v)", marked, err)
 	}
-	p, _ := s.GetPending(9)
+	p, _ = s.GetPending(9)
 	if p.Status != "pushed" {
 		t.Fatalf("期望 pushed，实际 %s", p.Status)
 	}

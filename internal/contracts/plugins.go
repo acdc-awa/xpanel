@@ -94,19 +94,6 @@ type ClientProjectionInput struct {
 	TlsVerifyMode string
 }
 
-// ClientNodeInput 兼容保留：旧版订阅节点组装输入（内部桥接至 ClientProjectionInput）。
-type ClientNodeInput struct {
-	Name string
-	Host string
-	Port int
-
-	Spec          *InboundSpec
-	Share         ShareOverride
-	EntrySecurity string
-	InboundFlow   string
-	UserUUID      string
-}
-
 // ServerOverrides 协议插件对服务端入站结构的规范化结果（纯数据，不修改入参 spec）。
 // nil 字段表示该层无需修正：Settings 为 nil 时沿用 spec.Settings，Stream 为 nil 时沿用 spec.Stream。
 // Stream 是「覆盖键」而不是完整替换：插件只声明该协议强制/派生的键。
@@ -132,9 +119,6 @@ type ProtocolPlugin interface {
 
 	// ProjectClient 统一客户端端点投影（按 role 区分 subscription / peer）。
 	ProjectClient(in *ClientProjectionInput) (*ProxyNodeDTO, error)
-
-	// BuildClientNode 兼容保留：组装订阅导出用 ProxyNodeDTO，内部桥接调用 ProjectClient。
-	BuildClientNode(in *ClientNodeInput) *ProxyNodeDTO
 
 	// ResolveFlow 决议用户在该入站上的 flow（生成侧盖戳与订阅侧同源）。
 	ResolveFlow(spec *InboundSpec, inboundFlow string) string

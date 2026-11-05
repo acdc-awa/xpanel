@@ -382,59 +382,6 @@ export interface UserAccessPoint {
   created_at?: string
 }
 
-export interface RealitySettings {
-  server_name?: string
-  server_names?: string[]
-  public_key?: string
-  short_id?: string
-  short_ids?: string[]
-  private_key?: string
-  dest?: string
-  spider_x?: string
-}
-
-export interface XHTTPSettings {
-  mode?: string
-  path?: string
-  host?: string
-}
-
-export interface SniffingSettings {
-  enabled: boolean
-  destOverride?: string[]
-  metadataOnly?: boolean
-  routeOnly?: boolean
-  dest_override?: string[]
-  metadata_only?: boolean
-  route_only?: boolean
-}
-
-export interface TLSCertificateItem {
-  certificate_file?: string
-  key_file?: string
-  certificate?: string[]
-  key?: string[]
-  usage?: 'encipherment' | 'verify' | 'issue'
-  ocsp_stapling?: number
-  one_time_loading?: boolean
-  build_chain?: boolean
-}
-
-export interface TLSSettings {
-  server_name?: string
-  cert_file?: string
-  key_file?: string
-  alpn?: string[]
-  min_version?: string
-  max_version?: string
-  cipher_suites?: string[]
-  certificates?: TLSCertificateItem[]
-  disable_system_root?: boolean
-  pinned_peer_cert_sha256?: string
-  verify_peer_cert_by_name?: string
-  reject_unknown_sni?: boolean
-}
-
 export interface SockoptSettings {
   mark?: number
   tcp_fast_open?: boolean | number
@@ -457,12 +404,6 @@ export interface FallbackItem {
   path?: string
   dest: string
   xver?: number
-}
-
-export interface VlessClientItem {
-  id: string
-  flow?: string
-  email?: string
 }
 
 export interface ServerOutbound {

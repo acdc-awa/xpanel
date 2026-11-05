@@ -318,25 +318,6 @@ func (p VLESSPlugin) projectPeer(in *contracts.ClientProjectionInput) (*contract
 	return dto, nil
 }
 
-// BuildClientNode 兼容保留：组装订阅导出用 ProxyNodeDTO，内部桥接调用 ProjectClient。
-func (p VLESSPlugin) BuildClientNode(in *contracts.ClientNodeInput) *contracts.ProxyNodeDTO {
-	if in == nil {
-		return nil
-	}
-	dto, _ := p.ProjectClient(&contracts.ClientProjectionInput{
-		Role:          contracts.RoleSubscription,
-		Name:          in.Name,
-		Host:          in.Host,
-		Port:          in.Port,
-		Spec:          in.Spec,
-		Share:         in.Share,
-		EntrySecurity: in.EntrySecurity,
-		InboundFlow:   in.InboundFlow,
-		UserUUID:      in.UserUUID,
-	})
-	return dto
-}
-
 // FormatLink 格式化为标准 vless:// 订阅链接。
 func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 	if dto == nil || dto.Auth == nil || dto.Auth.UUID == "" {

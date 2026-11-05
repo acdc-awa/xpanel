@@ -38,9 +38,6 @@ const (
 
 	ProtocolVless    = "vless"
 	ProtocolTunnel   = "tunnel"
-	ProtocolSocks    = "socks"
-	ProtocolHTTP     = "http"
-	ProtocolMixed    = "mixed"
 	ProtocolHysteria = "hysteria"
 
 	ChannelStatusExceeded = "quota_exceeded"
