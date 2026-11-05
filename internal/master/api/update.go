@@ -7,13 +7,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -73,14 +76,67 @@ var (
 	updateCfgCfg = "/app/configs/config.yaml" // 容器形态固定配置路径
 )
 
+// updateBuiltinMirrors 下载源候选链（与 deploy/master/install.sh 的 DEFAULT_MIRRORS 同序）。
+//
+// 旧实现是「单 URL + 单次尝试」：GitHub Release 资产 302 到
+// release-assets.githubusercontent.com 后，一次 TLS 握手抖动（默认 Transport 10s 超时）
+// 就让整单更新失败，线上表现为「每次发版要点 2–3 次、第一次必报 TLS handshake timeout」。
+// 这里与安装脚本、agent 升级器对齐：同源重试 + 跨源回退。
+var updateBuiltinMirrors = []string{
+	"https://github.com",
+	"https://ghproxy.net/https://github.com",
+	"https://gh-proxy.com/https://github.com",
+	"https://github.moeyy.xyz/https://github.com",
+}
+
+const (
+	// updateDialTimeout 连接建立超时。
+	updateDialTimeout = 10 * time.Second
+	// updateTLSTimeout TLS 握手超时：默认 Transport 只有 10s，跨境冷连经常压在边界上。
+	updateTLSTimeout = 20 * time.Second
+	// updateHeaderTimeout 等待响应头超时（镜像回源慢时不必干等整段预算）。
+	updateHeaderTimeout = 30 * time.Second
+	// updateDownloadAttempts 同一源内的下载尝试次数（含首次）。
+	updateDownloadAttempts = 3
+)
+
+// updateRetryBackoff 同一源重试的退避：第 2 次前 2s，第 3 次前 5s。
+var updateRetryBackoff = []time.Duration{2 * time.Second, 5 * time.Second}
+
+// updateClient 更新下载专用 client。刻意不用 http.DefaultClient：裸默认值握手只有 10s
+// 且没有响应头超时；整体时长仍由 runUpdate 的 ctx（10 分钟）约束。
+var updateClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   updateDialTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   updateTLSTimeout,
+		ResponseHeaderTimeout: updateHeaderTimeout,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          4,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
+
+// updateTagPattern 严格限制版本标签（与 agent 的 TagPattern 同规则），防路径穿越与 URL 注入。
+var updateTagPattern = regexp.MustCompile(`^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$`)
+
+// urlQueryRe 匹配 URL 的查询串（GitHub 资产直链的 sig/token 全在这里）。
+var urlQueryRe = regexp.MustCompile(`(https?://[^\s"?#]+)\?[^\s"]*`)
+
+// sanitizeURLText 抹掉 URL 查询串：签名直链不该进日志、更不该当错误正文怼到界面上。
+func sanitizeURLText(s string) string {
+	return urlQueryRe.ReplaceAllString(s, "$1")
+}
+
 // setUpdateProgress 推进进度；failed 同时释放重入标记放行下次更新。
 func setUpdateProgress(phase, message, errText string) {
 	updateStateMu.Lock()
 	updateState.Phase = phase
 	updateState.Message = message
-	if errText != "" {
-		updateState.Error = errText
-	}
+	updateState.Error = errText
 	if phase == phaseFailed {
 		updateState.Running = false
 		updateActive.Store(false)
@@ -115,6 +171,12 @@ func (d *Deps) AdminUpdateCheck(c *gin.Context) {
 	if err != nil {
 		util.Fail(c, 502, "查询更新源失败: "+err.Error())
 		return
+	}
+	// 展示与实际下载同口径：配了 update.mirror 就是镜像直链，否则候选链首项（GitHub 直连）。
+	if tarballURL != "" && rel.TagName != "" {
+		if srcs := d.updateSources(rel.TagName); len(srcs) > 0 {
+			tarballURL, shaURL = srcs[0].Tarball, srcs[0].Sha256
+		}
 	}
 	available := rel.TagName != "" && rel.TagName != PanelVersion && tarballURL != ""
 	util.OK(c, gin.H{
@@ -257,31 +319,33 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	}
 	updateStateMu.Unlock()
 
-	// 1. 解析更新源：指定版本走直链模板，空走 releases/latest（同步完成，耗时≤10s）
+	// 1. 解析目标版本：指定版本只做格式校验，空走 releases/latest（同步完成，耗时≤10s）。
+	//    具体下载源在 runUpdate 里按候选链逐个尝试。
 	var (
-		rel        *latestRelease
-		tarballURL string
-		shaURL     string
-		err        error
+		rel *latestRelease
+		err error
 	)
-	if req.Version != "" {
-		tarballURL, shaURL = d.assetURLs(req.Version)
+	version := strings.TrimSpace(req.Version)
+	if version != "" {
+		if !updateTagPattern.MatchString(version) {
+			updateActive.Store(false)
+			util.BadRequest(c, "版本号格式不正确")
+			return
+		}
 	} else {
-		rel, tarballURL, shaURL, err = d.resolveLatest(c.Request.Context())
+		var assetURL string
+		rel, assetURL, _, err = d.resolveLatest(c.Request.Context())
 		if err != nil {
 			setUpdateProgress(phaseFailed, "查询更新源失败", err.Error())
 			util.Fail(c, 502, "查询更新源失败: "+err.Error())
 			return
 		}
-	}
-	if tarballURL == "" {
-		msg := "更新源未提供当前架构（" + runtime.GOARCH + "）的安装包"
-		setUpdateProgress(phaseFailed, msg, "")
-		util.BadRequest(c, msg)
-		return
-	}
-	version := req.Version
-	if version == "" && rel != nil {
+		if assetURL == "" {
+			msg := "更新源未提供当前架构（" + runtime.GOARCH + "）的安装包"
+			setUpdateProgress(phaseFailed, msg, "")
+			util.BadRequest(c, msg)
+			return
+		}
 		version = rel.TagName
 	}
 	if version == "" {
@@ -289,7 +353,7 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 		util.BadRequest(c, "无法确定目标版本")
 		return
 	}
-	if version == PanelVersion && req.Version == "" {
+	if version == PanelVersion && strings.TrimSpace(req.Version) == "" {
 		// 仅「latest 解析后与当前一致」短路；显式指定同版本视为重装修复，照旧执行。
 		updateStateMu.Lock()
 		updateState = updateProgress{Phase: "success", Message: fmt.Sprintf("已是最新版本 %s，无需更新", PanelVersion)}
@@ -309,7 +373,7 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	go func() {
 		defer cancel()
-		d.runUpdate(ctx, appRoot, masterPath, tarballURL, shaURL, version)
+		d.runUpdate(ctx, appRoot, masterPath, d.updateSources(version), version)
 	}()
 
 	log.Printf("update: 已触发后台更新 %s → %s（%s）", PanelVersion, version, runtime.GOARCH)
@@ -330,7 +394,7 @@ func (d *Deps) AdminUpdateStatus(c *gin.Context) {
 
 // runUpdate 后台执行 下载 → sha256 校验 → 解压/自检 → 备份/替换 → SIGTERM 重启，
 // 阶段推进经 setUpdateProgress 暴露（对齐 agent runUpgrade 的 report 模式）。
-func (d *Deps) runUpdate(ctx context.Context, appRoot, masterPath, tarballURL, shaURL, version string) {
+func (d *Deps) runUpdate(ctx context.Context, appRoot, masterPath string, sources []updateSource, version string) {
 	// staging 必须与替换目标同挂载点（/app = 宿主安装目录整挂）才能原子 rename：
 	// /app/data 是独立 bind mount（./data:/app/data），staging 放那里跨挂载 rename 必报
 	// EXDEV（invalid cross-device link），自更新会卡死在替换一步（2026-08-31 实机复现路径）。
@@ -341,10 +405,9 @@ func (d *Deps) runUpdate(ctx context.Context, appRoot, masterPath, tarballURL, s
 	}
 	defer os.RemoveAll(stage)
 
-	// 下载（独立协程每秒刷新已下载字节数——「卡在下载」从此肉眼可见）
+	// 下载（独立协程每秒刷新已下载字节数——「卡在下载」从此肉眼可见；
+	// 已推进到校验/换源阶段时不再覆盖进度文案）
 	tarball := filepath.Join(stage, "package.tar.gz")
-	log.Printf("update: 下载 %s", tarballURL)
-	setUpdateProgress(phaseDownloading, "正在下载更新包...", "")
 	downloaded := new(atomic.Int64)
 	stopProgress := make(chan struct{})
 	go func() {
@@ -355,29 +418,60 @@ func (d *Deps) runUpdate(ctx context.Context, appRoot, masterPath, tarballURL, s
 			case <-stopProgress:
 				return
 			case <-t.C:
+				if snapshotUpdateProgress().Phase != phaseDownloading {
+					continue
+				}
 				setUpdateProgress(phaseDownloading,
 					fmt.Sprintf("正在下载更新包...（已下载 %.1f MB）", float64(downloaded.Load())/1024/1024), "")
 			}
 		}
 	}()
-	err = downloadFile(ctx, tarballURL, tarball, downloaded)
-	close(stopProgress)
-	if err != nil {
-		setUpdateProgress(phaseFailed, "下载更新包失败", err.Error())
-		return
-	}
-	setUpdateProgress(phaseDownloading,
-		fmt.Sprintf("下载完成（%.1f MB），开始校验...", float64(downloaded.Load())/1024/1024), "")
 
-	// sha256 校验
-	setUpdateProgress(phaseVerifying, "正在计算 sha256 并核对校验和...", "")
-	hash, err := sha256File(tarball)
-	if err != nil {
-		setUpdateProgress(phaseFailed, "计算校验失败", err.Error())
-		return
+	// 按候选链逐个源「下载 + 同源校验」：某个源握手抖动或没有该资产就换下一个，
+	// 全部源都失败才判更新失败（旧实现单源单次，一次抖动整单作废）。
+	var lastErr error
+	for i, src := range sources {
+		if err := ctx.Err(); err != nil {
+			lastErr = err
+			break
+		}
+		msg := "正在下载更新包..."
+		if i > 0 {
+			msg = fmt.Sprintf("切换备用下载源（%d/%d）...", i+1, len(sources))
+		}
+		setUpdateProgress(phaseDownloading, msg, "")
+		log.Printf("update: 下载 %s（源 %d/%d）", src.Base, i+1, len(sources))
+
+		downloaded.Store(0)
+		if err := downloadFile(ctx, src.Tarball, tarball, downloaded); err != nil {
+			lastErr = err
+			log.Printf("update: 下载失败（源 %s）: %v", src.Base, err)
+			continue
+		}
+
+		setUpdateProgress(phaseVerifying,
+			fmt.Sprintf("下载完成（%.1f MB），正在校验 sha256...", float64(downloaded.Load())/1024/1024), "")
+		hash, err := sha256File(tarball)
+		if err != nil {
+			close(stopProgress)
+			setUpdateProgress(phaseFailed, "计算校验失败", err.Error())
+			return
+		}
+		if err := d.verifyChecksum(ctx, src.Sha256, tarball, hash); err != nil {
+			lastErr = err
+			log.Printf("update: 校验失败（源 %s）: %v", src.Base, err)
+			continue
+		}
+		lastErr = nil
+		log.Printf("update: 已从 %s 下载并校验更新包（%.1f MB）", src.Base, float64(downloaded.Load())/1024/1024)
+		break
 	}
-	if err := d.verifyChecksum(ctx, shaURL, tarball, hash); err != nil {
-		setUpdateProgress(phaseFailed, "更新包校验失败（拒绝安装）", err.Error())
+	close(stopProgress)
+	if lastErr != nil || len(sources) == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("没有可用的下载源")
+		}
+		setUpdateProgress(phaseFailed, "下载更新包失败（已尝试全部下载源）", lastErr.Error())
 		return
 	}
 
@@ -486,14 +580,11 @@ func (d *Deps) resolveLatest(ctx context.Context) (*latestRelease, string, strin
 		return nil, "", "", err
 	}
 	want := fmt.Sprintf("xpanel-master-%s-linux-%s.tar.gz", rel.TagName, runtime.GOARCH)
-	prefix := "https://github.com"
-	if d.Cfg != nil && d.Cfg.Update.Mirror != "" {
-		prefix = strings.TrimSuffix(d.Cfg.Update.Mirror, "/")
-	}
 	tarballURL, shaURL := "", ""
 	for _, a := range rel.Assets {
 		if a.Name == want {
-			tarballURL = strings.Replace(a.BrowserDownloadURL, "https://github.com", prefix, 1)
+			// 只返回 github.com 直链：镜像前缀统一由 updateSources 派生，避免两处各算一套。
+			tarballURL = a.BrowserDownloadURL
 			shaURL = strings.TrimSuffix(tarballURL, ".tar.gz") + ".tar.gz.sha256"
 			break
 		}
@@ -501,15 +592,38 @@ func (d *Deps) resolveLatest(ctx context.Context) (*latestRelease, string, strin
 	return &rel, tarballURL, shaURL, nil
 }
 
-// assetURLs 按指定版本推导直链（--version 场景，与 install.sh URL 模板一致）。
-func (d *Deps) assetURLs(version string) (string, string) {
-	base := "https://github.com"
-	if d.Cfg != nil && d.Cfg.Update.Mirror != "" {
-		base = strings.TrimSuffix(d.Cfg.Update.Mirror, "/")
+// updateSource 一个下载候选源：压缩包与其 .sha256 同源取齐，避免跨源校验错配。
+type updateSource struct {
+	Base    string
+	Tarball string
+	Sha256  string
+}
+
+// updateSources 生成下载候选链：update.mirror（配置了则置顶）+ 内置候选，去空去重。
+// 只改写 https://github.com 前缀（与 install.sh 的「优先镜像」语义一致）。
+func (d *Deps) updateSources(version string) []updateSource {
+	canonical := fmt.Sprintf("https://github.com/%s/releases/download/%s/xpanel-master-%s-linux-%s.tar.gz",
+		d.repo(), version, version, runtime.GOARCH)
+	bases := make([]string, 0, len(updateBuiltinMirrors)+1)
+	if d.Cfg != nil {
+		if m := strings.TrimSpace(d.Cfg.Update.Mirror); m != "" {
+			bases = append(bases, m)
+		}
 	}
-	u := fmt.Sprintf("%s/%s/releases/download/%s/xpanel-master-%s-linux-%s.tar.gz",
-		base, d.repo(), version, version, runtime.GOARCH)
-	return u, u + ".sha256"
+	bases = append(bases, updateBuiltinMirrors...)
+
+	seen := make(map[string]bool, len(bases))
+	out := make([]updateSource, 0, len(bases))
+	for _, base := range bases {
+		base = strings.TrimSuffix(strings.TrimSpace(base), "/")
+		if base == "" || seen[base] {
+			continue
+		}
+		seen[base] = true
+		tarball := strings.Replace(canonical, "https://github.com", base, 1)
+		out = append(out, updateSource{Base: base, Tarball: tarball, Sha256: tarball + ".sha256"})
+	}
+	return out
 }
 
 func (d *Deps) repo() string {
@@ -525,7 +639,10 @@ func (d *Deps) verifyChecksum(ctx context.Context, shaURL, tarball, actual strin
 		return fmt.Errorf("缺少校验和地址")
 	}
 	var buf strings.Builder
-	if err := downloadTo(ctx, shaURL, &buf); err != nil {
+	if err := fetchWithRetry(ctx, "下载校验和", func() error {
+		buf.Reset() // 重试时清空上一次的半截内容
+		return downloadTo(ctx, shaURL, &buf)
+	}); err != nil {
 		return err
 	}
 	fields := strings.Fields(buf.String())
@@ -540,12 +657,74 @@ func (d *Deps) verifyChecksum(ctx context.Context, shaURL, tarball, actual strin
 
 // downloadFile 下载 URL 到本地文件，并累加已下载字节数到 counter（进度展示用）。
 func downloadFile(ctx context.Context, url, path string, counter *atomic.Int64) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
+	return fetchWithRetry(ctx, "下载更新包", func() error {
+		counter.Store(0)
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return downloadTo(ctx, url, io.MultiWriter(f, &counterWriter{n: counter}))
+	})
+}
+
+// fetchWithRetry 对一次下载动作做同源重试。连接/握手期的抖动重试同一源通常就能过
+// （线上每次发版第一次尝试都会撞上一次 10s TLS 握手超时）；内容性错误（4xx、ctx 结束）
+// 不重试，交给调用方换源或直接失败。
+func fetchWithRetry(ctx context.Context, label string, fn func() error) error {
+	var lastErr error
+	for attempt := 1; attempt <= updateDownloadAttempts; attempt++ {
+		if attempt > 1 {
+			wait := updateRetryBackoff[0]
+			if attempt-2 < len(updateRetryBackoff) {
+				wait = updateRetryBackoff[attempt-2]
+			}
+			log.Printf("update: %s 第 %d/%d 次失败，%s 后重试: %v",
+				label, attempt-1, updateDownloadAttempts, wait, lastErr)
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !updateRetryable(lastErr) {
+			return lastErr
+		}
 	}
-	defer f.Close()
-	return downloadTo(ctx, url, io.MultiWriter(f, &counterWriter{n: counter}))
+	return lastErr
+}
+
+// updateHTTPError 下载源返回了非 200 状态：4xx 多为该源没有这个资产，换源比重试有效。
+type updateHTTPError struct {
+	URL    string
+	Status int
+}
+
+func (e *updateHTTPError) Error() string {
+	return fmt.Sprintf("下载 %s 返回 %d", sanitizeURLText(e.URL), e.Status)
+}
+
+// updateRetryable 判断一次下载失败值不值得重试同一源。
+func updateRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var httpErr *updateHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Status >= 500 ||
+			httpErr.Status == http.StatusRequestTimeout ||
+			httpErr.Status == http.StatusTooManyRequests
+	}
+	return true // 拨号/TLS/读超时等网络性错误
 }
 
 // counterWriter 把写入字节数累加进原子计数器（下载进度协程每秒读取刷新）。
@@ -556,23 +735,32 @@ func (w *counterWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// downloadTo 下载 URL 内容写入 writer；无 client 级超时，生命周期由调用方 ctx 约束
-// （更新包走 runUpdate 的 10 分钟总预算——旧实现 60s client 超时在慢镜像下会掐断大包下载）。
+// downloadTo 下载 URL 内容写入 writer；用 updateClient（独立超时配比），
+// 整体生命周期由调用方 ctx 约束（更新包走 runUpdate 的 10 分钟总预算）。
+// 错误文本统一脱敏：GitHub 302 之后的直链带 sig/token，不该外泄。
 func downloadTo(ctx context.Context, url string, w io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := updateClient.Do(req)
 	if err != nil {
-		return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return errors.New(sanitizeURLText(err.Error()))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("下载 %s 返回 %d", url, resp.StatusCode)
+		return &updateHTTPError{URL: url, Status: resp.StatusCode}
 	}
-	_, err = io.Copy(w, resp.Body)
-	return err
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return errors.New(sanitizeURLText(err.Error()))
+	}
+	return nil
 }
 
 // sha256File 计算文件 sha256（hex）。

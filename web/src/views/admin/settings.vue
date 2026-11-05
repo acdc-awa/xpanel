@@ -847,6 +847,38 @@ watch(activeTab, (tab) => {
   if (tab === 'system') void refreshUpdate(true)
 })
 
+/**
+ * 触发更新/安装/重试的公共链路：apply 立即返回 → 打开进度弹窗轮询。
+ * 应用更新、安装历史版本、失败重试三条入口共用，避免三处各抄一遍走样。
+ */
+async function startUpdateFlow(target: string, failText = '触发更新失败') {
+  updateApplying.value = true
+  try {
+    // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
+    const { data } = await applyUpdate(target)
+    if (data.code !== 0) {
+      ElMessage.error(data.message)
+      return
+    }
+    if (data.data?.started === false && !data.data.progress?.running) {
+      // 「已是最新版本」等无需进入监控弹窗的情形
+      ElMessage.success(data.data.message || data.message)
+      return
+    }
+    updateTargetVer.value = data.data?.version || target || ''
+    updateDowntimeAt = 0
+    resumeUpdateWatch(
+      data.data?.progress?.running
+        ? data.data.progress
+        : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
+    )
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || errMsg(e, failText))
+  } finally {
+    updateApplying.value = false
+  }
+}
+
 async function confirmApply() {
   if (!updateInfo.value?.available) return
   const target = updateInfo.value.latest_version
@@ -856,34 +888,19 @@ async function confirmApply() {
     warning: '更新期间面板会短暂离线，新版本启动失败将自动回滚。',
     message: `将下载 ${target} 并替换当前版本（${current}）。流程：下载 → SHA-256 校验 → 自检 → 替换 → 容器自动重启（unless-stopped）。`,
     confirmText: '应用更新',
-    action: async () => {
-      updateApplying.value = true
-      try {
-        // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
-        const { data } = await applyUpdate(target || '')
-        if (data.code !== 0) {
-          ElMessage.error(data.message)
-          return
-        }
-        if (data.data?.started === false && !data.data.progress?.running) {
-          // 「已是最新版本」等无需进入监控弹窗的情形
-          ElMessage.success(data.data.message || data.message)
-          return
-        }
-        updateTargetVer.value = data.data?.version || target || ''
-        updateDowntimeAt = 0
-        resumeUpdateWatch(
-          data.data?.progress?.running
-            ? data.data.progress
-            : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
-        )
-      } catch (e: any) {
-        ElMessage.error(e?.response?.data?.message || errMsg(e, '触发更新失败'))
-      } finally {
-        updateApplying.value = false
-      }
-    },
+    action: () => startUpdateFlow(target || ''),
   })
+}
+
+/**
+ * 失败态重试：沿用上次的目标版本重走同一条 apply 链路。
+ * 下载失败多为连接期抖动（同源重试或换源即可恢复），不该逼用户关弹窗再点一遍。
+ * 不预先改状态：apply 成功会由 resumeUpdateWatch 接管，失败则保留原错误 + 按钮恢复可点。
+ */
+async function retryUpdate() {
+  const target = updateStatus.value?.target_version || updateTargetVer.value
+  if (!target) return
+  await startUpdateFlow(target)
 }
 
 // 拉取版本列表（安装历史版本 / 回滚）：来自 GitHub Release API，安装复用更新链路。
@@ -929,31 +946,7 @@ async function confirmInstallRelease() {
     warning: '降级/回滚同样走更新链路，若跨越数据库结构变更，降级前请先备份数据库。',
     message: `将下载并安装 ${v}（当前 ${updateInfo.value?.current_version || '—'}）。流程同应用更新：下载 → SHA-256 校验 → 自检 → 原子替换 → 容器重启，期间面板短暂不可用。`,
     confirmText: '下载并安装',
-    action: async () => {
-      updateApplying.value = true
-      try {
-        const { data } = await applyUpdate(v)
-        if (data.code !== 0) {
-          ElMessage.error(data.message)
-          return
-        }
-        if (data.data?.started === false && !data.data.progress?.running) {
-          ElMessage.success(data.data.message || data.message)
-          return
-        }
-        updateTargetVer.value = data.data?.version || v
-        updateDowntimeAt = 0
-        resumeUpdateWatch(
-          data.data?.progress?.running
-            ? data.data.progress
-            : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
-        )
-      } catch (e: any) {
-        ElMessage.error(e?.response?.data?.message || errMsg(e, '触发安装失败'))
-      } finally {
-        updateApplying.value = false
-      }
-    },
+    action: () => startUpdateFlow(v, '触发安装失败'),
   })
 }
 
@@ -1680,6 +1673,14 @@ async function save() {
           </div>
         </div>
       </div>
+
+      <!-- 失败才给动作：下载失败多为连接抖动，重试比关掉弹窗再来一遍顺手 -->
+      <template v-if="updateStatus?.phase === 'failed'" #footer>
+        <CsButton @click="updateModalOpen = false">关闭</CsButton>
+        <CsButton type="primary" :loading="updateApplying" :disabled="updateApplying" @click="retryUpdate">
+          重试
+        </CsButton>
+      </template>
     </CsModal>
 
     <!-- 破坏性操作确认（AWS 控制台口径：红色 Warning 行 + 红描边/红实心按钮） -->
