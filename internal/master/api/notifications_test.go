@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -347,5 +348,81 @@ func TestDaysUntilCalendarDay(t *testing.T) {
 		if ok != tc.ok || (ok && got != tc.want) {
 			t.Fatalf("daysUntilCalendarDay(%q) = (%d,%v), want (%d,%v)", tc.expire, got, ok, tc.want, tc.ok)
 		}
+	}
+}
+
+// TestCertExpiryItems 证书到期提醒只覆盖仍在链路里的证书：
+// leaf 看入站引用，CA 看签发记录；窗口外与未使用的不报。
+func TestCertExpiryItems(t *testing.T) {
+	db, d := setupNotificationsTest(t)
+	setProbes(t, releaseProbe{}, releaseProbe{})
+
+	srv := createServer(t, db, "cert-host", "node-cert", "", "", 1)
+	now := time.Now()
+
+	mkCert := func(domain string, notAfter time.Time) models.Cert {
+		t.Helper()
+		c := models.Cert{Domain: domain, NotAfter: notAfter}
+		if err := db.Create(&c).Error; err != nil {
+			t.Fatalf("create cert %s: %v", domain, err)
+		}
+		return c
+	}
+
+	certExpired := mkCert("expired.local", now.Add(-48*time.Hour))
+	certSoon := mkCert("soon.local", now.Add(3*24*time.Hour))
+	certLater := mkCert("later.local", now.Add(20*24*time.Hour))
+	certFar := mkCert("far.local", now.Add(90*24*time.Hour))
+	certUnused := mkCert("unused.local", now.Add(-48*time.Hour))
+
+	for i, c := range []models.Cert{certExpired, certSoon, certLater, certFar} {
+		inb := models.Inbound{ServerID: srv.ID, Tag: "in-" + strconv.Itoa(i), Protocol: "vless", Port: 443, CertID: &c.ID}
+		if err := db.Create(&inb).Error; err != nil {
+			t.Fatalf("create inbound: %v", err)
+		}
+	}
+
+	caExpired := models.CACert{Name: "ca-expired", CACertPEM: "x", NotAfter: now.Add(-time.Hour), HasKey: true}
+	caSoon := models.CACert{Name: "ca-soon", CACertPEM: "x", NotAfter: now.Add(10 * 24 * time.Hour), HasKey: false}
+	caUnused := models.CACert{Name: "ca-unused", CACertPEM: "x", NotAfter: now.Add(-time.Hour), HasKey: true}
+	for _, ca := range []*models.CACert{&caExpired, &caSoon, &caUnused} {
+		if err := db.Create(ca).Error; err != nil {
+			t.Fatalf("create ca: %v", err)
+		}
+	}
+	// 两个 CA 各挂一张签发记录；certUnused 本身未被引用，但仍算 CA 的签发历史。
+	db.Model(&models.Cert{}).Where("id = ?", certUnused.ID).Update("ca_id", caExpired.ID)
+	db.Model(&models.Cert{}).Where("id = ?", certFar.ID).Update("ca_id", caSoon.ID)
+
+	items := listNotifications(t, d)
+	byKey := keysOf(items)
+
+	want := map[string]string{
+		fmt.Sprintf("cert-expired:%d", certExpired.ID): notifSeverityCritical,
+		fmt.Sprintf("cert-expiring:%d", certSoon.ID):   notifSeverityHigh,
+		fmt.Sprintf("cert-expiring:%d", certLater.ID):  notifSeverityMedium,
+		fmt.Sprintf("ca-expired:%d", caExpired.ID):     notifSeverityCritical,
+		fmt.Sprintf("ca-expiring:%d", caSoon.ID):       notifSeverityMedium,
+	}
+	if len(items) != len(want) {
+		t.Fatalf("got %d items, want %d: %v", len(items), len(want), byKey)
+	}
+	for key, severity := range want {
+		item, ok := byKey[key]
+		if !ok {
+			t.Fatalf("missing %s: %v", key, byKey)
+		}
+		if item.Severity != severity {
+			t.Errorf("%s severity = %q, want %q", key, item.Severity, severity)
+		}
+		if item.Category != notifCategoryCert || item.ActionPath != "/admin/certs" {
+			t.Errorf("%s category/action = %q/%q", key, item.Category, item.ActionPath)
+		}
+	}
+	if _, ok := byKey[fmt.Sprintf("cert-expired:%d", certUnused.ID)]; ok {
+		t.Error("未被引用的证书不应提醒")
+	}
+	if _, ok := byKey[fmt.Sprintf("ca-expired:%d", caUnused.ID)]; ok {
+		t.Error("未签发过证书的 CA 不应提醒")
 	}
 }

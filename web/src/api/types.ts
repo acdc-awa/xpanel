@@ -583,7 +583,7 @@ export interface NoticePayload {
 /** 管理端提醒（派生模型：后端每次按当前状态现算，不落库）。 */
 export interface AdminNotificationItem {
   key: string
-  category: 'server' | 'version'
+  category: 'server' | 'version' | 'cert'
   severity: 'critical' | 'high' | 'medium' | 'low'
   title: string
   detail: string

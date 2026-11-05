@@ -23,6 +23,7 @@ import (
 const (
 	notifCategoryServer  = "server"
 	notifCategoryVersion = "version"
+	notifCategoryCert    = "cert"
 
 	notifSeverityCritical = "critical"
 	notifSeverityHigh     = "high"
@@ -31,6 +32,8 @@ const (
 
 	// serverExpiringWindowDays 服务器到期预警窗口（与前端 utils/vps.ts 的紧急阈值同口径）。
 	serverExpiringWindowDays = 7
+	// certExpiringWindowDays 证书到期预警窗口：证书续期通常按月安排，30 天足够走完重签/换证。
+	certExpiringWindowDays = 30
 )
 
 // notificationItem 单条提醒。Key 是跨刷新稳定的标识（同一条件就同一条），
@@ -157,6 +160,7 @@ func (d *Deps) buildNotifications() []notificationItem {
 
 	items := make([]notificationItem, 0, len(servers))
 	items = append(items, d.serverExpiryItems(servers)...)
+	items = append(items, d.certExpiryItems()...)
 	items = append(items, d.agentVersionItems(servers)...)
 	if item, ok := d.xrayVersionItem(servers); ok {
 		items = append(items, item)
@@ -232,6 +236,153 @@ func (d *Deps) serverExpiryItems(servers []models.Server) []notificationItem {
 		}
 	}
 	return items
+}
+
+// certExpiryItems 证书到期提醒：只提醒仍在链路里的证书——被入站引用的 leaf
+// 与已签发过证书的 CA。未被引用的证书到期不影响服务，不制造噪音。
+func (d *Deps) certExpiryItems() []notificationItem {
+	now := time.Now()
+	items := make([]notificationItem, 0)
+
+	var certs []models.Cert
+	if err := d.DB.Find(&certs).Error; err != nil {
+		log.Printf("[notifications] 读取证书列表失败: %v", err)
+		return nil
+	}
+	if len(certs) > 0 {
+		refs := make(map[uint64]int64)
+		var rows []struct {
+			CertID uint64 `gorm:"column:cert_id"`
+			Cnt    int64  `gorm:"column:cnt"`
+		}
+		if err := d.DB.Model(&models.Inbound{}).
+			Select("cert_id, count(*) as cnt").
+			Where("cert_id IS NOT NULL").
+			Group("cert_id").Scan(&rows).Error; err != nil {
+			log.Printf("[notifications] 统计证书引用失败: %v", err)
+		} else {
+			for _, row := range rows {
+				refs[row.CertID] = row.Cnt
+			}
+			for _, cert := range certs {
+				refCnt := refs[cert.ID]
+				if refCnt == 0 || cert.NotAfter.IsZero() {
+					continue
+				}
+				if item, ok := certExpiryItem("cert", "证书", cert.ID, cert.Domain, cert.NotAfter, now,
+					fmt.Sprintf("被 %d 个入站引用", refCnt), "请及时重签或换证"); ok {
+					items = append(items, item)
+				}
+			}
+		}
+	}
+
+	var cas []models.CACert
+	if err := d.DB.Find(&cas).Error; err != nil {
+		log.Printf("[notifications] 读取 CA 列表失败: %v", err)
+		return items
+	}
+	if len(cas) > 0 {
+		issued := make(map[uint64]int64)
+		var rows []struct {
+			CAID uint64 `gorm:"column:ca_id"`
+			Cnt  int64  `gorm:"column:cnt"`
+		}
+		if err := d.DB.Model(&models.Cert{}).
+			Select("ca_id, count(*) as cnt").
+			Where("ca_id IS NOT NULL").
+			Group("ca_id").Scan(&rows).Error; err != nil {
+			log.Printf("[notifications] 统计 CA 签发数失败: %v", err)
+		} else {
+			for _, row := range rows {
+				issued[row.CAID] = row.Cnt
+			}
+			for _, ca := range cas {
+				n := issued[ca.ID]
+				if n == 0 || ca.NotAfter.IsZero() {
+					continue
+				}
+				ref := fmt.Sprintf("已签发 %d 张证书", n)
+				task := "请及时轮换 CA 并重签相关证书"
+				if !ca.HasKey {
+					ref = fmt.Sprintf("作为 %d 张证书的校验根", n)
+					task = "请及时更换校验证书"
+				}
+				if item, ok := certExpiryItem("ca", "CA 证书", ca.ID, ca.Name, ca.NotAfter, now, ref, task); ok {
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	return items
+}
+
+// certExpiryItem 把一张证书的到期状态转成提醒；窗口外返回 ok=false。
+// kind 决定 Key 前缀（cert / ca），label 只影响标题措辞。
+func certExpiryItem(kind, label string, id uint64, name string, notAfter, now time.Time, ref, task string) (notificationItem, bool) {
+	expired, days, far := certExpiryState(notAfter, now)
+	if far {
+		return notificationItem{}, false
+	}
+
+	severity := notifSeverityMedium
+	if expired {
+		severity = notifSeverityCritical
+	} else if days <= 7 {
+		severity = notifSeverityHigh
+	}
+
+	due := notAfter.Format("2006-01-02")
+	ts := notAfter.Format("2006-01-02 15:04")
+	var title, detail string
+	if expired {
+		ago := "已过期不足 1 天"
+		if days > 0 {
+			ago = fmt.Sprintf("已过期 %d 天", days)
+		}
+		title = fmt.Sprintf("%s「%s」已过期", label, name)
+		detail = fmt.Sprintf("到期于 %s（%s），%s，%s", ts, ago, ref, task)
+		return notificationItem{
+			Key:         fmt.Sprintf("%s-expired:%d", kind, id),
+			Category:    notifCategoryCert,
+			Severity:    severity,
+			Title:       title,
+			Detail:      detail,
+			ActionPath:  "/admin/certs",
+			ActionLabel: "查看证书",
+			DueAt:       due,
+			Fingerprint: "expired:" + notAfter.Format(time.RFC3339),
+		}, true
+	}
+
+	if days == 0 {
+		title = fmt.Sprintf("%s「%s」今日到期", label, name)
+	} else {
+		title = fmt.Sprintf("%s「%s」还有 %d 天到期", label, name, days)
+	}
+	detail = fmt.Sprintf("到期于 %s，%s，%s", ts, ref, task)
+	return notificationItem{
+		Key:         fmt.Sprintf("%s-expiring:%d", kind, id),
+		Category:    notifCategoryCert,
+		Severity:    severity,
+		Title:       title,
+		Detail:      detail,
+		ActionPath:  "/admin/certs",
+		ActionLabel: "查看证书",
+		DueAt:       due,
+		// 指纹带剩余天数与严重度：30 天 → 7 天 → 今日到期会重新提醒。
+		Fingerprint: fmt.Sprintf("expiring:%s:%d:%s", notAfter.Format(time.RFC3339), days, severity),
+	}, true
+}
+
+// certExpiryState 计算到期状态：expired / 剩余天数（0=不足 1 天）/ 是否在预警窗口外。
+func certExpiryState(notAfter, now time.Time) (expired bool, days int, far bool) {
+	remain := notAfter.Sub(now)
+	if remain <= 0 {
+		return true, int(-remain.Hours() / 24), false
+	}
+	days = int(remain.Hours() / 24)
+	return false, days, days > certExpiringWindowDays
 }
 
 // agentVersionItems Agent 版本落后提醒。基准版本只认「已校验资产齐备」的探测结果，
