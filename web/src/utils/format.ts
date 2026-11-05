@@ -20,11 +20,6 @@ export function formatSignedMoney(cents: number): string {
   return `${n >= 0 ? '+' : ''}${formatMoney(n)}`
 }
 
-export function formatTraffic(gb: number): string {
-  if (gb >= 1024) return `${(gb / 1024).toFixed(2)} TB`
-  return `${gb.toFixed(1)} GB`
-}
-
 /** 字节数格式化为可读大小（B/KB/MB/GB/TB）。 */
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B'

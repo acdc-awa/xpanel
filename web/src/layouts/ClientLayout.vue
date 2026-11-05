@@ -658,21 +658,6 @@ onUnmounted(() => {
     flex: none;
   }
 
-  .client-avatar {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    box-shadow: 0 1px 4px rgba(99, 102, 241, 0.25);
-  }
-
   .switch-view-btn {
     padding: 0 8px;
     .switch-view-text {

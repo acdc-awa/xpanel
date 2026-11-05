@@ -23,8 +23,6 @@ export const useThemeStore = defineStore('theme', () => {
 
   const isDark = computed(() => mode.value === 'dark')
 
-  const modeLabel = computed(() => (isDark.value ? '深色模式' : '浅色模式'))
-
   const modeTooltip = computed(() =>
     isDark.value ? '当前：深色模式（点击切换为浅色）' : '当前：浅色模式（点击切换为深色）'
   )
@@ -62,7 +60,6 @@ export const useThemeStore = defineStore('theme', () => {
   return {
     mode,
     isDark,
-    modeLabel,
     modeTooltip,
     setMode,
     toggle,

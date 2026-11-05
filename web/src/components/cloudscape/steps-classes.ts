@@ -19,21 +19,6 @@ export const STEPS = {
   'with-annotation': 'awsui_with-annotation_gxp9y_o8puq_190',
 } as const
 
-// Official status-text tokens, used for the step header colour so the text
-// stays readable in dark mode (hard-coded hex would not).
-export const STEP_STATUS_COLOR: Record<string, string> = {
-  error: 'var(--color-text-status-error-ri38gt, #d13212)',
-  warning: 'var(--color-text-status-warning-fabq6h, #8d6605)',
-  success: 'var(--color-text-status-success-1i2jf8, #037f0c)',
-  info: 'var(--color-text-status-info-su6k9n, #006ce0)',
-  stopped: 'var(--color-text-status-inactive-fqjc97, #656871)',
-  pending: 'var(--color-text-status-inactive-fqjc97, #656871)',
-  'in-progress': 'var(--color-text-status-inactive-fqjc97, #656871)',
-  loading: 'var(--color-text-status-inactive-fqjc97, #656871)',
-  'not-started': 'var(--color-text-status-inactive-fqjc97, #656871)',
-  log: 'var(--color-text-status-inactive-fqjc97, #656871)',
-}
-
 export const DIVIDER = {
   divider: 'awsui_divider_1noo2_gvayg_9',
   horizontal: 'awsui_divider-horizontal_1noo2_gvayg_45',

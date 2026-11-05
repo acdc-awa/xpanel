@@ -83,12 +83,6 @@ func (VLESSPlugin) ServerUsers(users []protocol.User, _ *contracts.InboundSpec) 
 	return "clients", clients, nil
 }
 
-// ServerClients 兼容保留：旧版服务端 clients 注入，内部调用 ServerUsers。
-func (p VLESSPlugin) ServerClients(users []protocol.User, spec *contracts.InboundSpec) []any {
-	_, items, _ := p.ServerUsers(users, spec)
-	return items
-}
-
 // ResolveFlow 用户 flow 决议（生成侧盖戳与订阅侧同源）：空 = 无流控，vision 显式开启。
 func (VLESSPlugin) ResolveFlow(spec *contracts.InboundSpec, inboundFlow string) string {
 	if vlessEncActive(spec) {

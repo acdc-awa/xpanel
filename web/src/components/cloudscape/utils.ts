@@ -12,8 +12,3 @@ export function cx(...parts: ClassValue[]): string {
   parts.forEach(append)
   return out.join(' ')
 }
-
-export function toArray<T>(value: T | T[] | undefined | null): T[] {
-  if (value === undefined || value === null) return []
-  return Array.isArray(value) ? value : [value]
-}

@@ -598,17 +598,6 @@ func (d *Deps) SyncServerCerts(serverID uint64) {
 	}
 }
 
-// PushPendingCerts 补推该节点所有待推证书（手动触发；上线路径走 ReconcileServerCerts）。
-func (d *Deps) PushPendingCerts(serverID uint64) {
-	var pcs []models.PendingCert
-	if err := d.DB.Where("server_id = ? AND status = ?", serverID, "pending").Find(&pcs).Error; err != nil {
-		return
-	}
-	for _, pc := range pcs {
-		_ = d.pushCertToServer(serverID, pc.CertID)
-	}
-}
-
 // serverCAIDs 返回某服务器「中继出站 → 目标入站 → 证书 → 托管 CA」链路上需要的 CA ID。
 // 只算启用的出站与启用的入站：它们生成的配置才可能引用 CA 证书。
 func (d *Deps) serverCAIDs(serverID uint64) []uint64 {

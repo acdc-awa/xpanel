@@ -43,14 +43,8 @@ const (
 	ProtocolMixed    = "mixed"
 	ProtocolHysteria = "hysteria"
 
-	ChannelTypeTunnel = "tunnel"
-	ChannelTypeSocks5 = "socks5"
-	ChannelTypeHTTP   = "http"
-
-	ChannelStatusActive   = "active"
 	ChannelStatusExceeded = "quota_exceeded"
 	ChannelStatusExpired  = "expired"
-	ChannelStatusDisabled = "disabled"
 )
 
 // ProtocolDisplayName 协议名 → 面板展示名。

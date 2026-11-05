@@ -9,11 +9,7 @@ export const useSiteStore = defineStore('site', {
     favicon: window.__PANEL_SETTINGS__?.favicon || '',
     stopRegister: window.__PANEL_SETTINGS__?.stop_register === '1',
     captchaEnable: false,
-    captchaType: 'turnstile',
     turnstileSiteKey: '',
-    tosUrl: '',
-    currency: 'CNY',
-    currencySymbol: '¥',
     // 订阅端点属登录态信息：公开面（window.__PANEL_SETTINGS__）不下发，登录后由 /user/me 填充
     subscribeUrl: '',
     subscribePath: '',
@@ -47,11 +43,7 @@ export const useSiteStore = defineStore('site', {
       if (cfg.favicon !== undefined) this.favicon = cfg.favicon || ''
       if (cfg.stop_register !== undefined) this.stopRegister = !!cfg.stop_register
       if (cfg.captcha_enable !== undefined) this.captchaEnable = !!cfg.captcha_enable
-      if (cfg.captcha_type !== undefined) this.captchaType = cfg.captcha_type || 'turnstile'
       if (cfg.turnstile_site_key !== undefined) this.turnstileSiteKey = cfg.turnstile_site_key || ''
-      if (cfg.tos_url !== undefined) this.tosUrl = cfg.tos_url || ''
-      if (cfg.currency !== undefined) this.currency = cfg.currency || 'CNY'
-      if (cfg.currency_symbol !== undefined) this.currencySymbol = cfg.currency_symbol || '¥'
 
       // 同步更新网页 Favicon
       if (this.favicon) {

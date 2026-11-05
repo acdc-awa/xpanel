@@ -19,28 +19,6 @@ func yamlQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// yamlValue 把标量格式化为 YAML 片段：bool/number 原样，字符串加引号。
-func yamlValue(v any) string {
-	switch t := v.(type) {
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		if t == float64(int64(t)) {
-			return strconv.FormatInt(int64(t), 10)
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(t)
-	case string:
-		return yamlQuote(t)
-	default:
-		return yamlQuote(fmt.Sprint(t))
-	}
-}
-
 // xhttpOptSpec 声明一个 mihomo xhttp-opts 键：xray 键名、mihomo 键名、值类型。
 type xhttpOptSpec struct {
 	xrayKey   string

@@ -3,7 +3,6 @@ import type { FallbackItem } from '@/api/types'
 export type InboundProtocol = 'vless' | 'tunnel' | 'hysteria'
 export type InboundNetwork = 'tcp' | 'xhttp' | 'hysteria'
 export type InboundSecurity = 'reality' | 'tls' | 'none'
-export type InboundType = 'user' | 'forward' | 'tunnel'
 
 export type Hy2ObfsType = 'none' | 'salamander' | 'gecko'
 export type Hy2MasqType = '404' | 'file' | 'proxy' | 'string'

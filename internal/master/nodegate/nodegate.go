@@ -519,23 +519,6 @@ func (h *Hub) handleUpgradeProgress(conn *Conn, msg *protocol.Message) {
 	h.SetUpgradeStatus(conn.ServerID, &p)
 }
 
-// enqueueConfig 生成 → 落待推送 → 非阻塞推送（与 api.enqueueConfig 同构的网关侧版本）。
-func (h *Hub) enqueueConfig(serverID uint64) {
-	if h.Config == nil || serverID == 0 {
-		return
-	}
-	cfg, err := h.Config.Generate(serverID)
-	if err != nil {
-		log.Printf("nodegate: 生成服务器 %d 配置失败: %v", serverID, err)
-		return
-	}
-	if err := h.Config.SavePending(serverID, cfg); err != nil {
-		log.Printf("nodegate: 保存服务器 %d 待推送配置失败: %v", serverID, err)
-		return
-	}
-	go h.PushPending(serverID)
-}
-
 // handleTrafficReport 处理节点流量上报（批次去重 + 落库确认）+ 事件驱动超额/到期处置：
 // 落库后对本帧涉及用户做增量限额判定，命中即热更全节点用户列表（gRPC 秒级移除，
 // 不重启 xray）——「超额后还能跑流量 ~1h」问题的根治路径（2026-09-01），

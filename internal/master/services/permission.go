@@ -281,28 +281,3 @@ func AuthorizedEntryServerIDs(db *gorm.DB, user *models.User) map[uint64]bool {
 	return set
 }
 
-// FindServersByPermissionGroups 查询引用了指定权限组的所有服务器 ID（经由启用 AP -> 目标入站派生）。
-// 供流量重置、熔断与运维同步等反向索引场景使用。
-func FindServersByPermissionGroups(db *gorm.DB, groupIDs []uint64) ([]uint64, error) {
-	if len(groupIDs) == 0 {
-		return nil, nil
-	}
-	var inbIDs []uint64
-	err := db.Table("user_access_points").
-		Joins("JOIN permission_group_access_points ON permission_group_access_points.access_point_id = user_access_points.id").
-		Where("permission_group_access_points.permission_group_id IN ? AND user_access_points.enabled = ? AND user_access_points.target_type = ?", groupIDs, true, "inbound").
-		Where("user_access_points.target_inbound_id IS NOT NULL").
-		Distinct().
-		Pluck("user_access_points.target_inbound_id", &inbIDs).Error
-	if err != nil {
-		return nil, err
-	}
-	if len(inbIDs) == 0 {
-		return nil, nil
-	}
-	var sids []uint64
-	if err := db.Model(&models.Inbound{}).Where("id IN ? AND enabled = ?", inbIDs, true).Distinct().Pluck("server_id", &sids).Error; err != nil {
-		return nil, err
-	}
-	return sids, nil
-}

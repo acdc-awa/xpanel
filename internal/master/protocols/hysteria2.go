@@ -115,12 +115,6 @@ func (HysteriaPlugin) ServerUsers(users []protocol.User, _ *contracts.InboundSpe
 	return "users", items, nil
 }
 
-// ServerClients 兼容保留：旧版服务端 clients 注入，内部调用 ServerUsers。
-func (p HysteriaPlugin) ServerClients(users []protocol.User, spec *contracts.InboundSpec) []any {
-	_, items, _ := p.ServerUsers(users, spec)
-	return items
-}
-
 // ResolveFlow Hysteria 2 无 flow，固定返回空。
 func (HysteriaPlugin) ResolveFlow(_ *contracts.InboundSpec, _ string) string {
 	return ""

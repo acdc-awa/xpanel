@@ -220,10 +220,6 @@ const shareStrategyOptions = [
   margin-top: 16px;
 }
 
-.alert-gap {
-  margin-top: 10px;
-}
-
 .layer-field {
   margin-top: 12px;
 }

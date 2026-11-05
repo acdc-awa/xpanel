@@ -331,7 +331,6 @@ export interface InboundItem {
   traffic_reset?: string // 重置周期 (never / daily / weekly / monthly)
   remark?: string // 备注/通道名称
   type?: string // user / tunnel（forward 仅存量）
-  internal_uuid?: string // 历史字段（relay 模型已退役），仅老库兜底展示
   target_inbound_id?: number // 四层直通目标落地入站 ID
   target_address?: string // 手动指定的外部目标地址
   target_port?: number // 手动指定的外部目标端口
@@ -464,25 +463,6 @@ export interface VlessClientItem {
   id: string
   flow?: string
   email?: string
-}
-
-export interface InboundSettings {
-  network?: string
-  tls_type?: string
-  flow?: string
-  uuid?: string
-  clients?: VlessClientItem[]
-  reality?: RealitySettings
-  xhttp?: XHTTPSettings
-  tls?: TLSSettings
-  sniffing?: SniffingSettings
-  fallbacks?: FallbackItem[]
-  // 顶层透传字段
-  ratio?: number
-  share_addr_strategy?: string
-  share_addr?: string
-  share_port?: number
-  permission_group_ids?: number[]
 }
 
 export interface ServerOutbound {

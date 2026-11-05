@@ -54,10 +54,6 @@ func condNe(path string, value any) contracts.Condition {
 	return contracts.Condition{Path: path, Op: contracts.CondNe, Value: value}
 }
 
-func condIn(path string, values ...string) contracts.Condition {
-	return contracts.Condition{Path: path, Op: contracts.CondIn, Values: values}
-}
-
 func condNonEmpty(path string) contracts.Condition {
 	return contracts.Condition{Path: path, Op: contracts.CondNonEmpty}
 }

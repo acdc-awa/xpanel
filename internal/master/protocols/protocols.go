@@ -163,12 +163,6 @@ func ServerUsers(proto string, users []protocol.User, spec *contracts.InboundSpe
 	return p.ServerUsers(users, spec)
 }
 
-// ServerClients 兼容保留：按协议生成服务端入站 settings.clients。
-func ServerClients(proto string, users []protocol.User, spec *contracts.InboundSpec) []any {
-	_, items, _ := ServerUsers(proto, users, spec)
-	return items
-}
-
 // ResolveFlow 按协议决议用户 flow（生成侧盖戳与订阅侧同源）；
 // 未注册协议返回空（flow 是 VLESS 语义，不应泄漏到其他协议）。
 func ResolveFlow(proto string, spec *contracts.InboundSpec, inboundFlow string) string {

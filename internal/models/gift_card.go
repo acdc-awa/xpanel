@@ -13,7 +13,6 @@ const (
 	BalanceLogRechargeGiftCard = "recharge_gift_card" // 礼品卡充值
 	BalanceLogOrderPayment     = "order_payment"     // 订单余额支付
 	BalanceLogAdminAdjust      = "admin_adjust"      // 管理员调账
-	BalanceLogRefund           = "refund"            // 退款
 
 	PaymentMethodBalance = "balance" // 余额支付（唯一支付方式；人工收款已去除）
 )

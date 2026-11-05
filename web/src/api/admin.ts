@@ -619,8 +619,6 @@ export interface ReleaseVersionInfo {
   checked_at: string
 }
 
-export type XrayVersionInfo = ReleaseVersionInfo
-
 // 可选内核版本（含 prerelease，按新→旧；atom 只给最近若干条，更老的版本由界面手填）
 export function getXrayVersions(refresh = false) {
   return http.get<ApiResp<ReleaseVersionInfo>>('/admin/servers/xray-versions', {

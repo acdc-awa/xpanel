@@ -130,9 +130,6 @@ type ProtocolPlugin interface {
 	// 如 vless 返回 key="clients", items=[{id,email,flow,limit}], err=nil。
 	ServerUsers(users []protocol.User, spec *InboundSpec) (key string, items []any, err error)
 
-	// ServerClients 兼容保留：旧版服务端 clients 注入，内部桥接调用 ServerUsers。
-	ServerClients(users []protocol.User, spec *InboundSpec) []any
-
 	// ProjectClient 统一客户端端点投影（按 role 区分 subscription / peer）。
 	ProjectClient(in *ClientProjectionInput) (*ProxyNodeDTO, error)
 
