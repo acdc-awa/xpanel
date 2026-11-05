@@ -13,6 +13,7 @@ import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
+import { formatMoney } from '@/utils/format'
 import type { Order, Plan } from '@/api/types'
 
 const auth = useAuthStore()
@@ -62,7 +63,7 @@ const orderStatusMap: Record<string, { type: 'warning' | 'success' | 'info'; tex
 }
 
 function fmtMoney(cents: number) {
-  return `¥${(cents / 100).toFixed(2)}`
+  return formatMoney(cents)
 }
 
 function fmtGb(gb: number) {
@@ -362,7 +363,7 @@ async function confirmPay() {
         <div class="checkout-footer">
           <div class="total-bar">
             <span>实付金额：</span>
-            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : '¥0.00' }}</span>
+            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : formatMoney(0) }}</span>
           </div>
           <div class="footer-btn-group">
             <el-button @click="checkoutOpen = false">取消</el-button>

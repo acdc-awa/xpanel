@@ -518,7 +518,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		}
 		eff = normalized
 		if req.Protocol != nil && isReservedOutboundTag(ob.Tag) &&
-			strings.ToLower(strings.TrimSpace(*req.Protocol)) != strings.ToLower(ob.Protocol) {
+			!strings.EqualFold(strings.TrimSpace(*req.Protocol), ob.Protocol) {
 			util.BadRequest(c, "系统内置出站不可修改协议")
 			return
 		}
@@ -604,7 +604,7 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 			return
 		}
 		// 若当前记录是系统内置出站，禁止修改 Tag
-		if isReservedOutboundTag(ob.Tag) && strings.ToLower(tag) != strings.ToLower(ob.Tag) {
+		if isReservedOutboundTag(ob.Tag) && !strings.EqualFold(tag, ob.Tag) {
 			util.BadRequest(c, "系统内置出站（direct/blocked）不可修改 Tag")
 			return
 		}

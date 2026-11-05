@@ -476,7 +476,7 @@ function fmtTime(t: string) {
   border: 0;
   background: none;
   font: inherit;
-  color: var(--color-text-link-default, #0972d3);
+  color: var(--color-text-link-default-qabnuk, #0972d3);
   cursor: pointer;
   text-decoration: none;
 }

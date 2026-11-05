@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, setAutoRenew } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
+import { formatMoney, formatMoneyNumber, formatSignedMoney } from '@/utils/format'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { BalanceLog } from '@/api/types'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
@@ -69,7 +70,7 @@ function balanceLogTitle(type?: string): string {
 
 const balanceYuan = computed(() => {
   const cents = auth.user?.balance_cents ?? 0
-  return (cents / 100).toFixed(2)
+  return formatMoneyNumber(cents)
 })
 
 async function refresh() {
@@ -105,7 +106,7 @@ async function submitRedeem() {
   try {
     const { data } = await redeemGiftCard(code)
     if (data.code === 0) {
-      ElMessage.success(`充值成功，已到账 ¥${(data.data.face_value_cents / 100).toFixed(2)}`)
+      ElMessage.success(`充值成功，已到账 ${formatMoney(data.data.face_value_cents)}`)
       redeemCode.value = ''
       await refresh()
     } else {
@@ -397,9 +398,9 @@ async function onLogout() {
                 </div>
                 <div class="log-right">
                   <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
-                    {{ log.amount_cents > 0 ? '+' : '' }}¥{{ (log.amount_cents / 100).toFixed(2) }}
+                    {{ formatSignedMoney(log.amount_cents) }}
                   </div>
-                  <div class="log-balance cell-mono">结余：¥{{ (log.balance_after / 100).toFixed(2) }}</div>
+                  <div class="log-balance cell-mono">结余：{{ formatMoney(log.balance_after) }}</div>
                 </div>
               </div>
             </div>
@@ -541,9 +542,9 @@ async function onLogout() {
             </div>
             <div class="log-right">
               <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
-                {{ log.amount_cents > 0 ? '+' : '' }}¥{{ (log.amount_cents / 100).toFixed(2) }}
+                {{ formatSignedMoney(log.amount_cents) }}
               </div>
-              <div class="log-balance cell-mono">结余：¥{{ (log.balance_after / 100).toFixed(2) }}</div>
+              <div class="log-balance cell-mono">结余：{{ formatMoney(log.balance_after) }}</div>
             </div>
           </div>
         </div>
