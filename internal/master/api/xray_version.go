@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,16 +17,22 @@ import (
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
 
-// 本文件：面板侧可选的 Xray 内核版本目录（供「自由升降级」下拉框使用）。
+// 本文件：面板侧可选的 Xray 内核 / Agent 版本目录（供「自由升降级」下拉框使用）。
 //
-// 与 agent 的版本查询同因同源：XTLS 的发布全部标记为 prerelease，
-// /releases/latest 会退回 v26.3.27，因此这里同样读 releases.atom。
-// atom 只给最近若干条——够覆盖常规升级/回退；更老的版本允许界面手填。
+// 版本来源是 GitHub REST 的 releases 列表，而不是 /releases/latest：
+//   - XTLS 的发布全部标记为 prerelease，latest 会退回 v26.3.27；
+//   - 列表接口一次响应就带 tag 与 assets，可以只保留「发布包齐备」的版本。
+//
+// 历史坑：原先读 releases.atom 免限流，但 atom 会把**只有 tag、没有发布**的提交一并列出
+// （XPanel-Node 实际只有 3 个 release，atom 却给出 10 条 tag），选中这种版本下载必然 404。
 const (
 	defaultXrayRepo = "XTLS/Xray-core"
 	xrayVersionTTL  = 15 * time.Minute
 	xrayVersionMax  = 30
 )
+
+// githubAPIBase GitHub REST 基址（单测替换为 httptest 地址）。
+var githubAPIBase = "https://api.github.com"
 
 type xrayVersionCacheEntry struct {
 	sync.RWMutex
@@ -42,14 +50,85 @@ type xrayAtomFeed struct {
 	} `xml:"entry"`
 }
 
-// FetchXrayVersions 从 releases.atom 取最近的内核版本（含 prerelease，按新→旧）。
+// FetchXrayVersions 取最近可安装的内核版本（含 prerelease，按新→旧）。
 func FetchXrayVersions(ctx context.Context, mirror string) ([]string, error) {
 	return FetchRepoVersions(ctx, mirror, defaultXrayRepo)
 }
 
-// FetchRepoVersions 从任意仓库的 releases.atom 取最近版本（新→旧）。
-// atom 包含 prerelease、不受 REST API 匿名限流，镜像候选也能代理。
+// FetchRepoVersions 取仓库最近的可安装版本（新→旧）。
+//
+// 只列「发布包齐备」的 release：纯 tag（无发布包）、草稿、资产不齐的一律剔除，
+// 否则用户选中一个下载 404 的版本。REST 不可用（匿名限流 / 内网只能走镜像）时
+// 才回退 releases.atom——atom 分不出 tag 与 release，属降级路径，留日志痕迹。
 func FetchRepoVersions(ctx context.Context, mirror, repo string) ([]string, error) {
+	versions, err := fetchRepoVersionsREST(ctx, repo)
+	if err == nil {
+		return versions, nil
+	}
+	log.Printf("[versions] %s 取 REST 版本列表失败（%v），回退 releases.atom", repo, err)
+	return fetchRepoVersionsAtom(ctx, mirror, repo)
+}
+
+// repoAssetsComplete 该 release 的资产是否够节点安装，口径与 version_probe.go 一致
+// （那边判「最新版本能不能升」，这边判「历史版本能不能选」，同一个取用形态）。
+func repoAssetsComplete(repo string, assets []releaseAsset) bool {
+	set := make(map[string]bool, len(assets))
+	for _, a := range assets {
+		set[a.Name] = true
+	}
+	switch repo {
+	case defaultAgentRepo:
+		return agentAssetsComplete(set)
+	case defaultXrayRepo:
+		return xrayAssetsComplete(set)
+	}
+	return len(set) > 0
+}
+
+// fetchRepoVersionsREST 读 GitHub releases 列表并过滤出可安装版本。
+func fetchRepoVersionsREST(ctx context.Context, repo string) ([]string, error) {
+	apiURL := fmt.Sprintf("%s/repos/%s/releases?per_page=%d", strings.TrimSuffix(githubAPIBase, "/"), repo, xrayVersionMax)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var items []releaseItem
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&items); err != nil {
+		return nil, fmt.Errorf("解析 releases 列表失败: %w", err)
+	}
+
+	out := make([]string, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, r := range items {
+		tag := strings.TrimSpace(r.TagName)
+		if r.Draft || tag == "" || seen[tag] || !repoAssetsComplete(repo, r.Assets) {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+		if len(out) >= xrayVersionMax {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("没有可安装的发布版本（资产不齐或全部为草稿）")
+	}
+	return out, nil
+}
+
+// fetchRepoVersionsAtom 降级路径：从 releases.atom 取最近版本（含纯 tag）。
+func fetchRepoVersionsAtom(ctx context.Context, mirror, repo string) ([]string, error) {
 	base := "https://github.com"
 	if strings.TrimSpace(mirror) != "" {
 		base = strings.TrimSuffix(strings.TrimSpace(mirror), "/")

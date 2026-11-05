@@ -618,7 +618,7 @@ func actionLabel(msgType string, force bool) string {
 		return "重启"
 	}
 	if force {
-		return "Agent 回滚"
+		return "Agent 回滚/重装"
 	}
 	return "Agent 自升级"
 }
@@ -660,6 +660,29 @@ func (d *Deps) AdminServerCommand(c *gin.Context) {
 		return
 	}
 	d.runCommandSync(c, ids[0], req.Type, req.ConfigJSON, req.Lines)
+}
+
+// agentUpgradeSkipReason Agent 自升级的预检：返回跳过原因，空串表示可以下发。
+//
+// 三种情形：
+//   - 非 force：目标不高于当前版本 ⇒ 无需升级（"已是最新版本"）；
+//   - force 且目标更低/相同：合法的回滚或**重装**——同版本不是无效请求，节点会重新
+//     下载并替换二进制（二进制损坏/被替换的修复路径，与内核同版本重装同语义）；
+//   - force 但当前 agent 低于 v0.1.17：旧 agent 不认识 force 字段且硬编码拒绝回滚，只能跳过。
+func agentUpgradeSkipReason(srv models.Server, target string, force bool) string {
+	if srv.AgentVersion == "" {
+		return "" // 旧 agent 未上报版本，交给节点自己判断
+	}
+	if !force {
+		if CompareAgentVersion(srv.AgentVersion, target) >= 0 {
+			return "已是最新版本 " + srv.AgentVersion
+		}
+		return ""
+	}
+	if srv.AgentVersion != "dev" && CompareAgentVersion(srv.AgentVersion, "v0.1.17") < 0 {
+		return "当前 Agent " + srv.AgentVersion + " 不支持在线回滚（需 v0.1.17 及以上）"
+	}
+	return ""
 }
 
 // dispatchAction 预检 → 标记排队 → 逐台下发，返回目标版本、派发与被跳过清单。
@@ -705,20 +728,9 @@ func (d *Deps) dispatchAction(ctx context.Context, ids []uint64, msgType, rawTar
 		effForce := force
 		switch msgType {
 		case protocol.MsgUpgradeAgent:
-			if !force && srv.AgentVersion != "" && CompareAgentVersion(srv.AgentVersion, target) >= 0 {
-				skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "已是最新版本 " + srv.AgentVersion})
+			if reason := agentUpgradeSkipReason(srv, target, force); reason != "" {
+				skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: reason})
 				continue
-			}
-			if force {
-				// 在线回滚只有 v0.1.17+ 支持（旧 agent 未知 force 字段且硬编码拒绝回滚）。
-				if srv.AgentVersion != "" && srv.AgentVersion != "dev" && CompareAgentVersion(srv.AgentVersion, "v0.1.17") < 0 {
-					skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "当前 Agent " + srv.AgentVersion + " 不支持在线回滚（需 v0.1.17 及以上）"})
-					continue
-				}
-				if srv.AgentVersion != "" && target != "" && CompareAgentVersion(srv.AgentVersion, target) == 0 {
-					skipped = append(skipped, commandSkip{ID: id, Name: srv.Name, Reason: "当前已是版本 " + srv.AgentVersion + "，无需回滚"})
-					continue
-				}
 			}
 		case protocol.MsgUpgradeXray:
 			if srv.XrayVersion != "" && target != "" {

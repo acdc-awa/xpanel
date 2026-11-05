@@ -212,7 +212,8 @@ func (d *Deps) GetCachedAgentVersions(ctx context.Context, force bool) ([]string
 }
 
 // AdminGetAgentVersions GET /api/v1/admin/servers/agent-versions?refresh=1
-// 返回最近发布的 Agent 版本列表（含 prerelease），供面板的版本选择器使用。
+// 返回最近**可安装**的 Agent 版本列表（含 prerelease，资产不齐/纯 tag 已剔除），
+// 供面板的版本选择器使用。
 func (d *Deps) AdminGetAgentVersions(c *gin.Context) {
 	force := c.Query("refresh") == "1" || c.Query("refresh") == "true"
 	versions, checkedAt, err := d.GetCachedAgentVersions(c.Request.Context(), force)
