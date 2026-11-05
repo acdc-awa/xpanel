@@ -18,6 +18,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 )
 
 // 支持的密钥类型常量
@@ -294,10 +296,29 @@ func SignServerCert(caCertPEM, caKeyPEM string, req CertSignRequest) (*CertSignR
 	if !caCert.IsCA {
 		return nil, errors.New("提供的证书不是 CA 证书（IsCA 为 false）")
 	}
+	// 过期的 CA 不能再签发：旧实现只把 leaf 的 NotAfter 夹到 CA 的 NotAfter，
+	// CA 已过期时会「成功」产出一张出生即过期的证书。
+	now := time.Now()
+	if now.After(caCert.NotAfter) {
+		return nil, fmt.Errorf("CA 证书已于 %s 过期，无法签发", caCert.NotAfter.Format("2006-01-02 15:04"))
+	}
+	if now.Add(5 * time.Minute).Before(caCert.NotBefore) {
+		return nil, fmt.Errorf("CA 证书尚未生效（NotBefore=%s）", caCert.NotBefore.Format("2006-01-02 15:04"))
+	}
+	if caCert.KeyUsage != 0 && caCert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, errors.New("CA 证书未声明 KeyUsageCertSign，无法签发")
+	}
 
 	caKey, err := ParsePrivateKey(caKeyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("解析 CA 私钥失败: %w", err)
+	}
+	caSigner, ok := caKey.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("不支持的 CA 私钥类型: %T", caKey)
+	}
+	if !tlscert.PublicKeysEqual(caCert.PublicKey, caSigner.Public()) {
+		return nil, errors.New("CA 私钥与 CA 证书不匹配")
 	}
 
 	leafPriv, leafPub, actualKeyType, err := generateKeyPair(req.KeyType)
@@ -458,10 +479,10 @@ func GenerateCustomSelfSigned(req SelfSignedRequest) (*CertSignResult, error) {
 		Subject:               subject,
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA:                  true, // 自签证书标记 IsCA=true 兼容作为信任锚点
+		IsCA:                  true, // 自签证书标记 IsCA=true 兼容作为信任锚点；不置 CertSign：它只服务 TLS，不签发任何证书。
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,
 	}
@@ -530,26 +551,98 @@ func ValidateCAPair(certPEM, keyPEM string) error {
 	if err != nil {
 		return err
 	}
-	switch k := key.(type) {
-	case *rsa.PrivateKey:
-		pub, ok := cert.PublicKey.(*rsa.PublicKey)
-		if ok && pub.N.Cmp(k.PublicKey.N) == 0 {
-			return nil
-		}
-	case *ecdsa.PrivateKey:
-		pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
-		if ok && pub.X.Cmp(k.PublicKey.X) == 0 && pub.Y.Cmp(k.PublicKey.Y) == 0 {
-			return nil
-		}
-	case ed25519.PrivateKey:
-		pub, ok := cert.PublicKey.(ed25519.PublicKey)
-		if ok && pub.Equal(k.Public()) {
-			return nil
-		}
-	default:
+	signer, ok := key.(crypto.Signer)
+	if !ok {
 		return fmt.Errorf("不支持的私钥类型: %T", key)
 	}
-	return errors.New("CA 证书与私钥公钥不匹配")
+	if !tlscert.PublicKeysEqual(cert.PublicKey, signer.Public()) {
+		return errors.New("CA 证书与私钥公钥不匹配")
+	}
+	return nil
+}
+
+// ValidateServerCert 校验「准备下发到节点」的服务端证书的语义：
+// 有效期、domain 是否被 SAN 覆盖、公钥强度。
+// PEM 语法与公私钥配对由调用方另行校验（见 tlscert.ValidatePair）。
+func ValidateServerCert(certPEM, domain string) error {
+	leaf, err := ParseCertificate(certPEM)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if now.After(leaf.NotAfter) {
+		return fmt.Errorf("证书已于 %s 过期", leaf.NotAfter.Format("2006-01-02 15:04"))
+	}
+	// 允许 5 分钟时钟偏差：证书通常以签发时刻作为 NotBefore。
+	if now.Add(5 * time.Minute).Before(leaf.NotBefore) {
+		return fmt.Errorf("证书尚未生效（NotBefore=%s）", leaf.NotBefore.Format("2006-01-02 15:04"))
+	}
+	if !certCoversDomain(leaf, domain) {
+		return fmt.Errorf("证书 SAN 未覆盖 %q", domain)
+	}
+	return validatePublicKeyStrength(leaf.PublicKey)
+}
+
+// certCoversDomain 判断证书 SAN 是否覆盖 domain：IP 走 IPAddresses 精确匹配，
+// 域名支持精确匹配与最左一级通配（*.example.com）。
+func certCoversDomain(cert *x509.Certificate, domain string) bool {
+	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	if ip := net.ParseIP(host); ip != nil {
+		for _, candidate := range cert.IPAddresses {
+			if candidate.Equal(ip) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, pattern := range cert.DNSNames {
+		if dnsNameMatches(strings.ToLower(strings.TrimSuffix(pattern, ".")), host) {
+			return true
+		}
+	}
+	return false
+}
+
+// dnsNameMatches 精确匹配，或通配只覆盖一层子域：
+// *.example.com 覆盖 a.example.com，不覆盖 example.com 与 a.b.example.com。
+func dnsNameMatches(pattern, host string) bool {
+	if pattern == host {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(pattern, "*.")
+	if !ok {
+		return false
+	}
+	left, ok := strings.CutSuffix(host, "."+suffix)
+	return ok && left != "" && !strings.Contains(left, ".")
+}
+
+// validatePublicKeyStrength 拒绝已被现代 TLS 淘汰的密钥：RSA < 2048、
+// P-224 等非常规曲线。Ed25519 长度固定，仅做完整性检查。
+func validatePublicKeyStrength(pub crypto.PublicKey) error {
+	switch k := pub.(type) {
+	case *rsa.PublicKey:
+		if k.N.BitLen() < 2048 {
+			return fmt.Errorf("RSA 密钥仅 %d 位，不足 2048 位", k.N.BitLen())
+		}
+	case *ecdsa.PublicKey:
+		switch k.Curve {
+		case elliptic.P256(), elliptic.P384(), elliptic.P521():
+		default:
+			name := "unknown"
+			if params := k.Curve.Params(); params != nil {
+				name = params.Name
+			}
+			return fmt.Errorf("不支持的椭圆曲线 %s", name)
+		}
+	case ed25519.PublicKey:
+		if len(k) != ed25519.PublicKeySize {
+			return errors.New("Ed25519 公钥长度非法")
+		}
+	default:
+		return fmt.Errorf("不支持的证书公钥类型 %T", pub)
+	}
+	return nil
 }
 
 func contains(arr []string, s string) bool {

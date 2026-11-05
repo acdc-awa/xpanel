@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel-node/pkg/tlscert"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/certutil"
 	"github.com/acdc-awa/xpanel/internal/pkg/db"
@@ -244,6 +245,11 @@ func (d *Deps) AdminIssueCertFromCA(c *gin.Context) {
 	domain := strings.TrimSpace(req.Domain)
 	if domain == "" {
 		util.BadRequest(c, "域名不能为空")
+		return
+	}
+	// 与上传/自签路径一致：domain 会落成节点上的目录名，必须是合法域名/IP。
+	if !tlscert.DomainRe.MatchString(domain) {
+		util.BadRequest(c, "域名格式无效（仅允许字母数字 . -）")
 		return
 	}
 

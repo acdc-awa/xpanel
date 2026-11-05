@@ -149,6 +149,10 @@ func (d *Deps) AdminCreateCert(c *gin.Context) {
 		util.BadRequest(c, err.Error())
 		return
 	}
+	if err := certutil.ValidateServerCert(req.CertPEM, req.Domain); err != nil {
+		util.BadRequest(c, err.Error())
+		return
+	}
 	pin, err := tlscert.PinSHA256Hex(req.CertPEM)
 	if err != nil {
 		util.BadRequest(c, "pin 计算失败: "+err.Error())
@@ -257,6 +261,10 @@ func (d *Deps) AdminUpdateCert(c *gin.Context) {
 			return
 		}
 		if err := tlscert.ValidatePair(*req.CertPEM, *req.KeyPEM); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
+		if err := certutil.ValidateServerCert(*req.CertPEM, cert.Domain); err != nil {
 			util.BadRequest(c, err.Error())
 			return
 		}

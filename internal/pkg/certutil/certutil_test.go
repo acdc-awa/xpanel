@@ -1,8 +1,17 @@
 package certutil
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,6 +184,9 @@ func TestGenerateCustomSelfSigned(t *testing.T) {
 	if !cert.IsCA {
 		t.Errorf("Self-signed cert should have IsCA=true")
 	}
+	if cert.KeyUsage&x509.KeyUsageCertSign != 0 {
+		t.Error("自签 leaf 不应带 KeyUsageCertSign（它不签发任何证书）")
+	}
 }
 
 func TestValidateCAPair_PublicKeyOnly(t *testing.T) {
@@ -209,5 +221,119 @@ func TestSignServerCert_InvalidCA(t *testing.T) {
 	_, err = SignServerCert("bad-pem", selfSigned.KeyPEM, CertSignRequest{CommonName: "sub.local"})
 	if err == nil {
 		t.Errorf("Expected error with bad CA PEM")
+	}
+}
+
+// mustSelfSignedPEM 造一张指定有效期与 SAN 的自签证书（用于边界用例）。
+func mustSelfSignedPEM(t *testing.T, key crypto.Signer, notBefore, notAfter time.Time, dns []string) string {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "edge.local"},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              dns,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	if err != nil {
+		t.Fatalf("CreateCertificate: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func mustKeyPEM(t *testing.T, key crypto.Signer) string {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+// TestSignServerCert_RejectsExpiredCA：CA 已过期时必须报错，而不是夹出一个
+// NotAfter 落在过去的 leaf。
+func TestSignServerCert_RejectsExpiredCA(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	now := time.Now()
+	caPEM := mustSelfSignedPEM(t, key, now.Add(-48*time.Hour), now.Add(-24*time.Hour), nil)
+
+	_, err = SignServerCert(caPEM, mustKeyPEM(t, key), CertSignRequest{
+		CommonName: "node.local",
+		ValidDays:  90,
+	})
+	if err == nil {
+		t.Fatal("过期 CA 应拒绝签发")
+	}
+	if !strings.Contains(err.Error(), "过期") {
+		t.Fatalf("错误应说明 CA 过期，got: %v", err)
+	}
+}
+
+// TestSignServerCert_RejectsMismatchedCAKey：证书与私钥不是一对时不能签发。
+func TestSignServerCert_RejectsMismatchedCAKey(t *testing.T) {
+	ca, err := GenerateCA(CAGenRequest{CommonName: "Pair CA", KeyType: KeyTypeECDSAP256})
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+	other, err := GenerateCA(CAGenRequest{CommonName: "Other CA", KeyType: KeyTypeECDSAP256})
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+	if _, err := SignServerCert(ca.CertPEM, other.KeyPEM, CertSignRequest{CommonName: "node.local"}); err == nil {
+		t.Fatal("CA 证书与私钥不匹配时应拒绝签发")
+	}
+}
+
+// TestValidateServerCert 覆盖下发前的语义闸门：SAN 覆盖、有效期、密钥强度。
+func TestValidateServerCert(t *testing.T) {
+	ca, err := GenerateCA(CAGenRequest{CommonName: "Validate CA", KeyType: KeyTypeECDSAP256})
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+	leaf, err := SignServerCert(ca.CertPEM, ca.KeyPEM, CertSignRequest{
+		CommonName: "relay.example.com",
+		SANDNS:     []string{"*.relay.example.com"},
+		SANIP:      []string{"10.0.0.8"},
+		ValidDays:  90,
+	})
+	if err != nil {
+		t.Fatalf("SignServerCert: %v", err)
+	}
+
+	okCases := []string{"relay.example.com", "node-1.relay.example.com", "10.0.0.8"}
+	for _, domain := range okCases {
+		if err := ValidateServerCert(leaf.FullchainPEM, domain); err != nil {
+			t.Errorf("ValidateServerCert(%q) 应通过: %v", domain, err)
+		}
+	}
+	badCases := []string{"other.example.com", "deep.node.relay.example.com", "10.0.0.9"}
+	for _, domain := range badCases {
+		if err := ValidateServerCert(leaf.FullchainPEM, domain); err == nil {
+			t.Errorf("ValidateServerCert(%q) 应拒绝（SAN 未覆盖）", domain)
+		}
+	}
+
+	// 已过期
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	now := time.Now()
+	expired := mustSelfSignedPEM(t, key, now.Add(-48*time.Hour), now.Add(-time.Hour), []string{"old.local"})
+	if err := ValidateServerCert(expired, "old.local"); err == nil {
+		t.Error("过期证书应拒绝")
+	}
+
+	// 弱密钥：RSA 1024
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	weak := mustSelfSignedPEM(t, rsaKey, now.Add(-time.Hour), now.Add(24*time.Hour), []string{"weak.local"})
+	if err := ValidateServerCert(weak, "weak.local"); err == nil {
+		t.Error("RSA 1024 应被拒绝")
 	}
 }
