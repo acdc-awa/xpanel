@@ -157,6 +157,11 @@ export interface SockoptConfig {
   // sockopt 不再重复提供（xray 运行时对两者取 OR，双开关会出现「关不掉」的假象）。
   mark?: number
   tproxy: 'off' | 'tproxy' | 'redirect'
+  /** v6only：监听 `::` 时只接受 IPv6（默认双栈）；仅在 listen 为 `::` 时生效 */
+  v6only: boolean
+  /** 表单未提供的 sockopt 子键（tcpMaxSeg / tcpWindowClamp / interface / tcpNoDelay…），
+   *  保存时原样回写——否则手改过的配置编辑一次就丢。 */
+  extra?: Record<string, any>
 }
 
 

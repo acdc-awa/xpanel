@@ -72,6 +72,8 @@ function editorModelValue(): string {
       flow: inb.flow || '',
       ratio: inb.ratio,
       total_gb: inb.total_gb ?? 0,
+      up: inb.up ?? 0,
+      down: inb.down ?? 0,
       expiry_time: inb.expiry_time ?? null,
       type: inb.type || 'user',
       target_inbound_id: inb.target_inbound_id,

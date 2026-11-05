@@ -31,8 +31,11 @@ func TestGetValidUsersFiltersUnavailableInbounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	past := time.Now().Add(-time.Hour)
+	// Total 是 GB、up/down 是字节（2026-11-05 修正的单位口径）：跑满 100GB 配额要按字节构造，
+	// 只写 Up:60/Down:40 会被当成 100 字节——那正是旧判定把 100GB 配额判超额的原因。
+	const gib = int64(1024 * 1024 * 1024)
 	full := models.Inbound{ServerID: srv.ID, Tag: "in-full", Protocol: "vless", Port: 1001,
-		Type: models.InboundTypeUser, Enabled: true, Total: 100, Up: 60, Down: 40}
+		Type: models.InboundTypeUser, Enabled: true, Total: 100, Up: 60 * gib, Down: 40 * gib}
 	expired := models.Inbound{ServerID: srv.ID, Tag: "in-expired", Protocol: "vless", Port: 1002,
 		Type: models.InboundTypeUser, Enabled: true, ExpiryTime: &past}
 	ok := models.Inbound{ServerID: srv.ID, Tag: "in-ok", Protocol: "vless", Port: 1003,

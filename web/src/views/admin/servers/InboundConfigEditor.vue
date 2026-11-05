@@ -13,6 +13,7 @@ import {
   CsInput,
   CsInputNumber,
   CsModal,
+  CsProgressBar,
   CsSegmentedControl,
   CsSelect,
   CsTabs,
@@ -28,6 +29,7 @@ import {
   getXrayKeys,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatBytes } from '@/utils/format'
 import CodeEditor from '@/components/CodeEditor.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { AccessLayer } from '@/api/types'
@@ -163,6 +165,14 @@ const localTrafficReset = ref(props.trafficReset || 'never')
 const localRatio = ref(1)
 const localTotalGB = ref(0)
 const localExpiryTime = ref<string | null>(null)
+// 本周期已用（只读）：随 _panel 传入，口径与后端限额判定一致（up+down 对配额）。
+// 编辑期间不刷新——新配额要保存后才会改变判定，这里只作「现在离限额还有多远」的参照。
+const localUsedBytes = ref(0)
+const localQuotaPercent = computed(() => {
+  const quota = localTotalGB.value * 1024 * 1024 * 1024
+  if (quota <= 0) return 0
+  return Math.min(100, Math.round((localUsedBytes.value / quota) * 100))
+})
 
 // 订阅分享与外部层
 const localShareStrategy = ref('node')
@@ -309,6 +319,8 @@ const sockoptForm = ref<SockoptConfig>({
   tcp_user_timeout: undefined,
   mark: undefined,
   tproxy: 'off',
+  v6only: false,
+  extra: {},
 })
 
 // 嗅探状态
@@ -664,12 +676,30 @@ function buildTlsSettingsObject(defaultAlpn?: string[]): Record<string, any> {
   return t
 }
 
+// sockopt 里有表单入口的键：回显时从 original 里剔除，剩下的进 extra 原样回写。
+// acceptProxyProtocol 有意列入「已知」——它统一写在 tcpSettings（xray 运行时对两者取 OR，
+// 双开关会出现「关不掉」的假象），保存时由传输层那条路径负责，不在 sockopt 里复活。
+const SOCKOPT_FORM_KEYS = new Set([
+  'tcpFastOpen',
+  'tcpCongestion',
+  'tcpcongestion',
+  'tcpMptcp',
+  'tcpKeepAliveIdle',
+  'tcpKeepAliveInterval',
+  'tcpUserTimeout',
+  'mark',
+  'tproxy',
+  'v6only',
+  'acceptProxyProtocol',
+])
+
 function buildSockoptObject(): Record<string, any> | undefined {
   // Hysteria 走 UDP/QUIC：sockopt 没有有效消费方（TCP 项全部无意义），
   // 表单已隐藏，生成侧也不写，避免把上一次 VLESS 的 TCP 调优带进配置。
   if (localProtocol.value === 'hysteria') return undefined
   if (!sockoptForm.value.enabled) return undefined
-  const so: Record<string, any> = {}
+  // 未知子键先铺底，表单字段覆盖其上——手改过的 tcpMaxSeg / interface 等不再保存即丢。
+  const so: Record<string, any> = { ...(sockoptForm.value.extra || {}) }
   if (sockoptForm.value.tcp_fast_open) {
     so.tcpFastOpen = sockoptForm.value.tcp_fast_open_qlen ? Number(sockoptForm.value.tcp_fast_open_qlen) : true
   }
@@ -693,6 +723,9 @@ function buildSockoptObject(): Record<string, any> | undefined {
   }
   if (sockoptForm.value.tproxy && sockoptForm.value.tproxy !== 'off') {
     so.tproxy = sockoptForm.value.tproxy
+  }
+  if (sockoptForm.value.v6only) {
+    so.v6only = true
   }
   return Object.keys(so).length > 0 ? so : undefined
 }
@@ -1182,6 +1215,8 @@ function parseJsonToForm(str: string) {
     if (typeof panel.flow === 'string') vlessForm.value.flow = panel.flow
     if (typeof panel.ratio === 'number') localRatio.value = panel.ratio
     if (typeof panel.total_gb === 'number') localTotalGB.value = panel.total_gb
+    localUsedBytes.value =
+      (typeof panel.up === 'number' ? panel.up : 0) + (typeof panel.down === 'number' ? panel.down : 0)
     if (typeof panel.expiry_time === 'string' && panel.expiry_time) localExpiryTime.value = panel.expiry_time
     if (typeof panel.share_addr_strategy === 'string') localShareStrategy.value = panel.share_addr_strategy
     if (typeof panel.share_addr === 'string') localShareAddr.value = panel.share_addr
@@ -1533,6 +1568,10 @@ function parseJsonToForm(str: string) {
     const sockoptSettings: any = streamObj.sockopt
     if (sockoptSettings && typeof sockoptSettings === 'object') {
       const isTfoNumber = typeof sockoptSettings.tcpFastOpen === 'number'
+      const sockoptExtra: Record<string, any> = {}
+      for (const [k, v] of Object.entries(sockoptSettings)) {
+        if (!SOCKOPT_FORM_KEYS.has(k)) sockoptExtra[k] = v
+      }
       sockoptForm.value = {
         enabled: true,
         tcp_fast_open: !!sockoptSettings.tcpFastOpen,
@@ -1544,6 +1583,8 @@ function parseJsonToForm(str: string) {
         tcp_user_timeout: typeof sockoptSettings.tcpUserTimeout === 'number' ? sockoptSettings.tcpUserTimeout : undefined,
         mark: typeof sockoptSettings.mark === 'number' ? sockoptSettings.mark : undefined,
         tproxy: sockoptSettings.tproxy || 'off',
+        v6only: sockoptSettings.v6only === true,
+        extra: sockoptExtra,
       }
     } else {
       sockoptForm.value = {
@@ -1557,6 +1598,8 @@ function parseJsonToForm(str: string) {
         tcp_user_timeout: undefined,
         mark: undefined,
         tproxy: 'off',
+        v6only: false,
+        extra: {},
       }
     }
 
@@ -1929,6 +1972,26 @@ watch(
                   value-format="YYYY-MM-DDTHH:mm:ssZ"
                 />
               </CsFormItem>
+
+              <!-- 本周期已用（只读，仅编辑存量入站时出现）：配额跑满或到期时后端 cron
+                   会自动停用该入站，这里给出与判定同口径的用量对照 -->
+              <CsFormItem v-if="inboundId" label="本周期已用" style="grid-column: span 2">
+                <div class="usage-line">
+                  <span class="usage-text">
+                    <strong>{{ formatBytes(localUsedBytes) }}</strong> /
+                    {{ localTotalGB > 0 ? formatBytes(localTotalGB * 1024 * 1024 * 1024) : '不限' }}
+                    <span v-if="localTotalGB > 0" class="usage-percent">({{ localQuotaPercent }}%)</span>
+                  </span>
+                  <CsProgressBar
+                    v-if="localTotalGB > 0"
+                    :value="localQuotaPercent"
+                    :bar-height="5"
+                    hide-text
+                    :color="localQuotaPercent >= 100 ? 'var(--color-text-status-error-ri38gt)' : undefined"
+                    :aria-label="`本周期已用 ${localQuotaPercent}%`"
+                  />
+                </div>
+              </CsFormItem>
             </div>
           </CsContainer>
         </div>
@@ -2199,6 +2262,27 @@ watch(
   font-size: 12px;
   line-height: 16px;
   color: var(--color-text-form-secondary-wt0md2, #656871);
+}
+
+/* 本周期已用：数值行 + 进度条（与入站卡片、用户卡片同一读法） */
+.usage-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  inline-size: 100%;
+}
+
+.usage-text {
+  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
+
+.usage-percent {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  margin-inline-start: 2px;
 }
 
 /* 嗅探目标是三个短选项：横向铺满整行，避免左侧堆成一列、右半边全空 */

@@ -324,6 +324,9 @@ export interface InboundItem {
   sniffing: string
   ratio: number
   total_gb?: number // 入站总流量上限（GB，0=不限）
+  /** 本周期已用字节（自上次 traffic_reset 清零以来的累计；tunnel 入站同样计数） */
+  up?: number
+  down?: number
   expiry_time?: string | null // 入站到期时间（null/缺失=永久）
   traffic_reset?: string // 重置周期 (never / daily / weekly / monthly)
   remark?: string // 备注/通道名称

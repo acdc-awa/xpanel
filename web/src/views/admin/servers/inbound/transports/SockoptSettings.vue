@@ -183,6 +183,22 @@ const tproxyOptions = [
           @update:model-value="(v: any) => updateField('tproxy', String(v) as SockoptConfig['tproxy'])"
         />
       </CsFormItem>
+
+      <!-- 仅 IPv6 监听（v6only） -->
+      <CsFormItem label="仅 IPv6 (v6only)">
+        <template #info>
+          <TipIcon
+            content="只在监听地址填 `::` 时生效：开启后该端口只接受 IPv6 连接（不再双栈）；监听 0.0.0.0 或具体 IPv4 时该开关无意义。"
+          />
+        </template>
+        <div class="control-cell">
+          <CsToggle
+            :model-value="modelValue.v6only"
+            label="仅接受 IPv6 连接"
+            @update:model-value="(v: boolean) => updateField('v6only', v)"
+          />
+        </div>
+      </CsFormItem>
     </div>
   </CsContainer>
 </template>

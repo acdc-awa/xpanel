@@ -31,6 +31,8 @@ type inboundView struct {
 	Sniffing           string     `json:"sniffing"`
 	Ratio              float64    `json:"ratio"`
 	TotalGB            int64      `json:"total_gb"`
+	Up                 int64      `json:"up"`   // 本周期已用字节（自上次 traffic_reset 清零以来；tunnel 入站同样计数）
+	Down               int64      `json:"down"` // 与 TotalGB 同口径：限额判定就是 up+down 对配额
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
 	Type               string     `json:"type"`                        // user / tunnel（forward 仅存量）
@@ -97,6 +99,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		Listen: i.Listen, SettingsJSON: i.SettingsJSON,
 		StreamSettings: i.StreamSettings, Sniffing: i.Sniffing,
 		Ratio: i.Ratio, TotalGB: i.Total, ExpiryTime: i.ExpiryTime,
+		Up: i.Up, Down: i.Down,
 		Enabled: i.Enabled, CreatedAt: i.CreatedAt,
 		Type: i.Type, InternalUUID: i.InternalUUID,
 		TargetInboundID: i.TargetInboundID, TargetAddress: i.TargetAddress, TargetPort: i.TargetPort,

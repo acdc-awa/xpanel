@@ -410,7 +410,8 @@ func migrateProxyChannelsToForwardInbounds(db *gorm.DB) error {
 						updates["remark"] = ch.Name
 					}
 					if ch.TrafficLimitGB > 0 && inb.Total == 0 {
-						updates["total"] = ch.TrafficLimitGB * 1024 * 1024 * 1024
+						// inbounds.total 的单位是 GB（与 API total_gb 同口径），这里不能乘 1024³。
+						updates["total"] = ch.TrafficLimitGB
 					}
 					if ch.UpBytes > 0 && inb.Up == 0 {
 						updates["up"] = ch.UpBytes

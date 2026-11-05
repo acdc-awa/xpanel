@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import {
   CsBadge,
@@ -14,6 +14,7 @@ import {
   CsFormField,
   CsModal,
   CsPage,
+  CsProgressBar,
   CsSelect,
   CsSpinner,
   CsTabs,
@@ -44,6 +45,7 @@ import {
   type UserAccessPoint,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatBytes } from '@/utils/format'
 import { formatDateOnly } from '@/utils/timezone'
 import { useServerScope } from '@/composables/useServerScope'
 
@@ -125,6 +127,34 @@ function syncTabQuery() {
   router.replace({ query })
 }
 
+// 用量轮询（20s）：只就地回填 up/down/enabled，不整表替换——整行换新会让卡片重建、
+// 开关与滚动位置闪动。页面不可见、有弹窗打开或正在保存/加载时跳过。
+const USAGE_REFRESH_MS = 20000
+let usageTimer: number | undefined
+// 写操作在途（启停/删除/保存）：轮询让路，避免把开关状态刷回旧值
+const mutating = ref(false)
+
+async function refreshUsage() {
+  if (document.visibilityState !== 'visible') return
+  if (activeTab.value !== 'inbounds' || loading.value || saving.value || editorOpen.value || mutating.value) return
+  const sid = typeof serverFilter.value === 'number' ? serverFilter.value : undefined
+  try {
+    const { data } = await getInbounds(sid)
+    if (data.code !== 0) return
+    const byId = new Map(list.value.map((r) => [r.id, r]))
+    for (const fresh of data.data.items) {
+      const row = byId.get(fresh.id)
+      if (!row) continue
+      row.up = fresh.up
+      row.down = fresh.down
+      // 配额/到期触发的自动停用发生在后端 cron，就地跟上开关状态
+      row.enabled = fresh.enabled
+    }
+  } catch {
+    /* 轮询失败静默：下次进入可见/下次 tick 再试，不弹 toast 打扰 */
+  }
+}
+
 let initialized = false
 
 onMounted(async () => {
@@ -136,6 +166,12 @@ onMounted(async () => {
   if (route.query.tab === 'access_points') activeTab.value = 'access_points'
   initialized = true
   syncServerQuery()
+  usageTimer = window.setInterval(refreshUsage, USAGE_REFRESH_MS)
+})
+
+onUnmounted(() => {
+  if (usageTimer !== undefined) window.clearInterval(usageTimer)
+  usageTimer = undefined
 })
 
 watch(serverFilter, () => {
@@ -288,6 +324,8 @@ function editorModelValue(): string {
       flow: editing.value.flow || '',
       ratio: editing.value.ratio,
       total_gb: editing.value.total_gb ?? 0,
+      up: editing.value.up ?? 0,
+      down: editing.value.down ?? 0,
       expiry_time: editing.value.expiry_time ?? null,
       type: editing.value.type || 'user',
       target_inbound_id: editing.value.target_inbound_id,
@@ -411,6 +449,8 @@ async function save() {
 
 // ---- 启用 / 删除 ----
 async function toggle(row: any) {
+  // 与用量轮询互斥：否则轮询可能在 toggle 请求在途时把开关刷回旧值
+  mutating.value = true
   try {
     const { data } = await toggleInbound(row.id)
     if (data.code === 0) {
@@ -421,6 +461,8 @@ async function toggle(row: any) {
     }
   } catch (e) {
     ElMessage.error(errMsg(e, '操作失败'))
+  } finally {
+    mutating.value = false
   }
 }
 
@@ -452,13 +494,40 @@ function transportOf(row: any): string {
   }
 }
 
-// 流量/到期摘要：主值 + 括号内细节，如 "100 GB（09-30 到期）" / "不限（永久，每天重置）"
-function quotaOf(row: any): string {
-  const gb = typeof row.total_gb === 'number' && row.total_gb > 0 ? `${row.total_gb} GB` : '不限'
-  const exp = row.expiry_time ? formatDateOnly(row.expiry_time) + ' 到期' : '永久'
-  const resetMap: Record<string, string> = { daily: '每天重置', weekly: '每周重置', monthly: '每月重置' }
-  const rst = row.traffic_reset && resetMap[row.traffic_reset] ? `，${resetMap[row.traffic_reset]}` : ''
-  return `${gb}（${exp}${rst}）`
+const BYTES_PER_GB = 1024 * 1024 * 1024
+const RESET_TEXT: Record<string, string> = { daily: '每天重置', weekly: '每周重置', monthly: '每月重置' }
+
+// 本周期已用字节：inbounds.up/down 由 agent 的 inbound>>> 计数器累计，
+// 口径与限额判定完全一致（都按字节比配额），tunnel 入站同样计数。
+function usedBytes(row: InboundItem): number {
+  return (row.up || 0) + (row.down || 0)
+}
+
+function quotaBytes(row: InboundItem): number {
+  return (row.total_gb || 0) * BYTES_PER_GB
+}
+
+function usagePercent(row: InboundItem): number {
+  const quota = quotaBytes(row)
+  if (quota <= 0) return 0
+  return Math.min(100, Math.round((usedBytes(row) / quota) * 100))
+}
+
+// 停用原因：cron 自动停用不写标记，只能按同一口径反推（与后端 QuotaExhausted 对齐）。
+// 没有这层提示时，超额/到期入站在卡片上与「管理员手动停用」长得一模一样。
+function stopReason(row: InboundItem): string {
+  if (row.enabled) return ''
+  if (row.total_gb && usedBytes(row) >= quotaBytes(row)) return '超额停用'
+  if (row.expiry_time && new Date(row.expiry_time).getTime() <= Date.now()) return '到期停用'
+  return ''
+}
+
+function resetTextOf(row: InboundItem): string {
+  return (row.traffic_reset && RESET_TEXT[row.traffic_reset]) || '不自动重置'
+}
+
+function expiryTextOf(row: InboundItem): string {
+  return row.expiry_time ? `${formatDateOnly(row.expiry_time)} 到期` : '永久有效'
 }
 </script>
 
@@ -524,6 +593,7 @@ function quotaOf(row: any): string {
                   </CsButton>
                   <span v-if="row.remark" class="cs-text-secondary node-card-remark">({{ row.remark }})</span>
                   <CsBadge :color="inboundChipColor(row)">{{ inboundChipText(row) }}</CsBadge>
+                  <CsBadge v-if="stopReason(row)" color="red">{{ stopReason(row) }}</CsBadge>
                 </div>
               </template>
 
@@ -546,8 +616,29 @@ function quotaOf(row: any): string {
                   </span>
                 </CsCardFact>
                 <CsCardFact label="传输与 TLS" :value="transportOf(row)" mono />
-                <CsCardFact label="流量与到期" :value="quotaOf(row)" mono />
+                <CsCardFact label="流量重置" :value="resetTextOf(row)" />
               </CsCardFacts>
+
+              <!-- 本周期用量：口径与限额判定一致（up+down 对配额），tunnel 入站同样计数 -->
+              <div class="inbound-traffic">
+                <div class="traffic-head">
+                  <span>本周期用量</span>
+                  <span class="traffic-value">
+                    <strong>{{ formatBytes(usedBytes(row)) }}</strong> /
+                    {{ row.total_gb ? formatBytes(quotaBytes(row)) : '不限' }}
+                    <span v-if="row.total_gb" class="traffic-percent">({{ usagePercent(row) }}%)</span>
+                  </span>
+                </div>
+                <CsProgressBar
+                  v-if="row.total_gb"
+                  :value="usagePercent(row)"
+                  :bar-height="5"
+                  hide-text
+                  :color="usagePercent(row) >= 100 ? 'var(--color-text-status-error-ri38gt)' : undefined"
+                  :aria-label="`入站 ${row.tag} 本周期已用 ${usagePercent(row)}%`"
+                />
+                <div class="traffic-expire">{{ expiryTextOf(row) }}</div>
+              </div>
 
               <template #footer>
                 <CsButton icon-name="edit" @click="openEdit(row)">编辑入站</CsButton>
@@ -736,6 +827,45 @@ function quotaOf(row: any): string {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 本周期用量块：与用户卡片的「流量使用」同构（头行 + 细条），保持两页读法一致 */
+.inbound-traffic {
+  margin-block-start: 12px;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
+}
+
+.traffic-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block-end: 6px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-value {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  text-align: end;
+}
+
+.traffic-percent {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  margin-inline-start: 2px;
+}
+
+.traffic-expire {
+  margin-block-start: 6px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .ap-group-badges {

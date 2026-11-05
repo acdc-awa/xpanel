@@ -302,6 +302,54 @@ func TestAdminInbounds_RetiredProtocolsRejected(t *testing.T) {
 	}
 }
 
+func TestAdminInbounds_ExposesUsageCounters(t *testing.T) {
+	db := apiTestDB(t)
+	db.Create(&models.Server{ID: 31, Name: "node-31", Host: "1.2.3.4", NodeID: "n31", Secret: "sec"})
+	// 限额与已用量同口径来源：Total(GB) 是配置值，Up/Down 是自上次重置以来的累计字节。
+	db.Create(&models.Inbound{
+		ServerID: 31, Tag: "tunnel-usage", Protocol: models.ProtocolTunnel, Port: 44311,
+		Type: models.InboundTypeTunnel, Total: 10,
+		Up: 1024, Down: 2048, TrafficReset: "monthly",
+	})
+
+	d := &Deps{DB: db}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/api/v1/admin/inbounds", d.AdminInbounds)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/inbounds?server_id=31", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("列表查询失败: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Items []struct {
+				Up           int64  `json:"up"`
+				Down         int64  `json:"down"`
+				TotalGB      int64  `json:"total_gb"`
+				TrafficReset string `json:"traffic_reset"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v body=%s", err, w.Body.String())
+	}
+	if len(resp.Data.Items) != 1 {
+		t.Fatalf("期望 1 条入站，实际 %d", len(resp.Data.Items))
+	}
+	got := resp.Data.Items[0]
+	if got.Up != 1024 || got.Down != 2048 {
+		t.Errorf("用量字段未透出: up=%d down=%d, want 1024/2048", got.Up, got.Down)
+	}
+	if got.TotalGB != 10 || got.TrafficReset != "monthly" {
+		t.Errorf("限额配置字段异常: total_gb=%d traffic_reset=%s", got.TotalGB, got.TrafficReset)
+	}
+}
+
 func TestAdminUpdateInbound_ClearExpiryTime(t *testing.T) {
 	db := apiTestDB(t)
 	db.Create(&models.Server{ID: 30, Name: "node-30", Host: "1.2.3.4", NodeID: "n30", Secret: "sec"})

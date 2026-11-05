@@ -686,12 +686,12 @@ func ParseInboundTags(configJSON string) map[string]bool {
 }
 
 // FilterAvailableInbounds 过滤不可用入站（J9 激活，订阅与生成双端同源）：
-// Total>0 且 up+down >= Total（入站总流量跑满）→ 移除；ExpiryTime 已过 → 移除。
+// 配额跑满（QuotaExhausted，字节口径）→ 移除；ExpiryTime 已过 → 移除。
 func FilterAvailableInbounds(inbounds []models.Inbound) []models.Inbound {
 	now := time.Now()
 	out := inbounds[:0]
 	for _, inb := range inbounds {
-		if inb.Total > 0 && inb.Up+inb.Down >= inb.Total {
+		if inb.QuotaExhausted() {
 			continue
 		}
 		if inb.ExpiryTime != nil && now.After(*inb.ExpiryTime) {

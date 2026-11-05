@@ -122,3 +122,33 @@ func TestT1CertModel(t *testing.T) {
 	}
 	_ = got2.NotAfter
 }
+
+// 入站配额单位口径（2026-11-05）：total 列是 GB，up/down 是字节。
+// 历史缺陷是四处判定直接拿字节比 GB——100GB 的配额被 100 字节的用量判超额，
+// 入站收到第一批流量后 5 分钟内就被自动停用，订阅里整台入口消失。
+func TestInboundQuotaBytesUnit(t *testing.T) {
+	gb := int64(1024 * 1024 * 1024)
+	cases := []struct {
+		name string
+		inb  Inbound
+		want bool
+	}{
+		{"不限恒为未超额", Inbound{Total: 0, Up: 1 << 40, Down: 1 << 40}, false},
+		{"100GB 配额用到 1KB 不算超额", Inbound{Total: 100, Up: 1024, Down: 0}, false},
+		{"100GB 配额用到 99.9GB 不算超额", Inbound{Total: 100, Up: 99 * gb, Down: gb / 2}, false},
+		{"恰好跑满算超额", Inbound{Total: 100, Up: 60 * gb, Down: 40 * gb}, true},
+		{"超出 1 字节也算超额", Inbound{Total: 1, Up: gb, Down: 1}, true},
+	}
+	for _, c := range cases {
+		if got := c.inb.QuotaExhausted(); got != c.want {
+			t.Errorf("%s: QuotaExhausted=%v, want %v (quota=%d bytes)", c.name, got, c.want, c.inb.QuotaBytes())
+		}
+	}
+	inb := Inbound{Total: 100}
+	if got := inb.QuotaBytes(); got != 100*gb {
+		t.Errorf("QuotaBytes=%d, want %d", got, 100*gb)
+	}
+	if got := (&Inbound{Total: 0}).QuotaBytes(); got != 0 {
+		t.Errorf("不限应换算为 0，实际 %d", got)
+	}
+}

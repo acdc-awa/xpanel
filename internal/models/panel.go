@@ -103,7 +103,7 @@ type Inbound struct {
 	// 流量统计（冗余计数器，避免每次 SUM traffic_logs）
 	Up            int64      `gorm:"default:0" json:"up"`
 	Down          int64      `gorm:"default:0" json:"down"`
-	Total         int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限（0=不限）
+	Total         int64      `gorm:"default:0" json:"total"`                     // 入站总流量上限，单位 **GB**（0=不限；判定用 QuotaBytes 换算成字节）
 	TrafficReset  string     `gorm:"size:16;default:never" json:"traffic_reset"` // never / daily / weekly / monthly
 	LastResetDate string     `gorm:"size:10" json:"-"`                           // ISSUE-05：上次清零周期键（YYYY-MM-DD / YYYY-MM），防止同周期重复清零
 	ExpiryTime    *time.Time `json:"expiry_time,omitempty"`                      // 入站自身到期时间
@@ -144,6 +144,27 @@ type Inbound struct {
 // IsTunnel 判断入站是否为四层直通管道（端口转发）。
 func (inb *Inbound) IsTunnel() bool {
 	return inb.Protocol == ProtocolTunnel || inb.Type == InboundTypeTunnel
+}
+
+// quotaBytesPerGB 入站配额的单位换算基数（GiB，与前端 total_gb 展示同口径）。
+const quotaBytesPerGB int64 = 1024 * 1024 * 1024
+
+// QuotaBytes 入站总流量上限换算成字节（0=不限）。
+// `total` 列存的是 **GB**（J9 起 UI/API 的 total_gb 原样落库），而 up/down 与
+// traffic_logs 全是字节——限额判定必须在唯一一处换算，否则 100GB 的配额会被
+// 100 字节的用量判超额（历史上四处判定各自拿字节比 GB，就是这个后果）。
+func (inb *Inbound) QuotaBytes() int64 {
+	if inb.Total <= 0 {
+		return 0
+	}
+	return inb.Total * quotaBytesPerGB
+}
+
+// QuotaExhausted 本周期用量是否已跑满上限（up/down 均为自上次 traffic_reset 清零
+// 以来的字节累计）。0=不限恒为 false。
+func (inb *Inbound) QuotaExhausted() bool {
+	q := inb.QuotaBytes()
+	return q > 0 && inb.Up+inb.Down >= q
 }
 
 // IsForwardProxy 判断入站是否为无用户维度的转发入口（四层直通 / 独立通道）。

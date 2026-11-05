@@ -626,8 +626,8 @@ func (s *TrafficService) resetInboundTraffic() {
 		if inb.LastResetDate == key {
 			continue
 		}
-		// 如果因超额停用（up+down >= total），重置周期时若未过期则自动复原启用
-		if inb.Total > 0 && !inb.Enabled && (inb.Up+inb.Down >= inb.Total) && (inb.ExpiryTime == nil || now.Before(*inb.ExpiryTime)) {
+		// 如果因超额停用（up+down >= 配额），重置周期时若未过期则自动复原启用
+		if inb.QuotaExhausted() && !inb.Enabled && (inb.ExpiryTime == nil || now.Before(*inb.ExpiryTime)) {
 			_ = s.DB.Model(&models.Inbound{}).Where("id = ?", inb.ID).Update("enabled", true)
 			modifiedServers[inb.ServerID] = true
 		}
@@ -908,7 +908,7 @@ func trafficDeleteCutoff(db *gorm.DB, now time.Time, days int) (time.Time, bool)
 }
 
 // checkInboundLifecycle 每 5 分钟检查入站生命周期（J9 激活）：
-// Total 跑满（up+down >= total）或 ExpiryTime 到期 → 自动停用。
+// 配额跑满（QuotaExhausted：字节口径）或 ExpiryTime 到期 → 自动停用。
 // 停用后订阅端实时生效（查询同源过滤）；节点配置由 1h 校准/下次推送收敛。
 func (s *TrafficService) checkInboundLifecycle() {
 	var inbounds []models.Inbound
@@ -921,7 +921,7 @@ func (s *TrafficService) checkInboundLifecycle() {
 		if !inb.Enabled {
 			continue
 		}
-		expired := (inb.Total > 0 && inb.Up+inb.Down >= inb.Total) ||
+		expired := inb.QuotaExhausted() ||
 			(inb.ExpiryTime != nil && now.After(*inb.ExpiryTime))
 		if expired {
 			_ = s.DB.Model(&inb).Update("enabled", false)

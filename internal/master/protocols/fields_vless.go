@@ -167,6 +167,8 @@ func vlessFieldSet() contracts.ProtocolFieldSet {
 		{Path: "stream.sockopt.mark", Xray: "streamSettings.sockopt.mark", Note: "mihomo 客户端无对应字段"},
 		{Path: "stream.sockopt.tcpFastOpen", Xray: "streamSettings.sockopt.tcpFastOpen"},
 		{Path: "stream.sockopt.acceptProxyProtocol", Xray: "streamSettings.sockopt.acceptProxyProtocol"},
+		{Path: "stream.sockopt.v6only", Xray: "streamSettings.sockopt.v6only",
+			Note: "仅服务端监听生效，且要求 listen=::；mihomo 客户端无对应字段"},
 	}
 
 	return contracts.ProtocolFieldSet{
