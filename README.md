@@ -3,13 +3,11 @@
 <div align="center">
 
 **主控 - 节点 - 用户三层架构的代理节点管理面板**
-*Go 1.26 + Vue 3.5 + Xray-core v26.10.31*
+*Go 1.27 + Vue 3.5 + Xray-core v26.10.31*
 
-[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Vue Version](https://img.shields.io/badge/Vue-3.5+-4FC08D?style=flat&logo=vuedotjs)](https://vuejs.org)
 [![Xray-core](https://img.shields.io/badge/Xray--core-v26.10.31-red?style=flat)](https://github.com/XTLS/Xray-core)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://docker.com)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 </div>
@@ -18,154 +16,85 @@
 
 ## 项目简介
 
-XrayPanel 是一套自托管的代理节点管理系统，采用「主控（Master） - 节点（Agent） - 用户端」三层架构：主控负责 Web 管理界面、配置生成、订阅服务与节点编排；节点 Agent 托管 Xray-core 进程，经 WebSocket 长连接接收配置下发、上报心跳与流量；用户端通过订阅链接获取节点信息。系统支持 VLESS（TCP / XHTTP）与 Hysteria 2（QUIC）入站、REALITY / TLS / VLESS Encryption 安全层，以及四层直通（tunnel）与 PROXY Protocol v2 透传，并提供可视化拓扑编排、权限组订阅模板、余额与礼品卡计费等运营能力。
+XrayPanel 是一套自托管的代理节点管理系统：主控负责 Web 管理端、Xray 配置生成、订阅服务与节点编排；节点 Agent 托管 Xray-core 进程，经 WSS 长连接接收配置下发、上报心跳与流量；用户凭订阅连接接入点。支持 VLESS（TCP / XHTTP）、Hysteria 2 与四层直通，并提供可视化拓扑编排、权限组订阅模板与余额计费。
 
-> **仓库结构**：面板（本仓库）与节点 Agent（[XPanel-Node](https://github.com/acdc-awa/XPanel-Node)）为两个独立仓库。Agent 二进制经 GitHub Actions 发布到 XPanel-Node Releases（linux/amd64 + arm64，附 sha256 校验），节点安装与自升级均从 Releases 拉取；通信协议包（`pkg/protocol`）单源托管于 XPanel-Node，本仓库经 go.mod 引入。
+> 节点 Agent 是独立仓库 [XPanel-Node](https://github.com/acdc-awa/XPanel-Node)：二进制与安装脚本从其 Releases 发布，跨仓库协议包 `pkg/protocol` 单源托管在那边、本仓库经 go.mod 引入。
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│           用户自备反向代理 (Caddy/Nginx) —— TLS 终止 + 域名/路径分流           │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │ 127.0.0.1:18080 / 18082 / 6000
-┌───────────────────────────────────┴─────────────────────────────────────────┐
-│                           Master 主控控制面 (Docker)                         │
-│                                                                             │
-│  ┌────────────────────────┐  ┌─────────────────────────┐  ┌──────────────┐  │
-│  │ Vue3 + Cloudscape      │  │ Gin REST API + JWT 鉴权 │  │ 节点 WS 网关  │  │
-│  │ 管理端 & 用户端 SPA     │  │ 订阅服务 (Clash / VLESS) │  │ (WSS 长连接) │  │
-│  └────────────────────────┘  └─────────────────────────┘  └──────────────┘  │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │ (双向长连接: 心跳 / 流量上报 / 配置下发)
-             ┌─────────────────────────┴─────────────────────────┐
-             ▼                                                   ▼
-┌─────────────────────────┐                         ┌─────────────────────────┐
-│    Agent 节点 1 (VPS)   │                         │     Agent 节点 2 (VPS)   │
-│ ┌─────────────────────┐ │                         │ ┌─────────────────────┐ │
-│ │ xray-agent 守护进程  │ │                         │ │ xray-agent 守护进程 │ │
-│ ├─────────────────────┤ │                         | ├─────────────────────┤ │
-│ │ Xray-core v26.10.31  │ │                         │ │ Xray-core v26.10.31  │ │
-│ └─────────────────────┘ │                         | └─────────────────────┘ │
-└─────────────────────────┘                         └─────────────────────────┘
+用户 ──TLS──▶ 自备反代（Caddy / Nginx：TLS 终止 + 域名/路径分流）
+                   │ 127.0.0.1:18080 面板 / 18082 节点 WS / 6000 订阅
+                   ▼
+        ┌──────────────────────────────────────┐
+        │  Master 主控（Docker）               │
+        │  SPA + API │ 订阅服务 │ 节点 WS 网关 │
+        └──────────────────┬───────────────────┘
+                           │ WSS：心跳 / 流量上报 / 配置下发
+                           ▼
+        ┌──────────────────────────────────────┐
+        │  Agent 节点（每台 VPS 一个）         │
+        │  xray-agent + Xray-core v26.10.31    │
+        └──────────────────────────────────────┘
 ```
 
 ---
 
 ## 核心特性
 
-### 传输与安全
-- **协议**：VLESS（TCP 推荐搭配 REALITY + Vision；XHTTP 适配 CDN 与反代分流）与 Hysteria 2（QUIC），另支持四层直通（tunnel）承接任意 TCP/UDP 转发；
-- **入站安全层可配置**：REALITY / TLS / VLESS Encryption（vlessenc，Xray 内建加密，适用无 TLS 场景）/ none；
-- **四层直通与 PROXY Protocol v2**：直通入站只做监听，目标与转发规则落库为可排序的普通出站/规则；出站可开启 PROXY Protocol v2 向落地透传真实客户端 IP；
-- **物理监听与对外暴露解耦**：节点本地仅监听 `127.0.0.1` 明文，TLS 终止由外部反向代理承担，订阅侧自动覆写分享地址（`ShareSecurity` / `ShareSNI` / `ShareHost` / `SharePath`）。
-
-### 可视化拓扑编排
-- 拖拽式画布管理节点连线与出站链（Outbound Chain），支持多级转发可视化；
-- 直-弧-直动态避让连线与 DAG 自动排版，布局云端持久化，支持全屏模式。
-
-### 安全机制
-- JWT 密钥首次启动自动生成（`crypto/rand`，64 字符）并持久化，无默认弱密钥；
-- 首次初始化自动生成 16 位随机管理员密码并在控制台高亮输出，首次登录强制改密；
-- `reset-admin` CLI 子命令可在终端直接重置密码，重置同时递增 `token_version` 使全网旧会话立即失效；
-- 支持 TOTP 两步验证、Cloudflare Turnstile 人机校验与登录失败防爆破锁定。
-
-### 部署韧性
-- 用户面板域名与节点通信端点物理分离，面板更换域名不影响节点在线；
-- Agent 支持多候选端点池与自动回退，主端点不可达时自动切换备用地址。
-
-### 计费与订阅
-- 纯余额直付：礼品卡（卡密）批量生成、导出、核销与余额流水；
-- 权限组模型：以入站开放权限组为访问控制来源，套餐自动绑定权限组；
-- 订阅模板库与 Clash 模板引擎：支持 `$PROXIES$` 全量展开、`$FILTER_PROXIES(regex)` 正则分组。
-
-### 监控与运营
-- 仪表盘核心 KPI 卡片、3/7/30 天流量趋势图、节点时序性能监控（CPU / 内存 / 磁盘 / 带宽 / 连接数）；
-- 公告系统（置顶与首页弹窗）、审计日志、定时备份。
+- **协议**：VLESS（TCP + REALITY/Vision；XHTTP 适配 CDN 与反代分流）、Hysteria 2（QUIC），以及承接任意 TCP/UDP 转发的四层直通（tunnel）；
+- **安全层四选一**：REALITY / TLS / VLESS Encryption / none；
+- **拓扑编排**：拖拽画布管理出站链，直-弧-直动态避让、DAG 自动排版，布局持久化；
+- **订阅**：VLESS 链接与 Clash 配置，支持模板库与 `$PROXIES$` / `$FILTER_PROXIES(regex)`；
+- **计费运营**：礼品卡余额直付、权限组与套餐、订阅到期自动退订、审计日志、定时备份；
+- **安全**：JWT 密钥首启自动生成，初始管理员随机密码仅输出一次且首登强制改密，支持 TOTP、Turnstile 与登录防爆破；
+- **部署韧性**：面板域名与节点通信端点分离，Agent 多候选端点自动回退；出站可开 PROXY Protocol v2 透传真实客户端 IP。
 
 ---
 
 ## 快速部署（主控）
 
-生产环境推荐 **Docker Compose + 压缩包挂载**形态部署主控：release 压缩包含编译好的二进制与前端产物，解压到宿主目录、完成配置后即可启动。TLS 终止与域名/路径分流由你自行部署的反向代理承担，本项目不随 compose 部署任何反代。
+生产推荐 Docker Compose 形态：release 包含二进制与前端产物，解压改配置即可启动，数据落在安装目录的 `data/`（SQLite + 备份）。TLS 终止与域名分流由你自备的反代承担（参考包内 `Caddyfile.reference`）。
 
-### 目录结构（安装后）
-
-```
-/opt/xray-panel/
-├── master                  # 主控二进制（升级时替换）
-├── web/dist/               # 前端产物（升级时替换）
-├── configs/config.yaml     # 应用配置（唯一入口，编辑后重启生效）
-├── data/                   # 数据目录（SQLite + JWT + 备份，持久化）
-├── docker-compose.yml
-├── .env                    # 仅 compose 编排参数（宿主端口映射 / BIND_ADDR，不进进程）
-├── .env.example
-├── Dockerfile.runtime      # 固定运行时镜像定义（compose 检测到镜像缺失时自动构建）
-├── Caddyfile.reference     # 自备反代参考模板
-├── install.sh              # 一键部署/升级脚本（release 包内自带）
-└── deploy/master/entrypoint.sh
-```
-
-### 第一步：运行安装脚本
-
-在目标目录执行（二选一）：
+### 1. 安装
 
 ```bash
-# 方式 A：在线一键（默认取最新 release，解压到当前目录）
+# 在线一键（取最新 release，解压到当前目录）
 curl -fsSL https://raw.githubusercontent.com/acdc-awa/xpanel/master/deploy/master/install.sh | bash
 
-# 方式 B：下载 release 包到服务器后，使用包内脚本
-bash install.sh                 # 解压到当前目录
-bash install.sh --dir /opt/xray-panel   # 或指定目录
+# 或下载 release 包后
+bash install.sh --dir /opt/xray-panel
 ```
 
-脚本自动完成：架构探测（amd64/arm64）→ 下载对应 release 包（直连 GitHub 超时自动切换内置镜像源）→ sha256 强制校验 → 解压二进制、前端产物与编排模板到目标目录 → 首次安装生成 `configs/config.yaml` 与 `.env` → 创建 `data/` 数据目录 → 以 root 运行时自动将安装目录属主调整为容器内用户（uid 1000）。
+常用参数：`--dir` 安装目录、`--version` 钉版本、`--file` 本地包离线安装、`--mirror` GitHub 代理前缀、`--fresh` 全新覆盖（默认保留已有配置与数据）；完整列表见 `bash install.sh --help`。
 
-重复运行默认只更新二进制与前端产物，**保留已有配置与数据**（即升级语义；`--fresh` 强制全新覆盖）。
+重复运行即升级：替换二进制与前端产物（编排模板同步刷新），已有的 `configs/`、`.env` 与 `data/` 保留。
 
-常用选项：
+### 2. 配置
 
-| 选项 | 说明 |
-|---|---|
-| `--dir <path>` | 安装目录（默认当前目录） |
-| `--version <v>` | 钉版本安装（如 `v0.1.21`），缺省取最新 release |
-| `--file <path>` | 本地 release 压缩包，完全离线部署 |
-| `--mirror <url>` | GitHub 替代基址/代理前缀（如 `https://ghproxy.net/https://github.com`） |
-| `--fresh` | 全新覆盖（默认保留已有配置与数据） |
-| `--dry-run` | 只打印将执行的步骤 |
-
-### 第二步：编辑配置
-
-编辑 `configs/config.yaml`（应用配置唯一入口；`.env` 只承载 compose 编排参数，不参与应用配置）。至少填写面板公网地址，JWT 密钥与管理员账密留空即可（首次启动自动生成）：
+编辑 `configs/config.yaml`（应用配置唯一入口），至少填写面板公网地址；JWT 密钥与管理员账密留空即可，首次启动自动生成：
 
 ```yaml
 app:
   env: prod
   public_url: https://panel.yourdomain.com
-  # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；不填则使用面板域名 + /node/ws
+  # ws_public_url: wss://ws.yourdomain.com/node/ws   # 可选；缺省用面板域名 + /node/ws
 ```
 
-**三端口模型**：面板由三个独立监听端口组成——
+三端口：`18080` 面板（SPA + API，含 `/healthz` `/readyz`）、`18082` 节点 WS 网关（`/node/ws`）、`6000` 订阅。默认只绑 `127.0.0.1`，改 `.env` 的 `BIND_ADDR=0.0.0.0` 才对全网卡开放。
 
-- **面板**（`app.port`，默认 18080）：SPA 前端与后端 API 合并监听，含 `/healthz` `/readyz` 探针；
-- **节点 WS 网关**（`app.ws_port`，默认 18082）：对外路径 `/node/ws`，可用 `app.ws_public_url` 整体覆盖；
-- **订阅**（`app.sub_port`，默认 6000）：独立订阅端口。
-
-三个端口默认只绑定宿主机 `127.0.0.1`（改 `.env` 中 `BIND_ADDR=0.0.0.0` 可对全网卡开放），由你部署的反向代理按域名/路径分流（参考模板见 `Caddyfile.reference`）。
-
-### 第三步：启动
+### 3. 启动
 
 ```bash
 docker compose up -d
 ```
 
-首次启动会自动构建固定运行时镜像（仅运行时依赖，不含业务代码，不随版本变化），无需手动 `docker build`。
+首次启动自动构建运行时镜像（仅运行时依赖，不随版本变化）。控制台会输出**仅显示一次**的随机管理员密码，首次登录强制改密。
 
-### 第四步：配置反向代理
+### 4. 反向代理
 
-TLS 终止与 443 端口由你的反代接管。以 Caddy 为例，使用包内 `Caddyfile.reference`（模板已按 `127.0.0.1` upstream 配好三端口分流规则）：
+用包内 `Caddyfile.reference` 按域名/路径分流三个端口（`/node/ws` 规则须先于默认反代匹配）：
 
 ```bash
-docker run -d --name caddy \
-  -p 80:80 -p 443:443 \
+docker run -d --name caddy -p 80:80 -p 443:443 \
   -v /opt/xray-panel/Caddyfile.reference:/etc/caddy/Caddyfile:ro \
   -v caddy-data:/data -v caddy-config:/config \
   -e SITE_ADDRESS=panel.yourdomain.com \
@@ -173,40 +102,15 @@ docker run -d --name caddy \
   caddy:2-alpine
 ```
 
-- `SITE_ADDRESS` 为面板域名，Caddy 自动申请并续签 HTTPS 证书；`SUB_SITE_ADDRESS` 为订阅独立域名（可选，不用可删除模板中对应段落）；
-- 使用 Nginx 等其他反代时，参照模板注释中的分流规则自行编写（`/node/ws` 规则必须先于默认反代匹配）；
-- 反代与面板同机时保持 `BIND_ADDR=127.0.0.1`，反代容器通过 `host.docker.internal` 或宿主机网卡访问各端口。
-
-> **安全提示（客户端 IP 识别）**：面板只在 **TCP 直连对端命中 `config.yaml` 的 `app.trusted_proxies`** 时才采信 `X-Forwarded-For`（`CF-Connecting-IP` / `X-Real-IP` 不再直接信任），否则一律使用 `RemoteAddr`。默认只信任回环；**Docker 部署时面板在容器内、反代在宿主机，面板看到的来源是 Docker 网桥网关（常见 `172.18.0.1`），必须把该地址加入 `trusted_proxies`**（`docker network inspect` 确认），否则所有请求会被视为同一 IP，限流共享且审计只记网关地址。反代侧还需用真实对端**覆盖**（而非追加）XFF（参考 `Caddyfile` 中的 `header_up X-Forwarded-For {remote_host}`）。切勿把面板端口直接暴露公网；即便如此，客户端自报的转发头也不会再影响限流、审计与人机验证的 IP 口径。
-
-### 第五步：获取初始管理员密码
-
-```bash
-docker compose logs master
-```
-
-首次初始化会输出如下卡片（随机密码仅显示一次，首次登录后强制修改）：
-
-```text
-==========================================================================
-                   XrayPanel 主控系统首次初始化成功！
-==========================================================================
-   管理后台:       https://panel.yourdomain.com (或您的反代域名)
-   管理员账号:     admin@panel.local
-   初始管理员密码: Kd4%H&$sb67Bnk^@
---------------------------------------------------------------------------
-   [安全提示] 初始随机密码仅在控制台显示一次，请妥善保存！
-   [安全提示] 首次登录后系统将强制要求修改密码。
-==========================================================================
-```
+面板只采信**来源命中 `app.trusted_proxies` 的** `X-Forwarded-For`（`CF-Connecting-IP` / `X-Real-IP` 不再直接信任），默认仅回环。Docker 部署时来源是网桥网关（常见 `172.18.0.1`），必须加入 `trusted_proxies`；反代侧还需用真实对端**覆盖**而非追加 XFF，否则限流与审计会把所有人记成同一 IP。
 
 ---
 
-## 接入节点（Agent）
+## 接入节点
 
-1. 登录管理后台，进入 **「服务器」** 页面，点击 **「新增服务器」**；
-2. 填写服务器名称与公网 IP，保存后点击对应服务器的 **「安装命令」** 按钮复制一键安装指令；
-3. 登录节点 VPS，以 `root` 权限粘贴并执行：
+1. 管理后台 →「服务器」→「新增服务器」，填写名称与公网 IP；
+2. 点击该服务器的「安装命令」复制指令；
+3. 在节点 VPS 以 `root` 执行：
 
 ```bash
 bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/download/install-agent.sh) \
@@ -215,144 +119,65 @@ bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/downlo
   --secret sec_xxxxxxxxxxxxxxxx
 ```
 
-脚本自动完成：
-
-- 从 [XPanel-Node Releases](https://github.com/acdc-awa/XPanel-Node/releases) 下载 `xray-agent` 二进制（自动匹配 amd64/arm64，按 release `checksums.txt` 强制 sha256 校验）；
-- 下载并配置锁定的 Xray-core v26.10.31（官方 Releases + 校验）；
-- 配置 systemd 守护进程并启动，与主控建立 WSS 长连接后自动上线。
-
-节点侧同样支持离线与镜像参数：`--agent-file` / `--xray-file`（本地文件安装）、`--agent-mirror`（GitHub 代理前缀）、`--agent-version`（钉版本）、`--force-config`（重置节点配置）等，直连 GitHub 超时时脚本也会自动切换内置镜像源。
+脚本按 release `checksums.txt` 强制校验 sha256，安装 `xray-agent` 与锁定的 Xray-core v26.10.31，写入 systemd 后自动上线。离线与镜像场景用 `--agent-file` / `--agent-mirror` / `--agent-version`。
 
 ---
 
 ## 日常运维
 
-### 重置管理员密码
-
-无需登录数据库，在宿主机执行：
-
 ```bash
-# 方式 A：自动生成全新 16 位随机强密码
+# 重置管理员密码（默认首个管理员，-email 可指定）
 docker compose exec master /app/master reset-admin
-
-# 方式 B：指定新密码
 docker compose exec master /app/master reset-admin -password "MyNewPass2026#!"
 
-# 指定目标管理员（默认重置首个管理员）
-docker compose exec master /app/master reset-admin -email admin@example.com
+# 升级面板：管理后台 →「系统设置 → 检查更新」（sha256 校验 + 自检 + 失败自动回滚）
+#         或直接重跑安装脚本：cd /opt/xray-panel && bash install.sh
 ```
 
-重置后系统自动递增 `token_version`，所有已签发的旧会话 Token 立即失效。
+升级只替换二进制与前端产物，配置与数据不动。**数据库 schema 是有版本的**：跨 `DBMinCompatibleVersion` 升级后不能只回退二进制，必须同时换回升级前的数据库备份（并删除 `panel.db-wal` / `panel.db-shm`）；面板内「备份恢复」只回数据、不回版本。**更新前先手动备份。**
 
-### 升级主控
-
-三种方式任选：
-
-```bash
-# 方式 A（推荐）：管理后台 → 系统设置 → 「检查更新 / 应用更新」
-# 自动下载 release 并强制校验 sha256，替换后进程退出由容器自动拉起新版本；
-# 新版本启动失败时 entrypoint 会自动回滚上一个二进制。更新前请先手动备份数据库。
-
-# 方式 B：重新运行安装脚本（覆盖 master 与 web/dist，保留配置与数据）
-cd /opt/xray-panel && bash install.sh
-
-# 方式 C：离线手动升级
-curl -fLO https://github.com/acdc-awa/xpanel/releases/latest/download/xpanel-master-<ver>-linux-amd64.tar.gz
-sha256sum -c xpanel-master-<ver>-linux-amd64.tar.gz.sha256
-tar -xzf xpanel-master-<ver>-linux-amd64.tar.gz -C /opt/xray-panel
-docker compose restart master
-```
-
-升级只替换 `master` 二进制与 `web/dist`，`configs/config.yaml` 与 `data/` 不受影响；但**数据库 schema 是有版本的**，跨不兼容版本（如 v0.2.0 的 v3 → v4）升级后**不能只回退二进制**——旧面板读到新库会被启动护栏拒绝并退出。完整回退必须同时换回升级前的数据库备份：
-
-1. `docker compose stop master`；
-2. 用升级前的备份覆盖 `data/panel.db`，并删除 `data/panel.db-wal`、`data/panel.db-shm`；
-3. 换回上一版 `master` 与 `web/dist`；
-4. `docker compose start master`。
-
-面板内的「备份列表恢复」只能把**数据**退回到某个时点（启动的仍是当前版本，会再次迁移到 v4），不能把面板版本退回去。
-
-### 节点维护命令
-
-在节点 VPS 上执行：
-
-```bash
-xray-agent status       # 查看 Agent 与 Xray 进程运行状态
-xray-agent restart      # 重启 Agent 及其托管的 Xray-core
-xray-agent logs -n 100  # 查看最近 100 行运行日志（-f 持续跟踪）
-xray-agent upgrade      # 检查并执行 Agent 自升级
-xray-agent uninstall    # 卸载 Agent 及相关组件
-```
+节点侧常用命令：`xray-agent status`、`restart`、`logs -n 100`、`upgrade`、`uninstall`。
 
 ---
 
 ## 本地开发
 
-### 依赖环境
-
-- Go 1.26+
-- Node.js 22+ 与 npm（CI 同版本）
-- Xray-core v26.10.31（配置验证用，建议使用[官方二进制](https://github.com/XTLS/Xray-core/releases)）
-
-### 仓库与工作区
-
-面板与节点两个仓库同级放置，通过根目录 `go.work` 聚合为 Go 工作区：
+依赖 Go 1.27+、Node.js 22+。两个仓库同级放置，并用 `go work init` 并入同一工作区，本地改 agent 的 `pkg/protocol` 才会立即生效（只克隆本仓库也可，go.mod 会拉取已发布的协议包）：
 
 ```bash
 git clone https://github.com/acdc-awa/xpanel.git
 git clone https://github.com/acdc-awa/XPanel-Node.git
-# 目录结构：xpanel/ 与 XPanel-Node/ 同级，工作区文件位于父目录 go.work
+go work init ./xpanel ./XPanel-Node
 ```
 
-面板经 `go.mod` 引入 XPanel-Node 的 `pkg/protocol`（`require github.com/acdc-awa/xpanel-node`）；工作区模式下本地修改 agent 仓库代码即时生效，发布时以 go.mod 钉定的版本为准。
-
-### 后端
-
 ```bash
-cd xpanel
-
-# 本地运行主控
+# 后端
 go run ./cmd/master -config configs/config.example.yaml
-
-# 运行全量单元测试
 go test ./...
-
-# 编译
 go build -o bin/master ./cmd/master
-```
 
-### 前端
-
-```bash
-cd xpanel/web
-
-npm install          # 安装依赖
-npm run dev          # Vite 开发服务器（端口 5173）
-npm run typecheck    # vue-tsc 严格类型检查
-npm run build        # 生产构建（含类型检查）
+# 前端（端口 5173）
+cd web && npm install && npm run dev
+npm run typecheck
+npm run build
 ```
 
 ---
 
 ## 技术栈
 
-| 层次 | 技术选型 | 说明 |
-|---|---|---|
-| 后端框架 | Go 1.26 + Gin | 单二进制分发，低资源占用 |
-| 持久层 | GORM + SQLite（默认） | 开发与生产均默认 SQLite（WAL 模式），MySQL 驱动保留可选 |
-| 协议引擎 | Xray-core v26.10.31（锁定版本） | VLESS（TCP / XHTTP）+ Hysteria 2（QUIC）+ 四层直通（tunnel） |
-| 前端框架 | Vue 3.5 + Vite + TypeScript | 组合式 API，Pinia 状态管理 |
-| UI 组件库 | Cloudscape 移植组件库（`Cs*`，Element Plus 残留） | 深色/浅色主题适配 |
-| 拓扑画布 | @vue-flow/core | 自定义节点、动态避让连线、DAG 自动排版 |
-| 反向代理 | 用户自备（Caddy 2 / Nginx 等） | TLS 终止与域名/路径分流由用户部署的反代承担，仓库提供参考模板 |
-| 安全与认证 | JWT (HMAC-SHA256) + Argon2id + TOTP | 无状态鉴权、会话版本吊销、两步验证 |
+| 层次 | 技术 |
+|---|---|
+| 后端 | Go 1.27 + Gin，单二进制分发 |
+| 持久层 | GORM + SQLite（WAL；开发与生产同构） |
+| 协议引擎 | Xray-core v26.10.31（锁定）：VLESS / Hysteria 2 / 四层直通 |
+| 前端 | Vue 3.5 + Vite + TypeScript + Pinia |
+| UI | Cloudscape 移植组件库（`Cs*`） |
+| 拓扑画布 | @vue-flow/core |
+| 认证 | JWT（HMAC-SHA256）+ Argon2id + TOTP |
 
 ---
 
 ## 许可证
 
-本项目基于 [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) 开源，Copyright (C) 2026 acdc-awa。
-
-- 任何人都可以自由使用、修改和再分发本项目，但无论以二进制还是网络服务形式向他人提供，都必须以相同协议开放完整源代码。
-- 捆绑/运行时下载的 [Xray-core](https://github.com/XTLS/Xray-core) 官方二进制遵循 [MPL-2.0](https://github.com/XTLS/Xray-core/blob/main/LICENSE)，不受本协议约束。
-- 如需商业授权（闭源、豁免 AGPL 义务），请联系作者单独洽谈。
+本项目基于 [AGPL-3.0](LICENSE) 开源，Copyright (C) 2026 acdc-awa：无论以二进制还是网络服务形式提供给他人，都必须以相同协议开放完整源码。捆绑的 Xray-core 遵循 MPL-2.0。如需商业授权，请联系作者。
