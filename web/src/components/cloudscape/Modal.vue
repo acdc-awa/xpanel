@@ -53,7 +53,7 @@ const headerId = `modal-header-${Math.random().toString(36).slice(2)}`
 /** 本实例是否持有滚动锁；隐藏实例（visible=false）不得释放别人的锁。 */
 let scrollLocked = false
 
-const rootClasses = computed(() => cx(CS.modal.root, CS.modal.refresh))
+const rootClasses = computed(() => cx(CS.modal.root, CS.modal.refresh, 'cs-modal-root'))
 const focusLockClasses = computed(() => cx(CS.modal['focus-lock'], CS.modal['position-center']))
 const dialogClasses = computed(() =>
   cx(
@@ -218,5 +218,20 @@ onBeforeUnmount(unlockScroll)
   flex: 1 1 auto;
   min-block-size: 0;
   overflow-y: auto;
+}
+
+/*
+ * 弹窗根节点是 inset:0 的全屏可点击层（click-outside-to-close），移动端 WebView
+ * 会把 tap highlight 画满整个视口，表现为点击弹窗出现蓝色遮罩。这里禁用该层高亮；
+ * 触摸设备再去掉 pointer 语义，避免部分 WebView 仍按 clickable 节点处理。
+ */
+.cs-modal-root {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (pointer: coarse) {
+  .cs-modal-root {
+    cursor: default;
+  }
 }
 </style>
