@@ -474,7 +474,7 @@ function removeHeader(index: number) {
           @update:model-value="(v: boolean) => updateField('xmuxEnabled', v)"
         />
         <TipIcon
-          content="不启用时交给内核默认（maxConnections=3，hMaxRequestTimes=600-900，hMaxReusableSecs=1800-3000）；一旦显式写入，必须整组填全，否则未填项会变成 0（不限制）。"
+          content="不启用时交给内核默认（maxConnections=3，hMaxRequestTimes=600-900，hMaxReusableSecs=1800-3000）；一旦显式写入，必须整组填全，否则未填项会变成 0（不限制）。区间是启动时随机取一个固定值，不是动态限流。"
         />
       </div>
       <div v-if="modelValue.xmuxEnabled" class="form-grid-2">
@@ -499,7 +499,7 @@ function removeHeader(index: number) {
           />
         </CsFormItem>
 
-        <CsFormItem label="单连接复用次数 hMaxRequestTimes">
+        <CsFormItem label="单连接请求上限 hMaxRequestTimes">
           <CsInput
             :model-value="modelValue.xmuxMaxRequestTimes"
             placeholder="默认 600-900"

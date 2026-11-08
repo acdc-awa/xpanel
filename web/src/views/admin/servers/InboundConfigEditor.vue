@@ -934,7 +934,10 @@ function buildXhttpSettings(): Record<string, any> {
     const kaNum = Number(ka)
     if (ka && Number.isInteger(kaNum)) xmux.hKeepAlivePeriod = kaNum
     else delete xmux.hKeepAlivePeriod
-    x.xmux = xmux
+    // 空对象等价于缺省（xray 会套默认组），但存成 {} 会让再次打开时开关显示为关闭。
+    // 统一按“未启用”落库，保持 UI 状态与配置语义一致。
+    if (Object.keys(xmux).length > 0) x.xmux = xmux
+    else delete x.xmux
   } else {
     delete x.xmux
   }
@@ -1500,10 +1503,13 @@ function parseJsonToForm(str: string) {
         uplinkDataKey: String(xhttpSettings.uplinkDataKey ?? ''),
         uplinkChunkSize: jsonRangeToString(xhttpSettings.uplinkChunkSize),
         xmuxEnabled,
-        xmuxMaxConnections: xmuxEnabled ? (jsonRangeToString(xmux.maxConnections) || '3') : '3',
+        // 已存在 xmux 时必须原样回显：缺键就是 0/不限，不能拿内核默认值补齐，
+        // 否则部分配置（如只写 maxConcurrency）保存后会多出 maxConnections=3 并触发互斥。
+        // 未启用时保留默认种子值，供用户打开开关时直接使用。
+        xmuxMaxConnections: xmuxEnabled ? jsonRangeToString(xmux.maxConnections) : '3',
         xmuxMaxConcurrency: xmuxEnabled ? jsonRangeToString(xmux.maxConcurrency) : '',
-        xmuxMaxRequestTimes: xmuxEnabled ? (jsonRangeToString(xmux.hMaxRequestTimes) || '600-900') : '600-900',
-        xmuxMaxReusableSecs: xmuxEnabled ? (jsonRangeToString(xmux.hMaxReusableSecs) || '1800-3000') : '1800-3000',
+        xmuxMaxRequestTimes: xmuxEnabled ? jsonRangeToString(xmux.hMaxRequestTimes) : '600-900',
+        xmuxMaxReusableSecs: xmuxEnabled ? jsonRangeToString(xmux.hMaxReusableSecs) : '1800-3000',
         xmuxCMaxReuseTimes: xmuxEnabled ? jsonRangeToString(xmux.cMaxReuseTimes) : '',
         xmuxHKeepAlivePeriod: xmuxEnabled && xmux.hKeepAlivePeriod !== undefined ? String(xmux.hKeepAlivePeriod) : '',
         rawExtra: Object.keys(rawExtra).length > 0 ? rawExtra : undefined,

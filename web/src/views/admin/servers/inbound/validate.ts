@@ -7,6 +7,9 @@ export interface IntRange {
   to: number
 }
 
+/** xray 的 Int32Range 上限；超出后 xray 反序列化会直接失败（中继出站也会用到该配置）。 */
+export const XRAY_INT32_MAX = 2147483647
+
 export function parseIntRange(raw: string): IntRange | null {
   const s = (raw || '').trim()
   if (!s) return null
@@ -15,7 +18,7 @@ export function parseIntRange(raw: string): IntRange | null {
   const from = parts[0]
   const to = parts.length > 1 ? parts[1] : parts[0]
   if (!Number.isInteger(from) || !Number.isInteger(to)) return null
-  if (from < 0 || to < 0 || to < from) return null
+  if (from < 0 || to < 0 || to < from || to > XRAY_INT32_MAX) return null
   return { from, to }
 }
 
@@ -23,7 +26,7 @@ function rangeError(raw: string, label: string, min: number): string {
   const s = (raw || '').trim()
   if (!s) return ''
   const r = parseIntRange(s)
-  if (!r) return `${label}：区间写法应为 "最小-最大" 或单个整数（如 "100-1000"）`
+  if (!r) return `${label}：区间写法应为 "最小-最大" 或单个整数（0–${XRAY_INT32_MAX}）`
   if (r.from < min) return `${label}：最小值不能小于 ${min}`
   if (r.to > 0 && r.to < r.from) return `${label}：最大值不能小于最小值`
   return ''
@@ -152,9 +155,14 @@ export function validateXhttp(c: XhttpConfig): string[] {
     if (conn && conc && conn.to > 0 && conc.to > 0) {
       errs.push('xmux：maxConnections 与 maxConcurrency 只能填一个')
     }
-    // hKeepAlivePeriod 是唯一允许负数的项（-1 关闭空闲保活），但必须整数。
+    // hKeepAlivePeriod 是唯一允许负数的项（-1 关闭空闲保活），但必须是有界整数。
     const ka = c.xmuxHKeepAlivePeriod.trim()
-    if (ka && !/^-?\d+$/.test(ka)) errs.push('xmux hKeepAlivePeriod：必须是整数（-1 表示关闭空闲保活）')
+    if (ka) {
+      const kaNum = Number(ka)
+      if (!/^-?\d+$/.test(ka) || !Number.isSafeInteger(kaNum) || kaNum < -1 || kaNum > XRAY_INT32_MAX) {
+        errs.push(`xmux hKeepAlivePeriod：必须是 -1 或 0–${XRAY_INT32_MAX} 的整数`)
+      }
+    }
   }
   return errs
 }

@@ -145,7 +145,7 @@ func certFilePath(domain, file string) string {
 	return "/etc/xray/certs/" + domain + "/" + file
 }
 
-// ValidateInbound 校验入站 JSON 基本有效性（透传模式：仅检查 JSON 可解析）。
+// ValidateInbound 校验入站 JSON 基本有效性，并对 xmux 做语义预检。
 func ValidateInbound(settingsJSON, streamSettings, sniffing string) error {
 	if settingsJSON != "" {
 		var v any
@@ -166,11 +166,14 @@ func ValidateInbound(settingsJSON, streamSettings, sniffing string) error {
 		}
 	}
 	// REALITY 密钥格式预检（非法 base64/长度推送到 agent 端 -test 才暴露）
+	if err := validateXHTTPXmux(streamSettings); err != nil {
+		return err
+	}
 	return ValidateRealityStream(streamSettings)
 }
 
 // ValidateOutbound 校验出站 settings/streamSettings JSON 有效性，
-// 并对 REALITY 密钥做格式预检（01 号文档 §4 第 6 项）。
+// 并对 REALITY 密钥与 xmux 做语义预检（01 号文档 §4 第 6 项）。
 func ValidateOutbound(settingsJSON, streamSettings string) error {
 	for _, s := range []string{settingsJSON, streamSettings} {
 		if s == "" {
@@ -180,6 +183,9 @@ func ValidateOutbound(settingsJSON, streamSettings string) error {
 		if err := json.Unmarshal([]byte(s), &v); err != nil {
 			return fmt.Errorf("出站 JSON 无效: %w", err)
 		}
+	}
+	if err := validateXHTTPXmux(streamSettings); err != nil {
+		return err
 	}
 	return ValidateRealityStream(streamSettings)
 }
