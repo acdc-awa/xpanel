@@ -164,3 +164,98 @@ func TestReservedOutbounds_RejectCreateAndDelete(t *testing.T) {
 		t.Errorf("renaming reserved tag should be 400, got %d: %s", wUpd.Code, wUpd.Body.String())
 	}
 }
+
+// 内置出站停用会让它在生成结果里被跳过、退回模板默认配置（策略静默丢失），
+// 所以启用状态必须和 Tag/协议一样锁死；普通出站的停用不能被误伤。
+func TestReservedOutbounds_RejectDisable(t *testing.T) {
+	deps, r, server := setupReservedOutboundsTest(t)
+	EnsureDefaultServerOutbounds(deps.DB, server.ID)
+
+	var directOb, blockedOb models.ServerOutbound
+	deps.DB.Where("server_id = ? AND tag = ?", server.ID, "direct").First(&directOb)
+	deps.DB.Where("server_id = ? AND tag = ?", server.ID, "blocked").First(&blockedOb)
+
+	putEnabled := func(ob models.ServerOutbound, enabled bool) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"enabled": enabled})
+		req := httptest.NewRequest(
+			"PUT",
+			"/api/v1/admin/servers/"+strconv.FormatUint(server.ID, 10)+"/outbounds/"+strconv.FormatUint(ob.ID, 10),
+			bytes.NewReader(body),
+		)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1. direct / blocked 停用一律 400，且库里仍是启用态
+	for _, ob := range []models.ServerOutbound{directOb, blockedOb} {
+		if w := putEnabled(ob, false); w.Code != http.StatusBadRequest {
+			t.Errorf("disabling reserved outbound %s should be 400, got %d: %s", ob.Tag, w.Code, w.Body.String())
+		}
+		var after models.ServerOutbound
+		deps.DB.First(&after, ob.ID)
+		if !after.Enabled {
+			t.Errorf("reserved outbound %s should stay enabled after rejected disable", ob.Tag)
+		}
+	}
+
+	// 2. 内置出站保存时整表回传 enabled=true 必须放行（否则编辑器改备注都会被拦）
+	if w := putEnabled(directOb, true); w.Code != http.StatusOK {
+		t.Errorf("saving reserved outbound with enabled=true should succeed, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 3. 形态锁定：协议没变、但把 settings 清空（旧版「引用入站 + 未选目标」的载荷）
+	// 会静默丢掉 direct 的 domainStrategy / 私网拦截 / 阻断回国，必须拦下
+	bodyWipe, _ := json.Marshal(map[string]any{
+		"protocol":             "freedom",
+		"inbound_ref":          0,
+		"settings_json":        "",
+		"outbound_json":        "",
+		"stream_settings_json": "",
+	})
+	reqWipe := httptest.NewRequest("PUT", "/api/v1/admin/servers/"+strconv.FormatUint(server.ID, 10)+"/outbounds/"+strconv.FormatUint(directOb.ID, 10), bytes.NewReader(bodyWipe))
+	reqWipe.Header.Set("Content-Type", "application/json")
+	wWipe := httptest.NewRecorder()
+	r.ServeHTTP(wWipe, reqWipe)
+	if wWipe.Code != http.StatusBadRequest {
+		t.Errorf("wiping reserved outbound settings should be 400, got %d: %s", wWipe.Code, wWipe.Body.String())
+	}
+	var kept models.ServerOutbound
+	deps.DB.First(&kept, directOb.ID)
+	if kept.SettingsJSON == "" {
+		t.Error("reserved outbound settings should be preserved after rejected wipe")
+	}
+
+	// 4. 普通出站仍可停用（守卫不能误伤）
+	bodyNew, _ := json.Marshal(map[string]any{"tag": "proxy-out", "protocol": "freedom"})
+	reqNew := httptest.NewRequest("POST", "/api/v1/admin/servers/"+strconv.FormatUint(server.ID, 10)+"/outbounds", bytes.NewReader(bodyNew))
+	reqNew.Header.Set("Content-Type", "application/json")
+	wNew := httptest.NewRecorder()
+	r.ServeHTTP(wNew, reqNew)
+	if wNew.Code != http.StatusOK {
+		t.Fatalf("create normal outbound failed: %d %s", wNew.Code, wNew.Body.String())
+	}
+	var normal models.ServerOutbound
+	if err := deps.DB.Where("server_id = ? AND tag = ?", server.ID, "proxy-out").First(&normal).Error; err != nil {
+		t.Fatalf("normal outbound not found: %v", err)
+	}
+	if w := putEnabled(normal, false); w.Code != http.StatusOK {
+		t.Errorf("disabling normal outbound should succeed, got %d: %s", w.Code, w.Body.String())
+	}
+	var normalAfter models.ServerOutbound
+	deps.DB.First(&normalAfter, normal.ID)
+	if normalAfter.Enabled {
+		t.Error("normal outbound should be disabled after update")
+	}
+
+	// 5. 历史库被停用过的内置出站由 Ensure 自愈回启用态：否则前端锁住开关后无法再点回去
+	deps.DB.Model(&models.ServerOutbound{}).Where("id = ?", directOb.ID).Update("enabled", false)
+	EnsureDefaultServerOutbounds(deps.DB, server.ID)
+	var healed models.ServerOutbound
+	deps.DB.First(&healed, directOb.ID)
+	if !healed.Enabled {
+		t.Error("Ensure should re-enable reserved outbound disabled by legacy data")
+	}
+}

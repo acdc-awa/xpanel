@@ -29,6 +29,7 @@ import {
 } from '@/api/admin'
 import type { InboundItem } from '@/api/types'
 import { errMsg } from '@/api/http'
+import { isReservedOutboundTag } from '@/utils/outbound'
 
 const props = defineProps<{
   serverId: number
@@ -52,13 +53,13 @@ const deleting = ref(false)
 const mode = ref<OutboundMode>('basic')
 const legacyPayload = ref(false)
 
-const isSystemReserved = computed(() => props.outbound?.tag === 'direct' || props.outbound?.tag === 'blocked')
+const isSystemReserved = computed(() => isReservedOutboundTag(props.outbound?.tag))
 
-const modeOptions = [
+const modeOptions = computed(() => [
   { id: 'basic', text: '基础出口' },
-  { id: 'inbound_ref', text: '引用入站' },
-  { id: 'custom', text: '自定义 JSON' },
-]
+  { id: 'inbound_ref', text: '引用入站', disabled: isSystemReserved.value },
+  { id: 'custom', text: '自定义 JSON', disabled: isSystemReserved.value },
+])
 
 const BASIC_PROTOCOL_OPTIONS = [
   { label: 'freedom（自主直连出口）', value: 'freedom' },
@@ -518,7 +519,7 @@ onMounted(async () => {
   >
     <CsForm variant="embedded" label-position="top">
       <CsAlert v-if="isSystemReserved" type="info" header="系统内置核心出站">
-        该出站的 Tag 与模式已锁定，可调整内部策略、优先级与备注。
+        该出站的 Tag、出站形态与启用状态已锁定，可调整内部策略、优先级与备注。
       </CsAlert>
       <CsAlert v-if="legacyPayload" type="warning" header="旧版外部代理配置" style="margin-top: 12px">
         该行仍是旧版「外部代理节点」的 settings/stream 存储。已尽力预填为 JSON，请检查字段后保存，保存即完成转换。
@@ -528,7 +529,11 @@ onMounted(async () => {
         <template #actions>
           <div class="meta-toggle">
             <span class="cs-text-secondary">启用此出站</span>
-            <CsToggle v-model="form.enabled" aria-label="启用此出站" />
+            <CsToggle
+              v-model="form.enabled"
+              :disabled="isSystemReserved"
+              aria-label="启用此出站"
+            />
           </div>
         </template>
         <div class="form-grid-2">
@@ -544,30 +549,32 @@ onMounted(async () => {
             <CsInput v-model="form.send_through" class="mono" placeholder="留空使用系统默认 IP" />
           </CsFormItem>
           <CsFormItem label="优先级 Priority" description="数值越小，在 Xray outbounds 数组里越靠前。">
-            <CsInputNumber v-model="form.priority" :min="0" style="width: 100%" />
+            <CsInputNumber v-model="form.priority" :min="0" :precision="0" style="width: 100%" />
           </CsFormItem>
-          <CsFormItem label="备注说明">
-            <CsInput v-model="form.remark" placeholder="选填，如 默认直连出口 / 日本落地中转" />
+          <CsFormItem label="备注说明" description="仅面板内展示，不写入 Xray 配置。">
+            <CsInput v-model="form.remark" placeholder="如 默认直连出口 / 日本落地中转" />
           </CsFormItem>
         </div>
       </CsContainer>
 
       <CsContainer header="出站形态" style="margin-top: 16px">
+        <template #info>
+          <TipIcon
+            content="基础出口直接生成 freedom / blackhole；引用入站由目标入站自动拼装 vnext、传输与安全参数；自定义 JSON 原样交给 Xray。"
+          />
+        </template>
         <CsSegmentedControl
           :model-value="mode"
           :options="modeOptions"
           :full-width="true"
           @change="onModeChange"
         />
-        <p class="mode-hint cs-text-secondary">
-          基础出口直接生成 freedom / blackhole；引用入站由目标入站自动拼装；自定义 JSON 原样交给 Xray。
-        </p>
       </CsContainer>
 
       <!-- 基础出口 -->
       <CsContainer v-if="mode === 'basic'" header="基础出口策略" style="margin-top: 16px">
         <div class="form-grid-2">
-          <CsFormItem label="出口协议">
+          <CsFormItem label="出口协议" style="grid-column: 1 / -1">
             <CsSelect
               :model-value="form.protocol"
               :options="BASIC_PROTOCOL_OPTIONS"
@@ -575,11 +582,12 @@ onMounted(async () => {
               @update:model-value="onBasicProtocolChange"
             />
           </CsFormItem>
-        </div>
 
-        <template v-if="form.protocol === 'freedom'">
-          <div class="form-grid-2">
-            <CsFormItem label="域名解析策略 domainStrategy">
+          <template v-if="form.protocol === 'freedom'">
+            <CsFormItem
+              label="域名解析策略 domainStrategy"
+              description="AsIs 保留域名交给系统解析；UseIPv4 / UseIPv6 只用对应地址族；UseIP 自动选择。"
+            >
               <CsSelect
                 :model-value="form.domain_strategy"
                 :options="DOMAIN_STRATEGY_OPTIONS"
@@ -589,22 +597,28 @@ onMounted(async () => {
             <CsFormItem label="redirect 目标" description="格式 host:port；留空表示不重定向。">
               <CsInput v-model="form.redirect" class="mono" placeholder="host:port" />
             </CsFormItem>
-          </div>
-          <div class="switch-row">
-            <CsToggle v-model="form.block_private" label="屏蔽内网 / 保留网段（geoip:private）" />
-            <CsToggle v-model="form.block_cn" label="阻断回国（geoip:cn）" />
-          </div>
-        </template>
+            <div class="control-cell">
+              <CsToggle v-model="form.block_private" label="屏蔽内网 / 保留网段（geoip:private）" />
+            </div>
+            <div class="control-cell">
+              <CsToggle v-model="form.block_cn" label="阻断回国（geoip:cn）" />
+            </div>
+          </template>
 
-        <template v-else>
-          <CsFormItem label="黑洞响应方式" description="none 静默丢弃；http 返回 403，便于客户端快速失败。">
-            <CsSelect
-              :model-value="form.response_type"
-              :options="RESPONSE_TYPE_OPTIONS"
-              @update:model-value="(v: any) => (form.response_type = String(v))"
-            />
-          </CsFormItem>
-        </template>
+          <template v-else>
+            <CsFormItem
+              label="黑洞响应方式"
+              description="none 静默丢弃；http 返回 403，便于客户端快速失败。"
+              style="grid-column: 1 / -1"
+            >
+              <CsSelect
+                :model-value="form.response_type"
+                :options="RESPONSE_TYPE_OPTIONS"
+                @update:model-value="(v: any) => (form.response_type = String(v))"
+              />
+            </CsFormItem>
+          </template>
+        </div>
       </CsContainer>
 
       <!-- 引用入站 -->
@@ -632,6 +646,7 @@ onMounted(async () => {
         <CsAlert
           :type="refTarget ? 'success' : refTargetMissing ? 'warning' : 'info'"
           :header="refTarget ? '已连线' : refTargetMissing ? '目标入站不可用' : '待连线'"
+          style="margin-top: 12px"
         >
           <template v-if="refTarget">
             已引用「{{ refTargetServer?.name || '服务器#' + refTarget.server_id }} / {{ refTarget.tag }}」。vnext
@@ -694,10 +709,13 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* 全局 .form-grid-2 的 280px 最小列宽在本弹窗（large，内容约 920px）会挤成 3 列；
+   收到 350px 后宽屏稳定 2 列、窄屏自动落 1 列。行距沿用全局 12px，
+   子项间距一律交给栅格，不再用子项 margin 拼（与 base.scss 的网格清零规则打架）。 */
 .form-grid-2 {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+  gap: 12px 16px;
 }
 .meta-toggle {
   display: flex;
@@ -707,12 +725,8 @@ onMounted(async () => {
 .switch-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 28px;
+  gap: 12px 24px;
   margin-top: 4px;
-}
-.mode-hint {
-  margin: 10px 0 0;
-  font-size: 13px;
 }
 .mono {
   font-family: var(--font-family-monospace-842lr2, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -726,8 +740,5 @@ onMounted(async () => {
 /* 破坏性操作靠左，与右侧的主操作（保存）拉开距离 */
 .footer-delete {
   margin-inline-end: auto;
-}
-:deep(.cs-form-item) {
-  margin-bottom: 16px;
 }
 </style>

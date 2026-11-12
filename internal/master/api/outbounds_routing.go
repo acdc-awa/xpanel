@@ -281,6 +281,12 @@ func EnsureDefaultServerOutbounds(db *gorm.DB, serverID uint64) {
 			db.Model(&srv).Update("default_outbound_tag", "direct")
 		}
 	}
+
+	// 4. 内置出站不可停用（停用会让它们从生成结果里消失、退回模板默认策略）。
+	// 该限制是后加的，历史库可能已被停用，这里自愈回启用态，免得 UI 锁住开关后再也点不回去。
+	db.Model(&models.ServerOutbound{}).
+		Where("server_id = ? AND tag IN ? AND enabled = ?", serverID, []string{"direct", "blocked"}, false).
+		Update("enabled", true)
 }
 
 // AdminGetServerOutbounds GET /api/v1/admin/servers/:id/outbounds
@@ -522,6 +528,19 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 			util.BadRequest(c, "系统内置出站不可修改协议")
 			return
 		}
+		// 形态锁定：前端已置灰分段控件，这里兜住直接调 API 的情况。
+		// 除「引用入站 / 自定义 JSON」外，还要挡住「协议没变但把 settings 清空」——那会静默
+		// 丢掉 direct 的 domainStrategy / 私网拦截 / 阻断回国（生成时退回模板默认）。
+		if isReservedOutboundTag(ob.Tag) {
+			if eff.OutboundJSON != "" || eff.InboundRef != nil {
+				util.BadRequest(c, "系统内置出站只能使用基础出口形态")
+				return
+			}
+			if strings.TrimSpace(eff.SettingsJSON) == "" {
+				util.BadRequest(c, "系统内置出站的出口策略不能为空")
+				return
+			}
+		}
 		// 引用目标：协议可投影 + 无环；行协议跟随目标入站。
 		if eff.InboundRef != nil && *eff.InboundRef > 0 {
 			if msg := d.checkInboundRef(ob.ServerID, *eff.InboundRef, outboundID); msg != "" {
@@ -629,6 +648,12 @@ func (d *Deps) AdminUpdateServerOutbound(c *gin.Context) {
 		updates["send_through"] = *req.SendThrough
 	}
 	if req.Enabled != nil {
+		// 内置出站承担默认出口（direct）与全局阻断（blocked），停用会让它们从生成结果的
+		// outbounds 里消失并退回模板默认配置（策略静默丢失），因此与 Tag/协议一样锁死。
+		if !*req.Enabled && isReservedOutboundTag(ob.Tag) {
+			util.BadRequest(c, "系统内置出站（direct/blocked）不可停用")
+			return
+		}
 		updates["enabled"] = *req.Enabled
 	}
 	if req.Priority != nil {

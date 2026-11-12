@@ -31,6 +31,7 @@ import {
   type ServerOutbound,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { isReservedOutboundTag } from '@/utils/outbound'
 
 const route = useRoute()
 const router = useRouter()
@@ -271,7 +272,7 @@ onMounted(async () => {
               <span class="outbound-tag">{{ row.tag }}</span>
               <CsBadge v-if="row.owner_inbound_id" color="blue">系统内置·直通</CsBadge>
               <CsBadge v-else-if="row.tag === defaultOutboundTag" color="green">默认出口</CsBadge>
-              <CsBadge v-if="row.tag === 'direct' || row.tag === 'blocked'" color="grey">系统内置</CsBadge>
+              <CsBadge v-if="isReservedOutboundTag(row.tag)" color="grey">系统内置</CsBadge>
               <CsBadge v-if="row.send_proxy_protocol" color="blue">PPv2</CsBadge>
               <CsBadge v-if="isBlockCN(row)" color="red">阻断回国</CsBadge>
             </div>
@@ -280,7 +281,7 @@ onMounted(async () => {
           <template #actions>
             <CsToggle
               :model-value="row.enabled"
-              :disabled="row.tag === 'direct' || !!row.owner_inbound_id"
+              :disabled="isReservedOutboundTag(row.tag) || !!row.owner_inbound_id"
               :aria-label="`启用出站 ${row.tag}`"
               @change="toggleOutbound(row)"
             />
