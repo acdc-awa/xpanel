@@ -174,7 +174,8 @@ async function save() {
       price_cents: Math.round(form.price_yuan * 100),
       traffic_gb: form.traffic_gb,
       duration_days: form.duration_days,
-      permission_group_id: form.permission_group_id || undefined,
+      // 0 是有效终态（解绑），不能 `|| undefined`：后端收 nil 会保留旧值，界面显示已保存但绑定没变。
+      permission_group_id: form.permission_group_id ? Number(form.permission_group_id) : 0,
       is_featured: form.is_featured,
       purchasable: form.purchasable,
       renewable: form.renewable,
@@ -417,6 +418,7 @@ async function restore(row: any) {
         </CsFormItem>
         <CsFormItem label="权限组（选填，购买后自动授权组内入站）">
           <CsSelect v-model="form.permission_group_id" style="width: 100%" clearable placeholder="不绑定">
+            <CsOption label="不绑定" :value="0" />
             <CsOption v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
           </CsSelect>
         </CsFormItem>
