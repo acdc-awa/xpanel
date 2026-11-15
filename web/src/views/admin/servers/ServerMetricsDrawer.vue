@@ -48,26 +48,6 @@ const axisLabels = computed<string[]>(() => {
   return raw.length ? raw.map((t) => formatAxisTime(t, spanHours)) : data.timestamps || []
 })
 
-/**
- * 峰值曲线用虚线（官方 threshold 样式）：峰值不在两点间插值，
- * 画成平滑曲线会低于真实峰值，把包络线变成假的。
- */
-function peakSeries(
-  title: string,
-  color: string,
-  values: number[] | undefined,
-  format: (value: number) => string
-): LineSeries {
-  return {
-    type: 'line',
-    title,
-    color,
-    dashed: true,
-    data: axisLabels.value.map((label, index) => ({ x: label, y: Number(values?.[index] ?? 0) })),
-    valueFormatter: format,
-  }
-}
-
 function lineSeries(
   title: string,
   color: string,
@@ -95,39 +75,36 @@ const mbps = (value: number) => `${value.toFixed(2)} Mbps`
 const percent = (value: number) => `${value.toFixed(1)}%`
 const people = (value: number) => `${value.toFixed(0)} 人`
 
+/**
+ * 只画均值曲线。后端仍下发 *_max（桶内原始采样点最大值），但不再绘制：
+ * 节点侧本来就每分钟一行（网速那行已是 1 分钟窗口峰值、CPU 是窗口均值），
+ * 而桶宽最小也是 1 分钟 —— 1h 档每桶只有 1 个点，峰值与均值逐点相同，
+ * 虚线被实线完全盖住，只会让图例翻倍。趋势监控留下的信息量不值这个成本。
+ */
 const netSeries = computed<LineSeries[]>(() => {
   const data = metricsData.value
   return [
-    lineSeries('下行均值 (Rx)', PALETTE.blue, data?.rx_mbps, mbps),
-    peakSeries('下行峰值 (Rx)', PALETTE.blue, data?.rx_mbps_max, mbps),
-    lineSeries('上行均值 (Tx)', PALETTE.purple, data?.tx_mbps, mbps),
-    peakSeries('上行峰值 (Tx)', PALETTE.purple, data?.tx_mbps_max, mbps),
+    lineSeries('下行 (Rx)', PALETTE.blue, data?.rx_mbps, mbps),
+    lineSeries('上行 (Tx)', PALETTE.purple, data?.tx_mbps, mbps),
   ]
 })
 
 const cpuSeries = computed<LineSeries[]>(() => {
   const data = metricsData.value
-  return [
-    lineSeries('CPU 均值', PALETTE.green, data?.cpu, percent),
-    peakSeries('CPU 峰值', PALETTE.green, data?.cpu_max, percent),
-  ]
+  return [lineSeries('CPU 使用率', PALETTE.green, data?.cpu, percent)]
 })
 
 const memSeries = computed<LineSeries[]>(() => {
   const data = metricsData.value
   return [
-    lineSeries('内存均值', PALETTE.pink, data?.mem_percent, percent),
-    peakSeries('内存峰值', PALETTE.pink, data?.mem_percent_max, percent),
-    lineSeries('磁盘均值', PALETTE.orange, data?.disk_percent, percent),
+    lineSeries('内存', PALETTE.pink, data?.mem_percent, percent),
+    lineSeries('磁盘', PALETTE.orange, data?.disk_percent, percent),
   ]
 })
 
 const userSeries = computed<LineSeries[]>(() => {
   const data = metricsData.value
-  return [
-    lineSeries('在线均值', PALETTE.blue, data?.online_users, people),
-    peakSeries('在线峰值', PALETTE.blue, data?.online_users_max, people),
-  ]
+  return [lineSeries('在线人数', PALETTE.blue, data?.online_users, people)]
 })
 
 const formatPercentTick = (value: number) => `${value}%`
