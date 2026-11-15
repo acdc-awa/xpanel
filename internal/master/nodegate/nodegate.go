@@ -102,6 +102,9 @@ type Conn struct {
 	lastXrayState string
 	// lastDiskHash 上次上报的磁盘配置哈希（内存缓存，用于避免高频心跳每帧查库判断偏离）。
 	lastDiskHash string
+	// lastDriftRepairAt 上次因磁盘偏离发起冷推修复的时刻（unix 秒，节流用）：偏离期间
+	// 每帧心跳都会命中，而冷推包含 Stop+Start，必须限频；失败由待推送补推循环（2 分钟）兜底。
+	lastDriftRepairAt atomic.Int64
 	// metricsLane 该连接是否走快车道（收到过首帧 metrics 即置位）：置位后心跳只写慢字段，
 	// 实时字段（CPU/网速）一律以快车道为准，避免心跳里缺失的零值把快车道读数覆盖掉。
 	metricsLane atomic.Bool
@@ -125,6 +128,19 @@ type Conn struct {
 
 // touch 更新最近活跃时间。
 func (c *Conn) touch() { c.LastSeen.Store(time.Now().Unix()) }
+
+// diskRepairInterval 磁盘偏离冷推修复的最小间隔：与看门狗对待推送配置的补推周期一致。
+// 修复失败时 pending 行保持待推送，2 分钟补推循环会自动重试，不必靠心跳每帧重开一轮。
+const diskRepairInterval = 2 * time.Minute
+
+// beginDriftRepair 申请一次冷推修复名额（同一连接每 diskRepairInterval 最多一次）。
+func (c *Conn) beginDriftRepair(now time.Time) bool {
+	last := c.lastDriftRepairAt.Load()
+	if last != 0 && now.Sub(time.Unix(last, 0)) < diskRepairInterval {
+		return false
+	}
+	return c.lastDriftRepairAt.CompareAndSwap(last, now.Unix())
+}
 
 // closeSafe 幂等关闭：置 closed、关闭 done 通知 writePump 退出、关闭 WS。
 // 注意：这里刻意不 close(c.Send)——Send 通道可能正被并发 Send/Ask 选中发送，
@@ -706,13 +722,13 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 			if h.Config != nil {
 				if pend, perr := h.Config.GetPending(conn.ServerID); perr == nil && pend != nil &&
 					pend.Status == "pushed" && pend.AppliedHash != "" && hb.DiskHash != pend.AppliedHash {
-					if conn.usersSynced.Load() {
-						conn.usersSynced.Store(false)
-						go func(sid uint64) {
-							if err := h.SyncUsers(sid); err != nil {
-								log.Printf("nodegate: 节点 %d 磁盘偏离自动修复失败: %v（将由看门狗重试）", sid, err)
-							}
-						}(conn.ServerID)
+					// 磁盘偏离必须冷推整份配置，不能靠热更：偏离意味着节点运行/落盘的结构不是
+					// 主控以为的那份（迁移换机、第三方改盘、.good 回退），此时热更会因
+					// handler not found 整条失败，连带阻断「顺带落盘」分支，偏离永远修不回来
+					// （2026-11-15 zouter-HK 迁移卡死的根因）。
+					// 不再用 usersSynced 门控：热更失败时它恰好是 false，会把唯一自愈路堵死。
+					if conn.beginDriftRepair(now) {
+						go h.repairDisk(conn.ServerID)
 					}
 				}
 			}
@@ -1213,6 +1229,40 @@ func (h *Hub) SyncUsers(serverID uint64) error {
 	return nil
 }
 
+// repairDisk 冷推整份配置修复磁盘偏离。
+//
+// 为什么不能走 SyncUsers（2026-11-15 迁移事故）：热更的前提是「节点运行中的结构 = 主控以为
+// 的结构」。磁盘偏离恰恰意味着这个前提不成立（迁移换机、第三方改盘、回退 .good），此时热更
+// 必然 handler not found，而 agent 端热更失败会整条 return，连「顺带落盘」的整份配置也一并
+// 丢掉——self-heal 变成死循环。因此这里重建待推送行走真正的冷推（节点侧 Stop+Start），
+// 失败由看门狗每 2 分钟的待推送补推循环兜底。
+func (h *Hub) repairDisk(serverID uint64) {
+	if h.Config == nil {
+		return
+	}
+	p, err := h.Config.GetPending(serverID)
+	if err != nil || p == nil || p.Status != "pushed" {
+		// 无待推送行或已有更新的待推送（编辑并发）时交给正常流程，不抢它的内容
+		return
+	}
+	cfg, err := h.Config.Generate(serverID)
+	if err != nil {
+		log.Printf("nodegate: 磁盘偏离修复生成配置失败 (server=%d): %v", serverID, err)
+		return
+	}
+	ok, serr := h.Config.SavePendingIfSame(serverID, p.ConfigJSON, cfg)
+	switch {
+	case serr != nil:
+		log.Printf("nodegate: 磁盘偏离修复保存待推送失败 (server=%d): %v", serverID, serr)
+		return
+	case !ok:
+		log.Printf("nodegate: 磁盘偏离修复期间待推内容被新编辑覆盖，交由正常推送 (server=%d)", serverID)
+		return
+	}
+	log.Printf("nodegate: 节点 %d 磁盘配置偏离，改为冷推整份配置修复", serverID)
+	h.PushPending(serverID)
+}
+
 // SyncUsersToAll 广播给所有在线节点增量/全量同步最新用户列表（非阻塞）。
 // 广播前将所有在线连接的 usersSynced 标志置为 false，若异步下发失败将由看门狗 2 分钟重试兜底。
 func (h *Hub) SyncUsersToAll() {
@@ -1348,12 +1398,13 @@ func (h *Hub) watchdog() {
 					applied := h.Config.AppliedConfig(sid)
 					if p, perr := h.Config.GetPending(sid); perr == nil && p != nil &&
 						p.Status == "pushed" && applied == cfgStr {
-						// 检查节点磁盘是否偏离：若节点上报了磁盘哈希且与期望哈希不符，触发热更落盘对齐
+						// 检查节点磁盘是否偏离：若节点上报了磁盘哈希且与期望哈希不符，冷推整份配置修复
+						// （热更在结构对不上时必然失败，见 repairDisk 注释）
 						var srv models.Server
 						if herr := h.DB.Select("xray_disk_hash").First(&srv, sid).Error; herr == nil &&
 							srv.XrayDiskHash != "" && p.AppliedHash != "" && srv.XrayDiskHash != p.AppliedHash {
-							log.Printf("nodegate: 定期校准发现节点 %d 磁盘配置偏离，触发热更落盘对齐", sid)
-							_ = h.SyncUsers(sid)
+							log.Printf("nodegate: 定期校准发现节点 %d 磁盘配置偏离，冷推整份配置修复", sid)
+							h.repairDisk(sid)
 						}
 						return // 已生效内容与现场重算相同且磁盘未偏离：无事可做，不打扰节点
 					}
