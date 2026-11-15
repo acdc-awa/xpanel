@@ -108,7 +108,6 @@ const refInboundOptions = computed(() => {
 })
 
 const refTarget = computed(() => allInbounds.value.find((i) => i.id === refInboundId.value) || null)
-const refTargetServer = computed(() => servers.value.find((s) => s.id === refServerId.value) || null)
 const refTargetMissing = computed(() => refInboundId.value > 0 && !refTarget.value)
 // PROXY Protocol 只对 VLESS（TCP）落地成立：Hysteria 2 走 QUIC/UDP，XHTTP 落地不解析 PP 头。
 const ppApplicable = computed(() => {
@@ -518,10 +517,7 @@ onMounted(async () => {
     :close-on-click-overlay="false"
   >
     <CsForm variant="embedded" label-position="top">
-      <CsAlert v-if="isSystemReserved" type="info" header="系统内置核心出站">
-        该出站的 Tag、出站形态与启用状态已锁定，可调整内部策略、优先级与备注。
-      </CsAlert>
-      <CsAlert v-if="legacyPayload" type="warning" header="旧版外部代理配置" style="margin-top: 12px">
+      <CsAlert v-if="legacyPayload" type="warning" header="旧版外部代理配置">
         该行仍是旧版「外部代理节点」的 settings/stream 存储。已尽力预填为 JSON，请检查字段后保存，保存即完成转换。
       </CsAlert>
 
@@ -537,7 +533,7 @@ onMounted(async () => {
           </div>
         </template>
         <div class="form-grid-2">
-          <CsFormItem label="出站标签 Tag" required description="该出站在本服务器上的唯一标识，如 proxy-out / via-japan。">
+          <CsFormItem label="出站标签 Tag" required>
             <CsInput
               v-model="form.tag"
               :disabled="isSystemReserved"
@@ -545,13 +541,19 @@ onMounted(async () => {
               placeholder="如 proxy-out / via-japan"
             />
           </CsFormItem>
-          <CsFormItem label="发送 IP (sendThrough)" description="多 IP 服务器可指定出口源地址。">
+          <CsFormItem label="发送 IP (sendThrough)">
             <CsInput v-model="form.send_through" class="mono" placeholder="留空使用系统默认 IP" />
           </CsFormItem>
-          <CsFormItem label="优先级 Priority" description="数值越小，在 Xray outbounds 数组里越靠前。">
+          <CsFormItem label="优先级 Priority">
+            <template #info>
+              <TipIcon content="数值越小，在 Xray outbounds 数组里越靠前。" />
+            </template>
             <CsInputNumber v-model="form.priority" :min="0" :precision="0" style="width: 100%" />
           </CsFormItem>
-          <CsFormItem label="备注说明" description="仅面板内展示，不写入 Xray 配置。">
+          <CsFormItem label="备注说明">
+            <template #info>
+              <TipIcon content="仅面板内展示，不写入 Xray 配置。" />
+            </template>
             <CsInput v-model="form.remark" placeholder="如 默认直连出口 / 日本落地中转" />
           </CsFormItem>
         </div>
@@ -584,18 +586,18 @@ onMounted(async () => {
           </CsFormItem>
 
           <template v-if="form.protocol === 'freedom'">
-            <CsFormItem
-              label="域名解析策略 domainStrategy"
-              description="AsIs 保留域名交给系统解析；UseIPv4 / UseIPv6 只用对应地址族；UseIP 自动选择。"
-            >
+            <CsFormItem label="域名解析策略 domainStrategy">
+              <template #info>
+                <TipIcon content="AsIs 保留域名交给系统解析；UseIPv4 / UseIPv6 只用对应地址族；UseIP 自动选择。" />
+              </template>
               <CsSelect
                 :model-value="form.domain_strategy"
                 :options="DOMAIN_STRATEGY_OPTIONS"
                 @update:model-value="(v: any) => (form.domain_strategy = String(v))"
               />
             </CsFormItem>
-            <CsFormItem label="redirect 目标" description="格式 host:port；留空表示不重定向。">
-              <CsInput v-model="form.redirect" class="mono" placeholder="host:port" />
+            <CsFormItem label="redirect 目标">
+              <CsInput v-model="form.redirect" class="mono" placeholder="host:port（留空不重定向）" />
             </CsFormItem>
             <div class="control-cell">
               <CsToggle v-model="form.block_private" label="屏蔽内网 / 保留网段（geoip:private）" />
@@ -606,11 +608,7 @@ onMounted(async () => {
           </template>
 
           <template v-else>
-            <CsFormItem
-              label="黑洞响应方式"
-              description="none 静默丢弃；http 返回 403，便于客户端快速失败。"
-              style="grid-column: 1 / -1"
-            >
+            <CsFormItem label="黑洞响应方式" style="grid-column: 1 / -1">
               <CsSelect
                 :model-value="form.response_type"
                 :options="RESPONSE_TYPE_OPTIONS"
@@ -624,7 +622,10 @@ onMounted(async () => {
       <!-- 引用入站 -->
       <CsContainer v-if="mode === 'inbound_ref'" header="引用落地入站" style="margin-top: 16px">
         <div class="form-grid-2">
-          <CsFormItem label="目标服务器" description="引用必须跨服务器；同机会形成转发环路。">
+          <CsFormItem label="目标服务器">
+            <template #info>
+              <TipIcon content="引用必须跨服务器；同机会形成转发环路，因此不会列出当前服务器。" />
+            </template>
             <CsSelect
               :model-value="refServerId"
               :options="refServerOptions"
@@ -632,7 +633,10 @@ onMounted(async () => {
               @update:model-value="onRefServerChange"
             />
           </CsFormItem>
-          <CsFormItem label="目标入站" description="仅列出已启用、支持客户端投影的 VLESS / Hysteria 2 入站。">
+          <CsFormItem label="目标入站">
+            <template #info>
+              <TipIcon content="仅列出已启用、支持客户端投影的 VLESS / Hysteria 2 入站。" />
+            </template>
             <CsSelect
               :model-value="refInboundId"
               :options="refInboundOptions"
@@ -644,20 +648,12 @@ onMounted(async () => {
         </div>
 
         <CsAlert
-          :type="refTarget ? 'success' : refTargetMissing ? 'warning' : 'info'"
-          :header="refTarget ? '已连线' : refTargetMissing ? '目标入站不可用' : '待连线'"
+          v-if="refTargetMissing"
+          type="warning"
+          header="目标入站不可用"
           style="margin-top: 12px"
         >
-          <template v-if="refTarget">
-            已引用「{{ refTargetServer?.name || '服务器#' + refTarget.server_id }} / {{ refTarget.tag }}」。vnext
-            地址、端口、UUID、传输与安全参数由主控按目标入站自动拼装，机间凭据自动注入落地入站，无需手填。
-          </template>
-          <template v-else-if="refTargetMissing">
-            当前引用的入站已不在可引用列表（可能被停用/删除，或不是 VLESS / Hysteria 2）。请重新选择目标。
-          </template>
-          <template v-else>
-            留空保存后，到「路由 → 拓扑画布」把本出站拖到目标服务器的入站即可；也可以直接在上方选择目标。
-          </template>
+          当前引用的入站已不在可引用列表（可能被停用/删除，或不是 VLESS / Hysteria 2）。请重新选择目标。
         </CsAlert>
 
         <div class="switch-row" style="margin-top: 12px">
