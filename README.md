@@ -3,11 +3,11 @@
 <div align="center">
 
 **主控 - 节点 - 用户三层架构的代理节点管理面板**
-*Go 1.27 + Vue 3.5 + Xray-core v26.10.31*
+*Go 1.27 + Vue 3.5 + Xray-core v26.11.9*
 
 [![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Vue Version](https://img.shields.io/badge/Vue-3.5+-4FC08D?style=flat&logo=vuedotjs)](https://vuejs.org)
-[![Xray-core](https://img.shields.io/badge/Xray--core-v26.10.31-red?style=flat)](https://github.com/XTLS/Xray-core)
+[![Xray-core](https://img.shields.io/badge/Xray--core-v26.11.9-red?style=flat)](https://github.com/XTLS/Xray-core)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 </div>
@@ -32,7 +32,7 @@ XrayPanel 是一套自托管的代理节点管理系统：主控负责 Web 管�
                            ▼
         ┌──────────────────────────────────────┐
         │  Agent 节点（每台 VPS 一个）         │
-        │  xray-agent + Xray-core v26.10.31    │
+        │  xray-agent + Xray-core v26.11.9    │
         └──────────────────────────────────────┘
 ```
 
@@ -119,7 +119,7 @@ bash <(curl -fsSL https://github.com/acdc-awa/XPanel-Node/releases/latest/downlo
   --secret sec_xxxxxxxxxxxxxxxx
 ```
 
-脚本按 release `checksums.txt` 强制校验 sha256，安装 `xray-agent` 与锁定的 Xray-core v26.10.31，写入 systemd 后自动上线。离线与镜像场景用 `--agent-file` / `--agent-mirror` / `--agent-version`。
+脚本按 release `checksums.txt` 强制校验 sha256，安装 `xray-agent` 与锁定的 Xray-core v26.11.9，写入 systemd 后自动上线。离线与镜像场景用 `--agent-file` / `--agent-mirror` / `--agent-version`。
 
 ---
 
@@ -170,7 +170,7 @@ npm run build
 |---|---|
 | 后端 | Go 1.27 + Gin，单二进制分发 |
 | 持久层 | GORM + SQLite（WAL；开发与生产同构） |
-| 协议引擎 | Xray-core v26.10.31（锁定）：VLESS / Hysteria 2 / 四层直通 |
+| 协议引擎 | Xray-core v26.11.9（锁定）：VLESS / Hysteria 2 / 四层直通 |
 | 前端 | Vue 3.5 + Vite + TypeScript + Pinia |
 | UI | Cloudscape 移植组件库（`Cs*`） |
 | 拓扑画布 | @vue-flow/core |

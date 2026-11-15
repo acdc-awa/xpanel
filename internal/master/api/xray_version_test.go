@@ -25,7 +25,7 @@ func TestFetchRepoVersionsKeepsOnlyInstallableReleases(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `[
-		  {"tag_name":"v26.10.31","draft":false,"assets":[{"name":"Xray-linux-64.zip"},{"name":"Xray-linux-64.zip.dgst"}]},
+		  {"tag_name":"v26.11.9","draft":false,"assets":[{"name":"Xray-linux-64.zip"},{"name":"Xray-linux-64.zip.dgst"}]},
 		  {"tag_name":"v26.10.29","draft":false,"assets":[]},
 		  {"tag_name":"v26.10.21","draft":true,"assets":[{"name":"Xray-linux-64.zip"},{"name":"Xray-linux-64.zip.dgst"}]},
 		  {"tag_name":"v26.9.30","draft":false,"assets":[{"name":"Xray-linux-64.zip"}]},
@@ -40,7 +40,7 @@ func TestFetchRepoVersionsKeepsOnlyInstallableReleases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchXrayVersions: %v", err)
 	}
-	want := []string{"v26.10.31", "v26.9.9"}
+	want := []string{"v26.11.9", "v26.9.9"}
 	if len(got) != len(want) {
 		t.Fatalf("versions = %v, want %v", got, want)
 	}
