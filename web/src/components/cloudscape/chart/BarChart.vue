@@ -16,6 +16,7 @@ const props = withDefaults(
     xTitle?: string
     yTitle?: string
     legendTitle?: string
+    legendAlign?: 'start' | 'center'
     hideLegend?: boolean
     emptyText?: string
     ariaLabel?: string
@@ -31,6 +32,7 @@ const props = withDefaults(
     xTitle: undefined,
     yTitle: undefined,
     legendTitle: undefined,
+    legendAlign: 'start',
     hideLegend: false,
     emptyText: '暂无数据',
     ariaLabel: '条形图',
@@ -49,6 +51,7 @@ const plotProps = computed<ChartProps>(() => ({
   xTitle: props.xTitle,
   yTitle: props.yTitle,
   legendTitle: props.legendTitle,
+  legendAlign: props.legendAlign,
   hideLegend: props.hideLegend,
   emptyText: props.emptyText,
   ariaLabel: props.ariaLabel,

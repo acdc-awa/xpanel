@@ -33,6 +33,7 @@ const props = withDefaults(defineProps<ChartProps>(), {
   xTitle: undefined,
   yTitle: undefined,
   legendTitle: undefined,
+  legendAlign: 'start',
   hideLegend: false,
   emptyText: '暂无数据',
   ariaLabel: '图表',
@@ -746,6 +747,7 @@ function seriesClass(seriesTitle: string) {
       v-if="!hideLegend && hasData"
       :items="legendItems"
       :legend-title="legendTitle"
+      :align="legendAlign"
       :highlighted-title="hoveredSeriesTitle"
       @hover="hoveredSeriesTitle = $event"
     />

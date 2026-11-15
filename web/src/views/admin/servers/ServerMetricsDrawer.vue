@@ -234,7 +234,7 @@ onUnmounted(() => {
         <CsContainer>
           <template #header>
             <CsHeader variant="h2">
-              网络吞吐速率
+              网络速率
               <template #info>
                 <TipIcon content="整机物理网卡聚合速率，含节点上所有进程的流量，不只是 xray。" />
               </template>
@@ -245,9 +245,10 @@ onUnmounted(() => {
             :series="netSeries"
             :height="210"
             :loading="loading"
+            legend-align="center"
             y-title="Mbps"
             :y-tick-formatter="formatCountTick"
-            aria-label="网络吞吐速率"
+            aria-label="网络速率"
             empty-text="暂无监控数据"
           />
         </CsContainer>
@@ -262,6 +263,7 @@ onUnmounted(() => {
             :series="cpuSeries"
             :height="210"
             :loading="loading"
+            legend-align="center"
             y-title="%"
             :y-tick-formatter="formatPercentTick"
             aria-label="CPU 使用率"
@@ -273,7 +275,7 @@ onUnmounted(() => {
         <CsContainer>
           <template #header>
             <CsHeader variant="h2">
-              内存与磁盘空间占用
+              内存与磁盘
               <template #info>
                 <TipIcon content="磁盘统计的是根分区（/）的用量。" />
               </template>
@@ -284,18 +286,19 @@ onUnmounted(() => {
             :series="memSeries"
             :height="210"
             :loading="loading"
+            legend-align="center"
             y-title="%"
             :y-tick-formatter="formatPercentTick"
-            aria-label="内存与磁盘空间占用"
+            aria-label="内存与磁盘"
             empty-text="暂无监控数据"
           />
         </CsContainer>
 
-        <!-- 4. TCP / UDP 连接数 -->
+        <!-- 4. TCP/UDP 连接数 -->
         <CsContainer>
           <template #header>
             <CsHeader variant="h2">
-              TCP / UDP 连接数
+              TCP/UDP 连接数
               <template #info>
                 <TipIcon
                   content="整机 socket 口径，含节点上所有进程。TCP 为连接表项总数（不含 LISTEN，含 TIME_WAIT 等残留）；UDP 是绑定的 socket 数，不是会话数。"
@@ -308,9 +311,10 @@ onUnmounted(() => {
             :series="connSeries"
             :height="210"
             :loading="loading"
+            legend-align="center"
             y-title="个"
             :y-tick-formatter="formatCountTick"
-            aria-label="TCP / UDP 连接数"
+            aria-label="TCP/UDP 连接数"
             empty-text="暂无连接数数据"
           />
         </CsContainer>
@@ -330,6 +334,7 @@ onUnmounted(() => {
             :series="userSeries"
             :height="210"
             :loading="loading"
+            legend-align="center"
             y-title="人"
             :y-tick-formatter="formatCountTick"
             aria-label="在线用户数"

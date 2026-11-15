@@ -52,6 +52,8 @@ export interface ChartProps {
   xTitle?: string
   yTitle?: string
   legendTitle?: string
+  /** 图例横向对齐：默认靠左（官方行为）；center 用于整卡居中的单图。 */
+  legendAlign?: 'start' | 'center'
   hideLegend?: boolean
   emptyText?: string
   ariaLabel?: string
