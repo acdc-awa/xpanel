@@ -177,6 +177,13 @@ export interface ServerMetricsData {
   rx_mbps_max?: number[]
   tx_mbps_max?: number[]
   online_users_max?: number[]
+  /**
+   * 连接数（整机 socket 数，桶内均值）。-1 = 该桶没有可比样本（本列上线前的存量行、
+   * 旧 agent、非 Linux 节点），前端丢点、不画成 0。旧后端无这些字段，故可选。
+   */
+  conn_tcp_established?: number[]
+  conn_tcp_total?: number[]
+  conn_udp?: number[]
 }
 
 export interface AdminUser {

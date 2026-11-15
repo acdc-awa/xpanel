@@ -7,6 +7,7 @@ import { formatAxisTime } from '@/utils/timezone'
 import type { ServerMetricsData } from '@/api/types'
 import { CsButton, CsContainer, CsHeader, CsLineChart, CsModal, CsSegmentedControl } from '@/components/cloudscape'
 import type { LineSeries, SegmentedOption } from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -105,6 +106,26 @@ const memSeries = computed<LineSeries[]>(() => {
 const userSeries = computed<LineSeries[]>(() => {
   const data = metricsData.value
   return [lineSeries('在线人数', PALETTE.blue, data?.online_users, people)]
+})
+
+/**
+ * 连接数曲线：-1 是该桶「没有可比样本」的哨兵（本列上线前的存量行、旧 agent、
+ * 非 Linux 节点），直接丢点而不是画成 0 —— 空闲节点的连接数本来就是 0，两者不能混。
+ */
+function gaugeSeries(title: string, color: string, values: number[] | undefined): LineSeries {
+  const data = axisLabels.value.flatMap((label, index) => {
+    const value = values?.[index]
+    return value === undefined || value < 0 ? [] : [{ x: label, y: value }]
+  })
+  return { type: 'line', title, color, data, valueFormatter: (value) => `${value.toFixed(0)} 个` }
+}
+
+const connSeries = computed<LineSeries[]>(() => {
+  const data = metricsData.value
+  return [
+    gaugeSeries('TCP', PALETTE.green, data?.conn_tcp_total),
+    gaugeSeries('UDP', PALETTE.purple, data?.conn_udp),
+  ]
 })
 
 const formatPercentTick = (value: number) => `${value}%`
@@ -212,8 +233,11 @@ onUnmounted(() => {
         <!-- 1. 网络 I/O 带宽 -->
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="物理网卡动态聚合速率 (Mbps)">
-              网络吞吐速率 (Network Bandwidth)
+            <CsHeader variant="h2">
+              网络吞吐速率
+              <template #info>
+                <TipIcon content="整机物理网卡聚合速率，含节点上所有进程的流量，不只是 xray。" />
+              </template>
             </CsHeader>
           </template>
           <CsLineChart
@@ -223,7 +247,7 @@ onUnmounted(() => {
             :loading="loading"
             y-title="Mbps"
             :y-tick-formatter="formatCountTick"
-            aria-label="网络吞吐速率 (Network Bandwidth)"
+            aria-label="网络吞吐速率"
             empty-text="暂无监控数据"
           />
         </CsContainer>
@@ -231,9 +255,7 @@ onUnmounted(() => {
         <!-- 2. CPU 负载 -->
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="系统全核综合利用百分比 (%)">
-              CPU 使用率 (CPU Utilization)
-            </CsHeader>
+            <CsHeader variant="h2">CPU 使用率</CsHeader>
           </template>
           <CsLineChart
             class="chart-box"
@@ -242,7 +264,7 @@ onUnmounted(() => {
             :loading="loading"
             y-title="%"
             :y-tick-formatter="formatPercentTick"
-            aria-label="CPU 使用率 (CPU Utilization)"
+            aria-label="CPU 使用率"
             empty-text="暂无监控数据"
           />
         </CsContainer>
@@ -250,8 +272,11 @@ onUnmounted(() => {
         <!-- 3. 内存与磁盘 -->
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="系统物理内存与根分区挂载负载 (%)">
-              内存与磁盘空间占用 (Memory & Storage)
+            <CsHeader variant="h2">
+              内存与磁盘空间占用
+              <template #info>
+                <TipIcon content="磁盘统计的是根分区（/）的用量。" />
+              </template>
             </CsHeader>
           </template>
           <CsLineChart
@@ -261,16 +286,43 @@ onUnmounted(() => {
             :loading="loading"
             y-title="%"
             :y-tick-formatter="formatPercentTick"
-            aria-label="内存与磁盘空间占用 (Memory & Storage)"
+            aria-label="内存与磁盘空间占用"
             empty-text="暂无监控数据"
           />
         </CsContainer>
 
-        <!-- 4. 在线连接数 -->
+        <!-- 4. TCP / UDP 连接数 -->
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="服务器实时心跳活跃连接设备统计">
-              当前在线连接数 (Active Clients)
+            <CsHeader variant="h2">
+              TCP / UDP 连接数
+              <template #info>
+                <TipIcon
+                  content="整机 socket 口径，含节点上所有进程。TCP 为连接表项总数（不含 LISTEN，含 TIME_WAIT 等残留）；UDP 是绑定的 socket 数，不是会话数。"
+                />
+              </template>
+            </CsHeader>
+          </template>
+          <CsLineChart
+            class="chart-box"
+            :series="connSeries"
+            :height="210"
+            :loading="loading"
+            y-title="个"
+            :y-tick-formatter="formatCountTick"
+            aria-label="TCP / UDP 连接数"
+            empty-text="暂无连接数数据"
+          />
+        </CsContainer>
+
+        <!-- 5. 在线用户 -->
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2">
+              在线用户数
+              <template #info>
+                <TipIcon content="来自 xray 在线统计，同一用户的多个入站连接合并计数。" />
+              </template>
             </CsHeader>
           </template>
           <CsLineChart
@@ -280,7 +332,7 @@ onUnmounted(() => {
             :loading="loading"
             y-title="人"
             :y-tick-formatter="formatCountTick"
-            aria-label="当前在线连接数 (Active Clients)"
+            aria-label="在线用户数"
             empty-text="暂无监控数据"
           />
         </CsContainer>
