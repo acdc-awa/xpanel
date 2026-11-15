@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/contracts"
@@ -194,7 +195,26 @@ type Hub struct {
 
 	enforcedMu sync.Mutex
 	enforcedAt map[uint64]time.Time // 事件驱动处置节流：userID → 上次触发时刻（watchdog 定期清理）
+
+	// 服务器网卡日聚合（2026-11-15）：按累计字节差分成日累加，60s 落库一次。
+	// nicMu 只保护 map/计数器的读写（帧路径与 watchdog 并发），DB 写入在锁外完成。
+	nicMu        sync.Mutex
+	nicAcc       map[uint64]*nicAccumulator
+	lastNICFlush time.Time
+	nicFlushMu   sync.Mutex // 串行化 flush（watchdog 与 Shutdown 可能先后触发）
 }
+
+// nicAccumulator 单个服务器的网卡累计计数器状态。
+type nicAccumulator struct {
+	lastRx, lastTx uint64 // 上一帧的原始累计字节
+	have           bool   // 是否已有基线；false 时下一帧只建基线不计增量
+	pendingRx      int64  // 尚未落库的当日增量
+	pendingTx      int64
+}
+
+// nicFlushInterval 网卡日聚合落库周期。与 node_reports 的 1 分钟采样同节奏：
+// 面板列表读到的最多是 1 分钟前的数据，代价是每个服务器每天最多 1440 次极小 upsert。
+const nicFlushInterval = time.Minute
 
 // NewHub 构造网关。
 func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.ConfigService) *Hub {
@@ -225,6 +245,9 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 	h.latestMetrics = make(map[uint64]*NodeMetricsSnapshot)
 	h.enforcedAt = make(map[uint64]time.Time)
 	h.upgradeStatus = make(map[uint64]*protocol.UpgradeProgressPayload)
+	h.nicAcc = make(map[uint64]*nicAccumulator)
+	h.lastNICFlush = time.Now()
+	h.loadNICBaselines()
 	h.wg.Add(1)
 	go h.watchdog()
 	return h
@@ -234,6 +257,8 @@ func NewHub(db *gorm.DB, traffic contracts.TrafficService, config contracts.Conf
 func (h *Hub) Shutdown() {
 	close(h.quit)
 	h.wg.Wait()
+	// watchdog 已停：把最后一个 flush 窗口的网卡增量落库（best effort，失败仅日志）。
+	h.flushNIC(time.Now())
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, c := range h.conns {
@@ -680,6 +705,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 	//    否则心跳里缺失的零值会把均值/峰值拉低。
 	if !metricsLane {
 		h.recordFastWindow(conn, hb.CPU, hb.RxRate, hb.TxRate, hb.RxBytes, hb.TxBytes)
+		h.accumulateNIC(conn.ServerID, hb.RxBytes, hb.TxBytes)
 	}
 	h.recordSlowWindow(conn, hb.Mem, uint64(hb.MemTotal), hb.Disk, uint64(hb.DiskTotal), onlineUsers)
 	h.recordConnWindow(conn, hb.Conns)
@@ -851,6 +877,161 @@ func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
 	conn.windowConnSeen = false
 }
 
+// loadNICBaselines 从日聚合表恢复每个服务器的差分基线。
+//
+// 主控重启后内存累计器清零；没有基线就只能从下一条帧重新起算，停机期间的网卡流量会漏掉。
+// 日表每行都记录了「写入时的原始累计值」，取每个服务器最新一行的 last_raw 继续差分即可。
+func (h *Hub) loadNICBaselines() {
+	if h.DB == nil || !h.DB.Migrator().HasTable(&models.ServerNICTrafficDaily{}) {
+		return
+	}
+	var rows []models.ServerNICTrafficDaily
+	if err := h.DB.Raw(`SELECT d.* FROM server_nic_traffic_daily d
+		JOIN (SELECT server_id, MAX(date) AS md FROM server_nic_traffic_daily GROUP BY server_id) x
+		ON d.server_id = x.server_id AND d.date = x.md`).Scan(&rows).Error; err != nil {
+		log.Printf("nodegate: 读取网卡流量基线失败: %v", err)
+		return
+	}
+	for _, r := range rows {
+		if r.LastRawRx == 0 && r.LastRawTx == 0 {
+			continue // 没有真实基线（防御旧数据/回填跳过 0/0 后的残留）
+		}
+		h.nicAcc[r.ServerID] = &nicAccumulator{lastRx: r.LastRawRx, lastTx: r.LastRawTx, have: true}
+	}
+}
+
+// accumulateNIC 在指标帧上累计网卡字节差分。
+//
+// 快车道连接只由 metrics 帧调用；旧 agent（无快车道）由心跳调用——与 recordFastWindow
+// 的归属完全一致，两处都调会双计。
+func (h *Hub) accumulateNIC(serverID uint64, rx, tx uint64) {
+	// 0/0 = 该帧没携带网卡数据（旧 agent / 非 Linux 节点 / 确实空闲）。不建基线：
+	// 否则下一帧非零值会被当成本周期新增，把「自开机累计」整段写进当天。
+	if rx == 0 && tx == 0 {
+		return
+	}
+	h.nicMu.Lock()
+	defer h.nicMu.Unlock()
+	if h.nicAcc == nil {
+		h.nicAcc = make(map[uint64]*nicAccumulator)
+	}
+	a := h.nicAcc[serverID]
+	if a == nil {
+		a = &nicAccumulator{}
+		h.nicAcc[serverID] = a
+	}
+	if !a.have {
+		a.lastRx, a.lastTx = rx, tx
+		a.have = true
+		return
+	}
+	a.pendingRx += services.NICDelta(rx, a.lastRx)
+	a.pendingTx += services.NICDelta(tx, a.lastTx)
+	a.lastRx, a.lastTx = rx, tx
+}
+
+// maybeFlushNIC 到落库周期就写入；watchdog 15s tick 调用。
+func (h *Hub) maybeFlushNIC(now time.Time) {
+	if now.Sub(h.lastNICFlush) < nicFlushInterval {
+		return
+	}
+	h.flushNIC(now)
+}
+
+// flushNIC 把各服务器的待落库增量写入日聚合表。
+//
+// 一致性要点：
+//   - 先在锁内取快照（pending + 同一时刻的 last_raw），DB 写在锁外；
+//   - 写入成功后只扣掉快照部分：期间新到的帧留在 pending，下一轮再写；
+//   - 写入失败不扣 pending，下一 tick 重试；
+//   - last_raw 必须与本次写入的增量来自同一快照：崩溃后从 last_raw 续算时，
+//     不会把「已写进日表」的增量再算一遍，也不会漏掉「还没写」的那段。
+func (h *Hub) flushNIC(now time.Time) {
+	h.nicFlushMu.Lock()
+	defer h.nicFlushMu.Unlock()
+	if h.DB == nil {
+		h.lastNICFlush = now
+		return
+	}
+
+	type item struct {
+		serverID       uint64
+		rx, tx         int64
+		lastRx, lastTx uint64
+	}
+	var items []item
+	h.nicMu.Lock()
+	for sid, a := range h.nicAcc {
+		if a.pendingRx == 0 && a.pendingTx == 0 {
+			continue
+		}
+		items = append(items, item{serverID: sid, rx: a.pendingRx, tx: a.pendingTx, lastRx: a.lastRx, lastTx: a.lastTx})
+	}
+	h.nicMu.Unlock()
+	if len(items) == 0 {
+		h.lastNICFlush = now
+		return
+	}
+
+	loc := services.BusinessLocation(h.DB)
+	date := now.In(loc).Format("2006-01-02")
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		for _, it := range items {
+			row := models.ServerNICTrafficDaily{
+				ServerID: it.serverID, Date: date,
+				RxBytes: it.rx, TxBytes: it.tx,
+				LastRawRx: it.lastRx, LastRawTx: it.lastTx,
+			}
+			var doUpdates clause.Set
+			if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+				doUpdates = clause.Assignments(map[string]any{
+					"rx_bytes":    gorm.Expr("server_nic_traffic_daily.rx_bytes + VALUES(rx_bytes)"),
+					"tx_bytes":    gorm.Expr("server_nic_traffic_daily.tx_bytes + VALUES(tx_bytes)"),
+					"last_raw_rx": gorm.Expr("VALUES(last_raw_rx)"),
+					"last_raw_tx": gorm.Expr("VALUES(last_raw_tx)"),
+					"updated_at":  gorm.Expr("VALUES(updated_at)"),
+				})
+			} else {
+				doUpdates = clause.Assignments(map[string]any{
+					"rx_bytes":    gorm.Expr("rx_bytes + excluded.rx_bytes"),
+					"tx_bytes":    gorm.Expr("tx_bytes + excluded.tx_bytes"),
+					"last_raw_rx": gorm.Expr("excluded.last_raw_rx"),
+					"last_raw_tx": gorm.Expr("excluded.last_raw_tx"),
+					"updated_at":  gorm.Expr("excluded.updated_at"),
+				})
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "server_id"}, {Name: "date"}},
+				DoUpdates: doUpdates,
+			}).Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("nodegate: 网卡流量日聚合落库失败（下轮重试）: %v", err)
+		return
+	}
+
+	h.nicMu.Lock()
+	for _, it := range items {
+		if a := h.nicAcc[it.serverID]; a != nil {
+			a.pendingRx -= it.rx
+			a.pendingTx -= it.tx
+		}
+	}
+	h.nicMu.Unlock()
+	h.lastNICFlush = now
+}
+
+// ForgetNIC 服务器删除时清掉内存累计器（日表行由 API 在同一事务里删除）。
+func (h *Hub) ForgetNIC(serverID uint64) {
+	h.nicMu.Lock()
+	delete(h.nicAcc, serverID)
+	h.nicMu.Unlock()
+}
+
 // upsertMetrics 在内存快照上就地更新指定节点（快/慢车道各写各的字段，互不清空）。
 // 读侧（GetLatestMetrics/GetAllLatestMetrics）在 RLock 下整结构拷贝，因此就地改写安全；
 // 切片字段（OnlineIPs/UserRates）每帧整体替换、从不原地修改，拷贝共享底层数组也不会撕裂。
@@ -893,6 +1074,7 @@ func (h *Hub) handleMetrics(conn *Conn, msg *protocol.Message) {
 	})
 	h.recordFastWindow(conn, m.CPU, m.RxRate, m.TxRate, m.RxBytes, m.TxBytes)
 	h.recordConnWindow(conn, m.Conns)
+	h.accumulateNIC(conn.ServerID, m.RxBytes, m.TxBytes)
 	h.flushNodeReport(conn, now)
 }
 
@@ -1389,6 +1571,7 @@ func (h *Hub) watchdog() {
 			}
 		case <-ticker.C:
 			h.pruneEnforced()
+			h.maybeFlushNIC(time.Now())
 			h.mu.RLock()
 			var stale []*Conn
 			for _, c := range h.conns {

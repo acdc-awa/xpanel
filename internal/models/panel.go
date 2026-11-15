@@ -23,14 +23,23 @@ type Server struct {
 	Remark     string `gorm:"size:255" json:"remark"`
 	// VPS 到期日（纯日历日 YYYY-MM-DD，空=未设置）。续费日是"哪一天"而不是某一瞬，
 	// 故全程不存时刻、不做时区换算——一旦存成时刻，同一日期在不同展示时区会漂成前后一天。
-	ExpireAt              string `gorm:"size:10" json:"expire_at"`
-	BillingCycle          string `gorm:"size:32" json:"billing_cycle"`                        // 计费周期（月付/季付/年付/一次性 等或自定义）
-	Price                 string `gorm:"size:64" json:"price"`                                // 价格 / 续费金额（如 $5.99 / ¥35 / 120/年）
-	IDCAddress            string `gorm:"column:idc_address;size:255" json:"idc_address"`      // IDC 地址 / 服务商控制台链接
-	Status                int    `gorm:"default:0;index" json:"status"`                       // 0 离线 1 在线
-	SortOrder             int    `gorm:"default:0;index" json:"sort_order"`                   // 排序序号（数字越小越靠前，默认 0）
-	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`  // 默认出口（路由未命中时的出站标签）
-	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"` // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
+	ExpireAt     string `gorm:"size:10" json:"expire_at"`
+	BillingCycle string `gorm:"size:32" json:"billing_cycle"`                   // 计费周期（月付/季付/年付/一次性 等或自定义）
+	Price        string `gorm:"size:64" json:"price"`                           // 价格 / 续费金额（如 $5.99 / ¥35 / 120/年）
+	IDCAddress   string `gorm:"column:idc_address;size:255" json:"idc_address"` // IDC 地址 / 服务商控制台链接
+	// 网卡周期流量统计（2026-11-15）：服务器卡/概览展示「本周期用了多少」。
+	// 数据源是节点上报的累计物理网卡 Rx/Tx 字节（agent collector），与 xray 用户流量无关。
+	//   - NICCycleStart 为空 = 自动：按 billing_cycle + expire_at 推导；推导不出按自然月。
+	//   - 有起点且 NICCycleDays>0 = 固定天数周期；有起点、天数为 0 = 按计费周期长度（识别不出按 1 个月）。
+	// 两个字段都为空/0 时完全走自动，存量服务器升级后行为一致。
+	NICCycleStart         string `gorm:"column:nic_cycle_start;size:10" json:"nic_cycle_start"`                      // 统计周期起点 YYYY-MM-DD（空=自动）
+	NICCycleDays          int    `gorm:"column:nic_cycle_days;default:0" json:"nic_cycle_days"`                      // 固定天数周期（0=按计费周期长度）
+	NICQuotaGB            int64  `gorm:"column:nic_quota_gb;default:0" json:"nic_quota_gb"`                          // 每周期流量额度（GB，0=不限）
+	NICQuotaDirection     string `gorm:"column:nic_quota_direction;size:8;default:total" json:"nic_quota_direction"` // 额度口径：total/rx/tx/max
+	Status                int    `gorm:"default:0;index" json:"status"`                                              // 0 离线 1 在线
+	SortOrder             int    `gorm:"default:0;index" json:"sort_order"`                                          // 排序序号（数字越小越靠前，默认 0）
+	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`                         // 默认出口（路由未命中时的出站标签）
+	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"`                        // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
 	// 出站域名解析策略（freedom settings.domainStrategy）不在此建模：它是出站级属性，唯一入口是
 	// 出站编辑器（ServerOutbound.SettingsJSON.domainStrategy）。历史上的服务器级
 	// default_outbound_domain_strategy 列已移除，存量值由 migrateDefaultOutboundDSIntoOutbounds 并入出站。
@@ -327,6 +336,32 @@ type NodeReport struct {
 	ConnUDP            *int      `json:"conn_udp"`
 	ReportedAt         time.Time `gorm:"index:idx_server_reported,priority:2;index" json:"reported_at"`
 }
+
+// ServerNICTrafficDaily 服务器网卡流量日聚合（2026-11-15）。
+//
+// 节点上报的是「自开机累计」的物理网卡 Rx/Tx 字节（见 agent collector），
+// 主控在每条指标帧上做差分并按业务时区归日累加。日表是「周期流量」的唯一账本：
+// node_reports 只保 30 天且会被降采样，不能直接当长期周期账本。
+//
+// LastRawRx/LastRawTx 是写这一行时对应到的原始累计值（不是当日累计），
+// 用于主控重启后从「上次落库的位置」继续差分：崩溃时最多回放一个 flush 窗口，
+// 不会因为重启把停机期间的网卡流量漏掉（除非节点在停机期间重启、计数器归零）。
+type ServerNICTrafficDaily struct {
+	ID       uint64 `gorm:"primaryKey" json:"id"`
+	ServerID uint64 `gorm:"uniqueIndex:idx_nic_server_date,priority:1;not null" json:"server_id"`
+	// Date 业务时区日期（YYYY-MM-DD）：与仪表盘「今日/本月」、流量日汇总同口径。
+	Date      string    `gorm:"size:10;uniqueIndex:idx_nic_server_date,priority:2;not null" json:"date"`
+	RxBytes   int64     `gorm:"not null" json:"rx_bytes"` // 当日网卡接收增量（下行）
+	TxBytes   int64     `gorm:"not null" json:"tx_bytes"` // 当日网卡发送增量（上行）
+	LastRawRx uint64    `gorm:"not null" json:"last_raw_rx"`
+	LastRawTx uint64    `gorm:"not null" json:"last_raw_tx"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName 固定表名：GORM 默认会把 Daily 复数化成 server_nic_traffic_dailies，
+// 而回填/基线查询的裸 SQL 使用单数表名，显式钉死避免两套名字并存。
+func (ServerNICTrafficDaily) TableName() string { return "server_nic_traffic_daily" }
 
 // AuditLog 审计日志（管理员操作、登录、订单确认等）。
 //

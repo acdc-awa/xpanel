@@ -480,8 +480,34 @@ export interface ServerItem {
   billing_cycle?: string // 计费周期（月付/季付/年付等）
   price?: string // 续费价格
   idc_address?: string // IDC 控制台地址
+  // 网卡周期流量配置（空/0 = 自动：按计费周期+到期日推导，识别不出按自然月）
+  nic_cycle_start?: string // 统计周期起点 YYYY-MM-DD
+  nic_cycle_days?: number // 固定天数周期（0=按计费周期长度）
+  nic_quota_gb?: number // 每周期流量额度（GB，0=不限）
+  nic_quota_direction?: NicQuotaDirection // 额度口径
+  nic_traffic?: ServerNicTraffic // 本周期用量 + 进度（列表接口附带）
   last_seen_at: string | null
   created_at: string
+}
+
+export type NicQuotaDirection = 'total' | 'rx' | 'tx' | 'max'
+
+/** 服务器网卡周期流量（整机物理网卡口径，不是 xray 用户流量）。 */
+export interface ServerNicTraffic {
+  rx_bytes: number // 本周期网卡接收（下行）
+  tx_bytes: number // 本周期网卡发送（上行）
+  total_bytes: number // Rx+Tx
+  cycle_start: string // YYYY-MM-DD（含）
+  cycle_end: string // YYYY-MM-DD（不含）
+  cycle_label: string // 自然月 / 计费周期（月付，按到期日）/ 自定义 30 天
+  tracked_since?: string // 日表最早一天；空=还没有数据
+  partial: boolean // 数据起点晚于周期起点（本周期不完整）
+  quota_gb: number // 0=不限
+  quota_bytes: number
+  quota_direction: NicQuotaDirection
+  quota_used_bytes: number // 已按 quota_direction 取口径
+  quota_percent: number // 可 >100
+  quota_state?: '' | 'ok' | 'warning' | 'exceeded'
 }
 
 export interface CreateServerResult {
@@ -511,6 +537,10 @@ export function createServer(payload: {
   billing_cycle?: string
   price?: string
   idc_address?: string
+  nic_cycle_start?: string
+  nic_cycle_days?: number
+  nic_quota_gb?: number
+  nic_quota_direction?: NicQuotaDirection
   sort_order?: number
 }) {
   return http.post<ApiResp<CreateServerResult>>('/admin/servers', payload)
@@ -534,6 +564,10 @@ export function updateServer(
     billing_cycle?: string
     price?: string
     idc_address?: string
+    nic_cycle_start?: string
+    nic_cycle_days?: number
+    nic_quota_gb?: number
+    nic_quota_direction?: NicQuotaDirection
     sort_order?: number
   },
 ) {

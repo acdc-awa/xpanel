@@ -124,6 +124,13 @@ func main() {
 	if err := services.MigrateLegacyLogs(database, Version); err != nil {
 		log.Fatalf("存量日志压缩迁移失败: %v", err)
 	}
+	// 服务器网卡流量日聚合回填（2026-11-15，schema v6）：日表从本版本起才累计，
+	// 首次升级用 node_reports 保留期内的累计字节补齐当前周期。必须在 NewHub 之前完成——
+	// 回填与 Hub 的内存累计器共用 last_raw 基线，先回填才能无缝续算。
+	// 一个事务全量写入 + 完成标记，失败中止启动（下次重试幂等，不会留半份数据）。
+	if err := services.BackfillNICDaily(database); err != nil {
+		log.Fatalf("服务器网卡流量日聚合回填失败: %v", err)
+	}
 	if err := models.RecordSchemaVersion(database, Version); err != nil {
 		// 仅记日志：承重的 min_compatible 已在上方（迁移前）落下且失败致命，此处写的是
 		// 「迁移已跑完」的最终状态与展示信息，失败不会打开护栏缺口。

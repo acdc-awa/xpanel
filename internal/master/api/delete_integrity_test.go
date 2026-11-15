@@ -65,7 +65,7 @@ func TestAdminDeleteServerCascadesAccessLayer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.UserAccessPoint{}))
+	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.ServerNICTrafficDaily{}, &models.UserAccessPoint{}))
 
 	srv := models.Server{Name: "s1", Host: "1.2.3.4", NodeID: "n1", Secret: "s1"}
 	require.NoError(t, db.Create(&srv).Error)
@@ -98,7 +98,7 @@ func TestAdminDeleteServer_ProtectedByTunnel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.UserAccessPoint{}))
+	require.NoError(t, db.AutoMigrate(&models.Server{}, &models.Inbound{}, &models.AccessLayer{}, &models.ServerOutbound{}, &models.ServerRoutingRule{}, &models.PendingConfig{}, &models.PendingCert{}, &models.NodeReport{}, &models.ServerNICTrafficDaily{}, &models.UserAccessPoint{}))
 
 	srv1 := models.Server{Name: "landing-srv", Host: "1.2.3.4", NodeID: "n1", Secret: "s1"}
 	require.NoError(t, db.Create(&srv1).Error)

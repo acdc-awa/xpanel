@@ -5,14 +5,29 @@ import {
   CsBadge,
   CsButton,
   CsContainer,
+  CsProgressBar,
   CsStatusIndicator,
   CsTooltip,
   ElMessage,
 } from '@/components/cloudscape'
+import TipIcon from '@/components/base/TipIcon.vue'
 import { getInbounds, runServerCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatBytes } from '@/utils/format'
 import { formatDateTime } from '@/utils/timezone'
 import { indicatorTypeOf, onlineChip, pushStateChip, pushStateSummary, xrayChip } from '@/utils/server-status'
+import {
+  hasNicTrafficData,
+  nicCycleRangeText,
+  nicPartialText,
+  nicQuotaColor,
+  nicQuotaPercentText,
+  nicQuotaStateText,
+  nicTrafficOf,
+  nicTrafficTooltip,
+  nicUsageHeadline,
+  quotaDirectionLabel,
+} from '@/utils/server-nic-traffic'
 
 // 概览只回答「这台机器现在怎么样」：在线/进程/配置同步/接入点。
 // 名称、地址、地区、到期、计费这些可编辑的资产字段一律只在「设置」页签出现，
@@ -65,6 +80,24 @@ const connsText = computed(
   () =>
     `TCP 已建立 ${props.server.conn_tcp_established}，连接表 ${props.server.conn_tcp_total}，UDP socket ${props.server.conn_udp}`,
 )
+
+// 网卡周期流量：后端已解析周期与额度口径，这里只做展示。
+const nic = computed(() => nicTrafficOf(props.server))
+const nicHasData = computed(() => hasNicTrafficData(nic.value))
+const nicRx = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.rx_bytes) : '—'))
+const nicTx = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.tx_bytes) : '—'))
+const nicTotal = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.total_bytes) : '—'))
+const nicRange = computed(() => (nic.value ? nicCycleRangeText(nic.value) : '—'))
+const nicCycleLabel = computed(() => nic.value?.cycle_label ?? '')
+const nicPartial = computed(() => nicPartialText(nic.value))
+const nicUsage = computed(() => (nic.value && nicHasData.value ? nicUsageHeadline(nic.value) : '—'))
+const nicPercent = computed(() =>
+  nic.value && nic.value.quota_bytes > 0 && nicHasData.value ? nicQuotaPercentText(nic.value) : '',
+)
+const nicBarColor = computed(() => nicQuotaColor(nic.value))
+const nicState = computed(() => nicQuotaStateText(nic.value))
+const nicTip = computed(() => nicTrafficTooltip(nic.value))
+const nicDirection = computed(() => quotaDirectionLabel(nic.value?.quota_direction))
 
 const processText = computed(() => {  if (offline.value) return '服务器离线，无法查询实时进程'
   const s = status.value
@@ -230,6 +263,57 @@ watch(
         </CsAlert>
       </div>
     </CsContainer>
+
+    <CsContainer header="网卡流量（本周期）">
+      <template #info>
+        <TipIcon :content="nicTip" />
+      </template>
+      <template #actions>
+        <CsBadge v-if="nicState" :color="nic?.quota_state === 'exceeded' ? 'red' : 'severity-medium'">
+          {{ nicState }}
+        </CsBadge>
+      </template>
+
+      <div class="server-traffic-band">
+        <div class="server-traffic-cell">
+          <span class="server-status-label">下行（Rx）</span>
+          <span class="server-traffic-value">{{ nicRx }}</span>
+        </div>
+        <div class="server-traffic-cell">
+          <span class="server-status-label">上行（Tx）</span>
+          <span class="server-traffic-value">{{ nicTx }}</span>
+        </div>
+        <div class="server-traffic-cell">
+          <span class="server-status-label">合计</span>
+          <span class="server-traffic-value">{{ nicTotal }}</span>
+        </div>
+      </div>
+
+      <div v-if="nic && nic.quota_bytes > 0" class="server-traffic-quota">
+        <div class="traffic-head">
+          <span>额度进度（{{ nicDirection }}）</span>
+          <span class="traffic-value">
+            <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage }}</strong>
+            <span class="traffic-percent">({{ nicPercent }})</span>
+          </span>
+        </div>
+        <CsProgressBar
+          :value="nic.quota_percent"
+          :bar-height="6"
+          hide-text
+          :color="nicBarColor"
+          :aria-label="`周期流量已用 ${nicPercent}`"
+        />
+      </div>
+
+      <div v-if="nic" class="server-traffic-cycle">
+        {{ nicRange }}（{{ nicCycleLabel }}）<template v-if="nicPartial">，{{ nicPartial }}</template>
+      </div>
+      <div v-if="nic && !nicHasData" class="server-traffic-note">节点尚未上报可用的网卡计数（需要 agent 升级或节点在线）</div>
+      <CsAlert v-else-if="nic?.partial" type="info">
+        本周期数据自 {{ nic.tracked_since }} 起，之前的部分不计入用量。
+      </CsAlert>
+    </CsContainer>
   </div>
 </template>
 
@@ -330,6 +414,71 @@ watch(
   flex-direction: column;
   gap: 10px;
   margin-top: 16px;
+}
+
+/* 网卡流量：三段指标 + 额度进度，字号与状态带一致。 */
+.server-traffic-band {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.server-traffic-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-inline-size: 0;
+}
+
+.server-traffic-value {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 16px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.server-traffic-quota {
+  margin-block-start: 16px;
+}
+
+.traffic-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block-end: 6px;
+  font-size: var(--font-size-body-s, 12px);
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-value {
+  min-inline-size: 0;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  text-align: end;
+}
+
+.traffic-percent {
+  margin-inline-start: 2px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.server-traffic-cycle {
+  margin-block-start: 12px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow-wrap: anywhere;
+}
+
+.server-traffic-note {
+  margin-block-start: 8px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 @media (max-width: $bp-tablet-max) {

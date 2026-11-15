@@ -4,6 +4,7 @@ import {
   CsBadge,
   CsButton,
   CsCard,
+  CsProgressBar,
   CsStatusIndicator,
   CsTooltip,
   type BadgeColor,
@@ -11,9 +12,19 @@ import {
 import SortHandle from '@/components/base/SortHandle.vue'
 import type { ServerItem } from '@/api/admin'
 import { compareVersion } from '@/utils/version'
+import { formatBytes } from '@/utils/format'
 import { formatDateTime } from '@/utils/timezone'
 import { formatExpireDate, getExpiryStatus, isUrl, normalizeUrl } from '@/utils/vps'
 import { indicatorTypeOf, onlineChip, pushStateChip, xrayChip } from '@/utils/server-status'
+import {
+  hasNicTrafficData,
+  nicCycleRangeText,
+  nicQuotaColor,
+  nicQuotaPercentText,
+  nicTrafficOf,
+  nicTrafficTooltip,
+  nicUsageHeadline,
+} from '@/utils/server-nic-traffic'
 
 // 服务器卡片：名称 → 状态条 → 地址/心跳/版本 → 操作。
 // 状态文案与配色全部来自 utils/server-status（与设置弹窗同一份），这里只负责排版。
@@ -81,6 +92,20 @@ const hasAsset = computed(
     Boolean(props.server.price) ||
     Boolean(props.server.idc_address),
 )
+
+// 周期流量（网卡整机口径）：数据由列表接口附带，卡片只格式化；额度为 0 时不画进度条。
+const nic = computed(() => nicTrafficOf(props.server))
+const nicHasData = computed(() => hasNicTrafficData(nic.value))
+const nicUsage = computed(() => (nic.value && nicHasData.value ? nicUsageHeadline(nic.value) : '—'))
+const nicPercent = computed(() =>
+  nic.value && nic.value.quota_bytes > 0 && nicHasData.value ? nicQuotaPercentText(nic.value) : '',
+)
+const nicBarColor = computed(() => nicQuotaColor(nic.value))
+const nicTip = computed(() => nicTrafficTooltip(nic.value))
+const nicRange = computed(() => (nic.value ? nicCycleRangeText(nic.value) : ''))
+const nicPartial = computed(() => (nic.value?.partial ? `数据自 ${nic.value.tracked_since} 起` : ''))
+const nicDown = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.rx_bytes) : ''))
+const nicUp = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.tx_bytes) : ''))
 
 /** 到期状态的颜色语义映射到 Cloudscape Badge（与 utils/vps 的 cls 一一对应）。 */
 function badgeColorOf(cls: string): BadgeColor {
@@ -197,6 +222,34 @@ function onRootClick() {
             <span class="cs-text-mono">{{ inboundCount ?? 0 }}</span> 个
           </CsButton>
         </span>
+      </div>
+
+      <div v-if="nic" class="server-traffic">
+        <CsTooltip :content="nicTip" class="traffic-head">
+          <span class="traffic-label">周期流量</span>
+          <span class="traffic-value">
+            <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage }}</strong>
+            <span v-if="nicPercent" class="traffic-percent">({{ nicPercent }})</span>
+          </span>
+        </CsTooltip>
+        <CsProgressBar
+          v-if="nicHasData && nic.quota_bytes > 0"
+          :value="nic.quota_percent"
+          :bar-height="5"
+          hide-text
+          :color="nicBarColor"
+          :aria-label="`周期流量已用 ${nicPercent}`"
+        />
+        <div v-if="nicHasData" class="traffic-meta">
+          <span class="traffic-cycle">{{ nicRange }}<template v-if="nicPartial">，{{ nicPartial }}</template></span>
+          <span class="traffic-split">
+            <span>↓ {{ nicDown }}</span>
+            <span>↑ {{ nicUp }}</span>
+          </span>
+        </div>
+        <div v-else class="traffic-cycle">
+          {{ nicRange }}<template v-if="nicPartial">，{{ nicPartial }}</template>
+        </div>
       </div>
 
       <div v-if="hasAsset" class="server-asset">
@@ -381,6 +434,84 @@ function onRootClick() {
 
 .server-inbound-link {
   font-size: 14px;
+}
+
+/* 周期流量（网卡整机口径）：与入站卡片同一套紧凑条样式，避免另造一套视觉。 */
+.server-traffic {
+  margin-block-start: 4px;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-input-k1q34z, 8px);
+  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
+}
+
+.traffic-head {
+  inline-size: 100%;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block-end: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-label {
+  flex: none;
+}
+
+.traffic-value {
+  min-inline-size: 0;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  text-align: end;
+}
+
+.traffic-percent {
+  margin-inline-start: 2px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-block-start: 6px;
+}
+
+.traffic-cycle,
+.traffic-split {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.traffic-cycle {
+  margin-block-start: 6px;
+  overflow-wrap: anywhere;
+}
+
+.traffic-meta .traffic-cycle {
+  margin-block-start: 0;
+}
+
+.traffic-split {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-inline-start: auto;
+}
+
+.traffic-cycle {
+  margin-block-start: 6px;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  overflow-wrap: anywhere;
 }
 
 .server-asset {

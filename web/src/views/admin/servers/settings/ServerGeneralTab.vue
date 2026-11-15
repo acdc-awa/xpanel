@@ -8,11 +8,13 @@ import {
   CsForm,
   CsFormItem,
   CsInput,
+  CsInputNumber,
   CsSelect,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
-import { deleteServer, resetServerSecret, updateServer, type ServerItem } from '@/api/admin'
+import TipIcon from '@/components/base/TipIcon.vue'
+import { deleteServer, resetServerSecret, updateServer, type NicQuotaDirection, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
 // 设置页只做编辑：名称/地址/地区/备注、VPS 资产、节点通信凭据、危险操作。
@@ -39,6 +41,13 @@ const billingOptions = [
   { label: '一次性 / 永久', value: '一次性' },
 ]
 
+const quotaDirectionOptions = [
+  { label: '双向合计', value: 'total' },
+  { label: '仅下行（Rx）', value: 'rx' },
+  { label: '仅上行（Tx）', value: 'tx' },
+  { label: '双向取较大值', value: 'max' },
+]
+
 const form = reactive({
   name: '',
   host: '',
@@ -48,6 +57,10 @@ const form = reactive({
   billing_cycle: '',
   price: '',
   idc_address: '',
+  nic_cycle_start: '' as string | null,
+  nic_cycle_days: 0 as number | null,
+  nic_quota_gb: 0 as number | null,
+  nic_quota_direction: 'total' as NicQuotaDirection,
 })
 
 const errors = reactive({ name: '', host: '' })
@@ -63,6 +76,10 @@ function resetForm() {
     billing_cycle: props.server.billing_cycle ?? '',
     price: props.server.price ?? '',
     idc_address: props.server.idc_address ?? '',
+    nic_cycle_start: props.server.nic_cycle_start || null,
+    nic_cycle_days: props.server.nic_cycle_days ?? 0,
+    nic_quota_gb: props.server.nic_quota_gb ?? 0,
+    nic_quota_direction: props.server.nic_quota_direction ?? 'total',
   })
   errors.name = ''
   errors.host = ''
@@ -85,7 +102,11 @@ const dirty = computed(
     norm(form.expire_at) !== norm(props.server.expire_at) ||
     norm(form.billing_cycle) !== norm(props.server.billing_cycle) ||
     norm(form.price) !== norm(props.server.price) ||
-    norm(form.idc_address) !== norm(props.server.idc_address),
+    norm(form.idc_address) !== norm(props.server.idc_address) ||
+    norm(form.nic_cycle_start) !== norm(props.server.nic_cycle_start) ||
+    Number(form.nic_cycle_days ?? 0) !== Number(props.server.nic_cycle_days ?? 0) ||
+    Number(form.nic_quota_gb ?? 0) !== Number(props.server.nic_quota_gb ?? 0) ||
+    norm(form.nic_quota_direction) !== norm(props.server.nic_quota_direction ?? 'total'),
 )
 
 async function save() {
@@ -93,6 +114,10 @@ async function save() {
   errors.host = form.host.trim() ? '' : '请填写主机地址'
   if (errors.name || errors.host) {
     ElMessage.warning('请先补全服务器名称与主机地址')
+    return
+  }
+  if ((Number(form.nic_cycle_days) || 0) > 0 && !form.nic_cycle_start) {
+    ElMessage.warning('固定天数周期需要填写流量统计周期起点')
     return
   }
 
@@ -108,6 +133,10 @@ async function save() {
       billing_cycle: form.billing_cycle,
       price: form.price,
       idc_address: form.idc_address,
+      nic_cycle_start: form.nic_cycle_start || '',
+      nic_cycle_days: Number(form.nic_cycle_days) || 0,
+      nic_quota_gb: Number(form.nic_quota_gb) || 0,
+      nic_quota_direction: form.nic_quota_direction,
     })
     if (data.code === 0) {
       ElMessage.success('已保存')
@@ -255,6 +284,49 @@ async function copyText(text: string, label: string) {
           </CsFormItem>
           <CsFormItem label="IDC 控制台地址">
             <CsInput v-model="form.idc_address" placeholder="控制台网址，如 https://..." clearable />
+          </CsFormItem>
+        </div>
+      </CsForm>
+    </CsContainer>
+
+    <CsContainer header="流量统计与额度（选填）">
+      <template #info>
+        <TipIcon content="周期起点留空时按「计费周期 + 到期日」自动推导，识别不出按自然月；周期天数留空或 0 表示按计费周期长度；额度 0 表示不限。" />
+      </template>
+      <CsForm>
+        <div class="server-form-grid">
+          <CsFormItem label="统计周期起点">
+            <CsDatePicker
+              v-model="form.nic_cycle_start"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="留空 = 自动"
+            />
+          </CsFormItem>
+          <CsFormItem label="周期天数">
+            <CsInputNumber
+              v-model="form.nic_cycle_days"
+              :min="0"
+              :max="3650"
+              :controls="false"
+              placeholder="留空 = 按计费周期"
+            />
+          </CsFormItem>
+          <CsFormItem label="每周期流量额度（GB）">
+            <CsInputNumber
+              v-model="form.nic_quota_gb"
+              :min="0"
+              :max="10000000"
+              :controls="false"
+              placeholder="0 = 不限"
+            />
+          </CsFormItem>
+          <CsFormItem label="额度口径">
+            <CsSelect
+              :model-value="form.nic_quota_direction"
+              :options="quotaDirectionOptions"
+              @update:model-value="(v: string | number | (string | number)[] | '') => (form.nic_quota_direction = String(v || 'total') as NicQuotaDirection)"
+            />
           </CsFormItem>
         </div>
       </CsForm>

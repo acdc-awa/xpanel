@@ -84,7 +84,13 @@ const (
 	//     target_type / target_id / target_name（目标对象）、status（HTTP 状态），
 	//     并给 created_at 与 (target_type,target_id) 加索引；存量行由启动迁移从 detail 信封回填；
 	//  ③ audit detail 上限由 2 KB 提到 32 KB（base64/二进制转 sha256 摘要），正文不再摘要化。
-	DBSchemaVersion = 5
+	//
+	// v6（2026-11-15，服务器网卡周期流量）：纯增量，不提升 Min——
+	// 新增 server_nic_traffic_daily 日聚合表（server_id,date 唯一），servers 加
+	// nic_cycle_start / nic_cycle_days / nic_quota_gb / nic_quota_direction 四列。
+	// 旧面板不认识新表/新列但不会写坏；日表由主控按累计网卡字节差分维护，
+	// 首次升级从 node_reports 保留期一次性回填（失败中止启动，重试幂等）。
+	DBSchemaVersion = 6
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。

@@ -16,6 +16,7 @@ import (
 
 	"github.com/acdc-awa/xpanel-node/pkg/protocol"
 	"github.com/acdc-awa/xpanel/internal/master/nodegate"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/xray"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -26,27 +27,34 @@ var agentTagPattern = regexp.MustCompile(`^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$`)
 
 // serverView 服务器对外结构。
 type serverView struct {
-	ID                    uint64     `json:"id"`
-	ServerType            string     `json:"server_type"` // xray（托管 Xray-core 计算节点）
-	Name                  string     `json:"name"`
-	Host                  string     `json:"host"`
-	NodeID                string     `json:"node_id"`
-	Location              string     `json:"location"`
-	Remark                string     `json:"remark"`
-	ExpireAt              string     `json:"expire_at"` // 纯日历日 YYYY-MM-DD，空串=未设置
-	BillingCycle          string     `json:"billing_cycle"`
-	Price                 string     `json:"price"`
-	IDCAddress            string     `json:"idc_address"`
-	Status                int        `json:"status"`                  // 0 离线 1 在线
-	SortOrder             int        `json:"sort_order"`              // 排序序号
-	ConfigStatus          string     `json:"config_status"`           // pushed / pending / ""（无待推送配置）
-	PushError             string     `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
-	PushAttempts          int        `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
-	PushLastTryAt         *time.Time `json:"push_last_try_at,omitempty"`
-	DefaultOutboundTag    string     `json:"default_outbound_tag"`    // 路由默认出口
-	RoutingDomainStrategy string     `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
-	AgentVersion          string     `json:"agent_version"`           // 节点心跳上报的 agent 版本（旧 agent 为空）
-	XrayVersion           string     `json:"xray_version,omitempty"`  // 节点心跳上报的 xray 内核版本（旧 agent 为空）
+	ID           uint64 `json:"id"`
+	ServerType   string `json:"server_type"` // xray（托管 Xray-core 计算节点）
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	NodeID       string `json:"node_id"`
+	Location     string `json:"location"`
+	Remark       string `json:"remark"`
+	ExpireAt     string `json:"expire_at"` // 纯日历日 YYYY-MM-DD，空串=未设置
+	BillingCycle string `json:"billing_cycle"`
+	Price        string `json:"price"`
+	IDCAddress   string `json:"idc_address"`
+	// 网卡周期流量的配置（2026-11-15）：起点/天数/额度/额度口径。
+	// 实际周期区间与用量由 nic_traffic 给出（后端解析，前端不重算）。
+	NICCycleStart         string          `json:"nic_cycle_start"`
+	NICCycleDays          int             `json:"nic_cycle_days"`
+	NICQuotaGB            int64           `json:"nic_quota_gb"`
+	NICQuotaDirection     string          `json:"nic_quota_direction"`
+	NICTraffic            *nicTrafficView `json:"nic_traffic,omitempty"`
+	Status                int             `json:"status"`                  // 0 离线 1 在线
+	SortOrder             int             `json:"sort_order"`              // 排序序号
+	ConfigStatus          string          `json:"config_status"`           // pushed / pending / ""（无待推送配置）
+	PushError             string          `json:"push_error,omitempty"`    // 待推送配置最近一次失败原因（仅 pending 时有值）
+	PushAttempts          int             `json:"push_attempts,omitempty"` // 待推送配置累计失败次数
+	PushLastTryAt         *time.Time      `json:"push_last_try_at,omitempty"`
+	DefaultOutboundTag    string          `json:"default_outbound_tag"`    // 路由默认出口
+	RoutingDomainStrategy string          `json:"routing_domain_strategy"` // 路由域名策略（路由匹配阶段）
+	AgentVersion          string          `json:"agent_version"`           // 节点心跳上报的 agent 版本（旧 agent 为空）
+	XrayVersion           string          `json:"xray_version,omitempty"`  // 节点心跳上报的 xray 内核版本（旧 agent 为空）
 	// 连接数快照（-1 = 从未上报，前端展示为「—」；0 是合法值）
 	ConnTCPEstablished int        `json:"conn_tcp_established"`
 	ConnTCPTotal       int        `json:"conn_tcp_total"`
@@ -79,6 +87,8 @@ func toServerView(s *models.Server) serverView {
 		ID: s.ID, ServerType: st, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
 		Location: s.Location, Remark: s.Remark,
 		ExpireAt: s.ExpireAt, BillingCycle: s.BillingCycle, Price: s.Price, IDCAddress: s.IDCAddress,
+		NICCycleStart: s.NICCycleStart, NICCycleDays: s.NICCycleDays,
+		NICQuotaGB: s.NICQuotaGB, NICQuotaDirection: services.NICQuotaDirection(s.NICQuotaDirection),
 		Status:                s.Status,
 		SortOrder:             s.SortOrder,
 		DefaultOutboundTag:    s.DefaultOutboundTag,
@@ -154,6 +164,8 @@ func (d *Deps) AdminServers(c *gin.Context) {
 		v.PushState = pushStateOf(v.ConfigDrift, hasPend, v.ConfigStatus, v.PushError, v.Status)
 		items = append(items, v)
 	}
+	// 网卡周期流量与额度：一次列表请求内按服务器逐个聚合日表（见 servers_nic_traffic.go）。
+	d.fillNICTraffic(items, list)
 	util.OK(c, gin.H{"items": items})
 }
 
@@ -189,7 +201,13 @@ func parseExpireDate(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return "", err
 	}
-	s = strings.TrimSpace(s)
+	return parseCalendarDay(s)
+}
+
+// parseCalendarDay 归一纯日历日字符串（YYYY-MM-DD，容忍未补零与 / 分隔；空串=未设置）。
+// 与 parseExpireDate 共用同一套写法，网卡统计周期起点也走它。
+func parseCalendarDay(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
 	if s == "" {
 		return "", nil
 	}
@@ -202,7 +220,7 @@ func parseExpireDate(raw json.RawMessage) (string, error) {
 			return t.Format("2006-01-02"), nil
 		}
 	}
-	return "", fmt.Errorf("无法解析到期日期: %s", s)
+	return "", fmt.Errorf("无法解析日期: %s", s)
 }
 
 func (d *Deps) AdminCreateServer(c *gin.Context) {
@@ -216,6 +234,10 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		BillingCycle          string          `json:"billing_cycle" binding:"max=32"`
 		Price                 string          `json:"price" binding:"max=64"`
 		IDCAddress            string          `json:"idc_address" binding:"max=255"`
+		NICCycleStart         string          `json:"nic_cycle_start" binding:"max=10"`
+		NICCycleDays          int             `json:"nic_cycle_days" binding:"min=0,max=3650"`
+		NICQuotaGB            int64           `json:"nic_quota_gb" binding:"min=0,max=10000000"`
+		NICQuotaDirection     string          `json:"nic_quota_direction" binding:"max=8"`
 		DefaultOutboundTag    string          `json:"default_outbound_tag"`
 		RoutingDomainStrategy string          `json:"routing_domain_strategy"`
 		SortOrder             *int            `json:"sort_order"`
@@ -226,6 +248,15 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 	expireDate, err := parseExpireDate(req.ExpireAt)
 	if err != nil {
 		util.BadRequest(c, "到期日期格式错误（需 YYYY-MM-DD）")
+		return
+	}
+	nicStart, err := parseCalendarDay(req.NICCycleStart)
+	if err != nil {
+		util.BadRequest(c, "流量统计周期起点格式错误（需 YYYY-MM-DD）")
+		return
+	}
+	if req.NICCycleDays > 0 && nicStart == "" {
+		util.BadRequest(c, "固定天数周期需要填写流量统计周期起点")
 		return
 	}
 	idcAddr := strings.TrimSpace(req.IDCAddress)
@@ -261,6 +292,10 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		BillingCycle:          strings.TrimSpace(req.BillingCycle),
 		Price:                 strings.TrimSpace(req.Price),
 		IDCAddress:            idcAddr,
+		NICCycleStart:         nicStart,
+		NICCycleDays:          req.NICCycleDays,
+		NICQuotaGB:            req.NICQuotaGB,
+		NICQuotaDirection:     services.NICQuotaDirection(req.NICQuotaDirection),
 		Status:                0,
 		SortOrder:             sortOrder,
 		DefaultOutboundTag:    req.DefaultOutboundTag,
@@ -332,6 +367,10 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		BillingCycle          *string         `json:"billing_cycle"`
 		Price                 *string         `json:"price"`
 		IDCAddress            *string         `json:"idc_address"`
+		NICCycleStart         *string         `json:"nic_cycle_start"`
+		NICCycleDays          *int            `json:"nic_cycle_days"`
+		NICQuotaGB            *int64          `json:"nic_quota_gb"`
+		NICQuotaDirection     *string         `json:"nic_quota_direction"`
 		DefaultOutboundTag    *string         `json:"default_outbound_tag"`
 		RoutingDomainStrategy *string         `json:"routing_domain_strategy"`
 		SortOrder             *int            `json:"sort_order"`
@@ -387,6 +426,41 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	}
 	if req.IDCAddress != nil {
 		updates["idc_address"] = strings.TrimSpace(*req.IDCAddress)
+	}
+	// 网卡周期流量配置（2026-11-15）：起点/天数/额度/额度口径。
+	// 部分更新时用「库内现值 + 本次传入」做交叉校验，避免只传天数导致非法组合。
+	effNICStart := srv.NICCycleStart
+	if req.NICCycleStart != nil {
+		v, err := parseCalendarDay(*req.NICCycleStart)
+		if err != nil {
+			util.BadRequest(c, "流量统计周期起点格式错误（需 YYYY-MM-DD）")
+			return
+		}
+		updates["nic_cycle_start"] = v
+		effNICStart = v
+	}
+	effNICDays := srv.NICCycleDays
+	if req.NICCycleDays != nil {
+		if *req.NICCycleDays < 0 || *req.NICCycleDays > 3650 {
+			util.BadRequest(c, "流量统计周期天数需在 0-3650 之间")
+			return
+		}
+		updates["nic_cycle_days"] = *req.NICCycleDays
+		effNICDays = *req.NICCycleDays
+	}
+	if effNICDays > 0 && effNICStart == "" {
+		util.BadRequest(c, "固定天数周期需要填写流量统计周期起点")
+		return
+	}
+	if req.NICQuotaGB != nil {
+		if *req.NICQuotaGB < 0 || *req.NICQuotaGB > 10000000 {
+			util.BadRequest(c, "流量额度需在 0-10000000 GB 之间")
+			return
+		}
+		updates["nic_quota_gb"] = *req.NICQuotaGB
+	}
+	if req.NICQuotaDirection != nil {
+		updates["nic_quota_direction"] = services.NICQuotaDirection(*req.NICQuotaDirection)
 	}
 	// 这两项只在本机配置生成期读取（outbounds[0] 兜底出口 / routing.domainStrategy），
 	// 写库不会自动下发，必须显式重推本机。
@@ -530,6 +604,9 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		if err := tx.Where("server_id = ?", id).Delete(&models.NodeReport{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("server_id = ?", id).Delete(&models.ServerNICTrafficDaily{}).Error; err != nil {
+			return err
+		}
 		// 悬空引用收口：对外接入层随服务器级联删除（层无宿主后成孤儿）
 		if err := tx.Where("server_id = ?", id).Delete(&models.AccessLayer{}).Error; err != nil {
 			return err
@@ -539,9 +616,11 @@ func (d *Deps) AdminDeleteServer(c *gin.Context) {
 		util.ServerError(c, "删除失败")
 		return
 	}
-	// 服务器已从数据库删除，主动断开现有长连接并熔断指令等待
+	// 服务器已从数据库删除：先断开长连接（readPump 停止后不再有新帧进累计器），
+	// 再清掉内存累计器，避免删除后又被一帧迟到指标写回日表。
 	if d.Hub != nil {
 		d.Hub.Disconnect(id)
+		d.Hub.ForgetNIC(id)
 	}
 	util.OK(c, gin.H{"deleted": id})
 }

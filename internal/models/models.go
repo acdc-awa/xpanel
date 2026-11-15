@@ -61,6 +61,7 @@ func All() []any {
 		&ServerOutbound{}, &ServerRoutingRule{},
 		&Plan{}, &Order{}, &Cert{}, &CACert{},
 		&TrafficLog{}, &TrafficDaily{}, &NodeReport{}, &TrafficBatch{},
+		&ServerNICTrafficDaily{},
 		&AuditLog{}, &Setting{},
 		&PermissionGroup{},
 		&AccessLayer{},
