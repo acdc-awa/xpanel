@@ -34,6 +34,10 @@ type metricsResp struct {
 		TxMbpsMax     []float64 `json:"tx_mbps_max"`
 		OnlineUsers   []int     `json:"online_users"`
 		OnlineMax     []int     `json:"online_users_max"`
+		// 连接数：-1 = 该桶无数据（存量行 / 旧 agent / 非 Linux 节点），0 是合法值。
+		ConnEstablished []int `json:"conn_tcp_established"`
+		ConnTotal       []int `json:"conn_tcp_total"`
+		ConnUDP         []int `json:"conn_udp"`
 	} `json:"data"`
 }
 
@@ -183,6 +187,74 @@ func TestAdminServerMetricsBucketAvgAndPeak(t *testing.T) {
 		if d.DiskPctMax[i] < d.DiskPercent[i] {
 			t.Fatalf("disk_percent_max[%d]=%v < disk_percent[%d]=%v", i, d.DiskPctMax[i], i, d.DiskPercent[i])
 		}
+	}
+}
+
+// TestAdminServerMetricsConnSeries 连接数序列：桶内取均值；整行没有连接数（本列上线前的
+// 存量行、旧 agent、非 Linux 节点）输出 -1 哨兵而不是 0——0 是合法值（空闲节点的已建立
+// 连接恒为 0），混用会让图表画出一条假的归零线。
+func TestAdminServerMetricsConnSeries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Server{}, &models.NodeReport{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srv := models.Server{Name: "node1", Host: "1.2.3.4", NodeID: "n1"}
+	if err := db.Create(&srv).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	intPtr := func(v int) *int { return &v }
+	base := time.Now().Add(-10 * time.Minute).Truncate(time.Minute)
+	rows := []models.NodeReport{
+		{
+			ServerID: srv.ID, ReportedAt: base, CPU: 10,
+			ConnTCPEstablished: intPtr(10), ConnTCPTotal: intPtr(12), ConnUDP: intPtr(4),
+		},
+		{
+			ServerID: srv.ID, ReportedAt: base, CPU: 30,
+			ConnTCPEstablished: intPtr(20), ConnTCPTotal: intPtr(24), ConnUDP: intPtr(6),
+		},
+		// 同一服务器的存量行 / 旧 agent 行：整行没有连接数（三列为 NULL）。
+		{ServerID: srv.ID, ReportedAt: base.Add(2 * time.Minute), CPU: 50},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	d := callMetrics(t, db, srv.ID, "1h").Data
+	if len(d.ConnEstablished) != len(d.CPU) || len(d.ConnTotal) != len(d.CPU) || len(d.ConnUDP) != len(d.CPU) {
+		t.Fatalf("连接数序列长度与 CPU 不一致: %d/%d/%d vs %d",
+			len(d.ConnEstablished), len(d.ConnTotal), len(d.ConnUDP), len(d.CPU))
+	}
+
+	// 承载两个采样点的桶：均值落位（established 15、total 18、udp 5）。
+	idx := -1
+	for i, v := range d.ConnEstablished {
+		if v == 15 {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("未在响应中找到承载连接数采样点的桶（conn_tcp_established 无 15）")
+	}
+	if got := d.ConnTotal[idx]; got != 18 {
+		t.Errorf("conn_tcp_total[%d] = %d, want 18（12/24 的均值）", idx, got)
+	}
+	if got := d.ConnUDP[idx]; got != 5 {
+		t.Errorf("conn_udp[%d] = %d, want 5（4/6 的均值）", idx, got)
+	}
+
+	// 有过上报但整行缺连接数：保持 -1，不能被前向填充成上一桶的读数。
+	if got := d.ConnEstablished[idx+2]; got != -1 {
+		t.Errorf("conn_tcp_established[%d] = %d, want -1（该行无连接数数据）", idx+2, got)
+	}
+	if got := d.ConnUDP[idx+2]; got != -1 {
+		t.Errorf("conn_udp[%d] = %d, want -1（该行无连接数数据）", idx+2, got)
 	}
 }
 

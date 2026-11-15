@@ -121,6 +121,12 @@ type Conn struct {
 	windowUsersMax  int
 	windowRxBytes   uint64
 	windowTxBytes   uint64
+	// 连接数窗口（快/慢车道都携带，取窗口末值）：windowConnSeen 区分「这一分钟确实上报了
+	// 连接数」与「旧 agent / 非 Linux 节点整窗没数据」——后者落库必须是 NULL，不能写成 0。
+	windowConnEstablished int
+	windowConnTotal       int
+	windowConnUDP         int
+	windowConnSeen        bool
 
 	mu     sync.Mutex
 	closed bool
@@ -676,6 +682,7 @@ func (h *Hub) handleHeartbeat(conn *Conn, msg *protocol.Message) {
 		h.recordFastWindow(conn, hb.CPU, hb.RxRate, hb.TxRate, hb.RxBytes, hb.TxBytes)
 	}
 	h.recordSlowWindow(conn, hb.Mem, uint64(hb.MemTotal), hb.Disk, uint64(hb.DiskTotal), onlineUsers)
+	h.recordConnWindow(conn, hb.Conns)
 
 	// 3. 构建 servers 表更新字段
 	updates := map[string]any{
@@ -785,6 +792,18 @@ func (h *Hub) recordSlowWindow(conn *Conn, mem float64, memTotal uint64, disk fl
 	conn.windowDiskTotal = diskTotal
 }
 
+// recordConnWindow 连接数窗口聚合：整机 socket 数是瞬时量，取窗口末值（与内存/磁盘同口径）。
+// 两条车道都会携带该字段，谁先到点谁的值进当前窗口；nil 表示该帧没上报，不覆盖已有值。
+func (h *Hub) recordConnWindow(conn *Conn, cs *protocol.ConnStatsPayload) {
+	if cs == nil {
+		return
+	}
+	conn.windowConnEstablished = cs.TCPEstablished
+	conn.windowConnTotal = cs.TCPTotal
+	conn.windowConnUDP = cs.UDP
+	conn.windowConnSeen = true
+}
+
 // flushNodeReport 到采样间隔就落一行 node_reports 并重置窗口（两条车道谁先到点谁写）。
 // 统计口径按字段归属取值：CPU/网速/字节窗口由快车道喂，内存/磁盘/人数窗口由慢车道喂。
 func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
@@ -800,7 +819,7 @@ func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
 		avgCPU = conn.windowCPUSum / float64(conn.windowCPUCount)
 	}
 	if h.DB != nil {
-		_ = h.DB.Create(&models.NodeReport{
+		report := &models.NodeReport{
 			ServerID:    conn.ServerID,
 			CPU:         avgCPU,
 			Mem:         conn.windowMemLast,
@@ -813,7 +832,14 @@ func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
 			RxBytes:     conn.windowRxBytes,
 			TxBytes:     conn.windowTxBytes,
 			ReportedAt:  now,
-		}).Error
+		}
+		// 整窗没收到连接数（旧 agent / 非 Linux 节点）时三列保持 NULL：写 0 会与
+		// 「确实没有连接」混为一谈，图表上就是一条假的归零线。
+		if conn.windowConnSeen {
+			established, total, udp := conn.windowConnEstablished, conn.windowConnTotal, conn.windowConnUDP
+			report.ConnTCPEstablished, report.ConnTCPTotal, report.ConnUDP = &established, &total, &udp
+		}
+		_ = h.DB.Create(report).Error
 	}
 
 	// 重置窗口统计
@@ -822,6 +848,7 @@ func (h *Hub) flushNodeReport(conn *Conn, now time.Time) {
 	conn.windowCPUSum = 0
 	conn.windowCPUCount = 0
 	conn.windowUsersMax = 0
+	conn.windowConnSeen = false
 }
 
 // upsertMetrics 在内存快照上就地更新指定节点（快/慢车道各写各的字段，互不清空）。
@@ -865,6 +892,7 @@ func (h *Hub) handleMetrics(conn *Conn, msg *protocol.Message) {
 		s.MetricsAt = now
 	})
 	h.recordFastWindow(conn, m.CPU, m.RxRate, m.TxRate, m.RxBytes, m.TxBytes)
+	h.recordConnWindow(conn, m.Conns)
 	h.flushNodeReport(conn, now)
 }
 

@@ -1039,6 +1039,12 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		rxRateMax float64
 		txRateMax float64
 		usersMax  int
+		// 连接数（整机 socket 数，瞬时量）：只累加有数据的行（本列上线前的存量行、
+		// 旧 agent、非 Linux 节点都是 NULL），connCount 决定桶内有没有可比样本。
+		connEstSum   int
+		connTotalSum int
+		connUDPSum   int
+		connCount    int
 	}
 
 	buckets := make([]bucketAgg, numBuckets)
@@ -1080,6 +1086,12 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 			b.rxRateSum += r.RxRate
 			b.txRateSum += r.TxRate
 			b.usersSum += r.OnlineUsers
+			if r.ConnTCPEstablished != nil && r.ConnTCPTotal != nil && r.ConnUDP != nil {
+				b.connEstSum += *r.ConnTCPEstablished
+				b.connTotalSum += *r.ConnTCPTotal
+				b.connUDPSum += *r.ConnUDP
+				b.connCount++
+			}
 			b.count++
 		}
 	}
@@ -1098,6 +1110,13 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 	rxMbpsMaxList := make([]float64, numBuckets)
 	txMbpsMaxList := make([]float64, numBuckets)
 	usersMaxList := make([]int, numBuckets)
+	// 连接数用 -1 表示「该桶没有可比样本」——0 是合法值（空闲节点），不能当哨兵。
+	connEstList := make([]int, numBuckets)
+	connTotalList := make([]int, numBuckets)
+	connUDPList := make([]int, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		connEstList[i], connTotalList[i], connUDPList[i] = -1, -1, -1
+	}
 
 	// 已用字节 / 总量 → 百分比，1 位小数、封顶 100。均值与峰值共用，保证两条线同口径可比。
 	pctOf := func(used float64, total uint64) float64 {
@@ -1146,6 +1165,12 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 			rxMbpsMaxList[i] = mbpsOf(b.rxRateMax)
 			txMbpsMaxList[i] = mbpsOf(b.txRateMax)
 			usersMaxList[i] = b.usersMax
+			// 连接数：桶内采样点均值（整机 socket 数，读起来就是「这一桶里平均有多少连接」）。
+			if b.connCount > 0 {
+				connEstList[i] = b.connEstSum / b.connCount
+				connTotalList[i] = b.connTotalSum / b.connCount
+				connUDPList[i] = b.connUDPSum / b.connCount
+			}
 		} else if i > 0 {
 			// 空桶前向填充：保持曲线连续，避免无上报的时段被画成 0（会误读为「无流量/无负载」）。
 			// 峰值同样前向填充——本档位下空桶意味着该区间没有采样点，任何取值都只是占位。
@@ -1162,6 +1187,9 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 			rxMbpsMaxList[i] = rxMbpsMaxList[i-1]
 			txMbpsMaxList[i] = txMbpsMaxList[i-1]
 			usersMaxList[i] = usersMaxList[i-1]
+			connEstList[i] = connEstList[i-1]
+			connTotalList[i] = connTotalList[i-1]
+			connUDPList[i] = connUDPList[i-1]
 		}
 	}
 
@@ -1182,6 +1210,11 @@ func (d *Deps) AdminServerMetrics(c *gin.Context) {
 		"rx_mbps":        rxMbpsList,
 		"tx_mbps":        txMbpsList,
 		"online_users":   usersList,
+		// 连接数（整机 socket 数，桶内均值）：-1 = 该桶无数据（本列上线前的存量行、
+		// 旧 agent、非 Linux 节点），前端丢点而不是画一条假的归零线。
+		"conn_tcp_established": connEstList,
+		"conn_tcp_total":       connTotalList,
+		"conn_udp":             connUDPList,
 		// 峰值（桶内原始采样点最大值，同单位同口径，与上面的均值一一对应）
 		"cpu_max":          cpuMaxList,
 		"mem_percent_max":  memPercentMaxList,
