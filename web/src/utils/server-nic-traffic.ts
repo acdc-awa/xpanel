@@ -59,12 +59,21 @@ export function nicResetText(t: ServerNicTraffic): string {
   return `${days} 天后重置 · ${date}`
 }
 
-/** 本周期用量（按额度口径取数；无额度时显示双向合计）。 */
-export function nicUsageHeadline(t: ServerNicTraffic): string {
+/**
+ * 本周期用量拆分（按额度口径取数；无额度时额度为 ∞）。
+ * 拆开是为了分别排版：∞ 在等宽字体里又小又偏下，卡片上单独给它正文字体。
+ */
+export function nicUsageParts(t: ServerNicTraffic): { used: string; quota: string } {
   if (t.quota_bytes > 0) {
-    return `${formatBytes(t.quota_used_bytes)} / ${formatBytes(t.quota_bytes)}`
+    return { used: formatBytes(t.quota_used_bytes), quota: formatBytes(t.quota_bytes) }
   }
-  return formatBytes(t.total_bytes)
+  return { used: formatBytes(t.total_bytes), quota: '∞' }
+}
+
+/** 本周期用量单行文本（纯文本场景）。 */
+export function nicUsageHeadline(t: ServerNicTraffic): string {
+  const p = nicUsageParts(t)
+  return `${p.used} / ${p.quota}`
 }
 
 /** 用量百分比文本（整数不带小数，非整数保留 1 位）。 */

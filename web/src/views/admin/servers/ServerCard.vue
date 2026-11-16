@@ -23,7 +23,7 @@ import {
   nicResetText,
   nicTrafficOf,
   nicTrafficTooltip,
-  nicUsageHeadline,
+  nicUsageParts,
 } from '@/utils/server-nic-traffic'
 
 // 服务器卡片：名称 → 状态条 → 地址/心跳/版本 → 操作。
@@ -112,7 +112,11 @@ const hasAsset = computed(
 // 周期流量（网卡整机口径）：数据由列表接口附带，卡片只格式化；额度为 0 时不画进度条。
 const nic = computed(() => nicTrafficOf(props.server))
 const nicHasData = computed(() => hasNicTrafficData(nic.value))
-const nicUsage = computed(() => (nic.value && nicHasData.value ? nicUsageHeadline(nic.value) : '—'))
+const nicUsage = computed(() =>
+  nic.value && nicHasData.value ? nicUsageParts(nic.value) : { used: '—', quota: '' },
+)
+/** 无额度：额度侧显示 ∞（与进度条一样，只在 quota_bytes > 0 时才画）。 */
+const nicUnlimited = computed(() => Boolean(nic.value && nic.value.quota_bytes <= 0))
 const nicPercent = computed(() =>
   nic.value && nic.value.quota_bytes > 0 && nicHasData.value ? nicQuotaPercentText(nic.value) : '',
 )
@@ -195,6 +199,39 @@ function onRootClick() {
     <div class="server-divider" aria-hidden="true" />
 
     <div class="server-details">
+      <!-- 周期流量放在最上面：这是卡片上最常看的一块，地址与机器信息退到它下面。 -->
+      <div v-if="nic" class="server-traffic">
+        <CsTooltip :content="nicTip" class="traffic-head">
+          <span class="traffic-label">已用流量：</span>
+          <span class="traffic-value">
+            <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage.used }}</strong>
+            <span v-if="nicUsage.quota" class="traffic-quota" :class="{ 'traffic-quota--inf': nicUnlimited }">
+              / {{ nicUsage.quota }}
+            </span>
+            <span v-if="nicPercent" class="traffic-percent">({{ nicPercent }})</span>
+          </span>
+        </CsTooltip>
+        <CsProgressBar
+          v-if="nicHasData && nic.quota_bytes > 0"
+          :value="nic.quota_percent"
+          :bar-height="5"
+          hide-text
+          :color="nicBarColor"
+          :aria-label="`周期流量已用 ${nicPercent}`"
+        />
+        <!-- 明细只留「双向用量 + 还剩几天重置」；完整周期区间与数据完整性交给头部 tooltip -->
+        <div v-if="nicHasData" class="traffic-meta">
+          <span class="traffic-split">
+            <span>↓ {{ nicDown }}</span>
+            <span>↑ {{ nicUp }}</span>
+          </span>
+          <span v-if="nicReset" class="traffic-reset">{{ nicReset }}</span>
+        </div>
+      </div>
+
+      <!-- 分隔符是独立元素，不归属任何一块：上下留白由 .server-details 的 gap 统一给。 -->
+      <div v-if="nic" class="server-divider" aria-hidden="true" />
+
       <div class="server-host-row">
         <span class="server-label">服务器地址</span>
         <CsButton
@@ -232,32 +269,6 @@ function onRootClick() {
             <span class="cs-text-mono">{{ inboundCount ?? 0 }}</span> 个
           </CsButton>
         </span>
-      </div>
-
-      <div v-if="nic" class="server-traffic">
-        <CsTooltip :content="nicTip" class="traffic-head">
-          <span class="traffic-label">已用流量：</span>
-          <span class="traffic-value">
-            <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage }}</strong>
-            <span v-if="nicPercent" class="traffic-percent">({{ nicPercent }})</span>
-          </span>
-        </CsTooltip>
-        <CsProgressBar
-          v-if="nicHasData && nic.quota_bytes > 0"
-          :value="nic.quota_percent"
-          :bar-height="5"
-          hide-text
-          :color="nicBarColor"
-          :aria-label="`周期流量已用 ${nicPercent}`"
-        />
-        <!-- 明细只留「双向用量 + 还剩几天重置」；完整周期区间与数据完整性交给头部 tooltip -->
-        <div v-if="nicHasData" class="traffic-meta">
-          <span class="traffic-split">
-            <span>↓ {{ nicDown }}</span>
-            <span>↑ {{ nicUp }}</span>
-          </span>
-          <span v-if="nicReset" class="traffic-reset">{{ nicReset }}</span>
-        </div>
       </div>
 
       <div v-if="hasAsset" class="server-asset">
@@ -387,9 +398,15 @@ function onRootClick() {
   cursor: help;
 }
 
+/* 分隔符：纯排版元素，不属于上下任何一块。详情区里上下留白交给 .server-details 的 gap，
+   自身不再带外边距，否则 12px gap 会再叠一层。 */
 .server-divider {
-  margin-block: 16px;
+  margin-block: 12px;
   border-block-start: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+}
+
+.server-details > .server-divider {
+  margin-block: 0;
 }
 
 .server-details {
@@ -449,11 +466,21 @@ function onRootClick() {
   font-size: 14px;
 }
 
-/* 周期流量（网卡整机口径）：不再套灰色底框，用上下两条分隔线把它和「机器信息」「资产信息」
-   分开，省掉一层容器；字号跟上面的信息行对齐，读数时才不会突然缩一档。 */
+/* cs-text-mono 自带 12px/16px：卡内所有「数值」都按所在行的字号来，否则同样是一行里的读数，
+   地址、接入点数、到期日、价格会比心跳/版本小一号，整卡字号读起来不齐。 */
+.server-host,
+.server-inbound-link,
+.server-expiry {
+  .cs-text-mono {
+    font-size: 14px;
+    line-height: 18px;
+  }
+}
+
+/* 周期流量（网卡整机口径）：块本身不带内外边距与分隔线，与相邻块的分隔交给独立的
+   .server-divider 元素 + .server-details 的 12px gap，间距口径全卡一致。 */
 .server-traffic {
-  padding-block: 12px;
-  border-block: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+  min-inline-size: 0;
 }
 
 .traffic-head {
@@ -484,6 +511,12 @@ function onRootClick() {
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
+/* 额度无穷：∞ 在等宽字体里又小又偏下，改正文字体并提一档，否则它比读数矮一截还贴基线。 */
+.traffic-quota--inf {
+  font-family: var(--font-family-base-c9u5cr, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  font-size: 16px;
+}
+
 .traffic-meta {
   display: flex;
   flex-wrap: wrap;
@@ -496,8 +529,8 @@ function onRootClick() {
 .traffic-split,
 .traffic-reset {
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 18px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
@@ -529,6 +562,8 @@ function onRootClick() {
 }
 
 .server-price {
+  font-size: 14px;
+  line-height: 18px;
   font-weight: 600;
   color: var(--color-text-link-default-qabnuk, #0972d3);
 }
