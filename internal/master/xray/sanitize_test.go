@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+// sanitizeStreamSettings 测试辅助：把 JSON 串过一遍入站清洗器，返回清洗后的 JSON。
+// 生产链路直接消费 InboundSpec.Stream（config.go 的 sanitizeStreamMap + stripInbound*），
+// 故这里只是给「以 JSON 串为输入」的用例提供一个薄包装。
+func sanitizeStreamSettings(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	var stream map[string]any
+	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
+		return raw // 解析失败则原样保留（让 xray -test 报错）
+	}
+	stream = sanitizeStreamMap(stream)
+	result, err := json.Marshal(stream)
+	if err != nil {
+		return raw
+	}
+	return string(result)
+}
+
 func TestSanitizeStreamSettings(t *testing.T) {
 	tests := []struct {
 		name string

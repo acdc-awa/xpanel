@@ -5,25 +5,6 @@ import (
 	"strings"
 )
 
-// sanitizeStreamSettings 规范化入站 streamSettings：删除面板专用字段、修复旧版键名、
-// 拦截已知的 xray panic 组合。输出前调用，确保 xray-core 收到的配置是干净的。
-func sanitizeStreamSettings(raw string) string {
-	if raw == "" {
-		return raw
-	}
-	var stream map[string]any
-	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
-		return raw // 解析失败则原样保留（让 xray -test 报错）
-	}
-	stream = sanitizeStreamMap(stream)
-
-	result, err := json.Marshal(stream)
-	if err != nil {
-		return raw
-	}
-	return string(result)
-}
-
 // SanitizeOutboundStreamSettings 规范化出站（客户端角色）streamSettings。
 //
 // 出站不能复用入站清洗器：入站会删除 fingerprint/publicKey/spiderX 与

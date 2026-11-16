@@ -471,8 +471,3 @@ func NICGBToBytes(gb int64) int64 {
 	}
 	return gb * 1024 * 1024 * 1024
 }
-
-// FormatNICCycleRange 面板/日志用的周期区间（YYYY-MM-DD 至 YYYY-MM-DD，结束日不含）。
-func FormatNICCycleRange(c NICCycle) string {
-	return c.Start.Format("2006-01-02") + " 至 " + c.End.Format("2006-01-02")
-}
