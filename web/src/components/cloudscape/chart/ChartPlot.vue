@@ -805,10 +805,17 @@ function seriesClass(seriesTitle: string) {
   text-align: center;
 }
 
+/* width must not depend on `left`: as an abspos box with only `left` set,
+   `width: auto` resolves shrink-to-fit against "container width - left", so the
+   popover got crushed into a few dozen pixels whenever the pointer was near the
+   right edge. max-content keeps the measured width stable, which is also what
+   the flip/clamp math in popoverStyle reads back. */
 .cs-chart-popover {
   position: absolute;
   z-index: 20;
   pointer-events: none;
+  width: max-content;
+  max-width: 260px;
 }
 
 .cs-chart-detail-dimmed {
