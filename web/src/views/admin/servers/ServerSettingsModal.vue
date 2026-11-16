@@ -67,8 +67,10 @@ const generalTab = ref<InstanceType<typeof ServerGeneralTab> | null>(null)
 const generalDirty = computed(() => Boolean(generalTab.value?.dirty))
 const generalSaving = computed(() => Boolean(generalTab.value?.saving))
 
-function saveGeneral() {
-  void generalTab.value?.save()
+// 保存成功后自动关窗：与其余编辑类弹窗一致，成功即退出编辑态。
+async function saveGeneral() {
+  const ok = await generalTab.value?.save()
+  if (ok) visible.value = false
 }
 
 function goInbounds() {

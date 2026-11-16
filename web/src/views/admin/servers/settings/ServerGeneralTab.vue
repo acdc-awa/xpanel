@@ -166,11 +166,11 @@ async function save() {
   errors.host = form.host.trim() ? '' : '请填写主机地址'
   if (errors.name || errors.host) {
     ElMessage.warning('请先补全服务器名称与主机地址')
-    return
+    return false
   }
   if ((Number(form.nic_cycle_days) || 0) > 0 && !form.nic_cycle_start) {
     ElMessage.warning('自定义周期天数需要同时填写统计周期起点')
-    return
+    return false
   }
 
   saving.value = true
@@ -194,14 +194,15 @@ async function save() {
     if (data.code === 0) {
       ElMessage.success('已保存')
       emit('changed')
-    } else {
-      ElMessage.error(data.message)
+      return true
     }
+    ElMessage.error(data.message)
   } catch (e) {
     ElMessage.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
+  return false
 }
 
 defineExpose({ save, saving, dirty })
