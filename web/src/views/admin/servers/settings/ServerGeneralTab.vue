@@ -5,6 +5,7 @@ import {
   CsButton,
   CsContainer,
   CsDatePicker,
+  CsExpandableSection,
   CsForm,
   CsFormItem,
   CsInput,
@@ -17,7 +18,7 @@ import TipIcon from '@/components/base/TipIcon.vue'
 import { deleteServer, resetServerSecret, updateServer, type NicQuotaDirection, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
-// 设置页只做编辑：名称/地址/地区/备注、VPS 资产、节点通信凭据、危险操作。
+// 设置页只做编辑：名称/地址/地区/备注、计费与流量周期、节点通信凭据、危险操作。
 // 保存动作由弹窗 footer 承载（ServerSettingsModal），所以这里不放大按钮 ——
 // 否则按钮挂在某一张卡上，会让人误以为只保存那张卡的字段。
 
@@ -31,7 +32,8 @@ const emit = defineEmits<{
   (e: 'removed'): void
 }>()
 
-const billingOptions = [
+// 计费周期是流量周期的唯一来源：只允许固定档位，保证「计费周期 + 到期日」的推导可预测。
+const baseBillingOptions = [
   { label: '月付', value: '月付' },
   { label: '季付', value: '季付' },
   { label: '半年付', value: '半年付' },
@@ -62,6 +64,20 @@ const form = reactive({
   nic_quota_gb: 0 as number | null,
   nic_quota_direction: 'total' as NicQuotaDirection,
 })
+
+// 旧数据可能存着非枚举的自定义周期：作为「旧值」保留在选项里，避免编辑时被静默清空。
+const billingOptions = computed(() => {
+  const current = form.billing_cycle.trim()
+  if (current && !baseBillingOptions.some((o) => o.value === current)) {
+    return [...baseBillingOptions, { label: `${current}（旧值，请改选）`, value: current }]
+  }
+  return baseBillingOptions
+})
+
+/** 已有自定义周期配置的机器，打开设置页时直接展开高级区，避免「看不见的生效配置」。 */
+const hasCustomCycle = computed(
+  () => Boolean(props.server.nic_cycle_start) || Number(props.server.nic_cycle_days ?? 0) > 0,
+)
 
 const errors = reactive({ name: '', host: '' })
 const saving = ref(false)
@@ -117,7 +133,7 @@ async function save() {
     return
   }
   if ((Number(form.nic_cycle_days) || 0) > 0 && !form.nic_cycle_start) {
-    ElMessage.warning('固定天数周期需要填写流量统计周期起点')
+    ElMessage.warning('自定义周期天数需要同时填写统计周期起点')
     return
   }
 
@@ -257,7 +273,10 @@ async function copyText(text: string, label: string) {
       </CsForm>
     </CsContainer>
 
-    <CsContainer header="VPS 采购与续费资产（选填）">
+    <CsContainer header="计费与流量周期（选填）">
+      <template #info>
+        <TipIcon content="流量周期跟随计费周期：月付=每月、季付=每季、年付=每年，以到期日为锚点向前推导；一次性/未填到期日按自然月。每周期流量额度按同一周期计算，0 表示不限。" />
+      </template>
       <CsForm>
         <div class="server-form-grid">
           <CsFormItem label="到期日期">
@@ -273,9 +292,8 @@ async function copyText(text: string, label: string) {
               :model-value="form.billing_cycle"
               :options="billingOptions"
               filterable
-              allow-create
               clearable
-              placeholder="选择或输入计费周期"
+              placeholder="选择计费周期"
               @update:model-value="(v: string | number | (string | number)[] | '') => (form.billing_cycle = String(v ?? ''))"
             />
           </CsFormItem>
@@ -284,33 +302,6 @@ async function copyText(text: string, label: string) {
           </CsFormItem>
           <CsFormItem label="IDC 控制台地址">
             <CsInput v-model="form.idc_address" placeholder="控制台网址，如 https://..." clearable />
-          </CsFormItem>
-        </div>
-      </CsForm>
-    </CsContainer>
-
-    <CsContainer header="流量统计与额度（选填）">
-      <template #info>
-        <TipIcon content="周期起点留空时按「计费周期 + 到期日」自动推导，识别不出按自然月；周期天数留空或 0 表示按计费周期长度；额度 0 表示不限。" />
-      </template>
-      <CsForm>
-        <div class="server-form-grid">
-          <CsFormItem label="统计周期起点">
-            <CsDatePicker
-              v-model="form.nic_cycle_start"
-              type="date"
-              value-format="YYYY-MM-DD"
-              placeholder="留空 = 自动"
-            />
-          </CsFormItem>
-          <CsFormItem label="周期天数">
-            <CsInputNumber
-              v-model="form.nic_cycle_days"
-              :min="0"
-              :max="3650"
-              :controls="false"
-              placeholder="留空 = 按计费周期"
-            />
           </CsFormItem>
           <CsFormItem label="每周期流量额度（GB）">
             <CsInputNumber
@@ -329,6 +320,33 @@ async function copyText(text: string, label: string) {
             />
           </CsFormItem>
         </div>
+
+        <CsExpandableSection
+          header="自定义统计周期"
+          header-description="默认留空即可；填写后优先于「计费周期 + 到期日」的推导"
+          class="server-nic-advanced"
+          :default-expanded="hasCustomCycle"
+        >
+          <div class="server-form-grid">
+            <CsFormItem label="统计周期起点">
+              <CsDatePicker
+                v-model="form.nic_cycle_start"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="留空 = 自动"
+              />
+            </CsFormItem>
+            <CsFormItem label="周期天数">
+              <CsInputNumber
+                v-model="form.nic_cycle_days"
+                :min="0"
+                :max="3650"
+                :controls="false"
+                placeholder="留空 = 按计费周期"
+              />
+            </CsFormItem>
+          </div>
+        </CsExpandableSection>
       </CsForm>
     </CsContainer>
 
@@ -397,6 +415,11 @@ async function copyText(text: string, label: string) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 20px;
+}
+
+/* 自定义周期是计费周期推导的逃生口：与上方常规字段留出层级间距。 */
+.server-nic-advanced {
+  margin-top: 16px;
 }
 
 @media (max-width: $bp-tablet-max) {

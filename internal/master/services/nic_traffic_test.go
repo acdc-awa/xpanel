@@ -72,6 +72,17 @@ func TestResolveNICCycle(t *testing.T) {
 	// 自动：预付了多期（到期日在半年后）→ 找到包含今天的那个月窗口
 	check("auto prepaid", models.Server{BillingCycle: "月付", ExpireAt: "2027-05-20"},
 		date(2026, 10, 20), date(2026, 11, 20), "billing")
+	// 自动：年付（大于月付）→ 以到期日为锚点，按 12 个月一格
+	check("auto yearly", models.Server{BillingCycle: "年付", ExpireAt: "2027-05-20"},
+		date(2026, 5, 20), date(2027, 5, 20), "billing")
+	// 续费语义 = 旧到期日 + 整周期：网格平移一格，当前窗口不应变化
+	renewBefore := ResolveNICCycle(&models.Server{BillingCycle: "季付", ExpireAt: "2027-02-15"}, now, loc)
+	renewAfter := ResolveNICCycle(&models.Server{BillingCycle: "季付", ExpireAt: "2027-05-15"}, now, loc)
+	if !renewBefore.Start.Equal(renewAfter.Start) || !renewBefore.End.Equal(renewAfter.End) {
+		t.Errorf("续费整周期后当前窗口应不变: before [%s, %s), after [%s, %s)",
+			renewBefore.Start.Format("2006-01-02"), renewBefore.End.Format("2006-01-02"),
+			renewAfter.Start.Format("2006-01-02"), renewAfter.End.Format("2006-01-02"))
+	}
 	// 自定义起点 + 计费周期长度（月付）
 	check("custom anchored monthly", models.Server{BillingCycle: "月付", NICCycleStart: "2026-05-05"},
 		date(2026, 11, 5), date(2026, 12, 5), "custom_months")

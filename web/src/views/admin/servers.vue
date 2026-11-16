@@ -703,9 +703,8 @@ const billingCycleOptions = [
                     v-model="createForm.billing_cycle"
                     :options="billingCycleOptions"
                     filterable
-                    allow-create
                     clearable
-                    placeholder="选择或输入计费周期"
+                    placeholder="选择计费周期"
                   />
                 </CsFormItem>
               </CsColumnLayout>
