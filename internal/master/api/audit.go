@@ -11,8 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/acdc-awa/xpanel/internal/master/middleware"
-	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -268,17 +266,8 @@ func (d *Deps) AdminExportAuditLogs(c *gin.Context) {
 	}
 	w.Flush()
 
-	// 导出本身也是敏感操作：留痕（正常写在本次查询之后，不进入本次导出）。
-	d.audit(services.AuditEvent{
-		OperatorType: "admin",
-		OperatorID:   middleware.CurrentUser(c),
-		Action:       "audit-logs.export",
-		TargetType:   "",
-		Status:       200,
-		Message:      fmt.Sprintf("导出了 %d 条审计日志", len(list)),
-		Extra:        map[string]any{"rows": len(list), "query": c.Request.URL.RawQuery},
-		IP:           util.ClientIPFromContext(c),
-	})
+	// 导出本身不写审计：它是只读动作（不改任何数据），记下来只会让「谁看了一眼日志」
+	// 淹没真正的配置变更（2026-11-16 精简）。要看导出行为请走访问日志。
 }
 
 // auditCSVRow 单行 CSV。身份列沿用列表口径「名字 #id」：同名/同邮箱重建后只能靠 id 区分，

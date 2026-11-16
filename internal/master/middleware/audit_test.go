@@ -414,3 +414,50 @@ func TestAuditOperatorSnapshot(t *testing.T) {
 	assert.NoError(t, db.First(&log).Error)
 	assert.Equal(t, "old@panel.local", log.OperatorName)
 }
+
+// TestAuditSkipsPreviewRoutes 只读预览 / 排序 / 布局 / 忽略提醒一律不写审计；
+// 跳过按 FullPath 精确匹配，相邻的写路由照记（2026-11-16 精简）。
+func TestAuditSkipsPreviewRoutes(t *testing.T) {
+	db := setupAuditMWDB(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Audit(db))
+	handler := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
+	r.POST("/api/v1/admin/permission-groups/:id/preview-template", handler)
+	r.POST("/api/v1/admin/xray/preview-config", handler)
+	r.PUT("/api/v1/admin/permission-groups/:id", handler)
+	// 排序/布局/忽略提醒：跳过精确路径，同资源的常规写路由仍要记
+	r.PUT("/api/v1/admin/plans/order", handler)
+	r.PUT("/api/v1/admin/plans/:id", handler)
+	r.PUT("/api/v1/admin/topology-layout", handler)
+	r.DELETE("/api/v1/admin/notifications/:key", handler)
+
+	fire := func(method, path string) {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"a":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	fire(http.MethodPost, "/api/v1/admin/permission-groups/7/preview-template")
+	fire(http.MethodPost, "/api/v1/admin/xray/preview-config")
+	fire(http.MethodPut, "/api/v1/admin/plans/order")
+	fire(http.MethodPut, "/api/v1/admin/topology-layout")
+	fire(http.MethodDelete, "/api/v1/admin/notifications/vps_expire")
+	var n int64
+	assert.NoError(t, db.Model(&models.AuditLog{}).Count(&n).Error)
+	assert.Equal(t, int64(0), n, "预览/排序/布局/忽略提醒都不应写审计")
+
+	fire(http.MethodPut, "/api/v1/admin/permission-groups/7")
+	var log models.AuditLog
+	assert.NoError(t, db.Order("id ASC").First(&log).Error)
+	assert.Equal(t, "permission-groups.:id", log.Action)
+
+	// /plans/order 被跳过不影响 /plans/:id：精确匹配而非前缀
+	fire(http.MethodPut, "/api/v1/admin/plans/7")
+	var total int64
+	assert.NoError(t, db.Model(&models.AuditLog{}).Count(&total).Error)
+	assert.Equal(t, int64(2), total)
+	var log2 models.AuditLog
+	assert.NoError(t, db.Order("id DESC").First(&log2).Error)
+	assert.Equal(t, "plans.:id", log2.Action)
+}

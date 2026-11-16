@@ -43,6 +43,19 @@ var (
 	ErrSecretInvalid   = errors.New("验证信息无效，请联系管理员")
 )
 
+// totpLockTriggered 本次校验刚好把失败计数打到上限 = 进入锁定的那一次。
+// 审计只在这一次记录；锁定期内被拒的重复尝试不再落库（2026-11-16 精简）。
+type totpLockTriggered struct{}
+
+func (totpLockTriggered) Error() string { return ErrTOTPLocked.Error() }
+func (totpLockTriggered) Unwrap() error { return ErrTOTPLocked }
+
+// IsTOTPLockTriggered 判断 err 是否代表「本次校验触发锁定」（而非锁定期内被拒）。
+func IsTOTPLockTriggered(err error) bool {
+	var t totpLockTriggered
+	return errors.As(err, &t)
+}
+
 // OTPService TOTP 2FA 服务。
 type OTPService struct {
 	DB      *gorm.DB
@@ -173,7 +186,7 @@ func (s *OTPService) VerifyCode(user *models.User, code string) error {
 		updates["totp_locked_until"] = until
 		updates["totp_failed_count"] = 0
 		_ = s.DB.Model(user).Updates(updates)
-		return ErrTOTPLocked
+		return totpLockTriggered{}
 	}
 	_ = s.DB.Model(user).Update("totp_failed_count", failed)
 	return ErrTOTPCodeInvalid

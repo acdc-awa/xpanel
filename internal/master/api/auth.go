@@ -65,7 +65,10 @@ func (d *Deps) Login(c *gin.Context) {
 	user, err := d.Auth.Login(c.Request.Context(), req.Email, req.Password, util.ClientIPFromContext(c))
 	if err != nil {
 		code, msg := authError(err)
-		d.auditLoginFailure(c, req.Email, err, code)
+		// 只有「本次尝试导致锁定」才落审计：单次密码错误（手误、撞库残留）不记。
+		if services.IsLoginLockTriggered(err) {
+			d.auditLoginLocked(c, req.Email)
+		}
 		util.Fail(c, code, msg)
 		return
 	}
@@ -112,22 +115,20 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 	if err := d.OTP.VerifyCode(&user, req.Code); err != nil {
 		if errors.Is(err, services.ErrTOTPCodeInvalid) {
 			if berr := d.OTP.VerifyBackupCode(&user, req.Code); berr != nil {
-				d.audit(services.AuditEvent{
-					OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
-					Action: "auth.2fa_failed", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
-					Status: 400, Message: "两步验证失败：验证码错误",
-					Extra: map[string]any{"reason": "invalid_code"}, IP: util.ClientIPFromContext(c),
-				})
+				// 单次验证码错误不记审计（与登录失败同口径）。
 				util.BadRequest(c, "验证码错误")
 				return
 			}
 		} else {
-			d.audit(services.AuditEvent{
-				OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
-				Action: "auth.2fa_failed", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
-				Status: 400, Message: "两步验证失败", Extra: map[string]any{"reason": err.Error()},
-				IP: util.ClientIPFromContext(c),
-			})
+			// 只有「本次校验触发锁定」才落一条，锁定期内的重复尝试不重复记。
+			if services.IsTOTPLockTriggered(err) {
+				d.audit(services.AuditEvent{
+					OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
+					Action: "auth.2fa_locked", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+					Status: 400, Message: "两步验证失败次数过多，已锁定 30 分钟",
+					Extra: map[string]any{"window_minutes": 30}, IP: util.ClientIPFromContext(c),
+				})
+			}
 			util.BadRequest(c, err.Error())
 			return
 		}
@@ -266,43 +267,23 @@ func (d *Deps) Refresh(c *gin.Context) {
 }
 
 // Logout POST /api/v1/auth/logout
-// 该路由不挂鉴权中间件（登出不该因令牌过期而失败），但审计要能定位到人：
-// 尽量从 access_token cookie 解析身份，解析失败就只留 IP。
+// 该路由不挂鉴权中间件（登出不该因令牌过期而失败）。**不写审计**：
+// 退出登录不改变任何业务状态，逐条记录只会把登录/锁定这些真正有价值的事件埋掉
+// （2026-11-16 精简，用户拍板）。
 func (d *Deps) Logout(c *gin.Context) {
-	if token, err := c.Cookie("access_token"); err == nil && token != "" {
-		if claims, perr := d.JWT.Parse(token); perr == nil {
-			ev := services.AuditEvent{
-				OperatorType: "user", OperatorID: claims.UserID,
-				Action: "auth.logout", TargetType: "user", TargetID: claims.UserID,
-				Status: 200, Message: "退出登录", IP: util.ClientIPFromContext(c),
-			}
-			d.audit(ev)
-		}
-	}
 	d.clearAuthCookies(c)
 	util.OK(c, gin.H{"ok": true})
 }
 
-// auditLoginFailure 记录登录失败（只记邮箱与原因，绝不记密码）。
-// 失败事件与成功事件同等重要：爆破、撞库、账号被扫都能从这里看出来。
-func (d *Deps) auditLoginFailure(c *gin.Context, email string, err error, status int) {
-	reason := "密码错误"
-	switch {
-	case errors.Is(err, services.ErrUserDisabled):
-		reason = "账号已禁用"
-	case errors.Is(err, services.ErrInvalidCreds):
-		reason = "密码错误"
-	case strings.Contains(err.Error(), "次数过多"):
-		reason = "失败次数过多（临时锁定）"
-	default:
-		reason = "登录被拒绝"
-	}
+// auditLoginLocked 记录「连续失败触发锁定」——单次密码错误不落库（只记邮箱，绝不记密码）。
+// 锁定事件本身已经说明「有人在试 + 试到什么程度」，逐次失败记录会把审计列表冲满。
+func (d *Deps) auditLoginLocked(c *gin.Context, email string) {
 	who := strings.ToLower(strings.TrimSpace(email))
 	d.audit(services.AuditEvent{
 		OperatorType: "user", OperatorName: who,
-		Action: "auth.login_failed", TargetType: "user", TargetName: who,
-		Status: status, Message: "登录失败：" + reason,
-		Extra: map[string]any{"reason": reason}, IP: util.ClientIPFromContext(c),
+		Action: "auth.login_locked", TargetType: "user", TargetName: who,
+		Status: 429, Message: "登录失败次数过多，该邮箱+IP 已锁定 30 分钟",
+		Extra: map[string]any{"window_minutes": 30}, IP: util.ClientIPFromContext(c),
 	})
 }
 
@@ -341,6 +322,10 @@ func authError(err error) (int, string) {
 	// 凭据错误与账号禁用统一 401 同文案：不暴露「账号存在但被禁用」的可枚举信号
 	case errors.Is(err, services.ErrInvalidCreds), errors.Is(err, services.ErrUserDisabled):
 		return 401, "邮箱或密码错误"
+	// 锁定态单独给 429 + 真实文案：它只会在账号存在且已连续失败后出现，
+	// 不构成账号枚举信号（此前落到 500「服务器内部错误」，管理员看不到原因）。
+	case errors.Is(err, services.ErrLoginLocked):
+		return 429, err.Error()
 	case errors.Is(err, services.ErrInvalidRefresh):
 		return 401, err.Error()
 	case errors.Is(err, services.ErrRegisterClosed):

@@ -986,6 +986,8 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     let title = '身份认证操作'
     if (act === 'auth.login') title = '账号登录'
     else if (act === 'auth.login_2fa') title = '两步验证登录'
+    else if (act === 'auth.login_locked') title = '登录失败锁定'
+    else if (act === 'auth.2fa_locked') title = '两步验证锁定'
     else if (act === 'auth.change_password') title = '修改密码'
     else if (act === 'otp.enable') title = '开启两步验证'
     else if (act === 'otp.disable') title = '关闭两步验证'

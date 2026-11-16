@@ -1,8 +1,8 @@
 package services
 
 import (
+	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -66,14 +66,19 @@ func TestLoginLockByEmailAndIP(t *testing.T) {
 		attackerIP = "203.0.113.9"
 		victimIP   = "198.51.100.7"
 	)
-	for i := 0; i < loginFailLimit; i++ {
-		if _, err := svc.Login(t.Context(), "user@example.com", "wrong-password", attackerIP); err == nil {
-			t.Fatalf("第 %d 次错误密码未返回错误", i+1)
+	for i := 0; i < loginFailLimit-1; i++ {
+		_, err := svc.Login(t.Context(), "user@example.com", "wrong-password", attackerIP)
+		if !errors.Is(err, ErrInvalidCreds) || IsLoginLockTriggered(err) {
+			t.Fatalf("第 %d 次错误密码应为普通失败，got %v", i+1, err)
 		}
 	}
-	// 第 6 次：组合已锁定
-	if _, err := svc.Login(t.Context(), "user@example.com", "wrong-password", attackerIP); err == nil || !strings.Contains(err.Error(), "次数过多") {
-		t.Fatalf("同 IP 第 6 次应报锁定，got %v", err)
+	// 第 5 次 = 触发锁定的那一次：审计只在这里落一条
+	if _, err := svc.Login(t.Context(), "user@example.com", "wrong-password", attackerIP); !IsLoginLockTriggered(err) {
+		t.Fatalf("第 %d 次应触发锁定，got %v", loginFailLimit, err)
+	}
+	// 第 6 次：组合已在锁定期内（Is ErrLoginLocked，但不是新的触发事件）
+	if _, err := svc.Login(t.Context(), "user@example.com", "wrong-password", attackerIP); !errors.Is(err, ErrLoginLocked) || IsLoginLockTriggered(err) {
+		t.Fatalf("同 IP 第 6 次应报锁定期内拒绝且不再触发，got %v", err)
 	}
 	// 正确密码也打不开被锁的组合
 	if _, err := svc.Login(t.Context(), "user@example.com", "correct-password", attackerIP); err == nil {

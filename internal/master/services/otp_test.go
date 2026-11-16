@@ -2,6 +2,7 @@ package services
 
 import (
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -181,17 +182,19 @@ func TestOTP_Lock(t *testing.T) {
 			t.Fatalf("iteration %d: want invalid code, got %v", i, err)
 		}
 	}
-	if err := svc.VerifyCode(&u, "000000"); err != ErrTOTPLocked {
-		t.Fatalf("5th fail should lock, got %v", err)
+	// 第 5 次失败 = 进入锁定的那一次：错误本身仍 Is ErrTOTPLocked，
+	// 但额外带「刚触发」标记（审计只在这一次记录）。
+	if err := svc.VerifyCode(&u, "000000"); !IsTOTPLockTriggered(err) {
+		t.Fatalf("5th fail should trigger lock, got %v", err)
 	}
 	db.First(&u, u.ID)
 	if u.TotpLockedUntil == nil || !u.TotpLockedUntil.After(time.Now()) {
 		t.Fatal("locked_until should be set in future")
 	}
-	// 锁定期间正确码也拒绝
+	// 锁定期间正确码也拒绝（这次只是「锁定期内被拒」，不再是触发事件）
 	good, _ := totp.GenerateCode(secret, time.Now())
-	if err := svc.VerifyCode(&u, good); err != ErrTOTPLocked {
-		t.Fatalf("locked state should reject even good code, got %v", err)
+	if err := svc.VerifyCode(&u, good); !errors.Is(err, ErrTOTPLocked) || IsTOTPLockTriggered(err) {
+		t.Fatalf("locked state should reject even good code without re-trigger, got %v", err)
 	}
 }
 

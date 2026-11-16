@@ -593,6 +593,29 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
+// auditSkipRoutes 不写审计的写方法路由。
+//
+// 判据（2026-11-16 精简，用户拍板）：
+//  1. 不改变任何配置或业务数据，只是「看一眼」（预览类挂 POST/PUT 只为方便带参数）；
+//  2. 改了也只是位次/布局/个人 UI 状态这类高频碎操作，取证价值几乎为零。
+//
+// 这类条目光进不出、数量却会随管理员操作线性增长，把真正的配置变更埋掉。
+// **按 FullPath 精确匹配**：/plans/order 被跳过不影响 /plans/:id。
+var auditSkipRoutes = map[string]bool{
+	// 只读预览
+	"/api/v1/admin/xray/preview-config":                    true,
+	"/api/v1/admin/permission-groups/:id/preview-template": true,
+	// 卡片/公告排序（纯位次微调）
+	"/api/v1/admin/notices/order":           true,
+	"/api/v1/admin/plans/order":             true,
+	"/api/v1/admin/servers/order":           true,
+	"/api/v1/admin/permission-groups/order": true,
+	// 拓扑画布布局（每次拖动保存）
+	"/api/v1/admin/topology-layout": true,
+	// 忽略提醒（每位管理员自己的 UI 状态）
+	"/api/v1/admin/notifications/:key": true,
+}
+
 // Audit 自动审计中间件（J16，Xboard RequestLog 模式）：
 // admin 组写操作（POST/PUT/DELETE）自动落 AuditLog——action 由路径推导、
 // detail 为 v2 结构化信封（真实路径+参数+脱敏 body），并把身份/目标/结果写成独立列：
@@ -603,6 +626,10 @@ func Audit(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
 		if method == "GET" || method == "OPTIONS" || method == "HEAD" {
+			c.Next()
+			return
+		}
+		if auditSkipRoutes[c.FullPath()] {
 			c.Next()
 			return
 		}

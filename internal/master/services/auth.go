@@ -139,6 +139,22 @@ const (
 	loginFailMaxEntry = 10000 // P2-12：失败计数 map 上限，防止内存无限增长
 )
 
+// ErrLoginLocked 邮箱+IP 组合处于锁定窗口内（拒绝登录）。
+var ErrLoginLocked = errors.New("密码错误次数过多，请 30 分钟后再试")
+
+// loginLockTriggered 本次尝试刚好把失败计数打到上限 = 进入锁定的那一次。
+// 审计只在这一次记录（每次爆破尝试都落一条会把「有人在试」这件事本身埋掉）。
+type loginLockTriggered struct{}
+
+func (loginLockTriggered) Error() string { return ErrLoginLocked.Error() }
+func (loginLockTriggered) Unwrap() error { return ErrLoginLocked }
+
+// IsLoginLockTriggered 判断 err 是否代表「本次尝试触发锁定」（而非锁定期内被拒）。
+func IsLoginLockTriggered(err error) bool {
+	var t loginLockTriggered
+	return errors.As(err, &t)
+}
+
 // cleanupLoginFailuresLocked 清理过期/超量的失败计数（调用方须持有 loginFailures 锁）。
 func cleanupLoginFailuresLocked(now time.Time) {
 	for k, f := range loginFailures.m {
@@ -168,7 +184,7 @@ func (s *AuthService) Login(ctx context.Context, email, password, clientIP strin
 	now := time.Now()
 	if locked && now.Before(f.until) {
 		loginFailures.Unlock()
-		return nil, errors.New("密码错误次数过多，请 30 分钟后再试")
+		return nil, ErrLoginLocked
 	}
 	// 仅清理"已设置锁定且已过期"的条目；截至 until 为零值（累计中）的计数条目必须保留，
 	// 否则每次尝试都会重置计数，锁定永不触发（P1-4 实测暴露）。
@@ -189,13 +205,18 @@ func (s *AuthService) Login(ctx context.Context, email, password, clientIP strin
 		loginFailures.Lock()
 		cur := loginFailures.m[key]
 		cur.count++
+		triggered := false
 		if cur.count >= loginFailLimit {
 			cur.until = now.Add(loginFailWindow)
 			cur.count = 0
+			triggered = true
 		}
 		loginFailures.m[key] = cur
 		cleanupLoginFailuresLocked(now)
 		loginFailures.Unlock()
+		if triggered {
+			return nil, loginLockTriggered{}
+		}
 		return nil, ErrInvalidCreds
 	}
 	// 登录成功：清零失败计数
