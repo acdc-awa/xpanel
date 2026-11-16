@@ -262,3 +262,80 @@ func TestServerVPSFields_DateIndependentOfLocalTimezone(t *testing.T) {
 		}
 	}
 }
+
+// 流量重置周期（与计费周期独立）与「自定义起点 + 天数」互斥：同一台机器只能有一套周期配置，
+// 前端会互相清空，后端也必须兜住，否则库里会留下两套打架的值，解析优先级再对也会让人看不懂。
+func TestServerNICResetPeriod_MutualExclusion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := vpsDeps(t)
+
+	code, srv := createServerReq(t, deps, map[string]any{
+		"name": "yearly-monthly", "host": "oy.example.com",
+		"billing_cycle": "年付", "expire_at": "2027-06-30",
+		"nic_reset_period": "1m",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create status = %d", code)
+	}
+	if srv.NICResetPeriod != "1m" {
+		t.Fatalf("create: nic_reset_period = %q, want 1m", srv.NICResetPeriod)
+	}
+	id := srv.ID
+
+	// 改成每季
+	if _, srv = updateServerReq(t, deps, id, map[string]any{"nic_reset_period": "3m"}); srv.NICResetPeriod != "3m" {
+		t.Fatalf("update period: got %q, want 3m", srv.NICResetPeriod)
+	}
+
+	// 填自定义起点 → 预设周期被清空
+	_, srv = updateServerReq(t, deps, id, map[string]any{"nic_cycle_start": "2026-05-05"})
+	if srv.NICResetPeriod != "" || srv.NICCycleStart != "2026-05-05" {
+		t.Fatalf("custom start should clear period: period=%q start=%q", srv.NICResetPeriod, srv.NICCycleStart)
+	}
+
+	// 再选预设周期 → 自定义起点被清空
+	_, srv = updateServerReq(t, deps, id, map[string]any{"nic_reset_period": "natural_month"})
+	if srv.NICResetPeriod != "natural_month" || srv.NICCycleStart != "" || srv.NICCycleDays != 0 {
+		t.Fatalf("period should clear custom start: period=%q start=%q days=%d",
+			srv.NICResetPeriod, srv.NICCycleStart, srv.NICCycleDays)
+	}
+
+	// 只改额度时不该动周期配置
+	_, srv = updateServerReq(t, deps, id, map[string]any{"nic_quota_gb": 100})
+	if srv.NICResetPeriod != "natural_month" {
+		t.Fatalf("quota update must not touch period: got %q", srv.NICResetPeriod)
+	}
+
+	// 清空预设 → 回到「跟随计费周期」
+	_, srv = updateServerReq(t, deps, id, map[string]any{"nic_reset_period": ""})
+	if srv.NICResetPeriod != "" {
+		t.Fatalf("clear period: got %q, want empty", srv.NICResetPeriod)
+	}
+
+	// 非法取值直接拒
+	if code, _ = updateServerReq(t, deps, id, map[string]any{"nic_reset_period": "weekly"}); code == http.StatusOK {
+		t.Fatalf("invalid period should be rejected, got status %d", code)
+	}
+}
+
+// 创建时两组字段同时给出：自定义优先（与前端「填了自定义就清空普通字段」同口径）。
+func TestServerNICResetPeriod_CustomWinsOnCreate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := vpsDeps(t)
+
+	code, srv := createServerReq(t, deps, map[string]any{
+		"name": "both", "host": "both.example.com",
+		"nic_reset_period": "1m",
+		"nic_cycle_start":  "2026-05-05",
+		"nic_cycle_days":   30,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create status = %d", code)
+	}
+	if srv.NICResetPeriod != "" {
+		t.Fatalf("custom config should clear period, got %q", srv.NICResetPeriod)
+	}
+	if srv.NICCycleStart != "2026-05-05" || srv.NICCycleDays != 30 {
+		t.Fatalf("custom config lost: start=%q days=%d", srv.NICCycleStart, srv.NICCycleDays)
+	}
+}

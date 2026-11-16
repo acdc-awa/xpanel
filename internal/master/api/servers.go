@@ -38,8 +38,9 @@ type serverView struct {
 	BillingCycle string `json:"billing_cycle"`
 	Price        string `json:"price"`
 	IDCAddress   string `json:"idc_address"`
-	// 网卡周期流量的配置（2026-11-15）：起点/天数/额度/额度口径。
+	// 网卡周期流量的配置（2026-11-15）：重置周期/起点/天数/额度/额度口径。
 	// 实际周期区间与用量由 nic_traffic 给出（后端解析，前端不重算）。
+	NICResetPeriod        string          `json:"nic_reset_period"`
 	NICCycleStart         string          `json:"nic_cycle_start"`
 	NICCycleDays          int             `json:"nic_cycle_days"`
 	NICQuotaGB            int64           `json:"nic_quota_gb"`
@@ -87,7 +88,8 @@ func toServerView(s *models.Server) serverView {
 		ID: s.ID, ServerType: st, Name: s.Name, Host: s.Host, NodeID: s.NodeID,
 		Location: s.Location, Remark: s.Remark,
 		ExpireAt: s.ExpireAt, BillingCycle: s.BillingCycle, Price: s.Price, IDCAddress: s.IDCAddress,
-		NICCycleStart: s.NICCycleStart, NICCycleDays: s.NICCycleDays,
+		NICResetPeriod: s.NICResetPeriod,
+		NICCycleStart:  s.NICCycleStart, NICCycleDays: s.NICCycleDays,
 		NICQuotaGB: s.NICQuotaGB, NICQuotaDirection: services.NICQuotaDirection(s.NICQuotaDirection),
 		Status:                s.Status,
 		SortOrder:             s.SortOrder,
@@ -234,6 +236,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		BillingCycle          string          `json:"billing_cycle" binding:"max=32"`
 		Price                 string          `json:"price" binding:"max=64"`
 		IDCAddress            string          `json:"idc_address" binding:"max=255"`
+		NICResetPeriod        string          `json:"nic_reset_period" binding:"max=16"`
 		NICCycleStart         string          `json:"nic_cycle_start" binding:"max=10"`
 		NICCycleDays          int             `json:"nic_cycle_days" binding:"min=0,max=3650"`
 		NICQuotaGB            int64           `json:"nic_quota_gb" binding:"min=0,max=10000000"`
@@ -254,6 +257,16 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 	if err != nil {
 		util.BadRequest(c, "流量统计周期起点格式错误（需 YYYY-MM-DD）")
 		return
+	}
+	// 流量重置周期与「自定义起点 + 天数」互斥：自定义优先（它是显式逃生口），
+	// 选了预设周期时前端会清空起点/天数，这里兜底，避免库里留下两套打架的配置。
+	nicPeriod := services.NormalizeNICResetPeriod(req.NICResetPeriod)
+	if !services.NICValidResetPeriod(nicPeriod) {
+		util.BadRequest(c, "流量重置周期取值非法")
+		return
+	}
+	if nicStart != "" || req.NICCycleDays > 0 {
+		nicPeriod = ""
 	}
 	if req.NICCycleDays > 0 && nicStart == "" {
 		util.BadRequest(c, "固定天数周期需要填写流量统计周期起点")
@@ -292,6 +305,7 @@ func (d *Deps) AdminCreateServer(c *gin.Context) {
 		BillingCycle:          strings.TrimSpace(req.BillingCycle),
 		Price:                 strings.TrimSpace(req.Price),
 		IDCAddress:            idcAddr,
+		NICResetPeriod:        nicPeriod,
 		NICCycleStart:         nicStart,
 		NICCycleDays:          req.NICCycleDays,
 		NICQuotaGB:            req.NICQuotaGB,
@@ -367,6 +381,7 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		BillingCycle          *string         `json:"billing_cycle"`
 		Price                 *string         `json:"price"`
 		IDCAddress            *string         `json:"idc_address"`
+		NICResetPeriod        *string         `json:"nic_reset_period"`
 		NICCycleStart         *string         `json:"nic_cycle_start"`
 		NICCycleDays          *int            `json:"nic_cycle_days"`
 		NICQuotaGB            *int64          `json:"nic_quota_gb"`
@@ -427,8 +442,18 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 	if req.IDCAddress != nil {
 		updates["idc_address"] = strings.TrimSpace(*req.IDCAddress)
 	}
-	// 网卡周期流量配置（2026-11-15）：起点/天数/额度/额度口径。
+	// 网卡周期流量配置（2026-11-15）：重置周期/起点/天数/额度/额度口径。
 	// 部分更新时用「库内现值 + 本次传入」做交叉校验，避免只传天数导致非法组合。
+	effNICPeriod := services.NormalizeNICResetPeriod(srv.NICResetPeriod)
+	if req.NICResetPeriod != nil {
+		v := services.NormalizeNICResetPeriod(*req.NICResetPeriod)
+		if !services.NICValidResetPeriod(v) {
+			util.BadRequest(c, "流量重置周期取值非法")
+			return
+		}
+		updates["nic_reset_period"] = v
+		effNICPeriod = v
+	}
 	effNICStart := srv.NICCycleStart
 	if req.NICCycleStart != nil {
 		v, err := parseCalendarDay(*req.NICCycleStart)
@@ -447,6 +472,21 @@ func (d *Deps) AdminUpdateServer(c *gin.Context) {
 		}
 		updates["nic_cycle_days"] = *req.NICCycleDays
 		effNICDays = *req.NICCycleDays
+	}
+	// 两者互斥：本次显式动了哪一侧，就清掉另一侧（前端也会清空，这里是后端兜底）。
+	// 自定义起点优先——它是显式逃生口；把它清空（起点空 + 天数 0）则什么都不清，
+	// 流量周期回到「重置周期」，没有就是跟随计费周期。
+	if (req.NICCycleStart != nil || req.NICCycleDays != nil) && (effNICStart != "" || effNICDays > 0) {
+		if effNICPeriod != "" {
+			updates["nic_reset_period"] = ""
+			effNICPeriod = ""
+		}
+	} else if req.NICResetPeriod != nil && effNICPeriod != "" {
+		if effNICStart != "" || effNICDays > 0 {
+			updates["nic_cycle_start"] = ""
+			updates["nic_cycle_days"] = 0
+			effNICStart, effNICDays = "", 0
+		}
 	}
 	if effNICDays > 0 && effNICStart == "" {
 		util.BadRequest(c, "固定天数周期需要填写流量统计周期起点")

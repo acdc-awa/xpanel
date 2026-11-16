@@ -50,6 +50,16 @@ const quotaDirectionOptions = [
   { label: '双向取较大值', value: 'max' },
 ]
 
+// 流量重置周期：与计费周期解耦（「年付但每月重置流量」是常见组合）。
+// 空串 = 跟随计费周期；其余取值与后端 services.NICResetPeriodValues 一一对应。
+const resetPeriodOptions = [
+  { label: '跟随计费周期', value: '' },
+  { label: '每月（按到期日）', value: '1m' },
+  { label: '每季（按到期日）', value: '3m' },
+  { label: '每半年（按到期日）', value: '6m' },
+  { label: '自然月（每月 1 日）', value: 'natural_month' },
+]
+
 const form = reactive({
   name: '',
   host: '',
@@ -59,6 +69,7 @@ const form = reactive({
   billing_cycle: '',
   price: '',
   idc_address: '',
+  nic_reset_period: '',
   nic_cycle_start: '' as string | null,
   nic_cycle_days: 0 as number | null,
   nic_quota_gb: 0 as number | null,
@@ -79,6 +90,29 @@ const hasCustomCycle = computed(
   () => Boolean(props.server.nic_cycle_start) || Number(props.server.nic_cycle_days ?? 0) > 0,
 )
 
+/** 选了预设周期 → 清空高级里的「自定义起点 + 天数」，界面上只留一套生效配置。 */
+function setResetPeriod(v: string) {
+  form.nic_reset_period = v
+  if (v) {
+    form.nic_cycle_start = null
+    form.nic_cycle_days = 0
+  }
+}
+
+// 反向互斥：只要用户真的填了自定义起点/天数，就清掉预设周期。
+// 用「与快照比对」而不是单纯的 watch，避免打开存量配置时把库里的值顺手改掉。
+watch(
+  () => [form.nic_cycle_start, form.nic_cycle_days] as const,
+  ([start, days]) => {
+    const touched =
+      norm(start) !== norm(props.server.nic_cycle_start) ||
+      Number(days ?? 0) !== Number(props.server.nic_cycle_days ?? 0)
+    if (touched && (norm(start).trim() || Number(days) > 0) && form.nic_reset_period) {
+      form.nic_reset_period = ''
+    }
+  },
+)
+
 const errors = reactive({ name: '', host: '' })
 const saving = ref(false)
 
@@ -92,6 +126,7 @@ function resetForm() {
     billing_cycle: props.server.billing_cycle ?? '',
     price: props.server.price ?? '',
     idc_address: props.server.idc_address ?? '',
+    nic_reset_period: props.server.nic_reset_period ?? '',
     nic_cycle_start: props.server.nic_cycle_start || null,
     nic_cycle_days: props.server.nic_cycle_days ?? 0,
     nic_quota_gb: props.server.nic_quota_gb ?? 0,
@@ -119,6 +154,7 @@ const dirty = computed(
     norm(form.billing_cycle) !== norm(props.server.billing_cycle) ||
     norm(form.price) !== norm(props.server.price) ||
     norm(form.idc_address) !== norm(props.server.idc_address) ||
+    norm(form.nic_reset_period) !== norm(props.server.nic_reset_period) ||
     norm(form.nic_cycle_start) !== norm(props.server.nic_cycle_start) ||
     Number(form.nic_cycle_days ?? 0) !== Number(props.server.nic_cycle_days ?? 0) ||
     Number(form.nic_quota_gb ?? 0) !== Number(props.server.nic_quota_gb ?? 0) ||
@@ -149,6 +185,7 @@ async function save() {
       billing_cycle: form.billing_cycle,
       price: form.price,
       idc_address: form.idc_address,
+      nic_reset_period: form.nic_reset_period,
       nic_cycle_start: form.nic_cycle_start || '',
       nic_cycle_days: Number(form.nic_cycle_days) || 0,
       nic_quota_gb: Number(form.nic_quota_gb) || 0,
@@ -275,7 +312,7 @@ async function copyText(text: string, label: string) {
 
     <CsContainer header="计费与流量周期（选填）">
       <template #info>
-        <TipIcon content="流量周期跟随计费周期：月付=每月、季付=每季、年付=每年，以到期日为锚点向前推导；一次性/未填到期日按自然月。每周期流量额度按同一周期计算，0 表示不限。" />
+        <TipIcon content="流量周期默认跟随计费周期（月付=每月、季付=每季…），以到期日为锚点向前推导；流量重置周期单独设置后以它为准（如年付但每月重置流量）。两者都没有或没有到期日时按自然月。每周期流量额度按同一周期计算，0 表示不限。" />
       </template>
       <CsForm>
         <div class="server-form-grid">
@@ -303,6 +340,14 @@ async function copyText(text: string, label: string) {
           <CsFormItem label="IDC 控制台地址">
             <CsInput v-model="form.idc_address" placeholder="控制台网址，如 https://..." clearable />
           </CsFormItem>
+          <CsFormItem label="流量重置周期">
+            <CsSelect
+              :model-value="form.nic_reset_period"
+              :options="resetPeriodOptions"
+              placeholder="选择流量重置周期"
+              @update:model-value="(v: string | number | (string | number)[] | '') => setResetPeriod(String(v ?? ''))"
+            />
+          </CsFormItem>
           <CsFormItem label="每周期流量额度（GB）">
             <CsInputNumber
               v-model="form.nic_quota_gb"
@@ -323,7 +368,7 @@ async function copyText(text: string, label: string) {
 
         <CsExpandableSection
           header="自定义统计周期"
-          header-description="默认留空即可；填写后优先于「计费周期 + 到期日」的推导"
+          header-description="存量逃生口：填了这里会清空上面的「流量重置周期」，且优先于计费周期的推导"
           class="server-nic-advanced"
           :default-expanded="hasCustomCycle"
         >

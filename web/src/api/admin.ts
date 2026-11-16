@@ -481,7 +481,8 @@ export interface ServerItem {
   price?: string // 续费价格
   idc_address?: string // IDC 控制台地址
   // 网卡周期流量配置（空/0 = 自动：按计费周期+到期日推导，识别不出按自然月）
-  nic_cycle_start?: string // 统计周期起点 YYYY-MM-DD
+  nic_reset_period?: string // 流量重置周期（与计费周期解耦）
+  nic_cycle_start?: string // 统计周期起点 YYYY-MM-DD（存量逃生口）
   nic_cycle_days?: number // 固定天数周期（0=按计费周期长度）
   nic_quota_gb?: number // 每周期流量额度（GB，0=不限）
   nic_quota_direction?: NicQuotaDirection // 额度口径
@@ -537,6 +538,7 @@ export function createServer(payload: {
   billing_cycle?: string
   price?: string
   idc_address?: string
+  nic_reset_period?: string // ''=跟随计费周期 / natural_month / 1m / 3m / 6m
   nic_cycle_start?: string
   nic_cycle_days?: number
   nic_quota_gb?: number
@@ -564,7 +566,8 @@ export function updateServer(
     billing_cycle?: string
     price?: string
     idc_address?: string
-    nic_cycle_start?: string
+    nic_reset_period?: string // ''=跟随计费周期 / natural_month / 1m / 3m / 6m
+  nic_cycle_start?: string
     nic_cycle_days?: number
     nic_quota_gb?: number
     nic_quota_direction?: NicQuotaDirection

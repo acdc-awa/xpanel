@@ -26,13 +26,84 @@ const SettingNICDailyBackfilled = "nic_traffic_daily_backfilled"
 type NICCycle struct {
 	Start time.Time // 本周期起点
 	End   time.Time // 下周期起点（不含）
-	Label string    // 面向面板的说明：自然月 / 计费周期（月付，按到期日） / 自定义 30 天
-	Mode  string    // natural_month / billing / custom_months / custom_days
+	Label string    // 面向面板的说明：自然月 / 流量周期（每月，按到期日） / 计费周期（月付，按到期日） / 自定义 30 天
+	Mode  string    // natural_month / reset_natural_month / reset_months / billing / custom_months / custom_days
+}
+
+// 流量重置周期（servers.nic_reset_period）的取值。
+//
+// 与计费周期解耦：计费周期是「付多少钱买多久」，这里只决定「流量多久归零」。
+// 最典型的组合是「年付 + 每月重置」——旧模型只能靠「自定义起点 + 天数」曲线表达，
+// 而 30 天 ≠ 日历月（2 月会提前两天重置），所以这两件事必须分开存。
+const (
+	NICResetPeriodFollow       = ""              // 跟随计费周期（默认）
+	NICResetPeriodNaturalMonth = "natural_month" // 自然月（每月 1 日归零）
+	NICResetPeriodMonthly      = "1m"            // 每月（日号 = 到期日的日号）
+	NICResetPeriodQuarterly    = "3m"            // 每季
+	NICResetPeriodSemiAnnual   = "6m"            // 每半年
+)
+
+// NICResetPeriodValues 合法取值（含空串 = 跟随计费周期），供 API 白名单校验。
+var NICResetPeriodValues = []string{
+	NICResetPeriodFollow, NICResetPeriodNaturalMonth,
+	NICResetPeriodMonthly, NICResetPeriodQuarterly, NICResetPeriodSemiAnnual,
+}
+
+// NICValidResetPeriod 校验取值是否合法（容忍 natural-month 之类的手写变体）。
+func NICValidResetPeriod(v string) bool {
+	v = NormalizeNICResetPeriod(v)
+	for _, x := range NICResetPeriodValues {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func NormalizeNICResetPeriod(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "natural", "naturalmonth", "natural-month", "natural_month":
+		return NICResetPeriodNaturalMonth
+	}
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
+// NICResetPeriodMonths 把预设周期换算成月数；natural=true 表示「按自然月」。
+// 空串或未知取值返回 (0,false)，调用方按「跟随计费周期」处理。
+func NICResetPeriodMonths(period string) (months int, natural bool) {
+	switch NormalizeNICResetPeriod(period) {
+	case NICResetPeriodNaturalMonth:
+		return 0, true
+	case NICResetPeriodMonthly:
+		return 1, false
+	case NICResetPeriodQuarterly:
+		return 3, false
+	case NICResetPeriodSemiAnnual:
+		return 6, false
+	}
+	return 0, false
+}
+
+// NICResetPeriodLabel 周期月数 → 中文档位名（只用于拼周期说明）。
+func NICResetPeriodLabel(months int) string {
+	switch months {
+	case 1:
+		return "每月"
+	case 3:
+		return "每季"
+	case 6:
+		return "每半年"
+	case 12:
+		return "每年"
+	}
+	return fmt.Sprintf("每 %d 个月", months)
 }
 
 // ResolveNICCycle 解析服务器的网卡流量统计周期。
 //
 // 口径优先级：
+//  0. 流量重置周期：nic_reset_period 非空 → 与计费周期无关，以到期日为锚点滚动
+//     （natural_month 直接按自然月切）。与「自定义起点」互斥，两者都在时以本项为准。
 //  1. 自定义天数：nic_cycle_start 非空且 nic_cycle_days>0 → 从起点起每 N 天一个周期；
 //  2. 自定义月周期：nic_cycle_start 非空、天数为 0 → 从起点起按 billing_cycle 的月数滚动
 //     （计费周期识别不出/一次性时按 1 个月）；
@@ -46,6 +117,29 @@ func ResolveNICCycle(s *models.Server, now time.Time, loc *time.Location) NICCyc
 		loc = time.UTC
 	}
 	now = now.In(loc)
+
+	naturalMonth := func(label, mode string) NICCycle {
+		start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		end := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, loc)
+		return NICCycle{Start: start, End: end, Label: label, Mode: mode}
+	}
+
+	if months, natural := NICResetPeriodMonths(s.NICResetPeriod); natural || months > 0 {
+		if natural {
+			return naturalMonth("流量周期（自然月）", "reset_natural_month")
+		}
+		if anchor, ok := parseCalendarDate(s.ExpireAt, loc); ok {
+			start, end := cycleByMonths(anchor, months, now)
+			return NICCycle{
+				Start: start,
+				End:   end,
+				Label: fmt.Sprintf("流量周期（%s，按到期日）", NICResetPeriodLabel(months)),
+				Mode:  "reset_months",
+			}
+		}
+		// 选了预设但没填到期日：没有锚点就退回自然月，与自动模式的兜底保持同一口径。
+		return naturalMonth("流量周期（自然月）", "reset_natural_month")
+	}
 
 	if anchor, ok := parseCalendarDate(s.NICCycleStart, loc); ok {
 		if s.NICCycleDays > 0 {
@@ -81,9 +175,7 @@ func ResolveNICCycle(s *models.Server, now time.Time, loc *time.Location) NICCyc
 		}
 	}
 
-	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
-	end := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, loc)
-	return NICCycle{Start: start, End: end, Label: "自然月", Mode: "natural_month"}
+	return naturalMonth("自然月", "natural_month")
 }
 
 // BillingCycleMonths 把 servers.billing_cycle 的中文/英文标签归一为月数。

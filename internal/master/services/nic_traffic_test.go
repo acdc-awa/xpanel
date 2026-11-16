@@ -92,6 +92,33 @@ func TestResolveNICCycle(t *testing.T) {
 	// 自定义起点 + 固定天数
 	check("custom days", models.Server{NICCycleStart: "2026-10-01", NICCycleDays: 30},
 		date(2026, 10, 31), date(2026, 11, 30), "custom_days")
+	// 流量重置周期：年付但每月重置流量（与计费周期独立），按到期日的日号滚动
+	check("reset monthly on yearly billing", models.Server{
+		BillingCycle: "年付", ExpireAt: "2027-05-20", NICResetPeriod: "1m",
+	}, date(2026, 10, 20), date(2026, 11, 20), "reset_months")
+	// 流量重置周期：每季
+	check("reset quarterly", models.Server{
+		BillingCycle: "年付", ExpireAt: "2026-01-10", NICResetPeriod: "3m",
+	}, date(2026, 10, 10), date(2027, 1, 10), "reset_months")
+	// 流量重置周期：自然月（不看到期日）
+	check("reset natural month", models.Server{
+		BillingCycle: "年付", ExpireAt: "2027-05-20", NICResetPeriod: "natural_month",
+	}, date(2026, 11, 1), date(2026, 12, 1), "reset_natural_month")
+	// 选了预设但没填到期日：没有锚点 → 退回自然月
+	check("reset without expire", models.Server{BillingCycle: "月付", NICResetPeriod: "1m"},
+		date(2026, 11, 1), date(2026, 12, 1), "reset_natural_month")
+	// 重置周期与自定义起点同时存在（手工改库/旧客户端）：重置周期优先
+	check("reset beats custom start", models.Server{
+		NICResetPeriod: "1m", NICCycleStart: "2026-05-05", ExpireAt: "2027-05-20",
+	}, date(2026, 10, 20), date(2026, 11, 20), "reset_months")
+	// 续费平移整计费周期后，月度重置的窗口不变（12 个月是 1 个月的整数倍）
+	resetBefore := ResolveNICCycle(&models.Server{BillingCycle: "年付", ExpireAt: "2027-05-20", NICResetPeriod: "1m"}, now, loc)
+	resetAfter := ResolveNICCycle(&models.Server{BillingCycle: "年付", ExpireAt: "2028-05-20", NICResetPeriod: "1m"}, now, loc)
+	if !resetBefore.Start.Equal(resetAfter.Start) || !resetBefore.End.Equal(resetAfter.End) {
+		t.Errorf("续费整周期后月度重置窗口应不变: before [%s, %s), after [%s, %s)",
+			resetBefore.Start.Format("2006-01-02"), resetBefore.End.Format("2006-01-02"),
+			resetAfter.Start.Format("2006-01-02"), resetAfter.End.Format("2006-01-02"))
+	}
 	// 月末夹取：1/31 + 1 月 = 2/28，3/1 落在 [2/28, 3/31)
 	marNow := time.Date(2026, 3, 1, 12, 0, 0, 0, loc)
 	clamped := ResolveNICCycle(&models.Server{BillingCycle: "月付", NICCycleStart: "2026-01-31"}, marNow, loc)

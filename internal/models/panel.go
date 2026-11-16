@@ -29,11 +29,14 @@ type Server struct {
 	IDCAddress   string `gorm:"column:idc_address;size:255" json:"idc_address"` // IDC 地址 / 服务商控制台链接
 	// 网卡周期流量统计（2026-11-15）：服务器卡/概览展示「本周期用了多少」。
 	// 数据源是节点上报的累计物理网卡 Rx/Tx 字节（agent collector），与 xray 用户流量无关。
-	//   - NICCycleStart 为空 = 自动：按 billing_cycle + expire_at 推导；推导不出按自然月。
+	//   - NICResetPeriod 非空 = 流量周期与计费周期独立，按到期日（expire_at）为锚点滚动；
+	//     空 = 跟随计费周期（billing_cycle + expire_at 推导），推导不出按自然月。
 	//   - 有起点且 NICCycleDays>0 = 固定天数周期；有起点、天数为 0 = 按计费周期长度（识别不出按 1 个月）。
-	// 两个字段都为空/0 时完全走自动，存量服务器升级后行为一致。
-	NICCycleStart         string `gorm:"column:nic_cycle_start;size:10" json:"nic_cycle_start"`                      // 统计周期起点 YYYY-MM-DD（空=自动）
-	NICCycleDays          int    `gorm:"column:nic_cycle_days;default:0" json:"nic_cycle_days"`                      // 固定天数周期（0=按计费周期长度）
+	//     NICCycleStart 是与 NICResetPeriod 互斥的存量逃生口（自定义起点），两者同时为空时完全走自动，
+	//     存量服务器升级后行为一致。
+	NICResetPeriod        string `gorm:"column:nic_reset_period;size:16;default:''" json:"nic_reset_period"`         // 流量重置周期：''/natural_month/1m/3m/6m
+	NICCycleStart         string `gorm:"column:nic_cycle_start;size:10" json:"nic_cycle_start"`                      // 存量：统计周期起点 YYYY-MM-DD（空=自动）
+	NICCycleDays          int    `gorm:"column:nic_cycle_days;default:0" json:"nic_cycle_days"`                      // 存量：固定天数周期（0=按计费周期长度）
 	NICQuotaGB            int64  `gorm:"column:nic_quota_gb;default:0" json:"nic_quota_gb"`                          // 每周期流量额度（GB，0=不限）
 	NICQuotaDirection     string `gorm:"column:nic_quota_direction;size:8;default:total" json:"nic_quota_direction"` // 额度口径：total/rx/tx/max
 	Status                int    `gorm:"default:0;index" json:"status"`                                              // 0 离线 1 在线

@@ -90,7 +90,13 @@ const (
 	// nic_cycle_start / nic_cycle_days / nic_quota_gb / nic_quota_direction 四列。
 	// 旧面板不认识新表/新列但不会写坏；日表由主控按累计网卡字节差分维护，
 	// 首次升级从 node_reports 保留期一次性回填（失败中止启动，重试幂等）。
-	DBSchemaVersion = 6
+	//
+	// v7（2026-11-16，流量重置周期与计费周期解耦）：纯增量，不提升 Min——
+	// servers 加 nic_reset_period（''=跟随计费周期 / natural_month / 1m / 3m / 6m），
+	// 让「年付但每月重置流量」这类机器不必再靠「自定义起点 + 天数」曲线表达。
+	// 旧面板不认识该列：回滚到 v0.2.7 后这类机器的流量窗口会退回按计费周期推导
+	// （本周期用量随之变化，但日表数据不丢，重新升级即自愈），故不构成 fail-closed 条件。
+	DBSchemaVersion = 7
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。
