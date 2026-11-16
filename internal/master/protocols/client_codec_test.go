@@ -62,47 +62,40 @@ func runXrayTestHelper(t *testing.T, outbound map[string]any) {
 	}
 }
 
-// TestVLESS_ClientCodec 测试 VLESS 协议的 URL 格式化、解析与 Xray 出站生成。
+// TestVLESS_ClientCodec 测试 VLESS 协议的 URL 格式化与 Xray 出站生成。
+// DTO 直接构造：订阅链接解析（ParseLink）入口已随「链接导入」功能退役（2026-11-16）。
 func TestVLESS_ClientCodec(t *testing.T) {
-	// 1. Reality + TCP 测试
-	rawReality := "vless://00000000-0000-0000-0000-000000000001@example.com:443?type=tcp&security=reality&pbk=1fX-n4WsBK43qAdhkvmHMvshe533A_Aj5fWcnSGcyzw&sid=1234abcd&sni=www.apple.com&fp=chrome&flow=xtls-rprx-vision#MyNode"
-	dto1, err := protocols.ParseLink(rawReality)
-	if err != nil {
-		t.Fatalf("ParseLink reality failed: %v", err)
-	}
-	if dto1.Protocol != "vless" || dto1.ServerHost != "example.com" || dto1.ServerPort != 443 {
-		t.Fatalf("DTO 基础参数不匹配: %+v", dto1)
-	}
-	if dto1.Auth.UUID != "00000000-0000-0000-0000-000000000001" || dto1.Auth.Flow != "xtls-rprx-vision" {
-		t.Fatalf("DTO 认证参数不匹配: %+v", dto1.Auth)
-	}
-	if dto1.Security.Type != "reality" || dto1.Security.Reality.PublicKey != "1fX-n4WsBK43qAdhkvmHMvshe533A_Aj5fWcnSGcyzw" || dto1.Security.Reality.ShortID != "1234abcd" {
-		t.Fatalf("DTO Reality 不匹配: %+v", dto1.Security)
-	}
-	// 链接未声明该参数时按面板默认（开启）解析。
-	if !dto1.Security.Reality.SupportMLKEM {
-		t.Fatalf("DTO REALITY 默认应开启 SupportMLKEM")
+	// 1. Reality + TCP
+	dto1 := &contracts.ProxyNodeDTO{
+		Name:       "MyNode",
+		ServerHost: "example.com",
+		ServerPort: 443,
+		Protocol:   "vless",
+		Transport:  &contracts.TransportOptions{Network: "tcp"},
+		Security: &contracts.SecurityOptions{
+			Type:        "reality",
+			SNI:         "www.apple.com",
+			Fingerprint: "chrome",
+			Reality:     contracts.NewRealityOptions("1fX-n4WsBK43qAdhkvmHMvshe533A_Aj5fWcnSGcyzw", "1234abcd"),
+		},
+		Auth: &contracts.ClientCredentialDTO{
+			UUID: "00000000-0000-0000-0000-000000000001",
+			Flow: "xtls-rprx-vision",
+		},
 	}
 
-	// 格式化回 URL
 	link1, err := protocols.FormatLink(dto1)
 	if err != nil {
 		t.Fatalf("FormatLink reality failed: %v", err)
-	}
-	dto1Re, err := protocols.ParseLink(link1)
-	if err != nil {
-		t.Fatalf("ParseLink re-parse failed: %v", err)
-	}
-	if dto1Re.Auth.UUID != dto1.Auth.UUID || dto1Re.Security.Reality.PublicKey != dto1.Security.Reality.PublicKey {
-		t.Fatalf("Round-trip DTO 不一致")
-	}
-	if !dto1Re.Security.Reality.SupportMLKEM {
-		t.Fatalf("Round-trip 后 SupportMLKEM 丢失")
 	}
 	// Xray ≥26.9.8 的 REALITY 服务端强制要求 ClientHello 携带 X25519MLKEM768；
 	// mihomo 默认剥离，链接必须显式声明该开关。
 	if !strings.Contains(link1, "support-x25519mlkem768=1") {
 		t.Errorf("reality 链接缺少 support-x25519mlkem768=1: %s", link1)
+	}
+	if !strings.Contains(link1, "pbk=1fX-n4WsBK43qAdhkvmHMvshe533A_Aj5fWcnSGcyzw") ||
+		!strings.Contains(link1, "sid=1234abcd") || !strings.Contains(link1, "flow=xtls-rprx-vision") {
+		t.Errorf("reality 链接缺少关键参数: %s", link1)
 	}
 
 	// 反向验证：开关来自基准模型，而非渲染器无条件硬编码。
@@ -130,14 +123,15 @@ func TestVLESS_ClientCodec(t *testing.T) {
 	}
 	runXrayTestHelper(t, out1)
 
-	// 2. XHTTP + TLS 测试
-	rawXHTTP := "vless://00000000-0000-0000-0000-000000000002@xh.example.com:8443?type=xhttp&security=tls&sni=xh.example.com&path=%2Fcustom&mode=stream-up#XHTTP-Node"
-	dto2, err := protocols.ParseLink(rawXHTTP)
-	if err != nil {
-		t.Fatalf("ParseLink xhttp failed: %v", err)
-	}
-	if dto2.Transport.Network != "xhttp" || dto2.Transport.Path != "/custom" || dto2.Transport.Mode != "stream-up" {
-		t.Fatalf("DTO xhttp 参数不匹配: %+v", dto2.Transport)
+	// 2. XHTTP + TLS
+	dto2 := &contracts.ProxyNodeDTO{
+		Name:       "XHTTP-Node",
+		ServerHost: "xh.example.com",
+		ServerPort: 8443,
+		Protocol:   "vless",
+		Transport:  &contracts.TransportOptions{Network: "xhttp", Path: "/custom", Mode: "stream-up"},
+		Security:   &contracts.SecurityOptions{Type: "tls", SNI: "xh.example.com"},
+		Auth:       &contracts.ClientCredentialDTO{UUID: "00000000-0000-0000-0000-000000000002"},
 	}
 	out2, err := protocols.RenderOutbound(dto2)
 	if err != nil {
@@ -146,41 +140,24 @@ func TestVLESS_ClientCodec(t *testing.T) {
 	runXrayTestHelper(t, out2)
 }
 
-// TestHysteria_ClientCodec 测试 Hysteria 2 协议的 URL 格式化、解析与 Xray 出站生成。
+// TestHysteria_ClientCodec 测试 Hysteria 2 协议的 URL 格式化与 Xray 出站生成。
 func TestHysteria_ClientCodec(t *testing.T) {
-	rawHy2 := "hysteria2://mySecretPass@hy.example.com:443/?sni=hy.example.com&insecure=1#Hy2Node"
-	dto, err := protocols.ParseLink(rawHy2)
-	if err != nil {
-		t.Fatalf("ParseLink hy2 failed: %v", err)
-	}
-	if dto.Protocol != "hysteria" || dto.Auth.Password != "mySecretPass" || dto.ServerPort != 443 {
-		t.Fatalf("DTO 参数不匹配: %+v", dto)
-	}
-	if dto.Security.SNI != "hy.example.com" || !dto.Security.AllowInsecure {
-		t.Fatalf("DTO TLS 参数不匹配: %+v", dto.Security)
+	dto := &contracts.ProxyNodeDTO{
+		Name:       "Hy2Node",
+		ServerHost: "hy.example.com",
+		ServerPort: 443,
+		Protocol:   "hysteria",
+		Transport:  &contracts.TransportOptions{Network: "hysteria"},
+		Security:   &contracts.SecurityOptions{Type: "tls", SNI: "hy.example.com", AllowInsecure: true},
+		Auth:       &contracts.ClientCredentialDTO{Password: "mySecretPass"},
 	}
 
-	// 测试 hy2:// 别名
-	rawHy2Alias := "hy2://mySecretPass2@hy2.example.com:8443/?sni=hy2.example.com#Hy2Alias"
-	dtoAlias, err := protocols.ParseLink(rawHy2Alias)
-	if err != nil {
-		t.Fatalf("ParseLink hy2 alias failed: %v", err)
-	}
-	if dtoAlias.Auth.Password != "mySecretPass2" {
-		t.Fatalf("DTO Alias password want mySecretPass2, got %v", dtoAlias.Auth.Password)
-	}
-
-	// 格式化回 URL
 	link, err := protocols.FormatLink(dto)
 	if err != nil {
 		t.Fatalf("FormatLink failed: %v", err)
 	}
-	dtoRe, err := protocols.ParseLink(link)
-	if err != nil {
-		t.Fatalf("ParseLink re-parse failed: %v", err)
-	}
-	if dtoRe.Auth.Password != dto.Auth.Password {
-		t.Fatalf("Round-trip password 不一致")
+	if !strings.HasPrefix(link, "hysteria2://mySecretPass@hy.example.com:443") {
+		t.Errorf("hy2 链接形态不符合预期: %s", link)
 	}
 
 	// 渲染出站并验证
@@ -200,13 +177,16 @@ func TestHysteria_ClientCodec(t *testing.T) {
 	runXrayTestHelper(t, out)
 }
 
-// TestMixed_ClientCodec 测试 SOCKS5 与 HTTP 协议的 URL 格式化、解析与 Xray 出站生成。
+// TestRenderOutbound_TLSCAAndPin VLESS TLS 携带 CA 证书与 Pin SHA256 的出站生成。
 func TestRenderOutbound_TLSCAAndPin(t *testing.T) {
-	// 测试 VLESS TLS 携带 CA 证书与 Pin SHA256 出站生成并送 xray.exe 校验
-	rawVless := "vless://a0000000-0000-0000-0000-000000000001@1.2.3.4:443?security=tls&sni=proxy.example.com#VlessNode"
-	dto, err := protocols.ParseLink(rawVless)
-	if err != nil {
-		t.Fatalf("ParseLink failed: %v", err)
+	dto := &contracts.ProxyNodeDTO{
+		Name:       "VlessNode",
+		ServerHost: "1.2.3.4",
+		ServerPort: 443,
+		Protocol:   "vless",
+		Transport:  &contracts.TransportOptions{Network: "tcp"},
+		Security:   &contracts.SecurityOptions{Type: "tls", SNI: "proxy.example.com"},
+		Auth:       &contracts.ClientCredentialDTO{UUID: "a0000000-0000-0000-0000-000000000001"},
 	}
 	dto.Security.PinnedPeerCertSha256 = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
 	dto.Security.DisableSystemRoot = true

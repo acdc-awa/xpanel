@@ -140,18 +140,9 @@ func TestHysteriaFormatLink_Extras(t *testing.T) {
 		}
 	}
 
-	// 回环解析：端口跳跃与 obfs 必须能读回来。
-	back, err := protocols.ParseLink(link)
-	if err != nil {
-		t.Fatalf("ParseLink: %v", err)
-	}
-	if back.ServerPort != 20000 {
-		t.Errorf("端口跳跃回环 ServerPort = %d, want 20000", back.ServerPort)
-	}
-	if back.Transport.Opts[protocols.Hy2OptPorts] != "20000-30000" {
-		t.Errorf("回环 ports = %q", back.Transport.Opts[protocols.Hy2OptPorts])
-	}
-	if back.Transport.Opts[protocols.Hy2OptObfs] != "salamander" {
-		t.Errorf("回环 obfs = %q", back.Transport.Opts[protocols.Hy2OptObfs])
+	// 端口跳跃：authority 端口位是集合（ParseLink 已随「链接导入」功能退役，
+	// 故这里只断言格式，不再做回环解析）。
+	if !strings.Contains(link, "hy.example.com:20000-30000") {
+		t.Errorf("链接缺少端口跳跃集合: %s", link)
 	}
 }

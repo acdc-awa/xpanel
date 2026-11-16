@@ -46,7 +46,6 @@ func (HysteriaPlugin) Descriptor() contracts.ProtocolDescriptor {
 		HotSync:       true,
 		AccountType:   "hysteria",
 		InboundTypes:  []string{"user"},
-		ClientSchemes: []string{"hysteria2", "hy2"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "version", Role: contracts.RoleBoth},
 			{Layer: "stream", Key: "hysteriaSettings", Role: contracts.RoleBoth},
@@ -290,109 +289,6 @@ func (HysteriaPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 		Fragment: dto.Name,
 	}
 	return u.String(), nil
-}
-
-// ParseLink 解析 hysteria2:// 或 hy2:// 订阅链接为中性 ProxyNodeDTO。
-func (HysteriaPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
-	if u == nil {
-		return nil, fmt.Errorf("url 不能为空")
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "hysteria2" && scheme != "hy2" {
-		return nil, fmt.Errorf("协议 scheme 不匹配: %s, 期望 hysteria2 或 hy2", u.Scheme)
-	}
-
-	password := u.User.Username()
-	if password == "" {
-		if p, ok := u.User.Password(); ok {
-			password = p
-		}
-	}
-	if password == "" {
-		return nil, fmt.Errorf("hysteria2 链接缺少认证密码")
-	}
-
-	host := u.Hostname()
-	portStr := u.Port()
-	// 端口跳跃：链接把端口集合整体放在 authority（如 host:20000-30000），
-	// 此时 u.Port() 为空，需要从 Host 尾部取出集合再取首端口。
-	ports := ""
-	if portStr == "" {
-		if idx := strings.LastIndex(u.Host, ":"); idx >= 0 && idx+1 < len(u.Host) {
-			ports = u.Host[idx+1:]
-			first := ports
-			if j := strings.IndexAny(ports, ",-"); j > 0 {
-				first = ports[:j]
-			}
-			portStr = first
-		}
-	}
-	if host == "" || portStr == "" {
-		return nil, fmt.Errorf("hysteria2 链接缺少主机或端口: %s", u.Host)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
-		return nil, fmt.Errorf("非法端口: %s", portStr)
-	}
-
-	q := u.Query()
-	sni := q.Get("sni")
-	if sni == "" {
-		sni = host
-	}
-	allowInsecure := q.Get("insecure") == "1"
-
-	name, _ := url.QueryUnescape(u.Fragment)
-	if name == "" {
-		name = fmt.Sprintf("hy2-%s-%d", host, port)
-	}
-
-	dto := &contracts.ProxyNodeDTO{
-		Name:       name,
-		ServerHost: host,
-		ServerPort: port,
-		Protocol:   "hysteria",
-		Transport:  &contracts.TransportOptions{Network: "hysteria"},
-		Security: &contracts.SecurityOptions{
-			Type:          "tls",
-			SNI:           sni,
-			AllowInsecure: allowInsecure,
-			Fingerprint:   "chrome",
-		},
-		Auth: &contracts.ClientCredentialDTO{
-			Password: password,
-			UUID:     password,
-			Extra:    make(map[string]any),
-		},
-	}
-	if q.Get("obfs") != "" {
-		if dto.Transport.Opts == nil {
-			dto.Transport.Opts = make(map[string]string)
-		}
-		dto.Transport.Opts[Hy2OptObfs] = q.Get("obfs")
-		if pw := q.Get("obfs-password"); pw != "" {
-			dto.Transport.Opts[Hy2OptObfsPassword] = pw
-		}
-	}
-	if up := Hy2BandwidthFromMihomo(q.Get("up")); up != "" {
-		if dto.Transport.Opts == nil {
-			dto.Transport.Opts = make(map[string]string)
-		}
-		dto.Transport.Opts[Hy2OptBwUp] = up
-	}
-	if down := Hy2BandwidthFromMihomo(q.Get("down")); down != "" {
-		if dto.Transport.Opts == nil {
-			dto.Transport.Opts = make(map[string]string)
-		}
-		dto.Transport.Opts[Hy2OptBwDown] = down
-	}
-	if ports != "" && strings.ContainsAny(ports, ",-") {
-		if dto.Transport.Opts == nil {
-			dto.Transport.Opts = make(map[string]string)
-		}
-		dto.Transport.Opts[Hy2OptPorts] = ports
-	}
-	return dto, nil
 }
 
 // RenderOutbound 将中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。

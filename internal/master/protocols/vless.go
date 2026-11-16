@@ -21,16 +21,15 @@ func (VLESSPlugin) Protocol() string { return "vless" }
 // Descriptor 声明 VLESS 的能力描述符。
 func (VLESSPlugin) Descriptor() contracts.ProtocolDescriptor {
 	return contracts.ProtocolDescriptor{
-		Name:          "vless",
-		Label:         "VLESS",
-		Networks:      []string{"tcp", "xhttp"},
-		Securities:    []string{"reality", "tls", "none"},
-		Credential:    contracts.CredentialUUID,
-		SupportsUDP:   true,
-		HotSync:       true,
-		AccountType:   "vless",
-		InboundTypes:  []string{"user"},
-		ClientSchemes: []string{"vless"},
+		Name:         "vless",
+		Label:        "VLESS",
+		Networks:     []string{"tcp", "xhttp"},
+		Securities:   []string{"reality", "tls", "none"},
+		Credential:   contracts.CredentialUUID,
+		SupportsUDP:  true,
+		HotSync:      true,
+		AccountType:  "vless",
+		InboundTypes: []string{"user"},
 		Segments: []contracts.LayerSegment{
 			{Layer: "settings", Key: "decryption", Role: contracts.RoleServerOnly},
 			{Layer: "settings", Key: "encryption", Role: contracts.RoleClientOnly},
@@ -409,131 +408,6 @@ func (VLESSPlugin) FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 
 	frag := url.QueryEscape(dto.Name)
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s", dto.Auth.UUID, dto.ServerHost, dto.ServerPort, q.Encode(), frag), nil
-}
-
-// ParseLink 解析 vless:// 订阅链接为中性 ProxyNodeDTO。
-func (VLESSPlugin) ParseLink(u *url.URL) (*contracts.ProxyNodeDTO, error) {
-	if u == nil {
-		return nil, fmt.Errorf("url 不能为空")
-	}
-	if strings.ToLower(u.Scheme) != "vless" {
-		return nil, fmt.Errorf("协议 scheme 不匹配: %s, 期望 vless", u.Scheme)
-	}
-
-	uuid := u.User.Username()
-	if uuid == "" {
-		return nil, fmt.Errorf("vless 链接缺少 UUID")
-	}
-	host := u.Hostname()
-	portStr := u.Port()
-	if host == "" || portStr == "" {
-		return nil, fmt.Errorf("vless 链接缺少主机或端口: %s", u.Host)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
-		return nil, fmt.Errorf("非法端口: %s", portStr)
-	}
-
-	q := u.Query()
-	net := q.Get("type")
-	if net == "" {
-		net = q.Get("network")
-	}
-	if net == "" {
-		net = "tcp"
-	}
-	net = strings.ToLower(net)
-
-	sec := strings.ToLower(q.Get("security"))
-	if sec == "" {
-		sec = "none"
-	}
-
-	name, _ := url.QueryUnescape(u.Fragment)
-	if name == "" {
-		name = fmt.Sprintf("vless-%s-%d", host, port)
-	}
-
-	dto := &contracts.ProxyNodeDTO{
-		Name:       name,
-		ServerHost: host,
-		ServerPort: port,
-		Protocol:   "vless",
-		Transport:  &contracts.TransportOptions{Network: net},
-		Security:   &contracts.SecurityOptions{Type: sec},
-		Auth: &contracts.ClientCredentialDTO{
-			UUID:       uuid,
-			Flow:       q.Get("flow"),
-			Encryption: "none",
-			Extra:      make(map[string]any),
-		},
-	}
-	if enc := q.Get("encryption"); enc != "" {
-		dto.Auth.Encryption = enc
-	}
-
-	// 提取 SNI 与 Fingerprint
-	sni := q.Get("sni")
-	if sni == "" {
-		sni = q.Get("serverName")
-	}
-	dto.Security.SNI = sni
-
-	fp := q.Get("fp")
-	if fp == "" {
-		fp = q.Get("fingerprint")
-	}
-	dto.Security.Fingerprint = fp
-
-	switch sec {
-	case "reality":
-		pbk := q.Get("pbk")
-		if pbk == "" {
-			pbk = q.Get("publicKey")
-		}
-		sid := q.Get("sid")
-		if sid == "" {
-			sid = q.Get("shortId")
-		}
-		dto.Security.Reality = contracts.NewRealityOptions(pbk, sid)
-		// 链接未声明时按面板默认（开启）处理：旧内核不敏感，开启无副作用。
-		if v := q.Get("support-x25519mlkem768"); v != "" {
-			if enabled, err := strconv.ParseBool(v); err == nil {
-				dto.Security.Reality.SupportMLKEM = enabled
-			}
-		}
-	case "tls":
-		if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {
-			dto.Security.AllowInsecure = true
-		}
-	}
-
-	// 传输层参数
-	switch net {
-	case "xhttp":
-		dto.Transport.Path = q.Get("path")
-		dto.Transport.Host = q.Get("host")
-		dto.Transport.Mode = q.Get("mode")
-		if dto.Transport.Mode == "" {
-			dto.Transport.Mode = "auto"
-		}
-		if dto.Transport.Path == "" {
-			dto.Transport.Path = "/"
-		}
-	case "ws":
-		dto.Transport.Path = q.Get("path")
-		dto.Transport.Host = q.Get("host")
-		if dto.Transport.Path == "" {
-			dto.Transport.Path = "/"
-		}
-	case "grpc":
-		svc := q.Get("serviceName")
-		if svc != "" {
-			dto.Transport.Opts = map[string]string{"serviceName": svc}
-		}
-	}
-
-	return dto, nil
 }
 
 // RenderOutbound 将中性 ProxyNodeDTO 渲染为 Xray 客户端出站结构 map。
