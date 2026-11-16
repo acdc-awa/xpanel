@@ -193,6 +193,11 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := NormalizeTimesToUTC(db); err != nil {
 		return err
 	}
+	// 审计历史噪音一次性清理（2026-11-16，settings 标记、**不升 schema 版本**）：
+	// 删掉逐次认证失败/只读预览/位次布局这类历史行；失败不阻断启动。
+	if err := PurgeAuditNoise(db); err != nil {
+		return err
+	}
 	return migrateUserSubscribeTokens(db)
 }
 

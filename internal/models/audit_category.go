@@ -70,10 +70,10 @@ func AuditCategory(action string) string {
 		return AuditCategoryInbounds
 
 	// 系统域：全局设置、公告（含旧版 notice. 单数）、备份（含备份服务内部 action）、
-	// 数据管理、拓扑布局、面板更新与系统状态。
+	// 数据管理、拓扑布局、面板更新、系统状态与审计自维护。
 	case hasAnyPrefix(a, "settings", "notices", "notice.", "backup", "topology", "data",
 		"update", "system", "dashboard"),
-		a == "audit-logs":
+		a == "audit-logs", a == "audit.noise_purge":
 		return AuditCategorySettings
 
 	default:

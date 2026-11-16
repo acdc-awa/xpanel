@@ -959,10 +959,12 @@ export function getActionMeta(action: string, method = '', detail = ''): ActionM
     act.startsWith('topology') ||
     act.startsWith('data') ||
     act.startsWith('update') ||
-    act.startsWith('system')
+    act.startsWith('system') ||
+    act === 'audit.noise_purge'
   ) {
     let title = '系统设置'
-    if (act.startsWith('settings')) title = '修改全局系统设置'
+    if (act === 'audit.noise_purge') title = '清理历史审计噪音'
+    else if (act.startsWith('settings')) title = '修改全局系统设置'
     else if (act.startsWith('notices') || act.startsWith('notice.')) {
       if (act.endsWith('.toggle')) title = '切换公告状态'
       else title = isDel ? '删除系统公告' : '发布/编辑系统公告'

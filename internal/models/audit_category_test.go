@@ -38,6 +38,7 @@ func TestAuditCategory(t *testing.T) {
 		"update.apply":                       AuditCategorySettings,
 		"system.status":                      AuditCategorySettings,
 		"dashboard":                          AuditCategorySettings,
+		"audit.noise_purge":                  AuditCategorySettings, // 启动迁移清理历史噪音的自述行
 		// 业务代码手动打点
 		"auth.login":            AuditCategoryAuth,
 		"auth.login_2fa":        AuditCategoryAuth,
