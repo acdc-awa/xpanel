@@ -1,5 +1,6 @@
 import type { NicQuotaDirection, ServerItem, ServerNicTraffic } from '@/api/admin'
 import { formatBytes } from './format'
+import { daysUntilDate, formatDateOnly } from './timezone'
 
 // 服务器网卡周期流量的展示口径（单一来源，卡片与概览共用）。
 //
@@ -37,6 +38,25 @@ export function nicCycleRangeText(t: ServerNicTraffic): string {
   end.setUTCDate(end.getUTCDate() - 1)
   const endInclusive = end.toISOString().slice(0, 10)
   return `${t.cycle_start} 至 ${endInclusive}`
+}
+
+/** 本周期距重置的天数（cycle_end 是左闭右开的下一周期起点；已过或当天都算 0）。 */
+export function nicDaysToReset(t: ServerNicTraffic): number | null {
+  const days = daysUntilDate(t.cycle_end)
+  return days === null ? null : Math.max(days, 0)
+}
+
+/**
+ * 卡片上的重置提示：`3 天后重置 · 11-19`（跨年才带年份），当天重置只说「今天重置」。
+ * 完整区间与数据完整性不在这里展开——由 tooltip 承担，卡片只留「还剩几天、什么时候重置」。
+ */
+export function nicResetText(t: ServerNicTraffic): string {
+  const days = nicDaysToReset(t)
+  if (days === null) return ''
+  if (days === 0) return '今天重置'
+  const [y, m, d] = t.cycle_end.split('-')
+  const date = y === formatDateOnly(new Date()).slice(0, 4) ? `${m}-${d}` : t.cycle_end
+  return `${days} 天后重置 · ${date}`
 }
 
 /** 本周期用量（按额度口径取数；无额度时显示双向合计）。 */

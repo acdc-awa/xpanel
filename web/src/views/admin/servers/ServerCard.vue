@@ -18,9 +18,9 @@ import { formatExpireDate, getExpiryStatus, isUrl, normalizeUrl } from '@/utils/
 import { indicatorTypeOf, onlineChip, pushStateChip, xrayChip } from '@/utils/server-status'
 import {
   hasNicTrafficData,
-  nicCycleRangeText,
   nicQuotaColor,
   nicQuotaPercentText,
+  nicResetText,
   nicTrafficOf,
   nicTrafficTooltip,
   nicUsageHeadline,
@@ -70,6 +70,22 @@ const xrayOutdated = computed(
     compareVersion(props.server.xray_version!, props.latestXrayVersion!) < 0,
 )
 
+// 版本提醒合并成一条徽章：Agent/Xray 同时落后也只有一项，状态条不会因此挤到第二行。
+const versionAlert = computed(() => {
+  const names: string[] = []
+  const detail: string[] = []
+  if (agentOutdated.value) {
+    names.push('Agent')
+    detail.push(`Agent ${props.server.agent_version} → ${props.latestAgentVersion}`)
+  }
+  if (xrayOutdated.value) {
+    names.push('Xray')
+    detail.push(`Xray ${props.server.xray_version} → ${props.latestXrayVersion}`)
+  }
+  if (!names.length) return null
+  return { text: `${names.join('、')} 有新版`, tip: detail.join('；') }
+})
+
 const heartbeat = computed(() =>
   props.server.last_seen_at ? formatDateTime(props.server.last_seen_at, '—').slice(5, 16) : '—',
 )
@@ -102,8 +118,7 @@ const nicPercent = computed(() =>
 )
 const nicBarColor = computed(() => nicQuotaColor(nic.value))
 const nicTip = computed(() => nicTrafficTooltip(nic.value))
-const nicRange = computed(() => (nic.value ? nicCycleRangeText(nic.value) : ''))
-const nicPartial = computed(() => (nic.value?.partial ? `数据自 ${nic.value.tracked_since} 起` : ''))
+const nicReset = computed(() => (nic.value && nicHasData.value ? nicResetText(nic.value) : ''))
 const nicDown = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.rx_bytes) : ''))
 const nicUp = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.tx_bytes) : ''))
 
@@ -158,7 +173,8 @@ function onRootClick() {
       </div>
     </template>
 
-    <!-- 状态条：三项常显 + 待办追加，固定顺序便于扫读 -->
+    <!-- 状态条：只放机器状态（在线 / Xray / 同步 / 版本提醒）。到期属于资产信息，
+         跟着到期日落在下方资产行，状态条因此最多 4 项，不会多出一枚孤零零的徽章。 -->
     <div class="server-status-bar">
       <CsTooltip :content="comm.tip">
         <CsStatusIndicator :type="indicatorTypeOf(comm.color)" :text="comm.text" />
@@ -171,14 +187,8 @@ function onRootClick() {
       <CsTooltip :content="push.tip">
         <CsStatusIndicator :type="indicatorTypeOf(push.color)" :text="push.text" />
       </CsTooltip>
-      <CsBadge v-if="agentOutdated" color="severity-medium" :title="`官方最新 ${latestAgentVersion}`">
-        Agent 有新版
-      </CsBadge>
-      <CsBadge v-if="xrayOutdated" color="severity-medium" :title="`官方最新 ${latestXrayVersion}`">
-        Xray 有新版
-      </CsBadge>
-      <CsTooltip v-if="expiry?.isUrgent" :content="expiry.tip">
-        <CsBadge :color="expiryBadgeColor" class="server-chip-help">{{ expiry.text }}</CsBadge>
+      <CsTooltip v-if="versionAlert" :content="versionAlert.tip">
+        <CsBadge color="severity-medium" class="server-chip-help">{{ versionAlert.text }}</CsBadge>
       </CsTooltip>
     </div>
 
@@ -226,7 +236,7 @@ function onRootClick() {
 
       <div v-if="nic" class="server-traffic">
         <CsTooltip :content="nicTip" class="traffic-head">
-          <span class="traffic-label">周期流量</span>
+          <span class="traffic-label">已用流量：</span>
           <span class="traffic-value">
             <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage }}</strong>
             <span v-if="nicPercent" class="traffic-percent">({{ nicPercent }})</span>
@@ -240,26 +250,29 @@ function onRootClick() {
           :color="nicBarColor"
           :aria-label="`周期流量已用 ${nicPercent}`"
         />
+        <!-- 明细只留「双向用量 + 还剩几天重置」；完整周期区间与数据完整性交给头部 tooltip -->
         <div v-if="nicHasData" class="traffic-meta">
-          <span class="traffic-cycle">{{ nicRange }}<template v-if="nicPartial">，{{ nicPartial }}</template></span>
           <span class="traffic-split">
             <span>↓ {{ nicDown }}</span>
             <span>↑ {{ nicUp }}</span>
           </span>
-        </div>
-        <div v-else class="traffic-cycle">
-          {{ nicRange }}<template v-if="nicPartial">，{{ nicPartial }}</template>
+          <span v-if="nicReset" class="traffic-reset">{{ nicReset }}</span>
         </div>
       </div>
 
       <div v-if="hasAsset" class="server-asset">
-        <span
-          v-if="server.expire_at"
-          class="cs-text-mono"
-          :style="expiry?.isUrgent ? { color: expiry.color, fontWeight: 600 } : {}"
-          :title="expiry?.tip || `到期日：${formatExpireDate(server.expire_at)}`"
-        >
-          {{ formatExpireDate(server.expire_at) }}
+        <!-- 到期提醒跟着到期日本身走：日期变色 + 剩余天数徽章放在同一处，不再散落到状态条 -->
+        <span v-if="server.expire_at" class="server-expiry">
+          <span
+            class="cs-text-mono"
+            :style="expiry?.isUrgent ? { color: expiry.color, fontWeight: 600 } : {}"
+            :title="expiry?.tip || `到期日：${formatExpireDate(server.expire_at)}`"
+          >
+            {{ formatExpireDate(server.expire_at) }}
+          </span>
+          <CsTooltip v-if="expiry?.isUrgent" :content="expiry.tip">
+            <CsBadge :color="expiryBadgeColor" class="server-chip-help">{{ expiry.text }}</CsBadge>
+          </CsTooltip>
         </span>
         <CsBadge v-if="server.billing_cycle" color="grey">{{ server.billing_cycle }}</CsBadge>
         <span v-if="server.price" class="cs-text-mono server-price">{{ server.price }}</span>
@@ -436,12 +449,11 @@ function onRootClick() {
   font-size: 14px;
 }
 
-/* 周期流量（网卡整机口径）：与入站卡片同一套紧凑条样式，避免另造一套视觉。 */
+/* 周期流量（网卡整机口径）：不再套灰色底框，用上下两条分隔线把它和「机器信息」「资产信息」
+   分开，省掉一层容器；字号跟上面的信息行对齐，读数时才不会突然缩一档。 */
 .server-traffic {
-  margin-block-start: 4px;
-  padding: 10px 12px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
+  padding-block: 12px;
+  border-block: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
 }
 
 .traffic-head {
@@ -449,8 +461,8 @@ function onRootClick() {
   justify-content: space-between;
   gap: 8px;
   margin-block-end: 6px;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 18px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
@@ -461,6 +473,7 @@ function onRootClick() {
 .traffic-value {
   min-inline-size: 0;
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-body-default-b2us04, #0f141a);
   text-align: end;
@@ -480,8 +493,8 @@ function onRootClick() {
   margin-block-start: 6px;
 }
 
-.traffic-cycle,
-.traffic-split {
+.traffic-split,
+.traffic-reset {
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: 12px;
   line-height: 16px;
@@ -489,29 +502,15 @@ function onRootClick() {
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.traffic-cycle {
-  margin-block-start: 6px;
-  overflow-wrap: anywhere;
-}
-
-.traffic-meta .traffic-cycle {
-  margin-block-start: 0;
-}
-
 .traffic-split {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  margin-inline-start: auto;
 }
 
-.traffic-cycle {
-  margin-block-start: 6px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  overflow-wrap: anywhere;
+.traffic-reset {
+  margin-inline-start: auto;
+  text-align: end;
 }
 
 .server-asset {
@@ -520,6 +519,13 @@ function onRootClick() {
   align-items: center;
   gap: 8px 12px;
   font-size: 14px;
+}
+
+.server-expiry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .server-price {
