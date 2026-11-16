@@ -18,6 +18,7 @@ import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, 
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
 import { errMsg } from '@/api/http'
 import { formatMoney, formatMoneyNumber, formatSignedMoney } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { BalanceLog } from '@/api/types'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
@@ -76,7 +77,7 @@ const balanceYuan = computed(() => {
 async function refresh() {
   try {
     await auth.fetchMe()
-    createdText.value = (auth.user?.created_at ?? '').replace('T', ' ').slice(0, 16) || '—'
+    createdText.value = formatDateTimeMinute(auth.user?.created_at, '—')
     loadRecentLogs()
   } catch (e) {
     ElMessage.error(errMsg(e, '加载资料失败'))
@@ -394,7 +395,7 @@ async function onLogout() {
               <div v-for="log in balanceLogs.slice(0, 5)" :key="log.id" class="log-item">
                 <div class="log-left">
                   <div class="log-title">{{ log.remark || balanceLogTitle(log.type) }}</div>
-                  <div class="log-time cell-mono">{{ String(log.created_at).replace('T', ' ').slice(0, 16) }}</div>
+                  <div class="log-time cell-mono">{{ formatDateTimeMinute(log.created_at) }}</div>
                 </div>
                 <div class="log-right">
                   <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">
@@ -538,7 +539,7 @@ async function onLogout() {
           <div v-for="log in balanceLogs" :key="log.id" class="log-item">
             <div class="log-left">
               <div class="log-title">{{ log.remark || balanceLogTitle(log.type) }}</div>
-              <div class="log-time cell-mono">{{ String(log.created_at).replace('T', ' ').slice(0, 16) }}</div>
+              <div class="log-time cell-mono">{{ formatDateTimeMinute(log.created_at) }}</div>
             </div>
             <div class="log-right">
               <div class="log-amount cell-mono" :class="{ plus: log.amount_cents > 0, minus: log.amount_cents < 0 }">

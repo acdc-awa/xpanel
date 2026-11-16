@@ -9,6 +9,7 @@ import {
 import type { TableColumn } from '@/components/cloudscape'
 import type { RankPeriod } from '@/api/admin'
 import { formatBytes, formatMoney } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import { rankPeriodOptions } from '../rank-period'
 import type { DashboardContext } from '../types'
 import type { WidgetLayoutItem } from '@/components/cloudscape'
@@ -188,7 +189,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
           </template>
           <template #cell-card-time="{ row }">
             <span class="user-sub-email tabular-num">
-              {{ String(row.used_at).replace('T', ' ').slice(5, 16) }}
+              {{ formatDateTimeMinute(row.used_at).slice(5) }}
             </span>
           </template>
         </CsTable>

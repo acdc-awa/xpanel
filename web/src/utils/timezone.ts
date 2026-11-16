@@ -49,6 +49,25 @@ export function formatDateTime(v?: string | number | Date | null, fallback = '-'
     .replace(/\//g, '-')
 }
 
+/** 到分钟粒度的日期时间，按展示时区渲染（如 2026-09-11 15:04）。
+ *  表格/卡片列用：秒数在列表里只占宽、不给信息。 */
+export function formatDateTimeMinute(v?: string | number | Date | null, fallback = '-'): string {
+  if (v === undefined || v === null || v === '') return fallback
+  const d = toDate(v)
+  if (!d) return String(v)
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: tzOption(),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+    .format(d)
+    .replace(/\//g, '-')
+}
+
 /** 仅日期，按展示时区渲染（如 2026-09-11）。 */
 export function formatDateOnly(v?: string | number | Date | null, fallback = '-'): string {
   if (v === undefined || v === null || v === '') return fallback

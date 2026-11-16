@@ -22,6 +22,7 @@ import {
 import type { TabItem } from '@/components/cloudscape'
 import { exportAuditLogs, getAuditLog, getAuditLogs, type AuditLog } from '@/api/admin'
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
+import { formatDateTime } from '@/utils/timezone'
 import { errMsg } from '@/api/http'
 import { ElMessage } from '@/components/cloudscape'
 
@@ -227,8 +228,10 @@ async function openDetail(row: AuditLog) {
   }
 }
 
+// 后端时间是 UTC（进程固定 time.Local=UTC），必须按面板「展示时区」渲染，
+// 直接字符串截断会让非 UTC 时区的管理员看到 8 小时偏差。
 function fmtTime(t: string) {
-  return t ? t.replace('T', ' ').slice(0, 19) : ''
+  return formatDateTime(t, '')
 }
 </script>
 

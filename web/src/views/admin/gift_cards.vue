@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatMoney, formatMoneyNumber } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import { onMounted, reactive, ref } from 'vue'
 import {
   CsAlert,
@@ -45,8 +46,7 @@ const statusFilter = ref('')
 const keyword = ref('')
 
 function fmtTime(t: string | null) {
-  if (!t) return '—'
-  return String(t).replace('T', ' ').slice(0, 16)
+  return t ? formatDateTimeMinute(t) : '—'
 }
 
 function fmtMoney(cents: number) {

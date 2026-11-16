@@ -27,6 +27,7 @@ import {
 } from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
+import { formatDateTimeMinute } from '@/utils/timezone'
 
 const list = ref<Invitation[]>([])
 const loading = ref(false)
@@ -196,8 +197,7 @@ async function revoke(row: any) {
 }
 
 function fmtTime(t: string | null) {
-  if (!t) return '—'
-  return t.replace('T', ' ').slice(0, 16)
+  return t ? formatDateTimeMinute(t) : '—'
 }
 </script>
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { formatMoney } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import { ElMessage } from '@/components/cloudscape'
 import {
   CsBadge,
@@ -68,8 +69,7 @@ function resetFilters() {
 onMounted(load)
 
 function fmtTime(t: string | null) {
-  if (!t) return '—'
-  return String(t).replace('T', ' ').slice(0, 16)
+  return t ? formatDateTimeMinute(t) : '—'
 }
 
 function statusOf(row: Order): { color: 'green' | 'grey' | 'severity-medium'; text: string } {

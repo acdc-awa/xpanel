@@ -14,6 +14,7 @@ import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import { formatMoney } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import type { Order, Plan } from '@/api/types'
 
 const auth = useAuthStore()
@@ -244,7 +245,7 @@ async function confirmPay() {
           <div class="x-order-meta">
             <div class="x-order-name">{{ o.plan_name }}</div>
             <div class="x-order-sub">
-              <code class="cell-mono">{{ o.order_no }}</code> · {{ String(o.created_at).replace('T', ' ').slice(0, 16) }}
+              <code class="cell-mono">{{ o.order_no }}</code> · {{ formatDateTimeMinute(o.created_at) }}
               <span class="x-chip green" style="margin-left: 6px; font-size: 10.5px">
                 余额支付
               </span>
