@@ -260,13 +260,11 @@ var auditTargets = map[string]auditTarget{
 	"/api/v1/admin/notices/:id/toggle":                 {model: &models.Notice{}, field: "title"},
 	"/api/v1/admin/users/:id":                          {model: &models.User{}, field: "email"},
 	"/api/v1/admin/users/:id/toggle":                   {model: &models.User{}, field: "email"},
-	"/api/v1/admin/users/:id/2fa/disable":              {model: &models.User{}, field: "email"},
 	"/api/v1/admin/users/:id/reset-traffic":            {model: &models.User{}, field: "email"},
 	"/api/v1/admin/users/:id/balance":                  {model: &models.User{}, field: "email"},
 	"/api/v1/admin/users/:id/subscribe-token/reset":    {model: &models.User{}, field: "email"},
 	"/api/v1/admin/servers/:id":                        {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/servers/:id/reset-secret":           {model: &models.Server{}, field: "name"},
-	"/api/v1/admin/servers/:id/generate-config":        {model: &models.Server{}, field: "name"},
 	"/api/v1/admin/inbounds/:id":                       {model: &models.Inbound{}, field: "tag"},
 	"/api/v1/admin/inbounds/:id/toggle":                {model: &models.Inbound{}, field: "tag"},
 	"/api/v1/admin/plans/:id":                          {model: &models.Plan{}, field: "name"},
@@ -603,7 +601,6 @@ func itoa(n int) string {
 // **按 FullPath 精确匹配**：/plans/order 被跳过不影响 /plans/:id。
 var auditSkipRoutes = map[string]bool{
 	// 只读预览
-	"/api/v1/admin/xray/preview-config":                    true,
 	"/api/v1/admin/permission-groups/:id/preview-template": true,
 	// 卡片/公告排序（纯位次微调）
 	"/api/v1/admin/notices/order":           true,

@@ -1023,61 +1023,6 @@ func (d *Deps) AdminGetServerConfigPreview(c *gin.Context) {
 	})
 }
 
-// AdminGenerateConfig POST /api/v1/admin/servers/:id/generate-config
-// 由主控根据「服务器启用入站 + 节点出站 + 节点路由 + 全部启用用户」生成 Xray 配置：
-// 保存为待推送 → 节点在线则立即下发；离线则保留，节点上线自动补推（非阻塞）。
-func (d *Deps) AdminGenerateConfig(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		util.BadRequest(c, "无效的 ID")
-		return
-	}
-	var srv models.Server
-	if err := d.DB.First(&srv, id).Error; err != nil {
-		util.Fail(c, 404, "服务器不存在")
-		return
-	}
-	if d.Config == nil {
-		util.ServerError(c, "配置服务未初始化")
-		return
-	}
-	cfgStr, err := d.Config.Generate(id)
-	if err != nil {
-		util.BadRequest(c, "配置生成失败: "+err.Error())
-		return
-	}
-
-	// 保存待推送（无论节点是否在线）
-	if d.Config != nil {
-		if serr := d.Config.SavePending(id, cfgStr); serr != nil {
-			util.ServerError(c, "保存待推送配置失败")
-			return
-		}
-	}
-
-	if d.Hub == nil || !d.Hub.IsOnline(id) {
-		util.OK(c, gin.H{
-			"ok":      true,
-			"pushed":  false,
-			"queued":  true,
-			"message": "服务器离线，配置已保存，上线后自动推送",
-			"config":  cfgStr,
-		})
-		return
-	}
-
-	// P2-7：generate-config 恢复为真正的非阻塞——API 立即返回 queued，
-	// 由后台 PushPending 完成下发与回执处理，不再同步等待最长 30s。
-	go d.Hub.PushPending(id)
-	util.OK(c, gin.H{
-		"ok":      true,
-		"pushed":  false,
-		"queued":  true,
-		"message": "配置已保存，正在推送到服务器",
-		"config":  cfgStr,
-	})
-}
-
 // AdminServerMetrics GET /api/v1/admin/servers/:id/metrics —— 查询节点时序监控数据 (1h/6h/24h/7d/30d)。
 // 每档的读桶不小于存储分辨率（见 services.CompactNodeReports 的分级降采样档位），
 // 否则桶内无真实采样点、只能靠前向填充造曲线。

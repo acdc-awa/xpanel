@@ -109,20 +109,6 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 	util.OK(c, gin.H{"ok": true})
 }
 
-// AdminDisableOTP POST /api/v1/admin/users/:id/2fa/disable —— 管理员解绑（兜底，记审计）。
-func (d *Deps) AdminDisableOTP(c *gin.Context) {
-	id, err := parseUint(c.Param("id"))
-	if err != nil {
-		util.BadRequest(c, "无效的 ID")
-		return
-	}
-	if err := d.OTP.Disable(id); err != nil {
-		util.ServerError(c, "解绑失败")
-		return
-	}
-	util.OK(c, gin.H{"ok": true})
-}
-
 // UserResetSubscribe POST /api/v1/user/subscribe/reset —— 重置订阅密钥与连接凭据 UUID（旧订阅与节点连接即刻失效）。
 func (d *Deps) UserResetSubscribe(c *gin.Context) {
 	uid := middleware.CurrentUser(c)

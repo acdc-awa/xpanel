@@ -424,7 +424,6 @@ func TestAuditSkipsPreviewRoutes(t *testing.T) {
 	r.Use(Audit(db))
 	handler := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
 	r.POST("/api/v1/admin/permission-groups/:id/preview-template", handler)
-	r.POST("/api/v1/admin/xray/preview-config", handler)
 	r.PUT("/api/v1/admin/permission-groups/:id", handler)
 	// 排序/布局/忽略提醒：跳过精确路径，同资源的常规写路由仍要记
 	r.PUT("/api/v1/admin/plans/order", handler)
@@ -439,7 +438,6 @@ func TestAuditSkipsPreviewRoutes(t *testing.T) {
 	}
 
 	fire(http.MethodPost, "/api/v1/admin/permission-groups/7/preview-template")
-	fire(http.MethodPost, "/api/v1/admin/xray/preview-config")
 	fire(http.MethodPut, "/api/v1/admin/plans/order")
 	fire(http.MethodPut, "/api/v1/admin/topology-layout")
 	fire(http.MethodDelete, "/api/v1/admin/notifications/vps_expire")

@@ -586,7 +586,6 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 
 	if req.Type != nil || req.Protocol != nil {
 		updates["type"] = effType
-		updates["previous_type"] = ""
 		if effType == models.InboundTypeTunnel && inb.Protocol != models.ProtocolTunnel && req.Protocol == nil {
 			updates["protocol"] = models.ProtocolTunnel
 			inb.Protocol = models.ProtocolTunnel
@@ -1172,79 +1171,4 @@ func (d *Deps) enqueueConfig(serverID uint64) error {
 	}
 	go d.Hub.PushPending(serverID)
 	return nil
-}
-
-// formToInbound 把入站表单转为 models.Inbound（配置预览用）。
-func formToInbound(f *inboundForm) models.Inbound {
-	inb := models.Inbound{
-		ID: f.ID, ServerID: f.ServerID, Tag: f.Tag, Protocol: f.Protocol,
-		Port: f.Port, Listen: f.Listen,
-		SettingsJSON: f.SettingsJSON, StreamSettings: f.StreamSettings,
-		Sniffing: f.Sniffing, Ratio: f.Ratio, Enabled: true,
-		Total: f.TotalGB, ExpiryTime: f.ExpiryTime,
-		Remark: f.Remark, TrafficReset: f.TrafficReset,
-		TargetInboundID:    f.TargetInboundID,
-		TargetAddress:      f.TargetAddress,
-		TargetPort:         f.TargetPort,
-		ShareAddrStrategy:  f.ShareAddrStrategy,
-		ShareAddr:          f.ShareAddr,
-		SharePort:          f.SharePort,
-		ShareSNI:           f.ShareSNI,
-		ShareAllowInsecure: f.ShareAllowInsecure,
-		LayerID:            f.LayerID,
-	}
-	if f.Type != "" {
-		inb.Type = f.Type
-	}
-	inb.Flow = f.Flow
-	inb.CertID = f.CertID
-	return inb
-}
-
-// AdminPreviewConfig POST /api/v1/admin/xray/preview-config
-func (d *Deps) AdminPreviewConfig(c *gin.Context) {
-	var req struct {
-		ServerID uint64       `json:"server_id" binding:"required"`
-		Form     *inboundForm `json:"form"`
-	}
-	if !util.BindJSON(c, &req) {
-		return
-	}
-	var srv models.Server
-	if err := d.DB.First(&srv, req.ServerID).Error; err != nil {
-		util.Fail(c, 404, "服务器不存在")
-		return
-	}
-	var formInb *models.Inbound
-	if req.Form != nil {
-		f := formToInbound(req.Form)
-		formInb = &f
-	}
-	cfg, err := d.Config.Preview(req.ServerID, formInb)
-	if err != nil {
-		util.BadRequest(c, "配置生成失败: "+err.Error())
-		return
-	}
-	resp := gin.H{"config": cfg}
-	// S4：只读预览附带字段来源与交叉规则问题。
-	// 有表单 → 解释本次编辑的终态；无表单 → 逐入站解释服务器现有配置。
-	if formInb != nil {
-		resp["provenance"] = protocols.ExplainInbound(formInb)
-		resp["issues"] = protocols.ValidateInboundFields(formInb)
-	} else {
-		var list []models.Inbound
-		if err := d.DB.Where("server_id = ?", req.ServerID).Order("id").Find(&list).Error; err == nil {
-			items := make([]gin.H, 0, len(list))
-			for i := range list {
-				items = append(items, gin.H{
-					"inbound_id": list[i].ID,
-					"tag":        list[i].Tag,
-					"provenance": protocols.ExplainInbound(&list[i]),
-					"issues":     protocols.ValidateInboundFields(&list[i]),
-				})
-			}
-			resp["inbounds"] = items
-		}
-	}
-	util.OK(c, resp)
 }
