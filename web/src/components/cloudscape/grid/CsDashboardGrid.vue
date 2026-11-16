@@ -146,19 +146,96 @@ function resolveColumn(width: number): number {
   return targetCol
 }
 
-function updateResponsiveColumns(width: number) {
-  const targetCol = resolveColumn(width)
-
-  if (targetCol !== currentColumn.value) {
-    currentColumn.value = targetCol
-    if (gridInstance.value) {
-      // column() 会同步触发 change 事件；响应式缩列不是用户编辑，不能落盘。
-      responsiveAdjusting = true
-      gridInstance.value.column(targetCol, 'moveScale')
-      responsiveAdjusting = false
-      applyInteractionState()
+/**
+ * 按 y 把基准布局分组为「视觉行」；用区间重叠而不是严格等于 y，
+ * 否则用户拖出的 y 差一两格的两张卡片会被当成两行、各自撑满整行。
+ */
+function groupLayoutRows(items: WidgetLayoutItem[]): WidgetLayoutItem[][] {
+  const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x)
+  const rows: WidgetLayoutItem[][] = []
+  let rowBottom = -Infinity
+  for (const item of sorted) {
+    if (!rows.length || item.y >= rowBottom) {
+      rows.push([item])
+      rowBottom = item.y + (item.h || 1)
+    } else {
+      rows[rows.length - 1].push(item)
+      rowBottom = Math.max(rowBottom, item.y + (item.h || 1))
     }
   }
+  return rows
+}
+
+/**
+ * 由基准（6 列）布局推导目标列数的布局。
+ *
+ * 不能直接用 GridStack 的 `column(n, 'moveScale')`：它只做 `Math.round(w * 比例)`，
+ * 而 addNode 之后又会把 w 顶回 minW（gridstack-engine 的 nodeBoundFix）。4 列档下
+ * 服务器矩阵（基准 w3、minW3）缩成 2 又被顶回 3，排行卡 minW2 得 2，一行要 5 列
+ * 却只有 4 列 —— 后一张被挤到下一行、x 收在中间，于是留下「一半宽 + 一半空洞」的错位。
+ *
+ * 这里按行推：行内缩放后放不下（含 minW 地板）就整行降级为满宽纵向堆叠，
+ * 保证任何自定义布局在 2 / 4 / 6 列下都不重叠、不留洞。
+ */
+function buildResponsiveLayout(targetCol: number): WidgetLayoutItem[] {
+  const base = props.layout || []
+  const baseColumn = props.column || 6
+  if (!base.length) return []
+  if (targetCol === baseColumn) return base.map((item) => ({ ...item }))
+
+  const ratio = targetCol / baseColumn
+  const out: WidgetLayoutItem[] = []
+  let cursorY = 0
+
+  for (const row of groupLayoutRows(base)) {
+    const scaled = row.map((item) => {
+      const floor = Math.min(item.minW ?? 1, targetCol)
+      const scaledW = Math.round((item.w || 1) * ratio) || 1
+      return { ...item, w: Math.min(targetCol, Math.max(floor, Math.min(targetCol, scaledW))) }
+    })
+
+    if (scaled.reduce((sum, item) => sum + item.w, 0) > targetCol) {
+      for (const item of scaled) {
+        out.push({ ...item, x: 0, y: cursorY, w: targetCol })
+        cursorY += item.h || 1
+      }
+      continue
+    }
+
+    let cursorX = 0
+    let rowHeight = 1
+    for (const item of scaled) {
+      out.push({ ...item, x: cursorX, y: cursorY })
+      cursorX += item.w
+      rowHeight = Math.max(rowHeight, item.h || 1)
+    }
+    cursorY += rowHeight
+  }
+
+  return out
+}
+
+function updateResponsiveColumns(width: number) {
+  const targetCol = resolveColumn(width)
+  if (targetCol === currentColumn.value) return
+
+  const grid = gridInstance.value
+  if (!grid) {
+    currentColumn.value = targetCol
+    return
+  }
+
+  const layout = buildResponsiveLayout(targetCol)
+  // column()/load() 会同步触发 change 事件；响应式换列不是用户编辑，不能落盘。
+  responsiveAdjusting = true
+  try {
+    grid.column(targetCol, 'none')
+    if (layout.length) grid.load(layout.map((item) => ({ ...item })), false)
+  } finally {
+    responsiveAdjusting = false
+  }
+  currentColumn.value = targetCol
+  applyInteractionState()
 }
 
 /**
@@ -173,7 +250,6 @@ function syncColumnsFromLayout() {
 onMounted(() => {
   if (!gridContainerRef.value) return
 
-  const initialColumn = resolveColumn(rootContainerRef.value?.clientWidth || window.innerWidth)
   // 引擎始终以基准列数创建，再把初始视口按比例缩列；避免平板首屏被强制 clamp 成非等比布局。
   currentColumn.value = props.column || 6
 
@@ -196,12 +272,7 @@ onMounted(() => {
   pendingWidgets.forEach((el) => grid.makeWidget(el))
   pendingWidgets.clear()
 
-  if (initialColumn !== currentColumn.value) {
-    responsiveAdjusting = true
-    grid.column(initialColumn, 'moveScale')
-    responsiveAdjusting = false
-    currentColumn.value = initialColumn
-  }
+  updateResponsiveColumns(rootContainerRef.value?.clientWidth || window.innerWidth)
   applyInteractionState()
 
   grid.on('dragstart', () => {
