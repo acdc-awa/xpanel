@@ -809,7 +809,6 @@ func TestMigrateRelayOutboundCredentials(t *testing.T) {
 		Port:         443,
 		Type:         InboundTypeRelay,
 		InternalUUID: "legacy-relay-uuid-999",
-		PreviousType: InboundTypeUser,
 		Enabled:      true,
 	}
 	if err := db.Create(&inb).Error; err != nil {
@@ -847,9 +846,6 @@ func TestMigrateRelayOutboundCredentials(t *testing.T) {
 	}
 	if gotInb.Type != InboundTypeUser {
 		t.Fatalf("入站 Type 应归正为 %q，实际 %q", InboundTypeUser, gotInb.Type)
-	}
-	if gotInb.PreviousType != "" {
-		t.Fatalf("入站 PreviousType 应清空，实际 %q", gotInb.PreviousType)
 	}
 
 	// 幂等性：二次执行不产生副作用

@@ -91,11 +91,12 @@ const (
 	// 旧面板不认识新表/新列但不会写坏；日表由主控按累计网卡字节差分维护，
 	// 首次升级从 node_reports 保留期一次性回填（失败中止启动，重试幂等）。
 	//
-	// v7（2026-11-16，流量重置周期与计费周期解耦）：纯增量，不提升 Min——
-	// servers 加 nic_reset_period（''=跟随计费周期 / natural_month / 1m / 3m / 6m），
-	// 让「年付但每月重置流量」这类机器不必再靠「自定义起点 + 天数」曲线表达。
-	// 旧面板不认识该列：回滚到 v0.2.7 后这类机器的流量窗口会退回按计费周期推导
-	// （本周期用量随之变化，但日表数据不丢，重新升级即自愈），故不构成 fail-closed 条件。
+	// v7（2026-11-16，流量重置周期与计费周期解耦 + 死列清理）：两步并于同一步发版——
+	//  ① 纯增量：servers 加 nic_reset_period（''=跟随计费周期 / natural_month / 1m / 3m / 6m），
+	//     让「年付但每月重置流量」这类机器不必再靠「自定义起点 + 天数」曲线表达；
+	//  ② 删列（向后不兼容）：inbounds 删掉 share_security / share_host / share_path / previous_type
+	//     四个纯残留列（明细见 migrate_v7_inbounds.go）。旧面板的入站读写会显式带这些列，
+	//     删列后直接报 "no such column"，属硬故障 ⇒ Min 与 DBSchemaVersion 同步提升，拒绝回滚。
 	DBSchemaVersion = 7
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
@@ -133,7 +134,12 @@ const (
 	// 旧面板的注册/建用户/改邮箱都会显式写该列（INSERT/UPDATE 报 "no such column"），
 	// 登录也按 username 查询——回滚后整套账号体系直接不可用。不存在「读错但能跑」的中间态，
 	// 故必须 fail-closed。出路：前进到 v5，或停服用升级前备份恢复（见 UPGRADE.md）。
-	DBMinCompatibleVersion = 5
+	//
+	// v7 与 DBSchemaVersion 同步提升，依据同样是**硬故障**：v7 删掉了 inbounds 上的
+	// share_security / share_host / share_path / previous_type 四列，v6 面板的入站保存
+	// （GORM 整结构 UPDATE）与列表查询（SELECT *）都会因缺列直接报错——不是「读错但能跑」，
+	// 而是入站页与配置下发全链不可用。出路：前进到 v7，或停服用升级前备份恢复。
+	DBMinCompatibleVersion = 7
 )
 
 // settings 键（复用既有 settings 键值表，避免新表）。

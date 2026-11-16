@@ -1637,10 +1637,11 @@ function parseJsonToForm(str: string) {
     const panelKeys = new Set([
       '_panel', 'tag', 'port', 'listen', 'protocol',
       'settings', 'settings_json', 'streamSettings', 'stream_settings', 'sniffing',
-      // 旧形态平铺在顶层的面板字段，不参与回写（share_path 已废弃：path 只取 xhttp 设置）
+      // 旧形态平铺在顶层的面板字段，不参与回写
+      // （share_security / share_host / share_path 已随后端 schema v7 删列下线）
       'network', 'tls_type', 'remark', 'traffic_reset', 'flow', 'ratio', 'total_gb',
-      'expiry_time', 'share_addr_strategy', 'share_addr', 'share_port', 'share_security',
-      'share_sni', 'share_host', 'share_path', 'share_allow_insecure', 'layer_id', 'cert_id',
+      'expiry_time', 'share_addr_strategy', 'share_addr', 'share_port',
+      'share_sni', 'share_allow_insecure', 'layer_id', 'cert_id',
       'type', 'target_inbound_id', 'target_address', 'target_port',
     ])
     const topExtraObj: Record<string, any> = {}

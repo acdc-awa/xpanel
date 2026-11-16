@@ -103,6 +103,11 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateUsersDropUsername(db); err != nil {
 		return err
 	}
+	// v7：删掉 inbounds 上四个纯残留列（share_security / share_host / share_path / previous_type）。
+	// 同样必须早于 AutoMigrate：模型里已无这些字段，AutoMigrate 不会替我们删列。
+	if err := dropLegacyInboundColumns(db); err != nil {
+		return err
+	}
 	if err := db.AutoMigrate(All()...); err != nil {
 		return err
 	}
@@ -277,7 +282,7 @@ func backfillOrderPlanNames(db *gorm.DB) error {
 }
 
 // migrateRelayOutboundCredentials 将存量 relay 入站的 internal_uuid 回填到引用它的 server_outbounds.internal_uuid，
-// 并将存量 relay 入站归正为普通 user 入站、清空 previous_type。幂等执行。
+// 并将存量 relay 入站归正为普通 user 入站。幂等执行。
 func migrateRelayOutboundCredentials(db *gorm.DB) error {
 	var obs []ServerOutbound
 	if err := db.Where("inbound_ref IS NOT NULL AND (internal_uuid IS NULL OR internal_uuid = '')").Find(&obs).Error; err != nil {
@@ -296,11 +301,8 @@ func migrateRelayOutboundCredentials(db *gorm.DB) error {
 		}
 	}
 
-	// 存量 relay 入站归正为 user，清空 previous_type
-	_ = db.Model(&Inbound{}).Where("type = ?", "relay").Updates(map[string]any{
-		"type":          InboundTypeUser,
-		"previous_type": "",
-	}).Error
+	// 存量 relay 入站归正为 user（previous_type 列已于 schema v7 删除）
+	_ = db.Model(&Inbound{}).Where("type = ?", "relay").Update("type", InboundTypeUser).Error
 
 	return nil
 }

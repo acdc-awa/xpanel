@@ -136,7 +136,6 @@ func TestBuildNodeDTO_AccessLayer(t *testing.T) {
 	}
 
 	// 安全层不再有客户端覆写：层是 tls 就一定下发 tls（存量 share_security 列被忽略）
-	inb.ShareSecurity = "none"
 	inb.ShareSNI = ""
 	dto3 := BuildNodeDTO(srv, inb, uuid, layer)
 	if dto3.Security == nil || dto3.Security.Type != "tls" {
