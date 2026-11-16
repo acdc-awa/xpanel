@@ -487,7 +487,8 @@ function onRootClick() {
   inline-size: 100%;
   justify-content: space-between;
   gap: 8px;
-  margin-block-end: 6px;
+  /* 进度条是紧凑模式（容器高度 auto），条形直接贴着头行，留白只由这里给。 */
+  margin-block-end: 10px;
   font-size: 13px;
   line-height: 18px;
   color: var(--color-text-body-secondary-66ygbb, #656871);

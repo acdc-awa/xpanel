@@ -122,19 +122,23 @@ onBeforeUnmount(() => {
     @focusout="hide"
   >
     <slot />
+    <!-- Teleport 必须留在 trigger 内部：模板一旦出现第二个根节点，Vue 就不再把这个组件
+         当单根处理，父组件传进来的作用域 id 不会落到 trigger 上，父级所有
+         `.xxx[data-v-…]` 规则（间距、字号、justify-content…）都会静默失效。
+         Teleport 会把节点搬到 body，嵌套在 span 里不影响布局。 -->
+    <Teleport to="body">
+      <div
+        v-if="open"
+        ref="tooltipRef"
+        class="cs-tooltip"
+        :class="`cs-tooltip--${placement}`"
+        :style="tooltipStyle"
+        role="tooltip"
+      >
+        {{ content }}
+      </div>
+    </Teleport>
   </span>
-  <Teleport to="body">
-    <div
-      v-if="open"
-      ref="tooltipRef"
-      class="cs-tooltip"
-      :class="`cs-tooltip--${placement}`"
-      :style="tooltipStyle"
-      role="tooltip"
-    >
-      {{ content }}
-    </div>
-  </Teleport>
 </template>
 
 <style scoped lang="scss">
