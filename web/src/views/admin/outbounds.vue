@@ -147,9 +147,17 @@ function isBlockCN(row: EffectiveOutbound): boolean {
   }
 }
 
-// 出站域名解析策略（freedom settings.domainStrategy）：唯一入口在出站编辑器，卡片正面只读展示
+// 出站域名解析策略：唯一入口在出站编辑器，卡片正面只读展示。
+// 正式落点是 streamSettings.sockopt.domainStrategy；settings.domainStrategy 是 v26.9.8 起的废弃旧位置，仅作存量兜底。
 function freedomDS(row: EffectiveOutbound): string {
   if (row.protocol !== 'freedom') return ''
+  try {
+    const stream = row.stream_settings_json ? JSON.parse(row.stream_settings_json) : {}
+    const fromSockopt = stream?.sockopt?.domainStrategy
+    if (fromSockopt) return fromSockopt
+  } catch {
+    /* 坏 stream JSON 按 settings 兜底 */
+  }
   try {
     const s = JSON.parse(row.settings_json || '{}')
     return s.domainStrategy || 'AsIs'

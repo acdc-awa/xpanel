@@ -70,6 +70,8 @@ const DOMAIN_STRATEGY_OPTIONS = [
   { label: 'UseIP（优先解析为 IP）', value: 'UseIP' },
   { label: 'UseIPv4', value: 'UseIPv4' },
   { label: 'UseIPv6', value: 'UseIPv6' },
+  { label: 'ForceIPv4', value: 'ForceIPv4' },
+  { label: 'ForceIPv6', value: 'ForceIPv6' },
 ]
 const RESPONSE_TYPE_OPTIONS = [
   { label: 'none（静默丢弃）', value: 'none' },
@@ -262,10 +264,18 @@ function parseExisting() {
   // 4. 基础出口
   if (ob.protocol === 'freedom' || ob.protocol === 'blackhole') {
     mode.value = 'basic'
+    let stream: any = {}
+    try {
+      stream = ob.stream_settings_json ? JSON.parse(ob.stream_settings_json) : {}
+    } catch {
+      /* 坏 stream JSON：按无 streamSettings 展示，保存时重建 */
+    }
     try {
       const settings = ob.settings_json ? JSON.parse(ob.settings_json) : {}
       if (form.protocol === 'freedom') {
-        form.domain_strategy = settings.domainStrategy || 'AsIs'
+        // 解析策略的正式落点是 streamSettings.sockopt.domainStrategy；
+        // settings.domainStrategy 是 xray v26.9.8 起废弃的旧位置，只作存量读取兜底。
+        form.domain_strategy = stream?.sockopt?.domainStrategy || settings.domainStrategy || 'AsIs'
         form.block_private =
           Array.isArray(settings.finalRules) &&
           settings.finalRules.some(
@@ -344,15 +354,26 @@ function buildBasicSettingsJSON(): string {
   if (form.protocol === 'blackhole') {
     return JSON.stringify({ response: { type: form.response_type } })
   }
-  const s: Record<string, any> = { domainStrategy: form.domain_strategy }
+  // domainStrategy 不写在这里：freedom 的 settings.domainStrategy 自 xray v26.9.8 起废弃，
+  // 唯一有效位置是 streamSettings.sockopt.domainStrategy（见 buildBasicStreamSettingsJSON）。
+  const s: Record<string, any> = {}
   const redirect = form.redirect.trim()
   if (redirect) s.redirect = redirect
   if (form.block_cn) s.block_cn = true
   const rules: Record<string, any>[] = []
-  if (form.block_private) rules.push({ action: 'block', ip: ['geoip:private'], blockDelay: '0' })
+  if (form.block_private) rules.push({ action: 'block', ip: ['geoip:private'], delay: '0' })
   rules.push({ action: 'allow' })
   s.finalRules = rules
   return JSON.stringify(s)
+}
+
+// buildBasicStreamSettingsJSON 基础出口的 streamSettings：目前只承载域名解析策略。
+// AsIs 是默认值，不落键（保持空 streamSettings，避免生成脏配置）。
+function buildBasicStreamSettingsJSON(): string {
+  if (form.protocol !== 'freedom') return ''
+  const ds = form.domain_strategy
+  if (!ds || ds === 'AsIs') return ''
+  return JSON.stringify({ sockopt: { domainStrategy: ds } })
 }
 
 function validateCustomJSON(): Record<string, any> | null {
@@ -431,7 +452,7 @@ async function save() {
     payload.inbound_ref = 0
     payload.outbound_json = ''
     payload.settings_json = buildBasicSettingsJSON()
-    payload.stream_settings_json = ''
+    payload.stream_settings_json = buildBasicStreamSettingsJSON()
   } else if (mode.value === 'inbound_ref') {
     payload.protocol = refTarget.value?.protocol || form.protocol || 'vless'
     payload.inbound_ref = refInboundId.value || 0
@@ -588,7 +609,9 @@ onMounted(async () => {
           <template v-if="form.protocol === 'freedom'">
             <CsFormItem label="域名解析策略 domainStrategy">
               <template #info>
-                <TipIcon content="AsIs 保留域名交给系统解析；UseIPv4 / UseIPv6 只用对应地址族；UseIP 自动选择。" />
+                <TipIcon
+                  content="只对域名目标生效（客户端直传的 IP 字面量不受影响）。Use 系解析失败会回退 AsIs；Force 系解析失败直接断开，不会回退。"
+                />
               </template>
               <CsSelect
                 :model-value="form.domain_strategy"
