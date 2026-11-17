@@ -1,10 +1,10 @@
-package xray_test
+package protocols_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/acdc-awa/xpanel/internal/master/xray"
+	"github.com/acdc-awa/xpanel/internal/master/protocols"
 )
 
 // 与官方 xray v26.6.27 二进制逐字节对齐的金样（xray mlkem768 / xray x25519 实测输出）：
@@ -18,14 +18,14 @@ const (
 )
 
 func TestGenerateVlessEnc(t *testing.T) {
-	decryption, encryption, err := xray.GenerateVlessEnc()
+	decryption, encryption, err := protocols.GenerateVlessEnc()
 	if err != nil {
 		t.Fatalf("GenerateVlessEnc: %v", err)
 	}
-	if err := xray.ValidateVlessEncDecryption(decryption); err != nil {
+	if err := protocols.ValidateVlessEncDecryption(decryption); err != nil {
 		t.Fatalf("生成的 decryption 未通过格式自校验: %v", err)
 	}
-	got, err := xray.VlessEncClientFromDecryption(decryption)
+	got, err := protocols.VlessEncClientFromDecryption(decryption)
 	if err != nil {
 		t.Fatalf("配对派生失败: %v", err)
 	}
@@ -65,14 +65,14 @@ func TestVlessEncClientFromDecryption_Golden(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := xray.VlessEncClientFromDecryption(c.decryption)
+			got, err := protocols.VlessEncClientFromDecryption(c.decryption)
 			if err != nil {
 				t.Fatalf("派生失败: %v", err)
 			}
 			if got != c.want {
 				t.Errorf("派生不一致:\n got %s\nwant %s", got, c.want)
 			}
-			if err := xray.ValidateVlessEncDecryption(c.decryption); err != nil {
+			if err := protocols.ValidateVlessEncDecryption(c.decryption); err != nil {
 				t.Errorf("合法串被校验拒绝: %v", err)
 			}
 		})
@@ -98,13 +98,13 @@ func TestValidateVlessEncDecryption(t *testing.T) {
 	}
 	for _, c := range bad {
 		t.Run(c.name, func(t *testing.T) {
-			if err := xray.ValidateVlessEncDecryption(c.value); err == nil {
+			if err := protocols.ValidateVlessEncDecryption(c.value); err == nil {
 				t.Errorf("应拒绝: %s", c.value)
 			}
 		})
 	}
 	for _, v := range []string{valid, multi} {
-		if err := xray.ValidateVlessEncDecryption(v); err != nil {
+		if err := protocols.ValidateVlessEncDecryption(v); err != nil {
 			t.Errorf("应通过: %s → %v", v, err)
 		}
 	}
@@ -112,7 +112,7 @@ func TestValidateVlessEncDecryption(t *testing.T) {
 
 func TestVlessEncMultiKeyDerive(t *testing.T) {
 	// 多密钥轮换通道：两把密钥 → 两个派生公钥
-	got, err := xray.VlessEncClientFromDecryption("mlkem768x25519plus.native.600s." + goldenX25519Priv + "." + goldenMlkemSeed)
+	got, err := protocols.VlessEncClientFromDecryption("mlkem768x25519plus.native.600s." + goldenX25519Priv + "." + goldenMlkemSeed)
 	if err != nil {
 		t.Fatalf("多密钥派生失败: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestVlessDecryptionFromSettings(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := xray.VlessDecryptionFromSettings(c.json)
+			got, err := protocols.VlessDecryptionFromSettings(c.json)
 			if c.wantOK && err != nil {
 				t.Fatalf("应成功: %v", err)
 			}

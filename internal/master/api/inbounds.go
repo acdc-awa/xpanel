@@ -36,7 +36,6 @@ type inboundView struct {
 	ExpiryTime         *time.Time `json:"expiry_time,omitempty"`
 	Enabled            bool       `json:"enabled"`
 	Type               string     `json:"type"`                        // user / tunnel（forward 仅存量）
-	InternalUUID       string     `json:"internal_uuid,omitempty"`     // 历史字段（relay 模型已退役），仅老库兜底展示
 	TargetInboundID    *uint64    `json:"target_inbound_id,omitempty"` // 四层直通目标落地入站 ID
 	TargetAddress      string     `json:"target_address,omitempty"`    // 手动指定的外部目标地址
 	TargetPort         int        `json:"target_port,omitempty"`       // 手动指定的外部目标端口
@@ -101,7 +100,7 @@ func toInboundView(i *models.Inbound, serverName string) inboundView {
 		Ratio: i.Ratio, TotalGB: i.Total, ExpiryTime: i.ExpiryTime,
 		Up: i.Up, Down: i.Down,
 		Enabled: i.Enabled, CreatedAt: i.CreatedAt,
-		Type: i.Type, InternalUUID: i.InternalUUID,
+		Type:            i.Type,
 		TargetInboundID: i.TargetInboundID, TargetAddress: i.TargetAddress, TargetPort: i.TargetPort,
 		CertID: i.CertID, Flow: i.Flow, ShareAddrStrategy: i.ShareAddrStrategy, ShareAddr: i.ShareAddr,
 		SharePort: i.SharePort,
@@ -1091,7 +1090,7 @@ func (d *Deps) AdminXrayKeys(c *gin.Context) {
 // AdminXrayVlessEnc GET /api/v1/admin/xray/vlessenc —— VLESS Encryption（ML-KEM-768）
 // decryption/encryption 配对一键生成。
 func (d *Deps) AdminXrayVlessEnc(c *gin.Context) {
-	decryption, encryption, err := xray.GenerateVlessEnc()
+	decryption, encryption, err := protocols.GenerateVlessEnc()
 	if err != nil {
 		util.ServerError(c, err.Error())
 		return
@@ -1105,14 +1104,14 @@ func checkVlessDecryption(protocol, inboundType, settingsJSON string) error {
 	if protocol != "vless" {
 		return nil
 	}
-	dec, err := xray.VlessDecryptionFromSettings(settingsJSON)
+	dec, err := protocols.VlessDecryptionFromSettings(settingsJSON)
 	if err != nil {
 		return err
 	}
-	if !xray.VlessEncEnabled(dec) {
+	if !protocols.VlessEncEnabled(dec) {
 		return nil
 	}
-	return xray.ValidateVlessEncDecryption(dec)
+	return protocols.ValidateVlessEncDecryption(dec)
 }
 
 // validInboundProtocol 入站协议白名单（支持已注册协议插件、四层直通 tunnel；Mixed / SOCKS5 / HTTP 已退役）。

@@ -46,11 +46,6 @@ func FormatLink(dto *contracts.ProxyNodeDTO) (string, error) {
 	return p.FormatLink(dto)
 }
 
-// AllDescriptors 获取所有已注册协议的描述符。
-func AllDescriptors() []contracts.ProtocolDescriptor {
-	return registry.AllDescriptors()
-}
-
 // RegisteredProtocols 获取所有已注册的协议名列表。
 func RegisteredProtocols() []string {
 	return registry.RegisteredProtocols()

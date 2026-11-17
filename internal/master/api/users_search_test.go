@@ -80,7 +80,7 @@ func TestAdminUsersKeywordSearch(t *testing.T) {
 	assert.Equal(t, []string{"bob@y.com"}, names)
 
 	// 域名关键词命中两个邮箱
-	total, names = fetch("keyword=x.com")
+	total, _ = fetch("keyword=x.com")
 	assert.Equal(t, int64(2), total)
 
 	// UUID 前缀匹配

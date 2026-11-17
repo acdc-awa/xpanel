@@ -167,15 +167,6 @@ func (r *PluginRegistry) Find(proto string) ProtocolPlugin {
 	return nil
 }
 
-// AllDescriptors 返回已注册协议的所有能力描述符。
-func (r *PluginRegistry) AllDescriptors() []ProtocolDescriptor {
-	res := make([]ProtocolDescriptor, 0, len(r.plugins))
-	for _, p := range r.plugins {
-		res = append(res, p.Descriptor())
-	}
-	return res
-}
-
 // RegisteredProtocols 返回所有已注册的协议名。
 func (r *PluginRegistry) RegisteredProtocols() []string {
 	res := make([]string, 0, len(r.plugins))
