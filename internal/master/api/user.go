@@ -167,7 +167,6 @@ func (d *Deps) UserServers(c *gin.Context) {
 		items = append(items, gin.H{
 			"id":           srv.ID,
 			"name":         srv.Name,
-			"host":         srv.Host,
 			"location":     srv.Location,
 			"online":       online,
 			"last_seen_at": srv.LastSeenAt,

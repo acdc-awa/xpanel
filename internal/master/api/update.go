@@ -328,7 +328,7 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 	version := strings.TrimSpace(req.Version)
 	if version != "" {
 		if !updateTagPattern.MatchString(version) {
-			updateActive.Store(false)
+			setUpdateProgress(phaseFailed, "版本号格式不正确", "")
 			util.BadRequest(c, "版本号格式不正确")
 			return
 		}
@@ -349,7 +349,7 @@ func (d *Deps) AdminUpdateApply(c *gin.Context) {
 		version = rel.TagName
 	}
 	if version == "" {
-		updateActive.Store(false)
+		setUpdateProgress(phaseFailed, "无法确定目标版本", "")
 		util.BadRequest(c, "无法确定目标版本")
 		return
 	}
@@ -505,37 +505,13 @@ func (d *Deps) runUpdate(ctx context.Context, appRoot, masterPath string, source
 
 	// 备份当前版本 + 落待确认标记（供 entrypoint 回滚判定）
 	setUpdateProgress(phaseReplacing, "正在备份当前版本...", "")
-	cur, err := os.ReadFile(masterPath)
-	if err != nil {
-		setUpdateProgress(phaseFailed, "读取当前版本失败", err.Error())
-		return
-	}
-	if err := os.WriteFile(masterPath+".prev", cur, 0o755); err != nil {
-		setUpdateProgress(phaseFailed, "备份当前版本失败", err.Error())
-		return
-	}
-	webDist := filepath.Join(appRoot, "web", "dist")
-	if err := copyDir(webDist, webDist+".prev"); err != nil {
-		setUpdateProgress(phaseFailed, "备份前端失败", err.Error())
-		return
-	}
-	if err := os.WriteFile(filepath.Join(appRoot, ".update-pending"), []byte(version), 0o644); err != nil {
-		setUpdateProgress(phaseFailed, "写入更新标记失败", err.Error())
-		return
-	}
-
-	// 原子替换（staging 与 /app 同文件系统，rename 原子）
-	setUpdateProgress(phaseReplacing, "正在替换 master 与前端产物...", "")
-	if err := os.Rename(newBin, masterPath); err != nil {
-		setUpdateProgress(phaseFailed, "替换 master 失败", err.Error())
-		return
-	}
-	if err := os.RemoveAll(webDist); err != nil {
-		setUpdateProgress(phaseFailed, "清理旧前端失败", err.Error())
-		return
-	}
-	if err := os.Rename(newDist, webDist); err != nil {
-		setUpdateProgress(phaseFailed, "替换前端失败", err.Error())
+	if err := swapUpdateFiles(appRoot, masterPath, newBin, newDist, version); err != nil {
+		var se *swapStageError
+		if errors.As(err, &se) {
+			setUpdateProgress(phaseFailed, se.Stage, se.Cause.Error())
+		} else {
+			setUpdateProgress(phaseFailed, "替换更新文件失败", err.Error())
+		}
 		return
 	}
 
@@ -830,6 +806,71 @@ func extractTarGz(tarball, dest string) error {
 			out.Close()
 		}
 	}
+	return nil
+}
+
+// swapStageError 标识自更新文件替换失败时的中文阶段描述与原始错误。
+type swapStageError struct {
+	Stage string
+	Cause error
+}
+
+func (e *swapStageError) Error() string { return e.Stage + ": " + e.Cause.Error() }
+func (e *swapStageError) Unwrap() error { return e.Cause }
+
+// swapUpdateFiles 备份当前版本到 master.prev / web.prev（与 entrypoint.sh / main.go 一致），
+// 写入 .update-pending 并原子替换前端与 master；任一步失败时回滚磁盘状态并移除待确认标记。
+func swapUpdateFiles(appRoot, masterPath, newBin, newDist, version string) error {
+	masterPrev := masterPath + ".prev"
+	webDist := filepath.Join(appRoot, "web", "dist")
+	webPrev := filepath.Join(appRoot, "web.prev")
+	webOld := filepath.Join(appRoot, "web", "dist.old")
+	pendingFile := filepath.Join(appRoot, ".update-pending")
+
+	_ = os.Remove(masterPrev)
+	_ = os.RemoveAll(webPrev)
+	_ = os.RemoveAll(webOld)
+
+	cur, err := os.ReadFile(masterPath)
+	if err != nil {
+		return &swapStageError{Stage: "读取当前版本失败", Cause: err}
+	}
+	if err := os.WriteFile(masterPrev, cur, 0o755); err != nil {
+		return &swapStageError{Stage: "备份当前版本失败", Cause: err}
+	}
+	if err := copyDir(webDist, webPrev); err != nil {
+		_ = os.Remove(masterPrev)
+		return &swapStageError{Stage: "备份前端失败", Cause: err}
+	}
+	if err := os.WriteFile(pendingFile, []byte(version), 0o644); err != nil {
+		_ = os.Remove(masterPrev)
+		_ = os.RemoveAll(webPrev)
+		return &swapStageError{Stage: "写入更新标记失败", Cause: err}
+	}
+
+	cleanupRollback := func() {
+		_ = os.Remove(pendingFile)
+		_ = os.Remove(masterPrev)
+		_ = os.RemoveAll(webPrev)
+	}
+
+	// 先移走旧前端目录再落新目录（不先删再移动，确保新目录失败时可秒级回滚原目录）。
+	if err := os.Rename(webDist, webOld); err != nil {
+		cleanupRollback()
+		return &swapStageError{Stage: "备份旧前端目录失败", Cause: err}
+	}
+	if err := os.Rename(newDist, webDist); err != nil {
+		_ = os.Rename(webOld, webDist)
+		cleanupRollback()
+		return &swapStageError{Stage: "替换前端失败", Cause: err}
+	}
+	if err := os.Rename(newBin, masterPath); err != nil {
+		_ = os.Rename(webDist, newDist)
+		_ = os.Rename(webOld, webDist)
+		cleanupRollback()
+		return &swapStageError{Stage: "替换 master 失败", Cause: err}
+	}
+	_ = os.RemoveAll(webOld)
 	return nil
 }
 

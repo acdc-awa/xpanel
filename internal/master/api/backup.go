@@ -80,8 +80,7 @@ func (d *Deps) AdminRestoreBackup(c *gin.Context) {
 	var req struct {
 		File string `json:"file" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.Fail(c, http.StatusBadRequest, "file 不能为空")
+	if !util.BindJSON(c, &req) {
 		return
 	}
 	safety, err := d.Backup.ScheduleRestore(req.File)

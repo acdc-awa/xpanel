@@ -448,3 +448,70 @@ func TestAdminUpdateServerRoutingRule_DerivedRuleProtection(t *testing.T) {
 	}
 }
 
+// TestAdminUpdateInbound_TunnelToUserCleansDerived 验证直通入站改为普通用户入站后，其派生出站与规则被自动清除。
+func TestAdminUpdateInbound_TunnelToUserCleansDerived(t *testing.T) {
+	d, r := newTunnelDeps(t)
+	inb := models.Inbound{
+		ServerID: 1, Tag: "tun-convert", Protocol: models.ProtocolTunnel, Port: 20010,
+		Type: models.InboundTypeTunnel, TargetAddress: "remote.host", TargetPort: 443, Enabled: true,
+	}
+	seedTunnelInbound(t, d.DB, &inb)
+	if err := services.EnsureTunnelDerivedObjects(d.DB, 1); err != nil {
+		t.Fatal(err)
+	}
+	if ownedOutbound(t, d.DB, inb.ID) == nil || ownedRule(t, d.DB, inb.ID) == nil {
+		t.Fatal("前置条件失败：直通入站应存在派生对象")
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"type":            models.InboundTypeUser,
+		"protocol":        models.ProtocolVless,
+		"settings_json":   `{"decryption":"none"}`,
+		"stream_settings": `{"network":"tcp","security":"none"}`,
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/inbounds/"+u64s(inb.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("转换入站类型失败: %d, body: %s", w.Code, w.Body.String())
+	}
+	if ob := ownedOutbound(t, d.DB, inb.ID); ob != nil {
+		t.Fatalf("直通转回 user 后不应残留派生出口: %+v", ob)
+	}
+	if rl := ownedRule(t, d.DB, inb.ID); rl != nil {
+		t.Fatalf("直通转回 user 后不应残留派生规则: %+v", rl)
+	}
+}
+
+// TestAdminUpdateInbound_TagRenameMultiTagRule 验证入站改名时能同步替换包含多个逗号分隔标签的路由规则。
+func TestAdminUpdateInbound_TagRenameMultiTagRule(t *testing.T) {
+	d, r := newTunnelDeps(t)
+	inb := models.Inbound{
+		ServerID: 1, Tag: "vless-old", Protocol: models.ProtocolVless, Port: 20011,
+		Type: models.InboundTypeUser, SettingsJSON: `{"decryption":"none"}`, StreamSettings: `{"network":"tcp","security":"none"}`,
+		Enabled: true,
+	}
+	seedTunnelInbound(t, d.DB, &inb)
+	rule := models.ServerRoutingRule{
+		ServerID: 1, InboundTag: "other-tag,vless-old", OutboundTag: "direct", Enabled: true,
+	}
+	if err := d.DB.Create(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"tag": "vless-new"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/inbounds/"+u64s(inb.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("改名失败: %d, body: %s", w.Code, w.Body.String())
+	}
+	var updated models.ServerRoutingRule
+	d.DB.First(&updated, rule.ID)
+	if updated.InboundTag != "other-tag,vless-new" {
+		t.Fatalf("多标签路由规则应更新为 other-tag,vless-new, got %q", updated.InboundTag)
+	}
+}
+

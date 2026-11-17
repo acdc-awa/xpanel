@@ -74,10 +74,9 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 		return
 	}
 	ok := false
+	var codeErr error
 	if req.Code != "" {
-		if err := d.OTP.VerifyCode(&user, req.Code); err == nil {
-			ok = true
-		} else if berr := d.OTP.VerifyBackupCode(&user, req.Code); berr == nil {
+		if codeErr = d.OTP.VerifyCodeOrBackup(&user, req.Code); codeErr == nil {
 			ok = true
 		}
 	}
@@ -88,6 +87,10 @@ func (d *Deps) UserOTPDisable(c *gin.Context) {
 		}
 	}
 	if !ok {
+		if req.Password == "" && codeErr != nil {
+			util.BadRequest(c, codeErr.Error())
+			return
+		}
 		util.BadRequest(c, "验证信息无效（需验证码、恢复码或当前密码）")
 		return
 	}

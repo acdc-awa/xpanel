@@ -116,3 +116,31 @@ func TestSetSiteGroupSubFields(t *testing.T) {
 		t.Error("未知键应被拒绝")
 	}
 }
+
+// TestSetSiteGroupSubscribePathValidation 订阅路径校验：拦截会导致 Gin 路由注册 panic 或双斜杠的非法值。
+func TestSetSiteGroupSubscribePathValidation(t *testing.T) {
+	db := newSiteTestDB(t)
+	svc := NewSiteService(db)
+
+	bad := []string{"/", "sub", "/sub/", "/a//b", "/sub/:id", "/sub/*all", "/sub?a=1", "/sub#x", "/sub bad", `/sub\x`}
+	for _, p := range bad {
+		if err := svc.SetSiteGroup(map[string]string{SettingSubscribePath: p}); err == nil {
+			t.Errorf("非法 subscribe_path %q 应被拒绝", p)
+		}
+	}
+
+	for _, p := range []string{"", "/sub", "/ehisnodn", "/v2/sub"} {
+		if err := svc.SetSiteGroup(map[string]string{SettingSubscribePath: p}); err != nil {
+			t.Errorf("合法 subscribe_path %q 应放行, got %v", p, err)
+		}
+	}
+}
+
+// TestSubscribePathFallbackWhenDBInvalid 若 DB 中存在异常值（如手工篡改带尾斜杠或 :param），SubscribePath 安全回退 /sub。
+func TestSubscribePathFallbackWhenDBInvalid(t *testing.T) {
+	db := newSiteTestDB(t)
+	_ = SetSetting(db, SettingSubscribePath, "/bad/:param")
+	if got := SubscribePath(db); got != "/sub" {
+		t.Fatalf("非法存量 subscribe_path 应回退 /sub, got %q", got)
+	}
+}

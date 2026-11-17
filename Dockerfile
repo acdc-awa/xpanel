@@ -30,8 +30,5 @@ COPY configs/config.example.yaml /app/configs/config.yaml
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 EXPOSE 18080 18082 6000
-ENV APP_PORT=18080
-ENV APP_WS_PORT=18082
-ENV APP_SUB_PORT=6000
-ENV APP_ENV=prod
+# 运行期配置统一以挂载进 /app/configs/config.yaml 的配置文件为准（环境变量不再覆盖应用项）
 CMD ["/app/master", "-config", "/app/configs/config.yaml"]

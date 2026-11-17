@@ -148,5 +148,27 @@ func TestAdminSelfBanForbidden(t *testing.T) {
 		var b models.User
 		db.First(&b, 2)
 		assert.Equal(t, models.StatusDisabled, b.Status)
+		assert.Equal(t, uint32(1), b.TokenVersion, "toggle 封禁应递增 token_version")
+	}
+
+	// 4. 经 PUT status=0 封禁用户 → 同样递增 token_version
+	{
+		userC := models.User{
+			Email: "c@panel.local", UUID: "uuid-c",
+			Role: models.RoleUser, Status: models.StatusActive,
+			SubscribeToken: "tok-c", TrafficCycleStart: time.Now(),
+		}
+		require.NoError(t, db.Create(&userC).Error)
+
+		body, _ := json.Marshal(map[string]any{"status": 0})
+		req := httptest.NewRequest(http.MethodPut, "/admin/users/3", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var c models.User
+		db.First(&c, userC.ID)
+		assert.Equal(t, models.StatusDisabled, c.Status)
+		assert.Equal(t, uint32(1), c.TokenVersion, "AdminUpdateUser 禁用应递增 token_version 吊销旧刷新令牌")
 	}
 }

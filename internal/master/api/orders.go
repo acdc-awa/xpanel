@@ -25,25 +25,62 @@ type orderView struct {
 	PaidAt        *time.Time `json:"paid_at"`
 }
 
-func (d *Deps) toOrderView(o *models.Order) orderView {
-	v := orderView{
-		ID: o.ID, OrderNo: o.OrderNo, UserID: o.UserID, PlanID: o.PlanID,
-		AmountCents: o.AmountCents, PaymentMethod: o.PaymentMethod, Status: o.Status, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
+func (d *Deps) toOrderViews(orders []models.Order) []orderView {
+	items := make([]orderView, 0, len(orders))
+	if len(orders) == 0 {
+		return items
 	}
-	var user models.User
-	if err := d.DB.First(&user, o.UserID).Error; err == nil {
-		v.Email = user.Email
-	}
-	// 套餐名优先用订单快照（2026-10-25）：套餐可归档，归档行在常规查询里不可见，
-	// 实时 JOIN 会拿不到名称。旧订单若快照为空，仍回落实时查询与迁移前的行为一致。
-	v.PlanName = o.PlanName
-	if v.PlanName == "" {
-		var plan models.Plan
-		if err := d.DB.Unscoped().First(&plan, o.PlanID).Error; err == nil {
-			v.PlanName = plan.Name
+	userIDs := make([]uint64, 0, len(orders))
+	userSeen := make(map[uint64]bool, len(orders))
+	planIDs := make([]uint64, 0, len(orders))
+	planSeen := make(map[uint64]bool, len(orders))
+	for i := range orders {
+		o := &orders[i]
+		if o.UserID > 0 && !userSeen[o.UserID] {
+			userSeen[o.UserID] = true
+			userIDs = append(userIDs, o.UserID)
+		}
+		if o.PlanName == "" && o.PlanID > 0 && !planSeen[o.PlanID] {
+			planSeen[o.PlanID] = true
+			planIDs = append(planIDs, o.PlanID)
 		}
 	}
-	return v
+
+	emailByID := make(map[uint64]string, len(userIDs))
+	if len(userIDs) > 0 {
+		var users []models.User
+		if err := d.DB.Select("id, email").Where("id IN ?", userIDs).Find(&users).Error; err == nil {
+			for _, u := range users {
+				emailByID[u.ID] = u.Email
+			}
+		}
+	}
+
+	// 套餐名优先用订单快照（2026-10-25）：套餐可归档，归档行在常规查询里不可见，
+	// 实时 JOIN 会拿不到名称。旧订单若快照为空，仍批量 Unscoped 回落查询。
+	planByID := make(map[uint64]string, len(planIDs))
+	if len(planIDs) > 0 {
+		var plans []models.Plan
+		if err := d.DB.Unscoped().Select("id, name").Where("id IN ?", planIDs).Find(&plans).Error; err == nil {
+			for _, p := range plans {
+				planByID[p.ID] = p.Name
+			}
+		}
+	}
+
+	for i := range orders {
+		o := &orders[i]
+		planName := o.PlanName
+		if planName == "" {
+			planName = planByID[o.PlanID]
+		}
+		items = append(items, orderView{
+			ID: o.ID, OrderNo: o.OrderNo, UserID: o.UserID, Email: emailByID[o.UserID],
+			PlanID: o.PlanID, PlanName: planName, AmountCents: o.AmountCents,
+			PaymentMethod: o.PaymentMethod, Status: o.Status, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
+		})
+	}
+	return items
 }
 
 // UserOrders GET /api/v1/user/orders —— 我的订单（余额直付记录，只读）。
@@ -54,11 +91,7 @@ func (d *Deps) UserOrders(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	items := make([]orderView, 0, len(list))
-	for i := range list {
-		items = append(items, d.toOrderView(&list[i]))
-	}
-	util.OK(c, gin.H{"items": items})
+	util.OK(c, gin.H{"items": d.toOrderViews(list)})
 }
 
 // AdminOrders GET /api/v1/admin/orders —— 订单列表（分页，只读支付记录）。
@@ -94,9 +127,5 @@ func (d *Deps) AdminOrders(c *gin.Context) {
 		util.ServerError(c, "查询失败")
 		return
 	}
-	items := make([]orderView, 0, len(list))
-	for i := range list {
-		items = append(items, d.toOrderView(&list[i]))
-	}
-	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": items})
+	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": d.toOrderViews(list)})
 }

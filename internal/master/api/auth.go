@@ -72,7 +72,7 @@ func (d *Deps) Login(c *gin.Context) {
 		util.Fail(c, code, msg)
 		return
 	}
-	// 2FA：已开启 → 签发 2 分钟 pending access，前端二次验证后换发完整令牌
+	// 2FA：已开启 → 签发 2 分钟 pending access，同时清除可能残留的旧 refresh_token，前端二次验证后换发完整令牌
 	if user.TotpEnabled {
 		pending, err := d.JWT.GeneratePending2FA(user.ID, user.Role, user.TokenVersion)
 		if err != nil {
@@ -80,6 +80,9 @@ func (d *Deps) Login(c *gin.Context) {
 			return
 		}
 		d.setAuthCookies(c, pending, "")
+		secure := util.IsHTTPSRequest(c.Request)
+		c.SetSameSite(http.SameSiteStrictMode)
+		c.SetCookie("refresh_token", "", -1, "/", "", secure, true)
 		util.OK(c, gin.H{"twofa_required": true})
 		return
 	}
@@ -112,26 +115,18 @@ func (d *Deps) TwoFAVerify(c *gin.Context) {
 		util.BadRequest(c, "未开启两步验证")
 		return
 	}
-	if err := d.OTP.VerifyCode(&user, req.Code); err != nil {
-		if errors.Is(err, services.ErrTOTPCodeInvalid) {
-			if berr := d.OTP.VerifyBackupCode(&user, req.Code); berr != nil {
-				// 单次验证码错误不记审计（与登录失败同口径）。
-				util.BadRequest(c, "验证码错误")
-				return
-			}
-		} else {
-			// 只有「本次校验触发锁定」才落一条，锁定期内的重复尝试不重复记。
-			if services.IsTOTPLockTriggered(err) {
-				d.audit(services.AuditEvent{
-					OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
-					Action: "auth.2fa_locked", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
-					Status: 400, Message: "两步验证失败次数过多，已锁定 30 分钟",
-					Extra: map[string]any{"window_minutes": 30}, IP: util.ClientIPFromContext(c),
-				})
-			}
-			util.BadRequest(c, err.Error())
-			return
+	if err := d.OTP.VerifyCodeOrBackup(&user, req.Code); err != nil {
+		// 只有「本次校验触发锁定」才落一条，锁定期内的重复尝试不重复记。
+		if services.IsTOTPLockTriggered(err) {
+			d.audit(services.AuditEvent{
+				OperatorType: "user", OperatorID: user.ID, OperatorName: user.Email,
+				Action: "auth.2fa_locked", TargetType: "user", TargetID: user.ID, TargetName: user.Email,
+				Status: 400, Message: "两步验证失败次数过多，已锁定 30 分钟",
+				Extra: map[string]any{"window_minutes": 30}, IP: util.ClientIPFromContext(c),
+			})
 		}
+		util.BadRequest(c, err.Error())
+		return
 	}
 	d.audit(services.AuditEvent{
 		OperatorType: auditOperatorType(&user), OperatorID: user.ID, OperatorName: user.Email,
@@ -296,9 +291,9 @@ func auditOperatorType(user *models.User) string {
 }
 
 // setAuthCookies 签发认证 cookie（J19-① 加固）：
-// SameSite=Strict 防 CSRF；Secure 仅在反代标记 HTTPS 时开启（生产 Caddy TLS 反代带 X-Forwarded-Proto）。
+// SameSite=Strict 防 CSRF；Secure 仅在直连 TLS 或可信反代标记 HTTPS 时开启。
 func (d *Deps) setAuthCookies(c *gin.Context, access, refresh string) {
-	secure := c.GetHeader("X-Forwarded-Proto") == "https"
+	secure := util.IsHTTPSRequest(c.Request)
 	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie("access_token", access, int(d.Cfg.JWT.AccessTTL.Seconds()), "/", "", secure, true)
 	if refresh != "" {
@@ -307,7 +302,7 @@ func (d *Deps) setAuthCookies(c *gin.Context, access, refresh string) {
 }
 
 func (d *Deps) clearAuthCookies(c *gin.Context) {
-	secure := c.GetHeader("X-Forwarded-Proto") == "https"
+	secure := util.IsHTTPSRequest(c.Request)
 	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie("access_token", "", -1, "/", "", secure, true)
 	c.SetCookie("refresh_token", "", -1, "/", "", secure, true)

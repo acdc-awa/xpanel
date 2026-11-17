@@ -146,3 +146,25 @@ func TestGetRealIPNilRequest(t *testing.T) {
 		t.Fatalf("GetRealIP(nil) = %q, want empty", got)
 	}
 }
+
+func TestIsHTTPSRequest(t *testing.T) {
+	trust(t, "127.0.0.1/32")
+
+	// 直连不可信对端伪造 X-Forwarded-Proto 必须忽略
+	untrusted := newIPRequest("198.51.100.7:1234", map[string]string{"X-Forwarded-Proto": "https"})
+	if IsHTTPSRequest(untrusted) {
+		t.Fatal("不可信对端的 X-Forwarded-Proto=https 不应被信任")
+	}
+
+	// 可信反代传递的 X-Forwarded-Proto=https 应识别
+	trusted := newIPRequest("127.0.0.1:1234", map[string]string{"X-Forwarded-Proto": "HTTPS"})
+	if !IsHTTPSRequest(trusted) {
+		t.Fatal("可信反代的 X-Forwarded-Proto=HTTPS 应返回 true")
+	}
+
+	// 可信反代传递 http
+	trustedHTTP := newIPRequest("127.0.0.1:1234", map[string]string{"X-Forwarded-Proto": "http"})
+	if IsHTTPSRequest(trustedHTTP) {
+		t.Fatal("X-Forwarded-Proto=http 应返回 false")
+	}
+}

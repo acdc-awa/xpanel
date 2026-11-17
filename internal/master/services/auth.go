@@ -326,15 +326,8 @@ func (s *OTPService) ResetPassword(ctx context.Context, email, code, newPwd stri
 	if !user.TotpEnabled {
 		return ErrTOTPNotEnabled // 未绑定 TOTP 无法自助重置（走管理员）
 	}
-	if err := s.VerifyCode(&user, code); err != nil {
-		if errors.Is(err, ErrTOTPCodeInvalid) {
-			// 尝试恢复码
-			if berr := s.VerifyBackupCode(&user, code); berr != nil {
-				return ErrTOTPCodeInvalid
-			}
-		} else {
-			return err
-		}
+	if err := s.VerifyCodeOrBackup(&user, code); err != nil {
+		return err
 	}
 	hash, err := argon2id.CreateHash(newPwd, argon2id.DefaultParams)
 	if err != nil {

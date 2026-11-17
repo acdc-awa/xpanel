@@ -341,3 +341,39 @@ func TestSaveLateOldCycleBatchInLaterHour(t *testing.T) {
 		t.Fatalf("账期标记 = %d/%d, want 1/2", rows[0].CycleID, rows[1].CycleID)
 	}
 }
+
+// TestUsersBilledMatchesUserBilled 验证批量查询 UsersBilled 与单用户查询 UserBilled 口径完全一致。
+func TestUsersBilledMatchesUserBilled(t *testing.T) {
+	db := cycleTestDB(t)
+	aligned := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	u1 := cycleTestUser(t, db, "u1", 1, aligned)
+	u2 := cycleTestUser(t, db, "u2", 2, aligned)
+	svc := &TrafficService{DB: db}
+
+	_, err := svc.Save(protocol.TrafficReportPayload{
+		Period:  "2026-09-20T11:00:00Z",
+		BatchID: "batch-users-billed",
+		Entries: []protocol.TrafficEntry{
+			{UserID: u1.ID, UpBytes: 100, DownBytes: 200, CycleID: 1},
+			{UserID: u2.ID, UpBytes: 300, DownBytes: 400, CycleID: 1}, // 旧账期，不计入 u2（cycle=2）
+			{UserID: u2.ID, UpBytes: 50, DownBytes: 60, CycleID: 2},
+		},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	batch, err := svc.UsersBilled([]uint64{u1.ID, u2.ID})
+	if err != nil {
+		t.Fatalf("UsersBilled: %v", err)
+	}
+	for _, uid := range []uint64{u1.ID, u2.ID} {
+		su, sd, err := svc.UserBilled(uid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batch[uid] != [2]int64{su, sd} {
+			t.Fatalf("user %d: UsersBilled=%v != UserBilled=(%d,%d)", uid, batch[uid], su, sd)
+		}
+	}
+}

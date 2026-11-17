@@ -45,12 +45,24 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		return
 	}
 
+	userIDs := make([]uint64, len(users))
+	for i := range users {
+		userIDs[i] = users[i].ID
+	}
+	billedMap := map[uint64][2]int64{}
+	if d.Traffic != nil && len(userIDs) > 0 {
+		if m, berr := d.Traffic.UsersBilled(userIDs); berr == nil {
+			billedMap = m
+		}
+	}
+
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
 		// 额度口径（2026-09-07）：读 billed 两列，与管理端本页展示的「已用/剩余/进度条」
 		// 和用户侧主页、Subscription-Userinfo、节点摘除/403 判定严格同源——倍率只作用于
 		// 套餐内用量扣减，不代表真实流量；真实流量统计在 dashboard/入站计数（原始口径）。
-		up, down, _ := d.Traffic.UserBilled(u.ID)
+		pair := billedMap[u.ID]
+		up, down := pair[0], pair[1]
 		used := up + down
 		// 快照化（2026-09-01）：total/生效组读用户行快照列（用户自定义优先），
 		// 不再实时 join plans——与生成/订阅/用户侧同口径。
@@ -383,6 +395,10 @@ func (d *Deps) AdminUpdateUser(c *gin.Context) {
 			}
 		}
 		updates["status"] = status
+		if status != models.StatusActive {
+			// 与 AdminToggleUser 同口径（J5）：禁用立即递增 token_version 吊销旧会话与 refresh token
+			updates["token_version"] = gorm.Expr("token_version + 1")
+		}
 	}
 	if req.Password != nil && *req.Password != "" {
 		// 管理员改密：bump token_version 吊销该用户全部旧会话（J5）

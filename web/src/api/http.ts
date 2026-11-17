@@ -18,7 +18,27 @@ interface RetriableRequest extends InternalAxiosRequestConfig {
   _retried?: boolean
 }
 
-// 401 时用 refresh token 换新 access 后重放一次；失败则登出
+let refreshPromise: Promise<boolean> | null = null
+let redirectingToLogin = false
+
+function refreshSession(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post<{ code: number }>(
+        `${import.meta.env.VITE_API_BASE ?? apiBase}/auth/refresh`,
+        {},
+        { withCredentials: true },
+      )
+      .then((res) => res.data.code === 0)
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+// 401 时用 single-flight refresh token 换新 access 后重放一次；失败则登出
 http.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
@@ -28,26 +48,24 @@ http.interceptors.response.use(
     // 访客页面（login / register / forgot）未登录探针返回 401 为正常现象，不触发刷新与强跳
     const currentPath = window.location.pathname
     const isGuestPage = ['/login', '/register', '/forgot'].some(
-      (p) => currentPath === p || currentPath.startsWith(`${p}/`)
+      (p) => currentPath === p || currentPath.startsWith(`${p}/`),
     )
 
     if (status === 401 && cfg && !cfg._retried && !isGuestPage) {
       cfg._retried = true
-      try {
-        const { data } = await axios.post<{ code: number }>(
-          `${import.meta.env.VITE_API_BASE ?? apiBase}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        )
-        if (data.code === 0) {
-          return http(cfg)
-        }
-      } catch {
-        /* 刷新失败走登出 */
+      const refreshed = await refreshSession()
+      if (refreshed) {
+        return http(cfg)
       }
       const auth = useAuthStore()
+      // 首次加载（路由守卫尚在 fetchMe 探测登录态）：静默清态，交由守卫无刷新跳转到 /login?redirect=...
+      if (!auth.isInitialized) {
+        auth.user = null
+        return Promise.reject(error)
+      }
       await auth.logout()
-      if (!isGuestPage) {
+      if (!isGuestPage && !redirectingToLogin) {
+        redirectingToLogin = true
         ElMessage.error('登录已过期，请重新登录')
         window.location.href = '/login'
       }

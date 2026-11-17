@@ -55,7 +55,7 @@ func (d *Deps) UserPayOrderByBalance(c *gin.Context) {
 	// 用户热更新已由 Stage 5 事件驱动（billing 发布 OrderPaidEvent → 订阅方 SyncUsersToAll），
 	// 此处不再直调 Hub——任何新增支付路径自动获得同步能力。
 
-	ov := d.toOrderView(order)
+	ov := d.toOrderViews([]models.Order{*order})[0]
 	detail := "余额直付购买套餐"
 	if ov.PlanName != "" {
 		detail += "「" + ov.PlanName + "」"

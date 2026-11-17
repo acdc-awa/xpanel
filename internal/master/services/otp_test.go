@@ -233,3 +233,71 @@ func TestOTP_ResetPassword(t *testing.T) {
 		t.Fatalf("unbound user reset should fail with ErrTOTPNotEnabled, got %v", err)
 	}
 }
+
+// TestOTP_VerifyCodeOrBackup_FifthAttemptValidBackup 连续 4 次错码后第 5 次输入有效恢复码必须直接通过且清零计数。
+func TestOTP_VerifyCodeOrBackup_FifthAttemptValidBackup(t *testing.T) {
+	svc, db := otpTestSvc(t)
+	u := mkUser(t, db, "backup5")
+
+	secret, _, err := svc.Setup(u.ID, u.Email)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(secret, time.Now())
+	codes, err := svc.Confirm(u.ID, secret, code)
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	db.First(&u, u.ID)
+
+	for i := 0; i < 4; i++ {
+		if err := svc.VerifyCodeOrBackup(&u, "000000"); !errors.Is(err, ErrTOTPCodeInvalid) {
+			t.Fatalf("第 %d 次错码应返回 ErrTOTPCodeInvalid, got %v", i+1, err)
+		}
+	}
+	if u.TotpFailedCount != 4 {
+		t.Fatalf("错 4 次后 failed_count 应为 4, got %d", u.TotpFailedCount)
+	}
+
+	// 第 5 次输入有效恢复码：不得误触锁定，应通过、消费恢复码并清零失败计数
+	if err := svc.VerifyCodeOrBackup(&u, codes[0]); err != nil {
+		t.Fatalf("第 5 次有效恢复码应通过, got %v", err)
+	}
+	db.First(&u, u.ID)
+	if u.TotpFailedCount != 0 || u.TotpLockedUntil != nil {
+		t.Fatalf("恢复码通过后应清零锁定态, failed=%d lockedUntil=%v", u.TotpFailedCount, u.TotpLockedUntil)
+	}
+	// 同恢复码不得复用
+	if err := svc.VerifyCodeOrBackup(&u, codes[0]); !errors.Is(err, ErrTOTPCodeInvalid) {
+		t.Fatalf("已消费恢复码复用应失败, got %v", err)
+	}
+}
+
+// TestOTP_VerifyCodeOrBackup_LockOnFifthInvalid 连续 5 次都非法才触发锁定，且锁定期内拒绝备用码防爆破。
+func TestOTP_VerifyCodeOrBackup_LockOnFifthInvalid(t *testing.T) {
+	svc, db := otpTestSvc(t)
+	u := mkUser(t, db, "backuplock")
+
+	secret, _, err := svc.Setup(u.ID, u.Email)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(secret, time.Now())
+	codes, err := svc.Confirm(u.ID, secret, code)
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	db.First(&u, u.ID)
+
+	for i := 0; i < 4; i++ {
+		if err := svc.VerifyCodeOrBackup(&u, "bad-code"); !errors.Is(err, ErrTOTPCodeInvalid) {
+			t.Fatalf("第 %d 次应返回 ErrTOTPCodeInvalid, got %v", i+1, err)
+		}
+	}
+	if err := svc.VerifyCodeOrBackup(&u, "bad-code"); !IsTOTPLockTriggered(err) {
+		t.Fatalf("第 5 次无效码应触发锁定, got %v", err)
+	}
+	if err := svc.VerifyCodeOrBackup(&u, codes[0]); !errors.Is(err, ErrTOTPLocked) || IsTOTPLockTriggered(err) {
+		t.Fatalf("锁定期内再试恢复码应直接拒绝且不重触锁定, got %v", err)
+	}
+}

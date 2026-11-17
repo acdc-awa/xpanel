@@ -204,8 +204,8 @@ func (d *Deps) Subscribe(c *gin.Context) {
 			profileName, url.PathEscape(profileName),
 		))
 		webPage := "http://" + c.Request.Host
-		if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {
-			webPage = scheme + "://" + c.Request.Host
+		if util.IsHTTPSRequest(c.Request) {
+			webPage = "https://" + c.Request.Host
 		}
 		c.Header("Profile-Web-Page-Url", webPage)
 	}

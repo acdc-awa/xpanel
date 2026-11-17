@@ -710,22 +710,20 @@ func (d *Deps) AdminUpdateInbound(c *gin.Context) {
 			util.ServerError(c, "更新失败")
 			return
 		}
-		// 级联改名：若入站 Tag 发生改名，同步更新本服务器上引用该 Tag 的路由规则，杜绝拓扑隐藏或规则悬空
+		// 级联改名：若入站 Tag 发生改名，同步更新本服务器上引用该 Tag 的路由规则（含多标签规则），杜绝拓扑隐藏或规则悬空
 		if req.Tag != nil {
 			newTag := *req.Tag
 			if oldTag != "" && oldTag != newTag {
-				d.DB.Model(&models.ServerRoutingRule{}).
-					Where("server_id = ? AND inbound_tag = ?", inb.ServerID, oldTag).
-					Update("inbound_tag", newTag)
+				d.renameInboundTagInRules(inb.ServerID, oldTag, newTag)
 			}
 		}
 	}
-	// C2：直通的目标变更 / tag 改名 / 启停都会改变它的派生出口与转发规则，这里统一对账
-	// （改名级联的唯一落点：对账按 owner_inbound_id 认出旧行，把 tag 与规则的 inbound_tag 一起改写）。
-	// 对账失败只记日志：入站已经改完了，此时拒绝只会让状态更不一致，下次推送/打开路由页还会再对账。
+	// C2：直通的目标变更 / tag 改名 / 启停 / 类型迁出都会改变它的派生出口与转发规则，这里统一对账
+	// （改名级联的唯一落点：对账按 owner_inbound_id 认出旧行，把 tag 与规则的 inbound_tag 一起改写；
+	// 当 tunnel 改回非直通形态时同样须触发对账以清理既有 owner 行）。
 	// 先重读一次：上面的 Updates 走 map，内存里的 inb 可能还是旧值（例如本次刚把 type 改成 tunnel）。
 	_ = d.DB.First(&inb, id)
-	if services.IsTunnelInbound(&inb) {
+	if services.IsTunnelInbound(&origInbound) || services.IsTunnelInbound(&inb) {
 		d.ensureTunnelDerived(inb.ServerID)
 	}
 	// P2-8 配对：按「指向该落地的已启用直通」重算接收侧开关（开、关都同步）。
@@ -1171,4 +1169,37 @@ func (d *Deps) enqueueConfig(serverID uint64) error {
 	}
 	go d.Hub.PushPending(serverID)
 	return nil
+}
+
+// renameInboundTagInRules 在入站改名时同步替换本服路由规则里（含逗号/JSON 数组多标签）对旧 tag 的引用。
+func (d *Deps) renameInboundTagInRules(serverID uint64, oldTag, newTag string) {
+	var rules []models.ServerRoutingRule
+	if err := d.DB.Where("server_id = ? AND inbound_tag != ''", serverID).Find(&rules).Error; err != nil {
+		return
+	}
+	for i := range rules {
+		r := &rules[i]
+		tags := xray.ParseStringList(r.InboundTag)
+		changed := false
+		for j, t := range tags {
+			if t == oldTag {
+				tags[j] = newTag
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		trimmed := strings.TrimSpace(r.InboundTag)
+		var next string
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if b, err := json.Marshal(tags); err == nil {
+				next = string(b)
+			}
+		}
+		if next == "" {
+			next = strings.Join(tags, ",")
+		}
+		_ = d.DB.Model(r).Update("inbound_tag", next).Error
+	}
 }

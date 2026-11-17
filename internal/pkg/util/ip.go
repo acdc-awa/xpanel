@@ -123,3 +123,23 @@ func ClientIPFromContext(c *gin.Context) string {
 	}
 	return GetRealIP(c.Request)
 }
+
+// IsHTTPSRequest 判断请求是否经 TLS 或可信反代以 HTTPS 送达。
+// 仅当直连对端命中 trusted_proxies 时才采信 X-Forwarded-Proto，防止客户端伪造该头。
+func IsHTTPSRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	peer := remoteIP(r.RemoteAddr)
+	if peer == nil {
+		return false
+	}
+	set := trustedProxies.Load()
+	if !set.contains(peer) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}

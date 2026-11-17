@@ -69,6 +69,7 @@ type OTPService interface {
 	Setup(userID uint64, email string) (secret, otpauthURL string, err error)
 	VerifyBackupCode(user *models.User, code string) error
 	VerifyCode(user *models.User, code string) error
+	VerifyCodeOrBackup(user *models.User, code string) error
 }
 
 // TrafficService 流量统计服务接口。
@@ -82,6 +83,8 @@ type TrafficService interface {
 	// 与配额判定（节点摘除/403 门/自动续费触发）唯一口径；真实流量统计走
 	// dashboard/入站计数的 SQL 聚合（原始口径），不经过本方法。
 	UserBilled(userID uint64) (up, down int64, err error)
+	// UsersBilled 批量查询一组用户当前账期内已按倍率折算的用量（字节，计费口径），避免列表页 N+1。
+	UsersBilled(userIDs []uint64) (map[uint64][2]int64, error)
 }
 
 // OrderService 订单/余额支付服务接口。

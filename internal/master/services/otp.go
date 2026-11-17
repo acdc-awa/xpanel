@@ -169,16 +169,48 @@ func (s *OTPService) VerifyCode(user *models.User, code string) error {
 		return err
 	}
 	if totp.Validate(code, secret) {
-		// 成功后清零失败计数
-		if user.TotpFailedCount != 0 || user.TotpLockedUntil != nil {
-			_ = s.DB.Model(user).Updates(map[string]any{
-				"totp_failed_count": 0,
-				"totp_locked_until": nil,
-			})
-		}
+		s.clearTOTPFailures(user)
 		return nil
 	}
-	// 失败计数 + 锁定
+	return s.recordTOTPFailure(user)
+}
+
+// VerifyCodeOrBackup 先尝试 TOTP 与备用恢复码，均不命中时才累计一次失败计数/锁定。
+// 修复「第 5 次尝试输入正确恢复码却被 TOTP 校验抢先触发 30 分钟锁定」且错过恢复码校验的路径断裂。
+func (s *OTPService) VerifyCodeOrBackup(user *models.User, code string) error {
+	if !user.TotpEnabled {
+		return ErrTOTPNotEnabled
+	}
+	if user.TotpLockedUntil != nil && time.Now().Before(*user.TotpLockedUntil) {
+		return ErrTOTPLocked
+	}
+	secret, decryptErr := s.decrypt(user.TotpSecret)
+	if decryptErr == nil && totp.Validate(code, secret) {
+		s.clearTOTPFailures(user)
+		return nil
+	}
+	if berr := s.VerifyBackupCode(user, code); berr == nil {
+		s.clearTOTPFailures(user)
+		return nil
+	}
+	if decryptErr != nil {
+		return decryptErr
+	}
+	return s.recordTOTPFailure(user)
+}
+
+func (s *OTPService) clearTOTPFailures(user *models.User) {
+	if user.TotpFailedCount != 0 || user.TotpLockedUntil != nil {
+		_ = s.DB.Model(user).Updates(map[string]any{
+			"totp_failed_count": 0,
+			"totp_locked_until": nil,
+		})
+		user.TotpFailedCount = 0
+		user.TotpLockedUntil = nil
+	}
+}
+
+func (s *OTPService) recordTOTPFailure(user *models.User) error {
 	failed := user.TotpFailedCount + 1
 	updates := map[string]any{"totp_failed_count": failed}
 	if failed >= totpMaxFailed {
@@ -186,9 +218,12 @@ func (s *OTPService) VerifyCode(user *models.User, code string) error {
 		updates["totp_locked_until"] = until
 		updates["totp_failed_count"] = 0
 		_ = s.DB.Model(user).Updates(updates)
+		user.TotpFailedCount = 0
+		user.TotpLockedUntil = &until
 		return totpLockTriggered{}
 	}
 	_ = s.DB.Model(user).Update("totp_failed_count", failed)
+	user.TotpFailedCount = failed
 	return ErrTOTPCodeInvalid
 }
 

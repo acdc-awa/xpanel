@@ -202,6 +202,8 @@ type Hub struct {
 	nicAcc       map[uint64]*nicAccumulator
 	lastNICFlush time.Time
 	nicFlushMu   sync.Mutex // 串行化 flush（watchdog 与 Shutdown 可能先后触发）
+
+	pushLocks sync.Map // map[uint64]*sync.Mutex：按 serverID 串行化 PushPending，防上线/定时器/编辑并发重入
 }
 
 // nicAccumulator 单个服务器的网卡累计计数器状态。
@@ -323,12 +325,14 @@ func (h *Hub) ServeWS(c *gin.Context) {
 	h.DB.Model(&models.Server{}).Where("id = ?", server.ID).
 		Updates(map[string]any{"status": 1, "last_seen_at": time.Now()})
 
-	// 节点上线：自动补推待推送配置 + 待推证书（非阻塞）+ 对齐最新用户名单 + 下发运行时设置
-	// （PushPending 内部会先补齐按需 CA，再重算/推送配置）
-	go h.PushPending(server.ID)
-	if h.CertPusher != nil {
-		go h.CertPusher(server.ID)
-	}
+	// 节点上线：先补推证书/同步 GC，再补推待推送配置（避免配置引用本地证书但文件尚未落盘导致 -test 失败）；
+	// 同时异步对齐最新用户名单与下发运行时设置（均不阻塞 WS 收发循环）。
+	go func(id uint64) {
+		if h.CertPusher != nil {
+			h.CertPusher(id)
+		}
+		h.PushPending(id)
+	}(server.ID)
 	// 重连即对齐最新有效用户名单：离线期间发生的用户超额/到期/禁用，PushPending 推的
 	// 可能是旧配置，热更一次立即移除，不必等 1h 校准（2026-09-01）
 	go func(id uint64) {
@@ -1199,12 +1203,21 @@ func (h *Hub) Ask(serverID uint64, typ string, payload any, timeout time.Duratio
 	}
 }
 
+func (h *Hub) serverPushLock(serverID uint64) *sync.Mutex {
+	v, _ := h.pushLocks.LoadOrStore(serverID, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
 // PushPending 若存在待推送配置且节点在线，则下发并标记已推送（非阻塞，调用方用 goroutine）。
+// 按 serverID 串行化：避免 ServeWS / 定时补推 / API 编辑同时对同一节点并发发起冷推。
 // 2026-08-31：失败路径补日志——此前 Ask 出错/节点拒绝均静默，生成后"没推送"无从诊断。
 func (h *Hub) PushPending(serverID uint64) {
 	if h.Config == nil {
 		return
 	}
+	pmu := h.serverPushLock(serverID)
+	pmu.Lock()
+	defer pmu.Unlock()
 	p, err := h.Config.GetPending(serverID)
 	if err != nil {
 		log.Printf("nodegate: 读取待推送配置失败 (server=%d): %v", serverID, err)

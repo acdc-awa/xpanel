@@ -560,20 +560,40 @@ func (s *TrafficService) FindViolators(userIDs []uint64) ([]uint64, error) {
 // exhaustCandidates 同一份谓词）。这里要分列取 billed_up / billed_down，故从谓词派生
 // 两个 CASE，而不是另写一遍判定——就地重写会让四处口径各自漂移。
 func (s *TrafficService) UserBilled(userID uint64) (up, down int64, err error) {
-	var row struct {
-		Up   int64
-		Down int64
-	}
-	err = s.DB.Raw(`
-		SELECT COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_up ELSE 0 END), 0) AS up,
-		       COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_down ELSE 0 END), 0) AS down
-		FROM users u
-		LEFT JOIN traffic_logs l ON l.user_id = u.id
-		WHERE u.id = ?`, userID).Scan(&row).Error
+	m, err := s.UsersBilled([]uint64{userID})
 	if err != nil {
 		return 0, 0, err
 	}
-	return row.Up, row.Down, nil
+	v := m[userID]
+	return v[0], v[1], nil
+}
+
+// UsersBilled 批量读取一组用户当前账期内已按倍率折算的用量（[2]int64{up, down}），与 UserBilled 严格同源。
+func (s *TrafficService) UsersBilled(userIDs []uint64) (map[uint64][2]int64, error) {
+	out := make(map[uint64][2]int64, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		UserID uint64
+		Up     int64
+		Down   int64
+	}
+	err := s.DB.Raw(`
+		SELECT u.id AS user_id,
+		       COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_up ELSE 0 END), 0) AS up,
+		       COALESCE(SUM(CASE WHEN `+models.CycleMatchSQL+` THEN l.billed_down ELSE 0 END), 0) AS down
+		FROM users u
+		LEFT JOIN traffic_logs l ON l.user_id = u.id
+		WHERE u.id IN ?
+		GROUP BY u.id`, userIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.UserID] = [2]int64{r.Up, r.Down}
+	}
+	return out, nil
 }
 
 // StartTrafficResetCron 启动 Inbound 级流量重置定时任务（每 5 分钟检查）。

@@ -61,13 +61,37 @@ func SubDenyCode(db *gorm.DB) int {
 	}
 }
 
-// SubscribePath 订阅端口入口路径（设置页 subscribe_path；空缺省 /sub）。
+// SubscribePath 订阅端口入口路径（设置页 subscribe_path；空或非法值回退缺省 /sub）。
 func SubscribePath(db *gorm.DB) string {
 	p := strings.TrimSpace(GetSetting(db, SettingSubscribePath))
-	if p == "" {
+	if p == "" || ValidateSubscribePath(p) != nil {
 		return "/sub"
 	}
 	return p
+}
+
+// ValidateSubscribePath 校验 subscribe_path，保证可直接拼接到 Gin 路由 `{path}/:token` 而不会 panic。
+func ValidateSubscribePath(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if v == "/" || !strings.HasPrefix(v, "/") {
+		return errors.New("订阅路径必须为以 / 开头的具体路径（例如 /sub 或 /ehisnodn，不能是根路径）")
+	}
+	if strings.HasSuffix(v, "/") {
+		return errors.New("订阅路径不能以 / 结尾")
+	}
+	if strings.Contains(v, "//") {
+		return errors.New("订阅路径不能包含连续斜杠 //")
+	}
+	if strings.ContainsAny(v, ":*?\\# \t\r\n") {
+		return errors.New("订阅路径不能包含 : * ? # \\ 或空白字符")
+	}
+	if len(v) > 128 {
+		return errors.New("订阅路径过长（最多 128 字符）")
+	}
+	return nil
 }
 
 // SubProfileTitle Clash 订阅标题（2026-09-08 管理端可自定义；设置页 sub_profile_title，
@@ -225,14 +249,10 @@ func (s *SiteService) SetSiteGroup(vals map[string]string) error {
 			}
 		case SettingSubscribePath:
 			v = strings.TrimSpace(v)
-			if v != "" {
-				if v == "/" || !strings.HasPrefix(v, "/") {
-					return errors.New("订阅路径必须为以 / 开头的具体路径（例如 /sub 或 /ehisnodn，不能是根路径）")
-				}
-				if len(v) > 128 {
-					return errors.New("订阅路径过长（最多 128 字符）")
-				}
+			if err := ValidateSubscribePath(v); err != nil {
+				return err
 			}
+			vals[k] = v
 		case SettingSubDenyCode:
 			if v != "" && v != "404" && v != "401" {
 				return errors.New("订阅拒绝错误码仅接受 404 或 401（留空=404）")

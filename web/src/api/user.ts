@@ -45,7 +45,6 @@ export function resetSubscribeToken() {
 export interface MyServerItem {
   id: number
   name: string
-  host: string
   location: string
   online: boolean
   last_seen_at: string | null
