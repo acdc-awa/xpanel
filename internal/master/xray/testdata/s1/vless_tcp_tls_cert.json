@@ -57,11 +57,10 @@
     {
       "protocol": "freedom",
       "settings": {
-        "domainStrategy": "AsIs",
         "finalRules": [
           {
             "action": "block",
-            "blockDelay": "0",
+            "delay": "0",
             "ip": [
               "geoip:private"
             ]

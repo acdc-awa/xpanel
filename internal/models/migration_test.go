@@ -421,15 +421,20 @@ func TestDefaultOutboundDSIntoOutboundsMigration(t *testing.T) {
 		if err := db.First(&ob, id).Error; err != nil {
 			t.Fatalf("load outbound %d: %v", id, err)
 		}
-		var settings map[string]any
-		if err := json.Unmarshal([]byte(ob.SettingsJSON), &settings); err != nil {
-			t.Fatalf("unmarshal outbound %d settings: %v", id, err)
+		// 解析策略的唯一落点是 streamSettings.sockopt.domainStrategy（settings 里已废弃）
+		var stream map[string]any
+		if err := json.Unmarshal([]byte(ob.StreamSettingsJSON), &stream); err != nil {
+			// 未写入过 streamSettings 时是空串
+			if strings.TrimSpace(ob.StreamSettingsJSON) != "" {
+				t.Fatalf("unmarshal outbound %d streamSettings: %v", id, err)
+			}
 		}
-		ds, _ := settings["domainStrategy"].(string)
+		sockopt, _ := stream["sockopt"].(map[string]any)
+		ds, _ := sockopt["domainStrategy"].(string)
 		return ds
 	}
 	if got := dsOf(obA.ID); got != "UseIP" {
-		t.Fatalf("存量 UseIP 应并入 direct 出站，got %q", got)
+		t.Fatalf("存量 UseIP 应并入 direct 出站 sockopt，got %q", got)
 	}
 	if got := dsOf(obB.ID); got != "UseIPv4" {
 		t.Fatalf("出站自有非 AsIs 值不得被覆盖，got %q", got)
@@ -438,8 +443,8 @@ func TestDefaultOutboundDSIntoOutboundsMigration(t *testing.T) {
 	if got := dsOf(obC.ID); got != "" {
 		t.Fatalf("非 freedom 目标出站不应被写入 domainStrategy，got %q", got)
 	}
-	if got := dsOf(obD.ID); got != "AsIs" {
-		t.Fatalf("存量 AsIs 不应改动出站，got %q", got)
+	if got := dsOf(obD.ID); got != "" {
+		t.Fatalf("存量 AsIs 不需要落键，got %q", got)
 	}
 
 	// 幂等：再次迁移不报错、值不变
@@ -456,7 +461,7 @@ func TestDefaultOutboundDSIntoOutboundsMigration(t *testing.T) {
 
 // TestFreedomFinalRulesMigration 私网拦截下沉迁移（2026-09-17 路由层私网规则移除）：
 //   - 种子形态（settings 仅 domainStrategy 一个键）→ 回填 canonical（私网 block + allow 兜底），
-//     并保留其 domainStrategy（含被上一迁移改成非 AsIs 的行）；
+//     解析策略搬到官方位置 streamSettings.sockopt.domainStrategy（非 AsIs 才落键）；
 //   - 已有 finalRules 且私网 block 缺 blockDelay → 补 "0"（维持原先路由层「立即断开」的快速失败）；
 //   - 已有 blockDelay 的规则、非 freedom 出站、设置了面板开关（finalRules 已存在）的行 → 不动。
 func TestFreedomFinalRulesMigration(t *testing.T) {
@@ -477,9 +482,9 @@ func TestFreedomFinalRulesMigration(t *testing.T) {
 	// 种子形态（RouterDomainStrategy 已被上一迁移改成 UseIP 的场景同样属种子形态）
 	stub := mk("direct", "freedom", `{"domainStrategy":"AsIs"}`)
 	stubMigrated := mk("direct2", "freedom", `{"domainStrategy":"UseIP"}`)
-	// 缺 blockDelay 的私网拦截规则 → 补 0
+	// 缺延迟字段的私网拦截规则 → 补 delay=0
 	noDelay := mk("legacy-panel", "freedom", `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"]},{"action":"allow"}]}`)
-	// 已显式指定 blockDelay → 不动
+	// 旧键名 blockDelay 指定了区间 → 改名为 delay 且值不变
 	hasDelay := mk("explicit", "freedom", `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"],"blockDelay":"30-90"},{"action":"allow"}]}`)
 	// 非 freedom 出站 → 不动
 	relay := mk("relay", "vless", `{"vnext":[]}`)
@@ -508,20 +513,43 @@ func TestFreedomFinalRulesMigration(t *testing.T) {
 				continue
 			}
 			if ips, _ := m["ip"].([]any); len(ips) > 0 && ips[0] == "geoip:private" {
-				d, _ := m["blockDelay"].(string)
+				if _, still := m["blockDelay"]; still {
+					return "blockDelay 键未被迁移", true
+				}
+				d, _ := m["delay"].(string)
 				return d, true
 			}
 		}
 		return "", false
 	}
 
-	// 种子行：回填 canonical 且保留 domainStrategy
+	sockoptDSOf := func(id uint64) string {
+		t.Helper()
+		var ob ServerOutbound
+		if err := db.First(&ob, id).Error; err != nil {
+			t.Fatalf("load outbound %d: %v", id, err)
+		}
+		var stream map[string]any
+		if strings.TrimSpace(ob.StreamSettingsJSON) != "" {
+			if err := json.Unmarshal([]byte(ob.StreamSettingsJSON), &stream); err != nil {
+				t.Fatalf("unmarshal outbound %d streamSettings: %v", id, err)
+			}
+		}
+		sockopt, _ := stream["sockopt"].(map[string]any)
+		ds, _ := sockopt["domainStrategy"].(string)
+		return ds
+	}
+
+	// 种子行：回填 canonical，解析策略不留在 settings（AsIs 不落键）
 	s := settingsOf(stub.ID)
-	if ds, _ := s["domainStrategy"].(string); ds != "AsIs" {
-		t.Errorf("种子行 domainStrategy 被改动: %q", ds)
+	if ds, still := s["domainStrategy"]; still {
+		t.Errorf("种子行不应保留已废弃的 settings.domainStrategy: %v", ds)
+	}
+	if ds := sockoptDSOf(stub.ID); ds != "" {
+		t.Errorf("AsIs 不需要落到 sockopt.domainStrategy，got %q", ds)
 	}
 	if d, ok := privateBlockDelay(s); !ok || d != "0" {
-		t.Errorf("种子行应回填私网 block 且 blockDelay=0, got (%q,%v): %v", d, ok, s)
+		t.Errorf("种子行应回填私网 block 且 delay=0, got (%q,%v): %v", d, ok, s)
 	}
 	rules, _ := s["finalRules"].([]any)
 	if len(rules) != 2 {
@@ -530,22 +558,25 @@ func TestFreedomFinalRulesMigration(t *testing.T) {
 		t.Errorf("种子行 finalRules 末位应为 allow: %v", rules)
 	}
 
-	// 上一迁移改成 UseIP 的种子行：回填时须保留 UseIP
+	// 上一迁移改成 UseIP 的种子行：回填时策略须落到 sockopt，不丢
 	s2 := settingsOf(stubMigrated.ID)
-	if ds, _ := s2["domainStrategy"].(string); ds != "UseIP" {
-		t.Errorf("种子行回填丢失 domainStrategy: %q", ds)
+	if ds, still := s2["domainStrategy"]; still {
+		t.Errorf("种子行不应保留已废弃的 settings.domainStrategy: %v", ds)
+	}
+	if ds := sockoptDSOf(stubMigrated.ID); ds != "UseIP" {
+		t.Errorf("种子行回填丢失解析策略（应在 sockopt.domainStrategy）: %q", ds)
 	}
 	if d, ok := privateBlockDelay(s2); !ok || d != "0" {
 		t.Errorf("种子行应回填私网 block: (%q,%v)", d, ok)
 	}
 
-	// 缺 blockDelay → 补 0
+	// 缺延迟字段 → 补 delay=0
 	if d, ok := privateBlockDelay(settingsOf(noDelay.ID)); !ok || d != "0" {
-		t.Errorf("缺 blockDelay 的私网规则应补 0, got (%q,%v)", d, ok)
+		t.Errorf("缺延迟字段的私网规则应补 delay=0, got (%q,%v)", d, ok)
 	}
-	// 已显式指定 → 不覆盖
+	// 旧键 blockDelay 指定了区间 → 改名为 delay 且值不变
 	if d, _ := privateBlockDelay(settingsOf(hasDelay.ID)); d != "30-90" {
-		t.Errorf("显式 blockDelay 不应被覆盖, got %q", d)
+		t.Errorf("旧键 blockDelay 应原值改名为 delay, got %q", d)
 	}
 	// 非 freedom → 不动
 	if _, ok := privateBlockDelay(settingsOf(relay.ID)); ok {
@@ -560,7 +591,7 @@ func TestFreedomFinalRulesMigration(t *testing.T) {
 		t.Errorf("重复迁移改动种子行: %q", d)
 	}
 	if d, _ := privateBlockDelay(settingsOf(hasDelay.ID)); d != "30-90" {
-		t.Errorf("重复迁移覆盖显式 blockDelay: %q", d)
+		t.Errorf("重复迁移覆盖显式 delay: %q", d)
 	}
 }
 

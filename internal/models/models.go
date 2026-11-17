@@ -114,7 +114,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := migrateDefaultOutboundDSIntoOutbounds(db); err != nil {
 		return err
 	}
-	// 必须紧跟上一行：种子形态判定要看到并退后的最终 domainStrategy。
+	// 必须紧跟上一行：种子形态判定要读 DS 迁移后的 settings（回填会整份重写该 JSON）。
 	if err := migrateFreedomFinalRules(db); err != nil {
 		return err
 	}
@@ -744,22 +744,35 @@ func moveServerDSIntoOutbound(db *gorm.DB, r legacyServerDSRow) error {
 	if err := json.Unmarshal([]byte(ob.SettingsJSON), &settings); err != nil {
 		return nil // 非法 JSON：旧生成器同样不会写入，交由出站编辑器修正
 	}
-	if cur, _ := settings["domainStrategy"].(string); cur != "" && cur != "AsIs" {
+	cur := ""
+	if v, _ := settings["domainStrategy"].(string); v != "" {
+		cur = v
+	} else if raw := strings.TrimSpace(ob.StreamSettingsJSON); raw != "" {
+		var stream map[string]any
+		if err := json.Unmarshal([]byte(raw), &stream); err == nil {
+			if sockopt, ok := stream["sockopt"].(map[string]any); ok {
+				cur, _ = sockopt["domainStrategy"].(string)
+			}
+		}
+	}
+	if cur != "" && cur != "AsIs" {
 		// 出站自有非 AsIs 值优先，旧生成器亦不覆盖。此处必须记日志：该值随后随列删除消失，
 		// 而出站卡片不展示生效值，界面无从察觉——静默丢弃是这条路径最容易埋下的坑。
 		log.Printf("[migrate] 服务器 %d 的服务器级解析策略 %s 与出站 %d(#%s) 自有值 %s 冲突，按出站优先丢弃",
 			r.ID, r.DS, ob.ID, ob.Tag, cur)
 		return nil
 	}
-	settings["domainStrategy"] = r.DS
-	return updateOutboundSettings(db, ob.ID, settings)
+	// 写官方位置 streamSettings.sockopt.domainStrategy（settings.domainStrategy 自 xray v26.9.8 起废弃）。
+	return updateOutboundSockoptDomainStrategy(db, &ob, r.DS)
 }
 
-// migrateFreedomFinalRules freedom 出站私网拦截下沉 + blockDelay 归一（2026-09-17 路由层私网规则移除）：
+// migrateFreedomFinalRules freedom 出站私网拦截下沉 + 黑洞延迟归一（2026-09-17 路由层私网规则移除，
+// 2026-11-17 起 blockDelay 键名统一为 delay）：
 // 路由层不再注入 {"ip":["geoip:private"],"outboundTag":"blocked"}——路由规则自上而下首个命中生效，
 // 该规则不带 inbound/outbound 维度限定，会抢在管理员「入站 → 其他出站」的规则之前拦掉目标为私网的
 // 连接（且注入规则在 UI 中不可见，管理员无从排查）。私网拦截改由 freedom 出站 finalRules 承担，故：
-//  1. finalRules 已含 block geoip:private 但未指定 blockDelay 的行 → 补 "0"。原先路由层丢给 blocked
+//  1. finalRules 的 blockDelay 键 → delay（xray v26.11 起弃用旧键名；值原样搬运）；
+//     已含 block geoip:private 但没有任何延迟字段的行 → 补 delay:"0"。原先路由层丢给 blocked
 //     出站是立即断开，不补会退化为官方默认 30-90s 黑洞挂起（CN 规则有意不补，保抗探测延迟）。
 //  2. settings 只有 domainStrategy 一个键的 freedom 出站（从未通过出站编辑器保存过面板开关的种子形态）
 //     → 回填 canonical 默认：私网拦截 + allow 兜底，与面板开关默认值（开）及种子行一致。
@@ -768,7 +781,7 @@ func moveServerDSIntoOutbound(db *gorm.DB, r legacyServerDSRow) error {
 //     内建安全策略），回填只把拦截位置显式化，不会放宽；确需放行私网的管理员在出站编辑器关掉开关
 //     即可（关闭会写入无条件 allow 规则）。
 //
-// 幂等：已有 finalRules 的非种子行不再改动（第 1 条除外，补齐后再次运行无匹配项）。
+// 幂等：已有 finalRules 的非种子行只做键名/补齐归一，重复运行无匹配项。
 func migrateFreedomFinalRules(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&ServerOutbound{}) {
 		return nil
@@ -788,7 +801,9 @@ func migrateFreedomFinalRules(db *gorm.DB) error {
 		}
 		rules, hasRules := settings["finalRules"].([]any)
 		if !hasRules {
-			// 种子形态：仅 domainStrategy 一个键 → 回填 canonical（保留其 domainStrategy）
+			// 种子形态：仅 domainStrategy 一个键 → 回填 canonical。
+			// 解析策略本身搬到官方位置 streamSettings.sockopt.domainStrategy（settings.domainStrategy
+			// 自 xray v26.9.8 起已废弃）；AsIs 是默认值，不落配置。
 			if len(settings) != 1 {
 				continue
 			}
@@ -800,13 +815,18 @@ func migrateFreedomFinalRules(db *gorm.DB) error {
 			if err := json.Unmarshal([]byte(DefaultFreedomDirectSettingsJSON), &canon); err != nil {
 				return fmt.Errorf("解析 canonical freedom 默认 settings 失败: %w", err)
 			}
-			canon["domainStrategy"] = ds
 			if err := updateOutboundSettings(db, ob.ID, canon); err != nil {
 				return err
 			}
+			if ds != "" && !strings.EqualFold(ds, "AsIs") {
+				if err := updateOutboundSockoptDomainStrategy(db, &ob, ds); err != nil {
+					return err
+				}
+			}
 			continue
 		}
-		// 补齐私网拦截规则的 blockDelay
+		// 归一 finalRules 的黑洞延迟：blockDelay 键名 xray v26.11 起弃用（改名 delay），
+		// 存量行改写成 delay；私网拦截规则缺延迟时补 "0"。
 		changed := false
 		for _, r := range rules {
 			m, ok := r.(map[string]any)
@@ -816,13 +836,21 @@ func migrateFreedomFinalRules(db *gorm.DB) error {
 			if action, _ := m["action"].(string); action != "block" {
 				continue
 			}
-			if _, has := m["blockDelay"]; has {
+			// blockDelay → delay（值原样搬运；已有 delay 时以 delay 为准）
+			if old, has := m["blockDelay"]; has {
+				delete(m, "blockDelay")
+				if _, hasNew := m["delay"]; !hasNew {
+					m["delay"] = old
+				}
+				changed = true
+			}
+			if _, hasDelay := m["delay"]; hasDelay {
 				continue
 			}
 			if ips, ok := m["ip"].([]any); !ok || len(ips) == 0 || ips[0] != "geoip:private" {
 				continue
 			}
-			m["blockDelay"] = "0"
+			m["delay"] = "0"
 			changed = true
 		}
 		if !changed {
@@ -845,6 +873,33 @@ func updateOutboundSettings(db *gorm.DB, id uint64, settings map[string]any) err
 	if err := db.Model(&ServerOutbound{}).Where("id = ?", id).Update("settings_json", string(raw)).Error; err != nil {
 		return fmt.Errorf("回填出站 %d settings 失败: %w", id, err)
 	}
+	return nil
+}
+
+// updateOutboundSockoptDomainStrategy 把出站域名解析策略写入 streamSettings.sockopt.domainStrategy
+// （xray v26.9.8 起 freedom 的 settings.domainStrategy 已废弃，唯一有效位置是 sockopt）。
+// 既有的其它 sockopt 键原样保留；StreamSettingsJSON 非法时不动它，交给出站编辑器修正。
+func updateOutboundSockoptDomainStrategy(db *gorm.DB, ob *ServerOutbound, ds string) error {
+	stream := map[string]any{}
+	if raw := strings.TrimSpace(ob.StreamSettingsJSON); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &stream); err != nil {
+			return nil
+		}
+	}
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	if sockopt == nil {
+		sockopt = map[string]any{}
+		stream["sockopt"] = sockopt
+	}
+	sockopt["domainStrategy"] = ds
+	raw, err := json.Marshal(stream)
+	if err != nil {
+		return fmt.Errorf("序列化出站 %d streamSettings 失败: %w", ob.ID, err)
+	}
+	if err := db.Model(&ServerOutbound{}).Where("id = ?", ob.ID).Update("stream_settings_json", string(raw)).Error; err != nil {
+		return fmt.Errorf("回填出站 %d streamSettings 失败: %w", ob.ID, err)
+	}
+	ob.StreamSettingsJSON = string(raw)
 	return nil
 }
 

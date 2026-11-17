@@ -549,6 +549,10 @@ func mergeOutbounds(tmpl any, outs []models.ServerOutbound, ctx *GenerateContext
 		normalizeVlessOutbound(item)
 		// freedom 出站面板开关（block_cn）拆分为 finalRules，面板键不透传给 xray
 		translateFreedomPanelKeys(item)
+		// domainStrategy 落到官方位置（streamSettings.sockopt），不再使用已废弃的 settings 字段
+		normalizeFreedomDomainStrategy(item)
+		// finalRules.blockDelay 已弃用，统一改写成 delay
+		normalizeFreedomFinalRulesDelay(item)
 		tag, _ := item["tag"].(string)
 		if tag != "" {
 			if idx, exists := seen[tag]; exists {
@@ -705,9 +709,9 @@ func normalizeVlessOutbound(item map[string]any) {
 // 路由层规则是全局分发（会误伤中转等其他出口的合法回国链路），finalRules 只拦走该出站的
 // 流量，且在解析出最终 IP 后、拨号前匹配，域名会被强制解析，比 geosite 更彻底；
 // 域名级拦截无此字段，故仅支持 IP 级。
-// blockDelay 有意不设置（保留官方默认 30-90s 黑洞）：回国拦截历史上一直是出站级 finalRules，
+// 黑洞延迟有意不设置（保留官方默认 30-90s）：回国拦截历史上一直是出站级 finalRules，
 // 黑洞延迟起到抗探测作用；而私网拦截原先由路由层的 blocked 出站「立即断开」承担，改用
-// finalRules 后必须显式 blockDelay:"0" 才能维持同样的快速失败（见 models 的 canonical 默认值）。
+// finalRules 后必须显式 delay:"0" 才能维持同样的快速失败（见 models 的 canonical 默认值）。
 func translateFreedomPanelKeys(item map[string]any) {
 	proto, _ := item["protocol"].(string)
 	if proto != "freedom" {
@@ -746,6 +750,72 @@ func translateFreedomPanelKeys(item map[string]any) {
 		}
 	}
 	settings["finalRules"] = append(rules, newRule)
+}
+
+// normalizeFreedomDomainStrategy 把 freedom 出站里已废弃的 settings.domainStrategy 搬到官方位置
+// streamSettings.sockopt.domainStrategy。
+//
+// 上游自 v26.9.8（XTLS/Xray-core#6058）起不再由 freedom 读取 settings.domainStrategy：配置加载时
+// 只打一条「deprecated and will be removed」告警，再把值挪进 sockopt.domainStrategy（infra/conf/xray.go）。
+// 面板若继续生成旧字段，则每个节点每次启动都刷一条 Warning，且将来上游删除该键就彻底失效。
+// 这里在生成期就写到位：值非 AsIs 时写入 sockopt（已有其它 sockopt 键时合并，不整块覆盖），
+// 写完后一律从 settings 删除该键（AsIs 等于默认值，不需要落进配置）。
+func normalizeFreedomDomainStrategy(item map[string]any) {
+	if proto, _ := item["protocol"].(string); proto != "freedom" {
+		return
+	}
+	settings, _ := item["settings"].(map[string]any)
+	if settings == nil {
+		return
+	}
+	ds, _ := settings["domainStrategy"].(string)
+	delete(settings, "domainStrategy")
+	if ds == "" || strings.EqualFold(ds, "AsIs") {
+		return
+	}
+	stream, _ := item["streamSettings"].(map[string]any)
+	if stream == nil {
+		stream = make(map[string]any)
+		item["streamSettings"] = stream
+	}
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	if sockopt == nil {
+		sockopt = make(map[string]any)
+		stream["sockopt"] = sockopt
+	}
+	// 与上游垫片一致：settings 里的显式值覆盖既有 sockopt（上游也是这么搬的）。
+	sockopt["domainStrategy"] = ds
+}
+
+// normalizeFreedomFinalRulesDelay 把 freedom finalRules 里已弃用的 blockDelay 键改写成 delay。
+//
+// xray v26.11（XTLS/Xray-core#7329）起 blockDelay 改名 delay：旧键仍兼容，但配置加载时每次都会
+// 打一条「deprecated, will be removed soon」告警。生成期统一改写，值原样搬运（区间字符串语义不变，
+// 单位仍是秒）；已同时存在 delay 时以 delay 为准。块内不带该键的规则（如 block_cn 回国拦截）保持
+// 原样——它们依赖官方默认的 30-90s 黑洞延迟做抗探测。
+func normalizeFreedomFinalRulesDelay(item map[string]any) {
+	if proto, _ := item["protocol"].(string); proto != "freedom" {
+		return
+	}
+	settings, _ := item["settings"].(map[string]any)
+	if settings == nil {
+		return
+	}
+	rules, _ := settings["finalRules"].([]any)
+	for _, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		old, has := m["blockDelay"]
+		if !has {
+			continue
+		}
+		delete(m, "blockDelay")
+		if _, hasNew := m["delay"]; !hasNew {
+			m["delay"] = old
+		}
+	}
 }
 
 // mergeRoutingRules 合并模板路由规则与节点路由规则。

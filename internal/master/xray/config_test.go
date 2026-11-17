@@ -850,7 +850,9 @@ func TestGenerateShortID(t *testing.T) {
 }
 
 // TestGenerate_OutboundDomainStrategySingleSource：出站域名解析策略唯一入口——
-// freedom 出站的 settings.domainStrategy 一律取自该出站在库内的自有值（原样落到生成配置），
+// freedom 出站的解析策略取自该出站在库内的自有值，但落点是官方位置
+// streamSettings.sockopt.domainStrategy（settings.domainStrategy 自 xray v26.9.8 起已废弃：
+// 生成期搬进 sockopt 并从 settings 删除，否则每个节点每次启动都会刷一条弃用告警）。
 // 不存在任何服务器级默认值/兜底注入可覆盖它；defaultOutboundTag 只决定 outbounds[0]；
 // routing.domainStrategy 独立不受影响。
 func TestGenerate_OutboundDomainStrategySingleSource(t *testing.T) {
@@ -869,37 +871,54 @@ func TestGenerate_OutboundDomainStrategySingleSource(t *testing.T) {
 		return parsed
 	}
 
-	findDS := func(parsed map[string]any, tag string) string {
+	findSockopt := func(parsed map[string]any, tag string) map[string]any {
 		t.Helper()
 		for _, o := range asArray(t, parsed["outbounds"], "outbounds") {
 			m := asObject(t, o, "outbound")
 			if m["tag"] == tag {
 				settings := asObject(t, m["settings"], tag+" settings")
-				ds, _ := settings["domainStrategy"].(string)
-				return ds
+				if ds, still := settings["domainStrategy"]; still {
+					t.Fatalf("settings.domainStrategy 已废弃，不应再出现在生成配置里: %v", ds)
+				}
+				stream, _ := m["streamSettings"].(map[string]any)
+				sockopt, _ := stream["sockopt"].(map[string]any)
+				return sockopt
 			}
 		}
 		t.Fatalf("outbound %s not found", tag)
-		return ""
+		return nil
+	}
+	findDS := func(parsed map[string]any, tag string) string {
+		t.Helper()
+		ds, _ := findSockopt(parsed, tag)["domainStrategy"].(string)
+		return ds
 	}
 
-	// DB 出站自有 UseIPv4 → 原样落到生成配置
+	// DB 出站自有 UseIPv4 → 搬到 sockopt.domainStrategy
 	if got := findDS(gen([]models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
 	}, "direct"), "direct"); got != "UseIPv4" {
-		t.Fatalf("出站自有 domainStrategy 应原样生成，got %q", got)
+		t.Fatalf("出站自有 domainStrategy 应落到 sockopt.domainStrategy，got %q", got)
 	}
 
-	// 出站显式 AsIs 同样原样生效（无服务器级兜底可改写它）
-	if got := findDS(gen([]models.ServerOutbound{
+	// 已有其它 sockopt 键时合并，不整块覆盖
+	if got := findSockopt(gen([]models.ServerOutbound{
+		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"ForceIPv4"}`,
+			StreamSettingsJSON: `{"sockopt":{"mark":255}}`, Enabled: true},
+	}, "direct"), "direct"); got["domainStrategy"] != "ForceIPv4" || got["mark"] == nil {
+		t.Fatalf("应合并进既有 sockopt（mark 保留 + 解析策略迁移），got %v", got)
+	}
+
+	// 显式 AsIs 是默认值：不落键
+	if got := findSockopt(gen([]models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"AsIs"}`, Enabled: true},
-	}, "direct"), "direct"); got != "AsIs" {
-		t.Fatalf("显式 AsIs 应原样生效，got %q", got)
+	}, "direct"), "direct"); len(got) != 0 {
+		t.Fatalf("显式 AsIs 不应落任何键，got %v", got)
 	}
 
-	// 无 DB 出站 → 回落模板默认 AsIs
-	if got := findDS(gen(nil, "direct"), "direct"); got != "AsIs" {
-		t.Fatalf("模板默认应为 AsIs，got %q", got)
+	// 无 DB 出站 → 回落模板默认（AsIs，无键）
+	if got := findDS(gen(nil, "direct"), "direct"); got != "" {
+		t.Fatalf("模板默认应为 AsIs（无键），got %q", got)
 	}
 
 	// defaultOutboundTag 只决定 outbounds[0]（Xray 未命中规则的兜底出口）
@@ -913,7 +932,7 @@ func TestGenerate_OutboundDomainStrategySingleSource(t *testing.T) {
 	}
 	// 默认出口的解析策略仍取自出站自有值
 	if got := findDS(parsedDef, "proxy-out"); got != "UseIP" {
-		t.Fatalf("默认出口出站自有 domainStrategy 应原样生成，got %q", got)
+		t.Fatalf("默认出口出站自有 domainStrategy 应落到 sockopt，got %q", got)
 	}
 
 	// routing.domainStrategy 独立（IPIfNonMatch 生效，与出站解析策略互不影响）
@@ -1274,7 +1293,7 @@ func TestGenerate_PrivateBlockScopedToOutbound(t *testing.T) {
 		t.Errorf("管理员 relay 规则丢失: %+v", root.Routing.Rules)
 	}
 
-	// 3. 私网拦截落在 direct 出站的 finalRules 上，且 blockDelay=0（立即断开，非官方默认 30-90s 黑洞）
+	// 3. 私网拦截落在 direct 出站的 finalRules 上，且 delay=0（立即断开，非官方默认 30-90s 黑洞）
 	var directSettings map[string]any
 	for _, o := range root.Outbounds {
 		if o["tag"] == "direct" {
@@ -1295,8 +1314,11 @@ func TestGenerate_PrivateBlockScopedToOutbound(t *testing.T) {
 	if ips, _ := firstRule["ip"].([]any); len(ips) == 0 || ips[0] != "geoip:private" {
 		t.Errorf("finalRules[0] 应拦 geoip:private: %+v", firstRule)
 	}
-	if delay, _ := firstRule["blockDelay"].(string); delay != "0" {
-		t.Errorf("私网 block 应显式 blockDelay=0（否则退化为 30-90s 黑洞挂起）: %+v", firstRule)
+	if delay, _ := firstRule["delay"].(string); delay != "0" {
+		t.Errorf("私网 block 应显式 delay=0（否则退化为 30-90s 黑洞挂起）: %+v", firstRule)
+	}
+	if old, still := firstRule["blockDelay"]; still {
+		t.Errorf("blockDelay 已弃用，生成配置不应再出现: %v", old)
 	}
 	lastRule, _ := finalRules[len(finalRules)-1].(map[string]any)
 	if action, _ := lastRule["action"].(string); action != "allow" {
@@ -1351,8 +1373,9 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		for _, item := range asArray(t, parsed["outbounds"], "outbounds") {
 			m := asObject(t, item, "outbound")
 			if m["tag"] == "direct" {
-				settings := asObject(t, m["settings"], "direct.settings")
-				ds, _ := settings["domainStrategy"].(string)
+				stream, _ := m["streamSettings"].(map[string]any)
+				sockopt, _ := stream["sockopt"].(map[string]any)
+				ds, _ := sockopt["domainStrategy"].(string)
 				return ds
 			}
 		}
@@ -1360,7 +1383,7 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		return ""
 	}
 
-	// 服务器 A：DB 出站自有 UseIPv4 → 本次生成生效
+	// 服务器 A：DB 出站自有 UseIPv4 → 本次生成生效（落在 sockopt.domainStrategy）
 	rawA, err := xray.Generate(inbounds, []models.ServerOutbound{
 		{ID: 1, ServerID: 1, Tag: "direct", Protocol: "freedom", SettingsJSON: `{"domainStrategy":"UseIPv4"}`, Enabled: true},
 	}, nil, users, nil, "direct", "")
@@ -1368,17 +1391,20 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 		t.Fatalf("Generate A failed: %v", err)
 	}
 	if ds := directDS(rawA); ds != "UseIPv4" {
-		t.Fatalf("服务器 A 的 direct.domainStrategy = %q, 期望 UseIPv4", ds)
+		t.Fatalf("服务器 A 的 direct sockopt.domainStrategy = %q, 期望 UseIPv4", ds)
 	}
 
-	// 模板本体不得被 A 的节点配置污染（默认值仍为 AsIs）
+	// 模板本体不得被 A 的节点配置污染（模板 direct 不再携带解析策略键）
 	cached := xray.LoadTemplate()
 	for _, item := range asArray(t, cached["outbounds"], "cached.outbounds") {
 		m := asObject(t, item, "cached.outbound")
 		if m["tag"] == "direct" {
 			settings := asObject(t, m["settings"], "cached.direct.settings")
-			if ds, _ := settings["domainStrategy"].(string); ds != "AsIs" {
-				t.Fatalf("模板被污染：cached direct.domainStrategy = %q, 期望 AsIs", ds)
+			if ds, still := settings["domainStrategy"]; still {
+				t.Fatalf("模板被污染：cached direct.domainStrategy = %v，模板不应再带该键", ds)
+			}
+			if stream, _ := m["streamSettings"].(map[string]any); stream != nil {
+				t.Fatalf("模板被污染：cached direct.streamSettings = %v", stream)
 			}
 		}
 	}
@@ -1388,8 +1414,8 @@ func TestTemplateCacheNotPolluted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate B failed: %v", err)
 	}
-	if ds := directDS(rawB); ds != "AsIs" {
-		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct.domainStrategy = %q, 期望模板默认 AsIs", ds)
+	if ds := directDS(rawB); ds != "" {
+		t.Fatalf("服务器 B 继承了服务器 A 的配置：direct sockopt.domainStrategy = %q, 期望模板默认（无键）", ds)
 	}
 }
 

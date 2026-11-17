@@ -28,9 +28,8 @@
       "protocol": "freedom",
       "tag": "direct",
       "settings": {
-        "domainStrategy": "AsIs",
         "finalRules": [
-          {"action": "block", "ip": ["geoip:private"], "blockDelay": "0"},
+          {"action": "block", "ip": ["geoip:private"], "delay": "0"},
           {"action": "allow"}
         ]
       }

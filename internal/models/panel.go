@@ -43,8 +43,9 @@ type Server struct {
 	SortOrder             int    `gorm:"default:0;index" json:"sort_order"`                                          // 排序序号（数字越小越靠前，默认 0）
 	DefaultOutboundTag    string `gorm:"size:64;default:direct" json:"default_outbound_tag"`                         // 默认出口（路由未命中时的出站标签）
 	RoutingDomainStrategy string `gorm:"size:32;default:AsIs" json:"routing_domain_strategy"`                        // 路由域名策略 AsIs/IPIfNonMatch/IPOnDemand
-	// 出站域名解析策略（freedom settings.domainStrategy）不在此建模：它是出站级属性，唯一入口是
-	// 出站编辑器（ServerOutbound.SettingsJSON.domainStrategy）。历史上的服务器级
+	// 出站域名解析策略不在此建模：它是出站级属性，唯一入口是出站编辑器，
+	// 落点 = ServerOutbound.StreamSettingsJSON 的 sockopt.domainStrategy
+	// （settings.domainStrategy 自 xray v26.9.8 起废弃）。历史上的服务器级
 	// default_outbound_domain_strategy 列已移除，存量值由 migrateDefaultOutboundDSIntoOutbounds 并入出站。
 	AgentVersion string `gorm:"size:32" json:"agent_version"` // 节点心跳上报的 agent 版本（旧 agent 为空）
 	// AgentCaps 节点能力声明（心跳上报，逗号分隔；旧 agent 为空）。
@@ -473,13 +474,17 @@ type ServerOutbound struct {
 // 三处必须一致：嵌入式模板 config.template.json 的 direct 段、EnsureDefaultServerOutbounds 的种子行、
 // 以及存量迁移的回填值；xray 包有测试断言模板与本体一致，勿单独改其中一处。
 //
+// 域名解析策略不在此处：freedom 的 settings.domainStrategy 自 xray v26.9.8 起已废弃，
+// 唯一落点是 streamSettings.sockopt.domainStrategy（见 xray.normalizeFreedomDomainStrategy）。
+//
 // 语义（对照 xray freedom 的 finalRules）：
-//   - {block, ip:geoip:private, blockDelay:"0"}：私网目标在「最终 IP 解析后、拨号前」被拦，
-//     目标不会被拨号；blockDelay 显式设 0 → 立即关闭连接，而非官方默认的 30-90s 黑洞挂起。
+//   - {block, ip:geoip:private, delay:"0"}：私网目标在「最终 IP 解析后、拨号前」被拦，
+//     目标不会被拨号；delay 显式设 0 → 立即关闭连接，而非官方默认的 30-90s 黑洞挂起。
+//     （键名原为 blockDelay，xray v26.11 起弃用并改名 delay，生成期会做兼容迁移。）
 //   - {allow}：无条件的兜底放行规则。freedom 内建安全策略（对来自 VLESS/VMess/Trojan/SS 入站的
 //     流量默认阻断私网与保留网段）只在「无显式规则命中」时生效，这条 allow 会取代它——即除私网外
 //     一律放行，同时也不再拦保留网段（官方文档提示需自行评估安全影响）。
-const DefaultFreedomDirectSettingsJSON = `{"domainStrategy":"AsIs","finalRules":[{"action":"block","ip":["geoip:private"],"blockDelay":"0"},{"action":"allow"}]}`
+const DefaultFreedomDirectSettingsJSON = `{"finalRules":[{"action":"block","ip":["geoip:private"],"delay":"0"},{"action":"allow"}]}`
 
 // ServerRoutingRule 服务器独立路由规则（§多节点 3x-ui 架构）。
 type ServerRoutingRule struct {

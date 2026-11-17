@@ -80,8 +80,15 @@ func normalizeOutboundShape(in outboundShape) (outboundShape, string) {
 	case proto == "custom":
 		return in, "自定义 JSON 模式必须填写 outbound_json"
 	case proto == "freedom" || proto == "blackhole":
+		// 基础出口不承担传输层：唯一例外是 freedom 的域名解析策略，
+		// 它自 xray v26.9.8 起只能写在 streamSettings.sockopt.domainStrategy。
 		if stream != "" {
-			return in, "基础出口（freedom/blackhole）不支持 streamSettings"
+			if proto != "freedom" {
+				return in, "基础出口（freedom/blackhole）不支持 streamSettings"
+			}
+			if msg := validateFreedomSockopt(stream); msg != "" {
+				return in, msg
+			}
 		}
 		in.OutboundJSON = ""
 	default:
@@ -92,6 +99,48 @@ func normalizeOutboundShape(in outboundShape) (outboundShape, string) {
 		in.OutboundJSON = ""
 	}
 	return in, ""
+}
+
+// freedomDomainStrategies xray 支持的出站域名解析策略取值（transport/internet DomainStrategy）。
+var freedomDomainStrategies = map[string]bool{
+	"asis":        true,
+	"useip":       true,
+	"useipv4":     true,
+	"useipv6":     true,
+	"useipv4v6":   true,
+	"useipv6v4":   true,
+	"forceip":     true,
+	"forceipv4":   true,
+	"forceipv6":   true,
+	"forceipv4v6": true,
+	"forceipv6v4": true,
+}
+
+// validateFreedomSockopt 校验基础出口 freedom 的 streamSettings：只允许承载域名解析策略。
+// xray v26.9.8 起 freedom 的 settings.domainStrategy 已废弃，唯一有效位置是
+// streamSettings.sockopt.domainStrategy；除此之外基础出口不接受任何传输层配置
+// （出站没有传输语义，多余键只会变成脏配置，xray 还会静默忽略）。
+func validateFreedomSockopt(raw string) string {
+	var stream map[string]any
+	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
+		return "streamSettings 格式非法: " + err.Error()
+	}
+	for k := range stream {
+		if k != "sockopt" {
+			return "基础出口（freedom）的 streamSettings 只支持 sockopt.domainStrategy"
+		}
+	}
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	for k := range sockopt {
+		if k != "domainStrategy" {
+			return "基础出口（freedom）的 sockopt 只支持 domainStrategy"
+		}
+	}
+	ds, _ := sockopt["domainStrategy"].(string)
+	if !freedomDomainStrategies[strings.ToLower(strings.TrimSpace(ds))] {
+		return "不支持的域名解析策略: " + ds
+	}
+	return ""
 }
 
 // serverOutboundTagExists 校验出站 tag 存在（含模板内置 direct/blocked）。
