@@ -16,6 +16,7 @@ import type {
   Order,
   PermissionGroup,
   Plan,
+  NoticeCategory,
   NoticeItem,
   NoticePayload,
   AdminNotificationsResult,
@@ -1183,7 +1184,7 @@ export function deleteUser(id: number) {
 
 // ===== 公告管理 =====
 
-export function getAdminNotices(params?: { keyword?: string; status?: number }) {
+export function getAdminNotices(params?: { keyword?: string; status?: number; category?: NoticeCategory }) {
   return http.get<ApiResp<NoticeItem[]>>('/admin/notices', { params })
 }
 

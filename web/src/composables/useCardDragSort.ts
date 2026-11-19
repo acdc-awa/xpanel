@@ -20,6 +20,8 @@ export interface CardDragSortOptions<T> {
   handleSelector?: string
   /** 保存失败提示，默认「保存排序失败，已恢复原顺序」。 */
   errorMessage?: string
+  /** 拖拽判定轴向：卡片网格用 horizontal（默认），纵向列表/表格用 vertical。 */
+  axis?: 'horizontal' | 'vertical'
 }
 
 /**
@@ -43,6 +45,7 @@ export function useCardDragSort<T>(options: CardDragSortOptions<T>) {
     cardSelector = '[data-sort-id]',
     handleSelector = '[data-sort-handle]',
     errorMessage = '保存排序失败，已恢复原顺序',
+    axis = 'horizontal',
   } = options
 
   const canReorder = computed(() => (enabled ? enabled.value : true) && list.value.length > 1)
@@ -85,8 +88,11 @@ export function useCardDragSort<T>(options: CardDragSortOptions<T>) {
     const from = list.value.findIndex((x) => idOf(x) === draggingId.value)
     if (from < 0) return
     const rect = card.getBoundingClientRect()
-    // 卡片网格按左右半区判定插入点（拖过中线即换位）
-    const after = e.clientX > rect.left + rect.width / 2
+    // 卡片网格按左右半区、纵向列表按上下半区判定插入点（拖过中线即换位）
+    const after =
+      axis === 'vertical'
+        ? e.clientY > rect.top + rect.height / 2
+        : e.clientX > rect.left + rect.width / 2
     const next = [...list.value]
     const [moved] = next.splice(from, 1)
     let insertAt = next.findIndex((x) => idOf(x) === targetId)

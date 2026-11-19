@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   CsAlert,
   CsBadge,
+  CsBox,
   CsButton,
   CsContainer,
   CsHeader,
@@ -16,7 +17,9 @@ import {
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
-import { resetSubscribeToken } from '@/api/user'
+import { getUserNotices, resetSubscribeToken } from '@/api/user'
+import type { NoticeItem } from '@/api/types'
+import { renderMarkdown } from '@/utils/markdown'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 
@@ -27,6 +30,10 @@ const qrDataUrl = ref('')
 const loading = ref(false)
 const qrModalOpen = ref(false)
 const resettingSub = ref(false)
+const guides = ref<NoticeItem[]>([])
+const guideLoading = ref(false)
+const selectedGuide = ref<NoticeItem | null>(null)
+const guideModalOpen = ref(false)
 
 const hasPlan = computed(() => {
   if (!auth.user?.plan_id) return false
@@ -68,6 +75,7 @@ async function refreshQr() {
 
 onMounted(async () => {
   loading.value = true
+  loadGuides()
   try {
     if (!auth.user) await auth.fetchMe()
     await refreshQr()
@@ -77,6 +85,25 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+async function loadGuides() {
+  guideLoading.value = true
+  try {
+    const { data } = await getUserNotices()
+    if (data.code === 0) {
+      guides.value = data.data.filter((n) => n.category === 'guide')
+    }
+  } catch {
+    guides.value = []
+  } finally {
+    guideLoading.value = false
+  }
+}
+
+function viewGuide(g: NoticeItem) {
+  selectedGuide.value = g
+  guideModalOpen.value = true
+}
 
 function copyText(text: string, label: string) {
   if (!text) {
@@ -263,41 +290,50 @@ const clashApps: ClientApp[] = [
       </div>
     </CsSpaceBetween>
 
-    <!-- 快速接入指引 -->
+    <!-- 使用指南（由管理端客制化） -->
     <CsContainer>
       <template #header>
-        <CsHeader variant="h2">快速接入指引</CsHeader>
+        <CsHeader variant="h2">使用指南</CsHeader>
       </template>
-      <div class="steps-grid">
-        <div class="step-item">
-          <span class="step-num">1</span>
-          <div>
-            <div class="step-title">获取客户端</div>
-            <div class="step-desc">
-              Windows / macOS 推荐使用 Clash Verge Rev 或 Mihomo Party；Android 推荐 FlClash；iOS 推荐 Stash。
-            </div>
+      <CsBox v-if="guideLoading" color="text-body-secondary" font-size="body-s">
+        加载指南中…
+      </CsBox>
+      <CsBox v-else-if="!guides.length" color="text-body-secondary" font-size="body-s">
+        暂无使用指南
+      </CsBox>
+      <div v-else class="guide-list">
+        <button
+          v-for="g in guides"
+          :key="g.id"
+          type="button"
+          class="guide-row"
+          @click="viewGuide(g)"
+        >
+          <div class="guide-title">
+            <CsBadge v-if="g.is_pinned" color="red">置顶</CsBadge>
+            <span>{{ g.title }}</span>
           </div>
-        </div>
-        <div class="step-item">
-          <span class="step-num">2</span>
-          <div>
-            <div class="step-title">导入订阅配置</div>
-            <div class="step-desc">
-              点击上方「一键导入 Mihomo 客户端」，或复制订阅地址后在客户端配置页手动拉取。
-            </div>
-          </div>
-        </div>
-        <div class="step-item">
-          <span class="step-num">3</span>
-          <div>
-            <div class="step-title">开启系统代理</div>
-            <div class="step-desc">
-              选择延迟最低的节点或使用自动选择策略组，开启系统代理即可畅享高速连接。
-            </div>
-          </div>
-        </div>
+          <span class="guide-action">查看详情</span>
+        </button>
       </div>
     </CsContainer>
+
+    <!-- 指南详情弹窗 -->
+    <CsModal
+      v-model:visible="guideModalOpen"
+      :header="selectedGuide?.title || '使用指南'"
+      size="medium"
+      :close-on-click-overlay="false"
+    >
+      <div
+        v-if="selectedGuide"
+        class="guide-body markdown-content"
+        v-html="renderMarkdown(selectedGuide.content)"
+      />
+      <template #footer>
+        <CsButton variant="primary" @click="guideModalOpen = false">我知道了</CsButton>
+      </template>
+    </CsModal>
 
     <!-- 二维码放大弹窗 -->
     <CsModal
@@ -401,43 +437,58 @@ const clashApps: ClientApp[] = [
   color: var(--x-text-secondary);
 }
 
-.steps-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.step-item {
+.guide-list {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
 }
 
-.step-num {
-  display: inline-flex;
+.guide-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  inline-size: 24px;
-  block-size: 24px;
-  border-radius: 999px;
-  background-color: var(--x-primary-soft);
-  color: var(--x-primary);
-  font-size: 12px;
-  font-weight: 700;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 12px;
+  inline-size: 100%;
+  padding: 10px 0;
+  border: none;
+  border-bottom: 1px solid var(--x-border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:hover .guide-title {
+    color: var(--x-primary);
+  }
 }
 
-.step-title {
+.guide-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   font-weight: 600;
   color: var(--x-text);
-  margin-bottom: 4px;
+  transition: color 0.15s ease;
 }
 
-.step-desc {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--x-text-secondary);
+.guide-action {
+  font-size: 12px;
+  color: var(--x-primary);
+  flex-shrink: 0;
+}
+
+.guide-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--x-text);
 }
 
 .qr-modal-body {
@@ -466,8 +517,7 @@ const clashApps: ClientApp[] = [
 
 @media (max-width: $bp-tablet-max) {
   .sub-main-grid,
-  .client-grid,
-  .steps-grid {
+  .client-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -5,6 +5,7 @@ import "time"
 // Notice 公告模型（支持置顶、强弹窗、排序与启用状态）。
 type Notice struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	Category  string    `gorm:"type:varchar(32);not null;default:'notice';index" json:"category"` // notice: 系统公告, guide: 使用指南
 	Title     string    `gorm:"type:varchar(255);not null" json:"title"`
 	Content   string    `gorm:"type:text;not null" json:"content"`
 	IsPinned  bool      `gorm:"default:false;index" json:"is_pinned"`

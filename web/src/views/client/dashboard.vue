@@ -10,7 +10,6 @@ import {
   CsContainer,
   CsHeader,
   CsIcon,
-  CsLink,
   CsModal,
   CsProgressBar,
   CsSpaceBetween,
@@ -141,13 +140,16 @@ async function loadServers() {
   }
 }
 
-// 公告系统（真实接口 + 弹窗与强提醒）
+// 公告与使用指南（同一接口返回，按 category 分流）
 const notices = ref<NoticeItem[]>([])
 const noticeLoading = ref(false)
 const selectedNotice = ref<NoticeItem | null>(null)
 const noticeModalOpen = ref(false)
 const popupNotice = ref<NoticeItem | null>(null)
 const popupOpen = ref(false)
+
+const systemNotices = computed(() => notices.value.filter((n) => n.category !== 'guide'))
+const guides = computed(() => notices.value.filter((n) => n.category === 'guide'))
 
 async function loadNotices() {
   noticeLoading.value = true
@@ -326,12 +328,12 @@ function viewNotice(n: NoticeItem) {
           <CsBox v-if="noticeLoading" color="text-body-secondary" font-size="body-s">
             加载公告中…
           </CsBox>
-          <CsBox v-else-if="!notices.length" color="text-body-secondary" font-size="body-s">
+          <CsBox v-else-if="!systemNotices.length" color="text-body-secondary" font-size="body-s">
             暂无系统公告
           </CsBox>
           <div v-else class="notice-list">
             <button
-              v-for="n in notices"
+              v-for="n in systemNotices"
               :key="n.id"
               type="button"
               class="notice-row"
@@ -350,14 +352,26 @@ function viewNotice(n: NoticeItem) {
           <template #header>
             <CsHeader variant="h2">使用指南</CsHeader>
           </template>
-          <CsSpaceBetween direction="vertical" size="xs">
-            <CsLink @follow="router.push('/subscribe')">
-              Clash Verge Rev (Mihomo) 快速导入教程
-            </CsLink>
-            <CsLink @follow="router.push('/subscribe')">
-              苹果 iOS Stash 客户端配置指南
-            </CsLink>
-          </CsSpaceBetween>
+          <CsBox v-if="noticeLoading" color="text-body-secondary" font-size="body-s">
+            加载指南中…
+          </CsBox>
+          <CsBox v-else-if="!guides.length" color="text-body-secondary" font-size="body-s">
+            暂无使用指南
+          </CsBox>
+          <div v-else class="notice-list">
+            <button
+              v-for="g in guides"
+              :key="g.id"
+              type="button"
+              class="notice-row"
+              @click="viewNotice(g)"
+            >
+              <div class="notice-title">
+                <CsBadge v-if="g.is_pinned" color="red">置顶</CsBadge>
+                <span>{{ g.title }}</span>
+              </div>
+            </button>
+          </div>
         </CsContainer>
       </CsSpaceBetween>
     </div>

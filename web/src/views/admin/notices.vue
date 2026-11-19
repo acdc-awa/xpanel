@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardGrid,
   CsContainer,
   CsEmpty,
   CsFormField,
@@ -17,7 +14,6 @@ import {
   CsRadio,
   CsRadioGroup,
   CsSelect,
-  CsSpinner,
   CsToggle,
   CsToolbar,
   CsTooltip,
@@ -33,26 +29,43 @@ import {
 import type { NoticeItem, NoticePayload } from '@/api/types'
 import { errMsg } from '@/api/http'
 import SortHandle from '@/components/base/SortHandle.vue'
-import { useCardDragSort } from '@/composables/useCardDragSort'
 import { formatDate } from '@/utils/format'
 import { renderMarkdown } from '@/utils/markdown'
 
 const list = ref<NoticeItem[]>([])
+const noticeList = ref<NoticeItem[]>([])
+const guideList = ref<NoticeItem[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const statusFilter = ref<number | undefined>(undefined)
+
+function plainPreview(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_~\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 async function load() {
   loading.value = true
   try {
     const params: { keyword?: string; status?: number } = {}
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
-    if (statusFilter.value !== undefined) params.status = statusFilter.value
+    if (statusFilter.value !== undefined && statusFilter.value !== null && (statusFilter.value as unknown) !== '') {
+      params.status = statusFilter.value
+    }
 
     const { data } = await getAdminNotices(params)
     if (data.code === 0) {
       list.value = data.data
-      syncSnapshot()
+      noticeList.value = data.data.filter((n) => n.category !== 'guide')
+      guideList.value = data.data.filter((n) => n.category === 'guide')
+      syncNoticeSnapshot()
+      syncGuideSnapshot()
     } else {
       ElMessage.error(data.message)
     }
@@ -71,6 +84,7 @@ const editing = ref(false)
 const saving = ref(false)
 const form = reactive({
   id: 0,
+  category: 'notice' as 'notice' | 'guide',
   title: '',
   content: '',
   status: 1,
@@ -78,7 +92,7 @@ const form = reactive({
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: 0, title: '', content: '', status: 1 })
+  Object.assign(form, { id: 0, category: 'notice', title: '', content: '', status: 1 })
   formOpen.value = true
 }
 
@@ -86,6 +100,7 @@ function openEdit(row: NoticeItem) {
   editing.value = true
   Object.assign(form, {
     id: row.id,
+    category: row.category === 'guide' ? 'guide' : 'notice',
     title: row.title,
     content: row.content,
     status: row.status,
@@ -145,6 +160,7 @@ async function save() {
   try {
     // 只提交表单里有的字段：置顶/弹窗/排序由卡片与拖拽维护，后端缺省即不改。
     const payload: NoticePayload = {
+      category: form.category,
       title: form.title.trim(),
       content: form.content,
       status: form.status,
@@ -211,19 +227,139 @@ async function remove(row: NoticeItem) {
 // ---- 排序（拖拽）----
 // 唯一写入点：拖完一次性提交全量顺序（数组下标即 sort_order）。
 // 搜索/筛选时禁用——那时「插到哪」没有确定语义。
-const reorderEnabled = computed(() => !keyword.value.trim() && statusFilter.value === undefined)
-const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
-  list,
-  idOf: (n) => n.id,
-  enabled: reorderEnabled,
-  persist: reorderNotices,
-  // 置顶公告在管理端与用户端都固定排在最前，拖拽只能在自己的分组内换位。
-  // rest 是「已摘掉被拖项」的列表，pinnedCount 即置顶组可用下标的上界。
-  clamp: (rest, insertAt, moved) => {
-    const pinnedCount = rest.filter((n) => n.is_pinned).length
-    return moved.is_pinned ? Math.min(insertAt, pinnedCount) : Math.max(insertAt, pinnedCount)
-  },
-})
+const reorderEnabled = computed(
+  () =>
+    !keyword.value.trim() &&
+    (statusFilter.value === undefined || statusFilter.value === null || (statusFilter.value as unknown) === ''),
+)
+
+const persistMergedOrder = () =>
+  reorderNotices([...noticeList.value, ...guideList.value].map((n) => n.id))
+
+const clampPinned = (rest: NoticeItem[], insertAt: number, moved: NoticeItem) => {
+  const pinnedCount = rest.filter((n) => n.is_pinned).length
+  return moved.is_pinned ? Math.min(insertAt, pinnedCount) : Math.max(insertAt, pinnedCount)
+}
+
+function createRowDrag(
+  targetList: Ref<NoticeItem[]>,
+  enabled: Ref<boolean>,
+  persist: () => Promise<{ data: { code: number; message?: string } }>,
+  clamp: (rest: NoticeItem[], insertAt: number, moved: NoticeItem) => number,
+) {
+  const canReorder = computed(() => enabled.value && targetList.value.length > 1)
+  const draggingId = ref<number | null>(null)
+  const dragOffsetY = ref(0)
+  let snapshot: NoticeItem[] = []
+  let startY = 0
+  let startIndex = 0
+  let rowHeight = 48
+
+  function syncSnapshot() {
+    snapshot = [...targetList.value]
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    if (draggingId.value === null) return
+    const from = targetList.value.findIndex((n) => n.id === draggingId.value)
+    if (from < 0) return
+
+    const movedItem = targetList.value[from]
+    const pinnedCount = targetList.value.filter((n) => n.is_pinned).length
+    const minIdx = movedItem.is_pinned ? 0 : pinnedCount
+    const maxIdx = movedItem.is_pinned ? Math.max(0, pinnedCount - 1) : targetList.value.length - 1
+
+    const minDy = (minIdx - startIndex) * rowHeight
+    const maxDy = (maxIdx - startIndex) * rowHeight
+    const clampedDy = Math.max(minDy, Math.min(maxDy, e.clientY - startY))
+
+    const rawTarget = startIndex + Math.round(clampedDy / rowHeight)
+    const bounded = Math.max(minIdx, Math.min(maxIdx, rawTarget))
+
+    if (bounded !== from) {
+      const next = [...targetList.value]
+      const [moved] = next.splice(from, 1)
+      const insertAt = clamp(next, bounded, moved)
+      if (insertAt !== from) {
+        next.splice(insertAt, 0, moved)
+        targetList.value = next
+      }
+    }
+
+    const currentIndex = targetList.value.findIndex((n) => n.id === draggingId.value)
+    dragOffsetY.value = clampedDy - (currentIndex - startIndex) * rowHeight
+  }
+
+  async function onPointerUp() {
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
+    if (draggingId.value === null) return
+    draggingId.value = null
+    dragOffsetY.value = 0
+
+    const changed = targetList.value.some((n, i) => snapshot[i]?.id !== n.id)
+    if (!changed) return
+    try {
+      const { data } = await persist()
+      if (data.code === 0) {
+        snapshot = [...targetList.value]
+      } else {
+        targetList.value = [...snapshot]
+        ElMessage.error(data.message || '保存排序失败，已恢复原顺序')
+      }
+    } catch (e) {
+      targetList.value = [...snapshot]
+      ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
+    }
+  }
+
+  function onPointerDown(e: PointerEvent) {
+    if (!canReorder.value || e.button !== 0) return
+    const handle = (e.target as HTMLElement | null)?.closest('[data-sort-handle]')
+    const row = handle?.closest<HTMLElement>('tr[data-sort-id]')
+    if (!handle || !row) return
+    const id = Number(row.getAttribute('data-sort-id'))
+    if (!id) return
+    const idx = targetList.value.findIndex((n) => n.id === id)
+    if (idx < 0) return
+
+    e.preventDefault()
+    snapshot = [...targetList.value]
+    draggingId.value = id
+    dragOffsetY.value = 0
+    startY = e.clientY
+    startIndex = idx
+    rowHeight = row.getBoundingClientRect().height || 48
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+  }
+
+  onUnmounted(() => {
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
+  })
+
+  return { canReorder, draggingId, dragOffsetY, onPointerDown, syncSnapshot }
+}
+
+const {
+  canReorder: canReorderNotice,
+  draggingId: draggingNoticeId,
+  dragOffsetY: dragNoticeOffsetY,
+  onPointerDown: onNoticePointerDown,
+  syncSnapshot: syncNoticeSnapshot,
+} = createRowDrag(noticeList, reorderEnabled, persistMergedOrder, clampPinned)
+
+const {
+  canReorder: canReorderGuide,
+  draggingId: draggingGuideId,
+  dragOffsetY: dragGuideOffsetY,
+  onPointerDown: onGuidePointerDown,
+  syncSnapshot: syncGuideSnapshot,
+} = createRowDrag(guideList, reorderEnabled, persistMergedOrder, clampPinned)
 </script>
 
 <template>
@@ -248,88 +384,123 @@ const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, sync
       </template>
     </CsToolbar>
 
-    <!-- 卡片列表（拖拽排序，与服务器卡片同一套交互） -->
-    <CsContainer header="全站公告列表">
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <CsSpinner size="large" />
-      </div>
+    <!-- 紧凑列表：分「系统公告」与「使用指南」两栏 -->
+    <CsContainer
+      v-for="section in [
+        {
+          key: 'notice',
+          header: '系统公告',
+          emptyText: '暂无系统公告，点击右上角「新建公告」',
+          items: noticeList,
+          canReorder: canReorderNotice,
+          draggingId: draggingNoticeId,
+          dragOffsetY: dragNoticeOffsetY,
+          onPointerDown: onNoticePointerDown,
+        },
+        {
+          key: 'guide',
+          header: '使用指南',
+          emptyText: '暂无使用指南，点击右上角「新建公告」并选择类型「使用指南」',
+          items: guideList,
+          canReorder: canReorderGuide,
+          draggingId: draggingGuideId,
+          dragOffsetY: dragGuideOffsetY,
+          onPointerDown: onGuidePointerDown,
+        },
+      ]"
+      :key="section.key"
+      :header="section.header"
+    >
+      <CsEmpty v-if="!loading && section.items.length === 0" icon-name="announcement" :description="section.emptyText" />
 
-      <CsEmpty v-else-if="list.length === 0" icon-name="announcement" description="暂无公告，点击右上角「新建公告」" />
-
-      <CsCardGrid
+      <div
         v-else
-        :min-width="380"
-        @dragstart="onDragStart"
-        @dragover="onDragOver"
-        @drop="onDrop"
-        @dragend="onDragEnd"
+        class="notice-table-wrap"
+        @pointerdown="section.onPointerDown"
       >
-        <CsCard
-          v-for="row in list"
-          :key="row.id"
-          class="notice-card"
-          :class="{
-            'notice-card--off': row.status !== 1,
-            'notice-card--dragging': draggingId === row.id,
-          }"
-          :data-sort-id="row.id"
-        >
-          <template #header>
-            <div class="notice-head">
-              <SortHandle v-if="canReorder" title="拖拽调整公告顺序" />
-              <button type="button" class="notice-name" title="点击编辑公告" @click="openEdit(row)">
-                {{ row.title }}
-              </button>
-              <CsBadge v-if="row.is_pinned" color="red">置顶</CsBadge>
-              <CsBadge v-if="row.is_popup" color="severity-medium">强制弹窗</CsBadge>
-              <CsBadge :color="row.status === 1 ? 'green' : 'grey'">
-                {{ row.status === 1 ? '已发布' : '草稿' }}
-              </CsBadge>
-            </div>
-          </template>
-
-          <template #actions>
-            <CsTooltip
-              :content="row.status === 1 ? '已发布（用户可见），点击转为草稿' : '草稿（仅管理员可见），点击发布'"
-              placement="top"
+        <table class="notice-table">
+          <thead>
+            <tr>
+              <th v-if="section.canReorder" class="col-sort" />
+              <th class="col-title">标题与内容</th>
+              <th class="col-toggle">发布</th>
+              <th class="col-toggle">置顶</th>
+              <th v-if="section.key !== 'guide'" class="col-toggle">弹窗</th>
+              <th class="col-updated">更新时间</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <TransitionGroup name="notice-row" tag="tbody">
+            <tr
+              v-for="item in section.items"
+              :key="item.id"
+              class="notice-row"
+              :class="{
+                'notice-row--off': item.status !== 1,
+                'notice-row--dragging': section.draggingId === item.id,
+              }"
+              :style="
+                section.draggingId === item.id
+                  ? { transform: `translate3d(0, ${section.dragOffsetY}px, 0)` }
+                  : undefined
+              "
+              :data-sort-id="item.id"
             >
-              <CsToggle
-                :model-value="row.status === 1"
-                :aria-label="`切换公告 ${row.title} 的发布状态`"
-                @change="() => handleToggle(row, 'status')"
-              />
-            </CsTooltip>
-          </template>
+              <td v-if="section.canReorder" class="col-sort">
+                <SortHandle title="拖拽调整顺序" />
+              </td>
 
-          <!-- 渲染后的正文预览（3 行裁切），不是 Markdown 原文 -->
-          <div class="notice-content-preview markdown-content" v-html="renderMarkdown(row.content)" />
+              <td class="col-title">
+                <div class="notice-title-cell">
+                  <button type="button" class="notice-name" title="点击编辑" @click="openEdit(item)">
+                    {{ item.title }}
+                  </button>
+                  <span v-if="plainPreview(item.content)" class="notice-snippet">
+                    {{ plainPreview(item.content) }}
+                  </span>
+                </div>
+              </td>
 
-          <div class="notice-switches">
-            <div class="notice-switch-row">
-              <span class="switch-label">置顶显示</span>
-              <CsToggle
-                :model-value="row.is_pinned"
-                aria-label="切换置顶显示"
-                @change="() => handleToggle(row, 'is_pinned')"
-              />
-            </div>
-            <div class="notice-switch-row">
-              <span class="switch-label">登录强制弹窗</span>
-              <CsToggle
-                :model-value="row.is_popup"
-                aria-label="切换登录强制弹窗"
-                @change="() => handleToggle(row, 'is_popup')"
-              />
-            </div>
-          </div>
+              <td class="col-toggle">
+                <CsTooltip
+                  :content="item.status === 1 ? '已发布（用户可见），点击转为草稿' : '草稿（仅管理员可见），点击发布'"
+                  placement="top"
+                >
+                  <CsToggle
+                    :model-value="item.status === 1"
+                    :aria-label="`切换 ${item.title} 的发布状态`"
+                    @change="() => handleToggle(item, 'status')"
+                  />
+                </CsTooltip>
+              </td>
 
-          <template #footer>
-            <span class="notice-updated"><span>#{{ row.id }}</span><span>{{ formatDate(row.updated_at) }} 更新</span></span>
-            <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
-            <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
-          </template>
-        </CsCard>
-      </CsCardGrid>
+              <td class="col-toggle">
+                <CsToggle
+                  :model-value="item.is_pinned"
+                  aria-label="切换置顶显示"
+                  @change="() => handleToggle(item, 'is_pinned')"
+                />
+              </td>
+
+              <td v-if="section.key !== 'guide'" class="col-toggle">
+                <CsToggle
+                  :model-value="item.is_popup"
+                  aria-label="切换登录强制弹窗"
+                  @change="() => handleToggle(item, 'is_popup')"
+                />
+              </td>
+
+              <td class="col-updated">
+                <span class="notice-updated-cell">{{ formatDate(item.updated_at) }}</span>
+              </td>
+
+              <td class="col-actions">
+                <CsButton size="small" icon-name="edit" @click="openEdit(item)">编辑</CsButton>
+              </td>
+            </tr>
+          </TransitionGroup>
+        </table>
+      </div>
     </CsContainer>
 
     <!-- 编辑公告：基础信息 + 双栏 Markdown（左侧源码、右侧渲染预览） -->
@@ -350,6 +521,13 @@ const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, sync
               placeholder="如：系统升级维护通知 / 节点新增上线"
               :maxlength="100"
             />
+          </CsFormField>
+
+          <CsFormField label="类型" class="notice-status-field">
+            <CsRadioGroup v-model="form.category" direction="horizontal">
+              <CsRadio value="notice" label="系统公告" />
+              <CsRadio value="guide" label="使用指南" />
+            </CsRadioGroup>
           </CsFormField>
 
           <CsFormField label="状态" class="notice-status-field">
@@ -437,6 +615,22 @@ const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, sync
       </div>
 
       <template #footer>
+        <CsButton
+          v-if="editing && form.id"
+          variant="danger-outline"
+          icon-name="remove"
+          @click="
+            () => {
+              const target = list.find((n) => n.id === form.id)
+              if (target) {
+                formOpen = false
+                remove(target)
+              }
+            }
+          "
+        >
+          删除
+        </CsButton>
         <CsButton @click="formOpen = false">取消</CsButton>
         <CsButton variant="primary" :loading="saving" @click="save">
           {{ editing ? '保存修改' : '创建公告' }}
@@ -734,6 +928,129 @@ const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, sync
       }
     }
   }
+}
+
+.notice-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.notice-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 14px;
+
+  th {
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-text-label-g80qnu);
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px;
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w);
+    vertical-align: middle;
+  }
+
+  .col-sort {
+    width: 36px;
+    padding-inline: 6px;
+    text-align: center;
+  }
+
+  .col-title {
+    width: auto;
+    min-width: 220px;
+  }
+
+  .col-category {
+    width: 68px;
+    white-space: nowrap;
+  }
+
+  .col-toggle {
+    width: 56px;
+    text-align: center;
+  }
+
+  .col-updated {
+    width: 152px;
+    white-space: nowrap;
+  }
+
+  .col-actions {
+    width: 115px;
+    text-align: right;
+    white-space: nowrap;
+
+    :deep(button) {
+      white-space: nowrap;
+    }
+  }
+}
+
+.notice-row {
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+
+  &:hover {
+    background: var(--color-background-dropdown-item-hover-pvfsrg);
+  }
+
+  &--off {
+    opacity: 0.65;
+  }
+
+  &--dragging,
+  &--dragging.notice-row-move {
+    position: relative;
+    z-index: 10;
+    background: var(--color-background-container-content-mjfil9);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    transition: none !important;
+  }
+}
+
+.notice-row-move {
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.notice-title-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.notice-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notice-snippet {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--color-text-body-secondary-66ygbb);
+}
+
+.notice-cat-badge {
+  white-space: nowrap;
+}
+
+.notice-updated-cell {
+  font-size: 13px;
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .text-primary {

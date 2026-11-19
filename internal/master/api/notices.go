@@ -14,12 +14,20 @@ import (
 // noticeForm 中所有非标题/正文字段都是指针：缺省即「不改」。
 // 编辑弹窗不再包含置顶/弹窗开关（改由列表卡片直接切换），漏传不能把它们清成 false。
 type noticeForm struct {
-	Title     string `json:"title" binding:"required"`
-	Content   string `json:"content" binding:"required"`
-	IsPinned  *bool  `json:"is_pinned"`
-	IsPopup   *bool  `json:"is_popup"`
-	Status    *int   `json:"status"`
-	SortOrder *int   `json:"sort_order"`
+	Category  *string `json:"category"`
+	Title     string  `json:"title" binding:"required"`
+	Content   string  `json:"content" binding:"required"`
+	IsPinned  *bool   `json:"is_pinned"`
+	IsPopup   *bool   `json:"is_popup"`
+	Status    *int    `json:"status"`
+	SortOrder *int    `json:"sort_order"`
+}
+
+func normalizeNoticeCategory(raw *string) string {
+	if raw != nil && strings.TrimSpace(*raw) == "guide" {
+		return "guide"
+	}
+	return "notice"
 }
 
 // AdminListNotices GET /api/v1/admin/notices —— 管理端公告列表。
@@ -33,6 +41,9 @@ func (d *Deps) AdminListNotices(c *gin.Context) {
 		if v, err := strconv.Atoi(st); err == nil {
 			q = q.Where("status = ?", v)
 		}
+	}
+	if cat := strings.TrimSpace(c.Query("category")); cat == "notice" || cat == "guide" {
+		q = q.Where("category = ?", cat)
 	}
 
 	var list []models.Notice
@@ -63,10 +74,11 @@ func (d *Deps) AdminCreateNotice(c *gin.Context) {
 	}
 
 	notice := models.Notice{
+		Category:  normalizeNoticeCategory(form.Category),
 		Title:     strings.TrimSpace(form.Title),
 		Content:   form.Content,
 		IsPinned:  form.IsPinned != nil && *form.IsPinned,
-		IsPopup:   form.IsPopup != nil && *form.IsPopup,
+		IsPopup:   normalizeNoticeCategory(form.Category) != "guide" && form.IsPopup != nil && *form.IsPopup,
 		Status:    status,
 		SortOrder: sortOrder,
 	}
@@ -112,10 +124,15 @@ func (d *Deps) AdminUpdateNotice(c *gin.Context) {
 
 	notice.Title = strings.TrimSpace(form.Title)
 	notice.Content = form.Content
+	if form.Category != nil {
+		notice.Category = normalizeNoticeCategory(form.Category)
+	}
 	if form.IsPinned != nil {
 		notice.IsPinned = *form.IsPinned
 	}
-	if form.IsPopup != nil {
+	if notice.Category == "guide" {
+		notice.IsPopup = false
+	} else if form.IsPopup != nil {
 		notice.IsPopup = *form.IsPopup
 	}
 	if form.Status != nil {
@@ -188,7 +205,11 @@ func (d *Deps) AdminToggleNotice(c *gin.Context) {
 	case "is_pinned":
 		updates["is_pinned"] = !notice.IsPinned
 	case "is_popup":
-		updates["is_popup"] = !notice.IsPopup
+		if notice.Category == "guide" {
+			updates["is_popup"] = false
+		} else {
+			updates["is_popup"] = !notice.IsPopup
+		}
 	default:
 		util.BadRequest(c, "不支持的切换字段")
 		return

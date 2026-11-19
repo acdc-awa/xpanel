@@ -505,8 +505,11 @@ export interface ServerRoutingRule {
   updated_at: string
 }
 
+export type NoticeCategory = 'notice' | 'guide'
+
 export interface NoticeItem {
   id: number
+  category?: NoticeCategory
   title: string
   content: string
   is_pinned: boolean
@@ -518,6 +521,7 @@ export interface NoticeItem {
 }
 
 export interface NoticePayload {
+  category?: NoticeCategory
   title: string
   content: string
   is_pinned?: boolean

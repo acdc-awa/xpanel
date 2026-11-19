@@ -29,19 +29,6 @@ const route = useRoute()
 
 const pageTitle = computed(() => (route.meta.title as string) || '用户中心')
 
-// 导航开合（Cloudscape AppLayout 语义：开 = 固定列，关 = 完全收起）
-const storedCollapsed = typeof localStorage !== 'undefined' ? localStorage.getItem('client_sidebar_collapsed') : null
-const navigationOpen = ref(storedCollapsed !== '1')
-
-function setNavigationOpen(value: boolean) {
-  navigationOpen.value = value
-  localStorage.setItem('client_sidebar_collapsed', value ? '0' : '1')
-}
-
-function toggleNavigation() {
-  setNavigationOpen(!navigationOpen.value)
-}
-
 // 侧边栏菜单项（桌面/平板端）
 const navItems = computed<SideNavigationItem[]>(() =>
   clientMenus.map((item) => ({
@@ -143,9 +130,8 @@ function syncTopbarHeight() {
   if (rectHeight > 0) topbarHeight.value = rectHeight
 }
 
-// 响应式分级：< 768px 手机端走底部 Tab Bar；768px ~ 1024px 默认收起导航
+// 响应式分级：< 768px 手机端走底部 Tab Bar
 const mobileMq = typeof window !== 'undefined' ? window.matchMedia(MQ.tablet) : null
-const tabletMq = typeof window !== 'undefined' ? window.matchMedia(MQ.content) : null
 
 const isMobile = ref(mobileMq?.matches ?? false)
 
@@ -153,28 +139,8 @@ function onMobileMq(e: MediaQueryListEvent | MediaQueryList) {
   isMobile.value = e.matches
 }
 
-function onTabletMq(e: MediaQueryListEvent | MediaQueryList) {
-  if (e.matches && localStorage.getItem('client_sidebar_collapsed') === null) {
-    navigationOpen.value = false
-  }
-}
-
-// 全局快捷键 (Ctrl/Cmd + B 切换侧栏)
-function handleGlobalKeydown(e: KeyboardEvent) {
-  if (isMobile.value) return
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-  const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey
-  if (isCtrlOrCmd && e.key.toLowerCase() === 'b') {
-    e.preventDefault()
-    toggleNavigation()
-  }
-}
-
 onMounted(() => {
-  if (tabletMq) onTabletMq(tabletMq)
   mobileMq?.addEventListener('change', onMobileMq)
-  tabletMq?.addEventListener('change', onTabletMq)
-  window.addEventListener('keydown', handleGlobalKeydown)
   syncTopbarHeight()
   const topbarEl = topbarRef.value?.$el as HTMLElement | undefined
   if (topbarEl && typeof ResizeObserver !== 'undefined') {
@@ -185,8 +151,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   mobileMq?.removeEventListener('change', onMobileMq)
-  tabletMq?.removeEventListener('change', onTabletMq)
-  window.removeEventListener('keydown', handleGlobalKeydown)
   topbarObserver?.disconnect()
   topbarObserver = null
 })
@@ -210,14 +174,12 @@ onUnmounted(() => {
       v-if="!isMobile"
       :height="TOOLBAR_HEIGHT"
       :sticky-top="topbarHeight"
-      :navigation-label="navigationOpen ? '收起导航' : '展开导航'"
-      @navigation-click="toggleNavigation"
     >
       <CsBreadcrumbGroup v-if="breadcrumbs.length" :items="breadcrumbs" />
     </CsAppToolbar>
 
     <CsAppLayout
-      :navigation-open="navigationOpen"
+      :navigation-open="true"
       :navigation-width="236"
       :header-height="appHeaderHeight"
       :navigation-hide="isMobile"
@@ -225,7 +187,6 @@ onUnmounted(() => {
       :max-content-width="1280"
       navigation-toggle="external"
       :reserve-navigation-toggle-row="false"
-      @update:navigation-open="setNavigationOpen"
     >
       <template #navigation>
         <CsSideNavigation
@@ -273,6 +234,13 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 900;
+
+  @media (max-width: $bp-tablet-max) {
+    :deep([class*='padding-box']) {
+      min-block-size: 54px;
+      padding-inline: 16px;
+    }
+  }
 }
 
 .client-bottom-nav {
