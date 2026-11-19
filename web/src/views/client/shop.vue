@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  Check,
-  Box,
-  Ticket,
-  ShoppingCart,
-  InfoFilled,
-  Wallet,
-} from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+  CsAlert,
+  CsBadge,
+  CsBox,
+  CsButton,
+  CsContainer,
+  CsForm,
+  CsFormItem,
+  CsHeader,
+  CsInput,
+  CsModal,
+  CsSpaceBetween,
+  CsStatusIndicator,
+  ElMessage,
+} from '@/components/cloudscape'
 import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'
@@ -40,9 +46,6 @@ const quickRedeemCode = ref('')
 const quickRedeeming = ref(false)
 
 const userBalanceCents = computed(() => auth.user?.balance_cents ?? 0)
-
-// 当前持有套餐：商店列表由后端按身份过滤（非持有者只见可新购套餐；持有者额外可见
-// 自己可续费的当前套餐），故出现即可下单——持有者按钮显示「续费」（同套餐直付=顺延）
 const currentPlanId = computed(() => auth.user?.plan_id ?? 0)
 const balanceYuan = computed(() => (userBalanceCents.value / 100).toFixed(2))
 
@@ -57,10 +60,10 @@ const balanceDeficitYuan = computed(() => {
   return diff > 0 ? (diff / 100).toFixed(2) : '0.00'
 })
 
-const orderStatusMap: Record<string, { type: 'warning' | 'success' | 'info'; text: string }> = {
-  pending: { type: 'warning', text: '处理中' },
+const orderStatusMap: Record<string, { type: 'pending' | 'success' | 'stopped'; text: string }> = {
+  pending: { type: 'pending', text: '处理中' },
   paid: { type: 'success', text: '已生效' },
-  cancelled: { type: 'info', text: '已取消' },
+  cancelled: { type: 'stopped', text: '已取消' },
 }
 
 function fmtMoney(cents: number) {
@@ -79,8 +82,6 @@ function getPlanFeatures(plan: Plan): string[] {
 
   const rawText = plan.description?.trim() ? plan.description : defaultTemplate
   const trafficStr = fmtGb(plan.traffic_gb)
-  // 占位符只替换数值：模板与后台默认文案都在占位符后写了「天」，
-  // 这里再拼单位会渲染成「有效期 30 天 天」
   const durationStr = `${plan.duration_days}`
 
   return rawText
@@ -91,7 +92,6 @@ function getPlanFeatures(plan: Plan): string[] {
       line
         .replace(/(\$TRAFFIC\$|\{traffic\}|\{\{traffic\}\})/gi, trafficStr)
         .replace(/(\$DURATION\$|\{duration\}|\{\{duration\}\}|\$DAYS\$|\{days\})/gi, durationStr)
-        // 设备限制已下线：存量文案残留的占位符清空，避免整行露出裸 token
         .replace(/(\$DEVICE_LIMIT\$|\{device_limit\}|\{\{device_limit\}\}|\$DEVICES\$|\{devices\})/gi, ''),
     )
     .filter((line) => line !== '')
@@ -117,7 +117,6 @@ function openCheckout(plan: Plan) {
   checkoutOpen.value = true
 }
 
-// 快捷卡密充值
 async function handleQuickRedeem() {
   const code = quickRedeemCode.value.trim()
   if (!code) {
@@ -142,7 +141,6 @@ async function handleQuickRedeem() {
   }
 }
 
-// 确认结账支付
 async function confirmPay() {
   if (!selectedPlan.value) return
   paying.value = true
@@ -164,627 +162,322 @@ async function confirmPay() {
 </script>
 
 <template>
-  <div class="x-client-body" v-loading="loading">
-    <!-- 头部横幅与用户余额卡 -->
-    <div class="shop-header-row">
-      <div class="shop-hero">
-        <div class="shop-badge"><el-icon><ShoppingCart /></el-icon>&nbsp;订阅与套餐</div>
-        <h1 class="shop-title">套餐</h1>
-        <p class="shop-desc">高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。</p>
-      </div>
+  <CsSpaceBetween direction="vertical" size="l">
+    <CsHeader variant="h1" description="高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。">
+      套餐商店
+      <template #actions>
+        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+          <CsBadge color="grey">余额 ¥{{ balanceYuan }}</CsBadge>
+          <CsButton
+            @click="
+              quickRedeemCode = '';
+              topupModalOpen = true
+            "
+          >
+            卡密充值
+          </CsButton>
+        </CsSpaceBetween>
+      </template>
+    </CsHeader>
 
-      <div class="shop-wallet-badge">
-        <div class="wallet-icon"><el-icon><Wallet /></el-icon></div>
-        <div class="wallet-text">
-          <span class="wallet-lbl">账户可用余额</span>
-          <span class="wallet-val cell-mono">¥{{ balanceYuan }}</span>
-        </div>
-        <el-button size="small" type="primary" plain style="margin-left: 8px" @click="quickRedeemCode = ''; topupModalOpen = true">
-          卡密充值
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 定价方案网格 -->
-    <div class="pricing-grid">
-      <div
+    <!-- 套餐列表 -->
+    <div v-if="plans.length" class="pricing-grid">
+      <CsContainer
         v-for="(p, idx) in plans"
         :key="p.id"
         class="pricing-card"
-        :class="{ featured: idx === featuredIdx }"
+        :class="{ 'is-featured': idx === featuredIdx }"
       >
-        <span v-if="idx === featuredIdx" class="featured-badge">热门推荐</span>
+        <template #header>
+          <CsHeader variant="h2">
+            {{ p.name }}
+            <template #actions>
+              <CsBadge v-if="idx === featuredIdx" color="blue">热门推荐</CsBadge>
+              <CsBadge v-else color="grey">{{ fmtGb(p.traffic_gb) }}</CsBadge>
+            </template>
+          </CsHeader>
+        </template>
 
-        <div class="card-top">
-          <div class="plan-title">{{ p.name }}</div>
-          <div class="plan-traffic-pill">{{ fmtGb(p.traffic_gb) }} 配额</div>
-        </div>
+        <CsSpaceBetween direction="vertical" size="m">
+          <div class="plan-price-row">
+            <span class="plan-price cell-mono">¥{{ (p.price_cents / 100).toFixed(2) }}</span>
+            <span class="plan-period">/ {{ p.duration_days }} 天</span>
+          </div>
 
-        <div class="plan-price-wrap">
-          <span class="currency">¥</span>
-          <span class="price-val">{{ (p.price_cents / 100).toFixed(2) }}</span>
-          <span class="price-period">/ {{ p.duration_days }} 天</span>
-        </div>
+          <ul class="plan-features">
+            <li v-for="(feat, fIdx) in getPlanFeatures(p)" :key="fIdx" class="plan-feature-item">
+              <CsStatusIndicator type="success">{{ feat }}</CsStatusIndicator>
+            </li>
+          </ul>
+        </CsSpaceBetween>
 
-        <div class="plan-divider" />
-
-        <ul class="plan-features">
-          <li v-for="(feat, fIdx) in getPlanFeatures(p)" :key="fIdx">
-            <el-icon class="check-icon"><Check /></el-icon>
-            <span>{{ feat }}</span>
-          </li>
-        </ul>
-
-        <div class="card-action">
-          <el-button
-            :type="idx === featuredIdx ? 'primary' : 'default'"
-            size="large"
-            class="buy-btn"
-            :class="{ 'glow-btn': idx === featuredIdx }"
+        <template #footer>
+          <CsButton
+            :variant="idx === featuredIdx ? 'primary' : 'normal'"
+            class="plan-buy-btn"
             @click="openCheckout(p)"
           >
             {{ p.id === currentPlanId ? '续费' : '立即订购' }}
-          </el-button>
-        </div>
-      </div>
-
-      <div v-if="!plans.length" class="empty-plan-box">
-        <el-icon style="font-size: 32px; color: var(--x-text-3)"><InfoFilled /></el-icon>
-        <p class="muted" style="margin-top: 8px">暂无在售套餐</p>
-      </div>
+          </CsButton>
+        </template>
+      </CsContainer>
     </div>
+
+    <CsContainer v-else>
+      <CsBox color="text-body-secondary" font-size="body-s">
+        {{ loading ? '正在加载在售套餐…' : '暂无在售套餐' }}
+      </CsBox>
+    </CsContainer>
 
     <!-- 订单记录 -->
-    <div class="x-card" style="margin-top: 24px">
-      <div class="x-card-head">
-        <span><el-icon><Box /></el-icon>&nbsp;服务订购记录</span>
-      </div>
-      <div v-if="orders.length">
-        <div v-for="o in orders" :key="o.id" class="x-order-item">
-          <div class="x-order-icon"><el-icon><Box /></el-icon></div>
-          <div class="x-order-meta">
-            <div class="x-order-name">{{ o.plan_name }}</div>
-            <div class="x-order-sub">
-              <code class="cell-mono">{{ o.order_no }}</code> · {{ formatDateTimeMinute(o.created_at) }}
-              <span class="x-chip green" style="margin-left: 6px; font-size: 10.5px">
-                余额支付
-              </span>
+    <CsContainer>
+      <template #header>
+        <CsHeader variant="h2">服务订购记录</CsHeader>
+      </template>
+
+      <div v-if="orders.length" class="order-list">
+        <div v-for="o in orders" :key="o.id" class="order-row">
+          <div class="order-main">
+            <div class="order-name">{{ o.plan_name }}</div>
+            <div class="order-meta">
+              <code class="cell-mono">{{ o.order_no }}</code>
+              <span>{{ formatDateTimeMinute(o.created_at) }}</span>
+              <CsBadge color="grey">余额支付</CsBadge>
             </div>
           </div>
-          <div style="text-align: right">
-            <div class="x-order-amount cell-mono">{{ fmtMoney(o.amount_cents) }}</div>
-            <span class="x-chip" :class="o.status === 'paid' ? 'green' : 'orange'" style="margin-top: 4px">
+          <div class="order-right">
+            <div class="order-amount cell-mono">{{ fmtMoney(o.amount_cents) }}</div>
+            <CsStatusIndicator :type="orderStatusMap[o.status]?.type ?? 'stopped'">
               {{ orderStatusMap[o.status]?.text ?? o.status }}
-            </span>
+            </CsStatusIndicator>
           </div>
         </div>
       </div>
-      <div v-else class="muted" style="padding: 24px 18px; font-size: 13px; text-align: center">
-        <el-icon><Ticket /></el-icon>&nbsp;暂无订购记录
-      </div>
-    </div>
+      <CsBox v-else color="text-body-secondary" font-size="body-s">暂无订购记录</CsBox>
+    </CsContainer>
 
-    <!-- 原地充值卡密弹窗 -->
-    <el-dialog
-      v-model="topupModalOpen"
-      title="卡密核销"
-      width="400px"
-      append-to-body
+    <!-- 卡密核销弹窗 -->
+    <CsModal
+      v-model:visible="topupModalOpen"
+      header="卡密核销"
+      size="small"
+      :close-on-click-overlay="false"
     >
-      <div style="display: flex; flex-direction: column; gap: 12px;">
-        <p class="muted" style="font-size: 12.5px;">
-          输入 16 位卡密，核销后余额即时到账。
-        </p>
-        <el-input
-          v-model="quickRedeemCode"
-          placeholder="请输入 16 位卡密"
-          class="cell-mono"
-          size="large"
-          @keyup.enter="handleQuickRedeem"
-        />
-        <el-button
-          type="primary"
-          size="large"
-          :loading="quickRedeeming"
-          @click="handleQuickRedeem"
-        >
-          立即核销
-        </el-button>
-      </div>
-    </el-dialog>
+      <CsForm @submit="handleQuickRedeem">
+        <CsFormItem label="卡密兑换码" description="输入 16 位卡密，核销后余额即时到账。">
+          <CsInput
+            v-model="quickRedeemCode"
+            placeholder="请输入 16 位卡密"
+            class="cell-mono"
+          />
+        </CsFormItem>
+      </CsForm>
+      <template #footer>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="topupModalOpen = false">取消</CsButton>
+          <CsButton variant="primary" :loading="quickRedeeming" @click="handleQuickRedeem">
+            立即核销
+          </CsButton>
+        </CsSpaceBetween>
+      </template>
+    </CsModal>
 
     <!-- 结账收银台弹窗 -->
-    <el-dialog
-      v-model="checkoutOpen"
-      title="结算收银台"
-      width="420px"
-      align-center
-      :append-to-body="true"
+    <CsModal
+      v-model:visible="checkoutOpen"
+      header="结算收银台"
+      size="small"
+      :close-on-click-overlay="false"
     >
-      <div v-if="selectedPlan" class="checkout-body">
-        <!-- 选购商品概要 -->
-        <div class="checkout-plan-card">
-          <div>
-            <div class="cp-title">{{ selectedPlan.name }}</div>
-            <div class="cp-sub">{{ fmtGb(selectedPlan.traffic_gb) }} 高速配额 · 有效期 {{ selectedPlan.duration_days }} 天</div>
-          </div>
-          <div class="cp-price cell-mono">
-            {{ fmtMoney(selectedPlan.price_cents) }}
+      <CsSpaceBetween v-if="selectedPlan" direction="vertical" size="m">
+        <div class="checkout-summary">
+          <div class="checkout-plan-name">{{ selectedPlan.name }}</div>
+          <div class="checkout-plan-meta">
+            {{ fmtGb(selectedPlan.traffic_gb) }} 高速配额，有效期 {{ selectedPlan.duration_days }} 天
           </div>
         </div>
 
-        <!-- 购买语义提示（与后端计时长规则一致）：一律作废重算 -->
-        <el-alert type="warning" :closable="false" show-icon class="purchase-notice">
-          购买提示：支付成功后立即生效——现有套餐剩余时长（如有）将作废，新套餐自购买时刻起重新计时
-          {{ selectedPlan.duration_days }} 天，已用流量与计费周期同步重置；续费与切换均按此规则。
-        </el-alert>
+        <div class="checkout-kv">
+          <span>应付金额</span>
+          <strong class="cell-mono">¥{{ (selectedPlan.price_cents / 100).toFixed(2) }}</strong>
+        </div>
+        <div class="checkout-kv">
+          <span>账户余额</span>
+          <span class="cell-mono">¥{{ balanceYuan }}</span>
+        </div>
 
-        <!-- 账户余额支付方式 -->
-        <div class="pay-method-wrap">
-          <div class="pay-option active">
-            <div class="opt-info">
-              <div class="opt-title">
-                <el-icon color="#6366f1"><Wallet /></el-icon>&nbsp;账户余额支付
-                <el-tag size="small" type="success" effect="dark" style="margin-left: 6px; font-size: 10px">即时生效</el-tag>
-              </div>
-              <div class="opt-desc cell-mono">
-                当前可用余额：<b>¥{{ balanceYuan }}</b>
-              </div>
-            </div>
-          </div>
+        <CsAlert v-if="!isBalanceSufficient" type="warning" header="账户余额不足">
+          当前还差 ¥{{ balanceDeficitYuan }}，可直接输入卡密即时充值。
+        </CsAlert>
 
-          <!-- 余额不足时的卡密充值辅助栏 -->
-          <div v-if="!isBalanceSufficient" class="deficit-topup-box">
-            <div class="deficit-msg">
-              <el-icon color="#f59e0b"><InfoFilled /></el-icon>
-              <span>余额不足，还需 <b>¥{{ balanceDeficitYuan }}</b>。可直接输入卡密：</span>
-            </div>
-            <div class="topup-input-row">
-              <el-input
+        <CsForm v-if="!isBalanceSufficient" @submit="handleQuickRedeem">
+          <CsFormItem label="卡密充值">
+            <CsSpaceBetween direction="horizontal" size="xs">
+              <CsInput
                 v-model="quickRedeemCode"
                 placeholder="输入 16 位卡密"
                 class="cell-mono"
-                size="small"
-                @keyup.enter="handleQuickRedeem"
               />
-              <el-button
-                type="primary"
-                size="small"
-                :loading="quickRedeeming"
-                @click="handleQuickRedeem"
-              >
-                充值
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </div>
+              <CsButton :loading="quickRedeeming" @click="handleQuickRedeem">核销</CsButton>
+            </CsSpaceBetween>
+          </CsFormItem>
+        </CsForm>
+      </CsSpaceBetween>
 
       <template #footer>
-        <div class="checkout-footer">
-          <div class="total-bar">
-            <span>实付金额：</span>
-            <span class="total-amount cell-mono">{{ selectedPlan ? fmtMoney(selectedPlan.price_cents) : formatMoney(0) }}</span>
-          </div>
-          <div class="footer-btn-group">
-            <el-button @click="checkoutOpen = false">取消</el-button>
-            <el-button
-              type="primary"
-              :loading="paying"
-              :disabled="!isBalanceSufficient"
-              @click="confirmPay"
-            >
-              {{ isBalanceSufficient ? '确认支付' : '余额不足' }}
-            </el-button>
-          </div>
-        </div>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="checkoutOpen = false">取消</CsButton>
+          <CsButton
+            variant="primary"
+            :disabled="!isBalanceSufficient"
+            :loading="paying"
+            @click="confirmPay"
+          >
+            确认支付
+          </CsButton>
+        </CsSpaceBetween>
       </template>
-    </el-dialog>
-  </div>
+    </CsModal>
+  </CsSpaceBetween>
 </template>
 
 <style scoped lang="scss">
-.shop-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  margin-bottom: 24px;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.shop-hero {
-  .shop-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 10px;
-    background: var(--x-primary-soft);
-    color: var(--x-primary);
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  .shop-title {
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--x-text);
-    margin: 0;
-  }
-  .shop-desc {
-    color: var(--x-text-2);
-    font-size: 13px;
-    margin-top: 4px;
-    line-height: 1.5;
-  }
-}
-
-.shop-wallet-badge {
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  box-shadow: var(--x-shadow);
-
-  .wallet-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: var(--x-primary-soft);
-    color: var(--x-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-  }
-
-  .wallet-text {
-    display: flex;
-    flex-direction: column;
-  }
-  .wallet-lbl {
-    font-size: 11px;
-    color: var(--x-text-3);
-  }
-  .wallet-val {
-    font-size: 17px;
-    font-weight: 800;
-    color: var(--x-text);
-  }
-}
-
 .pricing-grid {
   display: grid;
-  /* auto-fill 而非 auto-fit：套餐少时按固定列宽铺排，避免单套餐被拉成整行宽卡片 */
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
 }
 
-.pricing-card {
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 22px;
-  box-shadow: var(--x-shadow);
-  position: relative;
+.plan-price-row {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  transition: all 0.25s ease;
-
-  &:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--x-shadow-md);
-    border-color: rgba(99, 102, 241, 0.4);
-  }
-
-  &.featured {
-    border-color: var(--x-primary);
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.12);
-  }
-
-  .featured-badge {
-    position: absolute;
-    top: -10px;
-    right: 18px;
-    background: var(--x-primary);
-    color: #fff;
-    font-size: 10.5px;
-    font-weight: 700;
-    padding: 2px 10px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-  }
-
-  .card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-
-    .plan-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--x-text);
-    }
-    .plan-traffic-pill {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      background: var(--x-primary-soft);
-      color: var(--x-primary);
-      border-radius: 10px;
-    }
-  }
-
-  .plan-price-wrap {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    margin: 6px 0 14px;
-    font-family: var(--x-font-mono);
-
-    .currency {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--x-text);
-    }
-    .price-val {
-      font-size: 28px;
-      font-weight: 800;
-      color: var(--x-text);
-    }
-    .price-period {
-      font-size: 12.5px;
-      color: var(--x-text-3);
-      font-family: var(--el-font-family);
-    }
-  }
-
-  .plan-divider {
-    height: 1px;
-    background: var(--x-border);
-    margin-bottom: 14px;
-  }
-
-  .plan-features {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 20px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex: 1;
-
-    li {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12.5px;
-      color: var(--x-text-2);
-
-      .check-icon {
-        color: var(--x-success);
-        font-size: 14px;
-        flex: none;
-      }
-    }
-  }
-
-  .card-action {
-    .buy-btn {
-      width: 100%;
-      font-weight: 600;
-      font-size: 13.5px;
-      border-radius: var(--x-radius-sm);
-    }
-    .glow-btn {
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-    }
-  }
+  align-items: baseline;
+  gap: 6px;
 }
 
-.empty-plan-box {
-  grid-column: 1 / -1;
-  background: var(--x-card);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 40px 20px;
-  text-align: center;
+.plan-price {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--x-text);
 }
 
-.x-order-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--x-border);
-  gap: 12px;
-
-  &:last-child {
-    border-bottom: none;
-  }
-
-  .x-order-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    background: var(--x-card-soft);
-    color: var(--x-text-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    flex: none;
-  }
-
-  .x-order-meta {
-    flex: 1;
-    min-width: 0;
-
-    .x-order-name {
-      font-size: 13.5px;
-      font-weight: 600;
-      color: var(--x-text);
-    }
-    .x-order-sub {
-      font-size: 11.5px;
-      color: var(--x-text-3);
-      margin-top: 2px;
-    }
-  }
-
-  .x-order-amount {
-    font-size: 14.5px;
-    font-weight: 700;
-    color: var(--x-text);
-  }
+.plan-period {
+  font-size: 13px;
+  color: var(--x-text-secondary);
 }
 
-.checkout-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.checkout-plan-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 14px;
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius-sm);
-
-  .cp-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--x-text);
-  }
-  .cp-sub {
-    font-size: 11.5px;
-    color: var(--x-text-3);
-    margin-top: 2px;
-  }
-  .cp-price {
-    font-size: 16px;
-    font-weight: 800;
-    color: var(--x-primary);
-  }
-}
-
-.purchase-notice {
-  margin-bottom: 12px;
-}
-
-.pay-method-wrap {
+.plan-features {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
-
-  .pay-option {
-    border: 1px solid var(--x-border);
-    border-radius: var(--x-radius-sm);
-    padding: 10px 14px;
-    background: var(--x-card);
-    transition: all 0.15s ease;
-
-    &.active {
-      border-color: var(--x-primary);
-      background: var(--x-primary-soft);
-    }
-
-    .opt-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--x-text);
-      display: flex;
-      align-items: center;
-    }
-    .opt-desc {
-      font-size: 11.5px;
-      color: var(--x-text-2);
-      margin-top: 2px;
-    }
-  }
-
-  .deficit-topup-box {
-    background: var(--x-warning-soft);
-    border: 1px dashed rgba(245, 158, 11, 0.35);
-    border-radius: var(--x-radius);
-    padding: 10px 14px;
-    margin-top: 8px;
-
-    .deficit-msg {
-      font-size: 12px;
-      color: var(--x-warning);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 8px;
-    }
-    .topup-input-row {
-      display: flex;
-      gap: 8px;
-    }
-  }
 }
 
-.checkout-footer {
+.plan-feature-item {
+  font-size: 13px;
+  color: var(--x-text);
+}
+
+.plan-buy-btn {
+  inline-size: 100%;
+}
+
+.order-list {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+}
+
+.order-row {
+  display: flex;
   align-items: center;
-  width: 100%;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--x-border);
 
-  .total-bar {
-    font-size: 13px;
-    color: var(--x-text-2);
-    display: flex;
-    align-items: baseline;
-    .total-amount {
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--x-primary);
-      margin-left: 6px;
-    }
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
   }
 
-  .footer-btn-group {
-    display: flex;
-    gap: 8px;
-    align-items: center;
+  &:first-child {
+    padding-top: 0;
   }
 }
 
-@media (max-width: 480px) {
-  .checkout-footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+.order-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-inline-size: 0;
+}
 
-    .total-bar {
-      justify-content: space-between;
-      width: 100%;
-    }
+.order-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--x-text);
+}
 
-    .footer-btn-group {
-      display: grid;
-      grid-template-columns: 1fr 1.5fr;
-      width: 100%;
-      gap: 8px;
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
 
-      .el-button {
-        margin: 0 !important;
-      }
-    }
+.order-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.order-amount {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--x-text);
+}
+
+.checkout-summary {
+  padding: 12px 14px;
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+}
+
+.checkout-plan-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--x-text);
+}
+
+.checkout-plan-meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--x-text-secondary);
+}
+
+.checkout-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--x-text);
+}
+
+@media (max-width: $bp-content-max) {
+  .pricing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.muted {
-  color: var(--x-text-3);
+@media (max-width: $bp-tablet-max) {
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

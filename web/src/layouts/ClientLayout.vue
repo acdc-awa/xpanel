@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Setting, Sunny, Moon, Monitor, Fold, Expand } from '@element-plus/icons-vue'
+import { MQ } from '@/utils/media'
 import { clientMenus } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useThemeStore } from '@/stores/theme'
-import { MQ } from '@/utils/media'
 import UserAvatarDropdown from '@/components/UserAvatarDropdown.vue'
+import {
+  CsAppLayout,
+  CsAppToolbar,
+  CsBreadcrumbGroup,
+  CsIcon,
+  CsSideNavigation,
+  CsTopNavigation,
+  type BreadcrumbItem,
+  type SideNavigationFollowDetail,
+  type SideNavigationItem,
+  type TopNavigationIdentity,
+  type TopNavigationUtility,
+} from '@/components/cloudscape'
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -17,710 +29,298 @@ const route = useRoute()
 
 const pageTitle = computed(() => (route.meta.title as string) || '用户中心')
 
-// 折叠侧边栏状态（true = 折叠/靠近展开远离收起模式；false = 固定展开模式）
-// Pad 平板屏幕（< 1024px）默认折叠为 mini dock；宽屏可读取用户缓存
-const collapseMq = typeof window !== 'undefined' ? window.matchMedia(MQ.content) : null
+// 导航开合（Cloudscape AppLayout 语义：开 = 固定列，关 = 完全收起）
 const storedCollapsed = typeof localStorage !== 'undefined' ? localStorage.getItem('client_sidebar_collapsed') : null
-const isCollapsed = ref(storedCollapsed !== null ? storedCollapsed === '1' : collapseMq?.matches ?? false)
+const navigationOpen = ref(storedCollapsed !== '1')
 
-// 悬停展开状态（靠近展开，远离收起）
-const isHovered = ref(false)
-let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
-
-// 用户是否手动定过折叠状态。手动定过之后断点变化不再覆盖他的选择；
-// 没定过则折叠态完全跟随断点 —— 这样「拖窗口到某宽度」和「在该宽度刷新」
-// 必然得到同一种布局（原实现只在 setup 里读一次 window.innerWidth，
-// 拖窄得展开、在窄屏刷新得折叠，同一宽度两种结果）。
-const userChoseCollapse = ref(storedCollapsed !== null)
-
-function onCollapseMq(e: MediaQueryListEvent) {
-  if (userChoseCollapse.value) return
-  isCollapsed.value = e.matches
-  isHovered.value = false
+function setNavigationOpen(value: boolean) {
+  navigationOpen.value = value
+  localStorage.setItem('client_sidebar_collapsed', value ? '0' : '1')
 }
 
-// 是否当前处于视觉展开状态（固定展开 OR 悬停展开）
-const isEffectiveExpanded = computed(() => !isCollapsed.value || isHovered.value)
-
-function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value
-  isHovered.value = false
-  userChoseCollapse.value = true
-  localStorage.setItem('client_sidebar_collapsed', isCollapsed.value ? '1' : '0')
+function toggleNavigation() {
+  setNavigationOpen(!navigationOpen.value)
 }
 
-function handleMouseEnter() {
-  if (hoverLeaveTimer) {
-    clearTimeout(hoverLeaveTimer)
-    hoverLeaveTimer = null
-  }
-  if (isCollapsed.value) {
-    isHovered.value = true
-  }
+// 侧边栏菜单项（桌面/平板端）
+const navItems = computed<SideNavigationItem[]>(() =>
+  clientMenus.map((item) => ({
+    type: 'link',
+    text: item.title,
+    href: item.path,
+  })),
+)
+
+// 移动端底部导航图标映射
+const MOBILE_TAB_ICONS: Record<string, string> = {
+  '/dashboard': 'view-vertical',
+  '/subscribe': 'share',
+  '/shop': 'add-plus',
+  '/account': 'user-profile',
 }
 
-function handleMouseLeave() {
-  if (isCollapsed.value) {
-    hoverLeaveTimer = setTimeout(() => {
-      isHovered.value = false
-    }, 140)
+function mobileTabIcon(path: string): string {
+  return MOBILE_TAB_ICONS[path] ?? 'ellipsis'
+}
+
+function onNavFollow(detail: SideNavigationFollowDetail) {
+  if (detail.href && detail.href !== route.path) {
+    router.push(detail.href)
   }
 }
 
-// 全局快捷键监听 (Ctrl/Cmd + B 切换固定/折叠)
+// 顶栏品牌与全局工具
+const topbarIdentity = computed<TopNavigationIdentity>(() => ({
+  href: '/dashboard',
+  title: site.appName || 'XrayPanel',
+  logo: site.logo
+    ? {
+        src: site.logo,
+        alt: site.appName || 'XrayPanel',
+      }
+    : undefined,
+}))
+
+const themeUtilityIcon = computed(() => {
+  if (theme.mode === 'light') return 'sun'
+  if (theme.mode === 'dark') return 'moon'
+  return 'settings'
+})
+
+const topbarUtilities = computed<TopNavigationUtility[]>(() => {
+  const list: TopNavigationUtility[] = [
+    {
+      type: 'button',
+      iconName: themeUtilityIcon.value,
+      ariaLabel: theme.modeTooltip,
+      title: theme.modeTooltip,
+      onClick: () => theme.toggle(),
+    },
+  ]
+  if (auth.role === 'admin') {
+    list.push({
+      type: 'button',
+      text: '管理后台',
+      iconName: 'settings',
+      title: '进入管理后台',
+      onClick: () => router.push('/admin/dashboard'),
+    })
+  }
+  return list
+})
+
+function goDashboard() {
+  if (route.path !== '/dashboard') {
+    router.push('/dashboard')
+  }
+}
+
+// 面包屑
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+  if (route.path === '/dashboard') {
+    return [{ text: '用户中心', href: '/dashboard' }]
+  }
+  return [
+    { text: '用户中心', href: '/dashboard' },
+    { text: pageTitle.value, href: route.path },
+  ]
+})
+
+// 顶栏高度同步（向下取整避免高分屏/缩放下与工具栏之间出现 1px 缝隙）
+const TOOLBAR_HEIGHT = 42
+const topbarRef = ref<{ $el?: HTMLElement } | null>(null)
+const topbarHeight = ref(56)
+let topbarObserver: ResizeObserver | null = null
+
+const appHeaderHeight = computed(() =>
+  isMobile.value ? topbarHeight.value : topbarHeight.value + TOOLBAR_HEIGHT,
+)
+
+function syncTopbarHeight() {
+  const el = topbarRef.value?.$el as HTMLElement | undefined
+  if (!el) return
+  const rectHeight = Math.floor(el.getBoundingClientRect().height)
+  if (rectHeight > 0) topbarHeight.value = rectHeight
+}
+
+// 响应式分级：< 768px 手机端走底部 Tab Bar；768px ~ 1024px 默认收起导航
+const mobileMq = typeof window !== 'undefined' ? window.matchMedia(MQ.tablet) : null
+const tabletMq = typeof window !== 'undefined' ? window.matchMedia(MQ.content) : null
+
+const isMobile = ref(mobileMq?.matches ?? false)
+
+function onMobileMq(e: MediaQueryListEvent | MediaQueryList) {
+  isMobile.value = e.matches
+}
+
+function onTabletMq(e: MediaQueryListEvent | MediaQueryList) {
+  if (e.matches && localStorage.getItem('client_sidebar_collapsed') === null) {
+    navigationOpen.value = false
+  }
+}
+
+// 全局快捷键 (Ctrl/Cmd + B 切换侧栏)
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if (isMobile.value) return
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
   const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey
-
   if (isCtrlOrCmd && e.key.toLowerCase() === 'b') {
     e.preventDefault()
-    toggleCollapse()
+    toggleNavigation()
   }
 }
 
 onMounted(() => {
+  if (tabletMq) onTabletMq(tabletMq)
+  mobileMq?.addEventListener('change', onMobileMq)
+  tabletMq?.addEventListener('change', onTabletMq)
   window.addEventListener('keydown', handleGlobalKeydown)
-  collapseMq?.addEventListener('change', onCollapseMq)
+  syncTopbarHeight()
+  const topbarEl = topbarRef.value?.$el as HTMLElement | undefined
+  if (topbarEl && typeof ResizeObserver !== 'undefined') {
+    topbarObserver = new ResizeObserver(syncTopbarHeight)
+    topbarObserver.observe(topbarEl)
+  }
 })
 
 onUnmounted(() => {
-  if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
+  mobileMq?.removeEventListener('change', onMobileMq)
+  tabletMq?.removeEventListener('change', onTabletMq)
   window.removeEventListener('keydown', handleGlobalKeydown)
-  collapseMq?.removeEventListener('change', onCollapseMq)
+  topbarObserver?.disconnect()
+  topbarObserver = null
 })
 </script>
 
 <template>
-  <div class="client-layout" :class="{ 'is-collapsed': isCollapsed }">
-    <!-- 桌面端与平板端侧边栏 (>= 768px 显示) -->
-    <aside
-      class="client-aside"
-      :class="{
-        collapsed: isCollapsed,
-        'is-hovered': isHovered,
-      }"
-      @mouseenter="handleMouseEnter"
-      @mouseleave="handleMouseLeave"
+  <div class="client-shell" :class="{ 'is-mobile': isMobile }">
+    <CsTopNavigation
+      ref="topbarRef"
+      class="client-topbar"
+      :identity="topbarIdentity"
+      :utilities="topbarUtilities"
+      @identity-follow="goDashboard"
     >
-      <!-- 侧边栏顶部品牌 -->
-      <div class="client-brand">
-        <div class="client-brand-main">
-          <span v-if="site.logo" class="client-logo-img-wrap">
-            <img :src="site.logo" class="client-logo-img" alt="logo" />
-          </span>
-          <span v-else class="client-logo-mark">X</span>
-          <div v-if="isEffectiveExpanded" class="client-brand-info">
-            <div class="client-brand-title">{{ site.appName || 'XrayPanel' }}</div>
-            <div class="client-brand-sub">用户中心</div>
-          </div>
-        </div>
+      <template #utility-extra>
+        <UserAvatarDropdown current-portal="client" />
+      </template>
+    </CsTopNavigation>
 
-        <!-- 固定/折叠切换按钮（仅在展开或 hover 浮层态时展示） -->
-        <button
-          v-if="isEffectiveExpanded"
-          type="button"
-          class="sidebar-pin-btn"
-          :title="isCollapsed ? '展开侧栏 (Ctrl+B)' : '收起侧栏 (Ctrl+B)'"
-          @click.stop="toggleCollapse"
-        >
-          <el-icon :size="15"><Fold v-if="!isCollapsed" /><Expand v-else /></el-icon>
-        </button>
-      </div>
+    <CsAppToolbar
+      v-if="!isMobile"
+      :height="TOOLBAR_HEIGHT"
+      :sticky-top="topbarHeight"
+      :navigation-label="navigationOpen ? '收起导航' : '展开导航'"
+      @navigation-click="toggleNavigation"
+    >
+      <CsBreadcrumbGroup v-if="breadcrumbs.length" :items="breadcrumbs" />
+    </CsAppToolbar>
 
-      <!-- 侧边栏主导航 -->
-      <nav class="client-aside-nav">
-        <router-link
-          v-for="item in clientMenus"
-          :key="item.path"
-          :to="item.path"
-          class="client-nav-pill"
-          :class="{
-            active: route.path === item.path,
-            'is-mini': !isEffectiveExpanded,
-          }"
-          :title="!isEffectiveExpanded ? item.title : undefined"
-        >
-          <el-icon class="nav-icon" :size="18"><component :is="item.icon" /></el-icon>
-          <span v-if="isEffectiveExpanded" class="nav-title">{{ item.title }}</span>
-        </router-link>
-      </nav>
+    <CsAppLayout
+      :navigation-open="navigationOpen"
+      :navigation-width="236"
+      :header-height="appHeaderHeight"
+      :navigation-hide="isMobile"
+      content-type="default"
+      :max-content-width="1280"
+      navigation-toggle="external"
+      :reserve-navigation-toggle-row="false"
+      @update:navigation-open="setNavigationOpen"
+    >
+      <template #navigation>
+        <CsSideNavigation
+          v-if="!isMobile"
+          :items="navItems"
+          :active-href="route.path"
+          @follow="onNavFollow"
+        />
+      </template>
 
-      <!-- 侧边栏底部简明状态 -->
-      <div class="client-aside-foot" :class="{ 'is-mini': !isEffectiveExpanded }">
-        <div class="status-dot-wrap" :title="auth.displayName">
-          <span class="status-pulse-dot" />
-        </div>
-        <span v-if="isEffectiveExpanded" class="foot-text">{{ site.appName || 'XrayPanel' }}</span>
-      </div>
-    </aside>
+      <router-view v-slot="{ Component }">
+        <Transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </router-view>
+    </CsAppLayout>
 
-    <!-- 主工作区 -->
-    <div class="client-main">
-      <!-- 移动端顶部 Header (< 768px 出现) -->
-      <header class="client-mobile-header">
-        <div class="client-mobile-logo">
-          <span v-if="site.logo" class="client-logo-img-wrap">
-            <img :src="site.logo" class="client-logo-img" alt="logo" />
-          </span>
-          <span v-else class="client-logo-mark">X</span>
-          <span class="client-title">{{ site.appName || 'XrayPanel' }}</span>
-        </div>
-
-        <div class="client-mobile-actions">
-          <el-button
-            circle
-            size="small"
-            class="theme-toggle-btn"
-            :title="theme.modeTooltip"
-            @click="theme.toggle()"
-          >
-            <el-icon :size="15">
-              <Sunny v-if="theme.mode === 'light'" />
-              <Moon v-else-if="theme.mode === 'dark'" />
-              <Monitor v-else />
-            </el-icon>
-          </el-button>
-
-          <el-button
-            v-if="auth.role === 'admin'"
-            size="small"
-            plain
-            class="switch-view-btn"
-            title="进入管理后台"
-            @click="router.push('/admin/dashboard')"
-          >
-            <el-icon :size="14"><Setting /></el-icon><span class="switch-view-text">&nbsp;管理后台</span>
-          </el-button>
-
-          <!-- 用户头像下拉菜单（统一组件） -->
-          <UserAvatarDropdown current-portal="client" />
-        </div>
-      </header>
-
-      <!-- 桌面端与平板端 Topbar (>= 768px 出现) -->
-      <header class="client-desktop-topbar">
-        <div class="topbar-left">
-          <button
-            v-if="isCollapsed"
-            type="button"
-            class="topbar-expand-btn"
-            title="展开侧栏 (Ctrl+B)"
-            @click="toggleCollapse"
-          >
-            <el-icon :size="16"><Expand /></el-icon>
-          </button>
-          <h1 class="page-title">{{ pageTitle }}</h1>
-        </div>
-
-        <div class="topbar-right">
-          <!-- 亮色/深色/跟随系统 主题切换按钮 -->
-          <el-button
-            circle
-            size="small"
-            class="theme-toggle-btn"
-            :title="theme.modeTooltip"
-            @click="theme.toggle()"
-          >
-            <el-icon :size="15">
-              <Sunny v-if="theme.mode === 'light'" />
-              <Moon v-else-if="theme.mode === 'dark'" />
-              <Monitor v-else />
-            </el-icon>
-          </el-button>
-
-          <!-- 管理员快速切换至管理后台（组件样式与管理端一致） -->
-          <el-button
-            v-if="auth.role === 'admin'"
-            size="small"
-            plain
-            class="switch-view-btn"
-            title="进入管理后台"
-            @click="router.push('/admin/dashboard')"
-          >
-            <el-icon :size="14"><Setting /></el-icon><span class="switch-view-text">&nbsp;管理后台</span>
-          </el-button>
-
-          <!-- 用户头像下拉菜单（桌面端与移动端完全对齐置于右上角，使用统一组件） -->
-          <UserAvatarDropdown current-portal="client" />
-        </div>
-      </header>
-
-      <!-- 页面主内容区域 (Fluid 自适应流式宽度) -->
-      <main class="client-content">
-        <div class="client-content-inner">
-          <router-view />
-        </div>
-      </main>
-
-      <!-- 移动端底部固定 Tabbar (< 768px 出现) -->
-      <nav class="client-tabbar">
-        <router-link
-          v-for="item in clientMenus"
-          :key="item.path"
-          :to="item.path"
-          class="client-tabbar-item"
-          :class="{ active: route.path === item.path }"
-        >
-          <el-icon :size="20"><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </router-link>
-      </nav>
-    </div>
+    <!-- 移动端底部固定导航栏 -->
+    <nav v-if="isMobile" class="client-bottom-nav" aria-label="主导航">
+      <router-link
+        v-for="item in clientMenus"
+        :key="item.path"
+        :to="item.path"
+        class="bottom-nav-item"
+        :class="{ 'is-active': route.path === item.path }"
+      >
+        <CsIcon :name="mobileTabIcon(item.path)" size="normal" />
+        <span class="bottom-nav-label">{{ item.title }}</span>
+      </router-link>
+    </nav>
   </div>
 </template>
 
-<style scoped lang="scss">
-.client-layout {
-  display: flex;
+<style lang="scss" scoped>
+.client-shell {
   min-height: 100vh;
-  background: var(--x-bg);
-  width: 100%;
-}
+  background-color: var(--x-bg-page);
 
-/* ===== 左侧固定侧边栏 (>= 768px 平板与桌面端) ===== */
-.client-aside {
-  width: var(--x-sidebar-w, 236px);
-  height: 100vh;
-  position: fixed;
-  top: 0;
-  left: 0;
-  background: var(--x-card);
-  border-right: 1px solid var(--x-border);
-  display: flex;
-  flex-direction: column;
-  z-index: var(--x-z-sidebar, 80);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  transition: width var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1)), background-color 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
-
-  @media (max-width: $bp-tablet-max) {
-    display: none;
-  }
-
-  /* 折叠收起模式 (Mini Dock) */
-  &.collapsed {
-    width: var(--x-sidebar-w-mini, 58px);
-
-    /* 悬停浮层模式（靠近展开，远离收起） */
-    &.is-hovered {
-      width: var(--x-sidebar-w, 236px);
-      z-index: var(--x-z-sidebar-hover, 200);
-      box-shadow: var(--x-shadow-xl);
-    }
+  &.is-mobile {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
   }
 }
 
-.client-brand {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--x-border);
-  flex: none;
-}
-
-.client-brand-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-
-.client-logo-img-wrap {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  border-radius: var(--x-radius-sm, 8px);
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.03);
-  flex: none;
-}
-
-.client-logo-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.client-logo-mark {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  border-radius: var(--x-radius-sm, 8px);
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 800;
-  flex: none;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-}
-
-.client-brand-info {
-  min-width: 0;
-  flex: 1;
-}
-
-.client-brand-title {
-  font-size: 14.5px;
-  font-weight: 700;
-  color: var(--x-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: -0.2px;
-}
-
-.client-brand-sub {
-  font-size: 10.5px;
-  color: var(--x-text-3);
-  font-weight: 500;
-  margin-top: 1px;
-}
-
-.sidebar-pin-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--x-radius-xs, 6px);
-  border: 1px solid var(--x-border);
-  background: var(--x-card-soft);
-  color: var(--x-text-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s ease;
-  flex: none;
-
-  &:hover {
-    color: var(--x-primary);
-    border-color: var(--x-primary);
-    background: var(--x-primary-soft);
-  }
-}
-
-/* 侧边主导航列表 */
-.client-aside-nav {
-  flex: 1;
-  padding: 14px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow-y: auto;
-}
-
-.client-nav-pill {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--x-radius-sm, 8px);
-  color: var(--x-text-2);
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-  text-decoration: none;
-
-  .nav-icon {
-    color: var(--x-text-3);
-    transition: color 0.15s ease;
-    flex: none;
-  }
-
-  &:hover {
-    background: var(--x-fill-2);
-    color: var(--x-text);
-
-    .nav-icon {
-      color: var(--x-text);
-    }
-  }
-
-  &.active {
-    background: var(--x-primary-soft);
-    color: var(--x-primary);
-    font-weight: 600;
-
-    .nav-icon {
-      color: var(--x-primary);
-    }
-  }
-
-  &.is-mini {
-    justify-content: center;
-    padding: 10px 0;
-  }
-}
-
-/* 侧边栏底部简明状态 */
-.client-aside-foot {
-  height: 48px;
-  padding: 0 14px;
-  border-top: 1px solid var(--x-border);
-  background: var(--x-card-soft);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-  user-select: none;
-
-  &.is-mini {
-    padding: 0;
-    justify-content: center;
-  }
-
-  .status-dot-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .status-pulse-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--x-success, #10b981);
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
-  }
-
-  .foot-text {
-    font-size: 11.5px;
-    color: var(--x-text-3);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
-
-/* ===== 右侧主工作区 ===== */
-.client-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  // 与侧栏宽度过渡同一时长同一曲线，消除折叠过程中交界处的露缝/重叠闪烁
-  transition: margin-left var(--x-collapse-dur, 0.24s) var(--x-collapse-ease, cubic-bezier(0.2, 0, 0, 1));
-
-  @media (min-width: $bp-tablet-min) {
-    margin-left: var(--x-sidebar-w, 236px);
-  }
-
-  @media (max-width: $bp-tablet-max) {
-    margin-left: 0;
-    // 与 .client-tabbar 的 height 同源，原来写死 60px 而 tabbar 实际 54px，多留 6px 空白
-    padding-bottom: calc(var(--x-tabbar-h, 54px) + env(safe-area-inset-bottom, 0px));
-  }
-}
-
-.client-layout.is-collapsed .client-main {
-  @media (min-width: $bp-tablet-min) {
-    margin-left: var(--x-sidebar-w-mini, 58px);
-  }
-}
-
-/* 桌面端与平板端 Topbar (>= 768px) */
-.client-desktop-topbar {
-  height: var(--x-topbar-h, 56px);
-  background: var(--x-card);
-  border-bottom: 1px solid var(--x-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
+.client-topbar {
   position: sticky;
   top: 0;
-  z-index: var(--x-z-sidebar, 80);
-  transition: background-color 0.24s ease, border-color 0.24s ease;
-
-  @media (max-width: $bp-tablet-max) {
-    display: none;
-  }
-
-  .topbar-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-
-    .topbar-expand-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: var(--x-radius-xs, 6px);
-      border: 1px solid var(--x-border);
-      background: var(--x-card-soft);
-      color: var(--x-text-2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      outline: none;
-      transition: all 0.15s ease;
-
-      &:hover {
-        color: var(--x-primary);
-        border-color: var(--x-primary);
-        background: var(--x-primary-soft);
-      }
-    }
-
-    .page-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--x-text);
-      margin: 0;
-    }
-  }
-
-  .topbar-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  z-index: 900;
 }
 
-.switch-view-btn {
-  background: var(--x-card-soft, #f8fafc);
-  border: 1px solid var(--x-border);
-  color: var(--x-text);
-  font-size: 12px;
-  transition: all 0.15s ease;
-
-  &:hover {
-    color: var(--x-primary);
-    border-color: var(--x-primary);
-    background: var(--x-primary-soft);
-  }
-}
-
-.theme-toggle-btn {
-  background: var(--x-card-soft, #f8fafc);
-  border: 1px solid var(--x-border);
-  color: var(--x-text-2);
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-
-  &:hover {
-    color: var(--x-primary);
-    border-color: var(--x-primary);
-    background: var(--x-primary-soft);
-    transform: rotate(18deg) scale(1.05);
-  }
-}
-
-/* 移动端 Header (< 768px) */
-.client-mobile-header {
-  height: 52px;
-  background: var(--x-card);
-  border-bottom: 1px solid var(--x-border);
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: var(--x-z-sidebar, 80);
-
-  @media (min-width: $bp-tablet-min) {
-    display: none;
-  }
-
-  .client-mobile-logo {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    // 100% 而非 100vw：100vw 把经典滚动条宽度也算进去，会多出约 15px
-    max-width: calc(100% - 150px);
-    overflow: hidden;
-
-    .client-title {
-      font-size: 14.5px;
-      font-weight: 800;
-      color: var(--x-text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
-
-  .client-mobile-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: none;
-  }
-
-  .switch-view-btn {
-    padding: 0 8px;
-    .switch-view-text {
-      display: none !important;
-    }
-  }
-}
-
-/* 主内容容器 (Fluid 自适应流式容器) */
-.client-content {
-  flex: 1;
-  padding: 20px 24px;
-
-  @media (max-width: $bp-tablet-max) {
-    padding: 12px 10px 20px;
-  }
-}
-
-.client-content-inner {
-  width: 100%;
-  max-width: var(--x-content-max, 1320px);
-  margin: 0 auto;
-}
-
-/* 移动端固定底部 Tabbar (< 768px) */
-.client-tabbar {
+.client-bottom-nav {
   position: fixed;
-  bottom: 0;
   left: 0;
   right: 0;
-  width: 100%;
-  height: var(--x-tabbar-h, 54px);
-  background: var(--x-card);
-  border-top: 1px solid var(--x-border);
+  bottom: 0;
+  z-index: 900;
   display: flex;
-  z-index: var(--x-z-sidebar, 80);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
+  align-items: stretch;
+  justify-content: space-around;
+  min-height: 56px;
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  transition: background-color 0.24s ease, border-color 0.24s ease;
-
-  @media (min-width: $bp-tablet-min) {
-    display: none;
-  }
+  background-color: var(--color-background-container-content-mjfil9);
+  border-top: 1px solid var(--x-border);
 }
 
-.client-tabbar-item {
+.bottom-nav-item {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 5px 0;
-  font-size: 11px;
-  color: var(--x-text-3);
-  font-weight: 500;
+  gap: 3px;
+  padding: 6px 4px;
+  color: var(--x-text-secondary);
   text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
   transition: color 0.15s ease;
 
-  &.active {
+  &.is-active {
     color: var(--x-primary);
-    font-weight: 700;
+    font-weight: 600;
   }
 }
-</style>
 
+.bottom-nav-label {
+  line-height: 1.2;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

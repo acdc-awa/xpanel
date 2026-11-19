@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  Promotion,
-  ShoppingBag,
-  CopyDocument,
-  Document,
-  Bell,
-  Connection,
-  WarningFilled,
-  InfoFilled,
-} from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+  CsAlert,
+  CsBadge,
+  CsBox,
+  CsButton,
+  CsColumnLayout,
+  CsContainer,
+  CsHeader,
+  CsIcon,
+  CsLink,
+  CsModal,
+  CsProgressBar,
+  CsSpaceBetween,
+  CsStatusIndicator,
+  ElMessage,
+} from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'
@@ -20,6 +26,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import { getMyServers, getUserNotices, type MyServerItem } from '@/api/user'
 import type { NoticeItem } from '@/api/types'
 
+const router = useRouter()
 const auth = useAuthStore()
 const site = useSiteStore()
 const loading = ref(false)
@@ -54,7 +61,6 @@ const expireText = computed(() => {
   return formatDate(t)
 })
 
-// U23：到期/未开通判定（用于横幅 CTA，不再让无套餐用户看到误导性的「永久有效」）
 const isExpired = computed(() => {
   const t = auth.user?.expire_at
   return !!t && new Date(t).getTime() < Date.now()
@@ -66,7 +72,6 @@ const isPlanActive = computed(() => {
   return true
 })
 
-// 流量耗尽：套餐仍在有效期（到期时间未过），只是本周期额度已用尽。
 const isExhausted = computed(
   () => isPlanActive.value && totalBytes.value > 0 && usedBytes.value >= totalBytes.value,
 )
@@ -79,6 +84,11 @@ const daysLeft = computed(() => {
   return diff > 0 ? diff : 0
 })
 
+const progressStatus = computed<'error' | 'in-progress'>(() => {
+  if (usagePercent.value > 90) return 'error'
+  return 'in-progress'
+})
+
 const subscribeUrl = computed(() => {
   const token = auth.user?.subscribe_token
   return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
@@ -87,7 +97,6 @@ const subscribeUrl = computed(() => {
 onMounted(async () => {
   loadServers()
   loadNotices()
-  // ISSUE-16：登录响应可能只是浅层摘要，首页挂载始终拉取 /user/me，保证首屏数据与刷新后一致。
   loading.value = true
   try {
     await auth.fetchMe()
@@ -181,555 +190,413 @@ function viewNotice(n: NoticeItem) {
 </script>
 
 <template>
-  <div class="x-client-body" v-loading="loading">
-    <div class="x-dash-grid">
-      <!-- 左侧主栏：用量卡片 + 快捷操作 -->
-      <div>
-        <!-- 到期/流量耗尽/未开通 CTA 横幅 -->
-        <div v-if="isExpired && auth.user?.plan_id" class="dash-alert danger">
-          <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>当前套餐已到期，节点转发已暂停。请续费或重新订购套餐以恢复使用</span>
-          <router-link to="/shop">
-            <el-button size="small" type="primary" round>前往续费/订购</el-button>
-          </router-link>
-        </div>
-        <div v-else-if="isExpired" class="dash-alert danger">
-          <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>当前套餐已到期并已自动取消，节点转发已暂停。请重新订购套餐以恢复使用</span>
-          <router-link to="/shop">
-            <el-button size="small" type="primary" round>前往订购</el-button>
-          </router-link>
-        </div>
-        <div v-else-if="isExhausted" class="dash-alert danger">
-          <el-icon><WarningFilled /></el-icon>&nbsp;
-          <span>当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用</span>
-          <router-link to="/shop">
-            <el-button size="small" type="primary" round>前往续费/订购</el-button>
-          </router-link>
-        </div>
-        <div v-else-if="!auth.user?.plan_id" class="dash-alert">
-          <el-icon><InfoFilled /></el-icon>&nbsp;
-          <span>尚未订购套餐，订购后即可获取节点订阅</span>
-          <router-link to="/shop">
-            <el-button size="small" type="primary" round>选购套餐</el-button>
-          </router-link>
-        </div>
+  <CsSpaceBetween direction="vertical" size="l">
+    <!-- 到期 / 流量耗尽 / 未开通提示 -->
+    <CsAlert v-if="isExpired && auth.user?.plan_id" type="error" header="套餐已到期">
+      当前套餐已到期，节点转发已暂停。请续费或重新订购套餐以恢复使用。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">前往续费/订购</CsButton>
+      </template>
+    </CsAlert>
+    <CsAlert v-else-if="isExpired" type="error" header="套餐已到期">
+      当前套餐已到期并已自动取消，节点转发已暂停。请重新订购套餐以恢复使用。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">前往订购</CsButton>
+      </template>
+    </CsAlert>
+    <CsAlert v-else-if="isExhausted" type="error" header="流量已用尽">
+      当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">前往续费/订购</CsButton>
+      </template>
+    </CsAlert>
+    <CsAlert v-else-if="!auth.user?.plan_id" type="info" header="尚未订购套餐">
+      订购套餐后即可获取节点订阅并开始使用。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">选购套餐</CsButton>
+      </template>
+    </CsAlert>
 
-        <!-- 极简响应式用量 Hero 卡片 -->
-        <div class="dash-hero">
-          <div class="hero-top">
-            <div class="hero-plan-badge">
-              <span class="x-status-dot" :class="isPlanActive ? 'online' : 'offline'" />
-              <span>{{ planLabel }}</span>
+    <div class="dash-grid">
+      <!-- 左侧主栏：用量概览 + 快捷入口 -->
+      <CsSpaceBetween direction="vertical" size="l">
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2">
+              {{ planLabel }}
+              <template #actions>
+                <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                  <CsStatusIndicator :type="isPlanActive ? 'success' : 'stopped'">
+                    {{ isPlanActive ? '生效中' : '未激活' }}
+                  </CsStatusIndicator>
+                  <CsBadge color="grey">余额 ¥{{ balanceYuan }}</CsBadge>
+                  <CsBadge v-if="daysLeft !== null" color="blue">剩余 {{ daysLeft }} 天</CsBadge>
+                </CsSpaceBetween>
+              </template>
+            </CsHeader>
+          </template>
+
+          <CsSpaceBetween direction="vertical" size="l">
+            <CsColumnLayout :columns="3" variant="text-grid">
+              <div class="stat-item">
+                <div class="stat-label">已用流量</div>
+                <div class="stat-value cell-mono">{{ loading ? '…' : usedText }}</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">剩余可用</div>
+                <div class="stat-value cell-mono is-remain">{{ loading ? '…' : remainText }}</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">套餐总量</div>
+                <div class="stat-value cell-mono">{{ loading ? '…' : totalText }}</div>
+              </div>
+            </CsColumnLayout>
+
+            <CsProgressBar
+              :value="usagePercent"
+              :status="progressStatus"
+              label="流量使用进度"
+              :additional-info="`有效期：${expireText}`"
+            />
+
+            <CsSpaceBetween direction="horizontal" size="xs">
+              <CsButton variant="primary" icon-name="external" @click="importMihomo">
+                一键导入 Mihomo
+              </CsButton>
+              <CsButton icon-name="copy" @click="copySub">复制订阅地址</CsButton>
+              <CsButton @click="router.push('/shop')">选购/续费</CsButton>
+            </CsSpaceBetween>
+          </CsSpaceBetween>
+        </CsContainer>
+
+        <!-- 快捷入口 -->
+        <div class="dash-tiles-grid">
+          <CsContainer class="tile-card" @click="router.push('/subscribe')">
+            <div class="tile-row">
+              <div class="tile-icon">
+                <CsIcon name="share" size="medium" />
+              </div>
+              <div class="tile-body">
+                <div class="tile-title">Mihomo 订阅中心</div>
+                <div class="tile-desc">客户端下载与配置自动同步</div>
+              </div>
             </div>
-            <div class="hero-top-right">
-              <span class="x-chip gray cell-mono">余额 ¥{{ balanceYuan }}</span>
-              <span v-if="daysLeft !== null" class="x-chip gray">剩余 {{ daysLeft }} 天</span>
+          </CsContainer>
+
+          <CsContainer class="tile-card" @click="router.push('/shop')">
+            <div class="tile-row">
+              <div class="tile-icon">
+                <CsIcon name="add-plus" size="medium" />
+              </div>
+              <div class="tile-body">
+                <div class="tile-title">套餐商店</div>
+                <div class="tile-desc">套餐与流量配额</div>
+              </div>
+            </div>
+          </CsContainer>
+        </div>
+      </CsSpaceBetween>
+
+      <!-- 右侧栏：节点可用性 + 系统公告 + 使用指南 -->
+      <CsSpaceBetween direction="vertical" size="l">
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2" description="在线状态每分钟自动刷新">节点可用性</CsHeader>
+          </template>
+          <div v-if="servers.length" class="node-list">
+            <div v-for="s in servers" :key="s.id" class="node-row">
+              <div class="node-name">
+                <span>{{ s.location || '未命名节点' }}</span>
+                <span class="node-sub">{{ s.name }}</span>
+              </div>
+              <CsStatusIndicator :type="s.online ? 'success' : 'stopped'">
+                {{ s.online ? '在线' : '离线' }}
+              </CsStatusIndicator>
             </div>
           </div>
+          <CsBox v-else color="text-body-secondary" font-size="body-s">
+            暂无可用节点（购买套餐后自动开通）
+          </CsBox>
+        </CsContainer>
 
-          <div class="hero-main-stats">
-            <div class="stat-col">
-              <span class="stat-lbl">已用流量</span>
-              <span class="stat-val cell-mono">{{ usedText }}</span>
-            </div>
-            <div class="stat-divider" />
-            <div class="stat-col">
-              <span class="stat-lbl">剩余可用</span>
-              <span class="stat-val cell-mono remain">{{ remainText }}</span>
-            </div>
-            <div class="stat-divider" />
-            <div class="stat-col">
-              <span class="stat-lbl">套餐总量</span>
-              <span class="stat-val cell-mono total">{{ totalText }}</span>
-            </div>
-          </div>
-
-          <!-- 动态阈值进度条 -->
-          <div class="hero-progress-wrap">
-            <div class="progress-bar-bg">
-              <div
-                class="progress-bar-fill"
-                :class="{
-                  'is-danger': usagePercent > 90,
-                  'is-warning': usagePercent > 75 && usagePercent <= 90,
-                }"
-                :style="{ width: usagePercent + '%' }"
-              />
-            </div>
-            <div class="progress-meta">
-              <span>用量占比：{{ usagePercent }}%</span>
-              <span class="cell-mono">有效期：{{ expireText }}</span>
-            </div>
-          </div>
-
-          <!-- 卡片内快捷操作栏 -->
-          <div class="hero-actions">
-            <el-button type="primary" class="hero-btn-primary" @click="importMihomo">
-              <el-icon><Promotion /></el-icon>&nbsp;一键导入 Mihomo
-            </el-button>
-            <el-button class="hero-btn-glass" @click="copySub">
-              <el-icon><CopyDocument /></el-icon>&nbsp;复制订阅地址
-            </el-button>
-            <router-link to="/shop" style="flex: 1 1 110px;">
-              <el-button class="hero-btn-glass" style="width: 100%;">
-                <el-icon><ShoppingBag /></el-icon>&nbsp;选购/续费
-              </el-button>
-            </router-link>
-          </div>
-        </div>
-
-        <!-- 快捷入口磁贴 -->
-        <div class="dash-tiles">
-          <router-link to="/subscribe" class="dash-tile">
-            <div class="tile-icon purple"><el-icon><Promotion /></el-icon></div>
-            <div class="tile-info">
-              <div class="tile-title">Mihomo 订阅中心</div>
-              <div class="tile-desc">客户端下载与配置自动同步</div>
-            </div>
-          </router-link>
-          <router-link to="/shop" class="dash-tile">
-            <div class="tile-icon green"><el-icon><ShoppingBag /></el-icon></div>
-            <div class="tile-info">
-              <div class="tile-title">套餐商店</div>
-              <div class="tile-desc">套餐与流量配额</div>
-            </div>
-          </router-link>
-        </div>
-      </div>
-
-      <!-- 右侧侧边栏：节点状态 + 公告 + 教程 -->
-      <div>
-        <!-- 节点状态 -->
-        <div class="x-card">
-          <div class="x-card-head">
-            <span><el-icon><Connection /></el-icon>&nbsp;节点可用性</span>
-            <span class="muted" style="font-size: 12px">在线状态每分钟自动刷新</span>
-          </div>
-          <div style="padding: 8px 16px">
-            <div v-for="s in servers" :key="s.id" class="x-row-line">
-              <span class="k">
-                <span class="x-status-dot" :class="s.online ? 'online' : 'offline'" />
-                {{ s.location || '未命名节点' }} · {{ s.name }}
-              </span>
-              <span class="v muted" style="font-size: 12px">{{ s.online ? '在线' : '离线' }}</span>
-            </div>
-            <p v-if="!servers.length" class="muted" style="font-size: 12px; padding: 4px 0">
-              暂无可用节点（购买套餐后自动开通）
-            </p>
-          </div>
-        </div>
-
-        <!-- 公告栏 -->
-        <div class="x-card">
-          <div class="x-card-head">
-            <span><el-icon><Bell /></el-icon>&nbsp;系统公告</span>
-          </div>
-          <div v-if="noticeLoading" style="padding: 16px; text-align: center" class="muted">
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2">系统公告</CsHeader>
+          </template>
+          <CsBox v-if="noticeLoading" color="text-body-secondary" font-size="body-s">
             加载公告中…
-          </div>
-          <div v-else-if="!notices.length" style="padding: 16px; text-align: center" class="muted">
+          </CsBox>
+          <CsBox v-else-if="!notices.length" color="text-body-secondary" font-size="body-s">
             暂无系统公告
+          </CsBox>
+          <div v-else class="notice-list">
+            <button
+              v-for="n in notices"
+              :key="n.id"
+              type="button"
+              class="notice-row"
+              @click="viewNotice(n)"
+            >
+              <div class="notice-title">
+                <CsBadge v-if="n.is_pinned" color="red">置顶</CsBadge>
+                <span>{{ n.title }}</span>
+              </div>
+              <div class="notice-date cell-mono">{{ formatDate(n.created_at || n.updated_at) }}</div>
+            </button>
           </div>
-          <div
-            v-for="n in notices"
-            :key="n.id"
-            class="x-notice-item cursor-pointer"
-            @click="viewNotice(n)"
-          >
-            <div class="x-notice-title">
-              <el-tag v-if="n.is_pinned" size="small" type="danger" effect="dark" class="mr-1">置顶</el-tag>
-              {{ n.title }}
-            </div>
-            <div class="x-notice-date">{{ formatDate(n.created_at || n.updated_at) }}</div>
-          </div>
-        </div>
+        </CsContainer>
 
-        <!-- 帮助文档 -->
-        <div class="x-card">
-          <div class="x-card-head">
-            <span><el-icon><Document /></el-icon>&nbsp;使用指南</span>
-          </div>
-          <div style="display: grid; gap: 10px; padding: 14px 16px">
-            <router-link to="/subscribe" class="muted help-link">
+        <CsContainer>
+          <template #header>
+            <CsHeader variant="h2">使用指南</CsHeader>
+          </template>
+          <CsSpaceBetween direction="vertical" size="xs">
+            <CsLink @follow="router.push('/subscribe')">
               Clash Verge Rev (Mihomo) 快速导入教程
-            </router-link>
-            <router-link to="/subscribe" class="muted help-link">
+            </CsLink>
+            <CsLink @follow="router.push('/subscribe')">
               苹果 iOS Stash 客户端配置指南
-            </router-link>
-          </div>
-        </div>
-      </div>
+            </CsLink>
+          </CsSpaceBetween>
+        </CsContainer>
+      </CsSpaceBetween>
     </div>
 
     <!-- 公告详情弹窗 -->
-    <el-dialog
-      v-model="noticeModalOpen"
-      :title="selectedNotice?.title || '公告详情'"
-      width="580px"
-      destroy-on-close
+    <CsModal
+      v-model:visible="noticeModalOpen"
+      :header="selectedNotice?.title || '公告详情'"
+      size="medium"
+      :close-on-click-overlay="false"
     >
-      <div v-if="selectedNotice" class="notice-detail-dialog">
+      <div v-if="selectedNotice" class="notice-detail">
         <div class="notice-meta">
-          <el-tag v-if="selectedNotice.is_pinned" size="small" type="danger" effect="dark" class="mr-1">置顶</el-tag>
-          <span class="notice-time muted">发布于 {{ formatDate(selectedNotice.created_at) }}</span>
+          <CsBadge v-if="selectedNotice.is_pinned" color="red">置顶</CsBadge>
+          <span class="notice-time">发布于 {{ formatDate(selectedNotice.created_at) }}</span>
         </div>
         <div class="notice-body markdown-content" v-html="renderMarkdown(selectedNotice.content)" />
       </div>
       <template #footer>
-        <el-button type="primary" @click="noticeModalOpen = false">我知道了</el-button>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton variant="primary" @click="noticeModalOpen = false">我知道了</CsButton>
+        </CsSpaceBetween>
       </template>
-    </el-dialog>
+    </CsModal>
 
     <!-- 首页重要公告强提醒弹窗 -->
-    <el-dialog
-      v-model="popupOpen"
-      :title="popupNotice?.title || '重要通知'"
-      width="540px"
-      :before-close="handleClosePopup"
-      destroy-on-close
+    <CsModal
+      v-model:visible="popupOpen"
+      :header="popupNotice?.title || '重要通知'"
+      size="medium"
+      :close-on-click-overlay="false"
+      @update:visible="(v) => !v && handleClosePopup()"
     >
-      <div v-if="popupNotice" class="notice-detail-dialog">
+      <div v-if="popupNotice" class="notice-detail">
         <div class="notice-meta">
-          <el-tag size="small" type="warning" effect="dark" class="mr-1">重要通知</el-tag>
-          <span class="notice-time muted">{{ formatDate(popupNotice.updated_at) }}</span>
+          <CsBadge color="blue">重要通知</CsBadge>
+          <span class="notice-time">{{ formatDate(popupNotice.updated_at) }}</span>
         </div>
-        <div class="notice-body popup-emphasis markdown-content" v-html="renderMarkdown(popupNotice.content)" />
+        <div class="notice-body markdown-content" v-html="renderMarkdown(popupNotice.content)" />
       </div>
       <template #footer>
-        <el-button type="primary" @click="handleClosePopup">我知道了</el-button>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton variant="primary" @click="handleClosePopup">我知道了</CsButton>
+        </CsSpaceBetween>
       </template>
-    </el-dialog>
-  </div>
+    </CsModal>
+  </CsSpaceBetween>
 </template>
 
 <style scoped lang="scss">
-.dash-alert {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: var(--x-radius);
-  margin-bottom: 14px;
-  font-size: 13.5px;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: var(--x-text);
-  > span { flex: 1; }
-  &.danger {
-    background: rgba(244, 63, 94, 0.1);
-    border-color: rgba(244, 63, 94, 0.35);
-    color: #fb7185;
-  }
-}
-.dash-hero {
-  background: linear-gradient(135deg, #3730a3 0%, #4f46e5 50%, #6366f1 100%);
-  border-radius: var(--x-radius-lg, 14px);
-  padding: 22px;
-  color: #fff;
-  box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
-
-  @media (max-width: 480px) {
-    padding: 16px;
-  }
-}
-
-.hero-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-  gap: 10px;
-
-  @media (max-width: 480px) {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .hero-plan-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.16);
-    backdrop-filter: blur(8px);
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .hero-top-right {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-wrap: wrap;
-
-    .x-chip.gray {
-      background: rgba(255, 255, 255, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.22);
-      color: #fff;
-      font-size: 11.5px;
-      font-family: var(--x-font-mono);
-      font-variant-numeric: tabular-nums;
-    }
-  }
-}
-
-.hero-main-stats {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-
-  @media (max-width: 480px) {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-
-    .stat-divider {
-      display: none;
-    }
-    .stat-col:last-child {
-      grid-column: 1 / -1;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
-      padding-top: 8px;
-    }
-  }
-
-  .stat-col {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .stat-divider {
-    width: 1px;
-    height: 32px;
-    background: rgba(255, 255, 255, 0.15);
-    margin: 0 12px;
-  }
-
-  .stat-lbl {
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.75);
-    font-weight: 500;
-  }
-
-  .stat-val {
-    font-size: var(--x-font-2xl, 22px);
-    font-weight: 700;
-    white-space: nowrap;
-    font-family: var(--x-font-mono);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-    &.remain {
-      color: #ffffff;
-    }
-    &.total {
-      color: rgba(255, 255, 255, 0.9);
-    }
-  }
-}
-
-.hero-progress-wrap {
-  margin-bottom: 18px;
-
-  .progress-bar-bg {
-    height: 7px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .progress-bar-fill {
-    height: 100%;
-    background: #38bdf8;
-    border-radius: 4px;
-    transition: width 0.3s ease, background-color 0.3s ease;
-
-    &.is-warning {
-      background: #f59e0b;
-    }
-    &.is-danger {
-      background: #ef4444;
-    }
-  }
-
-  .progress-meta {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.75);
-    margin-top: 5px;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-}
-
-.hero-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-
-  .hero-btn-primary {
-    background: #ffffff;
-    color: #4338ca;
-    border: none;
-    font-weight: 600;
-    flex: 1 1 140px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    &:hover {
-      background: #f8fafc;
-      color: #3730a3;
-    }
-  }
-
-  .hero-btn-glass {
-    background: rgba(255, 255, 255, 0.14);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    color: #fff;
-    font-weight: 500;
-    flex: 1 1 100px;
-    &:hover {
-      background: rgba(255, 255, 255, 0.22);
-    }
-  }
-}
-
-.dash-tiles {
+.dash-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
-  margin-bottom: 16px;
-
-  .dash-tile {
-    background: var(--x-card);
-    border: 1px solid var(--x-border);
-    border-radius: var(--x-radius);
-    padding: 16px;
-    box-shadow: var(--x-shadow);
-    display: flex;
-    gap: 14px;
-    align-items: center;
-    min-width: 0;
-    transition: all 0.2s ease;
-
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: var(--x-shadow-md);
-      border-color: rgba(99, 102, 241, 0.3);
-    }
-
-    .tile-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      flex: none;
-
-      &.purple {
-        background: var(--x-primary-soft);
-        color: var(--x-primary);
-      }
-      &.green {
-        background: var(--x-success-soft);
-        color: var(--x-success);
-      }
-    }
-
-    .tile-info {
-      min-width: 0;
-      flex: 1;
-    }
-
-    .tile-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--x-text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .tile-desc {
-      font-size: 12px;
-      color: var(--x-text-3);
-      margin-top: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
 
-.help-link {
-  font-size: 13px;
+.stat-item {
   display: flex;
-  align-items: center;
-  transition: color 0.15s;
-  &:hover {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--x-text);
+
+  &.is-remain {
     color: var(--x-primary);
   }
 }
 
-.demo-tag {
-  font-size: 11px;
-  color: var(--x-success);
-  background: var(--x-success-soft);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  border-radius: 6px;
-  padding: 1px 7px;
-  font-weight: 500;
+.tile-card {
+  cursor: pointer;
 }
 
-.cursor-pointer {
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-  &:hover {
-    background-color: var(--x-fill-2, rgba(0, 0, 0, 0.03));
+.dash-tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tile-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 8px;
+  background-color: var(--x-primary-soft);
+  color: var(--x-primary);
+  flex-shrink: 0;
+}
+
+.tile-body {
+  min-inline-size: 0;
+}
+
+.tile-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--x-text);
+}
+
+.tile-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
+
+.node-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--x-border);
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &:first-child {
+    padding-top: 0;
   }
 }
 
-.mr-1 {
-  margin-right: 4px;
+.node-name {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--x-text);
 }
 
-.notice-detail-dialog {
+.node-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--x-text-secondary);
+}
+
+.notice-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.notice-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  inline-size: 100%;
+  padding: 10px 0;
+  border: none;
+  border-bottom: 1px solid var(--x-border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:hover .notice-title {
+    color: var(--x-primary);
+  }
+}
+
+.notice-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--x-text);
+  transition: color 0.15s ease;
+}
+
+.notice-date {
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
+
+.notice-detail {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
 
-  .notice-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
+.notice-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notice-time {
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
+
+.notice-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--x-text);
+}
+
+@media (max-width: $bp-two-pane) {
+  .dash-grid {
+    grid-template-columns: 1fr;
   }
+}
 
-  .notice-body {
-    font-size: 14px;
-    line-height: 1.65;
-    color: var(--x-text);
-    word-break: break-word;
-    background: var(--x-fill-1, #f8fafc);
-    border: 1px solid var(--x-border-light, #e2e8f0);
-    border-radius: 8px;
-    padding: 12px 16px;
-    max-height: 480px;
-    overflow-y: auto;
-
-    &.popup-emphasis {
-      border-left: 4px solid var(--x-warning, #f59e0b);
-      background: var(--x-fill-1, #fffbeb);
-    }
+@media (max-width: $bp-tablet-max) {
+  .dash-tiles-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  CopyDocument,
-  Download,
-  Cellphone,
-  Promotion,
-  View,
-  RefreshRight,
-  ShoppingBag,
-  WarningFilled,
-} from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+  CsAlert,
+  CsBadge,
+  CsButton,
+  CsContainer,
+  CsHeader,
+  CsLink,
+  CsModal,
+  CsSpaceBetween,
+  ElMessage,
+  ElMessageBox,
+} from '@/components/cloudscape'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -18,6 +20,7 @@ import { resetSubscribeToken } from '@/api/user'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
 
+const router = useRouter()
 const auth = useAuthStore()
 const site = useSiteStore()
 const qrDataUrl = ref('')
@@ -31,7 +34,6 @@ const hasPlan = computed(() => {
   return !(exp && new Date(exp).getTime() < Date.now())
 })
 
-// 流量耗尽：套餐仍在有效期（plan_id 保留），只是本周期额度用尽 —— 订阅会拒绝下发。
 const usedBytes = computed(() => auth.user?.used_bytes ?? 0)
 const totalBytes = computed(() => auth.user?.total_bytes ?? 0)
 const isExhausted = computed(
@@ -43,7 +45,6 @@ const subscribeUrl = computed(() => {
   return token ? buildSubscribeUrl(token, site.subscribeUrl, site.subscribePath) : ''
 })
 
-// 一键唤醒 Mihomo Scheme
 const mihomoSchemeUrl = computed(() => {
   if (!subscribeUrl.value) return ''
   return `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=${encodeURIComponent('XrayPanel')}`
@@ -173,459 +174,301 @@ const clashApps: ClientApp[] = [
 </script>
 
 <template>
-  <div class="x-client-body" v-loading="loading">
-    <!-- 头部横幅 -->
-    <div class="sub-hero">
-      <div class="sub-badge"><el-icon><Promotion /></el-icon>&nbsp;Mihomo 核心托管</div>
-      <h1 class="sub-title">Mihomo 订阅中心</h1>
-      <p class="sub-desc">适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。</p>
-    </div>
+  <CsSpaceBetween direction="vertical" size="l">
+    <CsHeader variant="h1" description="适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。">
+      Mihomo 订阅中心
+      <template #actions>
+        <CsBadge color="blue">Mihomo 核心托管</CsBadge>
+      </template>
+    </CsHeader>
 
-    <!-- 流量耗尽提示：套餐仍在有效期，仅本周期额度用尽，订阅内容暂停下发 -->
-    <div v-if="isExhausted" class="sub-alert danger">
-      <el-icon><WarningFilled /></el-icon>
-      <span>当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用。</span>
-      <router-link to="/shop">
-        <el-button size="small" type="primary" round>前往续费/订购</el-button>
-      </router-link>
-    </div>
+    <CsAlert v-if="isExhausted" type="error" header="流量已用尽">
+      当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">前往续费/订购</CsButton>
+      </template>
+    </CsAlert>
 
-    <!-- 无套餐空状态友好引导 -->
-    <div v-if="!hasPlan" class="x-card empty-sub-card">
-      <el-icon class="empty-sub-icon"><ShoppingBag /></el-icon>
-      <h3 class="empty-sub-title">当前无有效套餐</h3>
-      <p class="empty-sub-desc">
-        您当前未订购套餐或套餐已到期，重新订购后系统将自动为您下发订阅地址并分配全球节点线路。
-      </p>
-      <router-link to="/shop">
-        <el-button type="primary" size="large" round class="glow-btn">
-          <el-icon><ShoppingBag /></el-icon>&nbsp;前往选购套餐
-        </el-button>
-      </router-link>
-    </div>
+    <CsAlert v-else-if="!hasPlan" type="info" header="当前无有效套餐">
+      您当前未订购套餐或套餐已到期，重新订购后系统将自动为您下发订阅地址并分配节点线路。
+      <template #action>
+        <CsButton variant="primary" @click="router.push('/shop')">前往选购套餐</CsButton>
+      </template>
+    </CsAlert>
 
-    <!-- 核心一键导入卡片 -->
-    <div class="x-card primary-card">
-      <div class="x-card-body">
-        <div class="sub-main-grid">
-          <!-- 左侧：一键唤醒与快捷复制 -->
-          <div class="sub-left">
-            <div class="sub-url-box">
-              <span class="sub-url-label">Mihomo 订阅地址</span>
-              <code class="sub-url-code cell-mono">{{ subscribeUrl || (hasPlan ? '正在生成订阅地址…' : '暂无有效订阅（请先订购套餐）') }}</code>
-            </div>
+    <!-- 核心订阅卡片 -->
+    <CsContainer>
+      <template #header>
+        <CsHeader variant="h2">订阅地址与快捷导入</CsHeader>
+      </template>
 
-            <div class="sub-action-buttons">
-              <el-button type="primary" size="large" class="glow-btn" @click="importToMihomo">
-                <el-icon><Promotion /></el-icon>&nbsp;一键导入 Mihomo 客户端
-              </el-button>
-              <el-button size="large" @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">
-                <el-icon><CopyDocument /></el-icon>&nbsp;复制订阅地址
-              </el-button>
-            </div>
-
-            <div class="sub-minor-actions">
-              <el-button text size="small" @click="openQrModal">
-                <el-icon><Cellphone /></el-icon>&nbsp;手机扫码导入
-              </el-button>
-              <el-button text size="small" type="danger" :loading="resettingSub" @click="onResetSubscribe">
-                <el-icon><RefreshRight /></el-icon>&nbsp;重置订阅地址
-              </el-button>
-            </div>
+      <div class="sub-main-grid">
+        <CsSpaceBetween direction="vertical" size="m">
+          <div class="sub-url-box">
+            <div class="sub-url-label">Mihomo 订阅地址</div>
+            <code class="sub-url-code cell-mono">
+              {{
+                loading
+                  ? '正在加载订阅地址…'
+                  : subscribeUrl || (hasPlan ? '正在生成订阅地址…' : '暂无有效订阅（请先订购套餐）')
+              }}
+            </code>
           </div>
 
-          <!-- 右侧：二维码微缩卡片 -->
-          <div class="sub-right" @click="openQrModal">
-            <div class="qr-wrap" title="点击放大查看">
-              <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="sub-qr" />
-              <div v-else class="sub-qr-empty">—</div>
-              <span class="qr-tip"><el-icon><View /></el-icon>&nbsp;扫码导入</span>
-            </div>
+          <CsSpaceBetween direction="horizontal" size="xs">
+            <CsButton variant="primary" icon-name="external" @click="importToMihomo">
+              一键导入 Mihomo 客户端
+            </CsButton>
+            <CsButton icon-name="copy" @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">
+              复制订阅地址
+            </CsButton>
+            <CsButton @click="openQrModal">手机扫码导入</CsButton>
+            <CsButton :loading="resettingSub" @click="onResetSubscribe">重置订阅地址</CsButton>
+          </CsSpaceBetween>
+        </CsSpaceBetween>
+
+        <div class="sub-qr-panel" @click="openQrModal">
+          <div class="qr-wrap" title="点击放大查看">
+            <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="sub-qr" />
+            <div v-else class="sub-qr-empty">—</div>
           </div>
+          <span class="qr-tip">点击放大扫码</span>
         </div>
       </div>
-    </div>
+    </CsContainer>
 
-    <!-- 推荐客户端生态 -->
-    <div class="section-title">
-      <span>推荐客户端（Mihomo 生态）</span>
-    </div>
-
-    <div class="client-grid">
-      <div v-for="app in clashApps" :key="app.name" class="client-card">
-        <div>
-          <div class="client-head">
-            <div class="client-meta">
-              <div class="client-name">
-                {{ app.name }}
-                <span class="client-tag">{{ app.tag }}</span>
-              </div>
-              <div class="client-platform-tags">
-                <span v-for="plat in app.platforms" :key="plat" class="platform-chip">{{ plat }}</span>
-              </div>
+    <!-- 推荐客户端 -->
+    <CsSpaceBetween direction="vertical" size="m">
+      <CsHeader variant="h2">推荐客户端（Mihomo 生态）</CsHeader>
+      <div class="client-grid">
+        <CsContainer v-for="app in clashApps" :key="app.name">
+          <template #header>
+            <CsHeader variant="h3">
+              {{ app.name }}
+              <template #actions>
+                <CsBadge color="blue">{{ app.tag }}</CsBadge>
+              </template>
+            </CsHeader>
+          </template>
+          <CsSpaceBetween direction="vertical" size="s">
+            <div class="platform-list">
+              <CsBadge v-for="plat in app.platforms" :key="plat" color="grey">{{ plat }}</CsBadge>
             </div>
-          </div>
-          <p class="client-desc">{{ app.desc }}</p>
-        </div>
-        <div class="client-footer">
-          <a v-if="app.url" :href="app.url" target="_blank" rel="noreferrer" class="client-link">
-            <el-icon><Download /></el-icon>&nbsp;获取客户端
-          </a>
-        </div>
+            <div class="client-desc">{{ app.desc }}</div>
+          </CsSpaceBetween>
+          <template #footer>
+            <CsLink v-if="app.url" :href="app.url" external>获取客户端</CsLink>
+          </template>
+        </CsContainer>
       </div>
-    </div>
+    </CsSpaceBetween>
 
-    <!-- 快速接入说明 -->
-    <div class="x-card" style="margin-top: 20px">
-      <div class="x-card-head"><span>快速接入指引</span></div>
-      <div class="sub-steps">
-        <div class="sub-step">
+    <!-- 快速接入指引 -->
+    <CsContainer>
+      <template #header>
+        <CsHeader variant="h2">快速接入指引</CsHeader>
+      </template>
+      <div class="steps-grid">
+        <div class="step-item">
           <span class="step-num">1</span>
-          <div class="step-info">
+          <div>
             <div class="step-title">获取客户端</div>
-            <div class="step-desc">Windows / macOS 推荐使用 <b>Clash Verge Rev</b> 或 <b>Mihomo Party</b>；Android 推荐 <b>FlClash</b>；iOS 推荐 <b>Stash</b>。</div>
+            <div class="step-desc">
+              Windows / macOS 推荐使用 Clash Verge Rev 或 Mihomo Party；Android 推荐 FlClash；iOS 推荐 Stash。
+            </div>
           </div>
         </div>
-        <div class="sub-step">
+        <div class="step-item">
           <span class="step-num">2</span>
-          <div class="step-info">
-            <div class="step-title">同步订阅配置</div>
-            <div class="step-desc">点击上方「一键导入 Mihomo 客户端」，或复制订阅地址至客户端配置管理中粘贴保存并更新。</div>
+          <div>
+            <div class="step-title">导入订阅配置</div>
+            <div class="step-desc">
+              点击上方「一键导入 Mihomo 客户端」，或复制订阅地址后在客户端配置页手动拉取。
+            </div>
           </div>
         </div>
-        <div class="sub-step">
+        <div class="step-item">
           <span class="step-num">3</span>
-          <div class="step-info">
-            <div class="step-title">启用系统代理</div>
-            <div class="step-desc">在客户端代理分组中选择节点或开启「自动故障转移」，打开「系统代理」开关即可顺畅连接。</div>
+          <div>
+            <div class="step-title">开启系统代理</div>
+            <div class="step-desc">
+              选择延迟最低的节点或使用自动选择策略组，开启系统代理即可畅享高速连接。
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </CsContainer>
 
     <!-- 二维码放大弹窗 -->
-    <el-dialog v-model="qrModalOpen" title="手机扫码导入订阅" width="340px" append-to-body center>
-      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
-        <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" style="width: 220px; height: 220px; border-radius: 8px; border: 1px solid var(--x-border)" />
-        <div v-else style="width: 220px; height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--x-card-soft); border-radius: 8px; border: 1px dashed var(--x-border); color: var(--x-text-3); font-size: 13px">
-          <el-icon style="font-size: 28px; margin-bottom: 8px"><ShoppingBag /></el-icon>
-          <span>暂无可用订阅二维码</span>
-        </div>
-        <p class="muted" style="font-size: 12px; text-align: center">
-          {{ qrDataUrl ? '使用手机端 Mihomo 客户端（如 Stash、FlClash）扫码即可自动添加配置。' : '请先订购有效套餐以下发订阅地址。' }}
-        </p>
+    <CsModal
+      v-model:visible="qrModalOpen"
+      header="手机扫码导入订阅"
+      size="small"
+      :close-on-click-overlay="false"
+    >
+      <div class="qr-modal-body">
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="qr-modal-img" />
+        <p class="qr-modal-tip">使用支持 Clash / Mihomo 协议的客户端扫描上方二维码即可导入订阅。</p>
       </div>
-    </el-dialog>
-  </div>
+      <template #footer>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">复制订阅地址</CsButton>
+          <CsButton variant="primary" @click="qrModalOpen = false">关闭</CsButton>
+        </CsSpaceBetween>
+      </template>
+    </CsModal>
+  </CsSpaceBetween>
 </template>
 
 <style scoped lang="scss">
-.sub-hero {
-  margin-bottom: 18px;
-  .sub-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 10px;
-    background: var(--x-primary-soft);
-    color: var(--x-primary);
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  .sub-title {
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--x-text);
-    margin: 0;
-  }
-  .sub-desc {
-    color: var(--x-text-2);
-    font-size: 13px;
-    margin-top: 4px;
-    line-height: 1.5;
-  }
-}
-
-.sub-alert {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: var(--x-radius);
-  margin-bottom: 14px;
-  font-size: 13.5px;
-  background: rgba(244, 63, 94, 0.1);
-  border: 1px solid rgba(244, 63, 94, 0.35);
-  color: #fb7185;
-
-  > span {
-    flex: 1;
-  }
-}
-
-.primary-card {
-  border-color: rgba(99, 102, 241, 0.25);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.06);
-}
-
 .sub-main-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 20px;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-
-  .sub-left {
-    flex: 1;
-    min-width: 260px;
-  }
-  .sub-right {
-    flex: none;
-    cursor: pointer;
-  }
 }
 
 .sub-url-box {
-  background: var(--x-card-soft);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
   padding: 12px 14px;
-  margin-bottom: 14px;
-  .sub-url-label {
-    display: block;
-    font-size: 11px;
-    letter-spacing: 0.3px;
-    color: var(--x-text-3);
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-  .sub-url-code {
-    display: block;
-    word-break: break-all;
-    font-size: 12.5px;
-    color: var(--x-text);
-  }
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
 }
 
-.sub-action-buttons {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-
-  .glow-btn {
-    box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
-  }
+.sub-url-label {
+  font-size: 12px;
+  color: var(--x-text-secondary);
+  margin-bottom: 6px;
 }
 
-.sub-minor-actions {
+.sub-url-code {
+  display: block;
+  font-size: 13px;
+  color: var(--x-text);
+  word-break: break-all;
+}
+
+.sub-qr-panel {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 .qr-wrap {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 10px;
-  background: var(--x-card-soft);
+  justify-content: center;
+  inline-size: 120px;
+  block-size: 120px;
+  padding: 6px;
   border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  transition: all 0.2s ease;
-  &:hover {
-    border-color: var(--x-primary);
-    transform: translateY(-2px);
-    box-shadow: var(--x-shadow-md);
-  }
-  .sub-qr {
-    width: 100px;
-    height: 100px;
-    border-radius: 6px;
-  }
-  .sub-qr-empty {
-    width: 100px;
-    height: 100px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--x-text-3);
-  }
-  .qr-tip {
-    font-size: 11px;
-    color: var(--x-text-2);
-    margin-top: 6px;
-    display: flex;
-    align-items: center;
-  }
+  border-radius: 8px;
+  background-color: #ffffff;
 }
 
-.section-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--x-text);
-  margin: 20px 0 12px;
+.sub-qr {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.sub-qr-empty {
+  font-size: 14px;
+  color: var(--x-text-secondary);
+}
+
+.qr-tip {
+  font-size: 12px;
+  color: var(--x-text-secondary);
 }
 
 .client-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.client-card {
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  padding: 16px;
-  box-shadow: var(--x-shadow);
+.platform-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.client-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--x-text-secondary);
+}
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 999px;
+  background-color: var(--x-primary-soft);
+  color: var(--x-primary);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--x-text);
+  margin-bottom: 4px;
+}
+
+.step-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--x-text-secondary);
+}
+
+.qr-modal-body {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  transition: all 0.2s ease;
-
-  &:hover {
-    transform: translateY(-2px);
-    border-color: rgba(99, 102, 241, 0.35);
-    box-shadow: var(--x-shadow-md);
-  }
-
-  .client-head {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-  }
-  .client-meta {
-    min-width: 0;
-    flex: 1;
-  }
-  .client-name {
-    font-size: 14.5px;
-    font-weight: 700;
-    color: var(--x-text);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .client-tag {
-    font-size: 10.5px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--x-primary-soft);
-    color: var(--x-primary);
-    font-weight: 600;
-  }
-  .client-platform-tags {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-    margin-top: 6px;
-
-    .platform-chip {
-      font-size: 10.5px;
-      padding: 1px 5px;
-      border-radius: 3px;
-      background: var(--x-card-soft);
-      border: 1px solid var(--x-border);
-      color: var(--x-text-3);
-    }
-  }
-  .client-desc {
-    font-size: 12px;
-    color: var(--x-text-2);
-    line-height: 1.5;
-    margin: 10px 0 12px;
-  }
-  .client-footer {
-    display: flex;
-    justify-content: flex-end;
-  }
-  .client-link {
-    font-size: 12px;
-    color: var(--x-primary);
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-}
-
-.sub-steps {
-  padding: 14px 16px;
-  display: grid;
+  align-items: center;
   gap: 12px;
-}
-.sub-step {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  .step-num {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: var(--x-primary);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    margin-top: 2px;
-  }
-  .step-info {
-    flex: 1;
-  }
-  .step-title {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--x-text);
-  }
-  .step-desc {
-    font-size: 12px;
-    color: var(--x-text-2);
-    margin-top: 2px;
-    line-height: 1.5;
-  }
+  padding: 8px 0;
 }
 
-.empty-sub-card {
-  margin-bottom: 20px;
+.qr-modal-img {
+  inline-size: 220px;
+  block-size: 220px;
+  border-radius: 8px;
+  background-color: #ffffff;
+  padding: 8px;
+  border: 1px solid var(--x-border);
+}
+
+.qr-modal-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--x-text-secondary);
   text-align: center;
-  padding: 36px 20px;
-  background: var(--x-card);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius);
-
-  .empty-sub-icon {
-    font-size: 42px;
-    color: var(--x-primary);
-    margin-bottom: 12px;
-  }
-
-  .empty-sub-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--x-text);
-    margin-bottom: 8px;
-  }
-
-  .empty-sub-desc {
-    color: var(--x-text-2);
-    font-size: 13px;
-    max-width: 460px;
-    margin: 0 auto 18px;
-    line-height: 1.6;
-  }
 }
 
-@media (max-width: 640px) {
-  .sub-right {
-    display: none !important;
+@media (max-width: $bp-tablet-max) {
+  .sub-main-grid,
+  .client-grid,
+  .steps-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
