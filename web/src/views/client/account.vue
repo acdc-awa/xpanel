@@ -4,8 +4,9 @@ import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, setAutoRenew } from '@/api/user'
-import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
+import { getMyBalanceLogs } from '@/api/gift_card'
 import { cancelOrder, getMyOrders } from '@/api/shop'
+import RechargeModal from '@/components/RechargeModal.vue'
 import { errMsg } from '@/api/http'
 import { formatMoney, formatMoneyNumber, formatSignedMoney } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
@@ -61,9 +62,8 @@ async function toggleAutoRenew(kind: 'expire' | 'exhaust', val: boolean) {
   }
 }
 
-// 余额 & 卡密兑换
-const redeemCode = ref('')
-const redeeming = ref(false)
+// 余额 & 充值弹窗
+const rechargeModalOpen = ref(false)
 const balanceLogs = ref<BalanceLog[]>([])
 const loadingLogs = ref(false)
 
@@ -74,7 +74,10 @@ const BALANCE_TYPE_LABEL: Record<string, string> = {
   refund: '退款',
 }
 function balanceLogTitle(type?: string): string {
-  return BALANCE_TYPE_LABEL[type ?? ''] ?? '余额变动'
+  if (!type) return '余额变动'
+  if (BALANCE_TYPE_LABEL[type]) return BALANCE_TYPE_LABEL[type]
+  if (type.startsWith('recharge_')) return '充值'
+  return '余额变动'
 }
 
 const balanceYuan = computed(() => {
@@ -116,13 +119,29 @@ const orderStatusMap: Record<string, { type: 'pending' | 'success' | 'stopped'; 
 
 const orderColumns: TableColumn[] = [
   { id: 'order_no', header: '订单号' },
-  { id: 'plan_name', header: '套餐' },
+  { id: 'plan_name', header: '订单内容' },
   { id: 'payment_method', header: '支付方式' },
   { id: 'amount', header: '金额' },
   { id: 'status', header: '状态' },
   { id: 'created_at', header: '创建时间' },
   { id: 'actions', header: '操作' },
 ]
+
+function orderMethodLabel(row: Order): string {
+  if (row.payment_method === 'gift_card') return '卡密兑换'
+  if (row.payment_method === 'balance') return '余额支付'
+  return row.payment_channel || row.payment_method || '在线支付'
+}
+
+function orderHasAmountChange(row: Order): boolean {
+  return row.status === 'paid' && row.amount_cents > 0
+}
+
+function formatOrderAmount(row: Order): string {
+  const prefix = row.order_type === 'recharge' ? '+' : '-'
+  if (row.amount_cents === 0) return formatMoney(0)
+  return `${prefix}${formatMoney(row.amount_cents)}`
+}
 
 const logPage = ref(1)
 const logPageSize = ref(10)
@@ -172,27 +191,8 @@ async function loadRecentLogs() {
   }
 }
 
-async function submitRedeem() {
-  const code = redeemCode.value.trim()
-  if (!code) {
-    ElMessage.warning('请输入卡密')
-    return
-  }
-  redeeming.value = true
-  try {
-    const { data } = await redeemGiftCard(code)
-    if (data.code === 0) {
-      ElMessage.success(`充值成功，已到账 ${formatMoney(data.data.face_value_cents)}`)
-      redeemCode.value = ''
-      await refresh()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '卡密核销失败'))
-  } finally {
-    redeeming.value = false
-  }
+async function handleRecharged() {
+  await refresh()
 }
 
 // 修改密码
@@ -385,25 +385,15 @@ async function onResetSubscribe() {
           </template>
 
           <CsSpaceBetween direction="vertical" size="l">
-            <div class="balance-box">
-              <div class="balance-label">可用余额</div>
-              <div class="balance-value cell-mono">¥{{ balanceYuan }}</div>
+            <div class="balance-box balance-box-row">
+              <div>
+                <div class="balance-label">可用余额</div>
+                <div class="balance-value cell-mono">¥{{ balanceYuan }}</div>
+              </div>
+              <CsButton variant="primary" @click="rechargeModalOpen = true">
+                充值
+              </CsButton>
             </div>
-
-            <CsForm @submit="submitRedeem">
-              <CsFormItem label="卡密充值" description="输入 16 位充值卡密，核销后余额即时到账。">
-                <CsSpaceBetween direction="horizontal" size="xs">
-                  <CsInput
-                    v-model="redeemCode"
-                    placeholder="请输入 16 位卡密"
-                    class="cell-mono"
-                  />
-                  <CsButton variant="primary" :loading="redeeming" @click="submitRedeem">
-                    立即核销
-                  </CsButton>
-                </CsSpaceBetween>
-              </CsFormItem>
-            </CsForm>
           </CsSpaceBetween>
         </CsContainer>
 
@@ -635,15 +625,25 @@ async function onResetSubscribe() {
                 <code class="cell-mono">{{ row.order_no }}</code>
               </template>
               <template #cell-plan_name="{ row }">
-                {{ row.plan_name || `#${row.plan_id}` }}
+                <CsSpaceBetween direction="horizontal" size="xs" align="center">
+                  <CsBadge :color="row.order_type === 'recharge' ? 'blue' : 'grey'">
+                    {{ row.order_type === 'recharge' ? '充值' : '套餐' }}
+                  </CsBadge>
+                  <span>{{ row.plan_name || (row.order_type === 'recharge' ? '账户充值' : `#${row.plan_id}`) }}</span>
+                </CsSpaceBetween>
               </template>
               <template #cell-payment_method="{ row }">
                 <CsBadge color="grey">
-                  {{ row.payment_method === 'gift_card' ? '卡密支付' : '余额支付' }}
+                  {{ orderMethodLabel(row) }}
                 </CsBadge>
               </template>
               <template #cell-amount="{ row }">
-                <span class="cell-mono"><strong>{{ formatMoney(row.amount_cents) }}</strong></span>
+                <span
+                  class="cell-mono"
+                  :class="orderHasAmountChange(row) ? 'amount-changed' : 'amount-unchanged'"
+                >
+                  <strong>{{ formatOrderAmount(row) }}</strong>
+                </span>
               </template>
               <template #cell-status="{ row }">
                 <CsStatusIndicator :type="orderStatusMap[row.status]?.type ?? 'stopped'">
@@ -722,6 +722,8 @@ async function onResetSubscribe() {
         </div>
       </CsTabs>
     </CsContainer>
+
+    <RechargeModal v-model:visible="rechargeModalOpen" @recharged="handleRecharged" />
   </CsSpaceBetween>
 </template>
 
@@ -926,6 +928,21 @@ async function onResetSubscribe() {
   border: 1px solid var(--x-border);
   text-align: center;
   font-size: 13px;
+}
+
+.balance-box-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.amount-changed {
+  color: var(--color-text-link-default-qabnuk, #0972d3);
+}
+
+.amount-unchanged {
+  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
 @media (max-width: $bp-two-pane) {

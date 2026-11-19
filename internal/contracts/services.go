@@ -92,6 +92,9 @@ type OrderService interface {
 	ListByUser(userID uint64) ([]models.Order, error)
 	PayWithBalance(userID, planID uint64) (*models.Order, error)
 	CreateOrder(userID, planID uint64, replacePending bool) (*models.Order, error)
+	CreateRechargeOrder(userID uint64, channel string, amountCents int64, replacePending bool) (*models.Order, error)
+	UpdateOrderPaymentInfo(orderID uint64, method, channel, tradeNo, payPayload string) error
+	CompleteRechargeOrder(orderNo, channel, tradeNo string, paidAmountCents int64) (*models.Order, error)
 	GetOrder(userID uint64, orderNo string) (*models.Order, error)
 	PayOrderWithBalance(userID uint64, orderNo string) (*models.Order, error)
 	CancelOrder(userID uint64, orderNo string) (*models.Order, error)
@@ -162,6 +165,7 @@ type GiftCardService interface {
 	ListBalanceLogs(userID uint64, page, size int) ([]models.BalanceLog, int64, error)
 	ListCards(page, size int, status, search string) ([]models.GiftCard, int64, error)
 	Redeem(userID uint64, code string) (*models.GiftCard, int64, error)
+	RedeemWithOrder(userID uint64, code string) (*models.GiftCard, *models.Order, int64, error)
 }
 
 // BackupService 备份服务接口。

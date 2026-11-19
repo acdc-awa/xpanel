@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,12 +72,19 @@ func (s *GiftCardService) BatchGenerate(adminID uint64, count int, name string, 
 
 // Redeem 兑换礼品卡充值余额（原子事务 + 行锁；行锁方言差异在 pkg/db.LockForUpdate 收口）。
 func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, int64, error) {
+	card, _, newBalance, err := s.RedeemWithOrder(userID, code)
+	return card, newBalance, err
+}
+
+// RedeemWithOrder 兑换礼品卡充值余额，并原子生成一笔已支付的统一充值订单。
+func (s *GiftCardService) RedeemWithOrder(userID uint64, code string) (*models.GiftCard, *models.Order, int64, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
-		return nil, 0, errors.New("卡密不能为空")
+		return nil, nil, 0, errors.New("卡密不能为空")
 	}
 
 	var card *models.GiftCard
+	var order *models.Order
 	var newBalance int64
 	ctx := context.Background()
 
@@ -123,7 +131,26 @@ func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, 
 			return err
 		}
 
-		// 6. 记流水
+		// 6. 生成统一充值订单（已支付）
+		orderNo := now.Format("20060102150405") + util.RandomID(4)
+		order = &models.Order{
+			OrderNo:        orderNo,
+			OrderType:      models.OrderTypeRecharge,
+			UserID:         userID,
+			PlanID:         0,
+			PlanName:       "账户充值",
+			AmountCents:    card.FaceValueCents,
+			PaymentMethod:  models.PaymentMethodGiftCard,
+			PaymentChannel: models.PaymentMethodGiftCard,
+			TradeNo:        "GC-" + strconv.FormatUint(card.ID, 10),
+			Status:         models.OrderPaid,
+			PaidAt:         &now,
+		}
+		if err := tx.CreateOrder(ctx, order); err != nil {
+			return err
+		}
+
+		// 7. 记流水
 		entry := models.BalanceLog{
 			UserID:       userID,
 			AmountCents:  card.FaceValueCents,
@@ -141,9 +168,9 @@ func (s *GiftCardService) Redeem(userID uint64, code string) (*models.GiftCard, 
 	})
 
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	return card, newBalance, nil
+	return card, order, newBalance, nil
 }
 
 // ListCards 管理端查询礼品卡列表。

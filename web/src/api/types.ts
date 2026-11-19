@@ -277,15 +277,31 @@ export interface Plan {
 
 export type OrderStatus = 'paid'
 
+export interface PaymentChannelInfo {
+  id: string
+  name: string
+  description?: string
+  flow_type: 'sync' | 'redirect' | 'qrcode' | string
+  supports_recharge: boolean
+  supports_plan_pay: boolean
+  requires_amount: boolean
+  min_amount_cents?: number
+  max_amount_cents?: number
+  enabled: boolean
+}
+
 export interface Order {
   id: number
   order_no: string
+  order_type?: 'plan' | 'recharge' | string
   user_id: number
   email: string
   plan_id: number
   plan_name: string
   amount_cents: number
   payment_method?: 'balance' | 'gift_card' | string
+  payment_channel?: string
+  pay_payload?: string
   status: 'pending' | 'paid' | 'cancelled' | string
   cancel_reason?: string
   expires_at?: string | null

@@ -15,7 +15,9 @@ import {
   ElMessage,
 } from '@/components/cloudscape'
 import { cancelOrder, getOrder, payOrder } from '@/api/shop'
-import type { Order } from '@/api/types'
+import { errMsg } from '@/api/http'
+import type { Order, PaymentChannelInfo } from '@/api/types'
+import RechargeModal from '@/components/RechargeModal.vue'
 import { formatMoney } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 
@@ -30,10 +32,16 @@ const cancelling = ref(false)
 const order = ref<Order | null>(null)
 const balanceCents = ref(0)
 const availableMethods = ref<string[]>(['balance', 'gift_card'])
-const selectedMethod = ref<'balance' | 'gift_card'>('balance')
+const channels = ref<PaymentChannelInfo[]>([])
+const selectedMethod = ref<string>('balance')
 const giftCode = ref('')
+const rechargeModalOpen = ref(false)
+const payUrl = ref('')
+const qrCodeText = ref('')
 const nowMs = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
+
+const isRecharge = computed(() => order.value?.order_type === 'recharge')
 
 const remainingSeconds = computed(() => {
   if (!order.value?.expires_at || order.value.status !== 'pending') return 0
@@ -59,14 +67,34 @@ async function load() {
     const payload = res.data.data
     order.value = payload.order
     balanceCents.value = payload.balance_cents
+    if (payload.channels?.length) {
+      channels.value = payload.channels
+    }
     if (payload.available_methods?.length) {
       availableMethods.value = payload.available_methods
     }
-    if (order.value?.status === 'pending' && !balanceEnough.value && availableMethods.value.includes('gift_card')) {
-      selectedMethod.value = 'gift_card'
+    if (order.value?.pay_payload) {
+      try {
+        const parsed = JSON.parse(order.value.pay_payload) as { pay_url?: string; qr_code?: string }
+        payUrl.value = parsed.pay_url || ''
+        qrCodeText.value = parsed.qr_code || ''
+      } catch {
+        // ignore invalid payload
+      }
+    }
+    if (order.value?.status === 'pending') {
+      if (isRecharge.value) {
+        if (order.value.payment_channel && availableMethods.value.includes(order.value.payment_channel)) {
+          selectedMethod.value = order.value.payment_channel
+        } else if (availableMethods.value.length > 0) {
+          selectedMethod.value = availableMethods.value[0]
+        }
+      } else if (!balanceEnough.value && availableMethods.value.includes('gift_card')) {
+        selectedMethod.value = 'gift_card'
+      }
     }
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '加载订单失败')
+    ElMessage.error(errMsg(e, '加载订单失败'))
   } finally {
     loading.value = false
   }
@@ -89,11 +117,17 @@ async function handlePay() {
     if (payload.paid) {
       order.value = payload.order
       await auth.fetchMe()
-      ElMessage.success('支付成功，套餐已生效')
-      router.push('/subscribe')
+      ElMessage.success(isRecharge.value ? '充值成功，余额已到账' : '支付成功，套餐已生效')
+      router.push(isRecharge.value ? '/account' : '/subscribe')
+    } else {
+      payUrl.value = payload.pay_url || ''
+      qrCodeText.value = payload.qr_code || ''
+      if (payload.pay_url) {
+        window.open(payload.pay_url, '_blank', 'noopener')
+      }
     }
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '支付失败')
+    ElMessage.error(errMsg(e, '支付失败'))
     await load()
     await auth.fetchMe()
   } finally {
@@ -109,9 +143,16 @@ async function handleCancel() {
     order.value = res.data.data.order
     ElMessage.success('订单已取消')
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '取消失败')
+    ElMessage.error(errMsg(e, '取消失败'))
   } finally {
     cancelling.value = false
+  }
+}
+
+async function handleRecharged() {
+  await Promise.all([load(), auth.fetchMe()])
+  if (!isRecharge.value && balanceEnough.value) {
+    selectedMethod.value = 'balance'
   }
 }
 
@@ -154,10 +195,10 @@ onUnmounted(() => {
         type="info"
         :header="`待支付 · 剩余支付时间 ${remainingText}`"
       >
-        订单已为您锁定当前套餐价格，请在倒计时结束前完成支付。
+        {{ isRecharge ? '请在倒计时结束前完成充值支付，成功后将自动计入账户余额。' : '订单已为您锁定当前套餐价格，请在倒计时结束前完成支付。' }}
       </CsAlert>
       <CsAlert v-else-if="order.status === 'paid'" type="success" header="订单已支付">
-        该订单已完成支付，套餐已生效。
+        {{ isRecharge ? '该笔充值已完成，金额已计入您的账户余额。' : '该订单已完成支付，套餐已生效。' }}
       </CsAlert>
       <CsAlert v-else type="warning" header="订单已取消">
         {{ order.cancel_reason === 'timeout' ? '订单超时未支付已自动关闭。' : '该订单已被取消。' }}
@@ -174,8 +215,8 @@ onUnmounted(() => {
               <span class="kv-val cell-mono">{{ order.order_no }}</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">套餐名称</span>
-              <span class="kv-val">{{ order.plan_name || `#${order.plan_id}` }}</span>
+              <span class="kv-label">{{ isRecharge ? '订单内容' : '套餐名称' }}</span>
+              <span class="kv-val">{{ order.plan_name || (isRecharge ? '账户充值' : `#${order.plan_id}`) }}</span>
             </div>
             <div class="kv-row">
               <span class="kv-label">应付金额</span>
@@ -203,7 +244,7 @@ onUnmounted(() => {
           <CsSpaceBetween size="m">
             <div class="method-list">
               <div
-                v-if="availableMethods.includes('balance')"
+                v-if="!isRecharge && availableMethods.includes('balance')"
                 class="method-card"
                 :class="{ active: selectedMethod === 'balance' }"
                 @click="selectedMethod = 'balance'"
@@ -224,7 +265,7 @@ onUnmounted(() => {
               </div>
 
               <div
-                v-if="availableMethods.includes('gift_card')"
+                v-if="!isRecharge && availableMethods.includes('gift_card')"
                 class="method-card"
                 :class="{ active: selectedMethod === 'gift_card' }"
                 @click="selectedMethod = 'gift_card'"
@@ -237,11 +278,36 @@ onUnmounted(() => {
                   卡密核销后自动充入余额并完成订单支付，多余金额保留在账户余额中
                 </CsBox>
               </div>
+
+              <div
+                v-for="ch in (isRecharge ? channels.filter((c) => c.requires_amount && c.id !== 'balance' && c.id !== 'gift_card') : [])"
+                :key="ch.id"
+                class="method-card"
+                :class="{ active: selectedMethod === ch.id }"
+                @click="selectedMethod = ch.id"
+              >
+                <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                  <strong>{{ ch.name }}</strong>
+                  <CsBadge color="blue">在线支付</CsBadge>
+                </CsSpaceBetween>
+                <CsBox v-if="ch.description" variant="small" color="text-body-secondary">
+                  {{ ch.description }}
+                </CsBox>
+              </div>
             </div>
 
             <CsFormField v-if="selectedMethod === 'gift_card'" label="输入卡密">
               <CsInput v-model="giftCode" placeholder="请输入礼品卡 / 充值卡密" />
             </CsFormField>
+
+            <CsAlert v-if="payUrl" type="info" header="已生成支付链接">
+              请在新窗口完成支付；如未自动跳转，可
+              <a :href="payUrl" target="_blank" rel="noopener">点击此处前往支付</a>。
+            </CsAlert>
+
+            <CsAlert v-if="qrCodeText" type="info" header="请扫码完成支付">
+              支付二维码内容：<code class="cell-mono">{{ qrCodeText }}</code>
+            </CsAlert>
 
             <CsSpaceBetween direction="horizontal" size="s">
               <CsButton
@@ -253,8 +319,17 @@ onUnmounted(() => {
                 {{
                   selectedMethod === 'balance'
                     ? `确认支付 ${formatMoney(order.amount_cents)}`
-                    : '核销卡密并支付'
+                    : selectedMethod === 'gift_card'
+                      ? (isRecharge ? '确认兑换' : '核销卡密并支付')
+                      : `立即支付 ${formatMoney(order.amount_cents)}`
                 }}
+              </CsButton>
+              <CsButton
+                v-if="!isRecharge && !balanceEnough"
+                variant="normal"
+                @click="rechargeModalOpen = true"
+              >
+                去充值
               </CsButton>
               <CsButton variant="normal" :loading="cancelling" @click="handleCancel">
                 取消订单
@@ -268,8 +343,11 @@ onUnmounted(() => {
             <CsHeader variant="h2">后续操作</CsHeader>
           </template>
           <CsSpaceBetween direction="horizontal" size="s">
-            <CsButton v-if="order.status === 'paid'" variant="primary" @click="router.push('/subscribe')">
+            <CsButton v-if="order.status === 'paid' && !isRecharge" variant="primary" @click="router.push('/subscribe')">
               查看我的订阅
+            </CsButton>
+            <CsButton v-if="order.status === 'paid' && isRecharge" variant="primary" @click="router.push('/account')">
+              查看我的订单
             </CsButton>
             <CsButton variant="normal" @click="router.push('/shop')">
               返回套餐商店
@@ -278,6 +356,12 @@ onUnmounted(() => {
         </CsContainer>
       </CsColumnLayout>
     </template>
+
+    <RechargeModal
+      v-model:visible="rechargeModalOpen"
+      :suggested-amount-cents="diffCents"
+      @recharged="handleRecharged"
+    />
   </CsSpaceBetween>
 </template>
 

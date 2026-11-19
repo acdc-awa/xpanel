@@ -23,6 +23,7 @@ type Deps struct {
 	Config    contracts.ConfigService
 	Site      contracts.SiteService
 	GiftCard  contracts.GiftCardService
+	Payments  *contracts.PaymentRegistry
 	Backup    contracts.BackupService
 	SubServer *SubscribeServer
 }

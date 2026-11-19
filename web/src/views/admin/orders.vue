@@ -30,6 +30,7 @@ const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
 const filterStatus = ref('')
+const filterOrderType = ref('')
 const keyword = ref('')
 
 async function load() {
@@ -40,6 +41,7 @@ async function load() {
       size.value,
       filterStatus.value || undefined,
       keyword.value.trim() || undefined,
+      filterOrderType.value || undefined,
     )
     if (data.code === 0) {
       list.value = data.data.items
@@ -61,6 +63,7 @@ function onFilterChange() {
 
 function resetFilters() {
   filterStatus.value = ''
+  filterOrderType.value = ''
   keyword.value = ''
   page.value = 1
   load()
@@ -79,19 +82,36 @@ function statusOf(row: Order): { color: 'green' | 'grey' | 'severity-medium'; te
 }
 
 function amountClassOf(row: Order) {
-  if (row.status === 'paid') return 'order-amount--paid'
-  if (row.status === 'pending') return 'order-amount--pending'
-  return 'order-amount--muted'
+  return row.status === 'paid' && row.amount_cents > 0 ? 'order-amount--changed' : 'order-amount--unchanged'
+}
+
+function formatOrderAmount(row: Order) {
+  if (row.amount_cents === 0) return formatMoney(0)
+  const prefix = row.order_type === 'recharge' ? '+' : '-'
+  return `${prefix}${formatMoney(row.amount_cents)}`
 }
 
 function paymentLabel(row: Order) {
-  return row.payment_method === 'balance' ? '余额支付' : row.payment_method || '—'
+  if (row.payment_method === 'balance') return '余额支付'
+  if (row.payment_method === 'gift_card') return '卡密兑换'
+  return row.payment_channel || row.payment_method || '—'
 }
 </script>
 
 <template>
   <CsPage>
     <CsToolbar>
+      <CsSelect
+          v-model="filterOrderType"
+          placeholder="全部类型"
+          clearable
+          style="width: 130px"
+          @change="onFilterChange"
+        >
+          <CsOption label="全部类型" value="" />
+          <CsOption label="套餐订单" value="plan" />
+          <CsOption label="充值订单" value="recharge" />
+        </CsSelect>
       <CsSelect
           v-model="filterStatus"
           placeholder="全部状态"
@@ -133,15 +153,18 @@ function paymentLabel(row: Order) {
       <CsCardGrid v-else>
         <CsCard v-for="row in list" :key="row.id">
           <template #header>
-            <div class="order-plan">{{ row.plan_name }}</div>
+            <div class="order-plan">{{ row.plan_name || (row.order_type === 'recharge' ? '账户充值' : `#${row.plan_id}`) }}</div>
             <div class="order-meta">
               <span class="order-id">#{{ row.id }}</span>
+              <CsBadge :color="row.order_type === 'recharge' ? 'blue' : 'grey'">
+                {{ row.order_type === 'recharge' ? '充值' : '套餐' }}
+              </CsBadge>
               <CsBadge :color="statusOf(row).color">{{ statusOf(row).text }}</CsBadge>
             </div>
           </template>
           <template #actions>
             <span class="order-amount" :class="amountClassOf(row)">
-              {{ formatMoney(row.amount_cents) }}
+              {{ formatOrderAmount(row) }}
             </span>
           </template>
 
@@ -201,16 +224,12 @@ function paymentLabel(row: Order) {
   white-space: nowrap;
 }
 
-.order-amount--paid {
-  color: var(--color-text-status-success-1i2jf8, #00802f);
+.order-amount--changed {
+  color: var(--color-text-link-default-qabnuk, #0972d3);
 }
 
-.order-amount--pending {
+.order-amount--unchanged {
   color: var(--color-text-body-default-b2us04, #0f141a);
-}
-
-.order-amount--muted {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 </style>

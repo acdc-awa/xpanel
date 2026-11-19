@@ -238,15 +238,18 @@ func PlanOrderSnapshot(p *Plan) string {
 	return string(b)
 }
 
-// Order 订单（支持 pending -> paid / cancelled 完整状态机，兼容存量 paid 订单）。
+// Order 订单（统一承载套餐订单与充值订单；支持 pending -> paid / cancelled 完整状态机）。
 type Order struct {
-	ID            uint64 `gorm:"primaryKey" json:"id"`
-	OrderNo       string `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
-	UserID        uint64 `gorm:"index;not null" json:"user_id"`
-	PlanID        uint64 `gorm:"index;not null" json:"plan_id"`
-	AmountCents   int64  `gorm:"not null" json:"amount_cents"`
-	PaymentMethod string `gorm:"size:32;default:balance;index" json:"payment_method"` // balance / gift_card / 未来扩展
-	Status        string `gorm:"size:16;default:paid;index" json:"status"`            // pending / paid / cancelled
+	ID             uint64 `gorm:"primaryKey" json:"id"`
+	OrderNo        string `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
+	OrderType      string `gorm:"size:16;default:plan;index" json:"order_type"` // plan / recharge
+	UserID         uint64 `gorm:"index;not null" json:"user_id"`
+	PlanID         uint64 `gorm:"index;not null" json:"plan_id"`
+	AmountCents    int64  `gorm:"not null" json:"amount_cents"`
+	PaymentMethod  string `gorm:"size:32;default:balance;index" json:"payment_method"`   // balance / gift_card / 第三方支付渠道
+	PaymentChannel string `gorm:"size:32;default:'';index" json:"payment_channel,omitempty"`
+	PayPayload     string `gorm:"type:text" json:"pay_payload,omitempty"` // 异步支付载体（JSON：pay_url/qr_code 等）
+	Status         string `gorm:"size:16;default:paid;index" json:"status"` // pending / paid / cancelled
 	// 套餐快照（2026-10-25）：套餐可归档，历史订单不能依赖实时 JOIN plans 取名称。
 	// PlanName 用于列表展示；PlanSnapshot 固化下单时点的名称/价格/流量/时长/权限组。
 	// 存量订单由 backfillOrderPlanNames 回填名称，快照留空（属一次性迁移前的历史行）。

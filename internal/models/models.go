@@ -31,6 +31,9 @@ const (
 	OrderPaid      = "paid"      // 已支付
 	OrderCancelled = "cancelled" // 已取消
 
+	OrderTypePlan     = "plan"     // 套餐购买/续费订单
+	OrderTypeRecharge = "recharge" // 账户充值订单
+
 	// Phase T：入站形态（面向终端用户 / 四层直通管道 / 独立通道 / 转发代理）
 	InboundTypeUser    = "user"    // 进订阅、参与用户授权与 SyncUsers（默认）
 	InboundTypeRelay   = "relay"   // 已退役：仅存量数据兼容（启动迁移归正为 user），新数据不再产生
@@ -138,6 +141,9 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	if err := backfillOrderPlanNames(db); err != nil {
+		return err
+	}
+	if err := backfillGiftCardOrders(db); err != nil {
 		return err
 	}
 	if err := migratePlanSaleFlags(db); err != nil {
@@ -279,6 +285,66 @@ func backfillOrderPlanNames(db *gorm.DB) error {
 			(SELECT p.name FROM plans p WHERE p.id = orders.plan_id), '')
 		WHERE (plan_name IS NULL OR plan_name = '') AND plan_id > 0`).Error; err != nil {
 		return fmt.Errorf("回填 orders.plan_name 失败: %w", err)
+	}
+	return upsertSetting(db, doneKey, "1")
+}
+
+// backfillGiftCardOrders 为存量订单补齐 order_type，并将历史已核销礼品卡一次性回填为已支付充值订单（v8）。
+// 幂等执行（通过 settings 标记 + trade_no 去重）。
+func backfillGiftCardOrders(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Order{}) {
+		return nil
+	}
+	// 兜底把历史空 order_type 归正为 plan
+	if err := db.Exec(`UPDATE orders SET order_type = ? WHERE order_type IS NULL OR order_type = ''`, OrderTypePlan).Error; err != nil {
+		return fmt.Errorf("回填 orders.order_type 失败: %w", err)
+	}
+	if !db.Migrator().HasTable(&GiftCard{}) {
+		return nil
+	}
+	const doneKey = "v8_gift_card_orders_backfill_done"
+	if readSettingValue(db, doneKey) == "1" {
+		return nil
+	}
+
+	var usedCards []GiftCard
+	if err := db.Where("status = ? AND used_by > 0", GiftCardUsed).Order("id ASC").Find(&usedCards).Error; err != nil {
+		return fmt.Errorf("查询已核销礼品卡失败: %w", err)
+	}
+	for _, c := range usedCards {
+		tradeNo := "GC-" + strconv.FormatUint(c.ID, 10)
+		var existing int64
+		if err := db.Model(&Order{}).Where("trade_no = ?", tradeNo).Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			continue
+		}
+		paidAt := c.CreatedAt
+		if c.UsedAt != nil {
+			paidAt = *c.UsedAt
+		}
+		orderNo := paidAt.Format("20060102150405") + "GC" + strconv.FormatUint(c.ID, 10)
+		if len(orderNo) > 32 {
+			orderNo = orderNo[:32]
+		}
+		o := Order{
+			OrderNo:        orderNo,
+			OrderType:      OrderTypeRecharge,
+			UserID:         c.UsedBy,
+			PlanID:         0,
+			PlanName:       "账户充值",
+			AmountCents:    c.FaceValueCents,
+			PaymentMethod:  PaymentMethodGiftCard,
+			PaymentChannel: PaymentMethodGiftCard,
+			TradeNo:        tradeNo,
+			Status:         OrderPaid,
+			CreatedAt:      paidAt,
+			PaidAt:         &paidAt,
+		}
+		if err := db.Create(&o).Error; err != nil {
+			return fmt.Errorf("回填礼品卡充值订单 #%d 失败: %w", c.ID, err)
+		}
 	}
 	return upsertSetting(db, doneKey, "1")
 }

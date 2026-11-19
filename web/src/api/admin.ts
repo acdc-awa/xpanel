@@ -1105,10 +1105,18 @@ export function restorePlan(id: number) {
   return http.post<ApiResp<{ plan: Plan }>>(`/admin/plans/${id}/restore`)
 }
 
-export function getOrders(page = 1, size = 20, status?: string, keyword?: string) {
+export function getOrders(page = 1, size = 20, status?: string, keyword?: string, orderType?: string) {
   return http.get<ApiResp<{ total: number; page: number; size: number; items: Order[] }>>(
     '/admin/orders',
-    { params: { page, size, status: status || undefined, keyword: keyword || undefined } },
+    {
+      params: {
+        page,
+        size,
+        status: status || undefined,
+        keyword: keyword || undefined,
+        order_type: orderType || undefined,
+      },
+    },
   )
 }
 

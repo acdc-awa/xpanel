@@ -153,6 +153,20 @@ func (s *BillingStore) FindPendingOrderByUser(ctx context.Context, userID uint64
 	return &o, nil
 }
 
+func (s *BillingStore) FindPendingOrderByUserAndType(ctx context.Context, userID uint64, orderType string) (*models.Order, error) {
+	var o models.Order
+	err := s.with(ctx).
+		Where("user_id = ? AND order_type = ? AND status = ?", userID, orderType, models.OrderPending).
+		Order("id DESC").First(&o).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
 func (s *BillingStore) GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error) {
 	var o models.Order
 	err := s.with(ctx).Where("order_no = ?", orderNo).First(&o).Error
@@ -167,6 +181,20 @@ func (s *BillingStore) GetOrderByNo(ctx context.Context, orderNo string) (*model
 
 func (s *BillingStore) CreateOrder(ctx context.Context, o *models.Order) error {
 	return s.with(ctx).Create(o).Error
+}
+
+func (s *BillingStore) UpdateOrderPaymentInfo(ctx context.Context, id uint64, method, channel, tradeNo, payPayload string) error {
+	updates := map[string]any{
+		"payment_method":  method,
+		"payment_channel": channel,
+	}
+	if tradeNo != "" {
+		updates["trade_no"] = tradeNo
+	}
+	if payPayload != "" {
+		updates["pay_payload"] = payPayload
+	}
+	return s.with(ctx).Model(&models.Order{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func (s *BillingStore) MarkOrderPaid(ctx context.Context, id uint64, method, tradeNo string, paidAt time.Time) (bool, error) {

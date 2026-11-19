@@ -96,6 +96,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 	{
 		// 公开配置（captcha site key 等）
 		v1.GET("/config", d.PublicConfig)
+		// 第三方支付异步回调统一入口（由各插件自行验签）
+		v1.Any("/payments/callback/:channel", d.PaymentCallback)
 
 		// 认证（登录/注册限流 5 次/分钟）
 		auth := v1.Group("/auth", middleware.RateLimit(5, time.Minute))
@@ -121,6 +123,8 @@ func registerAPI(r *gin.Engine, d *Deps) {
 			user.POST("/orders/:orderNo/pay", d.PayUserOrder)
 			user.POST("/orders/:orderNo/cancel", d.CancelUserOrder)
 			user.POST("/orders/pay-balance", d.UserPayOrderByBalance)
+			user.GET("/payment-channels", d.UserPaymentChannels)
+			user.POST("/recharges", middleware.RateLimit(20, time.Minute), d.CreateUserRecharge)
 			user.POST("/gift-cards/redeem", middleware.RateLimit(10, time.Minute), d.UserRedeemGiftCard)
 			user.GET("/balance-logs", d.UserBalanceLogs)
 			user.POST("/password", d.UserChangePassword)

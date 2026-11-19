@@ -7,16 +7,13 @@ import {
   CsBox,
   CsButton,
   CsContainer,
-  CsForm,
-  CsFormItem,
   CsHeader,
-  CsInput,
   CsModal,
   CsSpaceBetween,
   ElMessage,
 } from '@/components/cloudscape'
 import { createOrder, payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
-import { redeemGiftCard } from '@/api/gift_card'
+import RechargeModal from '@/components/RechargeModal.vue'
 import { useAuthStore } from '@/stores/auth'
 import { renderPlanMarkdown } from '@/utils/markdown'
 import { errMsg } from '@/api/http'
@@ -39,10 +36,8 @@ const checkoutOpen = ref(false)
 const selectedPlan = ref<Plan | null>(null)
 const paying = ref(false)
 
-// 现场快速充值弹窗
+// 统一充值弹窗
 const topupModalOpen = ref(false)
-const quickRedeemCode = ref('')
-const quickRedeeming = ref(false)
 
 const userBalanceCents = computed(() => auth.user?.balance_cents ?? 0)
 const currentPlanId = computed(() => auth.user?.plan_id ?? 0)
@@ -111,28 +106,8 @@ async function openCheckout(plan: Plan) {
   }
 }
 
-async function handleQuickRedeem() {
-  const code = quickRedeemCode.value.trim()
-  if (!code) {
-    ElMessage.warning('请输入卡密')
-    return
-  }
-  quickRedeeming.value = true
-  try {
-    const { data } = await redeemGiftCard(code)
-    if (data.code === 0) {
-      ElMessage.success(`充值成功，已到账 ¥${(data.data.face_value_cents / 100).toFixed(2)}`)
-      quickRedeemCode.value = ''
-      topupModalOpen.value = false
-      await auth.fetchMe()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '卡密核销失败'))
-  } finally {
-    quickRedeeming.value = false
-  }
+async function handleRecharged() {
+  await load()
 }
 
 async function confirmPay() {
@@ -198,32 +173,8 @@ async function confirmPay() {
       </CsBox>
     </CsContainer>
 
-    <!-- 订单记录 -->
-    <!-- 卡密核销弹窗 -->
-    <CsModal
-      v-model:visible="topupModalOpen"
-      header="卡密核销"
-      size="small"
-      :close-on-click-overlay="false"
-    >
-      <CsForm @submit="handleQuickRedeem">
-        <CsFormItem label="卡密兑换码" description="输入 16 位卡密，核销后余额即时到账。">
-          <CsInput
-            v-model="quickRedeemCode"
-            placeholder="请输入 16 位卡密"
-            class="cell-mono"
-          />
-        </CsFormItem>
-      </CsForm>
-      <template #footer>
-        <CsSpaceBetween direction="horizontal" size="xs">
-          <CsButton @click="topupModalOpen = false">取消</CsButton>
-          <CsButton variant="primary" :loading="quickRedeeming" @click="handleQuickRedeem">
-            立即核销
-          </CsButton>
-        </CsSpaceBetween>
-      </template>
-    </CsModal>
+    <!-- 统一账户充值弹窗 -->
+    <RechargeModal v-model:visible="topupModalOpen" @recharged="handleRecharged" />
 
     <!-- 结账收银台弹窗 -->
     <CsModal
@@ -250,21 +201,12 @@ async function confirmPay() {
         </div>
 
         <CsAlert v-if="!isBalanceSufficient" type="warning" header="账户余额不足">
-          当前还差 ¥{{ balanceDeficitYuan }}，可直接输入卡密即时充值。
+          当前还差 ¥{{ balanceDeficitYuan }}，请先充值后再支付。
         </CsAlert>
 
-        <CsForm v-if="!isBalanceSufficient" @submit="handleQuickRedeem">
-          <CsFormItem label="卡密充值">
-            <CsSpaceBetween direction="horizontal" size="xs">
-              <CsInput
-                v-model="quickRedeemCode"
-                placeholder="输入 16 位卡密"
-                class="cell-mono"
-              />
-              <CsButton :loading="quickRedeeming" @click="handleQuickRedeem">核销</CsButton>
-            </CsSpaceBetween>
-          </CsFormItem>
-        </CsForm>
+        <div v-if="!isBalanceSufficient">
+          <CsButton variant="normal" @click="topupModalOpen = true">去充值</CsButton>
+        </div>
       </CsSpaceBetween>
 
       <template #footer>

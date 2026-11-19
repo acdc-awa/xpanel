@@ -97,7 +97,10 @@ const (
 	//  ② 删列（向后不兼容）：inbounds 删掉 share_security / share_host / share_path / previous_type
 	//     四个纯残留列（明细见 migrate_v7_inbounds.go）。旧面板的入站读写会显式带这些列，
 	//     删列后直接报 "no such column"，属硬故障 ⇒ Min 与 DBSchemaVersion 同步提升，拒绝回滚。
-	DBSchemaVersion = 7
+	// v8（2026-11-19，统一充值入口与订单模型）：纯增量，不提升 Min——
+	// orders 新增 order_type（默认 'plan'）、payment_channel、pay_payload 三列，
+	// 并把历史已核销礼品卡一次性回填为 order_type='recharge'、status='paid' 订单。
+	DBSchemaVersion = 8
 
 	// DBMinCompatibleVersion 能安全读取当前 schema 的最老面板 schema 版本。
 	// 注意：做了不向后兼容的迁移时才与 DBSchemaVersion 同步提升。

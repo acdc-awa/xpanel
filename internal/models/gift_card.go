@@ -14,7 +14,8 @@ const (
 	BalanceLogOrderPayment     = "order_payment"     // 订单余额支付
 	BalanceLogAdminAdjust      = "admin_adjust"      // 管理员调账
 
-	PaymentMethodBalance = "balance" // 余额支付（唯一支付方式；人工收款已去除）
+	PaymentMethodBalance  = "balance"   // 余额支付
+	PaymentMethodGiftCard = "gift_card" // 卡密兑换
 )
 
 // GiftCard 礼品卡（卡密充值）。

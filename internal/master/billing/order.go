@@ -20,13 +20,17 @@ import (
 // 2026-08-23 Stage 8：存储访问收口 contracts.BillingStore（GORM 实现见 store/gormstore）。
 // Events（Stage 5）：事务提交后发布 OrderPaidEvent；nil 时不发布（兼容测试与旧构造）。
 type OrderService struct {
-	store  contracts.BillingStore
-	Events contracts.EventPublisher
+	store    contracts.BillingStore
+	Events   contracts.EventPublisher
+	Payments *contracts.PaymentRegistry
 }
 
 // NewOrderService 构造订单服务。
 func NewOrderService(store contracts.BillingStore) *OrderService {
-	return &OrderService{store: store}
+	return &OrderService{
+		store:    store,
+		Payments: contracts.NewPaymentRegistry(),
+	}
 }
 
 // payIdempotentWindow 余额直付幂等窗口：同用户+同套餐在此窗口内已支付则直接复用订单，防重放双扣款。
@@ -44,9 +48,14 @@ var (
 	// ErrPlanChanged 自动续费期间用户套餐已被改动：调用方跳过，下一轮按新套餐重新判定。
 	ErrPlanChanged        = errors.New("套餐已变更")
 	ErrOrderNotFound      = errors.New("订单不存在")
-	ErrOrderNotPending    = errors.New("订单当前状态不可支付或取消")
-	ErrOrderExpired       = errors.New("订单已超时关闭")
-	ErrPendingOrderExists = errors.New("您有一笔待支付订单，请先完成支付或取消后再下单")
+	ErrOrderNotPending       = errors.New("订单当前状态不可支付或取消")
+	ErrOrderExpired          = errors.New("订单已超时关闭")
+	ErrPendingOrderExists    = errors.New("您有一笔待支付订单，请先完成支付或取消后再下单")
+	ErrInvalidRechargeAmount = errors.New("充值金额必须大于 0")
+	ErrUnsupportedChannel    = errors.New("不支持的支付渠道")
+	ErrChannelDisabled       = errors.New("该支付渠道暂未启用")
+	ErrAmountMismatch        = errors.New("支付金额与订单金额不一致")
+	ErrUnsupportedOrderPay   = errors.New("当前订单类型不支持该支付方式")
 )
 
 // OrderPendingTTL 待支付订单默认有效期（30 分钟）。
@@ -136,15 +145,17 @@ func (s *OrderService) pay(userID, planID uint64, renewalOnly bool) (*models.Ord
 
 		orderNo := now.Format("20060102150405") + util.RandomID(4)
 		order = &models.Order{
-			OrderNo:       orderNo,
-			UserID:        userID,
-			PlanID:        planID,
-			PlanName:      plan.Name,
-			PlanSnapshot:  models.PlanOrderSnapshot(plan),
-			AmountCents:   plan.PriceCents,
-			PaymentMethod: models.PaymentMethodBalance,
-			Status:        models.OrderPaid,
-			PaidAt:        &now,
+			OrderNo:        orderNo,
+			OrderType:      models.OrderTypePlan,
+			UserID:         userID,
+			PlanID:         planID,
+			PlanName:       plan.Name,
+			PlanSnapshot:   models.PlanOrderSnapshot(plan),
+			AmountCents:    plan.PriceCents,
+			PaymentMethod:  models.PaymentMethodBalance,
+			PaymentChannel: models.PaymentMethodBalance,
+			Status:         models.OrderPaid,
+			PaidAt:         &now,
 		}
 		if err := tx.CreateOrder(ctx, order); err != nil {
 			return err
@@ -263,7 +274,7 @@ func (s *OrderService) CreateOrder(userID, planID uint64, replacePending bool) (
 		}
 
 		now := time.Now()
-		pending, err := tx.FindPendingOrderByUser(ctx, userID)
+		pending, err := tx.FindPendingOrderByUserAndType(ctx, userID, models.OrderTypePlan)
 		if err != nil {
 			return err
 		}
@@ -281,15 +292,17 @@ func (s *OrderService) CreateOrder(userID, planID uint64, replacePending bool) (
 		exp := now.Add(OrderPendingTTL)
 		orderNo := now.Format("20060102150405") + util.RandomID(4)
 		order = &models.Order{
-			OrderNo:       orderNo,
-			UserID:        userID,
-			PlanID:        planID,
-			PlanName:      plan.Name,
-			PlanSnapshot:  models.PlanOrderSnapshot(plan),
-			AmountCents:   plan.PriceCents,
-			PaymentMethod: models.PaymentMethodBalance,
-			Status:        models.OrderPending,
-			ExpiresAt:     &exp,
+			OrderNo:        orderNo,
+			OrderType:      models.OrderTypePlan,
+			UserID:         userID,
+			PlanID:         planID,
+			PlanName:       plan.Name,
+			PlanSnapshot:   models.PlanOrderSnapshot(plan),
+			AmountCents:    plan.PriceCents,
+			PaymentMethod:  models.PaymentMethodBalance,
+			PaymentChannel: models.PaymentMethodBalance,
+			Status:         models.OrderPending,
+			ExpiresAt:      &exp,
 		}
 		return tx.CreateOrder(ctx, order)
 	})
@@ -341,6 +354,9 @@ func (s *OrderService) PayOrderWithBalance(userID uint64, orderNo string) (*mode
 		}
 		if o == nil || o.UserID != userID {
 			return ErrOrderNotFound
+		}
+		if o.OrderType == models.OrderTypeRecharge {
+			return ErrUnsupportedOrderPay
 		}
 		order = o
 
@@ -454,4 +470,145 @@ func (s *OrderService) CancelOrder(userID uint64, orderNo string) (*models.Order
 // ExpirePendingOrders 批量关闭已超时的待支付订单。
 func (s *OrderService) ExpirePendingOrders() (int64, error) {
 	return s.store.ExpirePendingOrders(context.Background(), time.Now())
+}
+
+// CreateRechargeOrder 创建待支付充值订单（按 recharge 类型独立互斥）。
+func (s *OrderService) CreateRechargeOrder(userID uint64, channel string, amountCents int64, replacePending bool) (*models.Order, error) {
+	if amountCents <= 0 {
+		return nil, ErrInvalidRechargeAmount
+	}
+	provider, ok := s.Payments.Get(channel)
+	if !ok {
+		return nil, ErrUnsupportedChannel
+	}
+	info := provider.Info()
+	if !provider.Enabled() || !info.SupportsRecharge {
+		return nil, ErrChannelDisabled
+	}
+	if !info.RequiresAmount {
+		return nil, ErrUnsupportedChannel
+	}
+	if info.MinAmountCents > 0 && amountCents < info.MinAmountCents {
+		return nil, ErrInvalidRechargeAmount
+	}
+	if info.MaxAmountCents > 0 && amountCents > info.MaxAmountCents {
+		return nil, ErrInvalidRechargeAmount
+	}
+
+	ctx := context.Background()
+	var order *models.Order
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		if _, err := tx.LockUser(ctx, userID); err != nil {
+			return ErrUserNotFound
+		}
+		now := time.Now()
+		pending, err := tx.FindPendingOrderByUserAndType(ctx, userID, models.OrderTypeRecharge)
+		if err != nil {
+			return err
+		}
+		if pending != nil {
+			if pending.ExpiresAt != nil && !now.Before(*pending.ExpiresAt) {
+				_, _ = tx.CancelOrder(ctx, pending.ID, "timeout", now)
+			} else if !replacePending {
+				order = pending
+				return ErrPendingOrderExists
+			} else {
+				_, _ = tx.CancelOrder(ctx, pending.ID, "replaced", now)
+			}
+		}
+
+		exp := now.Add(OrderPendingTTL)
+		orderNo := now.Format("20060102150405") + util.RandomID(4)
+		order = &models.Order{
+			OrderNo:        orderNo,
+			OrderType:      models.OrderTypeRecharge,
+			UserID:         userID,
+			PlanID:         0,
+			PlanName:       "账户充值",
+			AmountCents:    amountCents,
+			PaymentMethod:  channel,
+			PaymentChannel: channel,
+			Status:         models.OrderPending,
+			ExpiresAt:      &exp,
+		}
+		return tx.CreateOrder(ctx, order)
+	})
+	if err != nil {
+		return order, err
+	}
+	return order, nil
+}
+
+// UpdateOrderPaymentInfo 更新订单的支付渠道与异步支付载体（pay_url / qr_code 等）。
+func (s *OrderService) UpdateOrderPaymentInfo(orderID uint64, method, channel, tradeNo, payPayload string) error {
+	return s.store.UpdateOrderPaymentInfo(context.Background(), orderID, method, channel, tradeNo, payPayload)
+}
+
+// CompleteRechargeOrder 结算待支付充值订单（幂等：已支付直接返回；支持回调或主动查单触发）。
+// paidAmountCents 为外部实际支付金额（分），必须严格大于 0 且等于订单金额，否则拒绝入账。
+func (s *OrderService) CompleteRechargeOrder(orderNo, channel, tradeNo string, paidAmountCents int64) (*models.Order, error) {
+	ctx := context.Background()
+	var order *models.Order
+
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		o, err := tx.GetOrderByNo(ctx, orderNo)
+		if err != nil {
+			return err
+		}
+		if o == nil || o.OrderType != models.OrderTypeRecharge {
+			return ErrOrderNotFound
+		}
+		order = o
+		if paidAmountCents <= 0 || paidAmountCents != o.AmountCents {
+			return ErrAmountMismatch
+		}
+		if o.Status == models.OrderPaid {
+			return nil
+		}
+		if o.Status != models.OrderPending {
+			return ErrOrderNotPending
+		}
+
+		user, err := tx.LockUser(ctx, o.UserID)
+		if err != nil {
+			return ErrUserNotFound
+		}
+		now := time.Now()
+		method := channel
+		if method == "" {
+			method = o.PaymentMethod
+		}
+		ok, err := tx.MarkOrderPaid(ctx, o.ID, method, tradeNo, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrOrderNotPending
+		}
+
+		newBalance := user.BalanceCents + o.AmountCents
+		if err := tx.UpdateBalance(ctx, o.UserID, newBalance); err != nil {
+			return err
+		}
+
+		o.Status = models.OrderPaid
+		o.PaymentMethod = method
+		o.TradeNo = tradeNo
+		o.PaidAt = &now
+
+		entry := models.BalanceLog{
+			UserID:       o.UserID,
+			AmountCents:  o.AmountCents,
+			BalanceAfter: newBalance,
+			Type:         "recharge_" + method,
+			RelatedID:    o.ID,
+			Remark:       "在线充值订单 #" + o.OrderNo,
+			CreatedAt:    now,
+		}
+		return tx.CreateBalanceLog(ctx, &entry)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return order, nil
 }
