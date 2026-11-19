@@ -377,9 +377,7 @@ async function onResetSubscribe() {
     </CsHeader>
 
     <div class="acct-grid">
-      <!-- 左栏：账户资产 + 自动续费 -->
-      <CsSpaceBetween direction="vertical" size="l">
-        <CsContainer>
+      <CsContainer>
           <template #header>
             <CsHeader variant="h2">账户资产</CsHeader>
           </template>
@@ -429,11 +427,8 @@ async function onResetSubscribe() {
             </div>
           </CsSpaceBetween>
         </CsContainer>
-      </CsSpaceBetween>
 
-      <!-- 右栏：账户资料 + 安全设置 + 修改密码 -->
-      <CsSpaceBetween direction="vertical" size="l">
-        <CsContainer>
+      <CsContainer>
           <template #header>
             <CsHeader variant="h2">账户资料</CsHeader>
           </template>
@@ -508,7 +503,6 @@ async function onResetSubscribe() {
             </div>
           </CsSpaceBetween>
         </CsContainer>
-      </CsSpaceBetween>
     </div>
 
     <!-- 修改登录密码弹窗 -->

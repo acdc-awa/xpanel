@@ -39,7 +39,11 @@ const navItems = computed<SideNavigationItem[]>(() =>
   })),
 )
 
-function onNavFollow(detail: SideNavigationFollowDetail) {
+function onNavFollow(detail: SideNavigationFollowDetail, event?: MouseEvent) {
+  if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)) {
+    return
+  }
+  event?.preventDefault()
   if (detail.href && detail.href !== route.path) {
     router.push(detail.href)
   }
@@ -85,7 +89,11 @@ const topbarUtilities = computed<TopNavigationUtility[]>(() => {
   return list
 })
 
-function goDashboard() {
+function goDashboard(_detail: { href: string }, event?: MouseEvent) {
+  if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)) {
+    return
+  }
+  event?.preventDefault()
   if (route.path !== '/dashboard') {
     router.push('/dashboard')
   }

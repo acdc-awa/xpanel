@@ -65,7 +65,7 @@ const handleClasses = computed(() =>
 <template>
   <span :class="cx(abstract.wrapper, CS.toggle.root)">
     <span :class="abstract['label-wrapper']" :aria-disabled="disabled ? 'true' : undefined">
-      <span :class="controlClasses">
+      <span :class="cx(controlClasses, 'cs-toggle-scaled')">
         <input
           type="checkbox"
           :class="abstract['native-input']"
@@ -92,3 +92,10 @@ const handleClasses = computed(() =>
     </span>
   </span>
 </template>
+
+<style scoped>
+.cs-toggle-scaled {
+  transform: scale(1.2);
+  transform-origin: center;
+}
+</style>
