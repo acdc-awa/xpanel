@@ -6,8 +6,9 @@ import { CsIcon } from '@/components/cloudscape'
 withDefaults(
   defineProps<{
     title?: string
+    draggable?: boolean
   }>(),
-  { title: '拖拽调整顺序' },
+  { title: '拖拽调整顺序', draggable: true },
 )
 
 const emit = defineEmits<{
@@ -19,7 +20,7 @@ const emit = defineEmits<{
 <template>
   <span
     class="cs-sort-handle"
-    draggable="true"
+    :draggable="draggable"
     data-sort-handle
     :title="title"
     @dragstart="emit('dragstart', $event)"
@@ -39,6 +40,8 @@ const emit = defineEmits<{
   border-radius: 4px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
   cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
 .cs-sort-handle:hover {

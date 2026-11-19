@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/components/cloudscape'
 import {
   CsButton,
@@ -64,8 +64,8 @@ async function load() {
       list.value = data.data
       noticeList.value = data.data.filter((n) => n.category !== 'guide')
       guideList.value = data.data.filter((n) => n.category === 'guide')
-      syncNoticeSnapshot()
-      syncGuideSnapshot()
+      noticeDrag.syncSnapshot()
+      guideDrag.syncSnapshot()
     } else {
       ElMessage.error(data.message)
     }
@@ -247,119 +247,397 @@ function createRowDrag(
   persist: () => Promise<{ data: { code: number; message?: string } }>,
   clamp: (rest: NoticeItem[], insertAt: number, moved: NoticeItem) => number,
 ) {
+  const HYSTERESIS = 4
+  const FLIP_MS = 180
+  const SETTLE_MS = 150
+
   const canReorder = computed(() => enabled.value && targetList.value.length > 1)
   const draggingId = ref<number | null>(null)
-  const dragOffsetY = ref(0)
+
   let snapshot: NoticeItem[] = []
-  let startY = 0
-  let startIndex = 0
-  let rowHeight = 48
+  let saving = false
+  let tbodyEl: HTMLElement | null = null
+  let dragEl: HTMLElement | null = null
+  let pointerId: number | null = null
+  let grabOffsetY = 0
+  let lastClientY = 0
+  let lastOffsetY = 0
+  let minIdx = 0
+  let maxIdx = 0
+  let minTopInTbody = 0
+  let maxTopInTbody = 0
+  const heightById = new Map<number, number>()
+  let pendingOldTops: Map<number, number> | null = null
+  let scrollTimer: number | null = null
+  let scrollStep = 0
+  let settleCleanup: (() => void) | null = null
+  const siblingCleanups = new WeakMap<HTMLElement, () => void>()
 
   function syncSnapshot() {
     snapshot = [...targetList.value]
   }
 
-  function onPointerMove(e: PointerEvent) {
-    if (draggingId.value === null) return
+  function rowHeightOf(id: number): number {
+    return heightById.get(id) ?? 48
+  }
+
+  function slotTopOf(items: NoticeItem[], idx: number): number {
+    let top = 0
+    for (let i = 0; i < idx; i++) {
+      top += rowHeightOf(items[i].id)
+    }
+    return top
+  }
+
+  function clearRowInlineStyles(tbody: HTMLElement) {
+    tbody.querySelectorAll<HTMLElement>('tr[data-sort-id]').forEach((tr) => {
+      siblingCleanups.get(tr)?.()
+      tr.style.transition = ''
+      tr.style.transform = ''
+    })
+  }
+
+  function stopAutoScroll() {
+    if (scrollTimer !== null) {
+      clearInterval(scrollTimer)
+      scrollTimer = null
+    }
+    scrollStep = 0
+  }
+
+  function updateAutoScroll(clientY: number) {
+    const edge = 32
+    scrollStep = clientY < edge ? -10 : clientY > window.innerHeight - edge ? 10 : 0
+    if (scrollStep && scrollTimer === null) {
+      scrollTimer = window.setInterval(() => {
+        window.scrollBy(0, scrollStep)
+        updateDragPosition(lastClientY)
+      }, 16)
+    } else if (!scrollStep) {
+      stopAutoScroll()
+    }
+  }
+
+  function applyDragTransform() {
+    if (draggingId.value === null || !tbodyEl || !dragEl) return
+    const idx = targetList.value.findIndex((n) => n.id === draggingId.value)
+    if (idx < 0) return
+    const desiredTop = lastClientY - tbodyEl.getBoundingClientRect().top - grabOffsetY
+    const clampedTop = Math.max(minTopInTbody, Math.min(maxTopInTbody, desiredTop))
+    const offsetY = clampedTop - slotTopOf(targetList.value, idx)
+    lastOffsetY = offsetY
+    dragEl.style.transform = `translate3d(0, ${offsetY}px, 0)`
+  }
+
+  function flushSwapFlip() {
+    const oldTops = pendingOldTops
+    const tbody = tbodyEl
+    pendingOldTops = null
+    if (!oldTops || !tbody) return
+
+    if (draggingId.value !== null && dragEl) {
+      applyDragTransform()
+    }
+
+    const animated: HTMLElement[] = []
+    tbody.querySelectorAll<HTMLElement>('tr[data-sort-id]').forEach((tr) => {
+      const id = Number(tr.getAttribute('data-sort-id'))
+      if (!id || id === draggingId.value) return
+      const oldTop = oldTops.get(id)
+      if (oldTop === undefined) return
+
+      siblingCleanups.get(tr)?.()
+      tr.style.transition = 'none'
+      tr.style.transform = ''
+      const newTop = tr.getBoundingClientRect().top
+      const dy = oldTop - newTop
+      if (Math.abs(dy) > 0.5) {
+        tr.style.transform = `translate3d(0, ${dy}px, 0)`
+        animated.push(tr)
+      } else {
+        tr.style.transition = ''
+      }
+    })
+
+    if (animated.length === 0) return
+    void tbody.offsetHeight
+    for (const tr of animated) {
+      tr.style.transition = `transform ${FLIP_MS}ms cubic-bezier(0.2, 0, 0, 1)`
+      tr.style.transform = ''
+      const onEnd = (ev: TransitionEvent) => {
+        if (ev.target !== tr || ev.propertyName !== 'transform') return
+        cleanup()
+      }
+      const timer = window.setTimeout(() => cleanup(), FLIP_MS + 50)
+      const cleanup = () => {
+        window.clearTimeout(timer)
+        tr.removeEventListener('transitionend', onEnd)
+        siblingCleanups.delete(tr)
+        tr.style.transition = ''
+      }
+      siblingCleanups.set(tr, cleanup)
+      tr.addEventListener('transitionend', onEnd)
+    }
+  }
+
+  function updateDragPosition(clientY: number) {
+    if (draggingId.value === null || !tbodyEl || !dragEl) return
+    lastClientY = clientY
     const from = targetList.value.findIndex((n) => n.id === draggingId.value)
     if (from < 0) return
 
-    const movedItem = targetList.value[from]
-    const pinnedCount = targetList.value.filter((n) => n.is_pinned).length
-    const minIdx = movedItem.is_pinned ? 0 : pinnedCount
-    const maxIdx = movedItem.is_pinned ? Math.max(0, pinnedCount - 1) : targetList.value.length - 1
+    const desiredTop = clientY - tbodyEl.getBoundingClientRect().top - grabOffsetY
+    const clampedTop = Math.max(minTopInTbody, Math.min(maxTopInTbody, desiredTop))
 
-    const minDy = (minIdx - startIndex) * rowHeight
-    const maxDy = (maxIdx - startIndex) * rowHeight
-    const clampedDy = Math.max(minDy, Math.min(maxDy, e.clientY - startY))
+    const next = [...targetList.value]
+    let curIdx = from
+    let curSlotTop = slotTopOf(next, curIdx)
 
-    const rawTarget = startIndex + Math.round(clampedDy / rowHeight)
-    const bounded = Math.max(minIdx, Math.min(maxIdx, rawTarget))
-
-    if (bounded !== from) {
-      const next = [...targetList.value]
-      const [moved] = next.splice(from, 1)
-      const insertAt = clamp(next, bounded, moved)
-      if (insertAt !== from) {
-        next.splice(insertAt, 0, moved)
-        targetList.value = next
+    while (curIdx < maxIdx) {
+      const belowH = rowHeightOf(next[curIdx + 1].id)
+      if (clampedTop > curSlotTop + belowH / 2 + HYSTERESIS) {
+        const tmp = next[curIdx]
+        next[curIdx] = next[curIdx + 1]
+        next[curIdx + 1] = tmp
+        curSlotTop += belowH
+        curIdx += 1
+      } else {
+        break
       }
     }
 
-    const currentIndex = targetList.value.findIndex((n) => n.id === draggingId.value)
-    dragOffsetY.value = clampedDy - (currentIndex - startIndex) * rowHeight
+    while (curIdx > minIdx) {
+      const aboveH = rowHeightOf(next[curIdx - 1].id)
+      if (clampedTop < curSlotTop - aboveH / 2 - HYSTERESIS) {
+        const tmp = next[curIdx]
+        next[curIdx] = next[curIdx - 1]
+        next[curIdx - 1] = tmp
+        curSlotTop -= aboveH
+        curIdx -= 1
+      } else {
+        break
+      }
+    }
+
+    if (curIdx !== from) {
+      const rest = [...targetList.value]
+      const [moved] = rest.splice(from, 1)
+      const insertAt = clamp(rest, curIdx, moved)
+      if (insertAt !== from) {
+        const scheduleFlip = pendingOldTops === null
+        if (scheduleFlip) {
+          const tops = new Map<number, number>()
+          tbodyEl.querySelectorAll<HTMLElement>('tr[data-sort-id]').forEach((tr) => {
+            const rowId = Number(tr.getAttribute('data-sort-id'))
+            if (rowId && rowId !== draggingId.value) {
+              tops.set(rowId, tr.getBoundingClientRect().top)
+            }
+          })
+          pendingOldTops = tops
+        }
+        rest.splice(insertAt, 0, moved)
+        targetList.value = rest
+        if (scheduleFlip) void nextTick(flushSwapFlip)
+        return
+      }
+    }
+
+    if (pendingOldTops === null) {
+      lastOffsetY = clampedTop - curSlotTop
+      dragEl.style.transform = `translate3d(0, ${lastOffsetY}px, 0)`
+    }
   }
 
-  async function onPointerUp() {
+  function onPointerMove(e: PointerEvent) {
+    if (draggingId.value === null) return
+    if (pointerId !== null && e.pointerId !== pointerId) return
+    updateAutoScroll(e.clientY)
+    updateDragPosition(e.clientY)
+  }
+
+  function onScroll() {
+    if (draggingId.value !== null) {
+      updateDragPosition(lastClientY)
+    }
+  }
+
+  function detachListeners() {
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', onPointerUp)
     window.removeEventListener('pointercancel', onPointerUp)
+    window.removeEventListener('scroll', onScroll)
+  }
+
+  async function onPointerUp(e?: PointerEvent) {
+    if (e && pointerId !== null && e.pointerId !== pointerId) return
+    detachListeners()
+    stopAutoScroll()
+
+    const capturedId = pointerId
+    const activeTbody = tbodyEl
+    if (capturedId !== null && activeTbody) {
+      try {
+        if (activeTbody.hasPointerCapture(capturedId)) {
+          activeTbody.releasePointerCapture(capturedId)
+        }
+      } catch {
+        /* 忽略未捕获或已卸载 */
+      }
+    }
+
     if (draggingId.value === null) return
+    const releasedId = draggingId.value
+    const el = dragEl
+    const settledOffset = lastOffsetY
+
+    if (pendingOldTops !== null && el) {
+      pendingOldTops.set(releasedId, el.getBoundingClientRect().top)
+    }
+
     draggingId.value = null
-    dragOffsetY.value = 0
+    dragEl = null
+    tbodyEl = null
+    pointerId = null
+    lastOffsetY = 0
+
+    if (el && pendingOldTops === null) {
+      if (Math.abs(settledOffset) > 0.5) {
+        el.style.transition = 'none'
+        el.style.transform = `translate3d(0, ${settledOffset}px, 0)`
+        void el.offsetHeight
+        el.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(0.2, 0, 0, 1)`
+        el.style.transform = ''
+        const finishSettle = () => {
+          window.clearTimeout(timer)
+          el.removeEventListener('transitionend', onEnd)
+          if (settleCleanup === finishSettle) settleCleanup = null
+          el.style.transition = ''
+        }
+        const onEnd = (ev: TransitionEvent) => {
+          if (ev.target !== el || ev.propertyName !== 'transform') return
+          finishSettle()
+        }
+        const timer = window.setTimeout(finishSettle, SETTLE_MS + 50)
+        settleCleanup = finishSettle
+        el.addEventListener('transitionend', onEnd)
+      } else {
+        el.style.transition = ''
+        el.style.transform = ''
+      }
+    }
 
     const changed = targetList.value.some((n, i) => snapshot[i]?.id !== n.id)
     if (!changed) return
+
+    saving = true
     try {
       const { data } = await persist()
       if (data.code === 0) {
         snapshot = [...targetList.value]
       } else {
         targetList.value = [...snapshot]
+        if (activeTbody) clearRowInlineStyles(activeTbody)
         ElMessage.error(data.message || '保存排序失败，已恢复原顺序')
       }
-    } catch (e) {
+    } catch (err) {
       targetList.value = [...snapshot]
-      ElMessage.error(errMsg(e, '保存排序失败，已恢复原顺序'))
+      if (activeTbody) clearRowInlineStyles(activeTbody)
+      ElMessage.error(errMsg(err, '保存排序失败，已恢复原顺序'))
+    } finally {
+      saving = false
     }
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (!canReorder.value || e.button !== 0) return
-    const handle = (e.target as HTMLElement | null)?.closest('[data-sort-handle]')
+    if (!canReorder.value || saving || draggingId.value !== null || e.button !== 0) return
+    const handle = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-sort-handle]')
     const row = handle?.closest<HTMLElement>('tr[data-sort-id]')
-    if (!handle || !row) return
+    const tbody = row?.closest<HTMLElement>('tbody')
+    if (!handle || !row || !tbody) return
+
     const id = Number(row.getAttribute('data-sort-id'))
     if (!id) return
     const idx = targetList.value.findIndex((n) => n.id === id)
     if (idx < 0) return
 
+    const item = targetList.value[idx]
+    const pinnedCount = targetList.value.filter((n) => n.is_pinned).length
+    minIdx = item.is_pinned ? 0 : pinnedCount
+    maxIdx = item.is_pinned ? Math.max(0, pinnedCount - 1) : targetList.value.length - 1
+    if (minIdx >= maxIdx) {
+      e.preventDefault()
+      return
+    }
+
     e.preventDefault()
+    settleCleanup?.()
+    clearRowInlineStyles(tbody)
+    heightById.clear()
+    tbody.querySelectorAll<HTMLElement>('tr[data-sort-id]').forEach((tr) => {
+      const rowId = Number(tr.getAttribute('data-sort-id'))
+      if (rowId) {
+        heightById.set(rowId, tr.getBoundingClientRect().height || 48)
+      }
+    })
+
+    minTopInTbody = slotTopOf(targetList.value, minIdx)
+    const groupBottom = slotTopOf(targetList.value, maxIdx) + rowHeightOf(targetList.value[maxIdx].id)
+    maxTopInTbody = groupBottom - rowHeightOf(id)
+
     snapshot = [...targetList.value]
+    tbodyEl = tbody
+    dragEl = row
+    pointerId = e.pointerId
+    grabOffsetY = e.clientY - row.getBoundingClientRect().top
+    lastClientY = e.clientY
+    lastOffsetY = 0
+    pendingOldTops = null
     draggingId.value = id
-    dragOffsetY.value = 0
-    startY = e.clientY
-    startIndex = idx
-    rowHeight = row.getBoundingClientRect().height || 48
+
+    try {
+      tbody.setPointerCapture(e.pointerId)
+    } catch {
+      /* 降级走 window 监听 */
+    }
+
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerUp)
+    window.addEventListener('scroll', onScroll, { passive: true })
   }
 
   onUnmounted(() => {
-    window.removeEventListener('pointermove', onPointerMove)
-    window.removeEventListener('pointerup', onPointerUp)
-    window.removeEventListener('pointercancel', onPointerUp)
+    detachListeners()
+    stopAutoScroll()
+    settleCleanup?.()
   })
 
-  return { canReorder, draggingId, dragOffsetY, onPointerDown, syncSnapshot }
+  return { canReorder, draggingId, onPointerDown, syncSnapshot }
 }
 
-const {
-  canReorder: canReorderNotice,
-  draggingId: draggingNoticeId,
-  dragOffsetY: dragNoticeOffsetY,
-  onPointerDown: onNoticePointerDown,
-  syncSnapshot: syncNoticeSnapshot,
-} = createRowDrag(noticeList, reorderEnabled, persistMergedOrder, clampPinned)
+const noticeDrag = createRowDrag(noticeList, reorderEnabled, persistMergedOrder, clampPinned)
+const guideDrag = createRowDrag(guideList, reorderEnabled, persistMergedOrder, clampPinned)
 
-const {
-  canReorder: canReorderGuide,
-  draggingId: draggingGuideId,
-  dragOffsetY: dragGuideOffsetY,
-  onPointerDown: onGuidePointerDown,
-  syncSnapshot: syncGuideSnapshot,
-} = createRowDrag(guideList, reorderEnabled, persistMergedOrder, clampPinned)
+const sections = computed(() => [
+  {
+    key: 'notice',
+    header: '系统公告',
+    emptyText: '暂无系统公告，点击右上角「新建公告」',
+    items: noticeList.value,
+    canReorder: noticeDrag.canReorder.value,
+    draggingId: noticeDrag.draggingId.value,
+    onPointerDown: noticeDrag.onPointerDown,
+  },
+  {
+    key: 'guide',
+    header: '使用指南',
+    emptyText: '暂无使用指南，点击右上角「新建公告」并选择类型「使用指南」',
+    items: guideList.value,
+    canReorder: guideDrag.canReorder.value,
+    draggingId: guideDrag.draggingId.value,
+    onPointerDown: guideDrag.onPointerDown,
+  },
+])
 </script>
 
 <template>
@@ -386,28 +664,7 @@ const {
 
     <!-- 紧凑列表：分「系统公告」与「使用指南」两栏 -->
     <CsContainer
-      v-for="section in [
-        {
-          key: 'notice',
-          header: '系统公告',
-          emptyText: '暂无系统公告，点击右上角「新建公告」',
-          items: noticeList,
-          canReorder: canReorderNotice,
-          draggingId: draggingNoticeId,
-          dragOffsetY: dragNoticeOffsetY,
-          onPointerDown: onNoticePointerDown,
-        },
-        {
-          key: 'guide',
-          header: '使用指南',
-          emptyText: '暂无使用指南，点击右上角「新建公告」并选择类型「使用指南」',
-          items: guideList,
-          canReorder: canReorderGuide,
-          draggingId: draggingGuideId,
-          dragOffsetY: dragGuideOffsetY,
-          onPointerDown: onGuidePointerDown,
-        },
-      ]"
+      v-for="section in sections"
       :key="section.key"
       :header="section.header"
     >
@@ -417,8 +674,9 @@ const {
         v-else
         class="notice-table-wrap"
         @pointerdown="section.onPointerDown"
+        @dragstart.prevent
       >
-        <table class="notice-table">
+        <table class="notice-table" :class="{ 'notice-table--dragging': section.draggingId !== null }">
           <thead>
             <tr>
               <th v-if="section.canReorder" class="col-sort" />
@@ -430,7 +688,7 @@ const {
               <th class="col-actions">操作</th>
             </tr>
           </thead>
-          <TransitionGroup name="notice-row" tag="tbody">
+          <tbody>
             <tr
               v-for="item in section.items"
               :key="item.id"
@@ -439,15 +697,10 @@ const {
                 'notice-row--off': item.status !== 1,
                 'notice-row--dragging': section.draggingId === item.id,
               }"
-              :style="
-                section.draggingId === item.id
-                  ? { transform: `translate3d(0, ${section.dragOffsetY}px, 0)` }
-                  : undefined
-              "
               :data-sort-id="item.id"
             >
               <td v-if="section.canReorder" class="col-sort">
-                <SortHandle title="拖拽调整顺序" />
+                <SortHandle :draggable="false" title="拖拽调整顺序" />
               </td>
 
               <td class="col-title">
@@ -498,7 +751,7 @@ const {
                 <CsButton size="small" icon-name="edit" @click="openEdit(item)">编辑</CsButton>
               </td>
             </tr>
-          </TransitionGroup>
+          </tbody>
         </table>
       </div>
     </CsContainer>
@@ -937,7 +1190,8 @@ const {
 
 .notice-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   font-size: 14px;
 
@@ -994,6 +1248,15 @@ const {
   }
 }
 
+.notice-table--dragging {
+  user-select: none;
+  cursor: grabbing;
+
+  .notice-row:not(.notice-row--dragging):hover {
+    background: transparent;
+  }
+}
+
 .notice-row {
   transition: background-color 0.15s ease, opacity 0.15s ease;
 
@@ -1005,18 +1268,14 @@ const {
     opacity: 0.65;
   }
 
-  &--dragging,
-  &--dragging.notice-row-move {
+  &--dragging {
     position: relative;
     z-index: 10;
     background: var(--color-background-container-content-mjfil9);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-    transition: none !important;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+    will-change: transform;
+    transition: none;
   }
-}
-
-.notice-row-move {
-  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .notice-title-cell {
