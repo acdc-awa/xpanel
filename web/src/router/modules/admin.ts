@@ -115,6 +115,7 @@ export const adminRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/data_management.vue'),
         meta: { title: '数据管理' },
       },
+      { path: ':pathMatch(.*)*', redirect: '/admin/dashboard' },
     ],
   },
 ]

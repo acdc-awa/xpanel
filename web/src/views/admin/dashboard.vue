@@ -392,7 +392,7 @@ onUnmounted(() => {
         <template #description>
           <CsStatusIndicator
             :type="pollFailed ? 'warning' : isClusterHealthy ? 'success' : 'warning'"
-            :text="pollFailed ? '数据拉取受阻' : isClusterHealthy ? '集群健康运行中' : '部分节点异常'"
+            :text="pollFailed ? '数据拉取受阻' : isClusterHealthy ? '集群健康运行中' : '部分服务器异常'"
           />
         </template>
 

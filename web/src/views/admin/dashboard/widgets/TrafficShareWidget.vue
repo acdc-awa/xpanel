@@ -17,8 +17,19 @@ const theme = useThemeStore()
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
+let lastNarrow: boolean | null = null
 
 const awsChartPalette = ['#006ce0', '#8c4bff', '#00a1c9', '#ec7211', '#1d8102', '#656871', '#d13212', '#2489c5']
+const CHART_FONT_FAMILY =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif"
+
+function escapeHtml(raw: string): string {
+  return String(raw)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
 
 function updateChart() {
   if (!chartRef.value) return
@@ -29,6 +40,7 @@ function updateChart() {
   const isDark = theme.isDark
   const textColor = isDark ? '#9ba7b6' : '#656871'
   const titleColor = isDark ? '#f9fafb' : '#0f141a'
+  const accentColor = isDark ? '#42b4ff' : '#006ce0'
   const tooltipBg = isDark ? '#161f2e' : '#ffffff'
   const tooltipBorder = isDark ? '#2a3441' : '#e9ebed'
   const donutCenterBg = isDark ? '#161f2e' : '#ffffff'
@@ -36,7 +48,7 @@ function updateChart() {
   let pieData: { name: string; value: number; percent?: number }[] = []
   if (ctx.dashData.value?.server_rank?.length) {
     pieData = ctx.dashData.value.server_rank.map((s) => {
-      const base = s.name || `节点#${s.server_id}`
+      const base = s.name || `服务器#${s.server_id}`
       return {
         name: s.deleted ? `${base}（已删除）` : base,
         value: parseFloat((s.total_bytes / 1073741824).toFixed(2)),
@@ -46,6 +58,7 @@ function updateChart() {
   }
 
   const isNarrow = chartRef.value.clientWidth < 420
+  lastNarrow = isNarrow
 
   chart.setOption({
     animationDuration: 300,
@@ -55,18 +68,18 @@ function updateChart() {
       backgroundColor: tooltipBg,
       borderColor: tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: titleColor, fontSize: 12, fontFamily: "'Open Sans', sans-serif" },
+      textStyle: { color: titleColor, fontSize: 12, fontFamily: CHART_FONT_FAMILY },
       formatter: (params: any) => {
         const item = params.data
         const pct = item.percent !== undefined ? item.percent.toFixed(1) : params.percent
-        return `<div style="font-weight:700;margin-bottom:4px;color:${titleColor}">${params.name}</div>
+        return `<div style="font-weight:700;margin-bottom:4px;color:${titleColor}">${escapeHtml(params.name)}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
           <span style="color:${textColor};font-size:12px">承载用量</span>
           <b style="color:${titleColor};font-variant-numeric:tabular-nums">${params.value} GB</b>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:2px">
           <span style="color:${textColor};font-size:12px">全网流量占比</span>
-          <b style="color:#006ce0;font-variant-numeric:tabular-nums">${pct}%</b>
+          <b style="color:${accentColor};font-variant-numeric:tabular-nums">${pct}%</b>
         </div>`
       },
     },
@@ -77,7 +90,7 @@ function updateChart() {
           left: 'center',
           itemWidth: 8,
           itemHeight: 8,
-          textStyle: { color: textColor, fontSize: 10.5, fontFamily: "'Open Sans', sans-serif" },
+          textStyle: { color: textColor, fontSize: 12, fontFamily: CHART_FONT_FAMILY },
         }
       : {
           orient: 'vertical',
@@ -85,7 +98,7 @@ function updateChart() {
           top: 'middle',
           itemWidth: 9,
           itemHeight: 9,
-          textStyle: { color: textColor, fontSize: 11, fontFamily: "'Open Sans', sans-serif" },
+          textStyle: { color: textColor, fontSize: 12, fontFamily: CHART_FONT_FAMILY },
           formatter: (name: string) => {
             return name.length > 12 ? name.slice(0, 11) + '…' : name
           },
@@ -111,7 +124,7 @@ function updateChart() {
         data: pieData.length ? pieData : [{ name: '暂无流量', value: 0 }],
       },
     ],
-  })
+  }, true)
 }
 
 watch([() => ctx.dashData.value, () => ctx.rankPeriod.value], () => {
@@ -127,6 +140,11 @@ onMounted(() => {
     updateChart()
     if (chartRef.value) {
       ro = new ResizeObserver(() => {
+        if (!chartRef.value) return
+        const narrow = chartRef.value.clientWidth < 420
+        if (lastNarrow !== null && narrow !== lastNarrow) {
+          updateChart()
+        }
         chart?.resize()
       })
       ro.observe(chartRef.value)

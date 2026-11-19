@@ -35,7 +35,7 @@ function onPeriodChange(detail: { selectedId: string | number }) {
 
 const dashboardTabs = computed(() => [
   { id: 'users', label: '用户排行' },
-  { id: 'nodes', label: '节点排行' },
+  { id: 'nodes', label: '服务器排行' },
   { id: 'cards', label: '卡密核销' },
   { id: 'orders', label: '订单流水' },
 ])
@@ -49,7 +49,7 @@ const userColumns = computed<TableColumn[]>(() => [
 
 const nodeColumns = computed<TableColumn[]>(() => [
   { id: 'rank', header: '#', width: 40 },
-  { id: 'node-main', header: '节点', minWidth: 110 },
+  { id: 'node-main', header: '服务器', minWidth: 110 },
   { id: 'node-percent', header: '占比', width: 70 },
   { id: 'node-usage', header: '用量', width: 105 },
 ])
@@ -142,7 +142,7 @@ function columnsMinWidth(columns: TableColumn[]): number {
           compact
           :items="rankSource?.server_rank || []"
           :columns="nodeColumns"
-          empty-text="暂无节点流量数据"
+          empty-text="暂无服务器流量数据"
         >
           <template #cell-rank="{ index }">
             <span class="tabular-num rank-badge" :class="`rank-pos-${index + 1}`">

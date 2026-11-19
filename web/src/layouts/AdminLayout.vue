@@ -55,7 +55,13 @@ function onNavToggleClick() {
 
 // 侧边栏搜索过滤
 const searchQuery = ref('')
-const searchInputRef = ref<{ focus: () => void; select: () => void; blur: () => void } | null>(null)
+type SearchInputHandle = { focus: () => void; select: () => void; blur: () => void }
+const searchInputRef = ref<SearchInputHandle | null>(null)
+const mobileSearchInputRef = ref<SearchInputHandle | null>(null)
+
+function activeSearchInput(): SearchInputHandle | null {
+  return isMobile.value ? mobileSearchInputRef.value : searchInputRef.value
+}
 
 const filteredMenuGroups = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -128,7 +134,6 @@ function toNavItems(groups: MenuGroup[]): SideNavigationItem[] {
 }
 
 const navItems = computed(() => toNavItems(filteredMenuGroups.value))
-const mobileNavItems = computed(() => toNavItems(adminMenuGroups))
 
 function onNavChange(detail: SideNavigationChangeDetail) {
   if (detail.item.type !== 'section') return
@@ -153,16 +158,16 @@ function handleSearchKeydown(e: KeyboardEvent) {
       if (firstGroup.path) {
         router.push(firstGroup.path)
         searchQuery.value = ''
-        searchInputRef.value?.blur()
+        activeSearchInput()?.blur()
       }
     } else if (firstGroup.children[0]?.path) {
       router.push(firstGroup.children[0].path)
       searchQuery.value = ''
-      searchInputRef.value?.blur()
+      activeSearchInput()?.blur()
     }
   } else if (e.key === 'Escape') {
     searchQuery.value = ''
-    searchInputRef.value?.blur()
+    activeSearchInput()?.blur()
   }
 }
 
@@ -179,8 +184,8 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     // 桌面端搜索框常驻顶栏；移动端搜索在抽屉里，需要先打开抽屉
     if (isMobile.value) drawerOpen.value = true
     nextTick(() => {
-      searchInputRef.value?.focus()
-      searchInputRef.value?.select()
+      activeSearchInput()?.focus()
+      activeSearchInput()?.select()
     })
   }
 }
@@ -393,6 +398,7 @@ onUnmounted(() => {
       <div class="admin-drawer-body">
         <div class="admin-nav-search admin-drawer-search">
           <CsInput
+            ref="mobileSearchInputRef"
             v-model="searchQuery"
             type="search"
             prefix-icon="search"
@@ -404,7 +410,7 @@ onUnmounted(() => {
         </div>
         <div class="admin-drawer-nav">
           <CsSideNavigation
-            :items="mobileNavItems"
+            :items="navItems"
             :active-href="route.path"
             @follow="onNavFollow"
             @change="onNavChange"

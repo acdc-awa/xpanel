@@ -264,7 +264,7 @@ function onRootClick() {
           </CsTooltip>
         </span>
         <span class="server-meta-item">
-          <span class="server-label">接入点</span>
+          <span class="server-label">入站</span>
           <CsButton variant="inline-link" class="server-inbound-link" @click.stop="emit('go-inbounds')">
             <span class="cs-text-mono">{{ inboundCount ?? 0 }}</span> 个
           </CsButton>
