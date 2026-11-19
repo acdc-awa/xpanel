@@ -247,9 +247,8 @@ const contentType = computed(() => (route.path === '/admin/dashboard' ? 'dashboa
 /** 路由级宽度：`meta.contentWidth = 'full'` 用满导航右侧的剩余宽度（画布/大表格用）。 */
 const contentMaxWidth = computed(() => (route.meta.contentWidth === 'full' ? 'full' : undefined))
 
-// 顶栏高度不能写死：TopNavigation 按自身宽度分宽/中/窄三档，padding-box 分别是
-// 56 / 48 / 40px（外加 1px 分隔线），窄屏比桌面矮 16px。应用栏的 sticky 起点
-// 与 AppLayout 的顶偏移都跟着实际渲染高度走，否则窄屏会在两条 bar 之间露出缝隙。
+// 顶栏已全尺寸固定为 56px（外加 1px 底边共 57px）；仍保留 ResizeObserver
+// 同步实际渲染高度，以兼容浏览器缩放下的像素取整并避免应用栏之间露出缝隙。
 const TOOLBAR_HEIGHT = 40
 const topbarRef = ref<ComponentPublicInstance | null>(null)
 const topbarHeight = ref(57)

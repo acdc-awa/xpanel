@@ -97,12 +97,13 @@ export interface MenuItem {
   title: string
   path: string // 与路由 path 一一对应（唯一关联键）
   icon: Component
+  iconName?: string
   roles?: ('admin' | 'user')[]
 }
 
 export const clientMenus: MenuItem[] = [
-  { title: '首页', path: '/dashboard', icon: HomeFilled },
-  { title: '订阅中心', path: '/subscribe', icon: Promotion },
-  { title: '商店', path: '/shop', icon: ShoppingCart },
-  { title: '我的', path: '/account', icon: UserFilled },
+  { title: '首页', path: '/dashboard', icon: HomeFilled, iconName: 'home' },
+  { title: '订阅中心', path: '/subscribe', icon: Promotion, iconName: 'send' },
+  { title: '商店', path: '/shop', icon: ShoppingCart, iconName: 'shopping-bag' },
+  { title: '我的', path: '/account', icon: UserFilled, iconName: 'user-profile' },
 ]

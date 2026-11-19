@@ -1,6 +1,5 @@
-// 面板自用图标。官方 @cloudscape-design/components 只有 light-dark 半边圆，
-// 没有太阳/月亮，主题切换按钮需要随当前模式换图形，故在此单独维护。
-// 与 icons.ts 同一套绘制约定：viewBox 16、只写 d，描边/填充由 Icon 组件的 CSS 决定。
+// 面板自用图标：补充官方 @cloudscape-design/components 未收录的图标（如 sun/moon/home/shopping-bag）。
+// 与 icons.ts 同一套绘制约定：viewBox 16、只写几何路径，描边/填充由 Icon 组件的 CSS 决定。
 import type { CloudscapeIconDefinition } from './icons'
 
 export const APP_ICON_DEFINITIONS: Record<string, CloudscapeIconDefinition> = {
@@ -14,5 +13,17 @@ export const APP_ICON_DEFINITIONS: Record<string, CloudscapeIconDefinition> = {
     viewBox: '0 0 16 16',
     inner:
       '<path d="M13.2 10.4A5.6 5.6 0 0 1 5.6 2.8 6.2 6.2 0 1 0 13.2 10.4Z" class="stroke-linejoin-round"></path>',
+  },
+  home: {
+    viewBox: '0 0 16 16',
+    inner:
+      '<path d="M1.5 7.5 8 2l6.5 5.5" class="stroke-linejoin-round stroke-linecap-round"></path>' +
+      '<path d="M3.5 6V14h9V6" class="stroke-linejoin-round"></path>',
+  },
+  'shopping-bag': {
+    viewBox: '0 0 16 16',
+    inner:
+      '<path d="M3 5.5h10l1 8.5H2l1-8.5Z" class="stroke-linejoin-round"></path>' +
+      '<path d="M5.5 5.5V4.5a2.5 2.5 0 0 1 5 0v1" class="stroke-linejoin-round"></path>',
   },
 }

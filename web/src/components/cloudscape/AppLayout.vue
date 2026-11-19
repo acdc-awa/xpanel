@@ -39,9 +39,10 @@ const props = withDefaults(
      * 导航开合按钮由谁提供：
      * - `panel`（默认）：官方语义，收起时在左侧留出 36px 圆形按钮；
      * - `external`：调用方在自己的顶栏里放了开合按钮（如 AWS 控制台的汉堡），
-     *   这里不再渲染圆形按钮，也不预留左侧 gutter。
+     *   这里不再渲染圆形按钮，也不预留左侧 gutter；
+     * - `none`：常驻展开，不渲染任何开合或收起按钮。
      */
-    navigationToggle?: 'panel' | 'external'
+    navigationToggle?: 'panel' | 'external' | 'none'
     /**
      * 是否在导航内容顶部预留 44px 给悬浮的收起按钮。
      * 调用方若给 SideNavigation 传了 header（收起按钮会与 header 同行），传 false。
@@ -193,9 +194,9 @@ function closeNavigation() {
       >
         <div
           :class="cx(cs['content-container'], cs['animated-content'], 'cs-nav-content')"
-          :style="{ paddingBlockStart: reserveNavigationToggleRow ? '44px' : '0px' }"
+          :style="{ paddingBlockStart: reserveNavigationToggleRow && navigationToggle !== 'none' ? '44px' : '0px' }"
         >
-          <div :class="[cs['hide-navigation'], 'cs-nav-close']">
+          <div v-if="navigationToggle !== 'none'" :class="[cs['hide-navigation'], 'cs-nav-close']">
             <Button
               variant="icon"
               icon-name="angle-left"

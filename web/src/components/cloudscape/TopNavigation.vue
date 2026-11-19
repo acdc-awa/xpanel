@@ -88,7 +88,7 @@ function onIdentityClick(event: MouseEvent) {
     :class="visualContext === 'top-navigation' ? 'awsui-context-top-navigation' : undefined"
   >
     <header :class="rootClasses">
-      <div :class="cs['padding-box']">
+      <div :class="cx(cs['padding-box'], 'cs-topnav-padding-box')">
         <div
           v-if="$slots.left || identity"
           :class="cx(cs.identity, !identity?.logo && cs['no-logo'])"
@@ -141,6 +141,12 @@ function onIdentityClick(event: MouseEvent) {
 </template>
 
 <style scoped lang="scss">
+/* 全尺寸统一顶栏高度为 56px（外加 1px 底边共 57px），不再随 wide/medium/narrow 跳变；
+   vendor 规则带 :not(#\9) 的 ID 权重，需用 !important 覆盖。 */
+.cs-topnav-padding-box {
+  block-size: var(--x-topbar-h, 56px) !important;
+}
+
 .cs-topnav-extra {
   display: flex;
   align-items: center;

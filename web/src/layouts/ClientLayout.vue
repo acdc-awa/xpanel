@@ -35,20 +35,9 @@ const navItems = computed<SideNavigationItem[]>(() =>
     type: 'link',
     text: item.title,
     href: item.path,
+    icon: item.iconName,
   })),
 )
-
-// 移动端底部导航图标映射
-const MOBILE_TAB_ICONS: Record<string, string> = {
-  '/dashboard': 'view-vertical',
-  '/subscribe': 'share',
-  '/shop': 'add-plus',
-  '/account': 'user-profile',
-}
-
-function mobileTabIcon(path: string): string {
-  return MOBILE_TAB_ICONS[path] ?? 'ellipsis'
-}
 
 function onNavFollow(detail: SideNavigationFollowDetail) {
   if (detail.href && detail.href !== route.path) {
@@ -116,7 +105,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
 // 顶栏高度同步（向下取整避免高分屏/缩放下与工具栏之间出现 1px 缝隙）
 const TOOLBAR_HEIGHT = 42
 const topbarRef = ref<{ $el?: HTMLElement } | null>(null)
-const topbarHeight = ref(56)
+const topbarHeight = ref(57)
 let topbarObserver: ResizeObserver | null = null
 
 const appHeaderHeight = computed(() =>
@@ -185,12 +174,13 @@ onUnmounted(() => {
       :navigation-hide="isMobile"
       content-type="default"
       :max-content-width="1280"
-      navigation-toggle="external"
+      navigation-toggle="none"
       :reserve-navigation-toggle-row="false"
     >
       <template #navigation>
         <CsSideNavigation
           v-if="!isMobile"
+          class="client-side-nav"
           :items="navItems"
           :active-href="route.path"
           @follow="onNavFollow"
@@ -213,7 +203,7 @@ onUnmounted(() => {
         class="bottom-nav-item"
         :class="{ 'is-active': route.path === item.path }"
       >
-        <CsIcon :name="mobileTabIcon(item.path)" size="normal" />
+        <CsIcon :name="item.iconName ?? 'ellipsis'" size="normal" />
         <span class="bottom-nav-label">{{ item.title }}</span>
       </router-link>
     </nav>
@@ -234,13 +224,6 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 900;
-
-  @media (max-width: $bp-tablet-max) {
-    :deep([class*='padding-box']) {
-      min-block-size: 54px;
-      padding-inline: 16px;
-    }
-  }
 }
 
 .client-bottom-nav {
@@ -280,6 +263,36 @@ onUnmounted(() => {
 
 .bottom-nav-label {
   line-height: 1.2;
+}
+
+.client-side-nav {
+  --size-side-navigation-item-height-4tugsp: 40px;
+  --space-side-navigation-item-icon-gap-0fty3a: 8px;
+  --space-panel-content-top-ehvp15: 26px;
+  --color-background-side-navigation-item-active-vz7d6m: var(--color-background-item-selected-dotkup);
+
+  :deep(a) {
+    align-items: center !important;
+    padding-inline: 12px !important;
+  }
+
+  :deep([class*='item-icon']) {
+    margin-inline-end: 10px !important;
+  }
+
+  :deep(a .cs-nav-root-link-text) {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+
+  :deep(a[aria-current='page'] .cs-nav-root-link-text) {
+    font-weight: 700;
+  }
+
+  :deep(a .cs-nav-root-link-text--idle) {
+    color: inherit;
+  }
 }
 
 .fade-enter-active,
