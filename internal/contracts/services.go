@@ -91,6 +91,10 @@ type TrafficService interface {
 type OrderService interface {
 	ListByUser(userID uint64) ([]models.Order, error)
 	PayWithBalance(userID, planID uint64) (*models.Order, error)
+	CreateOrder(userID, planID uint64, replacePending bool) (*models.Order, error)
+	GetOrder(userID uint64, orderNo string) (*models.Order, error)
+	PayOrderWithBalance(userID uint64, orderNo string) (*models.Order, error)
+	CancelOrder(userID uint64, orderNo string) (*models.Order, error)
 }
 
 // AuditEvent 一条手动打点的审计事件（用户侧登录/注册/改密等）。

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   CsAlert,
   CsBadge,
@@ -12,16 +13,13 @@ import {
   CsInput,
   CsModal,
   CsSpaceBetween,
-  CsStatusIndicator,
   ElMessage,
 } from '@/components/cloudscape'
-import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
+import { createOrder, payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'
 import { renderPlanMarkdown } from '@/utils/markdown'
 import { errMsg } from '@/api/http'
-import { formatMoney } from '@/utils/format'
-import { formatDateTimeMinute } from '@/utils/timezone'
 import type { Order, Plan } from '@/api/types'
 
 const auth = useAuthStore()
@@ -61,16 +59,6 @@ const balanceDeficitYuan = computed(() => {
   return diff > 0 ? (diff / 100).toFixed(2) : '0.00'
 })
 
-const orderStatusMap: Record<string, { type: 'pending' | 'success' | 'stopped'; text: string }> = {
-  pending: { type: 'pending', text: '处理中' },
-  paid: { type: 'success', text: '已生效' },
-  cancelled: { type: 'stopped', text: '已取消' },
-}
-
-function fmtMoney(cents: number) {
-  return formatMoney(cents)
-}
-
 function fmtGb(gb: number) {
   return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`
 }
@@ -97,10 +85,30 @@ async function load() {
 }
 onMounted(load)
 
-function openCheckout(plan: Plan) {
-  selectedPlan.value = plan
-  quickRedeemCode.value = ''
-  checkoutOpen.value = true
+const router = useRouter()
+
+async function openCheckout(plan: Plan) {
+  try {
+    const { data } = await createOrder(plan.id)
+    if (data.code === 0 && data.data?.order) {
+      const order = data.data.order
+      if (order.status === 'paid') {
+        await auth.fetchMe()
+        ElMessage.success('订购成功，套餐已生效')
+        router.push('/subscribe')
+        return
+      }
+      router.push(`/checkout/${order.order_no}`)
+    }
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number; data?: { pending_order_no?: string; message?: string } } }
+    if (err?.response?.status === 409 && err.response.data?.pending_order_no) {
+      ElMessage.warning('您有一笔待支付订单，正在前往收银台')
+      router.push(`/checkout/${err.response.data.pending_order_no}`)
+      return
+    }
+    ElMessage.error(err?.response?.data?.message || '创建订单失败')
+  }
 }
 
 async function handleQuickRedeem() {
@@ -191,32 +199,6 @@ async function confirmPay() {
     </CsContainer>
 
     <!-- 订单记录 -->
-    <CsContainer>
-      <template #header>
-        <CsHeader variant="h2">服务订购记录</CsHeader>
-      </template>
-
-      <div v-if="orders.length" class="order-list">
-        <div v-for="o in orders" :key="o.id" class="order-row">
-          <div class="order-main">
-            <div class="order-name">{{ o.plan_name }}</div>
-            <div class="order-meta">
-              <code class="cell-mono">{{ o.order_no }}</code>
-              <span>{{ formatDateTimeMinute(o.created_at) }}</span>
-              <CsBadge color="grey">余额支付</CsBadge>
-            </div>
-          </div>
-          <div class="order-right">
-            <div class="order-amount cell-mono">{{ fmtMoney(o.amount_cents) }}</div>
-            <CsStatusIndicator :type="orderStatusMap[o.status]?.type ?? 'stopped'">
-              {{ orderStatusMap[o.status]?.text ?? o.status }}
-            </CsStatusIndicator>
-          </div>
-        </div>
-      </div>
-      <CsBox v-else color="text-body-secondary" font-size="body-s">暂无订购记录</CsBox>
-    </CsContainer>
-
     <!-- 卡密核销弹窗 -->
     <CsModal
       v-model:visible="topupModalOpen"
@@ -467,5 +449,20 @@ async function confirmPay() {
   .pricing-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.pricing-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.pricing-card > :deep([class*='awsui_content-wrapper_']),
+.pricing-card > :deep([class*='awsui_content_']) {
+  flex: 1;
+}
+
+.pricing-card > :deep([class*='awsui_footer_']) {
+  margin-top: auto;
 }
 </style>

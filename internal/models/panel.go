@@ -238,22 +238,26 @@ func PlanOrderSnapshot(p *Plan) string {
 	return string(b)
 }
 
-// Order 订单（余额直付即时生效：paid）。人工确认收款已去除（2026-08-14 方向④）。
+// Order 订单（支持 pending -> paid / cancelled 完整状态机，兼容存量 paid 订单）。
 type Order struct {
 	ID            uint64 `gorm:"primaryKey" json:"id"`
 	OrderNo       string `gorm:"size:32;uniqueIndex;not null" json:"order_no"`
 	UserID        uint64 `gorm:"index;not null" json:"user_id"`
 	PlanID        uint64 `gorm:"index;not null" json:"plan_id"`
 	AmountCents   int64  `gorm:"not null" json:"amount_cents"`
-	PaymentMethod string `gorm:"size:32;default:balance;index" json:"payment_method"` // balance（唯一）
-	Status        string `gorm:"size:16;default:paid;index" json:"status"`            // paid（唯一）
+	PaymentMethod string `gorm:"size:32;default:balance;index" json:"payment_method"` // balance / gift_card / 未来扩展
+	Status        string `gorm:"size:16;default:paid;index" json:"status"`            // pending / paid / cancelled
 	// 套餐快照（2026-10-25）：套餐可归档，历史订单不能依赖实时 JOIN plans 取名称。
 	// PlanName 用于列表展示；PlanSnapshot 固化下单时点的名称/价格/流量/时长/权限组。
 	// 存量订单由 backfillOrderPlanNames 回填名称，快照留空（属一次性迁移前的历史行）。
 	PlanName     string     `gorm:"size:64" json:"plan_name"`
 	PlanSnapshot string     `gorm:"type:text" json:"-"`
+	TradeNo      string     `gorm:"size:64;index" json:"trade_no,omitempty"`
+	CancelReason string     `gorm:"size:32" json:"cancel_reason,omitempty"`
+	ExpiresAt    *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	PaidAt       *time.Time `json:"paid_at"`
+	CancelledAt  *time.Time `json:"cancelled_at,omitempty"`
 }
 
 // TrafficLog 节点上报的流量明细（按 用户×入站×周期）。

@@ -42,8 +42,15 @@ var (
 	ErrPlanRenewalStopped  = errors.New("该套餐已停止续费")
 	ErrPlanNotPurchasable  = errors.New("该套餐已停售")
 	// ErrPlanChanged 自动续费期间用户套餐已被改动：调用方跳过，下一轮按新套餐重新判定。
-	ErrPlanChanged = errors.New("套餐已变更")
+	ErrPlanChanged        = errors.New("套餐已变更")
+	ErrOrderNotFound      = errors.New("订单不存在")
+	ErrOrderNotPending    = errors.New("订单当前状态不可支付或取消")
+	ErrOrderExpired       = errors.New("订单已超时关闭")
+	ErrPendingOrderExists = errors.New("您有一笔待支付订单，请先完成支付或取消后再下单")
 )
+
+// OrderPendingTTL 待支付订单默认有效期（30 分钟）。
+const OrderPendingTTL = 30 * time.Minute
 
 // IsRenewalRejection 是否为可确定的业务性拒绝（调用方据此决定到期退订）。
 // ErrPlanChanged 不算：套餐刚被改动时应重试而不是退订。
@@ -220,4 +227,231 @@ func (s *OrderService) ClearExpiredSubscription(userID uint64) (bool, error) {
 // ListByUser 用户订单列表。
 func (s *OrderService) ListByUser(userID uint64) ([]models.Order, error) {
 	return s.store.ListOrdersByUser(context.Background(), userID, 50)
+}
+
+// CreateOrder 创建待支付订单（下单即锁价；0 元套餐自动完成支付）。
+func (s *OrderService) CreateOrder(userID, planID uint64, replacePending bool) (*models.Order, error) {
+	ctx := context.Background()
+	var order *models.Order
+	var zeroAutoPaid bool
+
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		plan, err := tx.GetPlan(ctx, planID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlanNotFound
+			}
+			return err
+		}
+		user, err := tx.LockUser(ctx, userID)
+		if err != nil {
+			return ErrUserNotFound
+		}
+
+		isRenewal := user.PlanID > 0 && user.PlanID == planID
+		if isRenewal {
+			if !plan.Renewable {
+				return ErrPlanRenewalStopped
+			}
+		} else if !plan.Purchasable {
+			return ErrPlanNotPurchasable
+		}
+
+		if plan.PriceCents == 0 {
+			zeroAutoPaid = true
+			return nil
+		}
+
+		now := time.Now()
+		pending, err := tx.FindPendingOrderByUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if pending != nil {
+			if pending.ExpiresAt != nil && !now.Before(*pending.ExpiresAt) {
+				_, _ = tx.CancelOrder(ctx, pending.ID, "timeout", now)
+			} else if !replacePending {
+				order = pending
+				return ErrPendingOrderExists
+			} else {
+				_, _ = tx.CancelOrder(ctx, pending.ID, "replaced", now)
+			}
+		}
+
+		exp := now.Add(OrderPendingTTL)
+		orderNo := now.Format("20060102150405") + util.RandomID(4)
+		order = &models.Order{
+			OrderNo:       orderNo,
+			UserID:        userID,
+			PlanID:        planID,
+			PlanName:      plan.Name,
+			PlanSnapshot:  models.PlanOrderSnapshot(plan),
+			AmountCents:   plan.PriceCents,
+			PaymentMethod: models.PaymentMethodBalance,
+			Status:        models.OrderPending,
+			ExpiresAt:     &exp,
+		}
+		return tx.CreateOrder(ctx, order)
+	})
+	if err != nil {
+		return order, err
+	}
+	if zeroAutoPaid {
+		return s.PayWithBalance(userID, planID)
+	}
+	return order, nil
+}
+
+// GetOrder 获取用户指定订单（含惰性超时关单）。
+func (s *OrderService) GetOrder(userID uint64, orderNo string) (*models.Order, error) {
+	ctx := context.Background()
+	o, err := s.store.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	if o == nil || o.UserID != userID {
+		return nil, ErrOrderNotFound
+	}
+	now := time.Now()
+	if o.Status == models.OrderPending && o.ExpiresAt != nil && !now.Before(*o.ExpiresAt) {
+		ok, err := s.store.CancelOrder(ctx, o.ID, "timeout", now)
+		if err == nil && ok {
+			o.Status = models.OrderCancelled
+			o.CancelReason = "timeout"
+			o.CancelledAt = &now
+		}
+	}
+	return o, nil
+}
+
+// PayOrderWithBalance 使用账户余额支付指定待支付订单（按订单快照金额结算）。
+func (s *OrderService) PayOrderWithBalance(userID uint64, orderNo string) (*models.Order, error) {
+	ctx := context.Background()
+	var order *models.Order
+	paid := false
+
+	err := s.store.Transaction(ctx, func(tx contracts.BillingStore) error {
+		user, err := tx.LockUser(ctx, userID)
+		if err != nil {
+			return ErrUserNotFound
+		}
+		o, err := tx.GetOrderByNo(ctx, orderNo)
+		if err != nil {
+			return err
+		}
+		if o == nil || o.UserID != userID {
+			return ErrOrderNotFound
+		}
+		order = o
+
+		if o.Status == models.OrderPaid {
+			return nil
+		}
+		if o.Status != models.OrderPending {
+			return ErrOrderNotPending
+		}
+		now := time.Now()
+		if o.ExpiresAt != nil && !now.Before(*o.ExpiresAt) {
+			_, _ = tx.CancelOrder(ctx, o.ID, "timeout", now)
+			return ErrOrderExpired
+		}
+
+		if user.BalanceCents < o.AmountCents {
+			return ErrInsufficientBalance
+		}
+
+		plan, err := tx.GetPlan(ctx, o.PlanID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlanNotFound
+			}
+			return err
+		}
+
+		newBalance := user.BalanceCents - o.AmountCents
+		if err := tx.UpdateBalance(ctx, userID, newBalance); err != nil {
+			return err
+		}
+
+		ok, err := tx.MarkOrderPaid(ctx, o.ID, models.PaymentMethodBalance, "", now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrOrderNotPending
+		}
+
+		o.Status = models.OrderPaid
+		o.PaymentMethod = models.PaymentMethodBalance
+		o.PaidAt = &now
+
+		entry := models.BalanceLog{
+			UserID:       userID,
+			AmountCents:  -o.AmountCents,
+			BalanceAfter: newBalance,
+			Type:         models.BalanceLogOrderPayment,
+			RelatedID:    o.ID,
+			Remark:       "余额支付订单 #" + o.OrderNo + " (" + o.PlanName + ")",
+			CreatedAt:    now,
+		}
+		if err := tx.CreateBalanceLog(ctx, &entry); err != nil {
+			return err
+		}
+
+		newExpire := now.AddDate(0, 0, plan.DurationDays)
+		if err := tx.UpdateSubscription(ctx, userID, plan, newExpire, now); err != nil {
+			return err
+		}
+
+		paid = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if paid && s.Events != nil {
+		ev := contracts.OrderPaidEvent{
+			OrderID: order.ID,
+			OrderNo: order.OrderNo,
+			UserID:  userID,
+			PlanID:  order.PlanID,
+			PaidAt:  *order.PaidAt,
+		}
+		if err := s.Events.Publish(context.Background(), ev); err != nil {
+			log.Printf("billing: 订单 #%s 支付事件发布失败（订单已生效）: %v", order.OrderNo, err)
+		}
+	}
+	return order, nil
+}
+
+// CancelOrder 用户手动取消待支付订单。
+func (s *OrderService) CancelOrder(userID uint64, orderNo string) (*models.Order, error) {
+	ctx := context.Background()
+	o, err := s.store.GetOrderByNo(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	if o == nil || o.UserID != userID {
+		return nil, ErrOrderNotFound
+	}
+	if o.Status != models.OrderPending {
+		return nil, ErrOrderNotPending
+	}
+	now := time.Now()
+	ok, err := s.store.CancelOrder(ctx, o.ID, "user_cancel", now)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrOrderNotPending
+	}
+	o.Status = models.OrderCancelled
+	o.CancelReason = "user_cancel"
+	o.CancelledAt = &now
+	return o, nil
+}
+
+// ExpirePendingOrders 批量关闭已超时的待支付订单。
+func (s *OrderService) ExpirePendingOrders() (int64, error) {
+	return s.store.ExpirePendingOrders(context.Background(), time.Now())
 }

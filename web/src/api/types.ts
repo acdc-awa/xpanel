@@ -285,10 +285,13 @@ export interface Order {
   plan_id: number
   plan_name: string
   amount_cents: number
-  payment_method?: 'balance'
-  status: OrderStatus
+  payment_method?: 'balance' | 'gift_card' | string
+  status: 'pending' | 'paid' | 'cancelled' | string
+  cancel_reason?: string
+  expires_at?: string | null
   created_at: string
   paid_at: string | null
+  cancelled_at?: string | null
 }
 
 export interface AuditLog {

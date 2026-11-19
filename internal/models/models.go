@@ -27,7 +27,9 @@ const (
 	InviteUsed     = 1 // 邀请码已使用
 	InviteDisabled = 2 // 邀请码已禁用/过期
 
-	OrderPaid = "paid" // 订单状态（余额直付即时生效，无 pending/人工确认）
+	OrderPending   = "pending"   // 待支付
+	OrderPaid      = "paid"      // 已支付
+	OrderCancelled = "cancelled" // 已取消
 
 	// Phase T：入站形态（面向终端用户 / 四层直通管道 / 独立通道 / 转发代理）
 	InboundTypeUser    = "user"    // 进订阅、参与用户授权与 SyncUsers（默认）

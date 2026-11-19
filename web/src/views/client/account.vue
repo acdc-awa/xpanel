@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
 import { changePassword, setup2FA, confirm2FA, disable2FA, resetSubscribeToken, setAutoRenew } from '@/api/user'
 import { redeemGiftCard, getMyBalanceLogs } from '@/api/gift_card'
+import { cancelOrder, getMyOrders } from '@/api/shop'
 import { errMsg } from '@/api/http'
 import { formatMoney, formatMoneyNumber, formatSignedMoney } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
-import type { BalanceLog } from '@/api/types'
+import type { BalanceLog, Order } from '@/api/types'
 import {
   CsAlert,
   CsBadge,
-  CsBox,
   CsButton,
   CsColumnLayout,
   CsContainer,
@@ -20,13 +21,19 @@ import {
   CsHeader,
   CsInput,
   CsModal,
+  CsPagination,
+  CsPaginationBar,
   CsSpaceBetween,
   CsStatusIndicator,
+  CsTable,
+  CsTabs,
   CsToggle,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 
+const router = useRouter()
 const auth = useAuthStore()
 
 const createdText = ref('—')
@@ -57,7 +64,6 @@ async function toggleAutoRenew(kind: 'expire' | 'exhaust', val: boolean) {
 // 余额 & 卡密兑换
 const redeemCode = ref('')
 const redeeming = ref(false)
-const balanceLogsOpen = ref(false)
 const balanceLogs = ref<BalanceLog[]>([])
 const loadingLogs = ref(false)
 
@@ -81,11 +87,79 @@ async function refresh() {
     await auth.fetchMe()
     createdText.value = formatDateTimeMinute(auth.user?.created_at, '—')
     loadRecentLogs()
+    loadOrders()
   } catch (e) {
     ElMessage.error(errMsg(e, '加载资料失败'))
   }
 }
 onMounted(refresh)
+
+const activeRecordTab = ref<'orders' | 'logs'>('orders')
+const recordTabs = [
+  { id: 'orders', label: '我的订单' },
+  { id: 'logs', label: '收支明细' },
+]
+
+const orders = ref<Order[]>([])
+const orderPage = ref(1)
+const orderPageSize = ref(10)
+const orderTotalPages = computed(() => Math.max(1, Math.ceil(orders.value.length / orderPageSize.value)))
+const pagedOrders = computed(() => {
+  const start = (orderPage.value - 1) * orderPageSize.value
+  return orders.value.slice(start, start + orderPageSize.value)
+})
+const orderStatusMap: Record<string, { type: 'pending' | 'success' | 'stopped'; text: string }> = {
+  pending: { type: 'pending', text: '待支付' },
+  paid: { type: 'success', text: '已支付' },
+  cancelled: { type: 'stopped', text: '已取消' },
+}
+
+const orderColumns: TableColumn[] = [
+  { id: 'order_no', header: '订单号' },
+  { id: 'plan_name', header: '套餐' },
+  { id: 'payment_method', header: '支付方式' },
+  { id: 'amount', header: '金额' },
+  { id: 'status', header: '状态' },
+  { id: 'created_at', header: '创建时间' },
+  { id: 'actions', header: '操作' },
+]
+
+const logPage = ref(1)
+const logPageSize = ref(10)
+const pagedLogs = computed(() => {
+  const start = (logPage.value - 1) * logPageSize.value
+  return balanceLogs.value.slice(start, start + logPageSize.value)
+})
+const logColumns: TableColumn[] = [
+  { id: 'type', header: '类型' },
+  { id: 'remark', header: '说明' },
+  { id: 'amount', header: '变动金额' },
+  { id: 'created_at', header: '时间' },
+]
+
+async function loadOrders() {
+  try {
+    const { data } = await getMyOrders()
+    if (data.code === 0) {
+      orders.value = data.data.items
+      if (orderPage.value > orderTotalPages.value) {
+        orderPage.value = 1
+      }
+    }
+  } catch {
+    // 静默失败，不影响主资料展示
+  }
+}
+
+async function handleCancelOrder(orderNo: string) {
+  try {
+    await cancelOrder(orderNo)
+    ElMessage.success('订单已取消')
+    await loadOrders()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '取消订单失败'))
+  }
+}
 
 async function loadRecentLogs() {
   try {
@@ -121,24 +195,17 @@ async function submitRedeem() {
   }
 }
 
-async function openBalanceLogs() {
-  balanceLogsOpen.value = true
-  loadingLogs.value = true
-  try {
-    const { data } = await getMyBalanceLogs(1, 50)
-    if (data.code === 0) {
-      balanceLogs.value = data.data.items
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '加载明细失败'))
-  } finally {
-    loadingLogs.value = false
-  }
-}
-
 // 修改密码
+const pwdOpen = ref(false)
 const pwd = reactive({ old: '', next: '', confirm: '' })
 const savingPwd = ref(false)
+
+function openPwdModal() {
+  pwd.old = ''
+  pwd.next = ''
+  pwd.confirm = ''
+  pwdOpen.value = true
+}
 
 async function savePwd() {
   if (!pwd.old || !pwd.next) {
@@ -158,6 +225,7 @@ async function savePwd() {
     const { data } = await changePassword(pwd.old, pwd.next)
     if (data.code === 0) {
       ElMessage.success('登录密码已更新')
+      pwdOpen.value = false
       pwd.old = ''
       pwd.next = ''
       pwd.confirm = ''
@@ -313,12 +381,7 @@ async function onResetSubscribe() {
       <CsSpaceBetween direction="vertical" size="l">
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2">
-              账户资产
-              <template #actions>
-                <CsButton @click="openBalanceLogs">收支明细</CsButton>
-              </template>
-            </CsHeader>
+            <CsHeader variant="h2">账户资产</CsHeader>
           </template>
 
           <CsSpaceBetween direction="vertical" size="l">
@@ -341,19 +404,6 @@ async function onResetSubscribe() {
                 </CsSpaceBetween>
               </CsFormItem>
             </CsForm>
-
-            <div v-if="balanceLogs.length" class="log-list">
-              <div class="log-section-title">最近变动</div>
-              <div v-for="item in balanceLogs.slice(0, 5)" :key="item.id" class="log-row">
-                <div class="log-main">
-                  <div class="log-title">{{ item.remark || balanceLogTitle(item.type) }}</div>
-                  <div class="log-time cell-mono">{{ formatDateTimeMinute(item.created_at) }}</div>
-                </div>
-                <div class="log-amount cell-mono" :class="{ 'is-plus': item.amount_cents > 0 }">
-                  {{ formatSignedMoney(item.amount_cents) }}
-                </div>
-              </div>
-            </div>
           </CsSpaceBetween>
         </CsContainer>
 
@@ -458,55 +508,44 @@ async function onResetSubscribe() {
               </div>
               <CsButton :loading="resettingSub" @click="onResetSubscribe">重置订阅</CsButton>
             </div>
-          </CsSpaceBetween>
-        </CsContainer>
 
-        <CsContainer>
-          <template #header>
-            <CsHeader variant="h2">修改登录密码</CsHeader>
-          </template>
-          <CsForm @submit="savePwd">
-            <CsFormItem label="当前密码">
-              <CsInput v-model="pwd.old" type="password" show-password placeholder="请输入当前密码" />
-            </CsFormItem>
-            <CsFormItem label="新密码" description="长度不少于 8 位。">
-              <CsInput v-model="pwd.next" type="password" show-password placeholder="请输入新密码" />
-            </CsFormItem>
-            <CsFormItem label="确认新密码">
-              <CsInput v-model="pwd.confirm" type="password" show-password placeholder="请再次输入新密码" />
-            </CsFormItem>
-            <CsButton variant="primary" :loading="savingPwd" form-action="submit">
-              保存新密码
-            </CsButton>
-          </CsForm>
+            <div class="switch-row">
+              <div class="switch-info">
+                <div class="switch-title">登录密码</div>
+                <div class="switch-desc">定期修改登录密码以保障账户安全</div>
+              </div>
+              <CsButton @click="openPwdModal">修改密码</CsButton>
+            </div>
+          </CsSpaceBetween>
         </CsContainer>
       </CsSpaceBetween>
     </div>
 
-    <!-- 收支明细弹窗 -->
+    <!-- 修改登录密码弹窗 -->
     <CsModal
-      v-model:visible="balanceLogsOpen"
-      header="账户收支明细"
-      size="medium"
+      v-model:visible="pwdOpen"
+      header="修改登录密码"
+      size="small"
       :close-on-click-overlay="false"
     >
-      <CsBox v-if="loadingLogs" color="text-body-secondary" font-size="body-s">加载中…</CsBox>
-      <CsBox v-else-if="!balanceLogs.length" color="text-body-secondary" font-size="body-s">
-        暂无收支记录
-      </CsBox>
-      <div v-else class="log-list">
-        <div v-for="item in balanceLogs" :key="item.id" class="log-row">
-          <div class="log-main">
-            <div class="log-title">{{ item.remark || balanceLogTitle(item.type) }}</div>
-            <div class="log-time cell-mono">{{ formatDateTimeMinute(item.created_at) }}</div>
-          </div>
-          <div class="log-amount cell-mono" :class="{ 'is-plus': item.amount_cents > 0 }">
-            {{ formatSignedMoney(item.amount_cents) }}
-          </div>
-        </div>
-      </div>
+      <CsForm @submit="savePwd">
+        <CsFormItem label="当前密码">
+          <CsInput v-model="pwd.old" type="password" show-password placeholder="请输入当前密码" />
+        </CsFormItem>
+        <CsFormItem label="新密码" description="长度不少于 8 位。">
+          <CsInput v-model="pwd.next" type="password" show-password placeholder="请输入新密码" />
+        </CsFormItem>
+        <CsFormItem label="确认新密码">
+          <CsInput v-model="pwd.confirm" type="password" show-password placeholder="请再次输入新密码" />
+        </CsFormItem>
+      </CsForm>
       <template #footer>
-        <CsButton variant="primary" @click="balanceLogsOpen = false">关闭</CsButton>
+        <CsSpaceBetween direction="horizontal" size="xs">
+          <CsButton @click="pwdOpen = false">取消</CsButton>
+          <CsButton variant="primary" :loading="savingPwd" @click="savePwd">
+            保存新密码
+          </CsButton>
+        </CsSpaceBetween>
       </template>
     </CsModal>
 
@@ -576,6 +615,113 @@ async function onResetSubscribe() {
         </CsSpaceBetween>
       </template>
     </CsModal>
+
+    <CsContainer>
+      <template #header>
+        <CsHeader variant="h2">订单与收支记录</CsHeader>
+      </template>
+
+      <CsTabs v-model="activeRecordTab" :tabs="recordTabs">
+        <div v-if="activeRecordTab === 'orders'">
+          <CsSpaceBetween size="m">
+            <CsTable
+              compact
+              :items="pagedOrders"
+              :columns="orderColumns"
+              track-by="id"
+              empty-text="暂无订单记录"
+            >
+              <template #cell-order_no="{ row }">
+                <code class="cell-mono">{{ row.order_no }}</code>
+              </template>
+              <template #cell-plan_name="{ row }">
+                {{ row.plan_name || `#${row.plan_id}` }}
+              </template>
+              <template #cell-payment_method="{ row }">
+                <CsBadge color="grey">
+                  {{ row.payment_method === 'gift_card' ? '卡密支付' : '余额支付' }}
+                </CsBadge>
+              </template>
+              <template #cell-amount="{ row }">
+                <span class="cell-mono"><strong>{{ formatMoney(row.amount_cents) }}</strong></span>
+              </template>
+              <template #cell-status="{ row }">
+                <CsStatusIndicator :type="orderStatusMap[row.status]?.type ?? 'stopped'">
+                  {{ orderStatusMap[row.status]?.text ?? row.status }}
+                </CsStatusIndicator>
+              </template>
+              <template #cell-created_at="{ row }">
+                <span class="cell-mono">{{ formatDateTimeMinute(row.created_at) }}</span>
+              </template>
+              <template #cell-actions="{ row }">
+                <CsSpaceBetween v-if="row.status === 'pending'" direction="horizontal" size="xs">
+                  <CsButton variant="primary" @click="router.push(`/checkout/${row.order_no}`)">
+                    去支付
+                  </CsButton>
+                  <CsButton variant="normal" @click="handleCancelOrder(row.order_no)">
+                    取消
+                  </CsButton>
+                </CsSpaceBetween>
+                <span v-else class="cell-muted">—</span>
+              </template>
+            </CsTable>
+
+            <CsPaginationBar v-if="orders.length > 0">
+              <CsPagination
+                v-model:current-page="orderPage"
+                v-model:page-size="orderPageSize"
+                :total="orders.length"
+                :page-sizes="[10, 20, 50]"
+                layout="total, sizes, prev, pager, next"
+                @size-change="orderPage = 1"
+              />
+            </CsPaginationBar>
+          </CsSpaceBetween>
+        </div>
+
+        <div v-else-if="activeRecordTab === 'logs'">
+          <CsSpaceBetween size="m">
+            <CsTable
+              compact
+              :items="pagedLogs"
+              :columns="logColumns"
+              :loading="loadingLogs"
+              loading-text="加载中…"
+              track-by="id"
+              empty-text="暂无收支记录"
+            >
+              <template #cell-type="{ row }">
+                <CsBadge :color="row.amount_cents > 0 ? 'green' : 'grey'">
+                  {{ balanceLogTitle(row.type) }}
+                </CsBadge>
+              </template>
+              <template #cell-remark="{ row }">
+                {{ row.remark || balanceLogTitle(row.type) }}
+              </template>
+              <template #cell-amount="{ row }">
+                <span class="log-amount cell-mono" :class="{ 'is-plus': row.amount_cents > 0 }">
+                  {{ formatSignedMoney(row.amount_cents) }}
+                </span>
+              </template>
+              <template #cell-created_at="{ row }">
+                <span class="cell-mono">{{ formatDateTimeMinute(row.created_at) }}</span>
+              </template>
+            </CsTable>
+
+            <CsPaginationBar v-if="balanceLogs.length > 0">
+              <CsPagination
+                v-model:current-page="logPage"
+                v-model:page-size="logPageSize"
+                :total="balanceLogs.length"
+                :page-sizes="[10, 20, 50]"
+                layout="total, sizes, prev, pager, next"
+                @size-change="logPage = 1"
+              />
+            </CsPaginationBar>
+          </CsSpaceBetween>
+        </div>
+      </CsTabs>
+    </CsContainer>
   </CsSpaceBetween>
 </template>
 
@@ -584,7 +730,67 @@ async function onResetSubscribe() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
-  align-items: start;
+}
+
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #eaeded);
+}
+
+.order-row.clickable {
+  cursor: pointer;
+}
+
+.order-row.clickable:hover {
+  border-color: var(--color-border-item-selected-7104rh, #0972d3);
+}
+
+.order-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.order-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
+}
+
+.order-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.order-amount {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.order-pagination {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .balance-box {

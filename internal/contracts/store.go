@@ -45,7 +45,12 @@ type BillingStore interface {
 
 	// 订单
 	FindRecentPaidOrder(ctx context.Context, userID, planID uint64, since time.Time) (*models.Order, error) // 无记录返回 nil,nil
+	FindPendingOrderByUser(ctx context.Context, userID uint64) (*models.Order, error)                    // 无记录返回 nil,nil
+	GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error)
 	CreateOrder(ctx context.Context, o *models.Order) error
+	MarkOrderPaid(ctx context.Context, id uint64, method, tradeNo string, paidAt time.Time) (bool, error)
+	CancelOrder(ctx context.Context, id uint64, reason string, at time.Time) (bool, error)
+	ExpirePendingOrders(ctx context.Context, now time.Time) (int64, error)
 	ListOrdersByUser(ctx context.Context, userID uint64, limit int) ([]models.Order, error)
 
 	// 礼品卡

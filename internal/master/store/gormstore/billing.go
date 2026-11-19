@@ -139,8 +139,71 @@ func (s *BillingStore) FindRecentPaidOrder(ctx context.Context, userID, planID u
 	return &o, nil
 }
 
+func (s *BillingStore) FindPendingOrderByUser(ctx context.Context, userID uint64) (*models.Order, error) {
+	var o models.Order
+	err := s.with(ctx).
+		Where("user_id = ? AND status = ?", userID, models.OrderPending).
+		Order("id DESC").First(&o).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func (s *BillingStore) GetOrderByNo(ctx context.Context, orderNo string) (*models.Order, error) {
+	var o models.Order
+	err := s.with(ctx).Where("order_no = ?", orderNo).First(&o).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
 func (s *BillingStore) CreateOrder(ctx context.Context, o *models.Order) error {
 	return s.with(ctx).Create(o).Error
+}
+
+func (s *BillingStore) MarkOrderPaid(ctx context.Context, id uint64, method, tradeNo string, paidAt time.Time) (bool, error) {
+	updates := map[string]any{
+		"status":         models.OrderPaid,
+		"payment_method": method,
+		"paid_at":        paidAt,
+	}
+	if tradeNo != "" {
+		updates["trade_no"] = tradeNo
+	}
+	res := s.with(ctx).Model(&models.Order{}).
+		Where("id = ? AND status = ?", id, models.OrderPending).
+		Updates(updates)
+	return res.RowsAffected == 1, res.Error
+}
+
+func (s *BillingStore) CancelOrder(ctx context.Context, id uint64, reason string, at time.Time) (bool, error) {
+	res := s.with(ctx).Model(&models.Order{}).
+		Where("id = ? AND status = ?", id, models.OrderPending).
+		Updates(map[string]any{
+			"status":        models.OrderCancelled,
+			"cancel_reason": reason,
+			"cancelled_at":  at,
+		})
+	return res.RowsAffected == 1, res.Error
+}
+
+func (s *BillingStore) ExpirePendingOrders(ctx context.Context, now time.Time) (int64, error) {
+	res := s.with(ctx).Model(&models.Order{}).
+		Where("status = ? AND expires_at IS NOT NULL AND expires_at <= ?", models.OrderPending, now).
+		Updates(map[string]any{
+			"status":        models.OrderCancelled,
+			"cancel_reason": "timeout",
+			"cancelled_at":  now,
+		})
+	return res.RowsAffected, res.Error
 }
 
 func (s *BillingStore) ListOrdersByUser(ctx context.Context, userID uint64, limit int) ([]models.Order, error) {

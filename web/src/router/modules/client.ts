@@ -22,6 +22,12 @@ export const clientRoutes: RouteRecordRaw[] = [
         meta: { title: '商店' },
       },
       {
+        path: 'checkout/:orderNo',
+        name: 'client.checkout',
+        component: () => import('@/views/client/checkout.vue'),
+        meta: { title: '收银台' },
+      },
+      {
         path: 'account',
         name: 'client.account',
         component: () => import('@/views/client/account.vue'),

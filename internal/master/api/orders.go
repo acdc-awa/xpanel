@@ -1,11 +1,14 @@
 package api
 
 import (
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/acdc-awa/xpanel/internal/master/billing"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
@@ -21,8 +24,11 @@ type orderView struct {
 	AmountCents   int64      `json:"amount_cents"`
 	PaymentMethod string     `json:"payment_method"`
 	Status        string     `json:"status"`
+	CancelReason  string     `json:"cancel_reason,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	PaidAt        *time.Time `json:"paid_at"`
+	CancelledAt   *time.Time `json:"cancelled_at,omitempty"`
 }
 
 func (d *Deps) toOrderViews(orders []models.Order) []orderView {
@@ -77,7 +83,8 @@ func (d *Deps) toOrderViews(orders []models.Order) []orderView {
 		items = append(items, orderView{
 			ID: o.ID, OrderNo: o.OrderNo, UserID: o.UserID, Email: emailByID[o.UserID],
 			PlanID: o.PlanID, PlanName: planName, AmountCents: o.AmountCents,
-			PaymentMethod: o.PaymentMethod, Status: o.Status, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
+			PaymentMethod: o.PaymentMethod, Status: o.Status, CancelReason: o.CancelReason,
+			ExpiresAt: o.ExpiresAt, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt, CancelledAt: o.CancelledAt,
 		})
 	}
 	return items
@@ -128,4 +135,157 @@ func (d *Deps) AdminOrders(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"total": total, "page": page, "size": size, "items": d.toOrderViews(list)})
+}
+
+type createOrderReq struct {
+	PlanID         uint64 `json:"plan_id" binding:"required"`
+	ReplacePending bool   `json:"replace_pending"`
+}
+
+// CreateUserOrder POST /api/v1/user/orders —— 创建待支付订单（0元套餐自动完成）。
+func (d *Deps) CreateUserOrder(c *gin.Context) {
+	var req createOrderReq
+	if !util.BindJSON(c, &req) {
+		return
+	}
+	uid := middleware.CurrentUser(c)
+	order, err := d.Order.CreateOrder(uid, req.PlanID, req.ReplacePending)
+	if err != nil {
+		switch {
+		case errors.Is(err, billing.ErrPendingOrderExists):
+			pendingNo := ""
+			if order != nil {
+				pendingNo = order.OrderNo
+			}
+			c.JSON(http.StatusConflict, gin.H{
+				"code":             http.StatusConflict,
+				"message":          err.Error(),
+				"pending_order_no": pendingNo,
+			})
+		case errors.Is(err, billing.ErrPlanNotFound),
+			errors.Is(err, billing.ErrPlanNotPurchasable),
+			errors.Is(err, billing.ErrPlanRenewalStopped):
+			util.BadRequest(c, err.Error())
+		default:
+			util.ServerError(c, "创建订单失败")
+		}
+		return
+	}
+	views := d.toOrderViews([]models.Order{*order})
+	util.OK(c, gin.H{"order": views[0]})
+}
+
+// GetUserOrder GET /api/v1/user/orders/:orderNo —— 收银台拉取订单详情与可用支付方式。
+func (d *Deps) GetUserOrder(c *gin.Context) {
+	uid := middleware.CurrentUser(c)
+	orderNo := strings.TrimSpace(c.Param("orderNo"))
+	order, err := d.Order.GetOrder(uid, orderNo)
+	if err != nil {
+		if errors.Is(err, billing.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": http.StatusNotFound, "message": err.Error()})
+			return
+		}
+		util.ServerError(c, "查询订单失败")
+		return
+	}
+	var user models.User
+	_ = d.DB.Select("balance_cents").Where("id = ?", uid).First(&user).Error
+	views := d.toOrderViews([]models.Order{*order})
+	util.OK(c, gin.H{
+		"order":             views[0],
+		"balance_cents":     user.BalanceCents,
+		"available_methods": []string{"balance", "gift_card"},
+	})
+}
+
+type payOrderReq struct {
+	Method string `json:"method" binding:"required"`
+	Code   string `json:"code"`
+}
+
+// PayUserOrder POST /api/v1/user/orders/:orderNo/pay —— 收银台支付订单。
+func (d *Deps) PayUserOrder(c *gin.Context) {
+	var req payOrderReq
+	if !util.BindJSON(c, &req) {
+		return
+	}
+	uid := middleware.CurrentUser(c)
+	orderNo := strings.TrimSpace(c.Param("orderNo"))
+
+	switch req.Method {
+	case "balance":
+		order, err := d.Order.PayOrderWithBalance(uid, orderNo)
+		if err != nil {
+			handleOrderPayError(c, err)
+			return
+		}
+		views := d.toOrderViews([]models.Order{*order})
+		util.OK(c, gin.H{"order": views[0], "paid": true})
+	case "gift_card":
+		code := strings.TrimSpace(req.Code)
+		if code == "" {
+			util.BadRequest(c, "请输入卡密")
+			return
+		}
+		// 先核销卡密充入余额，再尝试用余额完成订单扣款
+		if _, _, err := d.GiftCard.Redeem(uid, code); err != nil {
+			util.BadRequest(c, err.Error())
+			return
+		}
+		order, err := d.Order.PayOrderWithBalance(uid, orderNo)
+		if err != nil {
+			if errors.Is(err, billing.ErrInsufficientBalance) {
+				var user models.User
+				_ = d.DB.Select("balance_cents").Where("id = ?", uid).First(&user).Error
+				c.JSON(http.StatusPaymentRequired, gin.H{
+					"code":          http.StatusPaymentRequired,
+					"message":       "卡密已充入余额，但当前余额仍不足以支付该订单",
+					"balance_cents": user.BalanceCents,
+					"paid":          false,
+				})
+				return
+			}
+			handleOrderPayError(c, err)
+			return
+		}
+		views := d.toOrderViews([]models.Order{*order})
+		util.OK(c, gin.H{"order": views[0], "paid": true})
+	default:
+		util.BadRequest(c, "不支持的支付方式")
+	}
+}
+
+func handleOrderPayError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, billing.ErrOrderNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": http.StatusNotFound, "message": err.Error()})
+	case errors.Is(err, billing.ErrInsufficientBalance),
+		errors.Is(err, billing.ErrOrderNotPending),
+		errors.Is(err, billing.ErrOrderExpired),
+		errors.Is(err, billing.ErrPlanNotFound):
+		util.BadRequest(c, err.Error())
+	default:
+		util.ServerError(c, "支付失败")
+	}
+}
+
+// CancelUserOrder POST /api/v1/user/orders/:orderNo/cancel —— 手动取消待支付订单。
+func (d *Deps) CancelUserOrder(c *gin.Context) {
+	uid := middleware.CurrentUser(c)
+	orderNo := strings.TrimSpace(c.Param("orderNo"))
+	order, err := d.Order.CancelOrder(uid, orderNo)
+	if err != nil {
+		if errors.Is(err, billing.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": http.StatusNotFound, "message": err.Error()})
+			return
+		}
+		if errors.Is(err, billing.ErrOrderNotPending) {
+			util.BadRequest(c, err.Error())
+			return
+		}
+		util.ServerError(c, "取消订单失败")
+		return
+	}
+	views := d.toOrderViews([]models.Order{*order})
+	util.OK(c, gin.H{"order": views[0]})
 }
