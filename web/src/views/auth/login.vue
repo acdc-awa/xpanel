@@ -162,7 +162,7 @@ function gotoHome() {
         <CsLink href="/forgot" font-size="body-m" @follow="(_, e) => goRoute('/forgot', e)">
           忘记密码
         </CsLink>
-        <span v-if="!site.stopRegister" class="auth-register-hint">
+        <span v-if="!site.stopRegister" class="auth-footer-hint">
           <span>还没有账号？</span>
           <CsLink href="/register" font-size="body-m" @follow="(_, e) => goRoute('/register', e)">
             使用邀请码注册
@@ -181,53 +181,64 @@ function gotoHome() {
     :close-on-click-overlay="false"
     initial-focus=".twofa-code-input input"
   >
-    <CsForm @submit="confirm2fa">
-      <CsFormItem label="动态验证码 / 恢复码" :error="twofaError" class="twofa-form-item">
-        <CsInput
-          v-model="twofaCode"
-          class="twofa-code-input"
-          prefix-icon="key"
-          autocomplete="one-time-code"
-          placeholder="6 位动态验证码"
-          :maxlength="16"
-          :invalid="Boolean(twofaError)"
-          @update:model-value="twofaError = ''"
-        />
-      </CsFormItem>
-    </CsForm>
+    <div class="twofa-body">
+      <CsForm @submit="confirm2fa">
+        <CsFormItem label="动态验证码 / 恢复码" :error="twofaError" class="twofa-form-item">
+          <CsInput
+            v-model="twofaCode"
+            class="twofa-code-input"
+            prefix-icon="key"
+            autocomplete="one-time-code"
+            placeholder="6 位动态验证码"
+            :maxlength="16"
+            :invalid="Boolean(twofaError)"
+            @update:model-value="twofaError = ''"
+          />
+        </CsFormItem>
+      </CsForm>
+    </div>
     <template #footer>
       <CsSpaceBetween direction="horizontal" size="xs">
-        <CsButton :disabled="twofaLoading" @click="twofaOpen = false">取消</CsButton>
-        <CsButton variant="primary" :loading="twofaLoading" @click="confirm2fa">验证</CsButton>
+        <CsButton class="twofa-btn" :disabled="twofaLoading" @click="twofaOpen = false">取消</CsButton>
+        <CsButton class="twofa-btn" variant="primary" :loading="twofaLoading" @click="confirm2fa">
+          验证
+        </CsButton>
       </CsSpaceBetween>
     </template>
   </CsModal>
 </template>
 
 <style scoped lang="scss">
-.auth-submit-wrap {
-  margin-block-start: 4px;
-}
-
-.auth-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.auth-register-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .twofa-form-item {
   margin-block-end: 0;
+}
+
+/* 弹窗挂在 AuthShell 之外，控件尺寸需单独对齐认证页的 44px/16px */
+.twofa-body {
+  :deep(input) {
+    min-block-size: 44px !important;
+    padding-block: 10px !important;
+    font-size: 16px !important;
+  }
+
+  :deep(.cs-input-root [class*='input-icon-start'] [class*='awsui_icon']),
+  :deep(.cs-input-root [class*='input-icon-start'] svg),
+  :deep(.cs-input-root [class*='input-icon-end'] svg) {
+    inline-size: 20px !important;
+    block-size: 20px !important;
+    padding-block: 0 !important;
+  }
+
+  :deep(.cs-input-root .cs-icon-button) {
+    inline-size: 24px !important;
+    block-size: 24px !important;
+  }
+}
+
+.twofa-btn {
+  min-block-size: 44px !important;
+  padding-block: 10px !important;
+  font-size: 16px !important;
 }
 
 .twofa-code-input :deep(input) {

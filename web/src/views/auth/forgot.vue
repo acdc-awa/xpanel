@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Message, Lock, Key } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import {
+  CsAlert,
+  CsButton,
+  CsForm,
+  CsFormItem,
+  CsInput,
+  CsLink,
+  ElMessage,
+} from '@/components/cloudscape'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { forgotPassword, resetPassword } from '@/api/auth'
 import { errMsg } from '@/api/http'
 import { useSiteStore } from '@/stores/site'
+import AuthShell from './AuthShell.vue'
 
 const site = useSiteStore()
 const router = useRouter()
@@ -18,6 +26,9 @@ const turnstileToken = ref('')
 const loading = ref(false)
 const submitting = ref(false)
 const hint = ref('')
+const errors = reactive({ email: '', code: '', password: '', confirm: '', captcha: '' })
+const emailInputRef = ref<{ focus: () => void } | null>(null)
+const codeInputRef = ref<{ focus: () => void } | null>(null)
 // 两步各有一个 widget（v-if/v-else 互斥渲染），各自持有重置句柄。
 const turnstileEmailRef = ref<{ reset: () => void } | null>(null)
 const turnstileResetRef = ref<{ reset: () => void } | null>(null)
@@ -33,25 +44,41 @@ function resetCaptcha(current: 'email' | 'reset') {
   target?.reset()
 }
 
+function onCaptchaToken(token: string) {
+  turnstileToken.value = token
+  if (token) errors.captcha = ''
+}
+
+function goRoute(path: string, event: Event) {
+  event.preventDefault()
+  void router.push(path)
+}
+
 onMounted(async () => {
+  nextTick(() => emailInputRef.value?.focus())
   await site.fetchConfig()
 })
 
 async function submitEmail() {
-  if (!email.value || !EMAIL_RE.test(email.value)) {
-    ElMessage.warning('请输入正确的邮箱地址')
-    return
-  }
-  if (site.captchaEnable && !turnstileToken.value) {
-    ElMessage.warning('请先完成人机验证')
-    return
-  }
+  if (loading.value) return
+  errors.email = !email.value
+    ? '请输入邮箱'
+    : EMAIL_RE.test(email.value.trim())
+      ? ''
+      : '请输入正确的邮箱地址'
+  errors.captcha = site.captchaEnable && !turnstileToken.value ? '请先完成人机验证' : ''
+  if (errors.email || errors.captcha) return
+
   loading.value = true
   try {
     const { data } = await forgotPassword(email.value.trim().toLowerCase(), turnstileToken.value || undefined)
     if (data.code === 0) {
       hint.value = data.data.message
       step.value = 'reset'
+      // 第一步的验证码已消费，第二步的 widget 会重新取 token，先清掉旧值避免误用。
+      turnstileToken.value = ''
+      await nextTick()
+      codeInputRef.value?.focus()
     } else {
       ElMessage.error(data.message)
       resetCaptcha('email')
@@ -65,22 +92,21 @@ async function submitEmail() {
 }
 
 async function submitReset() {
-  if (!form.code) {
-    ElMessage.warning('请输入两步验证动态码或恢复码')
-    return
-  }
-  if (form.password.length < 8) {
-    ElMessage.warning('新密码至少 8 位')
-    return
-  }
-  if (form.password !== form.confirm) {
-    ElMessage.warning('两次输入的新密码不一致')
-    return
-  }
-  if (site.captchaEnable && !turnstileToken.value) {
-    ElMessage.warning('请先完成人机验证')
-    return
-  }
+  if (submitting.value) return
+  errors.code = form.code.trim() ? '' : '请输入动态验证码或恢复码'
+  errors.password = !form.password
+    ? '请输入新密码'
+    : form.password.length < 8
+      ? '新密码至少 8 位'
+      : ''
+  errors.confirm = !form.confirm
+    ? '请再次输入新密码'
+    : form.password !== form.confirm
+      ? '两次输入的新密码不一致'
+      : ''
+  errors.captcha = site.captchaEnable && !turnstileToken.value ? '请先完成人机验证' : ''
+  if (errors.code || errors.password || errors.confirm || errors.captcha) return
+
   submitting.value = true
   try {
     const { data } = await resetPassword(
@@ -106,135 +132,109 @@ async function submitReset() {
 </script>
 
 <template>
-  <div class="auth-stage">
-    <div class="auth-card">
-      <div class="auth-brand">
-        <span v-if="site.logo" class="auth-logo-img"><img :src="site.logo" alt="logo" /></span>
-        <span v-else class="auth-logo">X</span>
-        <div>
-          <div class="auth-title">{{ site.appName }} · 重置密码</div>
-          <div class="auth-sub">需邮箱和两步验证动态码（未开启两步验证的账号请联系管理员）</div>
-        </div>
-      </div>
-
-      <!-- 第一步：邮箱 -->
-      <el-form v-if="step === 'email'" label-position="top" size="large" @submit.prevent="submitEmail">
-        <el-form-item label="注册邮箱">
-          <el-input v-model="email" placeholder="you@example.com" :prefix-icon="Message" autofocus />
-        </el-form-item>
-        <TurnstileWidget
-          v-if="site.captchaEnable && site.turnstileSiteKey"
-          ref="turnstileEmailRef"
-          :site-key="site.turnstileSiteKey"
-          @token="(t) => (turnstileToken = t)"
+  <AuthShell
+    title="重置密码"
+    description="需邮箱和两步验证动态码（未开启两步验证的账号请联系管理员）"
+  >
+    <!-- 第一步：邮箱 -->
+    <CsForm v-if="step === 'email'" @submit="submitEmail">
+      <CsFormItem label="注册邮箱" :error="errors.email">
+        <CsInput
+          ref="emailInputRef"
+          v-model="email"
+          type="email"
+          prefix-icon="envelope"
+          autocomplete="email"
+          placeholder="you@example.com"
+          :invalid="Boolean(errors.email)"
+          @update:model-value="errors.email = ''"
         />
-        <el-button type="primary" size="large" class="auth-submit" :loading="loading" native-type="submit">
+      </CsFormItem>
+
+      <CsFormItem v-if="site.captchaEnable && site.turnstileSiteKey" :error="errors.captcha">
+        <TurnstileWidget ref="turnstileEmailRef" :site-key="site.turnstileSiteKey" @token="onCaptchaToken" />
+      </CsFormItem>
+
+      <div class="auth-submit-wrap">
+        <CsButton variant="primary" form-action="submit" full-width :loading="loading">
           下一步
-        </el-button>
-      </el-form>
-
-      <!-- 第二步：验证码 + 新密码 -->
-      <el-form v-else label-position="top" size="large" @submit.prevent="submitReset">
-        <p class="hint">{{ hint }}</p>
-        <el-form-item label="两步验证动态码 / 恢复码">
-          <el-input
-            v-model="form.code"
-            placeholder="验证器动态码或恢复码"
-            :prefix-icon="Key"
-            maxlength="16"
-            style="font-family: var(--x-font-mono)"
-          />
-        </el-form-item>
-        <el-form-item label="新密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="至少 8 位字符" :prefix-icon="Lock" />
-        </el-form-item>
-        <el-form-item label="确认新密码">
-          <el-input
-            v-model="form.confirm"
-            type="password"
-            show-password
-            placeholder="再次输入新密码"
-            :prefix-icon="Lock"
-            @keyup.enter="submitReset"
-          />
-        </el-form-item>
-        <TurnstileWidget
-          v-if="site.captchaEnable && site.turnstileSiteKey"
-          ref="turnstileResetRef"
-          :site-key="site.turnstileSiteKey"
-          @token="(t) => (turnstileToken = t)"
-        />
-        <el-button type="primary" size="large" class="auth-submit" :loading="submitting" native-type="submit">
-          重置密码
-        </el-button>
-      </el-form>
-
-      <div class="auth-foot">
-        <router-link class="auth-link" to="/login">返回登录</router-link>
+        </CsButton>
       </div>
-    </div>
-  </div>
+    </CsForm>
+
+    <!-- 第二步：验证码 + 新密码 -->
+    <CsForm v-else @submit="submitReset">
+      <CsAlert v-if="hint" type="info" class="reset-hint">{{ hint }}</CsAlert>
+
+      <CsFormItem label="两步验证动态码 / 恢复码" :error="errors.code">
+        <CsInput
+          ref="codeInputRef"
+          v-model="form.code"
+          class="code-input"
+          prefix-icon="key"
+          autocomplete="one-time-code"
+          placeholder="验证器动态码或恢复码"
+          :maxlength="16"
+          :invalid="Boolean(errors.code)"
+          @update:model-value="errors.code = ''"
+        />
+      </CsFormItem>
+
+      <CsFormItem label="新密码" :error="errors.password">
+        <CsInput
+          v-model="form.password"
+          type="password"
+          show-password
+          prefix-icon="lock-private"
+          autocomplete="new-password"
+          placeholder="至少 8 位字符"
+          :invalid="Boolean(errors.password)"
+          @update:model-value="errors.password = ''"
+        />
+      </CsFormItem>
+
+      <CsFormItem label="确认新密码" :error="errors.confirm">
+        <CsInput
+          v-model="form.confirm"
+          type="password"
+          show-password
+          prefix-icon="lock-private"
+          autocomplete="new-password"
+          placeholder="再次输入新密码"
+          :invalid="Boolean(errors.confirm)"
+          @update:model-value="errors.confirm = ''"
+        />
+      </CsFormItem>
+
+      <CsFormItem v-if="site.captchaEnable && site.turnstileSiteKey" :error="errors.captcha">
+        <TurnstileWidget ref="turnstileResetRef" :site-key="site.turnstileSiteKey" @token="onCaptchaToken" />
+      </CsFormItem>
+
+      <div class="auth-submit-wrap">
+        <CsButton variant="primary" form-action="submit" full-width :loading="submitting">
+          重置密码
+        </CsButton>
+      </div>
+    </CsForm>
+
+    <template #footer>
+      <div class="auth-footer auth-footer-centered">
+        <CsLink href="/login" font-size="body-m" @follow="(_, e) => goRoute('/login', e)">
+          返回登录
+        </CsLink>
+      </div>
+    </template>
+  </AuthShell>
 </template>
 
 <style scoped lang="scss">
-.auth-stage {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, 0.35), transparent 60%),
-    radial-gradient(1000px 500px at 110% 110%, rgba(168, 85, 247, 0.28), transparent 60%),
-    var(--x-bg);
+.reset-hint {
+  margin-block-end: 16px;
 }
-.auth-card {
-  width: 100%;
-  max-width: 420px;
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: 16px;
-  box-shadow: var(--x-shadow-lg);
-  padding: 30px 28px;
+
+.code-input :deep(input) {
+  font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
 }
-.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-.auth-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
-  color: #fff;
-  font-size: 21px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
-}
-.auth-logo-img {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--x-bg);
-  border: 1px solid var(--x-border);
-  flex: none;
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-}
-.auth-title { font-size: 19px; font-weight: 700; }
-.auth-sub { font-size: 12.5px; color: var(--x-text-3); margin-top: 3px; }
-// 原来是 margin-top: -6px（为了抵消表单行的默认间距反推出来的值），
-// 校验错误文案出现/消失时它会和上一行文字重叠；改为正向间距
-.hint { font-size: 12.5px; color: var(--x-text-2); margin: 0 0 12px; line-height: 1.6; }
-.auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
-.auth-foot { margin-top: 18px; text-align: center; font-size: 13px; color: var(--x-text-2); }
-.auth-link { color: var(--x-primary); font-weight: 600; }
 </style>

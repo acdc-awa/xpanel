@@ -21,6 +21,8 @@ const SCOPE = [
   'src/views/admin',
   'src/views/auth/AuthShell.vue',
   'src/views/auth/login.vue',
+  'src/views/auth/register.vue',
+  'src/views/auth/forgot.vue',
   'src/layouts/AdminLayout.vue',
   'src/components/base',
   'src/components/cloudscape',

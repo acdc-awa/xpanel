@@ -143,10 +143,36 @@ const theme = useThemeStore()
     inline-size: 24px !important;
     block-size: 24px !important;
   }
+
+  :deep(.auth-submit-wrap) {
+    margin-block-start: 4px;
+  }
 }
 
 .auth-card-foot {
   padding: 4px 12px;
+
+  /* footer 槽内容由各页提供，样式在此统一，避免三页各复制一份 */
+  :deep(.auth-footer) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text-body-secondary-66ygbb, #656871);
+  }
+
+  :deep(.auth-footer-centered) {
+    justify-content: center;
+  }
+
+  :deep(.auth-footer-hint) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
 }
 
 .auth-brand {
