@@ -19,6 +19,8 @@ const ROOT = new URL('../', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, 
 /** 扫描范围：管理端渲染路径（vendor 是第三方快照，不受本护栏约束）。 */
 const SCOPE = [
   'src/views/admin',
+  'src/views/auth/AuthShell.vue',
+  'src/views/auth/login.vue',
   'src/layouts/AdminLayout.vue',
   'src/components/base',
   'src/components/cloudscape',

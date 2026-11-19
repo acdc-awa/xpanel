@@ -20,11 +20,15 @@ const props = withDefaults(
   }
 )
 
+const emit = defineEmits<{
+  (e: 'submit', event: Event): void
+}>()
+
 provide('csFormLabelPosition', props.labelPosition)
 </script>
 
 <template>
-  <form :class="cx(CS.form.root, variant === 'embedded' && 'cs-form-embedded')" @submit.prevent>
+  <form :class="cx(CS.form.root, variant === 'embedded' && 'cs-form-embedded')" @submit.prevent="emit('submit', $event)">
     <div v-if="header || $slots.header" :class="CS.form.header">
       <slot name="header">{{ header }}</slot>
     </div>

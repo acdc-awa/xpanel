@@ -1,13 +1,16 @@
 <script setup lang="ts">
 // TurnstileWidget Cloudflare Turnstile 人机验证组件（方向②）。
 // 由父组件传入 siteKey；验证通过后 emit token，失效/过期时 emit 空串。
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useThemeStore } from '@/stores/theme'
 
 const props = defineProps<{ siteKey: string }>()
 const emit = defineEmits<{ (e: 'token', token: string): void }>()
 
+const theme = useThemeStore()
 const container = ref<HTMLDivElement>()
 let widgetId: string | null = null
+let scriptReady = false
 
 declare global {
   interface Window {
@@ -37,24 +40,7 @@ function loadScript(): Promise<void> {
   })
 }
 
-onMounted(async () => {
-  if (!props.siteKey || !container.value) return
-  try {
-    await loadScript()
-    if (!window.turnstile) return
-    widgetId = window.turnstile.render(container.value, {
-      sitekey: props.siteKey,
-      callback: (token: string) => emit('token', token),
-      'expired-callback': () => emit('token', ''),
-      'error-callback': () => emit('token', ''),
-    })
-  } catch {
-    // 脚本加载失败：不阻断表单，由后端在校验开启时兜底拒绝
-    emit('token', '')
-  }
-})
-
-onBeforeUnmount(() => {
+function removeWidget() {
   if (widgetId && window.turnstile) {
     try {
       window.turnstile.remove(widgetId)
@@ -62,7 +48,43 @@ onBeforeUnmount(() => {
       /* noop */
     }
   }
+  widgetId = null
+}
+
+function renderWidget() {
+  if (!props.siteKey || !container.value || !window.turnstile) return
+  removeWidget()
+  widgetId = window.turnstile.render(container.value, {
+    sitekey: props.siteKey,
+    theme: theme.isDark ? 'dark' : 'light',
+    callback: (token: string) => emit('token', token),
+    'expired-callback': () => emit('token', ''),
+    'error-callback': () => emit('token', ''),
+  })
+}
+
+onMounted(async () => {
+  if (!props.siteKey || !container.value) return
+  try {
+    await loadScript()
+    scriptReady = true
+    renderWidget()
+  } catch {
+    // 脚本加载失败：不阻断表单，由后端在校验开启时兜底拒绝
+    emit('token', '')
+  }
 })
+
+watch(
+  () => theme.isDark,
+  () => {
+    if (!scriptReady) return
+    emit('token', '')
+    renderWidget()
+  }
+)
+
+onBeforeUnmount(removeWidget)
 
 // reset 供父组件在校验失败后调用。
 // Turnstile token 是一次性的：提交过一次（无论后端判定通过与否）就不能复用，

@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { User, Lock, Key } from '@element-plus/icons-vue'
-import { ElMessage } from '@/components/cloudscape'
+import {
+  CsButton,
+  CsForm,
+  CsFormItem,
+  CsInput,
+  CsLink,
+  CsModal,
+  CsSpaceBetween,
+  ElMessage,
+} from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 import { useSiteStore } from '@/stores/site'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
+import AuthShell from './AuthShell.vue'
 
 const auth = useAuthStore()
 const site = useSiteStore()
@@ -14,15 +23,19 @@ const router = useRouter()
 const route = useRoute()
 
 const form = reactive({ email: '', password: '', turnstile_token: '' })
+const errors = reactive({ email: '', password: '', captcha: '' })
 const loading = ref(false)
+const emailInputRef = ref<{ focus: () => void } | null>(null)
 const turnstileRef = ref<{ reset: () => void } | null>(null)
 
 // 2FA 二次验证
 const twofaOpen = ref(false)
 const twofaCode = ref('')
+const twofaError = ref('')
 const twofaLoading = ref(false)
 
 onMounted(async () => {
+  nextTick(() => emailInputRef.value?.focus())
   await site.fetchConfig()
 })
 
@@ -34,21 +47,30 @@ function resetCaptcha() {
   turnstileRef.value?.reset()
 }
 
+function onCaptchaToken(token: string) {
+  form.turnstile_token = token
+  if (token) errors.captcha = ''
+}
+
+function goRoute(path: string, event: Event) {
+  event.preventDefault()
+  void router.push(path)
+}
+
 async function onSubmit() {
-  if (!form.email || !form.password) {
-    ElMessage.warning('请输入邮箱和密码')
-    return
-  }
-  if (site.captchaEnable && !form.turnstile_token) {
-    ElMessage.warning('请先完成人机验证')
-    return
-  }
+  if (loading.value) return
+  errors.email = form.email.trim() ? '' : '请输入邮箱'
+  errors.password = form.password ? '' : '请输入密码'
+  errors.captcha = site.captchaEnable && !form.turnstile_token ? '请先完成人机验证' : ''
+  if (errors.email || errors.password || errors.captcha) return
+
   loading.value = true
   try {
     const result = await auth.login(form.email.trim(), form.password, form.turnstile_token)
     if (result === '2fa') {
-      twofaOpen.value = true
       twofaCode.value = ''
+      twofaError.value = ''
+      twofaOpen.value = true
       return
     }
     gotoHome()
@@ -61,10 +83,12 @@ async function onSubmit() {
 }
 
 async function confirm2fa() {
-  if (!twofaCode.value) {
-    ElMessage.warning('请输入动态验证码')
+  if (twofaLoading.value) return
+  if (!twofaCode.value.trim()) {
+    twofaError.value = '请输入动态验证码或恢复码'
     return
   }
+  twofaError.value = ''
   twofaLoading.value = true
   try {
     await auth.verify2fa(twofaCode.value.trim())
@@ -90,152 +114,125 @@ function gotoHome() {
 </script>
 
 <template>
-  <div class="auth-stage">
-    <div class="auth-card">
-      <div class="auth-brand">
-        <span v-if="site.logo" class="auth-logo-img"><img :src="site.logo" alt="logo" /></span>
-        <span v-else class="auth-logo">X</span>
-        <div>
-          <div class="auth-title">{{ site.appName }}</div>
-          <div class="auth-sub">{{ site.appDescription }}</div>
-        </div>
-      </div>
+  <AuthShell title="登录">
+    <CsForm @submit="onSubmit">
+      <CsFormItem label="邮箱" :error="errors.email">
+        <CsInput
+          ref="emailInputRef"
+          v-model="form.email"
+          type="email"
+          prefix-icon="envelope"
+          autocomplete="username"
+          placeholder="you@example.com"
+          :invalid="Boolean(errors.email)"
+          @update:model-value="errors.email = ''"
+        />
+      </CsFormItem>
 
-      <el-form label-position="top" size="large" @submit.prevent="onSubmit">
-        <el-form-item label="邮箱">
-          <el-input v-model="form.email" placeholder="you@example.com" :prefix-icon="User" autofocus />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input
-            v-model="form.password"
-            type="password"
-            show-password
-            placeholder="请输入密码"
-            :prefix-icon="Lock"
-            @keyup.enter="onSubmit"
-          />
-        </el-form-item>
+      <CsFormItem label="密码" :error="errors.password">
+        <CsInput
+          v-model="form.password"
+          type="password"
+          show-password
+          prefix-icon="lock-private"
+          autocomplete="current-password"
+          placeholder="请输入密码"
+          :invalid="Boolean(errors.password)"
+          @update:model-value="errors.password = ''"
+        />
+      </CsFormItem>
+
+      <CsFormItem v-if="site.captchaEnable && site.turnstileSiteKey" :error="errors.captcha">
         <TurnstileWidget
-          v-if="site.captchaEnable && site.turnstileSiteKey"
           ref="turnstileRef"
           :site-key="site.turnstileSiteKey"
-          @token="(t) => (form.turnstile_token = t)"
+          @token="onCaptchaToken"
         />
-        <el-button
-          type="primary"
-          size="large"
-          class="auth-submit"
-          :loading="loading"
-          native-type="submit"
-        >
+      </CsFormItem>
+
+      <div class="auth-submit-wrap">
+        <CsButton variant="primary" form-action="submit" full-width :loading="loading">
           登录
-        </el-button>
-      </el-form>
-
-      <div class="auth-foot">
-        <router-link class="auth-link" to="/forgot">忘记密码？</router-link>
-        <template v-if="!site.stopRegister">
-          <span style="margin: 0 8px">·</span>
-          还没有账号？
-          <router-link class="auth-link" to="/register">使用邀请码注册</router-link>
-        </template>
+        </CsButton>
       </div>
-    </div>
+    </CsForm>
 
-    <!-- 2FA 二次验证 -->
-    <el-dialog
-      v-model="twofaOpen"
-      title="两步验证"
-      width="360px"
-      class="twofa-dialog"
-      :close-on-click-modal="false"
-      append-to-body
-    >
-      <p style="font-size: 13px; color: var(--x-text-2); margin-bottom: 14px">
-        该账号已开启两步验证，请输入验证器动态码或恢复码
-      </p>
-      <el-input
-        v-model="twofaCode"
-        placeholder="6 位动态验证码"
-        :prefix-icon="Key"
-        size="large"
-        maxlength="16"
-        style="font-family: var(--x-font-mono)"
-        @keyup.enter="confirm2fa"
-      />
-      <template #footer>
-        <el-button type="primary" style="width: 100%" :loading="twofaLoading" @click="confirm2fa">
-          验证
-        </el-button>
-      </template>
-    </el-dialog>
-  </div>
+    <template #footer>
+      <div class="auth-footer">
+        <CsLink href="/forgot" font-size="body-m" @follow="(_, e) => goRoute('/forgot', e)">
+          忘记密码
+        </CsLink>
+        <span v-if="!site.stopRegister" class="auth-register-hint">
+          <span>还没有账号？</span>
+          <CsLink href="/register" font-size="body-m" @follow="(_, e) => goRoute('/register', e)">
+            使用邀请码注册
+          </CsLink>
+        </span>
+      </div>
+    </template>
+  </AuthShell>
+
+  <!-- 2FA 二次验证 -->
+  <CsModal
+    v-model:visible="twofaOpen"
+    header="两步验证"
+    description="该账号已开启两步验证，请输入验证器动态码或恢复码"
+    size="small"
+    :close-on-click-overlay="false"
+    initial-focus=".twofa-code-input input"
+  >
+    <CsForm @submit="confirm2fa">
+      <CsFormItem label="动态验证码 / 恢复码" :error="twofaError" class="twofa-form-item">
+        <CsInput
+          v-model="twofaCode"
+          class="twofa-code-input"
+          prefix-icon="key"
+          autocomplete="one-time-code"
+          placeholder="6 位动态验证码"
+          :maxlength="16"
+          :invalid="Boolean(twofaError)"
+          @update:model-value="twofaError = ''"
+        />
+      </CsFormItem>
+    </CsForm>
+    <template #footer>
+      <CsSpaceBetween direction="horizontal" size="xs">
+        <CsButton :disabled="twofaLoading" @click="twofaOpen = false">取消</CsButton>
+        <CsButton variant="primary" :loading="twofaLoading" @click="confirm2fa">验证</CsButton>
+      </CsSpaceBetween>
+    </template>
+  </CsModal>
 </template>
 
 <style scoped lang="scss">
-.auth-stage {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, 0.35), transparent 60%),
-    radial-gradient(1000px 500px at 110% 110%, rgba(168, 85, 247, 0.28), transparent 60%),
-    var(--x-bg);
+.auth-submit-wrap {
+  margin-block-start: 4px;
 }
-.auth-card {
-  width: 100%;
-  max-width: 400px;
-  background: var(--x-card);
-  border: 1px solid var(--x-border);
-  border-radius: 16px;
-  box-shadow: var(--x-shadow-lg);
-  padding: 32px 28px;
-}
-.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.auth-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #6366f1, #a855f7);
-  color: #fff;
-  font-size: 20px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-}
-.auth-logo-img {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--x-bg, #f8fafc);
-  border: 1px solid var(--x-border, #e2e8f0);
-  flex: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
+.auth-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
-.auth-title { font-size: 19px; font-weight: 700; color: var(--x-text, #0f172a); }
-.auth-sub { font-size: 12px; color: var(--x-text-3, #64748b); margin-top: 2px; }
-.auth-submit { width: 100%; margin-top: 6px; font-weight: 600; letter-spacing: 4px; }
-.auth-foot { margin-top: 20px; text-align: center; font-size: 13px; color: var(--x-text-2); }
-.auth-link { color: var(--x-primary); font-weight: 600; }
 
-:deep(.twofa-dialog) {
-  width: min(380px, 90vw) !important;
-  max-width: 90vw !important;
-  border-radius: 16px !important;
+.auth-register-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.twofa-form-item {
+  margin-block-end: 0;
+}
+
+.twofa-code-input :deep(input) {
+  font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
 }
 </style>
