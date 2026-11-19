@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatMoney } from '@/utils/format'
+import { DEFAULT_PLAN_MARKDOWN, renderPlanMarkdown } from '@/utils/markdown'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import TipIcon from '@/components/base/TipIcon.vue'
 import SortHandle from '@/components/base/SortHandle.vue'
@@ -91,10 +92,15 @@ const form = reactive({
 })
 const saving = ref(false)
 
-const defaultPlanDesc = `包含 $TRAFFIC$ 高速流量
-有效期 $DURATION$ 天
-全量优质节点与中转链路授权
-全面兼容 Mihomo / Clash 生态`
+const defaultPlanDesc = DEFAULT_PLAN_MARKDOWN
+
+const descPreviewHtml = computed(() =>
+  renderPlanMarkdown(form.description, {
+    trafficGb: Number(form.traffic_gb) || 0,
+    priceCents: Math.round((Number(form.price_yuan) || 0) * 100),
+    durationDays: Number(form.duration_days) || 0,
+  }),
+)
 
 function insertPlaceholder(placeholder: string) {
   const el = (descInputRef.value?.textarea ||
@@ -361,23 +367,30 @@ async function restore(row: any) {
     <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium" :close-on-click-overlay="false">
       <CsForm label-position="top">
         <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 月付 200G" /></CsFormItem>
-        <CsFormItem label="套餐文案 / 特性描述（每行一条特性，支持占位符）">
+        <CsFormItem label="套餐文案（支持 Markdown 与 <u>下划线</u>，留空则使用默认模板）">
           <div class="placeholder-chips">
             <span class="chip-label">快捷插入占位符：</span>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$TRAFFIC$')">
-              $TRAFFIC$ (流量)
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{traffic}}')">
+              &#123;&#123;traffic&#125;&#125; (流量)
             </CsBadge>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('$DURATION$')">
-              $DURATION$ (周期)
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{price}}')">
+              &#123;&#123;price&#125;&#125; (价格)
+            </CsBadge>
+            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{duration}}')">
+              &#123;&#123;duration&#125;&#125; (周期)
             </CsBadge>
           </div>
           <CsInput
             ref="descInputRef"
             v-model="form.description"
             type="textarea"
-            :rows="5"
-            placeholder="如：&#10;包含 $TRAFFIC$ 高速流量&#10;有效期 $DURATION$ 天&#10;全量优质节点与中转链路授权&#10;全面兼容 Mihomo / Clash 生态"
+            :rows="6"
+            placeholder="支持 # 标题、**加粗**、~~删除线~~、<u>下划线</u> 与列表"
           />
+          <div class="plan-preview-box">
+            <div class="plan-preview-label">实时预览</div>
+            <div class="plan-preview-body" v-html="descPreviewHtml" />
+          </div>
         </CsFormItem>
         <div class="form-grid-2">
           <CsFormItem label="价格（元）">
@@ -556,6 +569,55 @@ async function restore(row: any) {
       border-color: var(--color-text-link-default-qabnuk);
       color: var(--color-text-link-default-qabnuk);
     }
+  }
+}
+
+.plan-preview-box {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-soft);
+}
+
+.plan-preview-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--x-text-secondary);
+}
+
+.plan-preview-body {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--x-text);
+
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
+    margin: 0 0 6px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  :deep(h1) { font-size: 24px; }
+  :deep(h2) { font-size: 20px; }
+  :deep(h3) { font-size: 16px; }
+  :deep(h4) { font-size: 14px; }
+
+  :deep(p),
+  :deep(ul),
+  :deep(ol) {
+    margin: 0 0 6px;
+  }
+
+  :deep(ul),
+  :deep(ol) {
+    padding-inline-start: 18px;
+  }
+
+  :deep(> :last-child) {
+    margin-bottom: 0;
   }
 }
 </style>

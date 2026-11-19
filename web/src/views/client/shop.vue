@@ -18,6 +18,7 @@ import {
 import { payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import { redeemGiftCard } from '@/api/gift_card'
 import { useAuthStore } from '@/stores/auth'
+import { renderPlanMarkdown } from '@/utils/markdown'
 import { errMsg } from '@/api/http'
 import { formatMoney } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
@@ -74,27 +75,12 @@ function fmtGb(gb: number) {
   return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`
 }
 
-function getPlanFeatures(plan: Plan): string[] {
-  const defaultTemplate = `包含 $TRAFFIC$ 高速流量
-有效期 $DURATION$ 天
-全量优质节点与中转链路
-全面兼容 Mihomo / Clash 生态`
-
-  const rawText = plan.description?.trim() ? plan.description : defaultTemplate
-  const trafficStr = fmtGb(plan.traffic_gb)
-  const durationStr = `${plan.duration_days}`
-
-  return rawText
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) =>
-      line
-        .replace(/(\$TRAFFIC\$|\{traffic\}|\{\{traffic\}\})/gi, trafficStr)
-        .replace(/(\$DURATION\$|\{duration\}|\{\{duration\}\}|\$DAYS\$|\{days\})/gi, durationStr)
-        .replace(/(\$DEVICE_LIMIT\$|\{device_limit\}|\{\{device_limit\}\}|\$DEVICES\$|\{devices\})/gi, ''),
-    )
-    .filter((line) => line !== '')
+function renderPlanBody(plan: Plan): string {
+  return renderPlanMarkdown(plan.description, {
+    trafficGb: plan.traffic_gb,
+    priceCents: plan.price_cents,
+    durationDays: plan.duration_days,
+  })
 }
 
 async function load() {
@@ -165,19 +151,6 @@ async function confirmPay() {
   <CsSpaceBetween direction="vertical" size="l">
     <CsHeader variant="h1" description="高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。">
       套餐商店
-      <template #actions>
-        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-          <CsBadge color="grey">余额 ¥{{ balanceYuan }}</CsBadge>
-          <CsButton
-            @click="
-              quickRedeemCode = '';
-              topupModalOpen = true
-            "
-          >
-            卡密充值
-          </CsButton>
-        </CsSpaceBetween>
-      </template>
     </CsHeader>
 
     <!-- 套餐列表 -->
@@ -191,25 +164,13 @@ async function confirmPay() {
         <template #header>
           <CsHeader variant="h2">
             {{ p.name }}
-            <template #actions>
-              <CsBadge v-if="idx === featuredIdx" color="blue">热门推荐</CsBadge>
-              <CsBadge v-else color="grey">{{ fmtGb(p.traffic_gb) }}</CsBadge>
+            <template v-if="idx === featuredIdx" #actions>
+              <CsBadge color="blue">热门推荐</CsBadge>
             </template>
           </CsHeader>
         </template>
 
-        <CsSpaceBetween direction="vertical" size="m">
-          <div class="plan-price-row">
-            <span class="plan-price cell-mono">¥{{ (p.price_cents / 100).toFixed(2) }}</span>
-            <span class="plan-period">/ {{ p.duration_days }} 天</span>
-          </div>
-
-          <ul class="plan-features">
-            <li v-for="(feat, fIdx) in getPlanFeatures(p)" :key="fIdx" class="plan-feature-item">
-              <CsStatusIndicator type="success">{{ feat }}</CsStatusIndicator>
-            </li>
-          </ul>
-        </CsSpaceBetween>
+        <div class="plan-markdown" v-html="renderPlanBody(p)" />
 
         <template #footer>
           <CsButton
@@ -349,39 +310,66 @@ async function confirmPay() {
   align-items: stretch;
 }
 
-.plan-price-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.plan-price {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--x-text);
-}
-
-.plan-period {
+.plan-markdown {
   font-size: 13px;
-  color: var(--x-text-secondary);
-}
-
-.plan-features {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.plan-feature-item {
-  font-size: 13px;
+  line-height: 1.65;
   color: var(--x-text);
+
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
+    margin: 0 0 8px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--x-text);
+  }
+
+  :deep(h1) {
+    font-size: 24px;
+  }
+
+  :deep(h2) {
+    font-size: 20px;
+  }
+
+  :deep(h3) {
+    font-size: 16px;
+  }
+
+  :deep(h4) {
+    font-size: 14px;
+  }
+
+  :deep(p) {
+    margin: 0 0 8px;
+  }
+
+  :deep(ul),
+  :deep(ol) {
+    margin: 0 0 8px;
+    padding-inline-start: 18px;
+  }
+
+  :deep(li + li) {
+    margin-top: 4px;
+  }
+
+  :deep(del),
+  :deep(s) {
+    color: var(--x-text-secondary);
+  }
+
+  :deep(> :last-child) {
+    margin-bottom: 0;
+  }
 }
 
 .plan-buy-btn {
   inline-size: 100%;
+  display: flex !important;
+  align-items: center;
+  justify-content: center !important;
 }
 
 .order-list {

@@ -17,13 +17,13 @@ export const APP_ICON_DEFINITIONS: Record<string, CloudscapeIconDefinition> = {
   home: {
     viewBox: '0 0 16 16',
     inner:
-      '<path d="M1.5 7.5 8 2l6.5 5.5" class="stroke-linejoin-round stroke-linecap-round"></path>' +
-      '<path d="M3.5 6V14h9V6" class="stroke-linejoin-round"></path>',
+      '<path d="M1 7.5 8 1.5l7 6" class="stroke-linejoin-round stroke-linecap-round"></path>' +
+      '<path d="M3 6v8.5h10V6" class="stroke-linejoin-round"></path>',
   },
   'shopping-bag': {
     viewBox: '0 0 16 16',
     inner:
-      '<path d="M3 5.5h10l1 8.5H2l1-8.5Z" class="stroke-linejoin-round"></path>' +
-      '<path d="M5.5 5.5V4.5a2.5 2.5 0 0 1 5 0v1" class="stroke-linejoin-round"></path>',
+      '<path d="M2.5 5.5h11l1 9h-13l1-9Z" class="stroke-linejoin-round"></path>' +
+      '<path d="M5.5 5.5V4a2.5 2.5 0 0 1 5 0v1.5" class="stroke-linejoin-round"></path>',
   },
 }

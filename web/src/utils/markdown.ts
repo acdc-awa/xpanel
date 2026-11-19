@@ -22,3 +22,41 @@ export function renderMarkdown(content?: string | null): string {
     return DOMPurify.sanitize(content)
   }
 }
+
+export interface PlanMarkdownVars {
+  trafficGb: number
+  priceCents: number
+  durationDays: number
+}
+
+export const DEFAULT_PLAN_MARKDOWN = `### **{{traffic}}** / **{{price}}** / {{duration}}
+
+- 包含 **{{traffic}}** 高速流量
+- 有效期 **{{duration}}**
+- 全量优质节点与中转链路授权
+- 全面兼容 Mihomo / Clash 生态`
+
+function formatPlanTraffic(gb: number): string {
+  if (gb >= 1024) return `${+(gb / 1024).toFixed(2)} TB`
+  return `${gb} GB`
+}
+
+/**
+ * 解析套餐描述中的占位符（{{traffic}} / {{price}} / {{duration}}）并渲染为安全 HTML。
+ * 描述为空时回退到默认 Markdown 模板；同时兼容历史 $TRAFFIC$ / $DURATION$ 占位符。
+ */
+export function renderPlanMarkdown(content: string | null | undefined, vars: PlanMarkdownVars): string {
+  const raw = content && content.trim() ? content : DEFAULT_PLAN_MARKDOWN
+  const trafficText = formatPlanTraffic(vars.trafficGb)
+  const priceText = `¥${(vars.priceCents / 100).toFixed(2)}`
+  const durationText = `${vars.durationDays} 天`
+
+  const resolved = raw
+    .replace(/\{\{\s*traffic\s*\}\}/g, trafficText)
+    .replace(/\{\{\s*price\s*\}\}/g, priceText)
+    .replace(/\{\{\s*duration\s*\}\}/g, durationText)
+    .replace(/\$TRAFFIC\$/g, trafficText)
+    .replace(/\$DURATION\$/g, String(vars.durationDays))
+
+  return renderMarkdown(resolved)
+}

@@ -102,7 +102,7 @@ function onIdentityClick(event: MouseEvent) {
             >
               <img
                 v-if="identity.logo"
-                :class="cx(cs.logo, sizeMode === 'narrow' && cs.narrow)"
+                :class="cs.logo"
                 :src="identity.logo.src"
                 :alt="identity.logo.alt || ''"
               />

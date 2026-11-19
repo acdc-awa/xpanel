@@ -20,7 +20,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { buildSubscribeUrl } from '@/config/site'
 import { errMsg } from '@/api/http'
-import { formatBytes, formatDate, formatMoneyNumber } from '@/utils/format'
+import { formatBytes, formatDate } from '@/utils/format'
 import { renderMarkdown } from '@/utils/markdown'
 import { getMyServers, getUserNotices, type MyServerItem } from '@/api/user'
 import type { NoticeItem } from '@/api/types'
@@ -29,11 +29,6 @@ const router = useRouter()
 const auth = useAuthStore()
 const site = useSiteStore()
 const loading = ref(false)
-
-const balanceYuan = computed(() => {
-  const cents = auth.user?.balance_cents ?? 0
-  return formatMoneyNumber(cents)
-})
 
 // plan_name 由 /user/me 等接口返回；套餐已删时为空，回退显示编号
 const planLabel = computed(() => {
@@ -74,14 +69,6 @@ const isPlanActive = computed(() => {
 const isExhausted = computed(
   () => isPlanActive.value && totalBytes.value > 0 && usedBytes.value >= totalBytes.value,
 )
-
-const daysLeft = computed(() => {
-  if (!isPlanActive.value || !auth.user?.expire_at) return null
-  const exp = new Date(auth.user.expire_at).getTime()
-  const now = Date.now()
-  const diff = Math.ceil((exp - now) / (1000 * 60 * 60 * 24))
-  return diff > 0 ? diff : 0
-})
 
 const progressStatus = computed<'error' | 'in-progress'>(() => {
   if (usagePercent.value > 90) return 'error'
@@ -226,15 +213,6 @@ function viewNotice(n: NoticeItem) {
           <template #header>
             <CsHeader variant="h2">
               {{ planLabel }}
-              <template #actions>
-                <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-                  <CsStatusIndicator :type="isPlanActive ? 'success' : 'stopped'">
-                    {{ isPlanActive ? '生效中' : '未激活' }}
-                  </CsStatusIndicator>
-                  <CsBadge color="grey">余额 ¥{{ balanceYuan }}</CsBadge>
-                  <CsBadge v-if="daysLeft !== null" color="blue">剩余 {{ daysLeft }} 天</CsBadge>
-                </CsSpaceBetween>
-              </template>
             </CsHeader>
           </template>
 
