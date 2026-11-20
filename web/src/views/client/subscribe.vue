@@ -8,9 +8,9 @@ import {
   CsButton,
   CsContainer,
   CsHeader,
-  CsLink,
   CsModal,
   CsSpaceBetween,
+  CsTabs,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
@@ -32,8 +32,19 @@ const qrModalOpen = ref(false)
 const resettingSub = ref(false)
 const guides = ref<NoticeItem[]>([])
 const guideLoading = ref(false)
-const selectedGuide = ref<NoticeItem | null>(null)
-const guideModalOpen = ref(false)
+const activeGuideId = ref('')
+
+const guideTabs = computed(() =>
+  guides.value.map((g) => ({
+    id: String(g.id),
+    label: g.title,
+  })),
+)
+
+const currentGuide = computed(() => {
+  if (!guides.value.length) return null
+  return guides.value.find((g) => String(g.id) === activeGuideId.value) ?? guides.value[0]
+})
 
 const hasPlan = computed(() => {
   if (!auth.user?.plan_id) return false
@@ -92,17 +103,14 @@ async function loadGuides() {
     const { data } = await getUserNotices()
     if (data.code === 0) {
       guides.value = data.data.filter((n) => n.category === 'guide')
+      activeGuideId.value = guides.value[0] ? String(guides.value[0].id) : ''
     }
   } catch {
     guides.value = []
+    activeGuideId.value = ''
   } finally {
     guideLoading.value = false
   }
-}
-
-function viewGuide(g: NoticeItem) {
-  selectedGuide.value = g
-  guideModalOpen.value = true
 }
 
 function copyText(text: string, label: string) {
@@ -159,45 +167,6 @@ async function onResetSubscribe() {
     resettingSub.value = false
   }
 }
-
-interface ClientApp {
-  name: string
-  tag: string
-  platforms: string[]
-  desc: string
-  url?: string
-}
-
-const clashApps: ClientApp[] = [
-  {
-    name: 'Clash Verge Rev',
-    tag: '首选推荐',
-    platforms: ['Windows', 'macOS', 'Linux'],
-    desc: '基于 Mihomo 核心，现代极简 UI，全协议兼容，支持流媒体策略组分流。',
-    url: 'https://github.com/clash-verge-rev/clash-verge-rev',
-  },
-  {
-    name: 'Mihomo Party',
-    tag: '优雅开源',
-    platforms: ['Windows', 'macOS', 'Linux'],
-    desc: '专为 Mihomo 定制的优雅桌面客户端，内置丰富分流规则、节点延迟测速与拓扑视图。',
-    url: 'https://github.com/mihomo-party-org/mihomo-party',
-  },
-  {
-    name: 'FlClash',
-    tag: '全平台',
-    platforms: ['Android', 'iOS', 'Windows', 'macOS'],
-    desc: '基于 Flutter 的跨平台客户端，轻量美观，内存占用低，适配移动端。',
-    url: 'https://github.com/chen08209/FlClash',
-  },
-  {
-    name: 'Stash',
-    tag: 'iOS 推荐',
-    platforms: ['iOS', 'iPadOS', 'macOS'],
-    desc: '适配苹果生态的规则分流代理客户端，全面支持按需连接与自动化策略。',
-    url: 'https://stash.ws/',
-  },
-]
 </script>
 
 <template>
@@ -239,16 +208,17 @@ const clashApps: ClientApp[] = [
             </code>
           </div>
 
-          <CsSpaceBetween direction="horizontal" size="xs">
-            <CsButton variant="primary" icon-name="external" @click="importToMihomo">
-              一键导入 Mihomo 客户端
+          <div class="sub-actions">
+            <CsButton variant="primary" icon-name="external" :wrap-text="false" @click="importToMihomo">
+              一键导入 Clash 客户端
             </CsButton>
-            <CsButton icon-name="copy" @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">
+            <CsButton icon-name="copy" :wrap-text="false" @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">
               复制订阅地址
             </CsButton>
-            <CsButton @click="openQrModal">手机扫码导入</CsButton>
-            <CsButton :loading="resettingSub" @click="onResetSubscribe">重置订阅地址</CsButton>
-          </CsSpaceBetween>
+            <CsButton :loading="resettingSub" :wrap-text="false" @click="onResetSubscribe">
+              重置订阅地址
+            </CsButton>
+          </div>
         </CsSpaceBetween>
 
         <div class="sub-qr-panel" @click="openQrModal">
@@ -261,33 +231,7 @@ const clashApps: ClientApp[] = [
       </div>
     </CsContainer>
 
-    <!-- 推荐客户端 -->
-    <CsSpaceBetween direction="vertical" size="m">
-      <CsHeader variant="h2">推荐客户端（Mihomo 生态）</CsHeader>
-      <div class="client-grid">
-        <CsContainer v-for="app in clashApps" :key="app.name">
-          <template #header>
-            <CsHeader variant="h3">
-              {{ app.name }}
-              <template #actions>
-                <CsBadge color="blue">{{ app.tag }}</CsBadge>
-              </template>
-            </CsHeader>
-          </template>
-          <CsSpaceBetween direction="vertical" size="s">
-            <div class="platform-list">
-              <CsBadge v-for="plat in app.platforms" :key="plat" color="grey">{{ plat }}</CsBadge>
-            </div>
-            <div class="client-desc">{{ app.desc }}</div>
-          </CsSpaceBetween>
-          <template #footer>
-            <CsLink v-if="app.url" :href="app.url" external>获取客户端</CsLink>
-          </template>
-        </CsContainer>
-      </div>
-    </CsSpaceBetween>
-
-    <!-- 使用指南（由管理端客制化） -->
+    <!-- 使用指南（由管理端客制化，直接摊开展示） -->
     <CsContainer>
       <template #header>
         <CsHeader variant="h2">使用指南</CsHeader>
@@ -295,59 +239,39 @@ const clashApps: ClientApp[] = [
       <CsBox v-if="guideLoading" color="text-body-secondary" font-size="body-s">
         加载指南中…
       </CsBox>
-      <CsBox v-else-if="!guides.length" color="text-body-secondary" font-size="body-s">
+      <CsBox v-else-if="!currentGuide" color="text-body-secondary" font-size="body-s">
         暂无使用指南
       </CsBox>
-      <div v-else class="guide-list">
-        <button
-          v-for="g in guides"
-          :key="g.id"
-          type="button"
-          class="guide-row"
-          @click="viewGuide(g)"
-        >
-          <div class="guide-title">
-            <CsBadge v-if="g.is_pinned" color="red">置顶</CsBadge>
-            <span>{{ g.title }}</span>
-          </div>
-          <span class="guide-action">查看详情</span>
-        </button>
-      </div>
+      <CsSpaceBetween v-else direction="vertical" size="m">
+        <CsTabs
+          v-if="guides.length > 1"
+          v-model="activeGuideId"
+          :tabs="guideTabs"
+          disable-content-paddings
+        />
+        <div v-else class="guide-single-head">
+          <CsBadge v-if="currentGuide.is_pinned" color="red">置顶</CsBadge>
+          <span class="guide-single-title">{{ currentGuide.title }}</span>
+        </div>
+        <div
+          class="guide-body markdown-content"
+          v-html="renderMarkdown(currentGuide.content)"
+        />
+      </CsSpaceBetween>
     </CsContainer>
-
-    <!-- 指南详情弹窗 -->
-    <CsModal
-      v-model:visible="guideModalOpen"
-      :header="selectedGuide?.title || '使用指南'"
-      size="medium"
-      :close-on-click-overlay="false"
-    >
-      <div
-        v-if="selectedGuide"
-        class="guide-body markdown-content"
-        v-html="renderMarkdown(selectedGuide.content)"
-      />
-      <template #footer>
-        <CsButton variant="primary" @click="guideModalOpen = false">我知道了</CsButton>
-      </template>
-    </CsModal>
 
     <!-- 二维码放大弹窗 -->
     <CsModal
       v-model:visible="qrModalOpen"
       header="手机扫码导入订阅"
       size="small"
-      :close-on-click-overlay="false"
     >
       <div class="qr-modal-body">
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="qr-modal-img" />
         <p class="qr-modal-tip">使用支持 Clash / Mihomo 协议的客户端扫描上方二维码即可导入订阅。</p>
       </div>
       <template #footer>
-        <CsSpaceBetween direction="horizontal" size="xs">
-          <CsButton @click="copyText(subscribeUrl, 'Mihomo 订阅地址')">复制订阅地址</CsButton>
-          <CsButton variant="primary" @click="qrModalOpen = false">关闭</CsButton>
-        </CsSpaceBetween>
+        <CsButton variant="primary" @click="qrModalOpen = false">关闭</CsButton>
       </template>
     </CsModal>
   </CsSpaceBetween>
@@ -380,6 +304,12 @@ const clashApps: ClientApp[] = [
   word-break: break-all;
 }
 
+.sub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .sub-qr-panel {
   display: flex;
   flex-direction: column;
@@ -392,8 +322,8 @@ const clashApps: ClientApp[] = [
   display: flex;
   align-items: center;
   justify-content: center;
-  inline-size: 120px;
-  block-size: 120px;
+  inline-size: 132px;
+  block-size: 132px;
   padding: 6px;
   border: 1px solid var(--x-border);
   border-radius: 8px;
@@ -416,70 +346,16 @@ const clashApps: ClientApp[] = [
   color: var(--x-text-secondary);
 }
 
-.client-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.platform-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.client-desc {
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--x-text-secondary);
-}
-
-.guide-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.guide-row {
+.guide-single-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  inline-size: 100%;
-  padding: 10px 0;
-  border: none;
-  border-bottom: 1px solid var(--x-border);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-
-  &:first-child {
-    padding-top: 0;
-  }
-
-  &:hover .guide-title {
-    color: var(--x-primary);
-  }
+  gap: 8px;
 }
 
-.guide-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
+.guide-single-title {
+  font-size: 15px;
   font-weight: 600;
   color: var(--x-text);
-  transition: color 0.15s ease;
-}
-
-.guide-action {
-  font-size: 12px;
-  color: var(--x-primary);
-  flex-shrink: 0;
 }
 
 .guide-body {
@@ -497,8 +373,8 @@ const clashApps: ClientApp[] = [
 }
 
 .qr-modal-img {
-  inline-size: 220px;
-  block-size: 220px;
+  inline-size: 242px;
+  block-size: 242px;
   border-radius: 8px;
   background-color: #ffffff;
   padding: 8px;
@@ -513,9 +389,22 @@ const clashApps: ClientApp[] = [
 }
 
 @media (max-width: $bp-tablet-max) {
-  .sub-main-grid,
-  .client-grid {
+  .sub-main-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sub-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    > :first-child {
+      grid-column: 1 / -1;
+    }
+
+    > *:not(#\9) {
+      inline-size: 100%;
+      text-align: center;
+    }
   }
 }
 </style>

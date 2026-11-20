@@ -303,15 +303,23 @@ async function submitTwofaConfirm() {
   }
 }
 
-async function copyBackupCodes() {
-  if (!backupCodes.value.length) return
-  const text = backupCodes.value.join('\n')
+async function copyText(text: string, label: string) {
+  if (!text) return
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success('恢复码已复制到剪贴板')
+    ElMessage.success(`${label}已复制到剪贴板`)
   } catch {
     ElMessage.error('复制失败，请手动复制')
   }
+}
+
+async function copyBackupCodes() {
+  if (!backupCodes.value.length) return
+  await copyText(backupCodes.value.join('\n'), '恢复码')
+}
+
+async function copyTwofaSecret() {
+  await copyText(twofaSecret.value, '密钥')
 }
 
 async function submitTwofaDisable() {
@@ -377,35 +385,30 @@ async function onResetSubscribe() {
     </CsHeader>
 
     <div class="acct-grid">
-      <CsContainer>
+      <CsContainer fit-height class="balance-card">
           <template #header>
-            <CsHeader variant="h2">账户资产</CsHeader>
+            <CsHeader variant="h2">账户余额</CsHeader>
           </template>
 
-          <CsSpaceBetween direction="vertical" size="l">
-            <div class="balance-box balance-box-row">
-              <div>
-                <div class="balance-label">可用余额</div>
-                <div class="balance-value cell-mono">¥{{ balanceYuan }}</div>
-              </div>
-              <CsButton variant="primary" @click="rechargeModalOpen = true">
-                充值
-              </CsButton>
-            </div>
-          </CsSpaceBetween>
+          <div class="balance-box">
+            <div class="balance-value cell-mono">¥{{ balanceYuan }}</div>
+            <CsButton variant="primary" @click="rechargeModalOpen = true">
+              充值
+            </CsButton>
+          </div>
         </CsContainer>
 
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="开启后将在触发条件时按当前套餐价格自动从余额扣费续订。">
-              自动续费
+            <CsHeader variant="h2" description="开启后自动从余额扣费。">
+              自动续费设置
             </CsHeader>
           </template>
           <CsSpaceBetween direction="vertical" size="m">
             <div class="switch-row">
               <div class="switch-info">
                 <div class="switch-title">到期自动续费</div>
-                <div class="switch-desc">套餐到期时自动使用账户余额续订</div>
+                <div class="switch-desc">套餐到期时自动续订</div>
               </div>
               <CsToggle
                 :model-value="autoRenewExpire"
@@ -417,7 +420,7 @@ async function onResetSubscribe() {
             <div class="switch-row">
               <div class="switch-info">
                 <div class="switch-title">流量耗尽自动续费</div>
-                <div class="switch-desc">本周期流量用尽时自动扣费重置流量</div>
+                <div class="switch-desc">本周期流量用尽时自动重新订阅套餐</div>
               </div>
               <CsToggle
                 :model-value="autoRenewExhaust"
@@ -468,7 +471,7 @@ async function onResetSubscribe() {
             <div class="switch-row">
               <div class="switch-info">
                 <div class="switch-title">两步验证（TOTP）</div>
-                <div class="switch-desc">使用身份验证器 App 为登录增加动态验证码保护</div>
+                <div class="switch-desc">使用身份验证器为账号开启两步验证</div>
               </div>
               <CsButton
                 v-if="auth.user?.totp_enabled"
@@ -489,7 +492,7 @@ async function onResetSubscribe() {
             <div class="switch-row">
               <div class="switch-info">
                 <div class="switch-title">重置订阅地址</div>
-                <div class="switch-desc">订阅泄露时可立即作废旧地址并生成新凭据</div>
+                <div class="switch-desc">订阅泄露时可立即重置地址</div>
               </div>
               <CsButton :loading="resettingSub" @click="onResetSubscribe">重置订阅</CsButton>
             </div>
@@ -551,8 +554,13 @@ async function onResetSubscribe() {
           <img v-if="twofaQrUrl" :src="twofaQrUrl" alt="TOTP 二维码" class="twofa-qr" />
         </div>
         <CsForm @submit="submitTwofaConfirm">
-          <CsFormItem label="手动密钥" description="若无法扫码，可在验证器中手动输入此密钥。">
-            <CsInput :model-value="twofaSecret" readonly class="cell-mono" />
+          <CsFormItem label="手动密钥" description="若无法扫码，可复制此密钥并在验证器中手动输入。">
+            <div class="twofa-secret-box">
+              <code class="twofa-secret-code cell-mono">{{ twofaSecret }}</code>
+              <CsButton icon-name="copy" :wrap-text="false" @click="copyTwofaSecret">
+                复制
+              </CsButton>
+            </div>
           </CsFormItem>
           <CsFormItem label="6 位动态验证码">
             <CsInput v-model="twofaCode" placeholder="请输入 6 位数字" class="cell-mono" />
@@ -664,6 +672,7 @@ async function onResetSubscribe() {
                 :total="orders.length"
                 :page-sizes="[10, 20, 50]"
                 layout="total, sizes, prev, pager, next"
+                simple
                 @size-change="orderPage = 1"
               />
             </CsPaginationBar>
@@ -707,6 +716,7 @@ async function onResetSubscribe() {
                 :total="balanceLogs.length"
                 :page-sizes="[10, 20, 50]"
                 layout="total, sizes, prev, pager, next"
+                simple
                 @size-change="logPage = 1"
               />
             </CsPaginationBar>
@@ -787,15 +797,20 @@ async function onResetSubscribe() {
   justify-content: flex-end;
 }
 
+.balance-card :deep([class*='content-inner']) {
+  block-size: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .balance-box {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.balance-label {
-  font-size: 12px;
-  color: var(--x-text-secondary);
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 0;
 }
 
 .balance-value {
@@ -922,11 +937,23 @@ async function onResetSubscribe() {
   font-size: 13px;
 }
 
-.balance-box-row {
+.twofa-secret-box {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  background-color: var(--x-bg-subtle, transparent);
+}
+
+.twofa-secret-code {
+  min-inline-size: 0;
+  font-size: 13px;
+  color: var(--x-text);
+  word-break: break-all;
+  user-select: all;
 }
 
 .amount-changed {

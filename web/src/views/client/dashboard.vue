@@ -239,13 +239,13 @@ function viewNotice(n: NoticeItem) {
               :additional-info="`有效期：${expireText}`"
             />
 
-            <CsSpaceBetween direction="horizontal" size="xs">
-              <CsButton variant="primary" icon-name="external" @click="importMihomo">
-                一键导入 Mihomo
+            <div class="plan-actions">
+              <CsButton variant="primary" icon-name="external" :wrap-text="false" @click="importMihomo">
+                一键导入 Clash
               </CsButton>
-              <CsButton icon-name="copy" @click="copySub">复制订阅地址</CsButton>
-              <CsButton @click="router.push('/shop')">选购/续费</CsButton>
-            </CsSpaceBetween>
+              <CsButton icon-name="copy" :Clashwrap-text="false" @click="copySub">复制订阅地址</CsButton>
+              <CsButton :wrap-text="false" @click="router.push('/shop')">选购/续费</CsButton>
+            </div>
           </CsSpaceBetween>
         </CsContainer>
 
@@ -257,8 +257,7 @@ function viewNotice(n: NoticeItem) {
                 <CsIcon name="share" size="medium" />
               </div>
               <div class="tile-body">
-                <div class="tile-title">Mihomo 订阅中心</div>
-                <div class="tile-desc">客户端下载与配置自动同步</div>
+                <div class="tile-title">订阅中心</div>
               </div>
             </div>
           </CsContainer>
@@ -270,7 +269,6 @@ function viewNotice(n: NoticeItem) {
               </div>
               <div class="tile-body">
                 <div class="tile-title">套餐商店</div>
-                <div class="tile-desc">套餐与流量配额</div>
               </div>
             </div>
           </CsContainer>
@@ -281,7 +279,7 @@ function viewNotice(n: NoticeItem) {
       <CsSpaceBetween direction="vertical" size="l">
         <CsContainer>
           <template #header>
-            <CsHeader variant="h2" description="在线状态每分钟自动刷新">节点可用性</CsHeader>
+            <CsHeader variant="h2" >节点可用性</CsHeader>
           </template>
           <div v-if="servers.length" class="node-list">
             <div v-for="s in servers" :key="s.id" class="node-row">
@@ -295,7 +293,7 @@ function viewNotice(n: NoticeItem) {
             </div>
           </div>
           <CsBox v-else color="text-body-secondary" font-size="body-s">
-            暂无可用节点（购买套餐后自动开通）
+            暂无可用节点
           </CsBox>
         </CsContainer>
 
@@ -428,6 +426,12 @@ function viewNotice(n: NoticeItem) {
   }
 }
 
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tile-card {
   cursor: pointer;
 }
@@ -464,12 +468,6 @@ function viewNotice(n: NoticeItem) {
   font-size: 14px;
   font-weight: 600;
   color: var(--x-text);
-}
-
-.tile-desc {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--x-text-secondary);
 }
 
 .node-list {
@@ -587,6 +585,20 @@ function viewNotice(n: NoticeItem) {
 }
 
 @media (max-width: $bp-tablet-max) {
+  .plan-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    > :first-child {
+      grid-column: 1 / -1;
+    }
+
+    > *:not(#\9) {
+      inline-size: 100%;
+      text-align: center;
+    }
+  }
+
   .dash-tiles-grid {
     grid-template-columns: 1fr;
   }

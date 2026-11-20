@@ -15,6 +15,7 @@ const props = withDefaults(
     disabled?: boolean
     small?: boolean
     background?: boolean
+    simple?: boolean
   }>(),
   {
     currentPage: 1,
@@ -25,6 +26,7 @@ const props = withDefaults(
     disabled: false,
     small: false,
     background: false,
+    simple: false,
   }
 )
 
@@ -106,7 +108,10 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
           <Icon name="angle-left" />
         </button>
       </li>
-      <template v-for="entry in pages" :key="entry">
+      <li v-if="simple" :class="CS.pagination['page-item']">
+        <span class="cs-pagination-simple-current" aria-current="page">{{ current }}</span>
+      </li>
+      <template v-else v-for="entry in pages" :key="entry">
         <li v-if="typeof entry !== 'number'" :class="CS.pagination.dots">...</li>
         <li v-else :class="CS.pagination['page-item']">
           <button
@@ -145,6 +150,7 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
         </button>
       </li>
     </ul>
+    <span v-if="simple" class="cs-pagination-total">共 {{ pagesCount }} 页</span>
   </div>
 </template>
 
@@ -163,5 +169,16 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
 
 .cs-pagination-sizes {
   inline-size: 120px;
+}
+
+.cs-pagination-simple-current {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 24px;
+  padding: 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 </style>
