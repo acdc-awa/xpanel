@@ -37,3 +37,16 @@ export function formatBytes(bytes: number): string {
 export function formatDate(isoStr?: string | null): string {
   return formatDateTime(isoStr, '-')
 }
+
+/** 格式化订单内容：充值订单展示具体充值说明（默认「账户充值」），套餐订单展示「订阅套餐：<套餐名>」。 */
+export function formatOrderContent(order: {
+  order_type?: string
+  plan_id?: number
+  plan_name?: string
+}): string {
+  if (order.order_type === 'recharge') {
+    return order.plan_name || '账户充值'
+  }
+  const name = order.plan_name || (order.plan_id ? `#${order.plan_id}` : '')
+  return name ? `订阅套餐：${name}` : '订阅套餐'
+}

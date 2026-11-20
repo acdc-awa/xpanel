@@ -202,8 +202,8 @@ const clashApps: ClientApp[] = [
 
 <template>
   <CsSpaceBetween direction="vertical" size="l">
-    <CsHeader variant="h1" description="适配 Mihomo / Clash 客户端，内置策略分流与自动故障转移。">
-      Mihomo 订阅中心
+    <CsHeader variant="h1">
+      订阅中心
     </CsHeader>
 
     <CsAlert v-if="isExhausted" type="error" header="流量已用尽">
@@ -223,7 +223,7 @@ const clashApps: ClientApp[] = [
     <!-- 核心订阅卡片 -->
     <CsContainer>
       <template #header>
-        <CsHeader variant="h2">订阅地址与快捷导入</CsHeader>
+        <CsHeader variant="h2">订阅地址</CsHeader>
       </template>
 
       <div class="sub-main-grid">

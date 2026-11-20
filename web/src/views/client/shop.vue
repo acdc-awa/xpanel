@@ -11,6 +11,7 @@ import {
   CsModal,
   CsSpaceBetween,
   ElMessage,
+  ElMessageBox,
 } from '@/components/cloudscape'
 import { createOrder, payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import RechargeModal from '@/components/RechargeModal.vue'
@@ -26,9 +27,9 @@ const orders = ref<Order[]>([])
 const loading = ref(false)
 
 // 「热门推荐」徽标与高亮卡片：管理端标记 is_featured 的第一个套餐；一个都没标时回退列表第一项
-const featuredIdx = computed(() => {
-  const i = plans.value.findIndex((p) => p.is_featured)
-  return i === -1 ? 0 : i
+const featuredPlanId = computed(() => {
+  const p = plans.value.find((item) => item.is_featured) ?? plans.value[0]
+  return p?.id ?? 0
 })
 
 // 结账收银台
@@ -41,6 +42,17 @@ const topupModalOpen = ref(false)
 
 const userBalanceCents = computed(() => auth.user?.balance_cents ?? 0)
 const currentPlanId = computed(() => auth.user?.plan_id ?? 0)
+const currentPlan = computed(() =>
+  currentPlanId.value > 0 ? (plans.value.find((p) => p.id === currentPlanId.value) ?? null) : null,
+)
+const otherPlans = computed(() =>
+  currentPlanId.value > 0 ? plans.value.filter((p) => p.id !== currentPlanId.value) : plans.value,
+)
+const hasUnexpiredPlan = computed(() => {
+  if (!currentPlanId.value || !auth.user?.expire_at) return false
+  const exp = Date.parse(auth.user.expire_at)
+  return Number.isFinite(exp) && exp > Date.now()
+})
 const balanceYuan = computed(() => (userBalanceCents.value / 100).toFixed(2))
 
 const isBalanceSufficient = computed(() => {
@@ -81,6 +93,26 @@ async function load() {
 onMounted(load)
 
 const router = useRouter()
+
+async function handleSelectPlan(plan: Plan) {
+  if (hasUnexpiredPlan.value) {
+    const isSame = plan.id === currentPlanId.value
+    const title = isSame ? '确认续费当前套餐' : '确认更换套餐'
+    const message = isSame
+      ? '续费将在支付完成后从当前时刻起重新计算有效期并重置流量，当前套餐的剩余有效期与剩余流量将作废清零。确定继续前往收银台吗？'
+      : `即将更换为「${plan.name}」。支付完成后将从当前时刻起重新计算有效期并重置流量，当前套餐的剩余有效期与剩余流量将作废清零。确定继续前往收银台吗？`
+    try {
+      await ElMessageBox.confirm(message, title, {
+        confirmButtonText: '继续前往收银台',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+    } catch {
+      return
+    }
+  }
+  await openCheckout(plan)
+}
 
 async function openCheckout(plan: Plan) {
   try {
@@ -132,40 +164,81 @@ async function confirmPay() {
 
 <template>
   <CsSpaceBetween direction="vertical" size="l">
-    <CsHeader variant="h1" description="高性能节点集群与全球链路中转，支持即时订阅下发与按需升级。">
+    <CsHeader variant="h1">
       套餐商店
     </CsHeader>
 
     <!-- 套餐列表 -->
-    <div v-if="plans.length" class="pricing-grid">
-      <CsContainer
-        v-for="(p, idx) in plans"
-        :key="p.id"
-        class="pricing-card"
-        :class="{ 'is-featured': idx === featuredIdx }"
-      >
-        <template #header>
-          <CsHeader variant="h2">
-            {{ p.name }}
-            <template v-if="idx === featuredIdx" #actions>
-              <CsBadge color="blue">热门推荐</CsBadge>
-            </template>
-          </CsHeader>
-        </template>
-
-        <div class="plan-markdown" v-html="renderPlanBody(p)" />
-
-        <template #footer>
-          <CsButton
-            :variant="idx === featuredIdx ? 'primary' : 'normal'"
-            class="plan-buy-btn"
-            @click="openCheckout(p)"
+    <template v-if="plans.length || currentPlanId > 0">
+      <CsSpaceBetween v-if="currentPlanId > 0" direction="vertical" size="s">
+        <CsHeader variant="h2">当前订阅套餐</CsHeader>
+        <div v-if="currentPlan" class="pricing-grid">
+          <CsContainer
+            class="pricing-card"
+            :class="{ 'is-featured': currentPlan.id === featuredPlanId }"
           >
-            {{ p.id === currentPlanId ? '续费' : '立即订购' }}
-          </CsButton>
-        </template>
-      </CsContainer>
-    </div>
+            <template #header>
+              <CsHeader variant="h2">
+                {{ currentPlan.name }}
+                <template #actions>
+                  <CsBadge color="green">当前订阅</CsBadge>
+                </template>
+              </CsHeader>
+            </template>
+
+            <div class="plan-markdown" v-html="renderPlanBody(currentPlan)" />
+
+            <template #footer>
+              <CsButton
+                :variant="currentPlan.id === featuredPlanId ? 'primary' : 'normal'"
+                class="plan-buy-btn"
+                @click="handleSelectPlan(currentPlan)"
+              >
+                续费
+              </CsButton>
+            </template>
+          </CsContainer>
+        </div>
+        <CsContainer v-else>
+          <CsBox color="text-body-secondary" font-size="body-s">
+            您当前订阅的套餐（{{ auth.user?.plan_name || `#${currentPlanId}` }}）已下架或暂不支持续费，请在下方选择其他套餐更换。
+          </CsBox>
+        </CsContainer>
+      </CsSpaceBetween>
+
+      <CsSpaceBetween v-if="otherPlans.length" direction="vertical" size="s">
+        <CsHeader v-if="currentPlanId > 0" variant="h2">其他可选套餐</CsHeader>
+        <div class="pricing-grid">
+          <CsContainer
+            v-for="p in otherPlans"
+            :key="p.id"
+            class="pricing-card"
+            :class="{ 'is-featured': p.id === featuredPlanId }"
+          >
+            <template #header>
+              <CsHeader variant="h2">
+                {{ p.name }}
+                <template v-if="p.id === featuredPlanId" #actions>
+                  <CsBadge color="blue">热门推荐</CsBadge>
+                </template>
+              </CsHeader>
+            </template>
+
+            <div class="plan-markdown" v-html="renderPlanBody(p)" />
+
+            <template #footer>
+              <CsButton
+                :variant="p.id === featuredPlanId ? 'primary' : 'normal'"
+                class="plan-buy-btn"
+                @click="handleSelectPlan(p)"
+              >
+                {{ currentPlanId > 0 ? '更换套餐' : '立即订购' }}
+              </CsButton>
+            </template>
+          </CsContainer>
+        </div>
+      </CsSpaceBetween>
+    </template>
 
     <CsContainer v-else>
       <CsBox color="text-body-secondary" font-size="body-s">

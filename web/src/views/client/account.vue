@@ -8,7 +8,7 @@ import { getMyBalanceLogs } from '@/api/gift_card'
 import { cancelOrder, getMyOrders } from '@/api/shop'
 import RechargeModal from '@/components/RechargeModal.vue'
 import { errMsg } from '@/api/http'
-import { formatMoney, formatMoneyNumber, formatSignedMoney } from '@/utils/format'
+import { formatMoney, formatMoneyNumber, formatOrderContent, formatSignedMoney } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
 import type { BalanceLog, Order } from '@/api/types'
 import {
@@ -111,26 +111,26 @@ const pagedOrders = computed(() => {
   const start = (orderPage.value - 1) * orderPageSize.value
   return orders.value.slice(start, start + orderPageSize.value)
 })
-const orderStatusMap: Record<string, { type: 'pending' | 'success' | 'stopped'; text: string }> = {
-  pending: { type: 'pending', text: '待支付' },
-  paid: { type: 'success', text: '已支付' },
-  cancelled: { type: 'stopped', text: '已取消' },
+const orderStatusMap: Record<string, { className: string; text: string }> = {
+  pending: { className: 'order-status-pending', text: '待支付' },
+  paid: { className: 'order-status-paid', text: '已支付' },
+  cancelled: { className: 'order-status-cancelled', text: '已取消' },
 }
 
 const orderColumns: TableColumn[] = [
-  { id: 'order_no', header: '订单号' },
   { id: 'plan_name', header: '订单内容' },
-  { id: 'payment_method', header: '支付方式' },
-  { id: 'amount', header: '金额' },
   { id: 'status', header: '状态' },
+  { id: 'amount', header: '金额' },
+  { id: 'payment_method', header: '支付方式' },
   { id: 'created_at', header: '创建时间' },
+  { id: 'order_no', header: '订单号' },
   { id: 'actions', header: '操作' },
 ]
 
 function orderMethodLabel(row: Order): string {
-  if (row.payment_method === 'gift_card') return '卡密兑换'
-  if (row.payment_method === 'balance') return '余额支付'
-  return row.payment_channel || row.payment_method || '在线支付'
+  if (row.payment_method === 'gift_card') return '卡密'
+  if (row.payment_method === 'balance') return '余额'
+  return row.payment_channel || row.payment_method || '—'
 }
 
 function orderHasAmountChange(row: Order): boolean {
@@ -150,9 +150,9 @@ const pagedLogs = computed(() => {
   return balanceLogs.value.slice(start, start + logPageSize.value)
 })
 const logColumns: TableColumn[] = [
+  { id: 'amount', header: '变动金额' },
   { id: 'type', header: '类型' },
   { id: 'remark', header: '说明' },
-  { id: 'amount', header: '变动金额' },
   { id: 'created_at', header: '时间' },
 ]
 
@@ -610,6 +610,7 @@ async function onResetSubscribe() {
           <CsSpaceBetween size="m">
             <CsTable
               compact
+              :wrap-lines="false"
               :items="pagedOrders"
               :columns="orderColumns"
               track-by="id"
@@ -619,17 +620,11 @@ async function onResetSubscribe() {
                 <code class="cell-mono">{{ row.order_no }}</code>
               </template>
               <template #cell-plan_name="{ row }">
-                <CsSpaceBetween direction="horizontal" size="xs" align="center">
-                  <CsBadge :color="row.order_type === 'recharge' ? 'blue' : 'grey'">
-                    {{ row.order_type === 'recharge' ? '充值' : '套餐' }}
-                  </CsBadge>
-                  <span>{{ row.plan_name || (row.order_type === 'recharge' ? '账户充值' : `#${row.plan_id}`) }}</span>
-                </CsSpaceBetween>
+                <span>{{ formatOrderContent(row) }}</span>
               </template>
               <template #cell-payment_method="{ row }">
-                <CsBadge color="grey">
-                  {{ orderMethodLabel(row) }}
-                </CsBadge>
+                <span v-if="orderMethodLabel(row) !== '—'">{{ orderMethodLabel(row) }}</span>
+                <span v-else class="cell-muted">—</span>
               </template>
               <template #cell-amount="{ row }">
                 <span
@@ -640,22 +635,24 @@ async function onResetSubscribe() {
                 </span>
               </template>
               <template #cell-status="{ row }">
-                <CsStatusIndicator :type="orderStatusMap[row.status]?.type ?? 'stopped'">
+                <span
+                  :class="orderStatusMap[row.status]?.className ?? 'order-status-cancelled'"
+                >
                   {{ orderStatusMap[row.status]?.text ?? row.status }}
-                </CsStatusIndicator>
+                </span>
               </template>
               <template #cell-created_at="{ row }">
                 <span class="cell-mono">{{ formatDateTimeMinute(row.created_at) }}</span>
               </template>
               <template #cell-actions="{ row }">
-                <CsSpaceBetween v-if="row.status === 'pending'" direction="horizontal" size="xs">
-                  <CsButton variant="primary" @click="router.push(`/checkout/${row.order_no}`)">
+                <div v-if="row.status === 'pending'" class="order-actions">
+                  <CsButton variant="primary" :wrap-text="false" @click="router.push(`/checkout/${row.order_no}`)">
                     去支付
                   </CsButton>
-                  <CsButton variant="normal" @click="handleCancelOrder(row.order_no)">
+                  <CsButton variant="normal" :wrap-text="false" @click="handleCancelOrder(row.order_no)">
                     取消
                   </CsButton>
-                </CsSpaceBetween>
+                </div>
                 <span v-else class="cell-muted">—</span>
               </template>
             </CsTable>
@@ -677,6 +674,7 @@ async function onResetSubscribe() {
           <CsSpaceBetween size="m">
             <CsTable
               compact
+              :wrap-lines="false"
               :items="pagedLogs"
               :columns="logColumns"
               :loading="loadingLogs"
@@ -685,9 +683,9 @@ async function onResetSubscribe() {
               empty-text="暂无收支记录"
             >
               <template #cell-type="{ row }">
-                <CsBadge :color="row.amount_cents > 0 ? 'green' : 'grey'">
+                <span :class="row.amount_cents > 0 ? 'order-status-paid' : ''">
                   {{ balanceLogTitle(row.type) }}
-                </CsBadge>
+                </span>
               </template>
               <template #cell-remark="{ row }">
                 {{ row.remark || balanceLogTitle(row.type) }}
@@ -937,6 +935,26 @@ async function onResetSubscribe() {
 
 .amount-unchanged {
   color: var(--color-text-body-default-b2us04, #0f141a);
+}
+
+.order-status-paid {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.order-status-pending {
+  color: var(--color-text-status-warning-fabq6h, #855900);
+}
+
+.order-status-cancelled {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.order-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 @media (max-width: $bp-two-pane) {

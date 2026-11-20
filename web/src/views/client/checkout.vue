@@ -18,7 +18,7 @@ import { cancelOrder, getOrder, payOrder } from '@/api/shop'
 import { errMsg } from '@/api/http'
 import type { Order, PaymentChannelInfo } from '@/api/types'
 import RechargeModal from '@/components/RechargeModal.vue'
-import { formatMoney } from '@/utils/format'
+import { formatMoney, formatOrderContent } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -118,7 +118,6 @@ async function handlePay() {
       order.value = payload.order
       await auth.fetchMe()
       ElMessage.success(isRecharge.value ? '充值成功，余额已到账' : '支付成功，套餐已生效')
-      router.push(isRecharge.value ? '/account' : '/subscribe')
     } else {
       payUrl.value = payload.pay_url || ''
       qrCodeText.value = payload.qr_code || ''
@@ -173,12 +172,9 @@ onUnmounted(() => {
 
 <template>
   <CsSpaceBetween size="l">
-    <CsHeader
-      variant="h1"
-      description="请在有效期内完成支付，超时订单将自动关闭"
-    >
-      收银台
-      <template #actions>
+    <CsHeader variant="h1">
+      {{ order?.status === 'paid' ? '订单完成' : '收银台' }}
+      <template v-if="order?.status !== 'paid'" #actions>
         <CsButton variant="normal" @click="router.push('/shop')">返回商店</CsButton>
       </template>
     </CsHeader>
@@ -195,9 +191,11 @@ onUnmounted(() => {
         type="info"
         :header="`待支付 · 剩余支付时间 ${remainingText}`"
       >
-        {{ isRecharge ? '请在倒计时结束前完成充值支付，成功后将自动计入账户余额。' : '订单已为您锁定当前套餐价格，请在倒计时结束前完成支付。' }}
+        <template v-if="isRecharge">
+          请在倒计时结束前完成充值支付，成功后将自动计入账户余额。
+        </template>
       </CsAlert>
-      <CsAlert v-else-if="order.status === 'paid'" type="success" header="订单已支付">
+      <CsAlert v-else-if="order.status === 'paid'" type="success" header="订单已完成">
         {{ isRecharge ? '该笔充值已完成，金额已计入您的账户余额。' : '该订单已完成支付，套餐已生效。' }}
       </CsAlert>
       <CsAlert v-else type="warning" header="订单已取消">
@@ -215,11 +213,11 @@ onUnmounted(() => {
               <span class="kv-val cell-mono">{{ order.order_no }}</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">{{ isRecharge ? '订单内容' : '套餐名称' }}</span>
-              <span class="kv-val">{{ order.plan_name || (isRecharge ? '账户充值' : `#${order.plan_id}`) }}</span>
+              <span class="kv-label">订单内容</span>
+              <span class="kv-val">{{ formatOrderContent(order) }}</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">应付金额</span>
+              <span class="kv-label">{{ order.status === 'paid' ? '实付金额' : '应付金额' }}</span>
               <span class="kv-val cell-mono"><strong>{{ formatMoney(order.amount_cents) }}</strong></span>
             </div>
             <div class="kv-row">
@@ -255,12 +253,8 @@ onUnmounted(() => {
                     当前余额 {{ formatMoney(balanceCents) }}
                   </CsBadge>
                 </CsSpaceBetween>
-                <CsBox variant="small" color="text-body-secondary">
-                  {{
-                    balanceEnough
-                      ? '余额充足，点击下方按钮立即完成支付'
-                      : `余额不足，还差 ${formatMoney(diffCents)}`
-                  }}
+                <CsBox v-if="!balanceEnough" variant="small" color="text-body-secondary">
+                  余额不足，还差 {{ formatMoney(diffCents) }}
                 </CsBox>
               </div>
 
