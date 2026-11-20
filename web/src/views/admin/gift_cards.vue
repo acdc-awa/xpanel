@@ -1,18 +1,12 @@
 <script setup lang="ts">
 import { formatMoney, formatMoneyNumber } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import {
   CsAlert,
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
   CsDatePicker,
-  CsEmpty,
   CsForm,
   CsFormItem,
   CsInput,
@@ -23,11 +17,12 @@ import {
   CsPagination,
   CsPaginationBar,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsToolbar,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 import {
   getAdminGiftCards,
   batchCreateGiftCards,
@@ -194,15 +189,45 @@ async function purgeCard(row: any) {
   }
 }
 
-const statusMap: Record<string, { color: 'green' | 'grey' | 'red'; text: string }> = {
-  unused: { color: 'green', text: '未使用' },
-  used: { color: 'grey', text: '已使用' },
-  disabled: { color: 'red', text: '已作废' },
+function onFilterChange() {
+  page.value = 1
+  load()
+}
+
+const emptyText = computed(() =>
+  statusFilter.value || keyword.value.trim()
+    ? '未找到符合条件的礼品卡记录'
+    : '暂无礼品卡记录，点击右上角「批量生成礼品卡」',
+)
+
+const giftCardColumns: TableColumn[] = [
+  { id: 'name', header: '批次名称' },
+  { id: 'code', header: '卡密（点击复制）' },
+  { id: 'face_value', header: '面值' },
+  { id: 'status', header: '状态' },
+  { id: 'used_by', header: '兑换用户' },
+  { id: 'expires_at', header: '有效期' },
+  { id: 'used_at', header: '兑换时间' },
+  { id: 'actions', header: '操作' },
+]
+
+function statusOf(row: GiftCard): { className: string; text: string } {
+  if (row.status === 'unused' && isExpired(row)) {
+    return { className: 'gc-status-danger', text: '已过期' }
+  }
+  if (row.status === 'unused') return { className: 'gc-status-unused', text: '未使用' }
+  if (row.status === 'used') return { className: 'gc-status-used', text: '已使用' }
+  if (row.status === 'disabled') return { className: 'gc-status-danger', text: '已作废' }
+  return { className: 'gc-status-used', text: row.status }
 }
 
 // 过期不落库，现场推导；过期的未使用卡不可兑换，排序上也排在使用可用项之后
 function isExpired(row: GiftCard) {
   return !!row.expires_at && new Date(row.expires_at).getTime() < Date.now()
+}
+
+function isMutedRow(row: GiftCard) {
+  return row.status !== 'unused' || isExpired(row)
 }
 </script>
 
@@ -215,9 +240,10 @@ function isExpired(row: GiftCard) {
         prefix-icon="search"
         clearable
         style="width: 220px"
-        @keyup.enter="load"
+        @keyup.enter="onFilterChange"
+        @clear="onFilterChange"
       />
-      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="onFilterChange">
         <CsOption label="全部状态" value="" />
         <CsOption label="未使用" value="unused" />
         <CsOption label="已使用" value="used" />
@@ -231,68 +257,86 @@ function isExpired(row: GiftCard) {
 
     <!-- 数据表格 -->
     <CsContainer header="卡密列表">
-      <!-- 桌面端表格视图 (双行紧凑聚合自适应展示) -->
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <CsSpinner size="large" />
-      </div>
-
-      <CsEmpty v-else-if="list.length === 0" icon-name="ticket" description="暂无礼品卡记录，点击右上角「批量生成礼品卡」" />
-
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，面额作为卡片主指标 -->
-      <CsCardGrid v-else>
-        <CsCard
-          v-for="row in list"
-          :key="row.id"
-          :class="{ 'gift-card-muted': row.status !== 'unused' || isExpired(row) }"
-        >
-          <template #header>
-            <div class="gift-card-title">{{ row.name || '通用礼品卡' }}</div>
-            <div class="gift-card-id">#{{ row.id }}</div>
-          </template>
-          <template #actions>
-            <div class="gift-card-summary">
-              <span class="gift-card-metric">{{ fmtMoney(row.face_value_cents) }}</span>
-              <CsBadge v-if="row.status === 'unused' && isExpired(row)" color="red">已过期</CsBadge>
-              <CsBadge v-else :color="statusMap[row.status]?.color || 'grey'">
-                {{ statusMap[row.status]?.text || row.status }}
-              </CsBadge>
-            </div>
-          </template>
-
-          <CsCardFacts>
-            <CsCardFact label="卡密（点击复制）" full-width mono>
-              <button type="button" class="gift-card-code" title="点击复制卡密" @click="copyText(row.code, '卡密')">
-                {{ row.code }}
-              </button>
-            </CsCardFact>
-            <CsCardFact
-              label="兑换用户"
-              :value="row.used_by ? (row.used_by_email || `用户 #${row.used_by}`) : '待兑换'"
-            />
-            <CsCardFact label="有效期" :value="row.expires_at ? fmtTime(row.expires_at) : '永久有效'" mono />
-            <CsCardFact v-if="row.used_at" label="兑换时间" :value="fmtTime(row.used_at)" mono full-width />
-          </CsCardFacts>
-
-          <template #footer>
-            <CsButton icon-name="copy" @click="copyText(row.code, '卡密')">复制卡密</CsButton>
-            <CsButton v-if="row.status === 'unused'" variant="danger-outline" icon-name="remove" @click="voidCard(row)">作废</CsButton>
-            <CsButton v-else-if="row.status === 'disabled'" variant="danger-outline" icon-name="remove" @click="purgeCard(row)">
-              彻底删除
-            </CsButton>
-          </template>
-        </CsCard>
-      </CsCardGrid>
+      <CsTable
+        compact
+        :wrap-lines="false"
+        :items="list"
+        :columns="giftCardColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        track-by="id"
+        :empty-text="emptyText"
+      >
+        <template #cell-name="{ row }">
+          <span :class="{ 'cell-muted': isMutedRow(row) }">{{ row.name || '通用礼品卡' }}</span>
+        </template>
+        <template #cell-code="{ row }">
+          <button
+            type="button"
+            class="gift-card-code cell-mono"
+            :class="{ 'is-muted': isMutedRow(row) }"
+            title="点击复制卡密"
+            @click="copyText(row.code, '卡密')"
+          >
+            {{ row.code }}
+          </button>
+        </template>
+        <template #cell-face_value="{ row }">
+          <span class="cell-mono" :class="{ 'cell-muted': isMutedRow(row) }">
+            <strong>{{ fmtMoney(row.face_value_cents) }}</strong>
+          </span>
+        </template>
+        <template #cell-status="{ row }">
+          <span :class="statusOf(row).className">{{ statusOf(row).text }}</span>
+        </template>
+        <template #cell-used_by="{ row }">
+          <span v-if="row.used_by" :class="{ 'cell-mono': !!row.used_by_email }">
+            {{ row.used_by_email || `用户 #${row.used_by}` }}
+          </span>
+          <span v-else class="cell-muted">待兑换</span>
+        </template>
+        <template #cell-expires_at="{ row }">
+          <span v-if="row.expires_at" class="cell-mono" :class="{ 'cell-muted': isMutedRow(row) }">
+            {{ fmtTime(row.expires_at) }}
+          </span>
+          <span v-else class="cell-muted">永久有效</span>
+        </template>
+        <template #cell-used_at="{ row }">
+          <span v-if="row.used_at" class="cell-mono">{{ fmtTime(row.used_at) }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-actions="{ row }">
+          <CsButton
+            v-if="row.status === 'unused'"
+            variant="danger-outline"
+            :wrap-text="false"
+            @click="voidCard(row)"
+          >
+            作废
+          </CsButton>
+          <CsButton
+            v-else-if="row.status === 'disabled'"
+            variant="danger-outline"
+            :wrap-text="false"
+            @click="purgeCard(row)"
+          >
+            彻底删除
+          </CsButton>
+          <span v-else class="cell-muted">—</span>
+        </template>
+      </CsTable>
 
       <template #footer>
-        <CsPaginationBar>
+        <CsPaginationBar v-if="total > 0">
           <CsPagination
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
             :page-sizes="[20, 50, 100]"
             layout="total, sizes, prev, pager, next"
+            simple
             @current-change="load"
-            @size-change="load"
+            @size-change="() => { page = 1; load() }"
           />
         </CsPaginationBar>
       </template>
@@ -351,32 +395,20 @@ function isExpired(row: GiftCard) {
 </template>
 
 <style scoped lang="scss">
-.gift-card-title {
-  overflow-wrap: anywhere;
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.gift-card-id {
-  margin-block-start: 2px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 400;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.gc-status-unused {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
 }
 
-.gift-card-summary {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
+.gc-status-used {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.gift-card-metric {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-body-default-b2us04, #0f141a);
+.gc-status-danger {
+  color: var(--color-text-status-error-ri38gt, #d91515);
 }
 
 .gift-card-code {
@@ -390,19 +422,13 @@ function isExpired(row: GiftCard) {
   color: var(--color-text-link-default-qabnuk, #006ce0);
   cursor: pointer;
   text-align: start;
-  overflow-wrap: anywhere;
 
   &:hover {
     text-decoration: underline;
   }
-}
 
-.gift-card-muted .gift-card-code {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+  &.is-muted {
+    color: var(--color-text-status-inactive-fqjc97, #656871);
+  }
 }
-
-.gift-card-muted .gift-card-metric {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
 </style>

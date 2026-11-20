@@ -1,26 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { formatMoney } from '@/utils/format'
+import { computed, onMounted, ref } from 'vue'
+import { formatMoney, formatOrderContent } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
 import { ElMessage } from '@/components/cloudscape'
 import {
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
-  CsEmpty,
   CsInput,
   CsOption,
   CsPage,
   CsPagination,
   CsPaginationBar,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsToolbar,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -71,18 +66,36 @@ function resetFilters() {
 
 onMounted(load)
 
+const emptyText = computed(() =>
+  filterStatus.value || filterOrderType.value || keyword.value.trim()
+    ? '未找到符合条件的订单记录'
+    : '暂无订购记录',
+)
+
+const orderColumns: TableColumn[] = [
+  { id: 'id', header: '#ID' },
+  { id: 'plan_name', header: '订单内容' },
+  { id: 'email', header: '订购用户' },
+  { id: 'status', header: '状态' },
+  { id: 'amount', header: '金额' },
+  { id: 'payment_method', header: '支付方式' },
+  { id: 'created_at', header: '创建时间' },
+  { id: 'paid_at', header: '支付时间' },
+  { id: 'order_no', header: '订单号' },
+]
+
+const orderStatusMap: Record<string, { className: string; text: string }> = {
+  pending: { className: 'order-status-pending', text: '待支付' },
+  paid: { className: 'order-status-paid', text: '已支付' },
+  cancelled: { className: 'order-status-cancelled', text: '已取消' },
+}
+
 function fmtTime(t: string | null) {
   return t ? formatDateTimeMinute(t) : '—'
 }
 
-function statusOf(row: Order): { color: 'green' | 'grey' | 'severity-medium'; text: string } {
-  if (row.status === 'paid') return { color: 'green', text: '已生效' }
-  if (row.status === 'pending') return { color: 'severity-medium', text: '待支付' }
-  return { color: 'grey', text: '已取消' }
-}
-
-function amountClassOf(row: Order) {
-  return row.status === 'paid' && row.amount_cents > 0 ? 'order-amount--changed' : 'order-amount--unchanged'
+function orderHasAmountChange(row: Order) {
+  return row.status === 'paid' && row.amount_cents > 0
 }
 
 function formatOrderAmount(row: Order) {
@@ -91,9 +104,9 @@ function formatOrderAmount(row: Order) {
   return `${prefix}${formatMoney(row.amount_cents)}`
 }
 
-function paymentLabel(row: Order) {
-  if (row.payment_method === 'balance') return '余额支付'
-  if (row.payment_method === 'gift_card') return '卡密兑换'
+function orderMethodLabel(row: Order) {
+  if (row.payment_method === 'balance') return '余额'
+  if (row.payment_method === 'gift_card') return '卡密'
   return row.payment_channel || row.payment_method || '—'
 }
 </script>
@@ -120,7 +133,7 @@ function paymentLabel(row: Order) {
           @change="onFilterChange"
         >
           <CsOption label="全部状态" value="" />
-          <CsOption label="已生效 (paid)" value="paid" />
+          <CsOption label="已支付 (paid)" value="paid" />
           <CsOption label="待支付 (pending)" value="pending" />
           <CsOption label="已取消 (cancelled)" value="cancelled" />
         </CsSelect>
@@ -139,53 +152,64 @@ function paymentLabel(row: Order) {
     </CsToolbar>
 
     <CsContainer header="服务订购记录">
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <CsSpinner size="large" />
-      </div>
-
-      <CsEmpty
-        v-else-if="list.length === 0"
-        icon-name="ticket"
-        :description="filterStatus || keyword ? '未找到符合条件的订单记录' : '暂无订购记录'"
-      />
-
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，金额作为卡片主指标 -->
-      <CsCardGrid v-else>
-        <CsCard v-for="row in list" :key="row.id">
-          <template #header>
-            <div class="order-plan">{{ row.plan_name || (row.order_type === 'recharge' ? '账户充值' : `#${row.plan_id}`) }}</div>
-            <div class="order-meta">
-              <span class="order-id">#{{ row.id }}</span>
-              <CsBadge :color="row.order_type === 'recharge' ? 'blue' : 'grey'">
-                {{ row.order_type === 'recharge' ? '充值' : '套餐' }}
-              </CsBadge>
-              <CsBadge :color="statusOf(row).color">{{ statusOf(row).text }}</CsBadge>
-            </div>
-          </template>
-          <template #actions>
-            <span class="order-amount" :class="amountClassOf(row)">
-              {{ formatOrderAmount(row) }}
-            </span>
-          </template>
-
-          <CsCardFacts>
-            <CsCardFact label="订购用户" :value="row.email || '—'" />
-            <CsCardFact label="支付方式" :value="paymentLabel(row)" />
-            <CsCardFact label="订单流水号" :value="row.order_no" full-width mono />
-            <CsCardFact label="创建时间" :value="fmtTime(row.created_at)" mono />
-            <CsCardFact label="支付时间" :value="row.paid_at ? fmtTime(row.paid_at) : '—'" mono />
-          </CsCardFacts>
-        </CsCard>
-      </CsCardGrid>
+      <CsTable
+        compact
+        :wrap-lines="false"
+        :items="list"
+        :columns="orderColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        track-by="id"
+        :empty-text="emptyText"
+      >
+        <template #cell-id="{ row }">
+          <span class="cell-mono order-id">#{{ row.id }}</span>
+        </template>
+        <template #cell-plan_name="{ row }">
+          <span>{{ formatOrderContent(row) }}</span>
+        </template>
+        <template #cell-email="{ row }">
+          <span v-if="row.email" class="cell-mono">{{ row.email }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-status="{ row }">
+          <span :class="orderStatusMap[row.status]?.className ?? 'order-status-cancelled'">
+            {{ orderStatusMap[row.status]?.text ?? row.status }}
+          </span>
+        </template>
+        <template #cell-amount="{ row }">
+          <span
+            class="cell-mono"
+            :class="orderHasAmountChange(row) ? 'amount-changed' : 'amount-unchanged'"
+          >
+            <strong>{{ formatOrderAmount(row) }}</strong>
+          </span>
+        </template>
+        <template #cell-payment_method="{ row }">
+          <span v-if="orderMethodLabel(row) !== '—'">{{ orderMethodLabel(row) }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-created_at="{ row }">
+          <span class="cell-mono">{{ fmtTime(row.created_at) }}</span>
+        </template>
+        <template #cell-paid_at="{ row }">
+          <span v-if="row.paid_at" class="cell-mono">{{ fmtTime(row.paid_at) }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-order_no="{ row }">
+          <code class="cell-mono">{{ row.order_no }}</code>
+        </template>
+      </CsTable>
 
       <template #footer>
-        <CsPaginationBar>
+        <CsPaginationBar v-if="total > 0">
           <CsPagination
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
             :page-sizes="[10, 20, 50]"
             layout="total, sizes, prev, pager, next"
+            simple
             @current-change="load"
             @size-change="() => { page = 1; load() }"
           />
@@ -196,40 +220,31 @@ function paymentLabel(row: Order) {
 </template>
 
 <style scoped lang="scss">
-.order-plan {
-  overflow-wrap: anywhere;
-}
-
-.order-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 4px;
-}
-
 .order-id {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 400;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.order-amount {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.order-amount--changed {
+.amount-changed {
   color: var(--color-text-link-default-qabnuk, #0972d3);
 }
 
-.order-amount--unchanged {
+.amount-unchanged {
   color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
+.order-status-paid {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.order-status-pending {
+  color: var(--color-text-status-warning-fabq6h, #855900);
+}
+
+.order-status-cancelled {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
 </style>

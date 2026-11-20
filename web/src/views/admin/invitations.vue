@@ -1,15 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
   CsDatePicker,
-  CsEmpty,
   CsForm,
   CsFormItem,
   CsInput,
@@ -20,11 +14,12 @@ import {
   CsPagination,
   CsPaginationBar,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsToolbar,
   ElMessage,
   ElMessageBox,
 } from '@/components/cloudscape'
+import type { TableColumn } from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatDateTimeMinute } from '@/utils/timezone'
@@ -69,35 +64,49 @@ const filtered = computed(() => {
   }
 })
 
-// 卡片状态角标：过期优先于未使用显示，避免管理员误认为可用
-function chipOf(row: Invitation): { cls: string; text: string } {
-  if (row.status === 1) return { cls: 'green', text: '已使用' }
-  if (row.status === 2) return { cls: 'red', text: '已禁用' }
-  if (isExpired(row)) return { cls: 'gray', text: '已过期' }
-  return { cls: 'blue', text: '未使用' }
+const emptyText = computed(() =>
+  list.value.length === 0
+    ? '暂无邀请码，点击右上角「生成邀请码」'
+    : '未找到匹配当前筛选的邀请码',
+)
+
+const invColumns: TableColumn[] = [
+  { id: 'code', header: '邀请码（点击复制）' },
+  { id: 'status', header: '状态' },
+  { id: 'created_by', header: '创建人' },
+  { id: 'expires_at', header: '有效期' },
+  { id: 'created_at', header: '创建时间' },
+  { id: 'used_at', header: '使用时间' },
+  { id: 'actions', header: '操作' },
+]
+
+function statusOf(row: Invitation): { className: string; text: string } {
+  if (row.status === 1) return { className: 'inv-status-used', text: '已使用' }
+  if (row.status === 2) return { className: 'inv-status-danger', text: '已禁用' }
+  if (isExpired(row)) return { className: 'inv-status-danger', text: '已过期' }
+  return { className: 'inv-status-unused', text: '未使用' }
 }
 
-function badgeColorOf(row: Invitation): 'green' | 'red' | 'grey' | 'blue' {
-  const cls = chipOf(row).cls
-  return cls === 'gray' ? 'grey' : (cls as 'green' | 'red' | 'blue')
+function isMutedRow(row: Invitation): boolean {
+  return row.status !== 0 || isExpired(row)
 }
 
 // ---- 本地分页（列表后端 Limit(200) 全量返回）----
-const PAGE_SIZE = 12
 const page = ref(1)
+const pageSize = ref(20)
 const paged = computed(() =>
-  filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
+  filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
 )
 
 watch(statusFilter, () => {
   page.value = 1
 })
 
-// 条目减少后页码回夹：停在被清空的页时网格空白且分页器消失（12≤PAGE_SIZE 不渲染）
+// 条目减少后页码回夹：停在被清空的页时列表空白
 watch(
-  () => filtered.value.length,
-  (len) => {
-    const max = Math.max(1, Math.ceil(len / PAGE_SIZE))
+  [() => filtered.value.length, pageSize],
+  ([len, size]) => {
+    const max = Math.max(1, Math.ceil(len / size))
     if (page.value > max) page.value = max
   },
 )
@@ -217,57 +226,72 @@ function fmtTime(t: string | null) {
     </CsToolbar>
 
     <CsContainer header="邀请码列表">
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <CsSpinner size="large" />
-      </div>
-
-      <!-- 空集合用 CsEmpty：手写居中文案在暗色下用的是自造 token，换主题会掉色 -->
-      <CsEmpty
-        v-else-if="filtered.length === 0"
-        icon-name="ticket"
-        :description="list.length === 0 ? '暂无邀请码，点击右上角「生成邀请码」' : '未找到匹配当前筛选的邀请码'"
-      />
-
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，次要信息 12/16 -->
-      <CsCardGrid v-else>
-        <CsCard v-for="row in paged" :key="row.id" :class="{ 'inv-card-muted': row.status !== 0 || isExpired(row) }">
-          <template #header>
-            <button type="button" class="inv-code" title="点击复制邀请码" @click="copyCode(row.code)">
-              {{ row.code }}
-            </button>
-          </template>
-          <template #actions>
-            <CsBadge :color="badgeColorOf(row)">{{ chipOf(row).text }}</CsBadge>
-          </template>
-
-          <CsCardFacts>
-            <CsCardFact label="创建人" :value="row.created_by || '系统生成'" />
-            <CsCardFact label="有效期" :value="row.expires_at ? '至 ' + fmtTime(row.expires_at) : '永不过期'" mono />
-            <CsCardFact label="创建时间" :value="fmtTime(row.created_at)" mono />
-            <CsCardFact label="使用时间" :value="row.used_at ? fmtTime(row.used_at) : '未使用'" mono />
-          </CsCardFacts>
-
-          <template #footer>
-            <template v-if="row.status === 0 && !isExpired(row)">
-              <CsButton icon-name="external" @click="copyRegisterLink(row.code)">复制链接</CsButton>
-              <CsButton icon-name="copy" @click="copyCode(row.code)">复制码</CsButton>
-              <CsButton variant="danger-outline" icon-name="remove" @click="revoke(row)">作废</CsButton>
-            </template>
-            <span v-else class="inv-card-note">
-              {{ row.status === 1 ? '该邀请码已被成功使用' : isExpired(row) ? '该邀请码已过有效期，无法注册' : '该邀请码已被作废禁用' }}
-            </span>
-          </template>
-        </CsCard>
-      </CsCardGrid>
+      <CsTable
+        compact
+        :wrap-lines="false"
+        :items="paged"
+        :columns="invColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        track-by="id"
+        :empty-text="emptyText"
+      >
+        <template #cell-code="{ row }">
+          <button
+            type="button"
+            class="inv-code-btn cell-mono"
+            :class="{ 'is-muted': isMutedRow(row) }"
+            title="点击复制邀请码"
+            @click="copyCode(row.code)"
+          >
+            {{ row.code }}
+          </button>
+        </template>
+        <template #cell-status="{ row }">
+          <span :class="statusOf(row).className">{{ statusOf(row).text }}</span>
+        </template>
+        <template #cell-created_by="{ row }">
+          <span :class="{ 'cell-muted': isMutedRow(row) }">{{ row.created_by || '系统生成' }}</span>
+        </template>
+        <template #cell-expires_at="{ row }">
+          <span v-if="row.expires_at" class="cell-mono" :class="{ 'cell-muted': isMutedRow(row) }">
+            {{ fmtTime(row.expires_at) }}
+          </span>
+          <span v-else class="cell-muted">永不过期</span>
+        </template>
+        <template #cell-created_at="{ row }">
+          <span class="cell-mono" :class="{ 'cell-muted': isMutedRow(row) }">{{ fmtTime(row.created_at) }}</span>
+        </template>
+        <template #cell-used_at="{ row }">
+          <span v-if="row.used_at" class="cell-mono" :class="{ 'cell-muted': isMutedRow(row) }">
+            {{ fmtTime(row.used_at) }}
+          </span>
+          <span v-else class="cell-muted">未使用</span>
+        </template>
+        <template #cell-actions="{ row }">
+          <div v-if="row.status === 0 && !isExpired(row)" class="inv-actions">
+            <CsButton variant="normal" :wrap-text="false" @click="copyRegisterLink(row.code)">
+              复制链接
+            </CsButton>
+            <CsButton variant="danger-outline" :wrap-text="false" @click="revoke(row)">
+              作废
+            </CsButton>
+          </div>
+          <span v-else class="cell-muted">—</span>
+        </template>
+      </CsTable>
 
       <!-- 分页放容器 footer：官方容器 footer 自带分隔线与内边距 -->
-      <template v-if="filtered.length > PAGE_SIZE" #footer>
+      <template v-if="filtered.length > 0" #footer>
         <CsPaginationBar>
           <CsPagination
             v-model:current-page="page"
+            v-model:page-size="pageSize"
             :total="filtered.length"
-            :page-size="PAGE_SIZE"
-            layout="prev, pager, next"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            simple
+            @size-change="page = 1"
           />
         </CsPaginationBar>
       </template>
@@ -335,35 +359,56 @@ function fmtTime(t: string | null) {
   border-radius: 8px;
   padding: 6px 12px;
 }
-.inv-code {
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.inv-status-unused {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.inv-status-used {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.inv-status-danger {
+  color: var(--color-text-status-error-ri38gt, #d91515);
+}
+
+.inv-code-btn {
   appearance: none;
   border: 0;
   background: transparent;
   margin: 0;
   padding: 0;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 16px;
-  line-height: 20px;
-  font-weight: 700;
+  font: inherit;
+  font-weight: 600;
   color: var(--color-text-link-default-qabnuk, #006ce0);
   cursor: pointer;
   text-align: start;
-  overflow-wrap: anywhere;
 
   &:hover {
     text-decoration: underline;
   }
+
+  &.is-muted {
+    color: var(--color-text-status-inactive-fqjc97, #656871);
+  }
 }
 
-.inv-card-muted .inv-code {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.inv-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
-.inv-card-note {
-  margin-inline-start: auto;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  text-align: end;
+.inv-code {
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  overflow-wrap: anywhere;
 }
 </style>
