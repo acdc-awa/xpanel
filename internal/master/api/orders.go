@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/acdc-awa/xpanel/internal/contracts"
 	"github.com/acdc-awa/xpanel/internal/master/billing"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/models"
 	"github.com/acdc-awa/xpanel/internal/pkg/util"
 )
@@ -264,6 +266,7 @@ func (d *Deps) CreateUserRecharge(c *gin.Context) {
 				util.BadRequest(c, err.Error())
 				return
 			}
+			d.auditGiftCardRedeemed(c, uid, card, order.OrderNo)
 			views := d.toOrderViews([]models.Order{*order})
 			util.OK(c, gin.H{
 				"order":            views[0],
@@ -401,6 +404,7 @@ func (d *Deps) PayUserOrder(c *gin.Context) {
 				handleOrderPayError(c, err)
 				return
 			}
+			d.auditRechargeCompleted(c, "user", uid, settled, method)
 			views := d.toOrderViews([]models.Order{*settled})
 			util.OK(c, gin.H{"order": views[0], "paid": true, "flow": res.Flow})
 			return
@@ -431,6 +435,7 @@ func (d *Deps) PayUserOrder(c *gin.Context) {
 			return
 		}
 		views := d.toOrderViews([]models.Order{*paidOrder})
+		d.auditPlanOrderPaid(c, uid, paidOrder, views[0])
 		util.OK(c, gin.H{"order": views[0], "paid": true})
 	case models.PaymentMethodGiftCard:
 		code := strings.TrimSpace(req.Code)
@@ -439,10 +444,12 @@ func (d *Deps) PayUserOrder(c *gin.Context) {
 			return
 		}
 		// 先核销卡密充入余额（同时生成充值订单），再尝试用余额完成套餐订单扣款
-		if _, _, err := d.GiftCard.Redeem(uid, code); err != nil {
+		card, _, err := d.GiftCard.Redeem(uid, code)
+		if err != nil {
 			util.BadRequest(c, err.Error())
 			return
 		}
+		d.auditGiftCardRedeemed(c, uid, card, orderNo)
 		paidOrder, err := d.Order.PayOrderWithBalance(uid, orderNo)
 		if err != nil {
 			if errors.Is(err, billing.ErrInsufficientBalance) {
@@ -460,6 +467,7 @@ func (d *Deps) PayUserOrder(c *gin.Context) {
 			return
 		}
 		views := d.toOrderViews([]models.Order{*paidOrder})
+		d.auditPlanOrderPaid(c, uid, paidOrder, views[0])
 		util.OK(c, gin.H{"order": views[0], "paid": true})
 	default:
 		util.BadRequest(c, "不支持的支付方式")
@@ -480,7 +488,8 @@ func (d *Deps) PaymentCallback(c *gin.Context) {
 		return
 	}
 	if cb != nil && cb.Paid && cb.OrderNo != "" {
-		if _, err := d.Order.CompleteRechargeOrder(cb.OrderNo, channel, cb.TradeNo, cb.AmountCents); err != nil {
+		settled, err := d.Order.CompleteRechargeOrder(cb.OrderNo, channel, cb.TradeNo, cb.AmountCents)
+		if err != nil {
 			switch {
 			case errors.Is(err, billing.ErrAmountMismatch):
 				log.Printf("payment callback rejected (amount mismatch): channel=%s order_no=%s trade_no=%s paid_cents=%d",
@@ -497,6 +506,7 @@ func (d *Deps) PaymentCallback(c *gin.Context) {
 			}
 			return
 		}
+		d.auditRechargeCompleted(c, "system", settled.UserID, settled, channel)
 	}
 	status := http.StatusOK
 	body := "success"
@@ -546,4 +556,69 @@ func (d *Deps) CancelUserOrder(c *gin.Context) {
 	}
 	views := d.toOrderViews([]models.Order{*order})
 	util.OK(c, gin.H{"order": views[0]})
+}
+
+func (d *Deps) auditPlanOrderPaid(c *gin.Context, uid uint64, paidOrder *models.Order, ov orderView) {
+	if paidOrder == nil {
+		return
+	}
+	detail := "余额支付购买套餐"
+	if ov.PlanName != "" {
+		detail += "「" + ov.PlanName + "」"
+	}
+	if paidOrder.PlanID > 0 {
+		detail += " #" + strconv.FormatUint(paidOrder.PlanID, 10)
+	}
+	detail += " (订单 #" + paidOrder.OrderNo + ")"
+	d.Audit.LogEvent(services.AuditEvent{
+		OperatorType: "user",
+		OperatorID:   uid,
+		Action:       "order.pay_balance",
+		TargetType:   "order",
+		TargetID:     paidOrder.ID,
+		TargetName:   paidOrder.OrderNo,
+		Status:       http.StatusOK,
+		Message:      detail,
+		IP:           util.ClientIPFromContext(c),
+	})
+}
+
+func (d *Deps) auditGiftCardRedeemed(c *gin.Context, uid uint64, card *models.GiftCard, orderNo string) {
+	if card == nil {
+		return
+	}
+	msg := "兑换礼品卡 " + card.Code + " (+¥" + strconv.FormatFloat(float64(card.FaceValueCents)/100, 'f', 2, 64) + ")"
+	if orderNo != "" {
+		msg += " (订单 #" + orderNo + ")"
+	}
+	d.Audit.LogEvent(services.AuditEvent{
+		OperatorType: "user",
+		OperatorID:   uid,
+		Action:       "gift_card.redeem",
+		TargetType:   "gift_card",
+		TargetID:     card.ID,
+		TargetName:   card.Code,
+		Status:       http.StatusOK,
+		Message:      msg,
+		IP:           util.ClientIPFromContext(c),
+	})
+}
+
+func (d *Deps) auditRechargeCompleted(c *gin.Context, opType string, uid uint64, settled *models.Order, channel string) {
+	if settled == nil {
+		return
+	}
+	msg := "在线充值到账 +¥" + strconv.FormatFloat(float64(settled.AmountCents)/100, 'f', 2, 64) +
+		" (渠道 " + channel + "，订单 #" + settled.OrderNo + ")"
+	d.Audit.LogEvent(services.AuditEvent{
+		OperatorType: opType,
+		OperatorID:   uid,
+		Action:       "orders.recharge",
+		TargetType:   "order",
+		TargetID:     settled.ID,
+		TargetName:   settled.OrderNo,
+		Status:       http.StatusOK,
+		Message:      msg,
+		IP:           util.ClientIPFromContext(c),
+	})
 }

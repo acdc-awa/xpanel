@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  CsBadge,
   CsButton,
-  CsCard,
-  CsCardGrid,
   CsContainer,
   CsDatePicker,
-  CsEmpty,
   CsInput,
   CsModal,
   CsOption,
@@ -16,10 +12,11 @@ import {
   CsPaginationBar,
   CsSelect,
   CsSpinner,
+  CsTable,
   CsTabs,
   CsToolbar,
 } from '@/components/cloudscape'
-import type { TabItem } from '@/components/cloudscape'
+import type { TabItem, TableColumn } from '@/components/cloudscape'
 import { exportAuditLogs, getAuditLog, getAuditLogs, type AuditLog } from '@/api/admin'
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
 import { formatDateTime } from '@/utils/timezone'
@@ -133,6 +130,7 @@ onMounted(load)
 
 // 翻译层：每行一次解析（摘要 + 字段表 + 大文本预览 + 分类元信息）
 interface RowView {
+  id: number
   row: AuditLog
   view: AuditView
   categoryName: string
@@ -154,13 +152,14 @@ const CATEGORY_META: Record<string, { color: RowView['categoryColor'] }> = {
 
 const rows = computed<RowView[]>(() =>
   list.value.map((row) => {
-    // 列表对超长 detail 做过截断（不是合法 JSON）：卡片只给提示，完整内容走「查看完整原文」
+    // 列表对超长 detail 做过截断（不是合法 JSON）：列表只给提示，完整内容走「查看原文」
     const view = row.detail_truncated
-      ? { ...renderAudit(row.action, '', row.target_name ?? ''), summary: '内容较长，已截断；点「查看完整原文」加载全文' }
+      ? { ...renderAudit(row.action, '', row.target_name ?? ''), summary: '内容较长，已截断；点「查看原文」加载全文' }
       : renderAudit(row.action, row.detail, row.target_name ?? '')
     const meta = getActionMeta(row.action, view.method, row.detail)
     const categoryMeta = row.category ? CATEGORY_META[row.category] : undefined
     return {
+      id: row.id,
       row,
       view,
       categoryName: row.category_label || meta.categoryName,
@@ -170,16 +169,41 @@ const rows = computed<RowView[]>(() =>
   }),
 )
 
-const CATEGORY_BADGE: Record<RowView['categoryColor'], 'blue' | 'green' | 'red' | 'grey'> = {
-  primary: 'blue',
-  info: 'grey',
-  success: 'green',
-  warning: 'grey',
-  danger: 'red',
+const auditColumns: TableColumn[] = [
+  { id: 'created_at', header: '时间', width: '155px' },
+  { id: 'category', header: '分类', width: '92px' },
+  { id: 'action', header: '操作', minWidth: '240px' },
+  { id: 'operator', header: '操作人', width: '185px' },
+  { id: 'target', header: '目标', width: '165px' },
+  { id: 'result', header: '结果', width: '88px' },
+  { id: 'ip', header: 'IP', width: '130px' },
+  { id: 'actions', header: '操作', width: '88px' },
+]
+
+const emptyText = computed(() =>
+  category.value ||
+  keyword.value.trim() ||
+  operatorType.value ||
+  operatorName.value ||
+  targetType.value ||
+  result.value ||
+  startTime.value ||
+  endTime.value
+    ? '无符合条件的审计日志'
+    : '暂无审计日志',
+)
+
+function hasDistinctSummary(rv: RowView) {
+  const s = rv.view.summary?.trim()
+  return Boolean(s && s !== '—' && s !== rv.title)
 }
 
-// 卡片内字段表最多展示条数，超出折叠进弹窗
-const CARD_FIELD_LIMIT = 6
+function actionTooltip(rv: RowView) {
+  const parts = [rv.title]
+  if (hasDistinctSummary(rv)) parts.push(rv.view.summary)
+  if (rv.row.action) parts.push(`动作码：${rv.row.action}`)
+  return parts.join('\n')
+}
 
 // 目标类型展示名（与后端 target_type 取值一一对应）
 const TARGET_LABELS: Record<string, string> = {
@@ -308,72 +332,68 @@ function fmtTime(t: string) {
     </CsToolbar>
 
     <CsContainer header="系统审计日志">
-      <div v-if="loading" class="state-block">
-        <CsSpinner size="large" />
-      </div>
-
-      <CsEmpty v-else-if="rows.length === 0" icon-name="file" description="暂无审计日志" />
-
-      <!-- 审计日志卡片网格（官方 ItemCard）：摘要 + 字段表 + 大文本预览 -->
-      <CsCardGrid v-else>
-        <CsCard v-for="rv in rows" :key="rv.row.id">
-          <template #header>
-            <div class="audit-head">
-              <span class="action-name">{{ rv.title }}</span>
-              <div class="audit-meta">
-                <CsBadge :color="CATEGORY_BADGE[rv.categoryColor]">{{ rv.categoryName }}</CsBadge>
-                <CsBadge :color="rv.row.operator_type === 'admin' ? 'severity-medium' : rv.row.operator_type === 'system' ? 'grey' : 'blue'">
-                  {{ rv.row.operator_type === 'admin' ? '管理员' : rv.row.operator_type === 'system' ? '系统' : '用户' }}
-                </CsBadge>
-                <button
-                  v-if="rv.row.operator_type !== 'system'"
-                  type="button"
-                  class="audit-operator audit-operator--link"
-                  :title="rv.row.operator_name ? `按操作人 ${rv.row.operator_name} 筛选` : undefined"
-                  @click="filterByOperator(rv.row.operator_name)"
-                >
-                  {{ rv.row.operator_name || `#${rv.row.operator_id}` }}
-                  <span v-if="rv.row.operator_name && rv.row.operator_id">#{{ rv.row.operator_id }}</span>
-                </button>
-                <CsBadge v-if="(rv.row.status ?? 0) >= 400" color="red">失败 {{ rv.row.status }}</CsBadge>
-              </div>
-              <code class="action-code">{{ rv.row.action }}</code>
-            </div>
-          </template>
-
-          <template #actions>
-            <code class="audit-ip" :title="rv.row.ip || undefined">{{ rv.row.ip || '—' }}</code>
-          </template>
-
-          <div v-if="rv.row.target_type" class="audit-target">
-            目标：{{ targetLabel(rv.row.target_type) }}
-            <span v-if="rv.row.target_name" class="audit-target-name">{{ rv.row.target_name }}</span>
-            <span v-if="rv.row.target_id" class="audit-target-id">#{{ rv.row.target_id }}</span>
+      <CsTable
+        compact
+        :wrap-lines="false"
+        :items="rows"
+        :columns="auditColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        track-by="id"
+        :empty-text="emptyText"
+      >
+        <template #cell-created_at="{ row }">
+          <span class="cell-mono">{{ fmtTime(row.row.created_at) }}</span>
+        </template>
+        <template #cell-category="{ row }">
+          <span :class="`category-${row.categoryColor}`">{{ row.categoryName }}</span>
+        </template>
+        <template #cell-action="{ row }">
+          <div class="audit-action-cell" :title="actionTooltip(row)">
+            <span class="audit-action-title">{{ row.title }}</span>
+            <span v-if="hasDistinctSummary(row)" class="audit-action-summary"> · {{ row.view.summary }}</span>
           </div>
-
-          <div class="audit-summary" :title="rv.view.summary">{{ rv.view.summary || '—' }}</div>
-
-          <div v-if="rv.view.fields.length" class="audit-fields">
-            <div v-for="(f, i) in rv.view.fields.slice(0, CARD_FIELD_LIMIT)" :key="i" class="audit-field-row">
-              <span class="af-label">{{ f.label }}</span>
-              <span class="af-value" :class="{ 'af-value--mono': f.mono }" :title="f.value">{{ f.value }}</span>
-            </div>
-          </div>
-
-          <div v-if="rv.view.texts.length" class="audit-text-chips">
-            <span v-for="(t, i) in rv.view.texts" :key="i" class="audit-text-chip" :title="t.preview" @click="openDetail(rv.row)">
-              <span>{{ t.title }}</span><span class="chip-meta">{{ t.meta }}</span>
+        </template>
+        <template #cell-operator="{ row }">
+          <div class="audit-operator-cell">
+            <span class="audit-operator-role">
+              {{ row.row.operator_type === 'admin' ? '管理员' : row.row.operator_type === 'system' ? '系统' : '用户' }}
             </span>
+            <button
+              v-if="row.row.operator_type !== 'system'"
+              type="button"
+              class="audit-operator--link"
+              :title="row.row.operator_name ? `按操作人 ${row.row.operator_name} 筛选` : undefined"
+              @click="filterByOperator(row.row.operator_name)"
+            >
+              {{ row.row.operator_name || `#${row.row.operator_id}` }}
+            </button>
           </div>
-
-          <template #footer>
-            <span class="audit-time">{{ fmtTime(rv.row.created_at) }}</span>
-            <CsButton variant="inline-link" @click="openDetail(rv.row)">
-              {{ rv.row.detail_truncated ? '查看完整原文' : rv.view.fields.length > CARD_FIELD_LIMIT ? `全部 ${rv.view.fields.length} 项 / 原文` : '展开 / 原文' }}
-            </CsButton>
-          </template>
-        </CsCard>
-      </CsCardGrid>
+        </template>
+        <template #cell-target="{ row }">
+          <span v-if="row.row.target_type" :title="[targetLabel(row.row.target_type), row.row.target_name, row.row.target_id ? `#${row.row.target_id}` : ''].filter(Boolean).join(' ')">
+            {{ targetLabel(row.row.target_type) }}
+            <template v-if="row.row.target_name"> {{ row.row.target_name }}</template>
+            <span v-if="row.row.target_id" class="cell-mono cell-muted"> #{{ row.row.target_id }}</span>
+          </span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-result="{ row }">
+          <span v-if="(row.row.status ?? 0) >= 400" class="status-fail">失败 {{ row.row.status }}</span>
+          <span v-else-if="(row.row.status ?? 0) > 0" class="status-success">成功</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+        <template #cell-ip="{ row }">
+          <span class="cell-mono" :class="{ 'cell-muted': !row.row.ip }" :title="row.row.ip || undefined">
+            {{ row.row.ip || '—' }}
+          </span>
+        </template>
+        <template #cell-actions="{ row }">
+          <CsButton variant="inline-link" @click="openDetail(row.row)">
+            {{ row.row.detail_truncated ? '查看原文' : '详情' }}
+          </CsButton>
+        </template>
+      </CsTable>
 
       <template #footer>
         <CsPaginationBar>
@@ -382,6 +402,7 @@ function fmtTime(t: string) {
             v-model:page-size="size"
             :total="total"
             :page-sizes="[10, 20, 50]"
+            simple
             layout="total, sizes, prev, pager, next"
             @current-change="load"
             @size-change="() => { page = 1; load() }"
@@ -441,40 +462,71 @@ function fmtTime(t: string) {
   text-align: center;
 }
 
-/* ================= 审计日志卡片（官方 ItemCard 口径） ================= */
-.audit-head {
-  min-inline-size: 0;
+/* ================= 审计日志列表单元格 ================= */
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.action-name {
-  display: block;
-  font-size: var(--font-size-heading-s-hm1hv8, 16px);
-  line-height: var(--line-height-heading-s-3z7qjv, 20px);
-  font-weight: 700;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  overflow-wrap: anywhere;
+.category-primary {
+  color: var(--color-text-status-info-su6k9n, #0972d3);
 }
 
-.audit-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 4px;
+.category-success {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
 }
 
-.audit-operator {
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
+.category-warning {
+  color: var(--color-text-status-warning-fabq6h, #855900);
+}
+
+.category-danger {
+  color: var(--color-text-status-error-ri38gt, #d91515);
+}
+
+.category-info {
   color: var(--color-text-body-secondary-66ygbb, #656871);
-  overflow-wrap: anywhere;
+}
+
+.status-success {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+}
+
+.status-fail {
+  color: var(--color-text-status-error-ri38gt, #d91515);
+  font-weight: 600;
+}
+
+.audit-action-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-inline-size: 420px;
+}
+
+.audit-action-title {
+  font-weight: 600;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
+
+.audit-action-summary {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.audit-operator-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-inline-size: 100%;
+  overflow: hidden;
+}
+
+.audit-operator-role {
+  flex: 0 0 auto;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 /* 操作人可点：按该邮箱筛选（搜索框搜不到名字的旧问题从此有入口） */
 .audit-operator--link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
   padding: 0;
   border: 0;
   background: none;
@@ -482,147 +534,13 @@ function fmtTime(t: string) {
   color: var(--color-text-link-default-qabnuk, #0972d3);
   cursor: pointer;
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .audit-operator--link:hover {
   text-decoration: underline;
-}
-
-.audit-target {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-end: 4px;
-  font-size: 12px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.audit-target-name {
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  overflow-wrap: anywhere;
-}
-
-.audit-target-id {
-  font-family: var(--font-family-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
-}
-
-.action-code {
-  display: inline-block;
-  margin-block-start: 4px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  overflow-wrap: anywhere;
-}
-
-.audit-ip {
-  display: block;
-  max-inline-size: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  white-space: nowrap;
-}
-
-/* 正文封顶：字段再多也不让单张卡片无限长，超出部分靠「展开 / 原文」看完整内容 */
-:deep(.cs-card__body) {
-  max-block-size: 240px;
-  overflow: hidden;
-}
-
-/* 翻译视图：摘要一句话 */
-.audit-summary {
-  padding: 8px 10px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 18px;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* 翻译视图：字段表 */
-.audit-fields {
-  margin-block-start: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.audit-field-row {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-
-  .af-label {
-    flex: 0 0 auto;
-    min-width: 64px;
-    color: var(--color-text-body-secondary-66ygbb, #656871);
-  }
-
-  .af-value {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: var(--color-text-body-default-b2us04, #0f141a);
-    overflow-wrap: anywhere;
-    /* 单字段最多两行，避免一段长 JSON / 长地址把整张卡片撑高 */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .af-value--mono {
-    font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  }
-}
-
-/* 翻译视图：大文本预览 chip（模板/正文/PEM） */
-.audit-text-chip .chip-meta {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.audit-text-chips {
-  margin-block-start: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.audit-text-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-link-default-qabnuk, #006ce0);
-  border: 1px dashed var(--color-border-divider-default-diwd4w, #dedee3);
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  padding: 2px 8px;
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--color-text-link-default-qabnuk, #006ce0);
-  }
-}
-
-.audit-time {
-  margin-inline-end: auto;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 

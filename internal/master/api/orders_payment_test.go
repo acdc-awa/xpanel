@@ -18,6 +18,7 @@ import (
 	"github.com/acdc-awa/xpanel/internal/master/api"
 	"github.com/acdc-awa/xpanel/internal/master/billing"
 	"github.com/acdc-awa/xpanel/internal/master/middleware"
+	"github.com/acdc-awa/xpanel/internal/master/services"
 	"github.com/acdc-awa/xpanel/internal/master/store/gormstore"
 	"github.com/acdc-awa/xpanel/internal/models"
 )
@@ -64,7 +65,7 @@ func setupOrderAPITest(t *testing.T, online *stubOnlineProvider) (*gorm.DB, *api
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Plan{}, &models.Order{}, &models.GiftCard{}, &models.BalanceLog{}, &models.TrafficLog{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Plan{}, &models.Order{}, &models.GiftCard{}, &models.BalanceLog{}, &models.TrafficLog{}, &models.AuditLog{}))
 
 	store := gormstore.NewBillingStore(db)
 	orderSvc := billing.NewOrderService(store)
@@ -79,6 +80,7 @@ func setupOrderAPITest(t *testing.T, online *stubOnlineProvider) (*gorm.DB, *api
 
 	deps := &api.Deps{
 		DB:       db,
+		Audit:    &services.AuditService{DB: db},
 		Order:    orderSvc,
 		GiftCard: giftCardSvc,
 		Payments: orderSvc.Payments,
@@ -247,4 +249,32 @@ func TestPlanCheckoutHidesThirdPartyProviders(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.ElementsMatch(t, []string{models.PaymentMethodBalance, models.PaymentMethodGiftCard}, resp.Data.AvailableMethods)
+}
+
+func TestPayUserOrder_WritesAuditLog(t *testing.T) {
+	db, deps, user := setupOrderAPITest(t, nil)
+	require.NoError(t, db.Model(&models.User{}).Where("id = ?", user.ID).Update("balance_cents", 5000).Error)
+
+	plan := models.Plan{Name: "月付", PriceCents: 1000, TrafficGB: 10, DurationDays: 30, Purchasable: true}
+	require.NoError(t, db.Create(&plan).Error)
+
+	planOrder, err := deps.Order.CreateOrder(user.ID, plan.ID, false)
+	require.NoError(t, err)
+
+	w := callUserJSON(deps.PayUserOrder, user.ID, http.MethodPost, "/user/orders/"+planOrder.OrderNo+"/pay",
+		gin.Params{{Key: "orderNo", Value: planOrder.OrderNo}}, map[string]any{"method": models.PaymentMethodBalance})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var logs []models.AuditLog
+	require.NoError(t, db.Order("id ASC").Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "user", logs[0].OperatorType)
+	assert.Equal(t, user.ID, logs[0].OperatorID)
+	assert.Equal(t, "order.pay_balance", logs[0].Action)
+	assert.Equal(t, models.AuditCategoryBilling, logs[0].Category)
+	assert.Equal(t, "order", logs[0].TargetType)
+	assert.Equal(t, planOrder.ID, logs[0].TargetID)
+	assert.Equal(t, planOrder.OrderNo, logs[0].TargetName)
+	assert.Contains(t, logs[0].Detail, "月付")
+	assert.Contains(t, logs[0].Detail, planOrder.OrderNo)
 }
