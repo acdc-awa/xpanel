@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import {
-  CsBadge,
   CsButton,
   CsCard,
-  CsProgressBar,
   CsStatusIndicator,
   CsTooltip,
   type BadgeColor,
@@ -12,23 +10,15 @@ import {
 import SortHandle from '@/components/base/SortHandle.vue'
 import type { ServerItem } from '@/api/admin'
 import { compareVersion } from '@/utils/version'
-import { formatBytes } from '@/utils/format'
-import { formatDateTime } from '@/utils/timezone'
 import { formatExpireDate, getExpiryStatus, isUrl, normalizeUrl } from '@/utils/vps'
 import { indicatorTypeOf, onlineChip, pushStateChip, xrayChip } from '@/utils/server-status'
 import {
   hasNicTrafficData,
   nicQuotaColor,
-  nicQuotaPercentText,
-  nicResetText,
   nicTrafficOf,
   nicTrafficTooltip,
   nicUsageParts,
 } from '@/utils/server-nic-traffic'
-
-// 服务器卡片：名称 → 状态条 → 地址/心跳/版本 → 操作。
-// 状态文案与配色全部来自 utils/server-status（与设置弹窗同一份），这里只负责排版。
-// 拖拽不在此组件内实现：抓起手把 dragstart 冒泡到列表容器，由页面统一重排（单一写入点）。
 
 const props = defineProps<{
   server: ServerItem
@@ -38,7 +28,6 @@ const props = defineProps<{
   canReorder?: boolean
   latestAgentVersion?: string
   latestXrayVersion?: string
-  inboundCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +35,6 @@ const emit = defineEmits<{
   (e: 'open-settings'): void
   (e: 'restart'): void
   (e: 'metrics'): void
-  (e: 'go-inbounds'): void
   (e: 'copy-text', text: string, label: string): void
 }>()
 
@@ -70,7 +58,6 @@ const xrayOutdated = computed(
     compareVersion(props.server.xray_version!, props.latestXrayVersion!) < 0,
 )
 
-// 版本提醒合并成一条徽章：Agent/Xray 同时落后也只有一项，状态条不会因此挤到第二行。
 const versionAlert = computed(() => {
   const names: string[] = []
   const detail: string[] = []
@@ -86,67 +73,62 @@ const versionAlert = computed(() => {
   return { text: `${names.join('、')} 有新版`, tip: detail.join('；') }
 })
 
-const heartbeat = computed(() =>
-  props.server.last_seen_at ? formatDateTime(props.server.last_seen_at, '—').slice(5, 16) : '—',
+const statusTip = computed(() =>
+  [
+    comm.value.tip || '与节点 Agent 连接正常',
+    `Xray：${xray.value.text}`,
+    `配置：${push.value.text}`,
+  ].join('；'),
 )
 
-// 连接数：-1 = 从未上报（旧 agent / 非 Linux 节点），展示为 —，不能显示成「0 个连接」
-const hasConns = computed(() => (props.server.conn_tcp_established ?? -1) >= 0)
-const connsText = computed(() => {
-  if (!hasConns.value) return '—'
-  return `TCP ${props.server.conn_tcp_established}，UDP ${props.server.conn_udp}`
-})
-const connsTip = computed(() => {
-  if (!hasConns.value) return '该节点尚未上报连接数（需要 agent 升级）'
-  return `TCP 已建立 ${props.server.conn_tcp_established}，连接表共 ${props.server.conn_tcp_total}（含 TIME_WAIT 等残留，不含 LISTEN）；UDP 为绑定的 socket 数，不是会话数`
+type TagTone = 'info' | 'warn' | 'error' | 'neutral'
+
+function toneOfColor(color: BadgeColor): TagTone {
+  switch (color) {
+    case 'red':
+    case 'severity-critical':
+    case 'severity-high':
+      return 'error'
+    case 'severity-medium':
+    case 'severity-low':
+      return 'warn'
+    case 'blue':
+      return 'info'
+    default:
+      return 'neutral'
+  }
+}
+
+const extraBadge = computed<{ text: string; tone: TagTone; tip: string } | null>(() => {
+  if (props.server.status === 1 && xray.value.color !== 'green') {
+    return { text: xray.value.text, tone: toneOfColor(xray.value.color), tip: xray.value.tip }
+  }
+  if (props.server.status === 1 && push.value.color !== 'green' && push.value.color !== 'grey') {
+    return { text: push.value.text, tone: toneOfColor(push.value.color), tip: push.value.tip }
+  }
+  if (versionAlert.value) {
+    return { text: versionAlert.value.text, tone: 'warn', tip: versionAlert.value.tip }
+  }
+  return null
 })
 
-const hasAsset = computed(
-  () =>
-    Boolean(props.server.expire_at) ||
-    Boolean(props.server.billing_cycle) ||
-    Boolean(props.server.price) ||
-    Boolean(props.server.idc_address),
-)
+// 周期流量圆圈（复用用户列表 18px 环形 SVG 语义）
+const RING_RADIUS = 7.5
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
-// 周期流量（网卡整机口径）：数据由列表接口附带，卡片只格式化；额度为 0 时不画进度条。
 const nic = computed(() => nicTrafficOf(props.server))
 const nicHasData = computed(() => hasNicTrafficData(nic.value))
 const nicUsage = computed(() =>
   nic.value && nicHasData.value ? nicUsageParts(nic.value) : { used: '—', quota: '' },
 )
-/** 无额度：额度侧显示 ∞（与进度条一样，只在 quota_bytes > 0 时才画）。 */
 const nicUnlimited = computed(() => Boolean(nic.value && nic.value.quota_bytes <= 0))
-const nicPercent = computed(() =>
-  nic.value && nic.value.quota_bytes > 0 && nicHasData.value ? nicQuotaPercentText(nic.value) : '',
-)
 const nicBarColor = computed(() => nicQuotaColor(nic.value))
 const nicTip = computed(() => nicTrafficTooltip(nic.value))
-const nicReset = computed(() => (nic.value && nicHasData.value ? nicResetText(nic.value) : ''))
-const nicDown = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.rx_bytes) : ''))
-const nicUp = computed(() => (nic.value && nicHasData.value ? formatBytes(nic.value.tx_bytes) : ''))
-
-/** 到期状态的颜色语义映射到 Cloudscape Badge（与 utils/vps 的 cls 一一对应）。 */
-function badgeColorOf(cls: string): BadgeColor {
-  switch (cls) {
-    case 'red':
-      return 'red'
-    case 'green':
-    case 'emerald':
-      return 'green'
-    case 'blue':
-      return 'blue'
-    case 'orange':
-    case 'deep-orange':
-    case 'yellow':
-    case 'amber':
-      return 'severity-medium'
-    default:
-      return 'grey'
-  }
-}
-
-const expiryBadgeColor = computed<BadgeColor>(() => (expiry.value ? badgeColorOf(expiry.value.cls) : 'grey'))
+const ringDashOffset = computed(() => {
+  if (!nic.value || nic.value.quota_bytes <= 0) return RING_CIRCUMFERENCE
+  const clamped = Math.min(100, Math.max(0, Number(nic.value.quota_percent) || 0))
+  return RING_CIRCUMFERENCE * (1 - clamped / 100)
+})
 
 function onRootClick() {
   if (props.selectMode) emit('toggle-select')
@@ -173,145 +155,98 @@ function onRootClick() {
           @dragend="dragging = false"
         />
         <button type="button" class="server-name" @click.stop="emit('open-settings')">{{ server.name }}</button>
-        <CsBadge v-if="server.location" color="blue">{{ server.location }}</CsBadge>
+        <span v-if="server.location" class="soft-tag soft-tag--info">{{ server.location }}</span>
       </div>
     </template>
 
-    <!-- 状态条：只放机器状态（在线 / Xray / 同步 / 版本提醒）。到期属于资产信息，
-         跟着到期日落在下方资产行，状态条因此最多 4 项，不会多出一枚孤零零的徽章。 -->
-    <div class="server-status-bar">
-      <CsTooltip :content="comm.tip">
-        <CsStatusIndicator :type="indicatorTypeOf(comm.color)" :text="comm.text" />
-      </CsTooltip>
-      <span class="server-status-sep" aria-hidden="true" />
-      <CsTooltip :content="xray.tip">
-        <CsStatusIndicator :type="indicatorTypeOf(xray.color)" :text="xray.text" />
-      </CsTooltip>
-      <span class="server-status-sep" aria-hidden="true" />
-      <CsTooltip :content="push.tip">
-        <CsStatusIndicator :type="indicatorTypeOf(push.color)" :text="push.text" />
-      </CsTooltip>
-      <CsTooltip v-if="versionAlert" :content="versionAlert.tip">
-        <CsBadge color="severity-medium" class="server-chip-help">{{ versionAlert.text }}</CsBadge>
-      </CsTooltip>
-    </div>
-
-    <div class="server-divider" aria-hidden="true" />
-
-    <div class="server-details">
-      <!-- 周期流量放在最上面：这是卡片上最常看的一块，地址与机器信息退到它下面。 -->
-      <div v-if="nic" class="server-traffic">
-        <CsTooltip :content="nicTip" class="traffic-head">
-          <span class="traffic-label">已用流量：</span>
-          <span class="traffic-value">
-            <strong :style="nicBarColor ? { color: nicBarColor } : {}">{{ nicUsage.used }}</strong>
-            <span v-if="nicUsage.quota" class="traffic-quota" :class="{ 'traffic-quota--inf': nicUnlimited }">
-              / {{ nicUsage.quota }}
-            </span>
-            <span v-if="nicPercent" class="traffic-percent">({{ nicPercent }})</span>
-          </span>
+    <template #actions>
+      <div class="server-card-status">
+        <CsTooltip :content="statusTip">
+          <CsStatusIndicator :type="indicatorTypeOf(comm.color)" :text="comm.text" />
         </CsTooltip>
-        <CsProgressBar
-          v-if="nicHasData && nic.quota_bytes > 0"
-          :value="nic.quota_percent"
-          :bar-height="5"
-          hide-text
-          :color="nicBarColor"
-          :aria-label="`周期流量已用 ${nicPercent}`"
-        />
-        <!-- 明细只留「双向用量 + 还剩几天重置」；完整周期区间与数据完整性交给头部 tooltip -->
-        <div v-if="nicHasData" class="traffic-meta">
-          <span class="traffic-split">
-            <span>↓ {{ nicDown }}</span>
-            <span>↑ {{ nicUp }}</span>
-          </span>
-          <span v-if="nicReset" class="traffic-reset">{{ nicReset }}</span>
-        </div>
+        <CsTooltip v-if="extraBadge" :content="extraBadge.tip">
+          <span class="soft-tag server-chip-help" :class="`soft-tag--${extraBadge.tone}`">{{ extraBadge.text }}</span>
+        </CsTooltip>
+      </div>
+    </template>
+
+    <div class="server-card-body">
+      <div class="server-traffic-row">
+        <span class="server-field-label">周期流量</span>
+        <CsTooltip :content="nicTip">
+          <div v-if="nic && nicHasData" class="traffic-cell">
+            <svg
+              v-if="nic.quota_bytes > 0"
+              class="traffic-ring"
+              viewBox="0 0 20 20"
+              aria-hidden="true"
+            >
+              <circle class="traffic-ring-track" cx="10" cy="10" r="7.5" />
+              <circle
+                v-if="nic.quota_used_bytes > 0"
+                class="traffic-ring-fill"
+                cx="10"
+                cy="10"
+                r="7.5"
+                transform="rotate(-90 10 10)"
+                :stroke-dasharray="RING_CIRCUMFERENCE"
+                :stroke-dashoffset="ringDashOffset"
+                :style="nicBarColor ? { stroke: nicBarColor } : undefined"
+              />
+            </svg>
+            <span class="traffic-text cell-mono">
+              <strong :style="nicBarColor ? { color: nicBarColor } : undefined">{{ nicUsage.used }}</strong>
+              <span> / </span>
+              <span v-if="!nicUnlimited">{{ nicUsage.quota }}</span>
+              <span v-else class="traffic-inf">∞</span>
+            </span>
+          </div>
+          <span v-else class="cell-muted">—</span>
+        </CsTooltip>
       </div>
 
-      <!-- 分隔符是独立元素，不归属任何一块：上下留白由 .server-details 的 gap 统一给。 -->
-      <div v-if="nic" class="server-divider" aria-hidden="true" />
-
-      <div class="server-host-row">
-        <span class="server-label">服务器地址</span>
-        <CsButton
-          variant="inline-link"
-          icon-name="copy"
-          class="server-host"
-          @click.stop="emit('copy-text', server.host, '服务器地址')"
-        >
-          <span class="cs-text-mono">{{ server.host }}</span>
-        </CsButton>
-      </div>
-
-      <div class="server-meta">
-        <span class="server-meta-item">
-          <span class="server-label">心跳</span>
-          <span class="cs-text-mono server-meta-value">{{ heartbeat }}</span>
-        </span>
-        <span class="server-meta-item">
-          <span class="server-label">Agent</span>
-          <span class="cs-text-mono server-meta-value">{{ server.agent_version || '—' }}</span>
-        </span>
-        <span class="server-meta-item">
-          <span class="server-label">Xray</span>
-          <span class="cs-text-mono server-meta-value">{{ server.xray_version || '—' }}</span>
-        </span>
-        <span class="server-meta-item">
-          <CsTooltip :content="connsTip">
-            <span class="server-label">连接</span>
-            <span class="cs-text-mono server-meta-value server-meta-conns">{{ connsText }}</span>
-          </CsTooltip>
-        </span>
-        <span class="server-meta-item">
-          <span class="server-label">入站</span>
-          <CsButton variant="inline-link" class="server-inbound-link" @click.stop="emit('go-inbounds')">
-            <span class="cs-text-mono">{{ inboundCount ?? 0 }}</span> 个
-          </CsButton>
-        </span>
-      </div>
-
-      <div v-if="hasAsset" class="server-asset">
-        <!-- 到期提醒跟着到期日本身走：日期变色 + 剩余天数徽章放在同一处，不再散落到状态条 -->
+      <div v-if="server.expire_at || server.idc_address" class="server-asset-row">
         <span v-if="server.expire_at" class="server-expiry">
+          <span class="server-field-label">到期</span>
           <span
-            class="cs-text-mono"
-            :style="expiry?.isUrgent ? { color: expiry.color, fontWeight: 600 } : {}"
+            class="cell-mono expiry-date"
+            :style="expiry?.isUrgent ? { color: expiry.color, fontWeight: 600 } : undefined"
             :title="expiry?.tip || `到期日：${formatExpireDate(server.expire_at)}`"
           >
             {{ formatExpireDate(server.expire_at) }}
           </span>
           <CsTooltip v-if="expiry?.isUrgent" :content="expiry.tip">
-            <CsBadge :color="expiryBadgeColor" class="server-chip-help">{{ expiry.text }}</CsBadge>
+            <span class="expiry-note server-chip-help" :style="{ color: expiry.color }">{{ expiry.text }}</span>
           </CsTooltip>
         </span>
-        <CsBadge v-if="server.billing_cycle" color="grey">{{ server.billing_cycle }}</CsBadge>
-        <span v-if="server.price" class="cs-text-mono server-price">{{ server.price }}</span>
-        <CsButton
-          v-if="server.idc_address && isUrl(server.idc_address)"
-          variant="inline-link"
-          icon-name="external"
-          :href="normalizeUrl(server.idc_address)"
-          target="_blank"
-          @click.stop
-        >
-          IDC 控制台
-        </CsButton>
-        <CsButton
-          v-else-if="server.idc_address"
-          variant="inline-link"
-          icon-name="copy"
-          @click.stop="emit('copy-text', server.idc_address || '', 'IDC 地址')"
-        >
-          {{ server.idc_address }}
-        </CsButton>
+
+        <span v-if="server.idc_address" class="server-idc">
+          <CsButton
+            v-if="isUrl(server.idc_address)"
+            variant="inline-link"
+            icon-name="external"
+            :href="normalizeUrl(server.idc_address)"
+            target="_blank"
+            @click.stop
+          >
+            IDC 控制台
+          </CsButton>
+          <CsButton
+            v-else
+            variant="inline-link"
+            icon-name="copy"
+            @click.stop="emit('copy-text', server.idc_address || '', 'IDC 地址')"
+          >
+            {{ server.idc_address }}
+          </CsButton>
+        </span>
       </div>
     </div>
 
     <template #footer>
-      <CsButton icon-name="settings" @click.stop="emit('open-settings')">设置</CsButton>
-      <CsButton icon-name="refresh" @click.stop="emit('restart')">重启</CsButton>
-      <CsButton icon-name="view-horizontal" @click.stop="emit('metrics')">监控</CsButton>
+      <CsButton :wrap-text="false" @click.stop="emit('metrics')">监控</CsButton>
+      <CsButton :wrap-text="false" @click.stop="emit('open-settings')">设置</CsButton>
+      <CsButton :wrap-text="false" @click.stop="emit('restart')">重启</CsButton>
     </template>
   </CsCard>
 </template>
@@ -329,8 +264,6 @@ function onRootClick() {
 .server-card--selected,
 .server-card--select-mode.server-card--selected,
 .server-card--select-mode.server-card--selected:hover {
-  // 选中只靠边缘发光，不放勾选标记。厂商 item-card 的 box-shadow 规则带 :not(#\9)（ID 级优先级）
-  // 且值恒为 none，不加 !important 会被整条吃掉。
   box-shadow:
     0 0 0 2px var(--color-text-link-default-qabnuk, #0972d3),
     0 0 18px 4px rgba(9, 114, 211, 0.45) !important;
@@ -355,7 +288,7 @@ function onRootClick() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 6px 8px;
   min-inline-size: 0;
 }
 
@@ -365,8 +298,8 @@ function onRootClick() {
   border: none;
   background: none;
   font-family: inherit;
-  font-size: 20px;
-  line-height: 28px;
+  font-size: 16px;
+  line-height: 22px;
   font-weight: 700;
   color: var(--color-text-link-default-qabnuk, #0972d3);
   text-align: start;
@@ -378,181 +311,120 @@ function onRootClick() {
   }
 }
 
-.server-status-bar {
+.server-card-status {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.server-status-sep {
-  flex: none;
-  inline-size: 1px;
-  block-size: 14px;
-  background: var(--color-border-divider-default-diwd4w, #dedee3);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .server-chip-help {
   cursor: help;
 }
 
-/* 分隔符：纯排版元素，不属于上下任何一块。详情区里上下留白交给 .server-details 的 gap，
-   自身不再带外边距，否则 12px gap 会再叠一层。 */
-.server-divider {
-  margin-block: 12px;
-  border-block-start: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
+.soft-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.server-details > .server-divider {
-  margin-block: 0;
+.soft-tag--info {
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  background: var(--x-primary-soft, #f0fbff);
+  border-color: rgba(0, 108, 224, 0.25);
 }
 
-.server-details {
+.soft-tag--warn {
+  color: var(--color-text-status-warning-fabq6h, #8d6605);
+  background: var(--x-warning-soft, #fffbeb);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.soft-tag--error {
+  color: var(--color-text-status-error-ri38gt, #db0000);
+  background: var(--x-danger-soft, #fef2f2);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.soft-tag--neutral {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  background: var(--x-card-soft, #f8fafc);
+  border-color: var(--color-border-divider-default-diwd4w, #e9ebed);
+}
+
+.server-card-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-inline-size: 0;
 }
 
-.server-host-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-inline-size: 0;
-}
-
-.server-label {
-  flex: none;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.server-host {
-  min-inline-size: 0;
-  font-size: 14px;
-  text-align: start;
-  overflow-wrap: anywhere;
-}
-
-.server-meta {
+.server-traffic-row,
+.server-asset-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 22px;
-  min-inline-size: 0;
-}
-
-.server-meta-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  min-inline-size: 0;
-}
-
-.server-meta-value {
-  font-size: 14px;
-  line-height: 18px;
-}
-
-/* Tooltip 触发层是 inline-flex 容器，父级 .server-meta-item 的 gap 进不到内部 */
-.server-meta-conns {
-  margin-inline-start: 8px;
-}
-
-.server-inbound-link {
-  font-size: 14px;
-}
-
-/* cs-text-mono 自带 12px/16px：卡内所有「数值」都按所在行的字号来，否则同样是一行里的读数，
-   地址、接入点数、到期日、价格会比心跳/版本小一号，整卡字号读起来不齐。 */
-.server-host,
-.server-inbound-link,
-.server-expiry {
-  .cs-text-mono {
-    font-size: 14px;
-    line-height: 18px;
-  }
-}
-
-/* 周期流量（网卡整机口径）：块本身不带内外边距与分隔线，与相邻块的分隔交给独立的
-   .server-divider 元素 + .server-details 的 12px gap，间距口径全卡一致。 */
-.server-traffic {
-  min-inline-size: 0;
-}
-
-.traffic-head {
-  inline-size: 100%;
   justify-content: space-between;
-  gap: 8px;
-  /* 进度条是紧凑模式（容器高度 auto），条形直接贴着头行，留白只由这里给。 */
-  margin-block-end: 10px;
+  gap: 6px 10px;
+  min-inline-size: 0;
+}
+
+.server-field-label {
+  flex: none;
   font-size: 13px;
   line-height: 18px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.traffic-label {
+.traffic-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  vertical-align: middle;
+}
+
+.traffic-ring {
+  width: 18px;
+  height: 18px;
   flex: none;
 }
 
-.traffic-value {
-  min-inline-size: 0;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+.traffic-ring-track {
+  fill: none;
+  stroke: var(--color-border-divider-default-diwd4w, #e9ebed);
+  stroke-width: 2.5;
+}
+
+.traffic-ring-fill {
+  fill: none;
+  stroke: var(--color-text-link-default-qabnuk, #006ce0);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+
+.traffic-text {
   font-size: 14px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-body-default-b2us04, #0f141a);
-  text-align: end;
 }
 
-.traffic-percent {
-  margin-inline-start: 2px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-/* 额度无穷：∞ 在等宽字体里又小又偏下，改正文字体并提一档，否则它比读数矮一截还贴基线。 */
-.traffic-quota--inf {
+.traffic-inf {
   font-family: var(--font-family-base-c9u5cr, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   font-size: 16px;
 }
 
-.traffic-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
-  margin-block-start: 6px;
-}
-
-.traffic-split,
-.traffic-reset {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 13px;
-  line-height: 18px;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.traffic-split {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-.traffic-reset {
-  margin-inline-start: auto;
-  text-align: end;
-}
-
-.server-asset {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  font-size: 14px;
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
 .server-expiry {
@@ -562,28 +434,36 @@ function onRootClick() {
   gap: 6px;
 }
 
-.server-price {
-  font-size: 14px;
+.expiry-date {
+  font-size: 13px;
   line-height: 18px;
-  font-weight: 600;
-  color: var(--color-text-link-default-qabnuk, #0972d3);
+  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 
-/* 卡片自身三段的内边距：默认 header→body 只留 4px，字变大后挤在一起，
-   这里统一放大，让「标题 / 状态+信息 / 操作」三段呼吸开。 */
+.expiry-note {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.server-idc {
+  margin-inline-start: auto;
+  font-size: 13px;
+}
+
 :deep(.cs-card__header) {
-  padding-block: 18px 10px !important;
+  padding-block: 14px 8px !important;
 }
 
 :deep(.cs-card__body) {
-  padding-block: 16px !important;
+  padding-block: 8px 12px !important;
 }
 
 :deep(.cs-card__footer) {
-  padding-block: 12px 18px !important;
+  padding-block: 10px 14px !important;
 }
 
 :deep(.cs-card__footer button) {
-  font-size: 14px !important;
+  font-size: 13px !important;
 }
 </style>

@@ -6,7 +6,6 @@ import {
   CsAlert,
   CsButton,
   CsCardGrid,
-  CsCheckbox,
   CsColumnLayout,
   CsContainer,
   CsDatePicker,
@@ -30,6 +29,7 @@ import {
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import ServerCard from './servers/ServerCard.vue'
+import ServerTable from './servers/ServerTable.vue'
 import BatchActionModal, {
   type BatchActionItem,
   type BatchActionKind,
@@ -52,6 +52,7 @@ import {
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { useCardDragSort } from '@/composables/useCardDragSort'
+import { useTableRowDrag } from '@/composables/useTableRowDrag'
 import { compareVersion } from '@/utils/version'
 import { getExpiryStatus } from '@/utils/vps'
 
@@ -84,10 +85,6 @@ async function loadInboundCounts() {
   } catch {
     /* 计数失败不阻塞列表 */
   }
-}
-
-function inboundCount(id: number) {
-  return inboundCountMap.value[id] ?? 0
 }
 
 function goInbounds(row: any) {
@@ -185,6 +182,8 @@ async function load() {
     const { data } = await getServers()
     if (data.code === 0) {
       list.value = data.data.items
+      const validIds = new Set(list.value.map((s) => s.id))
+      selectedIds.value = selectedIds.value.filter((id) => validIds.has(id))
       // 设置弹窗持有的是快照，列表刷新后按 id 回填，保存/换版本后立即反映
       if (settingsServer.value) {
         settingsServer.value = list.value.find((s) => s.id === settingsServer.value!.id) ?? settingsServer.value
@@ -308,8 +307,14 @@ const selectedIds = ref<number[]>([])
 const selectMode = ref(false)
 const selectedServers = computed(() => list.value.filter((s) => selectedIds.value.includes(s.id)))
 const selectedOfflineCount = computed(() => selectedServers.value.filter((s) => s.status !== 1).length)
+const selectedInFilteredCount = computed(
+  () => filtered.value.filter((s) => selectedIds.value.includes(s.id)).length,
+)
 const allSelected = computed(
-  () => filtered.value.length > 0 && filtered.value.every((s) => selectedIds.value.includes(s.id)),
+  () => filtered.value.length > 0 && selectedInFilteredCount.value === filtered.value.length,
+)
+const indeterminate = computed(
+  () => selectedInFilteredCount.value > 0 && !allSelected.value,
 )
 
 function toggleSelect(id: number, val: boolean) {
@@ -339,8 +344,15 @@ const drawerTopOffset = ref(0)
 let mobileMq: MediaQueryList | null = null
 
 const onMobileMq = () => {
-  isMobile.value = window.matchMedia(MQ.tablet).matches || window.innerWidth <= BP.tabletMin
-  if (!isMobile.value) actionDrawerOpen.value = false
+  const nextMobile = window.matchMedia(MQ.tablet).matches || window.innerWidth <= BP.tabletMin
+  if (nextMobile !== isMobile.value) {
+    isMobile.value = nextMobile
+    selectMode.value = false
+    actionDrawerOpen.value = false
+    if (nextMobile) {
+      selectedIds.value = []
+    }
+  }
 }
 
 onMounted(() => {
@@ -382,14 +394,43 @@ function tooMany(): boolean {
 
 // ---- 排序（拖拽）----
 // 唯一写入点：拖完一次性提交全量顺序，dashboard 的服务器监测按同一个 sort_order 取数。
-// 筛选/搜索/多选时禁用——那几种状态下「插到哪」没有确定语义。
-const reorderEnabled = computed(
-  () => !selectMode.value && !keyword.value.trim() && statusFilter.value === 'all' && !filterExpiring.value,
+// 筛选/搜索/勾选/多选时禁用——那几种状态下「插到哪」没有确定语义。
+const desktopReorderEnabled = computed(
+  () =>
+    !isMobile.value &&
+    selectedIds.value.length === 0 &&
+    !keyword.value.trim() &&
+    statusFilter.value === 'all' &&
+    !filterExpiring.value,
 )
-const { canReorder, onDragStart, onDragOver, onDrop, onDragEnd } = useCardDragSort({
+const {
+  canReorder: canTableReorder,
+  draggingId: tableDraggingId,
+  onPointerDown: onTablePointerDown,
+} = useTableRowDrag({
+  list,
+  enabled: desktopReorderEnabled,
+  persist: reorderServers,
+})
+
+const mobileReorderEnabled = computed(
+  () =>
+    isMobile.value &&
+    !selectMode.value &&
+    !keyword.value.trim() &&
+    statusFilter.value === 'all' &&
+    !filterExpiring.value,
+)
+const {
+  canReorder: canCardReorder,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+} = useCardDragSort({
   list,
   idOf: (s) => s.id,
-  enabled: reorderEnabled,
+  enabled: mobileReorderEnabled,
   persist: reorderServers,
 })
 
@@ -586,40 +627,36 @@ const billingCycleOptions = [
     </CsAlert>
 
     <CsContainer>
-      <!-- 标题行：左侧标题 + 紧贴标题的「多选 / 取消多选」（多选态再加全选与蓝色计数），
-           右侧常态放状态筛选、多选态放三个批量动作（窄屏改由底部操作栏 + 抽屉承载）。
-           注意：CsContainer 的 #actions 只挂在它自带的默认标题上，一旦传入 #header 就整块不渲染，
-           所以右侧控件必须写在这一行里，不能再用 #actions。 -->
+      <!-- 标题行：
+           - 桌面端：行头常驻复选框；常态放状态筛选，一旦勾选任意行左侧显示计数+取消选择，右侧切为三个批量动作。
+           - 移动端：保留「多选 / 取消多选」按钮，批量动作走底部操作栏与抽屉。
+           注意：CsContainer 的 #actions 只挂在默认标题上，传入 #header 后右侧控件需直接写在此行内。 -->
       <template #header>
         <div class="server-list-head">
           <span class="server-list-title"><CsHeader variant="h2">服务器列表</CsHeader></span>
           <CsButton
+            v-if="isMobile"
             :variant="selectMode ? 'primary' : 'normal'"
             icon-name="check"
             @click="toggleSelectMode"
           >{{ selectMode ? '取消多选' : '多选' }}</CsButton>
-          <template v-if="selectMode && !isMobile">
-            <CsCheckbox
-              :model-value="allSelected"
-              :indeterminate="selectedIds.length > 0 && !allSelected"
-              :disabled="filtered.length === 0"
-              @change="(v: boolean) => toggleSelectAll(!!v)"
-            >全选</CsCheckbox>
+          <template v-else-if="selectedIds.length > 0">
             <span class="server-selected-count">已选 {{ selectedIds.length }} 台服务器</span>
+            <CsButton variant="inline-link" @click="selectedIds = []">取消选择</CsButton>
           </template>
 
-          <div v-if="!selectMode || !isMobile" class="server-list-tools">
+          <div v-if="!isMobile || !selectMode" class="server-list-tools">
             <CsSegmentedControl
-              v-if="!selectMode"
+              v-if="isMobile ? !selectMode : selectedIds.length === 0"
               :model-value="statusFilter"
               :options="statusFilterOptions"
               label="按状态筛选服务器"
               @update:model-value="onStatusFilterChange"
             />
             <div v-else-if="!isMobile" class="server-select-actions">
-              <CsButton icon-name="upload" :disabled="!selectedIds.length" @click="batchAgentUpgrade">升级 Agent</CsButton>
-              <CsButton icon-name="upload" :disabled="!selectedIds.length" @click="openXrayUpgrade">升级 Xray</CsButton>
-              <CsButton icon-name="refresh" :disabled="!selectedIds.length" @click="batchRestartXray">重启 Xray</CsButton>
+              <CsButton icon-name="upload" @click="batchAgentUpgrade">升级 Agent</CsButton>
+              <CsButton icon-name="upload" @click="openXrayUpgrade">升级 Xray</CsButton>
+              <CsButton icon-name="refresh" @click="batchRestartXray">重启 Xray</CsButton>
             </div>
           </div>
         </div>
@@ -633,9 +670,30 @@ const billingCycleOptions = [
         :description="keyword ? '未找到匹配服务器' : '尚未添加服务器，点击右上角「新增服务器」'"
       />
 
+      <ServerTable
+        v-else-if="!isMobile"
+        :servers="filtered"
+        :selected-ids="selectedIds"
+        :all-selected="allSelected"
+        :indeterminate="indeterminate"
+        :can-reorder="canTableReorder"
+        :dragging-id="tableDraggingId"
+        :latest-agent-version="latestAgentVersion"
+        :latest-xray-version="latestXrayVersion"
+        :inbound-count-map="inboundCountMap"
+        @toggle-select="toggleSelect"
+        @toggle-select-all="toggleSelectAll"
+        @open-settings="openSettings"
+        @restart="restartXray"
+        @metrics="openMetrics"
+        @go-inbounds="goInbounds"
+        @copy-text="copyText"
+        @pointerdown="onTablePointerDown"
+      />
+
       <CsCardGrid
         v-else
-        :min-width="360"
+        :min-width="320"
         @dragstart="onDragStart"
         @dragover="onDragOver"
         @drop="onDrop"
@@ -647,15 +705,13 @@ const billingCycleOptions = [
           :server="row"
           :selected="selectedIds.includes(row.id)"
           :select-mode="selectMode"
-          :can-reorder="canReorder"
+          :can-reorder="canCardReorder"
           :latest-agent-version="latestAgentVersion"
           :latest-xray-version="latestXrayVersion"
-          :inbound-count="inboundCount(row.id)"
           @toggle-select="toggleSelect(row.id, !selectedIds.includes(row.id))"
           @open-settings="openSettings(row)"
           @restart="restartXray(row)"
           @metrics="openMetrics(row)"
-          @go-inbounds="goInbounds(row)"
           @copy-text="copyText"
         />
       </CsCardGrid>
