@@ -74,7 +74,7 @@ async function handleLogout() {
     <div class="user-menu-header">
       <div class="u-name" :title="auth.displayName">{{ auth.displayName }}</div>
       <div class="u-sub">
-        <CsBadge :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
+        <CsBadge class="nowrap-badge" :color="auth.role === 'admin' ? 'blue' : 'grey'">{{ roleLabel }}</CsBadge>
         <span v-if="footnote" class="u-footnote">{{ footnote }}</span>
       </div>
     </div>
@@ -96,8 +96,9 @@ async function handleLogout() {
   block-size: 32px;
   border-radius: 50%;
   border: 2px solid transparent;
-  background: var(--color-background-avatar-default-2c3w8u, #0f141a);
-  color: var(--color-text-inverted-fflnsl, #ffffff);
+  /* 暗黑模式下 Cloudscape 的头像底色与 inverted 文字会同时变深，改用亮暗都够深的品牌蓝 + 纯白字 */
+  background: #006ce0;
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -141,6 +142,11 @@ async function handleLogout() {
   align-items: center;
   gap: var(--space-xs-m9b7jf, 8px);
   min-inline-size: 0;
+}
+
+.nowrap-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .u-footnote {

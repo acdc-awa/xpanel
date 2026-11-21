@@ -4,6 +4,7 @@ import { formatMoney, formatOrderContent } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
 import { toast } from '@/components/cloudscape'
 import {
+  CsBadge,
   CsButton,
   CsContainer,
   CsInput,
@@ -15,7 +16,7 @@ import {
   CsTable,
   CsToolbar,
 } from '@/components/cloudscape'
-import type { TableColumn } from '@/components/cloudscape'
+import type { BadgeColor, TableColumn } from '@/components/cloudscape'
 import { getOrders, type Order } from '@/api/admin'
 import { errMsg } from '@/api/http'
 
@@ -66,10 +67,12 @@ function resetFilters() {
 
 onMounted(load)
 
+const hasFilters = computed(() =>
+  Boolean(filterStatus.value || filterOrderType.value || keyword.value.trim()),
+)
+
 const emptyText = computed(() =>
-  filterStatus.value || filterOrderType.value || keyword.value.trim()
-    ? '未找到符合条件的订单记录'
-    : '暂无订购记录',
+  hasFilters.value ? '未找到符合条件的订单记录' : '暂无订购记录',
 )
 
 const orderColumns: TableColumn[] = [
@@ -84,10 +87,10 @@ const orderColumns: TableColumn[] = [
   { id: 'order_no', header: '订单号' },
 ]
 
-const orderStatusMap: Record<string, { className: string; text: string }> = {
-  pending: { className: 'order-status-pending', text: '待支付' },
-  paid: { className: 'order-status-paid', text: '已支付' },
-  cancelled: { className: 'order-status-cancelled', text: '已取消' },
+const orderStatusMap: Record<string, { color: BadgeColor; text: string }> = {
+  pending: { color: 'severity-medium', text: '待支付' },
+  paid: { color: 'green', text: '已支付' },
+  cancelled: { color: 'grey', text: '已取消' },
 }
 
 function fmtTime(t: string | null) {
@@ -118,7 +121,7 @@ function orderMethodLabel(row: Order) {
           v-model="filterOrderType"
           placeholder="全部类型"
           clearable
-          style="width: 130px"
+          style="width: min(100%, 130px)"
           @change="onFilterChange"
         >
           <CsOption label="全部类型" value="" />
@@ -129,25 +132,24 @@ function orderMethodLabel(row: Order) {
           v-model="filterStatus"
           placeholder="全部状态"
           clearable
-          style="width: 140px"
+          style="width: min(100%, 140px)"
           @change="onFilterChange"
         >
           <CsOption label="全部状态" value="" />
-          <CsOption label="已支付 (paid)" value="paid" />
-          <CsOption label="待支付 (pending)" value="pending" />
-          <CsOption label="已取消 (cancelled)" value="cancelled" />
+          <CsOption label="已支付" value="paid" />
+          <CsOption label="待支付" value="pending" />
+          <CsOption label="已取消" value="cancelled" />
         </CsSelect>
         <CsInput
           v-model="keyword"
           placeholder="搜索流水号 / 邮箱..."
           clearable
           prefix-icon="search"
-          style="width: 220px"
+          style="width: min(100%, 220px)"
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
         />
-        <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
-        <CsButton @click="resetFilters">重置</CsButton>
+        <CsButton v-if="hasFilters" @click="resetFilters">重置</CsButton>
       <CsButton icon-name="refresh" @click="load">刷新</CsButton>
     </CsToolbar>
 
@@ -173,9 +175,9 @@ function orderMethodLabel(row: Order) {
           <span v-else class="cell-muted">—</span>
         </template>
         <template #cell-status="{ row }">
-          <span :class="orderStatusMap[row.status]?.className ?? 'order-status-cancelled'">
+          <CsBadge class="nowrap-badge" :color="orderStatusMap[row.status]?.color ?? 'grey'">
             {{ orderStatusMap[row.status]?.text ?? row.status }}
-          </span>
+          </CsBadge>
         </template>
         <template #cell-amount="{ row }">
           <span
@@ -207,7 +209,7 @@ function orderMethodLabel(row: Order) {
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
-            :page-sizes="[10, 20, 50]"
+            :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next"
             simple
             @current-change="load"
@@ -234,17 +236,5 @@ function orderMethodLabel(row: Order) {
 
 .amount-unchanged {
   color: var(--color-text-body-default-b2us04, #0f141a);
-}
-
-.order-status-paid {
-  color: var(--color-text-status-success-1i2jf8, #00802f);
-}
-
-.order-status-pending {
-  color: var(--color-text-status-warning-fabq6h, #855900);
-}
-
-.order-status-cancelled {
-  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 </style>

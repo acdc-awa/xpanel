@@ -4,6 +4,7 @@ import CsButton from '@/components/cloudscape/Button.vue'
 import CsIcon from '@/components/cloudscape/Icon.vue'
 import CsModal from '@/components/cloudscape/Modal.vue'
 import CsSlider from '@/components/cloudscape/Slider.vue'
+import { toast } from '@/components/cloudscape'
 
 const props = withDefaults(
   defineProps<{
@@ -185,6 +186,8 @@ watch(
 )
 
 function loadImage(src: string) {
+  imageLoaded.value = false
+  imgObj.value = null
   const img = new Image()
   img.crossOrigin = 'anonymous'
   img.onload = () => {
@@ -195,6 +198,11 @@ function loadImage(src: string) {
       draw()
       updatePreview()
     })
+  }
+  img.onerror = () => {
+    imgObj.value = null
+    imageLoaded.value = false
+    toast.error('图片加载失败，请检查图片格式或重新选择')
   }
   img.src = src
 }
@@ -453,9 +461,9 @@ function handleConfirm() {
 
         <div class="action-btn-row">
           <div class="rotate-row">
-            <CsButton icon-name="undo" @click="rotate(-90)">向左旋转</CsButton>
-            <CsButton icon-name="redo" @click="rotate(90)">向右旋转</CsButton>
-            <CsButton icon-name="refresh" @click="() => { resetTransform(); draw(); updatePreview() }">
+            <CsButton icon-name="undo" :wrap-text="false" @click="rotate(-90)">向左旋转</CsButton>
+            <CsButton icon-name="redo" :wrap-text="false" @click="rotate(90)">向右旋转</CsButton>
+            <CsButton icon-name="refresh" :wrap-text="false" @click="() => { resetTransform(); draw(); updatePreview() }">
               复位
             </CsButton>
           </div>
@@ -478,7 +486,7 @@ function handleConfirm() {
 
     <template #footer>
       <CsButton @click="visible = false">取消</CsButton>
-      <CsButton variant="primary" icon-name="check" @click="handleConfirm">
+      <CsButton variant="primary" icon-name="check" :disabled="!imageLoaded" @click="handleConfirm">
         完成裁剪并应用
       </CsButton>
     </template>
@@ -495,7 +503,7 @@ function handleConfirm() {
 
 .cropper-stage {
   position: relative;
-  border-radius: var(--x-radius, 12px);
+  border-radius: var(--x-radius, 8px);
   overflow: hidden;
   background: #1e1e24;
   cursor: grab;
@@ -533,7 +541,7 @@ function handleConfirm() {
 .crop-box {
   position: relative;
   border: 2px solid var(--color-text-status-info-su6k9n, #006ce0);
-  border-radius: var(--x-radius-lg, 14px);
+  border-radius: var(--x-radius-lg, 16px);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
   box-sizing: border-box;
 }
@@ -631,6 +639,14 @@ function handleConfirm() {
   background-position: 0 0, 4px 4px;
   background-size: 8px 8px;
   border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+:global(html.dark) .preview-canvas {
+  background-color: #1e293b;
+  background-image:
+    linear-gradient(45deg, #334155 25%, transparent 25%, transparent 75%, #334155 75%),
+    linear-gradient(45deg, #334155 25%, transparent 25%, transparent 75%, #334155 75%);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .size-hint {

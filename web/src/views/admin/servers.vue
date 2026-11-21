@@ -463,7 +463,7 @@ async function batchAgentUpgrade() {
   const lines = [
     `已选 ${selected.length} 台服务器，目标版本：${latest || '官方最新（提交时在线获取）'}。`,
     `可升级 ${outdated.length + unknown.length} 台（${outdated.length} 台有新版${unknown.length ? `、${unknown.length} 台版本未知` : ''}）${upToDate ? `；已是最新 ${upToDate} 台将自动跳过` : ''}。`,
-    '离线服务器将自动跳过；升级并行执行（sha256 校验，完成后自动重启，期间短暂离线）。',
+    '离线服务器将自动跳过；升级并行执行（SHA-256 校验，完成后自动重启，期间短暂离线）。',
   ]
   try {
     await messageBox.confirm(lines.join('\n'), '批量升级 Agent', {
@@ -507,7 +507,7 @@ async function batchRestartXray() {
   const lines = [
     `已选 ${selected.length} 台服务器，将并行下发重启指令。`,
     offline ? `其中 ${offline} 台离线，将自动跳过。` : '全部服务器当前在线。',
-    '重启会短暂中断该节点上的 Xray（约 1-2 秒）。',
+    '重启会短暂中断该服务器上的 Xray（约 1-2 秒）。',
   ]
   try {
     await messageBox.confirm(lines.join('\n'), '批量重启 Xray', {
@@ -717,8 +717,8 @@ const billingCycleOptions = [
       </CsCardGrid>
     </CsContainer>
 
-    <!-- 新增服务器 -->
-    <CsModal v-model:visible="createOpen" header="新增服务器" size="large" @close="closeCreate" :close-on-click-overlay="false">
+    <!-- 新建服务器 -->
+    <CsModal v-model:visible="createOpen" header="新建服务器" size="large" scrollable @close="closeCreate" :close-on-click-overlay="false">
       <CsForm v-if="!createdResult" label-position="top">
         <CsSpaceBetween size="m">
           <CsContainer header="基础设施与连接定位">
@@ -819,7 +819,7 @@ const billingCycleOptions = [
       <template #footer>
         <CsSpaceBetween direction="horizontal" size="xs">
           <template v-if="!createdResult">
-            <CsButton @click="createOpen = false">取消</CsButton>
+            <CsButton @click="closeCreate">取消</CsButton>
             <CsButton variant="primary" :loading="creating" @click="submitCreate">创建</CsButton>
           </template>
           <CsButton v-else variant="primary" @click="closeCreate">完成</CsButton>

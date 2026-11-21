@@ -141,14 +141,14 @@ async function runConfirmed() {
 function handleReissue(row: CertItem) {
   askConfirm({
     header: '重新签发这张证书？',
-    warning: '签发后将自动下发到落地节点，并重新渲染中转出站配置。',
+    warning: '签发后将自动下发到落地服务器，并重新渲染中转出站配置。',
     message: `证书「${row.domain}」将按现有 SAN 重新签发/续期。`,
     confirmText: '立即重签',
     action: async () => {
       try {
         const { data } = await reissueCert(row.id)
         if (data.code === 0) {
-          toast.success('证书已重签并推送到节点！')
+          toast.success('证书已重签并推送到服务器')
           loadCerts()
         } else {
           toast.error(data.message)
@@ -280,7 +280,7 @@ async function saveIssue() {
       remark: issueForm.remark.trim(),
     })
     if (data.code === 0) {
-      toast.success('证书已由 CA 成功签发并自动组装完整证书链！')
+      toast.success('证书已由 CA 成功签发并自动组装完整证书链')
       issueOpen.value = false
       activeTab.value = 'server'
       loadAll()
@@ -335,7 +335,7 @@ async function saveGenerateCA() {
       remark: genCAForm.remark.trim(),
     })
     if (data.code === 0) {
-      toast.success('CA 根证书已成功生成！')
+      toast.success('CA 根证书已成功生成')
       genCAOpen.value = false
       loadCAs()
     } else {
@@ -385,7 +385,7 @@ async function saveImportCA() {
     })
     if (data.code === 0) {
       toast.success(
-        importCAForm.ca_key_pem.trim() ? '完整 CA 已导入（支持签发与验签）' : '纯公钥 CA 已导入（仅供节点验签）',
+        importCAForm.ca_key_pem.trim() ? '完整 CA 已导入（支持签发与验签）' : '纯公钥 CA 已导入（仅供服务器验签）',
       )
       importCAOpen.value = false
       loadCAs()
@@ -618,7 +618,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
         <CsToolbar>
           <CsButton icon-name="refresh" @click="loadCAs">刷新</CsButton>
           <TipIcon
-            content="CA 根证书体系：完整 CA（含私钥）可无限签发节点 TLS 服务端证书；纯公钥 CA 可直接内联下发到出入站作为验签根证书。"
+            content="CA 根证书体系：完整 CA（含私钥）可无限签发服务器 TLS 服务端证书；纯公钥 CA 可直接内联下发到出入站作为验签根证书。"
           />
           <template #actions>
             <CsButton variant="primary" icon-name="add-plus" @click="openGenerateCA">生成新根 CA</CsButton>
@@ -683,6 +683,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
       v-model:visible="issueOpen"
       header="基于 CA 签发服务端 TLS 证书"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
       <CsForm label-position="top">
@@ -731,9 +732,10 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
       v-model:visible="ssOpen"
       header="生成自签证书（全面自定义）"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
-      <CsForm label-position="top" class="modal-form">
+      <CsForm label-position="top">
         <div class="form-grid-2">
           <CsFormItem label="域名 / 服务器标识 (CN)" required>
             <CsInput v-model="ssForm.domain" placeholder="如 relay-jp-01 或 relay.example.com" />
@@ -771,6 +773,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
       v-model:visible="genCAOpen"
       header="生成新根 CA"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
       <CsForm label-position="top">
@@ -811,6 +814,7 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
       v-model:visible="importCAOpen"
       header="导入外部 CA 根证书"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
       <CsForm label-position="top">
@@ -848,12 +852,12 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
     <!-- ===== 弹窗 5: 查看 / 复制 CA 公钥 ===== -->
     <CsModal
       v-model:visible="viewCAOpen"
-      :header="`CA 根证书公钥（${viewingCA?.name || ''}）`"
+      :header="viewingCA ? `CA 根证书公钥：${viewingCA.name}` : 'CA 根证书公钥'"
       size="medium"
-      :close-on-click-overlay="false"
+      scrollable
     >
       <div v-if="viewingCA" class="modal-stack">
-        <p class="modal-hint">可直接复制以下根公钥用于客户端验签、出站节点 TLS 校验或下发外部设备：</p>
+        <p class="modal-hint">可直接复制以下根公钥用于客户端验签、出站服务器 TLS 校验或下发外部设备：</p>
         <CsInput :model-value="viewingCA.ca_cert_pem" type="textarea" :rows="10" read-only class="pem-input" />
       </div>
       <template #footer>
@@ -871,8 +875,9 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
     <!-- ===== 弹窗 6: 上传外部证书 / 编辑备注 ===== -->
     <CsModal
       v-model:visible="formOpen"
-      :header="editing ? `编辑证书（${form.domain}）` : '上传外部证书'"
+      :header="editing ? `编辑证书：${form.domain}` : '上传外部证书'"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
       <CsForm label-position="top">
@@ -986,28 +991,10 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
   font-size: var(--font-size-body-s-89y7qg, 12px);
 }
 
-.form-grid-2,
-.form-grid-3 {
-  display: grid;
-  gap: 0 12px;
-}
-
-.form-grid-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.form-grid-3 {
-  grid-template-columns: minmax(0, 1fr) 120px 140px;
-}
-
 .modal-stack {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.modal-form {
-  margin-top: 16px;
 }
 
 .modal-hint {
@@ -1021,12 +1008,5 @@ function expireBadge(notAfter: string): { color: ExpireColor; text: string } {
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: 12px;
   line-height: 16px;
-}
-
-@media (max-width: $bp-tablet-max) {
-  .form-grid-2,
-  .form-grid-3 {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 </style>

@@ -57,7 +57,7 @@ const outerTabs = [
 ]
 const editorTabs = [
   { id: 'edit', label: '模板代码 (YAML)' },
-  { id: 'preview', label: '实时编译预览 (Preview)' },
+  { id: 'preview', label: '实时编译预览' },
 ]
 
 // ==================== 未保存修改闸门 ====================
@@ -696,7 +696,6 @@ async function saveAsFromEditor() {
           <template #actions>
             <CsInput
               v-model="groupKeyword"
-              size="small"
               placeholder="搜索权限组"
               prefix-icon="search"
               clearable
@@ -921,11 +920,10 @@ async function saveAsFromEditor() {
                 <span class="toolbar-label">模板名称</span>
                 <CsInput
                   v-model="libForm.name"
-                  size="small"
                   :maxlength="64"
                   show-word-limit
                   placeholder="如 通用精简模板 / 流媒体分流模板"
-                  style="width: 280px"
+                  style="width: min(100%, 280px)"
                 />
               </div>
               <div class="editor-toolbar-right">
@@ -1079,6 +1077,7 @@ async function saveAsFromEditor() {
   border-bottom: 1px solid var(--color-border-divider-default-diwd4w);
 }
 .editor-toolbar--library {
+  row-gap: 18px;
   padding-bottom: 18px;
 }
 .editor-toolbar-left,
@@ -1087,6 +1086,7 @@ async function saveAsFromEditor() {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .toolbar-label {
   font-size: 13px;
@@ -1115,12 +1115,12 @@ async function saveAsFromEditor() {
 .soft-tag--info {
   color: var(--x-tag-info-color, #006ce0);
   background: var(--x-tag-info-bg, #f0fbff);
-  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
+  border-color: var(--x-tag-info-border, var(--color-border-status-info-e5c14y, #0972d3));
 }
 .soft-tag--warn {
   color: var(--color-text-status-warning-fabq6h, #8d6605);
   background: var(--x-warning-soft, #fffbeb);
-  border-color: rgba(245, 158, 11, 0.3);
+  border-color: var(--color-border-status-warning-zj1tu9, #8d6605);
 }
 .soft-tag--neutral {
   color: var(--color-text-body-secondary-66ygbb, #656871);

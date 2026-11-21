@@ -4,7 +4,6 @@ import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { MQ, useMediaQuery } from '@/utils/media'
 import {
   toast,
-  messageBox,
   CsAlert,
   CsBadge,
   CsButton,
@@ -33,7 +32,6 @@ import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
 import ServerSettingsModal from './servers/ServerSettingsModal.vue'
 import TopologyCanvas from '@/components/topology/TopologyCanvas.vue'
 import {
-  deleteServerRoutingRule,
   getServerOutbounds,
   getServerRoutingRules,
   getTopology,
@@ -239,12 +237,12 @@ function resetRuleFilters() {
 }
 
 const routingColumns: TableColumn[] = [
-  { id: 'priority', header: '优先级', width: '1%' },
+  { id: 'priority', header: '优先级' },
   { id: 'inbound', header: '来源入站' },
   { id: 'rules', header: '匹配规则' },
   { id: 'outbound', header: '目标出站' },
   { id: 'remark', header: '备注' },
-  { id: 'enabled', header: '启用', width: '1%' },
+  { id: 'enabled', header: '启用' },
   { id: 'actions', header: '操作', width: '1%' },
 ]
 
@@ -336,24 +334,6 @@ async function toggleRule(row: EffectiveRoutingRule) {
     }
   } catch (e) {
     toast.error(errMsg(e, '操作失败'))
-  }
-}
-
-async function removeRule(row: EffectiveRoutingRule) {
-  if (!serverFilter.value) return
-  try {
-    await messageBox.confirm(`确认删除路由规则「${row.outbound_tag}」？`, '删除路由规则', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteServerRoutingRule(serverFilter.value, row.id)
-    if (data.code === 0) {
-      toast.success('已删除')
-      loadRouting()
-    }
-  } catch (e) {
-    toast.error(errMsg(e, '删除失败'))
   }
 }
 
@@ -497,43 +477,44 @@ onMounted(async () => {
 
     <!-- 表格视图 -->
     <template v-if="viewMode === 'table'">
-      <CsContainer>
-        <CsTabs :model-value="activeTab" :tabs="tabItems" @change="onTabChange">
-          <!-- Tab 1: 路由规则管理 -->
-          <template v-if="activeTab === 'rules'">
-            <CsSpaceBetween size="s">
-              <CsToolbar class="rule-toolbar">
-                <CsInput
-                  v-model="ruleKeyword"
-                  placeholder="搜索入站 / 出站 / 域名 / IP / 备注"
-                  clearable
-                  prefix-icon="search"
-                  class="rule-filter-search"
-                />
-                <CsSelect
-                  :model-value="ruleOutboundFilter"
-                  :options="ruleOutboundOptions"
-                  clearable
-                  placeholder="全部出站"
-                  aria-label="按目标出站筛选"
-                  class="rule-filter-select"
-                  @change="onRuleOutboundFilterChange"
-                />
-                <CsButton v-if="hasRuleFilters" @click="resetRuleFilters">重置</CsButton>
-                <template #actions>
-                  <CsButton
-                    variant="primary"
-                    :disabled="!serverFilter"
-                    icon-name="add-plus"
-                    @click="openRuleCreate"
-                  >
-                    新增规则
-                  </CsButton>
-                </template>
-              </CsToolbar>
+      <CsTabs :model-value="activeTab" :tabs="tabItems" @change="onTabChange">
+        <!-- Tab 1: 路由规则管理 -->
+        <template v-if="activeTab === 'rules'">
+          <CsSpaceBetween size="m">
+            <CsToolbar class="rule-toolbar">
+              <CsInput
+                v-model="ruleKeyword"
+                placeholder="搜索入站 / 出站 / 域名 / IP / 备注"
+                clearable
+                prefix-icon="search"
+                class="rule-filter-search"
+              />
+              <CsSelect
+                :model-value="ruleOutboundFilter"
+                :options="ruleOutboundOptions"
+                clearable
+                placeholder="全部出站"
+                aria-label="按目标出站筛选"
+                class="rule-filter-select"
+                @change="onRuleOutboundFilterChange"
+              />
+              <CsButton v-if="hasRuleFilters" @click="resetRuleFilters">重置</CsButton>
+              <template #actions>
+                <CsButton
+                  variant="primary"
+                  :disabled="!serverFilter"
+                  icon-name="add-plus"
+                  @click="openRuleCreate"
+                >
+                  新增规则
+                </CsButton>
+              </template>
+            </CsToolbar>
 
+            <CsContainer header="路由规则列表">
               <CsTable
                 compact
+                :wrap-lines="false"
                 track-by="id"
                 :items="filteredRoutingRules"
                 :columns="routingColumns"
@@ -609,102 +590,90 @@ onMounted(async () => {
                 </template>
 
                 <template #cell-actions="{ row }">
-                  <div class="row-actions">
-                    <CsButton :wrap-text="false" @click="openRuleEdit(row)">编辑</CsButton>
-                    <CsTooltip
-                      v-if="row.owner_inbound_id"
-                      :content="`随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可删除；要停用请停用或删除该直通`"
-                    >
-                      <span><CsButton variant="danger-outline" :wrap-text="false" disabled>删除</CsButton></span>
-                    </CsTooltip>
-                    <CsButton v-else variant="danger-outline" :wrap-text="false" @click="removeRule(row)">
-                      删除
-                    </CsButton>
-                  </div>
+                  <CsButton :wrap-text="false" @click="openRuleEdit(row)">编辑</CsButton>
                 </template>
               </CsTable>
-            </CsSpaceBetween>
-          </template>
+            </CsContainer>
+          </CsSpaceBetween>
+        </template>
 
-          <!-- Tab 2: 全局策略管理 -->
-          <template v-else>
-            <CsEmpty v-if="!currentServer" description="请在顶部工具栏选择目标服务器" />
+        <!-- Tab 2: 全局策略管理 -->
+        <template v-else>
+          <CsEmpty v-if="!currentServer" description="请在顶部工具栏选择目标服务器" />
 
-            <CsSpaceBetween v-else size="l">
-              <CsHeader
-                variant="h2"
-                :description="`配置「${currentServer.name}」的默认兜底出口与路由匹配策略。保存后系统将自动重新编译并推送配置到节点。`"
+          <CsSpaceBetween v-else size="l">
+            <CsHeader
+              variant="h2"
+              :description="`配置「${currentServer.name}」的默认兜底出口与路由匹配策略。保存后系统将自动重新编译并推送配置到服务器。`"
+            >
+              服务器全局路由与出口策略
+            </CsHeader>
+
+            <CsContainer>
+              <template #header>
+                <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                  <CsIcon name="status-info" size="small" />
+                  <span>默认兜底出口</span>
+                  <TipIcon
+                    content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。"
+                  />
+                </CsSpaceBetween>
+              </template>
+
+              <CsSpaceBetween size="xs">
+                <CsSelect
+                  :model-value="defaultOutboundTag"
+                  :options="outboundOptions"
+                  :disabled="outboundTags.length === 0"
+                  aria-label="默认兜底出口"
+                  @change="onDefaultOutboundChange"
+                />
+                <span v-if="outboundTags.length > 0" class="cs-text-secondary">
+                  当前选用出站通道：<code class="cs-text-mono">{{ defaultOutboundTag }}</code>
+                </span>
+                <CsAlert v-else type="warning">
+                  暂无可用出站通道，请先在 <CsLink @follow="goOutbounds">出站管理</CsLink> 添加出站
+                </CsAlert>
+              </CsSpaceBetween>
+            </CsContainer>
+
+            <CsContainer>
+              <template #header>
+                <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+                  <CsIcon name="share" size="small" />
+                  <span>路由匹配策略</span>
+                  <TipIcon
+                    content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。"
+                  />
+                </CsSpaceBetween>
+              </template>
+
+              <CsSpaceBetween size="xs">
+                <CsSelect
+                  :model-value="routingDomainStrategy"
+                  :options="domainStrategyOptions"
+                  aria-label="路由匹配策略"
+                  @change="onDomainStrategyChange"
+                />
+                <span class="cs-text-secondary">
+                  注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站管理页的出站列表内设置。
+                </span>
+              </CsSpaceBetween>
+            </CsContainer>
+
+            <div class="settings-actions">
+              <CsButton
+                variant="primary"
+                :loading="defaultSaving"
+                icon-name="check"
+                @click="saveDefaultOutbound"
               >
-                服务器全局路由与出口策略
-              </CsHeader>
-
-              <CsContainer>
-                <template #header>
-                  <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-                    <CsIcon name="status-info" size="small" />
-                    <span>默认兜底出口</span>
-                    <TipIcon
-                      content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。"
-                    />
-                  </CsSpaceBetween>
-                </template>
-
-                <CsSpaceBetween size="xs">
-                  <CsSelect
-                    :model-value="defaultOutboundTag"
-                    :options="outboundOptions"
-                    :disabled="outboundTags.length === 0"
-                    aria-label="默认兜底出口"
-                    @change="onDefaultOutboundChange"
-                  />
-                  <span v-if="outboundTags.length > 0" class="cs-text-secondary">
-                    当前选用出站通道：<code class="cs-text-mono">{{ defaultOutboundTag }}</code>
-                  </span>
-                  <CsAlert v-else type="warning">
-                    暂无可用出站通道，请先在 <CsLink @follow="goOutbounds">出站管理</CsLink> 添加出站
-                  </CsAlert>
-                </CsSpaceBetween>
-              </CsContainer>
-
-              <CsContainer>
-                <template #header>
-                  <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-                    <CsIcon name="share" size="small" />
-                    <span>路由匹配策略</span>
-                    <TipIcon
-                      content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。"
-                    />
-                  </CsSpaceBetween>
-                </template>
-
-                <CsSpaceBetween size="xs">
-                  <CsSelect
-                    :model-value="routingDomainStrategy"
-                    :options="domainStrategyOptions"
-                    aria-label="路由匹配策略"
-                    @change="onDomainStrategyChange"
-                  />
-                  <span class="cs-text-secondary">
-                    注：此为全局路由匹配策略；freedom 出站自身的连接域名解析策略在出站管理页的出站卡片内设置。
-                  </span>
-                </CsSpaceBetween>
-              </CsContainer>
-
-              <div class="settings-actions">
-                <CsButton
-                  variant="primary"
-                  :loading="defaultSaving"
-                  icon-name="check"
-                  @click="saveDefaultOutbound"
-                >
-                  保存全局策略
-                </CsButton>
-                <span class="cs-text-secondary">修改后自动重新编译并推送配置</span>
-              </div>
-            </CsSpaceBetween>
-          </template>
-        </CsTabs>
-      </CsContainer>
+                保存全局策略
+              </CsButton>
+            </div>
+          </CsSpaceBetween>
+        </template>
+      </CsTabs>
 
       <!-- 路由规则编辑器（自管 dialog） -->
       <RoutingRuleEditor
@@ -798,10 +767,6 @@ onMounted(async () => {
     opacity: 0.6;
   }
 }
-.nowrap-badge {
-  white-space: nowrap !important;
-  flex-shrink: 0;
-}
 .row-remark-cell {
   display: inline-block;
   max-width: 180px;
@@ -812,12 +777,6 @@ onMounted(async () => {
 }
 .cell-muted {
   color: var(--color-text-status-inactive-fqjc97, #656871);
-}
-.row-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
 }
 .settings-actions {
   display: flex;
@@ -834,11 +793,11 @@ onMounted(async () => {
 .topo-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--x-text);
+  color: var(--color-text-heading-default-e3tuze, #0f141a);
 }
 .topo-count {
   font-size: 12px;
-  color: var(--x-text-3);
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 @media (max-width: $bp-tablet-max) {

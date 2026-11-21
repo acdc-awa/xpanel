@@ -1,3 +1,58 @@
+<script lang="ts">
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (el: HTMLElement, opts: Record<string, any>) => string
+      getResponse: (widgetId: string) => string
+      reset: (widgetId: string) => void
+      remove: (widgetId: string) => void
+    }
+  }
+}
+
+// 模块级共享加载 Promise：避免登录/注册页快速切换时，<script> 标签已插入但尚未 onload，
+// 新实例见标签已存在便立即 resolve，此时 window.turnstile 仍未就绪导致验证框永久空白。
+let scriptPromise: Promise<void> | null = null
+
+function loadScript(): Promise<void> {
+  if (typeof window !== 'undefined' && window.turnstile) {
+    return Promise.resolve()
+  }
+  if (scriptPromise) return scriptPromise
+
+  scriptPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-turnstile]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener(
+        'error',
+        () => {
+          scriptPromise = null
+          existing.remove()
+          reject(new Error('Turnstile 脚本加载失败'))
+        },
+        { once: true }
+      )
+      return
+    }
+    const s = document.createElement('script')
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+    s.async = true
+    s.defer = true
+    s.dataset.turnstile = '1'
+    s.onload = () => resolve()
+    s.onerror = () => {
+      scriptPromise = null
+      s.remove()
+      reject(new Error('Turnstile 脚本加载失败'))
+    }
+    document.head.appendChild(s)
+  })
+
+  return scriptPromise
+}
+</script>
+
 <script setup lang="ts">
 // TurnstileWidget Cloudflare Turnstile 人机验证组件（方向②）。
 // 由父组件传入 siteKey；验证通过后 emit token，失效/过期时 emit 空串。
@@ -11,34 +66,6 @@ const theme = useThemeStore()
 const container = ref<HTMLDivElement>()
 let widgetId: string | null = null
 let scriptReady = false
-
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (el: HTMLElement, opts: Record<string, any>) => string
-      getResponse: (widgetId: string) => string
-      reset: (widgetId: string) => void
-      remove: (widgetId: string) => void
-    }
-  }
-}
-
-function loadScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector('script[data-turnstile]')) {
-      resolve()
-      return
-    }
-    const s = document.createElement('script')
-    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
-    s.async = true
-    s.defer = true
-    s.dataset.turnstile = '1'
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Turnstile 脚本加载失败'))
-    document.head.appendChild(s)
-  })
-}
 
 function removeWidget() {
   if (widgetId && window.turnstile) {

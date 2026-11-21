@@ -233,6 +233,7 @@ watch(
   overflow: auto;
   padding: 14px;
   border-radius: 8px;
+  border: 1px solid var(--x-border);
   background: #0b0f19;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;

@@ -19,9 +19,28 @@ let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
 let lastNarrow: boolean | null = null
 
-const awsChartPalette = ['#006ce0', '#8c4bff', '#00a1c9', '#ec7211', '#1d8102', '#656871', '#d13212', '#2489c5']
+const CHART_PALETTE_TOKENS: Array<[string, string]> = [
+  ['--color-text-link-default-qabnuk', '#006ce0'],
+  ['--color-charts-palette-categorical-3-2qk36g', '#2ea597'],
+  ['--color-charts-palette-categorical-5-5cbtgt', '#e07941'],
+  ['--color-charts-palette-categorical-1-r41m2k', '#688ae8'],
+  ['--color-text-status-success-1i2jf8', '#1d8102'],
+  ['--color-charts-palette-categorical-2-37jc27', '#c33d69'],
+  ['--color-text-body-secondary-66ygbb', '#656871'],
+  ['--color-text-status-info-55w81a', '#00a1c9'],
+]
 const CHART_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif"
+
+function readToken(el: HTMLElement, token: string, fallbackTokenOrColor: string): string {
+  const style = getComputedStyle(el)
+  const val = style.getPropertyValue(token).trim()
+  if (val) return val
+  if (fallbackTokenOrColor.startsWith('--')) {
+    return style.getPropertyValue(fallbackTokenOrColor).trim()
+  }
+  return fallbackTokenOrColor
+}
 
 function escapeHtml(raw: string): string {
   return String(raw)
@@ -37,13 +56,14 @@ function updateChart() {
     chart = echarts.init(chartRef.value)
   }
 
-  const isDark = theme.isDark
-  const textColor = isDark ? '#9ba7b6' : '#656871'
-  const titleColor = isDark ? '#f9fafb' : '#0f141a'
-  const accentColor = isDark ? '#42b4ff' : '#006ce0'
-  const tooltipBg = isDark ? '#161f2e' : '#ffffff'
-  const tooltipBorder = isDark ? '#2a3441' : '#e9ebed'
-  const donutCenterBg = isDark ? '#161f2e' : '#ffffff'
+  const hostEl = document.body || chartRef.value
+  const textColor = readToken(hostEl, '--color-text-body-secondary-66ygbb', '--x-text-2')
+  const titleColor = readToken(hostEl, '--color-text-body-default-b2us04', '--x-text')
+  const accentColor = readToken(hostEl, '--color-text-link-default-qabnuk', '--x-primary')
+  const tooltipBg = readToken(hostEl, '--color-background-container-content-mjfil9', '--x-card')
+  const tooltipBorder = readToken(hostEl, '--color-border-divider-default-diwd4w', '--x-border')
+  const donutCenterBg = tooltipBg
+  const chartPalette = CHART_PALETTE_TOKENS.map(([token, fallback]) => readToken(hostEl, token, fallback))
 
   let pieData: { name: string; value: number; percent?: number }[] = []
   if (ctx.dashData.value?.server_rank?.length) {
@@ -62,7 +82,7 @@ function updateChart() {
 
   chart.setOption({
     animationDuration: 300,
-    color: awsChartPalette,
+    color: chartPalette,
     tooltip: {
       trigger: 'item',
       backgroundColor: tooltipBg,

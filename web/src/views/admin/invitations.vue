@@ -6,7 +6,6 @@ import {
   CsDatePicker,
   CsForm,
   CsFormItem,
-  CsInput,
   CsInputNumber,
   CsModal,
   CsOption,
@@ -44,6 +43,11 @@ onMounted(load)
 // ---- 状态筛选（含隐性「已过期」：status=0 且已过有效期，过期不落库注册时才拒）----
 type InvStatusFilter = '' | 'unused' | 'used' | 'disabled' | 'expired'
 const statusFilter = ref<InvStatusFilter>('')
+const hasFilters = computed(() => Boolean(statusFilter.value))
+
+function resetFilters() {
+  statusFilter.value = ''
+}
 
 function isExpired(row: Invitation): boolean {
   return row.status === 0 && !!row.expires_at && new Date(row.expires_at).getTime() < Date.now()
@@ -77,7 +81,7 @@ const invColumns: TableColumn[] = [
   { id: 'expires_at', header: '有效期' },
   { id: 'created_at', header: '创建时间' },
   { id: 'used_at', header: '使用时间' },
-  { id: 'actions', header: '操作' },
+  { id: 'actions', header: '操作', width: '1%' },
 ]
 
 function statusOf(row: Invitation): { className: string; text: string } {
@@ -213,12 +217,14 @@ function fmtTime(t: string | null) {
 <template>
   <CsPage>
     <CsToolbar>
-      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: min(100%, 140px)">
+        <CsOption label="全部状态" value="" />
         <CsOption label="未使用" value="unused" />
         <CsOption label="已使用" value="used" />
         <CsOption label="已过期" value="expired" />
         <CsOption label="已禁用" value="disabled" />
       </CsSelect>
+      <CsButton v-if="hasFilters" @click="resetFilters">重置</CsButton>
       <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openGen">生成邀请码</CsButton>
@@ -288,7 +294,7 @@ function fmtTime(t: string | null) {
             v-model:current-page="page"
             v-model:page-size="pageSize"
             :total="filtered.length"
-            :page-sizes="[10, 20, 50]"
+            :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next"
             simple
             @size-change="page = 1"
@@ -297,7 +303,7 @@ function fmtTime(t: string | null) {
       </template>
     </CsContainer>
 
-    <CsModal v-model:visible="genOpen" header="生成邀请码" size="small" :close-on-click-overlay="false">
+    <CsModal v-model:visible="genOpen" header="生成邀请码" size="small" scrollable :close-on-click-overlay="false">
       <template v-if="!generated.length">
         <CsForm label-position="top">
           <CsFormItem label="生成数量">
@@ -316,21 +322,11 @@ function fmtTime(t: string | null) {
       </template>
       <template v-else>
         <p class="cs-text-secondary" style="margin: 0 0 8px">已生成 {{ generated.length }} 个（一次性使用）：</p>
-        <div class="inv-codes" style="max-height: 160px; overflow-y: auto">
+        <div class="inv-codes">
           <div v-for="c in generated" :key="c" class="inv-code-row">
             <code class="inv-code">{{ c }}</code>
-            <CsButton variant="link" @click="copyRegisterLink(c)">复制链接</CsButton>
+            <CsButton variant="link" :wrap-text="false" @click="copyRegisterLink(c)">复制链接</CsButton>
           </div>
-        </div>
-        <div style="margin-top: 12px">
-          <div class="cs-text-secondary" style="font-size: 12px; margin-bottom: 4px">只读备用文本（便于全选复制）：</div>
-          <CsInput
-            type="textarea"
-            :rows="4"
-            read-only
-            :model-value="generated.join('\n')"
-            placeholder="邀请码列表"
-          />
         </div>
       </template>
       <template #footer>

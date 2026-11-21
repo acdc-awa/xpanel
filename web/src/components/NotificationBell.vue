@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
         <li v-for="item in items" :key="item.key" class="notif-item">
           <button type="button" class="notif-main" @click="go(item)">
             <span class="notif-line">
-              <CsBadge :color="badgeColor(item.severity)">{{ SEVERITY_LABEL[item.severity] }}</CsBadge>
+              <CsBadge class="nowrap-badge" :color="badgeColor(item.severity)">{{ SEVERITY_LABEL[item.severity] }}</CsBadge>
               <span class="notif-title" :title="item.title">{{ item.title }}</span>
             </span>
             <span class="notif-detail" :title="item.detail">{{ item.detail }}</span>
@@ -290,6 +290,11 @@ onBeforeUnmount(() => {
   min-inline-size: 0;
 }
 
+.nowrap-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .notif-title {
   font-size: 13px;
   font-weight: 600;
@@ -316,9 +321,9 @@ onBeforeUnmount(() => {
 
 .notif-dismiss {
   flex: none;
-  inline-size: 24px;
-  block-size: 24px;
-  margin-block-start: 6px;
+  inline-size: 32px;
+  block-size: 32px;
+  margin-block-start: 4px;
   border: 0;
   border-radius: 8px;
   background: transparent;

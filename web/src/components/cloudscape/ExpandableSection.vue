@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useSlots, watch } from 'vue'
 import Icon from './Icon.vue'
 import { CS } from './classes'
 import { cx } from './utils'
@@ -36,10 +36,12 @@ const emit = defineEmits<{
   (e: 'change', detail: { expanded: boolean }): void
 }>()
 
+const slots = useSlots()
 const innerExpanded = ref(props.defaultExpanded)
 const isControlled = computed(() => props.expanded !== undefined)
 const isExpanded = computed(() => (isControlled.value ? Boolean(props.expanded) : innerExpanded.value))
 const iconAtEnd = computed(() => props.expandIconPosition === 'end')
+const hasHeaderDescription = computed(() => Boolean(props.headerDescription || slots['header-description']))
 const cs = CS['expandable-section']
 
 watch(
@@ -61,7 +63,9 @@ const wrapperClasses = computed(() =>
     CS['expandable-section'].wrapper,
     CS['expandable-section'][`wrapper-${props.variant}`],
     isExpanded.value && CS['expandable-section']['wrapper-expanded'],
-    !isExpanded.value && !props.headerDescription && CS['expandable-section']['wrapper-not-expanded-without-actions']
+    !isExpanded.value &&
+      !hasHeaderDescription.value &&
+      CS['expandable-section']['wrapper-not-expanded-without-actions']
   )
 )
 </script>
@@ -98,6 +102,19 @@ const wrapperClasses = computed(() =>
               <Icon name="angle-down" :class="cx(cs.icon, isExpanded && cs.expanded)" />
             </span>
           </button>
+        </div>
+        <div
+          v-if="hasHeaderDescription"
+          :class="
+            cx(
+              CS.header.description,
+              CS.header.refresh,
+              CS.header['description-variant-h3'],
+              'cs-expandable-header-description'
+            )
+          "
+        >
+          <slot name="header-description">{{ headerDescription }}</slot>
         </div>
       </div>
     </div>
@@ -170,5 +187,10 @@ button {
  */
 [class*='awsui_wrapper-container'] {
   font-size: var(--font-size-expandable-heading-04ofyn, 16px);
+}
+
+.cs-expandable-header-description {
+  font-weight: 400;
+  letter-spacing: normal;
 }
 </style>

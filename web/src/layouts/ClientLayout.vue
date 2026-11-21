@@ -61,11 +61,7 @@ const topbarIdentity = computed<TopNavigationIdentity>(() => ({
     : undefined,
 }))
 
-const themeUtilityIcon = computed(() => {
-  if (theme.mode === 'light') return 'sun'
-  if (theme.mode === 'dark') return 'moon'
-  return 'settings'
-})
+const themeUtilityIcon = computed(() => (theme.mode === 'light' ? 'sun' : 'moon'))
 
 const topbarUtilities = computed<TopNavigationUtility[]>(() => {
   const list: TopNavigationUtility[] = [
@@ -220,18 +216,25 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .client-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
   background-color: var(--color-background-layout-main-y4565g, var(--x-bg));
 
   &.is-mobile {
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+
+    :deep(> main) {
+      min-block-size: calc(
+        100dvh - var(--awsui-header-height-ka4djm, 57px) - 60px - env(safe-area-inset-bottom, 0px)
+      );
+    }
   }
 }
 
 .client-topbar {
   position: sticky;
   top: 0;
-  z-index: 900;
+  z-index: 1100;
 }
 
 .client-bottom-nav {

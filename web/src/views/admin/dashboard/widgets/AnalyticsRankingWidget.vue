@@ -41,31 +41,31 @@ const dashboardTabs = computed(() => [
 ])
 
 const userColumns = computed<TableColumn[]>(() => [
-  { id: 'rank', header: '#', width: 40 },
+  { id: 'rank', header: '#', minWidth: 40 },
   { id: 'user-main', header: '用户', minWidth: 110 },
-  { id: 'user-plan', header: '套餐', width: 90 },
-  { id: 'user-usage', header: '用量', width: 105 },
+  { id: 'user-plan', header: '套餐', minWidth: 90 },
+  { id: 'user-usage', header: '用量', minWidth: 105 },
 ])
 
 const nodeColumns = computed<TableColumn[]>(() => [
-  { id: 'rank', header: '#', width: 40 },
+  { id: 'rank', header: '#', minWidth: 40 },
   { id: 'node-main', header: '服务器', minWidth: 110 },
-  { id: 'node-percent', header: '占比', width: 70 },
-  { id: 'node-usage', header: '用量', width: 105 },
+  { id: 'node-percent', header: '占比', minWidth: 70 },
+  { id: 'node-usage', header: '用量', minWidth: 105 },
 ])
 
 const cardColumns: TableColumn[] = [
   { id: 'card-code', header: '卡密', minWidth: 110 },
-  { id: 'card-user', header: '使用人', width: 85, key: 'used_by_email' },
-  { id: 'card-face', header: '面值', width: 90 },
-  { id: 'card-time', header: '核销时间', width: 95 },
+  { id: 'card-user', header: '使用人', minWidth: 85, key: 'used_by_email' },
+  { id: 'card-face', header: '面值', minWidth: 90 },
+  { id: 'card-time', header: '核销时间', minWidth: 95 },
 ]
 
 const orderColumns: TableColumn[] = [
   { id: 'order-no', header: '订单号', minWidth: 110 },
-  { id: 'order-user', header: '用户', width: 85, key: 'email' },
-  { id: 'order-amount', header: '金额', width: 80 },
-  { id: 'order-status', header: '状态', width: 80 },
+  { id: 'order-user', header: '用户', minWidth: 85, key: 'email' },
+  { id: 'order-amount', header: '金额', minWidth: 80 },
+  { id: 'order-status', header: '状态', minWidth: 80 },
 ]
 
 /**
@@ -73,7 +73,7 @@ const orderColumns: TableColumn[] = [
  * 既难读也永远不会产生横向滚动。设了之后窄卡片里由表格自带的 wrapper 横向滚动。
  */
 function columnsMinWidth(columns: TableColumn[]): number {
-  return columns.reduce((sum, column) => sum + Number(column.width ?? column.minWidth ?? 120), 0)
+  return columns.reduce((sum, column) => sum + Number(column.minWidth ?? 120), 0)
 }
 </script>
 
@@ -111,6 +111,8 @@ function columnsMinWidth(columns: TableColumn[]): number {
           compact
           :items="rankSource?.user_rank || []"
           :columns="userColumns"
+          :wrap-lines="false"
+          track-by="email"
           empty-text="暂无用户流量数据"
         >
           <template #cell-rank="{ index }">
@@ -142,6 +144,8 @@ function columnsMinWidth(columns: TableColumn[]): number {
           compact
           :items="rankSource?.server_rank || []"
           :columns="nodeColumns"
+          :wrap-lines="false"
+          track-by="server_id"
           empty-text="暂无服务器流量数据"
         >
           <template #cell-rank="{ index }">
@@ -177,6 +181,8 @@ function columnsMinWidth(columns: TableColumn[]): number {
           compact
           :items="rankSource?.recent_gift_cards || []"
           :columns="cardColumns"
+          :wrap-lines="false"
+          track-by="code_masked"
           empty-text="暂无核销记录"
         >
           <template #cell-card-code="{ row }">
@@ -205,6 +211,8 @@ function columnsMinWidth(columns: TableColumn[]): number {
           compact
           :items="rankSource?.recent_orders || []"
           :columns="orderColumns"
+          :wrap-lines="false"
+          track-by="order_no"
           empty-text="暂无订单"
         >
           <template #cell-order-no="{ row }">

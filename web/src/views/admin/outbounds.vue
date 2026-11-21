@@ -476,11 +476,6 @@ onMounted(async () => {
   color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.nowrap-badge {
-  white-space: nowrap !important;
-  flex-shrink: 0;
-}
-
 @media (max-width: $bp-tablet-max) {
   .cs-toolbar {
     flex-direction: column;

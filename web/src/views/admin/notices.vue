@@ -29,7 +29,7 @@ import {
 import type { NoticeItem, NoticePayload } from '@/api/types'
 import { errMsg } from '@/api/http'
 import SortHandle from '@/components/base/SortHandle.vue'
-import { formatDate } from '@/utils/format'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import { renderMarkdown } from '@/utils/markdown'
 
 const list = ref<NoticeItem[]>([])
@@ -81,6 +81,7 @@ onMounted(load)
 // 编辑与新建弹窗（置顶/弹窗/排序都在列表卡片与拖拽里维护，不再进表单）
 const formOpen = ref(false)
 const editing = ref(false)
+const editingName = ref('')
 const saving = ref(false)
 const form = reactive({
   id: 0,
@@ -92,12 +93,14 @@ const form = reactive({
 
 function openCreate() {
   editing.value = false
+  editingName.value = ''
   Object.assign(form, { id: 0, category: 'notice', title: '', content: '', status: 1 })
   formOpen.value = true
 }
 
 function openEdit(row: NoticeItem) {
   editing.value = true
+  editingName.value = row.title
   Object.assign(form, {
     id: row.id,
     category: row.category === 'guide' ? 'guide' : 'notice',
@@ -207,8 +210,8 @@ async function handleToggle(row: NoticeItem, field: 'status' | 'is_pinned' | 'is
 
 async function remove(row: NoticeItem) {
   try {
-    await messageBox.confirm(`确定要删除公告「${row.title}」吗？`, '删除确认', {
-      type: 'warning',
+    await messageBox.confirm(`确定要删除公告「${row.title}」吗？`, '删除公告', {
+      type: 'error',
       confirmButtonText: '确定删除',
       cancelButtonText: '取消',
     })
@@ -648,11 +651,11 @@ const sections = computed(() => [
         placeholder="搜索公告标题或内容..."
         clearable
         prefix-icon="search"
-        style="width: 220px"
+        style="inline-size: min(100%, 220px)"
         @keyup.enter="load"
         @clear="load"
       />
-      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 120px" @change="load">
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="inline-size: min(100%, 120px)" @change="load">
         <CsOption label="已发布" :value="1" />
         <CsOption label="草稿" :value="0" />
       </CsSelect>
@@ -744,11 +747,11 @@ const sections = computed(() => [
               </td>
 
               <td class="col-updated">
-                <span class="notice-updated-cell">{{ formatDate(item.updated_at) }}</span>
+                <span class="notice-updated-cell">{{ formatDateTimeMinute(item.updated_at) }}</span>
               </td>
 
               <td class="col-actions">
-                <CsButton size="small" icon-name="edit" @click="openEdit(item)">编辑</CsButton>
+                <CsButton icon-name="edit" :wrap-text="false" @click="openEdit(item)">编辑</CsButton>
               </td>
             </tr>
           </tbody>
@@ -759,7 +762,7 @@ const sections = computed(() => [
     <!-- 编辑公告：基础信息 + 双栏 Markdown（左侧源码、右侧渲染预览） -->
     <CsModal
       v-model:visible="formOpen"
-      :header="editing ? '编辑公告' : '新建公告'"
+      :header="editing ? `编辑公告：${editingName}` : '新建公告'"
       size="x-large"
       scrollable
       :close-on-click-overlay="false"
@@ -894,126 +897,6 @@ const sections = computed(() => [
 </template>
 
 <style scoped lang="scss">
-/* ================= 列表卡片 ================= */
-.notice-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  min-inline-size: 0;
-}
-
-.notice-name {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  margin: 0;
-  min-inline-size: 0;
-  padding: 0;
-  font: inherit;
-  font-size: 20px;
-  line-height: 28px;
-  font-weight: 700;
-  color: inherit;
-  text-align: start;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-
-  &:hover {
-    color: var(--color-text-link-default-qabnuk, #006ce0);
-  }
-}
-
-.notice-content-preview {
-  min-height: 84px;
-  max-height: 120px;
-  overflow: hidden;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #dedee3);
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-container-content-mjfil9, #ffffff);
-  font-size: 13px;
-  line-height: 19px;
-
-  /* 卡片里的预览只要「看起来像正文」，标题/代码块按正文尺寸收一档，避免一行标题吃掉整块裁切高度 */
-  :deep(h1),
-  :deep(h2),
-  :deep(h3),
-  :deep(h4) {
-    margin: 0 0 3px;
-    padding: 0;
-    border: none;
-    font-size: 14px;
-    line-height: 19px;
-  }
-
-  :deep(p) {
-    margin: 0 0 3px;
-  }
-
-  :deep(ul),
-  :deep(ol) {
-    margin: 0;
-    padding-left: 18px;
-  }
-
-  :deep(pre) {
-    margin: 3px 0;
-    padding: 6px 8px;
-  }
-}
-
-.notice-switches {
-  margin-block-start: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 24px;
-}
-
-.notice-switch-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.switch-label {
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.notice-updated {
-  display: inline-flex;
-  gap: 8px;
-  margin-inline-end: auto;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-/*
- * 官方 item-card footer 会给按钮 `flex: 1 1 0`，两个按钮 + 时间戳挤在一行时
- * 文字会溢出到相邻按钮上（截图里的「编辑公……」叠字）。这里让按钮按内容宽度排布。
- */
-.notice-card :deep(.cs-card__footer) {
-  flex-wrap: wrap;
-  row-gap: 8px;
-
-  button {
-    flex: 0 0 auto;
-    padding-inline: 12px !important;
-  }
-}
-
-.notice-card--off {
-  opacity: 0.85;
-}
-
-.notice-card--dragging {
-  opacity: 0.45;
-}
-
 /* ================= 编辑弹窗 ================= */
 .notice-form {
   display: flex;
@@ -1027,7 +910,7 @@ const sections = computed(() => [
  */
 .notice-base-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 24px;
   align-items: end;
   padding-inline: 20px;
@@ -1222,11 +1105,6 @@ const sections = computed(() => [
     min-width: 220px;
   }
 
-  .col-category {
-    width: 68px;
-    white-space: nowrap;
-  }
-
   .col-toggle {
     width: 56px;
     text-align: center;
@@ -1286,11 +1164,27 @@ const sections = computed(() => [
 }
 
 .notice-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
   flex-shrink: 0;
   max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+  }
 }
 
 .notice-snippet {
@@ -1301,10 +1195,6 @@ const sections = computed(() => [
   white-space: nowrap;
   font-size: 13px;
   color: var(--color-text-body-secondary-66ygbb);
-}
-
-.notice-cat-badge {
-  white-space: nowrap;
 }
 
 .notice-updated-cell {

@@ -52,7 +52,7 @@ function cancel() {
   <Modal v-model:visible="visibleProxy" :header="header" size="small" :close-on-click-overlay="false" close-on-escape>
     <div :class="CS.box.box" class="cs-confirm-body">
       <p v-if="warning" class="cs-confirm-line">
-        <strong class="cs-confirm-warning">Warning:</strong>
+        <strong class="cs-confirm-warning">警告：</strong>
         <span>{{ warning }}</span>
       </p>
       <p v-if="message" class="cs-confirm-line">{{ message }}</p>

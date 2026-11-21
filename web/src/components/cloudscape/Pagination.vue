@@ -57,6 +57,15 @@ const pages = computed<PageEntry[]>(() => {
   return result
 })
 
+const simplePages = computed<PageEntry[]>(() => {
+  const count = pagesCount.value
+  if (count <= 3) return Array.from({ length: count }, (_, index) => index + 1)
+  const start = Math.max(1, Math.min(current.value - 1, count - 2))
+  return [start, start + 1, start + 2]
+})
+
+const displayedPages = computed<PageEntry[]>(() => (props.simple ? simplePages.value : pages.value))
+
 const sizeOptions = computed(() =>
   props.pageSizes.map((size) => ({ label: `${size} 条/页`, value: size }))
 )
@@ -90,6 +99,24 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
       :class="cx(CS.pagination.root, disabled && CS.pagination['root-disabled'])"
       aria-label="分页"
     >
+      <li v-if="simple" :class="CS.pagination['page-item']">
+        <button
+          type="button"
+          :class="
+            cx(
+              CS.pagination.button,
+              CS.pagination.arrow,
+              current <= 1 && CS.pagination['button-disabled']
+            )
+          "
+          aria-label="首页"
+          :aria-disabled="current <= 1 || undefined"
+          :disabled="current <= 1"
+          @click="goTo(1)"
+        >
+          <Icon name="angle-left-double" />
+        </button>
+      </li>
       <li :class="CS.pagination['page-item']">
         <button
           type="button"
@@ -108,10 +135,7 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
           <Icon name="angle-left" />
         </button>
       </li>
-      <li v-if="simple" :class="CS.pagination['page-item']">
-        <span class="cs-pagination-simple-current" aria-current="page">{{ current }}</span>
-      </li>
-      <template v-else v-for="entry in pages" :key="entry">
+      <template v-for="entry in displayedPages" :key="entry">
         <li v-if="typeof entry !== 'number'" :class="CS.pagination.dots">...</li>
         <li v-else :class="CS.pagination['page-item']">
           <button
@@ -149,8 +173,25 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
           <Icon name="angle-right" />
         </button>
       </li>
+      <li v-if="simple" :class="CS.pagination['page-item']">
+        <button
+          type="button"
+          :class="
+            cx(
+              CS.pagination.button,
+              CS.pagination.arrow,
+              current >= pagesCount && CS.pagination['button-disabled']
+            )
+          "
+          aria-label="末页"
+          :aria-disabled="current >= pagesCount || undefined"
+          :disabled="current >= pagesCount"
+          @click="goTo(pagesCount)"
+        >
+          <Icon name="angle-right-double" />
+        </button>
+      </li>
     </ul>
-    <span v-if="simple" class="cs-pagination-total">共 {{ pagesCount }} 页</span>
   </div>
 </template>
 
@@ -169,16 +210,5 @@ function onSizeChange(value: string | number | (string | number)[] | '') {
 
 .cs-pagination-sizes {
   inline-size: 120px;
-}
-
-.cs-pagination-simple-current {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: 24px;
-  padding: 0 4px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-body-default-b2us04, #0f141a);
 }
 </style>

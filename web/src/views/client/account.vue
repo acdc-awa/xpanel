@@ -23,7 +23,7 @@ import {
   CsInput,
   CsModal,
   CsPagination,
-  CsPaginationBar,
+  CsSelect,
   CsSpaceBetween,
   CsStatusIndicator,
   CsTable,
@@ -124,7 +124,7 @@ const orderColumns: TableColumn[] = [
   { id: 'payment_method', header: '支付方式' },
   { id: 'created_at', header: '创建时间' },
   { id: 'order_no', header: '订单号' },
-  { id: 'actions', header: '操作' },
+  { id: 'actions', header: '操作', width: '1%' },
 ]
 
 function orderMethodLabel(row: Order): string {
@@ -145,10 +145,26 @@ function formatOrderAmount(row: Order): string {
 
 const logPage = ref(1)
 const logPageSize = ref(10)
-const pagedLogs = computed(() => {
-  const start = (logPage.value - 1) * logPageSize.value
-  return balanceLogs.value.slice(start, start + logPageSize.value)
-})
+const logTotal = ref(0)
+const recordPageSizeOptions = [10, 20, 50].map((size) => ({ label: `${size} 条/页`, value: size }))
+const activeRecordTotal = computed(() =>
+  activeRecordTab.value === 'orders' ? orders.value.length : logTotal.value,
+)
+const activeRecordPageSize = computed(() =>
+  activeRecordTab.value === 'orders' ? orderPageSize.value : logPageSize.value,
+)
+function onRecordPageSizeChange(value: string | number | (string | number)[] | '') {
+  const size = Number(Array.isArray(value) ? value[0] : value)
+  if (!Number.isFinite(size) || size <= 0) return
+  if (activeRecordTab.value === 'orders') {
+    orderPageSize.value = size
+    orderPage.value = 1
+  } else {
+    logPageSize.value = size
+    logPage.value = 1
+    void loadRecentLogs()
+  }
+}
 const logColumns: TableColumn[] = [
   { id: 'amount', header: '变动金额' },
   { id: 'type', header: '类型' },
@@ -181,13 +197,18 @@ async function handleCancelOrder(orderNo: string) {
 }
 
 async function loadRecentLogs() {
+  loadingLogs.value = true
   try {
-    const { data } = await getMyBalanceLogs(1, 10)
+    const { data } = await getMyBalanceLogs(logPage.value, logPageSize.value)
     if (data.code === 0) {
       balanceLogs.value = data.data.items
+      logTotal.value = data.data.total ?? data.data.items.length
     }
   } catch {
     balanceLogs.value = []
+    logTotal.value = 0
+  } finally {
+    loadingLogs.value = false
   }
 }
 
@@ -198,28 +219,33 @@ async function handleRecharged() {
 // 修改密码
 const pwdOpen = ref(false)
 const pwd = reactive({ old: '', next: '', confirm: '' })
+const pwdErrors = reactive({ old: '', next: '', confirm: '' })
 const savingPwd = ref(false)
 
 function openPwdModal() {
   pwd.old = ''
   pwd.next = ''
   pwd.confirm = ''
+  pwdErrors.old = ''
+  pwdErrors.next = ''
+  pwdErrors.confirm = ''
   pwdOpen.value = true
 }
 
 async function savePwd() {
-  if (!pwd.old || !pwd.next) {
-    toast.warning('请填写当前密码与新密码')
-    return
-  }
-  if (pwd.next.length < 8) {
-    toast.warning('新密码长度不能少于 8 位')
-    return
-  }
-  if (pwd.next !== pwd.confirm) {
-    toast.warning('两次输入的新密码不一致')
-    return
-  }
+  pwdErrors.old = pwd.old ? '' : '请输入当前密码'
+  pwdErrors.next = !pwd.next
+    ? '请输入新密码'
+    : pwd.next.length < 8
+      ? '新密码长度不能少于 8 位'
+      : ''
+  pwdErrors.confirm = !pwd.confirm
+    ? '请再次输入新密码'
+    : pwd.next !== pwd.confirm
+      ? '两次输入的新密码不一致'
+      : ''
+  if (pwdErrors.old || pwdErrors.next || pwdErrors.confirm) return
+
   savingPwd.value = true
   try {
     const { data } = await changePassword(pwd.old, pwd.next)
@@ -245,9 +271,11 @@ const twofaStep = ref<'setup' | 'confirm' | 'backup' | 'disable'>('setup')
 const twofaSecret = ref('')
 const twofaQrUrl = ref('')
 const twofaCode = ref('')
+const twofaCodeError = ref('')
 const twofaLoading = ref(false)
 const backupCodes = ref<string[]>([])
 const disableForm = reactive({ code: '', password: '' })
+const disableErrors = reactive({ code: '', password: '' })
 
 async function startTwofaSetup() {
   twofaLoading.value = true
@@ -261,6 +289,7 @@ async function startTwofaSetup() {
         color: { dark: '#0f172a', light: '#ffffff' },
       })
       twofaCode.value = ''
+      twofaCodeError.value = ''
       twofaStep.value = 'confirm'
       twofaOpen.value = true
     } else {
@@ -276,15 +305,18 @@ async function startTwofaSetup() {
 function openDisable2FA() {
   disableForm.code = ''
   disableForm.password = ''
+  disableErrors.code = ''
+  disableErrors.password = ''
   twofaStep.value = 'disable'
   twofaOpen.value = true
 }
 
 async function submitTwofaConfirm() {
   if (!twofaCode.value || twofaCode.value.length !== 6) {
-    toast.warning('请输入 6 位动态验证码')
+    twofaCodeError.value = '请输入 6 位动态验证码'
     return
   }
+  twofaCodeError.value = ''
   twofaLoading.value = true
   try {
     const { data } = await confirm2FA(twofaSecret.value, twofaCode.value)
@@ -294,10 +326,13 @@ async function submitTwofaConfirm() {
       await auth.fetchMe()
       toast.success('两步验证已成功开启')
     } else {
+      twofaCodeError.value = data.message || '验证码无效'
       toast.error(data.message)
     }
   } catch (e) {
-    toast.error(errMsg(e, '开启失败'))
+    const msg = errMsg(e, '开启失败')
+    twofaCodeError.value = msg
+    toast.error(msg)
   } finally {
     twofaLoading.value = false
   }
@@ -324,9 +359,11 @@ async function copyTwofaSecret() {
 
 async function submitTwofaDisable() {
   if (!disableForm.code && !disableForm.password) {
-    toast.warning('请输入动态验证码、恢复码或当前密码')
+    disableErrors.code = '请输入动态验证码、恢复码或当前登录密码'
     return
   }
+  disableErrors.code = ''
+  disableErrors.password = ''
   twofaLoading.value = true
   try {
     const { data } = await disable2FA({
@@ -340,10 +377,13 @@ async function submitTwofaDisable() {
       disableForm.password = ''
       await auth.fetchMe()
     } else {
+      disableErrors.code = data.message || '关闭失败'
       toast.error(data.message)
     }
   } catch (e) {
-    toast.error(errMsg(e, '关闭失败'))
+    const msg = errMsg(e, '关闭失败')
+    disableErrors.code = msg
+    toast.error(msg)
   } finally {
     twofaLoading.value = false
   }
@@ -475,6 +515,8 @@ async function onResetSubscribe() {
               </div>
               <CsButton
                 v-if="auth.user?.totp_enabled"
+                class="switch-action-btn"
+                :wrap-text="false"
                 @click="openDisable2FA"
               >
                 关闭验证
@@ -482,6 +524,8 @@ async function onResetSubscribe() {
               <CsButton
                 v-else
                 variant="primary"
+                class="switch-action-btn"
+                :wrap-text="false"
                 :loading="twofaLoading"
                 @click="startTwofaSetup"
               >
@@ -494,7 +538,14 @@ async function onResetSubscribe() {
                 <div class="switch-title">重置订阅地址</div>
                 <div class="switch-desc">订阅泄露时可立即重置地址</div>
               </div>
-              <CsButton :loading="resettingSub" @click="onResetSubscribe">重置订阅</CsButton>
+              <CsButton
+                class="switch-action-btn"
+                :wrap-text="false"
+                :loading="resettingSub"
+                @click="onResetSubscribe"
+              >
+                重置订阅
+              </CsButton>
             </div>
 
             <div class="switch-row">
@@ -502,7 +553,9 @@ async function onResetSubscribe() {
                 <div class="switch-title">登录密码</div>
                 <div class="switch-desc">定期修改登录密码以保障账户安全</div>
               </div>
-              <CsButton @click="openPwdModal">修改密码</CsButton>
+              <CsButton class="switch-action-btn" :wrap-text="false" @click="openPwdModal">
+                修改密码
+              </CsButton>
             </div>
           </CsSpaceBetween>
         </CsContainer>
@@ -516,14 +569,38 @@ async function onResetSubscribe() {
       :close-on-click-overlay="false"
     >
       <CsForm @submit="savePwd">
-        <CsFormItem label="当前密码">
-          <CsInput v-model="pwd.old" type="password" show-password placeholder="请输入当前密码" />
+        <CsFormItem label="当前密码" :error="pwdErrors.old">
+          <CsInput
+            v-model="pwd.old"
+            type="password"
+            show-password
+            autocomplete="current-password"
+            placeholder="请输入当前密码"
+            :invalid="Boolean(pwdErrors.old)"
+            @update:model-value="pwdErrors.old = ''"
+          />
         </CsFormItem>
-        <CsFormItem label="新密码" description="长度不少于 8 位。">
-          <CsInput v-model="pwd.next" type="password" show-password placeholder="请输入新密码" />
+        <CsFormItem label="新密码" description="长度不少于 8 位。" :error="pwdErrors.next">
+          <CsInput
+            v-model="pwd.next"
+            type="password"
+            show-password
+            autocomplete="new-password"
+            placeholder="请输入新密码"
+            :invalid="Boolean(pwdErrors.next)"
+            @update:model-value="pwdErrors.next = ''"
+          />
         </CsFormItem>
-        <CsFormItem label="确认新密码">
-          <CsInput v-model="pwd.confirm" type="password" show-password placeholder="请再次输入新密码" />
+        <CsFormItem label="确认新密码" :error="pwdErrors.confirm">
+          <CsInput
+            v-model="pwd.confirm"
+            type="password"
+            show-password
+            autocomplete="new-password"
+            placeholder="请再次输入新密码"
+            :invalid="Boolean(pwdErrors.confirm)"
+            @update:model-value="pwdErrors.confirm = ''"
+          />
         </CsFormItem>
       </CsForm>
       <template #footer>
@@ -562,8 +639,16 @@ async function onResetSubscribe() {
               </CsButton>
             </div>
           </CsFormItem>
-          <CsFormItem label="6 位动态验证码">
-            <CsInput v-model="twofaCode" placeholder="请输入 6 位数字" class="cell-mono" />
+          <CsFormItem label="6 位动态验证码" :error="twofaCodeError">
+            <CsInput
+              v-model="twofaCode"
+              placeholder="请输入 6 位数字"
+              class="cell-mono"
+              :maxlength="6"
+              autocomplete="one-time-code"
+              :invalid="Boolean(twofaCodeError)"
+              @update:model-value="twofaCodeError = ''"
+            />
           </CsFormItem>
         </CsForm>
       </CsSpaceBetween>
@@ -578,11 +663,32 @@ async function onResetSubscribe() {
       </CsSpaceBetween>
 
       <CsForm v-else-if="twofaStep === 'disable'" @submit="submitTwofaDisable">
-        <CsFormItem label="动态验证码或恢复码">
-          <CsInput v-model="disableForm.code" placeholder="输入 6 位验证码或恢复码" class="cell-mono" />
+        <CsFormItem label="动态验证码或恢复码" :error="disableErrors.code">
+          <CsInput
+            v-model="disableForm.code"
+            placeholder="输入 6 位验证码或恢复码"
+            class="cell-mono"
+            :maxlength="6"
+            autocomplete="one-time-code"
+            :invalid="Boolean(disableErrors.code)"
+            @update:model-value="disableErrors.code = ''"
+          />
         </CsFormItem>
-        <CsFormItem label="或输入当前登录密码">
-          <CsInput v-model="disableForm.password" type="password" show-password placeholder="输入当前密码" />
+        <CsFormItem label="或输入当前登录密码" :error="disableErrors.password">
+          <CsInput
+            v-model="disableForm.password"
+            type="password"
+            show-password
+            autocomplete="current-password"
+            placeholder="输入当前密码"
+            :invalid="Boolean(disableErrors.password)"
+            @update:model-value="
+              () => {
+                disableErrors.password = ''
+                disableErrors.code = ''
+              }
+            "
+          />
         </CsFormItem>
       </CsForm>
 
@@ -613,7 +719,17 @@ async function onResetSubscribe() {
         <CsHeader variant="h2">订单与收支记录</CsHeader>
       </template>
 
-      <CsTabs v-model="activeRecordTab" :tabs="recordTabs">
+      <CsTabs v-model="activeRecordTab" :tabs="recordTabs" class="record-tabs">
+        <template v-if="activeRecordTotal > 0" #actions>
+          <CsSelect
+            :model-value="activeRecordPageSize"
+            :options="recordPageSizeOptions"
+            aria-label="每页显示条数"
+            class="record-page-size"
+            @update:model-value="onRecordPageSizeChange"
+          />
+        </template>
+
         <div v-if="activeRecordTab === 'orders'">
           <CsSpaceBetween size="m">
             <CsTable
@@ -665,17 +781,19 @@ async function onResetSubscribe() {
               </template>
             </CsTable>
 
-            <CsPaginationBar v-if="orders.length > 0">
+            <div v-if="orders.length > 0" class="record-footer-bar">
               <CsPagination
                 v-model:current-page="orderPage"
                 v-model:page-size="orderPageSize"
                 :total="orders.length"
                 :page-sizes="[10, 20, 50]"
-                layout="total, sizes, prev, pager, next"
+                layout="prev, pager, next"
                 simple
+                class="record-footer-pager"
                 @size-change="orderPage = 1"
               />
-            </CsPaginationBar>
+              <span class="record-total record-footer-total">共 {{ orders.length }} 条</span>
+            </div>
           </CsSpaceBetween>
         </div>
 
@@ -684,7 +802,7 @@ async function onResetSubscribe() {
             <CsTable
               compact
               :wrap-lines="false"
-              :items="pagedLogs"
+              :items="balanceLogs"
               :columns="logColumns"
               :loading="loadingLogs"
               loading-text="加载中…"
@@ -709,17 +827,20 @@ async function onResetSubscribe() {
               </template>
             </CsTable>
 
-            <CsPaginationBar v-if="balanceLogs.length > 0">
+            <div v-if="logTotal > 0" class="record-footer-bar">
               <CsPagination
                 v-model:current-page="logPage"
                 v-model:page-size="logPageSize"
-                :total="balanceLogs.length"
+                :total="logTotal"
                 :page-sizes="[10, 20, 50]"
-                layout="total, sizes, prev, pager, next"
+                layout="prev, pager, next"
                 simple
-                @size-change="logPage = 1"
+                class="record-footer-pager"
+                @current-change="loadRecentLogs"
+                @size-change="() => { logPage = 1; loadRecentLogs() }"
               />
-            </CsPaginationBar>
+              <span class="record-total record-footer-total">共 {{ logTotal }} 条</span>
+            </div>
           </CsSpaceBetween>
         </div>
       </CsTabs>
@@ -734,67 +855,6 @@ async function onResetSubscribe() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
-}
-
-.order-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.order-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-divider-default-diwd4w, #eaeded);
-}
-
-.order-row.clickable {
-  cursor: pointer;
-}
-
-.order-row.clickable:hover {
-  border-color: var(--color-border-item-selected-7104rh, #0972d3);
-}
-
-.order-main {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.order-name {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.order-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
-}
-
-.order-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.order-amount {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.order-pagination {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .balance-card :deep([class*='content-inner']) {
@@ -819,62 +879,15 @@ async function onResetSubscribe() {
   color: var(--x-primary);
 }
 
-.log-section-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--x-text-secondary);
-  margin-bottom: 6px;
-}
-
-.log-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.log-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--x-border);
-
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-}
-
-.log-main {
-  min-inline-size: 0;
-}
-
-.log-title {
-  font-size: 13px;
-  color: var(--x-text);
-}
-
-.log-time {
-  font-size: 12px;
-  color: var(--x-text-secondary);
-}
-
-.log-amount {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--x-text);
-  flex-shrink: 0;
-
-  &.is-plus {
-    color: var(--x-primary);
-  }
-}
-
 .switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.switch-action-btn {
+  flex-shrink: 0;
 }
 
 .switch-info {
@@ -982,6 +995,58 @@ async function onResetSubscribe() {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.log-amount {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--x-text);
+  flex-shrink: 0;
+
+  &.is-plus {
+    color: var(--x-primary);
+  }
+}
+
+.record-tabs :deep([class*='actions-container']) {
+  padding-inline: 0;
+  padding-block: 4px;
+}
+
+.record-total {
+  font-size: 13px;
+  color: var(--color-text-body-secondary-66ygbb, #5f6b7a);
+  white-space: nowrap;
+}
+
+.record-page-size {
+  inline-size: 104px;
+}
+
+.record-footer-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-footer-pager {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.record-footer-total {
+  grid-column: 3;
+  justify-self: end;
+}
+
+@media (max-width: 380px) {
+  .record-footer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
 }
 
 @media (max-width: $bp-two-pane) {

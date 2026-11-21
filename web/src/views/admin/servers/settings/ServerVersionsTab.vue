@@ -7,8 +7,12 @@ import {
   CsContainer,
   CsForm,
   CsFormItem,
+  CsIcon,
+  CsIconButton,
   CsSegmentedControl,
   CsSelect,
+  CsSpinner,
+  CsStatusIndicator,
   CsSteps,
   toast,
   messageBox,
@@ -128,7 +132,7 @@ const steps = computed<StepItem[]>(() => {
             : '检查远端版本',
     },
     { header: '下载资源', details: upgradeKind.value === 'xray' ? 'XTLS Releases' : 'GitHub Releases' },
-    { header: '完整性校验', details: 'SHA256 校验' },
+    { header: '完整性校验', details: 'SHA-256 校验' },
     { header: '重启生效', details: upgradeKind.value === 'xray' ? '重启 xray' : '服务重载就绪' },
   ]
   const s = upgradeStatus.value
@@ -164,6 +168,13 @@ const upgradeRunning = computed(
 )
 
 const risk = computed(() => versionCompare.value !== null && versionCompare.value > 0)
+
+const versionConstraint = computed(() => {
+  if (risk.value) return undefined
+  return subject.value === 'agent'
+    ? '服务器从 XPanel-Node Releases 下载并做 SHA-256 校验，完成后服务自动重启。'
+    : '服务器从官方 Releases 下载并做 SHA-256 校验；内核与规则库（geoip/geosite）一起切换。'
+})
 
 function defaultTarget() {
   const latest = options.value[0]
@@ -257,12 +268,12 @@ async function apply() {
     if (cmp !== null && cmp > 0) {
       lines.push('降级风险：更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。')
     }
-    lines.push('将从 XPanel-Node Releases 下载 Agent 二进制并做 sha256 校验，完成后服务自动重启（短暂离线）。')
+    lines.push('将从 XPanel-Node Releases 下载 Agent 二进制并做 SHA-256 校验，完成后服务自动重启（短暂离线）。')
   } else if (cmp !== null && cmp > 0) {
     lines.push('降级风险：Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。')
     lines.push('安装失败会自动回滚到原内核；期间 xray 会短暂中断。')
   } else {
-    lines.push('节点将从 XTLS/Xray-core Releases 下载并做 SHA-256 校验，完成后重启 xray（短暂中断）。')
+    lines.push('服务器将从 XTLS/Xray-core Releases 下载并做 SHA-256 校验，完成后重启 xray（短暂中断）。')
     lines.push('geoip.dat / geosite.dat 会一并同步为该发布包内的数据。')
   }
 
@@ -342,6 +353,16 @@ async function apply() {
 }
 
 watch(
+  () => props.server.id,
+  () => {
+    stopPolling()
+    upgradeStatus.value = null
+    rollbackTarget.value = ''
+    target.value = defaultTarget()
+  },
+)
+
+watch(
   () => props.active,
   (active) => {
     if (active && !loaded.value) {
@@ -374,18 +395,29 @@ onUnmounted(stopPolling)
       </div>
 
       <CsForm>
-        <CsFormItem label="目标版本" :description="hint">
-          <CsSelect
-            :model-value="target"
-            :options="selectOptions"
-            filterable
-            allow-create
-            :loading="optionsLoading"
-            :placeholder="
-              subject === 'agent' ? '选择版本，或直接输入（如 v0.1.19）' : '选择版本，或直接输入（如 v26.10.21）'
-            "
-            @update:model-value="(v: string | number | (string | number)[] | '') => (target = String(v ?? ''))"
-          />
+        <CsFormItem label="目标版本" :description="hint" :constraint-text="versionConstraint">
+          <div class="server-version-select-row">
+            <CsSelect
+              :model-value="target"
+              :options="selectOptions"
+              filterable
+              allow-create
+              :loading="optionsLoading"
+              :placeholder="
+                subject === 'agent' ? '选择版本，或直接输入（如 v0.1.19）' : '选择版本，或直接输入（如 v26.10.21）'
+              "
+              @update:model-value="(v: string | number | (string | number)[] | '') => (target = String(v ?? ''))"
+            />
+            <CsIconButton
+              size="normal"
+              label="刷新版本列表"
+              :disabled="optionsLoading"
+              @click="loadOptions(true)"
+            >
+              <CsSpinner v-if="optionsLoading" size="normal" />
+              <CsIcon v-else name="refresh" size="normal" />
+            </CsIconButton>
+          </div>
         </CsFormItem>
       </CsForm>
 
@@ -397,25 +429,15 @@ onUnmounted(stopPolling)
       >
         {{
           subject === 'agent'
-            ? '更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。服务重启期间节点短暂离线。'
+            ? '更老的 Agent 可能不认识主控新下发的协议消息（未知消息会被静默丢弃），请确认主控与之兼容。服务重启期间服务器短暂离线。'
             : 'Xray ≥26.9.8 起 REALITY 强制要求 MLKEM keyshare，更老的内核也可能无法加载当前配置。安装失败会自动回滚，期间 xray 短暂中断。'
-        }}
-      </CsAlert>
-      <CsAlert
-        v-else
-        type="info"
-        :header="`将${actionLabel} ${subjectLabel}`"
-        class="server-version-alert"
-      >
-        {{
-          subject === 'agent'
-            ? '节点从 XPanel-Node Releases 下载并做 sha256 校验，完成后服务自动重启。'
-            : '节点从官方 Releases 下载并做 SHA-256 校验；内核与规则库（geoip/geosite）一起切换。'
         }}
       </CsAlert>
 
       <div class="server-version-actions">
-        <CsButton :loading="optionsLoading" @click="loadOptions(true)">刷新版本列表</CsButton>
+        <CsStatusIndicator v-if="server.status !== 1" type="stopped" class="server-version-offline">
+          服务器离线，无法切换版本
+        </CsStatusIndicator>
         <CsButton
           variant="primary"
           :loading="switching"
@@ -423,7 +445,6 @@ onUnmounted(stopPolling)
           @click="apply"
         >{{ actionLabel }}</CsButton>
       </div>
-      <p v-if="server.status !== 1" class="server-version-hint">服务器离线，无法切换版本。</p>
     </CsContainer>
 
     <CsContainer v-if="upgradeStatus" header="切换进度">
@@ -476,6 +497,22 @@ onUnmounted(stopPolling)
   font-weight: 600;
 }
 
+.server-version-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.server-version-select-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.server-version-select-row > :last-child {
+  flex: none;
+}
+
 .server-version-alert {
   margin-top: 14px;
 }
@@ -483,9 +520,14 @@ onUnmounted(stopPolling)
 .server-version-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
   margin-top: 16px;
+}
+
+.server-version-offline {
+  margin-inline-end: auto;
 }
 
 .server-version-hint {

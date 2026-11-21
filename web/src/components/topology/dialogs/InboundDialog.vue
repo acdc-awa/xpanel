@@ -177,7 +177,7 @@ async function remove() {
 <template>
   <CsModal
     v-model:visible="visibleModel"
-    :header="inbound ? '编辑入站' : '为服务器新建入站'"
+    :header="inbound ? `编辑入站：${inbound.tag}` : '新建入站'"
     size="large"
     scrollable
     :close-on-click-overlay="false"

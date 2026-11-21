@@ -160,7 +160,7 @@ function copyText(txt: string, label = '内容') {
     <CsContainer header="Xray x25519 密钥对认证" class="section-gap">
       <template #actions>
         <CsButton
-          variant="primary"
+          variant="normal"
           icon-name="gen-ai"
           :loading="genKeyLoading"
           @click="fetchRealityKeys"

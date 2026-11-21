@@ -182,19 +182,19 @@ function viewNotice(n: NoticeItem) {
   <CsSpaceBetween direction="vertical" size="l">
     <!-- 到期 / 流量耗尽 / 未开通提示 -->
     <CsAlert v-if="isExpired && auth.user?.plan_id" type="error" header="套餐已到期">
-      当前套餐已到期，节点转发已暂停。请续费或重新订购套餐以恢复使用。
+      当前套餐已到期，连接服务已暂停。请续费或重新订购套餐以恢复使用。
       <template #action>
         <CsButton variant="primary" @click="router.push('/shop')">前往续费/订购</CsButton>
       </template>
     </CsAlert>
     <CsAlert v-else-if="isExpired" type="error" header="套餐已到期">
-      当前套餐已到期并已自动取消，节点转发已暂停。请重新订购套餐以恢复使用。
+      当前套餐已到期并已自动取消，连接服务已暂停。请重新订购套餐以恢复使用。
       <template #action>
         <CsButton variant="primary" @click="router.push('/shop')">前往订购</CsButton>
       </template>
     </CsAlert>
     <CsAlert v-else-if="isExhausted" type="error" header="流量已用尽">
-      当前套餐流量已用尽，节点转发已暂停。续费或订购其他套餐后将重置流量并恢复使用。
+      当前套餐流量已用尽，连接服务已暂停。续费或订购其他套餐后将重置流量并恢复使用。
       <template #action>
         <CsButton variant="primary" @click="router.push('/shop')">前往续费/订购</CsButton>
       </template>
@@ -240,18 +240,44 @@ function viewNotice(n: NoticeItem) {
             />
 
             <div class="plan-actions">
-              <CsButton variant="primary" icon-name="external" :wrap-text="false" @click="importMihomo">
+              <CsButton
+                :variant="subscribeUrl ? 'primary' : 'normal'"
+                icon-name="external"
+                :wrap-text="false"
+                :disabled="!subscribeUrl"
+                @click="importMihomo"
+              >
                 一键导入 Clash
               </CsButton>
-              <CsButton icon-name="copy" :Clashwrap-text="false" @click="copySub">复制订阅地址</CsButton>
-              <CsButton :wrap-text="false" @click="router.push('/shop')">选购/续费</CsButton>
+              <CsButton
+                icon-name="copy"
+                :wrap-text="false"
+                :disabled="!subscribeUrl"
+                @click="copySub"
+              >
+                复制订阅地址
+              </CsButton>
+              <CsButton
+                :variant="subscribeUrl ? 'normal' : 'primary'"
+                :wrap-text="false"
+                @click="router.push('/shop')"
+              >
+                选购/续费
+              </CsButton>
             </div>
           </CsSpaceBetween>
         </CsContainer>
 
         <!-- 快捷入口 -->
         <div class="dash-tiles-grid">
-          <CsContainer class="tile-card" @click="router.push('/subscribe')">
+          <CsContainer
+            class="tile-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/subscribe')"
+            @keydown.enter.prevent="router.push('/subscribe')"
+            @keydown.space.prevent="router.push('/subscribe')"
+          >
             <div class="tile-row">
               <div class="tile-icon">
                 <CsIcon name="share" size="medium" />
@@ -262,7 +288,14 @@ function viewNotice(n: NoticeItem) {
             </div>
           </CsContainer>
 
-          <CsContainer class="tile-card" @click="router.push('/shop')">
+          <CsContainer
+            class="tile-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/shop')"
+            @keydown.enter.prevent="router.push('/shop')"
+            @keydown.space.prevent="router.push('/shop')"
+          >
             <div class="tile-row">
               <div class="tile-icon">
                 <CsIcon name="add-plus" size="medium" />
@@ -357,7 +390,7 @@ function viewNotice(n: NoticeItem) {
       v-model:visible="noticeModalOpen"
       :header="selectedNotice?.title || '公告详情'"
       size="medium"
-      :close-on-click-overlay="false"
+      scrollable
     >
       <div v-if="selectedNotice" class="notice-detail">
         <div class="notice-meta">
@@ -378,6 +411,7 @@ function viewNotice(n: NoticeItem) {
       v-model:visible="popupOpen"
       :header="popupNotice?.title || '重要通知'"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
       @update:visible="(v) => !v && handleClosePopup()"
     >

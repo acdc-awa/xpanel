@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useSlots } from 'vue'
+import { computed, useAttrs, useSlots } from 'vue'
 import Icon from './Icon.vue'
 import Spinner from './Spinner.vue'
 import { CS } from './classes'
@@ -74,6 +74,7 @@ const emit = defineEmits<{
 }>()
 
 const slots = useSlots()
+const attrs = useAttrs()
 
 const isStandalone = computed(
   () => props.variant === 'icon' || props.variant === 'inline-icon' || props.variant === 'flashbar-icon'
@@ -120,7 +121,7 @@ function onClick(event: MouseEvent) {
     :aria-expanded="ariaExpanded"
     :aria-haspopup="ariaHaspopup"
     :aria-controls="ariaControls"
-    :title="ariaLabel"
+    :title="ariaLabel ?? (attrs.title as string | undefined)"
     @click="onClick"
   >
     <span

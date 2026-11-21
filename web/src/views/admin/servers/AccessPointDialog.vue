@@ -275,7 +275,7 @@ async function handleDelete() {
     await messageBox.confirm(
       `确认删除接入点「${props.accessPoint.name}」？订阅将立即移除该入口。`,
       '删除接入点',
-      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+      { type: 'error', confirmButtonText: '确定删除', cancelButtonText: '取消' },
     )
   } catch {
     return
@@ -296,7 +296,13 @@ async function handleDelete() {
 </script>
 
 <template>
-  <CsModal v-model:visible="visible" :header="isEditing ? '编辑接入点' : '新建接入点'" size="medium" :close-on-click-overlay="false">
+  <CsModal
+    v-model:visible="visible"
+    :header="isEditing ? `编辑接入点：${accessPoint?.name || form.name}` : '新建接入点'"
+    size="medium"
+    scrollable
+    :close-on-click-overlay="false"
+  >
     <CsForm label-position="top">
       <CsSpaceBetween size="m">
         <CsColumnLayout :columns="2">
@@ -308,7 +314,9 @@ async function handleDelete() {
             <CsInput v-model="form.name" placeholder="如 🇭🇰 香港直连 01, 🇨🇳 广州移动 BGP" />
           </CsFormItem>
           <CsFormItem label="启用状态">
-            <CsToggle v-model="form.enabled">{{ form.enabled ? '启用' : '禁用' }}</CsToggle>
+            <div class="control-cell">
+              <CsToggle v-model="form.enabled">{{ form.enabled ? '启用' : '禁用' }}</CsToggle>
+            </div>
           </CsFormItem>
         </CsColumnLayout>
 
@@ -346,7 +354,7 @@ async function handleDelete() {
                   @change="onTargetServerChange"
                 />
               </CsFormItem>
-              <CsFormItem label="目标入站 (Target Inbound)">
+              <CsFormItem label="目标入站">
                 <CsSelect
                   :model-value="form.target_inbound_id ?? null"
                   :options="inboundOptions"

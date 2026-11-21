@@ -98,14 +98,14 @@ const shareStrategyOptions = [
 <template>
   <div class="business-settings-box">
     <!-- 订阅对外入口：接入层（可复用）> 自定义地址 > 服务器主机名，三级取值在同处展示 -->
-    <CsContainer header="订阅对外入口 (Entry Endpoint)">
+    <CsContainer header="订阅对外入口">
       <template #info>
         <TipIcon content="下发到客户端的地址按「接入层 > 入站自定义地址 > 服务器主机名」逐级取值；客户端覆写只改 SNI；Host 与 Path 取传输页的 xhttp 设置，安全层由接入层决议。" />
       </template>
       <template #actions>
         <CsButton
           v-if="canOffload"
-          variant="primary"
+          variant="normal"
           icon-name="gen-ai"
           :disabled="!serverId"
           @click="emit('apply-caddy-preset')"

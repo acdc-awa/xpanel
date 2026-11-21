@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import QRCode from 'qrcode'
 import {
   CsAlert,
   CsBadge,
@@ -11,6 +12,8 @@ import {
   CsFormField,
   CsHeader,
   CsInput,
+  CsLink,
+  CsSpinner,
   CsSpaceBetween,
   toast,
 } from '@/components/cloudscape'
@@ -38,8 +41,12 @@ const giftCode = ref('')
 const rechargeModalOpen = ref(false)
 const payUrl = ref('')
 const qrCodeText = ref('')
+const qrDataUrl = ref('')
 const nowMs = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let expiredRefreshed = false
+const POLL_INTERVAL_MS = 4000
 
 const isRecharge = computed(() => order.value?.order_type === 'recharge')
 
@@ -59,9 +66,9 @@ const remainingText = computed(() => {
 const balanceEnough = computed(() => (order.value ? balanceCents.value >= order.value.amount_cents : false))
 const diffCents = computed(() => (order.value ? Math.max(0, order.value.amount_cents - balanceCents.value) : 0))
 
-async function load() {
+async function load(silent = false) {
   if (!orderNo.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const res = await getOrder(orderNo.value)
     const payload = res.data.data
@@ -94,11 +101,71 @@ async function load() {
       }
     }
   } catch (e: unknown) {
-    toast.error(errMsg(e, '加载订单失败'))
+    if (!silent) toast.error(errMsg(e, '加载订单失败'))
   } finally {
     loading.value = false
   }
 }
+
+watch(
+  qrCodeText,
+  async (text) => {
+    if (!text) {
+      qrDataUrl.value = ''
+      return
+    }
+    try {
+      qrDataUrl.value = await QRCode.toDataURL(text, {
+        width: 220,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+      })
+    } catch {
+      qrDataUrl.value = ''
+    }
+  },
+  { immediate: true },
+)
+
+// 支付中：已生成支付链接或二维码且订单仍待支付，才轮询订单状态
+const awaitingPayment = computed(
+  () => order.value?.status === 'pending' && Boolean(payUrl.value || qrCodeText.value),
+)
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function pollOnce() {
+  const before = order.value?.status
+  await load(true)
+  if (order.value?.status !== 'pending') {
+    stopPolling()
+    if (before === 'pending' && order.value?.status === 'paid') {
+      await auth.fetchMe()
+      toast.success(isRecharge.value ? '充值成功，余额已到账' : '支付成功，套餐已生效')
+    }
+  }
+}
+
+watch(awaitingPayment, (waiting) => {
+  stopPolling()
+  if (waiting) pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS)
+})
+
+// 路由切换到另一笔订单时重置本页状态并重新加载
+watch(orderNo, () => {
+  stopPolling()
+  expiredRefreshed = false
+  payUrl.value = ''
+  qrCodeText.value = ''
+  order.value = null
+  giftCode.value = ''
+  load()
+})
 
 async function handlePay() {
   if (!order.value || order.value.status !== 'pending') return
@@ -159,14 +226,22 @@ onMounted(() => {
   load()
   timer = setInterval(() => {
     nowMs.value = Date.now()
-    if (order.value?.status === 'pending' && order.value.expires_at && remainingSeconds.value === 0) {
-      load()
+    // 倒计时归零后仅刷新一次，避免每秒重复请求
+    if (
+      !expiredRefreshed &&
+      order.value?.status === 'pending' &&
+      order.value.expires_at &&
+      remainingSeconds.value === 0
+    ) {
+      expiredRefreshed = true
+      load(true)
     }
   }, 1000)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  stopPolling()
 })
 </script>
 
@@ -179,7 +254,13 @@ onUnmounted(() => {
       </template>
     </CsHeader>
 
-    <CsContainer v-if="!loading && !order">
+    <CsContainer v-if="loading && !order">
+      <CsBox text-align="center" padding="l">
+        <CsSpinner size="large" />
+      </CsBox>
+    </CsContainer>
+
+    <CsContainer v-else-if="!loading && !order">
       <CsAlert type="error" header="订单不存在">
         未找到对应订单，请返回商店重新选购。
       </CsAlert>
@@ -189,7 +270,7 @@ onUnmounted(() => {
       <CsAlert
         v-if="order.status === 'pending'"
         type="info"
-        :header="`待支付 · 剩余支付时间 ${remainingText}`"
+        :header="`待支付，剩余支付时间 ${remainingText}`"
       >
         <template v-if="isRecharge">
           请在倒计时结束前完成充值支付，成功后将自动计入账户余额。
@@ -202,7 +283,7 @@ onUnmounted(() => {
         {{ order.cancel_reason === 'timeout' ? '订单超时未支付已自动关闭。' : '该订单已被取消。' }}
       </CsAlert>
 
-      <CsColumnLayout :columns="2" variant="text-grid">
+      <CsColumnLayout :columns="2" variant="default">
         <CsContainer>
           <template #header>
             <CsHeader variant="h2">订单详情</CsHeader>
@@ -241,8 +322,9 @@ onUnmounted(() => {
           </template>
           <CsSpaceBetween size="m">
             <div class="method-list">
-              <div
+              <button
                 v-if="!isRecharge && availableMethods.includes('balance')"
+                type="button"
                 class="method-card"
                 :class="{ active: selectedMethod === 'balance' }"
                 @click="selectedMethod = 'balance'"
@@ -256,10 +338,11 @@ onUnmounted(() => {
                 <CsBox v-if="!balanceEnough" variant="small" color="text-body-secondary">
                   余额不足，还差 {{ formatMoney(diffCents) }}
                 </CsBox>
-              </div>
+              </button>
 
-              <div
+              <button
                 v-if="!isRecharge && availableMethods.includes('gift_card')"
+                type="button"
                 class="method-card"
                 :class="{ active: selectedMethod === 'gift_card' }"
                 @click="selectedMethod = 'gift_card'"
@@ -271,9 +354,10 @@ onUnmounted(() => {
                 <CsBox variant="small" color="text-body-secondary">
                   卡密核销后自动充入余额并完成订单支付，多余金额保留在账户余额中
                 </CsBox>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 v-for="ch in (isRecharge ? channels.filter((c) => c.requires_amount && c.id !== 'balance' && c.id !== 'gift_card') : [])"
                 :key="ch.id"
                 class="method-card"
@@ -287,7 +371,7 @@ onUnmounted(() => {
                 <CsBox v-if="ch.description" variant="small" color="text-body-secondary">
                   {{ ch.description }}
                 </CsBox>
-              </div>
+              </button>
             </div>
 
             <CsFormField v-if="selectedMethod === 'gift_card'" label="输入卡密">
@@ -296,11 +380,15 @@ onUnmounted(() => {
 
             <CsAlert v-if="payUrl" type="info" header="已生成支付链接">
               请在新窗口完成支付；如未自动跳转，可
-              <a :href="payUrl" target="_blank" rel="noopener">点击此处前往支付</a>。
+              <CsLink :href="payUrl" external>点击此处前往支付</CsLink>。
+              支付完成后本页会自动更新订单状态。
             </CsAlert>
 
             <CsAlert v-if="qrCodeText" type="info" header="请扫码完成支付">
-              支付二维码内容：<code class="cell-mono">{{ qrCodeText }}</code>
+              <div class="qr-wrap">
+                <img v-if="qrDataUrl" :src="qrDataUrl" alt="支付二维码" class="qr-img" />
+                <code v-else class="cell-mono">{{ qrCodeText }}</code>
+              </div>
             </CsAlert>
 
             <CsSpaceBetween direction="horizontal" size="s">
@@ -383,7 +471,31 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+.qr-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 220px;
+  block-size: 220px;
+  padding: 8px;
+  border: 1px solid var(--x-border);
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.qr-img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
 .method-card {
+  display: block;
+  inline-size: 100%;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: transparent;
   padding: 12px 14px;
   border-radius: 8px;
   border: 1px solid var(--color-border-divider-default-diwd4w, #d5dbdb);

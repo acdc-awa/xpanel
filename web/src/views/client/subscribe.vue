@@ -183,7 +183,7 @@ async function onResetSubscribe() {
     </CsAlert>
 
     <CsAlert v-else-if="!hasPlan" type="info" header="当前无有效套餐">
-      您当前未订购套餐或套餐已到期，重新订购后系统将自动为您下发订阅地址并分配节点线路。
+      您当前未订购套餐或套餐已到期，重新订购后系统将自动为您生成订阅地址并分配节点线路。
       <template #action>
         <CsButton variant="primary" @click="router.push('/shop')">前往选购套餐</CsButton>
       </template>
@@ -221,13 +221,18 @@ async function onResetSubscribe() {
           </div>
         </CsSpaceBetween>
 
-        <div class="sub-qr-panel" @click="openQrModal">
+        <button
+          type="button"
+          class="sub-qr-panel"
+          aria-label="放大查看订阅二维码"
+          @click="openQrModal"
+        >
           <div class="qr-wrap" title="点击放大查看">
             <img v-if="qrDataUrl" :src="qrDataUrl" alt="订阅二维码" class="sub-qr" />
             <div v-else class="sub-qr-empty">—</div>
           </div>
           <span class="qr-tip">点击放大扫码</span>
-        </div>
+        </button>
       </div>
     </CsContainer>
 
@@ -315,7 +320,17 @@ async function onResetSubscribe() {
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
+
+  &:focus-visible .qr-wrap {
+    outline: 2px solid var(--color-border-item-focused-sewkzn, #006ce0);
+    outline-offset: 2px;
+  }
 }
 
 .qr-wrap {
@@ -353,7 +368,7 @@ async function onResetSubscribe() {
 }
 
 .guide-single-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--x-text);
 }

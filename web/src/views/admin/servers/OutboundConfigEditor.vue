@@ -531,7 +531,7 @@ onMounted(async () => {
 <template>
   <CsModal
     :visible="visible"
-    :header="outbound ? `编辑出站：${outbound.tag}` : '新增出站'"
+    :header="outbound ? `编辑出站：${outbound.tag}` : '新建出站'"
     size="large"
     scrollable
     @close="handleClose"
@@ -679,7 +679,7 @@ onMounted(async () => {
           当前引用的入站已不在可引用列表（可能被停用/删除，或不是 VLESS / Hysteria 2）。请重新选择目标。
         </CsAlert>
 
-        <div class="switch-row" style="margin-top: 12px">
+        <div class="switch-row">
           <CsToggle
             :model-value="form.send_proxy_protocol && ppApplicable"
             :disabled="!ppApplicable"

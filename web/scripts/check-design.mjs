@@ -26,6 +26,7 @@ const SCOPE = [
   'src/views/client/dashboard.vue',
   'src/views/client/subscribe.vue',
   'src/views/client/shop.vue',
+  'src/views/client/checkout.vue',
   'src/views/client/account.vue',
   'src/layouts/AdminLayout.vue',
   'src/layouts/ClientLayout.vue',
@@ -34,6 +35,10 @@ const SCOPE = [
   'src/components/topology',
   'src/components/NotificationBell.vue',
   'src/components/ImageCropperDialog.vue',
+  'src/components/RechargeModal.vue',
+  'src/components/UserAvatarDropdown.vue',
+  'src/components/CodeEditor.vue',
+  'src/components/TurnstileWidget.vue',
   'src/styles',
 ]
 

@@ -430,7 +430,7 @@ function removeHeader(index: number) {
           <CsButton variant="icon" icon-name="remove" :aria-label="`删除请求头 ${h.key || i + 1}`" @click="removeHeader(i)" />
         </div>
       </div>
-      <CsButton icon-name="add" class="add-header" @click="addHeader">添加请求头</CsButton>
+      <CsButton icon-name="add-plus" class="add-header" @click="addHeader">添加请求头</CsButton>
       <div class="hint">Host 必须填在上方的 Host 字段，写进这里会被 xray 拒绝。</div>
     </CsExpandableSection>
 

@@ -170,28 +170,30 @@ const rows = computed<RowView[]>(() =>
 )
 
 const auditColumns: TableColumn[] = [
-  { id: 'created_at', header: '时间', width: '155px' },
-  { id: 'category', header: '分类', width: '92px' },
+  { id: 'created_at', header: '时间' },
+  { id: 'category', header: '分类' },
   { id: 'action', header: '操作', minWidth: '240px' },
-  { id: 'operator', header: '操作人', width: '185px' },
-  { id: 'target', header: '目标', width: '165px' },
-  { id: 'result', header: '结果', width: '88px' },
-  { id: 'ip', header: 'IP', width: '130px' },
-  { id: 'actions', header: '操作', width: '88px' },
+  { id: 'operator', header: '操作人' },
+  { id: 'target', header: '目标' },
+  { id: 'result', header: '结果' },
+  { id: 'ip', header: 'IP' },
+  { id: 'actions', header: '操作', width: '1%' },
 ]
 
-const emptyText = computed(() =>
-  category.value ||
-  keyword.value.trim() ||
-  operatorType.value ||
-  operatorName.value ||
-  targetType.value ||
-  result.value ||
-  startTime.value ||
-  endTime.value
-    ? '无符合条件的审计日志'
-    : '暂无审计日志',
+const hasFilters = computed(() =>
+  Boolean(
+    category.value ||
+      keyword.value.trim() ||
+      operatorType.value ||
+      operatorName.value ||
+      targetType.value ||
+      result.value ||
+      startTime.value ||
+      endTime.value,
+  ),
 )
+
+const emptyText = computed(() => (hasFilters.value ? '无符合条件的审计日志' : '暂无审计日志'))
 
 function hasDistinctSummary(rv: RowView) {
   const s = rv.view.summary?.trim()
@@ -262,7 +264,7 @@ function fmtTime(t: string) {
 <template>
   <CsPage>
     <CsToolbar>
-      <CsSelect v-model="category" placeholder="全部分类" clearable style="width: 140px" @change="onFilterChange">
+      <CsSelect v-model="category" placeholder="全部分类" clearable style="width: min(100%, 140px)" @change="onFilterChange">
           <CsOption label="全部分类" value="" />
           <CsOption label="服务器管理" value="servers" />
           <CsOption label="用户管理" value="users" />
@@ -272,13 +274,13 @@ function fmtTime(t: string) {
           <CsOption label="身份认证" value="auth" />
           <CsOption label="其他" value="other" />
         </CsSelect>
-        <CsSelect v-model="operatorType" placeholder="操作人类型" clearable style="width: 140px" @change="onFilterChange">
+        <CsSelect v-model="operatorType" placeholder="操作人类型" clearable style="width: min(100%, 140px)" @change="onFilterChange">
           <CsOption label="全部类型" value="" />
           <CsOption label="管理员" value="admin" />
           <CsOption label="普通用户" value="user" />
           <CsOption label="系统任务" value="system" />
         </CsSelect>
-        <CsSelect v-model="targetType" placeholder="目标类型" clearable style="width: 140px" @change="onFilterChange">
+        <CsSelect v-model="targetType" placeholder="目标类型" clearable style="width: min(100%, 140px)" @change="onFilterChange">
           <CsOption label="全部目标" value="" />
           <CsOption label="用户" value="user" />
           <CsOption label="服务器" value="server" />
@@ -294,7 +296,7 @@ function fmtTime(t: string) {
           <CsOption label="礼品卡" value="gift_card" />
           <CsOption label="邀请码" value="invitation" />
         </CsSelect>
-        <CsSelect v-model="result" placeholder="结果" clearable style="width: 120px" @change="onFilterChange">
+        <CsSelect v-model="result" placeholder="结果" clearable style="width: min(100%, 120px)" @change="onFilterChange">
           <CsOption label="全部结果" value="" />
           <CsOption label="成功" value="success" />
           <CsOption label="失败" value="fail" />
@@ -302,17 +304,17 @@ function fmtTime(t: string) {
         <div class="range-filter">
           <CsDatePicker
             v-model="startTime"
-            type="datetimerange"
+            type="datetime"
             placeholder="开始时间"
-            style="width: 165px"
+            style="width: min(100%, 165px)"
             @change="onFilterChange"
           />
           <span class="range-sep">至</span>
           <CsDatePicker
             v-model="endTime"
-            type="datetimerange"
+            type="datetime"
             placeholder="结束时间"
-            style="width: 165px"
+            style="width: min(100%, 165px)"
             @change="onFilterChange"
           />
         </div>
@@ -321,12 +323,11 @@ function fmtTime(t: string) {
           placeholder="搜索操作内容 / 路径 / IP / 操作人 / 目标"
           clearable
           prefix-icon="search"
-          style="width: 260px"
+          style="width: min(100%, 260px)"
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
         />
-        <CsButton variant="primary" icon-name="search" @click="onFilterChange">查询</CsButton>
-        <CsButton @click="resetFilters">重置</CsButton>
+        <CsButton v-if="hasFilters" @click="resetFilters">重置</CsButton>
         <CsButton icon-name="refresh" @click="refresh">刷新</CsButton>
         <CsButton icon-name="download" :loading="exporting" @click="doExport">导出</CsButton>
     </CsToolbar>
@@ -351,7 +352,7 @@ function fmtTime(t: string) {
         <template #cell-action="{ row }">
           <div class="audit-action-cell" :title="actionTooltip(row)">
             <span class="audit-action-title">{{ row.title }}</span>
-            <span v-if="hasDistinctSummary(row)" class="audit-action-summary"> · {{ row.view.summary }}</span>
+            <span v-if="hasDistinctSummary(row)" class="audit-action-summary">{{ row.view.summary }}</span>
           </div>
         </template>
         <template #cell-operator="{ row }">
@@ -396,14 +397,14 @@ function fmtTime(t: string) {
       </CsTable>
 
       <template #footer>
-        <CsPaginationBar>
+        <CsPaginationBar v-if="total > 0">
           <CsPagination
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
-            :page-sizes="[10, 20, 50]"
-            simple
+            :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next"
+            simple
             @current-change="load"
             @size-change="() => { page = 1; load() }"
           />
@@ -412,7 +413,7 @@ function fmtTime(t: string) {
     </CsContainer>
 
     <!-- 详情弹窗：翻译视图 / 原文 -->
-    <CsModal v-model:visible="detailModalOpen" header="操作详情" size="large">
+    <CsModal v-model:visible="detailModalOpen" header="操作详情" size="large" scrollable>
       <div v-if="detailLoading" class="state-block"><CsSpinner size="large" /></div>
       <CsTabs v-else-if="currentView" v-model="detailTab" :tabs="detailTabs">
         <div v-if="detailTab === 'translated'">
@@ -448,8 +449,23 @@ function fmtTime(t: string) {
 
 .range-filter {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+
+  @media (max-width: 767px) {
+    width: 100%;
+
+    > * {
+      flex: 1 1 140px;
+      min-width: 0;
+    }
+
+    .range-sep {
+      flex: 0 0 auto;
+    }
+  }
 }
 
 .range-sep {
@@ -509,6 +525,7 @@ function fmtTime(t: string) {
 }
 
 .audit-action-summary {
+  margin-inline-start: 8px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 

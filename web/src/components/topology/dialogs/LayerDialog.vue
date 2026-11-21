@@ -98,8 +98,9 @@ function requestDelete() {
 <template>
   <CsModal
     v-model:visible="visibleModel"
-    :header="layer ? '编辑对外接入层' : '新建对外接入层'"
+    :header="layer ? `编辑对外接入层：${layer.name}` : '新建对外接入层'"
     size="medium"
+    scrollable
     :close-on-click-overlay="false"
   >
     <CsForm label-position="top">

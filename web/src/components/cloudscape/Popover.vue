@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { pushOverlay } from './overlay-stack'
 
 type Placement = 'top' | 'top-start' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'left' | 'right'
 
@@ -88,8 +89,12 @@ function onPointerDown(event: PointerEvent) {
   setVisible(false)
 }
 
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && props.visible) setVisible(false)
+let popOverlay: (() => void) | null = null
+
+function unbindOverlay() {
+  document.removeEventListener('pointerdown', onPointerDown, true)
+  popOverlay?.()
+  popOverlay = null
 }
 
 watch(
@@ -97,21 +102,19 @@ watch(
   async (value) => {
     if (value) {
       document.addEventListener('pointerdown', onPointerDown, true)
-      document.addEventListener('keydown', onKeydown, true)
+      if (!popOverlay) popOverlay = pushOverlay(() => setVisible(false))
       await nextTick()
       updatePosition()
       bindPositionListeners()
     } else {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('keydown', onKeydown, true)
+      unbindOverlay()
       unbindPositionListeners()
     }
   }
 )
 
 onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', onPointerDown, true)
-  document.removeEventListener('keydown', onKeydown, true)
+  unbindOverlay()
   unbindPositionListeners()
 })
 </script>

@@ -5,7 +5,6 @@ import { getDashboard, getDashboardRealtime } from '@/api/admin'
 import type { RankPeriod } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import type { DashboardData, ServerMatrixItem } from '@/api/types'
-import { useThemeStore } from '@/stores/theme'
 import ServerMetricsDrawer from './servers/ServerMetricsDrawer.vue'
 import OnlineUsersPanel from './servers/OnlineUsersPanel.vue'
 
@@ -33,8 +32,6 @@ import ServerMatrixWidget from './dashboard/widgets/ServerMatrixWidget.vue'
 import AnalyticsRankingWidget from './dashboard/widgets/AnalyticsRankingWidget.vue'
 import AddWidgetDrawer from './dashboard/AddWidgetDrawer.vue'
 import type { DashboardContext } from './dashboard/types'
-
-const theme = useThemeStore()
 
 const loading = ref(false)
 const dashData = ref<DashboardData | null>(null)
@@ -69,6 +66,16 @@ const isClusterHealthy = computed(() => {
 // 在线用户弹窗
 const onlineDialogOpen = ref(false)
 const onlineServer = ref<ServerMatrixItem | null>(null)
+
+function closeOnlineUsers() {
+  onlineDialogOpen.value = false
+  onlineServer.value = null
+}
+
+// 无论通过遮罩、Esc 还是按钮关闭，都清空 onlineServer，避免面板在后台持续 3 秒轮询
+watch(onlineDialogOpen, (open) => {
+  if (!open) onlineServer.value = null
+})
 
 function openOnlineUsers(s: ServerMatrixItem) {
   onlineServer.value = s
@@ -206,7 +213,7 @@ const refreshHint = computed(() => `最后同步：${lastUpdatedTime.value || '�
 
 const pollHint = computed(() =>
   realtimeInterval.value
-    ? `实时网速与监控矩阵每 ${realtimeIntervalLabel.value}拉取一次（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。数据新鲜度由节点心跳周期决定（默认 5 秒一帧），刷新快于心跳不会得到更新的数据。`
+    ? `实时网速与监控矩阵每 ${realtimeIntervalLabel.value}拉取一次（纯内存）；营收、流量趋势与排行榜每 30 秒拉取。数据新鲜度由服务器心跳周期决定（默认 5 秒一帧），刷新快于心跳不会得到更新的数据。`
     : '实时高频刷新已关闭（30 秒统计仍会同步实时网速与监控矩阵）；可随时在右上角重新开启或手动点「刷新数据」。',
 )
 
@@ -382,7 +389,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="aws-console-page" :class="{ 'awsui-dark-mode': theme.isDark }">
+  <div class="aws-console-page">
     <CsSpaceBetween direction="vertical" size="l">
       <CsHeader variant="h1">
         运维监控大盘
@@ -459,11 +466,12 @@ onUnmounted(() => {
         v-model:visible="onlineDialogOpen"
         :header="onlineServer ? `在线用户名单：${onlineServer.name}` : '在线用户名单'"
         size="large"
-        @close="onlineServer = null"
+        scrollable
+        @close="closeOnlineUsers"
       >
-        <OnlineUsersPanel v-if="onlineServer" :server-id="onlineServer.id" />
+        <OnlineUsersPanel v-if="onlineDialogOpen && onlineServer" :server-id="onlineServer.id" />
         <template #footer>
-          <CsButton @click="onlineDialogOpen = false">关闭</CsButton>
+          <CsButton @click="closeOnlineUsers">关闭</CsButton>
         </template>
       </CsModal>
 
@@ -487,11 +495,6 @@ onUnmounted(() => {
   margin: 0;
   padding: 16px 20px 32px;
   box-sizing: border-box;
-}
-
-.awsui-dark-mode {
-  background-color: var(--color-background-layout-main-y4565g, #0f1b2a);
-  color: var(--color-text-body-default-b2us04, #f9fafb);
 }
 
 :deep(a) {

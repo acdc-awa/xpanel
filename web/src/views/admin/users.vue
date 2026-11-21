@@ -90,7 +90,7 @@ const planOptions = computed(() => [
 ])
 
 const groupOptions = computed(() => [
-  { label: `跟随套餐继承（当前: ${inheritedGroupName.value}）`, value: 0 },
+  { label: `跟随套餐继承（当前：${inheritedGroupName.value}）`, value: 0 },
   ...permissionGroups.value.map((g) => ({
     label: g.remark ? `${g.name}（${g.remark}）` : g.name,
     value: g.id,
@@ -153,12 +153,12 @@ function groupName(id?: number) {
 
 function userGroupDisplay(u: any) {
   if (u.permission_group_id && u.permission_group_id > 0) {
-    return { name: `${groupName(u.permission_group_id)} (自定义)`, type: 'primary', custom: true }
+    return { name: `${groupName(u.permission_group_id)}（自定义）`, type: 'primary', custom: true }
   }
   // 套餐继承读用户行快照推导的 effective_group_id（后端已下发），不读实时套餐——
   // 「改套餐权限组未勾同步」时存量用户实际生效组不变，显示不得漂移
   if (u.effective_group_id && u.effective_group_id > 0) {
-    return { name: `${groupName(u.effective_group_id)} (套餐继承)`, type: 'success', custom: false }
+    return { name: `${groupName(u.effective_group_id)}（套餐继承）`, type: 'success', custom: false }
   }
   return { name: '无', type: 'info', custom: false }
 }
@@ -490,7 +490,7 @@ async function doResetTraffic(row: any) {
 
 async function doDelete(row: any) {
   try {
-    await messageBox.confirm(`确定删除用户 ${row.email}？该操作不可逆。`, '删除确认', {
+    await messageBox.confirm(`确定删除用户 ${row.email}？该操作不可逆。`, '删除用户', {
       type: 'error',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
@@ -736,7 +736,7 @@ const tableColumns = computed<TableColumn[]>(() => {
     { id: 'traffic', header: '流量' },
     { id: 'expire_at', header: '到期时间' },
     { id: 'balance', header: '余额' },
-    { id: 'actions', header: '操作', align: 'end' },
+    { id: 'actions', header: '操作', width: '1%' },
   ]
   if (selectMode.value) {
     cols.unshift({ id: 'select', width: 42, align: 'center' })
@@ -791,6 +791,7 @@ const tableColumns = computed<TableColumn[]>(() => {
         @change="onFilterChange"
       />
       <CsButton v-if="hasActiveFilters" @click="resetFilters">重置</CsButton>
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       <template #actions>
         <template v-if="!selectMode">
           <CsButton icon-name="check" @click="enterSelectMode">批量操作</CsButton>
@@ -851,14 +852,14 @@ const tableColumns = computed<TableColumn[]>(() => {
               >
                 {{ row.email }}
               </button>
-              <CsBadge v-if="row.role === 'admin'" class="status-badge" color="severity-medium">管理员</CsBadge>
+              <CsBadge v-if="row.role === 'admin'" class="nowrap-badge" color="severity-medium">管理员</CsBadge>
             </div>
             <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
           </div>
         </template>
 
         <template #cell-status="{ row }">
-          <CsBadge class="status-badge" :color="row.status === 1 ? 'green' : 'red'">
+          <CsBadge class="nowrap-badge" :color="row.status === 1 ? 'green' : 'red'">
             {{ row.status === 1 ? '正常' : '已封禁' }}
           </CsBadge>
         </template>
@@ -870,7 +871,7 @@ const tableColumns = computed<TableColumn[]>(() => {
         </template>
 
         <template #cell-group="{ row }">
-          <CsBadge class="status-badge" :color="userGroupBadgeColor(row)">
+          <CsBadge class="nowrap-badge" :color="userGroupBadgeColor(row)">
             {{ userGroupDisplay(row).name }}
           </CsBadge>
         </template>
@@ -929,7 +930,7 @@ const tableColumns = computed<TableColumn[]>(() => {
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
-            :page-sizes="[10, 20, 50]"
+            :page-sizes="[10, 20, 50, 100]"
             :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
             @current-change="load"
             @size-change="() => { page = 1; load() }"
@@ -1049,7 +1050,7 @@ const tableColumns = computed<TableColumn[]>(() => {
                 style="width: 100%"
               />
               <div class="quick-expire-bar">
-                <span class="quick-label">快捷设定:</span>
+                <span class="quick-label">快捷设定：</span>
                 <CsButton @click="addQuickExpire(30)">+1个月</CsButton>
                 <CsButton @click="addQuickExpire(90)">+1季度</CsButton>
                 <CsButton @click="addQuickExpire(180)">+半年</CsButton>
@@ -1098,7 +1099,7 @@ const tableColumns = computed<TableColumn[]>(() => {
     </CsModal>
 
     <!-- 手动创建用户弹窗 -->
-    <CsModal v-model:visible="newUserOpen" header="新建用户" size="medium" @close="closeNewUser" :close-on-click-overlay="false">
+    <CsModal v-model:visible="newUserOpen" header="新建用户" size="medium" scrollable @close="closeNewUser" :close-on-click-overlay="false">
       <template v-if="!newUserResult">
         <CsForm label-position="top">
           <CsFormItem label="邮箱">
@@ -1124,7 +1125,7 @@ const tableColumns = computed<TableColumn[]>(() => {
               style="width: 100%"
             />
             <div class="quick-expire-bar">
-              <span class="quick-label">快捷设定:</span>
+              <span class="quick-label">快捷设定：</span>
               <CsButton @click="addNewUserQuickExpire(30)">+1个月</CsButton>
               <CsButton @click="addNewUserQuickExpire(90)">+1季度</CsButton>
               <CsButton @click="addNewUserQuickExpire(180)">+半年</CsButton>
@@ -1171,15 +1172,15 @@ const tableColumns = computed<TableColumn[]>(() => {
     </CsModal>
 
     <!-- 独立余额调账弹窗 -->
-    <CsModal v-model:visible="adjustOpen" header="调整用户余额" size="small" :close-on-click-overlay="false">
+    <CsModal v-model:visible="adjustOpen" header="调整用户余额" size="small" scrollable :close-on-click-overlay="false">
       <CsForm label-position="top">
         <div class="adjust-header">
           <div class="user-meta">
-            <span class="k">用户:</span>
+            <span class="k">用户：</span>
             <span class="v" style="font-weight: 600">{{ adjustUser?.email }}</span>
           </div>
           <div class="user-meta">
-            <span class="k">当前余额:</span>
+            <span class="k">当前余额：</span>
             <span class="v cs-text-mono" style="font-weight: 700; color: var(--color-text-link-default-qabnuk)">
               {{ formatMoney((adjustUser as any)?.balance_cents || 0) }}
             </span>
@@ -1188,7 +1189,6 @@ const tableColumns = computed<TableColumn[]>(() => {
         <CsFormItem label="变动金额（元，支持负数扣款）" style="margin-top: 14px">
           <CsInputNumber
             v-model="adjustForm.delta_yuan"
-            :controls="false"
             :precision="2"
             :step="10"
             placeholder="正数充值，负数扣减"
@@ -1206,17 +1206,17 @@ const tableColumns = computed<TableColumn[]>(() => {
     </CsModal>
 
     <!-- 订阅信息查看/重置弹窗 -->
-    <CsModal v-model:visible="subInfoOpen" header="订阅信息" size="medium">
+    <CsModal v-model:visible="subInfoOpen" header="订阅信息" size="medium" scrollable>
       <CsLoading :loading="subInfoLoading" class="sub-info-body">
         <div class="user-meta" style="margin-bottom: 12px">
-          <span class="k">用户:</span>
+          <span class="k">用户：</span>
           <span class="v" style="font-weight: 600">{{ subInfoRow?.email }}</span>
         </div>
         <!-- label 置顶独立成行：避免长 label 横向占宽挤压输入框（桌面），并消除窄屏下的行内溢出（移动） -->
         <CsForm label-position="top">
           <CsFormItem label="订阅地址（发给用户，客户端添加订阅用）">
             <div class="sub-url-row">
-              <CsInput :model-value="subInfoUrl" readonly class="cs-text-mono" />
+              <CsInput :model-value="subInfoUrl" read-only class="cs-text-mono" />
               <CsButton :disabled="!subInfoUrl" icon-name="copy" @click="copyText(subInfoUrl, '订阅地址')">复制</CsButton>
             </div>
           </CsFormItem>
@@ -1303,7 +1303,7 @@ const tableColumns = computed<TableColumn[]>(() => {
 
 .balance-text {
   font-weight: 700;
-  color: #059669;
+  color: var(--color-text-status-success-1i2jf8, #00802f);
 }
 
 .edit-sections {
@@ -1538,10 +1538,6 @@ const tableColumns = computed<TableColumn[]>(() => {
 
 .cell-muted {
   color: var(--color-text-status-inactive-fqjc97, #656871);
-}
-
-.status-badge {
-  white-space: nowrap;
 }
 
 .traffic-cell {

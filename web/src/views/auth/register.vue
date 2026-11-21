@@ -20,8 +20,6 @@ const site = useSiteStore()
 const route = useRoute()
 const router = useRouter()
 
-const autoFilledCode = ref(false)
-
 const form = reactive({
   email: '',
   password: '',
@@ -59,7 +57,6 @@ onMounted(async () => {
   const codeParam = (route.query.code || route.query.invite || route.query.invite_code) as string | undefined
   if (codeParam && codeParam.trim()) {
     form.invite_code = codeParam.trim()
-    autoFilledCode.value = true
   }
 })
 
@@ -125,8 +122,7 @@ async function onSubmit() {
           prefix-icon="ticket"
           autocomplete="off"
           placeholder="请输入邀请码"
-          :disabled="autoFilledCode"
-          :clearable="!autoFilledCode"
+          clearable
           :invalid="Boolean(errors.invite)"
           @update:model-value="errors.invite = ''"
         />

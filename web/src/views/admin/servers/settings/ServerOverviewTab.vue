@@ -209,7 +209,7 @@ watch(
         </div>
 
         <div class="server-status-cell">
-          <span class="server-status-label">托管接入点</span>
+          <span class="server-status-label">托管入站</span>
           <span class="server-status-value">
             <span class="server-status-count">{{ inboundsLoading && !inboundsLoaded ? '…' : inbounds.length }}</span>
             <span class="server-status-unit">个</span>
@@ -250,7 +250,7 @@ watch(
         </CsAlert>
 
         <CsAlert v-if="server.config_drift" type="error" header="磁盘偏离">
-          节点磁盘配置与主控不一致。磁盘哈希 {{ (server.xray_disk_hash || '').slice(0, 12) || '未上报' }}…，
+          服务器磁盘配置与主控不一致。磁盘哈希 {{ (server.xray_disk_hash || '').slice(0, 12) || '未上报' }}…，
           重新生成并推送一次即可对齐。
         </CsAlert>
 
@@ -309,7 +309,7 @@ watch(
       <div v-if="nic" class="server-traffic-cycle">
         {{ nicRange }}（{{ nicCycleLabel }}）<template v-if="nicPartial">，{{ nicPartial }}</template>
       </div>
-      <div v-if="nic && !nicHasData" class="server-traffic-note">节点尚未上报可用的网卡计数（需要 agent 升级或节点在线）</div>
+      <div v-if="nic && !nicHasData" class="server-traffic-note">服务器尚未上报可用的网卡计数（需要 agent 升级或服务器在线）</div>
       <CsAlert v-else-if="nic?.partial" type="info">
         本周期数据自 {{ nic.tracked_since }} 起，之前的部分不计入用量。
       </CsAlert>

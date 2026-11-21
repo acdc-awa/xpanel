@@ -179,6 +179,11 @@ html.dark .x-chip {
   &.yellow      { background: rgba(250, 204, 21, 0.18); color: #fde047; }
 }
 
+.nowrap-badge {
+  white-space: nowrap !important;
+  flex-shrink: 0;
+}
+
 // 统一独立开关设置卡片 (Toggle Card)
 .x-toggle-card {
   display: flex;
@@ -559,7 +564,7 @@ html.dark .x-chip {
       gap: 6px;
       justify-content: flex-end;
       padding-top: 8px;
-      border-top: 1px solid rgba(0, 0, 0, 0.04);
+      border-top: 1px solid var(--x-border);
     }
   }
 }

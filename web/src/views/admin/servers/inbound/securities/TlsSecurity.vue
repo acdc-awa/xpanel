@@ -228,7 +228,7 @@ function onCertChange(val: any) {
 }
 
 .span-two {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 
 .version-row {

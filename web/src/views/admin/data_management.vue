@@ -329,12 +329,9 @@ onMounted(() => {
 <template>
   <CsPage>
     <CsToolbar>
-      <div>
-        <CsBox variant="div" font-size="heading-m" font-weight="bold">数据管理</CsBox>
-        <CsBox variant="div" font-size="body-s" color="text-body-secondary">
-          日志量可视化、按日期清理与空间回收（统计数据按天分桶）
-        </CsBox>
-      </div>
+      <CsBox variant="span" font-size="body-s" color="text-body-secondary">
+        日志量统计、按日期清理与空间回收
+      </CsBox>
       <template #actions>
         <CsButton :loading="loading" icon-name="refresh" @click="load">刷新</CsButton>
       </template>
@@ -354,7 +351,7 @@ onMounted(() => {
             <CsBox variant="span" font-weight="bold">{{ fmtCount(stats?.totals?.[t.key]) }}</CsBox>
           </div>
           <div v-if="stats?.sqlite_avail" class="stat-cell">
-            <span class="dot" style="background: #94a3b8" />
+            <span class="dot" style="background: var(--color-text-body-secondary-66ygbb, #656871)" />
             <CsBox variant="span" color="text-body-secondary">数据库文件</CsBox>
             <CsBox variant="span" font-weight="bold">
               {{ fmtSize(stats?.db_size) }} + WAL {{ fmtSize(stats?.wal_size) }} = {{ fmtSize(totalDbSize) }}
@@ -391,7 +388,7 @@ onMounted(() => {
             <template v-else-if="estimatedRows">预估删除 {{ fmtCount(estimatedRows.count) }} 行（不含窗口外更早数据）</template>
             <template v-else>—</template>
           </CsBox>
-          <CsButton icon-name="remove" :loading="cleanupRunning" :disabled="!cleanupDate" @click="runCleanup">
+          <CsButton variant="danger-outline" icon-name="remove" :loading="cleanupRunning" :disabled="!cleanupDate" @click="runCleanup">
             清理
           </CsButton>
         </div>
@@ -418,7 +415,7 @@ onMounted(() => {
         <TipIcon content="把存量流量明细归并到小时桶、节点心跳按行龄抽稀（近 6 小时 1 分钟，更早 10 分钟），并清理超出保留期的数据。归并只做求和/抽样，计费与用量口径不变，可重复执行。" />
       </template>
       <div class="cleanup-row" style="align-items: center">
-        <CsButton variant="primary" :loading="compactRunning" @click="runCompact">压缩历史数据</CsButton>
+        <CsButton :loading="compactRunning" @click="runCompact">压缩历史数据</CsButton>
         <TipIcon
           type="warn"
           content="压缩后会执行一次 VACUUM 回收磁盘，期间数据库写入会短暂阻塞且需约 2 倍文件大小的空闲空间，建议在低峰时段执行；已归并到小时/分级桶的数据不会重复压缩。"
@@ -459,7 +456,7 @@ onMounted(() => {
           </template>
           <template v-else>当前数据库类型不支持在线回收</template>
         </CsBox>
-        <CsButton variant="primary" :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
+        <CsButton :loading="vacuumRunning" :disabled="!stats?.sqlite_avail" @click="runVacuum">
           回收空间
         </CsButton>
         <TipIcon type="warn" content="回收期间数据库写入会短暂阻塞，建议在低峰时段执行；日常无需频繁回收。" />

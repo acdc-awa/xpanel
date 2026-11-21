@@ -354,7 +354,6 @@ async function copyText(text: string, label: string) {
               v-model="form.nic_quota_gb"
               :min="0"
               :max="10000000"
-              :controls="false"
               placeholder="0 = 不限"
             />
           </CsFormItem>
@@ -369,7 +368,7 @@ async function copyText(text: string, label: string) {
 
         <CsExpandableSection
           header="自定义统计周期"
-          header-description="存量逃生口：填了这里会清空上面的「流量重置周期」，且优先于计费周期的推导"
+          header-description="手动覆盖周期（高级）：填了这里会清空上面的「流量重置周期」，且优先于计费周期的推导"
           class="server-nic-advanced"
           :default-expanded="hasCustomCycle"
         >
@@ -387,7 +386,6 @@ async function copyText(text: string, label: string) {
                 v-model="form.nic_cycle_days"
                 :min="0"
                 :max="3650"
-                :controls="false"
                 placeholder="留空 = 按计费周期"
               />
             </CsFormItem>
@@ -396,11 +394,11 @@ async function copyText(text: string, label: string) {
       </CsForm>
     </CsContainer>
 
-    <CsContainer header="节点通信凭据">
+    <CsContainer header="服务器通信凭据">
       <div class="server-cred-row">
         <div class="server-cred-copy">
           <strong>Node ID</strong>
-          <p>Agent 与主控握手时使用的节点标识，随服务器创建生成、重装 Agent 时沿用。</p>
+          <p>Agent 与主控握手时使用的服务器标识，随服务器创建生成、重装 Agent 时沿用。</p>
         </div>
         <div class="server-cred-value">
           <span class="cs-text-mono server-wrap">{{ server.node_id }}</span>
@@ -444,7 +442,7 @@ async function copyText(text: string, label: string) {
           <strong>删除服务器</strong>
           <p>关联的入站、待推送配置与上报数据将一并删除，该服务器的 Agent 将无法再连接。</p>
         </div>
-        <CsButton variant="danger" :loading="deleting" @click="removeServer">删除服务器</CsButton>
+        <CsButton variant="danger-outline" :loading="deleting" @click="removeServer">删除服务器</CsButton>
       </div>
     </CsContainer>
   </div>
@@ -461,6 +459,10 @@ async function copyText(text: string, label: string) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 20px;
+
+  > :deep(.cs-form-item) {
+    margin-block-end: 0;
+  }
 }
 
 /* 自定义周期是计费周期推导的逃生口：与上方常规字段留出层级间距。 */

@@ -109,7 +109,7 @@ function copyText(txt: string, label = '内容') {
             @click="copyText(modelValue.decryption, '密钥')"
           />
           <CsButton
-            variant="primary"
+            variant="normal"
             icon-name="gen-ai"
             :loading="veGenLoading"
             @click="fetchVlessencKey"

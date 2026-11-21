@@ -95,10 +95,18 @@ async function confirm2fa() {
     twofaOpen.value = false
     gotoHome()
   } catch (e) {
-    toast.error(errMsg(e, '验证失败'))
+    const msg = errMsg(e, '验证失败')
+    twofaError.value = msg
+    toast.error(msg)
   } finally {
     twofaLoading.value = false
   }
+}
+
+function cancel2fa() {
+  twofaOpen.value = false
+  twofaError.value = ''
+  resetCaptcha()
 }
 
 function gotoHome() {
@@ -180,6 +188,7 @@ function gotoHome() {
     size="small"
     :close-on-click-overlay="false"
     initial-focus=".twofa-code-input input"
+    @update:visible="(v) => !v && resetCaptcha()"
   >
     <div class="twofa-body">
       <CsForm @submit="confirm2fa">
@@ -199,7 +208,7 @@ function gotoHome() {
     </div>
     <template #footer>
       <CsSpaceBetween direction="horizontal" size="xs">
-        <CsButton class="twofa-btn" :disabled="twofaLoading" @click="twofaOpen = false">取消</CsButton>
+        <CsButton class="twofa-btn" :disabled="twofaLoading" @click="cancel2fa">取消</CsButton>
         <CsButton class="twofa-btn" variant="primary" :loading="twofaLoading" @click="confirm2fa">
           验证
         </CsButton>

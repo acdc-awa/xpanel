@@ -1954,7 +1954,7 @@ watch(
 
           <CsContainer header="备注与计费策略">
             <div class="form-grid-2">
-              <CsFormItem label="备注 (Remark)" style="grid-column: span 2">
+              <CsFormItem label="备注 (Remark)" style="grid-column: 1 / -1">
                 <CsInput v-model="localRemark" placeholder="如 深圳专线入口 / 办公内网" />
               </CsFormItem>
 
@@ -1982,7 +1982,7 @@ watch(
 
               <!-- 本周期已用（只读，仅编辑存量入站时出现）：配额跑满或到期时后端 cron
                    会自动停用该入站，这里给出与判定同口径的用量对照 -->
-              <CsFormItem v-if="inboundId" label="本周期已用" style="grid-column: span 2">
+              <CsFormItem v-if="inboundId" label="本周期已用" style="grid-column: 1 / -1">
                 <div class="usage-line">
                   <span class="usage-text">
                     <strong>{{ formatBytes(localUsedBytes) }}</strong> /
@@ -2123,7 +2123,7 @@ watch(
               <CsToggle v-model="sniffingForm.enabled" label="启用流量嗅探" />
             </template>
             <div v-if="sniffingForm.enabled" class="form-grid-2">
-              <CsFormItem label="嗅探目标协议" style="grid-column: span 2" class="sniff-targets">
+              <CsFormItem label="嗅探目标协议" style="grid-column: 1 / -1" class="sniff-targets">
                 <CsCheckboxGroup
                   v-model="sniffingForm.destOverride"
                   :options="sniffingTargetOptions"

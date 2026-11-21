@@ -256,6 +256,7 @@ async function remove(row: any) {
     const { data } = await deletePermissionGroup(row.id)
     if (data.code === 0) {
       toast.success('已删除')
+      formOpen.value = false
       load()
     } else {
       toast.error(data.message)
@@ -269,9 +270,9 @@ async function remove(row: any) {
 <template>
   <CsPage>
     <CsToolbar>
-      <TipIcon content="权限组用于组织与分发接入点。点击订阅模板标签即可前往编辑、绑定模板库或转为自定义。" />
+      <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       <template #actions>
-        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增权限组</CsButton>
+        <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新建权限组</CsButton>
       </template>
     </CsToolbar>
 
@@ -358,7 +359,6 @@ async function remove(row: any) {
               <td class="col-actions">
                 <div class="row-actions">
                   <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
-                  <CsButton variant="danger-outline" :wrap-text="false" @click="remove(row)">删除</CsButton>
                 </div>
               </td>
             </tr>
@@ -426,19 +426,32 @@ async function remove(row: any) {
 
           <template #footer>
             <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
-            <CsButton variant="danger-outline" :wrap-text="false" @click="remove(row)">删除</CsButton>
           </template>
         </CsCard>
       </CsCardGrid>
     </CsContainer>
 
     <!-- ===== 权限组基础信息编辑弹窗 ===== -->
-    <CsModal v-model:visible="formOpen" :header="editing ? '编辑权限组' : '新增权限组'" size="medium" :close-on-click-overlay="false">
+    <CsModal
+      v-model:visible="formOpen"
+      :header="editing ? `编辑权限组：${editing.name}` : '新建权限组'"
+      size="medium"
+      scrollable
+      :close-on-click-overlay="false"
+    >
       <CsForm label-position="top">
         <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 VIP 1 / 基础套餐组" /></CsFormItem>
         <CsFormItem label="备注说明"><CsInput v-model="form.remark" placeholder="选填，如 普通节点权限组" /></CsFormItem>
       </CsForm>
       <template #footer>
+        <CsButton
+          v-if="editing"
+          variant="danger-outline"
+          style="margin-inline-end: auto"
+          @click="remove(editing)"
+        >
+          删除
+        </CsButton>
         <CsButton @click="formOpen = false">取消</CsButton>
         <CsButton variant="primary" :loading="saving" @click="save">保存</CsButton>
       </template>
@@ -449,6 +462,7 @@ async function remove(row: any) {
       v-model:visible="apDialogOpen"
       :header="`接入点优先级：${apTarget?.name || ''}`"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
     >
       <CsForm label-position="top">

@@ -5,6 +5,7 @@ import Button from './Button.vue'
 import { CS } from './classes'
 import { cx } from './utils'
 import { lockBodyScroll, unlockBodyScroll } from './modal-scroll-lock'
+import { pushOverlay } from './overlay-stack'
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +29,8 @@ const props = withDefaults(
      * 所以要直接落焦到输入框时传它。
      */
     initialFocus?: string
+    /** 显式层级（如 MessageBoxHost 需高于普通弹窗）；不传则沿用 vendor 默认。 */
+    zIndex?: number
   }>(),
   {
     header: undefined,
@@ -40,6 +43,7 @@ const props = withDefaults(
     closeOnEscape: true,
     closeAriaLabel: 'Close modal',
     initialFocus: undefined,
+    zIndex: undefined,
   }
 )
 
@@ -52,6 +56,7 @@ const dialogRef = ref<HTMLElement | null>(null)
 const headerId = `modal-header-${Math.random().toString(36).slice(2)}`
 /** 本实例是否持有滚动锁；隐藏实例（visible=false）不得释放别人的锁。 */
 let scrollLocked = false
+let popOverlay: (() => void) | null = null
 
 const rootClasses = computed(() => cx(CS.modal.root, CS.modal.refresh, 'cs-modal-root'))
 const focusLockClasses = computed(() => cx(CS.modal['focus-lock'], CS.modal['position-center']))
@@ -82,11 +87,6 @@ function close() {
 
 function onKeydown(event: KeyboardEvent) {
   if (!props.visible) return
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    if (props.closeOnEscape) close()
-    return
-  }
   if (event.key !== 'Tab' || !dialogRef.value) return
   const focusables = dialogRef.value.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -103,11 +103,20 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+function syncOverlay() {
+  popOverlay?.()
+  popOverlay = null
+  if (props.visible && props.closeOnEscape) {
+    popOverlay = pushOverlay(close)
+  }
+}
+
 function lockScroll() {
   if (scrollLocked) return
   scrollLocked = true
   lockBodyScroll()
   document.addEventListener('keydown', onKeydown, true)
+  syncOverlay()
 }
 
 function unlockScroll() {
@@ -115,7 +124,11 @@ function unlockScroll() {
   scrollLocked = false
   unlockBodyScroll()
   document.removeEventListener('keydown', onKeydown, true)
+  popOverlay?.()
+  popOverlay = null
 }
+
+watch(() => props.closeOnEscape, syncOverlay)
 
 watch(
   () => props.visible,
@@ -150,6 +163,7 @@ onBeforeUnmount(unlockScroll)
       role="dialog"
       aria-modal="true"
       :aria-labelledby="headerId"
+      :style="zIndex !== undefined ? { zIndex } : undefined"
       @click.self="closeOnClickOverlay && close()"
     >
       <div :class="focusLockClasses">

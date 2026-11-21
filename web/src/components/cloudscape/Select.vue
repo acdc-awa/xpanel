@@ -159,7 +159,8 @@ const triggerButtonClasses = computed(() =>
     CS['internal/components/button-trigger']['button-trigger'],
     CS['internal/components/button-trigger']['has-caret'],
     open.value && CS['internal/components/button-trigger'].pressed,
-    props.disabled && CS['internal/components/button-trigger'].disabled
+    props.disabled && CS['internal/components/button-trigger'].disabled,
+    showClear.value && 'cs-select-trigger-clearable'
   )
 )
 
@@ -184,6 +185,7 @@ function updatePosition() {
     top: `${top}px`,
     minWidth: `${rect.width}px`,
     maxWidth: 'min(520px, calc(100vw - 16px))',
+    zIndex: '9000',
   }
 }
 
@@ -198,7 +200,7 @@ function openDropdown() {
   emit('visible-change', true)
   nextTick(() => {
     updatePosition()
-    if (props.filterable) filterRef.value?.$el?.querySelector('input')?.focus()
+    if (props.filterable) filterRef.value?.focus()
     window.addEventListener('scroll', updatePosition, true)
     window.addEventListener('resize', updatePosition)
   })
@@ -240,7 +242,7 @@ function choose(option: SelectOption) {
     commit(next)
     nextTick(() => {
       updatePosition()
-      if (props.filterable) filterRef.value?.$el?.querySelector('input')?.focus()
+      if (props.filterable) filterRef.value?.focus()
     })
   } else {
     commit([option.value], option.value)
@@ -257,6 +259,10 @@ function moveHighlight(delta: number) {
   const count = visibleOptions.value.length
   if (!count) return
   highlighted.value = (highlighted.value + delta + count) % count
+  nextTick(() => {
+    const items = dropdownRef.value?.querySelectorAll<HTMLElement>('[role="option"]')
+    items?.[highlighted.value]?.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 function onTriggerKeydown(event: KeyboardEvent) {
@@ -461,7 +467,11 @@ onBeforeUnmount(() => {
   inline-size: 100%;
 }
 
-/* 清除按钮的位置与外观来自 CsIconButton，这里只负责定位 */
+/* 清除按钮的位置与外观来自 CsIconButton，这里只负责定位与触发器右侧留白 */
+.cs-select-trigger-clearable {
+  padding-inline-end: 58px !important;
+}
+
 .cs-select-clear {
   position: absolute;
   inset-block-start: 50%;

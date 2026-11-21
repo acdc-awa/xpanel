@@ -485,5 +485,9 @@ onUnmounted(() => {
   margin-block: 12px;
   margin-inline: 12px;
   background: var(--color-border-divider-default-diwd4w, #c6c6cd);
+
+  @media (max-width: $bp-tablet-max) {
+    margin-inline: 6px;
+  }
 }
 </style>

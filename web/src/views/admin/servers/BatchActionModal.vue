@@ -73,10 +73,9 @@ const columns = computed<TableColumn[]>(() => {
     cols.push({
       id: 'version',
       header: props.kind === 'xray' ? '当前内核' : '当前版本',
-      width: 110,
     })
   }
-  cols.push({ id: 'status', header: '状态', width: 120 })
+  cols.push({ id: 'status', header: '状态' })
   cols.push({ id: 'progress', header: '进度', minWidth: 200 })
   return cols
 })
@@ -220,23 +219,31 @@ function close() {
     :visible="visible"
     :header="title"
     size="large"
+    scrollable
     :close-on-click-overlay="false"
     @update:visible="(v: boolean) => !v && close()"
   >
     <CsSpaceBetween size="s">
-      <CsTable :items="rows" :columns="columns" track-by="id" empty-text="暂无服务器">
+      <CsTable
+        :items="rows"
+        :columns="columns"
+        track-by="id"
+        compact
+        :wrap-lines="false"
+        empty-text="暂无服务器">
         <template v-if="showVersion" #cell-version="{ item }">
           <span class="cs-text-mono">{{ item.version }}</span>
         </template>
         <template #cell-status="{ item }">
-          <CsBadge v-if="item.skipped" color="grey">已跳过</CsBadge>
+          <CsBadge v-if="item.skipped" class="nowrap-badge" color="grey">已跳过</CsBadge>
           <CsBadge
             v-else-if="item.status"
+            class="nowrap-badge"
             :color="item.status.phase === 'success' ? 'green' : item.status.phase === 'failed' ? 'red' : 'blue'"
           >
             {{ phaseLabels[item.status.phase] || item.status.phase }}
           </CsBadge>
-          <CsBadge v-else color="grey">等待</CsBadge>
+          <CsBadge v-else class="nowrap-badge" color="grey">等待</CsBadge>
         </template>
         <template #cell-progress="{ item }">
           <span v-if="item.skipped" class="cs-text-secondary">{{ item.reason }}</span>
@@ -244,6 +251,7 @@ function close() {
             <CsProgressBar
               :value="phasePercents[item.status.phase] ?? 0"
               :status="progressStatus(item.status.phase)"
+              :result-text="phaseLabels[item.status.phase] || item.status.phase"
               :bar-height="8"
             />
             <div v-if="item.status.error" class="batch-error cs-text-mono">{{ item.status.error }}</div>
@@ -259,7 +267,7 @@ function close() {
       </p>
     </CsSpaceBetween>
     <template #footer>
-      <CsButton variant="primary" @click="close">关闭</CsButton>
+      <CsButton @click="close">关闭</CsButton>
     </template>
   </CsModal>
 </template>

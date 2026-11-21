@@ -54,7 +54,7 @@ const { servers, serverFilter, serverLoading, loadServers, syncServerQuery } = u
 })
 
 const tabs: TabItem[] = [
-  { id: 'inbounds', label: '入站 (Inbounds)' },
+  { id: 'inbounds', label: '入站' },
   { id: 'access_points', label: '接入点' },
 ]
 const activeTab = ref('inbounds')
@@ -703,7 +703,7 @@ function inboundTrafficTitle(row: InboundItem): string {
           <CsButton v-if="hasInboundFilters" @click="resetInboundFilters">重置</CsButton>
           <CsButton icon-name="refresh" @click="load">刷新</CsButton>
           <TipIcon
-            content="在此为 Xray 服务器配置物理入站：VLESS / Hysteria 2 代理入站支持多源复用（同时承载用户与链式中继），四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
+            content="在此为 Xray 服务器配置入站：VLESS / Hysteria 2 代理入站支持多源复用（同时承载用户与链式中继），四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
           />
           <template #actions>
             <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增入站</CsButton>
@@ -1125,11 +1125,6 @@ function inboundTrafficTitle(row: InboundItem): string {
   align-items: center;
   gap: 6px;
   vertical-align: middle;
-}
-
-.nowrap-badge {
-  white-space: nowrap !important;
-  flex-shrink: 0;
 }
 
 .traffic-cell {

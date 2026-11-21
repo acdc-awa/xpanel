@@ -52,7 +52,7 @@ const slots = useSlots()
       :description="description"
       :constraint-text="constraintText"
     >
-      <template #label><slot name="label">{{ label }}</slot></template>
+      <template v-if="label || slots.label" #label><slot name="label">{{ label }}</slot></template>
       <template v-if="slots.info" #info><slot name="info" /></template>
       <slot />
     </FormField>

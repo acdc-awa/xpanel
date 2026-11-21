@@ -99,7 +99,7 @@ function statusMetaOf(row: ServerItem) {
   const heartbeat = row.last_seen_at ? formatDateTime(row.last_seen_at, '—').slice(5, 16) : '—'
 
   const tipParts = [
-    comm.tip || '与节点 Agent 连接正常',
+    comm.tip || '与服务器 Agent 连接正常',
     `Xray：${xray.text}`,
     `配置：${push.text}`,
     `心跳：${heartbeat}`,
@@ -318,7 +318,7 @@ const rows = computed(() =>
                 icon-name="external"
                 :href="normalizeUrl(item.row.idc_address)"
                 target="_blank"
-                title="打开 IDC 控制台"
+                aria-label="打开 IDC 控制台"
               >
                 IDC
               </CsButton>
@@ -326,7 +326,7 @@ const rows = computed(() =>
                 v-else-if="item.row.idc_address"
                 variant="inline-link"
                 icon-name="copy"
-                :title="`复制 IDC 地址：${item.row.idc_address}`"
+                :aria-label="`复制 IDC 地址：${item.row.idc_address}`"
                 @click="emit('copy-text', item.row.idc_address || '', 'IDC 地址')"
               >
                 IDC
@@ -336,7 +336,7 @@ const rows = computed(() =>
           </td>
 
           <td class="col-inbounds">
-            <CsButton variant="inline-link" title="前往入站管理查看" @click="emit('go-inbounds', item.row)">
+            <CsButton variant="inline-link" aria-label="前往入站管理查看" @click="emit('go-inbounds', item.row)">
               <span class="cell-mono">{{ item.inboundCount }}</span>
             </CsButton>
           </td>

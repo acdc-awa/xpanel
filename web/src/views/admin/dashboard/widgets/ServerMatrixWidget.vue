@@ -27,7 +27,7 @@ const serverColumns: TableColumn[] = [
   { id: 'status', header: '状态', width: 96 },
   { id: 'load', header: '负载 (CPU / 内存)', width: 150 },
   { id: 'rate', header: '速率 / 在线', minWidth: 118 },
-  { id: 'actions', header: '历史', width: 52, align: 'center' },
+  { id: 'actions', header: '历史', width: 52 },
 ]
 
 /** 窄卡片下让表格保持可读列宽并横向滚动，而不是把每列压到逐字换行。 */
@@ -151,7 +151,6 @@ function fmtTime(t: string | null) {
               class="sc-status"
               :type="row.status === 1 ? 'success' : 'error'"
               :text="row.status === 1 ? '在线' : '离线'"
-              :pulse="row.status === 1"
             />
             <CsButton
               class="sc-history"
@@ -233,7 +232,6 @@ function fmtTime(t: string | null) {
             <CsStatusIndicator
               :type="row.status === 1 ? 'success' : 'error'"
               :text="row.status === 1 ? '在线' : '离线'"
-              :pulse="row.status === 1"
             />
             <div class="server-heartbeat tabular-num">
               {{ row.last_seen_at ? fmtTime(row.last_seen_at).slice(5, 16) : '—' }}

@@ -1948,12 +1948,12 @@ function handleMobileAction(id: string | number) {
           />
         </div>
       </div>
-    </div>
 
-    <!-- 布局未保存提示条（桌面端右上角，移动端沉底居中） -->
-    <div v-if="layoutDirty" class="layout-save-bar">
-      <span class="layout-save-tip">布局已修改</span>
-      <CsButton variant="primary" @click="saveLayoutToCloud">保存布局</CsButton>
+      <!-- 布局未保存提示条（与顶部工具栏同属 flex 容器，空间不足时自动换行避让） -->
+      <div v-if="layoutDirty" class="layout-save-bar">
+        <span class="layout-save-tip">布局已修改</span>
+        <CsButton variant="primary" @click="saveLayoutToCloud">保存布局</CsButton>
+      </div>
     </div>
 
     <VueFlow
@@ -2212,8 +2212,10 @@ function handleMobileAction(id: string | number) {
   right: 12px;
   z-index: 20;
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   pointer-events: none;
 
   .top-bar-left {
@@ -2253,16 +2255,13 @@ function handleMobileAction(id: string | number) {
   }
 }
 
-/* 布局未保存提示条（桌面端右上角浮动，移动端沉底居中） */
+/* 布局未保存提示条（与顶部工具栏同排居右，窄宽度下自动换行避让） */
 .layout-save-bar {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 20;
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
   padding: 4px 10px;
   white-space: nowrap;
   background: var(--topo-bar-bg);
@@ -2295,16 +2294,6 @@ function handleMobileAction(id: string | number) {
       display: inline-flex;
     }
   }
-
-  .layout-save-bar {
-    top: auto;
-    right: auto;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 25;
-    max-width: calc(100% - 24px);
-  }
 }
 
 .topology-empty {
@@ -2312,34 +2301,6 @@ function handleMobileAction(id: string | number) {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.muted {
-  color: var(--x-text-3);
-}
-.tip {
-  font-size: 12px;
-  margin: 8px 0 12px;
-}
-
-.rule-presets {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
-  .preset-label {
-    font-size: 12px;
-    color: var(--x-text-3);
-  }
-  .preset-btn {
-    cursor: pointer;
-    user-select: none;
-    transition: all 0.15s;
-    &:hover {
-      opacity: 0.85;
-      transform: translateY(-1px);
-    }
-  }
 }
 
 :deep(.ap-node .ep) {

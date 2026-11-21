@@ -31,8 +31,9 @@ function handleAdd(id: string) {
 <template>
   <CsModal
     :visible="visible"
-    header="添加小组件至大盘 (Add Widgets)"
+    header="添加小组件至大盘"
     size="medium"
+    scrollable
     @update:visible="(val) => emit('update:visible', val)"
     @close="emit('update:visible', false)"
     :close-on-click-overlay="false"

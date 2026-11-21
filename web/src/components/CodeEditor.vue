@@ -13,12 +13,13 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { basicSetup } from 'codemirror'
 import { yaml as yamlLanguage } from '@codemirror/lang-yaml'
 import { json as jsonLanguage } from '@codemirror/lang-json'
-import { EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, placeholder as cmPlaceholder, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { HighlightStyle, syntaxHighlighting, indentUnit, syntaxTree } from '@codemirror/language'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
 import { tags as t } from '@lezer/highlight'
 import { parseDocument } from 'yaml'
+import { useThemeStore } from '@/stores/theme'
 
 const props = withDefaults(
   defineProps<{
@@ -44,6 +45,9 @@ const emit = defineEmits<{
 
 const host = ref<HTMLDivElement>()
 let view: EditorView | null = null
+// 主题放进 Compartment：亮/暗切换时只 reconfigure，不重建编辑器（保留文档、光标与撤销历史）
+const themeCompartment = new Compartment()
+const theme = useThemeStore()
 // 由外部 prop 驱动的文档替换不再回吐 update 事件，避免自激循环
 let applyingExternal = false
 
@@ -256,7 +260,9 @@ const highlight = HighlightStyle.define([
   { tag: t.invalid, color: 'var(--x-code-invalid)', textDecoration: 'underline wavy var(--x-code-invalid)' },
 ])
 
-const editorTheme = EditorView.theme({
+// dark 标记决定 CodeMirror 基础主题里 &light / &dark 两套规则哪一套生效；
+// 颜色本身仍走 CSS 变量，这里只负责让光标、选区、搜索面板等基础规则选对分支。
+const buildEditorTheme = (dark: boolean): Extension => EditorView.theme({
   '&': {
     backgroundColor: 'var(--color-background-input-default-1u0v1p, #ffffff)',
     color: 'var(--color-text-body-default-b2us04, #0f141a)',
@@ -274,10 +280,52 @@ const editorTheme = EditorView.theme({
     fontFamily: 'var(--font-family-monospace-842lr2, Monaco, Menlo, Consolas, "Courier Prime", Courier, "Courier New", monospace)',
     lineHeight: '20px',
   },
-  '.cm-content': { padding: '8px 0', caretColor: 'var(--color-text-body-default-b2us04, #0f141a)' },
-  '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: 'var(--color-text-body-default-b2us04, #0f141a)',
+  // 用 &.cm-editor 提高特异性（0,3,0），稳定压过 CodeMirror baseTheme 的 &light/&dark（0,2,0），
+  // 同时 { dark } 会切换 CodeMirror 内置的 darkTheme facet（注意 EditorView.theme 不支持 &dark/&light 选择器）。
+  '&.cm-editor .cm-content': {
+    padding: '8px 0',
+    caretColor: dark
+      ? 'var(--color-text-body-default-b2us04, #ffffff)'
+      : 'var(--color-text-body-default-b2us04, #0f141a)',
   },
+  '&.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
+    borderLeftColor: dark
+      ? 'var(--color-text-body-default-b2us04, #ffffff)'
+      : 'var(--color-text-body-default-b2us04, #0f141a)',
+  },
+  // 搜索 / 替换面板（Ctrl+F）：默认是浅灰底 + 原生控件，暗色下刺眼且文字不可读
+  '.cm-panels': {
+    backgroundColor: 'var(--x-card)',
+    color: 'var(--x-text)',
+    borderColor: 'var(--x-border)',
+  },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--x-border)' },
+  '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--x-border)' },
+  '.cm-panel.cm-search': { fontSize: '13px' },
+  '.cm-panel.cm-search label': { color: 'var(--x-text-2)' },
+  '.cm-panel.cm-search [name=close]': { color: 'var(--x-text-2)' },
+  '.cm-textfield': {
+    backgroundColor: 'var(--color-background-input-default-1u0v1p, var(--x-card))',
+    color: 'var(--x-text)',
+    border: '1px solid var(--color-border-input-default-jtkw9d, var(--x-border))',
+    borderRadius: '4px',
+    padding: '2px 6px',
+  },
+  '.cm-textfield:focus': {
+    outline: 'none',
+    borderColor: 'var(--color-border-input-focused-ppoq5z, #006ce0)',
+  },
+  '.cm-button': {
+    backgroundImage: 'none',
+    backgroundColor: 'var(--x-fill-2)',
+    color: 'var(--x-text)',
+    border: '1px solid var(--x-border)',
+    borderRadius: '4px',
+    padding: '2px 8px',
+    cursor: 'pointer',
+  },
+  '.cm-button:hover': { backgroundImage: 'none', backgroundColor: 'var(--x-fill-3, var(--x-fill-2))' },
+  '.cm-button:active': { backgroundImage: 'none', backgroundColor: 'var(--x-fill-2)' },
   '.cm-gutters': {
     backgroundColor: 'var(--color-background-code-editor-gutter-default-8n8dxf, #f3f3f7)',
     color: 'var(--color-text-code-editor-gutter-default-u68cfj, #0f141a)',
@@ -304,7 +352,7 @@ const editorTheme = EditorView.theme({
     backgroundColor: 'var(--x-card)',
     color: 'var(--x-text)',
     border: '1px solid var(--x-border)',
-    borderRadius: '6px',
+    borderRadius: '8px',
   },
   '.cm-tooltip-lint': { padding: '4px 8px', fontSize: '12px' },
   '.cm-diagnostic': { paddingLeft: '18px' },
@@ -313,7 +361,7 @@ const editorTheme = EditorView.theme({
     border: '1px solid var(--x-border)',
     color: 'var(--x-text-2)',
   },
-})
+}, { dark })
 
 // ==================== 高度与拖拽缩放 ====================
 // Cloudscape 官方 CodeEditor 自带可缩放盒；这里用同样的交互给 CodeMirror 外壳加右下角手柄。
@@ -378,7 +426,7 @@ function extensions(): Extension[] {
     isYaml ? yamlLanguage() : jsonLanguage(),
     indentUnit.of('  '),
     syntaxHighlighting(highlight),
-    editorTheme,
+    themeCompartment.of(buildEditorTheme(theme.isDark)),
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {
       if (!u.docChanged || applyingExternal) return
@@ -411,6 +459,13 @@ onMounted(() => {
     parent: host.value,
   })
 })
+
+watch(
+  () => theme.isDark,
+  (dark) => {
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildEditorTheme(dark)) })
+  }
+)
 
 onBeforeUnmount(() => {
   stopResize()

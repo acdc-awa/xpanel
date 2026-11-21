@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { pushOverlay } from './overlay-stack'
 
 type Placement = 'top' | 'top-start' | 'top-end' | 'bottom' | 'left' | 'right'
 
@@ -91,14 +92,14 @@ function hide() {
   }, props.hideDelay)
 }
 
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && open.value) hide()
-}
+let popOverlay: (() => void) | null = null
 
 watch(open, (value) => {
-  if (value) document.addEventListener('keydown', onKeydown, true)
-  else {
-    document.removeEventListener('keydown', onKeydown, true)
+  if (value) {
+    if (!popOverlay) popOverlay = pushOverlay(hide)
+  } else {
+    popOverlay?.()
+    popOverlay = null
     unbindPositionListeners()
   }
 })
@@ -106,7 +107,8 @@ watch(open, (value) => {
 onBeforeUnmount(() => {
   clearTimeout(showTimer)
   clearTimeout(hideTimer)
-  document.removeEventListener('keydown', onKeydown, true)
+  popOverlay?.()
+  popOverlay = null
   unbindPositionListeners()
 })
 </script>
@@ -159,5 +161,10 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
   pointer-events: none;
+}
+
+:global(html.dark) .cs-tooltip,
+:global(.awsui-dark-mode) .cs-tooltip {
+  border: 1px solid var(--color-border-divider-default-diwd4w, #414d5c);
 }
 </style>

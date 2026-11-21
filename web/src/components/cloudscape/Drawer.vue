@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Button from './Button.vue'
 import { CS } from './classes'
 import { cx } from './utils'
+import { lockBodyScroll, unlockBodyScroll } from './modal-scroll-lock'
+import { pushOverlay } from './overlay-stack'
 
 const props = withDefaults(
   defineProps<{
@@ -45,6 +47,8 @@ const emit = defineEmits<{
 const drawerRef = ref<HTMLElement | null>(null)
 const headerId = `drawer-header-${Math.random().toString(36).slice(2)}`
 let previousActive: HTMLElement | null = null
+let scrollLocked = false
+let popOverlay: (() => void) | null = null
 
 const width = computed(() => (typeof props.size === 'number' ? `${props.size}px` : props.size))
 const offsetTop = computed(() => `${props.topOffset}px`)
@@ -70,11 +74,6 @@ function close() {
 
 function onKeydown(event: KeyboardEvent) {
   if (!props.visible) return
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    close()
-    return
-  }
   if (event.key !== 'Tab' || !drawerRef.value) return
   const focusables = drawerRef.value.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -92,14 +91,21 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 function lockScroll() {
+  if (scrollLocked) return
+  scrollLocked = true
   previousActive = document.activeElement as HTMLElement | null
-  document.body.style.overflow = 'hidden'
+  lockBodyScroll()
   document.addEventListener('keydown', onKeydown, true)
+  popOverlay = pushOverlay(close)
 }
 
 function unlockScroll() {
-  document.body.style.overflow = ''
+  if (!scrollLocked) return
+  scrollLocked = false
+  unlockBodyScroll()
   document.removeEventListener('keydown', onKeydown, true)
+  popOverlay?.()
+  popOverlay = null
   previousActive?.focus?.()
   previousActive = null
 }
@@ -175,13 +181,14 @@ onBeforeUnmount(unlockScroll)
   inset-block: var(--cs-drawer-top-offset, 0px) 0 !important;
   display: flex;
   flex-direction: column;
-  z-index: 6000;
+  z-index: 4500 !important;
   overflow: hidden auto;
   box-shadow: var(--shadow-panel-toggle-side, 0 1px 8px 1px rgba(0, 28, 36, 0.15));
 }
 
 /* 遮罩同样从顶栏下沿开始，否则顶栏虽可见却点不到（被遮罩吃掉点击） */
 .cs-drawer-backdrop {
+  z-index: 4499 !important;
   inset-block-start: var(--cs-drawer-top-offset, 0px) !important;
 }
 

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   toast,
+  messageBox,
   CsAlert,
   CsButton,
   CsCheckboxGroup,
@@ -22,6 +23,7 @@ import {
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   createServerRoutingRule,
+  deleteServerRoutingRule,
   updateServerRoutingRule,
   type RoutingRulePayload,
   type ServerRoutingRule,
@@ -46,6 +48,7 @@ const emit = defineEmits<{
 
 const visible = ref(false)
 const saving = ref(false)
+const deleting = ref(false)
 
 interface RoutingRuleForm extends RoutingRulePayload {
   inbound_tag?: string
@@ -222,7 +225,7 @@ async function save() {
     if (data.code === 0) {
       toast.success(props.rule ? '路由规则已更新' : '路由规则已创建')
       emit('saved')
-      visible.value = false
+      closeEditor()
     } else {
       toast.error(data.message)
     }
@@ -230,6 +233,34 @@ async function save() {
     toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
+  }
+}
+
+async function removeRule() {
+  if (!props.rule?.id || isDerived.value) return
+  try {
+    await messageBox.confirm(
+      `确认删除路由规则「${props.rule.outbound_tag}」？`,
+      '删除路由规则',
+      { type: 'error' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    const { data } = await deleteServerRoutingRule(props.serverId, props.rule.id)
+    if (data.code === 0) {
+      toast.success('已删除')
+      emit('saved')
+      closeEditor()
+    } else {
+      toast.error(data.message)
+    }
+  } catch (e) {
+    toast.error(errMsg(e, '删除失败'))
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -244,17 +275,21 @@ const selectedInboundTags = computed<string[]>({
   },
 })
 
-function onClosed() {
+let closed = false
+function closeEditor() {
+  if (closed) return
+  closed = true
+  visible.value = false
   emit('close')
 }
 </script>
 <template>
   <CsModal
     v-model:visible="visible"
-    :header="rule ? `编辑路由规则：${rule.outbound_tag}` : '新增路由规则'"
+    :header="rule ? `编辑路由规则：${rule.outbound_tag}` : '新建路由规则'"
     size="large"
     scrollable
-    @close="onClosed"
+    @close="closeEditor"
     :close-on-click-overlay="false"
   >
     <CsSpaceBetween size="l">
@@ -395,9 +430,20 @@ function onClosed() {
 
     <template #footer>
       <div class="modal-footer">
-        <span class="cs-text-secondary footer-hint">保存后主控自动编译并推送到服务器</span>
+        <div class="modal-footer-left">
+          <CsButton
+            v-if="rule && !isDerived"
+            variant="danger-outline"
+            icon-name="remove"
+            :loading="deleting"
+            @click="removeRule"
+          >
+            删除规则
+          </CsButton>
+          <span class="cs-text-secondary footer-hint">保存后主控自动编译并推送到服务器</span>
+        </div>
         <CsSpaceBetween direction="horizontal" size="xs">
-          <CsButton @click="visible = false">取消</CsButton>
+          <CsButton @click="closeEditor">取消</CsButton>
           <CsButton variant="primary" :loading="saving" icon-name="check" @click="save">保存规则</CsButton>
         </CsSpaceBetween>
       </div>
@@ -438,6 +484,11 @@ function onClosed() {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+.modal-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .footer-hint {
   font-size: 12px;

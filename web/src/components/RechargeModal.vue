@@ -79,6 +79,8 @@ watch(
       cardCode.value = ''
       if (props.suggestedAmountCents > 0) {
         amountYuan.value = (Math.ceil(props.suggestedAmountCents) / 100).toFixed(2)
+      } else {
+        amountYuan.value = '50'
       }
       loadChannels()
     }
@@ -216,6 +218,7 @@ async function handleSubmit(replacePending = false) {
               <CsInput
                 v-model="amountYuan"
                 type="number"
+                :min="0.01"
                 placeholder="请输入充值金额"
                 class="cell-mono"
                 @keyup.enter="handleSubmit(false)"
@@ -263,7 +266,7 @@ async function handleSubmit(replacePending = false) {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--color-border-divider-default-diwd4w, #d5dbdb);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--color-background-container-content-mjfil9, #ffffff);
   color: var(--color-text-body-default-b2us04, #0f141a);
   text-align: left;

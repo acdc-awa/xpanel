@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from './Button.vue'
 import { CS } from './classes'
 import { cx } from './utils'
@@ -80,6 +80,11 @@ function select(tab: TabItem) {
   emit('change', { activeTabId: tab.id })
   scrollActiveIntoView()
 }
+
+watch(
+  () => activeId.value,
+  () => nextTick(scrollActiveIntoView)
+)
 
 function onKeydown(event: KeyboardEvent) {
   const enabled = props.tabs.filter((tab) => !tab.disabled)

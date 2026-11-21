@@ -6,7 +6,6 @@ import { BP, MQ } from '@/utils/media'
 import TipIcon from '@/components/base/TipIcon.vue'
 import SortHandle from '@/components/base/SortHandle.vue'
 import {
-  CsBadge,
   CsButton,
   CsCard,
   CsCardFact,
@@ -504,21 +503,27 @@ async function restore(row: any) {
       </CsCardGrid>
     </CsContainer>
 
-    <CsModal v-model:visible="formOpen" :header="editing ? '编辑套餐' : '新增套餐'" size="medium" :close-on-click-overlay="false">
+    <CsModal
+      v-model:visible="formOpen"
+      :header="editing ? `编辑套餐：${form.name}` : '新建套餐'"
+      size="medium"
+      scrollable
+      :close-on-click-overlay="false"
+    >
       <CsForm label-position="top">
         <CsFormItem label="名称"><CsInput v-model="form.name" placeholder="如 月付 200G" /></CsFormItem>
         <CsFormItem label="套餐文案（支持 Markdown 与 <u>下划线</u>，留空则使用默认模板）">
           <div class="placeholder-chips">
             <span class="chip-label">快捷插入占位符：</span>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{traffic}}')">
+            <button type="button" class="placeholder-tag" @click="insertPlaceholder('{{traffic}}')">
               &#123;&#123;traffic&#125;&#125; (流量)
-            </CsBadge>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{price}}')">
+            </button>
+            <button type="button" class="placeholder-tag" @click="insertPlaceholder('{{price}}')">
               &#123;&#123;price&#125;&#125; (价格)
-            </CsBadge>
-            <CsBadge color="blue" class="placeholder-tag" @click="insertPlaceholder('{{duration}}')">
+            </button>
+            <button type="button" class="placeholder-tag" @click="insertPlaceholder('{{duration}}')">
               &#123;&#123;duration&#125;&#125; (周期)
-            </CsBadge>
+            </button>
           </div>
           <CsInput
             ref="descInputRef"
@@ -543,7 +548,7 @@ async function restore(row: any) {
             <CsInputNumber v-model="form.traffic_gb" :min="1" style="width: 100%" />
           </CsFormItem>
           <CsFormItem label="热门推荐">
-            <div style="display: flex; align-items: center; gap: 8px; width: 100%">
+            <div class="control-cell">
               <CsToggle v-model="form.is_featured" />
               <TipIcon content="商城展示「热门推荐」徽标并高亮（多个标记时仅排最前的生效）" />
             </div>
@@ -556,13 +561,13 @@ async function restore(row: any) {
               content="商店按身份过滤：非持有者只见「可新购」套餐；持有者额外可见自己「可续费」的当前套餐（用于续费）。停售老套餐但保留续费：关闭「可新购」，保留「可续费」。"
             />
           </template>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%">
-            <div style="display: flex; align-items: center; gap: 8px">
+          <div class="plan-status-grid">
+            <div class="control-cell">
               <CsToggle v-model="form.purchasable" />
               <span style="font-size: 13px">可新购</span>
               <span class="cs-text-secondary" style="font-size: 12px">商店展示并允许非持有者购买</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px">
+            <div class="control-cell">
               <CsToggle v-model="form.renewable" />
               <span style="font-size: 13px">可续费</span>
               <span class="cs-text-secondary" style="font-size: 12px">持有者余额直付顺延</span>
@@ -754,19 +759,19 @@ async function restore(row: any) {
 .soft-tag--info {
   color: var(--x-tag-info-color, #006ce0);
   background: var(--x-tag-info-bg, #f0fbff);
-  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
+  border-color: var(--x-tag-info-border, var(--color-border-status-info-e5c14y, #0972d3));
 }
 
 .soft-tag--success {
   color: var(--color-text-status-success-1i2jf8, #00802f);
   background: var(--x-success-soft, #ecfdf5);
-  border-color: rgba(16, 185, 129, 0.3);
+  border-color: var(--color-border-status-success-zsy8d6, #037f0c);
 }
 
 .soft-tag--warn {
   color: var(--color-text-status-warning-fabq6h, #8d6605);
   background: var(--x-warning-soft, #fffbeb);
-  border-color: rgba(245, 158, 11, 0.3);
+  border-color: var(--color-border-status-warning-zj1tu9, #8d6605);
 }
 
 .soft-tag--neutral {
@@ -879,16 +884,41 @@ async function restore(row: any) {
   }
 
   .placeholder-tag {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border-status-info-e5c14y, #0972d3);
+    background: var(--color-background-status-info-lki61z, #f0fbff);
+    color: var(--color-text-status-info-su6k9n, #0972d3);
     cursor: pointer;
     font-family: var(--font-family-monospace-842lr2);
     font-size: 12px;
+    line-height: 16px;
     user-select: none;
     transition: all 0.15s ease;
-    &:hover {
+    &:hover,
+    &:focus-visible {
       background: var(--color-background-item-selected-dotkup);
       border-color: var(--color-text-link-default-qabnuk);
       color: var(--color-text-link-default-qabnuk);
     }
+    &:focus-visible {
+      outline: 2px solid var(--color-border-item-focused-sewkzn, #0972d3);
+      outline-offset: 1px;
+    }
+  }
+}
+
+.plan-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  width: 100%;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
   }
 }
 

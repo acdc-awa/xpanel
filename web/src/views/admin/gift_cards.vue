@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { formatMoney, formatMoneyNumber } from '@/utils/format'
+import { formatMoney } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
@@ -194,6 +194,14 @@ function onFilterChange() {
   load()
 }
 
+const hasFilters = computed(() => Boolean(statusFilter.value || keyword.value.trim()))
+
+function resetFilters() {
+  statusFilter.value = ''
+  keyword.value = ''
+  onFilterChange()
+}
+
 const emptyText = computed(() =>
   statusFilter.value || keyword.value.trim()
     ? '未找到符合条件的礼品卡记录'
@@ -208,7 +216,7 @@ const giftCardColumns: TableColumn[] = [
   { id: 'used_by', header: '兑换用户' },
   { id: 'expires_at', header: '有效期' },
   { id: 'used_at', header: '兑换时间' },
-  { id: 'actions', header: '操作' },
+  { id: 'actions', header: '操作', width: '1%' },
 ]
 
 function statusOf(row: GiftCard): { className: string; text: string } {
@@ -239,16 +247,17 @@ function isMutedRow(row: GiftCard) {
         placeholder="搜索卡密 / 批次名称"
         prefix-icon="search"
         clearable
-        style="width: 220px"
+        class="filter-search"
         @keyup.enter="onFilterChange"
         @clear="onFilterChange"
       />
-      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="onFilterChange">
+      <CsSelect v-model="statusFilter" placeholder="全部状态" clearable class="filter-select" @change="onFilterChange">
         <CsOption label="全部状态" value="" />
         <CsOption label="未使用" value="unused" />
         <CsOption label="已使用" value="used" />
         <CsOption label="已作废" value="disabled" />
       </CsSelect>
+      <CsButton v-if="hasFilters" @click="resetFilters">重置</CsButton>
       <CsButton icon-name="refresh" @click="load">刷新</CsButton>
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openCreate">批量生成礼品卡</CsButton>
@@ -343,7 +352,7 @@ function isMutedRow(row: GiftCard) {
     </CsContainer>
 
     <!-- 批量生成弹窗 -->
-    <CsModal v-model:visible="createOpen" header="批量生成礼品卡" size="small" :close-on-click-overlay="false">
+    <CsModal v-model:visible="createOpen" header="批量生成礼品卡" size="small" scrollable :close-on-click-overlay="false">
       <CsForm label-position="top">
         <CsFormItem label="批次名称 / 备注">
           <CsInput v-model="createForm.name" placeholder="如 新年促销50元礼品卡" />
@@ -372,11 +381,9 @@ function isMutedRow(row: GiftCard) {
     </CsModal>
 
     <!-- 生成结果弹窗 -->
-    <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium" :close-on-click-overlay="false">
+    <CsModal v-model:visible="resultOpen" header="礼品卡生成成功" size="medium" scrollable :close-on-click-overlay="false">
       <CsAlert type="success" style="margin-bottom: 14px">
-        本次已成功生成 {{ createdCards.length }} 张面值为 ¥
-        {{ formatMoneyNumber(createdCards[0]?.face_value_cents || 0) }}
-        的卡密：
+        本次已成功生成 {{ createdCards.length }} 张面值为 {{ fmtMoney(createdCards[0]?.face_value_cents || 0) }} 的卡密：
       </CsAlert>
       <CsInput
         :model-value="createdCards.map((c) => c.code).join('\n')"
@@ -387,14 +394,22 @@ function isMutedRow(row: GiftCard) {
         style="font-size: 13px"
       />
       <template #footer>
-        <CsButton variant="primary" icon-name="copy" @click="copyAllCreated">一键复制全部卡密</CsButton>
         <CsButton @click="resultOpen = false">关闭</CsButton>
+        <CsButton variant="primary" icon-name="copy" @click="copyAllCreated">一键复制全部卡密</CsButton>
       </template>
     </CsModal>
   </CsPage>
 </template>
 
 <style scoped lang="scss">
+.filter-search {
+  width: min(100%, 220px);
+}
+
+.filter-select {
+  width: min(100%, 140px);
+}
+
 .cell-muted {
   color: var(--color-text-status-inactive-fqjc97, #656871);
 }

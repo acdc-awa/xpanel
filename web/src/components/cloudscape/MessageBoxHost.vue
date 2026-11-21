@@ -61,6 +61,7 @@ function confirm() {
     :visible="true"
     :header="request.title"
     size="small"
+    :z-index="6500"
     :hide-dismiss-button="!closeOnInteract"
     :close-on-click-overlay="closeOnInteract"
     :close-on-escape="closeOnInteract"

@@ -73,6 +73,8 @@ const hasValue = computed(() => props.modelValue !== '' && props.modelValue !== 
 const showClear = computed(() => props.clearable && hasValue.value && !props.disabled && !props.readOnly)
 const showPasswordToggle = computed(() => props.showPassword && !isTextarea.value)
 const hasEndIcon = computed(() => showClear.value || showPasswordToggle.value)
+const hasDualEndIcon = computed(() => Boolean(props.clearable && showPasswordToggle.value))
+const hasWordLimit = computed(() => Boolean(props.showWordLimit && props.maxlength))
 const hasStartIcon = computed(() => Boolean(props.prefixIcon || slots.icon))
 const charCount = computed(() => String(props.modelValue ?? '').length)
 
@@ -92,7 +94,8 @@ const inputClasses = computed(() =>
     props.invalid && CS.input['input-invalid'],
     props.warning && !props.invalid && CS.input['input-warning'],
     hasStartIcon.value && CS.input['input-has-icon-start'],
-    hasEndIcon.value && CS.input['input-has-icon-end']
+    hasEndIcon.value && CS.input['input-has-icon-end'],
+    hasDualEndIcon.value && 'cs-input-dual-icon-end'
   )
 )
 
@@ -117,7 +120,7 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="isTextarea" :class="[CS.textarea.root, 'cs-input-root']">
+  <div v-if="isTextarea" :class="[CS.textarea.root, 'cs-input-root', hasWordLimit && 'cs-input-with-word-limit']">
     <textarea
       ref="inputRef"
       :class="
@@ -144,7 +147,7 @@ defineExpose({
     />
     <span v-if="showWordLimit && maxlength" class="cs-input-word-count">{{ charCount }} / {{ maxlength }}</span>
   </div>
-  <div v-else :class="[CS.input['input-container'], 'cs-input-root']">
+  <div v-else :class="[CS.input['input-container'], 'cs-input-root', hasWordLimit && 'cs-input-with-word-limit']">
     <span v-if="hasStartIcon" :class="CS.input['input-icon-start']">
       <slot name="icon"><Icon v-if="prefixIcon" :name="prefixIcon" /></slot>
     </span>
@@ -194,6 +197,14 @@ defineExpose({
 <style scoped lang="scss">
 .cs-input-root {
   position: relative;
+}
+
+.cs-input-with-word-limit {
+  margin-block-end: 18px;
+}
+
+.cs-input-dual-icon-end {
+  padding-inline-end: 64px !important;
 }
 
 /* 两个辅助按钮同时出现时（可清除 + 可显隐）横向排布，避免叠在一起 */

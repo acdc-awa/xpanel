@@ -105,7 +105,7 @@ const errors = computed(() => validateHysteriaSettings(props.modelValue))
             />
           </CsFormItem>
           <CsFormItem label="反代选项">
-            <div class="inline-row">
+            <div class="control-cell inline-row">
               <CsCheckbox
                 :model-value="modelValue.masquerade.rewriteHost"
                 label="改写 Host"

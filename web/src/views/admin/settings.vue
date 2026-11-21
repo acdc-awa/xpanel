@@ -61,7 +61,7 @@ import {
 } from '@/api/admin'
 import { apiBase } from '@/config/site'
 import { errMsg } from '@/api/http'
-import { setDisplayTimezone, effectiveTimezoneLabel, formatDateTime } from '@/utils/timezone'
+import { setDisplayTimezone, effectiveTimezoneLabel, formatDateTime, formatDateTimeMinute } from '@/utils/timezone'
 import { useSiteStore } from '@/stores/site'
 
 const isMobile = useMediaQuery(MQ.tablet)
@@ -500,9 +500,9 @@ async function runConfirmed() {
 
 const backupColumns: TableColumn[] = [
   { id: 'file', header: '备份文件', minWidth: 220 },
-  { id: 'size', header: '大小', width: 110 },
-  { id: 'created', header: '创建时间', width: 170 },
-  { id: 'actions', header: '操作', width: 264, align: 'end' },
+  { id: 'size', header: '大小' },
+  { id: 'created', header: '创建时间' },
+  { id: 'actions', header: '操作', width: '1%' },
 ]
 
 /** 文件选择器承载上传：隐藏 input + 按钮，替换掉 el-upload（本页只用到 file 一项）。 */
@@ -1093,7 +1093,7 @@ async function save() {
               <!-- 品牌全景实时预览卡片 -->
               <div class="brand-preview-section">
                 <div class="preview-header">
-                  <CsIcon name="grid-view" />&nbsp;全场景实时效果预览（当前编辑状态）
+                  <CsIcon name="grid-view" /> 全场景实时效果预览（当前编辑状态）
                 </div>
                 <div class="preview-grid">
                   <!-- 1. 管理端侧栏效果 -->
@@ -1439,6 +1439,10 @@ async function save() {
               </template>
             </CsToolbar>
             <CsTable
+              compact
+              :wrap-lines="false"
+              track-by="file"
+              style="margin-top: 12px"
               :items="backups"
               :columns="backupColumns"
               :loading="backupLoading"
@@ -1448,7 +1452,7 @@ async function save() {
             >
               <template #cell-file="{ row }"><code class="cs-text-mono">{{ row.file }}</code></template>
               <template #cell-size="{ row }">{{ fmtSize(row.size) }}</template>
-              <template #cell-created="{ row }">{{ formatDateTime(row.created_at) }}</template>
+              <template #cell-created="{ row }">{{ formatDateTimeMinute(row.created_at) }}</template>
               <template #cell-actions="{ row }">
                 <div class="row-actions">
                   <CsButton :wrap-text="false" :disabled="backupRestoring" @click="restoreFromBackup(row)">恢复</CsButton>
@@ -1485,7 +1489,7 @@ async function save() {
                   </template>
                 </CsKeyValuePairs>
                 <!-- 计数块：与系统状态表同源，放在同一列宽里，用 CsCardGrid 的官方卡距 -->
-                <CsCardGrid class="status-count-grid" :min-width="200" :gap="12">
+                <CsCardGrid class="status-count-grid" :min-width="isMobile ? 140 : 200" :gap="12">
                   <CsCard v-for="(v, k) in system.counts" :key="k">
                     <CsBox variant="span" font-size="heading-l" font-weight="bold" display="block">{{ v }}</CsBox>
                     <CsBox variant="span" font-size="body-s" color="text-body-secondary">
@@ -1672,6 +1676,7 @@ async function save() {
       v-model:visible="updateModalOpen"
       header="面板更新进度"
       size="medium"
+      scrollable
       :close-on-click-overlay="false"
       :close-on-escape="false"
     >
@@ -2186,9 +2191,9 @@ async function save() {
 
 
 .proxy-snippet-box {
-  background: #0f172a;
+  background: var(--x-code-block-bg, var(--color-background-cell-shaded-twxsbz));
   border-radius: 8px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--x-code-block-border, var(--color-border-divider-default-diwd4w));
   overflow: hidden;
 
   .snippet-header {
@@ -2196,8 +2201,9 @@ async function save() {
     align-items: center;
     justify-content: space-between;
     padding: 8px 14px;
-    background: #1e293b;
-    color: #94a3b8;
+    background: var(--color-background-container-header-irktp5, var(--color-background-cell-shaded-twxsbz));
+    border-bottom: 1px solid var(--x-code-block-border, var(--color-border-divider-default-diwd4w));
+    color: var(--color-text-body-secondary-66ygbb);
     font-size: 12px;
     font-weight: 600;
   }
@@ -2208,7 +2214,7 @@ async function save() {
     font-family: var(--font-family-monospace-842lr2);
     font-size: 12px;
     line-height: 1.5;
-    color: #38bdf8;
+    color: var(--x-code-block-text, var(--color-text-body-default-b2us04));
     overflow-x: auto;
     white-space: pre;
   }
