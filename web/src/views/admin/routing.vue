@@ -3,8 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { MQ, useMediaQuery } from '@/utils/media'
 import {
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
   CsAlert,
   CsBadge,
   CsButton,
@@ -134,9 +134,9 @@ async function loadOutboundOptions() {
   try {
     const { data } = await getServerOutbounds(serverFilter.value)
     if (data.code === 0) outbounds.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载出站选项失败'))
+    toast.error(errMsg(e, '加载出站选项失败'))
   }
 }
 
@@ -149,17 +149,17 @@ async function saveDefaultOutbound() {
       routing_domain_strategy: routingDomainStrategy.value,
     })
     if (data.code === 0) {
-      ElMessage.success('默认出口与路由匹配策略已更新，下次配置推送生效')
+      toast.success('默认出口与路由匹配策略已更新，下次配置推送生效')
       const s = currentServer.value
       if (s) {
         s.default_outbound_tag = defaultOutboundTag.value
         s.routing_domain_strategy = routingDomainStrategy.value
       }
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存默认出口失败'))
+    toast.error(errMsg(e, '保存默认出口失败'))
   } finally {
     defaultSaving.value = false
   }
@@ -187,9 +187,9 @@ async function loadRouting() {
   try {
     const { data } = await getServerRoutingRules(serverFilter.value)
     if (data.code === 0) routingRules.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载路由规则失败'))
+    toast.error(errMsg(e, '加载路由规则失败'))
   } finally {
     routingLoading.value = false
   }
@@ -210,31 +210,31 @@ async function toggleRule(row: any) {
   try {
     const { data } = await updateServerRoutingRule(serverFilter.value, row.id, { enabled: !row.enabled })
     if (data.code === 0) {
-      ElMessage.success(data.data.rule.enabled ? '已启用' : '已停用')
+      toast.success(data.data.rule.enabled ? '已启用' : '已停用')
       loadRouting()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 
 async function removeRule(row: any) {
   if (!serverFilter.value) return
   try {
-    await ElMessageBox.confirm(`确认删除路由规则「${row.outbound_tag}」？`, '删除路由规则', { type: 'error' })
+    await messageBox.confirm(`确认删除路由规则「${row.outbound_tag}」？`, '删除路由规则', { type: 'error' })
   } catch {
     return
   }
   try {
     const { data } = await deleteServerRoutingRule(serverFilter.value, row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       loadRouting()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 
@@ -279,9 +279,9 @@ async function loadTopology() {
   try {
     const { data } = await getTopology()
     if (data.code === 0) topology.value = data.data
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载拓扑失败'))
+    toast.error(errMsg(e, '加载拓扑失败'))
   }
 }
 

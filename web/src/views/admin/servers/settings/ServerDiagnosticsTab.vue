@@ -7,7 +7,7 @@ import {
   CsSelect,
   CsSpinner,
   CsToggle,
-  ElMessage,
+  toast,
   type SegmentedOption,
 } from '@/components/cloudscape'
 import { getServerConfigPreview, runServerCommand, type CommandResult, type ServerItem } from '@/api/admin'
@@ -78,9 +78,9 @@ async function loadConfig() {
   try {
     const { data } = await getServerConfigPreview(props.server.id)
     if (data.code === 0) cfgText.value = data.data.config || ''
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载配置预览失败'))
+    toast.error(errMsg(e, '加载配置预览失败'))
   } finally {
     cfgLoading.value = false
     cfgLoaded.value = true
@@ -106,9 +106,9 @@ async function copyLogs() {
   if (!logContent.value) return
   try {
     await navigator.clipboard.writeText(displayedLogContent.value)
-    ElMessage.success('日志已复制到剪贴板')
+    toast.success('日志已复制到剪贴板')
   } catch {
-    ElMessage.error('复制失败')
+    toast.error('复制失败')
   }
 }
 
@@ -116,9 +116,9 @@ async function copyConfig() {
   if (!cfgText.value) return
   try {
     await navigator.clipboard.writeText(cfgText.value)
-    ElMessage.success('配置已复制到剪贴板')
+    toast.success('配置已复制到剪贴板')
   } catch {
-    ElMessage.error('复制失败')
+    toast.error('复制失败')
   }
 }
 

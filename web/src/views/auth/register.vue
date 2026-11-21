@@ -7,7 +7,7 @@ import {
   CsFormItem,
   CsInput,
   CsLink,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -92,10 +92,10 @@ async function onSubmit() {
       invite_code: form.invite_code.trim(),
       turnstile_token: form.turnstile_token,
     })
-    ElMessage.success('注册成功，已自动登录')
+    toast.success('注册成功，已自动登录')
     router.replace(auth.homePath())
   } catch (e) {
-    ElMessage.error(errMsg(e, '注册失败'))
+    toast.error(errMsg(e, '注册失败'))
     resetCaptcha()
   } finally {
     loading.value = false

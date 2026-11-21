@@ -19,8 +19,8 @@ import {
   CsSelect,
   CsTable,
   CsToolbar,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
 import {
@@ -61,10 +61,10 @@ async function load() {
       list.value = data.data.items
       total.value = data.data.total
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载礼品卡失败'))
+    toast.error(errMsg(e, '加载礼品卡失败'))
   } finally {
     loading.value = false
   }
@@ -96,11 +96,11 @@ function openCreate() {
 
 async function submitCreate() {
   if (createForm.count < 1 || createForm.count > 500) {
-    ElMessage.warning('生成数量需在 1~500 之间')
+    toast.warning('生成数量需在 1~500 之间')
     return
   }
   if (createForm.face_value_yuan <= 0) {
-    ElMessage.warning('面值必须大于 0')
+    toast.warning('面值必须大于 0')
     return
   }
   creating.value = true
@@ -113,16 +113,16 @@ async function submitCreate() {
     }
     const { data } = await batchCreateGiftCards(payload)
     if (data.code === 0) {
-      ElMessage.success(`成功生成 ${data.data.count} 张礼品卡`)
+      toast.success(`成功生成 ${data.data.count} 张礼品卡`)
       createOpen.value = false
       createdCards.value = data.data.items
       resultOpen.value = true
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成失败'))
+    toast.error(errMsg(e, '生成失败'))
   } finally {
     creating.value = false
   }
@@ -131,9 +131,9 @@ async function submitCreate() {
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
+    toast.success(`${label}已复制`)
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    toast.warning('复制失败，请手动复制')
   }
 }
 
@@ -145,7 +145,7 @@ function copyAllCreated() {
 // ---- 作废 / 彻底删除 ----
 async function voidCard(row: any) {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认作废卡密「${row.code}」？作废后不可兑换，记录保留可追溯。`,
       '作废卡密',
       { type: 'warning' },
@@ -156,19 +156,19 @@ async function voidCard(row: any) {
   try {
     const { data } = await voidGiftCard(row.id)
     if (data.code === 0) {
-      ElMessage.success('已作废')
+      toast.success('已作废')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '作废失败'))
+    toast.error(errMsg(e, '作废失败'))
   }
 }
 
 async function purgeCard(row: any) {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认彻底删除卡密「${row.code}」？删除后不可恢复，历史记录一并消失。`,
       '彻底删除',
       { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' },
@@ -179,13 +179,13 @@ async function purgeCard(row: any) {
   try {
     const { data } = await purgeGiftCard(row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 

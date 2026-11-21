@@ -18,7 +18,7 @@ import {
   CsToggle,
   CsToolbar,
   CsTooltip,
-  ElMessage,
+  toast,
   type BadgeColor,
   type TableColumn,
 } from '@/components/cloudscape'
@@ -156,9 +156,9 @@ async function loadOutbounds() {
   try {
     const { data } = await getServerOutbounds(serverFilter.value)
     if (data.code === 0) outbounds.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载出站失败'))
+    toast.error(errMsg(e, '加载出站失败'))
   } finally {
     loading.value = false
   }
@@ -189,13 +189,13 @@ async function toggleOutbound(row: EffectiveOutbound) {
   try {
     const { data } = await updateServerOutbound(serverFilter.value, row.id, { enabled: !row.enabled })
     if (data.code === 0) {
-      ElMessage.success(data.data.outbound.enabled ? '已启用' : '已停用')
+      toast.success(data.data.outbound.enabled ? '已启用' : '已停用')
       loadOutbounds()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 

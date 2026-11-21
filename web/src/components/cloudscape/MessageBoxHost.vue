@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * `ElMessageBox` 兼容壳的渲染宿主：挂在 App.vue，由 messagebox.ts 的命令式 API 驱动。
+ * `messageBox` 的渲染宿主：挂在 App.vue，由 messagebox.ts 的命令式 API 驱动。
  *
- * 保留 Element Plus 的调用语义，所以现有 50 处 confirm 与 2 处 prompt 只换 import
- * 即可，不改业务逻辑；视觉换成 Cloudscape Modal + 官方按钮。删除类操作（type='error'
- * 或 confirmButtonClass 含 danger）用红实心确认 + 红描边取消，其余走主色按钮。
+ * 渲染 Cloudscape Modal + 官方按钮；删除类操作（type='error' 或 danger=true）
+ * 用红实心确认 + 红描边取消，其余走主色按钮。
  */
 import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'

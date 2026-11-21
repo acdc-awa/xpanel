@@ -29,8 +29,8 @@ import {
   CsTable,
   CsTabs,
   CsToggle,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
 
@@ -50,13 +50,13 @@ async function toggleAutoRenew(kind: 'expire' | 'exhaust', val: boolean) {
     const payload = kind === 'expire' ? { auto_renew_expire: val } : { auto_renew_exhaust: val }
     const { data } = await setAutoRenew(payload)
     if (data.code === 0) {
-      ElMessage.success('自动续费设置已保存')
+      toast.success('自动续费设置已保存')
       await auth.fetchMe()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     autoRenewSaving.value = false
   }
@@ -92,7 +92,7 @@ async function refresh() {
     loadRecentLogs()
     loadOrders()
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载资料失败'))
+    toast.error(errMsg(e, '加载资料失败'))
   }
 }
 onMounted(refresh)
@@ -173,10 +173,10 @@ async function loadOrders() {
 async function handleCancelOrder(orderNo: string) {
   try {
     await cancelOrder(orderNo)
-    ElMessage.success('订单已取消')
+    toast.success('订单已取消')
     await loadOrders()
   } catch (e) {
-    ElMessage.error(errMsg(e, '取消订单失败'))
+    toast.error(errMsg(e, '取消订单失败'))
   }
 }
 
@@ -209,31 +209,31 @@ function openPwdModal() {
 
 async function savePwd() {
   if (!pwd.old || !pwd.next) {
-    ElMessage.warning('请填写当前密码与新密码')
+    toast.warning('请填写当前密码与新密码')
     return
   }
   if (pwd.next.length < 8) {
-    ElMessage.warning('新密码长度不能少于 8 位')
+    toast.warning('新密码长度不能少于 8 位')
     return
   }
   if (pwd.next !== pwd.confirm) {
-    ElMessage.warning('两次输入的新密码不一致')
+    toast.warning('两次输入的新密码不一致')
     return
   }
   savingPwd.value = true
   try {
     const { data } = await changePassword(pwd.old, pwd.next)
     if (data.code === 0) {
-      ElMessage.success('登录密码已更新')
+      toast.success('登录密码已更新')
       pwdOpen.value = false
       pwd.old = ''
       pwd.next = ''
       pwd.confirm = ''
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '修改密码失败'))
+    toast.error(errMsg(e, '修改密码失败'))
   } finally {
     savingPwd.value = false
   }
@@ -264,10 +264,10 @@ async function startTwofaSetup() {
       twofaStep.value = 'confirm'
       twofaOpen.value = true
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成两步验证密钥失败'))
+    toast.error(errMsg(e, '生成两步验证密钥失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -282,7 +282,7 @@ function openDisable2FA() {
 
 async function submitTwofaConfirm() {
   if (!twofaCode.value || twofaCode.value.length !== 6) {
-    ElMessage.warning('请输入 6 位动态验证码')
+    toast.warning('请输入 6 位动态验证码')
     return
   }
   twofaLoading.value = true
@@ -292,12 +292,12 @@ async function submitTwofaConfirm() {
       backupCodes.value = data.data.backup_codes || []
       twofaStep.value = 'backup'
       await auth.fetchMe()
-      ElMessage.success('两步验证已成功开启')
+      toast.success('两步验证已成功开启')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '开启失败'))
+    toast.error(errMsg(e, '开启失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -307,9 +307,9 @@ async function copyText(text: string, label: string) {
   if (!text) return
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制到剪贴板`)
+    toast.success(`${label}已复制到剪贴板`)
   } catch {
-    ElMessage.error('复制失败，请手动复制')
+    toast.error('复制失败，请手动复制')
   }
 }
 
@@ -324,7 +324,7 @@ async function copyTwofaSecret() {
 
 async function submitTwofaDisable() {
   if (!disableForm.code && !disableForm.password) {
-    ElMessage.warning('请输入动态验证码、恢复码或当前密码')
+    toast.warning('请输入动态验证码、恢复码或当前密码')
     return
   }
   twofaLoading.value = true
@@ -334,16 +334,16 @@ async function submitTwofaDisable() {
       password: disableForm.password || undefined,
     })
     if (data.code === 0) {
-      ElMessage.success('已关闭两步验证')
+      toast.success('已关闭两步验证')
       twofaOpen.value = false
       disableForm.code = ''
       disableForm.password = ''
       await auth.fetchMe()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '关闭失败'))
+    toast.error(errMsg(e, '关闭失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -353,7 +353,7 @@ async function submitTwofaDisable() {
 const resettingSub = ref(false)
 async function onResetSubscribe() {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       '重置后，原订阅地址与已连接的节点凭据将立即失效，所有客户端需重新同步或更新订阅后方可继续使用。确定重置订阅地址？',
       '重置订阅地址',
       { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' },
@@ -365,13 +365,13 @@ async function onResetSubscribe() {
   try {
     const { data } = await resetSubscribeToken()
     if (data.code === 0) {
-      ElMessage.success('订阅地址与连接凭据已重置，请在客户端中更新订阅')
+      toast.success('订阅地址与连接凭据已重置，请在客户端中更新订阅')
       await auth.fetchMe()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置订阅地址失败'))
+    toast.error(errMsg(e, '重置订阅地址失败'))
   } finally {
     resettingSub.value = false
   }

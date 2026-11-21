@@ -10,8 +10,8 @@ import {
   CsSegmentedControl,
   CsSelect,
   CsSteps,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
   type SegmentedOption,
   type StepItem,
   type StepsStatus,
@@ -236,11 +236,11 @@ function startPolling() {
 async function apply() {
   const t = normVersionTag(target.value)
   if (!t || !/^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$/.test(t)) {
-    ElMessage.error('版本号格式不正确（示例：v0.1.19 / v26.10.21）')
+    toast.error('版本号格式不正确（示例：v0.1.19 / v26.10.21）')
     return
   }
   if (props.server.status !== 1) {
-    ElMessage.warning('服务器离线，无法切换版本')
+    toast.warning('服务器离线，无法切换版本')
     return
   }
 
@@ -267,7 +267,7 @@ async function apply() {
   }
 
   try {
-    await ElMessageBox.confirm(lines.join('\n'), `确认${label}${subjectLabel.value}`, {
+    await messageBox.confirm(lines.join('\n'), `确认${label}${subjectLabel.value}`, {
       type: 'warning',
       confirmButtonText: `立即${label}`,
       cancelButtonText: '取消',

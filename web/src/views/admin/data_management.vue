@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsBarChart,
@@ -144,10 +144,10 @@ async function load() {
     if (data.code === 0) {
       stats.value = data.data
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载数据统计失败'))
+    toast.error(errMsg(e, '加载数据统计失败'))
   } finally {
     loading.value = false
   }
@@ -156,7 +156,7 @@ async function load() {
 // ---- 清理动作 ----
 async function runCleanup() {
   if (!cleanupDate.value) {
-    ElMessage.warning('请先选择清理截止日期')
+    toast.warning('请先选择清理截止日期')
     return
   }
   const meta = tableMeta.value
@@ -171,13 +171,13 @@ async function runCleanup() {
       try {
         const { data } = await cleanupLogs(cleanupTable.value, before)
         if (data.code === 0) {
-          ElMessage.success(`已清理 ${data.data.deleted.toLocaleString()} 条${meta.label}记录`)
+          toast.success(`已清理 ${data.data.deleted.toLocaleString()} 条${meta.label}记录`)
           load()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '清理失败'))
+        toast.error(errMsg(e, '清理失败'))
       } finally {
         cleanupRunning.value = false
       }
@@ -200,13 +200,13 @@ async function runVacuum() {
         const { data } = await vacuumDatabase()
         if (data.code === 0) {
           vacuumResult.value = data.data
-          ElMessage.success(`已回收 ${fmtSize(Math.max(0, data.data.reclaimed))}`)
+          toast.success(`已回收 ${fmtSize(Math.max(0, data.data.reclaimed))}`)
           load()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '空间回收失败'))
+        toast.error(errMsg(e, '空间回收失败'))
       } finally {
         vacuumRunning.value = false
       }
@@ -230,13 +230,13 @@ async function runCompact() {
         const { data } = await compactHistory()
         if (data.code === 0) {
           compactResult.value = data.data
-          ElMessage.success('历史数据压缩完成')
+          toast.success('历史数据压缩完成')
           load()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '压缩失败'))
+        toast.error(errMsg(e, '压缩失败'))
       } finally {
         compactRunning.value = false
       }
@@ -269,7 +269,7 @@ async function saveRetention() {
   const f = retentionForm.value
   for (const v of [f.retention_traffic_days, f.retention_node_reports_days, f.retention_audit_days]) {
     if (v === null || !Number.isInteger(v) || v < 1 || v > 3650) {
-      ElMessage.warning('保留天数需为 1–3650 的整数')
+      toast.warning('保留天数需为 1–3650 的整数')
       return
     }
   }
@@ -277,13 +277,13 @@ async function saveRetention() {
   try {
     const { data } = await updateSettings({ retention: { ...mapValues(f) } })
     if (data.code === 0) {
-      ElMessage.success('保留天数已保存，每日凌晨自动清理将按新周期执行')
+      toast.success('保留天数已保存，每日凌晨自动清理将按新周期执行')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     retentionSaving.value = false
   }

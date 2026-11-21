@@ -376,23 +376,24 @@ useGridHeight(boxEl)
   width: 440px;
   min-width: 344px;
   position: relative;
-  background: var(--topo-card-bg, rgba(24, 33, 47, 0.95));
-  border: 1px solid var(--topo-card-border, rgba(255, 255, 255, 0.1));
+  background: var(--topo-card-bg);
+  border: 1px solid var(--topo-card-border);
   border-radius: var(--topo-radius, 16px);
   font-size: 12px;
-  color: var(--topo-text-1, #e2e8f0);
-  box-shadow: var(--topo-card-shadow, 0 6px 24px rgba(0, 0, 0, 0.35));
+  color: var(--topo-text-1);
+  box-shadow: var(--topo-card-shadow);
   overflow: visible;
   transition: border-color 0.2s, box-shadow 0.2s;
   contain: paint;
   transform: translateZ(0);
 
+  &:hover {
+    border-color: var(--topo-card-border-hover);
+    box-shadow: var(--topo-card-shadow-hover);
+  }
+
   &.offline {
-    border-color: rgba(239, 68, 68, 0.25);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-    .sb-head {
-      background: linear-gradient(180deg, rgba(239, 68, 68, 0.1) 0%, transparent 100%);
-    }
+    border-color: var(--topo-danger-border);
   }
 
   .sb-head {
@@ -401,8 +402,8 @@ useGridHeight(boxEl)
     justify-content: space-between;
     padding: 0 16px;
     height: 48px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
+    border-bottom: 1px solid var(--topo-divider);
+    background: var(--topo-head-bg);
     border-radius: 16px 16px 0 0;
 
     .sb-head-left {
@@ -422,18 +423,18 @@ useGridHeight(boxEl)
     .sb-detail-btn {
       display: inline-flex;
       align-items: center;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: var(--topo-card-bg);
+      border: 1px solid var(--topo-card-border);
       border-radius: 8px;
-      color: #cbd5e1;
+      color: var(--topo-text-2);
       font-size: 11px;
       padding: 3px 8px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
       &:hover {
-        background: rgba(56, 189, 248, 0.2);
-        border-color: #38bdf8;
-        color: #38bdf8;
+        background: var(--topo-accent-soft);
+        border-color: var(--topo-accent);
+        color: var(--topo-accent);
       }
     }
 
@@ -443,179 +444,37 @@ useGridHeight(boxEl)
       border-radius: 50%;
       flex: none;
       &.online {
-        background: var(--topo-success, #34d399);
-        box-shadow: 0 0 8px var(--topo-success, #34d399);
+        background: var(--topo-success);
       }
       &.offline {
-        background: var(--topo-danger, #f87171);
-        box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+        background: var(--topo-danger);
       }
     }
     .name {
       font-weight: 600;
       font-size: 14px;
+      color: var(--topo-text-1);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 140px;
-      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     }
     .offline-badge {
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 4px;
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: var(--topo-danger-soft);
+      color: var(--topo-danger);
+      border: 1px solid var(--topo-danger-border);
       font-weight: 500;
     }
     .host {
-      color: var(--topo-text-2, #94a3b8);
+      color: var(--topo-text-2);
       font-size: 11px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       max-width: 140px;
-    }
-  }
-
-  /* 四层直通管道卡片：横贯整机宽度 (Full-width Tunnel Card) */
-  .sb-tunnels-wrap {
-    padding: 0 16px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .tunnel-card {
-    position: relative;
-    background: linear-gradient(90deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.75) 100%);
-    border: 1px solid rgba(6, 182, 212, 0.35);
-    border-radius: 8px;
-    padding: 6px 10px;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-
-    &:hover {
-      border-color: rgba(6, 182, 212, 0.6);
-      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.2);
-    }
-
-    .tunnel-card-content {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      width: 100%;
-    }
-
-    .tunnel-entry {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex: none;
-    }
-
-    .tunnel-badge {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 6px;
-      border-radius: 8px;
-      background: rgba(6, 182, 212, 0.2);
-      color: #22d3ee;
-      border: 1px solid rgba(6, 182, 212, 0.4);
-    }
-
-    .tunnel-tag {
-      font-weight: 600;
-      font-size: 12px;
-      color: #f1f5f9;
-      max-width: 100px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .tunnel-pipe {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      flex: 1;
-      min-width: 0;
-
-      .pipe-line {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px dashed rgba(148, 163, 184, 0.3);
-        font-size: 10.5px;
-        color: #94a3b8;
-        &.is-active {
-          border-style: solid;
-          border-color: rgba(6, 182, 212, 0.4);
-          background: rgba(6, 182, 212, 0.1);
-          color: #67e8f9;
-        }
-      }
-
-      .pipe-proto {
-        font-size: 9.5px;
-        font-weight: 700;
-        padding: 0 4px;
-        border-radius: 4px;
-        background: rgba(56, 189, 248, 0.2);
-        color: #38bdf8;
-      }
-
-      .pipe-target-info {
-        font-size: 10px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-        .target-desc {
-          color: #38bdf8;
-          font-weight: 500;
-        }
-        .target-draft {
-          color: #fbbf24;
-        }
-      }
-    }
-
-    .tunnel-actions {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex: none;
-
-      .tunnel-btn {
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        color: #cbd5e1;
-        border-radius: 4px;
-        padding: 2px 5px;
-        font-size: 11px;
-        cursor: pointer;
-        transition: all 0.15s;
-        &:hover {
-          background: rgba(56, 189, 248, 0.2);
-          border-color: #38bdf8;
-          color: #38bdf8;
-        }
-        &.danger:hover {
-          background: rgba(239, 68, 68, 0.2);
-          border-color: #ef4444;
-          color: #ef4444;
-        }
-      }
     }
   }
 
@@ -654,7 +513,7 @@ useGridHeight(boxEl)
       box-sizing: border-box;
     }
     .sb-title {
-      color: var(--topo-text-2, #94a3b8);
+      color: var(--topo-text-2);
       font-size: 12px;
       letter-spacing: 0.5px;
       font-weight: 600;
@@ -663,18 +522,17 @@ useGridHeight(boxEl)
     .sb-add-btn {
       display: inline-flex;
       align-items: center;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.25);
+      background: var(--topo-card-bg);
+      border: 1px solid var(--topo-card-border);
       border-radius: 4px;
-      color: #38bdf8;
+      color: var(--topo-accent);
       font-size: 11px;
       padding: 2px 6px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
       &:hover {
-        background: rgba(56, 189, 248, 0.25);
-        border-color: #38bdf8;
-        transform: translateY(-1px);
+        background: var(--topo-accent-soft);
+        border-color: var(--topo-accent);
       }
     }
   }
@@ -687,22 +545,19 @@ useGridHeight(boxEl)
     flex: none;
   }
   .layer-add-btn {
-    background: rgba(45, 212, 191, 0.12);
-    border-color: rgba(45, 212, 191, 0.25);
-    color: #2dd4bf;
+    color: var(--topo-teal);
     &:hover {
-      background: rgba(45, 212, 191, 0.25);
-      border-color: #2dd4bf;
+      background: var(--topo-teal-soft);
+      border-color: var(--topo-teal);
     }
   }
   .layer-capsule {
     width: 100%;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(45, 212, 191, 0.25);
-    border-radius: var(--topo-radius-sm, 12px);
+    background: var(--topo-surface);
+    border: 1px solid var(--topo-surface-border);
+    border-radius: 8px;
     padding: 8px;
     box-sizing: border-box;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -715,7 +570,7 @@ useGridHeight(boxEl)
       row-gap: 8px;
       min-height: 24px;
       padding: 0 4px 8px;
-      border-bottom: 1px dashed rgba(45, 212, 191, 0.2);
+      border-bottom: 1px dashed var(--topo-teal-border);
       flex-wrap: wrap;
 
       .layer-title {
@@ -724,7 +579,7 @@ useGridHeight(boxEl)
         gap: 4px;
         font-size: 11.5px;
         font-weight: 600;
-        color: #2dd4bf;
+        color: var(--topo-teal);
         min-width: 0;
       }
       .layer-icon {
@@ -739,8 +594,9 @@ useGridHeight(boxEl)
       .layer-endpoint {
         font-family: monospace;
         font-size: 10.5px;
-        color: #a5f3fc;
-        background: rgba(45, 212, 191, 0.1);
+        color: var(--topo-text-1);
+        background: var(--topo-teal-soft);
+        border: 1px solid var(--topo-teal-border);
         padding: 0 5px;
         border-radius: 4px;
         flex: none;
@@ -752,14 +608,14 @@ useGridHeight(boxEl)
         font-weight: 600;
         flex: none;
         &.tls {
-          background: rgba(45, 212, 191, 0.15);
-          color: #2dd4bf;
-          border: 1px solid rgba(45, 212, 191, 0.3);
+          background: var(--topo-teal-soft);
+          color: var(--topo-teal);
+          border: 1px solid var(--topo-teal-border);
         }
         &.none {
-          background: rgba(148, 163, 184, 0.15);
-          color: #94a3b8;
-          border: 1px solid rgba(148, 163, 184, 0.3);
+          background: var(--topo-row-bg);
+          color: var(--topo-text-2);
+          border: 1px solid var(--topo-row-border);
         }
       }
       .layer-actions {
@@ -772,26 +628,25 @@ useGridHeight(boxEl)
       .layer-act-btn {
         display: inline-flex;
         align-items: center;
-        background: rgba(45, 212, 191, 0.15);
-        border: 1px solid rgba(45, 212, 191, 0.35);
+        background: var(--topo-card-bg);
+        border: 1px solid var(--topo-card-border);
         border-radius: 4px;
-        color: #2dd4bf;
+        color: var(--topo-text-2);
         font-size: 10.5px;
         padding: 1px 6px;
         cursor: pointer;
-        transition: all 0.15s;
+        transition: background-color 0.15s, border-color 0.15s, color 0.15s;
         &:hover {
-          background: rgba(45, 212, 191, 0.3);
-          border-color: #2dd4bf;
+          background: var(--topo-accent-soft);
+          border-color: var(--topo-accent);
+          color: var(--topo-accent);
         }
       }
       .layer-act-btn.danger {
-        background: rgba(248, 113, 113, 0.15);
-        border-color: rgba(248, 113, 113, 0.35);
-        color: #f87171;
+        color: var(--topo-danger);
         &:hover {
-          background: rgba(248, 113, 113, 0.3);
-          border-color: #f87171;
+          background: var(--topo-danger-soft);
+          border-color: var(--topo-danger);
         }
       }
     }
@@ -803,11 +658,11 @@ useGridHeight(boxEl)
     }
 
     .layer-subrow {
-      background: rgba(45, 212, 191, 0.06);
-      border-color: rgba(45, 212, 191, 0.15);
+      background: var(--topo-card-bg);
+      border-color: var(--topo-teal-border);
       &:hover {
-        background: rgba(45, 212, 191, 0.12);
-        border-color: rgba(45, 212, 191, 0.3);
+        background: var(--topo-teal-soft);
+        border-color: var(--topo-teal);
       }
     }
     .layer-unbind-btn {
@@ -818,16 +673,16 @@ useGridHeight(boxEl)
       text-align: center;
       border-radius: 50%;
       font-size: 12px;
-      color: #94a3b8;
-      background: rgba(148, 163, 184, 0.15);
-      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: var(--topo-text-3);
+      background: var(--topo-card-bg);
+      border: 1px solid var(--topo-card-border);
       cursor: pointer;
       padding: 0;
-      transition: all 0.15s;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
       &:hover {
-        color: #f87171;
-        background: rgba(248, 113, 113, 0.2);
-        border-color: #f87171;
+        color: var(--topo-danger);
+        background: var(--topo-danger-soft);
+        border-color: var(--topo-danger);
       }
     }
     .layer-empty {
@@ -837,12 +692,12 @@ useGridHeight(boxEl)
 
   .path-badge {
     font-size: 10px;
-    color: #2dd4bf;
+    color: var(--topo-teal);
     font-family: monospace;
-    background: rgba(45, 212, 191, 0.15);
+    background: var(--topo-teal-soft);
     padding: 1px 5px;
     border-radius: 4px;
-    border: 1px solid rgba(45, 212, 191, 0.25);
+    border: 1px solid var(--topo-teal-border);
     flex: none;
   }
 
@@ -855,14 +710,15 @@ useGridHeight(boxEl)
     height: 32px;
     max-width: 100%;
     box-sizing: border-box;
-    background: var(--topo-surface, rgba(15, 23, 42, 0.55));
-    border: 1px solid var(--topo-surface-border, rgba(255, 255, 255, 0.05));
-    border-radius: var(--topo-radius, 16px);
-    transition: all 0.2s;
+    background: var(--topo-row-bg);
+    border: 1px solid var(--topo-row-border);
+    border-radius: 8px;
+    color: var(--topo-text-1);
+    transition: background-color 0.15s, border-color 0.15s;
 
     &:hover {
-      background: rgba(15, 23, 42, 0.85);
-      border-color: rgba(255, 255, 255, 0.15);
+      background: var(--topo-row-hover);
+      border-color: var(--topo-accent-border);
     }
 
     .tag {
@@ -874,14 +730,14 @@ useGridHeight(boxEl)
       &.clickable {
         cursor: pointer;
         &:hover {
-          color: #38bdf8;
+          color: var(--topo-accent);
           text-decoration: underline;
         }
       }
     }
     .out-tag {
       font-weight: 600;
-      color: #93c5fd;
+      color: var(--topo-accent);
       &.clickable {
         cursor: pointer;
         &:hover {
@@ -889,30 +745,31 @@ useGridHeight(boxEl)
         }
       }
       &.tunnel {
-        color: #c084fc;
+        color: var(--topo-teal);
       }
       &.ref {
-        color: #fbbf24;
+        color: var(--topo-warning);
       }
       &.direct {
-        color: #34d399;
+        color: var(--topo-success);
       }
       &.draft {
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
+        color: var(--topo-warning);
+        border: 1px dashed var(--topo-warning-border);
         padding: 1px 6px;
         border-radius: 8px;
       }
     }
     &.direct-row {
-      background: rgba(52, 211, 153, 0.1);
-      border-color: rgba(52, 211, 153, 0.2);
+      background: var(--topo-success-soft);
+      border-color: var(--topo-success-border);
     }
     &.clickable {
       cursor: pointer;
-      transition: background 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
       &:hover {
-        background: var(--x-bg-hover, rgba(59, 130, 246, 0.08));
+        background: var(--topo-row-hover);
+        border-color: var(--topo-accent-border);
         .row-edit-icon {
           opacity: 0.85;
         }
@@ -923,7 +780,7 @@ useGridHeight(boxEl)
       font-size: 11px;
       opacity: 0;
       margin-left: 3px;
-      color: var(--x-text-3);
+      color: var(--topo-text-3);
       transition: opacity 0.15s ease;
       flex: none;
     }
@@ -931,7 +788,7 @@ useGridHeight(boxEl)
     .port-badge {
       font-size: 11px;
       font-weight: 600;
-      color: #38bdf8;
+      color: var(--topo-accent);
       font-family: monospace;
       flex: none;
     }
@@ -943,37 +800,39 @@ useGridHeight(boxEl)
       font-weight: 600;
       flex: none;
       &.vless {
-        background: rgba(59, 130, 246, 0.12);
-        color: #60a5fa;
-        border: 1px solid rgba(59, 130, 246, 0.25);
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
+        border: 1px solid var(--topo-accent-border);
       }
       &.hy2 {
-        background: rgba(20, 184, 166, 0.15);
-        color: #2dd4bf;
-        border: 1px solid rgba(20, 184, 166, 0.3);
+        background: var(--topo-teal-soft);
+        color: var(--topo-teal);
+        border: 1px solid var(--topo-teal-border);
       }
       &.mixed {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
+        border: 1px solid var(--topo-accent-border);
       }
       &.tunnel {
-        background: rgba(249, 115, 22, 0.15);
-        color: #fb923c;
-        border: 1px solid rgba(249, 115, 22, 0.3);
+        background: var(--topo-teal-soft);
+        color: var(--topo-teal);
+        border: 1px solid var(--topo-teal-border);
       }
       &.other {
-        background: rgba(148, 163, 184, 0.15);
-        color: #cbd5e1;
+        background: var(--topo-card-bg);
+        color: var(--topo-text-2);
+        border: 1px solid var(--topo-card-border);
       }
       &.sec {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
+        border: 1px solid var(--topo-accent-border);
       }
       &.net {
-        background: rgba(56, 189, 248, 0.12);
-        color: #7dd3fc;
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
+        border: 1px solid var(--topo-accent-border);
       }
     }
 
@@ -983,37 +842,38 @@ useGridHeight(boxEl)
       border-radius: 4px;
       font-weight: 600;
       flex: none;
-      background: rgba(148, 163, 184, 0.15);
-      color: #cbd5e1;
+      background: var(--topo-card-bg);
+      color: var(--topo-text-2);
+      border: 1px solid var(--topo-card-border);
       &.tunnel {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
-        border: 1px solid rgba(168, 85, 247, 0.3);
+        background: var(--topo-teal-soft);
+        color: var(--topo-teal);
+        border: 1px solid var(--topo-teal-border);
       }
       &.ref {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px solid rgba(251, 191, 36, 0.3);
+        background: var(--topo-warning-soft);
+        color: var(--topo-warning);
+        border: 1px solid var(--topo-warning-border);
       }
       &.direct {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.3);
+        background: var(--topo-success-soft);
+        color: var(--topo-success);
+        border: 1px solid var(--topo-success-border);
       }
       &.blocked {
-        background: rgba(248, 113, 113, 0.15);
-        color: #f87171;
-        border: 1px solid rgba(248, 113, 113, 0.3);
+        background: var(--topo-danger-soft);
+        color: var(--topo-danger);
+        border: 1px solid var(--topo-danger-border);
       }
       &.draft {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px dashed rgba(251, 191, 36, 0.4);
+        background: var(--topo-warning-soft);
+        color: var(--topo-warning);
+        border: 1px dashed var(--topo-warning-border);
       }
       &.pp {
-        background: rgba(56, 189, 248, 0.15);
-        color: #38bdf8;
-        border: 1px solid rgba(56, 189, 248, 0.3);
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
+        border: 1px solid var(--topo-accent-border);
       }
     }
 
@@ -1024,24 +884,24 @@ useGridHeight(boxEl)
       border-radius: 8px;
       font-weight: 600;
       &.user {
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
+        background: var(--topo-success-soft);
+        color: var(--topo-success);
       }
       &.relay {
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
+        background: var(--topo-warning-soft);
+        color: var(--topo-warning);
       }
       &.tunnel {
-        background: rgba(168, 85, 247, 0.15);
-        color: #c084fc;
+        background: var(--topo-teal-soft);
+        color: var(--topo-teal);
       }
       &.forward {
-        background: rgba(56, 189, 248, 0.15);
-        color: #38bdf8;
+        background: var(--topo-accent-soft);
+        color: var(--topo-accent);
       }
       &.channel {
-        background: rgba(244, 114, 182, 0.15);
-        color: #f472b6;
+        background: var(--topo-teal-soft);
+        color: var(--topo-teal);
       }
     }
 
@@ -1055,9 +915,9 @@ useGridHeight(boxEl)
       margin-left: auto;
       z-index: 4;
       .order-btn {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: #94a3b8;
+        background: var(--topo-card-bg);
+        border: 1px solid var(--topo-card-border);
+        color: var(--topo-text-3);
         // 原来 7px / 8px 行高 / 10px 高：低于不少环境的最小字号下限
         // （部分 Android WebView 与国产套壳浏览器强制 12px），会被撑破按钮；
         // 提到 10px 后即使被强制放大到 12px 也仍在 14px 盒内
@@ -1072,12 +932,12 @@ useGridHeight(boxEl)
         align-items: center;
         justify-content: center;
         &:hover:not(:disabled) {
-          color: #38bdf8;
-          border-color: #38bdf8;
-          background: rgba(56, 189, 248, 0.15);
+          color: var(--topo-accent);
+          border-color: var(--topo-accent);
+          background: var(--topo-accent-soft);
         }
         &:disabled {
-          opacity: 0.15;
+          opacity: 0.25;
           cursor: not-allowed;
           border-color: transparent;
           background: transparent;
@@ -1090,19 +950,16 @@ useGridHeight(boxEl)
     }
   }
 
-
-
-
   .sb-empty {
     padding: 4px 10px;
-    color: var(--topo-text-3, #64748b);
+    color: var(--topo-text-3);
     font-size: 11px;
     height: 32px;
     display: flex;
     align-items: center;
-    background: rgba(15, 23, 42, 0.3);
-    border-radius: 16px;
-    border: 1px dashed rgba(255, 255, 255, 0.05);
+    background: var(--topo-surface);
+    border-radius: 8px;
+    border: 1px dashed var(--topo-surface-border);
   }
 }
 </style>

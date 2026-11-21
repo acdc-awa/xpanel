@@ -8,7 +8,7 @@ import {
   CsIconButton,
   CsInput,
   CsSelect,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { getXrayVlessEnc } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -38,12 +38,12 @@ async function fetchVlessencKey() {
     const { data } = await getXrayVlessEnc()
     if (data.code === 0 && data.data) {
       updateField('decryption', data.data.decryption)
-      ElMessage.success('已生成 VLESS Encryption 密钥')
+      toast.success('已生成 VLESS Encryption 密钥')
     } else {
-      ElMessage.error(data.message || '生成失败')
+      toast.error(data.message || '生成失败')
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成密钥失败'))
+    toast.error(errMsg(e, '生成密钥失败'))
   } finally {
     veGenLoading.value = false
   }
@@ -77,7 +77,7 @@ function updateFallback(idx: number, patch: Partial<FallbackItem>) {
 function copyText(txt: string, label = '内容') {
   if (!txt) return
   navigator.clipboard.writeText(txt)
-  ElMessage.success(`已复制 ${label}`)
+  toast.success(`已复制 ${label}`)
 }
 </script>
 

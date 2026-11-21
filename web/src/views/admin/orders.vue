@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { formatMoney, formatOrderContent } from '@/utils/format'
 import { formatDateTimeMinute } from '@/utils/timezone'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 import {
   CsButton,
   CsContainer,
@@ -42,10 +42,10 @@ async function load() {
       list.value = data.data.items
       total.value = data.data.total
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载订单失败'))
+    toast.error(errMsg(e, '加载订单失败'))
   } finally {
     loading.value = false
   }

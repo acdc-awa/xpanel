@@ -97,7 +97,7 @@
 
   /* 只声明随系统存在的字体。'Inter' 全项目未加载（无 @font-face / 无 webfont），
      留着会让 Windows 落 Segoe UI、macOS 落 SF Pro，字宽差 5%~8%。 */
-  --el-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
+  --x-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
@@ -161,20 +161,4 @@ html.dark {
   --x-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
   --x-shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.6);
   --x-shadow-xl: 0 20px 28px -6px rgba(0, 0, 0, 0.7);
-
-  /* Element Plus 深色变量覆盖 */
-  --el-bg-color: #131b2e;
-  --el-bg-color-overlay: #1a233a;
-  --el-bg-color-page: #0b0f19;
-  --el-border-color: #1e293b;
-  --el-border-color-light: #25334d;
-  --el-border-color-lighter: #2d3b55;
-  --el-border-color-extra-light: #334155;
-  --el-fill-color: #1e293b;
-  --el-fill-color-light: #182236;
-  --el-fill-color-blank: #131b2e;
-  --el-text-color-primary: #f8fafc;
-  --el-text-color-regular: #cbd5e1;
-  --el-text-color-secondary: #94a3b8;
-  --el-text-color-placeholder: #64748b;
 }

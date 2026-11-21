@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
-  ElMessage,
+  toast,
   CsAlert,
   CsButton,
   CsCheckboxGroup,
@@ -162,7 +162,7 @@ function applyPreset(p: PresetRule) {
   if (!form.remark || form.remark.includes('分流') || form.remark.includes('屏蔽')) {
     form.remark = p.remark
   }
-  ElMessage.success(`已应用「${p.name}」规则预设`)
+  toast.success(`已应用「${p.name}」规则预设`)
 }
 
 onMounted(() => {
@@ -190,7 +190,7 @@ const isDerived = computed(() => !!props.rule?.owner_inbound_id)
 async function save() {
   jsonError.value = ''
   if (!form.outbound_tag?.trim()) {
-    ElMessage.warning('请选择出站标签（OutboundTag）')
+    toast.warning('请选择出站标签（OutboundTag）')
     return
   }
   if (form.rule_json?.trim()) {
@@ -220,14 +220,14 @@ async function save() {
       ? await updateServerRoutingRule(props.serverId, props.rule.id, payload)
       : await createServerRoutingRule(props.serverId, payload)
     if (data.code === 0) {
-      ElMessage.success(props.rule ? '路由规则已更新' : '路由规则已创建')
+      toast.success(props.rule ? '路由规则已更新' : '路由规则已创建')
       emit('saved')
       visible.value = false
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }

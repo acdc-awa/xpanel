@@ -16,8 +16,8 @@ import {
   CsSelect,
   CsTable,
   CsToolbar,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import type { TableColumn } from '@/components/cloudscape'
 import { createInvitations, getInvitations, revokeInvitation, type Invitation } from '@/api/admin'
@@ -32,9 +32,9 @@ async function load() {
   try {
     const { data } = await getInvitations()
     if (data.code === 0) list.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载邀请码失败'))
+    toast.error(errMsg(e, '加载邀请码失败'))
   } finally {
     loading.value = false
   }
@@ -131,10 +131,10 @@ async function create() {
       generated.value = data.data.codes
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成失败'))
+    toast.error(errMsg(e, '生成失败'))
   } finally {
     creating.value = false
   }
@@ -147,9 +147,9 @@ function getRegisterUrl(code: string) {
 async function copyCode(code: string) {
   try {
     await navigator.clipboard.writeText(code)
-    ElMessage.success(`邀请码 ${code} 已复制`)
+    toast.success(`邀请码 ${code} 已复制`)
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    toast.warning('复制失败，请手动复制')
   }
 }
 
@@ -157,18 +157,18 @@ async function copyRegisterLink(code: string) {
   const url = getRegisterUrl(code)
   try {
     await navigator.clipboard.writeText(url)
-    ElMessage.success('注册链接已复制到剪贴板')
+    toast.success('注册链接已复制到剪贴板')
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    toast.warning('复制失败，请手动复制')
   }
 }
 
 async function copyAll() {
   try {
     await navigator.clipboard.writeText(generated.value.join('\n'))
-    ElMessage.success('已复制全部邀请码')
+    toast.success('已复制全部邀请码')
   } catch {
-    ElMessage.warning('复制失败，请手动选择')
+    toast.warning('复制失败，请手动选择')
   }
 }
 
@@ -176,15 +176,15 @@ async function copyAllLinks() {
   const links = generated.value.map(c => getRegisterUrl(c))
   try {
     await navigator.clipboard.writeText(links.join('\n'))
-    ElMessage.success('已复制全部注册链接')
+    toast.success('已复制全部注册链接')
   } catch {
-    ElMessage.warning('复制失败，请手动选择')
+    toast.warning('复制失败，请手动选择')
   }
 }
 
 async function revoke(row: any) {
   try {
-    await ElMessageBox.confirm(`确认作废邀请码 ${row.code}？作废后该邀请码将无法用于注册。`, '作废邀请码', {
+    await messageBox.confirm(`确认作废邀请码 ${row.code}？作废后该邀请码将无法用于注册。`, '作废邀请码', {
       type: 'warning',
       confirmButtonText: '作废',
       cancelButtonText: '取消',
@@ -195,13 +195,13 @@ async function revoke(row: any) {
   try {
     const { data } = await revokeInvitation(row.id)
     if (data.code === 0) {
-      ElMessage.success('已作废')
+      toast.success('已作废')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '作废失败'))
+    toast.error(errMsg(e, '作废失败'))
   }
 }
 

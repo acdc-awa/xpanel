@@ -4,7 +4,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body {
-  font-family: var(--el-font-family);
+  font-family: var(--x-font-family);
   background: var(--x-bg);
   color: var(--x-text);
   font-size: 14px;
@@ -23,11 +23,6 @@ a { color: inherit; text-decoration: none; }
 .font-medium { font-weight: var(--x-weight-medium, 500) !important; }
 .font-semibold { font-weight: var(--x-weight-semibold, 600) !important; }
 .font-bold { font-weight: var(--x-weight-bold, 700) !important; }
-
-// 说明性 Tooltip 统一限宽：文案收进图标后往往较长，不限宽会单行拉满视口
-.el-popper.is-dark {
-  max-width: 340px;
-}
 
 // 页面容器（内边距一律由 layout 单独提供，此处只负责最大宽度与居中；
 // 曾经这里在 900/768 两档也加 padding，与 .admin-content 叠加后正文左右边距
@@ -357,256 +352,6 @@ html.dark .x-chip {
 }
 
 // ==========================================
-// 统一弹窗体系 (Dialog / MessageBox / Drawer)
-// ==========================================
-
-// 1. 全局遮罩层 (Overlay)
-.el-overlay {
-  // 模糊半径从 5px 收到 3px：全屏 backdrop-filter 是弹窗打开掉帧的主要来源
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  background-color: rgba(15, 23, 42, 0.45) !important;
-  // 滚动交给下面这层 .el-overlay-dialog（EP 自带 position:fixed;inset:0;overflow:auto），
-  // 两层都 overflow:auto 时滚轮落点不确定，还可能看到两条相邻滚动条
-  overflow: hidden !important;
-}
-
-// 严禁对 display 进行 !important 覆盖，确保 style="display: none;" 能够正确隐藏
-.el-overlay[style*="display: none"],
-.el-overlay[style*="display:none"] {
-  display: none !important;
-}
-
-.el-overlay-dialog,
-.el-overlay-message-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  padding: 24px 16px;
-  overflow: auto;
-  box-sizing: border-box;
-}
-
-// 2. ElMessageBox 确认框（统一固定 440px 宽度，防止横向拉伸变形）
-.el-message-box {
-  width: 440px !important;
-  max-width: calc(100vw - 32px) !important;
-  border-radius: var(--x-radius-lg, 16px) !important;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
-  border: 1px solid var(--x-border) !important;
-  padding: 24px 24px 20px !important;
-  background: var(--x-card) !important;
-  box-sizing: border-box !important;
-  vertical-align: middle !important;
-  margin: auto !important;
-  text-align: left !important;
-  overflow: hidden !important;
-
-  .el-message-box__header {
-    padding: 0 0 14px 0 !important;
-    border-bottom: 1px solid var(--x-border);
-    margin-right: 0 !important;
-  }
-
-  .el-message-box__title {
-    font-weight: 700 !important;
-    font-size: 16px !important;
-    color: var(--x-text) !important;
-  }
-
-  .el-message-box__headerbtn {
-    // EP 原生按钮盒是 40×40 且图标居中，标题中心在 24 + 24/2 = 36px 处，
-    // 所以 top 必须是 36 - 40/2 = 16px 才对齐（原来写 18px，偏低 2px）
-    top: 16px !important;
-    right: 20px !important;
-    .el-message-box__close {
-      color: var(--x-text-3) !important;
-      font-size: 16px !important;
-      transition: color 0.15s ease;
-      &:hover {
-        color: var(--x-text) !important;
-      }
-    }
-  }
-
-  .el-message-box__content {
-    padding: 16px 0 6px 0 !important;
-  }
-
-  .el-message-box__container {
-    display: flex !important;
-    align-items: flex-start !important;
-    gap: 12px !important;
-  }
-
-  .el-message-box__status {
-    position: static !important;
-    transform: none !important;
-    font-size: 20px !important;
-    margin-top: 1px !important;
-  }
-
-  .el-message-box__message {
-    font-size: 14px !important;
-    color: var(--x-text-2) !important;
-    line-height: 1.6 !important;
-    padding-left: 0 !important;
-  }
-
-  .el-message-box__btns {
-    padding: 18px 0 0 0 !important;
-    display: flex !important;
-    justify-content: flex-end !important;
-    gap: 10px !important;
-    border-top: 1px solid var(--x-border);
-    margin-top: 14px;
-  }
-}
-
-// 3. ElDialog 通用对话框（紧凑自适应，高宽根据内容自然包裹）
-.el-dialog {
-  // 纵向弹性布局：标题/footer 固定，只有 body 滚动
-  display: flex !important;
-  flex-direction: column !important;
-  border-radius: var(--x-radius-lg, 16px) !important;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
-  border: 1px solid var(--x-border) !important;
-  background: var(--x-card) !important;
-  max-width: calc(100vw - 32px) !important;
-  // 高度上限移到弹窗整体：原先把上限写成 body 的 calc(85vh - 120px)，120px 是按
-  // 「单行标题 + 单行 footer」估的，标题一换行总高就突破 85vh、底部按钮被顶出视口
-  max-height: 85vh !important;
-  box-sizing: border-box !important;
-  height: auto !important;
-  margin: auto !important;
-  overflow: hidden !important;
-
-  .el-dialog__header {
-    flex: none;
-    padding: 16px 22px 14px !important;
-    margin-right: 0 !important;
-    border-bottom: 1px solid var(--x-border);
-  }
-
-  .el-dialog__title {
-    font-size: 16px !important;
-    font-weight: 700 !important;
-    color: var(--x-text);
-  }
-
-  .el-dialog__headerbtn {
-    // EP 原生的按钮盒是 48×48 且图标在盒内居中。只改 top/right 会让图标中心落在
-    // 16 + 48/2 = 40px，而标题中心在 16 + 24/2 = 28px → 低约 12px，且盒底追出 header 底边。
-    // 这里把盒子显式收成 40×40、top 收到 8px，中心 = 8 + 20 = 28px，与标题齐平。
-    top: 8px !important;
-    right: 20px !important;
-    width: 40px !important;
-    height: 40px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-
-    .el-dialog__close {
-      color: var(--x-text-3) !important;
-      font-size: 16px !important;
-      transition: color 0.15s ease;
-      &:hover {
-        color: var(--x-text) !important;
-      }
-    }
-  }
-
-  .el-dialog__body {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: 20px 22px !important;
-    overflow-y: auto !important;
-  }
-
-  .el-dialog__footer {
-    flex: none;
-    padding: 14px 22px 18px !important;
-    border-top: 1px solid var(--x-border);
-    display: flex !important;
-    justify-content: flex-end !important;
-    // 必须显式居中：footer 里除按钮还会放裸 el-icon（如危险操作的后果说明图标），
-    // stretch 下图标盒高仅 1em，会被顶到与按钮顶部齐平、比按钮中心高约 9px
-    align-items: center !important;
-    gap: 10px !important;
-  }
-
-  // 全屏弹窗由 EP 自己接管高度（height:100%），不要把 85vh 上限套上去
-  &.is-fullscreen {
-    max-height: none !important;
-  }
-}
-
-// 4. ElDrawer 抽屉风格统合
-.el-drawer {
-  background: var(--x-card) !important;
-  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.22) !important;
-  border-left: 1px solid var(--x-border) !important;
-  // 贴边抽屉不做圆角（显式声明，避免以后误以为是漏写）
-  border-radius: 0 !important;
-
-  @media (max-width: $bp-tablet-max) {
-    // 用 100% 而不是 100vw：.el-drawer 是 .el-overlay（position:fixed）内的
-    // position:absolute，100% 天然不含经典滚动条宽度，100vw 会宽出约 15px
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .el-drawer__header {
-    padding: 16px 22px 14px !important;
-    margin-bottom: 0 !important;
-    border-bottom: 1px solid var(--x-border);
-  }
-
-  .el-drawer__title {
-    font-size: 16px !important;
-    font-weight: 700 !important;
-    color: var(--x-text);
-  }
-
-  .el-drawer__body {
-    padding: 20px 22px !important;
-  }
-
-  .el-drawer__footer {
-    padding: 14px 22px 18px !important;
-    border-top: 1px solid var(--x-border);
-  }
-}
-
-@media (max-width: $bp-tablet-max) {
-  .el-dialog {
-    max-width: calc(100vw - 32px) !important;
-    margin: auto !important;
-
-    .el-dialog__header {
-      padding: 14px 18px 12px !important;
-    }
-    .el-dialog__headerbtn {
-      // 窄屏 header 变矮（14 + 24 + 12 = 50px），标题中心 26px → 6 + 20 = 26px
-      top: 6px !important;
-      right: 14px !important;
-    }
-    .el-dialog__body {
-      padding: 16px 18px !important;
-    }
-    .el-dialog__footer {
-      padding: 12px 18px 14px !important;
-    }
-  }
-
-  .el-message-box {
-    width: 90% !important;
-    padding: 20px 18px 16px !important;
-  }
-}
-
-// ==========================================
 // 统一 Markdown 内容排版规范 (.markdown-content)
 // ==========================================
 .markdown-content {
@@ -739,18 +484,8 @@ html.dark .x-chip {
       flex-direction: column;
       align-items: stretch;
       gap: 8px;
-
-      .el-input,
-      .el-select {
-        width: 100% !important;
-      }
-
-      .el-button {
-        width: 100%;
-      }
     }
 
-    > .el-button,
     .toolbar-actions {
       width: 100%;
     }
@@ -825,76 +560,6 @@ html.dark .x-chip {
       justify-content: flex-end;
       padding-top: 8px;
       border-top: 1px solid rgba(0, 0, 0, 0.04);
-
-      .el-button {
-        flex: 1;
-        margin: 0;
-        font-size: 12px;
-        padding: 6px 8px;
-      }
-    }
-  }
-
-  // 全局 Dialog 移动端安全适配
-  .el-dialog {
-    width: min(var(--el-dialog-width, 94vw), 94vw) !important;
-    min-width: min(320px, 94vw);
-    max-width: 94vw !important;
-    margin: 16px auto !important;
-    border-radius: var(--x-radius, 8px) !important;
-
-    // 紧凑型弹窗（如 2FA、确认框）不被过度拉伸
-    &.twofa-dialog,
-    &.compact-dialog {
-      width: min(380px, 92vw) !important;
-      min-width: auto;
-      max-width: 92vw !important;
-    }
-
-    .el-dialog__header {
-      padding: 14px 16px 10px !important;
-      margin-right: 0 !important;
-
-      .el-dialog__title {
-        font-size: 16px !important;
-      }
-    }
-
-    .el-dialog__headerbtn {
-      // 窄屏 header 高 14 + 24 + 10 = 48px，标题中心 26px → 6 + 20 = 26px
-      top: 6px !important;
-      right: 12px !important;
-    }
-
-    .el-dialog__body {
-      padding: 12px 16px !important;
-      // 高度上限已由 .el-dialog 的 max-height + body 弹性滚动接管
-      max-height: none !important;
-      overflow-y: auto !important;
-    }
-
-    .el-dialog__footer {
-      padding: 10px 16px 14px !important;
-    }
-  }
-
-  // 全局 Drawer 移动端安全适配
-  .el-drawer {
-    width: 100% !important;
-    max-width: 100% !important;
-
-    .el-drawer__header {
-      padding: 14px 16px 10px !important;
-      margin-bottom: 0 !important;
-
-      .el-drawer__title {
-        font-size: 16px !important;
-        font-weight: 600 !important;
-      }
-    }
-
-    .el-drawer__body {
-      padding: 14px 14px !important;
     }
   }
 }

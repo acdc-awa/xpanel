@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { MQ, useMediaQuery } from '@/utils/media'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import { toast, messageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsAlert,
@@ -189,7 +189,7 @@ function openAdjust(row: any) {
 async function submitAdjust() {
   if (!adjustUser.value) return
   if (adjustForm.delta_yuan === 0) {
-    ElMessage.warning('变动金额不能为 0')
+    toast.warning('变动金额不能为 0')
     return
   }
   adjusting.value = true
@@ -200,17 +200,17 @@ async function submitAdjust() {
     }
     const { data } = await adjustUserBalance(adjustUser.value.id, payload)
     if (data.code === 0) {
-      ElMessage.success('余额调整成功')
+      toast.success('余额调整成功')
       adjustOpen.value = false
       if (current.value && current.value.id === adjustUser.value.id) {
         current.value.balance_cents = data.data.new_balance
       }
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '调整余额失败'))
+    toast.error(errMsg(e, '调整余额失败'))
   } finally {
     adjusting.value = false
   }
@@ -256,10 +256,10 @@ async function load() {
       list.value = data.data.items
       total.value = data.data.total
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载用户失败'))
+    toast.error(errMsg(e, '加载用户失败'))
   } finally {
     loading.value = false
   }
@@ -357,12 +357,12 @@ async function saveUserConfig() {
   if (!current.value) return
   const trimmedEmail = userEditForm.email.trim()
   if (!trimmedEmail) {
-    ElMessage.warning('用户邮箱不能为空')
+    toast.warning('用户邮箱不能为空')
     return
   }
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(trimmedEmail)) {
-    ElMessage.warning('请输入有效的邮箱地址')
+    toast.warning('请输入有效的邮箱地址')
     return
   }
   userSaving.value = true
@@ -380,14 +380,14 @@ async function saveUserConfig() {
     }
     const { data } = await updateUser(current.value.id, payload)
     if (data.code === 0) {
-      ElMessage.success('用户配置已更新')
+      toast.success('用户配置已更新')
       detailOpen.value = false
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     userSaving.value = false
   }
@@ -408,7 +408,7 @@ const newUserResult = ref<{ uuid: string; email: string } | null>(null)
 
 async function submitNewUser() {
   if (!newUserForm.email || !newUserForm.password) {
-    ElMessage.warning('请填写邮箱与密码')
+    toast.warning('请填写邮箱与密码')
     return
   }
   newUserCreating.value = true
@@ -432,10 +432,10 @@ async function submitNewUser() {
       newUserForm.remark = ''
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建失败'))
+    toast.error(errMsg(e, '创建失败'))
   } finally {
     newUserCreating.value = false
   }
@@ -450,19 +450,19 @@ async function doToggle(row: any) {
   try {
     const { data } = await toggleUser(row.id)
     if (data.code === 0) {
-      ElMessage.success(data.message)
+      toast.success(data.message)
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 
 async function doResetTraffic(row: any) {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认重置「${row.email}」的流量周期？重置后其已用流量清零并重新计算限额。`,
       '重置流量',
       { type: 'warning' },
@@ -473,7 +473,7 @@ async function doResetTraffic(row: any) {
   try {
     const { data } = await resetUserTraffic(row.id)
     if (data.code === 0) {
-      ElMessage.success('流量已重置')
+      toast.success('流量已重置')
       if (current.value && current.value.id === row.id) {
         current.value.used_bytes = 0
         current.value.up_bytes = 0
@@ -481,26 +481,26 @@ async function doResetTraffic(row: any) {
       }
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置失败'))
+    toast.error(errMsg(e, '重置失败'))
   }
 }
 
 async function doDelete(row: any) {
   try {
-    await ElMessageBox.confirm(`确定删除用户 ${row.email}？该操作不可逆。`, '删除确认', {
+    await messageBox.confirm(`确定删除用户 ${row.email}？该操作不可逆。`, '删除确认', {
       type: 'error',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
     })
     const { data } = await deleteUser(row.id)
     if (data.code === 0) {
-      ElMessage.success('用户已删除')
+      toast.success('用户已删除')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch {
     /* 取消 */
@@ -509,7 +509,7 @@ async function doDelete(row: any) {
 
 function copyText(text: string, label: string) {
   navigator.clipboard.writeText(text)
-  ElMessage.success(`${label}已复制到剪贴板`)
+  toast.success(`${label}已复制到剪贴板`)
 }
 
 // 详情弹窗的底部动作：先关弹窗再执行，避免确认框被弹窗遮罩挡住
@@ -553,11 +553,11 @@ async function openSubscribeInfo(row: AdminUser) {
     if (data.code === 0) {
       subInfoToken.value = data.data.subscribe_token
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       subInfoOpen.value = false
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '获取订阅信息失败'))
+    toast.error(errMsg(e, '获取订阅信息失败'))
     subInfoOpen.value = false
   } finally {
     subInfoLoading.value = false
@@ -568,7 +568,7 @@ async function doResetSubscribeToken() {
   const row = subInfoRow.value
   if (!row) return
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       '重置后该用户的原订阅地址及连接密钥（UUID）将立即失效，在线服务器将实时断开旧凭据连接。确定重置？',
       '重置订阅地址',
       { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
@@ -584,12 +584,12 @@ async function doResetSubscribeToken() {
       if (data.data.uuid) {
         row.uuid = data.data.uuid
       }
-      ElMessage.success('订阅地址及连接密钥已重置')
+      toast.success('订阅地址及连接密钥已重置')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置订阅地址失败'))
+    toast.error(errMsg(e, '重置订阅地址失败'))
   } finally {
     subInfoResetting.value = false
   }
@@ -617,7 +617,7 @@ function csvCell(v: any) {
 function exportCSV() {
   const rows = selectMode.value ? selected.value : list.value
   if (!rows.length) {
-    ElMessage.warning('没有可导出的用户')
+    toast.warning('没有可导出的用户')
     return
   }
   const header = ['ID', '邮箱', 'UUID', '角色', '状态', '套餐', '权限组', '余额(分)', '已用流量', '总流量', '到期时间', '注册时间', '备注']
@@ -646,7 +646,7 @@ function exportCSV() {
   a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
-  ElMessage.success(`已导出 ${rows.length} 位用户`)
+  toast.success(`已导出 ${rows.length} 位用户`)
 }
 
 async function batchToggle(targetStatus: 0 | 1) {
@@ -655,11 +655,11 @@ async function batchToggle(targetStatus: 0 | 1) {
   const skippedSelf = targetStatus === 0 ? rows.filter((u) => isSelf(u)).length : 0
   rows = rows.filter((u) => !isSelf(u))
   if (!rows.length) {
-    ElMessage.warning(skippedSelf > 0 ? '所选用户中仅剩当前登录账号，不能封禁自己' : targetStatus === 1 ? '所选用户均已启用' : '所选用户均已禁用')
+    toast.warning(skippedSelf > 0 ? '所选用户中仅剩当前登录账号，不能封禁自己' : targetStatus === 1 ? '所选用户均已启用' : '所选用户均已禁用')
     return
   }
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       targetStatus === 1
         ? `确认启用所选 ${rows.length} 位用户？`
         : `确认封禁所选 ${rows.length} 位用户？封禁后其会话与订阅立即失效。${skippedSelf > 0 ? '（当前登录账号已自动跳过）' : ''}`,
@@ -676,14 +676,14 @@ async function batchToggle(targetStatus: 0 | 1) {
       const { data } = await toggleUser(u.id)
       if (data.code === 0) ok++
     }
-    ElMessage.success(`已完成 ${ok}/${rows.length}`)
+    toast.success(`已完成 ${ok}/${rows.length}`)
     if (ok > 0) {
       selected.value = []
       selectMode.value = false
       load()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '批量操作失败'))
+    toast.error(errMsg(e, '批量操作失败'))
   } finally {
     batchBusy.value = false
   }

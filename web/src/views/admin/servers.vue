@@ -24,8 +24,8 @@ import {
   CsSpaceBetween,
   CsSpinner,
   CsToolbar,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
   type SegmentedOption,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
@@ -193,9 +193,9 @@ async function load() {
       if (statusFilter.value === 'expiring' && expiringServers.value.length === 0) {
         statusFilter.value = 'all'
       }
-    } else ElMessage.error(data.message)
+    } else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载服务器失败'))
+    toast.error(errMsg(e, '加载服务器失败'))
   } finally {
     loading.value = false
   }
@@ -223,7 +223,7 @@ const createdResult = ref<{ node_id: string; secret: string; install_cmd: string
 
 async function submitCreate() {
   if (!createForm.name || !createForm.host) {
-    ElMessage.warning('请填写名称与地址')
+    toast.warning('请填写名称与地址')
     return
   }
   creating.value = true
@@ -257,10 +257,10 @@ async function submitCreate() {
       createForm.idc_address = ''
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建失败'))
+    toast.error(errMsg(e, '创建失败'))
   } finally {
     creating.value = false
   }
@@ -269,9 +269,9 @@ async function submitCreate() {
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
+    toast.success(`${label}已复制`)
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    toast.warning('复制失败，请手动复制')
   }
 }
 
@@ -374,7 +374,7 @@ const MAX_BATCH = 100
 /** 后端 binding 上限 100；超了直接拦住，不让请求白跑一趟。 */
 function tooMany(): boolean {
   if (selectedIds.value.length > MAX_BATCH) {
-    ElMessage.warning(`一次最多操作 ${MAX_BATCH} 台服务器`)
+    toast.warning(`一次最多操作 ${MAX_BATCH} 台服务器`)
     return true
   }
   return false
@@ -425,7 +425,7 @@ async function batchAgentUpgrade() {
     '离线服务器将自动跳过；升级并行执行（sha256 校验，完成后自动重启，期间短暂离线）。',
   ]
   try {
-    await ElMessageBox.confirm(lines.join('\n'), '批量升级 Agent', {
+    await messageBox.confirm(lines.join('\n'), '批量升级 Agent', {
       type: 'warning',
       confirmButtonText: '开始升级',
       cancelButtonText: '取消',
@@ -469,7 +469,7 @@ async function batchRestartXray() {
     '重启会短暂中断该节点上的 Xray（约 1-2 秒）。',
   ]
   try {
-    await ElMessageBox.confirm(lines.join('\n'), '批量重启 Xray', {
+    await messageBox.confirm(lines.join('\n'), '批量重启 Xray', {
       type: 'warning',
       confirmButtonText: '开始重启',
       cancelButtonText: '取消',
@@ -487,7 +487,7 @@ async function batchRestartXray() {
 // ---- 单台重启：派发后短轮询，终态再提示 ----
 async function restartXray(row: ServerItem) {
   try {
-    await ElMessageBox.confirm(`确认重启服务器「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
+    await messageBox.confirm(`确认重启服务器「${row.name}」的 Xray？约 1-2 秒断线。`, '重启 Xray', {
       type: 'warning',
     })
   } catch {
@@ -496,20 +496,20 @@ async function restartXray(row: ServerItem) {
   try {
     const { data } = await runServerCommand<CommandDispatchResult>({ ids: [row.id], type: 'restart_xray' })
     if (data.code !== 0) {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       return
     }
     const skip = data.data.skipped?.[0]
     if (skip) {
-      ElMessage.error(`重启失败：${skip.reason}`)
+      toast.error(`重启失败：${skip.reason}`)
       return
     }
     const result = await waitRestart(row.id)
-    if (result.ok) ElMessage.success(result.message || '已重启')
-    else ElMessage.error(result.message || '重启失败')
+    if (result.ok) toast.success(result.message || '已重启')
+    else toast.error(result.message || '重启失败')
     load()
   } catch (e) {
-    ElMessage.error(errMsg(e, '重启失败'))
+    toast.error(errMsg(e, '重启失败'))
   }
 }
 

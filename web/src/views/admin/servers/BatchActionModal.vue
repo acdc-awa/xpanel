@@ -7,7 +7,7 @@ import {
   CsProgressBar,
   CsSpaceBetween,
   CsTable,
-  ElMessage,
+  toast,
   type TableColumn,
 } from '@/components/cloudscape'
 import {
@@ -170,7 +170,7 @@ async function start() {
   try {
     const { data } = await runServerCommand<CommandDispatchResult>(props.request)
     if (data.code !== 0) {
-      ElMessage.error(data.message || '提交失败')
+      toast.error(data.message || '提交失败')
       stopPolling()
       running.value = false
       return
@@ -192,7 +192,7 @@ async function start() {
   } catch (e) {
     stopPolling()
     running.value = false
-    ElMessage.error(errMsg(e, '批量操作提交失败'))
+    toast.error(errMsg(e, '批量操作提交失败'))
   }
 }
 

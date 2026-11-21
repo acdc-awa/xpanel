@@ -25,8 +25,8 @@ import {
   CsSpinner,
   CsToggle,
   CsToolbar,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import { createPlan, deletePlan, getPermissionGroups, getPlans, reorderPlans, restorePlan, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -44,9 +44,9 @@ async function load() {
     if (data.code === 0) {
       list.value = data.data.items
       syncSnapshot()
-    } else ElMessage.error(data.message)
+    } else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载套餐失败'))
+    toast.error(errMsg(e, '加载套餐失败'))
   } finally {
     loading.value = false
   }
@@ -109,7 +109,7 @@ function insertPlaceholder(placeholder: string) {
   if (!el) {
     // 降级：未获取到 textarea 元素时追加到末尾
     form.description += (form.description.endsWith('\n') || !form.description ? '' : '\n') + placeholder
-    ElMessage.success(`已插入占位符 ${placeholder}`)
+    toast.success(`已插入占位符 ${placeholder}`)
     return
   }
 
@@ -121,7 +121,7 @@ function insertPlaceholder(placeholder: string) {
   const after = text.substring(end)
   form.description = before + placeholder + after
 
-  ElMessage.success(`已在光标处插入 ${placeholder}`)
+  toast.success(`已在光标处插入 ${placeholder}`)
 
   // 恢复光标至插入内容之后并保持聚焦
   nextTick(() => {
@@ -169,7 +169,7 @@ function openEdit(row: any) {
 
 async function save() {
   if (!form.name || form.price_yuan < 0 || form.traffic_gb < 1 || form.duration_days < 1) {
-    ElMessage.warning('请填写完整套餐信息')
+    toast.warning('请填写完整套餐信息')
     return
   }
   saving.value = true
@@ -189,14 +189,14 @@ async function save() {
     if (editing.value) payload.sync_users = form.sync_users
     const { data } = editing.value ? await updatePlan(form.id, payload) : await createPlan(payload)
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '已保存' : '已创建')
+      toast.success(editing.value ? '已保存' : '已创建')
       formOpen.value = false
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -208,7 +208,7 @@ async function toggleFlag(row: any, flag: 'purchasable' | 'renewable') {
     const { data } = await updatePlan(row.id, { [flag]: !row[flag] })
     if (data.code === 0) load()
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 
@@ -227,7 +227,7 @@ function groupNameOf(id?: number) {
 
 async function remove(row: any) {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认归档套餐「${row.name}」？归档后不再出现在套餐列表与商城，历史订单与统计保留；可在「显示已归档」中恢复。`,
       '归档套餐',
       { type: 'warning' },
@@ -238,11 +238,11 @@ async function remove(row: any) {
   try {
     const { data } = await deletePlan(row.id)
     if (data.code === 0) {
-      ElMessage.success('已归档')
+      toast.success('已归档')
       load()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '归档失败'))
+    toast.error(errMsg(e, '归档失败'))
   }
 }
 
@@ -251,13 +251,13 @@ async function restore(row: any) {
   try {
     const { data } = await restorePlan(row.id)
     if (data.code === 0) {
-      ElMessage.success('已恢复（仍为停售/停续，请按需开启）')
+      toast.success('已恢复（仍为停售/停续，请按需开启）')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '恢复失败'))
+    toast.error(errMsg(e, '恢复失败'))
   }
 }
 </script>

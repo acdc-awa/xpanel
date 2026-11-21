@@ -18,8 +18,8 @@ import {
   CsToggle,
   CsToolbar,
   CsTooltip,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
   type TabItem,
   type TableColumn,
 } from '@/components/cloudscape'
@@ -164,9 +164,9 @@ async function load() {
     const sid = typeof serverFilter.value === 'number' ? serverFilter.value : undefined
     const { data } = await getInbounds(sid)
     if (data.code === 0) list.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载入站失败'))
+    toast.error(errMsg(e, '加载入站失败'))
   } finally {
     loading.value = false
   }
@@ -354,10 +354,10 @@ async function loadAccessPoints() {
   try {
     const [res, inbRes] = await Promise.all([getAccessPoints(), getInbounds(undefined)])
     if (res.data.code === 0) apList.value = res.data.data.items
-    else ElMessage.error(res.data.message)
+    else toast.error(res.data.message)
     if (inbRes.data.code === 0) allInbounds.value = inbRes.data.data.items
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载接入点失败'))
+    toast.error(errMsg(e, '加载接入点失败'))
   } finally {
     apLoading.value = false
   }
@@ -388,13 +388,13 @@ async function toggleAccessPoint(ap: any) {
       target_inbound_id: ap.target_inbound_id,
     })
     if (data.code === 0) {
-      ElMessage.success(ap.enabled ? '接入点已停用' : '接入点已启用')
+      toast.success(ap.enabled ? '接入点已停用' : '接入点已启用')
       loadAccessPoints()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 
@@ -482,19 +482,19 @@ function onInboundEditorChange(payload: InboundEditorChangePayload) {
 async function save() {
   const c = inboundChange.value
   if (!c) {
-    ElMessage.warning('请先在表单中编辑入站配置')
+    toast.warning('请先在表单中编辑入站配置')
     return
   }
   if (!formServerId.value) {
-    ElMessage.warning('请选择所属服务器')
+    toast.warning('请选择所属服务器')
     return
   }
   if (!c.tag.trim() || !c.port) {
-    ElMessage.warning('请填写标签与端口')
+    toast.warning('请填写标签与端口')
     return
   }
   if (c.validationError) {
-    ElMessage.warning(`请先修正配置：${c.validationError}`)
+    toast.warning(`请先修正配置：${c.validationError}`)
     return
   }
 
@@ -533,24 +533,24 @@ async function save() {
     if (editing.value) {
       const { data } = await updateInbound(editing.value.id, payload)
       if (data.code === 0) {
-        ElMessage.success('入站已保存')
+        toast.success('入站已保存')
         closeEditor()
         load()
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     } else {
       const { data } = await createInbound(payload)
       if (data.code === 0) {
-        ElMessage.success('入站已创建')
+        toast.success('入站已创建')
         closeEditor()
         load()
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -563,13 +563,13 @@ async function toggle(row: any) {
   try {
     const { data } = await toggleInbound(row.id)
     if (data.code === 0) {
-      ElMessage.success(row.enabled ? '已停用' : '已启用')
+      toast.success(row.enabled ? '已停用' : '已启用')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   } finally {
     mutating.value = false
   }
@@ -577,20 +577,20 @@ async function toggle(row: any) {
 
 async function remove(row: any) {
   try {
-    await ElMessageBox.confirm(`确认删除入站「${row.tag}」？`, '删除入站', { type: 'error' })
+    await messageBox.confirm(`确认删除入站「${row.tag}」？`, '删除入站', { type: 'error' })
   } catch {
     return
   }
   try {
     const { data } = await deleteInbound(row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       load()
     } else {
-      ElMessage.error(errMsg(data.message, '删除失败'))
+      toast.error(errMsg(data.message, '删除失败'))
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 

@@ -13,7 +13,7 @@
 // 全页不自动保存：切换到别的权限组/模板、新建、清空、离开页面之前都会先确认，绝不静默丢弃修改。
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import { toast, messageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsBadge,
@@ -62,7 +62,7 @@ const editorTabs = [
 async function allowDiscard(dirty: boolean, message: string): Promise<boolean> {
   if (!dirty) return true
   try {
-    await ElMessageBox.confirm(message, '有未保存的修改', {
+    await messageBox.confirm(message, '有未保存的修改', {
       type: 'warning',
       confirmButtonText: '放弃修改',
       cancelButtonText: '返回编辑',
@@ -193,10 +193,10 @@ async function loadGroups() {
         await syncEditorFromGroup()
       }
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载权限组失败'))
+    toast.error(errMsg(e, '加载权限组失败'))
   } finally {
     groupsLoading.value = false
   }
@@ -263,7 +263,7 @@ onMounted(() => {
 onBeforeRouteLeave(async () => {
   if (!unsaved.value) return true
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       '本页有未保存的模板修改，离开后将丢失（模板编辑不会自动保存）。',
       '有未保存的修改',
       { type: 'warning', confirmButtonText: '放弃并离开', cancelButtonText: '留在本页' }
@@ -295,7 +295,7 @@ async function clearTemplate() {
   previewData.value = null
   editorTab.value = 'edit'
   clearLint()
-  ElMessage.info(
+  toast.info(
     isBoundGroup.value
       ? '已清空编辑内容；保存后该组会转为自定义并使用系统默认模板'
       : '已清空模板（将使用系统内置默认模板），保存到权限组后生效'
@@ -308,9 +308,9 @@ async function fetchPreview() {
   try {
     const { data } = await previewPermissionGroupTemplate(selectedGroup.value.id, templateCode.value)
     if (data.code === 0) previewData.value = data.data
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '编译预览失败'))
+    toast.error(errMsg(e, '编译预览失败'))
   } finally {
     previewLoading.value = false
   }
@@ -322,7 +322,7 @@ function onTabChange(detail: { activeTabId: string }) {
 
 async function saveTemplate() {
   if (!selectedGroup.value) {
-    ElMessage.warning('请先选择目标权限组')
+    toast.warning('请先选择目标权限组')
     return
   }
   const target = selectedGroup.value
@@ -337,7 +337,7 @@ async function saveTemplate() {
   if (errCount > 0) {
     const detail = lintNow?.messages.length ? `\n首条：${lintNow.messages[0]}` : ''
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。保存后客户端可能无法解析该订阅，确认保存？${detail}`,
         '模板存在语法错误',
         { type: 'error', confirmButtonText: '仍然保存', cancelButtonText: '返回修改' }
@@ -347,7 +347,7 @@ async function saveTemplate() {
     }
   }
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       wasBound
         ? `当前权限组绑定「${target.sub_template_name || '模板'}」。保存后会自动转为自定义模板（解除绑定），此后模板库改动不再影响该组。确认保存？`
         : `将当前模板保存到权限组「${target.name}」？保存后该组用户请求订阅时直接返回此配置。`,
@@ -361,14 +361,14 @@ async function saveTemplate() {
   try {
     const { data } = await updatePermissionGroup(target.id, { clash_template: templateCode.value })
     if (data.code === 0) {
-      ElMessage.success(wasBound ? '已转为组内自定义模板（绑定已解除）' : '订阅模板已保存')
+      toast.success(wasBound ? '已转为组内自定义模板（绑定已解除）' : '订阅模板已保存')
       await loadGroups()
       await syncEditorFromGroup()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存模板失败'))
+    toast.error(errMsg(e, '保存模板失败'))
   } finally {
     templateSaving.value = false
   }
@@ -387,7 +387,7 @@ async function onTemplateSourceChange(value: string | number | (string | number)
     if (!isBoundGroup.value) return
     if (!(await allowDiscard(groupDirty.value, '转为自定义会丢弃编辑器中未保存的修改。'))) return
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `将权限组「${g.name}」转为自定义（空键）？当前模板内容会保留为该组的副本，之后模板库改动不再影响它。`,
         '转为自定义模板',
         { type: 'warning', confirmButtonText: '转为自定义', cancelButtonText: '取消' }
@@ -399,14 +399,14 @@ async function onTemplateSourceChange(value: string | number | (string | number)
     try {
       const { data } = await clearPermissionGroupSubTemplate(g.id)
       if (data.code === 0) {
-        ElMessage.success('已转为自定义模板（保留当前内容）')
+        toast.success('已转为自定义模板（保留当前内容）')
         await loadGroups()
         await syncEditorFromGroup()
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '转为自定义失败'))
+      toast.error(errMsg(e, '转为自定义失败'))
     } finally {
       bindingSaving.value = false
     }
@@ -417,7 +417,7 @@ async function onTemplateSourceChange(value: string | number | (string | number)
   if (!tpl) return
   if (!(await allowDiscard(groupDirty.value, '绑定模板会覆盖编辑器内容。'))) return
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `将权限组「${g.name}」绑定到模板「${tpl.name}」？绑定后该组订阅跟随模板库更新；在组编辑器里保存会自动转为自定义。`,
       '绑定订阅模板',
       { type: 'warning', confirmButtonText: '绑定', cancelButtonText: '取消' }
@@ -429,14 +429,14 @@ async function onTemplateSourceChange(value: string | number | (string | number)
   try {
     const { data } = await bindPermissionGroupSubTemplate(g.id, tpl.id)
     if (data.code === 0) {
-      ElMessage.success(`已绑定「${tpl.name}」，该组订阅将跟随模板更新`)
+      toast.success(`已绑定「${tpl.name}」，该组订阅将跟随模板更新`)
       await loadGroups()
       await syncEditorFromGroup()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '绑定模板失败'))
+    toast.error(errMsg(e, '绑定模板失败'))
   } finally {
     bindingSaving.value = false
   }
@@ -446,9 +446,9 @@ async function copyPreview() {
   if (!previewData.value?.rendered) return
   try {
     await navigator.clipboard.writeText(previewData.value.rendered)
-    ElMessage.success('预览配置已复制到剪贴板')
+    toast.success('预览配置已复制到剪贴板')
   } catch {
-    ElMessage.warning('复制失败')
+    toast.warning('复制失败')
   }
 }
 
@@ -493,10 +493,10 @@ async function loadLibrary() {
         await syncEditorFromGroup()
       }
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载模板库失败'))
+    toast.error(errMsg(e, '加载模板库失败'))
   } finally {
     libraryLoading.value = false
   }
@@ -540,7 +540,7 @@ async function startNewLibrary() {
 async function saveLibrary() {
   const name = libForm.name.trim()
   if (!name) {
-    ElMessage.warning('请填写模板名称')
+    toast.warning('请填写模板名称')
     return
   }
   // 与组级模板同因：素材里留着语法错误，加载到权限组时会一路带下去
@@ -549,7 +549,7 @@ async function saveLibrary() {
   if (errCount > 0) {
     const detail = lintNow?.messages.length ? `\n首条：${lintNow.messages[0]}` : ''
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `当前模板有 ${errCount} 处 YAML 语法错误（编辑器内已标红）。绑定到权限组后会原样下发给客户端，确认保存？${detail}`,
         '模板存在语法错误',
         { type: 'error', confirmButtonText: '仍然保存', cancelButtonText: '返回修改' }
@@ -563,7 +563,7 @@ async function saveLibrary() {
   if (usage > 0) {
     const names = (libOrigin.value?.group_names || []).join('、')
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `模板「${name}」正被 ${usage} 个权限组绑定${names ? `（${names}）` : ''}。保存后这些组的下一次订阅请求立即使用新内容，确认保存？`,
         '保存将影响绑定组',
         { type: 'warning', confirmButtonText: '保存并生效', cancelButtonText: '取消' }
@@ -578,17 +578,17 @@ async function saveLibrary() {
       ? await createSubTemplate({ name, content: libForm.content })
       : await updateSubTemplate(libForm.id as number, { name, content: libForm.content })
     if (data.code === 0) {
-      ElMessage.success(isNew ? '已保存到模板库' : '模板已更新')
+      toast.success(isNew ? '已保存到模板库' : '模板已更新')
       // 以服务端返回值回填：新建后 id 生效，脏标记随之消失
       libForm.id = data.data.id
       libForm.name = data.data.name
       libForm.content = data.data.content
       await loadLibrary()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存模板失败'))
+    toast.error(errMsg(e, '保存模板失败'))
   } finally {
     librarySaving.value = false
   }
@@ -601,7 +601,7 @@ async function removeLibrary() {
   const usage = tpl.usage_count ?? 0
   const names = (tpl.group_names || []).join('、')
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       usage > 0
         ? `模板「${tpl.name}」正被 ${usage} 个权限组绑定${names ? `（${names}）` : ''}。删除后这些组将转为自定义模板（保留当前内容），此后模板库改动不再影响它们。此操作不可撤销。`
         : `删除模板库中的「${tpl.name}」？此操作不可撤销。`,
@@ -616,7 +616,7 @@ async function removeLibrary() {
     const { data } = await deleteSubTemplate(tpl.id)
     if (data.code === 0) {
       const detached = data.data.detached_group_count ?? 0
-      ElMessage.success(detached > 0 ? `模板已删除，${detached} 个权限组已转为自定义模板` : '模板已删除')
+      toast.success(detached > 0 ? `模板已删除，${detached} 个权限组已转为自定义模板` : '模板已删除')
       // 先刷新权限组（拿到解绑后的 mode/内容），再刷新模板库使用计数，避免编辑器先闪回旧快照。
       await loadGroups()
       await loadLibrary()
@@ -624,20 +624,20 @@ async function removeLibrary() {
       // 回到「未选择」而不是自动跳到下一条：避免看起来像内容被替换
       closeLibForm()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除模板失败'))
+    toast.error(errMsg(e, '删除模板失败'))
   }
 }
 
 // 把组编辑器当前内容沉淀为模板库条目（组 → 库）。纯写入：不切标签页、不动模板编辑器。
 async function saveAsFromEditor() {
   if (!templateCode.value.trim()) {
-    ElMessage.warning('当前编辑器内容为空，无需另存')
+    toast.warning('当前编辑器内容为空，无需另存')
     return
   }
-  const name = await ElMessageBox.prompt('请输入模板名称', '另存为模板', {
+  const name = await messageBox.prompt('请输入模板名称', '另存为模板', {
     confirmButtonText: '保存',
     cancelButtonText: '取消',
     inputPattern: /\S+/,
@@ -650,12 +650,12 @@ async function saveAsFromEditor() {
     const { data } = await createSubTemplate({ name: name.trim(), content: templateCode.value })
     if (data.code === 0) {
       await loadLibrary()
-      ElMessage.success(`已另存为模板库条目「${data.data.name}」，可在「我的模板库」中查看`)
+      toast.success(`已另存为模板库条目「${data.data.name}」，可在「我的模板库」中查看`)
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存模板失败'))
+    toast.error(errMsg(e, '保存模板失败'))
   }
 }
 </script>

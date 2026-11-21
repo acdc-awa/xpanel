@@ -11,8 +11,8 @@ import {
   CsModal,
   CsSpaceBetween,
   CsTabs,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import QRCode from 'qrcode'
 import { useAuthStore } from '@/stores/auth'
@@ -91,7 +91,7 @@ onMounted(async () => {
     if (!auth.user) await auth.fetchMe()
     await refreshQr()
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载订阅信息失败'))
+    toast.error(errMsg(e, '加载订阅信息失败'))
   } finally {
     loading.value = false
   }
@@ -115,27 +115,27 @@ async function loadGuides() {
 
 function copyText(text: string, label: string) {
   if (!text) {
-    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    toast.warning('暂无可用订阅地址，请先订购有效套餐')
     return
   }
   navigator.clipboard?.writeText(text).then(
-    () => ElMessage.success(`${label}已复制到剪贴板`),
-    () => ElMessage.warning('复制失败，请手动复制'),
+    () => toast.success(`${label}已复制到剪贴板`),
+    () => toast.warning('复制失败，请手动复制'),
   )
 }
 
 function importToMihomo() {
   if (!mihomoSchemeUrl.value) {
-    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    toast.warning('暂无可用订阅地址，请先订购有效套餐')
     return
   }
   window.location.href = mihomoSchemeUrl.value
-  ElMessage.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
+  toast.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
 }
 
 function openQrModal() {
   if (!subscribeUrl.value) {
-    ElMessage.warning('暂无可用订阅地址，请先订购有效套餐')
+    toast.warning('暂无可用订阅地址，请先订购有效套餐')
     return
   }
   qrModalOpen.value = true
@@ -143,7 +143,7 @@ function openQrModal() {
 
 async function onResetSubscribe() {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       '重置后，原订阅地址与已连接的节点凭据将立即失效，所有客户端需重新同步或更新订阅后方可继续使用。确定重置订阅地址？',
       '重置订阅地址',
       { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' },
@@ -155,14 +155,14 @@ async function onResetSubscribe() {
   try {
     const { data } = await resetSubscribeToken()
     if (data.code === 0) {
-      ElMessage.success('订阅地址与连接凭据已重置，请在客户端中更新订阅')
+      toast.success('订阅地址与连接凭据已重置，请在客户端中更新订阅')
       await auth.fetchMe()
       await refreshQr()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置订阅地址失败'))
+    toast.error(errMsg(e, '重置订阅地址失败'))
   } finally {
     resettingSub.value = false
   }

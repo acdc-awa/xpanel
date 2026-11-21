@@ -18,8 +18,8 @@ import {
   CsSelect,
   CsTabs,
   CsToggle,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import type { CheckboxGroupOption, SegmentedOption, TabItem } from '@/components/cloudscape'
 import {
@@ -1700,7 +1700,7 @@ function formatRawJson() {
     const obj = JSON.parse(rawJsonText.value)
     rawJsonText.value = JSON.stringify(obj, null, 2)
     jsonError.value = ''
-    ElMessage.success('已格式化 JSON')
+    toast.success('已格式化 JSON')
   } catch (e: any) {
     jsonError.value = e?.message || 'JSON 语法错误'
   }
@@ -1745,7 +1745,7 @@ async function deleteLayerFromEditor() {
   if (!l || !props.serverId) return
   const count = l.inbound_count ?? 1
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `删除对外接入层「${l.name}」？该层当前挂载 ${count} 个入站，删除后均回退为直连端点。`,
       '删除对外接入层',
       { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
@@ -1759,12 +1759,12 @@ async function deleteLayerFromEditor() {
     if (data.code === 0) {
       layers.value = layers.value.filter((x) => x.id !== l.id)
       localLayerId.value = 0
-      ElMessage.success('对外层已删除')
+      toast.success('对外层已删除')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   } finally {
     layerDeleting.value = false
   }
@@ -1781,7 +1781,7 @@ function openLayerQuick() {
 async function saveLayerQuick() {
   if (!props.serverId) return
   if (!layerQuickForm.name.trim() || !layerQuickForm.host.trim()) {
-    ElMessage.warning('请填写层名称与对外 Host')
+    toast.warning('请填写层名称与对外 Host')
     return
   }
   layerQuickSaving.value = true
@@ -1796,12 +1796,12 @@ async function saveLayerQuick() {
       layers.value = [...layers.value, data.data.layer]
       localLayerId.value = data.data.layer.id
       layerQuickOpen.value = false
-      ElMessage.success('对外层已创建并绑定')
+      toast.success('对外层已创建并绑定')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建失败'))
+    toast.error(errMsg(e, '创建失败'))
   } finally {
     layerQuickSaving.value = false
   }
@@ -1810,7 +1810,7 @@ async function saveLayerQuick() {
 function applyCaddyOffloadPreset() {
   // 对外 TLS 只能由接入层声明：不挂层时订阅会跟随入站传输层（这里是 none），必错。
   if (!props.serverId) {
-    ElMessage.warning('请先选择服务器：前置反代需要一个接入层来声明对外 TLS')
+    toast.warning('请先选择服务器：前置反代需要一个接入层来声明对外 TLS')
     return
   }
   localNetwork.value = 'xhttp'
@@ -1831,12 +1831,12 @@ function applyCaddyOffloadPreset() {
       if (data.code === 0) {
         layers.value = [...layers.value, data.data.layer]
         localLayerId.value = data.data.layer.id
-        ElMessage.success('已创建对外层「反代层」并绑定（TLS 卸载 + xhttp 传输）')
+        toast.success('已创建对外层「反代层」并绑定（TLS 卸载 + xhttp 传输）')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     })
-    .catch((e) => ElMessage.error(errMsg(e, '创建对外层失败')))
+    .catch((e) => toast.error(errMsg(e, '创建对外层失败')))
 }
 
 // -----------------------------------------------------------------------------

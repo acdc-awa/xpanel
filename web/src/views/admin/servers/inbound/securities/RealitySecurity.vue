@@ -10,7 +10,7 @@ import {
   CsInput,
   CsInputNumber,
   CsSelect,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { getXrayKeys } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -63,7 +63,7 @@ function applyPreset(id: string | number) {
     dest: preset.dest,
     server_name: preset.sni,
   })
-  ElMessage.success(`已应用目标预设：${preset.sni}`)
+  toast.success(`已应用目标预设：${preset.sni}`)
 }
 
 function genShortId() {
@@ -73,7 +73,7 @@ function genShortId() {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
   updateField('short_id', hex)
-  ElMessage.success('已随机生成 16 位 Short ID')
+  toast.success('已随机生成 16 位 Short ID')
 }
 
 async function fetchRealityKeys() {
@@ -86,12 +86,12 @@ async function fetchRealityKeys() {
         private_key: data.data.private_key,
         public_key: data.data.public_key,
       })
-      ElMessage.success('已生成 x25519 密钥对')
+      toast.success('已生成 x25519 密钥对')
     } else {
-      ElMessage.error(data.message || '生成失败')
+      toast.error(data.message || '生成失败')
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '请求后端生成密钥失败'))
+    toast.error(errMsg(e, '请求后端生成密钥失败'))
   } finally {
     genKeyLoading.value = false
   }
@@ -100,7 +100,7 @@ async function fetchRealityKeys() {
 function copyText(txt: string, label = '内容') {
   if (!txt) return
   navigator.clipboard.writeText(txt)
-  ElMessage.success(`已复制 ${label}`)
+  toast.success(`已复制 ${label}`)
 }
 </script>
 

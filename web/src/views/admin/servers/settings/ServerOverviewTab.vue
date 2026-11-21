@@ -8,7 +8,7 @@ import {
   CsProgressBar,
   CsStatusIndicator,
   CsTooltip,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import { getInbounds, runServerCommand, type CommandResult, type InboundItem, type ServerItem } from '@/api/admin'
@@ -136,7 +136,7 @@ async function loadStatus() {
     statusData.value = data.data
   } catch (e) {
     statusData.value = null
-    ElMessage.error(errMsg(e, '查询状态失败'))
+    toast.error(errMsg(e, '查询状态失败'))
   } finally {
     statusLoading.value = false
   }

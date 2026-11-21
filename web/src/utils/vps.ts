@@ -70,7 +70,7 @@ export function getExpiryStatus(expireDate?: string | null): ExpiryStatus | null
       isExpired: true,
       isUrgent: true,
       cls: 'red',
-      color: 'var(--el-color-danger, #ef4444)',
+      color: 'var(--x-danger, #ef4444)',
       text: `已过期 ${overdue} 天`,
       tip: `已于 ${dateStr} 到期（逾期 ${overdue} 天），请尽快续费或确认是否保留`,
       remainingDays: diffDays,

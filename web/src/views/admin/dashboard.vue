@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import { toast, messageBox } from '@/components/cloudscape'
 import { getDashboard, getDashboardRealtime } from '@/api/admin'
 import type { RankPeriod } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -91,15 +91,14 @@ function handleWidgetRemove(id: string) {
   const title = def ? def.title : id
   layout.value = layout.value.filter((item) => item.id !== id)
   saveLayout(layout.value)
-  ElMessage.success({
-    message: `已从大盘移除「${title}」，可随时在右上角「添加小组件」中恢复。`,
+  toast.success(`已从大盘移除「${title}」，可随时在右上角「添加小组件」中恢复。`, {
     duration: 3000,
   })
 }
 
 async function handleResetLayout() {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       '确定要恢复官方默认排版吗？当前所有自定义卡片位置与大小都将被重置。',
       '重置大盘布局',
       {
@@ -110,7 +109,7 @@ async function handleResetLayout() {
     )
     layout.value = resetLayout()
     gridKey.value++
-    ElMessage.success('已恢复为官方默认仪表盘布局')
+    toast.success('已恢复为官方默认仪表盘布局')
   } catch {}
 }
 
@@ -118,7 +117,7 @@ function handleAddWidget(id: string) {
   const def = WIDGET_DEFINITIONS[id]
   if (!def) return
   if (layout.value.some((item) => item.id === id)) {
-    ElMessage.info('该小组件已在大盘中')
+    toast.info('该小组件已在大盘中')
     return
   }
 
@@ -136,7 +135,7 @@ function handleAddWidget(id: string) {
 
   saveLayout(layout.value)
   gridKey.value++
-  ElMessage.success(`已添加「${def.title}」至大盘`)
+  toast.success(`已添加「${def.title}」至大盘`)
 }
 
 // 提供全局上下文给所有 Widget
@@ -277,7 +276,7 @@ async function load(opts: { silent?: boolean } = {}) {
     } else if (opts.silent) {
       pollFailed.value = true
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
     // 排行粒度与饼图不同源时，跟随主轮询一起刷新
     void loadRanking()
@@ -285,7 +284,7 @@ async function load(opts: { silent?: boolean } = {}) {
     if (opts.silent) {
       pollFailed.value = true
     } else {
-      ElMessage.error(errMsg(e, '加载仪表盘失败'))
+      toast.error(errMsg(e, '加载仪表盘失败'))
     }
   } finally {
     inFlight = false

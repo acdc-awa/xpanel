@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import {
-  ElMessage,
+  toast,
   CsButton,
   CsForm,
   CsFormItem,
@@ -61,7 +61,7 @@ watch(
 
 async function save() {
   if (!form.name.trim() || !form.host.trim()) {
-    ElMessage.warning('请填写层名称与对外 Host')
+    toast.warning('请填写层名称与对外 Host')
     return
   }
   saving.value = true
@@ -77,14 +77,14 @@ async function save() {
       ? await updateLayer(props.serverId, props.layer.id, payload)
       : await createLayer(props.serverId, payload)
     if (data.code === 0) {
-      ElMessage.success(props.layer ? '对外层已更新' : '对外层已创建')
+      toast.success(props.layer ? '对外层已更新' : '对外层已创建')
       visibleModel.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }

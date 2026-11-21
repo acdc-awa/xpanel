@@ -21,7 +21,7 @@ import { exportAuditLogs, getAuditLog, getAuditLogs, type AuditLog } from '@/api
 import { getActionMeta, renderAudit, type AuditView } from '@/utils/auditRender'
 import { formatDateTime } from '@/utils/timezone'
 import { errMsg } from '@/api/http'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 
 const list = ref<AuditLog[]>([])
 const total = ref(0)
@@ -68,10 +68,10 @@ async function load() {
       list.value = data.data.items
       total.value = data.data.total
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载审计日志失败'))
+    toast.error(errMsg(e, '加载审计日志失败'))
   } finally {
     loading.value = false
   }
@@ -118,9 +118,9 @@ async function doExport() {
     a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
-    ElMessage.success('已导出当前筛选结果')
+    toast.success('已导出当前筛选结果')
   } catch (e) {
-    ElMessage.error(errMsg(e, '导出失败'))
+    toast.error(errMsg(e, '导出失败'))
   } finally {
     exporting.value = false
   }
@@ -246,7 +246,7 @@ async function openDetail(row: AuditLog) {
     const { data } = await getAuditLog(row.id)
     if (data.code === 0) currentView.value = renderAudit(data.data.action, data.data.detail, data.data.target_name ?? '')
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载完整日志失败'))
+    toast.error(errMsg(e, '加载完整日志失败'))
   } finally {
     detailLoading.value = false
   }

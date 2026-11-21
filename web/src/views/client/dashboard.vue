@@ -14,7 +14,7 @@ import {
   CsProgressBar,
   CsSpaceBetween,
   CsStatusIndicator,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -87,7 +87,7 @@ onMounted(async () => {
   try {
     await auth.fetchMe()
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载用户信息失败'))
+    toast.error(errMsg(e, '加载用户信息失败'))
   } finally {
     loading.value = false
   }
@@ -95,23 +95,23 @@ onMounted(async () => {
 
 function copySub() {
   if (!subscribeUrl.value) {
-    ElMessage.warning('暂无可用订阅地址')
+    toast.warning('暂无可用订阅地址')
     return
   }
   navigator.clipboard?.writeText(subscribeUrl.value).then(
-    () => ElMessage.success('Mihomo 订阅地址已复制到剪贴板'),
-    () => ElMessage.warning('复制失败，请手动复制'),
+    () => toast.success('Mihomo 订阅地址已复制到剪贴板'),
+    () => toast.warning('复制失败，请手动复制'),
   )
 }
 
 function importMihomo() {
   if (!subscribeUrl.value) {
-    ElMessage.warning('暂无可用订阅地址')
+    toast.warning('暂无可用订阅地址')
     return
   }
   const url = `clash://install-config?url=${encodeURIComponent(subscribeUrl.value)}&name=XrayPanel`
   window.location.href = url
-  ElMessage.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
+  toast.info('正在唤醒 Mihomo / Clash 客户端，若未响应请手动复制订阅地址…')
 }
 
 const servers = ref<MyServerItem[]>([])

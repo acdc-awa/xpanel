@@ -135,13 +135,11 @@ function prompt(
 }
 
 /**
- * `ElMessageBox` 的兼容壳：调用点保持 `ElMessageBox.confirm(...)` 原样，
- * 渲染换成 Cloudscape Modal + 官方按钮，视觉与 `CsConfirmDialog` 一致。
+ * 命令式确认/提示/输入弹窗（渲染走 `CsMessageBoxHost`：Cloudscape Modal + 官方按钮）。
  *
- * 支持本仓库实际用到的选项：confirmButtonText / cancelButtonText / type /
+ * 支持选项：confirmButtonText / cancelButtonText / type /
  * distinguishCancelAndClose / showClose / inputPattern / inputErrorMessage /
- * inputValue / inputPlaceholder / confirmButtonClass（仅危险语义）。
- * 不支持的选项（beforeClose / dangerouslyUseHTMLString / customClass 等）会静默失效。
+ * inputValue / inputPlaceholder / danger / confirmButtonClass（仅危险语义）。
  *
  * 注意：不把正文首段自动改写成红色「Warning:」行——调用点的 message 多是问句
  * （「确认删除证书「x」？」），而 AWS 的 Warning 行陈述的是不可逆后果，两者语义不同。
@@ -153,5 +151,3 @@ export const messageBox = { confirm, alert, prompt }
 export function resolveMessageBox(id: number, action: MessageBoxAction, value?: string) {
   settle(id, action, value)
 }
-
-export const ElMessageBox = messageBox

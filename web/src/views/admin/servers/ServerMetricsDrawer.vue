@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 import { getServerMetrics } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { formatAxisTime } from '@/utils/timezone'
@@ -163,10 +163,10 @@ async function loadData(background = false) {
     if (data.code === 0) {
       metricsData.value = data.data
     } else if (!background) {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e: any) {
-    if (seq === requestSeq && !background) ElMessage.error(errMsg(e, '加载监控数据失败'))
+    if (seq === requestSeq && !background) toast.error(errMsg(e, '加载监控数据失败'))
   } finally {
     if (!background) {
       visiblePending = Math.max(0, visiblePending - 1)

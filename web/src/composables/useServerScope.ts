@@ -2,7 +2,7 @@ import { computed, ref, type Ref } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { getInbounds, getServers, type InboundItem, type ServerItem } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 
 export interface ServerScopeOptions {
   /**
@@ -41,10 +41,10 @@ export function useServerScope(options: ServerScopeOptions = {}) {
           serverFilter.value = servers.value[0]?.id
         }
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '加载服务器失败'))
+      toast.error(errMsg(e, '加载服务器失败'))
     } finally {
       serverLoading.value = false
     }

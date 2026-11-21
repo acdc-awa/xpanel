@@ -67,7 +67,7 @@ function groupName(id: number): string {
     <div v-if="data.ap.resolved_host" class="ap-resolved-text">
       <span class="ap-dot online" />
       <code class="cell-mono">{{ data.ap.resolved_host }}:{{ data.ap.resolved_port }}</code>
-      <span class="ap-chip" :class="data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'purple'">
+      <span class="ap-chip" :class="data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'blue'">
         {{ data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (protocolDisplayName(data.ap.resolved_protocol).toUpperCase() || 'VLESS') }}
       </span>
     </div>
@@ -86,36 +86,30 @@ function groupName(id: number): string {
 .ap-node {
   position: relative;
   width: 280px;
-  background: var(--topo-card-bg, rgba(24, 33, 47, 0.95));
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: var(--topo-card-bg);
+  border: 1px solid var(--topo-card-border);
+  border-left: 3px solid var(--topo-accent);
   border-radius: var(--topo-radius, 16px);
   padding: 16px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.35),
-    0 2px 12px rgba(56, 189, 248, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: var(--topo-card-shadow);
   transition: border-color 0.2s, box-shadow 0.2s;
   contain: paint;
   transform: translateZ(0);
 
   &:hover {
-    border-color: rgba(56, 189, 248, 0.6);
-    box-shadow:
-      0 6px 24px rgba(0, 0, 0, 0.35),
-      0 4px 18px rgba(56, 189, 248, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border-color: var(--topo-card-border-hover);
+    border-left-color: var(--topo-accent);
+    box-shadow: var(--topo-card-shadow-hover);
   }
   &.unlinked {
-    border-style: dashed;
-    border-color: rgba(251, 191, 36, 0.45);
-    box-shadow:
-      0 6px 24px rgba(0, 0, 0, 0.35),
-      0 2px 10px rgba(251, 191, 36, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border: 1.5px dashed var(--topo-warning);
+    &:hover {
+      border-color: var(--topo-warning);
+    }
   }
   &.disabled {
     opacity: 0.6;
@@ -130,11 +124,12 @@ function groupName(id: number): string {
   }
   .ap-icon {
     flex: none;
+    color: var(--topo-accent);
   }
   .ap-name-text {
     font-size: 13px;
     font-weight: 700;
-    color: var(--topo-text-1, #e2e8f0);
+    color: var(--topo-text-1);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -164,9 +159,9 @@ function groupName(id: number): string {
     gap: 6px;
     min-height: 24px;
     font-size: 11.5px;
-    color: var(--topo-accent, #38bdf8);
+    color: var(--topo-accent);
     &.waiting {
-      color: var(--topo-warning, #fbbf24);
+      color: var(--topo-warning);
     }
   }
   .ap-dot {
@@ -175,24 +170,22 @@ function groupName(id: number): string {
     border-radius: 50%;
     flex: none;
     &.online {
-      background: var(--topo-success, #34d399);
-      box-shadow: 0 0 6px var(--topo-success, #34d399);
+      background: var(--topo-success);
     }
     &.offline {
-      background: var(--topo-warning, #fbbf24);
-      box-shadow: 0 0 4px var(--topo-warning, #fbbf24);
+      background: var(--topo-warning);
     }
   }
   .ap-desc-text {
     font-size: 10.5px;
     line-height: 16px;
-    color: var(--topo-text-2, #94a3b8);
+    color: var(--topo-text-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  /* 画布内自有色板：不跟随全局亮/暗主题，保证深色卡片上始终可读 */
+  /* 语义徽标：全部消费画布亮/暗自适应令牌，与 Cloudscape Badge 保持一致 */
   .ap-chip {
     display: inline-flex;
     align-items: center;
@@ -206,29 +199,24 @@ function groupName(id: number): string {
     white-space: nowrap;
 
     &.blue {
-      background: rgba(56, 189, 248, 0.14);
-      border-color: rgba(56, 189, 248, 0.28);
-      color: #7dd3fc;
+      background: var(--topo-accent-soft);
+      border-color: var(--topo-accent-border);
+      color: var(--topo-accent);
     }
     &.gray {
-      background: rgba(148, 163, 184, 0.12);
-      border-color: rgba(148, 163, 184, 0.22);
-      color: #94a3b8;
+      background: var(--topo-row-bg);
+      border-color: var(--topo-row-border);
+      color: var(--topo-text-2);
     }
     &.orange {
-      background: rgba(251, 191, 36, 0.12);
-      border-color: rgba(251, 191, 36, 0.28);
-      color: #fbbf24;
+      background: var(--topo-warning-soft);
+      border-color: var(--topo-warning-border);
+      color: var(--topo-warning);
     }
     &.teal {
-      background: rgba(45, 212, 191, 0.14);
-      border-color: rgba(45, 212, 191, 0.28);
-      color: #2dd4bf;
-    }
-    &.purple {
-      background: rgba(192, 132, 252, 0.14);
-      border-color: rgba(192, 132, 252, 0.28);
-      color: #c084fc;
+      background: var(--topo-teal-soft);
+      border-color: var(--topo-teal-border);
+      color: var(--topo-teal);
     }
   }
 }

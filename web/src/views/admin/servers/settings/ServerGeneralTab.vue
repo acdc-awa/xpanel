@@ -11,8 +11,8 @@ import {
   CsInput,
   CsInputNumber,
   CsSelect,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import { deleteServer, resetServerSecret, updateServer, type NicQuotaDirection, type ServerItem } from '@/api/admin'
@@ -165,11 +165,11 @@ async function save() {
   errors.name = form.name.trim() ? '' : '请填写服务器名称'
   errors.host = form.host.trim() ? '' : '请填写主机地址'
   if (errors.name || errors.host) {
-    ElMessage.warning('请先补全服务器名称与主机地址')
+    toast.warning('请先补全服务器名称与主机地址')
     return false
   }
   if ((Number(form.nic_cycle_days) || 0) > 0 && !form.nic_cycle_start) {
-    ElMessage.warning('自定义周期天数需要同时填写统计周期起点')
+    toast.warning('自定义周期天数需要同时填写统计周期起点')
     return false
   }
 
@@ -192,13 +192,13 @@ async function save() {
       nic_quota_direction: form.nic_quota_direction,
     })
     if (data.code === 0) {
-      ElMessage.success('已保存')
+      toast.success('已保存')
       emit('changed')
       return true
     }
-    ElMessage.error(data.message)
+    toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -212,7 +212,7 @@ const resetting = ref(false)
 
 async function resetSecret() {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认重置服务器「${props.server.name}」的密钥？旧密钥立即失效，需在服务器 Agent 配置（/etc/xray-agent/config.yml）中更新。`,
       '重置密钥',
       { type: 'warning' },
@@ -229,12 +229,12 @@ async function resetSecret() {
         secret: data.data.secret,
         install_cmd: data.data.install_cmd,
       }
-      ElMessage.success('密钥已重置')
+      toast.success('密钥已重置')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置失败'))
+    toast.error(errMsg(e, '重置失败'))
   } finally {
     resetting.value = false
   }
@@ -244,7 +244,7 @@ const deleting = ref(false)
 
 async function removeServer() {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认删除服务器「${props.server.name}」？该服务器将从列表与拓扑中移除，关联的入站、待推送配置与上报数据一并清除，Agent 将无法再连接。历史流量仍保留在统计中并标注「已删除」。`,
       '删除服务器',
       { type: 'error' },
@@ -256,13 +256,13 @@ async function removeServer() {
   try {
     const { data } = await deleteServer(props.server.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       emit('removed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   } finally {
     deleting.value = false
   }
@@ -283,9 +283,9 @@ const secretItems = computed(() => {
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${label}已复制`)
+    toast.success(`${label}已复制`)
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    toast.warning('复制失败，请手动复制')
   }
 }
 </script>

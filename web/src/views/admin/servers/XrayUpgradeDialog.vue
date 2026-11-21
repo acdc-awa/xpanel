@@ -8,7 +8,7 @@ import {
   CsModal,
   CsSelect,
   CsSpaceBetween,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { getXrayVersions } from '@/api/admin'
 import { errMsg } from '@/api/http'
@@ -71,11 +71,11 @@ function close() {
 function submit() {
   const value = target.value.trim()
   if (!value) {
-    ElMessage.warning('请选择或输入目标版本')
+    toast.warning('请选择或输入目标版本')
     return
   }
   if (!/^v?\d+(\.\d+)+(-[0-9A-Za-z.-]+)?$/.test(value)) {
-    ElMessage.error('版本号格式不正确（示例：v26.10.21）')
+    toast.error('版本号格式不正确（示例：v26.10.21）')
     return
   }
   emit('start', value)

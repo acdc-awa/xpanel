@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, CsButton, CsModal } from '@/components/cloudscape'
+import { toast, messageBox, CsButton, CsModal } from '@/components/cloudscape'
 import {
   createInbound,
   deleteInbound,
@@ -93,15 +93,15 @@ function editorModelValue(): string {
 async function save() {
   const c = changePayload.value
   if (!c) {
-    ElMessage.warning('请先在表单中编辑入站配置')
+    toast.warning('请先在表单中编辑入站配置')
     return
   }
   if (!c.tag.trim() || !c.port) {
-    ElMessage.warning('请填写标签与端口')
+    toast.warning('请填写标签与端口')
     return
   }
   if (c.validationError) {
-    ElMessage.warning(`请先修正配置：${c.validationError}`)
+    toast.warning(`请先修正配置：${c.validationError}`)
     return
   }
   saving.value = true
@@ -138,14 +138,14 @@ async function save() {
       ? await updateInbound(props.inbound.id, payload)
       : await createInbound(payload as InboundPayload)
     if (data.code === 0) {
-      ElMessage.success(props.inbound ? '入站已保存' : '入站已创建')
+      toast.success(props.inbound ? '入站已保存' : '入站已创建')
       visibleModel.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, props.inbound ? '保存入站失败' : '创建入站失败'))
+    toast.error(errMsg(e, props.inbound ? '保存入站失败' : '创建入站失败'))
   } finally {
     saving.value = false
   }
@@ -155,21 +155,21 @@ async function remove() {
   const inb = props.inbound
   if (!inb) return
   try {
-    await ElMessageBox.confirm(`删除入站「${inb.tag}」？`, '删除入站', { type: 'error' })
+    await messageBox.confirm(`删除入站「${inb.tag}」？`, '删除入站', { type: 'error' })
   } catch {
     return
   }
   try {
     const { data } = await deleteInbound(inb.id)
     if (data.code === 0) {
-      ElMessage.success('入站已删除')
+      toast.success('入站已删除')
       visibleModel.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 </script>

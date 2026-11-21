@@ -1,5 +1,5 @@
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 import { errMsg } from '@/api/http'
 
 export interface CardDragSortOptions<T> {
@@ -131,7 +131,7 @@ export function useCardDragSort<T>(options: CardDragSortOptions<T>) {
       if (data.code !== 0) throw new Error(data.message || '保存排序失败')
     } catch (e) {
       list.value = orderSnapshot
-      ElMessage.error(errMsg(e, errorMessage))
+      toast.error(errMsg(e, errorMessage))
     } finally {
       saving = false
       orderSnapshot = [...list.value]

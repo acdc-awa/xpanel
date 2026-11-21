@@ -14,8 +14,8 @@ import {
   CsSelect,
   CsSpaceBetween,
   CsToggle,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
   type SegmentedOption,
 } from '@/components/cloudscape'
 import {
@@ -233,11 +233,11 @@ watch(
 async function handleSave() {
   const name = form.name.trim()
   if (!name) {
-    ElMessage.warning('请输入接入点名称')
+    toast.warning('请输入接入点名称')
     return
   }
   if (form.target_type === 'inbound' && !form.target_inbound_id) {
-    ElMessage.warning('请选择直连落地入站')
+    toast.warning('请选择直连落地入站')
     return
   }
   saving.value = true
@@ -256,14 +256,14 @@ async function handleSave() {
       ? await updateAccessPoint(props.accessPoint.id, payload)
       : await createAccessPoint(payload)
     if (data.code === 0) {
-      ElMessage.success(props.accessPoint ? '接入点已更新' : '接入点已创建')
+      toast.success(props.accessPoint ? '接入点已更新' : '接入点已创建')
       visible.value = false
       emit('saved')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存接入点失败'))
+    toast.error(errMsg(e, '保存接入点失败'))
   } finally {
     saving.value = false
   }
@@ -272,7 +272,7 @@ async function handleSave() {
 async function handleDelete() {
   if (!props.accessPoint) return
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认删除接入点「${props.accessPoint.name}」？订阅将立即移除该入口。`,
       '删除接入点',
       { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
@@ -283,14 +283,14 @@ async function handleDelete() {
   try {
     const { data } = await deleteAccessPoint(props.accessPoint.id)
     if (data.code === 0) {
-      ElMessage.success('接入点已删除')
+      toast.success('接入点已删除')
       visible.value = false
       emit('deleted')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 </script>

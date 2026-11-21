@@ -10,8 +10,8 @@ import {
   CsHeader,
   CsModal,
   CsSpaceBetween,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import { createOrder, payOrderByBalance, getMyOrders, getPublicPlans } from '@/api/shop'
 import RechargeModal from '@/components/RechargeModal.vue'
@@ -85,7 +85,7 @@ async function load() {
     if (p.data.code === 0) plans.value = p.data.data.items
     if (o.data.code === 0) orders.value = o.data.data.items
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载失败'))
+    toast.error(errMsg(e, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -102,7 +102,7 @@ async function handleSelectPlan(plan: Plan) {
       ? '续费将在支付完成后从当前时刻起重新计算有效期并重置流量，当前套餐的剩余有效期与剩余流量将作废清零。确定继续前往收银台吗？'
       : `即将更换为「${plan.name}」。支付完成后将从当前时刻起重新计算有效期并重置流量，当前套餐的剩余有效期与剩余流量将作废清零。确定继续前往收银台吗？`
     try {
-      await ElMessageBox.confirm(message, title, {
+      await messageBox.confirm(message, title, {
         confirmButtonText: '继续前往收银台',
         cancelButtonText: '取消',
         type: 'warning',
@@ -121,7 +121,7 @@ async function openCheckout(plan: Plan) {
       const order = data.data.order
       if (order.status === 'paid') {
         await auth.fetchMe()
-        ElMessage.success('订购成功，套餐已生效')
+        toast.success('订购成功，套餐已生效')
         router.push('/subscribe')
         return
       }
@@ -130,11 +130,11 @@ async function openCheckout(plan: Plan) {
   } catch (e: unknown) {
     const err = e as { response?: { status?: number; data?: { pending_order_no?: string; message?: string } } }
     if (err?.response?.status === 409 && err.response.data?.pending_order_no) {
-      ElMessage.warning('您有一笔待支付订单，正在前往收银台')
+      toast.warning('您有一笔待支付订单，正在前往收银台')
       router.push(`/checkout/${err.response.data.pending_order_no}`)
       return
     }
-    ElMessage.error(err?.response?.data?.message || '创建订单失败')
+    toast.error(err?.response?.data?.message || '创建订单失败')
   }
 }
 
@@ -148,14 +148,14 @@ async function confirmPay() {
   try {
     const { data } = await payOrderByBalance(selectedPlan.value.id)
     if (data.code === 0) {
-      ElMessage.success('订购成功，套餐已即时生效')
+      toast.success('订购成功，套餐已即时生效')
       checkoutOpen.value = false
       await Promise.all([load(), auth.fetchMe()])
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '支付失败'))
+    toast.error(errMsg(e, '支付失败'))
   } finally {
     paying.value = false
   }

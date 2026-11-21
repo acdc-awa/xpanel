@@ -12,7 +12,7 @@ import {
   CsHeader,
   CsInput,
   CsSpaceBetween,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { cancelOrder, getOrder, payOrder } from '@/api/shop'
 import { errMsg } from '@/api/http'
@@ -94,7 +94,7 @@ async function load() {
       }
     }
   } catch (e: unknown) {
-    ElMessage.error(errMsg(e, '加载订单失败'))
+    toast.error(errMsg(e, '加载订单失败'))
   } finally {
     loading.value = false
   }
@@ -103,7 +103,7 @@ async function load() {
 async function handlePay() {
   if (!order.value || order.value.status !== 'pending') return
   if (selectedMethod.value === 'gift_card' && !giftCode.value.trim()) {
-    ElMessage.warning('请输入卡密')
+    toast.warning('请输入卡密')
     return
   }
   paying.value = true
@@ -117,7 +117,7 @@ async function handlePay() {
     if (payload.paid) {
       order.value = payload.order
       await auth.fetchMe()
-      ElMessage.success(isRecharge.value ? '充值成功，余额已到账' : '支付成功，套餐已生效')
+      toast.success(isRecharge.value ? '充值成功，余额已到账' : '支付成功，套餐已生效')
     } else {
       payUrl.value = payload.pay_url || ''
       qrCodeText.value = payload.qr_code || ''
@@ -126,7 +126,7 @@ async function handlePay() {
       }
     }
   } catch (e: unknown) {
-    ElMessage.error(errMsg(e, '支付失败'))
+    toast.error(errMsg(e, '支付失败'))
     await load()
     await auth.fetchMe()
   } finally {
@@ -140,9 +140,9 @@ async function handleCancel() {
   try {
     const res = await cancelOrder(order.value.order_no)
     order.value = res.data.data.order
-    ElMessage.success('订单已取消')
+    toast.success('订单已取消')
   } catch (e: unknown) {
-    ElMessage.error(errMsg(e, '取消失败'))
+    toast.error(errMsg(e, '取消失败'))
   } finally {
     cancelling.value = false
   }

@@ -12,8 +12,8 @@ import {
   CsSegmentedControl,
   CsSelect,
   CsToggle,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import CodeEditor from '@/components/CodeEditor.vue'
 import TipIcon from '@/components/base/TipIcon.vue'
@@ -379,22 +379,22 @@ function buildBasicStreamSettingsJSON(): string {
 function validateCustomJSON(): Record<string, any> | null {
   const raw = form.outbound_json.trim()
   if (!raw) {
-    ElMessage.warning('请填写自定义 Outbound JSON')
+    toast.warning('请填写自定义 Outbound JSON')
     return null
   }
   let obj: any
   try {
     obj = JSON.parse(raw)
   } catch (e: any) {
-    ElMessage.error(`JSON 语法错误: ${e.message}`)
+    toast.error(`JSON 语法错误: ${e.message}`)
     return null
   }
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    ElMessage.warning('Outbound JSON 必须为合法的 JSON 对象 {...}')
+    toast.warning('Outbound JSON 必须为合法的 JSON 对象 {...}')
     return null
   }
   if (typeof obj.protocol !== 'string' || !obj.protocol.trim()) {
-    ElMessage.warning('Outbound JSON 必须包含非空 protocol 字段')
+    toast.warning('Outbound JSON 必须包含非空 protocol 字段')
     return null
   }
   return obj
@@ -402,16 +402,16 @@ function validateCustomJSON(): Record<string, any> | null {
 
 async function save() {
   if (!form.tag?.trim()) {
-    ElMessage.warning('请填写出站标签')
+    toast.warning('请填写出站标签')
     return
   }
   const lowerTag = form.tag.trim().toLowerCase()
   if (!props.outbound && (lowerTag === 'direct' || lowerTag === 'blocked')) {
-    ElMessage.warning('direct 与 blocked 为系统内置预留出站，请使用其他 Tag')
+    toast.warning('direct 与 blocked 为系统内置预留出站，请使用其他 Tag')
     return
   }
   if (lowerTag.startsWith('pp-')) {
-    ElMessage.warning('pp- 为 PROXY Protocol 派生出站的保留前缀，请更换出站 Tag')
+    toast.warning('pp- 为 PROXY Protocol 派生出站的保留前缀，请更换出站 Tag')
     return
   }
 
@@ -421,19 +421,19 @@ async function save() {
   if (mode.value === 'inbound_ref' && refInboundId.value > 0) {
     const target = refTarget.value
     if (!target) {
-      ElMessage.warning('目标入站已失效，请重新选择或在拓扑画布中改线')
+      toast.warning('目标入站已失效，请重新选择或在拓扑画布中改线')
       return
     }
     if (target.server_id === props.serverId) {
-      ElMessage.warning('引用目标必须在其他服务器上（同机会形成转发环路）')
+      toast.warning('引用目标必须在其他服务器上（同机会形成转发环路）')
       return
     }
     if (!REF_TARGET_PROTOCOLS.includes(target.protocol)) {
-      ElMessage.warning('引用目标仅支持 VLESS / Hysteria 2 入站')
+      toast.warning('引用目标仅支持 VLESS / Hysteria 2 入站')
       return
     }
     if (form.send_proxy_protocol && !ppApplicable.value) {
-      ElMessage.warning('PROXY Protocol 仅支持 VLESS + TCP 落地（Hysteria 2 走 QUIC/UDP，XHTTP 不解析 PP 头）')
+      toast.warning('PROXY Protocol 仅支持 VLESS + TCP 落地（Hysteria 2 走 QUIC/UDP，XHTTP 不解析 PP 头）')
       return
     }
   }
@@ -474,14 +474,14 @@ async function save() {
       : await createServerOutbound(props.serverId, payload)
 
     if (data.code === 0) {
-      ElMessage.success(props.outbound ? '出站已更新' : '出站已创建')
+      toast.success(props.outbound ? '出站已更新' : '出站已创建')
       emit('saved')
       handleClose()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -496,7 +496,7 @@ async function removeOutbound() {
   const ob = targetOutbound.value
   if (!ob?.id || !canDelete.value) return
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `确认删除出站「${ob.tag}」？引用该出站的路由规则会一并删除；若它是默认出口，将回退为 direct。`,
       '删除出站',
       { type: 'error' },
@@ -508,14 +508,14 @@ async function removeOutbound() {
   try {
     const { data } = await deleteServerOutbound(props.serverId, ob.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       emit('deleted')
       handleClose()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   } finally {
     deleting.value = false
   }

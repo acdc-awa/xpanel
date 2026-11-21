@@ -1,5 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { ElMessage } from '@/components/cloudscape'
+import { toast } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { apiBase } from '@/config/site'
 
@@ -66,7 +66,7 @@ http.interceptors.response.use(
       await auth.logout()
       if (!isGuestPage && !redirectingToLogin) {
         redirectingToLogin = true
-        ElMessage.error('登录已过期，请重新登录')
+        toast.error('登录已过期，请重新登录')
         window.location.href = '/login'
       }
     }

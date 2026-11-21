@@ -8,7 +8,7 @@ import {
   CsInputNumber,
   CsKeyValuePairs,
   CsSelect,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import type { AccessLayer } from '@/api/types'
@@ -43,7 +43,7 @@ const emit = defineEmits<{
 function copyText(txt: string, label = '内容') {
   if (!txt) return
   navigator.clipboard.writeText(txt)
-  ElMessage.success(`已复制 ${label}`)
+  toast.success(`已复制 ${label}`)
 }
 
 const layerOptions = computed(() => [

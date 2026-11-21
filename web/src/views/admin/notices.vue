@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import { toast, messageBox } from '@/components/cloudscape'
 import {
   CsButton,
   CsContainer,
@@ -67,10 +67,10 @@ async function load() {
       noticeDrag.syncSnapshot()
       guideDrag.syncSnapshot()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载公告列表失败'))
+    toast.error(errMsg(e, '加载公告列表失败'))
   } finally {
     loading.value = false
   }
@@ -152,7 +152,7 @@ function insertTable(rows: number, cols: number) {
 
 async function save() {
   if (!form.title.trim() || !form.content.trim()) {
-    ElMessage.warning('请填写公告标题与内容')
+    toast.warning('请填写公告标题与内容')
     return
   }
 
@@ -171,14 +171,14 @@ async function save() {
       : await createAdminNotice(payload)
 
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '公告已保存' : '公告已创建')
+      toast.success(editing.value ? '公告已保存' : '公告已创建')
       formOpen.value = false
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存公告失败'))
+    toast.error(errMsg(e, '保存公告失败'))
   } finally {
     saving.value = false
   }
@@ -188,7 +188,7 @@ async function handleToggle(row: NoticeItem, field: 'status' | 'is_pinned' | 'is
   try {
     const { data } = await toggleAdminNotice(row.id, field)
     if (data.code === 0) {
-      ElMessage.success('状态已更新')
+      toast.success('状态已更新')
       // 置顶会改变分组顺序（置顶始终排在最前），必须重新取列表
       if (field === 'is_pinned') {
         load()
@@ -196,28 +196,28 @@ async function handleToggle(row: NoticeItem, field: 'status' | 'is_pinned' | 'is
       }
       Object.assign(row, data.data)
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       load()
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '切换状态失败'))
+    toast.error(errMsg(e, '切换状态失败'))
     load()
   }
 }
 
 async function remove(row: NoticeItem) {
   try {
-    await ElMessageBox.confirm(`确定要删除公告「${row.title}」吗？`, '删除确认', {
+    await messageBox.confirm(`确定要删除公告「${row.title}」吗？`, '删除确认', {
       type: 'warning',
       confirmButtonText: '确定删除',
       cancelButtonText: '取消',
     })
     const { data } = await deleteAdminNotice(row.id)
     if (data.code === 0) {
-      ElMessage.success('公告已删除')
+      toast.success('公告已删除')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch {
     /* 用户取消 */
@@ -537,12 +537,12 @@ function createRowDrag(
       } else {
         targetList.value = [...snapshot]
         if (activeTbody) clearRowInlineStyles(activeTbody)
-        ElMessage.error(data.message || '保存排序失败，已恢复原顺序')
+        toast.error(data.message || '保存排序失败，已恢复原顺序')
       }
     } catch (err) {
       targetList.value = [...snapshot]
       if (activeTbody) clearRowInlineStyles(activeTbody)
-      ElMessage.error(errMsg(err, '保存排序失败，已恢复原顺序'))
+      toast.error(errMsg(err, '保存排序失败，已恢复原顺序'))
     } finally {
       saving = false
     }

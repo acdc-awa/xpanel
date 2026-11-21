@@ -156,7 +156,7 @@ function fmt(v: number): string {
   pointer-events: none;
   font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
   font-size: 10px;
-  color: #64748b;
+  color: var(--topo-text-3, #64748b);
 }
 
 .ruler-corner {
@@ -166,9 +166,9 @@ function fmt(v: number): string {
   width: 20px;
   height: 20px;
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.94);
-  border-right: 1px solid rgba(148, 163, 184, 0.16);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: var(--topo-bar-bg);
+  border-right: 1px solid var(--topo-bar-border);
+  border-bottom: 1px solid var(--topo-bar-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,36 +181,36 @@ function fmt(v: number): string {
     line-height: 8px;
     text-align: center;
     letter-spacing: -0.2px;
-    color: #475569;
+    color: var(--topo-text-3);
   }
 }
 
 .ruler {
   position: absolute;
-  background: rgba(15, 23, 42, 0.78);
-  border-color: rgba(148, 163, 184, 0.16);
+  background: var(--topo-bar-bg);
+  border-color: var(--topo-bar-border);
 }
 .ruler-x {
   left: 20px;
   right: 0;
   top: 0;
   height: 20px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  border-bottom: 1px solid var(--topo-bar-border);
 }
 .ruler-y {
   top: 20px;
   bottom: 0;
   left: 0;
   width: 20px;
-  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  border-right: 1px solid var(--topo-bar-border);
 }
 
 .tick {
   position: absolute;
-  background: rgba(148, 163, 184, 0.22);
+  background: var(--topo-divider);
 
   &.major {
-    background: rgba(148, 163, 184, 0.4);
+    background: var(--topo-text-3);
   }
 }
 .ruler-x .tick {
@@ -228,7 +228,7 @@ function fmt(v: number): string {
     white-space: nowrap;
     font-size: 9px;
     line-height: 10px;
-    color: #64748b;
+    color: var(--topo-text-3);
   }
 }
 .ruler-y .tick {
@@ -248,7 +248,7 @@ function fmt(v: number): string {
     white-space: nowrap;
     font-size: 9px;
     line-height: 10px;
-    color: #64748b;
+    color: var(--topo-text-3);
     transform: rotate(-90deg);
   }
 }
@@ -259,15 +259,16 @@ function fmt(v: number): string {
   height: 13px;
   margin-left: -6px;
   margin-top: -6px;
-  border-left: 1px solid rgba(56, 189, 248, 0.55);
-  border-top: 1px solid rgba(56, 189, 248, 0.55);
+  opacity: 0.75;
+  border-left: 1px solid var(--topo-accent);
+  border-top: 1px solid var(--topo-accent);
 
   .origin-label {
     position: absolute;
     left: 8px;
     top: 4px;
     font-size: 9px;
-    color: rgba(56, 189, 248, 0.6);
+    color: var(--topo-accent);
     white-space: nowrap;
   }
 }
@@ -281,22 +282,24 @@ function fmt(v: number): string {
   gap: 6px;
   padding: 3px 8px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  color: #94a3b8;
+  background: var(--topo-bar-bg);
+  border: 1px solid var(--topo-bar-border);
+  box-shadow: var(--topo-bar-shadow);
+  color: var(--topo-text-2);
 
   .coord-kind {
-    color: #64748b;
+    color: var(--topo-text-3);
   }
   .coord-name {
     max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #cbd5e1;
+    color: var(--topo-text-1);
+    font-weight: 500;
   }
   .coord-mono {
-    color: #7dd3fc;
+    color: var(--topo-accent);
   }
 }
 </style>

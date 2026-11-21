@@ -4,8 +4,7 @@
  *
  * 官方 Cloudscape 只提供 Modal，确认框由 AWS 控制台在上层拼装：标题是问句，
  * 正文首行用红色「Warning:」开头，底部是红色描边取消 + 红色实心确认。
- * 本组件把这套组合固定下来，避免各页再各自拼 ElMessageBox（原生 confirm 无法
- * 使用 Cloudscape 的按钮与配色）。
+ * 本组件把这套组合固定下来，避免各页再各自拼装确认框。
  */
 import { computed } from 'vue'
 import Button from './Button.vue'

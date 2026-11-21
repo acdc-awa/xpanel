@@ -21,7 +21,7 @@ import {
   CsSpinner,
   CsTabs,
   CsToolbar,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
@@ -65,9 +65,9 @@ async function loadCerts() {
   try {
     const { data } = await getCerts()
     if (data.code === 0) certList.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载证书失败'))
+    toast.error(errMsg(e, '加载证书失败'))
   } finally {
     certLoading.value = false
   }
@@ -82,9 +82,9 @@ async function loadCAs() {
   try {
     const { data } = await getCACerts()
     if (data.code === 0) caList.value = data.data.items
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载 CA 证书失败'))
+    toast.error(errMsg(e, '加载 CA 证书失败'))
   } finally {
     caLoading.value = false
   }
@@ -148,13 +148,13 @@ function handleReissue(row: CertItem) {
       try {
         const { data } = await reissueCert(row.id)
         if (data.code === 0) {
-          ElMessage.success('证书已重签并推送到节点！')
+          toast.success('证书已重签并推送到节点！')
           loadCerts()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '重签失败'))
+        toast.error(errMsg(e, '重签失败'))
       }
     },
   })
@@ -195,7 +195,7 @@ function openSelfSigned() {
 
 async function saveSelfSigned() {
   if (!ssForm.domain.trim()) {
-    ElMessage.warning('请填写域名/通用名称')
+    toast.warning('请填写域名/通用名称')
     return
   }
   ssSaving.value = true
@@ -211,14 +211,14 @@ async function saveSelfSigned() {
       remark: ssForm.remark.trim(),
     })
     if (data.code === 0) {
-      ElMessage.success('自签证书已生成并推送引用服务器；中转链路将自动 pin 该证书')
+      toast.success('自签证书已生成并推送引用服务器；中转链路将自动 pin 该证书')
       ssOpen.value = false
       loadCerts()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成失败'))
+    toast.error(errMsg(e, '生成失败'))
   } finally {
     ssSaving.value = false
   }
@@ -242,7 +242,7 @@ const issueForm = reactive({
 function openIssue(preselectedCaId = 0) {
   const available = issueCaOptions.value
   if (available.length === 0) {
-    ElMessage.warning('当前暂无可用于签发的 CA（需持有私钥），请先生成或导入完整 CA')
+    toast.warning('当前暂无可用于签发的 CA（需持有私钥），请先生成或导入完整 CA')
     return
   }
   const preset = available.find((ca) => ca.value === preselectedCaId)
@@ -260,11 +260,11 @@ function openIssue(preselectedCaId = 0) {
 
 async function saveIssue() {
   if (!issueForm.ca_id) {
-    ElMessage.warning('请选择签发 CA 根证书')
+    toast.warning('请选择签发 CA 根证书')
     return
   }
   if (!issueForm.domain.trim()) {
-    ElMessage.warning('请填写域名/通用名称')
+    toast.warning('请填写域名/通用名称')
     return
   }
   issueSaving.value = true
@@ -280,15 +280,15 @@ async function saveIssue() {
       remark: issueForm.remark.trim(),
     })
     if (data.code === 0) {
-      ElMessage.success('证书已由 CA 成功签发并自动组装完整证书链！')
+      toast.success('证书已由 CA 成功签发并自动组装完整证书链！')
       issueOpen.value = false
       activeTab.value = 'server'
       loadAll()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '签发失败'))
+    toast.error(errMsg(e, '签发失败'))
   } finally {
     issueSaving.value = false
   }
@@ -320,7 +320,7 @@ function openGenerateCA() {
 
 async function saveGenerateCA() {
   if (!genCAForm.name.trim()) {
-    ElMessage.warning('请填写 CA 标识名称')
+    toast.warning('请填写 CA 标识名称')
     return
   }
   genCASaving.value = true
@@ -335,14 +335,14 @@ async function saveGenerateCA() {
       remark: genCAForm.remark.trim(),
     })
     if (data.code === 0) {
-      ElMessage.success('CA 根证书已成功生成！')
+      toast.success('CA 根证书已成功生成！')
       genCAOpen.value = false
       loadCAs()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '生成 CA 失败'))
+    toast.error(errMsg(e, '生成 CA 失败'))
   } finally {
     genCASaving.value = false
   }
@@ -368,11 +368,11 @@ function openImportCA() {
 
 async function saveImportCA() {
   if (!importCAForm.name.trim()) {
-    ElMessage.warning('请填写 CA 标识名称')
+    toast.warning('请填写 CA 标识名称')
     return
   }
   if (!importCAForm.ca_cert_pem.trim()) {
-    ElMessage.warning('请填写 CA 根证书 PEM')
+    toast.warning('请填写 CA 根证书 PEM')
     return
   }
   importCASaving.value = true
@@ -384,16 +384,16 @@ async function saveImportCA() {
       remark: importCAForm.remark.trim(),
     })
     if (data.code === 0) {
-      ElMessage.success(
+      toast.success(
         importCAForm.ca_key_pem.trim() ? '完整 CA 已导入（支持签发与验签）' : '纯公钥 CA 已导入（仅供节点验签）',
       )
       importCAOpen.value = false
       loadCAs()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '导入 CA 失败'))
+    toast.error(errMsg(e, '导入 CA 失败'))
   } finally {
     importCASaving.value = false
   }
@@ -416,9 +416,9 @@ function closeViewCA() {
 async function copyText(text: string, title = '内容') {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success(`${title}已复制到剪贴板`)
+    toast.success(`${title}已复制到剪贴板`)
   } catch {
-    ElMessage.info('复制失败，请手动选择复制')
+    toast.info('复制失败，请手动选择复制')
   }
 }
 
@@ -449,11 +449,11 @@ function openEdit(row: CertItem) {
 async function save() {
   if (!editing.value) {
     if (!form.domain.trim()) {
-      ElMessage.warning('请填写域名')
+      toast.warning('请填写域名')
       return
     }
     if (!form.cert_pem.trim() || !form.key_pem.trim()) {
-      ElMessage.warning('请填写 PEM 证书链与私钥内容')
+      toast.warning('请填写 PEM 证书链与私钥内容')
       return
     }
   }
@@ -463,14 +463,14 @@ async function save() {
       ? await updateCert(editing.value.id, { remark: form.remark })
       : await createCert({ domain: form.domain.trim(), cert_pem: form.cert_pem, key_pem: form.key_pem, remark: form.remark })
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '证书备注已更新' : '证书已上传并推送引用服务器')
+      toast.success(editing.value ? '证书备注已更新' : '证书已上传并推送引用服务器')
       formOpen.value = false
       loadCerts()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -486,13 +486,13 @@ function removeCert(row: CertItem) {
       try {
         const { data } = await deleteCert(row.id)
         if (data.code === 0) {
-          ElMessage.success('已删除')
+          toast.success('已删除')
           loadCerts()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '删除失败'))
+        toast.error(errMsg(e, '删除失败'))
       }
     },
   })
@@ -508,13 +508,13 @@ function removeCA(row: CACertItem) {
       try {
         const { data } = await deleteCACert(row.id)
         if (data.code === 0) {
-          ElMessage.success('CA 已删除')
+          toast.success('CA 已删除')
           loadCAs()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '删除失败'))
+        toast.error(errMsg(e, '删除失败'))
       }
     },
   })

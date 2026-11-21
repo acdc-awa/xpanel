@@ -7,7 +7,7 @@
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { CsBadge, CsIcon, CsPopover, ElMessageBox } from '@/components/cloudscape'
+import { CsBadge, CsIcon, CsPopover, messageBox } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -44,7 +44,7 @@ function onSelect(id: string) {
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('确定退出登录？', '退出登录', {
+    await messageBox.confirm('确定退出登录？', '退出登录', {
       confirmButtonText: '退出登录',
       cancelButtonText: '取消',
       type: 'warning',

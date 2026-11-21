@@ -9,7 +9,7 @@ import {
   CsLink,
   CsModal,
   CsSpaceBetween,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
@@ -75,7 +75,7 @@ async function onSubmit() {
     }
     gotoHome()
   } catch (e) {
-    ElMessage.error(errMsg(e, '登录失败'))
+    toast.error(errMsg(e, '登录失败'))
     resetCaptcha()
   } finally {
     loading.value = false
@@ -95,7 +95,7 @@ async function confirm2fa() {
     twofaOpen.value = false
     gotoHome()
   } catch (e) {
-    ElMessage.error(errMsg(e, '验证失败'))
+    toast.error(errMsg(e, '验证失败'))
   } finally {
     twofaLoading.value = false
   }
@@ -104,7 +104,7 @@ async function confirm2fa() {
 function gotoHome() {
   // 强制改密（J8）：初始 admin123 等账号首次登录必须先改密码
   if (auth.user?.must_change_pwd) {
-    ElMessage.warning('首次登录请先修改初始密码')
+    toast.warning('首次登录请先修改初始密码')
     router.replace('/account')
     return
   }

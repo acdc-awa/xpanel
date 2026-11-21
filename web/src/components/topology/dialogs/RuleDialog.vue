@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import {
-  ElMessage,
+  toast,
   CsButton,
   CsForm,
   CsFormItem,
@@ -66,14 +66,14 @@ async function save() {
       priority: form.priority,
     })
     if (data.code === 0) {
-      ElMessage.success('路由规则已创建')
+      toast.success('路由规则已创建')
       visibleModel.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建规则失败'))
+    toast.error(errMsg(e, '创建规则失败'))
   } finally {
     saving.value = false
   }

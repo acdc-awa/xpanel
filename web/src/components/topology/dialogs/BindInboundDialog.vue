@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  ElMessage,
+  toast,
   CsButton,
   CsForm,
   CsFormItem,
@@ -45,21 +45,21 @@ watch(
 
 async function confirm() {
   if (!inboundId.value) {
-    ElMessage.warning('请选择要挂载的入站')
+    toast.warning('请选择要挂载的入站')
     return
   }
   saving.value = true
   try {
     const { data } = await updateInbound(inboundId.value, { layer_id: props.layerId })
     if (data.code === 0) {
-      ElMessage.success('入站已挂载到对外层')
+      toast.success('入站已挂载到对外层')
       visibleModel.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '挂载失败'))
+    toast.error(errMsg(e, '挂载失败'))
   } finally {
     saving.value = false
   }

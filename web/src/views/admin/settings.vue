@@ -32,7 +32,7 @@ import {
   CsToggle,
   CsToolbar,
   CsTooltip,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import type { KeyValuePair, StepItem, StepsStatus, TabItem, TableColumn } from '@/components/cloudscape'
 import {
@@ -305,8 +305,8 @@ const nginxSnippet = computed(() => {
 function copySnippet(text: string, label: string) {
   if (!text) return
   navigator.clipboard?.writeText(text).then(
-    () => ElMessage.success(`${label}已复制到剪贴板`),
-    () => ElMessage.warning('复制失败，请手动复制'),
+    () => toast.success(`${label}已复制到剪贴板`),
+    () => toast.warning('复制失败，请手动复制'),
   )
 }
 
@@ -323,7 +323,7 @@ function onLogoFileSelected(e: Event) {
     cropperVisible.value = true
   }
   reader.onerror = () => {
-    ElMessage.error('读取图片文件失败')
+    toast.error('读取图片文件失败')
   }
   reader.readAsDataURL(file)
   target.value = ''
@@ -342,7 +342,7 @@ function onFaviconFileSelected(e: Event) {
     cropperVisible.value = true
   }
   reader.onerror = () => {
-    ElMessage.error('读取图标文件失败')
+    toast.error('读取图标文件失败')
   }
   reader.readAsDataURL(file)
   target.value = ''
@@ -361,10 +361,10 @@ function openCropperForCurrent(type: 'logo' | 'favicon') {
 function onCropFinished(dataUrl: string) {
   if (cropperType.value === 'logo') {
     form.site.logo = dataUrl
-    ElMessage.success('LOGO 已裁剪并生成轻量 Base64 格式')
+    toast.success('LOGO 已裁剪并生成轻量 Base64 格式')
   } else {
     form.site.favicon = dataUrl
-    ElMessage.success('Favicon 已裁剪并生成轻量 Base64 格式')
+    toast.success('Favicon 已裁剪并生成轻量 Base64 格式')
   }
 }
 
@@ -382,10 +382,10 @@ async function load() {
         setDisplayTimezone(form.timezone.display_timezone)
       }
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载设置失败'))
+    toast.error(errMsg(e, '加载设置失败'))
   } finally {
     loading.value = false
   }
@@ -408,9 +408,9 @@ async function loadBackups() {
     const { data } = await getBackups()
     // 后端空目录返回 []（已修）；这里再兜一层，避免任何 null 把整页渲染打断
     if (data.code === 0) backups.value = data.data.items || []
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载备份列表失败'))
+    toast.error(errMsg(e, '加载备份列表失败'))
   } finally {
     backupLoading.value = false
   }
@@ -421,13 +421,13 @@ async function createBackupNow() {
   try {
     const { data } = await createBackup()
     if (data.code === 0) {
-      ElMessage.success(`备份成功：${data.data.file}`)
+      toast.success(`备份成功：${data.data.file}`)
       loadBackups()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建备份失败'))
+    toast.error(errMsg(e, '创建备份失败'))
   } finally {
     backupCreating.value = false
   }
@@ -448,13 +448,13 @@ async function removeBackup(row: any) {
       try {
         const { data } = await deleteBackup(file)
         if (data.code === 0) {
-          ElMessage.success('备份已删除')
+          toast.success('备份已删除')
           loadBackups()
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '删除备份失败'))
+        toast.error(errMsg(e, '删除备份失败'))
       }
     },
   })
@@ -526,13 +526,13 @@ async function onUploadBackup(options: any) {
   try {
     const { data } = await uploadBackup(file)
     if (data.code === 0) {
-      ElMessage.success(`已上传并校验通过：${data.data.file}`)
+      toast.success(`已上传并校验通过：${data.data.file}`)
       loadBackups()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '上传备份失败'))
+    toast.error(errMsg(e, '上传备份失败'))
   } finally {
     backupUploading.value = false
   }
@@ -567,14 +567,14 @@ async function restoreFromBackup(row: any) {
       try {
         const { data } = await restoreBackup(file)
         if (data.code !== 0) {
-          ElMessage.error(data.message)
+          toast.error(data.message)
           backupRestoring.value = false
           return
         }
-        ElMessage.warning(`恢复已安排（安全快照：${data.data.safety_backup.file}），面板即将重启...`)
+        toast.warning(`恢复已安排（安全快照：${data.data.safety_backup.file}），面板即将重启...`)
         waitRestartThenReload()
       } catch (e) {
-        ElMessage.error(errMsg(e, '恢复失败'))
+        toast.error(errMsg(e, '恢复失败'))
         backupRestoring.value = false
       }
     },
@@ -602,9 +602,9 @@ async function loadSystem() {
   try {
     const { data } = await getSystemStatus()
     if (data.code === 0) system.value = data.data
-    else ElMessage.error(data.message)
+    else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载系统状态失败'))
+    toast.error(errMsg(e, '加载系统状态失败'))
   } finally {
     systemLoading.value = false
   }
@@ -779,7 +779,7 @@ async function pollUpdateStatus() {
     stopUpdatePolling()
     updateWaitingRestart.value = false
     updateStatus.value = { running: false, phase: 'success', target_version: currentVersion, message: `已更新到 ${currentVersion}，面板已恢复` }
-    ElMessage.success(`面板已更新到 ${currentVersion}，即将刷新页面加载新前端`)
+    toast.success(`面板已更新到 ${currentVersion}，即将刷新页面加载新前端`)
     setTimeout(() => window.location.reload(), 1800)
     return
   }
@@ -817,11 +817,11 @@ async function onCheckUpdate(silent = false) {
       updateInfo.value = data.data
     } else {
       updateError.value = data.message || '检查更新失败'
-      if (!silent) ElMessage.error(updateError.value)
+      if (!silent) toast.error(updateError.value)
     }
   } catch (e) {
     updateError.value = errMsg(e, '检查更新失败')
-    if (!silent) ElMessage.error(updateError.value)
+    if (!silent) toast.error(updateError.value)
   } finally {
     updateChecking.value = false
   }
@@ -857,12 +857,12 @@ async function startUpdateFlow(target: string, failText = '触发更新失败') 
     // 显式传目标版本：审计日志记录请求体，空串会导致日志只见 {"version":""}
     const { data } = await applyUpdate(target)
     if (data.code !== 0) {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       return
     }
     if (data.data?.started === false && !data.data.progress?.running) {
       // 「已是最新版本」等无需进入监控弹窗的情形
-      ElMessage.success(data.data.message || data.message)
+      toast.success(data.data.message || data.message)
       return
     }
     updateTargetVer.value = data.data?.version || target || ''
@@ -873,7 +873,7 @@ async function startUpdateFlow(target: string, failText = '触发更新失败') 
         : { running: true, phase: 'checking', target_version: updateTargetVer.value, message: '正在解析更新源...' },
     )
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || errMsg(e, failText))
+    toast.error(e?.response?.data?.message || errMsg(e, failText))
   } finally {
     updateApplying.value = false
   }
@@ -919,11 +919,11 @@ async function onLoadReleases(silent = false) {
       }
     } else {
       releasesError.value = data.message || '查询版本列表失败'
-      if (!silent) ElMessage.error(releasesError.value)
+      if (!silent) toast.error(releasesError.value)
     }
   } catch (e) {
     releasesError.value = errMsg(e, '查询版本列表失败')
-    if (!silent) ElMessage.error(releasesError.value)
+    if (!silent) toast.error(releasesError.value)
   } finally {
     releasesLoading.value = false
   }
@@ -933,12 +933,12 @@ async function onLoadReleases(silent = false) {
 async function confirmInstallRelease() {
   const v = selectedRelease.value
   if (!v) {
-    ElMessage.warning('请选择要安装的版本')
+    toast.warning('请选择要安装的版本')
     return
   }
   const rel = releases.value.find((r) => r.version === v)
   if (rel && !rel.installable) {
-    ElMessage.warning('该版本没有当前架构的安装包')
+    toast.warning('该版本没有当前架构的安装包')
     return
   }
   askConfirm({
@@ -960,7 +960,7 @@ async function save() {
       timezone: { ...form.timezone },
     })
     if (data.code === 0) {
-      ElMessage.success('设置已保存并立即全站生效')
+      toast.success('设置已保存并立即全站生效')
       setDisplayTimezone(form.timezone.display_timezone)
       // 用服务端回写重置验证分组：清掉本次输入的 secret，并刷新「已配置」状态
       Object.assign(form.captcha, emptyCaptcha(), data.data.captcha)
@@ -970,10 +970,10 @@ async function save() {
       })
       await siteStore.fetchConfig()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }

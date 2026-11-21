@@ -18,8 +18,8 @@ import {
   CsButton,
   CsEmpty,
   CsSpaceBetween,
-  ElMessage,
-  ElMessageBox,
+  toast,
+  messageBox,
 } from '@/components/cloudscape'
 import {
   deleteServerOutbound,
@@ -35,6 +35,7 @@ import {
 } from '@/api/admin'
 import type { InboundItem, ServerOutbound, PermissionGroup, UserAccessPoint, AccessLayer } from '@/api/types'
 import { errMsg } from '@/api/http'
+import { useThemeStore } from '@/stores/theme'
 import OutboundConfigEditor from '@/views/admin/servers/OutboundConfigEditor.vue'
 import AccessPointDialog from '@/views/admin/servers/AccessPointDialog.vue'
 import ServerBoxNode from './nodes/ServerBoxNode.vue'
@@ -97,11 +98,20 @@ const wrapEl = ref<HTMLElement | null>(null)
 // 画布高度吃掉视口剩余高度：上方 chrome（顶栏/页头/页签/工具条）随宽度变化，不能写死 calc 偏移
 useFillViewportHeight(wrapEl)
 
+const theme = useThemeStore()
+
 // 画布视口：网格对齐、标尺读数与「新卡片居中」都依赖它。
 // 在渲染 <VueFlow> 的同一组件里调用 useVueFlow 会创建 store 并由 VueFlow 注入复用。
 const { viewport, dimensions, findNode, setCenter } = useVueFlow()
+const majorGridColor = computed(() =>
+  theme.isDark ? 'rgba(148, 163, 184, 0.14)' : 'rgba(15, 23, 42, 0.08)',
+)
 const minorGridColor = computed(() =>
-  viewport.value.zoom < 0.5 ? 'transparent' : 'rgba(148, 163, 184, 0.055)',
+  viewport.value.zoom < 0.5
+    ? 'transparent'
+    : theme.isDark
+      ? 'rgba(148, 163, 184, 0.055)'
+      : 'rgba(15, 23, 42, 0.035)',
 )
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
@@ -277,12 +287,12 @@ async function saveLayoutToCloud() {
       localLayout.tag_orders = tag_orders
       saveLayoutLocal(localLayout)
       layoutDirty.value = false
-      ElMessage.success('布局已保存到云端')
+      toast.success('布局已保存到云端')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   }
 }
 
@@ -391,7 +401,7 @@ function copyLayerCaddyfile(layer: AccessLayer) {
   }
   lines.push(`}`)
   navigator.clipboard.writeText(lines.join('\n'))
-  ElMessage.success(`已复制 ${layer.host} 的 Caddyfile 配置片段`)
+  toast.success(`已复制 ${layer.host} 的 Caddyfile 配置片段`)
 }
 
 // 按 tag_orders 排序列出服务器出站项
@@ -554,7 +564,7 @@ function autoAlignServerTags(serverId: number) {
   }
 
   setServerTagOrder(serverId, { outbounds: matchedOutboundIds })
-  ElMessage.success('已自动整理出入站对应走线')
+  toast.success('已自动整理出入站对应走线')
 }
 
 // ---- 布局落点：新卡片放哪、旧卡片怎么迁移 ----
@@ -1023,11 +1033,11 @@ async function handleConnect(conn: Connection) {
       try {
         const { data } = await setAccessPointTarget(apId, { target_type: 'inbound', target_inbound_id: inbId })
         if (data.code === 0) {
-          ElMessage.success('已连接接入点至入站/管道')
+          toast.success('已连接接入点至入站/管道')
           emit('changed')
-        } else ElMessage.error(data.message)
+        } else toast.error(data.message)
       } catch (e) {
-        ElMessage.error(errMsg(e, '连接失败'))
+        toast.error(errMsg(e, '连接失败'))
       }
       return
     }
@@ -1062,7 +1072,7 @@ async function handleConnect(conn: Connection) {
   if (inbSrc && outAny) {
     const outKey = outAny[1]
     if (outKey.startsWith('draft-tunnel-')) {
-      ElMessage.info('四层直通管道在连线落地入站后将自动生成专属转发规则')
+      toast.info('四层直通管道在连线落地入站后将自动生成专属转发规则')
       return
     }
     openRuleDialog(Number(inbSrc[1]), Number(outKey))
@@ -1070,9 +1080,9 @@ async function handleConnect(conn: Connection) {
   }
 
   if (inbSrc && inbTgt) {
-    ElMessage.warning('入站端点仅限连接服务器内部出站；跨服务器请从右侧「出站」端点拖出连接至落地入站')
+    toast.warning('入站端点仅限连接服务器内部出站；跨服务器请从右侧「出站」端点拖出连接至落地入站')
   } else {
-    ElMessage.warning('仅支持：接入点 -> 入站/管道、出站 -> 他服务器落地入站、入站 -> 盒内出站')
+    toast.warning('仅支持：接入点 -> 入站/管道、出站 -> 他服务器落地入站、入站 -> 盒内出站')
   }
 }
 
@@ -1082,7 +1092,7 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
   const tgtInb = data.inbounds.find((i) => i.id === targetInboundId)
   if (!srcInb || !tgtInb) return
   if (srcInb.server_id === tgtInb.server_id) {
-    ElMessage.warning('四层直通管道仅支持跨服务器直通落地入站')
+    toast.warning('四层直通管道仅支持跨服务器直通落地入站')
     return
   }
   const srcSrv = data.servers.find((s) => s.id === srcInb.server_id)?.name ?? `#${srcInb.server_id}`
@@ -1101,7 +1111,7 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
 
   let enablePP = true
   try {
-    await ElMessageBox.confirm(confirmMsg, '建立四层直通管道', {
+    await messageBox.confirm(confirmMsg, '建立四层直通管道', {
       type: 'info',
       distinguishCancelAndClose: true,
       confirmButtonText: '开启 PPv2 并连接',
@@ -1156,13 +1166,13 @@ async function connectTunnel(tunnelInboundId: number, targetInboundId: number) {
       stream_settings: JSON.stringify(srcSS),
     })
     if (res.code === 0) {
-      ElMessage.success(enablePP ? '四层直通管道已连接（已启用 PPv2）' : '四层直通管道已连接（未启用 PPv2）')
+      toast.success(enablePP ? '四层直通管道已连接（已启用 PPv2）' : '四层直通管道已连接（未启用 PPv2）')
       emit('changed')
     } else {
-      ElMessage.error(res.message)
+      toast.error(res.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '连接直通管道失败'))
+    toast.error(errMsg(e, '连接直通管道失败'))
   }
 }
 
@@ -1173,12 +1183,12 @@ async function createRef(outboundId: number, inboundId: number) {
   const inb = data.inbounds.find((i) => i.id === inboundId)
   if (!out || !inb) return
   if (out.inbound_ref === inboundId) {
-    ElMessage.info('该出站已引用此入站')
+    toast.info('该出站已引用此入站')
     return
   }
   const inbServer = data.servers.find((s) => s.id === inb.server_id)?.name ?? `#${inb.server_id}`
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `将出站「${out.tag}」设为引用落地入站「${inb.tag}」（${inbServer}）？\n` +
         'vnext 地址/端口/UUID/传输参数由主控自动构造，无需手填。',
       '创建 InboundRef 引用',
@@ -1197,13 +1207,13 @@ async function createRef(outboundId: number, inboundId: number) {
     }
     const { data: resp } = await updateServerOutbound(out.server_id, out.id, payload)
     if (resp.code === 0) {
-      ElMessage.success('引用已建立，配置将自动更新')
+      toast.success('引用已建立，配置将自动更新')
       emit('changed')
     } else {
-      ElMessage.error(resp.message)
+      toast.error(resp.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '创建引用失败'))
+    toast.error(errMsg(e, '创建引用失败'))
   }
 }
 
@@ -1254,7 +1264,7 @@ function openEditLayer(layer: AccessLayer) {
 // 画布胶囊上的「删除」快捷入口与弹窗底部按钮共用这一个删除流程
 async function handleDeleteLayer(layer: AccessLayer) {
   try {
-    await ElMessageBox.confirm(
+    await messageBox.confirm(
       `删除对外层「${layer.name}」？挂载的入站将回退为直连端点（原生行），订阅地址改为入站自身分享地址。`,
       '删除对外层',
       { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
@@ -1265,14 +1275,14 @@ async function handleDeleteLayer(layer: AccessLayer) {
   try {
     const { data } = await deleteLayer(layer.server_id, layer.id)
     if (data.code === 0) {
-      ElMessage.success('已删除对外层')
+      toast.success('已删除对外层')
       layerDialogOpen.value = false
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 
@@ -1290,7 +1300,7 @@ function openBindInbound(layer: AccessLayer) {
   bindServerId.value = layer.server_id
   bindLayerId.value = layer.id
   if (availableBindInbounds.value.length === 0) {
-    ElMessage.info('该服务器暂无可挂载的入站（已全部挂层）')
+    toast.info('该服务器暂无可挂载的入站（已全部挂层）')
     return
   }
   bindDialogOpen.value = true
@@ -1298,20 +1308,20 @@ function openBindInbound(layer: AccessLayer) {
 
 async function unbindInbound(inb: InboundItem) {
   try {
-    await ElMessageBox.confirm(`将入站「${inb.tag}」移出对外层，恢复为直连端点？`, '移出对外层', { type: 'warning' })
+    await messageBox.confirm(`将入站「${inb.tag}」移出对外层，恢复为直连端点？`, '移出对外层', { type: 'warning' })
   } catch {
     return
   }
   try {
     const { data } = await updateInbound(inb.id, { layer_id: 0 })
     if (data.code === 0) {
-      ElMessage.success('已移出对外层')
+      toast.success('已移出对外层')
       emit('changed')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '操作失败'))
+    toast.error(errMsg(e, '操作失败'))
   }
 }
 
@@ -1374,7 +1384,7 @@ function openRuleDialog(inboundId: number, outboundId: number) {
   const out = data.outbounds.find((o) => o.id === outboundId)
   if (!inb || !out) return
   if (inb.server_id !== out.server_id) {
-    ElMessage.warning('路由规则只能在同一服务器内（入站 → 出站）')
+    toast.warning('路由规则只能在同一服务器内（入站 → 出站）')
     return
   }
   ruleServerId.value = inb.server_id
@@ -1402,7 +1412,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     if (!out) return
     if (out.tag.startsWith('via-')) {
       try {
-        await ElMessageBox.confirm(
+        await messageBox.confirm(
           `删除自动创建的出站「${out.tag}」及其路由规则？目标落地入站将回退到引用前类型。`,
           '删除中转出站',
           { type: 'warning' },
@@ -1414,14 +1424,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       try {
         const { data } = await deleteServerOutbound(out.server_id, out.id)
         if (data.code === 0) {
-          ElMessage.success('已删除中转出站与路由规则')
+          toast.success('已删除中转出站与路由规则')
           emit('changed')
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
           deselectEdge(edge.id)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '删除失败'))
+        toast.error(errMsg(e, '删除失败'))
         deselectEdge(edge.id)
       }
       return
@@ -1430,7 +1440,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       const inb = props.topology.inbounds.find((i) => i.id === out.owner_inbound_id)
       const inbTag = inb ? inb.tag : out.tag
       try {
-        await ElMessageBox.confirm(
+        await messageBox.confirm(
           `解除四层直通管道「${inbTag}」与目标入站的连线？解除后管道将恢复为草稿状态。`,
           '解除直通管道',
           { type: 'warning' },
@@ -1442,20 +1452,20 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
       try {
         const { data } = await updateInbound(out.owner_inbound_id, { target_inbound_id: 0 })
         if (data.code === 0) {
-          ElMessage.success('已解除直通连线')
+          toast.success('已解除直通连线')
           emit('changed')
         } else {
-          ElMessage.error(data.message)
+          toast.error(data.message)
           deselectEdge(edge.id)
         }
       } catch (e) {
-        ElMessage.error(errMsg(e, '解除连线失败'))
+        toast.error(errMsg(e, '解除连线失败'))
         deselectEdge(edge.id)
       }
       return
     }
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `解除出站「${out.tag}」的 InboundRef 引用？`,
         '解除引用',
         { type: 'warning' },
@@ -1467,14 +1477,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     try {
       const { data } = await updateServerOutbound(out.server_id, out.id, { inbound_ref: 0 })
       if (data.code === 0) {
-        ElMessage.success('已解除引用')
+        toast.success('已解除引用')
         emit('changed')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
         deselectEdge(edge.id)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '解除引用失败'))
+      toast.error(errMsg(e, '解除引用失败'))
       deselectEdge(edge.id)
     }
   } else if (edge.id.startsWith('rule-')) {
@@ -1482,7 +1492,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     const rule = props.topology.routing_rules.find((r) => r.id === ruleId)
     if (!rule) return
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `删除路由规则（${rule.inbound_tag} → ${rule.outbound_tag}）？规则包含的匹配字段将一并删除。`,
         '删除路由规则',
         { type: 'error' },
@@ -1494,14 +1504,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     try {
       const { data } = await deleteServerRoutingRule(rule.server_id, ruleId)
       if (data.code === 0) {
-        ElMessage.success('已删除')
+        toast.success('已删除')
         emit('changed')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
         deselectEdge(edge.id)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '删除规则失败'))
+      toast.error(errMsg(e, '删除规则失败'))
       deselectEdge(edge.id)
     }
   } else if (edge.id.startsWith('ap-')) {
@@ -1509,7 +1519,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     const ap = props.topology.access_points?.find((a) => a.id === apId)
     if (!ap) return
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `解除接入点「${ap.name}」的目标连线？`,
         '解除接入点连接',
         { type: 'warning' },
@@ -1521,14 +1531,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     try {
       const { data } = await setAccessPointTarget(apId, { target_type: '', target_inbound_id: null })
       if (data.code === 0) {
-        ElMessage.success('已解除接入点连接')
+        toast.success('已解除接入点连接')
         emit('changed')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
         deselectEdge(edge.id)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '解除连接失败'))
+      toast.error(errMsg(e, '解除连接失败'))
       deselectEdge(edge.id)
     }
   } else if (edge.id.startsWith('tunnel-')) {
@@ -1536,7 +1546,7 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     const inb = props.topology.inbounds.find((i) => i.id === tunnelInboundId)
     if (!inb) return
     try {
-      await ElMessageBox.confirm(
+      await messageBox.confirm(
         `解除四层直通管道「${inb.tag}」与目标入站的连线？解除后管道将恢复为草稿状态。`,
         '解除直通管道',
         { type: 'warning' },
@@ -1548,14 +1558,14 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
     try {
       const { data } = await updateInbound(tunnelInboundId, { target_inbound_id: 0 })
       if (data.code === 0) {
-        ElMessage.success('已解除直通连线')
+        toast.success('已解除直通连线')
         emit('changed')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
         deselectEdge(edge.id)
       }
     } catch (e) {
-      ElMessage.error(errMsg(e, '解除连线失败'))
+      toast.error(errMsg(e, '解除连线失败'))
       deselectEdge(edge.id)
     }
   }
@@ -1691,7 +1701,7 @@ function autoLayout() {
     const p = boxPositions.get(node.id)
     if (p) node.position = { ...p }
   }
-  ElMessage.success('已完成拓扑分层排版（接入点 → 中转 → 落地）')
+  toast.success('已完成拓扑分层排版（接入点 → 中转 → 落地）')
 }
 
 // 重置为默认一字排列
@@ -1727,7 +1737,7 @@ function resetLayout() {
       }
     }
   }
-  ElMessage.success('已重置为默认排列')
+  toast.success('已重置为默认排列')
 }
 
 function toggleFullscreen() {
@@ -1765,8 +1775,8 @@ const selectionInfo = computed(() => {
 </script>
 
 <template>
-  <!-- 画布是固定深色工作区：挂 awsui-dark-mode 让画布内的 Cloudscape 控件也走暗色令牌 -->
-  <div ref="wrapEl" class="topology-wrap awsui-dark-mode" :class="{ 'is-fullscreen': isFullscreen }">
+  <!-- 画布跟随全局亮/暗主题，由 .topology-wrap 令牌与 body.awsui-dark-mode 驱动 -->
+  <div ref="wrapEl" class="topology-wrap" :class="{ 'is-fullscreen': isFullscreen }">
     <!-- 顶部微型操作栏 -->
     <div class="canvas-top-bar">
       <div class="top-bar-left">
@@ -1831,7 +1841,7 @@ const selectionInfo = computed(() => {
         variant="lines"
         :gap="[GRID * 10, GRID * 10]"
         :offset="[GRID * 5, GRID * 5]"
-        pattern-color="rgba(148, 163, 184, 0.14)"
+        :pattern-color="majorGridColor"
       />
       <Background
         id="minor"
@@ -1847,7 +1857,6 @@ const selectionInfo = computed(() => {
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit rule-hit"
           :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
-        <path class="boxrule-glow" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
         <path class="boxrule-path" :d="boxRulePath(e.sourceX, e.sourceY, e.targetX, e.targetY)" />
       </template>
 
@@ -1855,11 +1864,6 @@ const selectionInfo = computed(() => {
       <template #edge-refedge="e">
         <path
           class="vue-flow__edge-path vue-flow__edge-interaction edge-hit ref-hit"
-          :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
-        />
-        <path
-          class="refedge-glow"
-          :class="{ 'is-ap': e.data?.isAP, 'is-tunnel': e.data?.isTunnel }"
           :d="refEdgePath(e.sourceX, e.sourceY, e.targetX, e.targetY)"
         />
         <path
@@ -1976,28 +1980,58 @@ const selectionInfo = computed(() => {
 
 <style scoped lang="scss">
 .topology-wrap {
-  /* 画布是固定深色工作区，自带一套令牌：两张卡片/连线/工具条共用，不跟随全局亮暗主题 */
+  /* 画布跟随全局亮/暗主题（默认亮色；暗色覆盖见下方 html.dark .topology-wrap） */
   --topo-radius: 16px;
-  --topo-radius-sm: 12px;
-  --topo-card-bg: rgba(24, 33, 47, 0.95);
-  --topo-card-border: rgba(255, 255, 255, 0.1);
-  --topo-card-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  --topo-surface: rgba(15, 23, 42, 0.55);
-  --topo-surface-border: rgba(255, 255, 255, 0.05);
-  --topo-text-1: #e2e8f0;
-  --topo-text-2: #94a3b8;
+  --topo-radius-sm: 8px;
+  --topo-canvas-bg: #f6f8fa;
+  --topo-card-bg: var(--x-card, #ffffff);
+  --topo-card-border: #d1d5db;
+  --topo-card-border-hover: #9ca3af;
+  --topo-card-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --topo-card-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --topo-head-bg: #f8fafc;
+  --topo-divider: #e5e7eb;
+  --topo-surface: #f8fafc;
+  --topo-surface-border: #e2e8f0;
+  --topo-row-bg: #f8fafc;
+  --topo-row-hover: #eff6ff;
+  --topo-row-border: #e5e7eb;
+  --topo-bar-bg: rgba(255, 255, 255, 0.94);
+  --topo-bar-border: #d1d5db;
+  --topo-bar-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  --topo-text-1: #0f172a;
+  --topo-text-2: #475569;
   --topo-text-3: #64748b;
-  --topo-accent: #38bdf8;
-  --topo-success: #34d399;
-  --topo-warning: #fbbf24;
-  --topo-danger: #f87171;
-  --topo-teal: #2dd4bf;
+  --topo-accent: #006ce0;
+  --topo-accent-soft: #eff6ff;
+  --topo-accent-border: #bfdbfe;
+  --topo-success: #059669;
+  --topo-success-soft: #ecfdf5;
+  --topo-success-border: #a7f3d0;
+  --topo-warning: #d97706;
+  --topo-warning-soft: #fffbeb;
+  --topo-warning-border: #fde68a;
+  --topo-danger: #dc2626;
+  --topo-danger-soft: #fef2f2;
+  --topo-danger-border: #fecaca;
+  --topo-teal: #0d9488;
+  --topo-teal-soft: #f0fdfa;
+  --topo-teal-border: #99f6e4;
+  --topo-ep-border: #94a3b8;
+  --topo-edge-ap: #006ce0;
+  --topo-edge-ap-hover: #004ea8;
+  --topo-edge-rule: #0284c7;
+  --topo-edge-rule-hover: #0369a1;
+  --topo-edge-ref: #d97706;
+  --topo-edge-ref-hover: #b45309;
+  --topo-edge-tunnel: #0d9488;
+  --topo-edge-tunnel-hover: #0f766e;
 
   height: var(--topo-fill-h, 640px);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius-sm, 8px);
   overflow: hidden;
-  background: #0f172a;
+  background: var(--topo-canvas-bg);
   position: relative;
   /* 不把 height 放进过渡：窗口拉伸时逐帧改高度会拖出 250ms 的滞后 */
   transition: border-radius 0.25s ease-in-out, border-color 0.25s ease-in-out,
@@ -2041,11 +2075,11 @@ const selectionInfo = computed(() => {
     gap: 8px;
     align-items: center;
     pointer-events: auto;
-    background: rgba(15, 23, 42, 0.94);
+    background: var(--topo-bar-bg);
     padding: 4px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--topo-bar-border);
+    box-shadow: var(--topo-bar-shadow);
 
     .fs-btn {
       margin-left: 2px;
@@ -2060,13 +2094,13 @@ const selectionInfo = computed(() => {
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
-  background: rgba(15, 23, 42, 0.94);
-  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: var(--topo-bar-bg);
+  border: 1px solid var(--topo-warning-border);
   border-radius: 8px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--topo-bar-shadow);
   .layout-save-tip {
     font-size: 12px;
-    color: #fbbf24;
+    color: var(--topo-warning);
     font-weight: 500;
   }
 }
@@ -2110,19 +2144,14 @@ const selectionInfo = computed(() => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #0f172a;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  transition: all 0.2s ease;
-  &:hover {
-    border-color: #38bdf8;
-    background: rgba(56, 189, 248, 0.2);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
-  }
+  background: var(--topo-card-bg);
+  border: 2px solid var(--topo-ep-border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+  &:hover,
   &.valid,
   &.connecting {
-    border-color: #38bdf8;
-    background: rgba(56, 189, 248, 0.2);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+    border-color: var(--topo-accent);
+    background: var(--topo-accent-soft);
   }
 }
 
@@ -2137,70 +2166,35 @@ const selectionInfo = computed(() => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #0f172a;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  transition: all 0.2s ease;
-  &:hover {
-    border-color: #38bdf8;
-    background: rgba(56, 189, 248, 0.2);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
-  }
+  background: var(--topo-card-bg);
+  border: 2px solid var(--topo-ep-border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+  &:hover,
   &.valid,
   &.connecting {
-    border-color: #38bdf8;
-    background: rgba(56, 189, 248, 0.2);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+    border-color: var(--topo-accent);
+    background: var(--topo-accent-soft);
   }
   &.ext-src {
     z-index: 3;
-    border-color: rgba(255, 255, 255, 0.4);
+    border-color: var(--topo-ep-border);
   }
   &.ext-tgt {
     z-index: 2;
     opacity: 1;
-    border-color: rgba(255, 255, 255, 0.35);
+    border-color: var(--topo-ep-border);
   }
   &.in-ep {
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: var(--topo-card-border);
   }
   &.direct-ep-dot {
     position: absolute;
     right: -6px;
     top: 50%;
     transform: translateY(-50%);
-    border-color: #34d399;
-    box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+    border-color: var(--topo-success);
+    background: var(--topo-success-soft);
     pointer-events: none;
-  }
-  &.tunnel-ep-left {
-    left: -6px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    border-color: #22d3ee !important;
-    background: #0f172a !important;
-    opacity: 1 !important;
-    z-index: 5 !important;
-    cursor: crosshair;
-    &:hover {
-      border-color: #38bdf8 !important;
-      background: rgba(56, 189, 248, 0.3) !important;
-      box-shadow: 0 0 10px rgba(34, 211, 238, 0.8) !important;
-    }
-  }
-  &.tunnel-ep-right {
-    right: -6px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    border-color: #22d3ee !important;
-    background: #0f172a !important;
-    opacity: 1 !important;
-    z-index: 5 !important;
-    cursor: crosshair;
-    &:hover {
-      border-color: #38bdf8 !important;
-      background: rgba(56, 189, 248, 0.3) !important;
-      box-shadow: 0 0 10px rgba(34, 211, 238, 0.8) !important;
-    }
   }
 }
 
@@ -2208,28 +2202,74 @@ const selectionInfo = computed(() => {
   stroke-width: 2;
 }
 :deep(.vue-flow__minimap) {
-  background: #0f172a;
+  background: var(--topo-canvas-bg);
 }
 
 /* 新卡片定位后的短暂高亮：用 outline 而不是 box-shadow，避免覆盖卡片自身状态阴影 */
 :deep(.vue-flow__node.just-created .server-box),
 :deep(.vue-flow__node.just-created .ap-node) {
-  outline: 2px solid rgba(56, 189, 248, 0.9);
+  outline: 2px solid var(--topo-accent);
   outline-offset: 3px;
   animation: topo-created-glow 1.1s ease-out 2;
 }
 @keyframes topo-created-glow {
   0%,
   100% {
-    outline-color: rgba(56, 189, 248, 0.9);
+    outline-color: var(--topo-accent);
   }
   50% {
-    outline-color: rgba(56, 189, 248, 0.15);
+    outline-color: var(--topo-accent-border);
   }
 }
 </style>
 
 <style lang="scss">
+html.dark .topology-wrap {
+  --topo-canvas-bg: #0f1419;
+  --topo-card-bg: var(--x-card, #161d26);
+  --topo-card-border: #2a3441;
+  --topo-card-border-hover: #3e4c5e;
+  --topo-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --topo-card-shadow-hover: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --topo-head-bg: #1b2430;
+  --topo-divider: #2a3441;
+  --topo-surface: #111822;
+  --topo-surface-border: #263140;
+  --topo-row-bg: #111822;
+  --topo-row-hover: #1d2a3a;
+  --topo-row-border: #263140;
+  --topo-bar-bg: rgba(22, 29, 38, 0.94);
+  --topo-bar-border: #2a3441;
+  --topo-bar-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  --topo-text-1: #f1f5f9;
+  --topo-text-2: #94a3b8;
+  --topo-text-3: #64748b;
+  --topo-accent: #42b4ff;
+  --topo-accent-soft: rgba(66, 180, 255, 0.14);
+  --topo-accent-border: rgba(66, 180, 255, 0.3);
+  --topo-success: #34d399;
+  --topo-success-soft: rgba(52, 211, 153, 0.14);
+  --topo-success-border: rgba(52, 211, 153, 0.3);
+  --topo-warning: #fbbf24;
+  --topo-warning-soft: rgba(251, 191, 36, 0.14);
+  --topo-warning-border: rgba(251, 191, 36, 0.3);
+  --topo-danger: #f87171;
+  --topo-danger-soft: rgba(248, 113, 113, 0.14);
+  --topo-danger-border: rgba(248, 113, 113, 0.3);
+  --topo-teal: #2dd4bf;
+  --topo-teal-soft: rgba(45, 212, 191, 0.14);
+  --topo-teal-border: rgba(45, 212, 191, 0.3);
+  --topo-ep-border: #64748b;
+  --topo-edge-ap: #42b4ff;
+  --topo-edge-ap-hover: #7dd3fc;
+  --topo-edge-rule: #38bdf8;
+  --topo-edge-rule-hover: #bae6fd;
+  --topo-edge-ref: #fbbf24;
+  --topo-edge-ref-hover: #fde68a;
+  --topo-edge-tunnel: #2dd4bf;
+  --topo-edge-tunnel-hover: #99f6e4;
+}
+
 /* 连线层必须压在节点层之上，这不是笔误：
    1) type:'boxrule' 的边两端都在同一个节点上（source=server-N/inb-src-X，
       target=server-N/out-tgt-Y），画的就是服务器卡片内部的「入站行 → 出站行」路由虚线。
@@ -2257,20 +2297,8 @@ const selectionInfo = computed(() => {
   z-index: 50 !important;
 }
 
-.boxrule-glow {
-  stroke: #0284c7;
-  stroke-width: 6;
-  opacity: 0.22;
-  fill: none;
-  stroke-linecap: round;
-  transition:
-    stroke 0.2s ease,
-    stroke-width 0.2s ease,
-    opacity 0.2s ease;
-  pointer-events: none !important;
-}
 .boxrule-path {
-  stroke: #38bdf8;
+  stroke: var(--topo-edge-rule);
   stroke-width: 2;
   stroke-dasharray: 6 5;
   fill: none;
@@ -2282,30 +2310,8 @@ const selectionInfo = computed(() => {
   pointer-events: none !important;
 }
 
-.refedge-glow {
-  stroke: #d97706;
-  stroke-width: 8;
-  opacity: 0.25;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition:
-    stroke 0.2s ease,
-    stroke-width 0.2s ease,
-    opacity 0.2s ease;
-  pointer-events: none !important;
-
-  &.is-ap {
-    stroke: #0284c7;
-    opacity: 0.28;
-  }
-  &.is-tunnel {
-    stroke: #0891b2;
-    opacity: 0.35;
-  }
-}
 .refedge-path {
-  stroke: #fbbf24;
+  stroke: var(--topo-edge-ref);
   stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -2317,11 +2323,11 @@ const selectionInfo = computed(() => {
   pointer-events: none !important;
 
   &.is-ap {
-    stroke: #38bdf8;
+    stroke: var(--topo-edge-ap);
     stroke-dasharray: 6 4;
   }
   &.is-tunnel {
-    stroke: #06b6d4;
+    stroke: var(--topo-edge-tunnel);
     stroke-dasharray: 8 4;
   }
 }
@@ -2340,9 +2346,7 @@ const selectionInfo = computed(() => {
   stroke-width: 24;
 }
 
-.boxrule-glow,
 .boxrule-path,
-.refedge-glow,
 .refedge-path {
   pointer-events: none !important;
 }
@@ -2353,35 +2357,26 @@ const selectionInfo = computed(() => {
   cursor: pointer !important;
 }
 
-.vue-flow__edge:not(.selected):hover .boxrule-glow {
-  opacity: 0.45;
-  stroke-width: 7;
-}
 .vue-flow__edge:not(.selected):hover .boxrule-path {
-  stroke: #e0f2fe;
+  stroke: var(--topo-edge-rule-hover);
   stroke-width: 2.5;
 }
-.vue-flow__edge:not(.selected):hover .refedge-glow {
-  opacity: 0.5;
-  stroke-width: 9;
-}
-.vue-flow__edge:not(.selected):hover .refedge-glow.is-tunnel {
-  opacity: 0.6;
-  stroke-width: 10;
-}
 .vue-flow__edge:not(.selected):hover .refedge-path {
-  stroke: #fef3c7;
+  stroke: var(--topo-edge-ref-hover);
   stroke-width: 3;
 }
+.vue-flow__edge:not(.selected):hover .refedge-path.is-ap {
+  stroke: var(--topo-edge-ap-hover);
+}
 .vue-flow__edge:not(.selected):hover .refedge-path.is-tunnel {
-  stroke: #67e8f9;
-  stroke-width: 3.2;
+  stroke: var(--topo-edge-tunnel-hover);
+  stroke-width: 3;
 }
 
 @media (max-width: $bp-tablet-max) {
   .server-box,
   .ap-node {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    box-shadow: var(--topo-card-shadow) !important;
   }
 }
 
@@ -2397,15 +2392,14 @@ const selectionInfo = computed(() => {
   width: 6px;
   height: 36px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: var(--topo-bar-bg);
+  border: 1px solid var(--topo-bar-border);
   z-index: 10;
   cursor: ew-resize;
-  transition: all 0.2s;
+  transition: border-color 0.2s, background-color 0.2s;
   &:hover {
-    background: rgba(56, 189, 248, 0.8);
-    border-color: #38bdf8;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+    background: var(--topo-accent);
+    border-color: var(--topo-accent);
   }
 }
 </style>

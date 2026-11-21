@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from '@/components/cloudscape'
+import { toast, messageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
   CsBadge,
@@ -49,9 +49,9 @@ async function load() {
     if (data.code === 0) {
       list.value = data.data.items
       syncSnapshot()
-    } else ElMessage.error(data.message)
+    } else toast.error(data.message)
   } catch (e) {
-    ElMessage.error(errMsg(e, '加载权限组失败'))
+    toast.error(errMsg(e, '加载权限组失败'))
   } finally {
     loading.value = false
   }
@@ -88,7 +88,7 @@ function openEdit(row: any) {
 
 async function save() {
   if (!form.name.trim()) {
-    ElMessage.warning('请填写名称')
+    toast.warning('请填写名称')
     return
   }
   saving.value = true
@@ -97,14 +97,14 @@ async function save() {
       ? await updatePermissionGroup(editing.value.id, { name: form.name.trim(), remark: form.remark })
       : await createPermissionGroup({ name: form.name.trim(), remark: form.remark })
     if (data.code === 0) {
-      ElMessage.success(editing.value ? '权限组已更新' : '权限组已创建')
+      toast.success(editing.value ? '权限组已更新' : '权限组已创建')
       formOpen.value = false
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存失败'))
+    toast.error(errMsg(e, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -135,7 +135,7 @@ async function openAPEditor(row: any) {
       const { data } = await getAccessPoints()
       if (data.code === 0) allAPs.value = data.data.items
     } catch (e) {
-      ElMessage.error(errMsg(e, '加载接入点失败'))
+      toast.error(errMsg(e, '加载接入点失败'))
     }
   }
 }
@@ -164,14 +164,14 @@ async function saveOrdering() {
   try {
     const { data } = await setPermissionGroupAccessPoints(apTarget.value.id, orderedApIds.value)
     if (data.code === 0) {
-      ElMessage.success('接入点优先级已保存，订阅节点顺序即此排列')
+      toast.success('接入点优先级已保存，订阅节点顺序即此排列')
       apDialogOpen.value = false
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '保存优先级失败'))
+    toast.error(errMsg(e, '保存优先级失败'))
   } finally {
     orderingSaving.value = false
   }
@@ -195,20 +195,20 @@ function templateBadgeColor(row: PermissionGroup): 'blue' | 'grey' {
 
 async function remove(row: any) {
   try {
-    await ElMessageBox.confirm(`确认删除权限组「${row.name}」？关联的套餐和节点权限引用将一并解除。`, '删除权限组', { type: 'error' })
+    await messageBox.confirm(`确认删除权限组「${row.name}」？关联的套餐和节点权限引用将一并解除。`, '删除权限组', { type: 'error' })
   } catch {
     return
   }
   try {
     const { data } = await deletePermissionGroup(row.id)
     if (data.code === 0) {
-      ElMessage.success('已删除')
+      toast.success('已删除')
       load()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
+    toast.error(errMsg(e, '删除失败'))
   }
 }
 </script>

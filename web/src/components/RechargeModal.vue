@@ -8,7 +8,7 @@ import {
   CsInput,
   CsModal,
   CsSpaceBetween,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import { createRecharge, getPaymentChannels } from '@/api/shop'
 import { errMsg } from '@/api/http'
@@ -66,7 +66,7 @@ async function loadChannels() {
       }
     }
   } catch {
-    ElMessage.error('加载充值渠道失败')
+    toast.error('加载充值渠道失败')
   } finally {
     loadingChannels.value = false
   }
@@ -98,7 +98,7 @@ async function handleSubmit(replacePending = false) {
   if (!ch.requires_amount) {
     const code = cardCode.value.trim()
     if (!code) {
-      ElMessage.warning('请输入充值卡密')
+      toast.warning('请输入充值卡密')
       return
     }
     submitting.value = true
@@ -106,16 +106,16 @@ async function handleSubmit(replacePending = false) {
       const { data } = await createRecharge({ channel: ch.id, code })
       if (data.code === 0) {
         const face = data.data.face_value_cents ?? data.data.order?.amount_cents ?? 0
-        ElMessage.success(`充值成功，已到账 ${formatMoney(face)}`)
+        toast.success(`充值成功，已到账 ${formatMoney(face)}`)
         cardCode.value = ''
         modalVisible.value = false
         await auth.fetchMe()
         emit('recharged')
       } else {
-        ElMessage.error(data.message)
+        toast.error(data.message)
       }
     } catch (e: unknown) {
-      ElMessage.error(errMsg(e, '充值失败'))
+      toast.error(errMsg(e, '充值失败'))
     } finally {
       submitting.value = false
     }
@@ -124,7 +124,7 @@ async function handleSubmit(replacePending = false) {
 
   const cents = parseAmountCents()
   if (cents <= 0) {
-    ElMessage.warning('请输入有效的充值金额')
+    toast.warning('请输入有效的充值金额')
     return
   }
   submitting.value = true
@@ -138,18 +138,18 @@ async function handleSubmit(replacePending = false) {
       modalVisible.value = false
       router.push(`/checkout/${data.data.order.order_no}`)
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
     }
   } catch (err: unknown) {
     const resp = (err as { response?: { status?: number; data?: { pending_order_no?: string; message?: string } } })
       ?.response
     if (resp?.status === 409 && resp.data?.pending_order_no && !replacePending) {
       modalVisible.value = false
-      ElMessage.info('您有一笔待支付充值订单，已为您跳转')
+      toast.info('您有一笔待支付充值订单，已为您跳转')
       router.push(`/checkout/${resp.data.pending_order_no}`)
       return
     }
-    ElMessage.error(errMsg(err, '创建充值订单失败'))
+    toast.error(errMsg(err, '创建充值订单失败'))
   } finally {
     submitting.value = false
   }

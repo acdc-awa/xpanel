@@ -8,7 +8,7 @@ import {
   CsFormItem,
   CsInput,
   CsLink,
-  ElMessage,
+  toast,
 } from '@/components/cloudscape'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { forgotPassword, resetPassword } from '@/api/auth'
@@ -80,11 +80,11 @@ async function submitEmail() {
       await nextTick()
       codeInputRef.value?.focus()
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       resetCaptcha('email')
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '提交失败，请稍后重试'))
+    toast.error(errMsg(e, '提交失败，请稍后重试'))
     resetCaptcha('email')
   } finally {
     loading.value = false
@@ -116,14 +116,14 @@ async function submitReset() {
       turnstileToken.value || undefined,
     )
     if (data.code === 0) {
-      ElMessage.success('密码已重置，请重新登录')
+      toast.success('密码已重置，请重新登录')
       router.replace('/login')
     } else {
-      ElMessage.error(data.message)
+      toast.error(data.message)
       resetCaptcha('reset')
     }
   } catch (e) {
-    ElMessage.error(errMsg(e, '重置失败，请稍后重试'))
+    toast.error(errMsg(e, '重置失败，请稍后重试'))
     resetCaptcha('reset')
   } finally {
     submitting.value = false
