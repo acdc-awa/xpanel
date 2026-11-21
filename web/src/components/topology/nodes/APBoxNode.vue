@@ -60,7 +60,7 @@ function groupName(id: number): string {
           +{{ data.ap.permission_group_ids.length - 3 }}
         </span>
       </template>
-      <span v-else class="ap-chip orange">未授权（全员不可见）</span>
+      <span v-else class="ap-chip orange">未分配权限组（全员不可见）</span>
     </div>
 
     <!-- 管道消费的实时端点展示 -->
@@ -73,7 +73,7 @@ function groupName(id: number): string {
     </div>
     <div v-else class="ap-resolved-text waiting">
       <span class="ap-dot offline" />
-      <span style="font-size: 11px">待连线：从右侧端点拖出</span>
+      <span style="font-size: 11px">未绑定：从右侧端点拖出连线</span>
     </div>
 
     <div v-if="data.ap.resolved_target_desc" class="ap-desc-text" :title="data.ap.resolved_target_desc">

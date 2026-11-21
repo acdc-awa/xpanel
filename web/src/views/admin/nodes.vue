@@ -4,19 +4,16 @@ import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import {
   CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
-  CsEmpty,
   CsForm,
   CsFormField,
+  CsInput,
   CsModal,
   CsPage,
-  CsProgressBar,
+  CsPagination,
+  CsPaginationBar,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsTabs,
   CsToggle,
   CsToolbar,
@@ -24,9 +21,9 @@ import {
   ElMessage,
   ElMessageBox,
   type TabItem,
+  type TableColumn,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
-import { protocolDisplayName } from '@/utils/protocol'
 import InboundConfigEditor, { type InboundEditorChangePayload } from './servers/InboundConfigEditor.vue'
 import AccessPointDialog from './servers/AccessPointDialog.vue'
 import {
@@ -37,7 +34,6 @@ import {
   toggleInbound,
   updateInbound,
   updateAccessPoint,
-  deleteAccessPoint,
   getAccessPoints,
   type InboundItem,
   type InboundPayload,
@@ -71,15 +67,71 @@ const typeFilterOptions = [
   { label: '用户入站', value: 'user' },
   { label: '四层直通', value: 'tunnel' },
 ]
+const inboundStatusOptions = [
+  { label: '启用', value: 'enabled' },
+  { label: '停用', value: 'disabled' },
+]
 
 const list = ref<InboundItem[]>([])
 const loading = ref(false)
+const inboundKeyword = ref('')
 const typeFilter = ref('')
+const inboundStatusFilter = ref('')
+const inboundPage = ref(1)
+const inboundSize = ref(10)
 
-// 本地类型过滤（列表数据已全量在本地；历史行 type 为空按用户入站口径处理）
-const filteredInbounds = computed(() =>
-  typeFilter.value ? list.value.filter((r) => (r.type || 'user') === typeFilter.value) : list.value,
+const hasInboundFilters = computed(() =>
+  Boolean(serverFilter.value || typeFilter.value || inboundStatusFilter.value || inboundKeyword.value.trim()),
 )
+
+function resetInboundFilters() {
+  serverFilter.value = undefined
+  typeFilter.value = ''
+  inboundStatusFilter.value = ''
+  inboundKeyword.value = ''
+}
+
+// 本地过滤（列表数据已全量在本地；历史行 type 为空按用户入站口径处理）
+const filteredInbounds = computed(() => {
+  const kw = inboundKeyword.value.trim().toLowerCase()
+  return list.value.filter((r) => {
+    if (typeFilter.value && (r.type || 'user') !== typeFilter.value) return false
+    if (inboundStatusFilter.value === 'enabled' && !r.enabled) return false
+    if (inboundStatusFilter.value === 'disabled' && r.enabled) return false
+    if (kw) {
+      const hitTag = (r.tag || '').toLowerCase().includes(kw)
+      const hitRemark = (r.remark || '').toLowerCase().includes(kw)
+      const hitPort = String(r.port ?? '').includes(kw)
+      if (!hitTag && !hitRemark && !hitPort) return false
+    }
+    return true
+  })
+})
+
+watch([typeFilter, inboundStatusFilter, inboundKeyword, serverFilter], () => {
+  inboundPage.value = 1
+})
+
+watch([() => filteredInbounds.value.length, inboundSize], ([len, size]) => {
+  const maxPage = Math.max(1, Math.ceil(len / Math.max(1, size)))
+  if (inboundPage.value > maxPage) inboundPage.value = maxPage
+})
+
+const pagedInbounds = computed(() => {
+  const start = (inboundPage.value - 1) * inboundSize.value
+  return filteredInbounds.value.slice(start, start + inboundSize.value)
+})
+
+const inboundColumns: TableColumn[] = [
+  { id: 'id', header: '编号' },
+  { id: 'inbound', header: '入站' },
+  { id: 'server', header: '所属服务器' },
+  { id: 'protocol', header: '协议 / 端口' },
+  { id: 'transport', header: '传输 / TLS' },
+  { id: 'traffic', header: '用量' },
+  { id: 'status', header: '状态' },
+  { id: 'actions', header: '操作', width: '1%' },
+]
 
 type BadgeColor =
   | 'grey'
@@ -190,6 +242,77 @@ const apList = ref<UserAccessPoint[]>([])
 const apLoading = ref(false)
 const apGroups = ref<PermissionGroup[]>([])
 const allInbounds = ref<InboundItem[]>([])
+const apKeyword = ref('')
+const apGroupFilter = ref('')
+const apStatusFilter = ref('')
+const apPage = ref(1)
+const apSize = ref(10)
+
+const apGroupFilterOptions = computed(() => [
+  { label: '无权限组', value: 'none' },
+  ...apGroups.value.map((g) => ({ label: g.name, value: String(g.id) })),
+])
+
+const apStatusOptions = [
+  { label: '启用', value: 'enabled' },
+  { label: '停用', value: 'disabled' },
+]
+
+const hasApFilters = computed(() =>
+  Boolean(apKeyword.value.trim() || apGroupFilter.value || apStatusFilter.value),
+)
+
+function resetApFilters() {
+  apKeyword.value = ''
+  apGroupFilter.value = ''
+  apStatusFilter.value = ''
+}
+
+const filteredAccessPoints = computed(() => {
+  const kw = apKeyword.value.trim().toLowerCase()
+  return apList.value.filter((row) => {
+    if (apStatusFilter.value === 'enabled' && !row.enabled) return false
+    if (apStatusFilter.value === 'disabled' && row.enabled) return false
+    if (apGroupFilter.value === 'none') {
+      if (row.permission_group_ids && row.permission_group_ids.length > 0) return false
+    } else if (apGroupFilter.value) {
+      const gid = Number(apGroupFilter.value)
+      if (!row.permission_group_ids?.includes(gid)) return false
+    }
+    if (kw) {
+      const hitName = (row.name || '').toLowerCase().includes(kw)
+      const hitRemark = (row.remark || '').toLowerCase().includes(kw)
+      const hitTarget = apTargetDesc(row).toLowerCase().includes(kw)
+      const hitHost = (row.custom_host || '').toLowerCase().includes(kw)
+      if (!hitName && !hitRemark && !hitTarget && !hitHost) return false
+    }
+    return true
+  })
+})
+
+watch([apKeyword, apGroupFilter, apStatusFilter], () => {
+  apPage.value = 1
+})
+
+watch([() => filteredAccessPoints.value.length, apSize], ([len, size]) => {
+  const maxPage = Math.max(1, Math.ceil(len / Math.max(1, size)))
+  if (apPage.value > maxPage) apPage.value = maxPage
+})
+
+const pagedAccessPoints = computed(() => {
+  const start = (apPage.value - 1) * apSize.value
+  return filteredAccessPoints.value.slice(start, start + apSize.value)
+})
+
+const apColumns: TableColumn[] = [
+  { id: 'id', header: '编号' },
+  { id: 'name', header: '接入点' },
+  { id: 'groups', header: '开放权限组' },
+  { id: 'target', header: '目标绑定' },
+  { id: 'endpoint', header: '连接地址' },
+  { id: 'status', header: '状态' },
+  { id: 'actions', header: '操作', width: '1%' },
+]
 
 async function loadPermissionGroups() {
   try {
@@ -204,6 +327,11 @@ function groupName(id: number) {
   return apGroups.value.find((g) => g.id === id)?.name ?? `#${id}`
 }
 
+function apGroupTitle(ap: UserAccessPoint): string {
+  if (!ap.permission_group_ids || ap.permission_group_ids.length === 0) return '未分配权限组（全员不可见）'
+  return ap.permission_group_ids.map((gid) => groupName(gid)).join('、')
+}
+
 function apTargetDesc(ap: any): string {
   if (ap.target_type === 'inbound' && ap.target_inbound_tag) {
     if (ap.is_tunnel) {
@@ -212,11 +340,11 @@ function apTargetDesc(ap: any): string {
     }
     return `直连 → ${ap.target_inbound_tag}`
   }
-  return '待连线'
+  return '无'
 }
 
 function apTargetColor(ap: any): BadgeColor {
-  if (apTargetDesc(ap) === '待连线') return 'severity-medium'
+  if (apTargetDesc(ap) === '无') return 'severity-medium'
   if (ap.is_tunnel) return 'grey'
   return 'blue'
 }
@@ -246,25 +374,6 @@ function openCreateAccessPoint() {
 function openEditAccessPoint(ap: UserAccessPoint) {
   apEditingItem.value = ap
   apDialogOpen.value = true
-}
-
-async function removeAccessPoint(ap: any) {
-  try {
-    await ElMessageBox.confirm(`确认删除接入点「${ap.name}」？订阅将立即移除该入口。`, '删除接入点', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteAccessPoint(ap.id)
-    if (data.code === 0) {
-      ElMessage.success('接入点已删除')
-      loadAccessPoints()
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
 }
 
 async function toggleAccessPoint(ap: any) {
@@ -485,6 +594,13 @@ async function remove(row: any) {
   }
 }
 
+function removeFromEditor() {
+  const target = editing.value
+  if (!target) return
+  closeEditor()
+  remove(target)
+}
+
 function transportOf(row: any): string {
   try {
     const ss = JSON.parse(row.stream_settings || '{}')
@@ -495,6 +611,8 @@ function transportOf(row: any): string {
 }
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
+const RING_RADIUS = 7.5
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 const RESET_TEXT: Record<string, string> = { daily: '每天重置', weekly: '每周重置', monthly: '每月重置' }
 
 // 本周期已用字节：inbounds.up/down 由 agent 的 inbound>>> 计数器累计，
@@ -513,8 +631,16 @@ function usagePercent(row: InboundItem): number {
   return Math.min(100, Math.round((usedBytes(row) / quota) * 100))
 }
 
+function ringDashOffset(row: InboundItem): number {
+  const quota = quotaBytes(row)
+  const used = usedBytes(row)
+  if (quota <= 0 || used <= 0) return RING_CIRCUMFERENCE
+  const ratio = Math.min(1, used / quota)
+  return RING_CIRCUMFERENCE * (1 - ratio)
+}
+
 // 停用原因：cron 自动停用不写标记，只能按同一口径反推（与后端 QuotaExhausted 对齐）。
-// 没有这层提示时，超额/到期入站在卡片上与「管理员手动停用」长得一模一样。
+// 没有这层提示时，超额/到期入站在列表上与「管理员手动停用」长得一模一样。
 function stopReason(row: InboundItem): string {
   if (row.enabled) return ''
   if (row.total_gb && usedBytes(row) >= quotaBytes(row)) return '超额停用'
@@ -526,8 +652,12 @@ function resetTextOf(row: InboundItem): string {
   return (row.traffic_reset && RESET_TEXT[row.traffic_reset]) || '不自动重置'
 }
 
-function expiryTextOf(row: InboundItem): string {
-  return row.expiry_time ? `${formatDateOnly(row.expiry_time)} 到期` : '永久有效'
+function inboundTrafficTitle(row: InboundItem): string {
+  const parts = [row.total_gb ? `已用 ${usagePercent(row)}%` : '不限流量', resetTextOf(row)]
+  if (row.expiry_time) {
+    parts.push(`到期：${formatDateOnly(row.expiry_time)}`)
+  }
+  return parts.join('｜')
 }
 </script>
 
@@ -537,15 +667,22 @@ function expiryTextOf(row: InboundItem): string {
       <!-- ==================== Tab 1: 入站 (Inbounds) ==================== -->
       <div v-if="activeTab === 'inbounds'" class="nodes-tab-body">
         <CsToolbar>
+          <CsInput
+            v-model="inboundKeyword"
+            placeholder="搜索标签 / 备注 / 端口"
+            clearable
+            prefix-icon="search"
+            class="filter-search"
+          />
           <CsSelect
             v-model="serverFilter"
             :options="serverFilterOptions"
             :loading="serverLoading"
             clearable
             filterable
-            placeholder="全部 Xray 服务器"
+            placeholder="全部服务器"
             aria-label="按服务器筛选入站"
-            style="width: 220px"
+            class="filter-select filter-select--lg"
           />
           <CsSelect
             v-model="typeFilter"
@@ -553,8 +690,17 @@ function expiryTextOf(row: InboundItem): string {
             clearable
             placeholder="全部类型"
             aria-label="按类型筛选入站"
-            style="width: 150px"
+            class="filter-select filter-select--md"
           />
+          <CsSelect
+            v-model="inboundStatusFilter"
+            :options="inboundStatusOptions"
+            clearable
+            placeholder="全部状态"
+            aria-label="按状态筛选入站"
+            class="filter-select filter-select--sm"
+          />
+          <CsButton v-if="hasInboundFilters" @click="resetInboundFilters">重置</CsButton>
           <CsButton icon-name="refresh" @click="load">刷新</CsButton>
           <TipIcon
             content="在此为 Xray 服务器配置物理入站：VLESS / Hysteria 2 代理入站支持多源复用（同时承载用户与链式中继），四层直通管道实现多级穿透。新增/编辑/停用后自动生成配置推送到服务器（离线保存，上线补推）。"
@@ -565,39 +711,86 @@ function expiryTextOf(row: InboundItem): string {
         </CsToolbar>
 
         <CsContainer header="入站列表">
-          <div v-if="loading" class="nodes-loading">
-            <CsSpinner size="large" />
-          </div>
-
-          <CsEmpty
-            v-else-if="filteredInbounds.length === 0"
-            icon-name="globe"
-            :description="
-              list.length === 0
-                ? '尚未为任何服务器添加入站。点击右上角「新增入站」开始配置。'
-                : '未找到匹配当前筛选的入站'
+          <CsTable
+            compact
+            :wrap-lines="false"
+            track-by="id"
+            :items="pagedInbounds"
+            :columns="inboundColumns"
+            :loading="loading"
+            loading-text="加载中…"
+            :empty-text="
+              hasInboundFilters
+                ? '未找到匹配当前筛选的入站'
+                : '尚未为任何服务器添加入站，点击右上角「新增入站」开始配置。'
             "
-          />
+          >
+            <template #cell-id="{ row }">
+              <span class="row-id">#{{ row.id }}</span>
+            </template>
 
-          <CsCardGrid v-else>
-            <CsCard
-              v-for="row in filteredInbounds"
-              :key="row.id"
-              :class="{ 'node-card--disabled': !row.enabled }"
-            >
-              <template #header>
-                <div class="node-card-head">
-                  <span class="cs-text-mono cs-text-secondary">#{{ row.id }}</span>
-                  <CsButton variant="link" class="node-card-name" @click="openEdit(row)">
+            <template #cell-inbound="{ row }">
+              <div class="name-cell">
+                <div class="name-cell-main">
+                  <button
+                    type="button"
+                    class="name-link-btn"
+                    :class="{ 'is-muted': !row.enabled }"
+                    title="点击编辑入站"
+                    @click="openEdit(row)"
+                  >
                     {{ row.tag }}
-                  </CsButton>
-                  <span v-if="row.remark" class="cs-text-secondary node-card-remark">({{ row.remark }})</span>
-                  <CsBadge :color="inboundChipColor(row)">{{ inboundChipText(row) }}</CsBadge>
-                  <CsBadge v-if="stopReason(row)" color="red">{{ stopReason(row) }}</CsBadge>
+                  </button>
                 </div>
-              </template>
+                <div v-if="row.remark" class="row-remark" :title="row.remark">备注：{{ row.remark }}</div>
+              </div>
+            </template>
 
-              <template #actions>
+            <template #cell-server="{ row }">
+              <span :class="{ 'cell-muted': !row.enabled }">{{ serverName(row.server_id) }}</span>
+            </template>
+
+            <template #cell-protocol="{ row }">
+              <div class="proto-cell">
+                <CsBadge class="nowrap-badge" :color="inboundChipColor(row)">{{ inboundChipText(row) }}</CsBadge>
+                <span class="cell-mono" :class="{ 'cell-muted': !row.enabled }">:{{ row.port }}</span>
+              </div>
+            </template>
+
+            <template #cell-transport="{ row }">
+              <span class="cell-mono" :class="{ 'cell-muted': !row.enabled }">{{ transportOf(row) }}</span>
+            </template>
+
+            <template #cell-traffic="{ row }">
+              <div class="traffic-cell" :title="inboundTrafficTitle(row)">
+                <svg
+                  v-if="row.total_gb"
+                  class="traffic-ring"
+                  :class="{ 'is-danger': usagePercent(row) > 90 }"
+                  viewBox="0 0 20 20"
+                  aria-hidden="true"
+                >
+                  <circle class="traffic-ring-track" cx="10" cy="10" r="7.5" />
+                  <circle
+                    v-if="usedBytes(row) > 0"
+                    class="traffic-ring-fill"
+                    cx="10"
+                    cy="10"
+                    r="7.5"
+                    transform="rotate(-90 10 10)"
+                    :stroke-dasharray="RING_CIRCUMFERENCE"
+                    :stroke-dashoffset="ringDashOffset(row)"
+                  />
+                </svg>
+                <span class="traffic-text cell-mono" :class="{ 'cell-muted': !row.enabled }">
+                  <strong>{{ formatBytes(usedBytes(row)) }}</strong> /
+                  {{ row.total_gb ? formatBytes(quotaBytes(row)) : '不限' }}
+                </span>
+              </div>
+            </template>
+
+            <template #cell-status="{ row }">
+              <div class="status-cell">
                 <CsTooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'">
                   <CsToggle
                     :model-value="row.enabled"
@@ -605,53 +798,57 @@ function expiryTextOf(row: InboundItem): string {
                     @change="toggle(row)"
                   />
                 </CsTooltip>
-              </template>
-
-              <CsCardFacts :columns="2">
-                <CsCardFact label="所属服务器" :value="serverName(row.server_id)" />
-                <CsCardFact label="协议与端口">
-                  <span class="node-card-proto">
-                    <CsBadge color="blue">{{ protocolDisplayName(row.protocol).toUpperCase() }}</CsBadge>
-                    <span class="cs-text-mono">:{{ row.port }}</span>
-                  </span>
-                </CsCardFact>
-                <CsCardFact label="传输与 TLS" :value="transportOf(row)" mono />
-                <CsCardFact label="流量重置" :value="resetTextOf(row)" />
-              </CsCardFacts>
-
-              <!-- 本周期用量：口径与限额判定一致（up+down 对配额），tunnel 入站同样计数 -->
-              <div class="inbound-traffic">
-                <div class="traffic-head">
-                  <span>本周期用量</span>
-                  <span class="traffic-value">
-                    <strong>{{ formatBytes(usedBytes(row)) }}</strong> /
-                    {{ row.total_gb ? formatBytes(quotaBytes(row)) : '不限' }}
-                    <span v-if="row.total_gb" class="traffic-percent">({{ usagePercent(row) }}%)</span>
-                  </span>
-                </div>
-                <CsProgressBar
-                  v-if="row.total_gb"
-                  :value="usagePercent(row)"
-                  :bar-height="5"
-                  hide-text
-                  :color="usagePercent(row) >= 100 ? 'var(--color-text-status-error-ri38gt)' : undefined"
-                  :aria-label="`入站 ${row.tag} 本周期已用 ${usagePercent(row)}%`"
-                />
-                <div class="traffic-expire">{{ expiryTextOf(row) }}</div>
+                <CsBadge v-if="stopReason(row)" class="nowrap-badge" color="red">{{ stopReason(row) }}</CsBadge>
               </div>
+            </template>
 
-              <template #footer>
-                <CsButton icon-name="edit" @click="openEdit(row)">编辑入站</CsButton>
-                <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
-              </template>
-            </CsCard>
-          </CsCardGrid>
+            <template #cell-actions="{ row }">
+              <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+            </template>
+          </CsTable>
+
+          <template #footer>
+            <CsPaginationBar v-if="filteredInbounds.length > 0">
+              <CsPagination
+                v-model:current-page="inboundPage"
+                v-model:page-size="inboundSize"
+                :total="filteredInbounds.length"
+                :page-sizes="[10, 20, 50, 100]"
+                layout="total, sizes, prev, pager, next"
+                @size-change="inboundPage = 1"
+              />
+            </CsPaginationBar>
+          </template>
         </CsContainer>
       </div>
 
       <!-- ==================== Tab 2: 用户接入点 (Access Points) ==================== -->
       <div v-else class="nodes-tab-body">
         <CsToolbar>
+          <CsInput
+            v-model="apKeyword"
+            placeholder="搜索名称 / 备注 / 目标"
+            clearable
+            prefix-icon="search"
+            class="filter-search"
+          />
+          <CsSelect
+            v-model="apGroupFilter"
+            :options="apGroupFilterOptions"
+            clearable
+            placeholder="全部权限组"
+            aria-label="按权限组筛选接入点"
+            class="filter-select filter-select--md"
+          />
+          <CsSelect
+            v-model="apStatusFilter"
+            :options="apStatusOptions"
+            clearable
+            placeholder="全部状态"
+            aria-label="按状态筛选接入点"
+            class="filter-select filter-select--sm"
+          />
+          <CsButton v-if="hasApFilters" @click="resetApFilters">重置</CsButton>
           <CsButton icon-name="refresh" @click="loadAccessPoints">刷新</CsButton>
           <TipIcon
             content="接入点是用户订阅中实际看到的「节点」，通过白名单权限组控制哪些权限组可见。接入点可直接绑定入站，亦可在拓扑中参与链式转发中转。"
@@ -662,28 +859,79 @@ function expiryTextOf(row: InboundItem): string {
         </CsToolbar>
 
         <CsContainer header="接入点分发列表">
-          <div v-if="apLoading" class="nodes-loading">
-            <CsSpinner size="large" />
-          </div>
+          <CsTable
+            compact
+            :wrap-lines="false"
+            track-by="id"
+            :items="pagedAccessPoints"
+            :columns="apColumns"
+            :loading="apLoading"
+            loading-text="加载中…"
+            :empty-text="
+              hasApFilters
+                ? '未找到匹配当前筛选的接入点'
+                : '尚未创建任何接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。'
+            "
+          >
+            <template #cell-id="{ row }">
+              <span class="row-id">#{{ row.id }}</span>
+            </template>
 
-          <CsEmpty
-            v-else-if="apList.length === 0"
-            icon-name="share"
-            description="尚未创建任何接入点。新建后即可作为用户订阅的入口（订阅仅从接入点生成）。"
-          />
-
-          <CsCardGrid v-else>
-            <CsCard v-for="row in apList" :key="row.id" :class="{ 'node-card--disabled': !row.enabled }">
-              <template #header>
-                <div class="node-card-head">
-                  <span class="cs-text-mono cs-text-secondary">#{{ row.id }}</span>
-                  <CsButton variant="link" class="node-card-name" @click="openEditAccessPoint(row)">
+            <template #cell-name="{ row }">
+              <div class="name-cell">
+                <div class="name-cell-main">
+                  <button
+                    type="button"
+                    class="name-link-btn"
+                    :class="{ 'is-muted': !row.enabled }"
+                    title="点击编辑接入点"
+                    @click="openEditAccessPoint(row)"
+                  >
                     {{ row.name }}
-                  </CsButton>
+                  </button>
                 </div>
-              </template>
+                <div v-if="row.remark" class="row-remark" :title="row.remark">备注：{{ row.remark }}</div>
+              </div>
+            </template>
 
-              <template #actions>
+            <template #cell-target="{ row }">
+              <CsBadge
+                class="nowrap-badge"
+                :color="apTargetColor(row)"
+                :title="apTargetDesc(row) === '无' ? '未绑定入站（可在编辑或拓扑中连线）' : undefined"
+              >
+                {{ apTargetDesc(row) }}
+              </CsBadge>
+            </template>
+
+            <template #cell-endpoint="{ row }">
+              <span v-if="row.custom_host" class="cell-mono" :class="{ 'cell-muted': !row.enabled }">
+                {{ row.custom_host }}:{{ row.custom_port || '自动' }}
+              </span>
+              <span v-else class="cell-muted">自动继承</span>
+            </template>
+
+            <template #cell-groups="{ row }">
+              <div class="ap-group-badges" :title="apGroupTitle(row)">
+                <template v-if="row.permission_group_ids && row.permission_group_ids.length > 0">
+                  <CsBadge
+                    v-for="gid in row.permission_group_ids.slice(0, 3)"
+                    :key="gid"
+                    class="nowrap-badge"
+                    color="blue"
+                  >
+                    {{ groupName(gid) }}
+                  </CsBadge>
+                  <CsBadge v-if="row.permission_group_ids.length > 3" class="nowrap-badge" color="grey">
+                    +{{ row.permission_group_ids.length - 3 }}
+                  </CsBadge>
+                </template>
+                <CsBadge v-else class="nowrap-badge" color="severity-medium">无</CsBadge>
+              </div>
+            </template>
+
+            <template #cell-status="{ row }">
+              <div class="status-cell">
                 <CsTooltip :content="row.enabled ? '已启用，点击禁用' : '已禁用，点击启用'">
                   <CsToggle
                     :model-value="row.enabled"
@@ -691,42 +939,26 @@ function expiryTextOf(row: InboundItem): string {
                     @change="toggleAccessPoint(row)"
                   />
                 </CsTooltip>
-              </template>
+              </div>
+            </template>
 
-              <CsCardFacts :columns="2">
-                <CsCardFact label="目标绑定">
-                  <CsBadge :color="apTargetColor(row)">{{ apTargetDesc(row) }}</CsBadge>
-                </CsCardFact>
-                <CsCardFact
-                  label="连接地址覆写"
-                  :value="row.custom_host ? `${row.custom_host}:${row.custom_port || '自动'}` : '自动继承入站地址'"
-                  mono
-                />
-                <CsCardFact label="开放权限组 (白名单)" full-width>
-                  <div class="ap-group-badges">
-                    <template v-if="row.permission_group_ids && row.permission_group_ids.length > 0">
-                      <CsBadge
-                        v-for="gid in row.permission_group_ids.slice(0, 3)"
-                        :key="gid"
-                        color="blue"
-                      >
-                        {{ groupName(gid) }}
-                      </CsBadge>
-                      <CsBadge v-if="row.permission_group_ids.length > 3" color="grey">
-                        +{{ row.permission_group_ids.length - 3 }}
-                      </CsBadge>
-                    </template>
-                    <CsBadge v-else color="severity-medium">全员不可见</CsBadge>
-                  </div>
-                </CsCardFact>
-              </CsCardFacts>
+            <template #cell-actions="{ row }">
+              <CsButton :wrap-text="false" @click="openEditAccessPoint(row)">编辑</CsButton>
+            </template>
+          </CsTable>
 
-              <template #footer>
-                <CsButton icon-name="edit" @click="openEditAccessPoint(row)">编辑接入点</CsButton>
-                <CsButton variant="danger-outline" icon-name="remove" @click="removeAccessPoint(row)">删除</CsButton>
-              </template>
-            </CsCard>
-          </CsCardGrid>
+          <template #footer>
+            <CsPaginationBar v-if="filteredAccessPoints.length > 0">
+              <CsPagination
+                v-model:current-page="apPage"
+                v-model:page-size="apSize"
+                :total="filteredAccessPoints.length"
+                :page-sizes="[10, 20, 50, 100]"
+                layout="total, sizes, prev, pager, next"
+                @size-change="apPage = 1"
+              />
+            </CsPaginationBar>
+          </template>
         </CsContainer>
 
         <!-- 新建/编辑用户接入点（弹窗本体仍在后续批次迁移） -->
@@ -780,19 +1012,28 @@ function expiryTextOf(row: InboundItem): string {
       />
 
       <template #footer>
-        <CsButton @click="closeEditor">取消</CsButton>
-        <CsButton variant="primary" :loading="saving" @click="save">保存入站</CsButton>
+        <div class="modal-footer-split">
+          <div class="modal-footer-left">
+            <CsButton
+              v-if="editing"
+              variant="danger-outline"
+              :disabled="saving"
+              @click="removeFromEditor"
+            >
+              删除入站
+            </CsButton>
+          </div>
+          <div class="modal-footer-right">
+            <CsButton @click="closeEditor">取消</CsButton>
+            <CsButton variant="primary" :loading="saving" @click="save">保存入站</CsButton>
+          </div>
+        </div>
       </template>
     </CsModal>
   </CsPage>
 </template>
 
 <style scoped lang="scss">
-.nodes-loading {
-  padding: 48px 0;
-  text-align: center;
-}
-
 /* CsTabs 内容区默认只有上 16px 内边距（左右为 0），这里补工具栏与列表之间的 20px */
 .nodes-tab-body {
   display: flex;
@@ -801,76 +1042,187 @@ function expiryTextOf(row: InboundItem): string {
   min-inline-size: 0;
 }
 
-.node-card-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-inline-size: 0;
+.filter-search {
+  width: 220px;
 }
 
-.node-card-name {
-  font-size: 14px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+.filter-select--lg {
+  width: 190px;
 }
 
-.node-card-remark {
+.filter-select--md {
+  width: 145px;
+}
+
+.filter-select--sm {
+  width: 115px;
+}
+
+.row-id {
+  flex: none;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
   font-size: 12px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
-.node-card--disabled {
-  opacity: 0.7;
+.name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.node-card-proto {
+.name-cell-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.name-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  text-align: start;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+    text-decoration: underline;
+  }
+
+  &.is-muted {
+    color: var(--color-text-status-inactive-fqjc97, #656871);
+  }
+}
+
+.row-remark {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.proto-cell {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  vertical-align: middle;
 }
 
-/* 本周期用量块：与用户卡片的「流量使用」同构（头行 + 细条），保持两页读法一致 */
-.inbound-traffic {
-  margin-block-start: 12px;
-  padding: 10px 12px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
+.nowrap-badge {
+  white-space: nowrap !important;
+  flex-shrink: 0;
 }
 
-.traffic-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-block-end: 6px;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.traffic-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  vertical-align: middle;
 }
 
-.traffic-value {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+.traffic-ring {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.traffic-ring-track {
+  fill: none;
+  stroke: var(--color-border-divider-default-diwd4w, #e9ebed);
+  stroke-width: 2.5;
+}
+
+.traffic-ring-fill {
+  fill: none;
+  stroke: var(--color-text-link-default-qabnuk, #006ce0);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+
+.traffic-ring.is-danger .traffic-ring-fill {
+  stroke: var(--color-text-status-error-ri38gt, #d91515);
+}
+
+.traffic-text {
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  text-align: end;
 }
 
-.traffic-percent {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  margin-inline-start: 2px;
-}
-
-.traffic-expire {
-  margin-block-start: 6px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
 }
 
 .ap-group-badges {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
+}
+
+.modal-footer-split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.modal-footer-left,
+.modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: $bp-tablet-max) {
+  .cs-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-xs-m9b7jf, 8px);
+  }
+
+  :deep(.cs-toolbar-main) {
+    inline-size: 100%;
+
+    .filter-search {
+      inline-size: 100% !important;
+    }
+
+    .filter-select {
+      flex: 1 1 calc(50% - 4px);
+      min-inline-size: 120px;
+      inline-size: auto;
+    }
+  }
+
+  :deep(.cs-toolbar-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    inline-size: 100%;
+    gap: 6px;
+  }
 }
 </style>

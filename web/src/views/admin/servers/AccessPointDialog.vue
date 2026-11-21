@@ -107,7 +107,7 @@ const inboundOptions = computed(() =>
   availableInbounds.value.map((i) => ({ label: inboundOptionLabel(i), value: i.id })),
 )
 const targetTypeOptions: SegmentedOption[] = [
-  { id: '', text: '待连线 / 未绑定' },
+  { id: '', text: '未绑定（待连线）' },
   { id: 'inbound', text: '直连落地入站' },
 ]
 

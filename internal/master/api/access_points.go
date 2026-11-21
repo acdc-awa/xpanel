@@ -83,8 +83,8 @@ func buildAccessPointView(
 					v.TunnelLandingDesc = fmt.Sprintf("%s:%d", inb.TargetAddress, inb.TargetPort)
 					v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d ➔ %s:%d", srv.Name, inb.Port, inb.TargetAddress, inb.TargetPort)
 				} else {
-					v.TunnelLandingDesc = "待连线"
-					v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d (待连线)", srv.Name, inb.Port)
+					v.TunnelLandingDesc = "未绑定"
+					v.ResolvedTargetDesc = fmt.Sprintf("直通 ➜ %s:%d (未绑定)", srv.Name, inb.Port)
 				}
 			}
 		}
