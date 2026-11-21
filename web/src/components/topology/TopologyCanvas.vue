@@ -53,6 +53,8 @@ import {
   GAP,
   GRID,
   HEADER_H,
+  MAX_BOX_W,
+  MIN_BOX_W,
   ROW_BOX_H,
   ROW_H,
   clampBoxWidth,
@@ -1571,23 +1573,37 @@ async function handleEdgeClick(evt: EdgeMouseEvent) {
   }
 }
 
-// 自定义横向拖拉伸逻辑
+// 自定义横向拖拉伸逻辑（按画布缩放 1px 丝滑跟手，松手吸附到 8px 网格）
 function startBoxResize(e: MouseEvent, data: BoxData) {
   const nodeId = `server-${data.server.id}`
   const startX = e.clientX
   const startWidth = data.boxWidth || DEFAULT_BOX_W
+  const zoom = viewport.value.zoom || 1
+  let currentWidth = startWidth
+  const prevCursor = document.body.style.cursor
+  const prevUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'ew-resize'
+  document.body.style.userSelect = 'none'
+
   const onMouseMove = (moveEvent: MouseEvent) => {
-    const deltaX = moveEvent.clientX - startX
-    const w = clampBoxWidth(startWidth + deltaX)
+    const deltaX = (moveEvent.clientX - startX) / zoom
+    const w = Math.max(MIN_BOX_W, Math.min(MAX_BOX_W, Math.round(startWidth + deltaX)))
+    currentWidth = w
     data.boxWidth = w
     boxWidths.set(nodeId, w)
-    localLayout.widths = Object.fromEntries(boxWidths)
-    saveLayoutLocal(localLayout)
   }
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
-    layoutDirty.value = true
+    document.body.style.cursor = prevCursor
+    document.body.style.userSelect = prevUserSelect
+    const snapped = clampBoxWidth(currentWidth)
+    data.boxWidth = snapped
+    boxWidths.set(nodeId, snapped)
+    localLayout.widths = Object.fromEntries(boxWidths)
+    saveLayoutLocal(localLayout)
+    if (snapped !== startWidth) layoutDirty.value = true
+    nextTick(() => flowRef.value?.updateNodeInternals?.(nodeId))
   }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
@@ -2143,6 +2159,7 @@ const selectionInfo = computed(() => {
 :deep(.ap-node .ep) {
   width: 12px;
   height: 12px;
+  box-sizing: border-box;
   border-radius: 50%;
   background: var(--topo-card-bg);
   border: 2px solid var(--topo-ep-border);
@@ -2151,7 +2168,7 @@ const selectionInfo = computed(() => {
   &.valid,
   &.connecting {
     border-color: var(--topo-accent);
-    background: var(--topo-accent-soft);
+    background: linear-gradient(var(--topo-accent-soft), var(--topo-accent-soft)), var(--topo-card-bg);
   }
 }
 
@@ -2165,6 +2182,7 @@ const selectionInfo = computed(() => {
 :deep(.server-box .ep) {
   width: 12px;
   height: 12px;
+  box-sizing: border-box;
   border-radius: 50%;
   background: var(--topo-card-bg);
   border: 2px solid var(--topo-ep-border);
@@ -2173,7 +2191,7 @@ const selectionInfo = computed(() => {
   &.valid,
   &.connecting {
     border-color: var(--topo-accent);
-    background: var(--topo-accent-soft);
+    background: linear-gradient(var(--topo-accent-soft), var(--topo-accent-soft)), var(--topo-card-bg);
   }
   &.ext-src {
     z-index: 3;
@@ -2192,8 +2210,9 @@ const selectionInfo = computed(() => {
     right: -6px;
     top: 50%;
     transform: translateY(-50%);
+    z-index: 3;
     border-color: var(--topo-success);
-    background: var(--topo-success-soft);
+    background: linear-gradient(var(--topo-success-soft), var(--topo-success-soft)), var(--topo-card-bg);
     pointer-events: none;
   }
 }
@@ -2377,29 +2396,6 @@ html.dark .topology-wrap {
   .server-box,
   .ap-node {
     box-shadow: var(--topo-card-shadow) !important;
-  }
-}
-
-.custom-resizer-right {
-  position: absolute;
-  /* 原来是 top: 38px + translateY(-50%)：这个 38px 与抓手自身 36px 高、与 .sb-head 的
-     48px 高都没有对应关系（纯反推值），标题栏高度一变抓手就跑到卡片外。
-     改成上下贴边 + margin:auto，抓手恒在卡片垂直居中处，与任何高度常量解耦。 */
-  top: 0;
-  bottom: 0;
-  right: -3px;
-  margin: auto 0;
-  width: 6px;
-  height: 36px;
-  border-radius: 4px;
-  background: var(--topo-bar-bg);
-  border: 1px solid var(--topo-bar-border);
-  z-index: 10;
-  cursor: ew-resize;
-  transition: border-color 0.2s, background-color 0.2s;
-  &:hover {
-    background: var(--topo-accent);
-    border-color: var(--topo-accent);
   }
 }
 </style>

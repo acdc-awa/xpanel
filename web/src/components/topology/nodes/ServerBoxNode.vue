@@ -51,19 +51,26 @@ useGridHeight(boxEl)
   <div
     ref="boxEl"
     class="server-box"
-    :class="{ offline: data.server.status !== 1 }"
+    :class="{ offline: data.server.status !== 1, selected }"
     :style="{ width: (data.boxWidth || DEFAULT_BOX_W) + 'px' }"
   >
     <div
-      v-show="selected"
-      class="custom-resizer-right"
+      class="custom-resizer-corner nodrag"
+      title="拖动调整卡片宽度"
       @mousedown.stop.prevent="emit('resize-start', $event, data)"
-    />
+      @dblclick.stop
+    >
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+        <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      </svg>
+    </div>
     <div class="sb-head">
       <div class="sb-head-left">
-        <span class="status-dot" :class="data.server.status === 1 ? 'online' : 'offline'" />
-        <span class="name" :title="data.server.name">{{ data.server.name }}</span>
-        <span v-if="data.server.status !== 1" class="offline-badge">离线</span>
+        <div class="sb-head-title-row">
+          <span class="status-dot" :class="data.server.status === 1 ? 'online' : 'offline'" />
+          <span class="name" :title="data.server.name">{{ data.server.name }}</span>
+          <span v-if="data.server.status !== 1" class="offline-badge">离线</span>
+        </div>
         <span class="host" :title="data.server.host">{{ data.server.host }}</span>
       </div>
       <div class="sb-head-right">
@@ -76,7 +83,12 @@ useGridHeight(boxEl)
         >
           <CsIcon name="gen-ai" size="x-small" />&nbsp;整理
         </button>
-        <button class="sb-detail-btn" title="查看服务器详情与监控" @click.stop="emit('open-server', data.server.id)">
+        <button
+          class="sb-detail-btn nodrag"
+          title="查看服务器详情与监控"
+          @click.stop="emit('open-server', data.server.id)"
+          @dblclick.stop
+        >
           <CsIcon name="settings" size="x-small" />&nbsp;详情
         </button>
       </div>
@@ -86,21 +98,23 @@ useGridHeight(boxEl)
       <!-- 入站列：包含 Caddy 认知层容器与常规入站 -->
       <div class="sb-col">
         <div class="sb-col-head">
-          <span class="sb-title">入站 (Inbound)</span>
+          <span class="sb-title">入站 <span class="sb-count">{{ data.inbounds.length }}</span></span>
           <div class="sb-head-actions">
             <button
               v-if="editable"
-              class="sb-add-btn layer-add-btn"
+              class="sb-add-btn layer-add-btn nodrag"
               title="新建对外接入层（订阅地址分组：内部实现对外不可见）"
               @click.stop="emit('create-layer', data.server.id)"
+              @dblclick.stop
             >
               <CsIcon name="add-plus" size="x-small" />&nbsp;层
             </button>
             <button
               v-if="editable"
-              class="sb-add-btn"
+              class="sb-add-btn nodrag"
               title="为该服务器新建入站"
               @click.stop="emit('create-inbound', data.server.id)"
+              @dblclick.stop
             >
               <CsIcon name="add-plus" size="x-small" />&nbsp;入站
             </button>
@@ -115,41 +129,56 @@ useGridHeight(boxEl)
             class="layer-capsule"
           >
             <div class="layer-capsule-head">
-              <div class="layer-title">
-                <CsIcon name="globe" class="layer-icon" />
-                <span class="layer-name" :title="g.layer.name">{{ g.layer.name }}</span>
-                <code class="layer-endpoint">{{ g.layer.host }}:{{ g.layer.port }}</code>
-                <span class="layer-sec" :class="g.layer.security">
-                  {{ g.layer.security === 'tls' ? 'TLS' : '明文' }}
-                </span>
+              <div class="layer-head-top">
+                <div class="layer-title">
+                  <CsIcon name="globe" size="x-small" class="layer-icon" />
+                  <span class="layer-name" :title="g.layer.name">{{ g.layer.name }}</span>
+                  <span class="layer-sec" :class="g.layer.security">
+                    {{ g.layer.security === 'tls' ? 'TLS' : '明文' }}
+                  </span>
+                </div>
+                <div class="layer-actions">
+                  <button
+                    class="layer-act-btn nodrag"
+                    title="一键复制该层的 Caddyfile 反代配置片段"
+                    @click.stop="emit('copy-caddyfile', g.layer)"
+                    @dblclick.stop
+                  >
+                    <CsIcon name="copy" size="x-small" />
+                  </button>
+                  <button
+                    v-if="editable"
+                    class="layer-act-btn nodrag"
+                    title="将本机未挂层入站挂载到该层"
+                    @click.stop="emit('bind-layer', g.layer)"
+                    @dblclick.stop
+                  >
+                    <CsIcon name="add-plus" size="x-small" />
+                  </button>
+                  <button
+                    v-if="editable"
+                    class="layer-act-btn nodrag"
+                    title="编辑对外层"
+                    @click.stop="emit('edit-layer', g.layer)"
+                    @dblclick.stop
+                  >
+                    <CsIcon name="settings" size="x-small" />
+                  </button>
+                  <button
+                    v-if="editable"
+                    class="layer-act-btn danger nodrag"
+                    title="删除对外层（挂载入站回退原生行）"
+                    @click.stop="emit('delete-layer', g.layer)"
+                    @dblclick.stop
+                  >
+                    <CsIcon name="remove" size="x-small" />
+                  </button>
+                </div>
               </div>
-              <div class="layer-actions">
-                <button
-                  class="layer-copy-btn"
-                  title="一键复制该层的 Caddyfile 反代配置片段"
-                  @click.stop="emit('copy-caddyfile', g.layer)"
-                >
-                  <CsIcon name="copy" size="x-small" />&nbsp;Caddyfile
-                </button>
-                <button
-                  v-if="editable"
-                  class="layer-act-btn"
-                  title="将本机未挂层入站挂载到该层"
-                  @click.stop="emit('bind-layer', g.layer)"
-                >
-                  <CsIcon name="add-plus" size="x-small" />&nbsp;挂载
-                </button>
-                <button v-if="editable" class="layer-act-btn" title="编辑对外层" @click.stop="emit('edit-layer', g.layer)">
-                  <CsIcon name="settings" size="x-small" />
-                </button>
-                <button
-                  v-if="editable"
-                  class="layer-act-btn danger"
-                  title="删除对外层（挂载入站回退原生行）"
-                  @click.stop="emit('delete-layer', g.layer)"
-                >
-                  <CsIcon name="remove" size="x-small" />
-                </button>
+              <div class="layer-head-sub">
+                <span class="layer-endpoint" :title="`${g.layer.host}:${g.layer.port}`">
+                  {{ g.layer.host }}:{{ g.layer.port }}
+                </span>
               </div>
             </div>
             <div class="layer-capsule-body">
@@ -169,7 +198,7 @@ useGridHeight(boxEl)
                   class="ep ext-tgt"
                 />
                 <span
-                  v-if="typeInfo(inb.type).text"
+                  v-if="typeInfo(inb.type).text && inb.type !== 'tunnel'"
                   class="type-tag"
                   :class="typeInfo(inb.type).cls"
                   :title="`类型：${typeInfo(inb.type).text}`"
@@ -186,30 +215,31 @@ useGridHeight(boxEl)
                 <span class="port-badge">:{{ inb.port }}</span>
                 <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
                 <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-                <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑入站" />
-                <button
-                  v-if="editable"
-                  class="layer-unbind-btn"
-                  title="移出对外层（回退直连端点）"
-                  @click.stop="emit('unbind-inbound', inb)"
-                >
-                  ×
-                </button>
-                <div v-if="editable && g.inbounds.length > 1" class="tag-order-actions">
+                <div v-if="editable" class="row-hover-actions" @click.stop>
                   <button
-                    class="order-btn nodrag"
-                    :disabled="inbIdx === 0"
-                    title="上移入站"
-                    @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'up')"
+                    class="layer-unbind-btn nodrag"
+                    title="移出对外层（回退直连端点）"
+                    @click.stop="emit('unbind-inbound', inb)"
                     @dblclick.stop
-                  >▲</button>
-                  <button
-                    class="order-btn nodrag"
-                    :disabled="inbIdx === g.inbounds.length - 1"
-                    title="下移入站"
-                    @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'down')"
-                    @dblclick.stop
-                  >▼</button>
+                  >
+                    ×
+                  </button>
+                  <div v-if="g.inbounds.length > 1" class="tag-order-actions">
+                    <button
+                      class="order-btn nodrag"
+                      :disabled="inbIdx === 0"
+                      title="上移入站"
+                      @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'up')"
+                      @dblclick.stop
+                    >▲</button>
+                    <button
+                      class="order-btn nodrag"
+                      :disabled="inbIdx === g.inbounds.length - 1"
+                      title="下移入站"
+                      @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'down')"
+                      @dblclick.stop
+                    >▼</button>
+                  </div>
                 </div>
                 <Handle
                   type="source"
@@ -238,7 +268,7 @@ useGridHeight(boxEl)
               class="ep ext-tgt"
             />
             <span
-              v-if="typeInfo(inb.type).text"
+              v-if="typeInfo(inb.type).text && inb.type !== 'tunnel'"
               class="type-tag"
               :class="typeInfo(inb.type).cls"
               :title="`类型：${typeInfo(inb.type).text}`"
@@ -248,23 +278,24 @@ useGridHeight(boxEl)
             <span class="port-badge">:{{ inb.port }}</span>
             <span class="tag clickable" :title="`编辑入站「${inb.tag}」`">{{ inb.tag }}</span>
             <span class="proto-badge" :class="inboundSummary(inb).cls">{{ inboundSummary(inb).proto }}</span>
-            <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑入站" />
 
-            <div v-if="editable && nativeInbounds.length > 1" class="tag-order-actions">
-              <button
-                class="order-btn nodrag"
-                :disabled="inbIdx === 0"
-                title="上移入站"
-                @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'up')"
-                @dblclick.stop
-              >▲</button>
-              <button
-                class="order-btn nodrag"
-                :disabled="inbIdx === nativeInbounds.length - 1"
-                title="下移入站"
-                @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'down')"
-                @dblclick.stop
-              >▼</button>
+            <div v-if="editable && nativeInbounds.length > 1" class="row-hover-actions" @click.stop>
+              <div class="tag-order-actions">
+                <button
+                  class="order-btn nodrag"
+                  :disabled="inbIdx === 0"
+                  title="上移入站"
+                  @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'up')"
+                  @dblclick.stop
+                >▲</button>
+                <button
+                  class="order-btn nodrag"
+                  :disabled="inbIdx === nativeInbounds.length - 1"
+                  title="下移入站"
+                  @click.stop="emit('move-inbound-order', data.server.id, inb.id, 'down')"
+                  @dblclick.stop
+                >▼</button>
+              </div>
             </div>
 
             <Handle
@@ -282,12 +313,13 @@ useGridHeight(boxEl)
       <!-- 出站列：盒内点（中线右）= 收盒内规则；边缘外点（右缘）= 发引用线；direct 仅右缘绿点收线 -->
       <div class="sb-col">
         <div class="sb-col-head">
-          <span class="sb-title">出站 (Outbound)</span>
+          <span class="sb-title">出站 <span class="sb-count">{{ data.outbounds.length }}</span></span>
           <button
             v-if="editable"
-            class="sb-add-btn"
+            class="sb-add-btn nodrag"
             title="为该服务器新建出站"
             @click.stop="emit('create-outbound', data.server.id)"
+            @dblclick.stop
           >
             <CsIcon name="add-plus" size="x-small" />&nbsp;出站
           </button>
@@ -298,7 +330,6 @@ useGridHeight(boxEl)
             v-for="(out, outIdx) in data.outbounds"
             :key="out.id"
             class="sb-row clickable"
-            :class="{ 'direct-row': out.virtual }"
             title="点击编辑出站"
             @click="emit('edit-outbound', out)"
           >
@@ -312,7 +343,7 @@ useGridHeight(boxEl)
             />
             <span
               class="tag out-tag clickable"
-              :class="out.isDraftTunnel ? 'draft' : out.owner_inbound_id ? 'tunnel' : out.inbound_ref ? 'ref' : out.virtual ? 'direct' : out.protocol === 'blackhole' ? 'blocked' : isOutboundDraft(out) ? 'draft' : ''"
+              :class="{ draft: out.isDraftTunnel || isOutboundDraft(out) }"
               :title="out.isDraftTunnel ? `直通草稿「${out.tag}」（拖拽右侧端点至落地入站建立管道）` : out.owner_inbound_id ? `四层直通链路出口「${out.tag}」（点击编辑对应直通管道）` : isOutboundDraft(out) ? `待连线出站「${out.tag}」（拖拽右侧端点至目标入站完成绑定）` : `出站「${out.tag}」`"
             >
               {{ out.tag }}
@@ -330,23 +361,24 @@ useGridHeight(boxEl)
               class="out-proto-badge pp"
               title="该出站通过派生的 freedom 向落地发送 PROXY Protocol v2，携带客户端真实 IP"
             >PPv2</span>
-            <CsIcon class="row-edit-icon" name="edit" size="x-small" variant="subtle" title="编辑出站" />
 
-            <div v-if="editable && data.outbounds.length > 1" class="tag-order-actions">
-              <button
-                class="order-btn nodrag"
-                :disabled="outIdx === 0"
-                title="上移出站"
-                @click.stop="emit('move-outbound-order', data.server.id, out.id, 'up')"
-                @dblclick.stop
-              >▲</button>
-              <button
-                class="order-btn nodrag"
-                :disabled="outIdx === data.outbounds.length - 1"
-                title="下移出站"
-                @click.stop="emit('move-outbound-order', data.server.id, out.id, 'down')"
-                @dblclick.stop
-              >▼</button>
+            <div v-if="editable && data.outbounds.length > 1" class="row-hover-actions" @click.stop>
+              <div class="tag-order-actions">
+                <button
+                  class="order-btn nodrag"
+                  :disabled="outIdx === 0"
+                  title="上移出站"
+                  @click.stop="emit('move-outbound-order', data.server.id, out.id, 'up')"
+                  @dblclick.stop
+                >▲</button>
+                <button
+                  class="order-btn nodrag"
+                  :disabled="outIdx === data.outbounds.length - 1"
+                  title="下移出站"
+                  @click.stop="emit('move-outbound-order', data.server.id, out.id, 'down')"
+                  @dblclick.stop
+                >▼</button>
+              </div>
             </div>
 
             <!-- 右侧外端接口：普通出站发跨盒引用；direct 行显示绿色出口圆点 -->
@@ -373,8 +405,8 @@ useGridHeight(boxEl)
 
 <style scoped lang="scss">
 .server-box {
-  width: 440px;
-  min-width: 344px;
+  width: 520px;
+  min-width: 416px;
   position: relative;
   background: var(--topo-card-bg);
   border: 1px solid var(--topo-card-border);
@@ -400,16 +432,27 @@ useGridHeight(boxEl)
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 0 16px;
-    height: 48px;
+    height: 56px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--topo-divider);
     background: var(--topo-head-bg);
     border-radius: 16px 16px 0 0;
 
     .sb-head-left {
       display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .sb-head-title-row {
+      display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       min-width: 0;
     }
 
@@ -418,11 +461,13 @@ useGridHeight(boxEl)
       align-items: center;
       gap: 6px;
       flex: none;
+      white-space: nowrap;
     }
 
     .sb-detail-btn {
       display: inline-flex;
       align-items: center;
+      white-space: nowrap;
       background: var(--topo-card-bg);
       border: 1px solid var(--topo-card-border);
       border-radius: 8px;
@@ -453,42 +498,49 @@ useGridHeight(boxEl)
     .name {
       font-weight: 600;
       font-size: 14px;
+      line-height: 18px;
       color: var(--topo-text-1);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 140px;
+      min-width: 0;
     }
     .offline-badge {
       font-size: 10px;
+      line-height: 14px;
       padding: 1px 6px;
       border-radius: 4px;
       background: var(--topo-danger-soft);
       color: var(--topo-danger);
       border: 1px solid var(--topo-danger-border);
       font-weight: 500;
+      white-space: nowrap;
+      flex: none;
     }
     .host {
-      color: var(--topo-text-2);
       font-size: 11px;
+      line-height: 14px;
+      font-variant-numeric: tabular-nums;
+      color: var(--topo-text-2);
+      padding-left: 14px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 140px;
     }
   }
 
   .sb-cols {
     display: flex;
-    gap: 32px;
+    gap: 48px;
     justify-content: space-between;
     padding: 0 16px 16px;
     width: 100%;
     box-sizing: border-box;
 
     .sb-col {
-      flex: 1;
+      flex: 0 1 auto;
       min-width: 0;
+      max-width: min(280px, calc(50% - 24px));
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -502,26 +554,40 @@ useGridHeight(boxEl)
       .sb-title {
         text-align: right;
       }
+      .sb-empty {
+        justify-content: flex-end;
+      }
     }
     .sb-col-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
       width: 100%;
       height: 32px;
       padding: 6px 4px 2px;
       box-sizing: border-box;
     }
     .sb-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
       color: var(--topo-text-2);
       font-size: 12px;
-      letter-spacing: 0.5px;
       font-weight: 600;
-      text-transform: uppercase;
+    }
+    .sb-count {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--topo-text-3);
+      font-variant-numeric: tabular-nums;
     }
     .sb-add-btn {
       display: inline-flex;
       align-items: center;
+      white-space: nowrap;
+      flex: none;
       background: var(--topo-card-bg);
       border: 1px solid var(--topo-card-border);
       border-radius: 4px;
@@ -555,6 +621,7 @@ useGridHeight(boxEl)
     width: 100%;
     background: var(--topo-surface);
     border: 1px solid var(--topo-surface-border);
+    border-left: 2px solid var(--topo-teal);
     border-radius: 8px;
     padding: 8px;
     box-sizing: border-box;
@@ -564,45 +631,46 @@ useGridHeight(boxEl)
 
     .layer-capsule-head {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      row-gap: 8px;
-      min-height: 24px;
-      padding: 0 4px 8px;
-      border-bottom: 1px dashed var(--topo-teal-border);
-      flex-wrap: wrap;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      height: 40px;
+      box-sizing: border-box;
+      padding: 0 2px 3px;
+      border-bottom: 1px solid var(--topo-divider);
+
+      .layer-head-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        height: 20px;
+        min-width: 0;
+      }
 
       .layer-title {
         display: flex;
         align-items: center;
-        gap: 4px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--topo-teal);
+        gap: 5px;
         min-width: 0;
+        flex: 1;
       }
       .layer-icon {
         flex: none;
+        color: var(--topo-teal);
       }
       .layer-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--topo-text-1);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 90px;
-      }
-      .layer-endpoint {
-        font-family: monospace;
-        font-size: 10.5px;
-        color: var(--topo-text-1);
-        background: var(--topo-teal-soft);
-        border: 1px solid var(--topo-teal-border);
-        padding: 0 5px;
-        border-radius: 4px;
-        flex: none;
+        min-width: 0;
       }
       .layer-sec {
         font-size: 9px;
+        line-height: 12px;
         padding: 1px 5px;
         border-radius: 4px;
         font-weight: 600;
@@ -621,33 +689,47 @@ useGridHeight(boxEl)
       .layer-actions {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 2px;
         flex: none;
       }
-      .layer-copy-btn,
       .layer-act-btn {
         display: inline-flex;
         align-items: center;
-        background: var(--topo-card-bg);
-        border: 1px solid var(--topo-card-border);
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 4px;
-        color: var(--topo-text-2);
-        font-size: 10.5px;
-        padding: 1px 6px;
+        color: var(--topo-text-3);
         cursor: pointer;
         transition: background-color 0.15s, border-color 0.15s, color 0.15s;
         &:hover {
           background: var(--topo-accent-soft);
-          border-color: var(--topo-accent);
+          border-color: var(--topo-accent-border);
           color: var(--topo-accent);
         }
       }
-      .layer-act-btn.danger {
+      .layer-act-btn.danger:hover {
+        background: var(--topo-danger-soft);
+        border-color: var(--topo-danger-border);
         color: var(--topo-danger);
-        &:hover {
-          background: var(--topo-danger-soft);
-          border-color: var(--topo-danger);
-        }
+      }
+
+      .layer-head-sub {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+      }
+      .layer-endpoint {
+        font-size: 11px;
+        line-height: 14px;
+        font-variant-numeric: tabular-nums;
+        color: var(--topo-text-2);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
     }
 
@@ -659,17 +741,17 @@ useGridHeight(boxEl)
 
     .layer-subrow {
       background: var(--topo-card-bg);
-      border-color: var(--topo-teal-border);
+      border-color: var(--topo-row-border);
       &:hover {
-        background: var(--topo-teal-soft);
-        border-color: var(--topo-teal);
+        background: var(--topo-row-hover);
+        border-color: var(--topo-accent-border);
       }
     }
     .layer-unbind-btn {
       flex: none;
-      width: 16px;
-      height: 16px;
-      line-height: 14px;
+      width: 18px;
+      height: 18px;
+      line-height: 16px;
       text-align: center;
       border-radius: 50%;
       font-size: 12px;
@@ -692,8 +774,8 @@ useGridHeight(boxEl)
 
   .path-badge {
     font-size: 10px;
+    font-variant-numeric: tabular-nums;
     color: var(--topo-teal);
-    font-family: monospace;
     background: var(--topo-teal-soft);
     padding: 1px 5px;
     border-radius: 4px;
@@ -706,7 +788,8 @@ useGridHeight(boxEl)
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 8px;
+    padding: 0 12px;
+    width: 100%;
     height: 32px;
     max-width: 100%;
     box-sizing: border-box;
@@ -722,11 +805,12 @@ useGridHeight(boxEl)
     }
 
     .tag {
+      flex: 1;
+      min-width: 0;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 110px;
       &.clickable {
         cursor: pointer;
         &:hover {
@@ -736,33 +820,10 @@ useGridHeight(boxEl)
       }
     }
     .out-tag {
-      font-weight: 600;
-      color: var(--topo-accent);
-      &.clickable {
-        cursor: pointer;
-        &:hover {
-          text-decoration: underline;
-        }
-      }
-      &.tunnel {
-        color: var(--topo-teal);
-      }
-      &.ref {
-        color: var(--topo-warning);
-      }
-      &.direct {
-        color: var(--topo-success);
-      }
+      color: var(--topo-text-1);
       &.draft {
-        color: var(--topo-warning);
-        border: 1px dashed var(--topo-warning-border);
-        padding: 1px 6px;
-        border-radius: 8px;
+        color: var(--topo-text-2);
       }
-    }
-    &.direct-row {
-      background: var(--topo-success-soft);
-      border-color: var(--topo-success-border);
     }
     &.clickable {
       cursor: pointer;
@@ -770,69 +831,41 @@ useGridHeight(boxEl)
       &:hover {
         background: var(--topo-row-hover);
         border-color: var(--topo-accent-border);
-        .row-edit-icon {
-          opacity: 0.85;
-        }
       }
-    }
-
-    .row-edit-icon {
-      font-size: 11px;
-      opacity: 0;
-      margin-left: 3px;
-      color: var(--topo-text-3);
-      transition: opacity 0.15s ease;
-      flex: none;
     }
 
     .port-badge {
       font-size: 11px;
       font-weight: 600;
+      font-variant-numeric: tabular-nums;
       color: var(--topo-accent);
-      font-family: monospace;
       flex: none;
     }
 
     .proto-badge {
       font-size: 9px;
-      padding: 1px 4px;
+      padding: 1px 5px;
       border-radius: 4px;
       font-weight: 600;
       flex: none;
-      &.vless {
+      &.vless,
+      &.mixed,
+      &.sec,
+      &.net {
         background: var(--topo-accent-soft);
         color: var(--topo-accent);
         border: 1px solid var(--topo-accent-border);
       }
-      &.hy2 {
-        background: var(--topo-teal-soft);
-        color: var(--topo-teal);
-        border: 1px solid var(--topo-teal-border);
-      }
-      &.mixed {
-        background: var(--topo-accent-soft);
-        color: var(--topo-accent);
-        border: 1px solid var(--topo-accent-border);
+      &.hy2,
+      &.other {
+        background: var(--topo-surface);
+        color: var(--topo-text-2);
+        border: 1px solid var(--topo-card-border);
       }
       &.tunnel {
         background: var(--topo-teal-soft);
         color: var(--topo-teal);
         border: 1px solid var(--topo-teal-border);
-      }
-      &.other {
-        background: var(--topo-card-bg);
-        color: var(--topo-text-2);
-        border: 1px solid var(--topo-card-border);
-      }
-      &.sec {
-        background: var(--topo-accent-soft);
-        color: var(--topo-accent);
-        border: 1px solid var(--topo-accent-border);
-      }
-      &.net {
-        background: var(--topo-accent-soft);
-        color: var(--topo-accent);
-        border: 1px solid var(--topo-accent-border);
       }
     }
 
@@ -842,7 +875,7 @@ useGridHeight(boxEl)
       border-radius: 4px;
       font-weight: 600;
       flex: none;
-      background: var(--topo-card-bg);
+      background: var(--topo-surface);
       color: var(--topo-text-2);
       border: 1px solid var(--topo-card-border);
       &.tunnel {
@@ -881,7 +914,7 @@ useGridHeight(boxEl)
       flex: none;
       font-size: 10px;
       padding: 1px 5px;
-      border-radius: 8px;
+      border-radius: 4px;
       font-weight: 600;
       &.user {
         background: var(--topo-success-soft);
@@ -891,7 +924,8 @@ useGridHeight(boxEl)
         background: var(--topo-warning-soft);
         color: var(--topo-warning);
       }
-      &.tunnel {
+      &.tunnel,
+      &.channel {
         background: var(--topo-teal-soft);
         color: var(--topo-teal);
       }
@@ -899,21 +933,35 @@ useGridHeight(boxEl)
         background: var(--topo-accent-soft);
         color: var(--topo-accent);
       }
-      &.channel {
-        background: var(--topo-teal-soft);
-        color: var(--topo-teal);
-      }
+    }
+
+    .row-hover-actions {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding-left: 12px;
+      background: linear-gradient(90deg, transparent, var(--topo-row-hover) 12px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      z-index: 4;
+    }
+
+    &:hover .row-hover-actions,
+    .row-hover-actions:focus-within {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .tag-order-actions {
       display: inline-flex;
       flex-direction: column;
       gap: 1px;
-      opacity: 0;
-      transition: opacity 0.15s;
       flex: none;
-      margin-left: auto;
-      z-index: 4;
       .order-btn {
         background: var(--topo-card-bg);
         border: 1px solid var(--topo-card-border);
@@ -944,22 +992,45 @@ useGridHeight(boxEl)
         }
       }
     }
-    &:hover .tag-order-actions,
-    .tag-order-actions:focus-within {
-      opacity: 1;
-    }
   }
 
   .sb-empty {
-    padding: 4px 10px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0 4px;
     color: var(--topo-text-3);
     font-size: 11px;
     height: 32px;
     display: flex;
     align-items: center;
-    background: var(--topo-surface);
-    border-radius: 8px;
-    border: 1px dashed var(--topo-surface-border);
+  }
+
+  .custom-resizer-corner {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 3px;
+    box-sizing: border-box;
+    border-radius: 4px;
+    color: var(--topo-text-3);
+    cursor: ew-resize;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    z-index: 6;
+  }
+
+  &:hover .custom-resizer-corner,
+  &.selected .custom-resizer-corner {
+    opacity: 0.75;
+    &:hover {
+      opacity: 1;
+      color: var(--topo-accent);
+    }
   }
 }
 </style>
