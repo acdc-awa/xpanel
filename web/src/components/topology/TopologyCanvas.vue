@@ -2176,6 +2176,7 @@ const selectionInfo = computed(() => {
   right: -6px !important;
   top: 50% !important;
   transform: translateY(-50%) !important;
+  z-index: 3;
 }
 
 /* 端点双点结构 */

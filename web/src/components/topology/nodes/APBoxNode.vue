@@ -26,6 +26,13 @@ const groupNameMap = computed(
 function groupName(id: number): string {
   return groupNameMap.value.get(id) ?? `组#${id}`
 }
+
+const protoBadge = computed(() => {
+  const raw = protocolDisplayName(props.data.ap.resolved_protocol)
+  if (raw === 'hysteria') return { label: 'HY2', cls: 'neutral' }
+  if (raw === 'tunnel') return { label: 'TUNNEL', cls: 'teal' }
+  return { label: raw ? raw.toUpperCase() : 'VLESS', cls: 'blue' }
+})
 </script>
 
 <template>
@@ -45,39 +52,51 @@ function groupName(id: number): string {
       title="拖线至目标用户入站"
     />
 
-    <div class="ap-node-head">
-      <CsIcon name="globe" class="ap-icon" />
-      <span class="ap-name-text" :title="data.ap.name">{{ data.ap.name }}</span>
-      <span v-if="!data.ap.enabled" class="ap-chip gray">禁用</span>
+    <div class="ap-head">
+      <div class="ap-head-left">
+        <CsIcon name="globe" size="small" class="ap-icon" />
+        <span class="ap-name-text" :title="data.ap.name">{{ data.ap.name }}</span>
+      </div>
+      <div class="ap-head-badges">
+        <span class="ap-badge role">接入点</span>
+        <span v-if="!data.ap.enabled" class="ap-badge gray">禁用</span>
+      </div>
     </div>
 
-    <div class="ap-node-perms">
-      <template v-if="data.ap.permission_group_ids && data.ap.permission_group_ids.length > 0">
-        <span v-for="gid in data.ap.permission_group_ids.slice(0, 3)" :key="gid" class="ap-chip blue">
-          {{ groupName(gid) }}
+    <div class="ap-body">
+      <div class="ap-node-perms">
+        <template v-if="data.ap.permission_group_ids && data.ap.permission_group_ids.length > 0">
+          <span
+            v-for="gid in data.ap.permission_group_ids.slice(0, 3)"
+            :key="gid"
+            class="ap-badge blue perm-item"
+            :title="groupName(gid)"
+          >
+            {{ groupName(gid) }}
+          </span>
+          <span v-if="data.ap.permission_group_ids.length > 3" class="ap-badge gray">
+            +{{ data.ap.permission_group_ids.length - 3 }}
+          </span>
+        </template>
+        <span v-else class="ap-perm-warn">未分配权限组（全员不可见）</span>
+      </div>
+
+      <!-- 管道消费的实时端点展示 -->
+      <div v-if="data.ap.resolved_host" class="ap-endpoint-row">
+        <span class="ap-dot online" />
+        <span class="ap-endpoint-text" :title="`${data.ap.resolved_host}:${data.ap.resolved_port}`">
+          {{ data.ap.resolved_host }}:{{ data.ap.resolved_port }}
         </span>
-        <span v-if="data.ap.permission_group_ids.length > 3" class="ap-chip gray">
-          +{{ data.ap.permission_group_ids.length - 3 }}
-        </span>
-      </template>
-      <span v-else class="ap-chip orange">未分配权限组（全员不可见）</span>
-    </div>
+        <span class="ap-proto-badge" :class="protoBadge.cls">{{ protoBadge.label }}</span>
+      </div>
+      <div v-else class="ap-waiting-text">
+        <span class="ap-dot offline" />
+        <span>未绑定：从右侧端点拖出连线</span>
+      </div>
 
-    <!-- 管道消费的实时端点展示 -->
-    <div v-if="data.ap.resolved_host" class="ap-resolved-text">
-      <span class="ap-dot online" />
-      <code class="cell-mono">{{ data.ap.resolved_host }}:{{ data.ap.resolved_port }}</code>
-      <span class="ap-chip" :class="data.ap.resolved_protocol === 'hysteria' ? 'teal' : 'blue'">
-        {{ data.ap.resolved_protocol === 'hysteria' ? 'Hysteria 2' : (protocolDisplayName(data.ap.resolved_protocol).toUpperCase() || 'VLESS') }}
-      </span>
-    </div>
-    <div v-else class="ap-resolved-text waiting">
-      <span class="ap-dot offline" />
-      <span style="font-size: 11px">未绑定：从右侧端点拖出连线</span>
-    </div>
-
-    <div v-if="data.ap.resolved_target_desc" class="ap-desc-text" :title="data.ap.resolved_target_desc">
-      直连 → {{ data.ap.resolved_target_desc }}
+      <div v-if="data.ap.resolved_target_desc" class="ap-desc-text" :title="data.ap.resolved_target_desc">
+        直连 → {{ data.ap.resolved_target_desc }}
+      </div>
     </div>
   </div>
 </template>
@@ -86,41 +105,54 @@ function groupName(id: number): string {
 .ap-node {
   position: relative;
   width: 280px;
+  box-sizing: border-box;
   background: var(--topo-card-bg);
   border: 1px solid var(--topo-card-border);
-  border-left: 3px solid var(--topo-accent);
   border-radius: var(--topo-radius, 16px);
-  padding: 16px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  overflow: visible;
   box-shadow: var(--topo-card-shadow);
   transition: border-color 0.2s, box-shadow 0.2s;
-  contain: paint;
-  transform: translateZ(0);
 
   &:hover {
     border-color: var(--topo-card-border-hover);
-    border-left-color: var(--topo-accent);
     box-shadow: var(--topo-card-shadow-hover);
+    .ap-endpoint-row {
+      background: var(--topo-row-hover);
+      border-color: var(--topo-accent-border);
+    }
   }
   &.unlinked {
-    border: 1.5px dashed var(--topo-warning);
+    border: 1px dashed var(--topo-warning);
     &:hover {
       border-color: var(--topo-warning);
     }
   }
   &.disabled {
-    opacity: 0.6;
-    filter: grayscale(0.4);
+    .ap-head,
+    .ap-body {
+      opacity: 0.65;
+    }
   }
 
-  .ap-node-head {
+  .ap-head {
+    height: 40px;
+    padding: 0 14px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    min-height: 24px;
+    background: var(--topo-head-bg);
+    border-bottom: 1px solid var(--topo-divider);
+    border-radius: 16px 16px 0 0;
+    box-sizing: border-box;
+  }
+  .ap-head-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
   }
   .ap-icon {
     flex: none;
@@ -128,41 +160,105 @@ function groupName(id: number): string {
   }
   .ap-name-text {
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--topo-text-1);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex: 1;
     min-width: 0;
   }
-  /* 固定 24px 高、不换行：权限组数量再多也不改变卡片高度，保证底边落在 8pt 网格上 */
+  .ap-head-badges {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+  }
+
+  .ap-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .ap-node-perms {
     display: flex;
     align-items: center;
     gap: 4px;
-    flex-wrap: nowrap;
+    min-height: 20px;
     overflow: hidden;
-    height: 24px;
 
-    .ap-chip {
-      flex: none;
-      max-width: 120px;
+    .perm-item {
+      display: inline-block;
+      flex: 0 1 auto;
+      min-width: 28px;
+      max-width: 112px;
+      line-height: 16px;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
     }
   }
-  .ap-resolved-text {
+  .ap-perm-warn {
+    font-size: 11px;
+    line-height: 20px;
+    color: var(--topo-warning);
+  }
+
+  .ap-endpoint-row {
+    height: 32px;
+    padding: 0 10px;
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: 24px;
-    font-size: 11.5px;
-    color: var(--topo-accent);
-    &.waiting {
-      color: var(--topo-warning);
+    background: var(--topo-row-bg);
+    border: 1px solid var(--topo-row-border);
+    border-radius: 8px;
+    box-sizing: border-box;
+    transition: background-color 0.15s, border-color 0.15s;
+  }
+  .ap-endpoint-text {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--topo-text-1);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ap-proto-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 600;
+    flex: none;
+    border: 1px solid transparent;
+    &.blue {
+      background: var(--topo-accent-soft);
+      color: var(--topo-accent);
+      border-color: var(--topo-accent-border);
     }
+    &.neutral {
+      background: var(--topo-surface);
+      color: var(--topo-text-2);
+      border-color: var(--topo-card-border);
+    }
+    &.teal {
+      background: var(--topo-teal-soft);
+      color: var(--topo-teal);
+      border-color: var(--topo-teal-border);
+    }
+  }
+
+  .ap-waiting-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+    font-size: 11px;
+    line-height: 20px;
+    color: var(--topo-warning);
   }
   .ap-dot {
     width: 6px;
@@ -177,7 +273,7 @@ function groupName(id: number): string {
     }
   }
   .ap-desc-text {
-    font-size: 10.5px;
+    font-size: 11px;
     line-height: 16px;
     color: var(--topo-text-2);
     white-space: nowrap;
@@ -185,38 +281,30 @@ function groupName(id: number): string {
     text-overflow: ellipsis;
   }
 
-  /* 语义徽标：全部消费画布亮/暗自适应令牌，与 Cloudscape Badge 保持一致 */
-  .ap-chip {
+  .ap-badge {
     display: inline-flex;
     align-items: center;
     height: 18px;
+    line-height: 1;
     padding: 0 6px;
-    border-radius: 999px;
+    box-sizing: border-box;
+    border-radius: 4px;
     border: 1px solid transparent;
     font-size: 10px;
-    line-height: 1;
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
+    flex: none;
 
+    &.role,
     &.blue {
       background: var(--topo-accent-soft);
       border-color: var(--topo-accent-border);
       color: var(--topo-accent);
     }
     &.gray {
-      background: var(--topo-row-bg);
-      border-color: var(--topo-row-border);
+      background: var(--topo-surface);
+      border-color: var(--topo-card-border);
       color: var(--topo-text-2);
-    }
-    &.orange {
-      background: var(--topo-warning-soft);
-      border-color: var(--topo-warning-border);
-      color: var(--topo-warning);
-    }
-    &.teal {
-      background: var(--topo-teal-soft);
-      border-color: var(--topo-teal-border);
-      color: var(--topo-teal);
     }
   }
 }
