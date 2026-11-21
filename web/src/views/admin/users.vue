@@ -7,15 +7,9 @@ import {
   CsAlert,
   CsBadge,
   CsButton,
-  CsButtonDropdown,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsCheckbox,
   CsContainer,
   CsDatePicker,
-  CsEmpty,
   CsForm,
   CsFormItem,
   CsInput,
@@ -25,15 +19,13 @@ import {
   CsPage,
   CsPagination,
   CsPaginationBar,
-  CsProgressBar,
   CsSegmentedControl,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsToggle,
   CsToolbar,
-  CsTooltip,
 } from '@/components/cloudscape'
-import type { SegmentedOption } from '@/components/cloudscape'
+import type { SegmentedOption, TableColumn } from '@/components/cloudscape'
 import {
   getUsers,
   createUser,
@@ -61,8 +53,12 @@ const list = ref<AdminUser[]>([])
 const total = ref(0)
 const loading = ref(false)
 const page = ref(1)
-const size = ref(20)
+const size = ref(10)
 const keyword = ref('')
+const statusFilter = ref<'' | '0' | '1'>('')
+const planFilter = ref<'' | number>('')
+const groupFilter = ref<'' | number>('')
+const roleFilter = ref<'' | 'user' | 'admin'>('')
 
 const isMobile = useMediaQuery(MQ.tablet)
 onUnmounted(() => {
@@ -117,6 +113,39 @@ const newUserGroupOptions = computed(() => [
   ...permissionGroups.value.map((g) => ({ label: g.name, value: g.id })),
 ])
 
+const statusFilterOptions = [
+  { label: '全部状态', value: '' },
+  { label: '正常', value: '1' },
+  { label: '已封禁', value: '0' },
+]
+
+const planFilterOptions = computed(() => [
+  { label: '全部套餐', value: '' },
+  { label: '无套餐', value: 0 },
+  ...plans.value.map((p) => ({ label: p.name, value: p.id })),
+])
+
+const groupFilterOptions = computed(() => [
+  { label: '全部权限组', value: '' },
+  { label: '未分配权限组', value: 0 },
+  ...permissionGroups.value.map((g) => ({ label: g.name, value: g.id })),
+])
+
+const roleFilterOptions = [
+  { label: '全部角色', value: '' },
+  { label: '普通用户', value: 'user' },
+  { label: '管理员', value: 'admin' },
+]
+
+const hasActiveFilters = computed(
+  () =>
+    keyword.value.trim() !== '' ||
+    statusFilter.value !== '' ||
+    planFilter.value !== '' ||
+    groupFilter.value !== '' ||
+    roleFilter.value !== '',
+)
+
 function groupName(id?: number) {
   if (!id) return '无'
   return permissionGroups.value.find((g) => g.id === id)?.name ?? `组#${id}`
@@ -131,7 +160,7 @@ function userGroupDisplay(u: any) {
   if (u.effective_group_id && u.effective_group_id > 0) {
     return { name: `${groupName(u.effective_group_id)} (套餐继承)`, type: 'success', custom: false }
   }
-  return { name: '未分配权限组', type: 'info', custom: false }
+  return { name: '无', type: 'info', custom: false }
 }
 
 // 「未分配权限组」是告警态而不是健康态：绿色只留给「已继承套餐权限组」
@@ -198,10 +227,31 @@ function onSearch() {
   load()
 }
 
+function onFilterChange() {
+  page.value = 1
+  load()
+}
+
+function resetFilters() {
+  window.clearTimeout(searchTimer)
+  keyword.value = ''
+  statusFilter.value = ''
+  planFilter.value = ''
+  groupFilter.value = ''
+  roleFilter.value = ''
+  page.value = 1
+  load()
+}
+
 async function load() {
   loading.value = true
   try {
-    const { data } = await getUsers(page.value, size.value, keyword.value.trim())
+    const { data } = await getUsers(page.value, size.value, keyword.value.trim(), {
+      status: statusFilter.value,
+      plan_id: planFilter.value,
+      group_id: groupFilter.value,
+      role: roleFilter.value,
+    })
     if (data.code === 0) {
       list.value = data.data.items
       total.value = data.data.total
@@ -219,9 +269,18 @@ onMounted(async () => {
   await Promise.all([load(), loadAuxData()])
 })
 
+const RING_RADIUS = 7.5
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
 function usagePercent(u: any) {
   if (!u.total_bytes) return 0
   return Math.min(100, Math.round((u.used_bytes / u.total_bytes) * 100))
+}
+
+function ringDashOffset(u: any) {
+  if (!u.total_bytes || u.used_bytes <= 0) return RING_CIRCUMFERENCE
+  const ratio = Math.min(1, u.used_bytes / u.total_bytes)
+  return RING_CIRCUMFERENCE * (1 - ratio)
 }
 
 // 时间展示统一走展示时区：后端存 UTC，直接截断字符串会把 UTC 墙钟当本地时间显示
@@ -525,7 +584,7 @@ async function doResetSubscribeToken() {
       if (data.data.uuid) {
         row.uuid = data.data.uuid
       }
-      ElMessage.success('订阅地址及连接密钥已重置，已向在线服务器同步')
+      ElMessage.success('订阅地址及连接密钥已重置')
     } else {
       ElMessage.error(data.message)
     }
@@ -536,9 +595,19 @@ async function doResetSubscribeToken() {
   }
 }
 
-// ---- 批量操作与 CSV 导出（ISSUE-17 用户管理增强） ----
+// ---- 批量操作与 CSV 导出（显式进入多选模式） ----
+const selectMode = ref(false)
 const selected = ref<AdminUser[]>([])
 const batchBusy = ref(false)
+
+function enterSelectMode() {
+  selectMode.value = true
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  selected.value = []
+}
 
 function csvCell(v: any) {
   const s = String(v ?? '')
@@ -546,7 +615,7 @@ function csvCell(v: any) {
 }
 
 function exportCSV() {
-  const rows = selected.value.length ? selected.value : list.value
+  const rows = selectMode.value ? selected.value : list.value
   if (!rows.length) {
     ElMessage.warning('没有可导出的用户')
     return
@@ -608,8 +677,11 @@ async function batchToggle(targetStatus: 0 | 1) {
       if (data.code === 0) ok++
     }
     ElMessage.success(`已完成 ${ok}/${rows.length}`)
-    selected.value = []
-    load()
+    if (ok > 0) {
+      selected.value = []
+      selectMode.value = false
+      load()
+    }
   } catch (e) {
     ElMessage.error(errMsg(e, '批量操作失败'))
   } finally {
@@ -617,7 +689,7 @@ async function batchToggle(targetStatus: 0 | 1) {
   }
 }
 
-// 移动端卡片多选辅助
+// 表格多选辅助
 function isRowSelected(row: AdminUser): boolean {
   return selected.value.some((u) => u.id === row.id)
 }
@@ -654,40 +726,23 @@ function toggleSelectAll(checked: boolean) {
   }
 }
 
-function handleCardAction(cmd: string | number, row: AdminUser) {
-  switch (cmd) {
-    case 'adjust':
-      openAdjust(row)
-      break
-    case 'subscribe':
-      openSubscribeInfo(row)
-      break
-    case 'reset_traffic':
-      doResetTraffic(row)
-      break
-    case 'toggle':
-      doToggle(row)
-      break
-    case 'delete':
-      doDelete(row)
-      break
-  }
-}
-
-// CsButtonDropdown 的条目是数据驱动，禁用态与文案要按行走
-function cardMenuItems(row: AdminUser) {
-  return [
-    { id: 'subscribe', text: '订阅信息', iconName: 'external' },
-    { id: 'reset_traffic', text: '重置流量', iconName: 'refresh' },
-    {
-      id: 'toggle',
-      text: row.status === 1 ? '封禁用户' : '解封用户',
-      iconName: row.status === 1 ? 'lock-private' : 'unlocked',
-      disabled: isSelf(row),
-    },
-    { id: 'delete', text: '删除用户', iconName: 'remove', dividerBefore: true },
+const tableColumns = computed<TableColumn[]>(() => {
+  const cols: TableColumn[] = [
+    { id: 'id', header: '编号' },
+    { id: 'user', header: '用户' },
+    { id: 'status', header: '状态' },
+    { id: 'plan', header: '套餐' },
+    { id: 'group', header: '权限组' },
+    { id: 'traffic', header: '流量' },
+    { id: 'expire_at', header: '到期时间' },
+    { id: 'balance', header: '余额' },
+    { id: 'actions', header: '操作', align: 'end' },
   ]
-}
+  if (selectMode.value) {
+    cols.unshift({ id: 'select', width: 42, align: 'center' })
+  }
+  return cols
+})
 </script>
 
 <template>
@@ -698,131 +753,178 @@ function cardMenuItems(row: AdminUser) {
         placeholder="搜索邮箱 / UUID / 备注"
         clearable
         prefix-icon="search"
-        style="width: 280px"
+        class="filter-search"
         @keyup.enter="onSearch"
         @clear="onSearch"
         @input="onSearchInput"
       />
+      <CsSelect
+        v-model="statusFilter"
+        :options="statusFilterOptions"
+        placeholder="全部状态"
+        aria-label="按状态筛选"
+        class="filter-select filter-select--sm"
+        @change="onFilterChange"
+      />
+      <CsSelect
+        v-model="planFilter"
+        :options="planFilterOptions"
+        placeholder="全部套餐"
+        aria-label="按套餐筛选"
+        class="filter-select filter-select--md"
+        @change="onFilterChange"
+      />
+      <CsSelect
+        v-model="groupFilter"
+        :options="groupFilterOptions"
+        placeholder="全部权限组"
+        aria-label="按权限组筛选"
+        class="filter-select filter-select--md"
+        @change="onFilterChange"
+      />
+      <CsSelect
+        v-model="roleFilter"
+        :options="roleFilterOptions"
+        placeholder="全部角色"
+        aria-label="按角色筛选"
+        class="filter-select filter-select--sm"
+        @change="onFilterChange"
+      />
+      <CsButton v-if="hasActiveFilters" @click="resetFilters">重置</CsButton>
       <template #actions>
-        <CsButton icon-name="download" @click="exportCSV">导出 CSV</CsButton>
-        <CsButton :loading="batchBusy" @click="batchToggle(0)">批量封禁</CsButton>
-        <CsButton :loading="batchBusy" @click="batchToggle(1)">批量启用</CsButton>
-        <CsButton variant="primary" icon-name="add-plus" @click="newUserOpen = true">新增用户</CsButton>
+        <template v-if="!selectMode">
+          <CsButton icon-name="check" @click="enterSelectMode">批量操作</CsButton>
+          <CsButton icon-name="download" @click="exportCSV">导出 CSV</CsButton>
+          <CsButton variant="primary" icon-name="add-plus" @click="newUserOpen = true">新增用户</CsButton>
+        </template>
+        <template v-else>
+          <span class="select-count">已选 {{ selected.length }} 项</span>
+          <CsButton :loading="batchBusy" :disabled="selected.length === 0" @click="batchToggle(0)">批量封禁</CsButton>
+          <CsButton :loading="batchBusy" :disabled="selected.length === 0" @click="batchToggle(1)">批量启用</CsButton>
+          <CsButton icon-name="download" :disabled="selected.length === 0" @click="exportCSV">导出所选</CsButton>
+          <CsButton @click="exitSelectMode">退出多选</CsButton>
+        </template>
       </template>
     </CsToolbar>
 
     <CsContainer header="用户列表">
-      <template #actions>
-        <div class="user-select-bar">
+      <CsTable
+        compact
+        :wrap-lines="false"
+        :items="list"
+        :columns="tableColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        track-by="id"
+        :empty-text="hasActiveFilters ? '没有符合筛选条件的用户' : '暂无用户'"
+      >
+        <template #header-select>
           <CsCheckbox
             :model-value="isAllSelected"
             :indeterminate="isIndeterminate"
+            aria-label="全选当前页"
             @change="(v: boolean) => toggleSelectAll(!!v)"
-          >
-            全选当前页 (已选 {{ selected.length }} / {{ total }})
-          </CsCheckbox>
-        </div>
-      </template>
+          />
+        </template>
 
-      <div v-if="loading" style="padding: 48px 0; text-align: center">
-        <CsSpinner size="large" />
-      </div>
+        <template #cell-select="{ row }">
+          <CsCheckbox
+            :model-value="isRowSelected(row)"
+            :aria-label="`选择 ${row.email}`"
+            @change="(val: boolean) => toggleSelectRow(row, !!val)"
+          />
+        </template>
 
-      <CsEmpty v-else-if="list.length === 0" icon-name="user-profile" description="暂无匹配用户" />
+        <template #cell-id="{ row }">
+          <span class="user-id">#{{ row.id }}</span>
+        </template>
 
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，额度作为卡片主指标 -->
-      <CsCardGrid v-else>
-        <CsCard
-          v-for="row in list"
-          :key="row.id"
-          :class="{ 'user-card--selected': isRowSelected(row), 'user-card--banned': row.status !== 1 }"
-        >
-          <template #header>
-            <div class="user-head">
-              <CsCheckbox
-                :model-value="isRowSelected(row)"
-                :aria-label="`选择 ${row.email}`"
-                @change="(val: boolean) => toggleSelectRow(row, !!val)"
-              />
-              <button type="button" class="user-name" title="点击查看与编辑详情" @click="openDetail(row)">
+        <template #cell-user="{ row }">
+          <div class="user-cell">
+            <div class="user-cell-main">
+              <button
+                type="button"
+                class="user-email-btn"
+                :class="{ 'is-muted': row.status !== 1 }"
+                title="点击查看与编辑详情"
+                @click="openDetail(row)"
+              >
                 {{ row.email }}
               </button>
-            </div>
-            <div class="user-meta">
-              <span class="user-id">#{{ row.id }}</span>
-              <CsBadge v-if="row.role === 'admin'" color="severity-medium">管理员</CsBadge>
-              <CsBadge :color="row.status === 1 ? 'green' : 'red'">
-                {{ row.status === 1 ? '正常' : '已封禁' }}
-              </CsBadge>
+              <CsBadge v-if="row.role === 'admin'" class="status-badge" color="severity-medium">管理员</CsBadge>
             </div>
             <div v-if="row.remark" class="user-remark" :title="row.remark">备注：{{ row.remark }}</div>
-          </template>
-
-          <template #actions>
-            <CsTooltip
-              :content="isSelf(row) ? '不能封禁当前登录的账号' : row.status === 1 ? '点击封禁用户' : '点击解封用户'"
-              placement="top"
-            >
-              <CsToggle
-                :model-value="row.status === 1"
-                :disabled="isSelf(row)"
-                :aria-label="`切换 ${row.email} 的启用状态`"
-                @change="doToggle(row)"
-              />
-            </CsTooltip>
-          </template>
-
-          <CsCardFacts>
-            <CsCardFact label="套餐">
-              <CsBadge color="blue">{{ planName(row.plan_id) }}</CsBadge>
-            </CsCardFact>
-            <CsCardFact label="所属权限组">
-              <CsBadge :color="userGroupBadgeColor(row)">
-                {{ userGroupDisplay(row).name }}
-              </CsBadge>
-            </CsCardFact>
-            <CsCardFact label="账户余额" mono>
-              <span class="balance-value">{{ formatMoney((row as any).balance_cents || 0) }}</span>
-            </CsCardFact>
-          </CsCardFacts>
-
-          <div class="user-traffic">
-            <div class="traffic-head">
-              <span>流量使用</span>
-              <span class="traffic-value">
-                <strong>{{ formatBytes(row.used_bytes) }}</strong> /
-                {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}
-                <span v-if="row.total_bytes" class="traffic-percent">({{ usagePercent(row) }}%)</span>
-              </span>
-            </div>
-            <CsProgressBar
-              v-if="row.total_bytes"
-              :value="usagePercent(row)"
-              :bar-height="5"
-              hide-text
-              :color="usagePercent(row) > 90 ? 'var(--color-text-status-error-ri38gt)' : undefined"
-              :aria-label="`流量已用 ${usagePercent(row)}%`"
-            />
-            <div class="traffic-expire">{{ row.expire_at ? fmtTime(row.expire_at) + ' 到期' : '长期有效' }}</div>
           </div>
+        </template>
 
-          <template #footer>
-            <CsButton icon-name="settings" @click="openDetail(row)">编辑配置</CsButton>
-            <CsButton icon-name="ticket" @click="openAdjust(row)">调整余额</CsButton>
-            <CsButtonDropdown
-              class="card-more"
-              icon-only
-              icon-name="ellipsis"
-              aria-label="更多操作"
-              :items="cardMenuItems(row)"
-              @select="(cmd) => handleCardAction(cmd, row)"
-            />
-          </template>
-        </CsCard>
-      </CsCardGrid>
+        <template #cell-status="{ row }">
+          <CsBadge class="status-badge" :color="row.status === 1 ? 'green' : 'red'">
+            {{ row.status === 1 ? '正常' : '已封禁' }}
+          </CsBadge>
+        </template>
+
+        <template #cell-plan="{ row }">
+          <span :class="{ 'cell-muted': !row.plan_id || row.status !== 1 }">
+            {{ planName(row.plan_id) }}
+          </span>
+        </template>
+
+        <template #cell-group="{ row }">
+          <CsBadge class="status-badge" :color="userGroupBadgeColor(row)">
+            {{ userGroupDisplay(row).name }}
+          </CsBadge>
+        </template>
+
+        <template #cell-traffic="{ row }">
+          <div
+            class="traffic-cell"
+            :title="row.total_bytes ? `已用 ${usagePercent(row)}%` : '不限流量'"
+          >
+            <svg
+              v-if="row.total_bytes"
+              class="traffic-ring"
+              :class="{ 'is-danger': usagePercent(row) > 90 }"
+              viewBox="0 0 20 20"
+              aria-hidden="true"
+            >
+              <circle class="traffic-ring-track" cx="10" cy="10" r="7.5" />
+              <circle
+                v-if="row.used_bytes > 0"
+                class="traffic-ring-fill"
+                cx="10"
+                cy="10"
+                r="7.5"
+                transform="rotate(-90 10 10)"
+                :stroke-dasharray="RING_CIRCUMFERENCE"
+                :stroke-dashoffset="ringDashOffset(row)"
+              />
+            </svg>
+            <span class="traffic-text cell-mono" :class="{ 'cell-muted': row.status !== 1 }">
+              <strong>{{ formatBytes(row.used_bytes) }}</strong> / {{ row.total_bytes ? formatBytes(row.total_bytes) : '不限' }}
+            </span>
+          </div>
+        </template>
+
+        <template #cell-expire_at="{ row }">
+          <span v-if="row.expire_at" class="cell-mono" :class="{ 'cell-muted': row.status !== 1 }">
+            {{ fmtTime(row.expire_at) }}
+          </span>
+          <span v-else class="cell-muted">长期有效</span>
+        </template>
+
+        <template #cell-balance="{ row }">
+          <span class="cell-mono balance-cell" :class="{ 'cell-muted': row.status !== 1 }">
+            {{ formatMoney((row as any).balance_cents || 0) }}
+          </span>
+        </template>
+
+        <template #cell-actions="{ row }">
+          <CsButton :wrap-text="false" @click="openDetail(row)">编辑</CsButton>
+        </template>
+      </CsTable>
 
       <template #footer>
-        <CsPaginationBar>
+        <CsPaginationBar v-if="total > 0">
           <CsPagination
             v-model:current-page="page"
             v-model:page-size="size"
@@ -830,7 +932,7 @@ function cardMenuItems(row: AdminUser) {
             :page-sizes="[10, 20, 50]"
             :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
             @current-change="load"
-            @size-change="load"
+            @size-change="() => { page = 1; load() }"
           />
         </CsPaginationBar>
       </template>
@@ -841,31 +943,6 @@ function cardMenuItems(row: AdminUser) {
       <template v-if="current">
         <div class="user-summary">
           <div class="sum-item">
-            <span class="sum-label">邮箱</span>
-            <span class="sum-value">{{ current.email || '—' }}</span>
-          </div>
-          <div class="sum-item">
-            <span class="sum-label">UUID</span>
-            <span class="sum-value sum-inline">
-              <code class="cs-text-mono" :title="current.uuid">{{ current.uuid || '—' }}</code>
-              <CsButton
-                v-if="current.uuid"
-                variant="inline-icon"
-                icon-name="copy"
-                aria-label="复制 UUID"
-                @click="copyText(current.uuid, 'UUID')"
-              />
-            </span>
-          </div>
-          <div class="sum-item">
-            <span class="sum-label">角色</span>
-            <span class="sum-value">
-              <CsBadge :color="current.role === 'admin' ? 'severity-medium' : 'blue'">
-                {{ current.role === 'admin' ? '管理员' : '普通用户' }}
-              </CsBadge>
-            </span>
-          </div>
-          <div class="sum-item">
             <span class="sum-label">账户余额</span>
             <span class="sum-value sum-inline">
               <span class="cs-text-mono balance-text">{{ formatMoney((current as any).balance_cents || 0) }}</span>
@@ -875,108 +952,132 @@ function cardMenuItems(row: AdminUser) {
           <div class="sum-item">
             <span class="sum-label">套餐用量</span>
             <span class="sum-value sum-inline">
-              <span class="cs-text-mono">
+              <span class="cs-text-mono sum-truncate">
                 {{ formatBytes(current.used_bytes) }} / {{ current.total_bytes ? formatBytes(current.total_bytes) : '不限' }}
               </span>
               <CsButton variant="inline-link" @click="doResetTraffic(current)">重置流量</CsButton>
             </span>
           </div>
           <div class="sum-item">
-            <span class="sum-label">注册时间</span>
-            <span class="sum-value cell-mono">{{ fmtTime(current.created_at) }}</span>
+            <span class="sum-label">UUID</span>
+            <span class="sum-value sum-inline">
+              <code class="cs-text-mono sum-truncate" :title="current.uuid">{{ current.uuid || '—' }}</code>
+              <CsButton
+                v-if="current.uuid"
+                variant="inline-icon"
+                icon-name="copy"
+                aria-label="复制 UUID"
+                @click="copyText(current.uuid, 'UUID')"
+              />
+              <CsButton variant="inline-link" @click="openSubscribeInfo(current)">订阅地址</CsButton>
+            </span>
           </div>
-        </div>
-
-        <div class="sec-title">
-          套餐与权限设置
-          <TipIcon content="用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。" />
+          <div class="sum-item">
+            <span class="sum-label">账号概况</span>
+            <span class="sum-value sum-inline">
+              <span class="sum-id">#{{ current.id }}</span>
+              <span class="cell-mono">{{ fmtTime(current.created_at) }}</span>
+            </span>
+          </div>
         </div>
 
         <CsForm label-position="top">
-          <div class="form-grid-2">
-            <CsFormItem>
-              <template #label>
-                登录邮箱
-                <TipIcon
-                  type="warn"
-                  content="邮箱即登录账号。修改后该用户所有会话将被登出，需用新邮箱重新登录。"
+          <div class="edit-sections">
+            <div class="edit-section">
+            <div class="edit-section-title">账号信息</div>
+            <div class="form-grid-2">
+              <CsFormItem>
+                <template #label>
+                  登录邮箱
+                  <TipIcon
+                    type="warn"
+                    content="邮箱即登录账号。修改后该用户所有会话将被登出，需用新邮箱重新登录。"
+                  />
+                </template>
+                <CsInput v-model="userEditForm.email" placeholder="user@example.com" clearable />
+              </CsFormItem>
+
+              <CsFormItem>
+                <template #label>
+                  用户身份与角色
+                  <TipIcon content="管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。" />
+                </template>
+                <CsSegmentedControl v-model="userEditForm.role" :options="roleOptions" />
+              </CsFormItem>
+
+              <CsFormItem label="重置密码（留空不修改）">
+                <CsInput v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
+              </CsFormItem>
+
+              <CsFormItem label="备注">
+                <CsInput
+                  v-model="userEditForm.remark"
+                  :maxlength="255"
+                  clearable
+                  placeholder="仅管理员可见，如渠道来源、联系信息等"
                 />
-              </template>
-              <CsInput v-model="userEditForm.email" placeholder="user@example.com" clearable />
-            </CsFormItem>
-
-            <CsFormItem>
-              <template #label>
-                用户身份与角色
-                <TipIcon content="管理员拥有登录管理后台与运维配置全权（系统必须至少保留 1 名激活状态管理员）。" />
-              </template>
-              <CsSegmentedControl v-model="userEditForm.role" :options="roleOptions" />
-            </CsFormItem>
-
-            <CsFormItem label="绑定套餐">
-              <CsSelect v-model="userEditForm.plan_id" style="width: 100%" placeholder="选择套餐" :options="planOptions" />
-            </CsFormItem>
-
-            <CsFormItem label="所属权限组（覆盖套餐默认）">
-              <CsSelect
-                v-model="userEditForm.permission_group_id"
-                style="width: 100%"
-                :options="groupOptions"
-              />
-            </CsFormItem>
-
-            <CsFormItem label="重置密码（留空不修改）">
-              <CsInput v-model="userEditForm.password" type="password" show-password placeholder="输入新密码，留空保持原密码" />
-            </CsFormItem>
+              </CsFormItem>
+            </div>
           </div>
 
-          <CsFormItem label="到期时间">
-            <CsDatePicker
-              v-model="userEditForm.expire_at"
-              type="datetime"
-              placeholder="留空表示永不过期"
-              value-format="YYYY-MM-DDTHH:mm:ssZ"
-              style="width: 100%"
-            />
-            <div class="quick-expire-bar">
-              <span class="quick-label">快捷设定:</span>
-              <CsButton @click="addQuickExpire(30)">+1个月</CsButton>
-              <CsButton @click="addQuickExpire(90)">+1季度</CsButton>
-              <CsButton @click="addQuickExpire(180)">+半年</CsButton>
-              <CsButton @click="addQuickExpire(365)">+1年</CsButton>
-              <CsButton @click="clearExpire">永久/清空</CsButton>
+          <div class="edit-section">
+            <div class="edit-section-title">
+              套餐与权限
+              <TipIcon content="用户节点权限由「生效权限组」决定（优先使用管理员指定的独立权限组，未指定时继承当前有效套餐的权限组；未分配权限组的用户无法连接任何节点）。" />
             </div>
-          </CsFormItem>
 
-          <CsFormItem label="备注">
-            <CsInput
-              v-model="userEditForm.remark"
-              type="textarea"
-              :rows="2"
-              :maxlength="255"
-              show-word-limit
-              placeholder="仅管理员可见的用户备注，如渠道来源、联系信息等"
-            />
-          </CsFormItem>
+            <div class="form-grid-2">
+              <CsFormItem label="绑定套餐">
+                <CsSelect v-model="userEditForm.plan_id" style="width: 100%" placeholder="选择套餐" :options="planOptions" />
+              </CsFormItem>
 
-          <CsFormItem label="自动续费">
-            <div class="autorenew-admin-box">
-              <div class="autorenew-admin-row">
-                <div>
-                  <div style="font-size: 13px; font-weight: 600">到期自动续费</div>
-                  <div class="cs-text-secondary" style="font-size: 12px">到期时用余额自动续费，失败则自动取消套餐</div>
-                </div>
-                <CsToggle v-model="userEditForm.auto_renew_expire" />
-              </div>
-              <div class="autorenew-admin-row">
-                <div>
-                  <div style="font-size: 13px; font-weight: 600">流量耗尽自动续费</div>
-                  <div class="cs-text-secondary" style="font-size: 12px">流量用尽后用余额续购（重新计时+清零流量）</div>
-                </div>
-                <CsToggle v-model="userEditForm.auto_renew_exhaust" />
-              </div>
+              <CsFormItem label="所属权限组（覆盖套餐默认）">
+                <CsSelect
+                  v-model="userEditForm.permission_group_id"
+                  style="width: 100%"
+                  :options="groupOptions"
+                />
+              </CsFormItem>
             </div>
-          </CsFormItem>
+
+            <CsFormItem label="到期时间">
+              <CsDatePicker
+                v-model="userEditForm.expire_at"
+                type="datetime"
+                placeholder="留空表示永不过期"
+                value-format="YYYY-MM-DDTHH:mm:ssZ"
+                style="width: 100%"
+              />
+              <div class="quick-expire-bar">
+                <span class="quick-label">快捷设定:</span>
+                <CsButton @click="addQuickExpire(30)">+1个月</CsButton>
+                <CsButton @click="addQuickExpire(90)">+1季度</CsButton>
+                <CsButton @click="addQuickExpire(180)">+半年</CsButton>
+                <CsButton @click="addQuickExpire(365)">+1年</CsButton>
+                <CsButton @click="clearExpire">永久/清空</CsButton>
+              </div>
+            </CsFormItem>
+
+            <CsFormItem label="自动续费">
+              <div class="autorenew-admin-grid">
+                <div class="autorenew-admin-card">
+                  <div>
+                    <div class="autorenew-title">到期自动续费</div>
+                    <div class="autorenew-desc">到期时用余额自动续费，失败则取消套餐</div>
+                  </div>
+                  <CsToggle v-model="userEditForm.auto_renew_expire" />
+                </div>
+                <div class="autorenew-admin-card">
+                  <div>
+                    <div class="autorenew-title">流量耗尽自动续费</div>
+                    <div class="autorenew-desc">流量用尽后用余额续购并重置流量</div>
+                  </div>
+                  <CsToggle v-model="userEditForm.auto_renew_exhaust" />
+                </div>
+              </div>
+            </CsFormItem>
+          </div>
+          </div>
         </CsForm>
       </template>
 
@@ -1138,13 +1239,13 @@ function cardMenuItems(row: AdminUser) {
 <style scoped lang="scss">
 .user-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 24px;
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
-  padding: 14px 16px;
-  margin-bottom: 20px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
 }
 
 .sum-item {
@@ -1152,13 +1253,8 @@ function cardMenuItems(row: AdminUser) {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
   font-size: 13px;
-  padding: 5px 0;
-  border-bottom: 1px dashed var(--color-border-divider-default-diwd4w);
-
-  &:last-child {
-    border-bottom: none;
-  }
 }
 
 .sum-label {
@@ -1169,38 +1265,40 @@ function cardMenuItems(row: AdminUser) {
 
 .sum-value {
   min-width: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--color-text-body-default-b2us04);
   text-align: end;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 
   code {
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 
-/* 值里带操作按钮时改为横向排布；按钮不收缩，文本负责截断 */
+/* 值里带操作按钮时横向排布；按钮与固定标签不收缩，需要截断的文本使用 .sum-truncate */
 .sum-inline {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  white-space: normal;
-
-  > code,
-  > span:first-child {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
   > :deep([class*='awsui_button_']) {
     flex: none;
   }
+}
+
+.sum-truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-id {
+  flex: none;
+  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .balance-text {
@@ -1208,11 +1306,30 @@ function cardMenuItems(row: AdminUser) {
   color: #059669;
 }
 
-.sec-title {
+.edit-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.edit-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border-divider-default-diwd4w);
+  border-radius: 8px;
+  background: var(--color-background-container-content-mjfil9, transparent);
+
+  :deep(.cs-form-item) {
+    margin-block-end: 0;
+  }
+}
+
+.edit-section-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 12px;
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text-body-default-b2us04);
@@ -1220,8 +1337,8 @@ function cardMenuItems(row: AdminUser) {
 
 .form-grid-2 {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 0 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
 }
 
 .detail-footer {
@@ -1298,21 +1415,33 @@ function cardMenuItems(row: AdminUser) {
     min-width: 0; // 弹性收缩，保证复制按钮在窄屏下不被挤出弹窗
   }
 }
-.autorenew-admin-box {
+.autorenew-admin-grid {
   width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.autorenew-admin-card {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
+  background: var(--color-background-cell-shaded-twxsbz);
+}
 
-  .autorenew-admin-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-  }
+.autorenew-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-body-default-b2us04);
+}
+
+.autorenew-desc {
+  font-size: 12px;
+  color: var(--color-text-body-secondary-66ygbb);
 }
 
 .quick-expire-bar {
@@ -1329,149 +1458,164 @@ function cardMenuItems(row: AdminUser) {
   margin-right: 2px;
 }
 
-/* ================= 用户卡片（官方 ItemCard 口径） ================= */
-.user-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* ================= 用户表格与工具栏 ================= */
+.filter-search {
+  width: 220px;
 }
 
-.user-name {
+.filter-select--sm {
+  width: 115px;
+}
+
+.filter-select--md {
+  width: 145px;
+}
+
+.select-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  margin-inline-end: 4px;
+}
+
+.user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.user-cell-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.user-email-btn {
   appearance: none;
   border: 0;
   background: transparent;
   margin: 0;
   padding: 0;
-  font: inherit;
-  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-body-default-b2us04, #0f141a);
   text-align: start;
   cursor: pointer;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
   &:hover {
     color: var(--color-text-link-default-qabnuk, #006ce0);
+    text-decoration: underline;
+  }
+
+  &.is-muted {
+    color: var(--color-text-status-inactive-fqjc97, #656871);
   }
 }
 
-.user-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 4px;
-}
-
 .user-id {
+  flex: none;
   font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
+  font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
 }
 
 .user-remark {
-  margin-block-start: 4px;
-  font-size: var(--font-size-body-s, 12px);
+  font-size: 12px;
   line-height: 16px;
   color: var(--color-text-body-secondary-66ygbb, #656871);
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 选中 / 封禁只用官方高亮边框语义表达，不另造一层卡片底色 */
-.user-card--selected :deep(.awsui_inner-card_n1fwt_1f9u9_138) {
-  border-color: var(--color-border-item-selected-7104rh, #006ce0) !important;
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
 }
 
-.user-card--banned {
-  opacity: 0.88;
+.status-badge {
+  white-space: nowrap;
 }
 
-.balance-value {
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  font-weight: 700;
-}
-
-.user-traffic {
-  margin-block-start: 12px;
-  padding: 10px 12px;
-  border-radius: var(--border-radius-input-k1q34z, 8px);
-  background: var(--color-background-cell-shaded-twxsbz, #f2f3f3);
-}
-
-.traffic-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-block-end: 6px;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.traffic-value {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-body-default-b2us04, #0f141a);
-  text-align: end;
-}
-
-.traffic-percent {
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  margin-inline-start: 2px;
-}
-
-.traffic-expire {
-  margin-block-start: 6px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
-  font-size: var(--font-size-body-s, 12px);
-  line-height: 16px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-}
-
-.user-select-bar {
-  display: flex;
+.traffic-cell {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  vertical-align: middle;
+}
+
+.traffic-ring {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.traffic-ring-track {
+  fill: none;
+  stroke: var(--color-border-divider-default-diwd4w, #e9ebed);
+  stroke-width: 2.5;
+}
+
+.traffic-ring-fill {
+  fill: none;
+  stroke: var(--color-text-link-default-qabnuk, #006ce0);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+
+.traffic-ring.is-danger .traffic-ring-fill {
+  stroke: var(--color-text-status-error-ri38gt, #d91515);
+}
+
+.traffic-text {
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-cell {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: $bp-tablet-max) {
-  /* 窄屏工具栏整体竖排：搜索独占一行，操作按钮两列等分 */
   .cs-toolbar {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-xs-m9b7jf, 8px);
   }
 
-  /* CsToolbar 的内部结构不在本组件模板里，必须用 :deep 才能命中 */
   :deep(.cs-toolbar-main) {
     inline-size: 100%;
 
-    .cs-input-root {
+    .filter-search {
       inline-size: 100% !important;
+    }
+
+    .filter-select {
+      flex: 1 1 calc(50% - 4px);
+      min-inline-size: 120px;
+      inline-size: auto;
     }
   }
 
   :deep(.cs-toolbar-actions) {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
+    display: flex;
+    flex-wrap: wrap;
     inline-size: 100%;
-
-    [class*='awsui_button_'] {
-      margin: 0;
-      inline-size: 100%;
-      block-size: 32px;
-      font-size: 13px;
-    }
+    gap: 6px;
   }
-}
 
-@media (max-width: $bp-tablet-max) {
-  .user-traffic {
-    padding: 8px 10px;
+  .user-summary,
+  .form-grid-2,
+  .autorenew-admin-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -33,6 +33,30 @@ func (d *Deps) AdminUsers(c *gin.Context) {
 		like := "%" + keyword + "%"
 		base = base.Where("email LIKE ? OR uuid LIKE ? OR remark LIKE ?", like, like, like)
 	}
+	if statusStr := strings.TrimSpace(c.Query("status")); statusStr == "0" || statusStr == "1" {
+		if statusStr == "1" {
+			base = base.Where("status = ?", models.StatusActive)
+		} else {
+			base = base.Where("status = ?", models.StatusDisabled)
+		}
+	}
+	if planStr := strings.TrimSpace(c.Query("plan_id")); planStr != "" {
+		if planID, err := strconv.ParseUint(planStr, 10, 64); err == nil {
+			base = base.Where("plan_id = ?", planID)
+		}
+	}
+	if groupStr := strings.TrimSpace(c.Query("group_id")); groupStr != "" {
+		if groupID, err := strconv.ParseUint(groupStr, 10, 64); err == nil {
+			if groupID == 0 {
+				base = base.Where("permission_group_id = 0 AND plan_group_id = 0")
+			} else {
+				base = base.Where("(permission_group_id = ? OR (permission_group_id = 0 AND plan_group_id = ?))", groupID, groupID)
+			}
+		}
+	}
+	if role := strings.TrimSpace(c.Query("role")); role == models.RoleUser || role == models.RoleAdmin {
+		base = base.Where("role = ?", role)
+	}
 
 	var total int64
 	if err := base.Count(&total).Error; err != nil {

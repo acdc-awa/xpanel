@@ -27,7 +27,7 @@ const list = ref<AuditLog[]>([])
 const total = ref(0)
 const loading = ref(false)
 const page = ref(1)
-const size = ref(20)
+const size = ref(10)
 
 const category = ref('')
 const keyword = ref('')
@@ -389,7 +389,7 @@ function fmtTime(t: string) {
           </span>
         </template>
         <template #cell-actions="{ row }">
-          <CsButton variant="inline-link" @click="openDetail(row.row)">
+          <CsButton variant="inline-link" :wrap-text="false" @click="openDetail(row.row)">
             {{ row.row.detail_truncated ? '查看原文' : '详情' }}
           </CsButton>
         </template>

@@ -400,8 +400,22 @@ export function updateSettings(payload: SiteSettingsUpdate) {
   return http.put<ApiResp<SiteSettings>>('/admin/settings', payload)
 }
 
-export function getUsers(page = 1, size = 20, keyword = '') {
-  return http.get<ApiResp<AdminUserPage>>('/admin/users', { params: { page, size, keyword } })
+export interface AdminUserQuery {
+  status?: '' | '0' | '1'
+  plan_id?: '' | number
+  group_id?: '' | number
+  role?: '' | 'user' | 'admin'
+}
+
+export function getUsers(page = 1, size = 20, keyword = '', filters?: AdminUserQuery) {
+  const params: Record<string, string | number> = { page, size, keyword }
+  if (filters) {
+    if (filters.status !== undefined && filters.status !== '') params.status = filters.status
+    if (filters.plan_id !== undefined && filters.plan_id !== '') params.plan_id = filters.plan_id
+    if (filters.group_id !== undefined && filters.group_id !== '') params.group_id = filters.group_id
+    if (filters.role !== undefined && filters.role !== '') params.role = filters.role
+  }
+  return http.get<ApiResp<AdminUserPage>>('/admin/users', { params })
 }
 
 export function updateUser(

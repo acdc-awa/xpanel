@@ -93,7 +93,7 @@ function isMutedRow(row: Invitation): boolean {
 
 // ---- 本地分页（列表后端 Limit(200) 全量返回）----
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const paged = computed(() =>
   filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
 )

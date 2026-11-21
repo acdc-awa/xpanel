@@ -103,7 +103,7 @@ export interface MenuItem {
 
 export const clientMenus: MenuItem[] = [
   { title: '首页', path: '/dashboard', icon: HomeFilled, iconName: 'home' },
-  { title: '订阅中心', path: '/subscribe', icon: Promotion, iconName: 'send' },
+  { title: '订阅中心', path: '/subscribe', icon: Promotion, iconName: 'send-ne' },
   { title: '商店', path: '/shop', icon: ShoppingCart, iconName: 'shopping-bag' },
   { title: '我的', path: '/account', icon: UserFilled, iconName: 'user-profile' },
 ]

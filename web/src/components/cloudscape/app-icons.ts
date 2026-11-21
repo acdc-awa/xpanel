@@ -26,4 +26,9 @@ export const APP_ICON_DEFINITIONS: Record<string, CloudscapeIconDefinition> = {
       '<path d="M2.5 5.5h11l1 9h-13l1-9Z" class="stroke-linejoin-round"></path>' +
       '<path d="M5.5 5.5V4a2.5 2.5 0 0 1 5 0v1.5" class="stroke-linejoin-round"></path>',
   },
+  'send-ne': {
+    viewBox: '0 0 16 16',
+    inner:
+      '<path d="M14.5 1.5 1.5 6.5l5 3 3 5 5-13ZM6.5 9.5l8-8" class="stroke-linejoin-round"></path>',
+  },
 }

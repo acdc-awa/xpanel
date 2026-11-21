@@ -36,7 +36,7 @@ const list = ref<GiftCard[]>([])
 const total = ref(0)
 const loading = ref(false)
 const page = ref(1)
-const size = ref(20)
+const size = ref(10)
 const statusFilter = ref('')
 const keyword = ref('')
 
@@ -332,7 +332,7 @@ function isMutedRow(row: GiftCard) {
             v-model:current-page="page"
             v-model:page-size="size"
             :total="total"
-            :page-sizes="[20, 50, 100]"
+            :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next"
             simple
             @current-change="load"

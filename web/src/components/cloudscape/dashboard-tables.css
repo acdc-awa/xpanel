@@ -25,6 +25,14 @@
   white-space: nowrap;
 }
 
+.cs-cloudscape-table tbody tr {
+  height: 48px;
+}
+
+.cs-cloudscape-table td[class*='body-cell'] {
+  vertical-align: middle !important;
+}
+
 /*
  * 官方把表格 wrapper 的滚动条整体隐藏（桌面端另有一条粘性横向滚动条，
  * 这里没有实现）。仪表盘的紧凑表放在可缩放的小卡片里，窄卡片下滚动条一隐
