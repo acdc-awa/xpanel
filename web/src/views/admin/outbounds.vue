@@ -8,24 +8,23 @@ import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import {
   CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
-  CsEmpty,
+  CsInput,
   CsPage,
+  CsPagination,
+  CsPaginationBar,
   CsSelect,
-  CsSpinner,
+  CsTable,
   CsToggle,
   CsToolbar,
+  CsTooltip,
   ElMessage,
-  ElMessageBox,
+  type BadgeColor,
+  type TableColumn,
 } from '@/components/cloudscape'
 import OutboundConfigEditor from './servers/OutboundConfigEditor.vue'
 import { useServerInbounds, useServerScope } from '@/composables/useServerScope'
 import {
-  deleteServerOutbound,
   getServerOutbounds,
   updateServerOutbound,
   type ServerOutbound,
@@ -36,19 +35,41 @@ import { isReservedOutboundTag } from '@/utils/outbound'
 const route = useRoute()
 const router = useRouter()
 
-const { servers, serverFilter, currentServer, serverLoading, loadServers, syncServerQuery } =
-  useServerScope()
+const { servers, serverFilter, serverLoading, loadServers, syncServerQuery } = useServerScope()
 const { ownerTagOf, loadServerInbounds } = useServerInbounds(serverFilter)
 
 const serverOptions = computed(() =>
-  servers.value.map((s) => ({ label: `${s.name} (${s.host})`, value: s.id }))
+  servers.value.map((s) => ({ label: `${s.name} (${s.host})`, value: s.id })),
 )
+
+const protocolFilterOptions = [
+  { label: '全部协议', value: '' },
+  { label: '待连线', value: 'draft' },
+  { label: '直连 (freedom)', value: 'freedom' },
+  { label: 'VLESS 链', value: 'vless' },
+  { label: 'Hysteria 2', value: 'hysteria' },
+  { label: 'SOCKS5', value: 'socks' },
+  { label: 'HTTP(S)', value: 'http' },
+  { label: '黑洞 (blackhole)', value: 'blackhole' },
+  { label: '原生 JSON', value: 'custom' },
+]
+
+const statusFilterOptions = [
+  { label: '全部状态', value: '' },
+  { label: '已启用', value: 'enabled' },
+  { label: '已停用', value: 'disabled' },
+]
 
 const outbounds = ref<ServerOutbound[]>([])
 const loading = ref(false)
 const editorOpen = ref(false)
 const editing = ref<ServerOutbound | null>(null)
-const defaultOutboundTag = computed(() => currentServer.value?.default_outbound_tag || 'direct')
+
+const keyword = ref('')
+const protocolFilter = ref('')
+const statusFilter = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 
 type EffectiveOutbound = ServerOutbound & { ownerInboundTag?: string }
 
@@ -56,8 +77,75 @@ const displayOutbounds = computed<EffectiveOutbound[]>(() =>
   outbounds.value.map((o) => ({
     ...o,
     ownerInboundTag: o.owner_inbound_id ? ownerTagOf.value[o.owner_inbound_id] || '' : '',
-  }))
+  })),
 )
+
+// 待连线：没有任何引用目标、也没有载荷（基础 settings / 自定义 JSON）。
+// freedom 也要算：以「引用入站」形态保存但还没选目标时，行协议仍是 freedom 且载荷为空。
+function isDraftOutbound(row: EffectiveOutbound): boolean {
+  if (row.owner_inbound_id || row.inbound_ref || row.outbound_json) return false
+  if (row.settings_json || row.stream_settings_json) return false
+  return row.protocol !== 'blackhole'
+}
+
+const hasFilters = computed(() =>
+  Boolean(keyword.value.trim() || protocolFilter.value || statusFilter.value),
+)
+
+function resetFilters() {
+  keyword.value = ''
+  protocolFilter.value = ''
+  statusFilter.value = ''
+  page.value = 1
+}
+
+const filteredOutbounds = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  return displayOutbounds.value.filter((row) => {
+    if (protocolFilter.value === 'draft') {
+      if (!isDraftOutbound(row)) return false
+    } else if (protocolFilter.value) {
+      if (isDraftOutbound(row) || row.protocol !== protocolFilter.value) return false
+    }
+    if (statusFilter.value === 'enabled' && !row.enabled) return false
+    if (statusFilter.value === 'disabled' && row.enabled) return false
+    if (kw) {
+      const hitTag = (row.tag || '').toLowerCase().includes(kw)
+      const hitRemark = (row.remark || '').toLowerCase().includes(kw)
+      if (!hitTag && !hitRemark) return false
+    }
+    return true
+  })
+})
+
+watch([keyword, protocolFilter, statusFilter, serverFilter], () => {
+  page.value = 1
+})
+
+watch([() => filteredOutbounds.value.length, pageSize], ([len, size]) => {
+  const maxPage = Math.max(1, Math.ceil(len / Math.max(1, size)))
+  if (page.value > maxPage) page.value = maxPage
+})
+
+const pagedOutbounds = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredOutbounds.value.slice(start, start + pageSize.value)
+})
+
+const emptyText = computed(() => {
+  if (!serverFilter.value) return '请先选择目标服务器'
+  if (hasFilters.value) return '未找到匹配当前筛选的出站通道'
+  return '该服务器暂无出站通道，点击右上角「新增出站」'
+})
+
+const outboundColumns: TableColumn[] = [
+  { id: 'tag', header: '名称' },
+  { id: 'protocol', header: '协议' },
+  { id: 'priority', header: '优先级' },
+  { id: 'remark', header: '备注' },
+  { id: 'status', header: '状态' },
+  { id: 'actions', header: '操作', width: '1%' },
+]
 
 async function loadOutbounds() {
   if (!serverFilter.value) {
@@ -91,6 +179,7 @@ function openCreate() {
 }
 
 function openEdit(row: EffectiveOutbound) {
+  if (row.owner_inbound_id) return
   editing.value = row
   editorOpen.value = true
 }
@@ -110,70 +199,10 @@ async function toggleOutbound(row: EffectiveOutbound) {
   }
 }
 
-async function removeOutbound(row: EffectiveOutbound) {
-  if (!serverFilter.value) return
-  try {
-    await ElMessageBox.confirm(`确认删除出站「${row.tag}」？`, '删除出站', { type: 'error' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await deleteServerOutbound(serverFilter.value, row.id)
-    if (data.code === 0) {
-      ElMessage.success('已删除')
-      // 删除当前默认出口时后端会回退到 direct，顺带刷新服务器以更新「默认出口」徽标
-      await Promise.all([loadOutbounds(), loadServers()])
-    } else {
-      ElMessage.error(data.message)
-    }
-  } catch (e) {
-    ElMessage.error(errMsg(e, '删除失败'))
-  }
-}
-
 async function onOutboundDeleted() {
-  // 删除默认出口时后端会回退到 direct，顺带刷新服务器以更新「默认出口」徽标；
+  // 删除默认出口时后端会回退到 direct，顺带刷新服务器以更新关联状态；
   // 引用该出站 tag 的路由规则由后端级联删除，本页无需感知规则列表。
   await Promise.all([loadOutbounds(), loadServers(), loadServerInbounds()])
-}
-
-function isBlockCN(row: EffectiveOutbound): boolean {
-  if (row.protocol !== 'freedom') return false
-  try {
-    const s = JSON.parse(row.settings_json || '{}')
-    return !!s.block_cn
-  } catch {
-    return false
-  }
-}
-
-// 出站域名解析策略：唯一入口在出站编辑器，卡片正面只读展示。
-// 正式落点是 streamSettings.sockopt.domainStrategy；settings.domainStrategy 是 v26.9.8 起的废弃旧位置，仅作存量兜底。
-function freedomDS(row: EffectiveOutbound): string {
-  if (row.protocol !== 'freedom') return ''
-  try {
-    const stream = row.stream_settings_json ? JSON.parse(row.stream_settings_json) : {}
-    const fromSockopt = stream?.sockopt?.domainStrategy
-    if (fromSockopt) return fromSockopt
-  } catch {
-    /* 坏 stream JSON 按 settings 兜底 */
-  }
-  try {
-    const s = JSON.parse(row.settings_json || '{}')
-    return s.domainStrategy || 'AsIs'
-  } catch {
-    return 'AsIs'
-  }
-}
-
-type BadgeColor = 'grey' | 'green' | 'blue' | 'red' | 'severity-medium' | 'severity-neutral'
-
-// 待连线：没有任何引用目标、也没有载荷（基础 settings / 自定义 JSON）。
-// freedom 也要算：以「引用入站」形态保存但还没选目标时，行协议仍是 freedom 且载荷为空。
-function isDraftOutbound(row: EffectiveOutbound): boolean {
-  if (row.owner_inbound_id || row.inbound_ref || row.outbound_json) return false
-  if (row.settings_json || row.stream_settings_json) return false
-  return row.protocol !== 'blackhole'
 }
 
 function protocolBadge(row: EffectiveOutbound): { text: string; color: BadgeColor } {
@@ -198,19 +227,18 @@ function protocolBadge(row: EffectiveOutbound): { text: string; color: BadgeColo
   }
 }
 
-function connectionLabel(row: EffectiveOutbound): string {
+function derivedTooltip(row: EffectiveOutbound): string {
+  return `随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，目标在入站页修改`
+}
+
+function statusTooltip(row: EffectiveOutbound): string {
   if (row.owner_inbound_id) {
-    return `直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」`
+    return `随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可单独启停`
   }
-  if (row.inbound_ref) return `引用入站 #${row.inbound_ref}`
-  if (row.outbound_json) return '自定义透传'
-  if (isDraftOutbound(row)) return '待连接入站'
-  if (row.tag === 'direct') return '服务器直连互联网'
-  if (row.tag === 'blocked') return '黑洞丢弃阻断'
-  if (row.protocol === 'freedom') return '自主直连'
-  if (row.protocol === 'blackhole') return '黑洞阻断'
-  if (row.settings_json || row.stream_settings_json) return '旧版代理（待转换）'
-  return '待连接入站'
+  if (isReservedOutboundTag(row.tag)) {
+    return '系统内置出站不可停用'
+  }
+  return row.enabled ? '已启用，点击停用' : '已停用，点击启用'
 }
 
 let initialized = false
@@ -252,8 +280,32 @@ onMounted(async () => {
         filterable
         placeholder="选择目标服务器"
         aria-label="选择目标服务器"
-        style="width: 260px"
+        class="filter-select filter-select--server"
       />
+      <CsInput
+        v-model="keyword"
+        placeholder="搜索出站标识 / 备注"
+        clearable
+        prefix-icon="search"
+        class="filter-search"
+      />
+      <CsSelect
+        v-model="protocolFilter"
+        :options="protocolFilterOptions"
+        clearable
+        placeholder="全部协议"
+        aria-label="按协议筛选出站"
+        class="filter-select filter-select--md"
+      />
+      <CsSelect
+        v-model="statusFilter"
+        :options="statusFilterOptions"
+        clearable
+        placeholder="全部状态"
+        aria-label="按状态筛选出站"
+        class="filter-select filter-select--sm"
+      />
+      <CsButton v-if="hasFilters" @click="resetFilters">重置</CsButton>
       <CsButton icon-name="refresh" @click="refreshAll">刷新</CsButton>
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" :disabled="!serverFilter" @click="openCreate">
@@ -263,71 +315,92 @@ onMounted(async () => {
     </CsToolbar>
 
     <CsContainer header="出站通道">
-      <div v-if="loading" class="outbounds-loading">
-        <CsSpinner size="large" />
-      </div>
+      <CsTable
+        compact
+        :wrap-lines="false"
+        track-by="id"
+        :items="pagedOutbounds"
+        :columns="outboundColumns"
+        :loading="loading"
+        loading-text="加载中…"
+        :empty-text="emptyText"
+      >
+        <template #cell-tag="{ row }">
+          <button
+            v-if="!row.owner_inbound_id"
+            type="button"
+            class="name-link-btn cell-mono"
+            :class="{ 'is-muted': !row.enabled }"
+            title="点击编辑出站"
+            @click="openEdit(row)"
+          >
+            {{ row.tag }}
+          </button>
+          <span
+            v-else
+            class="name-readonly cell-mono"
+            :class="{ 'is-muted': !row.enabled }"
+            :title="derivedTooltip(row)"
+          >
+            {{ row.tag }}
+          </span>
+        </template>
 
-      <CsEmpty
-        v-else-if="displayOutbounds.length === 0"
-        icon-name="globe"
-        :description="serverFilter ? '该服务器暂无出站通道，点击右上角「新增出站」' : '请先选择目标服务器'"
-      />
+        <template #cell-protocol="{ row }">
+          <CsBadge class="nowrap-badge" :color="protocolBadge(row).color">
+            {{ protocolBadge(row).text }}
+          </CsBadge>
+        </template>
 
-      <CsCardGrid v-else>
-        <CsCard v-for="row in displayOutbounds" :key="row.id">
-          <template #header>
-            <div class="outbound-head">
-              <span class="outbound-tag">{{ row.tag }}</span>
-              <CsBadge v-if="row.owner_inbound_id" color="blue">系统内置·直通</CsBadge>
-              <CsBadge v-else-if="row.tag === defaultOutboundTag" color="green">默认出口</CsBadge>
-              <CsBadge v-if="isReservedOutboundTag(row.tag)" color="grey">系统内置</CsBadge>
-              <CsBadge v-if="row.send_proxy_protocol" color="blue">PPv2</CsBadge>
-              <CsBadge v-if="isBlockCN(row)" color="red">阻断回国</CsBadge>
-            </div>
-          </template>
+        <template #cell-priority="{ row }">
+          <span class="cell-mono" :class="{ 'cell-muted': !row.enabled }">
+            {{ row.priority ?? 0 }}
+          </span>
+        </template>
 
-          <template #actions>
+        <template #cell-remark="{ row }">
+          <span
+            v-if="row.remark"
+            class="row-remark-cell"
+            :class="{ 'cell-muted': !row.enabled }"
+            :title="row.remark"
+          >
+            {{ row.remark }}
+          </span>
+          <span v-else class="cell-muted">无</span>
+        </template>
+
+        <template #cell-status="{ row }">
+          <CsTooltip :content="statusTooltip(row)">
             <CsToggle
               :model-value="row.enabled"
               :disabled="isReservedOutboundTag(row.tag) || !!row.owner_inbound_id"
               :aria-label="`启用出站 ${row.tag}`"
               @change="toggleOutbound(row)"
             />
-          </template>
+          </CsTooltip>
+        </template>
 
-          <CsCardFacts>
-            <CsCardFact label="出站协议">
-              <CsBadge :color="protocolBadge(row).color">
-                {{ protocolBadge(row).text }}
-              </CsBadge>
-            </CsCardFact>
-            <CsCardFact label="连接与引用" :value="connectionLabel(row)" />
-            <CsCardFact v-if="row.send_through" label="发送出口 IP" :value="row.send_through" mono />
-            <CsCardFact v-if="row.protocol === 'freedom'" label="域名解析策略" :value="freedomDS(row)" mono />
-            <CsCardFact label="优先级" :value="row.priority ?? 0" mono />
-            <CsCardFact v-if="row.remark" label="备注说明" :value="row.remark" full-width />
-          </CsCardFacts>
+        <template #cell-actions="{ row }">
+          <CsTooltip v-if="row.owner_inbound_id" :content="derivedTooltip(row)">
+            <CsButton :wrap-text="false" disabled>编辑</CsButton>
+          </CsTooltip>
+          <CsButton v-else :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+        </template>
+      </CsTable>
 
-          <template #footer>
-            <template v-if="row.owner_inbound_id">
-              <span class="outbound-derived-note">
-                随四层直通「{{ row.ownerInboundTag || '#' + row.owner_inbound_id }}」自动维护，目标在通道页/入站页修改
-              </span>
-            </template>
-            <template v-else>
-              <CsButton icon-name="edit" @click="openEdit(row)">编辑出站</CsButton>
-              <CsButton
-                icon-name="remove"
-                :disabled="row.tag === 'direct' || row.tag === 'blocked'"
-                :title="row.tag === 'direct' || row.tag === 'blocked' ? '系统内置出站不可删除' : undefined"
-                @click="removeOutbound(row)"
-              >
-                删除
-              </CsButton>
-            </template>
-          </template>
-        </CsCard>
-      </CsCardGrid>
+      <template #footer>
+        <CsPaginationBar v-if="filteredOutbounds.length > 0">
+          <CsPagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            :total="filteredOutbounds.length"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @size-change="page = 1"
+          />
+        </CsPaginationBar>
+      </template>
     </CsContainer>
 
     <OutboundConfigEditor
@@ -342,32 +415,98 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="scss">
-.outbounds-loading {
-  padding: 48px 0;
-  text-align: center;
+.filter-search {
+  width: 220px;
 }
 
-.outbound-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-inline-size: 0;
+.filter-select--server {
+  width: 240px;
 }
 
-.outbound-tag {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 14px;
-  font-weight: 700;
+.filter-select--md {
+  width: 155px;
+}
+
+.filter-select--sm {
+  width: 115px;
+}
+
+.name-link-btn,
+.name-readonly {
+  display: inline-block;
+  max-width: 280px;
+  vertical-align: middle;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--color-text-body-default-b2us04, #0f141a);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.is-muted {
+    color: var(--color-text-status-inactive-fqjc97, #656871);
+  }
 }
 
-.outbound-derived-note {
-  flex: 1 1 100%;
-  text-align: center;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--color-text-body-secondary-66ygbb, #656871);
+.name-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  text-align: start;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-text-link-default-qabnuk, #006ce0);
+    text-decoration: underline;
+  }
+}
+
+.row-remark-cell {
+  display: inline-block;
+  max-width: 260px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.nowrap-badge {
+  white-space: nowrap !important;
+  flex-shrink: 0;
+}
+
+@media (max-width: $bp-tablet-max) {
+  .cs-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-xs-m9b7jf, 8px);
+  }
+
+  :deep(.cs-toolbar-main) {
+    inline-size: 100%;
+
+    .filter-search {
+      inline-size: 100% !important;
+    }
+
+    .filter-select {
+      flex: 1 1 calc(50% - 4px);
+      min-inline-size: 120px;
+      inline-size: auto;
+    }
+  }
+
+  :deep(.cs-toolbar-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    inline-size: 100%;
+    gap: 6px;
+  }
 }
 </style>
