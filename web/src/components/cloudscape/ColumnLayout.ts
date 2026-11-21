@@ -1,4 +1,4 @@
-import { Fragment, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType, type VNode } from 'vue'
+import { Comment, Fragment, Text, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType, type VNode } from 'vue'
 import Grid from './Grid'
 import { CS } from './classes'
 import { cx } from './utils'
@@ -6,6 +6,8 @@ import { cx } from './utils'
 function flattenVNodes(nodes: VNode[]): VNode[] {
   const out: VNode[] = []
   for (const node of nodes) {
+    if (node.type === Comment) continue
+    if (node.type === Text && typeof node.children === 'string' && !node.children.trim()) continue
     if (node.type === Fragment) {
       out.push(...flattenVNodes((node.children as VNode[]) ?? []))
     } else {

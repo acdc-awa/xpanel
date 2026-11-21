@@ -190,7 +190,7 @@ const isDerived = computed(() => !!props.rule?.owner_inbound_id)
 async function save() {
   jsonError.value = ''
   if (!form.outbound_tag?.trim()) {
-    toast.warning('请选择出站标签（OutboundTag）')
+    toast.warning('请选择目标出站')
     return
   }
   if (form.rule_json?.trim()) {
@@ -277,9 +277,9 @@ function onClosed() {
         <CsSpaceBetween size="l">
           <CsColumnLayout :columns="2">
             <!-- ===== 左栏：入站匹配条件 ===== -->
-            <CsContainer header="1. 流量匹配条件 (Match Criteria)">
+            <CsContainer header="1. 流量匹配条件">
               <CsSpaceBetween size="m">
-                <CsFormItem label="协议嗅探 Protocol">
+                <CsFormItem label="协议嗅探">
                   <CsCheckboxGroup
                     v-model="selectedProtocols"
                     :options="protocolOptions"
@@ -287,7 +287,7 @@ function onClosed() {
                   />
                 </CsFormItem>
 
-                <CsFormItem label="域名匹配 Domain（每行一条）">
+                <CsFormItem label="域名匹配（每行一条）">
                   <CsInput
                     v-model="form.domain"
                     type="textarea"
@@ -297,7 +297,7 @@ function onClosed() {
                   />
                 </CsFormItem>
 
-                <CsFormItem label="IP 段匹配 IP（每行一条）">
+                <CsFormItem label="IP 段匹配（每行一条）">
                   <CsInput
                     v-model="form.ip"
                     type="textarea"
@@ -308,7 +308,7 @@ function onClosed() {
                 </CsFormItem>
 
                 <CsColumnLayout :columns="2">
-                  <CsFormItem label="目标端口 Port">
+                  <CsFormItem label="目标端口">
                     <CsInput v-model="form.port" class="cs-text-mono" placeholder="如 443 或 80,443" />
                   </CsFormItem>
                   <CsFormItem label="传输层网络">
@@ -316,7 +316,7 @@ function onClosed() {
                   </CsFormItem>
                 </CsColumnLayout>
 
-                <CsFormItem label="限定来源入站 InboundTag">
+                <CsFormItem label="限定来源入站">
                   <CsSelect
                     v-model="selectedInboundTags"
                     :options="inboundTagOptions"
@@ -335,7 +335,7 @@ function onClosed() {
 
             <!-- ===== 右栏：路由目标与控制 ===== -->
             <CsSpaceBetween size="m">
-              <CsContainer header="2. 转发目标与属性 (Target)">
+              <CsContainer header="2. 转发目标与属性">
                 <template #actions>
                   <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
                     <span class="cs-text-secondary">生效此规则</span>
@@ -344,7 +344,7 @@ function onClosed() {
                 </template>
 
                 <CsSpaceBetween size="m">
-                  <CsFormItem label="目标出站出口 (OutboundTag)">
+                  <CsFormItem label="目标出站">
                     <CsSelect
                       v-model="form.outbound_tag"
                       :options="outboundTagOptions"
@@ -356,7 +356,7 @@ function onClosed() {
 
                   <CsFormItem>
                     <template #label>
-                      规则优先级 (Priority)
+                      规则优先级
                       <TipIcon content="数值越小越先匹配。Xray 按优先级从上至下检索，首条完全满足「协议嗅探 / 域名 / IP / 端口」的规则即决定出站走向。" />
                     </template>
                     <CsInputNumber v-model="form.priority" :min="0" />

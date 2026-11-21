@@ -8,26 +8,25 @@ import {
   CsAlert,
   CsBadge,
   CsButton,
-  CsCard,
-  CsCardFact,
-  CsCardFacts,
-  CsCardGrid,
   CsContainer,
   CsEmpty,
   CsHeader,
   CsIcon,
+  CsInput,
   CsLink,
-  CsLoading,
   CsPage,
   CsSegmentedControl,
   CsSelect,
   CsSpaceBetween,
+  CsTable,
   CsTabs,
   CsToggle,
   CsToolbar,
   CsTooltip,
+  type BadgeColor,
   type SegmentedOption,
   type TabItem,
+  type TableColumn,
 } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import RoutingRuleEditor from './servers/RoutingRuleEditor.vue'
@@ -77,8 +76,8 @@ const defaultSaving = ref(false)
 const activeTab = ref<'rules' | 'settings'>('rules')
 
 const tabItems: TabItem[] = [
-  { id: 'rules', label: '路由规则 (Routing Rules)' },
-  { id: 'settings', label: '全局策略 (Global Settings)' },
+  { id: 'rules', label: '路由规则' },
+  { id: 'settings', label: '全局策略' },
 ]
 
 const viewOptions: SegmentedOption[] = [
@@ -115,9 +114,21 @@ watch(currentServer, (s) => {
   }
 })
 
+interface RuleChip {
+  label: string
+  value: string
+  full: string
+}
+
+const VISIBLE_RULE_CHIP_LIMIT = 4
+
 type EffectiveRoutingRule = ServerRoutingRule & {
   /** 派生自四层直通：可编辑（改指向/加条件/调优先级），不可删除 */
   ownerInboundTag?: string
+  inboundTagList: string[]
+  visibleChips: RuleChip[]
+  hiddenCount: number
+  hiddenTooltip: string
 }
 
 // 出站列表只作为路由规则与默认出口的选项来源；出站对象的增删改在「出站管理」页。
@@ -164,18 +175,127 @@ async function saveDefaultOutbound() {
   }
 }
 
+// 辅助：将多行或逗号分隔的文本拆解为数组
+function parseTagList(val?: string): string[] {
+  if (!val) return []
+  return val.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
+}
+
+function buildRuleChips(r: ServerRoutingRule): RuleChip[] {
+  const chips: RuleChip[] = []
+  if (r.rule_json?.trim()) {
+    chips.push({ label: 'JSON', value: '自定义规则', full: '自定义 JSON 规则' })
+  }
+  for (const item of parseTagList(r.domain)) {
+    chips.push({ label: '域名', value: item, full: `域名: ${item}` })
+  }
+  for (const item of parseTagList(r.ip)) {
+    chips.push({ label: 'IP', value: item, full: `IP: ${item}` })
+  }
+  if (r.port?.trim()) {
+    const port = r.port.trim()
+    chips.push({ label: '端口', value: port, full: `端口: ${port}` })
+  }
+  if (r.network?.trim()) {
+    const net = r.network.trim().toUpperCase()
+    chips.push({ label: '网络', value: net, full: `网络: ${net}` })
+  }
+  for (const p of parseTagList(r.protocol)) {
+    chips.push({ label: '协议', value: p, full: `协议: ${p}` })
+  }
+  return chips
+}
+
+function outboundBadgeColor(tag: string): BadgeColor {
+  if (tag === 'direct') return 'green'
+  if (tag === 'blocked' || tag === 'blackhole') return 'red'
+  return 'blue'
+}
+
 // ---- 路由规则 ----
 const routingRules = ref<ServerRoutingRule[]>([])
 const routingLoading = ref(false)
 const ruleEditorOpen = ref(false)
 const ruleEditing = ref<ServerRoutingRule | null>(null)
+const ruleKeyword = ref('')
+const ruleOutboundFilter = ref('')
+
+const ruleOutboundOptions = computed(() => [
+  { label: '全部出站', value: '' },
+  ...outboundTags.value.map((t) => ({ label: t, value: t })),
+])
+
+const hasRuleFilters = computed(() =>
+  Boolean(ruleKeyword.value.trim() || ruleOutboundFilter.value)
+)
+
+function onRuleOutboundFilterChange(value: string | number | (string | number)[] | '') {
+  ruleOutboundFilter.value = Array.isArray(value) ? String(value[0] ?? '') : String(value)
+}
+
+function resetRuleFilters() {
+  ruleKeyword.value = ''
+  ruleOutboundFilter.value = ''
+}
+
+const routingColumns: TableColumn[] = [
+  { id: 'priority', header: '优先级', width: '1%' },
+  { id: 'inbound', header: '来源入站' },
+  { id: 'rules', header: '匹配规则' },
+  { id: 'outbound', header: '目标出站' },
+  { id: 'remark', header: '备注' },
+  { id: 'enabled', header: '启用', width: '1%' },
+  { id: 'actions', header: '操作', width: '1%' },
+]
 
 const displayRoutingRules = computed<EffectiveRoutingRule[]>(() =>
-  routingRules.value.map((r) => ({
-    ...r,
-    ownerInboundTag: r.owner_inbound_id ? ownerTagOf.value[r.owner_inbound_id] || '' : '',
-  }))
+  routingRules.value.map((r) => {
+    const chips = buildRuleChips(r)
+    const hidden = chips.slice(VISIBLE_RULE_CHIP_LIMIT)
+    return {
+      ...r,
+      ownerInboundTag: r.owner_inbound_id ? ownerTagOf.value[r.owner_inbound_id] || '' : '',
+      inboundTagList: parseTagList(r.inbound_tag),
+      visibleChips: chips.slice(0, VISIBLE_RULE_CHIP_LIMIT),
+      hiddenCount: hidden.length,
+      hiddenTooltip: hidden.map((c) => c.full).join('、'),
+    }
+  })
 )
+
+const filteredRoutingRules = computed<EffectiveRoutingRule[]>(() => {
+  const kw = ruleKeyword.value.trim().toLowerCase()
+  return displayRoutingRules.value.filter((row) => {
+    if (ruleOutboundFilter.value && row.outbound_tag !== ruleOutboundFilter.value) {
+      return false
+    }
+    if (kw) {
+      const haystack = [
+        row.inbound_tag,
+        row.outbound_tag,
+        row.domain,
+        row.ip,
+        row.port,
+        row.protocol,
+        row.network,
+        row.remark,
+        row.rule_json,
+        row.ownerInboundTag,
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .toLowerCase()
+      if (!haystack.includes(kw)) return false
+    }
+    return true
+  })
+})
+
+const ruleEmptyText = computed(() => {
+  if (!serverFilter.value) return '请在顶部工具栏选择目标服务器'
+  if (hasRuleFilters.value) return '没有匹配的路由规则'
+  return '该服务器暂无路由规则，点击右上角「新增规则」'
+})
 
 async function loadRouting() {
   if (!serverFilter.value) {
@@ -199,12 +319,12 @@ function openRuleCreate() {
   ruleEditorOpen.value = true
 }
 
-function openRuleEdit(row: any) {
+function openRuleEdit(row: EffectiveRoutingRule) {
   ruleEditing.value = row
   ruleEditorOpen.value = true
 }
 
-async function toggleRule(row: any) {
+async function toggleRule(row: EffectiveRoutingRule) {
   if (!serverFilter.value) return
   try {
     const { data } = await updateServerRoutingRule(serverFilter.value, row.id, { enabled: !row.enabled })
@@ -219,7 +339,7 @@ async function toggleRule(row: any) {
   }
 }
 
-async function removeRule(row: any) {
+async function removeRule(row: EffectiveRoutingRule) {
   if (!serverFilter.value) return
   try {
     await messageBox.confirm(`确认删除路由规则「${row.outbound_tag}」？`, '删除路由规则', { type: 'error' })
@@ -237,12 +357,6 @@ async function removeRule(row: any) {
   }
 }
 
-// 辅助：将多行或逗号分隔的文本拆解为数组
-function parseTagList(val?: string): string[] {
-  if (!val) return []
-  return val.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
-}
-
 function goOutbounds() {
   router.push({
     path: '/admin/outbounds',
@@ -254,6 +368,7 @@ function goOutbounds() {
 let initialized = false
 watch(serverFilter, (v) => {
   if (!initialized) return
+  resetRuleFilters()
   syncServerQuery()
   if (!v) {
     outbounds.value = []
@@ -387,9 +502,25 @@ onMounted(async () => {
           <!-- Tab 1: 路由规则管理 -->
           <template v-if="activeTab === 'rules'">
             <CsSpaceBetween size="s">
-              <CsToolbar>
+              <CsToolbar class="rule-toolbar">
+                <CsInput
+                  v-model="ruleKeyword"
+                  placeholder="搜索入站 / 出站 / 域名 / IP / 备注"
+                  clearable
+                  prefix-icon="search"
+                  class="rule-filter-search"
+                />
+                <CsSelect
+                  :model-value="ruleOutboundFilter"
+                  :options="ruleOutboundOptions"
+                  clearable
+                  placeholder="全部出站"
+                  aria-label="按目标出站筛选"
+                  class="rule-filter-select"
+                  @change="onRuleOutboundFilterChange"
+                />
+                <CsButton v-if="hasRuleFilters" @click="resetRuleFilters">重置</CsButton>
                 <template #actions>
-                  <CsButton :disabled="!serverFilter" icon-name="refresh" @click="loadRouting">刷新</CsButton>
                   <CsButton
                     variant="primary"
                     :disabled="!serverFilter"
@@ -401,80 +532,97 @@ onMounted(async () => {
                 </template>
               </CsToolbar>
 
-              <CsLoading :loading="routingLoading" min-height="200px">
-                <CsEmpty
-                  v-if="displayRoutingRules.length === 0"
-                  description="该服务器暂无路由规则，点击右上角「新增规则」"
-                  icon-name="list-view"
-                />
+              <CsTable
+                compact
+                track-by="id"
+                :items="filteredRoutingRules"
+                :columns="routingColumns"
+                :loading="routingLoading"
+                loading-text="加载中…"
+                :empty-text="ruleEmptyText"
+                aria-label="路由规则列表"
+              >
+                <template #cell-priority="{ row }">
+                  <span class="cell-mono" :class="{ 'cell-muted': !row.enabled }">
+                    {{ row.priority ?? 0 }}
+                  </span>
+                </template>
 
-                <CsCardGrid v-else>
-                  <CsCard v-for="row in displayRoutingRules" :key="row.id">
-                    <template #header>
-                      <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-                        <span class="cs-text-secondary">目标出站：</span>
-                        <CsBadge color="blue">{{ row.outbound_tag }}</CsBadge>
-                        <CsBadge v-if="row.owner_inbound_id" color="grey">系统内置·直通</CsBadge>
-                      </CsSpaceBetween>
-                    </template>
+                <template #cell-inbound="{ row }">
+                  <div v-if="row.inboundTagList.length" class="chip-container" :class="{ 'is-muted': !row.enabled }">
+                    <span v-for="tag in row.inboundTagList" :key="tag" class="tag-chip">{{ tag }}</span>
+                  </div>
+                  <span v-else class="cell-muted">全部入站</span>
+                </template>
 
-                    <template #actions>
-                      <CsToggle
-                        :model-value="row.enabled"
-                        :disabled="!!row.owner_inbound_id"
-                        aria-label="启用此路由规则"
-                        @change="toggleRule(row)"
-                      />
-                    </template>
+                <template #cell-rules="{ row }">
+                  <div v-if="row.visibleChips.length" class="chip-container" :class="{ 'is-muted': !row.enabled }">
+                    <span
+                      v-for="(chip, idx) in row.visibleChips"
+                      :key="idx"
+                      class="rule-chip"
+                      :title="chip.full"
+                    >
+                      <span class="rule-chip-label">{{ chip.label }}</span>
+                      <span class="rule-chip-value">{{ chip.value }}</span>
+                    </span>
+                    <CsTooltip v-if="row.hiddenCount > 0" :content="row.hiddenTooltip">
+                      <span class="rule-chip rule-chip--more">+{{ row.hiddenCount }}</span>
+                    </CsTooltip>
+                  </div>
+                  <span v-else class="cell-muted">全部流量</span>
+                </template>
 
-                    <CsCardFacts>
-                      <CsCardFact full-width label="域名规则 (Domain)">
-                        <div v-if="parseTagList(row.domain).length" class="chip-container">
-                          <code v-for="(item, idx) in parseTagList(row.domain)" :key="idx" class="rule-chip">
-                            {{ item }}
-                          </code>
-                        </div>
-                        <span v-else class="cs-text-secondary">—</span>
-                      </CsCardFact>
+                <template #cell-outbound="{ row }">
+                  <div class="outbound-cell" :class="{ 'is-muted': !row.enabled }">
+                    <CsBadge class="nowrap-badge" :color="outboundBadgeColor(row.outbound_tag)">
+                      {{ row.outbound_tag }}
+                    </CsBadge>
+                    <CsBadge v-if="row.owner_inbound_id" class="nowrap-badge" color="grey">系统直通</CsBadge>
+                  </div>
+                </template>
 
-                      <CsCardFact full-width label="IP 规则 (IP)">
-                        <div v-if="parseTagList(row.ip).length" class="chip-container">
-                          <code v-for="(item, idx) in parseTagList(row.ip)" :key="idx" class="rule-chip">
-                            {{ item }}
-                          </code>
-                        </div>
-                        <span v-else class="cs-text-secondary">—</span>
-                      </CsCardFact>
+                <template #cell-remark="{ row }">
+                  <span
+                    v-if="row.remark"
+                    class="row-remark-cell"
+                    :class="{ 'cell-muted': !row.enabled }"
+                    :title="row.remark"
+                  >
+                    {{ row.remark }}
+                  </span>
+                  <span v-else class="cell-muted">—</span>
+                </template>
 
-                      <CsCardFact label="入站来源" :value="row.inbound_tag || '全部入站'" mono />
-                      <CsCardFact label="规则优先级" :value="row.priority ?? 0" mono />
+                <template #cell-enabled="{ row }">
+                  <CsTooltip
+                    :disabled="!row.owner_inbound_id"
+                    :content="`随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可单独启停`"
+                  >
+                    <CsToggle
+                      :model-value="row.enabled"
+                      :disabled="!!row.owner_inbound_id"
+                      aria-label="启用此路由规则"
+                      @change="toggleRule(row)"
+                    />
+                  </CsTooltip>
+                </template>
 
-                      <CsCardFact label="端口 / 协议">
-                        <div class="chip-container">
-                          <span v-if="row.port" class="cs-text-mono">{{ row.port }}</span>
-                          <span v-else class="cs-text-secondary">全部端口</span>
-                          <CsBadge v-for="p in parseTagList(row.protocol)" :key="p" color="blue">{{ p }}</CsBadge>
-                        </div>
-                      </CsCardFact>
-                    </CsCardFacts>
-
-                    <template #footer>
-                      <div class="card-foot-actions">
-                        <CsButton icon-name="edit" @click="openRuleEdit(row)">编辑规则</CsButton>
-                        <CsTooltip
-                          v-if="row.owner_inbound_id"
-                          :content="`随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可删除；要停用请停用或删除该直通`"
-                        >
-                          <span><CsButton variant="danger-outline" icon-name="remove" disabled>删除</CsButton></span>
-                        </CsTooltip>
-                        <CsButton v-else variant="danger-outline" icon-name="remove" @click="removeRule(row)">
-                          删除
-                        </CsButton>
-                      </div>
-                    </template>
-                  </CsCard>
-                </CsCardGrid>
-              </CsLoading>
+                <template #cell-actions="{ row }">
+                  <div class="row-actions">
+                    <CsButton :wrap-text="false" @click="openRuleEdit(row)">编辑</CsButton>
+                    <CsTooltip
+                      v-if="row.owner_inbound_id"
+                      :content="`随四层直通「${row.ownerInboundTag || '#' + row.owner_inbound_id}」自动维护，不可删除；要停用请停用或删除该直通`"
+                    >
+                      <span><CsButton variant="danger-outline" :wrap-text="false" disabled>删除</CsButton></span>
+                    </CsTooltip>
+                    <CsButton v-else variant="danger-outline" :wrap-text="false" @click="removeRule(row)">
+                      删除
+                    </CsButton>
+                  </div>
+                </template>
+              </CsTable>
             </CsSpaceBetween>
           </template>
 
@@ -494,7 +642,7 @@ onMounted(async () => {
                 <template #header>
                   <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
                     <CsIcon name="status-info" size="small" />
-                    <span>默认兜底出口 (Default Outbound)</span>
+                    <span>默认兜底出口</span>
                     <TipIcon
                       content="当客户端请求未命中任何路由规则时，默认兜底转发的目标出口出站标签。该出站会被排到 outbounds 列表首位作为默认出口。"
                     />
@@ -522,7 +670,7 @@ onMounted(async () => {
                 <template #header>
                   <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
                     <CsIcon name="share" size="small" />
-                    <span>路由匹配策略 (DomainStrategy)</span>
+                    <span>路由匹配策略</span>
                     <TipIcon
                       content="Xray 路由规则匹配阶段的域名与 IP 解析策略，作用于全部路由规则。IPIfNonMatch=先按域名匹配，未命中则解析 IP 再次匹配。"
                     />
@@ -597,26 +745,79 @@ onMounted(async () => {
 .server-filter {
   inline-size: 220px;
 }
+.rule-filter-search {
+  inline-size: 260px;
+}
+.rule-filter-select {
+  inline-size: 160px;
+}
 .chip-container {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+
+  &.is-muted {
+    opacity: 0.6;
+  }
 }
+.tag-chip,
 .rule-chip {
-  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
-  background: var(--color-background-container-content-mjfil9, #fff);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+  background: var(--x-card-soft, #f8fafc);
   border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   padding: 1px 6px;
   border-radius: 4px;
   white-space: nowrap;
 }
-.card-foot-actions {
+.rule-chip-label {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+.rule-chip-value {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rule-chip--more {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  cursor: default;
+}
+.outbound-cell {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+
+  &.is-muted {
+    opacity: 0.6;
+  }
+}
+.nowrap-badge {
+  white-space: nowrap !important;
+  flex-shrink: 0;
+}
+.row-remark-cell {
+  display: inline-block;
+  max-width: 180px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 .settings-actions {
   display: flex;
@@ -643,6 +844,26 @@ onMounted(async () => {
 @media (max-width: $bp-tablet-max) {
   .server-filter {
     inline-size: 100%;
+  }
+
+  .rule-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-xs-m9b7jf, 8px);
+  }
+
+  :deep(.rule-toolbar .cs-toolbar-main) {
+    inline-size: 100%;
+
+    .rule-filter-search,
+    .rule-filter-select {
+      inline-size: 100%;
+    }
+  }
+
+  :deep(.rule-toolbar .cs-toolbar-actions) {
+    inline-size: 100%;
+    justify-content: flex-end;
   }
 }
 </style>
