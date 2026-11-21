@@ -945,7 +945,7 @@ async function onResetSubscribe() {
   padding: 8px 12px;
   border: 1px solid var(--x-border);
   border-radius: 8px;
-  background-color: var(--x-bg-subtle, transparent);
+  background-color: var(--x-card-soft);
 }
 
 .twofa-secret-code {

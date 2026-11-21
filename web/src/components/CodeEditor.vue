@@ -275,6 +275,9 @@ const editorTheme = EditorView.theme({
     lineHeight: '20px',
   },
   '.cm-content': { padding: '8px 0', caretColor: 'var(--color-text-body-default-b2us04, #0f141a)' },
+  '.cm-cursor, .cm-dropCursor': {
+    borderLeftColor: 'var(--color-text-body-default-b2us04, #0f141a)',
+  },
   '.cm-gutters': {
     backgroundColor: 'var(--color-background-code-editor-gutter-default-8n8dxf, #f3f3f7)',
     color: 'var(--color-text-code-editor-gutter-default-u68cfj, #0f141a)',

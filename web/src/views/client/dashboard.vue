@@ -523,6 +523,7 @@ function viewNotice(n: NoticeItem) {
   border: none;
   border-bottom: 1px solid var(--x-border);
   background: transparent;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 

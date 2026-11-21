@@ -4,6 +4,7 @@
 // 而管理端实际渲染的是 vendor 的 primary 色阶，两套并存且靛紫只残留在渐变里。
 // 现在 --x-primary 指向 vendor 的 primary-600，随亮/暗自动切。
 :root {
+  color-scheme: light;
   /* ===== 品牌主色 (Brand Primary) ===== */
   --x-primary: var(--color-primary-600-su56h9, #006ce0);
   --x-primary-soft: var(--color-primary-50-hzpado, #f0fbff);
@@ -22,6 +23,7 @@
   /* ===== 文字颜色阶梯 (Typography Colors) ===== */
   --x-text: #1e2333;
   --x-text-2: #6b7280;
+  --x-text-secondary: var(--color-text-body-secondary-66ygbb, #656871);
   --x-text-3: #9ca3af;
 
   /* ===== 字体字号阶梯 (Typography Scale) =====
@@ -114,6 +116,7 @@ body {
 }
 
 html.dark {
+  color-scheme: dark;
   /* ===== 品牌主色 (Brand Primary in Dark) =====
      暗色下 Cloudscape 的 primary-400 是更好的对比档，同样取自 vendor token。 */
   --x-primary: var(--color-primary-400-x68qyw, #42b4ff);
@@ -133,6 +136,7 @@ html.dark {
   /* ===== 文字阶梯 (Typography Colors in Dark) ===== */
   --x-text: #f8fafc;
   --x-text-2: #94a3b8;
+  --x-text-secondary: var(--color-text-body-secondary-66ygbb, #9ba7b6);
   --x-text-3: #64748b;
 
   /* ===== 代码编辑器配色（暗色） ===== */

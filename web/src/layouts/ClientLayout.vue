@@ -221,7 +221,7 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .client-shell {
   min-height: 100vh;
-  background-color: var(--x-bg-page);
+  background-color: var(--color-background-layout-main-y4565g, var(--x-bg));
 
   &.is-mobile {
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));

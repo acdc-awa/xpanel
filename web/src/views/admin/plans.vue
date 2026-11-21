@@ -897,7 +897,7 @@ async function restore(row: any) {
   padding: 12px 14px;
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius-sm);
-  background: var(--x-surface-soft);
+  background: var(--x-card-soft);
 }
 
 .plan-preview-label {

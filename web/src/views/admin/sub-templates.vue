@@ -16,9 +16,10 @@ import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { toast, messageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
-  CsBadge,
+  CsAlert,
   CsBox,
   CsButton,
+  CsButtonDropdown,
   CsContainer,
   CsInput,
   CsLoading,
@@ -26,6 +27,8 @@ import {
   CsSelect,
   CsTabs,
   CsToolbar,
+  CsTooltip,
+  type ButtonDropdownItem,
 } from '@/components/cloudscape'
 import {
   bindPermissionGroupSubTemplate,
@@ -42,7 +45,7 @@ import {
   type TemplatePreviewResult,
 } from '@/api/admin'
 import { errMsg } from '@/api/http'
-import { formatDateTime } from '@/utils/timezone'
+import { formatDateTimeMinute } from '@/utils/timezone'
 import CodeEditor from '@/components/CodeEditor.vue'
 
 const route = useRoute()
@@ -151,8 +154,11 @@ function groupBadge(g: PermissionGroup): string {
   if (isGroupBound(g)) return `绑定「${g.sub_template_name || '模板'}」`
   return g.template_source === 'custom' ? '自定义' : '系统默认'
 }
-function groupBadgeColor(g: PermissionGroup): 'blue' | 'grey' {
-  return isGroupBound(g) || g.template_source === 'custom' ? 'blue' : 'grey'
+function groupTagClass(g: PermissionGroup): string {
+  return isGroupBound(g) || g.template_source === 'custom' ? 'soft-tag--info' : 'soft-tag--neutral'
+}
+function formatUpdatedAt(iso?: string): string {
+  return iso ? formatDateTimeMinute(iso, '') : ''
 }
 
 const filteredGroups = computed(() => {
@@ -283,9 +289,20 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 
 // ==================== 组模板编辑动作 ====================
-function insertPlaceholder(placeholder: string) {
+const placeholderItems: ButtonDropdownItem[] = [
+  { id: '$PROXIES$', text: '$PROXIES$（节点池）' },
+  { id: '$ALL_PROXIES$', text: '$ALL_PROXIES$（全部节点）' },
+  { id: '$FILTER_PROXIES(关键词)$', text: '$FILTER_PROXIES(关键词)$（按地区过滤）' },
+  { id: '$PANEL_HOST$', text: '$PANEL_HOST$（面板防回环）' },
+]
+
+function insertGroupPlaceholder(id: string | number) {
   // 交给编辑器在光标处插入（替换选中内容），不再从 DOM 反查 textarea 选区
-  groupEditorRef.value?.insertAtCursor(placeholder)
+  groupEditorRef.value?.insertAtCursor(String(id))
+}
+
+function insertLibPlaceholder(id: string | number) {
+  libEditorRef.value?.insertAtCursor(String(id))
 }
 
 // 清空 = 把该组退回「未自定义」，订阅时走系统内置默认模板
@@ -674,311 +691,283 @@ async function saveAsFromEditor() {
     <CsTabs v-model="activeTab" :tabs="outerTabs" disable-content-paddings>
       <!-- ==================== TAB 1：组级订阅模板（生效位置） ==================== -->
       <div v-show="activeTab === 'groups'" class="tpl-layout">
-          <!-- 左：权限组选择 -->
-          <CsContainer header="权限组">
-            <template #actions>
-              <CsInput
-                v-model="groupKeyword"
-                size="small"
-                placeholder="搜索权限组"
-                prefix-icon="search"
-                clearable
-                style="width: 150px"
-              />
-            </template>
+        <!-- 左：权限组选择 -->
+        <CsContainer header="权限组">
+          <template #actions>
+            <CsInput
+              v-model="groupKeyword"
+              size="small"
+              placeholder="搜索权限组"
+              prefix-icon="search"
+              clearable
+              style="width: 150px"
+            />
+          </template>
 
-            <div v-if="groupsLoading" class="list-hint">正在加载…</div>
-            <div v-else-if="groups.length === 0" class="list-hint">
-              尚无权限组，请先在「订阅与财务 → 权限组管理」中创建
+          <div v-if="groupsLoading" class="list-hint">正在加载…</div>
+          <div v-else-if="groups.length === 0" class="list-hint">
+            尚无权限组，请先在「订阅与财务 → 权限组管理」中创建
+          </div>
+          <div v-else-if="filteredGroups.length === 0" class="list-hint">没有匹配的权限组</div>
+          <div v-else class="pick-list">
+            <button
+              v-for="g in filteredGroups"
+              :key="g.id"
+              type="button"
+              class="pick-row"
+              :class="{ active: g.id === selectedGroupId }"
+              @click="selectGroup(g.id)"
+            >
+              <span class="pick-main">
+                <span class="pick-name">{{ g.name }}</span>
+                <span v-if="g.remark" class="pick-remark">{{ g.remark }}</span>
+              </span>
+              <span class="pick-meta">
+                <span v-if="g.id === selectedGroupId && groupDirty" class="soft-tag soft-tag--warn">未保存</span>
+                <span class="soft-tag" :class="groupTagClass(g)">{{ groupBadge(g) }}</span>
+              </span>
+            </button>
+          </div>
+        </CsContainer>
+
+        <!-- 右：模板编辑器 -->
+        <CsContainer :header="selectedGroup ? selectedGroup.name : '配置订阅模板'">
+          <template #actions>
+            <span v-if="editorSyncing" class="soft-tag soft-tag--neutral">加载中</span>
+            <span v-else-if="groupDirty" class="soft-tag soft-tag--warn">未保存</span>
+            <span
+              v-if="selectedGroup"
+              class="soft-tag"
+              :class="isBoundGroup || selectedGroup.template_source === 'custom' ? 'soft-tag--info' : 'soft-tag--neutral'"
+            >
+              {{ templateSourceLabel }}
+            </span>
+          </template>
+
+          <div v-if="!selectedGroup" class="list-hint" style="padding: 60px 0">
+            请在左侧选择一个权限组
+          </div>
+
+          <template v-else>
+            <div class="editor-toolbar">
+              <div class="editor-toolbar-left">
+                <span class="toolbar-label">模板来源</span>
+                <CsSelect
+                  :model-value="templateSourceValue"
+                  :options="bindingOptions"
+                  :disabled="bindingSaving || editorSyncing"
+                  style="width: 220px"
+                  @change="onTemplateSourceChange"
+                />
+                <span v-if="bindingSaving" class="toolbar-status">正在保存…</span>
+              </div>
+              <div class="editor-toolbar-right">
+                <CsButtonDropdown
+                  v-show="editorTab === 'edit'"
+                  text="插入占位符"
+                  :items="placeholderItems"
+                  @select="insertGroupPlaceholder"
+                />
+                <CsButton @click="saveAsFromEditor">另存为模板</CsButton>
+                <CsButton @click="clearTemplate">清空</CsButton>
+              </div>
             </div>
-            <div v-else-if="filteredGroups.length === 0" class="list-hint">没有匹配的权限组</div>
-            <div v-else class="pick-list">
-              <button
-                v-for="g in filteredGroups"
-                :key="g.id"
-                type="button"
-                class="pick-row"
-                :class="{ active: g.id === selectedGroupId }"
-                @click="selectGroup(g.id)"
-              >
-                <span class="pick-main">
-                  <span class="pick-name">{{ g.name }}</span>
-                  <span class="pick-remark">{{ g.remark || '—' }}</span>
-                </span>
-                <span v-if="g.id === selectedGroupId && groupDirty" class="dirty-mark">未保存</span>
-                <CsBadge :color="groupBadgeColor(g)">{{ groupBadge(g) }}</CsBadge>
-              </button>
-            </div>
-            <div class="list-foot">绑定模板的组会跟随模板库更新；再次点击已选中的权限组可放弃修改、重新加载生效模板。</div>
-          </CsContainer>
 
-          <!-- 右：模板编辑器 -->
-          <CsContainer :header="selectedGroup ? `配置订阅模板：${selectedGroup.name}` : '配置订阅模板'">
-            <template #actions>
-              <CsBadge v-if="editorSyncing" color="grey">加载中</CsBadge>
-              <CsBadge v-else-if="groupDirty" color="severity-medium">未保存</CsBadge>
-              <CsBadge :color="isBoundGroup || selectedGroup?.template_source === 'custom' ? 'blue' : 'grey'">
-                {{ templateSourceLabel }}
-              </CsBadge>
-            </template>
-
-            <div v-if="!selectedGroup" class="list-hint" style="padding: 60px 0">
-              请在左侧选择一个权限组
-            </div>
-
-            <template v-else>
-              <div class="preset-section">
-                <div class="preset-row">
-                  <span class="preset-label">模板来源：</span>
-                  <CsSelect
-                    :model-value="templateSourceValue"
-                    :options="bindingOptions"
-                    :disabled="bindingSaving || editorSyncing"
-                    style="width: 240px"
-                    @change="onTemplateSourceChange"
-                  />
-                  <span v-if="bindingSaving" class="cs-text-secondary" style="font-size: 12px">
-                    正在保存…
-                  </span>
-                  <span v-else class="cs-text-secondary" style="font-size: 12px">
-                    选择模板即绑定（模板库改动同步到本组）；在此编辑内容后保存会转为自定义
-                  </span>
-                </div>
-                <div v-if="isBoundGroup" class="bind-hint">
-                  当前绑定「{{ selectedGroup.sub_template_name || '模板' }}」：内容随模板库更新；在此编辑并保存会自动转为自定义，此后不再跟随模板库。
-                </div>
-
-                <div class="preset-row" style="margin-top: 8px">
-                  <span class="preset-label">模板动作：</span>
-                  <CsButton @click="saveAsFromEditor">将当前内容另存为模板</CsButton>
-                  <CsButton @click="clearTemplate">清空</CsButton>
-                </div>
-
-                <div class="preset-row" style="margin-top: 8px">
-                  <span class="preset-label">常用占位符：</span>
-                  <TipIcon
-                    content="$PROXIES$ 自动展开为当前权限组所有可用 VLESS 节点；$ALL_PROXIES$ 展开为全部节点名称；$FILTER_PROXIES(关键词)$ 自动过滤匹配该地区的节点名称（匹配为空时使用默认规则）。占位符按后端支持的写法校验，不会被误判为语法错误。"
-                  />
-                  <div class="preset-chips">
-                    <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PROXIES$')">
-                      + $PROXIES$（节点池）
-                    </button>
-                    <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$ALL_PROXIES$')">
-                      + $ALL_PROXIES$（全部节点）
-                    </button>
-                    <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$FILTER_PROXIES(关键词)$')">
-                      + $FILTER_PROXIES(关键词)$
-                    </button>
-                    <button type="button" class="preset-chip code" @mousedown.prevent @click="insertPlaceholder('$PANEL_HOST$')">
-                      + $PANEL_HOST$（面板防回环）
-                    </button>
-                  </div>
-                </div>
+            <CsTabs v-model="editorTab" :tabs="editorTabs" disable-content-paddings @change="onTabChange">
+              <div v-show="editorTab === 'edit'">
+                <CodeEditor
+                  ref="groupEditorRef"
+                  v-model="templateCode"
+                  height="460px"
+                  resizable
+                  placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
+                  @lint="(e, w) => { groupLint.errors = e; groupLint.warnings = w }"
+                />
+                <CsAlert
+                  v-if="groupLint.errors > 0 || groupLint.warnings > 0"
+                  class="lint-banner"
+                  :type="groupLint.errors ? 'error' : 'warning'"
+                  header="YAML 校验未通过"
+                >
+                  {{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
+                  错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
+                </CsAlert>
               </div>
 
-              <CsTabs v-model="editorTab" :tabs="editorTabs" disable-content-paddings @change="onTabChange">
-                <div v-show="editorTab === 'edit'">
-                  <CodeEditor
-                    ref="groupEditorRef"
-                    v-model="templateCode"
-                    height="330px"
-                    resizable
-                    placeholder="留空则使用系统内置默认模板。填写后将在 proxies 和 proxy-groups 处按占位符注入该权限组的节点。"
-                    @lint="(e, w) => { groupLint.errors = e; groupLint.warnings = w }"
-                  />
-                  <CsAlert
-                    v-if="groupLint.errors > 0 || groupLint.warnings > 0"
-                    class="lint-banner"
-                    :type="groupLint.errors ? 'error' : 'warning'"
-                    header="YAML 校验未通过"
-                  >
-                    {{ groupLint.errors }} 处错误<span v-if="groupLint.warnings">、{{ groupLint.warnings }} 处警告</span>。
-                    错误行已在编辑器中标红，悬停可看原因；此处保存会把问题一起下发给客户端。
-                  </CsAlert>
-                </div>
-
-                <div v-if="editorTab === 'preview'">
-                  <CsLoading :loading="previewLoading">
-                    <div v-if="previewData" class="preview-header">
-                      <div class="preview-stats">
-                        <span class="stat-badge">
-                          注入节点数：<strong>{{ previewData.proxy_count }}</strong>
-                        </span>
-                        <span v-if="previewData.is_sample_nodes" class="stat-badge warning">
-                          该权限组暂无可用接入点，以下为样例模拟结果
-                        </span>
-                      </div>
-                      <div style="display: flex; gap: 8px">
-                        <CsButton icon-name="refresh" @click="fetchPreview">刷新预览</CsButton>
-                        <CsButton variant="primary" icon-name="copy" @click="copyPreview">复制预览配置</CsButton>
-                      </div>
-                    </div>
-
-                    <div v-if="previewData?.proxy_names && previewData.proxy_names.length" class="matched-nodes-box">
-                      <span class="box-label">组内可用节点池：</span>
-                      <span v-for="name in previewData.proxy_names" :key="name" class="node-chip cs-text-mono">
-                        {{ name }}
+              <div v-if="editorTab === 'preview'">
+                <CsLoading :loading="previewLoading">
+                  <div v-if="previewData" class="preview-header">
+                    <div class="preview-stats">
+                      <span class="soft-tag soft-tag--neutral">
+                        注入节点数：<strong>{{ previewData.proxy_count }}</strong>
+                      </span>
+                      <span v-if="previewData.is_sample_nodes" class="soft-tag soft-tag--warn">
+                        该权限组暂无可用接入点，以下为样例模拟结果
                       </span>
                     </div>
+                    <div style="display: flex; gap: 8px">
+                      <CsButton icon-name="refresh" @click="fetchPreview">刷新预览</CsButton>
+                      <CsButton variant="primary" icon-name="copy" @click="copyPreview">复制预览配置</CsButton>
+                    </div>
+                  </div>
 
-                    <CodeEditor
-                      v-if="previewData"
-                      :model-value="previewData.rendered"
-                      height="300px"
-                      readonly
-                      resizable
-                      @lint="(e, w) => { previewLint.errors = e; previewLint.warnings = w }"
-                    />
-                    <div v-else class="list-hint" style="padding: 30px 0">正在编译渲染…</div>
-                    <CsAlert v-if="previewLint.errors > 0" class="lint-banner" type="error" header="编译结果不合法">
-                      有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
-                    </CsAlert>
-                  </CsLoading>
-                </div>
-              </CsTabs>
+                  <div v-if="previewData?.proxy_names && previewData.proxy_names.length" class="matched-nodes-box">
+                    <span class="box-label">组内可用节点池：</span>
+                    <span v-for="name in previewData.proxy_names" :key="name" class="node-chip cs-text-mono">
+                      {{ name }}
+                    </span>
+                  </div>
 
-              <div class="save-bar">
-                <span class="cs-text-secondary" style="font-size: 12px">
-                  <template v-if="isBoundGroup">
-                    当前绑定「{{ selectedGroup.sub_template_name || '模板' }}」：保存会把编辑内容写为该组自定义模板并解除绑定
-                  </template>
-                  <template v-else>
-                    保存后权限组「{{ selectedGroup.name }}」的用户请求订阅时将直接返回此配置
-                  </template>
-                </span>
-                <CsButton
-                  variant="primary"
-                  icon-name="check"
-                  :loading="templateSaving"
-                  :disabled="editorSyncing || (isBoundGroup && !groupDirty)"
-                  @click="saveTemplate"
-                >
-                  {{ isBoundGroup ? '保存并转为自定义' : '保存到该权限组' }}
-                </CsButton>
+                  <CodeEditor
+                    v-if="previewData"
+                    :model-value="previewData.rendered"
+                    height="420px"
+                    readonly
+                    resizable
+                    @lint="(e, w) => { previewLint.errors = e; previewLint.warnings = w }"
+                  />
+                  <div v-else class="list-hint" style="padding: 30px 0">正在编译渲染…</div>
+                  <CsAlert v-if="previewLint.errors > 0" class="lint-banner" type="error" header="编译结果不合法">
+                    有 {{ previewLint.errors }} 处 YAML 语法错误：模板本身可能没问题，但占位符位置或缩进让最终配置不合法，客户端会解析失败。
+                  </CsAlert>
+                </CsLoading>
               </div>
-            </template>
-          </CsContainer>
-        </div>
+            </CsTabs>
+
+            <div class="save-bar">
+              <span class="cs-text-secondary" style="font-size: 12px">
+                <template v-if="isBoundGroup">编辑并保存将自动转为自定义模板</template>
+                <template v-else>保存后对「{{ selectedGroup.name }}」的订阅生效</template>
+              </span>
+              <CsButton
+                variant="primary"
+                :loading="templateSaving"
+                :disabled="editorSyncing || (isBoundGroup && !groupDirty)"
+                @click="saveTemplate"
+              >
+                {{ isBoundGroup ? '保存并转为自定义' : '保存' }}
+              </CsButton>
+            </div>
+          </template>
+        </CsContainer>
+      </div>
 
       <!-- ==================== TAB 2：我的模板库（可绑定给权限组，与 TAB 1 同一套双列骨架） ==================== -->
       <div v-show="activeTab === 'library'" class="tpl-layout">
-          <!-- 左：模板列表 -->
-          <CsContainer header="模板库">
-            <template #info>
-              <TipIcon content="模板库条目可被多个权限组绑定：绑定后改模板即更新这些组的订阅。删除模板时，绑定组会转为自定义并保留模板当前内容。" />
-            </template>
-            <template #actions>
-              <CsButton variant="primary" icon-name="add-plus" @click="startNewLibrary">
-                新建模板
-              </CsButton>
-            </template>
+        <!-- 左：模板列表 -->
+        <CsContainer header="模板库">
+          <template #info>
+            <TipIcon content="模板库条目可被多个权限组绑定：绑定后改模板即更新这些组的订阅。删除模板时，绑定组会转为自定义并保留模板当前内容。" />
+          </template>
+          <template #actions>
+            <CsButton variant="primary" icon-name="add-plus" @click="startNewLibrary">
+              新建模板
+            </CsButton>
+          </template>
 
-            <div v-if="libraryLoading" class="list-hint">正在加载…</div>
-            <div v-else-if="subTemplates.length === 0" class="list-hint">
-              模板库还是空的。点「新建模板」，或在「组级订阅模板」里把当前内容另存为模板。
-            </div>
-            <div v-else class="pick-list">
-              <button
-                v-for="tpl in subTemplates"
-                :key="tpl.id"
-                type="button"
-                class="pick-row"
-                :class="{ active: tpl.id === libForm.id }"
-                @click="selectLibrary(tpl)"
-              >
-                <span class="pick-main">
-                  <span class="pick-name">{{ tpl.name }}</span>
-                  <span class="pick-remark">
-                    {{ (tpl.content || '').length }} 字符，更新于 {{ formatDateTime(tpl.updated_at) }}
-                  </span>
+          <div v-if="libraryLoading" class="list-hint">正在加载…</div>
+          <div v-else-if="subTemplates.length === 0" class="list-hint">
+            模板库还是空的。点「新建模板」，或在「组级订阅模板」里把当前内容另存为模板。
+          </div>
+          <div v-else class="pick-list">
+            <button
+              v-for="tpl in subTemplates"
+              :key="tpl.id"
+              type="button"
+              class="pick-row"
+              :class="{ active: tpl.id === libForm.id }"
+              @click="selectLibrary(tpl)"
+            >
+              <span class="pick-main">
+                <span class="pick-name">{{ tpl.name }}</span>
+                <span class="pick-sub">
+                  <span>{{ (tpl.content || '').length }} 字符</span>
+                  <span v-if="tpl.updated_at">{{ formatUpdatedAt(tpl.updated_at) }}</span>
                 </span>
-                <span v-if="tpl.id === libForm.id && libDirty" class="dirty-mark">未保存</span>
-                <CsBadge v-if="tpl.usage_count" color="blue">{{ tpl.usage_count }} 组</CsBadge>
-              </button>
-            </div>
-          </CsContainer>
+              </span>
+              <span class="pick-meta">
+                <span v-if="tpl.id === libForm.id && libDirty" class="soft-tag soft-tag--warn">未保存</span>
+                <span v-if="tpl.usage_count" class="soft-tag soft-tag--info">{{ tpl.usage_count }} 组</span>
+              </span>
+            </button>
+          </div>
+        </CsContainer>
 
-          <!-- 右：模板编辑器（与组级页共用同一套骨架，不再用弹窗） -->
-          <CsContainer
-            :header="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'"
-          >
-            <template #info>
-              <TipIcon content="与组级模板语法一致：$PROXIES$（节点池）、$ALL_PROXIES$（全部节点名称）、$FILTER_PROXIES(关键词)$（按地区过滤）、$PANEL_HOST$（面板域名）。" />
-            </template>
-            <template #actions>
-              <span v-if="libPaneOpen && libDirty" class="dirty-mark">未保存</span>
-              <CsBadge v-if="libOrigin?.usage_count" color="blue">
-                被 {{ libOrigin.usage_count }} 个组使用
-              </CsBadge>
-            </template>
+        <!-- 右：模板编辑器（与组级页共用同一套骨架，不再用弹窗） -->
+        <CsContainer
+          :header="libPaneOpen ? (libIsNew ? '新建模板' : '编辑模板') : '模板编辑器'"
+        >
+          <template #info>
+            <TipIcon content="与组级模板语法一致：$PROXIES$（节点池）、$ALL_PROXIES$（全部节点名称）、$FILTER_PROXIES(关键词)$（按地区过滤）、$PANEL_HOST$（面板域名）。" />
+          </template>
+          <template #actions>
+            <span v-if="libPaneOpen && libDirty" class="soft-tag soft-tag--warn">未保存</span>
+            <CsTooltip
+              v-if="libOrigin?.usage_count"
+              :content="(libOrigin.group_names || []).join('、')"
+              :disabled="!libOrigin.group_names?.length"
+            >
+              <span class="soft-tag soft-tag--info">被 {{ libOrigin.usage_count }} 个组使用</span>
+            </CsTooltip>
+          </template>
 
-            <div v-if="!libPaneOpen" class="list-hint" style="padding: 60px 0">
-              请在左侧选择要编辑的模板，或点「新建模板」
-            </div>
+          <div v-if="!libPaneOpen" class="list-hint" style="padding: 60px 0">
+            请在左侧选择要编辑的模板，或点「新建模板」
+          </div>
 
-            <template v-else>
-              <div class="preset-section">
-                <div class="preset-row">
-                  <span class="preset-label">模板名称：</span>
-                  <CsInput
-                    v-model="libForm.name"
-                    size="small"
-                    :maxlength="64"
-                    show-word-limit
-                    placeholder="如 通用精简模板 / 流媒体分流模板"
-                    style="width: 280px"
-                  />
-                </div>
+          <template v-else>
+            <div class="editor-toolbar editor-toolbar--library">
+              <div class="editor-toolbar-left">
+                <span class="toolbar-label">模板名称</span>
+                <CsInput
+                  v-model="libForm.name"
+                  size="small"
+                  :maxlength="64"
+                  show-word-limit
+                  placeholder="如 通用精简模板 / 流媒体分流模板"
+                  style="width: 280px"
+                />
               </div>
-
-              <CsAlert
-                v-if="!libIsNew && (libOrigin?.usage_count ?? 0) > 0"
-                class="lint-banner"
-                type="warning"
-                header="该模板正在被权限组绑定"
-              >
-                保存后 {{ libOrigin?.usage_count }} 个绑定组的下一次订阅请求立即使用新内容<template
-                  v-if="libOrigin?.group_names?.length"
-                >（{{ libOrigin.group_names.join('、') }}）</template>。
-              </CsAlert>
-
-              <CodeEditor
-                ref="libEditorRef"
-                v-model="libForm.content"
-                height="330px"
-                resizable
-                placeholder="留空则使用系统内置默认模板"
-                @lint="(e, w) => { libLint.errors = e; libLint.warnings = w }"
-              />
-              <CsAlert
-                v-if="libLint.errors > 0 || libLint.warnings > 0"
-                class="lint-banner"
-                :type="libLint.errors ? 'error' : 'warning'"
-                header="YAML 校验未通过"
-              >
-                {{ libLint.errors }} 处错误<span v-if="libLint.warnings">、{{ libLint.warnings }} 处警告</span>。
-                错误行已在编辑器中标红，悬停可看原因。
-              </CsAlert>
-
-              <div class="save-bar">
-                <span class="cs-text-secondary" style="font-size: 12px">
-                  <template v-if="!libIsNew && (libOrigin?.usage_count ?? 0) > 0">
-                    保存后立即影响 {{ libOrigin?.usage_count }} 个绑定组的下一次订阅
-                  </template>
-                  <template v-else>
-                    保存只写入模板库，不会改变任何权限组的生效模板
-                  </template>
-                </span>
-                <div style="display: flex; gap: 8px">
-                  <CsButton v-if="!libIsNew" variant="danger-outline" icon-name="remove" @click="removeLibrary">删除</CsButton>
-                  <CsButton variant="primary" icon-name="check" :loading="librarySaving" @click="saveLibrary">
-                    {{ libIsNew ? '保存到模板库' : '保存修改' }}
-                  </CsButton>
-                </div>
+              <div class="editor-toolbar-right">
+                <CsButtonDropdown text="插入占位符" :items="placeholderItems" @select="insertLibPlaceholder" />
               </div>
-            </template>
-          </CsContainer>
-        </div>
+            </div>
+
+            <CodeEditor
+              ref="libEditorRef"
+              v-model="libForm.content"
+              height="460px"
+              resizable
+              placeholder="留空则使用系统内置默认模板"
+              @lint="(e, w) => { libLint.errors = e; libLint.warnings = w }"
+            />
+            <CsAlert
+              v-if="libLint.errors > 0 || libLint.warnings > 0"
+              class="lint-banner"
+              :type="libLint.errors ? 'error' : 'warning'"
+              header="YAML 校验未通过"
+            >
+              {{ libLint.errors }} 处错误<span v-if="libLint.warnings">、{{ libLint.warnings }} 处警告</span>。
+              错误行已在编辑器中标红，悬停可看原因。
+            </CsAlert>
+
+            <div class="save-bar">
+              <span class="cs-text-secondary" style="font-size: 12px">
+                <template v-if="!libIsNew && (libOrigin?.usage_count ?? 0) > 0">
+                  影响 {{ libOrigin?.usage_count }} 个绑定组<template v-if="libOrigin?.group_names?.length">：{{ libOrigin.group_names.join('、') }}</template>
+                </template>
+                <template v-else>仅写入模板库，不影响现有权限组</template>
+              </span>
+              <div style="display: flex; gap: 8px">
+                <CsButton v-if="!libIsNew" variant="danger-outline" @click="removeLibrary">删除</CsButton>
+                <CsButton variant="primary" :loading="librarySaving" @click="saveLibrary">
+                  {{ libIsNew ? '保存到模板库' : '保存修改' }}
+                </CsButton>
+              </div>
+            </div>
+          </template>
+        </CsContainer>
+      </div>
     </CsTabs>
   </CsPage>
 </template>
@@ -988,14 +977,14 @@ async function saveAsFromEditor() {
 /* ===== 两栏骨架：两个标签页共用（左列表 + 右编辑器） ===== */
 .tpl-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
   align-items: start;
 }
 .pick-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  border-top: 1px solid var(--color-border-divider-default-diwd4w);
   max-height: 620px;
   overflow-y: auto;
 }
@@ -1006,25 +995,27 @@ async function saveAsFromEditor() {
   gap: 8px;
   width: 100%;
   text-align: left;
-  background: var(--color-background-container-content-mjfil9);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
-  border-radius: 8px;
-  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border-divider-default-diwd4w);
+  border-radius: 0;
+  padding: 9px 10px;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: background-color 0.15s ease;
   font: inherit;
   &:hover {
-    border-color: var(--color-text-link-default-qabnuk);
+    background: var(--color-background-dropdown-item-hover-pvfsrg, var(--color-background-cell-shaded-twxsbz));
   }
   &.active {
-    border-color: var(--color-text-link-default-qabnuk);
     background: var(--color-background-item-selected-dotkup);
+    box-shadow: inset 3px 0 0 var(--color-text-link-default-qabnuk);
   }
   .pick-main {
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 0;
+    flex: 1;
   }
   .pick-name {
     font-size: 13px;
@@ -1042,28 +1033,28 @@ async function saveAsFromEditor() {
     white-space: nowrap;
   }
 }
-/* 列表行里的「未保存」标记；卡片标题栏改用 CsBadge severity-medium */
-.dirty-mark {
-  flex: none;
+.pick-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
-  line-height: 1.5;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--color-background-alert-warning-021z3n);
-  color: var(--color-text-status-warning-fabq6h);
+  color: var(--color-text-body-secondary-66ygbb);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .list-hint {
   padding: 24px 0;
   text-align: center;
   color: var(--color-text-body-secondary-66ygbb);
   font-size: 13px;
-}
-.list-foot {
-  margin-top: 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--color-text-body-secondary-66ygbb);
 }
 .save-bar {
   display: flex;
@@ -1076,61 +1067,67 @@ async function saveAsFromEditor() {
   padding-top: 12px;
 }
 
-/* ===== 编辑器工具条 ===== */
-.preset-section {
-  background: var(--color-background-cell-shaded-twxsbz);
-  border-radius: 8px;
-  padding: 10px 14px;
+/* ===== 编辑器顶部工具条 ===== */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
   margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border-divider-default-diwd4w);
 }
-.preset-row {
+.editor-toolbar--library {
+  padding-bottom: 18px;
+}
+.editor-toolbar-left,
+.editor-toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-.preset-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-link-default-qabnuk);
+.toolbar-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-body-secondary-66ygbb);
   white-space: nowrap;
 }
-.bind-hint {
-  margin-top: 8px;
-  padding: 6px 10px;
-  border-left: 3px solid var(--color-text-link-default-qabnuk);
-  background: var(--color-background-item-selected-dotkup);
-  border-radius: 4px;
+.toolbar-status {
   font-size: 12px;
-  line-height: 1.6;
   color: var(--color-text-body-secondary-66ygbb);
 }
-.preset-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.preset-chip {
+
+/* ===== 状态标签（与权限组 / 套餐页一致） ===== */
+.soft-tag {
   display: inline-flex;
   align-items: center;
-  background: var(--color-background-container-content-mjfil9);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
-  padding: 3px 8px;
-  border-radius: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
   font-size: 12px;
-  color: var(--color-text-body-default-b2us04);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  &:hover {
-    border-color: var(--color-text-link-default-qabnuk);
-    color: var(--color-text-link-default-qabnuk);
-    background: rgba(0, 108, 224, 0.06);
-  }
-  &.code {
-    font-family: var(--font-family-monospace-842lr2);
-    font-size: 12px;
-  }
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
+.soft-tag--info {
+  color: var(--x-tag-info-color, #006ce0);
+  background: var(--x-tag-info-bg, #f0fbff);
+  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
+}
+.soft-tag--warn {
+  color: var(--color-text-status-warning-fabq6h, #8d6605);
+  background: var(--x-warning-soft, #fffbeb);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.soft-tag--neutral {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  background: var(--x-card-soft, #f8fafc);
+  border-color: var(--color-border-divider-default-diwd4w, #e9ebed);
+}
+
 /* YAML 校验结果改用 CsAlert；这里只补编辑器与提示条之间的间距 */
 .lint-banner {
   margin-top: 8px;
@@ -1147,19 +1144,7 @@ async function saveAsFromEditor() {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-.stat-badge {
-  font-size: 12px;
-  background: var(--color-background-cell-shaded-twxsbz);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
-  padding: 3px 8px;
-  border-radius: 8px;
-  color: var(--color-text-body-default-b2us04);
-  &.warning {
-    background: var(--color-background-alert-warning-021z3n);
-    border-color: #fde68a;
-    color: #92400e;
-  }
+  flex-wrap: wrap;
 }
 .matched-nodes-box {
   display: flex;
@@ -1170,6 +1155,7 @@ async function saveAsFromEditor() {
   border: 1px solid var(--color-border-divider-default-diwd4w);
   border-radius: 8px;
   padding: 6px 10px;
+  margin-bottom: 8px;
   font-size: 12px;
 }
 .box-label {
