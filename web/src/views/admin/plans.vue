@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { formatMoney } from '@/utils/format'
 import { DEFAULT_PLAN_MARKDOWN, renderPlanMarkdown } from '@/utils/markdown'
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { BP, MQ } from '@/utils/media'
 import TipIcon from '@/components/base/TipIcon.vue'
 import SortHandle from '@/components/base/SortHandle.vue'
 import {
@@ -31,11 +32,18 @@ import {
 import { createPlan, deletePlan, getPermissionGroups, getPlans, reorderPlans, restorePlan, updatePlan, type PermissionGroup, type Plan } from '@/api/admin'
 import { errMsg } from '@/api/http'
 import { useCardDragSort } from '@/composables/useCardDragSort'
+import { useTableRowDrag } from '@/composables/useTableRowDrag'
 
 const list = ref<Plan[]>([])
 const loading = ref(false)
 // 默认只看在售/下架中的套餐；已归档套餐只在显式打开时出现（2026-10-25 删除语义改造）
 const showArchived = ref(false)
+
+const isMobile = ref(false)
+let mobileMq: MediaQueryList | null = null
+const onMobileMq = () => {
+  isMobile.value = window.matchMedia(MQ.tablet).matches || window.innerWidth <= BP.tabletMin
+}
 
 async function load() {
   loading.value = true
@@ -51,16 +59,34 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
 
 // ---- 排序（拖拽）----
 // 顺序即商城展示顺序（sort_order 升序）。已归档套餐不参与重排：后端 order 接口
 // 只收未归档 ID，故「显示已归档」时必须禁用拖拽（混排语义不清）。
-const reorderEnabled = computed(() => !showArchived.value && !loading.value)
-const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
+const desktopReorderEnabled = computed(() => !isMobile.value && !showArchived.value && !loading.value)
+const {
+  canReorder: canTableReorder,
+  draggingId: tableDraggingId,
+  onPointerDown: onTablePointerDown,
+} = useTableRowDrag({
+  list,
+  enabled: desktopReorderEnabled,
+  persist: reorderPlans,
+})
+
+const mobileReorderEnabled = computed(() => isMobile.value && !showArchived.value && !loading.value)
+const {
+  canReorder: canCardReorder,
+  draggingId: cardDraggingId,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  syncSnapshot,
+} = useCardDragSort({
   list,
   idOf: (p) => p.id,
-  enabled: reorderEnabled,
+  enabled: mobileReorderEnabled,
   persist: reorderPlans,
 })
 
@@ -72,7 +98,20 @@ async function loadGroups() {
     if (data.code === 0) groups.value = data.data.items
   } catch { /* 权限组加载失败不阻塞 */ }
 }
-onMounted(loadGroups)
+
+onMounted(() => {
+  mobileMq = window.matchMedia(MQ.tablet)
+  onMobileMq()
+  mobileMq.addEventListener('change', onMobileMq)
+  // matchMedia 为主；再挂 resize 兜住不派发 change 的嵌入环境（IAB/WebView）
+  window.addEventListener('resize', onMobileMq)
+  load()
+  loadGroups()
+})
+onUnmounted(() => {
+  mobileMq?.removeEventListener('change', onMobileMq)
+  window.removeEventListener('resize', onMobileMq)
+})
 
 const formOpen = ref(false)
 const editing = ref(false)
@@ -279,9 +318,113 @@ async function restore(row: any) {
 
       <CsEmpty v-else-if="list.length === 0" icon-name="ticket" description="暂无套餐，点击右上角「新增套餐」" />
 
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，价格作为卡片主指标 -->
+      <!-- 桌面端紧凑表格 -->
+      <div v-else-if="!isMobile" class="plan-table-wrap" @dragstart.prevent>
+        <table
+          class="plan-table"
+          :class="{ 'plan-table--dragging': tableDraggingId !== null }"
+          aria-label="套餐列表"
+        >
+          <thead>
+            <tr>
+              <th v-if="canTableReorder" class="col-sort" aria-label="拖拽排序" />
+              <th>套餐</th>
+              <th class="col-price">价格</th>
+              <th class="col-quota">流量 / 周期</th>
+              <th>权限组</th>
+              <th class="col-status">上架状态</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody @pointerdown="onTablePointerDown">
+            <tr
+              v-for="row in list"
+              :key="row.id"
+              class="plan-row"
+              :class="{ 'plan-row--dragging': tableDraggingId === row.id, 'plan-row--archived': row.archived }"
+              :data-sort-id="row.id"
+            >
+              <td v-if="canTableReorder" class="col-sort">
+                <SortHandle :draggable="false" title="拖拽调整套餐顺序（同步商城）" />
+              </td>
+
+              <td>
+                <div class="plan-name-cell">
+                  <button
+                    type="button"
+                    class="plan-name-btn"
+                    :title="row.archived ? '已归档，恢复后可编辑' : '点击编辑套餐'"
+                    :disabled="row.archived"
+                    @click="openEdit(row)"
+                  >
+                    {{ row.name }}
+                  </button>
+                  <span class="plan-id">#{{ row.id }}</span>
+                  <span v-if="row.is_featured && !row.archived" class="soft-tag soft-tag--warn">热门推荐</span>
+                </div>
+              </td>
+
+              <td class="col-price">
+                <span
+                  class="plan-table-price"
+                  :class="{ 'plan-price--muted': row.archived || (!row.purchasable && !row.renewable) }"
+                >
+                  {{ priceLabel(row.price_cents) }}
+                </span>
+              </td>
+
+              <td class="col-quota">
+                <span class="plan-quota">{{ trafficLabel(row.traffic_gb) }} / {{ row.duration_days }} 天</span>
+              </td>
+
+              <td>
+                <span :class="{ 'cell-muted': !row.permission_group_id }">{{ groupNameOf(row.permission_group_id) }}</span>
+              </td>
+
+              <td class="col-status">
+                <span v-if="row.archived" class="soft-tag soft-tag--neutral">已归档</span>
+                <div v-else class="plan-flags">
+                  <button
+                    type="button"
+                    class="plan-flag"
+                    title="可新购：商店展示并允许非持有者购买，点击切换"
+                    @click="toggleFlag(row, 'purchasable')"
+                  >
+                    <span class="soft-tag soft-tag--clickable" :class="row.purchasable ? 'soft-tag--success' : 'soft-tag--neutral'">
+                      {{ row.purchasable ? '可新购' : '停售' }}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="plan-flag"
+                    title="可续费：持有者余额直付顺延，点击切换"
+                    @click="toggleFlag(row, 'renewable')"
+                  >
+                    <span class="soft-tag soft-tag--clickable" :class="row.renewable ? 'soft-tag--info' : 'soft-tag--neutral'">
+                      {{ row.renewable ? '可续费' : '停续' }}
+                    </span>
+                  </button>
+                </div>
+              </td>
+
+              <td class="col-actions">
+                <div class="row-actions">
+                  <CsButton v-if="row.archived" :wrap-text="false" @click="restore(row)">恢复</CsButton>
+                  <template v-else>
+                    <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+                    <CsButton :wrap-text="false" @click="remove(row)">归档</CsButton>
+                  </template>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 移动端精简卡片 -->
       <CsCardGrid
         v-else
+        :min-width="320"
         @dragstart="onDragStart"
         @dragover="onDragOver"
         @drop="onDrop"
@@ -290,12 +433,12 @@ async function restore(row: any) {
         <CsCard
           v-for="row in list"
           :key="row.id"
-          :class="{ 'plan-card--archived': row.archived, 'plan-card--dragging': draggingId === row.id }"
+          :class="{ 'plan-card--archived': row.archived, 'plan-card--dragging': cardDraggingId === row.id }"
           :data-sort-id="row.id"
         >
           <template #header>
             <div class="plan-head">
-              <SortHandle v-if="canReorder" title="拖拽调整套餐顺序（同步商城）" />
+              <SortHandle v-if="canCardReorder" title="拖拽调整套餐顺序（同步商城）" />
               <button
                 type="button"
                 class="plan-name"
@@ -308,7 +451,7 @@ async function restore(row: any) {
             </div>
             <div class="plan-meta">
               <span class="plan-id">#{{ row.id }}</span>
-              <CsBadge v-if="row.archived" color="grey">已归档</CsBadge>
+              <span v-if="row.archived" class="soft-tag soft-tag--neutral">已归档</span>
               <template v-else>
                 <button
                   type="button"
@@ -316,9 +459,9 @@ async function restore(row: any) {
                   title="可新购：商店展示并允许非持有者购买，点击切换"
                   @click="toggleFlag(row, 'purchasable')"
                 >
-                  <CsBadge :color="row.purchasable ? 'green' : 'grey'">
+                  <span class="soft-tag soft-tag--clickable" :class="row.purchasable ? 'soft-tag--success' : 'soft-tag--neutral'">
                     {{ row.purchasable ? '可新购' : '停售' }}
-                  </CsBadge>
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -326,11 +469,11 @@ async function restore(row: any) {
                   title="可续费：持有者余额直付顺延，点击切换"
                   @click="toggleFlag(row, 'renewable')"
                 >
-                  <CsBadge :color="row.renewable ? 'blue' : 'grey'">
+                  <span class="soft-tag soft-tag--clickable" :class="row.renewable ? 'soft-tag--info' : 'soft-tag--neutral'">
                     {{ row.renewable ? '可续费' : '停续' }}
-                  </CsBadge>
+                  </span>
                 </button>
-                <CsBadge v-if="row.is_featured" color="severity-medium">热门推荐</CsBadge>
+                <span v-if="row.is_featured" class="soft-tag soft-tag--warn">热门推荐</span>
               </template>
             </div>
           </template>
@@ -343,21 +486,18 @@ async function restore(row: any) {
             </span>
           </template>
 
-          <div v-if="row.description" class="card-desc-box">{{ row.description }}</div>
-
           <CsCardFacts>
-            <CsCardFact label="包含流量" :value="trafficLabel(row.traffic_gb)" mono />
-            <CsCardFact label="有效期" :value="`${row.duration_days} 天`" mono />
-            <CsCardFact label="权限组" :value="groupNameOf(row.permission_group_id)" full-width />
+            <CsCardFact label="流量 / 周期" :value="`${trafficLabel(row.traffic_gb)} / ${row.duration_days} 天`" mono />
+            <CsCardFact label="权限组" :value="groupNameOf(row.permission_group_id)" />
           </CsCardFacts>
 
           <template #footer>
             <template v-if="row.archived">
-              <CsButton icon-name="refresh" @click="restore(row)">恢复套餐</CsButton>
+              <CsButton :wrap-text="false" @click="restore(row)">恢复</CsButton>
             </template>
             <template v-else>
-              <CsButton icon-name="edit" @click="openEdit(row)">编辑套餐</CsButton>
-              <CsButton icon-name="remove" @click="remove(row)">归档</CsButton>
+              <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+              <CsButton :wrap-text="false" @click="remove(row)">归档</CsButton>
             </template>
           </template>
         </CsCard>
@@ -454,6 +594,196 @@ async function restore(row: any) {
 </template>
 
 <style scoped lang="scss">
+.plan-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.plan-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+
+  th {
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-text-label-g80qnu, #414d5c);
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px;
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+    vertical-align: middle;
+  }
+
+  .col-sort {
+    width: 1%;
+    padding-inline: 2px 4px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .col-price,
+  .col-quota,
+  .col-status,
+  .col-actions {
+    width: 1%;
+    white-space: nowrap;
+  }
+}
+
+.plan-table--dragging {
+  user-select: none;
+  cursor: grabbing;
+
+  .plan-row:not(.plan-row--dragging):hover {
+    background: transparent;
+  }
+}
+
+.plan-row {
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background: var(--color-background-dropdown-item-hover-pvfsrg, rgba(0, 7, 22, 0.04));
+  }
+
+  &--dragging {
+    position: relative;
+    z-index: 10;
+    background: var(--color-background-container-content-mjfil9, #ffffff);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+    will-change: transform;
+    transition: none;
+  }
+
+  &--archived {
+    opacity: 0.72;
+    background: var(--color-background-cell-shaded-twxsbz, #f8fafc);
+  }
+}
+
+.plan-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plan-name-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    color: var(--color-text-body-secondary-66ygbb, #656871);
+    cursor: default;
+
+    &:hover {
+      text-decoration: none;
+    }
+  }
+}
+
+.plan-table-price {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
+
+.plan-quota {
+  font-size: 13px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-text-body-default-b2us04, #0f141a);
+}
+
+.plan-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.soft-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.soft-tag--info {
+  color: var(--x-tag-info-color, #006ce0);
+  background: var(--x-tag-info-bg, #f0fbff);
+  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
+}
+
+.soft-tag--success {
+  color: var(--color-text-status-success-1i2jf8, #00802f);
+  background: var(--x-success-soft, #ecfdf5);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.soft-tag--warn {
+  color: var(--color-text-status-warning-fabq6h, #8d6605);
+  background: var(--x-warning-soft, #fffbeb);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.soft-tag--neutral {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  background: var(--x-card-soft, #f8fafc);
+  border-color: var(--color-border-divider-default-diwd4w, #e9ebed);
+}
+
+.soft-tag--clickable {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+
+  &:hover {
+    filter: brightness(0.96);
+  }
+}
+
 .plan-head {
   display: flex;
   align-items: center;
@@ -499,7 +829,8 @@ async function restore(row: any) {
 }
 
 .plan-id {
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
@@ -532,17 +863,6 @@ async function restore(row: any) {
 .plan-card--archived {
   opacity: 0.72;
   background: var(--color-background-cell-shaded-twxsbz);
-}
-
-.card-desc-box {
-  margin-block-end: 12px;
-  padding: 8px 10px;
-  background: var(--color-background-cell-shaded-twxsbz);
-  border-radius: 8px;
-  font-size: var(--font-size-body-s, 12px);
-  line-height: var(--line-height-body-s, 16px);
-  color: var(--color-text-body-secondary-66ygbb, #656871);
-  white-space: pre-line;
 }
 
 .placeholder-chips {

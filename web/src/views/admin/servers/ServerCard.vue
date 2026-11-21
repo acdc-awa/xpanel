@@ -337,9 +337,9 @@ function onRootClick() {
 }
 
 .soft-tag--info {
-  color: var(--color-text-link-default-qabnuk, #006ce0);
-  background: var(--x-primary-soft, #f0fbff);
-  border-color: rgba(0, 108, 224, 0.25);
+  color: var(--x-tag-info-color, #006ce0);
+  background: var(--x-tag-info-bg, #f0fbff);
+  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
 }
 
 .soft-tag--warn {

@@ -7,6 +7,9 @@
   /* ===== 品牌主色 (Brand Primary) ===== */
   --x-primary: var(--color-primary-600-su56h9, #006ce0);
   --x-primary-soft: var(--color-primary-50-hzpado, #f0fbff);
+  --x-tag-info-color: var(--color-text-link-default-qabnuk, #006ce0);
+  --x-tag-info-bg: var(--x-primary-soft, #f0fbff);
+  --x-tag-info-border: rgba(0, 108, 224, 0.25);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds) ===== */
   --x-bg: #f4f5fb;
@@ -115,6 +118,9 @@ html.dark {
      暗色下 Cloudscape 的 primary-400 是更好的对比档，同样取自 vendor token。 */
   --x-primary: var(--color-primary-400-x68qyw, #42b4ff);
   --x-primary-soft: var(--color-primary-1000-cr22ew, #001129);
+  --x-tag-info-color: #ffffff;
+  --x-tag-info-bg: var(--color-primary-600-su56h9, #006ce0);
+  --x-tag-info-border: var(--color-primary-600-su56h9, #006ce0);
 
   /* ===== 背景与表面 (Surfaces & Backgrounds in Dark) ===== */
   --x-bg: #0b0f19;

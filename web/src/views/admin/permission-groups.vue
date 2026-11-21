@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { BP, MQ } from '@/utils/media'
 import { toast, messageBox } from '@/components/cloudscape'
 import TipIcon from '@/components/base/TipIcon.vue'
 import {
-  CsBadge,
   CsButton,
   CsCard,
   CsCardFact,
@@ -21,6 +21,7 @@ import {
   CsSelect,
   CsSpinner,
   CsToolbar,
+  CsTooltip,
 } from '@/components/cloudscape'
 import {
   createPermissionGroup,
@@ -36,11 +37,18 @@ import type { UserAccessPoint } from '@/api/types'
 import { errMsg } from '@/api/http'
 import SortHandle from '@/components/base/SortHandle.vue'
 import { useCardDragSort } from '@/composables/useCardDragSort'
+import { useTableRowDrag } from '@/composables/useTableRowDrag'
 
 const router = useRouter()
 
 const list = ref<PermissionGroup[]>([])
 const loading = ref(false)
+
+const isMobile = ref(false)
+let mobileMq: MediaQueryList | null = null
+const onMobileMq = () => {
+  isMobile.value = window.matchMedia(MQ.tablet).matches || window.innerWidth <= BP.tabletMin
+}
 
 async function load() {
   loading.value = true
@@ -56,14 +64,47 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
 
 // ---- 排序（拖拽）----
 // 只影响管理端列表与下拉展示顺序；组内接入点优先级仍由编辑器单独维护。
-const { canReorder, draggingId, onDragStart, onDragOver, onDrop, onDragEnd, syncSnapshot } = useCardDragSort({
+const desktopReorderEnabled = computed(() => !isMobile.value && !loading.value)
+const {
+  canReorder: canTableReorder,
+  draggingId: tableDraggingId,
+  onPointerDown: onTablePointerDown,
+} = useTableRowDrag({
+  list,
+  enabled: desktopReorderEnabled,
+  persist: reorderPermissionGroups,
+})
+
+const mobileReorderEnabled = computed(() => isMobile.value && !loading.value)
+const {
+  canReorder: canCardReorder,
+  draggingId: cardDraggingId,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  syncSnapshot,
+} = useCardDragSort({
   list,
   idOf: (g) => g.id,
+  enabled: mobileReorderEnabled,
   persist: reorderPermissionGroups,
+})
+
+onMounted(() => {
+  mobileMq = window.matchMedia(MQ.tablet)
+  onMobileMq()
+  mobileMq.addEventListener('change', onMobileMq)
+  // matchMedia 为主；再挂 resize 兜住不派发 change 的嵌入环境（IAB/WebView）
+  window.addEventListener('resize', onMobileMq)
+  load()
+})
+onUnmounted(() => {
+  mobileMq?.removeEventListener('change', onMobileMq)
+  window.removeEventListener('resize', onMobileMq)
 })
 
 // ---- 创建/编辑基础信息 ----
@@ -189,8 +230,20 @@ function templateBadge(row: PermissionGroup) {
   return row.template_source === 'custom' ? '自定义模板' : '系统默认'
 }
 
-function templateBadgeColor(row: PermissionGroup): 'blue' | 'grey' {
-  return row.template_mode === 'bound' || row.template_source === 'custom' ? 'blue' : 'grey'
+function templateBadgeTone(row: PermissionGroup): 'info' | 'neutral' {
+  return row.template_mode === 'bound' || row.template_source === 'custom' ? 'info' : 'neutral'
+}
+
+function visibleAPs(row: PermissionGroup): string[] {
+  return (row.access_point_names || []).slice(0, 3)
+}
+
+function extraAPCount(row: PermissionGroup): number {
+  return Math.max(0, (row.access_point_names?.length || 0) - 3)
+}
+
+function apFullTooltip(row: PermissionGroup): string {
+  return (row.access_point_names || []).map((n, i) => `${i + 1}. ${n}`).join('；')
 }
 
 async function remove(row: any) {
@@ -216,7 +269,7 @@ async function remove(row: any) {
 <template>
   <CsPage>
     <CsToolbar>
-      <TipIcon content="权限组用于组织与分发接入点。订阅模板已独立成页，点卡片上的模板徽标即可前往编辑、绑定模板库或转为自定义。" />
+      <TipIcon content="权限组用于组织与分发接入点。点击订阅模板标签即可前往编辑、绑定模板库或转为自定义。" />
       <template #actions>
         <CsButton variant="primary" icon-name="add-plus" @click="openCreate">新增权限组</CsButton>
       </template>
@@ -229,9 +282,94 @@ async function remove(row: any) {
 
       <CsEmpty v-else-if="list.length === 0" icon-name="folder-open" description="尚无权限组，点击右上角「新增权限组」" />
 
-      <!-- 官方 ItemCard 卡片网格：卡头 16/700，正文 14/20，模板状态作为卡片角标 -->
+      <!-- 桌面端紧凑表格 -->
+      <div v-else-if="!isMobile" class="pg-table-wrap" @dragstart.prevent>
+        <table
+          class="pg-table"
+          :class="{ 'pg-table--dragging': tableDraggingId !== null }"
+          aria-label="权限分组列表"
+        >
+          <thead>
+            <tr>
+              <th v-if="canTableReorder" class="col-sort" aria-label="拖拽排序" />
+              <th>权限组</th>
+              <th class="col-template">订阅模板</th>
+              <th>包含接入点</th>
+              <th>备注</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody @pointerdown="onTablePointerDown">
+            <tr
+              v-for="row in list"
+              :key="row.id"
+              class="pg-row"
+              :class="{ 'pg-row--dragging': tableDraggingId === row.id }"
+              :data-sort-id="row.id"
+            >
+              <td v-if="canTableReorder" class="col-sort">
+                <SortHandle :draggable="false" title="拖拽调整权限组顺序" />
+              </td>
+
+              <td>
+                <div class="pg-name-cell">
+                  <button type="button" class="pg-name-btn" title="点击编辑权限组" @click="openEdit(row)">
+                    {{ row.name }}
+                  </button>
+                  <span class="pg-id pg-id--inline">#{{ row.id }}</span>
+                </div>
+              </td>
+
+              <td class="col-template">
+                <button
+                  type="button"
+                  class="pg-template-flag"
+                  title="点击前往「订阅模板」页调整模板或绑定"
+                  @click="openTemplates(row)"
+                >
+                  <span class="soft-tag soft-tag--clickable" :class="`soft-tag--${templateBadgeTone(row)}`">
+                    {{ templateBadge(row) }}
+                  </span>
+                </button>
+              </td>
+
+              <td>
+                <div class="pg-aps">
+                  <template v-if="row.access_point_names && row.access_point_names.length">
+                    <span v-for="(name, idx) in visibleAPs(row)" :key="`${idx}-${name}`" class="soft-tag soft-tag--info">
+                      {{ idx + 1 }}. {{ name }}
+                    </span>
+                    <CsTooltip v-if="extraAPCount(row) > 0" :content="apFullTooltip(row)">
+                      <span class="soft-tag soft-tag--neutral pg-ap-more">+{{ extraAPCount(row) }}</span>
+                    </CsTooltip>
+                    <CsButton variant="inline-link" :wrap-text="false" @click="openAPEditor(row)">调整顺序</CsButton>
+                  </template>
+                  <template v-else>
+                    <span class="pg-empty">暂无接入点</span>
+                    <CsButton variant="inline-link" :wrap-text="false" @click="openAPEditor(row)">添加</CsButton>
+                  </template>
+                </div>
+              </td>
+
+              <td>
+                <span :class="{ 'cell-muted': !row.remark }">{{ row.remark || '—' }}</span>
+              </td>
+
+              <td class="col-actions">
+                <div class="row-actions">
+                  <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+                  <CsButton variant="danger-outline" :wrap-text="false" @click="remove(row)">删除</CsButton>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 移动端精简卡片 -->
       <CsCardGrid
         v-else
+        :min-width="320"
         @dragstart="onDragStart"
         @dragover="onDragOver"
         @drop="onDrop"
@@ -240,12 +378,12 @@ async function remove(row: any) {
         <CsCard
           v-for="row in list"
           :key="row.id"
-          :class="{ 'pg-card--dragging': draggingId === row.id }"
+          :class="{ 'pg-card--dragging': cardDraggingId === row.id }"
           :data-sort-id="row.id"
         >
           <template #header>
             <div class="pg-head">
-              <SortHandle v-if="canReorder" title="拖拽调整权限组顺序" />
+              <SortHandle v-if="canCardReorder" title="拖拽调整权限组顺序" />
               <button type="button" class="pg-name" title="点击编辑权限组" @click="openEdit(row)">
                 {{ row.name }}
               </button>
@@ -259,29 +397,36 @@ async function remove(row: any) {
               title="点击前往「订阅模板」页调整模板或绑定"
               @click="openTemplates(row)"
             >
-              <CsBadge :color="templateBadgeColor(row)">{{ templateBadge(row) }}</CsBadge>
+              <span class="soft-tag soft-tag--clickable" :class="`soft-tag--${templateBadgeTone(row)}`">
+                {{ templateBadge(row) }}
+              </span>
             </button>
           </template>
 
           <CsCardFacts>
-            <CsCardFact label="备注说明" :value="row.remark || '—'" full-width />
+            <CsCardFact v-if="row.remark" label="备注说明" :value="row.remark" full-width />
             <CsCardFact label="包含接入点" full-width>
               <div class="pg-aps">
                 <template v-if="row.access_point_names && row.access_point_names.length">
-                  <CsBadge v-for="(name, idx) in row.access_point_names" :key="name" color="blue">
+                  <span v-for="(name, idx) in visibleAPs(row)" :key="`${idx}-${name}`" class="soft-tag soft-tag--info">
                     {{ idx + 1 }}. {{ name }}
-                  </CsBadge>
-                  <CsButton variant="link" @click="openAPEditor(row)">调整顺序</CsButton>
+                  </span>
+                  <CsTooltip v-if="extraAPCount(row) > 0" :content="apFullTooltip(row)">
+                    <span class="soft-tag soft-tag--neutral pg-ap-more">+{{ extraAPCount(row) }}</span>
+                  </CsTooltip>
+                  <CsButton variant="inline-link" @click="openAPEditor(row)">调整顺序</CsButton>
                 </template>
-                <span v-else class="pg-empty">暂无接入点（在拓扑画布中绑定该组）</span>
+                <template v-else>
+                  <span class="pg-empty">暂无接入点</span>
+                  <CsButton variant="inline-link" @click="openAPEditor(row)">添加</CsButton>
+                </template>
               </div>
             </CsCardFact>
           </CsCardFacts>
 
           <template #footer>
-            <CsButton icon-name="file" @click="openTemplates(row)">订阅模板</CsButton>
-            <CsButton icon-name="edit" @click="openEdit(row)">编辑</CsButton>
-            <CsButton variant="danger-outline" icon-name="remove" @click="remove(row)">删除</CsButton>
+            <CsButton :wrap-text="false" @click="openEdit(row)">编辑</CsButton>
+            <CsButton variant="danger-outline" :wrap-text="false" @click="remove(row)">删除</CsButton>
           </template>
         </CsCard>
       </CsCardGrid>
@@ -352,6 +497,143 @@ async function remove(row: any) {
 </template>
 
 <style scoped lang="scss">
+.pg-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.pg-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+
+  th {
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-text-label-g80qnu, #414d5c);
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px;
+    border-bottom: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+    vertical-align: middle;
+  }
+
+  .col-sort {
+    width: 1%;
+    padding-inline: 2px 4px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .col-template,
+  .col-actions {
+    width: 1%;
+    white-space: nowrap;
+  }
+}
+
+.pg-table--dragging {
+  user-select: none;
+  cursor: grabbing;
+
+  .pg-row:not(.pg-row--dragging):hover {
+    background: transparent;
+  }
+}
+
+.pg-row {
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background: var(--color-background-dropdown-item-hover-pvfsrg, rgba(0, 7, 22, 0.04));
+  }
+
+  &--dragging {
+    position: relative;
+    z-index: 10;
+    background: var(--color-background-container-content-mjfil9, #ffffff);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+    will-change: transform;
+    transition: none;
+  }
+}
+
+.pg-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pg-name-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--color-text-link-default-qabnuk, #006ce0);
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.cell-muted {
+  color: var(--color-text-status-inactive-fqjc97, #656871);
+}
+
+.soft-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.soft-tag--info {
+  color: var(--x-tag-info-color, #006ce0);
+  background: var(--x-tag-info-bg, #f0fbff);
+  border-color: var(--x-tag-info-border, rgba(0, 108, 224, 0.25));
+}
+
+.soft-tag--neutral {
+  color: var(--color-text-body-secondary-66ygbb, #656871);
+  background: var(--x-card-soft, #f8fafc);
+  border-color: var(--color-border-divider-default-diwd4w, #e9ebed);
+}
+
+.soft-tag--clickable {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+
+  &:hover {
+    filter: brightness(0.96);
+  }
+}
 
 .pg-head {
   display: flex;
@@ -383,11 +665,16 @@ async function remove(row: any) {
 
 .pg-id {
   margin-block-start: 2px;
-  font-family: var(--font-family-monospace, ui-monospace, Menlo, Consolas, monospace);
+  font-family: var(--x-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
   color: var(--color-text-body-secondary-66ygbb, #656871);
+}
+
+.pg-id--inline {
+  margin-block-start: 0;
 }
 
 .pg-template-flag {
@@ -405,6 +692,15 @@ async function remove(row: any) {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.pg-table .pg-aps {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.pg-ap-more {
+  cursor: help;
 }
 
 .pg-empty {
