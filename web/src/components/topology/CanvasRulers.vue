@@ -7,143 +7,43 @@ interface ViewportState {
   zoom: number
 }
 
-interface SelectionInfo {
-  kind: 'server' | 'ap'
-  name: string
-  x: number
-  y: number
-  w: number
-  h: number
-}
-
 const props = defineProps<{
   viewport: ViewportState
   dimensions: { width: number; height: number }
-  selection?: SelectionInfo | null
 }>()
 
-/** 标尺厚度：与 CSS 中的 20px 保持一致。 */
-const RULER = 20
-
-const zoom = computed(() => props.viewport.zoom || 1)
 const width = computed(() => props.dimensions?.width || 0)
 const height = computed(() => props.dimensions?.height || 0)
 
-const worldLeft = computed(() => (0 - props.viewport.x) / zoom.value)
-const worldTop = computed(() => (0 - props.viewport.y) / zoom.value)
-const worldRight = computed(() => (width.value - props.viewport.x) / zoom.value)
-const worldBottom = computed(() => (height.value - props.viewport.y) / zoom.value)
-
-/** 主刻度步长：保证屏上间距落在 56–160px，缩放极端时自动增减。 */
-const majorStep = computed(() => {
-  let step = 80
-  while (step * zoom.value < 56) step *= 2
-  while (step * zoom.value > 160 && step > 8) step /= 2
-  return step
-})
-
-interface Tick {
-  world: number
-  pos: number
-  major: boolean
-}
-
-function buildTicks(min: number, max: number, step: number): Tick[] {
-  const ticks: Tick[] = []
-  const minor = step / 10
-  const showMinor = minor * zoom.value >= 6
-  const start = Math.floor(min / step) * step
-  for (let w = start; w <= max; w += step) {
-    if (w >= min) ticks.push({ world: w, pos: (w - min) * zoom.value, major: true })
-    if (showMinor) {
-      for (let i = 1; i < 10; i++) {
-        const mw = w + minor * i
-        if (mw >= min && mw <= max) {
-          ticks.push({ world: mw, pos: (mw - min) * zoom.value, major: false })
-        }
-      }
-    }
-  }
-  return ticks
-}
-
-const xTicks = computed(() => buildTicks(worldLeft.value, worldRight.value, majorStep.value))
-const yTicks = computed(() => buildTicks(worldTop.value, worldBottom.value, majorStep.value))
-
-// 世界原点 (0,0) 在屏幕上的位置
+// 世界原点 (0,0) 在画布视口内的屏幕坐标（0 * zoom + pan = pan）
 const originX = computed(() => props.viewport.x)
 const originY = computed(() => props.viewport.y)
+
+const showYAxis = computed(() => originX.value >= -2 && originX.value <= width.value + 2)
+const showXAxis = computed(() => originY.value >= -2 && originY.value <= height.value + 2)
 const originVisible = computed(
   () =>
-    originX.value >= RULER - 24 &&
-    originX.value <= width.value &&
-    originY.value >= RULER - 24 &&
-    originY.value <= height.value,
+    originX.value >= -32 &&
+    originX.value <= width.value + 16 &&
+    originY.value >= -32 &&
+    originY.value <= height.value + 16,
 )
-
-function fmt(v: number): string {
-  const n = Math.round(v)
-  return n === 0 ? '0' : String(n)
-}
 </script>
 
 <template>
   <div class="topo-rulers" aria-hidden="true">
-    <!-- 左上角：当前视口左上角的世界坐标 + 缩放 -->
-    <div class="ruler-corner">
-      <span class="corner-zoom">{{ Math.round(zoom * 100) }}%</span>
-      <span class="corner-coord">x {{ fmt(worldLeft) }}<br />y {{ fmt(worldTop) }}</span>
-    </div>
+    <!-- X / Y 世界坐标主轴（贯穿视口，以交叉点指示原点） -->
+    <div v-if="showXAxis" class="axis-line axis-x" :style="{ top: `${originY}px` }" />
+    <div v-if="showYAxis" class="axis-line axis-y" :style="{ left: `${originX}px` }" />
 
-    <!-- 顶部标尺 -->
-    <div class="ruler ruler-x">
-      <div
-        v-for="t in xTicks"
-        :key="`x-${t.world}`"
-        class="tick"
-        :class="{ major: t.major }"
-        :style="{ left: `${t.pos + RULER}px` }"
-      >
-        <span v-if="t.major" class="tick-label">{{ fmt(t.world) }}</span>
-      </div>
-    </div>
-
-    <!-- 左侧标尺 -->
-    <div class="ruler ruler-y">
-      <div
-        v-for="t in yTicks"
-        :key="`y-${t.world}`"
-        class="tick"
-        :class="{ major: t.major }"
-        :style="{ top: `${t.pos + RULER}px` }"
-      >
-        <span v-if="t.major" class="tick-label">{{ fmt(t.world) }}</span>
-      </div>
-    </div>
-
-    <!-- 世界原点标记 -->
+    <!-- 世界原点交叉指示 -->
     <div
       v-if="originVisible"
-      class="origin-mark"
+      class="origin-indicator"
       :style="{ left: `${originX}px`, top: `${originY}px` }"
     >
+      <span class="origin-dot" />
       <span class="origin-label">0,0</span>
-    </div>
-
-    <!-- 底部坐标读数 -->
-    <div class="coord-bar">
-      <template v-if="selection">
-        <span class="coord-kind">{{ selection.kind === 'ap' ? '接入点' : '服务器' }}</span>
-        <span class="coord-name">{{ selection.name }}</span>
-        <span class="coord-mono">x {{ selection.x }}</span>
-        <span class="coord-mono">y {{ selection.y }}</span>
-        <span class="coord-mono">{{ selection.w }} × {{ selection.h }}</span>
-      </template>
-      <template v-else>
-        <span class="coord-mono">x {{ fmt(worldLeft) }}</span>
-        <span class="coord-mono">y {{ fmt(worldTop) }}</span>
-        <span class="coord-mono">{{ Math.round(zoom * 100) }}%</span>
-      </template>
     </div>
   </div>
 </template>
@@ -152,154 +52,55 @@ function fmt(v: number): string {
 .topo-rulers {
   position: absolute;
   inset: 0;
-  z-index: 15;
+  z-index: 1;
   pointer-events: none;
-  font-family: var(--font-family-monospace-842lr2, ui-monospace, Menlo, Consolas, monospace);
-  font-size: 10px;
-  color: var(--topo-text-3, #64748b);
-}
-
-.ruler-corner {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 20px;
-  height: 20px;
   overflow: hidden;
-  background: var(--topo-bar-bg);
-  border-right: 1px solid var(--topo-bar-border);
-  border-bottom: 1px solid var(--topo-bar-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  .corner-zoom {
-    display: none;
-  }
-  .corner-coord {
-    font-size: 7px;
-    line-height: 8px;
-    text-align: center;
-    letter-spacing: -0.2px;
-    color: var(--topo-text-3);
-  }
 }
 
-.ruler {
+.axis-line {
   position: absolute;
-  background: var(--topo-bar-bg);
-  border-color: var(--topo-bar-border);
+  background: var(--topo-axis-line);
 }
-.ruler-x {
-  left: 20px;
-  right: 0;
-  top: 0;
-  height: 20px;
-  border-bottom: 1px solid var(--topo-bar-border);
-}
-.ruler-y {
-  top: 20px;
-  bottom: 0;
+
+.axis-x {
   left: 0;
-  width: 20px;
-  border-right: 1px solid var(--topo-bar-border);
+  right: 0;
+  height: 1.5px;
+  transform: translateY(-50%);
 }
 
-.tick {
+.axis-y {
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  transform: translateX(-50%);
+}
+
+.origin-indicator {
   position: absolute;
-  background: var(--topo-divider);
+}
 
-  &.major {
-    background: var(--topo-text-3);
-  }
-}
-.ruler-x .tick {
-  top: 14px;
-  width: 1px;
-  height: 6px;
-  &.major {
-    top: 10px;
-    height: 10px;
-  }
-  .tick-label {
-    position: absolute;
-    left: 3px;
-    top: -10px;
-    white-space: nowrap;
-    font-size: 9px;
-    line-height: 10px;
-    color: var(--topo-text-3);
-  }
-}
-.ruler-y .tick {
-  left: 14px;
-  height: 1px;
+.origin-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 6px;
-  &.major {
-    left: 10px;
-    width: 10px;
-  }
-  .tick-label {
-    position: absolute;
-    top: 1px;
-    left: -16px;
-    width: 24px;
-    text-align: right;
-    white-space: nowrap;
-    font-size: 9px;
-    line-height: 10px;
-    color: var(--topo-text-3);
-    transform: rotate(-90deg);
-  }
+  height: 6px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--topo-accent);
+  box-shadow: 0 0 0 2px var(--topo-canvas-bg);
 }
 
-.origin-mark {
+.origin-label {
   position: absolute;
-  width: 13px;
-  height: 13px;
-  margin-left: -6px;
-  margin-top: -6px;
-  opacity: 0.75;
-  border-left: 1px solid var(--topo-accent);
-  border-top: 1px solid var(--topo-accent);
-
-  .origin-label {
-    position: absolute;
-    left: 8px;
-    top: 4px;
-    font-size: 9px;
-    color: var(--topo-accent);
-    white-space: nowrap;
-  }
-}
-
-.coord-bar {
-  position: absolute;
-  left: 28px;
-  bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  background: var(--topo-bar-bg);
-  border: 1px solid var(--topo-bar-border);
-  box-shadow: var(--topo-bar-shadow);
-  color: var(--topo-text-2);
-
-  .coord-kind {
-    color: var(--topo-text-3);
-  }
-  .coord-name {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--topo-text-1);
-    font-weight: 500;
-  }
-  .coord-mono {
-    color: var(--topo-accent);
-  }
+  left: 7px;
+  top: 5px;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--topo-accent);
+  white-space: nowrap;
 }
 </style>

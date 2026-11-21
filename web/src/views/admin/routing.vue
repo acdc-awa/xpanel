@@ -22,7 +22,6 @@ import {
   CsSegmentedControl,
   CsSelect,
   CsSpaceBetween,
-  CsStatusIndicator,
   CsTabs,
   CsToggle,
   CsToolbar,
@@ -83,8 +82,8 @@ const tabItems: TabItem[] = [
 ]
 
 const viewOptions: SegmentedOption[] = [
-  { id: 'canvas', text: '拓扑画布', iconName: 'share' },
-  { id: 'table', text: '表格视图', iconName: 'grid-view' },
+  { id: 'canvas', text: '拓扑图', iconName: 'share' },
+  { id: 'table', text: '表格', iconName: 'grid-view' },
 ]
 
 const domainStrategyOptions = [
@@ -273,7 +272,6 @@ async function reloadTable() {
 // ---- T8：画布视图 ----
 const viewMode = ref<'table' | 'canvas'>('canvas')
 const topology = ref<TopologyData | null>(null)
-const canvasEdit = ref(true)
 
 async function loadTopology() {
   try {
@@ -370,14 +368,14 @@ onMounted(async () => {
         <CsButton icon-name="refresh" @click="reloadTable">刷新</CsButton>
       </template>
       <template v-else>
-        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-          <CsStatusIndicator type="success" text="全局可视化拓扑画布" />
-          <span class="cs-text-secondary">（共 {{ topology?.servers?.length || 0 }} 个服务器）</span>
-        </CsSpaceBetween>
-        <CsButton icon-name="refresh" @click="loadTopology">刷新拓扑</CsButton>
+        <div class="topo-heading">
+          <span class="topo-title">拓扑图</span>
+          <span class="topo-count">{{ topology?.servers?.length || 0 }} 台服务器</span>
+        </div>
       </template>
 
       <template #actions>
+        <CsButton v-if="viewMode === 'canvas'" icon-name="refresh" @click="loadTopology">刷新</CsButton>
         <CsSegmentedControl :model-value="viewMode" :options="viewOptions" label="视图" @change="onViewChange" />
       </template>
     </CsToolbar>
@@ -574,20 +572,9 @@ onMounted(async () => {
 
     <!-- 画布视图（T8） -->
     <template v-else>
-      <div class="canvas-bar">
-        <div class="canvas-tip">
-          <span class="tip-pill"><span class="legend-solid" /> 实线 InboundRef 引用</span>
-          <span class="tip-pill"><span class="legend-dash" /> 虚线 路由规则</span>
-          <span class="cs-text-secondary">点击连线可删除；拖拽把手可建线；双击卡片管理服务器</span>
-        </div>
-        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-          <span>编辑模式</span>
-          <CsToggle v-model="canvasEdit" aria-label="编辑模式" />
-        </CsSpaceBetween>
-      </div>
       <TopologyCanvas
         :topology="topology"
-        :editable="canvasEdit"
+        :editable="true"
         @changed="loadTopology"
         @open-server="openServer"
         @open-create-inbound="openInboundCreateForServer"
@@ -637,51 +624,25 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.canvas-bar {
+.topo-heading {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  background: var(--color-background-container-content-mjfil9, #fff);
-  border: 1px solid var(--color-border-divider-default-diwd4w, #e9ebed);
-  padding: 10px 16px;
-  border-radius: 8px;
-}
-.canvas-tip {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
+  white-space: nowrap;
 }
-.tip-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.topo-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--x-text);
+}
+.topo-count {
   font-size: 12px;
-  background: var(--color-background-container-content-mjfil9, #fff);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.legend-solid {
-  display: inline-block;
-  inline-size: 12px;
-  block-size: 2px;
-  background: var(--color-text-link-default-qabnuk, #0972d3);
-}
-.legend-dash {
-  display: inline-block;
-  inline-size: 12px;
-  block-size: 2px;
-  border-block-start: 2px dashed var(--color-text-status-warning-fabq6h, #e6a23c);
+  color: var(--x-text-3);
 }
 
 @media (max-width: $bp-tablet-max) {
   .server-filter {
     inline-size: 100%;
-  }
-  .canvas-bar {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 </style>

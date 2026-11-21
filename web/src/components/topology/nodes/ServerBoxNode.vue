@@ -55,6 +55,7 @@ useGridHeight(boxEl)
     :style="{ width: (data.boxWidth || DEFAULT_BOX_W) + 'px' }"
   >
     <div
+      v-if="editable"
       class="custom-resizer-corner nodrag"
       title="拖动调整卡片宽度"
       @mousedown.stop.prevent="emit('resize-start', $event, data)"

@@ -16,10 +16,12 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
   CsButton,
+  CsButtonDropdown,
   CsEmpty,
   CsSpaceBetween,
   toast,
   messageBox,
+  type ButtonDropdownItem,
 } from '@/components/cloudscape'
 import {
   deleteServerOutbound,
@@ -90,6 +92,39 @@ const emit = defineEmits<{
 // ---- 节点/边构建 ----
 const nodes = ref<GraphNode[]>([])
 const edges = ref<Edge[]>([])
+// 四层动态 z-index 模型（配合 :elevate-nodes-on-select="false"，避免选中节点 +1000 盖住自身连线）：
+//   普通卡片 10 < 普通连线 20 < 选中/拖动卡片 100 < 选中/拖动卡片自身及关联连线 110 < 新建连线预览 200
+const Z_NODE_BASE = 10
+const Z_EDGE_BASE = 20
+const Z_NODE_ACTIVE = 100
+const Z_EDGE_ACTIVE = 110
+const draggingNodeId = ref<string | null>(null)
+
+function syncLayerZIndex() {
+  const activeIds = new Set<string>()
+  for (const n of nodes.value) {
+    if (n.selected) activeIds.add(n.id)
+  }
+  if (draggingNodeId.value) activeIds.add(draggingNodeId.value)
+
+  for (const n of nodes.value) {
+    n.zIndex = activeIds.has(n.id) ? Z_NODE_ACTIVE : Z_NODE_BASE
+  }
+  for (const e of edges.value) {
+    e.zIndex = activeIds.has(e.source) || activeIds.has(e.target) ? Z_EDGE_ACTIVE : Z_EDGE_BASE
+  }
+}
+
+watch(
+  () => {
+    let key = ''
+    for (const n of nodes.value as unknown as { id: string; selected?: boolean }[]) {
+      if (n.selected) key += `${n.id},`
+    }
+    return key
+  },
+  syncLayerZIndex,
+)
 const flowRef = ref<{
   updateNodeInternals?: (id: string) => void
   fitView?: (options?: Record<string, unknown>) => void
@@ -106,14 +141,14 @@ const theme = useThemeStore()
 // 在渲染 <VueFlow> 的同一组件里调用 useVueFlow 会创建 store 并由 VueFlow 注入复用。
 const { viewport, dimensions, findNode, setCenter } = useVueFlow()
 const majorGridColor = computed(() =>
-  theme.isDark ? 'rgba(148, 163, 184, 0.14)' : 'rgba(15, 23, 42, 0.08)',
+  theme.isDark ? 'rgba(148, 163, 184, 0.14)' : 'rgba(15, 23, 42, 0.09)',
 )
 const minorGridColor = computed(() =>
   viewport.value.zoom < 0.5
     ? 'transparent'
     : theme.isDark
       ? 'rgba(148, 163, 184, 0.055)'
-      : 'rgba(15, 23, 42, 0.035)',
+      : 'rgba(15, 23, 42, 0.04)',
 )
 
 // ---- 布局管理：本地缓存 + 云端同步（内容哈希去重）----
@@ -236,6 +271,7 @@ normalizeLayout()
 
 // 云端同步：打开时拉取，hash 不一致 → 下载覆盖本地；一致 → 复用本地
 onMounted(async () => {
+  window.addEventListener('keydown', handleWindowKeydown)
   // 兜底：极端情况下 nodes-initialized 不触发（全部节点离屏），也不能让视口停在初始值
   setTimeout(onNodesInitialized, 1500)
   loadPermissionGroups()
@@ -928,6 +964,8 @@ function buildGraph(data: TopologyData): string | null {
     })
   }
   edges.value = es
+  draggingNodeId.value = null
+  syncLayerZIndex()
 
   const focusId = takeFocusId(placedIds)
   if (focusId) requestFocus(focusId)
@@ -1615,17 +1653,71 @@ function handleNodeDblClick(evt: NodeMouseEvent) {
   if (box?.server?.id) emit('open-server', box.server.id)
 }
 
-// 盒子拖动结束：更新本地布局
+const DRAG_CLEARANCE = 16
+
+function nodeSizeOf(node: { id: string; dimensions?: { width?: number; height?: number }; data?: unknown }): {
+  w: number
+  h: number
+} {
+  const dw = node.dimensions?.width ?? 0
+  const dh = node.dimensions?.height ?? 0
+  if (node.id.startsWith('ap-')) {
+    return { w: dw || AP_W, h: dh || AP_EST_H }
+  }
+  const sid = Number(node.id.replace('server-', ''))
+  const outCount = (node.data as BoxData | undefined)?.outbounds?.length ?? 0
+  const estH = Number.isFinite(sid) && sid > 0 ? estBoxHeight(sid, outCount) : 160
+  return {
+    w: dw || getBoxWidth(node.id),
+    h: dh || estH,
+  }
+}
+
+function otherNodeRects(excludeId: string): Rect[] {
+  const rects: Rect[] = []
+  for (const n of nodes.value) {
+    if (n.id === excludeId || !n.position) continue
+    rects.push({ x: n.position.x, y: n.position.y, ...nodeSizeOf(n) })
+  }
+  return rects
+}
+
+function onNodeDragStart(evt: NodeDragEvent) {
+  draggingNodeId.value = evt.node.id
+  syncLayerZIndex()
+}
+
+function onNodeDrag(evt: NodeDragEvent) {
+  const node = evt.node
+  if (!node.position) return
+  const cur: Rect = { x: node.position.x, y: node.position.y, ...nodeSizeOf(node) }
+  const overlapped = otherNodeRects(node.id).some((o) => rectsOverlap(cur, o, 0))
+  if (overlapped) {
+    node.class = 'drag-overlap'
+  } else if (node.class === 'drag-overlap') {
+    node.class = undefined
+  }
+}
+
+// 盒子拖动结束：吸附 8px 网格并自动避开重叠，随后更新本地布局与层级
 function onNodeDragStop(evt: NodeDragEvent) {
   const node = evt.node
+  draggingNodeId.value = null
+  if (node.class === 'drag-overlap') node.class = undefined
   if (node.position) {
-    const pos = snapPoint(node.position)
+    let pos = snapPoint(node.position)
+    const size = nodeSizeOf(node)
+    const others = otherNodeRects(node.id)
+    if (others.some((o) => rectsOverlap({ ...pos, ...size }, o, DRAG_CLEARANCE))) {
+      pos = findFreeSlot({ anchor: pos, size, occupied: others, padding: DRAG_CLEARANCE })
+    }
     node.position = pos
     boxPositions.set(node.id, pos)
     localLayout.positions = Object.fromEntries(boxPositions)
     saveLayoutLocal(localLayout)
     layoutDirty.value = true
   }
+  syncLayerZIndex()
 }
 
 // ---- 交互：一键分层自动排版（DAG 拓扑分层）----
@@ -1767,67 +1859,101 @@ function toggleFullscreen() {
   })
 }
 
+function handleWindowKeydown(e: KeyboardEvent) {
+  if (
+    e.key === 'Escape' &&
+    isFullscreen.value &&
+    !e.defaultPrevented &&
+    !document.querySelector('[role="dialog"], .cs-button-dropdown-panel')
+  ) {
+    toggleFullscreen()
+  }
+}
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleWindowKeydown)
   document.body.style.overflow = ''
   clearTimeout(flashTimer)
 })
 
 const hasData = computed(() => !!props.topology && props.topology.servers.length > 0)
 
-// 选中卡片的坐标读数（拖拽时 nodes 里的 position 会实时更新）
-const selectionInfo = computed(() => {
-  const node = (nodes.value as any[]).find((n) => n.selected)
-  if (!node) return null
-  const isAp = String(node.id).startsWith('ap-')
-  return {
-    kind: (isAp ? 'ap' : 'server') as 'ap' | 'server',
-    name: isAp ? (node.data?.ap?.name ?? '') : (node.data?.server?.name ?? ''),
-    x: Math.round(node.position?.x ?? 0),
-    y: Math.round(node.position?.y ?? 0),
-    w: Math.round(node.dimensions?.width || (isAp ? AP_W : getBoxWidth(node.id))),
-    h: Math.round(node.dimensions?.height || (isAp ? AP_EST_H : 0)),
-  }
-})
+const mobileActionItems = computed<ButtonDropdownItem[]>(() => [
+  { id: 'auto-layout', text: '自动排版', iconName: 'gen-ai' },
+  { id: 'reset-layout', text: '重置排列', iconName: 'refresh' },
+  {
+    id: 'fullscreen',
+    text: isFullscreen.value ? '退出全屏' : '全屏查看',
+    iconName: isFullscreen.value ? 'exit-full-screen' : 'expand',
+    dividerBefore: true,
+  },
+])
+
+function handleMobileAction(id: string | number) {
+  if (id === 'auto-layout') autoLayout()
+  else if (id === 'reset-layout') resetLayout()
+  else if (id === 'fullscreen') toggleFullscreen()
+}
 </script>
 
 <template>
   <!-- 画布跟随全局亮/暗主题，由 .topology-wrap 令牌与 body.awsui-dark-mode 驱动 -->
   <div ref="wrapEl" class="topology-wrap" :class="{ 'is-fullscreen': isFullscreen }">
-    <!-- 顶部微型操作栏 -->
+    <!-- 顶部微型操作栏（桌面横排全展开；移动端折叠为「+ 接入点 + 操作 ▾」） -->
     <div class="canvas-top-bar">
       <div class="top-bar-left">
-        <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
-          <CsButton icon-name="gen-ai" aria-label="根据拓扑链路（入口→中转→落地）自动分层排版" @click="autoLayout">
-            自动排版
+        <div class="top-bar-desktop">
+          <CsSpaceBetween direction="horizontal" size="xs" align-items="center">
+            <CsButton icon-name="gen-ai" aria-label="根据拓扑链路（入口→中转→落地）自动分层排版" @click="autoLayout">
+              自动排版
+            </CsButton>
+            <CsButton icon-name="refresh" aria-label="重置为默认一字排列" @click="resetLayout">
+              重置排列
+            </CsButton>
+          </CsSpaceBetween>
+          <CsButton
+            v-if="editable"
+            icon-name="add-plus"
+            variant="primary"
+            aria-label="新建接入点（订阅入口）"
+            @click="openCreateAccessPoint"
+          >
+            接入点
           </CsButton>
-          <CsButton icon-name="refresh" aria-label="重置为默认一字排列" @click="resetLayout">
-            重置排列
+          <CsButton
+            :icon-name="isFullscreen ? 'exit-full-screen' : 'expand'"
+            class="fs-btn"
+            :aria-label="isFullscreen ? '退出全屏' : '全屏查看'"
+            @click="toggleFullscreen"
+          >
+            {{ isFullscreen ? '退出全屏' : '全屏' }}
           </CsButton>
-        </CsSpaceBetween>
-        <CsButton
-          v-if="editable"
-          icon-name="add-plus"
-          variant="primary"
-          aria-label="新建接入点（订阅入口）"
-          @click="openCreateAccessPoint"
-        >
-          接入点
-        </CsButton>
-        <CsButton
-          :icon-name="isFullscreen ? 'exit-full-screen' : 'expand'"
-          class="fs-btn"
-          :aria-label="isFullscreen ? '退出全屏' : '全屏查看'"
-          @click="toggleFullscreen"
-        >
-          {{ isFullscreen ? '退出全屏' : '全屏' }}
-        </CsButton>
-      </div>
+        </div>
 
-      <!-- 布局未保存提示条 -->
-      <div v-if="layoutDirty" class="layout-save-bar">
-        <span class="layout-save-tip">布局已修改</span>
-        <CsButton variant="primary" @click="saveLayoutToCloud">保存布局</CsButton>
+        <div class="top-bar-mobile">
+          <CsButton
+            v-if="editable"
+            icon-name="add-plus"
+            variant="primary"
+            aria-label="新建接入点（订阅入口）"
+            @click="openCreateAccessPoint"
+          >
+            接入点
+          </CsButton>
+          <CsButtonDropdown
+            text="操作"
+            :items="mobileActionItems"
+            aria-label="画布操作菜单"
+            @select="handleMobileAction"
+          />
+        </div>
       </div>
+    </div>
+
+    <!-- 布局未保存提示条（桌面端右上角，移动端沉底居中） -->
+    <div v-if="layoutDirty" class="layout-save-bar">
+      <span class="layout-save-tip">布局已修改</span>
+      <CsButton variant="primary" @click="saveLayoutToCloud">保存布局</CsButton>
     </div>
 
     <VueFlow
@@ -1843,11 +1969,14 @@ const selectionInfo = computed(() => {
       :max-zoom="2"
       :snap-to-grid="!!editable"
       :snap-grid="[GRID, GRID]"
+      :elevate-nodes-on-select="false"
       :only-render-visible-elements="true"
       @nodes-initialized="onNodesInitialized"
       @connect="handleConnect"
       @edge-click="handleEdgeClick"
       @node-double-click="handleNodeDblClick"
+      @node-drag-start="onNodeDragStart"
+      @node-drag="onNodeDrag"
       @node-drag-stop="onNodeDragStop"
     >
       <!-- 双层网格：8px 细线 + 80px 主线。offset 必须传 gap/2 —— 库把线画在 tile 的
@@ -1929,12 +2058,11 @@ const selectionInfo = computed(() => {
       <CsEmpty description="暂无服务器。先到「服务器管理」页新增服务器，再回来拖线连接。" />
     </div>
 
-    <!-- 坐标参照：顶部/左侧标尺 + 世界原点 + 底部选中卡片读数 -->
+    <!-- X / Y 坐标主轴与世界原点交叉指示 -->
     <CanvasRulers
       v-if="hasData"
       :viewport="viewport"
       :dimensions="dimensions"
-      :selection="selectionInfo"
     />
 
     <!-- 出站新建/编辑弹窗 -->
@@ -1996,24 +2124,25 @@ const selectionInfo = computed(() => {
 
 <style scoped lang="scss">
 .topology-wrap {
-  /* 画布跟随全局亮/暗主题（默认亮色；暗色覆盖见下方 html.dark .topology-wrap） */
+  /* 画布跟随全局亮/暗主题（默认亮色为 Cloudscape 中性暖灰层次；暗色覆盖见下方 html.dark .topology-wrap） */
   --topo-radius: 16px;
   --topo-radius-sm: 8px;
-  --topo-canvas-bg: #f6f8fa;
+  --topo-canvas-bg: #f0f1f3;
   --topo-card-bg: var(--x-card, #ffffff);
-  --topo-card-border: #d1d5db;
-  --topo-card-border-hover: #9ca3af;
+  --topo-card-border: #d5dbdb;
+  --topo-card-border-hover: #aab7b8;
   --topo-card-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
   --topo-card-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.1);
-  --topo-head-bg: #f8fafc;
-  --topo-divider: #e5e7eb;
-  --topo-surface: #f8fafc;
-  --topo-surface-border: #e2e8f0;
-  --topo-row-bg: #f8fafc;
-  --topo-row-hover: #eff6ff;
-  --topo-row-border: #e5e7eb;
+  --topo-head-bg: #f6f7f9;
+  --topo-divider: #e4e7ec;
+  --topo-surface: #f6f7f9;
+  --topo-surface-border: #dfe3e8;
+  --topo-row-bg: #f6f7f9;
+  --topo-row-hover: #ebf3fc;
+  --topo-row-border: #e4e7ec;
+  --topo-axis-line: rgba(15, 23, 42, 0.16);
   --topo-bar-bg: rgba(255, 255, 255, 0.94);
-  --topo-bar-border: #d1d5db;
+  --topo-bar-border: #d5dbdb;
   --topo-bar-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
   --topo-text-1: #0f172a;
   --topo-text-2: #475569;
@@ -2069,6 +2198,8 @@ const selectionInfo = computed(() => {
   }
 }
 .topology-canvas {
+  position: relative;
+  z-index: 2;
   width: 100%;
   height: 100%;
 }
@@ -2076,20 +2207,20 @@ const selectionInfo = computed(() => {
 /* 顶部微型操作栏 */
 .canvas-top-bar {
   position: absolute;
-  /* 让开 20px 标尺 + 8px 间距，避免工具条压住刻度 */
-  top: 28px;
-  left: 28px;
-  right: 14px;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   z-index: 20;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   pointer-events: none;
 
   .top-bar-left {
     display: flex;
-    gap: 8px;
     align-items: center;
+    flex: none;
+    white-space: nowrap;
     pointer-events: auto;
     background: var(--topo-bar-bg);
     padding: 4px;
@@ -2097,27 +2228,82 @@ const selectionInfo = computed(() => {
     border: 1px solid var(--topo-bar-border);
     box-shadow: var(--topo-bar-shadow);
 
+    :deep(button),
+    :deep(span) {
+      white-space: nowrap;
+    }
+
     .fs-btn {
       margin-left: 2px;
     }
   }
+
+  .top-bar-desktop {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .top-bar-mobile {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
 }
 
-/* 布局未保存提示条（右上角浮动） */
+/* 布局未保存提示条（桌面端右上角浮动，移动端沉底居中） */
 .layout-save-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
+  white-space: nowrap;
   background: var(--topo-bar-bg);
   border: 1px solid var(--topo-warning-border);
   border-radius: 8px;
   box-shadow: var(--topo-bar-shadow);
+
+  :deep(button),
+  :deep(span) {
+    white-space: nowrap;
+  }
+
   .layout-save-tip {
     font-size: 12px;
     color: var(--topo-warning);
     font-weight: 500;
+  }
+}
+
+@media (max-width: $bp-tablet-max) {
+  .canvas-top-bar {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+
+    .top-bar-desktop {
+      display: none;
+    }
+    .top-bar-mobile {
+      display: inline-flex;
+    }
+  }
+
+  .layout-save-bar {
+    top: auto;
+    right: auto;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    max-width: calc(100% - 24px);
   }
 }
 
@@ -2258,6 +2444,7 @@ html.dark .topology-wrap {
   --topo-row-bg: #111822;
   --topo-row-hover: #1d2a3a;
   --topo-row-border: #263140;
+  --topo-axis-line: rgba(148, 163, 184, 0.26);
   --topo-bar-bg: rgba(22, 29, 38, 0.94);
   --topo-bar-border: #2a3441;
   --topo-bar-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -2290,31 +2477,28 @@ html.dark .topology-wrap {
   --topo-edge-tunnel-hover: #99f6e4;
 }
 
-/* 连线层必须压在节点层之上，这不是笔误：
-   1) type:'boxrule' 的边两端都在同一个节点上（source=server-N/inb-src-X，
-      target=server-N/out-tgt-Y），画的就是服务器卡片内部的「入站行 → 出站行」路由虚线。
-      一旦把 edges 压到 nodes 之下，这些盒内走线会被卡片背景整片盖住、完全不可见。
-   2) 跨盒 refedge 允许直穿中间盒子（见 refEdgePath 上方的取舍说明），
-      也是靠这一层实现的。
-   因此两者关系保持 edges(100) > nodes(10) 不变；
-   真正错的是「选中态」与普通节点同为 10 —— 选中/拖拽不再置顶，重叠卡片顺序错乱。
-   把选中态提到 50：高于其它节点、仍低于连线层，选中卡片自己的盒内走线照常可见。 */
+/* 动态 4 层 z-index 分层：
+   - 保持 .vue-flow__nodes 为默认 auto（不建封闭堆叠上下文），让每个节点与每条边 SVG
+     在 .vue-flow__transformationpane 内按各自内联 z-index 同台排序：
+     普通节点(10) < 普通连线(20) < 选中/拖动节点(100) < 选中/拖动节点关联连线(110) < 拖拽建线预览(200) */
 .topology-wrap .vue-flow__edges {
-  z-index: 100 !important;
   pointer-events: none !important;
 }
 
-.topology-wrap .vue-flow__nodes {
-  z-index: 10 !important;
+.topology-wrap .vue-flow__connectionline {
+  z-index: 200 !important;
 }
 
-.topology-wrap .vue-flow__node {
-  z-index: 10 !important;
+.topology-wrap .vue-flow__node.selected .server-box,
+.topology-wrap .vue-flow__node.selected .ap-node {
+  border-color: var(--topo-accent);
+  box-shadow: 0 0 0 2px var(--topo-accent-soft), var(--topo-card-shadow-hover);
 }
 
-.topology-wrap .vue-flow__node.selected,
-.topology-wrap .vue-flow__node.dragging {
-  z-index: 50 !important;
+.topology-wrap .vue-flow__node.drag-overlap .server-box,
+.topology-wrap .vue-flow__node.drag-overlap .ap-node {
+  border-color: var(--topo-warning);
+  box-shadow: 0 0 0 2px var(--topo-warning-soft), var(--topo-card-shadow-hover);
 }
 
 .boxrule-path {
