@@ -13,6 +13,7 @@ import {
   CsConfirmDialog,
   CsContainer,
   CsEmpty,
+  CsExpandableSection,
   CsForm,
   CsFormItem,
   CsIcon,
@@ -67,7 +68,7 @@ const isMobile = useMediaQuery(MQ.tablet)
 
 const siteStore = useSiteStore()
 const activeTab = ref('site')
-const isConfigTab = computed(() => ['site', 'subscribe', 'captcha', 'agent', 'timezone'].includes(activeTab.value))
+const isConfigTab = computed(() => ['site', 'subscribe', 'security'].includes(activeTab.value))
 const loading = ref(false)
 const saving = ref(false)
 const logoInputRef = ref<HTMLInputElement | null>(null)
@@ -75,11 +76,9 @@ const faviconInputRef = ref<HTMLInputElement | null>(null)
 const backupInputRef = ref<HTMLInputElement | null>(null)
 
 const settingsTabs: TabItem[] = [
-  { id: 'site', label: '站点品牌' },
-  { id: 'subscribe', label: '订阅与清洗网关' },
-  { id: 'captcha', label: '安全设置' },
-  { id: 'agent', label: '服务器上报' },
-  { id: 'timezone', label: '时间与时区' },
+  { id: 'site', label: '常规设置' },
+  { id: 'subscribe', label: '订阅与网关' },
+  { id: 'security', label: '安全与运行' },
   { id: 'backup', label: '数据备份' },
   { id: 'system', label: '系统状态' },
 ]
@@ -992,7 +991,7 @@ async function save() {
     <CsContainer class="settings-card">
       <CsLoading :loading="loading">
         <CsTabs v-model="activeTab" :tabs="settingsTabs">
-        <!-- ==================== TAB 1: 站点 ==================== -->
+        <!-- ==================== TAB 1: 常规设置 ==================== -->
         <div v-show="activeTab === 'site'">
           <input
             ref="logoInputRef"
@@ -1009,387 +1008,410 @@ async function save() {
             @change="onFaviconFileSelected"
           />
 
-          <CsForm label-position="top" style="max-width: 680px">
-            <div class="form-grid">
+          <CsForm label-position="top" style="max-width: 720px">
+            <div class="form-section">
+              <div class="section-title">站点品牌</div>
+              <div class="form-grid">
+                <CsFormItem>
+                  <template #label>
+                    站点名称
+                    <TipIcon content="用于浏览器页面标题、系统邮件及订阅默认文件名前缀" />
+                  </template>
+                  <CsInput v-model="form.site.app_name" placeholder="例如：星云机场" :maxlength="64" />
+                </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    站点描述
+                    <TipIcon content="站点的副标题或一句话描述，展示在登录认证页与页脚" />
+                  </template>
+                  <CsInput v-model="form.site.app_description" placeholder="一句话描述站点" :maxlength="200" />
+                </CsFormItem>
+              </div>
+
+              <!-- LOGO 上传与自定义 -->
               <CsFormItem>
                 <template #label>
-                  站点名称
-                  <TipIcon content="用于浏览器页面标题、系统邮件及订阅默认文件名前缀" />
+                  站点 LOGO
+                  <TipIcon content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。" />
                 </template>
-                <CsInput v-model="form.site.app_name" placeholder="例如：星云机场" :maxlength="64" />
+                <div class="upload-row">
+                  <span v-if="form.site.logo" class="upload-thumb">
+                    <img :src="form.site.logo" alt="站点 LOGO 预览" />
+                  </span>
+                  <CsInput
+                    v-model="logoUrl"
+                    :placeholder="logoPlaceholder"
+                    clearable
+                  />
+                  <CsButton :icon-name="'upload'" @click="logoInputRef?.click()">
+                    上传并裁剪
+                  </CsButton>
+                  <CsButton
+                    v-if="form.site.logo"
+                    :icon-name="'edit'"
+                    @click="openCropperForCurrent('logo')"
+                  >
+                    重新裁剪
+                  </CsButton>
+                  <CsButton v-if="form.site.logo" :icon-name="'remove'" @click="form.site.logo = ''">
+                    恢复默认
+                  </CsButton>
+                </div>
               </CsFormItem>
+
+              <!-- Favicon 上传与自定义 -->
               <CsFormItem>
                 <template #label>
-                  站点描述
-                  <TipIcon content="站点的副标题或一句话描述，展示在登录认证页与页脚" />
+                  Favicon
+                  <TipIcon content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。" />
                 </template>
-                <CsInput v-model="form.site.app_description" placeholder="一句话描述站点" :maxlength="200" />
+                <div class="upload-row">
+                  <span v-if="form.site.favicon" class="upload-thumb is-small">
+                    <img :src="form.site.favicon" alt="Favicon 预览" />
+                  </span>
+                  <CsInput
+                    v-model="faviconUrl"
+                    :placeholder="faviconPlaceholder"
+                    clearable
+                  />
+                  <CsButton :icon-name="'upload'" @click="faviconInputRef?.click()">
+                    上传并裁剪
+                  </CsButton>
+                  <CsButton
+                    v-if="form.site.favicon"
+                    :icon-name="'edit'"
+                    @click="openCropperForCurrent('favicon')"
+                  >
+                    重新裁剪
+                  </CsButton>
+                  <CsButton v-if="form.site.favicon" :icon-name="'remove'" @click="form.site.favicon = ''">
+                    清空
+                  </CsButton>
+                </div>
               </CsFormItem>
-            </div>
 
-            <!-- LOGO 上传与自定义 -->
-            <CsFormItem>
-              <template #label>
-                站点 LOGO
-                <TipIcon content="用于管理端侧栏、用户端顶栏及登录页。支持 png/jpg/ico/svg/webp 等格式，内置 1:1 智能裁剪与平滑缩放，并转为轻量 Base64 存储。" />
-              </template>
-              <div class="upload-row">
-                <span v-if="form.site.logo" class="upload-thumb">
-                  <img :src="form.site.logo" alt="站点 LOGO 预览" />
-                </span>
-                <CsInput
-                  v-model="logoUrl"
-                  :placeholder="logoPlaceholder"
-                  clearable
-                />
-                <CsButton :icon-name="'upload'" @click="logoInputRef?.click()">
-                  上传并裁剪
-                </CsButton>
-                <CsButton
-                  v-if="form.site.logo"
-                  :icon-name="'edit'"
-                  @click="openCropperForCurrent('logo')"
-                >
-                  重新裁剪
-                </CsButton>
-                <CsButton v-if="form.site.logo" :icon-name="'remove'" @click="form.site.logo = ''">
-                  恢复默认
-                </CsButton>
-              </div>
-            </CsFormItem>
-
-            <!-- Favicon 上传与自定义 -->
-            <CsFormItem>
-              <template #label>
-                Favicon
-                <TipIcon content="浏览器标签页左侧展示的小图标，建议尺寸 32x32 或 48x48。" />
-              </template>
-              <div class="upload-row">
-                <span v-if="form.site.favicon" class="upload-thumb is-small">
-                  <img :src="form.site.favicon" alt="Favicon 预览" />
-                </span>
-                <CsInput
-                  v-model="faviconUrl"
-                  :placeholder="faviconPlaceholder"
-                  clearable
-                />
-                <CsButton :icon-name="'upload'" @click="faviconInputRef?.click()">
-                  上传并裁剪
-                </CsButton>
-                <CsButton
-                  v-if="form.site.favicon"
-                  :icon-name="'edit'"
-                  @click="openCropperForCurrent('favicon')"
-                >
-                  重新裁剪
-                </CsButton>
-                <CsButton v-if="form.site.favicon" :icon-name="'remove'" @click="form.site.favicon = ''">
-                  清空
-                </CsButton>
-              </div>
-            </CsFormItem>
-
-            <!-- 品牌全景实时预览卡片 -->
-            <div class="brand-preview-section">
-              <div class="preview-header">
-                <CsIcon name="grid-view" />&nbsp;全场景实时效果预览（当前编辑状态）
-              </div>
-              <div class="preview-grid">
-                <!-- 1. 管理端侧栏效果 -->
-                <div class="preview-item dark-theme">
-                  <div class="preview-tag">管理端侧栏</div>
-                  <div class="preview-logo-box">
-                    <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
-                    <span v-else class="p-logo-mark">X</span>
-                    <span class="p-title">{{ form.site.app_name || 'Xray 管理面板' }}</span>
-                  </div>
+              <!-- 品牌全景实时预览卡片 -->
+              <div class="brand-preview-section">
+                <div class="preview-header">
+                  <CsIcon name="grid-view" />&nbsp;全场景实时效果预览（当前编辑状态）
                 </div>
-
-                <!-- 2. 用户端顶栏效果 -->
-                <div class="preview-item light-theme">
-                  <div class="preview-tag">用户端顶栏</div>
-                  <div class="preview-logo-box">
-                    <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
-                    <span v-else class="p-logo-mark">X</span>
-                    <span class="p-title">{{ form.site.app_name || 'XrayPanel' }}</span>
+                <div class="preview-grid">
+                  <!-- 1. 管理端侧栏效果 -->
+                  <div class="preview-item dark-theme">
+                    <div class="preview-tag">管理端侧栏</div>
+                    <div class="preview-logo-box">
+                      <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
+                      <span v-else class="p-logo-mark">X</span>
+                      <span class="p-title">{{ form.site.app_name || 'Xray 管理面板' }}</span>
+                    </div>
                   </div>
-                </div>
 
-                <!-- 3. 登录页品牌效果 -->
-                <div class="preview-item auth-theme">
-                  <div class="preview-tag">登录认证页</div>
-                  <div class="preview-auth-box">
-                    <img v-if="form.site.logo" :src="form.site.logo" class="p-auth-img" alt="logo" />
-                    <span v-else class="p-auth-logo">X</span>
-                    <div>
-                      <div class="p-auth-title">{{ form.site.app_name || 'Xray 面板' }}</div>
-                      <div class="p-auth-sub">{{ form.site.app_description || '订阅与节点管理平台' }}</div>
+                  <!-- 2. 用户端顶栏效果 -->
+                  <div class="preview-item light-theme">
+                    <div class="preview-tag">用户端顶栏</div>
+                    <div class="preview-logo-box">
+                      <img v-if="form.site.logo" :src="form.site.logo" class="p-logo-img" alt="logo" />
+                      <span v-else class="p-logo-mark">X</span>
+                      <span class="p-title">{{ form.site.app_name || 'XrayPanel' }}</span>
+                    </div>
+                  </div>
+
+                  <!-- 3. 登录页品牌效果 -->
+                  <div class="preview-item auth-theme">
+                    <div class="preview-tag">登录认证页</div>
+                    <div class="preview-auth-box">
+                      <img v-if="form.site.logo" :src="form.site.logo" class="p-auth-img" alt="logo" />
+                      <span v-else class="p-auth-logo">X</span>
+                      <div>
+                        <div class="p-auth-title">{{ form.site.app_name || 'Xray 面板' }}</div>
+                        <div class="p-auth-sub">{{ form.site.app_description || '订阅与节点管理平台' }}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="form-grid" style="margin-top: 14px">
+            <div class="form-section">
+              <div class="section-title">业务与货币</div>
               <CsFormItem label="服务条款 URL">
                 <CsInput v-model="form.site.tos_url" placeholder="https://example.com/tos" />
               </CsFormItem>
-              <CsFormItem label="货币代码">
-                <CsInput v-model="form.site.currency" placeholder="CNY" :maxlength="8" />
-              </CsFormItem>
-              <CsFormItem label="货币符号">
-                <CsInput v-model="form.site.currency_symbol" placeholder="¥" :maxlength="8" />
-              </CsFormItem>
+
+              <div class="form-grid">
+                <CsFormItem label="货币代码">
+                  <CsInput v-model="form.site.currency" placeholder="CNY" :maxlength="8" />
+                </CsFormItem>
+                <CsFormItem label="货币符号">
+                  <CsInput v-model="form.site.currency_symbol" placeholder="¥" :maxlength="8" />
+                </CsFormItem>
+              </div>
             </div>
 
-            <CsFormItem>
-              <template #label>
-                用户注册准入
-                <TipIcon content="开启后，新用户可通过前端注册页开户（仍受邀请码机制限制）；关闭后禁止新用户注册。" />
-              </template>
-              <CsToggle v-model="openRegister">
-  <template #default>
-    {{ openRegister ? '开放注册（需邀请码）' : '已关闭（禁止新用户注册）' }}
-  </template>
-</CsToggle>
-            </CsFormItem>
+            <div class="form-section">
+              <div class="section-title">时间与时区</div>
+              <div class="form-grid">
+                <CsFormItem>
+                  <template #label>
+                    业务时区（统计切天口径）
+                    <TipIcon content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。底层数据统一以 UTC 存储绝对时间戳；修改后切换当日历史聚合数据可能有短暂平滑窗口。" />
+                  </template>
+                  <CsSelect v-model="form.timezone.business_timezone" filterable allow-create style="width: 100%">
+                    <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+                  </CsSelect>
+                </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    展示时区
+                    <TipIcon content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。" />
+                  </template>
+                  <div class="tz-display-field">
+                    <CsSelect v-model="form.timezone.display_timezone" filterable style="width: 100%">
+                      <CsOption label="跟随浏览器" value="browser" />
+                      <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+                    </CsSelect>
+                    <CsBadge color="blue">当前识别：{{ effectiveTimezoneLabel() }}</CsBadge>
+                  </div>
+                </CsFormItem>
+              </div>
+            </div>
           </CsForm>
         </div>
 
-        <!-- ==================== TAB 2: 订阅与清洗网关 ==================== -->
+        <!-- ==================== TAB 2: 订阅与网关 ==================== -->
         <div v-show="activeTab === 'subscribe'">
           <CsForm label-position="top" style="max-width: 820px">
-            <CsBox variant="div" font-size="heading-s" font-weight="bold">订阅入口与行为参数</CsBox>
-            <div class="form-grid">
-              <CsFormItem>
-                <template #label>
-                  对外订阅根地址
-                  <TipIcon content="用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），不设置则默认使用当前面板域名 + 订阅路径。" />
-                </template>
-                <CsInput v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
-              </CsFormItem>
+            <div class="form-section">
+              <div class="section-title">订阅入口与行为参数</div>
+              <div class="form-grid">
+                <CsFormItem>
+                  <template #label>
+                    对外订阅根地址
+                    <TipIcon content="用户端获取的订阅链接根域名。订阅域名整域反代到独立订阅端口（APP_SUB_PORT），不设置则默认使用当前面板域名 + 订阅路径。" />
+                  </template>
+                  <CsInput v-model="form.site.subscribe_url" placeholder="如 https://sub.example.com" clearable />
+                </CsFormItem>
 
-              <CsFormItem>
-                <template #label>
-                  订阅入口路径
-                  <TipIcon content="订阅端口唯一入口路径（支持 /path/:token 与 ?token=xxx），其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。" />
-                </template>
-                <CsInput v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
-              </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    订阅入口路径
+                    <TipIcon content="订阅端口唯一入口路径（支持 /path/:token 与 ?token=xxx），其余路径一律按下方拒绝码返回。保存后订阅服务自动重载。" />
+                  </template>
+                  <CsInput v-model="form.site.subscribe_path" placeholder="如 /sub 或 /mysub（默认 /sub）" clearable />
+                </CsFormItem>
 
-              <CsFormItem>
-                <template #label>
-                  非订阅路径拒绝码
-                  <TipIcon content="订阅端口上访问非订阅路径的请求或无效订阅 Token 统一返回该 HTTP 状态码。404 可有效迷惑自动化扫描器。" />
-                </template>
-                <CsSelect v-model="form.site.sub_deny_code" style="width: 100%">
-                  <CsOption label="404 Not Found（推荐，防探测）" value="404" />
-                  <CsOption label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
-                </CsSelect>
-              </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    非订阅路径拒绝码
+                    <TipIcon content="订阅端口上访问非订阅路径的请求或无效订阅 Token 统一返回该 HTTP 状态码。404 可有效迷惑自动化扫描器。" />
+                  </template>
+                  <CsSelect v-model="form.site.sub_deny_code" style="width: 100%">
+                    <CsOption label="404 Not Found（推荐，防探测）" value="404" />
+                    <CsOption label="401 Unauthorized（客户端感知鉴权失败）" value="401" />
+                  </CsSelect>
+                </CsFormItem>
 
-              <CsFormItem>
-                <template #label>
-                  订阅配置标题
-                  <TipIcon content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。" />
-                </template>
-                <CsInput v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable :maxlength="64" />
-              </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    订阅配置标题
+                    <TipIcon content="Clash/Sing-box 等客户端显示的订阅配置文件名（Content-Disposition filename 响应头）。留空回退站点名称，仍为空时兜底 xray；引号/反斜杠/换行会被自动剥离。" />
+                  </template>
+                  <CsInput v-model="form.site.sub_profile_title" placeholder="留空则使用站点名称（app_name）" clearable :maxlength="64" />
+                </CsFormItem>
 
-              <CsFormItem>
-                <template #label>
-                  客户端更新间隔（小时）
-                  <TipIcon content="Profile-Update-Interval 响应头：客户端按该周期自动重新拉取订阅，默认 24 小时（范围 1–168 小时）。" />
-                </template>
-                <CsInputNumber v-model="subUpdateHours" :min="1" :max="168" style="width: 100%" />
-              </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    客户端更新间隔（小时）
+                    <TipIcon content="Profile-Update-Interval 响应头：客户端按该周期自动重新拉取订阅，默认 24 小时（范围 1–168 小时）。" />
+                  </template>
+                  <CsInputNumber v-model="subUpdateHours" :min="1" :max="168" style="width: 100%" />
+                </CsFormItem>
 
-              <CsFormItem>
-                <template #label>
-                  多域名分发
-                  <CsBadge color="grey">暂未开放</CsBadge>
-                  <TipIcon content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。" />
-                </template>
-                <CsInput v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
-              </CsFormItem>
-            </div>
-
-            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">
-              原生订阅清洗防探测网关 (Subscribe Sieve)
-              <TipIcon content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。" />
-            </CsBox>
-            <div class="form-grid">
-              <CsFormItem>
-                <template #label>
-                  智能 UA 过滤与爬虫拦截
-                  <TipIcon content="自动识别并阻断 curl、python-requests、空 User-Agent 及已知自动化扫描脚本。" />
-                </template>
-                <CsToggle v-model="subCleanUa">
-  <template #default>
-    {{ subCleanUa ? '开启（阻断空 UA / 常见脚本）' : '放行所有' }}
-  </template>
-</CsToggle>
-              </CsFormItem>
-
-              <CsFormItem>
-                <template #label>
-                  严格客户端白名单模式
-                  <TipIcon content="仅放行知名代理客户端（如 Clash、Sing-box、Shadowrocket、Surge、V2rayN 等），其余均直接阻断。" />
-                </template>
-                <CsToggle v-model="subStrictUa">
-  <template #default>
-    {{ subStrictUa ? '严格白名单' : '宽松模式' }}
-  </template>
-</CsToggle>
-              </CsFormItem>
-            </div>
-
-            <CsFormItem>
-              <template #label>
-                自定义封禁 UA 关键词
-                <TipIcon content="匹配 User-Agent 包含指定关键词时直接拦截并返回拒绝码，英文逗号分隔，如 scan,exploit,badbot。" />
-              </template>
-              <CsInput
-                v-model="form.site.sub_blocked_ua"
-                placeholder="如 scan,exploit,badbot（英文逗号分隔，命中即拦截）"
-                clearable
-              />
-            </CsFormItem>
-
-            <!-- 反代配置代码片段展示 -->
-            <CsBox variant="div" font-size="heading-s" font-weight="bold" :margin="{ top: 'l' }">生产反向代理配置参考（覆盖客户端 IP 头，防伪造）</CsBox>
-            <div class="proxy-snippet-box">
-              <div class="snippet-header">
-                <span>Caddyfile 配置示例（推荐）</span>
-                <CsButton :icon-name="'copy'" @click="copySnippet(caddySnippet, 'Caddyfile 配置')">
-                  复制 Caddy 配置
-                </CsButton>
+                <CsFormItem>
+                  <template #label>
+                    多域名分发
+                    <CsBadge color="grey">暂未开放</CsBadge>
+                    <TipIcon content="暂未开放。用于轮询或主备容灾的多订阅分发域名（英文逗号分隔）。" />
+                  </template>
+                  <CsInput v-model="form.site.subscribe_domain" disabled placeholder="sub1.com,sub2.com（暂未开放）" />
+                </CsFormItem>
               </div>
-              <pre class="snippet-code"><code>{{ caddySnippet }}</code></pre>
             </div>
 
-            <div class="proxy-snippet-box" style="margin-top: 14px">
-              <div class="snippet-header">
-                <span>Nginx 配置示例</span>
-                <CsButton :icon-name="'copy'" @click="copySnippet(nginxSnippet, 'Nginx 配置')">
-                  复制 Nginx 配置
-                </CsButton>
+            <div class="form-section">
+              <div class="section-title">
+                原生订阅清洗防探测网关 (Subscribe Sieve)
+                <TipIcon content="在独立订阅端口前置针对 HTTP User-Agent 与请求特征的深度过滤，有效阻断扫描探测与未授权爬虫。" />
               </div>
-              <pre class="snippet-code"><code>{{ nginxSnippet }}</code></pre>
-            </div>
-          </CsForm>
-        </div>
+              <div class="form-grid">
+                <CsFormItem>
+                  <template #label>
+                    智能 UA 过滤与爬虫拦截
+                    <TipIcon content="自动识别并阻断 curl、python-requests、空 User-Agent 及已知自动化扫描脚本。" />
+                  </template>
+                  <CsToggle v-model="subCleanUa">
+                    <template #default>
+                      {{ subCleanUa ? '开启（阻断空 UA / 常见脚本）' : '放行所有' }}
+                    </template>
+                  </CsToggle>
+                </CsFormItem>
 
-        <!-- ==================== TAB 3: 安全（人机验证） ==================== -->
-        <div v-show="activeTab === 'captcha'">
-          <CsForm label-position="top" style="max-width: 640px">
-            <CsFormItem>
-              <template #label>
-                人机验证保护
-                <TipIcon content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。开启但未配置有效密钥时将默认阻断验证（Fail-Closed）。" />
-              </template>
-              <CsToggle v-model="captchaEnable">
-  <template #default>
-    {{ captchaEnable ? '已开启（登录与注册保护）' : '已关闭（开发/内网环境）' }}
-  </template>
-</CsToggle>
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                验证提供商
-                <TipIcon content="当前支持 Cloudflare Turnstile 智能无感验证。" />
-              </template>
-              <CsSelect v-model="form.captcha.captcha_type" style="width: 100%">
-                <CsOption label="Cloudflare Turnstile（智能无感验证）" value="turnstile" />
-              </CsSelect>
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                Turnstile Site Key
-                <TipIcon content="从 Cloudflare 控制台 Turnstile 站点获取的公开前端密钥。" />
-              </template>
-              <CsInput v-model="form.captcha.turnstile_site_key" placeholder="0x4A...（Cloudflare 控制台获取）" />
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                Turnstile Secret Key
-                <TipIcon content="服务端与 Cloudflare 校验使用的私钥。只写不读：保存后不再回显，留空表示保持原密钥不变。" />
-              </template>
-              <div class="secret-row">
+                <CsFormItem>
+                  <template #label>
+                    严格客户端白名单模式
+                    <TipIcon content="仅放行知名代理客户端（如 Clash、Sing-box、Shadowrocket、Surge、V2rayN 等），其余均直接阻断。" />
+                  </template>
+                  <CsToggle v-model="subStrictUa">
+                    <template #default>
+                      {{ subStrictUa ? '严格白名单' : '宽松模式' }}
+                    </template>
+                  </CsToggle>
+                </CsFormItem>
+              </div>
+
+              <CsFormItem>
+                <template #label>
+                  自定义封禁 UA 关键词
+                  <TipIcon content="匹配 User-Agent 包含指定关键词时直接拦截并返回拒绝码，英文逗号分隔，如 scan,exploit,badbot。" />
+                </template>
                 <CsInput
-                  v-model="form.captcha.turnstile_secret_key"
-                  class="secret-input"
-                  type="password"
-                  show-password
-                  :disabled="secretClearing"
-                  :placeholder="secretConfigured ? '已配置（留空保持不变）' : '0x4B...（Cloudflare 控制台获取）'"
+                  v-model="form.site.sub_blocked_ua"
+                  placeholder="如 scan,exploit,badbot（英文逗号分隔，命中即拦截）"
+                  clearable
                 />
-                <CsBadge v-if="secretClearing" color="red">保存后清除</CsBadge>
-                <CsBadge v-else-if="secretConfigured" color="green">已配置</CsBadge>
-                <CsBadge v-else color="grey">未配置</CsBadge>
-                <CsButton v-if="secretConfigured && !secretClearing" @click="markSecretClear">清除</CsButton>
-                <CsButton v-else-if="secretClearing" @click="undoSecretClear">撤销</CsButton>
+              </CsFormItem>
+            </div>
+
+            <!-- 反代配置代码片段展示（默认收起） -->
+            <div class="form-section">
+              <CsContainer :disable-content-paddings="true">
+                <CsExpandableSection variant="container" header="生产反向代理配置参考（覆盖客户端 IP 头，防伪造）">
+                  <div class="proxy-snippet-list">
+                    <div class="proxy-snippet-box">
+                      <div class="snippet-header">
+                        <span>Caddyfile 配置示例（推荐）</span>
+                        <CsButton :icon-name="'copy'" @click="copySnippet(caddySnippet, 'Caddyfile 配置')">
+                          复制 Caddy 配置
+                        </CsButton>
+                      </div>
+                      <pre class="snippet-code"><code>{{ caddySnippet }}</code></pre>
+                    </div>
+
+                    <div class="proxy-snippet-box">
+                      <div class="snippet-header">
+                        <span>Nginx 配置示例</span>
+                        <CsButton :icon-name="'copy'" @click="copySnippet(nginxSnippet, 'Nginx 配置')">
+                          复制 Nginx 配置
+                        </CsButton>
+                      </div>
+                      <pre class="snippet-code"><code>{{ nginxSnippet }}</code></pre>
+                    </div>
+                  </div>
+                </CsExpandableSection>
+              </CsContainer>
+            </div>
+          </CsForm>
+        </div>
+
+        <!-- ==================== TAB 3: 安全与运行 ==================== -->
+        <div v-show="activeTab === 'security'">
+          <CsForm label-position="top" style="max-width: 720px">
+            <div class="form-section">
+              <div class="section-title">注册准入与人机验证</div>
+              <div class="form-grid">
+                <CsFormItem>
+                  <template #label>
+                    用户注册准入
+                    <TipIcon content="开启后，新用户可通过前端注册页开户（仍受邀请码机制限制）；关闭后禁止新用户注册。" />
+                  </template>
+                  <CsToggle v-model="openRegister">
+                    <template #default>
+                      {{ openRegister ? '开放注册（需邀请码）' : '已关闭（禁止新用户注册）' }}
+                    </template>
+                  </CsToggle>
+                </CsFormItem>
+
+                <CsFormItem>
+                  <template #label>
+                    人机验证保护
+                    <TipIcon content="开启后，用户在登录和注册页面必须通过人机挑战验证，有效防御恶意撞库与脚本批量注册。开启但未配置有效密钥时将默认阻断验证（Fail-Closed）。" />
+                  </template>
+                  <CsToggle v-model="captchaEnable">
+                    <template #default>
+                      {{ captchaEnable ? '已开启（登录与注册保护）' : '已关闭（开发/内网环境）' }}
+                    </template>
+                  </CsToggle>
+                </CsFormItem>
               </div>
-            </CsFormItem>
-          </CsForm>
-        </div>
 
-        <!-- ==================== TAB 3.5: 节点上报 ==================== -->
-        <div v-show="activeTab === 'agent'">
-          <CsForm label-position="top" style="max-width: 640px">
-            <CsBox variant="div" font-size="heading-s" font-weight="bold">
-              节点上报参数
-              <TipIcon content="保存后通过长连接即时下发至在线服务器生效；离线服务器重连后自动拉取同步，节点本地 agent.yaml 作为兜底。" />
-            </CsBox>
-            <CsFormItem>
-              <template #label>
-                流量增量上报周期（秒）
-                <TipIcon content="服务器向面板同步 xray 用户计费流量增量的频率。较长周期（如 60-120 秒）可减少数据库写入压力；超额/到期判定将在落库后即时处置。" />
-              </template>
-              <CsInputNumber v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 220px" />
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                状态心跳周期（秒）
-                <TipIcon content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。" />
-              </template>
-              <CsInputNumber v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 220px" />
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                实时指标周期（秒）
-                <TipIcon content="服务器上报 CPU / 实时网速 / 连接数 / 每用户上下行速率的频率（独立于状态心跳的快车道）。默认 3 秒；只更新主控内存，不写数据库。周期越短，「在线用户」面板里的速率刷新越快，但每帧体积随在线人数线性增长（1000 人在线约 24KB/s）。" />
-              </template>
-              <CsInputNumber v-model="agentMetricsSec" :min="2" :max="1800" :step="1" style="width: 220px" />
-            </CsFormItem>
-          </CsForm>
-        </div>
-
-        <!-- ==================== TAB 3.6: 时间与时区 ==================== -->
-        <div v-show="activeTab === 'timezone'">
-          <CsForm label-position="top" style="max-width: 680px">
-            <CsFormItem>
-              <template #label>
-                业务时区（统计切天口径）
-                <TipIcon content="决定「今日/本月流量汇总」「每日流量快照」「清理边界」以及「入站重置」的切天时间点。建议设置为主要用户群所在时区。底层数据统一以 UTC 存储绝对时间戳；修改后切换当日历史聚合数据可能有短暂平滑窗口。" />
-              </template>
-              <CsSelect v-model="form.timezone.business_timezone" filterable allow-create style="width: 300px">
-                <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
-              </CsSelect>
-            </CsFormItem>
-            <CsFormItem>
-              <template #label>
-                展示时区
-                <TipIcon content="控制后台管理端表格与日志中的时间戳显示格式；选择「跟随浏览器」将根据您的本地设备自动换算。" />
-              </template>
-              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
-                <CsSelect v-model="form.timezone.display_timezone" filterable style="width: 300px">
-                  <CsOption label="跟随浏览器" value="browser" />
-                  <CsOption v-for="tz in timezoneOptions" :key="tz" :label="tz" :value="tz" />
+              <CsFormItem>
+                <template #label>
+                  验证提供商
+                  <TipIcon content="当前支持 Cloudflare Turnstile 智能无感验证。" />
+                </template>
+                <CsSelect v-model="form.captcha.captcha_type" style="width: 100%">
+                  <CsOption label="Cloudflare Turnstile（智能无感验证）" value="turnstile" />
                 </CsSelect>
-                <CsBadge color="blue">当前识别：{{ effectiveTimezoneLabel() }}</CsBadge>
+              </CsFormItem>
+              <CsFormItem>
+                <template #label>
+                  Turnstile Site Key
+                  <TipIcon content="从 Cloudflare 控制台 Turnstile 站点获取的公开前端密钥。" />
+                </template>
+                <CsInput v-model="form.captcha.turnstile_site_key" placeholder="0x4A...（Cloudflare 控制台获取）" />
+              </CsFormItem>
+              <CsFormItem>
+                <template #label>
+                  Turnstile Secret Key
+                  <TipIcon content="服务端与 Cloudflare 校验使用的私钥。只写不读：保存后不再回显，留空表示保持原密钥不变。" />
+                </template>
+                <div class="secret-row">
+                  <CsInput
+                    v-model="form.captcha.turnstile_secret_key"
+                    class="secret-input"
+                    type="password"
+                    show-password
+                    :disabled="secretClearing"
+                    :placeholder="secretConfigured ? '已配置（留空保持不变）' : '0x4B...（Cloudflare 控制台获取）'"
+                  />
+                  <CsBadge v-if="secretClearing" color="red">保存后清除</CsBadge>
+                  <CsBadge v-else-if="secretConfigured" color="green">已配置</CsBadge>
+                  <CsBadge v-else color="grey">未配置</CsBadge>
+                  <CsButton v-if="secretConfigured && !secretClearing" @click="markSecretClear">清除</CsButton>
+                  <CsButton v-else-if="secretClearing" @click="undoSecretClear">撤销</CsButton>
+                </div>
+              </CsFormItem>
+            </div>
+
+            <div class="form-section">
+              <div class="section-title">
+                服务器上报参数
+                <TipIcon content="保存后通过长连接即时下发至在线服务器生效；离线服务器重连后自动拉取同步，节点本地 agent.yaml 作为兜底。" />
               </div>
-            </CsFormItem>
+              <div class="agent-grid">
+                <CsFormItem>
+                  <template #label>
+                    流量增量上报周期（秒）
+                    <TipIcon content="服务器向面板同步 xray 用户计费流量增量的频率。较长周期（如 60-120 秒）可减少数据库写入压力；超额/到期判定将在落库后即时处置。" />
+                  </template>
+                  <CsInputNumber v-model="agentReportSec" :min="5" :max="1800" :step="10" style="width: 100%" />
+                </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    状态心跳周期（秒）
+                    <TipIcon content="服务器向面板汇报 CPU / 内存 / 磁盘 / 实时网速 / 在线用户等实时健康状态的频率。默认 5 秒（推荐 3-5 秒）；状态仅更新在主控内存，历史快照按 1 分钟窗口聚合落库，高频心跳不会增大数据库体积或写入负担。" />
+                  </template>
+                  <CsInputNumber v-model="agentHeartbeatSec" :min="3" :max="1800" :step="1" style="width: 100%" />
+                </CsFormItem>
+                <CsFormItem>
+                  <template #label>
+                    实时指标周期（秒）
+                    <TipIcon content="服务器上报 CPU / 实时网速 / 连接数 / 每用户上下行速率的频率（独立于状态心跳的快车道）。默认 3 秒；只更新主控内存，不写数据库。周期越短，「在线用户」面板里的速率刷新越快，但每帧体积随在线人数线性增长（1000 人在线约 24KB/s）。" />
+                  </template>
+                  <CsInputNumber v-model="agentMetricsSec" :min="2" :max="1800" :step="1" style="width: 100%" />
+                </CsFormItem>
+              </div>
+            </div>
           </CsForm>
         </div>
 
@@ -1442,196 +1464,192 @@ async function save() {
         <div v-show="activeTab === 'system'">
           <CsLoading :loading="systemLoading" min-height="200px" class="system-pane">
             <template v-if="system">
-              <!-- 窄屏必须降到 1 列：2 列时每格只剩 ~100px，「数据库版本」这类标签会被
-                   折成「数据库版 / 本」、「schema v2 / 期望 v2 / 最低兼容 v2」折成三行，
-                   整张表看起来像被裁掉了一半，也读不出标签与值的对应关系 -->
-              <CsKeyValuePairs :items="systemPairs" :columns="isMobile ? 1 : 2" aria-label="系统状态">
-                <template #value="{ item }">
-                  <template v-if="item.key === 'db'">
-                    <CsBadge :color="system.db_ok ? 'green' : 'red'">{{ system.db_ok ? '正常' : '异常' }}</CsBadge>
-                    <span style="margin-left: 6px">{{ system.db_driver }}（{{ system.db_latency_ms }}ms）</span>
+              <div class="system-stack">
+                <!-- 窄屏必须降到 1 列：2 列时每格只剩 ~100px，「数据库版本」这类标签会被
+                     折成「数据库版 / 本」、「schema v2 / 期望 v2 / 最低兼容 v2」折成三行，
+                     整张表看起来像被裁掉了一半，也读不出标签与值的对应关系 -->
+                <CsKeyValuePairs :items="systemPairs" :columns="isMobile ? 1 : 2" aria-label="系统状态">
+                  <template #value="{ item }">
+                    <template v-if="item.key === 'db'">
+                      <CsBadge :color="system.db_ok ? 'green' : 'red'">{{ system.db_ok ? '正常' : '异常' }}</CsBadge>
+                      <span style="margin-left: 6px">{{ system.db_driver }}（{{ system.db_latency_ms }}ms）</span>
+                    </template>
+                    <template v-else-if="item.key === 'version'">
+                      <CsBox variant="code">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</CsBox>
+                      <CsBox variant="span" color="text-body-secondary" :margin="{ left: 'xs' }">
+                        最低兼容 v{{ system.schema_min_compatible }}
+                      </CsBox>
+                    </template>
+                    <CsBox v-else-if="item.key === 'panel'" variant="code">{{ item.value }}</CsBox>
+                    <template v-else>{{ item.value }}</template>
                   </template>
-                  <template v-else-if="item.key === 'version'">
-                    <CsBox variant="code">schema v{{ system.schema_version || '—' }} / 期望 v{{ system.schema_expected ?? '—' }}</CsBox>
-                    <CsBox variant="span" color="text-body-secondary" :margin="{ left: 'xs' }">
-                      最低兼容 v{{ system.schema_min_compatible }}
+                </CsKeyValuePairs>
+                <!-- 计数块：与系统状态表同源，放在同一列宽里，用 CsCardGrid 的官方卡距 -->
+                <CsCardGrid class="status-count-grid" :min-width="200" :gap="12">
+                  <CsCard v-for="(v, k) in system.counts" :key="k">
+                    <CsBox variant="span" font-size="heading-l" font-weight="bold" display="block">{{ v }}</CsBox>
+                    <CsBox variant="span" font-size="body-s" color="text-body-secondary">
+                      {{ { users: '用户', servers: '服务器', inbounds: '入站', orders: '订单', gift_cards: '礼品卡', audit_logs: '审计日志' }[k] ?? k }}
                     </CsBox>
+                  </CsCard>
+                </CsCardGrid>
+                <CsAlert v-if="!system.db_ok" type="error" header="数据库异常">{{ system.db_error }}</CsAlert>
+
+                <!-- 面板内更新（容器形态自更新）：进入本页签自动检查更新 + 拉取版本列表，
+                     有新版才出现「应用更新」，不再常驻「检查更新 / 加载版本列表」两个按钮 -->
+                <!-- 面板内更新卡片 -->
+                <CsContainer header="面板更新">
+                  <template #info>
+                    <span v-if="updateChecking || updateInfo" class="update-header-status">
+                      <CsStatusIndicator v-if="updateChecking" type="loading" text="检查中…" />
+                      <CsStatusIndicator v-else-if="updateInfo?.available" type="success" text="发现新版本" />
+                      <CsStatusIndicator v-else-if="updateInfo && !updateInfo.enabled" type="stopped" text="更新已禁用" />
+                      <CsStatusIndicator v-else-if="updateInfo" type="info" text="已是最新" />
+                    </span>
                   </template>
-                  <CsBox v-else-if="item.key === 'panel'" variant="code">{{ item.value }}</CsBox>
-                  <template v-else>{{ item.value }}</template>
-                </template>
-              </CsKeyValuePairs>
-              <!-- 计数块：与系统状态表同源，放在同一列宽里，用 CsCardGrid 的官方卡距 -->
-              <CsCardGrid class="status-count-grid" :min-width="160" :gap="10">
-                <CsCard v-for="(v, k) in system.counts" :key="k">
-                  <CsBox variant="span" font-size="heading-l" font-weight="bold" display="block">{{ v }}</CsBox>
-                  <CsBox variant="span" font-size="body-s" color="text-body-secondary">
-                    {{ { users: '用户', servers: '服务器', inbounds: '入站', orders: '订单', gift_cards: '礼品卡', audit_logs: '审计日志' }[k] ?? k }}
-                  </CsBox>
-                </CsCard>
-              </CsCardGrid>
-              <CsAlert v-if="!system.db_ok" type="error" header="数据库异常">{{ system.db_error }}</CsAlert>
+                  <template #actions>
+                    <CsTooltip
+                      placement="top"
+                      :show-delay="200"
+                      content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
+                    >
+                      <CsButton variant="icon" icon-name="status-info" aria-label="更新机制说明" />
+                    </CsTooltip>
+                    <CsButton
+                      :icon-name="'refresh'"
+                      :loading="updateChecking || releasesLoading"
+                      @click="refreshUpdate(false)"
+                    >
+                      检查更新
+                    </CsButton>
+                  </template>
 
-              <!-- 面板内更新（容器形态自更新）：进入本页签自动检查更新 + 拉取版本列表，
-                   有新版才出现「应用更新」，不再常驻「检查更新 / 加载版本列表」两个按钮 -->
-              <!-- 面板内更新卡片 -->
-              <CsContainer header="面板更新">
-                <template #info>
-                  <CsStatusIndicator v-if="updateChecking" type="loading" text="检查中…" />
-                  <CsStatusIndicator v-else-if="updateInfo?.available" type="success" text="发现新版本" />
-                  <CsStatusIndicator v-else-if="updateInfo && !updateInfo.enabled" type="stopped" text="更新已禁用" />
-                  <CsStatusIndicator v-else-if="updateInfo" type="info" text="已是最新" />
-                </template>
-                <template #actions>
-                  <CsTooltip
-                    placement="top"
-                    :show-delay="200"
-                    content="更新机制：下载官方 Release 并校验 SHA-256，原子替换后由容器守护自动拉起；若启动失败将自动安全回滚至上一版本。"
-                  >
-                    <CsButton variant="icon" icon-name="status-info" aria-label="更新机制说明" />
-                  </CsTooltip>
-                  <CsButton
-                    :icon-name="'refresh'"
-                    :loading="updateChecking || releasesLoading"
-                    @click="refreshUpdate(false)"
-                  >
-                    检查更新
-                  </CsButton>
-                </template>
+                  <!-- 场景 1：有可用更新 -> 升级对比舱 -->
+                  <div v-if="updateInfo?.available" class="update-action-banner">
+                    <div class="update-route-box">
+                      <div class="ver-pill current">
+                        <span class="ver-tag">当前版本</span>
+                        <code class="ver-code">{{ updateInfo?.current_version || system.panel_version }}</code>
+                      </div>
+                      <div class="route-arrow">
+                        <CsIcon name="angle-right" />
+                      </div>
+                      <div class="ver-pill target">
+                        <span class="ver-tag">目标版本</span>
+                        <code class="ver-code">{{ updateInfo?.latest_version }}</code>
+                      </div>
+                    </div>
 
-                <!-- 场景 1：有可用更新 -> 升级对比舱 -->
-                <div v-if="updateInfo?.available" class="update-action-banner">
-                  <div class="update-route-box">
-                    <div class="ver-pill current">
-                      <span class="ver-tag">当前版本</span>
-                      <code class="ver-code">{{ updateInfo?.current_version || system.panel_version }}</code>
-                    </div>
-                    <div class="route-arrow">
-                      <CsIcon name="angle-right" />
-                    </div>
-                    <div class="ver-pill target">
-                      <span class="ver-tag">目标版本</span>
-                      <code class="ver-code">{{ updateInfo?.latest_version }}</code>
+                    <CsButton
+                      class="update-apply-btn"
+                      variant="primary"
+                      :icon-name="'download'"
+                      :disabled="!!updateStatus?.running"
+                      :loading="updateApplying"
+                      @click="confirmApply"
+                    >
+                      立即更新到 {{ updateInfo?.latest_version }}
+                    </CsButton>
+                  </div>
+
+                  <!-- 场景 2：已是最新或检查完毕无需更新 -->
+                  <div v-else-if="updateInfo && updateInfo.enabled" class="update-status-row">
+                    <div class="uptodate-box">
+                      <div class="status-check-circle">
+                        <CsIcon name="check" />
+                      </div>
+                      <div class="uptodate-info">
+                        <span class="cur-ver-text">
+                          当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <CsButton
-                    class="update-apply-btn"
-                    type="primary"
-                    :icon-name="'download'"
-                    :disabled="!!updateStatus?.running"
-                    :loading="updateApplying"
-                    @click="confirmApply"
-                  >
-                    立即更新到 {{ updateInfo?.latest_version }}
-                  </CsButton>
-                </div>
-
-                <!-- 场景 2：已是最新或检查完毕无需更新 -->
-                <div v-else-if="updateInfo && updateInfo.enabled" class="update-status-row">
-                  <div class="uptodate-box">
-                    <div class="status-check-circle">
-                      <CsIcon name="check" />
-                    </div>
-                    <div class="uptodate-info">
+                  <!-- 场景 3：未启用自更新 -->
+                  <div v-else-if="updateInfo && !updateInfo.enabled" class="update-status-row">
+                    <div class="disabled-box">
                       <span class="cur-ver-text">
                         当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
                       </span>
+                      <span class="disabled-hint">当前部署形态未启用面板内在线更新（由环境设定），可在宿主机手动替换镜像或二进制版本。</span>
                     </div>
                   </div>
-                </div>
 
-                <!-- 场景 3：未启用自更新 -->
-                <div v-else-if="updateInfo && !updateInfo.enabled" class="update-status-row">
-                  <div class="disabled-box">
-                    <span class="cur-ver-text">
-                      当前运行版本：<code class="cs-text-mono">{{ updateInfo?.current_version || system.panel_version }}</code>
-                    </span>
-                    <span class="disabled-hint">当前部署形态未启用面板内在线更新（由环境设定），可在宿主机手动替换镜像或二进制版本。</span>
-                  </div>
-                </div>
-
-                <!-- 错误提示（若接口报错）：两个请求各报各的。合并成一条会把「版本列表拉取失败」
-                     伪装成「暂无可安装版本」，而两者直连同一个 GitHub API、往往同时失败。 -->
-                <CsAlert v-if="updateError || releasesError" type="error" header="更新检查失败">
-                  <!-- 后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），必须允许断词，否则横向顶出卡片 -->
-                  <div class="update-error-lines">
-                    <div v-if="updateError">检查更新失败：{{ updateError }}</div>
-                    <div v-if="releasesError">版本列表获取失败：{{ releasesError }}</div>
-                  </div>
-                </CsAlert>
-
-                <!-- 历史版本与回退区（可折叠高级选项，默认收起） -->
-                <div v-if="updateInfo?.enabled" class="update-hist-section">
-                  <button
-                    type="button"
-                    class="hist-collapse-trigger"
-                    :class="{ 'is-expanded': showHistoryReleases }"
-                    @click="showHistoryReleases = !showHistoryReleases"
-                  >
-                    <div class="trigger-label">
-                      <CsIcon name="angle-right" class="trigger-chevron" />
-                      <span>历史版本与安全回退</span>
+                  <!-- 错误提示（若接口报错）：两个请求各报各的。合并成一条会把「版本列表拉取失败」
+                       伪装成「暂无可安装版本」，而两者直连同一个 GitHub API、往往同时失败。 -->
+                  <CsAlert v-if="updateError || releasesError" type="error" header="更新检查失败">
+                    <!-- 后端会把上游 err.Error() 原样透出（含长 URL / 长 hash），必须允许断词，否则横向顶出卡片 -->
+                    <div class="update-error-lines">
+                      <div v-if="updateError">检查更新失败：{{ updateError }}</div>
+                      <div v-if="releasesError">版本列表获取失败：{{ releasesError }}</div>
                     </div>
-                  </button>
+                  </CsAlert>
 
-                  <div v-if="showHistoryReleases" class="hist-collapse-panel">
-                    <div class="hist-form-row">
-                      <span class="hist-label">指定版本</span>
-                      <CsSelect
-                        v-model="selectedRelease"
-                        :loading="releasesLoading"
-                        :placeholder="releases.length ? '选择要安装或回滚的历史版本' : '暂无可安装版本'"
-                        :disabled="!!updateStatus?.running || !releases.length"
-                        class="hist-select"
-                      >
-                        <CsOption
-                          v-for="r in releases"
-                          :key="r.version"
-                          :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
-                          :value="r.version"
-                          :disabled="!r.installable || r.current"
-                        />
-                      </CsSelect>
-                      <CsButton
-                        v-if="selectedRelease"
+                  <!-- 历史版本与回退区（可折叠高级选项，默认收起） -->
+                  <div v-if="updateInfo?.enabled" class="update-hist-section">
+                    <button
+                      type="button"
+                      class="hist-collapse-trigger"
+                      :class="{ 'is-expanded': showHistoryReleases }"
+                      @click="showHistoryReleases = !showHistoryReleases"
+                    >
+                      <div class="trigger-label">
+                        <CsIcon name="angle-right" class="trigger-chevron" />
+                        <span>历史版本与安全回退</span>
+                      </div>
+                    </button>
 
-
-                        :disabled="!!updateStatus?.running"
-                        :loading="updateApplying"
-                        @click="confirmInstallRelease"
-                      >
-                        安装 {{ selectedRelease }}
-                      </CsButton>
+                    <div v-if="showHistoryReleases" class="hist-collapse-panel">
+                      <div class="hist-form-row">
+                        <span class="hist-label">指定版本</span>
+                        <CsSelect
+                          v-model="selectedRelease"
+                          :loading="releasesLoading"
+                          :placeholder="releases.length ? '选择要安装或回滚的历史版本' : '暂无可安装版本'"
+                          :disabled="!!updateStatus?.running || !releases.length"
+                          class="hist-select"
+                        >
+                          <CsOption
+                            v-for="r in releases"
+                            :key="r.version"
+                            :label="r.version + (r.current ? '（当前）' : r.installable ? '' : '（无当前架构包）')"
+                            :value="r.version"
+                            :disabled="!r.installable || r.current"
+                          />
+                        </CsSelect>
+                        <CsButton
+                          v-if="selectedRelease"
+                          :disabled="!!updateStatus?.running"
+                          :loading="updateApplying"
+                          @click="confirmInstallRelease"
+                        >
+                          安装 {{ selectedRelease }}
+                        </CsButton>
+                      </div>
+                      <p class="hist-warning-note">
+                        <CsIcon name="status-warning" />
+                        <span>降级/回滚走相同更新链路。若跨越数据库结构变更，降级前请务必先备份数据库。</span>
+                      </p>
                     </div>
-                    <p class="hist-warning-note">
-                      <CsIcon name="status-warning" />
-                      <span>降级/回滚走相同更新链路。若跨越数据库结构变更，降级前请务必先备份数据库。</span>
+                  </div>
+                </CsContainer>
+
+                <!-- 客户端 IP 来源说明：长参考，默认收起 -->
+                <CsContainer :disable-content-paddings="true">
+                  <CsExpandableSection variant="container" header="客户端真实 IP 识别架构">
+                    <p class="ip-source-doc">
+                      面板只信任来自 <code>app.trusted_proxies</code> 列表内地址的 <code>X-Forwarded-For</code>：
+                      直连对端不在列表时一律使用 <code>RemoteAddr</code>，客户端自报的
+                      <code>X-Forwarded-For</code> / <code>CF-Connecting-IP</code> 不会影响限流、审计与人机验证。
+                      默认仅信任回环；Docker 部署时面板在容器内、反代在宿主机，来源通常是 Docker 网桥网关
+                      （用 <code>docker network inspect</code> 确认，常见 <code>172.18.0.1</code>），需把它加入
+                      <code>trusted_proxies</code>，否则所有请求会被视为同一 IP。反代侧还须以真实对端覆盖 XFF
+                      （Caddy：<code>header_up X-Forwarded-For {remote_host}</code>）。切勿把面板端口直接暴露公网。
                     </p>
-                  </div>
-                </div>
-              </CsContainer>
-
-              <!-- 客户端 IP 来源说明：长参考，默认收起 -->
-              <CsContainer :disable-content-paddings="true">
-                <CsExpandableSection variant="container" header="客户端真实 IP 识别架构">
-                  <p class="ip-source-doc">
-                    面板只信任来自 <code>app.trusted_proxies</code> 列表内地址的 <code>X-Forwarded-For</code>：
-                    直连对端不在列表时一律使用 <code>RemoteAddr</code>，客户端自报的
-                    <code>X-Forwarded-For</code> / <code>CF-Connecting-IP</code> 不会影响限流、审计与人机验证。
-                    默认仅信任回环；Docker 部署时面板在容器内、反代在宿主机，来源通常是 Docker 网桥网关
-                    （用 <code>docker network inspect</code> 确认，常见 <code>172.18.0.1</code>），需把它加入
-                    <code>trusted_proxies</code>，否则所有请求会被视为同一 IP。反代侧还须以真实对端覆盖 XFF
-                    （Caddy：<code>header_up X-Forwarded-For {remote_host}</code>）。切勿把面板端口直接暴露公网。
-                  </p>
-                </CsExpandableSection>
-              </CsContainer>
-
-              <CsToolbar class="system-refresh-bar">
-                <template #actions>
-                  <CsButton :icon-name="'refresh'" @click="loadSystem">刷新状态</CsButton>
-                </template>
-              </CsToolbar>
+                  </CsExpandableSection>
+                </CsContainer>
+              </div>
             </template>
             <CsEmpty v-else-if="!systemLoading" description="暂无状态数据" icon-name="status-info" />
           </CsLoading>
@@ -1677,7 +1695,7 @@ async function save() {
       <!-- 失败才给动作：下载失败多为连接抖动，重试比关掉弹窗再来一遍顺手 -->
       <template v-if="updateStatus?.phase === 'failed'" #footer>
         <CsButton @click="updateModalOpen = false">关闭</CsButton>
-        <CsButton type="primary" :loading="updateApplying" :disabled="updateApplying" @click="retryUpdate">
+        <CsButton variant="primary" :loading="updateApplying" :disabled="updateApplying" @click="retryUpdate">
           重试
         </CsButton>
       </template>
@@ -1702,9 +1720,52 @@ async function save() {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 0 16px;
 }
+.form-section {
+  & + .form-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-divider-default-diwd4w);
+  }
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-body-default-b2us04);
+  margin: 0 0 14px;
+}
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0 16px;
+}
+.tz-display-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.proxy-snippet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 /* 系统状态页签的内容宽度上限（原 v-loading 容器上的 max-width） */
 .system-pane {
   max-width: 720px;
+}
+.system-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.update-header-status {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
 }
 /* 备份表操作列：三个按钮排成一行，不换行 */
 .row-actions {
@@ -1715,20 +1776,8 @@ async function save() {
   flex-wrap: nowrap;
 }
 
-/* 面板更新卡片 */
-
-
-
-
-
-
-
-
-
-
 /* 升级对比舱（有可用新版本） */
 .update-action-banner {
-  margin-top: 14px;
   padding: 14px 18px;
   border-radius: var(--border-radius-input-k1q34z);
   background: linear-gradient(135deg, var(--color-background-item-selected-dotkup) 0%, var(--color-background-cell-shaded-twxsbz) 100%);
@@ -1754,7 +1803,6 @@ async function save() {
   .ver-tag {
     font-size: 12px;
     color: var(--color-text-body-secondary-66ygbb);
-   -transform: uppercase;
     letter-spacing: 0.5px;
   }
   .ver-code {
@@ -1781,7 +1829,6 @@ async function save() {
 
 /* 状态展示行（最新 / 禁用） */
 .update-status-row {
-  margin-top: 14px;
   padding: 12px 16px;
   background: var(--color-background-cell-shaded-twxsbz);
   border: 1px solid var(--color-border-divider-default-diwd4w);
@@ -1846,6 +1893,7 @@ async function save() {
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
+  color: var(--color-text-body-secondary-66ygbb);
   overflow-wrap: anywhere;
 }
 
@@ -2010,6 +2058,7 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   border: 1px solid var(--color-border-divider-default-diwd4w);
   position: relative;
 
@@ -2020,6 +2069,13 @@ async function save() {
     border-radius: 4px;
     align-self: flex-start;
     opacity: 0.8;
+  }
+
+  .p-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &.dark-theme {
@@ -2033,6 +2089,7 @@ async function save() {
   &.light-theme {
     background: #ffffff;
     color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.08);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     .preview-tag { background: #f1f5f9; color: #475569; }
     .p-title { color: #0f172a; font-weight: 800; font-size: 14px; }
@@ -2041,8 +2098,7 @@ async function save() {
   &.auth-theme {
     background: var(--color-background-container-content-mjfil9);
     border-color: var(--color-border-divider-default-diwd4w);
-    box-shadow: var(--shadow-container-quglkl);
-    .preview-tag { background: var(--color-background-item-selected-dotkup); color: var(--color-text-link-default-qabnuk); }
+    .preview-tag { background: var(--color-background-cell-shaded-twxsbz); color: var(--color-text-body-secondary-66ygbb); }
   }
 }
 
@@ -2050,6 +2106,7 @@ async function save() {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .p-logo-img {
@@ -2079,6 +2136,11 @@ async function save() {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+
+  > div {
+    min-width: 0;
+  }
 }
 
 .p-auth-img {
@@ -2086,8 +2148,6 @@ async function save() {
   height: 38px;
   border-radius: 8px;
   object-fit: contain;
-  background: var(--color-background-cell-shaded-twxsbz);
-  border: 1px solid var(--color-border-divider-default-diwd4w);
   flex: none;
 }
 
@@ -2110,12 +2170,18 @@ async function save() {
   font-size: 16px;
   font-weight: 700;
   color: var(--color-text-body-default-b2us04);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .p-auth-sub {
   font-size: 12px;
   color: var(--color-text-body-secondary-66ygbb);
   margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 
